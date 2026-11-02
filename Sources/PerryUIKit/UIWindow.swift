@@ -15,6 +15,13 @@ final class WindowState: ObjectState {
 enum Windows {
     /// The application's key window; not retained.
     nonisolated(unsafe) static var key: UnsafeMutableRawPointer?
+    /// Every window, in the order made; not retained.
+    nonisolated(unsafe) static var all: [UnsafeMutableRawPointer] = []
+
+    /// The windows that are not hidden, back to front.
+    static var visible: [UIWindow] {
+        all.map { UIWindow(objcObject: $0, ownership: .retain) }.filter { !$0.state.hidden }
+    }
 }
 
 @ObjCClass("UIWindow")
@@ -27,6 +34,7 @@ open class UIWindow: UIView {
     override func initialize(frame: CGRect) -> Self {
         _ = super.initialize(frame: frame)
         state.hidden = true
+        if !Windows.all.contains(objcObject) { Windows.all.append(objcObject) }
         return self
     }
 
@@ -41,6 +49,7 @@ open class UIWindow: UIView {
     @ObjCMethod("dealloc")
     override func dealloc() {
         if Windows.key == objcObject { Windows.key = nil }
+        Windows.all.removeAll { $0 == objcObject }
         if let scene = windowState.scene { UIWindowScene.remove(window: objcObject, from: scene) }
         UIWindow.windowStates.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIWindow.objCClass.pointer)
