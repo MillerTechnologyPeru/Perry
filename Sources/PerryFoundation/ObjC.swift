@@ -154,7 +154,6 @@ enum ObjC {
 /// Selectors Foundation sends.
 enum Selectors {
     nonisolated(unsafe) static let dealloc = ObjC.selector("dealloc")
-    nonisolated(unsafe) static let description = ObjC.selector("description")
     nonisolated(unsafe) static let isEqual = ObjC.selector("isEqual:")
     nonisolated(unsafe) static let hash = ObjC.selector("hash")
     nonisolated(unsafe) static let copyWithZone = ObjC.selector("copyWithZone:")
