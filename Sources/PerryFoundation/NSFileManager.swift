@@ -132,6 +132,11 @@ final class NSFileManager: NSObject {
         }
     }
 
+    @ObjCMethod("removeItemAtURL:error:")
+    func removeItem(at url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        removeItem(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", error: errorPointer)
+    }
+
     @ObjCMethod("copyItemAtPath:toPath:error:")
     func copyItem(atPath source: String, toPath destination: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
         do {
