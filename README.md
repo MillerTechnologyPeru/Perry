@@ -32,11 +32,14 @@ yet.
   `NSArray`, `NSDictionary` and `NSSet` with their mutable subclasses,
   constant collection literals, sorting, blocks and fast enumeration,
   Foundation's description format, `NSDate`, `NSTimer`, `NSRunLoop` and
-  `CFRunLoop` (timers only), `NSNotificationCenter`, and `NSLog`
+  `CFRunLoop` (timers only), `NSNotificationCenter`, `NSData`, `NSURL`,
+  `NSUUID`, `NSJSONSerialization`, `NSError`, `NSNull`, `NSString`'s
+  encodings, paths and searching, and `NSLog`
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(data, URLs, operation queues, run loop input sources), UIKit, Swift.
+(bundles, process info, user defaults, file manager, operation queues, run
+loop input sources), UIKit, Swift.
 
 ## Layout
 
@@ -156,23 +159,39 @@ forwarding and the `$`-named data symbols are C and assembly. Blocks are
 classes built inside libSystem's `_NSConcrete*Block` storage, which the
 runtime reaches through the loader's `lookup_symbol`.
 
-**Objective-C classes in Swift.** Every class Perry implements, from
-`NSObject` in the runtime to Foundation's, is a Swift type marked
-`@ObjCImplementation` whose static functions are marked with their
-selectors:
+**Objective-C classes in Swift.** `PerryObjCInterop` connects Swift and
+Objective-C in both directions. `@ObjCClass` declares a Swift wrapper for an
+Objective-C class: a struct holding one reference to the object. In a
+wrapper, `@ObjCMethod` functions without a body send the message:
 
 ```swift
-@ObjCImplementation
-enum NSStringMethods {
+@ObjCClass("NSString")
+struct NSString {
     @ObjCMethod("characterAtIndex:")
-    static func character(_ string: id?, at index: UInt) -> UInt16 { … }
+    func character(at index: UInt) -> UInt16
 }
 ```
 
-The macro generates a C-convention thunk for each (receiver, `_cmd`,
-arguments), its type encoding from the Swift types (`S24@0:8Q16`), and a
-`register(_:)` that installs them, and rejects selectors whose argument
-count does not match the function at compile time.
+In an `@ObjCImplementation` extension, functions with a body implement the
+method, with `self` as the wrapper for the receiver and the arguments as
+Swift values:
+
+```swift
+@ObjCImplementation
+extension NSString {
+    @ObjCMethod("stringByAppendingString:")
+    func appending(_ other: String) -> String { value + other }
+}
+```
+
+The macro generates a C-convention thunk per method and a `register`
+function that installs them into a class, and rejects selectors whose
+argument count does not match at compile time. Values cross through the
+`ObjCValue` protocol, which gives each Swift type its C representation, its
+type encoding and Objective-C's ownership rules: numbers and pointers pass
+as they are, `String` becomes an `NSString`, wrappers pass their object, and
+results of `alloc`, `new`, `copy` and `init` methods are owned. `NSObject` in
+the runtime and every Foundation class are written this way.
 
 **Foundation** is written in Swift as a client of libobjc's C API, which it
 looks up through the loader at startup, so it shares the one runtime rather
