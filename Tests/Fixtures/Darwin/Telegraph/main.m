@@ -1,7 +1,8 @@
 // NSURLSession against an HTTP server this program runs on 127.0.0.1 with
 // BSD sockets: data, upload and download tasks, completion handlers and
 // delegates, redirects, errors, timeouts, cancellation, cookies, requests,
-// responses and configurations.
+// responses and configurations. Then NSURLConnection: synchronous and
+// asynchronous requests, and delegates on the run loop or a queue.
 
 #import <Foundation/Foundation.h>
 #include <arpa/inet.h>
@@ -200,6 +201,141 @@ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLReques
 }
 @end
 
+// An NSURLConnection delegate that records what it is told.
+@interface Listener : NSObject <NSURLConnectionDataDelegate>
+@property (readonly) NSMutableArray<NSString *> *events;
+@property (readonly) NSMutableData *body;
+@property BOOL done;
+@property BOOL onMain;
+@property NSOperationQueue *queue;
+@property BOOL onQueue;
+@end
+
+@implementation Listener
+- (instancetype)init {
+    if ((self = [super init])) {
+        _events = [NSMutableArray array];
+        _body = [NSMutableData data];
+    }
+    return self;
+}
+- (NSURLRequest *)connection:(NSURLConnection *)connection willSendRequest:(NSURLRequest *)request
+            redirectResponse:(NSURLResponse *)response {
+    [self.events addObject:[NSString stringWithFormat:@"will send %@ after %ld", request.URL.path,
+                            (long)((NSHTTPURLResponse *)response).statusCode]];
+    return request;
+}
+- (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
+    [self.events addObject:[NSString stringWithFormat:@"response %ld", (long)((NSHTTPURLResponse *)response).statusCode]];
+    self.onMain = NSThread.isMainThread;
+    self.onQueue = self.queue && NSOperationQueue.currentQueue == self.queue;
+}
+- (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
+    [self.body appendData:data];
+}
+- (void)connectionDidFinishLoading:(NSURLConnection *)connection {
+    [self.events addObject:@"finished"];
+    self.done = YES;
+}
+- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
+    [self.events addObject:[NSString stringWithFormat:@"failed %ld", (long)error.code]];
+    self.done = YES;
+}
+@end
+
+static void runUntil(BOOL (^condition)(void), NSTimeInterval limit) {
+    NSDate *end = [NSDate dateWithTimeIntervalSinceNow:limit];
+    while (!condition() && [end timeIntervalSinceNow] > 0) {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static void connections(void) {
+    NSURLResponse *response = nil;
+    NSError *error = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:[NSURLRequest requestWithURL:url(@"/hello")]
+                                         returningResponse:&response error:&error];
+    say([NSString stringWithFormat:@"sync: %ld '%@' %@, error %@", (long)((NSHTTPURLResponse *)response).statusCode,
+         string(data), response.MIMEType, describe(error)]);
+    response = nil;
+    data = [NSURLConnection sendSynchronousRequest:[NSURLRequest requestWithURL:url(@"/missing")]
+                                 returningResponse:&response error:&error];
+    say([NSString stringWithFormat:@"sync missing: %ld '%@', error %@", (long)((NSHTTPURLResponse *)response).statusCode,
+         string(data), describe(error)]);
+
+    int closed = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in address = {0};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bind(closed, (struct sockaddr *)&address, sizeof(address));
+    socklen_t size = sizeof(address);
+    getsockname(closed, (struct sockaddr *)&address, &size);
+    close(closed);
+    NSURL *refused = [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%d/", ntohs(address.sin_port)]];
+    response = nil;
+    error = nil;
+    data = [NSURLConnection sendSynchronousRequest:[NSURLRequest requestWithURL:refused] returningResponse:&response error:&error];
+    say([NSString stringWithFormat:@"sync refused: data %@, response %@, error %@", data, response, describe(error)]);
+
+    NSOperationQueue *queue = [NSOperationQueue new];
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    [NSURLConnection sendAsynchronousRequest:[NSURLRequest requestWithURL:url(@"/json")] queue:queue
+                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+        say([NSString stringWithFormat:@"async: %ld %@, on queue %d, error %@", (long)((NSHTTPURLResponse *)response).statusCode,
+             string(data), NSOperationQueue.currentQueue == queue, describe(error)]);
+        dispatch_semaphore_signal(done);
+    }];
+    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+
+    __block BOOL finished = NO;
+    [NSURLConnection sendAsynchronousRequest:[NSURLRequest requestWithURL:url(@"/hello")] queue:NSOperationQueue.mainQueue
+                           completionHandler:^(NSURLResponse *response, NSData *data, NSError *error) {
+        say([NSString stringWithFormat:@"async main: '%@', main thread %d", string(data), NSThread.isMainThread]);
+        finished = YES;
+    }];
+    runUntil(^{ return finished; }, 5);
+
+    Listener *listener = [Listener new];
+    NSURLConnection *connection = [NSURLConnection connectionWithRequest:[NSURLRequest requestWithURL:url(@"/redirect")]
+                                                                delegate:listener];
+    runUntil(^{ return listener.done; }, 5);
+    say([NSString stringWithFormat:@"delegate: %@; '%@', main thread %d, original %@, current %@",
+         [listener.events componentsJoinedByString:@"; "], string(listener.body), listener.onMain,
+         connection.originalRequest.URL.path, connection.currentRequest.URL.path]);
+
+    Listener *queued = [Listener new];
+    queued.queue = [NSOperationQueue new];
+    NSURLConnection *later = [[NSURLConnection alloc] initWithRequest:[NSURLRequest requestWithURL:url(@"/big")]
+                                                             delegate:queued startImmediately:NO];
+    [later setDelegateQueue:queued.queue];
+    [later start];
+    for (int i = 0; i < 500 && !queued.done; i++) usleep(10000);
+    say([NSString stringWithFormat:@"delegate queue: %@; %lu bytes, on queue %d, main thread %d",
+         [queued.events componentsJoinedByString:@"; "], (unsigned long)queued.body.length, queued.onQueue, queued.onMain]);
+
+    Listener *failing = [Listener new];
+    [NSURLConnection connectionWithRequest:[NSURLRequest requestWithURL:refused] delegate:failing];
+    runUntil(^{ return failing.done; }, 5);
+    say([NSString stringWithFormat:@"delegate failure: %@", [failing.events componentsJoinedByString:@"; "]]);
+
+    Listener *cancelled = [Listener new];
+    NSURLConnection *slow = [NSURLConnection connectionWithRequest:[NSURLRequest requestWithURL:url(@"/slow")]
+                                                          delegate:cancelled];
+    runUntil(^{ return NO; }, 0.1);
+    [slow cancel];
+    runUntil(^{ return NO; }, 0.3);
+    say([NSString stringWithFormat:@"cancelled connection: %@ (%lu events)", [cancelled.events componentsJoinedByString:@"; "],
+         (unsigned long)cancelled.events.count]);
+
+    say([NSString stringWithFormat:@"can handle: %d %d %d",
+         [NSURLConnection canHandleRequest:[NSURLRequest requestWithURL:url(@"/")]],
+         [NSURLConnection canHandleRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"https://example.com/"]]],
+         [NSURLConnection canHandleRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:@"perry-unknown://x"]]]]);
+}
+#pragma clang diagnostic pop
+
 // MARK: - Tests
 
 static void basics(void) {
@@ -390,6 +526,7 @@ int main(int argc, char *argv[]) {
         transfers();
         cookies();
         objects();
+        connections();
     }
     return 0;
 }
