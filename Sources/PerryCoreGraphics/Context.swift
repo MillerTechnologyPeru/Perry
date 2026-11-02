@@ -447,8 +447,8 @@ public func CGContextClipToRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>
 @c(_CGContextDrawImage)
 public func CGContextDrawImage(_ context: Ref?, _ rect: CGRect, _ image: Ref?) {
     guard let image = Images.state(image) else { return }
-    let r = CGRectStandardize(rect), bitmap = image.bitmap
-    Contexts.paint(context) { $0.draw(bitmap, r.origin.x, r.origin.y, r.size.width, r.size.height) }
+    let r = CGRectStandardize(rect)
+    Contexts.paint(context) { $0.draw(image, r.origin.x, r.origin.y, r.size.width, r.size.height) }
 }
 
 @c(_CGContextBeginTransparencyLayer)
