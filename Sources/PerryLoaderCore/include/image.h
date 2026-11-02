@@ -92,6 +92,8 @@ typedef struct perry_loader {
     perry_provider **providers;  // includes negative entries (handle == NULL)
     uint32_t provider_count;
 
+    uint64_t next_image_address; // where the next slid image is placed
+
     char **library_dirs;        // where provider .so files are searched
     uint32_t library_dir_count;
 
