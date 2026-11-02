@@ -6,6 +6,7 @@
 // functions.
 
 #include <stdint.h>
+#include <sys/eventfd.h>
 
 // objc_class, filled in by the runtime (objc_initializeClassPair).
 typedef struct perry_class_storage {
