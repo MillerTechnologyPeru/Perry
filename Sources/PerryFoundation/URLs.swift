@@ -64,8 +64,7 @@ enum URLs {
     }
 
     static func install(superclass: Class) {
-        urlClass = ClassDefinition(PERRY_CLASS_NSURL, name: "NSURL", superclass: superclass,
-                                   StorageAllocated.register, NSURL.register).cls
+        urlClass = NSURL.defineObjCClass(StorageAllocated.registerObjCMethods).storage
     }
 
     /// A new NSURL wrapped for returning, +0; nil for no URL.
@@ -76,10 +75,7 @@ enum URLs {
 
 /// NSURL.
 @ObjCClass("NSURL")
-public struct NSURL {}
-
-@ObjCImplementation
-extension NSURL {
+public final class NSURL: NSObject {
     /// Every NSURL has a URL once initialized.
     var url: URL { URLs.url(objcObject) ?? URL(filePath: "/") }
 
