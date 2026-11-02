@@ -107,8 +107,9 @@ static NSString *names(NSArray<UIViewController *> *controllers) {
     say(@"visible");
 }
 
+// Whether the scene activates before or after the first appearance pass
+// varies between runs on iOS, so it is not printed.
 - (void)sceneDidBecomeActive:(UIScene *)scene {
-    say(@"active");
     [self buildSteps];
     [self runNextStep];
 }
