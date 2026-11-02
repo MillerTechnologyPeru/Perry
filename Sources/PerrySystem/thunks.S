@@ -77,7 +77,6 @@ PASSTHROUGH _rmdir, rmdir
 PASSTHROUGH _isatty, isatty
 PASSTHROUGH _listen, listen
 PASSTHROUGH _shutdown, shutdown
-PASSTHROUGH _poll, poll
 PASSTHROUGH _inet_addr, inet_addr
 PASSTHROUGH _inet_ntoa, inet_ntoa
 PASSTHROUGH _sched_yield, sched_yield
@@ -86,6 +85,42 @@ PASSTHROUGH _pthread_join, pthread_join
 PASSTHROUGH _pthread_detach, pthread_detach
 PASSTHROUGH _pthread_self, pthread_self
 PASSTHROUGH _pthread_equal, pthread_equal
+PASSTHROUGH _pthread_attr_init, pthread_attr_init
+PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
+PASSTHROUGH _pthread_attr_setstacksize, pthread_attr_setstacksize
+PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
+PASSTHROUGH _access, access
+PASSTHROUGH _mkdir, mkdir
+PASSTHROUGH _symlink, symlink
+PASSTHROUGH _link, link
+PASSTHROUGH _readlink, readlink
+PASSTHROUGH _rename, rename
+PASSTHROUGH _truncate, truncate
+PASSTHROUGH _ftruncate, ftruncate
+PASSTHROUGH _chmod, chmod
+PASSTHROUGH _fchmod, fchmod
+PASSTHROUGH _chown, chown
+PASSTHROUGH _fchown, fchown
+PASSTHROUGH _chdir, chdir
+PASSTHROUGH _fchdir, fchdir
+PASSTHROUGH _getcwd, getcwd
+PASSTHROUGH _umask, umask
+PASSTHROUGH _getpagesize, getpagesize
+PASSTHROUGH _time, time
+PASSTHROUGH _nanosleep, nanosleep
+PASSTHROUGH _gettimeofday, gettimeofday
+PASSTHROUGH _munmap, munmap
+PASSTHROUGH _mprotect, mprotect
+PASSTHROUGH _mlock, mlock
+PASSTHROUGH _munlock, munlock
+PASSTHROUGH _arc4random, arc4random
+PASSTHROUGH _arc4random_buf, arc4random_buf
+PASSTHROUGH _arc4random_uniform, arc4random_uniform
+
+// open, openat and fcntl are variadic on Darwin.
+VARIADIC _open, perry_vopen, 2
+VARIADIC _openat, perry_vopenat, 3
+VARIADIC _fcntl, perry_vfcntl, 2
 
 // ___chkstk_darwin probes each page of a large stack frame, which Darwin
 // needs below its guard pages; Linux grows stacks on its own.
