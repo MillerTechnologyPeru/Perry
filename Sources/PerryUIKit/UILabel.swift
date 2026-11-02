@@ -1,0 +1,335 @@
+import CPerryGeometry
+import Glibc
+import PerryObjCInterop
+
+// Text and images in views: UIFont, which names a font and its size;
+// UILabel, which draws its text through CoreGraphics; and UIImageView,
+// whose layer shows its image.
+
+final class FontState: ObjectState {
+    var name = "Helvetica"
+    var pointSize: CGFloat = 17
+    var weight: CGFloat = 0
+}
+
+@ObjCClass("UIFont")
+open class UIFont: NSObject {
+    static let states = StateTable<FontState>()
+    var state: FontState { UIFont.states[objcObject] }
+
+    static func make(name: String, size: CGFloat, weight: CGFloat = 0) -> UIFont {
+        let font = objCClass.object.allocated().unsafeCast(to: UIFont.self)
+        (font.state.name, font.state.pointSize, font.state.weight) = (name, size, weight)
+        return font
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIFont.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIFont.objCClass.pointer)
+    }
+
+    @ObjCClassMethod("systemFontOfSize:") static func systemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size) }
+    @ObjCClassMethod("boldSystemFontOfSize:") static func boldSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Semibold", size: size, weight: 0.4) }
+    @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-RegularItalic", size: size) }
+
+    @ObjCClassMethod("systemFontOfSize:weight:")
+    static func systemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
+
+    @ObjCClassMethod("monospacedSystemFontOfSize:weight:")
+    static func monospacedSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: "Courier", size: size, weight: weight) }
+
+    @ObjCClassMethod("monospacedDigitSystemFontOfSize:weight:")
+    static func monospacedDigitSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
+
+    @ObjCClassMethod("fontWithName:size:")
+    static func font(name: String, size: CGFloat) -> UIFont? { make(name: name, size: size) }
+
+    /// Text styles at their default sizes.
+    @ObjCClassMethod("preferredFontForTextStyle:")
+    static func preferredFont(textStyle: String) -> UIFont {
+        let sizes: [String: CGFloat] = [
+            "UICTFontTextStyleLargeTitle": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
+            "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubheadline": 15,
+            "UICTFontTextStyleBody": 17, "UICTFontTextStyleCallout": 16, "UICTFontTextStyleFootnote": 13,
+            "UICTFontTextStyleCaption1": 12, "UICTFontTextStyleCaption2": 11,
+        ]
+        return make(name: ".SFUI-Regular", size: sizes[textStyle] ?? 17, weight: textStyle == "UICTFontTextStyleHeadline" ? 0.3 : 0)
+    }
+
+    @ObjCClassMethod("systemFontSize") static func systemFontSize() -> CGFloat { 14 }
+    @ObjCClassMethod("labelFontSize") static func labelFontSize() -> CGFloat { 17 }
+
+    @ObjCMethod("fontName") func fontName() -> String { state.name }
+    @ObjCMethod("familyName") func familyName() -> String { state.name.hasPrefix(".SFUI") ? ".AppleSystemUIFont" : state.name }
+    @ObjCMethod("pointSize") func pointSize() -> CGFloat { state.pointSize }
+    @ObjCMethod("ascender") func ascender() -> CGFloat { state.pointSize * 0.95 }
+    @ObjCMethod("descender") func descender() -> CGFloat { -state.pointSize * 0.24 }
+    @ObjCMethod("lineHeight") func lineHeight() -> CGFloat { state.pointSize * 1.19 }
+    @ObjCMethod("capHeight") func capHeight() -> CGFloat { state.pointSize * 0.7 }
+    @ObjCMethod("xHeight") func xHeight() -> CGFloat { state.pointSize * 0.52 }
+    @ObjCMethod("leading") func leading() -> CGFloat { 0 }
+
+    @ObjCMethod("fontWithSize:")
+    func withSize(_ size: CGFloat) -> UIFont { UIFont.make(name: state.name, size: size, weight: state.weight) }
+
+    @ObjCMethod("isEqual:")
+    func isEqual(_ other: NSObject?) -> Bool {
+        guard let other = other?.as(UIFont.self) else { return false }
+        return other.state.name == state.name && other.state.pointSize == state.pointSize
+    }
+
+    @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: state.name.hashValue) ^ UInt(state.pointSize) }
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+
+    /// The font CoreGraphics draws with: a bold or regular sans serif for
+    /// the system font.
+    var drawingName: String {
+        if state.name.hasPrefix(".SFUI") { return state.weight >= 0.3 ? "DejaVu Sans Bold" : "DejaVu Sans" }
+        return state.name
+    }
+}
+
+// MARK: - Measuring and drawing text
+
+enum Text {
+    /// A context to measure text in.
+    nonisolated(unsafe) private static var scratch: CGRef?
+
+    /// Widths measured, by font and text.
+    nonisolated(unsafe) private static var widths: [String: CGFloat] = [:]
+
+    /// The width of `text` in `font`, on one line.
+    static func width(_ text: String, font: UIFont) -> CGFloat {
+        let key = "\(font.drawingName)|\(font.state.pointSize)|\(text)"
+        if let width = widths[key] { return width }
+        let width = measure(text, font: font)
+        if widths.count > 4096 { widths = [:] }
+        widths[key] = width
+        return width
+    }
+
+    private static func measure(_ text: String, font: UIFont) -> CGFloat {
+        if scratch == nil { scratch = CG.makeContext(size: CGSize(width: 1, height: 1), scale: 1, opaque: false) }
+        guard let context = scratch else { return 0 }
+        CG.saveGState(context)
+        defer { CG.restoreGState(context) }
+        font.drawingName.withCString { CG.selectFont(context, $0, font.state.pointSize, 1) }
+        CG.setTextDrawingMode(context, 3) // invisible
+        CG.setTextPosition(context, 0, 0)
+        var utf8 = Array(text.utf8)
+        utf8.withUnsafeMutableBufferPointer { buffer in
+            buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { CG.showText(context, $0, buffer.count) }
+        }
+        return CG.getTextPosition(context).x
+    }
+
+    /// The size of `text` on one line.
+    static func size(_ text: String, font: UIFont) -> CGSize {
+        CGSize(width: (width(text, font: font)).rounded(.up), height: (font.state.pointSize * 1.19).rounded(.up))
+    }
+
+    /// Draws one line of `text` in the current context with its top left
+    /// at `point`.
+    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor) {
+        guard let context = Graphics.current else { return }
+        CG.saveGState(context)
+        defer { CG.restoreGState(context) }
+        font.drawingName.withCString { CG.selectFont(context, $0, font.state.pointSize, 1) }
+        CG.setFillColorWithColor(context, color.state.makeCGColor())
+        CG.setTextDrawingMode(context, 0)
+        // Glyphs are drawn upright in UIKit's flipped coordinates.
+        CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0))
+        CG.setTextPosition(context, point.x, point.y + font.state.pointSize * 0.95)
+        var utf8 = Array(text.utf8)
+        utf8.withUnsafeMutableBufferPointer { buffer in
+            buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { CG.showText(context, $0, buffer.count) }
+        }
+    }
+}
+
+// MARK: - UILabel
+
+final class LabelState: ObjectState {
+    var text: String?
+    var attributedText: NSObject?
+    var font: UIFont?
+    var textColor: UIColor?
+    var highlightedTextColor: UIColor?
+    /// NSTextAlignment: natural 4.
+    var textAlignment = 4
+    var numberOfLines = 1
+    var lineBreakMode = 4
+    var adjustsFontSizeToFitWidth = false
+    var minimumScaleFactor: CGFloat = 0
+    var highlighted = false
+    var enabled = true
+    var preferredMaxLayoutWidth: CGFloat = 0
+}
+
+@ObjCClass("UILabel")
+open class UILabel: UIView {
+    static let labelStates = StateTable<LabelState>()
+    var label: LabelState { UILabel.labelStates[objcObject] }
+
+    @ObjCMethod("initWithFrame:")
+    override func initialize(frame: CGRect) -> Self {
+        _ = super.initialize(frame: frame)
+        state.userInteractionEnabled = false
+        state.contentMode = 7
+        return self
+    }
+
+    @ObjCMethod("dealloc")
+    override func dealloc() {
+        UILabel.labelStates.remove(objcObject)
+        super.dealloc()
+    }
+
+    var font: UIFont { label.font ?? UIFont.systemFont(size: 17) }
+
+    @ObjCMethod("text") func text() -> String? { label.text }
+
+    @ObjCMethod("setText:")
+    func setText(_ text: String?) {
+        label.text = text
+        setNeedsDisplay()
+    }
+
+    @ObjCMethod("attributedText") func attributedText() -> NSObject? { label.attributedText }
+
+    /// Its string becomes the text.
+    @ObjCMethod("setAttributedText:")
+    func setAttributedText(_ text: NSObject?) {
+        label.attributedText = text
+        setText(text?.sendString())
+    }
+
+    @ObjCMethod("font") func fontObject() -> UIFont { font }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { label.font = font; setNeedsDisplay() }
+    @ObjCMethod("textColor") func textColor() -> UIColor { label.textColor ?? UIColor.label() }
+    @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { label.textColor = color; setNeedsDisplay() }
+    @ObjCMethod("highlightedTextColor") func highlightedTextColor() -> UIColor? { label.highlightedTextColor }
+    @ObjCMethod("setHighlightedTextColor:") func setHighlightedTextColor(_ color: UIColor?) { label.highlightedTextColor = color }
+    @ObjCMethod("textAlignment") func textAlignment() -> Int { label.textAlignment }
+    @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { label.textAlignment = alignment; setNeedsDisplay() }
+    @ObjCMethod("numberOfLines") func numberOfLines() -> Int { label.numberOfLines }
+    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) { label.numberOfLines = lines }
+    @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { label.lineBreakMode }
+    @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { label.lineBreakMode = mode }
+    @ObjCMethod("adjustsFontSizeToFitWidth") func adjustsFontSizeToFitWidth() -> Bool { label.adjustsFontSizeToFitWidth }
+    @ObjCMethod("setAdjustsFontSizeToFitWidth:") func setAdjustsFontSizeToFitWidth(_ adjusts: Bool) { label.adjustsFontSizeToFitWidth = adjusts }
+    @ObjCMethod("minimumScaleFactor") func minimumScaleFactor() -> CGFloat { label.minimumScaleFactor }
+    @ObjCMethod("setMinimumScaleFactor:") func setMinimumScaleFactor(_ factor: CGFloat) { label.minimumScaleFactor = factor }
+    @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { label.highlighted }
+    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { label.highlighted = highlighted }
+    @ObjCMethod("isEnabled") func isEnabled() -> Bool { label.enabled }
+    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { label.enabled = enabled }
+    @ObjCMethod("preferredMaxLayoutWidth") func preferredMaxLayoutWidth() -> CGFloat { label.preferredMaxLayoutWidth }
+    @ObjCMethod("setPreferredMaxLayoutWidth:") func setPreferredMaxLayoutWidth(_ width: CGFloat) { label.preferredMaxLayoutWidth = width }
+
+    /// One line of the text; empty text has no size.
+    @ObjCMethod("sizeThatFits:")
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        guard let text = label.text, !text.isEmpty else { return .zero }
+        return Text.size(text, font: font)
+    }
+
+    @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { sizeThatFits(.zero) }
+
+    @ObjCMethod("drawRect:")
+    override func draw(_ rect: CGRect) { sendDrawText(in: state.bounds) }
+
+    /// The text centered vertically, placed by the alignment.
+    @ObjCMethod("drawTextInRect:")
+    func drawText(in rect: CGRect) {
+        guard let text = label.text, !text.isEmpty else { return }
+        let size = Text.size(text, font: font)
+        let x: CGFloat
+        switch label.textAlignment {
+        case 1: x = rect.midX - size.width / 2
+        case 2: x = rect.maxX - size.width
+        default: x = rect.minX
+        }
+        let color = label.highlighted ? (label.highlightedTextColor ?? textColor()) : textColor()
+        Text.draw(text, at: CGPoint(x: x, y: rect.midY - size.height / 2), font: font, color: color)
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("string") func sendString() -> String?
+    @ObjCMethod("drawTextInRect:") func sendDrawText(in rect: CGRect)
+}
+
+// MARK: - UIImageView
+
+final class ImageViewState: ObjectState {
+    var image: UIImage?
+    var highlightedImage: UIImage?
+    var highlighted = false
+}
+
+@ObjCClass("UIImageView")
+open class UIImageView: UIView {
+    static let imageStates = StateTable<ImageViewState>()
+    var imageState: ImageViewState { UIImageView.imageStates[objcObject] }
+
+    @ObjCMethod("initWithFrame:")
+    override func initialize(frame: CGRect) -> Self {
+        _ = super.initialize(frame: frame)
+        state.userInteractionEnabled = false
+        return self
+    }
+
+    /// The image's size.
+    @ObjCMethod("initWithImage:")
+    func initialize(image: UIImage?) -> NSObject {
+        let view = initializeView(frame: CGRect(origin: .zero, size: image?.state.size ?? .zero)).unsafeCast(to: UIImageView.self)
+        view.setImage(image)
+        return view
+    }
+
+    @ObjCMethod("dealloc")
+    override func dealloc() {
+        UIImageView.imageStates.remove(objcObject)
+        super.dealloc()
+    }
+
+    @ObjCMethod("image") func image() -> UIImage? { imageState.image }
+
+    @ObjCMethod("setImage:")
+    func setImage(_ image: UIImage?) {
+        imageState.image = image
+        showImage()
+    }
+
+    @ObjCMethod("highlightedImage") func highlightedImage() -> UIImage? { imageState.highlightedImage }
+    @ObjCMethod("setHighlightedImage:") func setHighlightedImage(_ image: UIImage?) { imageState.highlightedImage = image }
+    @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { imageState.highlighted }
+    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) {
+        imageState.highlighted = highlighted
+        showImage()
+    }
+
+    @ObjCMethod("setContentMode:")
+    override func setContentMode(_ mode: Int) {
+        state.contentMode = mode
+        showImage()
+    }
+
+    @ObjCMethod("sizeThatFits:")
+    override func sizeThatFits(_ size: CGSize) -> CGSize { imageState.image?.state.size ?? .zero }
+
+    @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { imageState.image?.state.size ?? CGSize(width: -1, height: -1) }
+
+    /// The layer shows the image, placed by the content mode.
+    private func showImage() {
+        let image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        let geometry = state.geometry!
+        geometry.contents = image.flatMap { $0.state.cgImage.map { NSObject($0) } }
+        geometry.contentsScale = image?.state.scale ?? 1
+        let gravities = ["resize", "resizeAspect", "resizeAspectFill", "resize", "center", "top", "bottom", "left", "right",
+                         "topLeft", "topRight", "bottomLeft", "bottomRight"]
+        geometry.contentsGravity = gravities.indices.contains(state.contentMode) ? gravities[state.contentMode] : "resize"
+    }
+}
