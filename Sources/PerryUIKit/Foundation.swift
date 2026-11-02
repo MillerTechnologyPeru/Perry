@@ -105,3 +105,35 @@ extension ObjCClass {
     /// The class object, as an object to send class messages to.
     var object: NSObject { NSObject(pointer) }
 }
+
+@ObjCWrapper("NSData")
+class NSData: NSObject {
+    @ObjCClassMethod("dataWithContentsOfFile:")
+    static func contents(ofFile path: String) -> NSData?
+}
+
+@ObjCWrapper("NSMutableData")
+class NSMutableData: NSData {
+    @ObjCClassMethod("data")
+    static func empty() -> NSMutableData
+}
+
+@ObjCWrapper("NSMutableDictionary")
+class NSMutableDictionary: NSDictionary {
+    @ObjCClassMethod("dictionary")
+    static func empty() -> NSMutableDictionary
+
+    @ObjCMethod("setObject:forKey:")
+    func set(_ object: NSObject, forKey key: String)
+}
+
+@ObjCWrapper("NSNumber")
+class NSNumber: NSObject {
+    @ObjCClassMethod("numberWithDouble:")
+    static func make(double: Double) -> NSNumber
+}
+
+extension NSBundle {
+    @ObjCMethod("pathForResource:ofType:")
+    func path(forResource name: String?, ofType type: String?) -> String?
+}
