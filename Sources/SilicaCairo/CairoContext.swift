@@ -39,9 +39,10 @@ public final class CairoContext: CGContext {
 
     // MARK: - Private Properties
 
-    private let internalContext: Cairo.Context
+    // Perry: internal, for the CoreGraphics operations in CairoContext+CoreGraphics.swift.
+    internal let internalContext: Cairo.Context
 
-    private var internalState: State = State()
+    internal var internalState: State = State()
 
     // MARK: - Initialization
 
@@ -188,7 +189,8 @@ public final class CairoContext: CGContext {
 
             let length = Int(header.length)
 
-            let data = Array(cairoPath.data[index + 1 ..< length])
+            // Perry: the element's points follow its header, up to index + length.
+            let data = Array(cairoPath.data[index + 1 ..< index + length])
 
             let element: PathElement
 
@@ -253,29 +255,10 @@ public final class CairoContext: CGContext {
 
         get { return CGFloat(internalState.alpha) }
 
-        set {
-
-            // store new value
-            internalState.alpha = newValue
-
-            // update stroke
-            if var stroke = internalState.stroke {
-
-                stroke.color.alpha = newValue
-                stroke.pattern = Pattern(color: stroke.color)
-
-                internalState.stroke = stroke
-            }
-
-            // update fill
-            if var fill = internalState.fill {
-
-                fill.color.alpha = newValue
-                fill.pattern = Pattern(color: fill.color)
-
-                internalState.fill = fill
-            }
-        }
+        // Perry: as in CoreGraphics, the global alpha multiplies the fill
+        // and stroke colors' own alpha when they paint (see fillPattern and
+        // strokePattern) rather than replacing it.
+        set { internalState.alpha = newValue }
     }
 
     public var font: CGFont? {
@@ -450,7 +433,7 @@ public final class CairoContext: CGContext {
             startShadow()
         }
 
-        internalContext.source = internalState.stroke?.pattern ?? .default
+        internalContext.source = strokePattern
 
         internalContext.stroke()
 
@@ -468,7 +451,7 @@ public final class CairoContext: CGContext {
             startShadow()
         }
 
-        internalContext.source = internalState.fill?.pattern ?? .default
+        internalContext.source = fillPattern
 
         internalContext.fillRule = evenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
 
@@ -487,12 +470,16 @@ public final class CairoContext: CGContext {
         assert(CairoError(internalContext.status) == nil, "Cairo error: \(internalContext.status)")
     }
 
+    // Perry: clears the clip region to transparent, as CGContextClearRect does.
     public func clear() {
 
-        internalContext.source = internalState.fill?.pattern ?? .default
+        let previous = internalContext.operator
 
-        internalContext.clip()
-        internalContext.clipPreserve()
+        internalContext.operator = CAIRO_OPERATOR_CLEAR
+
+        internalContext.paint()
+
+        internalContext.operator = previous
     }
 
     public func clip(evenOdd: Bool) {
@@ -587,7 +574,10 @@ public final class CairoContext: CGContext {
                                      width: Double(rect.size.width),
                                      height: Double(rect.size.height))
 
-        internalContext.fill()
+        // Perry: the global alpha applies to images too.
+        internalContext.clip()
+
+        internalContext.paint(alpha: Double(internalState.alpha))
 
         internalContext.restore()
     }
@@ -618,7 +608,7 @@ public final class CairoContext: CGContext {
 
         internalContext.setFont(matrix: cairoTextMatrix)
 
-        internalContext.source = internalState.fill?.pattern ?? .default
+        internalContext.source = fillPattern
 
         internalContext.show(text: text)
 
@@ -675,7 +665,7 @@ public final class CairoContext: CGContext {
 
         internalContext.setFont(matrix: cairoTextMatrix)
 
-        internalContext.source = internalState.fill?.pattern ?? .default
+        internalContext.source = fillPattern
 
         // show glyphs
         cairoGlyphs.forEach { internalContext.show(glyph: $0) }
@@ -743,7 +733,8 @@ internal extension Cairo.Pattern {
 internal extension CairoContext {
 
     /// To save non-Cairo state variables
-    fileprivate final class State {
+    // Perry: internal, for CairoContext+CoreGraphics.swift.
+    final class State {
 
         var next: State?
         var alpha: CGFloat = 1.0
