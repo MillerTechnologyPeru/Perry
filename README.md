@@ -93,6 +93,11 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   Basic challenges for session and connection delegates, with
   `NSURLProtectionSpace`, `NSURLCredential`, `NSURLCredentialStorage` and
   each disposition
+- Uniform type identifiers (`libPerryUniformTypeIdentifiers`, which
+  MobileCoreServices and CoreServices map to): `UTType` with iOS's system
+  types, lookups by filename extension and MIME type, conformance, the
+  app's exported and imported types and dynamic types; MobileCoreServices'
+  `UTTypeCreatePreferredIdentifierForTag` family and `kUTType` constants
 - Security (`libPerrySecurity`): `SecRandomCopyBytes`; the keychain's
   generic and internet passwords, keys and certificates (`SecItemAdd`,
   `SecItemCopyMatching`, `SecItemUpdate`, `SecItemDelete`) with iOS's
@@ -154,6 +159,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
 | `Sources/PerrySecurity` | `libPerrySecurity.so`: Security over swift-crypto and swift-certificates (Swift) |
 | `Sources/CPerrySecurity` | `kSecRandomDefault`, the one export Swift cannot define (C) |
+| `Sources/PerryUniformTypeIdentifiers` | `libPerryUniformTypeIdentifiers.so`: UTType, MobileCoreServices' UTType functions and the type database (Swift) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
