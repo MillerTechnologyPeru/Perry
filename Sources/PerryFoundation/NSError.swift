@@ -21,8 +21,8 @@ final class ErrorStorage {
 
 enum Errors {
     nonisolated(unsafe) static var errorClass: Class!
-    nonisolated(unsafe) static var cocoaDomain: id!
-    nonisolated(unsafe) static var localizedDescriptionKey: id!
+    static var cocoaDomain: id { ErrorConstants.NSCocoaErrorDomainObject }
+    static var localizedDescriptionKey: id { ErrorConstants.NSLocalizedDescriptionKeyObject }
 
     static func storage(_ object: id?) -> ErrorStorage? {
         Storage.get(object, as: ErrorStorage.self)
@@ -49,17 +49,18 @@ enum Errors {
 
     static func install(superclass: Class) {
         errorClass = NSError.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-        func constant(_ which: perry_foundation_constant_id, _ value: String) -> id {
-            let string = Strings.make(value)
-            perry_foundation_constant(which).pointee = string
-            return string
-        }
-        cocoaDomain = constant(PERRY_CONSTANT_NSCocoaErrorDomain, "NSCocoaErrorDomain")
-        _ = constant(PERRY_CONSTANT_NSPOSIXErrorDomain, "NSPOSIXErrorDomain")
-        localizedDescriptionKey = constant(PERRY_CONSTANT_NSLocalizedDescriptionKey, "NSLocalizedDescription")
-        _ = constant(PERRY_CONSTANT_NSFilePathErrorKey, "NSFilePath")
-        _ = constant(PERRY_CONSTANT_NSUnderlyingErrorKey, "NSUnderlyingError")
     }
+}
+
+/// Error domains and user info keys.
+@ObjCConstants
+enum ErrorConstants {
+    static let NSCocoaErrorDomain = "NSCocoaErrorDomain"
+    static let NSPOSIXErrorDomain = "NSPOSIXErrorDomain"
+    static let NSLocalizedDescriptionKey = "NSLocalizedDescription"
+    static let NSLocalizedFailureReasonErrorKey = "NSLocalizedFailureReason"
+    static let NSFilePathErrorKey = "NSFilePath"
+    static let NSUnderlyingErrorKey = "NSUnderlyingError"
 }
 
 /// NSError.
