@@ -40,15 +40,16 @@ enum Process {
 
     nonisolated(unsafe) static var processInfo: id!
 
-    static func install(superclass: Class) {
-        let cls = NSProcessInfo.defineObjCClass().storage
-        processInfo = ObjC.createInstance(cls, 0)
-    }
 }
 
 /// NSProcessInfo.
 @ObjCClass("NSProcessInfo")
 public final class NSProcessInfo: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        Process.processInfo = ObjC.createInstance(cls.storage, 0)
+    }
+
     private static var info: ProcessInfo { ProcessInfo.processInfo }
 
     @ObjCClassMethod("processInfo")
