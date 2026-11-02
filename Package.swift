@@ -22,13 +22,18 @@ let package = Package(
         .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
         // libcompression, Apple's API over open compressors.
         .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
+        // Core Data.
+        .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
         .library(name: "PerryCoreGraphics", type: .dynamic, targets: ["PerryCoreGraphics"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
+        // CoreModel's macros need swift-syntax 603; Perry's work with 603 and 604.
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", "603.0.1"..<"605.0.0"),
+        .package(url: "https://github.com/PureSwift/CoreModel.git", from: "2.11.0"),
+        .package(url: "https://github.com/PureSwift/CoreModel-SQLite.git", from: "0.3.3"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -107,6 +112,17 @@ let package = Package(
                 .linkedLibrary("z"), .linkedLibrary("lzma"), .linkedLibrary("lz4"),
                 .linkedLibrary("brotlienc"), .linkedLibrary("brotlidec"), .linkedLibrary("lzfse"),
             ]
+        ),
+        // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
+        // every other store type in memory.
+        .target(
+            name: "PerryCoreData",
+            dependencies: [
+                "PerryInterface", "PerryObjCInterop",
+                .product(name: "CoreModel", package: "CoreModel"),
+                .product(name: "CoreModelSQLite", package: "CoreModel-SQLite"),
+            ],
+            plugins: ["PerryProviderPlugin"]
         ),
         // CoreGraphics' geometry types, shared by the providers that pass them.
         .target(name: "CPerryGeometry"),
