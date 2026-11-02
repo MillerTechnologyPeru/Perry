@@ -71,7 +71,7 @@ enum Sets {
     }
 
     static func install(superclass: Class) {
-        let set = NSSet.defineObjCClass(StorageAllocated.registerObjCMethods)
+        let set = NSSet.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
         setClass = set.storage
         set.addMethod("setWithObjects:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
