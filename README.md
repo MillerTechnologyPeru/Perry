@@ -68,7 +68,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry (Swift) |
 | `Sources/CPerryCoreGraphics` | CoreGraphics' exported constants (C) |
 | `Sources/CPerryGeometry` | `CGPoint`, `CGSize`, `CGRect` as C structs, shared by providers |
-| `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes in Swift, and calls into Objective-C |
+| `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCProtocol`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes and protocols in Swift, and calls into Objective-C |
 | `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
 | `Plugins/PerryProviderPlugin` | Build plugin that generates a provider's entry points from its declarations |
 | `Sources/PerryProviderGenerator` | The plugin's generator (swift-syntax) |
@@ -238,6 +238,33 @@ extension NSObject {
 ```
 
 `@ObjCClass` and `@ObjCCategory` register only the functions with bodies.
+
+`@ObjCProtocol` makes an Objective-C protocol a Swift protocol. Its
+requirements name their selectors with `@ObjCRequired` or `@ObjCOptional`:
+
+```swift
+@ObjCProtocol("UIWindowSceneDelegate")
+protocol UIWindowSceneDelegate: UISceneDelegate {
+    @ObjCOptional("window")
+    func window() -> UIWindow?
+}
+```
+
+The macro generates `AnyUIWindowSceneDelegate`, a class that conforms by
+sending each requirement's message to the object it wraps, whatever its
+class; an optional method is sent only if the object implements it, and
+one that returns a value returns an Optional, nil otherwise. It also
+generates default implementations of the optional requirements, so a Swift
+class implements only those it needs, and the protocol's registration. A
+protocol may refine one other; its `Any` class inherits the other's. The
+provider's generated startup registers the protocols with the runtime
+(`objc_allocateProtocol`) and adds them to the `@ObjCClass` classes that
+adopt them, so `conformsToProtocol:` answers as on Darwin:
+
+```swift
+@ObjCClass("UIView")
+open class UIView: UIResponder, UICoordinateSpace { … }
+```
 
 `@ObjCConstants` exports a type's `static let` constants as the data symbols
 Objective-C code reads, such as `NSString *const NSCocoaErrorDomain`:
