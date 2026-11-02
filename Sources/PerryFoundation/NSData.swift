@@ -123,10 +123,6 @@ enum DataObjects {
         return "{length = \(bytes.count), bytes = 0x\(shown)}"
     }
 
-    static func install(superclass: Class) {
-        dataClass = NSData.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-        mutableClass = NSMutableData.defineObjCClass().storage
-    }
 
     /// A new NSData wrapped for returning, +1.
     static func owned(_ storage: DataStorage, cls: ObjCClass? = nil) -> NSData {
@@ -147,6 +143,12 @@ private func base64(_ data: Data, options: UInt) -> String {
 /// NSData.
 @ObjCClass("NSData")
 public class NSData: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        DataObjects.dataClass = cls.storage
+    }
+
     var data: Data { DataObjects.data(objcObject) }
     private var storage: DataStorage? { DataObjects.storage(objcObject) }
 
@@ -302,6 +304,11 @@ public class NSData: NSObject {
 /// NSMutableData.
 @ObjCClass("NSMutableData")
 public class NSMutableData: NSData {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        DataObjects.mutableClass = cls.storage
+    }
+
     private var storage: DataStorage {
         guard let storage = DataObjects.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableData")
@@ -375,11 +382,6 @@ public class NSMutableData: NSData {
 /// NSNull: one immortal instance, also exported as kCFNull.
 enum Nulls {
     nonisolated(unsafe) static var null: id!
-
-    static func install(superclass: Class) {
-        let cls = NSNull.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
-        null = ObjC.createInstance(cls, 0)
-    }
 }
 
 /// CoreFoundation's name for the NSNull instance.
@@ -391,6 +393,12 @@ enum NullConstants {
 /// NSNull.
 @ObjCClass("NSNull")
 public final class NSNull: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Nulls.null = ObjC.createInstance(cls.markingStatic().storage, 0)
+    }
+
     @ObjCClassMethod("null") static func null() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCClassMethod("alloc") static func alloc() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCMethod("init") func initialize() -> Self { self }
