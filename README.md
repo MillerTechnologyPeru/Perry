@@ -72,6 +72,13 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   `NSHTTPURLResponse`, `NSURLSessionConfiguration`, `NSHTTPCookie` and
   `NSHTTPCookieStorage`; `NSURLConnection` with synchronous and
   asynchronous requests and delegates on the run loop or a queue
+- Security (`libPerrySecurity`): `SecRandomCopyBytes`; the keychain's
+  generic and internet passwords, keys and certificates (`SecItemAdd`,
+  `SecItemCopyMatching`, `SecItemUpdate`, `SecItemDelete`) with iOS's
+  attributes, defaults, uniqueness and errors; RSA and P-256/384/521 keys
+  with every signature, encryption, key exchange and ECIES algorithm
+  Security names, in Apple's key formats; certificates; trust evaluation
+  with SSL and basic policies, anchors and verify dates
 - Grand Central Dispatch (`libPerrydispatch`, which libSystem re-exports):
   serial, concurrent, global and main queues, sync, async, barriers,
   `dispatch_after`, `dispatch_apply`, queue-specific data, target queues,
@@ -120,6 +127,8 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryCFNetwork` | `libPerryCFNetwork.so`: NSURLSession and the URL loading classes (Swift) |
 | `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
+| `Sources/PerrySecurity` | `libPerrySecurity.so`: Security over swift-crypto and swift-certificates (Swift) |
+| `Sources/CPerrySecurity` | `kSecRandomDefault`, the one export Swift cannot define (C) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
@@ -184,7 +193,11 @@ files as resources, and records its output with Apple's Foundation; apps
 that use UIKit are built for Mac Catalyst, which runs iOS's UIKit. A
 fixture's `dependencies` file names third-party sources by git URL and
 commit, such as KissXML for Scribe; the script clones them into `.build`.
-A fixture's `.xcdatamodeld` is compiled with `momc` into both apps.
+A fixture's `.xcdatamodeld` is compiled with `momc` into both apps. A
+fixture with an `Entitlements.plist` records its output from the iOS
+Simulator instead, built with the entitlements in `__TEXT,__entitlements`
+as Xcode puts them and run with `simctl spawn`: the keychain needs them,
+and the simulator's keychain is iOS's, apart from the Mac's.
 `DarwinFixtureTests` requires Perry's output to match it byte for byte. The
 suite is skipped when the apps have not been built.
 
@@ -505,6 +518,24 @@ delegate hears from it on the run loop of the thread that made or started
 it, through `-performSelector:onThread:withObject:waitUntilDone:`, or on its
 delegate queue, first with `connection:willSendRequest:redirectResponse:`
 for the original request, and nothing after `-cancel`.
+
+**Security** runs on swift-crypto, CryptoKit's API with its own BoringSSL,
+and swift-certificates. Elliptic-curve keys are CryptoKit's P-256, P-384
+and P-521 keys in X9.63 form, as Apple's external representation is;
+digest variants sign through a `Digest` carrying the caller's bytes. RSA's
+encodings (PKCS #1 v1.5 and PSS signatures, PKCS #1 v1.5, OAEP and raw
+encryption) are written out over the two raw operations, the private one
+by BoringSSL's blinded blind-signing operation and the public one by a
+Montgomery exponentiation, so every RSA algorithm Security names works
+rather than the subset `_CryptoExtras` offers. ECIES follows Apple's
+construction: an ephemeral key, the X9.63 KDF over the shared secret, and
+AES-GCM. Trust evaluation runs swift-certificates' verifier and reports
+failures with Security's codes: a host name mismatch when the chain alone
+verifies, an expired or not-yet-valid certificate, or an untrusted chain.
+The keychain keeps items in a JSON file under `~/Library/Keychains` (or
+`$PERRY_KEYCHAIN`), locked while each call reads and writes it. Keys,
+certificates, trusts and policies are Objective-C objects, so `CFRetain`,
+`CFRelease`, `CFEqual` and `CFGetTypeID` work on them.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
