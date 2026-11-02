@@ -81,7 +81,12 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   cancellation; `NSURLRequest`, `NSMutableURLRequest`, `NSURLResponse`,
   `NSHTTPURLResponse`, `NSURLSessionConfiguration`, `NSHTTPCookie` and
   `NSHTTPCookieStorage`; `NSURLConnection` with synchronous and
-  asynchronous requests and delegates on the run loop or a queue
+  asynchronous requests and delegates on the run loop or a queue;
+  `NSURLProtocol` subclasses, registered or in a configuration, for
+  sessions and connections, with request properties and redirects; HTTP
+  Basic challenges for session and connection delegates, with
+  `NSURLProtectionSpace`, `NSURLCredential`, `NSURLCredentialStorage` and
+  each disposition
 - Security (`libPerrySecurity`): `SecRandomCopyBytes`; the keychain's
   generic and internet passwords, keys and certificates (`SecItemAdd`,
   `SecItemCopyMatching`, `SecItemUpdate`, `SecItemDelete`) with iOS's
@@ -412,6 +417,18 @@ Objective-C code reads, such as `NSString *const NSCocoaErrorDomain`:
 enum RunLoopModes {
     static let NSDefaultRunLoopMode = "kCFRunLoopDefaultMode"
     static let kCFRunLoopDefaultMode = NSDefaultRunLoopMode   // the same object
+}
+```
+
+Numbers are exported too, their bits in the constant's 8 bytes: integer
+types (`const int64_t NSURLSessionTransferSizeUnknown`), `Double` or
+`CGFloat`, and `Float` in the low four bytes:
+
+```swift
+@ObjCConstants
+enum SessionNumbers {
+    static let NSURLSessionTransferSizeUnknown: Int64 = -1
+    static let NSURLSessionTaskPriorityHigh: Float = 0.75
 }
 ```
 
