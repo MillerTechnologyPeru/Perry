@@ -316,6 +316,24 @@ extension NSString {
     @ObjCMethod("caseInsensitiveCompare:")
     func caseInsensitiveCompare(_ other: String) -> Int { Strings.compare(value.lowercased(), other.lowercased()) }
 
+    /// NSStringCompareOptions: case insensitive 1, numeric 64 (digit runs
+    /// compare as numbers); others compare literally.
+    @ObjCMethod("compare:options:")
+    func compare(_ other: String, options: UInt) -> Int {
+        let a = options & 1 != 0 ? value.lowercased() : value, b = options & 1 != 0 ? other.lowercased() : other
+        return options & 64 != 0 ? Strings.numericCompare(a, b) : Strings.compare(a, b)
+    }
+
+    @ObjCMethod("compare:options:range:")
+    func compare(_ other: String, options: UInt, range: NSRange) -> Int {
+        let part = substring(range: range)
+        let a = options & 1 != 0 ? part.lowercased() : part, b = options & 1 != 0 ? other.lowercased() : other
+        return options & 64 != 0 ? Strings.numericCompare(a, b) : Strings.compare(a, b)
+    }
+
+    @ObjCMethod("localizedStandardCompare:")
+    func localizedStandardCompare(_ other: String) -> Int { Strings.numericCompare(value.lowercased(), other.lowercased()) }
+
     /// A letter starts a word unless a letter precedes it, so digits split
     /// words too ("br0wn" becomes "Br0Wn"), as in Foundation.
     @ObjCMethod("capitalizedString")
