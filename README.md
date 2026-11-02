@@ -38,7 +38,10 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the
   `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSCharacterSet`,
   `NSXMLParser`, `NSPredicate` and `NSExpression` (format parsing,
   printing and evaluation), `NSSortDescriptor`, key-value coding with collection
-  operators, `NSLock`, `NSRecursiveLock`, `NSCondition`,
+  operators, `NSLock`, `NSRecursiveLock`, `NSCondition`, `NSOperation`,
+  `NSBlockOperation` and `NSOperationQueue` (dependencies, priorities,
+  cancellation, concurrency limits, barriers, asynchronous operations,
+  the main queue),
   `NSKeyedUnarchiver` (binary archives), `NSLog`, and the CFString
   functions KissXML uses
   (`CFStringTransform` with `kCFStringTransformToXMLHex`,
@@ -78,7 +81,7 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(operation queues, run loop input sources, formatters, localization),
+(run loop input sources, formatters, localization, key-value observing),
 `dispatch_io` and dispatch workloops,
 most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 
@@ -443,6 +446,14 @@ the main queue through the hooks CoreFoundation uses on Darwin, waiting in
 the same without a run loop. libSystem re-exports libdispatch as on
 Darwin: the loader looks for a symbol libSystem lacks in libdispatch,
 loading it then, and libdispatch brings libobjc with it.
+
+`NSOperationQueue` is built on libdispatch, as Darwin's is: a queue starts
+each ready operation, highest priority first and within its concurrency
+limit, on a global dispatch queue, or on the main dispatch queue for
+`+mainQueue`. Operations' state is read through their messages, so
+subclasses' `-isReady` and `-isFinished` apply, and an asynchronous
+operation's `-didChangeValueForKey:@"isFinished"` tells its queue it has
+finished, the one part of key-value observing Perry has.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
