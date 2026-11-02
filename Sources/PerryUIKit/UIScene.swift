@@ -155,9 +155,36 @@ open class UIScene: UIResponder {
     }
 }
 
+final class WindowSceneState: ObjectState {
+    /// The scene's windows, in the order made; not retained.
+    var windows: [UnsafeMutableRawPointer] = []
+}
+
 /// A scene with windows: the kind the application role uses.
 @ObjCClass("UIWindowScene")
-open class UIWindowScene: UIScene {}
+open class UIWindowScene: UIScene {
+    static let windowSceneStates = StateTable<WindowSceneState>()
+    var windowSceneState: WindowSceneState { UIWindowScene.windowSceneStates[objcObject] }
+
+    static func remove(window: UnsafeMutableRawPointer, from scene: UnsafeMutableRawPointer) {
+        windowSceneStates[scene].windows.removeAll { $0 == window }
+    }
+
+    @ObjCMethod("windows")
+    func windows() -> NSObject { NSMutableArray.of(windowSceneState.windows.map(NSObject.init)) }
+
+    @ObjCMethod("keyWindow")
+    func keyWindow() -> NSObject? {
+        guard let key = Windows.key, windowSceneState.windows.contains(key) else { return nil }
+        return NSObject(key)
+    }
+
+    @ObjCMethod("dealloc")
+    override func dealloc() {
+        UIWindowScene.windowSceneStates.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIWindowScene.objCClass.pointer)
+    }
+}
 
 /// UISceneDelegate's messages, and UIScene's initializer as a message, so a
 /// subclass's runs.
