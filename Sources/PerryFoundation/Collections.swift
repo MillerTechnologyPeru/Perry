@@ -108,7 +108,7 @@ enum Describe {
     /// with escapes.
     static func quoted(_ string: String) -> String {
         let plain = !string.isEmpty && string.unicodeScalars.allSatisfy {
-            $0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains(Character($0)) || "_$./:".unicodeScalars.contains($0))
+            $0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains(Character($0)) || "_$.".unicodeScalars.contains($0))
         }
         if plain { return string }
         var escaped = "\""
