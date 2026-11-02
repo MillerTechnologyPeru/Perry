@@ -88,6 +88,14 @@ enum Strings {
         ObjC.autorelease(make(value))!
     }
 
+    /// A new autoreleased string of `cls`: convenience constructors make
+    /// their receiver's class, so +[NSMutableString string] is mutable.
+    static func autoreleased(_ value: String, of cls: UnsafeMutableRawPointer?) -> id {
+        guard let cls, let object = Storage.allocate(cls) else { return autoreleased(value) }
+        Storage.set(object, StringStorage(value))
+        return ObjC.autorelease(object)!
+    }
+
     /// FNV-1a over UTF-16, so equal strings hash equally in every process.
     static func hash(_ value: String) -> UInt {
         var hash: UInt = 0xcbf2_9ce4_8422_2325
@@ -139,13 +147,17 @@ public class NSString: NSObject {
     // MARK: Creating
 
     @ObjCClassMethod("string")
-    static func empty() -> String { "" }
+    static func empty(_ cls: ObjCClass) -> ObjCObject { ObjCObject(Strings.autoreleased("", of: cls.pointer)) }
 
     @ObjCClassMethod("stringWithString:")
-    static func string(with other: String) -> String { other }
+    static func string(_ cls: ObjCClass, with other: String) -> ObjCObject {
+        ObjCObject(Strings.autoreleased(other, of: cls.pointer))
+    }
 
     @ObjCClassMethod("stringWithUTF8String:")
-    static func string(utf8 bytes: UnsafePointer<CChar>?) -> String? { bytes.map { String(cString: $0) } }
+    static func string(_ cls: ObjCClass, utf8 bytes: UnsafePointer<CChar>?) -> ObjCObject? {
+        bytes.map { ObjCObject(Strings.autoreleased(String(cString: $0), of: cls.pointer)) }
+    }
 
     @ObjCMethod("init")
     func initialize() -> Self { setValue("") }
@@ -268,7 +280,7 @@ public func perry_foundation_stringWithFormat(_ cls: id?, _ cmd: SEL?, _ format:
                                               _ arguments: UnsafeRawPointer?) -> id? {
     guard let arguments else { return nil }
     var darwin = DarwinArguments(arguments)
-    return Strings.autoreleased(Format.string(Strings.value(of: format) ?? "", &darwin))
+    return Strings.autoreleased(Format.string(Strings.value(of: format) ?? "", &darwin), of: cls)
 }
 
 @c
