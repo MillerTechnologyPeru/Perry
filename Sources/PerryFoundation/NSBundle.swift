@@ -86,16 +86,19 @@ enum Bundles {
         return object
     }
 
-    static func install(superclass: Class) {
-        bundleClass = NSBundle.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-        // The app bundle, or the executable's directory for a bare executable.
-        main = bundle(path: Process.bundlePath ?? Paths.deletingLastComponent(Process.executablePath))
-    }
 }
 
 /// NSBundle.
 @ObjCClass("NSBundle")
 public final class NSBundle: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Bundles.bundleClass = cls.storage
+        // The app bundle, or the executable's directory for a bare executable.
+        Bundles.main = Bundles.bundle(path: Process.bundlePath ?? Paths.deletingLastComponent(Process.executablePath))
+    }
+
     private var storage: BundleStorage {
         guard let storage = Bundles.storage(objcObject) else { foundationFatal("message sent to an uninitialized NSBundle") }
         return storage
