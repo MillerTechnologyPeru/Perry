@@ -17,6 +17,8 @@ final class ThreadStorage {
     var isFinished = false
     var isCancelled = false
     var stackSize: UInt = 512 * 1024
+    /// The thread's run loop, once it or a perform onto the thread made one.
+    var runLoop: RunLoopState?
 
     init(isMain: Bool = false, block: id? = nil, target: id? = nil, selector: SEL? = nil, argument: id? = nil) {
         self.isMain = isMain
@@ -116,10 +118,29 @@ enum Threads {
     /// Runs `selector` on the main thread from its run loop, or at once when
     /// already there and waiting; with `wait`, blocks until it has run.
     static func performOnMain(_ target: id, _ selector: SEL, _ argument: id?, wait: Bool) {
-        if wait && isMainThread {
+        perform(target, selector, argument, on: main, wait: wait)
+    }
+
+    /// The run loop of a thread, made for it if it has none yet; the thread
+    /// adopts it when it first asks for its own.
+    static func runLoop(of thread: id) -> RunLoopState? {
+        if thread == main { return RunLoops.mainLoop }
+        guard let storage = storage(thread) else { return nil }
+        if let runLoop = storage.runLoop { return runLoop }
+        let runLoop = RunLoopState()
+        storage.runLoop = runLoop
+        return runLoop
+    }
+
+    /// Runs `selector` on `thread` from its run loop, or at once when that
+    /// is the calling thread and waiting; with `wait`, blocks until it has
+    /// run.
+    static func perform(_ target: id, _ selector: SEL, _ argument: id?, on thread: id, wait: Bool) {
+        if wait && thread == current {
             _ = ObjC.send(target, selector, argument)
             return
         }
+        guard let runLoop = runLoop(of: thread) else { return }
         var done = false
         let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
         let condition = UnsafeMutablePointer<pthread_cond_t>.allocate(capacity: 1)
@@ -142,7 +163,7 @@ enum Threads {
             }
         }
         let timer = Timers.make(request)
-        Timers.add(timer, to: RunLoops.mainLoop)
+        Timers.add(timer, to: runLoop)
         ObjC.release(timer)
         guard wait else { return }
         pthread_mutex_lock(mutex)
@@ -259,6 +280,18 @@ extension NSObject {
     @ObjCMethod("performSelectorOnMainThread:withObject:waitUntilDone:modes:")
     func performOnMain(_ selector: ObjCSelector, with argument: ObjCObject?, waitUntilDone wait: Bool, modes: ObjCObject?) {
         performOnMain(selector, with: argument, waitUntilDone: wait)
+    }
+
+    @ObjCMethod("performSelector:onThread:withObject:waitUntilDone:")
+    func perform(_ selector: ObjCSelector, on thread: ObjCObject, with argument: ObjCObject?, waitUntilDone wait: Bool) {
+        Threads.perform(objcObject, selector.pointer.assumingMemoryBound(to: CChar.self), argument?.id, on: thread.id,
+                        wait: wait)
+    }
+
+    @ObjCMethod("performSelector:onThread:withObject:waitUntilDone:modes:")
+    func perform(_ selector: ObjCSelector, on thread: ObjCObject, with argument: ObjCObject?, waitUntilDone wait: Bool,
+                 modes: ObjCObject?) {
+        perform(selector, on: thread, with: argument, waitUntilDone: wait)
     }
 
     @ObjCMethod("performSelectorInBackground:withObject:")
