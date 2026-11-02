@@ -110,17 +110,15 @@ enum Numbers {
     }
 
     static func install(superclass: Class) {
-        let number = ClassDefinition(PERRY_CLASS_NSNumber, name: "NSNumber", superclass: superclass,
-                                     StorageAllocated.register, NSNumber.register)
-        numberClass = number.cls
+        numberClass = NSNumber.defineObjCClass(StorageAllocated.registerObjCMethods).storage
         // Static numbers: immortal, read in place.
-        func constant(_ which: perry_foundation_class_id, _ name: String) -> Class {
-            ClassDefinition(which, name: name, superclass: number.cls, isStatic: true, ImmortalObject.register).cls
+        func constant(_ cls: NSNumber.Type) -> Class {
+            cls.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
         }
-        constantIntegerClass = constant(PERRY_CLASS_NSConstantIntegerNumber, "NSConstantIntegerNumber")
-        constantDoubleClass = constant(PERRY_CLASS_NSConstantDoubleNumber, "NSConstantDoubleNumber")
-        constantFloatClass = constant(PERRY_CLASS_NSConstantFloatNumber, "NSConstantFloatNumber")
-        booleanClass = constant(PERRY_CLASS_NSCFBoolean, "__NSCFBoolean")
+        constantIntegerClass = constant(NSConstantIntegerNumber.self)
+        constantDoubleClass = constant(NSConstantDoubleNumber.self)
+        constantFloatClass = constant(NSConstantFloatNumber.self)
+        booleanClass = constant(NSCFBoolean.self)
     }
 
     /// A new number wrapped for returning, +0.
@@ -131,10 +129,7 @@ enum Numbers {
 
 /// NSNumber.
 @ObjCClass("NSNumber")
-public struct NSNumber {}
-
-@ObjCImplementation
-extension NSNumber {
+public class NSNumber: NSObject {
     private var number: NumberStorage { Numbers.storage(objcObject) }
 
     private func setValue(_ value: NumberStorage.Value) -> Self {
@@ -236,3 +231,19 @@ extension NSNumber {
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
 }
+
+/// @42: { isa, const char *encoding, int64 value }.
+@ObjCClass("NSConstantIntegerNumber")
+final class NSConstantIntegerNumber: NSNumber {}
+
+/// @2.5: { isa, double value }.
+@ObjCClass("NSConstantDoubleNumber")
+final class NSConstantDoubleNumber: NSNumber {}
+
+/// @2.5f: { isa, float value }.
+@ObjCClass("NSConstantFloatNumber")
+final class NSConstantFloatNumber: NSNumber {}
+
+/// kCFBooleanTrue and kCFBooleanFalse: { isa, uint64 value }.
+@ObjCClass("__NSCFBoolean")
+final class NSCFBoolean: NSNumber {}
