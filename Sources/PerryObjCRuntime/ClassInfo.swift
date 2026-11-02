@@ -26,6 +26,8 @@ public final class ClassInfo {
     var methods: [SEL: UnsafeMutablePointer<perry_method>] = [:]
     /// Protocol lists adopted by the class and its categories.
     var protocolLists: [UnsafeRawPointer] = []
+    /// Declared property lists of the class and its categories.
+    var propertyLists: [UnsafeRawPointer] = []
 
     var loadCalled = false
     var initializing = false
@@ -48,6 +50,9 @@ public final class ClassInfo {
         instanceSize = Int(ro.pointee.instance_size)
         if let protocols = ro.pointee.base_protocols {
             protocolLists.append(protocols)
+        }
+        if let properties = ro.pointee.base_properties {
+            propertyLists.append(properties)
         }
         header = .allocate(capacity: 1)
         header.initialize(to: perry_class_header(cache: perry_objc_empty_cache_table(), info: nil))
