@@ -34,12 +34,14 @@ yet.
   Foundation's description format, `NSDate`, `NSTimer`, `NSRunLoop` and
   `CFRunLoop` (timers only), `NSNotificationCenter`, `NSData`, `NSURL`,
   `NSUUID`, `NSJSONSerialization`, `NSError`, `NSNull`, `NSString`'s
-  encodings, paths and searching, and `NSLog`
+  encodings, paths and searching, `NSBundle` with Info.plist and resources,
+  `NSProcessInfo`, `NSThread` with performs between threads,
+  `NSUserDefaults`, `NSFileManager`, and `NSLog`
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(bundles, process info, user defaults, file manager, operation queues, run
-loop input sources), UIKit, Swift.
+(operation queues, GCD, run loop input sources, formatters, localization),
+UIKit, Swift.
 
 ## Layout
 
@@ -100,8 +102,8 @@ Scripts/build-darwin-fixtures.sh   # on the Mac: .build/perry-fixtures/darwin/*.
 Scripts/docker-test.sh             # DarwinFixtureTests picks them up
 ```
 
-The script also builds each app for macOS and records its output with
-Apple's Foundation; `DarwinFixtureTests` requires Perry's output to match it
+The script also builds each app as a macOS app, with the fixture's other
+files as resources, and records its output with Apple's Foundation; `DarwinFixtureTests` requires Perry's output to match it
 byte for byte. The suite is skipped when the apps have not been built.
 
 ## Usage
@@ -159,39 +161,35 @@ forwarding and the `$`-named data symbols are C and assembly. Blocks are
 classes built inside libSystem's `_NSConcrete*Block` storage, which the
 runtime reaches through the loader's `lookup_symbol`.
 
-**Objective-C classes in Swift.** `PerryObjCInterop` connects Swift and
-Objective-C in both directions. `@ObjCClass` declares a Swift wrapper for an
-Objective-C class: a struct holding one reference to the object. In a
-wrapper, `@ObjCMethod` functions without a body send the message:
+**Objective-C classes in Swift.** `PerryObjCInterop` exposes Swift classes
+to Objective-C. An `@ObjCClass` class inherits from the class of its
+Objective-C superclass, rooted at `NSObject`, and an instance stands for one
+Objective-C object, holding a reference to it. Its `@ObjCMethod` and
+`@ObjCClassMethod` functions implement selectors, with `self` as the
+receiver and Swift values as arguments and results:
 
 ```swift
-@ObjCClass("NSString")
-struct NSString {
-    @ObjCMethod("characterAtIndex:")
-    func character(at index: UInt) -> UInt16
+@ObjCClass("NSMutableString")
+public class NSMutableString: NSString {
+    @ObjCMethod("appendString:")
+    func append(_ other: String) { storage.value += other }
 }
+
+NSMutableString.defineObjCClass()
 ```
 
-In an `@ObjCImplementation` extension, functions with a body implement the
-method, with `self` as the wrapper for the receiver and the arguments as
-Swift values:
-
-```swift
-@ObjCImplementation
-extension NSString {
-    @ObjCMethod("stringByAppendingString:")
-    func appending(_ other: String) -> String { value + other }
-}
-```
-
-The macro generates a C-convention thunk per method and a `register`
-function that installs them into a class, and rejects selectors whose
-argument count does not match at compile time. Values cross through the
-`ObjCValue` protocol, which gives each Swift type its C representation, its
-type encoding and Objective-C's ownership rules: numbers and pointers pass
-as they are, `String` becomes an `NSString`, wrappers pass their object, and
-results of `alloc`, `new`, `copy` and `init` methods are owned. `NSObject` in
-the runtime and every Foundation class are written this way.
+The macro generates a C-convention thunk per method and
+`registerObjCMethods(_:)`, which installs them, and rejects selectors whose
+argument count does not match at compile time. `defineObjCClass(_:)` creates
+the class in the runtime (in the provider's exported `_OBJC_CLASS_$_…`
+storage when it has some), installs its methods and any other classes'
+`registerObjCMethods`, the way categories add methods, and registers it.
+Values cross through the `ObjCValue` protocol, which gives each Swift type
+its C representation, its type encoding and Objective-C's ownership rules:
+numbers and pointers pass as they are, `String` becomes an `NSString`,
+wrappers pass their object, and results of `alloc`, `new`, `copy` and `init`
+methods are owned. `NSObject` in the runtime and every Foundation class are
+written this way.
 
 **Foundation** is written in Swift as a client of libobjc's C API, which it
 looks up through the loader at startup, so it shares the one runtime rather
