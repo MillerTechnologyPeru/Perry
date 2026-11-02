@@ -89,8 +89,8 @@ enum Notifications {
     }
 
     static func install(superclass: Class) {
-        notificationClass = NSNotification.defineObjCClass(StorageAllocated.registerObjCMethods).storage
-        centerClass = NSNotificationCenter.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        notificationClass = NSNotification.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
+        centerClass = NSNotificationCenter.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         // The default center lives for the whole process.
         defaultCenter = Storage.allocate(UnsafeMutableRawPointer(centerClass))
         Storage.set(defaultCenter, NotificationCenterStorage())
