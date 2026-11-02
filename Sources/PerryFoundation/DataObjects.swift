@@ -124,11 +124,8 @@ enum DataObjects {
     }
 
     static func install(superclass: Class) {
-        let data = ClassDefinition(PERRY_CLASS_NSData, name: "NSData", superclass: superclass,
-                                   StorageAllocated.register, NSData.register)
-        dataClass = data.cls
-        mutableClass = ClassDefinition(PERRY_CLASS_NSMutableData, name: "NSMutableData", superclass: data.cls,
-                                       NSMutableData.register).cls
+        dataClass = NSData.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        mutableClass = NSMutableData.defineObjCClass().storage
     }
 
     /// A new NSData wrapped for returning, +1.
@@ -149,10 +146,7 @@ private func base64(_ data: Data, options: UInt) -> String {
 
 /// NSData.
 @ObjCClass("NSData")
-public struct NSData {}
-
-@ObjCImplementation
-extension NSData {
+public class NSData: NSObject {
     var data: Data { DataObjects.data(objcObject) }
     private var storage: DataStorage? { DataObjects.storage(objcObject) }
 
@@ -307,10 +301,7 @@ extension NSData {
 
 /// NSMutableData.
 @ObjCClass("NSMutableData")
-public struct NSMutableData {}
-
-@ObjCImplementation
-extension NSMutableData {
+public class NSMutableData: NSData {
     private var storage: DataStorage {
         guard let storage = DataObjects.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableData")
@@ -339,7 +330,7 @@ extension NSMutableData {
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSData { DataObjects.owned(DataStorage(storage.data)) }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSData { DataObjects.owned(DataStorage(storage.data)) }
 
     @ObjCMethod("mutableBytes")
     func mutableBytes() -> UnsafeMutableRawPointer? { storage.bytes }
@@ -386,8 +377,7 @@ enum Nulls {
     nonisolated(unsafe) static var null: id!
 
     static func install(superclass: Class) {
-        let cls = ClassDefinition(PERRY_CLASS_NSNull, name: "NSNull", superclass: superclass, isStatic: true,
-                                  ImmortalObject.register, NSNull.register).cls
+        let cls = NSNull.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
         null = ObjC.createInstance(cls, 0)
         perry_foundation_constant(PERRY_CONSTANT_kCFNull).pointee = null
     }
@@ -395,10 +385,7 @@ enum Nulls {
 
 /// NSNull.
 @ObjCClass("NSNull")
-public struct NSNull {}
-
-@ObjCImplementation
-extension NSNull {
+public final class NSNull: NSObject {
     @ObjCClassMethod("null") static func null() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCClassMethod("alloc") static func alloc() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCMethod("init") func initialize() -> Self { self }
