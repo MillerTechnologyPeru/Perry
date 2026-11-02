@@ -105,6 +105,9 @@ class NSMutableDictionary: NSDictionary {
 class NSError: NSObject {
     @ObjCClassMethod("errorWithDomain:code:userInfo:")
     static func make(domain: String, code: Int, userInfo: NSDictionary?) -> NSError
+    @ObjCMethod("domain") func domain() -> String
+    @ObjCMethod("code") func code() -> Int
+    @ObjCMethod("localizedDescription") func localizedDescription() -> String?
 }
 
 @ObjCWrapper("NSOperationQueue")
