@@ -55,8 +55,10 @@ UIKit, Swift.
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
-| `Sources/PerryObjCInterop` | `@ObjCImplementation` and `@ObjCMethod`: Objective-C classes in Swift |
+| `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants` and `@ObjCMethod`: Objective-C classes in Swift |
 | `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
+| `Plugins/PerryProviderPlugin` | Build plugin that generates a provider's entry points from its declarations |
+| `Sources/PerryProviderGenerator` | The plugin's generator (swift-syntax) |
 | `Sources/PerryInterface` | Loader/provider interface header |
 | `Tests/PerryLoaderTests` | Swift Testing suite |
 | `Tests/Fixtures` | arm64 iOS test programs and stub `.tbd` link libraries |
@@ -217,6 +219,22 @@ Swift cannot define a data symbol by name, so providers may export
 the provider does not define as ELF symbols, and it returns a slot for each
 constant. At startup the provider fills the slots, before any Mach-O code
 runs.
+
+`PerryProviderPlugin` writes a provider's `perry_provider_startup` and
+`perry_provider_symbol`. It scans the module for `@ObjCClass`,
+`@ObjCCategory` and `@ObjCConstants` declarations and generates a startup
+that defines the classes (superclasses first), adds the categories and
+exports the constants. A class that overrides
+`didDefineObjCClass(_:)` in its body gets it called with the new class, for
+set-up such as variadic methods or shared instances; a category declared
+with `addedAtStartup: false` is a method set that classes register
+themselves. The provider adds its own steps as top-level functions:
+
+```swift
+func providerWillStart(_ info: perry_startup_info) -> Bool  // before; false stops startup
+func providerDidStart(_ info: perry_startup_info)           // after
+```
+
 Values cross through the `ObjCValue` protocol, which gives each Swift type
 its C representation, its type encoding and Objective-C's ownership rules:
 numbers and pointers pass as they are, `String` becomes an `NSString`,
