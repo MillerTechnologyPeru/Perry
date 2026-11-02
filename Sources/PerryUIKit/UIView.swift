@@ -33,8 +33,27 @@ enum Screen {
     static let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
 }
 
+/// A coordinate space: one with bounds that converts to and from others.
+@ObjCProtocol("UICoordinateSpace")
+protocol UICoordinateSpace {
+    @ObjCRequired("bounds")
+    func bounds() -> CGRect
+
+    @ObjCRequired("convertPoint:toCoordinateSpace:")
+    func convert(_ point: CGPoint, toCoordinateSpace space: NSObject) -> CGPoint
+
+    @ObjCRequired("convertPoint:fromCoordinateSpace:")
+    func convert(_ point: CGPoint, fromCoordinateSpace space: NSObject) -> CGPoint
+
+    @ObjCRequired("convertRect:toCoordinateSpace:")
+    func convert(_ rect: CGRect, toCoordinateSpace space: NSObject) -> CGRect
+
+    @ObjCRequired("convertRect:fromCoordinateSpace:")
+    func convert(_ rect: CGRect, fromCoordinateSpace space: NSObject) -> CGRect
+}
+
 @ObjCClass("UIView")
-open class UIView: UIResponder {
+open class UIView: UIResponder, UICoordinateSpace {
     static let states = StateTable<ViewState>()
     var state: ViewState { UIView.states[objcObject] }
 
@@ -273,6 +292,22 @@ open class UIView: UIResponder {
     func convert(_ rect: CGRect, from view: UIView?) -> CGRect {
         CGRect(origin: convert(rect.origin, from: view), size: rect.size)
     }
+
+    // UICoordinateSpace: another view's space, or else the window's.
+
+    private func view(of space: NSObject) -> UIView? { space.as(UIView.self) }
+
+    @ObjCMethod("convertPoint:toCoordinateSpace:")
+    func convert(_ point: CGPoint, toCoordinateSpace space: NSObject) -> CGPoint { convert(point, to: view(of: space)) }
+
+    @ObjCMethod("convertPoint:fromCoordinateSpace:")
+    func convert(_ point: CGPoint, fromCoordinateSpace space: NSObject) -> CGPoint { convert(point, from: view(of: space)) }
+
+    @ObjCMethod("convertRect:toCoordinateSpace:")
+    func convert(_ rect: CGRect, toCoordinateSpace space: NSObject) -> CGRect { convert(rect, to: view(of: space)) }
+
+    @ObjCMethod("convertRect:fromCoordinateSpace:")
+    func convert(_ rect: CGRect, fromCoordinateSpace space: NSObject) -> CGRect { convert(rect, from: view(of: space)) }
 
     // MARK: Layout
 
