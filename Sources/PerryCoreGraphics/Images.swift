@@ -458,6 +458,8 @@ final class ImageState: @unchecked Sendable {
     /// The UTType of the file it was read from.
     var typeIdentifier: String?
     private var cached: Bitmap?
+    /// What a canvas made to draw the image, kept for the next draw.
+    var renderCache: AnyObject?
 
     init(width: Int, height: Int, format: PixelFormat, bytesPerRow: Int, space: Ref?, provider: Ref, shouldInterpolate: Bool = true) {
         self.width = width
