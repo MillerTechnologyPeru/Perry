@@ -32,9 +32,8 @@ enum MutableStrings {
     }
 
     static func install(superclass: Class) {
-        let mutable = ClassDefinition(PERRY_CLASS_NSMutableString, name: "NSMutableString", superclass: superclass,
-                                      NSMutableString.register)
-        mutableClass = mutable.cls
+        let mutable = NSMutableString.defineObjCClass()
+        mutableClass = mutable.storage
         mutable.addMethod("appendFormat:", types: "v24@0:8@16",
                           implementation: variadicEntry(perry_imp_appendFormat), isClassMethod: false)
     }
@@ -42,10 +41,7 @@ enum MutableStrings {
 
 /// NSMutableString.
 @ObjCClass("NSMutableString")
-public struct NSMutableString {}
-
-@ObjCImplementation
-extension NSMutableString {
+public class NSMutableString: NSString {
     private var storage: StringStorage { MutableStrings.storage(objcObject) }
 
     @ObjCClassMethod("stringWithCapacity:")
@@ -63,12 +59,12 @@ extension NSMutableString {
 
     /// Copies of a mutable string are immutable.
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> ObjCObject {
-        ObjCObject(objCOwned: Strings.make(storage.value))
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSString {
+        NSString(objCOwned: Strings.make(storage.value))
     }
 
     @ObjCMethod("copy")
-    func copy() -> ObjCObject { copy(zone: nil) }
+    override func copy() -> NSString { copy(zone: nil) }
 
     @ObjCMethod("appendString:")
     func append(_ other: String) { storage.value += other }
