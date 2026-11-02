@@ -11,6 +11,7 @@
 //
 //     func providerWillStart(_ info: perry_startup_info) -> Bool  // before; false stops
 //     func providerDidStart(_ info: perry_startup_info)           // after
+//     func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? // other imports
 //
 // A class that declares `class func didDefineObjCClass(_:)` in its own body
 // has it called right after the class is defined.
@@ -46,6 +47,7 @@ final class Collector: SyntaxVisitor {
     var constantTables: [String] = []
     var hasWillStart = false
     var hasDidStart = false
+    var hasSymbol = false
 
     init() { super.init(viewMode: .sourceAccurate) }
 
@@ -118,6 +120,7 @@ final class Collector: SyntaxVisitor {
         if node.parent?.parent?.parent?.is(SourceFileSyntax.self) == true {
             if node.name.text == "providerWillStart" { hasWillStart = true }
             if node.name.text == "providerDidStart" { hasDidStart = true }
+            if node.name.text == "providerSymbol" { hasSymbol = true }
         }
         return .skipChildren
     }
@@ -214,11 +217,10 @@ if !classes.isEmpty || !constants.isEmpty {
     if !constants.isEmpty {
         lines += [
             "    ObjCConstantExports.shared.register(perryObjCConstantTables)",
-            "    return ObjCConstantExports.shared.symbol(symbol)",
+            "    if let slot = ObjCConstantExports.shared.symbol(symbol) { return slot }",
         ]
-    } else {
-        lines.append("    return nil")
     }
+    lines.append(collector.hasSymbol ? "    return providerSymbol(symbol)" : "    return nil")
     lines += ["}", ""]
 }
 
