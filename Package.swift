@@ -71,10 +71,12 @@ let package = Package(
         ),
         // Foundation: exported class storage and variadic entry points.
         .target(name: "CPerryFoundation"),
+        // Linux's libxml2, for NSXMLParser.
+        .systemLibrary(name: "CLibXML2", pkgConfig: "libxml-2.0", providers: [.apt(["libxml2-dev"])]),
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // libxml2: Linux's, with thunks for Darwin's variadic ABI.
