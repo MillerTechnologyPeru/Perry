@@ -3,7 +3,9 @@ import Glibc
 import PerryObjCInterop
 
 /// A thread's run loop. Perry's run loops have timers and no other input
-/// sources yet, and every mode runs every timer.
+/// sources yet, and every mode runs every timer. The main run loop behaves
+/// as if it had an input source, as it always does in a Darwin app: it waits
+/// for work instead of finishing when it has no timers.
 ///
 /// Like CFRunLoop, a run returns when it is stopped, when its time limit
 /// passes, or when it has nothing left to run ("finished").
@@ -19,7 +21,10 @@ final class RunLoopState {
     private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     private let condition = UnsafeMutablePointer<pthread_cond_t>.allocate(capacity: 1)
 
-    init() {
+    let isMain: Bool
+
+    init(isMain: Bool = false) {
+        self.isMain = isMain
         pthread_mutex_init(mutex, nil)
         pthread_cond_init(condition, nil)
         let object = Storage.allocate(UnsafeMutableRawPointer(RunLoops.runLoopClass))!
@@ -71,7 +76,8 @@ final class RunLoopState {
     /// Runs timers until `limit` (absolute time), a stop, or no timers.
     /// With `waitWhenEmpty`, running out of timers waits for `limit` instead,
     /// as a Darwin run loop with an input source does.
-    func run(until limit: Double, returnAfterSourceHandled: Bool = false, waitWhenEmpty: Bool = false) -> Result {
+    func run(until limit: Double, returnAfterSourceHandled: Bool = false, waitWhenEmpty: Bool? = nil) -> Result {
+        let waitWhenEmpty = waitWhenEmpty ?? isMain
         while true {
             let next: (timer: id?, fire: Double)? = locked {
                 if stopRequested {
@@ -84,7 +90,7 @@ final class RunLoopState {
             guard let next else { return .stopped }
             let now = absoluteTimeNow()
             guard let timer = next.timer else {
-                guard waitWhenEmpty, limit.isFinite, now < limit else { return .finished }
+                guard waitWhenEmpty, now < limit else { return .finished }
                 wait(until: limit)
                 continue
             }
@@ -133,7 +139,7 @@ enum RunLoops {
     /// The run loop of the thread that started the program.
     static var mainLoop: RunLoopState {
         if let main { return main }
-        let created = RunLoopState()
+        let created = RunLoopState(isMain: true)
         main = created
         return created
     }
@@ -159,8 +165,7 @@ enum RunLoops {
 
     static func install(superclass: Class) {
         mainThread = pthread_self()
-        runLoopClass = ClassDefinition(PERRY_CLASS_NSRunLoop, name: "NSRunLoop", superclass: superclass,
-                                       NSRunLoop.register).cls
+        runLoopClass = NSRunLoop.defineObjCClass().storage
         defaultMode = Strings.make("kCFRunLoopDefaultMode")
         let commonModes = Strings.make("kCFRunLoopCommonModes")
         perry_foundation_constant(PERRY_CONSTANT_NSDefaultRunLoopMode).pointee = defaultMode
@@ -172,10 +177,7 @@ enum RunLoops {
 
 /// NSRunLoop.
 @ObjCClass("NSRunLoop")
-public struct NSRunLoop {}
-
-@ObjCImplementation
-extension NSRunLoop {
+public final class NSRunLoop: NSObject {
     private var state: RunLoopState? { RunLoops.state(objcObject) }
 
     @ObjCClassMethod("currentRunLoop")
