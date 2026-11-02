@@ -14,6 +14,10 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <poll.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/uio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -274,6 +278,16 @@ int darwin_getpeername(int socket, void *address, socklen_t *length) {
     return result;
 }
 
+// Darwin's struct timeval: a 32-bit tv_usec, then padding.
+struct darwin_timeval {
+    int64_t tv_sec;
+    int32_t tv_usec;
+};
+
+static int is_timeout(int level, int name) {
+    return level == SOL_SOCKET && (name == SO_RCVTIMEO || name == SO_SNDTIMEO);
+}
+
 int darwin_setsockopt(int socket, int level, int name, const void *value, socklen_t length) DARWIN_SYMBOL(setsockopt);
 int darwin_setsockopt(int socket, int level, int name, const void *value, socklen_t length) {
     int ignored;
@@ -281,6 +295,11 @@ int darwin_setsockopt(int socket, int level, int name, const void *value, sockle
         return fail(ENOPROTOOPT);
     if (ignored)
         return 0;
+    if (is_timeout(level, name) && value && length >= sizeof(struct darwin_timeval)) {
+        const struct darwin_timeval *darwin = value;
+        struct timeval timeout = { .tv_sec = darwin->tv_sec, .tv_usec = darwin->tv_usec };
+        return setsockopt(socket, level, name, &timeout, sizeof(timeout));
+    }
     return setsockopt(socket, level, name, value, length);
 }
 
@@ -293,6 +312,18 @@ int darwin_getsockopt(int socket, int level, int name, void *value, socklen_t *l
         if (value && length && *length >= sizeof(int))
             *(int *)value = 1;
         return 0;
+    }
+    if (is_timeout(level, name) && value && length && *length >= sizeof(struct darwin_timeval)) {
+        struct timeval timeout;
+        socklen_t size = sizeof(timeout);
+        int result = getsockopt(socket, level, name, &timeout, &size);
+        if (result == 0) {
+            struct darwin_timeval darwin = { .tv_sec = timeout.tv_sec, .tv_usec = (int32_t)timeout.tv_usec };
+            memset(value, 0, sizeof(struct darwin_timeval));
+            memcpy(value, &darwin, sizeof(darwin));
+            *length = sizeof(struct darwin_timeval);
+        }
+        return result;
     }
     int result = getsockopt(socket, level, name, value, length);
     // SO_ERROR reports an errno, in Darwin's numbering.
@@ -336,6 +367,171 @@ ssize_t darwin_recvfrom(int socket, void *buffer, size_t length, int flags, void
     if (received >= 0 && address && linux_length > 0)
         address_to_darwin((struct sockaddr *)&linux_address, linux_length, address, address_length);
     return received;
+}
+
+// MARK: - Messages
+
+// Darwin's struct msghdr: 32-bit lengths where Linux has size_t.
+struct darwin_msghdr {
+    void *msg_name;
+    socklen_t msg_namelen;
+    struct iovec *msg_iov;
+    int msg_iovlen;
+    void *msg_control;
+    socklen_t msg_controllen;
+    int msg_flags;
+};
+
+// Darwin's struct cmsghdr is 12 bytes, its data 4-byte aligned; Linux's is
+// 16 bytes, 8-byte aligned.
+struct darwin_cmsghdr {
+    uint32_t cmsg_len;
+    int cmsg_level;
+    int cmsg_type;
+};
+
+#define DARWIN_CMSG_ALIGN(n) (((n) + 3u) & ~3u)
+#define DARWIN_CMSG_HEADER DARWIN_CMSG_ALIGN(sizeof(struct darwin_cmsghdr))
+
+static int received_flags_to_darwin(int flags) {
+    int out = flags & (MSG_OOB | MSG_PEEK | MSG_DONTROUTE);
+    if (flags & MSG_EOR) out |= 0x8;
+    if (flags & MSG_TRUNC) out |= 0x10;
+    if (flags & MSG_CTRUNC) out |= 0x20;
+    return out;
+}
+
+// Converts Darwin control messages into `out`; the Linux length, or -1.
+static ssize_t control_to_linux(const struct darwin_msghdr *message, char *out, size_t size) {
+    size_t used = 0, offset = 0;
+    const char *control = message->msg_control;
+    while (control && offset + sizeof(struct darwin_cmsghdr) <= message->msg_controllen) {
+        const struct darwin_cmsghdr *header = (const struct darwin_cmsghdr *)(control + offset);
+        if (header->cmsg_len < DARWIN_CMSG_HEADER)
+            break;
+        size_t data = header->cmsg_len - DARWIN_CMSG_HEADER;
+        if (used + CMSG_SPACE(data) > size)
+            return -1;
+        struct cmsghdr *linux_header = (struct cmsghdr *)(out + used);
+        linux_header->cmsg_len = CMSG_LEN(data);
+        linux_header->cmsg_level = header->cmsg_level == DARWIN_SOL_SOCKET ? SOL_SOCKET : header->cmsg_level;
+        linux_header->cmsg_type = header->cmsg_type;   // SCM_RIGHTS agrees
+        memcpy(CMSG_DATA(linux_header), (const char *)header + DARWIN_CMSG_HEADER, data);
+        used += CMSG_SPACE(data);
+        offset += DARWIN_CMSG_ALIGN(header->cmsg_len);
+    }
+    return (ssize_t)used;
+}
+
+// Converts Linux control messages back into the Darwin buffer; its length.
+static socklen_t control_to_darwin(struct msghdr *linux_message, struct darwin_msghdr *message, int *truncated) {
+    socklen_t used = 0;
+    char *out = message->msg_control;
+    for (struct cmsghdr *header = CMSG_FIRSTHDR(linux_message); header; header = CMSG_NXTHDR(linux_message, header)) {
+        size_t data = header->cmsg_len - CMSG_LEN(0);
+        size_t space = DARWIN_CMSG_HEADER + DARWIN_CMSG_ALIGN(data);
+        if (!out || used + DARWIN_CMSG_HEADER + data > message->msg_controllen) {
+            *truncated = 1;
+            break;
+        }
+        struct darwin_cmsghdr *darwin = (struct darwin_cmsghdr *)(out + used);
+        darwin->cmsg_len = (uint32_t)(DARWIN_CMSG_HEADER + data);
+        darwin->cmsg_level = header->cmsg_level == SOL_SOCKET ? DARWIN_SOL_SOCKET : header->cmsg_level;
+        darwin->cmsg_type = header->cmsg_type;
+        memcpy((char *)darwin + DARWIN_CMSG_HEADER, CMSG_DATA(header), data);
+        used += (socklen_t)(space <= message->msg_controllen - used ? space : message->msg_controllen - used);
+    }
+    return used;
+}
+
+ssize_t darwin_sendmsg(int socket, const struct darwin_msghdr *message, int flags) DARWIN_SYMBOL(sendmsg);
+ssize_t darwin_sendmsg(int socket, const struct darwin_msghdr *message, int flags) {
+    struct sockaddr_storage address;
+    char control[1024];
+    struct msghdr linux_message = {0};
+    if (message->msg_name) {
+        linux_message.msg_namelen = address_to_linux(message->msg_name, message->msg_namelen, &address);
+        if (!linux_message.msg_namelen)
+            return fail(EINVAL);
+        linux_message.msg_name = &address;
+    }
+    linux_message.msg_iov = message->msg_iov;
+    linux_message.msg_iovlen = (size_t)message->msg_iovlen;
+    if (message->msg_control && message->msg_controllen) {
+        ssize_t length = control_to_linux(message, control, sizeof(control));
+        if (length < 0)
+            return fail(ENOBUFS);
+        linux_message.msg_control = control;
+        linux_message.msg_controllen = (size_t)length;
+    }
+    return sendmsg(socket, &linux_message, flags_to_linux(flags) | MSG_NOSIGNAL);
+}
+
+ssize_t darwin_recvmsg(int socket, struct darwin_msghdr *message, int flags) DARWIN_SYMBOL(recvmsg);
+ssize_t darwin_recvmsg(int socket, struct darwin_msghdr *message, int flags) {
+    struct sockaddr_storage address;
+    char control[1024];
+    struct msghdr linux_message = {0};
+    linux_message.msg_name = message->msg_name ? &address : NULL;
+    linux_message.msg_namelen = message->msg_name ? sizeof(address) : 0;
+    linux_message.msg_iov = message->msg_iov;
+    linux_message.msg_iovlen = (size_t)message->msg_iovlen;
+    if (message->msg_control && message->msg_controllen) {
+        linux_message.msg_control = control;
+        linux_message.msg_controllen = sizeof(control);
+    }
+    ssize_t received = recvmsg(socket, &linux_message, flags_to_linux(flags));
+    if (received < 0)
+        return received;
+    if (message->msg_name && linux_message.msg_namelen)
+        address_to_darwin((struct sockaddr *)&address, linux_message.msg_namelen, message->msg_name, &message->msg_namelen);
+    int truncated = 0;
+    message->msg_controllen = linux_message.msg_control ? control_to_darwin(&linux_message, message, &truncated) : 0;
+    message->msg_flags = received_flags_to_darwin(linux_message.msg_flags) | (truncated ? 0x20 : 0);
+    return received;
+}
+
+// MARK: - Waiting
+
+// fd_set's bits agree; struct timeval does not.
+int darwin_select(int count, fd_set *read, fd_set *write, fd_set *error, struct darwin_timeval *timeout)
+    DARWIN_SYMBOL(select);
+int darwin_select(int count, fd_set *read, fd_set *write, fd_set *error, struct darwin_timeval *timeout) {
+    if (!timeout)
+        return select(count, read, write, error, NULL);
+    struct timeval linux_timeout = { .tv_sec = timeout->tv_sec, .tv_usec = timeout->tv_usec };
+    int result = select(count, read, write, error, &linux_timeout);
+    timeout->tv_sec = linux_timeout.tv_sec;
+    timeout->tv_usec = (int32_t)linux_timeout.tv_usec;
+    return result;
+}
+
+// The check FD_SET makes on Darwin: nonzero when the descriptor fits.
+int darwin_check_fd_set_overflow(int fd, const void *set, int unlimited) DARWIN_SYMBOL(__darwin_check_fd_set_overflow);
+int darwin_check_fd_set_overflow(int fd, const void *set, int unlimited) {
+    (void)set;
+    return unlimited || (fd >= 0 && fd < FD_SETSIZE);
+}
+
+// POLLWRNORM is POLLOUT on Darwin (4) but its own bit on Linux, and
+// POLLWRBAND is 0x100 rather than 0x200; the others agree.
+int darwin_poll(struct pollfd *descriptors, nfds_t count, int timeout) DARWIN_SYMBOL(poll);
+int darwin_poll(struct pollfd *descriptors, nfds_t count, int timeout) {
+    for (nfds_t i = 0; i < count; i++) {
+        short events = descriptors[i].events;
+        if (events & 0x100) events = (short)((events & ~0x100) | POLLWRBAND);
+        descriptors[i].events = events;
+    }
+    int result = poll(descriptors, count, timeout);
+    for (nfds_t i = 0; i < count; i++) {
+        short events = descriptors[i].events, revents = descriptors[i].revents;
+        if (events & POLLWRBAND) events = (short)((events & ~POLLWRBAND) | 0x100);
+        if (revents & POLLWRBAND) revents = (short)((revents & ~POLLWRBAND) | 0x100);
+        if (revents & POLLWRNORM) revents = (short)((revents & ~POLLWRNORM) | POLLOUT);
+        descriptors[i].events = events;
+        descriptors[i].revents = revents;
+    }
+    return result;
 }
 
 // MARK: - Addresses as text
