@@ -13,6 +13,8 @@ let package = Package(
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
+        // CoreGraphics.
+        .library(name: "PerryCoreGraphics", type: .dynamic, targets: ["PerryCoreGraphics"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
     ],
@@ -73,10 +75,15 @@ let package = Package(
             dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // CoreGraphics' geometry types, shared by the providers that pass them.
+        .target(name: "CPerryGeometry"),
+        // CoreGraphics: exported constants, and geometry in Swift.
+        .target(name: "CPerryCoreGraphics", dependencies: ["CPerryGeometry"]),
+        .target(name: "PerryCoreGraphics", dependencies: ["CPerryCoreGraphics", "CPerryGeometry"]),
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Generates a provider's perry_provider_startup and perry_provider_symbol
