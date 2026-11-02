@@ -186,18 +186,40 @@ open class UIWindowScene: UIScene {
     }
 }
 
-/// UISceneDelegate's messages, and UIScene's initializer as a message, so a
-/// subclass's runs.
+/// UIScene's initializer as a message, so a subclass's runs.
 extension NSObject {
     @ObjCMethod("initWithSession:connectionOptions:")
     func initializeScene(session: UISceneSession, options: UISceneConnectionOptions) -> NSObject
+}
 
-    @ObjCMethod("scene:willConnectToSession:options:")
-    func sceneWillConnect(_ scene: UIScene, to session: UISceneSession, options: UISceneConnectionOptions)
+/// A scene's delegate: its lifecycle.
+@ObjCProtocol("UISceneDelegate")
+protocol UISceneDelegate {
+    @ObjCOptional("scene:willConnectToSession:options:")
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UISceneConnectionOptions)
 
-    @ObjCMethod("sceneWillEnterForeground:")
+    @ObjCOptional("sceneDidDisconnect:")
+    func sceneDidDisconnect(_ scene: UIScene)
+
+    @ObjCOptional("sceneDidBecomeActive:")
+    func sceneDidBecomeActive(_ scene: UIScene)
+
+    @ObjCOptional("sceneWillResignActive:")
+    func sceneWillResignActive(_ scene: UIScene)
+
+    @ObjCOptional("sceneWillEnterForeground:")
     func sceneWillEnterForeground(_ scene: UIScene)
 
-    @ObjCMethod("sceneDidBecomeActive:")
-    func sceneDidBecomeActive(_ scene: UIScene)
+    @ObjCOptional("sceneDidEnterBackground:")
+    func sceneDidEnterBackground(_ scene: UIScene)
+}
+
+/// A window scene's delegate, which may hold the scene's window.
+@ObjCProtocol("UIWindowSceneDelegate")
+protocol UIWindowSceneDelegate: UISceneDelegate {
+    @ObjCOptional("window")
+    func window() -> UIWindow?
+
+    @ObjCOptional("setWindow:")
+    func setWindow(_ window: UIWindow?)
 }
