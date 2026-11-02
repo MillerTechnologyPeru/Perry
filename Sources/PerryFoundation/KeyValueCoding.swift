@@ -47,6 +47,8 @@ enum KeyValueCoding {
             return Numbers.make(nil, .double(Double(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Float).self)(object, selector))))
         case "v":
             return nil
+        case "{":
+            return Structures.encodedTypes(object, selector).first.flatMap { Structures.get(object, selector, type: $0) }
         default:
             return unsafeBitCast(send, to: (@convention(c) (id, SEL) -> id?).self)(object, selector)
         }
@@ -70,6 +72,8 @@ enum KeyValueCoding {
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Double) -> Void).self)(object, selector, number.double)
         case "f":
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Float) -> Void).self)(object, selector, Float(number.double))
+        case "{":
+            Structures.set(object, selector, value)
         default:
             unsafeBitCast(send, to: (@convention(c) (id, SEL, id?) -> Void).self)(object, selector, value)
         }
@@ -102,6 +106,100 @@ enum KeyValueCoding {
             foundationFatal("[<\(ObjC.className(object)) \(object)> setValue:forUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
         }
         set(object, selector, value)
+    }
+}
+
+/// Structures passed to and returned from accessors as arm64 passes them:
+/// up to four floats or doubles in d0 to d3, others up to 16 bytes in two
+/// general registers, larger ones through memory. KVC wraps them in NSValue.
+enum Structures {
+    /// A method's types, whole: "{_NSRange=QQ}", "@", ":".
+    static func encodedTypes(_ object: id, _ selector: SEL) -> [String] {
+        guard let method = ObjC.instanceMethod(ObjC.objectGetClass(object), selector),
+              let encoding = ObjC.methodTypes(method) else { return [] }
+        let characters = Array(String(cString: encoding))
+        var types: [String] = []
+        var index = 0
+        while index < characters.count {
+            while index < characters.count, "rnNoORV".contains(characters[index]) { index += 1 }
+            let start = index
+            var depth = 0
+            repeat {
+                guard index < characters.count else { break }
+                switch characters[index] {
+                case "{", "(", "[": depth += 1
+                case "}", ")", "]": depth -= 1
+                default: break
+                }
+                index += 1
+            } while depth > 0 || (index < characters.count && characters[index - 1] == "^")
+            types.append(String(characters[start..<index]))
+            while index < characters.count, characters[index].isNumber { index += 1 }
+        }
+        return types
+    }
+
+    /// The element type and count if the structure is a homogeneous
+    /// floating-point aggregate.
+    static func floatingMembers(_ type: String) -> (Character, Int)? {
+        var members: [Character] = []
+        var inName = false
+        for character in type {
+            switch character {
+            case "{": inName = true
+            case "=": inName = false
+            case "}": break
+            default: if !inName { members.append(character) }
+            }
+        }
+        guard let first = members.first, first == "d" || first == "f", members.count <= 4,
+              members.allSatisfy({ $0 == first }) else { return nil }
+        return (first, members.count)
+    }
+
+    static func get(_ object: id, _ selector: SEL, type: String) -> id? {
+        guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return nil }
+        var indirect = [UInt8](repeating: 0, count: max(size, 1))
+        var registers = [UInt64](repeating: 0, count: 6)
+        perry_foundation_call_getter(object, selector, imp, &indirect, &registers)
+        var bytes: [UInt8]
+        if let (member, count) = floatingMembers(type) {
+            bytes = (0..<count).flatMap { index -> [UInt8] in
+                let word = registers[2 + index]
+                return member == "d" ? withUnsafeBytes(of: word) { Array($0) } : withUnsafeBytes(of: UInt32(truncatingIfNeeded: word)) { Array($0) }
+            }
+        } else if size <= 16 {
+            bytes = Array(withUnsafeBytes(of: (registers[0], registers[1])) { Array($0) }.prefix(size))
+        } else {
+            bytes = indirect
+        }
+        return bytes.withUnsafeBytes { ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: $0.baseAddress, type: type)) }
+    }
+
+    static func set(_ object: id, _ selector: SEL, _ value: id?) {
+        guard let storage = Values.storage(value), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return }
+        var bytes = storage.bytes
+        var registers = [UInt64](repeating: 0, count: 6)
+        if let (member, count) = floatingMembers(storage.type) {
+            let width = member == "d" ? 8 : 4
+            for index in 0..<count where (index + 1) * width <= bytes.count {
+                var word: UInt64 = 0
+                withUnsafeMutableBytes(of: &word) { $0.copyMemory(from: UnsafeRawBufferPointer(rebasing: bytes.withUnsafeBytes { $0 }[index * width..<(index + 1) * width])) }
+                registers[2 + index] = word
+            }
+            perry_foundation_call_setter(object, selector, imp, registers)
+        } else if bytes.count <= 16 {
+            var padded = bytes + [UInt8](repeating: 0, count: 16 - bytes.count)
+            padded.withUnsafeBytes { registers[0] = $0.load(as: UInt64.self); registers[1] = $0.load(fromByteOffset: 8, as: UInt64.self) }
+            perry_foundation_call_setter(object, selector, imp, registers)
+        } else {
+            bytes.withUnsafeMutableBytes { buffer in
+                registers[0] = UInt64(UInt(bitPattern: buffer.baseAddress))
+                perry_foundation_call_setter(object, selector, imp, registers)
+            }
+        }
     }
 }
 
