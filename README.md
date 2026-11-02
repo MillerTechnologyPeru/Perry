@@ -67,6 +67,11 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
 - C libraries over Linux's builds of the same libraries, with thunks for
   Darwin's variadic ABI: libxml2 (`libPerryxml2`, which KissXML runs on),
   zlib, bzip2, Expat, iconv, and SQLite 3.54 built with Apple's options
+- Accelerate (`libPerryAccelerate`): vDSP's arithmetic, reductions,
+  conversions, matrices, correlation, windows and Fourier transforms with
+  Apple's scaling and packing; vForce; vImage's buffers, channel
+  operations, conversions, reflections, rotations and scaling; BLAS and
+  LAPACK from OpenBLAS
 - libcompression (`libPerrycompression`): Apple's API over zlib, liblzma,
   LZ4, Brotli and LZFSE, reading what Apple's encoders write
 - CommonCrypto, in libSystem: digests, HMAC, `CCCrypt` and `CCCryptor`
@@ -172,6 +177,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
 | `Sources/PerrySecurity` | `libPerrySecurity.so`: Security over swift-crypto and swift-certificates (Swift) |
 | `Sources/CPerrySecurity` | `kSecRandomDefault`, the one export Swift cannot define (C) |
+| `Sources/PerryAccelerate` | `libPerryAccelerate.so`: vDSP, vForce and vImage, and OpenBLAS's BLAS and LAPACK (C) |
 | `Sources/PerryUserNotifications` | `libPerryUserNotifications.so`: notification content, triggers, requests and the center (Swift) |
 | `Sources/PerryUniformTypeIdentifiers` | `libPerryUniformTypeIdentifiers.so`: UTType, MobileCoreServices' UTType functions and the type database (Swift) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
