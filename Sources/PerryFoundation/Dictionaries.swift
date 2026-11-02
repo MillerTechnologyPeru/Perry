@@ -112,15 +112,12 @@ enum Dictionaries {
     }
 
     static func install(superclass: Class) {
-        let dictionary = ClassDefinition(PERRY_CLASS_NSDictionary, name: "NSDictionary", superclass: superclass,
-                                         StorageAllocated.register, NSDictionary.register)
-        dictionaryClass = dictionary.cls
+        let dictionary = NSDictionary.defineObjCClass(StorageAllocated.registerObjCMethods)
+        dictionaryClass = dictionary.storage
         dictionary.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
                              implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
-        mutableClass = ClassDefinition(PERRY_CLASS_NSMutableDictionary, name: "NSMutableDictionary",
-                                       superclass: dictionary.cls, NSMutableDictionary.register).cls
-        constantClass = ClassDefinition(PERRY_CLASS_NSConstantDictionary, name: "NSConstantDictionary",
-                                        superclass: dictionary.cls, isStatic: true, ImmortalObject.register).cls
+        mutableClass = NSMutableDictionary.defineObjCClass().storage
+        constantClass = NSConstantDictionary.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
     }
 
     /// A new dictionary wrapped for returning, +1.
@@ -131,10 +128,7 @@ enum Dictionaries {
 
 /// NSDictionary.
 @ObjCClass("NSDictionary")
-public struct NSDictionary {}
-
-@ObjCImplementation
-extension NSDictionary {
+public class NSDictionary: NSObject {
     var entries: [(key: id, value: id)] { Dictionaries.entries(objcObject) }
 
     private func setEntries(_ entries: [(key: id, value: id)]) -> Self {
@@ -257,6 +251,10 @@ extension NSDictionary {
     }
 }
 
+/// @{…} literals of constants: { isa, options, count, keys, objects }.
+@ObjCClass("NSConstantDictionary")
+final class NSConstantDictionary: NSDictionary {}
+
 extension Dictionaries {
     /// Constant literals have no storage; they share one buffer, which is
     /// enough for one enumeration at a time on one thread.
@@ -265,10 +263,7 @@ extension Dictionaries {
 
 /// NSMutableDictionary.
 @ObjCClass("NSMutableDictionary")
-public struct NSMutableDictionary {}
-
-@ObjCImplementation
-extension NSMutableDictionary {
+public class NSMutableDictionary: NSDictionary {
     private var storage: DictionaryStorage {
         guard let storage = Dictionaries.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableDictionary")
@@ -286,7 +281,7 @@ extension NSMutableDictionary {
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSDictionary { Dictionaries.owned(Dictionaries.entries(objcObject)) }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSDictionary { Dictionaries.owned(Dictionaries.entries(objcObject)) }
 
     @ObjCMethod("setObject:forKey:")
     func set(_ value: ObjCObject?, forKey key: ObjCObject?) {
