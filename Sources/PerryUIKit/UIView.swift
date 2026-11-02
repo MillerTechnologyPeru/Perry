@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UIView: geometry, the view hierarchy with UIKit's callbacks, coordinate
@@ -61,8 +62,13 @@ final class ViewState: ObjectState {
 enum Screen {
     static let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
     static let scale: CGFloat = 3
-    /// Under the status bar and the home indicator.
-    static let safeAreaInsets = UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
+    /// Under the home indicator, and under a status bar when
+    /// PERRY_UIKIT_STATUS_BAR_HEIGHT gives it a height (47 on this
+    /// iPhone); none is drawn, so by default it has none.
+    nonisolated(unsafe) static let safeAreaInsets: UIEdgeInsets = {
+        let statusBar = getenv("PERRY_UIKIT_STATUS_BAR_HEIGHT").flatMap { Double(String(cString: $0)) } ?? 0
+        return UIEdgeInsets(top: max(statusBar, 0), left: 0, bottom: 34, right: 0)
+    }()
 }
 
 /// A coordinate space: one with bounds that converts to and from others.
