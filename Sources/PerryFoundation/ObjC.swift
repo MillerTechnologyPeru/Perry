@@ -55,10 +55,22 @@ enum ObjC {
         retainBlock = bind("_objc_retainBlock", (@convention(c) (id?) -> id?).self)
         poolPush = bind("_objc_autoreleasePoolPush", (@convention(c) () -> UnsafeMutableRawPointer?).self)
         poolPop = bind("_objc_autoreleasePoolPop", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)
-        return msgSend != nil && msgSendSuper2 != nil && retain != nil && release != nil && autorelease != nil
-            && initializeClassPair != nil && registerClassPair != nil && getClass != nil && objectGetClass != nil
+        guard let msgSend, let msgSendSuper2, let retain, let release, let autorelease, let retainBlock,
+              let getClassRaw = lookup("_objc_getClass"), let objectGetClassRaw = lookup("_object_getClass"),
+              let registerRaw = lookup("_sel_registerName"), let addRaw = lookup("_class_addMethod"),
+              let replaceRaw = lookup("_class_replaceMethod"), let poolPush, let poolPop else { return false }
+        ObjCRuntime.install(ObjCRuntimeFunctions(
+            msgSend: msgSend, msgSendSuper2: msgSendSuper2,
+            retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
+            getClass: unsafeBitCast(getClassRaw, to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?).self),
+            objectGetClass: unsafeBitCast(objectGetClassRaw, to: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?).self),
+            registerSelector: unsafeBitCast(registerRaw, to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeRawPointer?).self),
+            addMethod: unsafeBitCast(addRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> Bool).self),
+            replaceMethod: unsafeBitCast(replaceRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?).self)))
+        ObjCRuntime.poolFunctions = (push: poolPush, pop: poolPop)
+        return initializeClassPair != nil && registerClassPair != nil && getClass != nil && objectGetClass != nil
             && objectGetClassName != nil && addMethod != nil && replaceMethod != nil && createInstance != nil
-            && indexedIvars != nil && registerName != nil && retainBlock != nil && poolPush != nil && poolPop != nil
+            && indexedIvars != nil && registerName != nil
     }
 
     static func selector(_ name: String) -> SEL {
@@ -138,30 +150,29 @@ enum Selectors {
 }
 
 /// A class built in exported storage, or an existing class to extend.
-/// @ObjCImplementation method tables install into it.
+/// @ObjCImplementation registration functions install into it.
 struct ClassDefinition: ObjCMethodRegistrar {
     let cls: Class
     let metaclass: Class
 
-    /// Builds a class in Foundation's exported storage, with `tables`'
-    /// methods, and registers it.
-    init(_ which: perry_foundation_class_id, name: String, superclass: Class?, _ tables: any ObjCMethodTable.Type...) {
+    /// Builds a class in Foundation's exported storage with the given
+    /// methods, and registers it. `isStatic` marks classes of objects the
+    /// compiler emits (literals), which have no Swift state word.
+    init(_ which: perry_foundation_class_id, name: String, superclass: Class?, isStatic: Bool = false,
+         _ registrations: ObjCMethodRegistration...) {
         cls = perry_foundation_class(which)
         metaclass = perry_foundation_metaclass(which)
         _ = name.withCString { ObjC.initializeClassPair(superclass, $0, cls, metaclass) }
-        for table in tables { table.register(self) }
+        for register in registrations { register(self) }
         ObjC.registerClassPair(cls)
-        // Literal classes read their objects in place and never allocate.
-        if tables.contains(where: { $0 == ImmortalMethods.self }) {
-            Storage.staticClasses.insert(cls)
-        }
+        if isStatic { Storage.staticClasses.insert(cls) }
     }
 
     /// Adds methods to a class that already exists, like a category.
-    init(extending cls: Class, _ tables: any ObjCMethodTable.Type...) {
+    init(extending cls: Class, _ registrations: ObjCMethodRegistration...) {
         self.cls = cls
         metaclass = cls.pointee.isa
-        for table in tables { table.register(self) }
+        for register in registrations { register(self) }
     }
 
     func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool) {
@@ -180,20 +191,29 @@ func variadicEntry(_ entry: @convention(c) () -> Void) -> UnsafeRawPointer {
 }
 
 /// retain, release and autorelease for static objects such as literals.
+@ObjCClass("NSObject")
+struct ImmortalObject {}
+
 @ObjCImplementation
-enum ImmortalMethods {
-    @ObjCMethod("retain") static func retain(_ object: id?) -> id? { object }
-    @ObjCMethod("release", types: "Vv16@0:8") static func release(_ object: id?) {}
-    @ObjCMethod("autorelease") static func autorelease(_ object: id?) -> id? { object }
-    @ObjCMethod("retainCount") static func retainCount(_ object: id?) -> UInt { UInt.max }
+extension ImmortalObject {
+    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("release", types: "Vv16@0:8") func release() {}
+    @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("retainCount") func retainCount() -> UInt { UInt.max }
 }
 
 /// +alloc for classes whose instances keep Swift state in an extra word.
+@ObjCClass("NSObject")
+struct StorageAllocated {}
+
 @ObjCImplementation
-enum StorageAllocation {
-    @ObjCClassMethod("alloc") static func alloc(_ cls: id?) -> id? { Storage.allocate(cls) }
-    @ObjCClassMethod("allocWithZone:") static func alloc(_ cls: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Storage.allocate(cls)
+extension StorageAllocated {
+    @ObjCClassMethod("alloc")
+    static func alloc(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { Storage.allocate(cls.pointer) }
+
+    @ObjCClassMethod("allocWithZone:")
+    static func alloc(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        Storage.allocate(cls.pointer)
     }
 }
 
@@ -234,4 +254,23 @@ func foundationFatal(_ message: String) -> Never {
     let line = "perry: Foundation: *** \(message)\n"
     line.withCString { _ = write(2, $0, strlen($0)) }
     abort()
+}
+
+// MARK: - Foundation's C structs as Objective-C values
+
+extension NSRange: ObjCScalar {
+    public static var objCTypeEncoding: String { "{_NSRange=QQ}" }
+
+    init(location: Int, length: Int) {
+        self.init(location: UInt(location), length: UInt(length))
+    }
+}
+
+extension NSOperatingSystemVersion: ObjCScalar {
+    public static var objCTypeEncoding: String { "{NSOperatingSystemVersion=qqq}" }
+}
+
+extension AnyObjCObject {
+    /// The wrapped object as Foundation's internal helpers take it.
+    var id: id { objcObject }
 }
