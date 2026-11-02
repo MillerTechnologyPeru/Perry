@@ -3,6 +3,7 @@
 // DISPATCH_QUEUE_CONCURRENT and DISPATCH_SOURCE_TYPE_TIMER are likewise
 // addresses. The static objects get their classes at startup.
 
+#define _GNU_SOURCE
 #include "CPerryDispatch.h"
 
 #define DARWIN_DATA(name) __asm__("_" #name) __attribute__((visibility("default"), used))
@@ -58,3 +59,25 @@ static const char destructor_free_marker;
 static const char destructor_munmap_marker;
 EXPORTED const void *perry_dispatch_data_destructor_free = &destructor_free_marker;
 EXPORTED const void *perry_dispatch_data_destructor_munmap = &destructor_munmap_marker;
+
+// MARK: - Unified logging
+
+EXPORTED perry_dispatch_static_object perry_os_log_default;
+EXPORTED perry_dispatch_static_object perry_os_log_disabled;
+EXPORTED perry_dispatch_static_object perry_os_activity_current;
+EXPORTED perry_dispatch_static_object perry_os_activity_none;
+
+#include <errno.h>
+#include <stdio.h>
+#include <unistd.h>
+
+const char *perry_dispatch_program_name(void) { return program_invocation_short_name; }
+int perry_dispatch_thread_id(void) { return (int)gettid(); }
+
+int perry_format_integer(char *buffer, unsigned long size, const char *spec, long long value) {
+    return snprintf(buffer, size, spec, value);
+}
+
+int perry_format_double(char *buffer, unsigned long size, const char *spec, double value) {
+    return snprintf(buffer, size, spec, value);
+}
