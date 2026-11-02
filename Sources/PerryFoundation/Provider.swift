@@ -4,64 +4,27 @@ import PerryInterface
 import PerryObjCInterop
 
 // libPerryFoundation: the provider for Foundation.framework and
-// CoreFoundation.framework.
+// CoreFoundation.framework. PerryProviderPlugin generates its
+// perry_provider_startup and perry_provider_symbol from the module's
+// Objective-C declarations; this file adds the provider's own steps.
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
-
-/// The constants Foundation exports as data symbols.
-nonisolated(unsafe) private let constantTables: [any ObjCConstantTable.Type] = [
-    RunLoopModes.self, ErrorConstants.self, FileAttributes.self, NullConstants.self,
-]
-
-/// Hands the loader a slot for each exported constant while images bind.
-@c
-public func perry_provider_symbol(_ name: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {
-    guard let name else { return nil }
-    ObjCConstantExports.shared.register(constantTables)
-    return ObjCConstantExports.shared.symbol(String(cString: name))
-}
-
-@c
-public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
-    guard let info, info.pointee.version >= 2, let lookup = info.pointee.lookup_symbol else { return }
-    Process.start(info.pointee)
+/// Before the generated startup defines Foundation's classes: records the
+/// program's arguments and paths, and binds libobjc's C API, which
+/// Foundation calls rather than linking a second copy of the runtime.
+func providerWillStart(_ info: perry_startup_info) -> Bool {
+    guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    Process.start(info)
+    Threads.mainThread = pthread_self()
+    RunLoops.mainThread = pthread_self()
     let loaded = ObjC.load { name in
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }
-    guard loaded, let nsObject = "NSObject".withCString({ ObjC.getClass($0) }) else {
+    guard loaded, "NSObject".withCString({ ObjC.getClass($0) }) != nil else {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
-
-    // Foundation's categories on NSObject.
-    NSObject.addObjCCategoryFoundation()
-    NSObject.addObjCCategoryDelayedPerforms()
-    NSObject.addObjCCategoryThreadPerforms()
-    Strings.install(superclass: nsObject)
-    MutableStrings.install(superclass: Strings.stringClass)
-    Errors.install(superclass: nsObject)
-    Arrays.install(superclass: nsObject)
-    Dictionaries.install(superclass: nsObject)
-    Sets.install(superclass: nsObject)
-    Numbers.install(superclass: nsObject)
-    Dates.install(superclass: nsObject)
-    RunLoops.install(superclass: nsObject)
-    Timers.install(superclass: nsObject)
-    Notifications.install(superclass: nsObject)
-    Nulls.install(superclass: nsObject)
-    DataObjects.install(superclass: nsObject)
-    URLs.install(superclass: nsObject)
-    UUIDs.install(superclass: nsObject)
-    NSJSONSerialization.defineObjCClass()
-    Process.install(superclass: nsObject)
-    Bundles.install(superclass: nsObject)
-    Threads.install(superclass: nsObject)
-    UserDefaults.install()
-    FileManagers.install()
-
-    // Fill the constants' slots before any Mach-O code runs.
-    ObjCConstantExports.shared.register(constantTables)
-    ObjCConstantExports.shared.export()
+    return true
 }
 
 // MARK: - NSLog
