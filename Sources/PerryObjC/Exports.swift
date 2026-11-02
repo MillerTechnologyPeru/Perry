@@ -645,3 +645,14 @@ public func objc_enumerationMutation(_ object: id?) {
 public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwardStret: UnsafeMutableRawPointer?) {
     Runtime.forwardHandler = forward
 }
+
+// MARK: - Exceptions
+
+/// The personality routine Objective-C code's unwind tables name. Code
+/// that only cleans up (ARC, @autoreleasepool) refers to it without
+/// throwing; Perry cannot unwind Mach-O frames, so reaching it stops.
+@c(___objc_personality_v0)
+public func objc_personality_v0(_ version: Int32, _ actions: Int32, _ exceptionClass: UInt64, _ exception: UnsafeMutableRawPointer?,
+                                _ context: UnsafeMutableRawPointer?) -> Int32 {
+    objcFatal("an exception is unwinding through Objective-C code, which Perry cannot do")
+}
