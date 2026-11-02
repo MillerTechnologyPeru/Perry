@@ -23,13 +23,17 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
 
-    _ = ClassDefinition(extending: nsObject, NSObjectFoundationMethods.self)
+    _ = ClassDefinition(extending: nsObject, NSObjectFoundationMethods.self, NSObjectDelayedPerformMethods.self)
     Strings.install(superclass: nsObject)
     MutableStrings.install(superclass: Strings.stringClass)
     Arrays.install(superclass: nsObject)
     Dictionaries.install(superclass: nsObject)
     Sets.install(superclass: nsObject)
     Numbers.install(superclass: nsObject)
+    Dates.install(superclass: nsObject)
+    RunLoops.install(superclass: nsObject)
+    Timers.install(superclass: nsObject)
+    Notifications.install(superclass: nsObject)
 }
 
 /// Foundation's additions to NSObject. libobjc's -description returns nil.
