@@ -33,6 +33,9 @@ enum ObjC {
     nonisolated(unsafe) static var retainBlock: (@convention(c) (id?) -> id?)!
     nonisolated(unsafe) static var poolPush: (@convention(c) () -> UnsafeMutableRawPointer?)!
     nonisolated(unsafe) static var poolPop: (@convention(c) (UnsafeMutableRawPointer?) -> Void)!
+    nonisolated(unsafe) static var allocateClassPair: (@convention(c) (Class?, SEL, Int) -> Class?)!
+    nonisolated(unsafe) static var objectSetClass: (@convention(c) (id?, Class) -> Class?)!
+    nonisolated(unsafe) static var methodImplementation: (@convention(c) (Class?, SEL) -> UnsafeRawPointer?)!
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -59,6 +62,9 @@ enum ObjC {
         retainBlock = bind("_objc_retainBlock", (@convention(c) (id?) -> id?).self)
         poolPush = bind("_objc_autoreleasePoolPush", (@convention(c) () -> UnsafeMutableRawPointer?).self)
         poolPop = bind("_objc_autoreleasePoolPop", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)
+        allocateClassPair = bind("_objc_allocateClassPair", (@convention(c) (Class?, SEL, Int) -> Class?).self)
+        objectSetClass = bind("_object_setClass", (@convention(c) (id?, Class) -> Class?).self)
+        methodImplementation = bind("_class_getMethodImplementation", (@convention(c) (Class?, SEL) -> UnsafeRawPointer?).self)
         // The interop layer's wrappers call the runtime through its own table.
         guard ObjCRuntime.load(lookup) else { return false }
         // Classes Foundation defines live in its exported storage.
