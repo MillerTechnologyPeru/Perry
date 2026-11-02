@@ -87,7 +87,7 @@ enum Bundles {
     }
 
     static func install(superclass: Class) {
-        bundleClass = NSBundle.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        bundleClass = NSBundle.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         // The app bundle, or the executable's directory for a bare executable.
         main = bundle(path: Process.bundlePath ?? Paths.deletingLastComponent(Process.executablePath))
     }
