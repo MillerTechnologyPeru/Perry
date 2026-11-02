@@ -520,6 +520,38 @@ public func protocol_conformsToProtocol(_ proto: ProtocolPointer?, _ other: Prot
     return Protocols.conforms(proto, to: other)
 }
 
+/// A new protocol to fill in and register; nil if the name is taken.
+@c(_objc_allocateProtocol)
+public func objc_allocateProtocol(_ name: UnsafePointer<CChar>?) -> ProtocolPointer? {
+    RootClasses.bootstrap()
+    return name.flatMap(Protocols.allocate)
+}
+
+@c(_protocol_addProtocol)
+public func protocol_addProtocol(_ proto: ProtocolPointer?, _ addition: ProtocolPointer?) {
+    guard let proto, let addition else { return }
+    Protocols.add(addition, to: proto)
+}
+
+@c(_protocol_addMethodDescription)
+public func protocol_addMethodDescription(_ proto: ProtocolPointer?, _ name: UnsafePointer<CChar>?,
+                                          _ types: UnsafePointer<CChar>?, _ isRequired: Bool, _ isInstanceMethod: Bool) {
+    guard let proto, let name else { return }
+    Protocols.addMethod(Selectors.register(name), types: types, to: proto,
+                        isRequired: isRequired, isInstanceMethod: isInstanceMethod)
+}
+
+@c(_objc_registerProtocol)
+public func objc_registerProtocol(_ proto: ProtocolPointer?) {
+    if let proto { Protocols.register(proto) }
+}
+
+@c(_class_addProtocol)
+public func class_addProtocol(_ cls: Class?, _ proto: ProtocolPointer?) -> Bool {
+    guard let cls, let proto, let info = Runtime.info(cls) else { return false }
+    return Protocols.add(proto, toClass: info)
+}
+
 // MARK: - Associated objects
 
 @c(_objc_setAssociatedObject)
