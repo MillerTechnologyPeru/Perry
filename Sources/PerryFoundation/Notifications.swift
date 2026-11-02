@@ -90,123 +90,122 @@ enum Notifications {
 
     static func install(superclass: Class) {
         notificationClass = ClassDefinition(PERRY_CLASS_NSNotification, name: "NSNotification", superclass: superclass,
-                                            StorageAllocation.self, NSNotificationMethods.self).cls
+                                            StorageAllocated.register, NSNotification.register).cls
         centerClass = ClassDefinition(PERRY_CLASS_NSNotificationCenter, name: "NSNotificationCenter",
-                                      superclass: superclass, StorageAllocation.self,
-                                      NSNotificationCenterMethods.self).cls
+                                      superclass: superclass, StorageAllocated.register,
+                                      NSNotificationCenter.register).cls
         // The default center lives for the whole process.
         defaultCenter = Storage.allocate(UnsafeMutableRawPointer(centerClass))
         Storage.set(defaultCenter, NotificationCenterStorage())
     }
 }
 
+/// NSNotification.
+@ObjCClass("NSNotification")
+public struct NSNotification {}
+
 @ObjCImplementation
-enum NSNotificationMethods {
+extension NSNotification {
+    private var storage: NotificationStorage? { Notifications.storage(objcObject) }
+
     @ObjCClassMethod("notificationWithName:object:")
-    static func notification(_ cls: id?, name: id?, object: id?) -> id? {
-        ObjC.autorelease(Notifications.make(name: name, object: object, userInfo: nil, cls: cls))
+    static func notification(_ cls: ObjCClass, name: ObjCObject, object: ObjCObject?) -> NSNotification? {
+        Notifications.make(name: name.id, object: object?.id, userInfo: nil, cls: cls.pointer).map { NSNotification(objCOwned: $0) }
     }
 
     @ObjCClassMethod("notificationWithName:object:userInfo:")
-    static func notification(_ cls: id?, name: id?, object: id?, userInfo: id?) -> id? {
-        ObjC.autorelease(Notifications.make(name: name, object: object, userInfo: userInfo, cls: cls))
+    static func notification(_ cls: ObjCClass, name: ObjCObject, object: ObjCObject?, userInfo: ObjCObject?) -> NSNotification? {
+        Notifications.make(name: name.id, object: object?.id, userInfo: userInfo?.id, cls: cls.pointer)
+            .map { NSNotification(objCOwned: $0) }
     }
 
     @ObjCMethod("initWithName:object:userInfo:")
-    static func initialize(_ notification: id?, name: id?, object: id?, userInfo: id?) -> id? {
-        guard let notification else { return nil }
-        Storage.set(notification, NotificationStorage(name: name, object: object, userInfo: userInfo))
-        return notification
+    func initialize(name: ObjCObject, object: ObjCObject?, userInfo: ObjCObject?) -> Self {
+        Storage.set(objcObject, NotificationStorage(name: name.id, object: object?.id, userInfo: userInfo?.id))
+        return self
     }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ notification: id?) {
-        guard let notification else { return }
-        Storage.set(notification, nil)
-        ObjC.superDealloc(notification, from: Notifications.notificationClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Notifications.notificationClass)
     }
 
-    @ObjCMethod("name") static func name(_ notification: id?) -> id? { Notifications.storage(notification)?.name }
-    @ObjCMethod("object") static func object(_ notification: id?) -> id? { Notifications.storage(notification)?.object }
-    @ObjCMethod("userInfo") static func userInfo(_ notification: id?) -> id? { Notifications.storage(notification)?.userInfo }
+    @ObjCMethod("name") func name() -> ObjCObject? { storage?.name.map(ObjCObject.init) }
+    @ObjCMethod("object") func object() -> ObjCObject? { storage?.object.map(ObjCObject.init) }
+    @ObjCMethod("userInfo") func userInfo() -> ObjCObject? { storage?.userInfo.map(ObjCObject.init) }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ notification: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(notification) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSNotification { self }
 }
 
+/// NSNotificationCenter.
+@ObjCClass("NSNotificationCenter")
+public struct NSNotificationCenter {}
+
 @ObjCImplementation
-enum NSNotificationCenterMethods {
-    private static func observers(_ center: id?) -> NotificationCenterStorage {
-        guard let storage = Notifications.center(center) else {
+extension NSNotificationCenter {
+    private var observers: NotificationCenterStorage {
+        guard let storage = Notifications.center(objcObject) else {
             foundationFatal("message sent to an uninitialized NSNotificationCenter")
         }
         return storage
     }
 
     @ObjCClassMethod("defaultCenter")
-    static func defaultCenter(_ cls: id?) -> id? { Notifications.defaultCenter }
+    static func defaultCenter() -> NSNotificationCenter { NSNotificationCenter(objCArgument: Notifications.defaultCenter) }
 
     @ObjCMethod("init")
-    static func initialize(_ center: id?) -> id? {
-        if let center { Storage.set(center, NotificationCenterStorage()) }
-        return center
+    func initialize() -> Self {
+        Storage.set(objcObject, NotificationCenterStorage())
+        return self
     }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ center: id?) {
-        guard let center else { return }
-        Storage.set(center, nil)
-        ObjC.superDealloc(center, from: Notifications.centerClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Notifications.centerClass)
     }
 
     @ObjCMethod("addObserver:selector:name:object:")
-    static func add(_ center: id?, observer: id?, selector: SEL?, name: id?, object: id?) {
-        guard let observer, let selector else { return }
-        observers(center).observers.append(.init(observer: observer, selector: selector, block: nil, token: nil,
-                                                 name: Strings.value(of: name), object: object))
+    func add(observer: ObjCObject, selector: ObjCSelector, name: String?, object: ObjCObject?) {
+        observers.observers.append(.init(observer: observer.id, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
+                                         block: nil, token: nil, name: name, object: object?.id))
     }
 
     /// Calls `block` for each matching notification. Operation queues do not
     /// exist yet, so the block runs on the posting thread whatever `queue` is.
     @ObjCMethod("addObserverForName:object:queue:usingBlock:")
-    static func add(_ center: id?, name: id?, object: id?, queue: id?, block: ObjCBlock?) -> id? {
-        guard let block, let nsObject = "NSObject".withCString({ ObjC.getClass($0) }) else { return nil }
-        let token = ObjC.send(UnsafeMutableRawPointer(nsObject), ObjC.selector("new"))
-        observers(center).observers.append(.init(observer: nil, selector: nil, block: ObjC.retainBlock(block),
-                                                 token: token, name: Strings.value(of: name), object: object))
+    func add(name: String?, object: ObjCObject?, queue: ObjCObject?, block: ObjCBlock) -> ObjCObject {
+        let token = ObjCObject(objCOwned: ObjC.send(ObjCClass(named: "NSObject").pointer, ObjC.selector("new")))
+        observers.observers.append(.init(observer: nil, selector: nil, block: ObjC.retain(block.object),
+                                         token: ObjC.retain(token.id), name: name, object: object?.id))
         return token
     }
 
     @ObjCMethod("removeObserver:")
-    static func remove(_ center: id?, _ observer: id?) {
-        guard let observer else { return }
-        observers(center).remove { $0.observer == observer || $0.token == observer }
+    func remove(_ observer: ObjCObject) {
+        observers.remove { $0.observer == observer.id || $0.token == observer.id }
     }
 
     @ObjCMethod("removeObserver:name:object:")
-    static func remove(_ center: id?, _ observer: id?, name: id?, object: id?) {
-        guard let observer else { return }
-        let name = Strings.value(of: name)
-        observers(center).remove {
-            ($0.observer == observer || $0.token == observer)
-                && (name == nil || $0.name == name) && (object == nil || $0.object == object)
+    func remove(_ observer: ObjCObject, name: String?, object: ObjCObject?) {
+        observers.remove {
+            ($0.observer == observer.id || $0.token == observer.id)
+                && (name == nil || $0.name == name) && (object == nil || $0.object == object?.id)
         }
     }
 
     @ObjCMethod("postNotification:")
-    static func post(_ center: id?, _ notification: id?) {
-        if let notification { Notifications.post(notification, from: center) }
-    }
+    func post(_ notification: NSNotification) { Notifications.post(notification.id, from: objcObject) }
 
     @ObjCMethod("postNotificationName:object:")
-    static func post(_ center: id?, name: id?, object: id?) {
-        post(center, name: name, object: object, userInfo: nil)
-    }
+    func post(name: ObjCObject, object: ObjCObject?) { post(name: name, object: object, userInfo: nil) }
 
     @ObjCMethod("postNotificationName:object:userInfo:")
-    static func post(_ center: id?, name: id?, object: id?, userInfo: id?) {
-        guard let notification = Notifications.make(name: name, object: object, userInfo: userInfo) else { return }
-        Notifications.post(notification, from: center)
+    func post(name: ObjCObject, object: ObjCObject?, userInfo: ObjCObject?) {
+        guard let notification = Notifications.make(name: name.id, object: object?.id, userInfo: userInfo?.id) else { return }
+        Notifications.post(notification, from: objcObject)
         ObjC.release(notification)
     }
 }
