@@ -160,6 +160,7 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 
 #define LIBDISPATCH "/usr/lib/system/libdispatch.dylib"
 #define LIBOBJC "/usr/lib/libobjc.A.dylib"
+#define CFNETWORK "/System/Library/Frameworks/CFNetwork.framework/CFNetwork"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, and Foundation's run loop drains the
@@ -175,10 +176,13 @@ static const struct {
 // Sets up a provider just found under `short_name`: its re-exports and the
 // libraries it needs.
 static void link_provider(perry_loader *loader, perry_provider *provider, const char *short_name) {
-    // libSystem re-exports libdispatch, found the first time libSystem
-    // lacks a symbol, so programs that never use it never load it.
+    // libSystem re-exports libdispatch, and Foundation CFNetwork's URL
+    // loading classes, each found the first time the library lacks a
+    // symbol, so programs that never use them never load them.
     if (strcmp(short_name, "System") == 0)
         provider->reexport = LIBDISPATCH;
+    if (strcmp(short_name, "Foundation") == 0)
+        provider->reexport = CFNETWORK;
     for (size_t i = 0; i < sizeof(provider_links) / sizeof(provider_links[0]); i++)
         if (strcmp(provider_links[i].short_name, short_name) == 0)
             perry_find_provider(loader, provider_links[i].install_name);
