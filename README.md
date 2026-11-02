@@ -40,12 +40,17 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
   `UISceneConfiguration`), application and scene states, launch
-  notifications and the responder chain
+  notifications; `UIView` geometry, hierarchy, callbacks, coordinate
+  conversion and layout passes; `UIWindow` with its scene, root view
+  controller and key window; `UIViewController` view loading; the
+  responder chain from a view to the app delegate; `NSStringFromCGRect`
+- CoreGraphics (`libPerryCoreGraphics`): geometry constants and functions
+  (`CGRectZero`, `CGRectIntersection`, `CGRectInset`…)
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
 (operation queues, GCD, run loop input sources, formatters, localization),
-most of UIKit (views, windows, drawing, events), Swift.
+most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 
 ## Layout
 
@@ -60,6 +65,9 @@ most of UIKit (views, windows, drawing, events), Swift.
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
+| `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry (Swift) |
+| `Sources/CPerryCoreGraphics` | CoreGraphics' exported constants (C) |
+| `Sources/CPerryGeometry` | `CGPoint`, `CGSize`, `CGRect` as C structs, shared by providers |
 | `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes in Swift, and calls into Objective-C |
 | `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
 | `Plugins/PerryProviderPlugin` | Build plugin that generates a provider's entry points from its declarations |
@@ -302,7 +310,12 @@ part: its classes live in storage handed out through
 `perry_provider_symbol`, and its objects keep their Swift state in a table
 per class until they are deallocated. `UIApplicationMain` follows UIKit's
 launch order, which current SDKs require to include scenes, and then runs
-the main run loop.
+the main run loop. Views send their hierarchy callbacks as messages, so
+subclasses' overrides run, in UIKit's order: `willMoveToWindow:` down the
+subtree, `didMoveToWindow` back up. A window installs its root view
+controller's view when it becomes visible, inside the `UITransitionView`
+and `UIDropShadowView` UIKit puts there. Geometry types are C structs, so
+a `CGRect` passes in four floating-point registers as clang passes it.
 
 **Licensing.** The loader is written from Apple's published Mach-O format
 descriptions. It does not use code from Machismo (GPL-3.0), so Perry stays
