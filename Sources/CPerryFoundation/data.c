@@ -8,6 +8,16 @@
 
 int perry_foundation_thread_id(void) { return (int)gettid(); }
 
+// The empty array and dictionary the compiler refers to for @[] and @{}:
+// constant collections without elements, { isa, count, objects } and
+// { isa, options, count, keys, objects }, which get NSConstantArray's and
+// NSConstantDictionary's classes at startup.
+void *ns_array0[3] __asm__("___NSArray0__struct") __attribute__((visibility("default"), used));
+void *ns_dictionary0[5] __asm__("___NSDictionary0__struct") __attribute__((visibility("default"), used));
+
+void perry_foundation_set_empty_array_class(void *cls) { ns_array0[0] = cls; }
+void perry_foundation_set_empty_dictionary_class(void *cls) { ns_dictionary0[0] = cls; }
+
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 
 perry_class_storage ns_string DARWIN_SYMBOL("_OBJC_CLASS_$_NSString");
