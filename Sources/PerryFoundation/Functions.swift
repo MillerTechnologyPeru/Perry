@@ -93,7 +93,7 @@ public func CFGetTypeID(_ object: UnsafeMutableRawPointer?) -> UInt {
     guard let object else { return 0 }
     let selector = ObjC.selector("_cfTypeID")
     guard ObjC.sendBool(object, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector)) else {
-        return 1
+        return CFTypeIDs.of(object) ?? 1
     }
     return ObjC.sendUInt(object, selector)
 }
