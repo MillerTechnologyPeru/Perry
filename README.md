@@ -137,7 +137,13 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   validation, saving, rollback, merging and private queues, fetch requests
   with predicates, sorting, limits and counts, and `NSPersistentContainer`
 - CoreGraphics (`libPerryCoreGraphics`): geometry constants and functions
-  (`CGRectZero`, `CGRectIntersection`, `CGRectInset`…)
+  (`CGRectZero`, `CGRectIntersection`, `CGRectInset`…); images from bytes
+  in each 8-bit format, cropping, color spaces, colors and data providers;
+  bitmap contexts that fill, clear and draw images with CoreGraphics'
+  compositing; and ImageIO, which the loader maps here: image sources
+  reading PNG, JPEG (with orientation), GIF, WebP and HEIC with their
+  properties and thumbnails, and destinations writing PNG, JPEG and
+  animated GIF
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
@@ -172,7 +178,8 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryZ`, `PerryBZ2`, `PerryExpat`, `PerrySQLite3`, `PerryIconv` | zlib, bzip2, Expat, SQLite and iconv over Linux's (C, assembly) |
 | `Sources/PerryCompression` | `libPerrycompression.so`: libcompression (C) |
 | `Sources/CPerryWrapped` | Symbol lookup and variadic thunk macros the wrapped libraries share |
-| `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry (Swift) |
+| `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry, images and bitmap contexts, and ImageIO (Swift) |
+| `Sources/CPerryImageIO` | ImageIO's codecs over libpng, libjpeg-turbo, giflib, libwebp and libheif (C) |
 | `Sources/CPerryCoreGraphics` | CoreGraphics' exported constants (C) |
 | `Sources/CPerryGeometry` | `CGPoint`, `CGSize`, `CGRect` as C structs, shared by providers |
 | `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCProtocol`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes and protocols in Swift, and calls into Objective-C |
