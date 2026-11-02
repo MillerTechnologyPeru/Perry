@@ -27,13 +27,15 @@ yet.
   categories, protocols, `+load` and `+initialize`, message caching, ARC,
   `__weak`, autorelease pools, associated objects and blocks
 - Foundation (`libPerryFoundation`, also standing in for CoreFoundation):
-  `NSString` with string literals and `stringWithFormat:`, `NSNumber` with
-  constant number literals and `@YES`/`@NO`, `NSArray` and `NSMutableArray`
-  with sorting, blocks and fast enumeration, and `NSLog`
+  `NSString` and `NSMutableString` with string literals and
+  `stringWithFormat:`, `NSNumber` with number literals and `@YES`/`@NO`,
+  `NSArray`, `NSDictionary` and `NSSet` with their mutable subclasses,
+  constant collection literals, sorting, blocks and fast enumeration,
+  Foundation's description format, and `NSLog`
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(dictionaries, sets, data, dates, run loops), UIKit, Swift.
+(data, dates, run loops, notifications), UIKit, Swift.
 
 ## Layout
 
@@ -47,6 +49,8 @@ Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
+| `Sources/PerryObjCInterop` | `@ObjCImplementation` and `@ObjCMethod`: Objective-C classes in Swift |
+| `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
 | `Sources/PerryInterface` | Loader/provider interface header |
 | `Tests/PerryLoaderTests` | Swift Testing suite |
 | `Tests/Fixtures` | arm64 iOS test programs and stub `.tbd` link libraries |
@@ -92,7 +96,9 @@ Scripts/build-darwin-fixtures.sh   # on the Mac: .build/perry-fixtures/darwin/*.
 Scripts/docker-test.sh             # DarwinFixtureTests picks them up
 ```
 
-`DarwinFixtureTests` is skipped when the apps have not been built.
+The script also builds each app for macOS and records its output with
+Apple's Foundation; `DarwinFixtureTests` requires Perry's output to match it
+byte for byte. The suite is skipped when the apps have not been built.
 
 ## Usage
 
@@ -149,6 +155,24 @@ forwarding and the `$`-named data symbols are C and assembly. Blocks are
 classes built inside libSystem's `_NSConcrete*Block` storage, which the
 runtime reaches through the loader's `lookup_symbol`.
 
+**Objective-C classes in Swift.** Every class Perry implements, from
+`NSObject` in the runtime to Foundation's, is a Swift type marked
+`@ObjCImplementation` whose static functions are marked with their
+selectors:
+
+```swift
+@ObjCImplementation
+enum NSStringMethods {
+    @ObjCMethod("characterAtIndex:")
+    static func character(_ string: id?, at index: UInt) -> UInt16 { … }
+}
+```
+
+The macro generates a C-convention thunk for each (receiver, `_cmd`,
+arguments), its type encoding from the Swift types (`S24@0:8Q16`), and a
+`register(_:)` that installs them, and rejects selectors whose argument
+count does not match the function at compile time.
+
 **Foundation** is written in Swift as a client of libobjc's C API, which it
 looks up through the loader at startup, so it shares the one runtime rather
 than linking a copy. Its classes are built with `objc_initializeClassPair`
@@ -156,7 +180,8 @@ in storage exported under Mach-O names (`_OBJC_CLASS_$_NSString`,
 `___CFConstantStringClassReference`), and each method is a Swift function
 with C calling conventions. Objects keep their Swift state in one extra
 word. String and number literals are static objects the compiler emits;
-their classes read them in place. Variadic methods and `NSLog` receive
+their classes read them in place, including constant `@[…]` and `@{…}`
+literals and CoreFoundation's boolean objects. Variadic methods and `NSLog` receive
 Apple's stack-slot arguments through two-instruction assembly entry points,
 and a Swift formatter handles `%@` and passes other conversions to glibc.
 

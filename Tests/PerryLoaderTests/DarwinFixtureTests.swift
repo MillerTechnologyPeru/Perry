@@ -61,25 +61,14 @@ struct DarwinFixtureTests {
         #expect(messages == ["0: Kiwi says ... on 2 legs", "1: Rex says woof on 4 legs"])
     }
 
-    @Test("Foundation formats, collects and describes like Darwin",
-          .enabled(if: DarwinFixtures.built("Ledger")))
-    func ledgerRuns() throws {
-        let result = try runPerry([DarwinFixtures.app("Ledger").path])
+    /// Each app's stdout must match what it prints with Apple's Foundation
+    /// on macOS, recorded by Scripts/build-darwin-fixtures.sh.
+    @Test("Apps print exactly what they print on Darwin", arguments: DarwinFixtures.withReference)
+    func matchesDarwin(_ name: String) throws {
+        let result = try runPerry([DarwinFixtures.app(name).path])
         #expect(result.status == 0, "\(result.stderr)")
-        #expect(result.stdout.lines == [
-            "-7|   42|ab |3.14|ff|Z|%|obj",
-            "12 2.5 1",
-            "Hello, world (12) upper=HELLO, WORLD prefix=1",
-            "equal=1 compare=-1",
-            "unicode=café ☕ 6",
-            "count=5 total=199 first=40 last=10",
-            "10,20,30,40,99",
-            "contains=1 index=1",
-            "(",
-            "    x,",
-            "    y",
-            ")",
-        ])
+        let expected = try String(contentsOf: DarwinFixtures.reference(name), encoding: .utf8)
+        #expect(result.stdout == expected)
     }
 }
 
@@ -88,6 +77,17 @@ enum DarwinFixtures {
 
     static func app(_ name: String) -> URL {
         directory.appending(path: "\(name).app")
+    }
+
+    static func reference(_ name: String) -> URL {
+        directory.appending(path: "\(name).expected")
+    }
+
+    /// Fixtures with a recorded Darwin output.
+    static var withReference: [String] {
+        ["Atlas", "Ledger", "Menagerie"].filter {
+            built($0) && FileManager.default.fileExists(atPath: reference($0).path)
+        }
     }
 
     static func built(_ name: String) -> Bool {

@@ -30,6 +30,12 @@ VARIADIC perry_imp_initWithFormat, perry_foundation_initWithFormat, 3
 VARIADIC perry_imp_stringByAppendingFormat, perry_foundation_stringByAppendingFormat, 3
     .hidden perry_imp_arrayWithObjects
 VARIADIC perry_imp_arrayWithObjects, perry_foundation_arrayWithObjects, 3
+    .hidden perry_imp_setWithObjects
+VARIADIC perry_imp_setWithObjects, perry_foundation_setWithObjects, 3
+    .hidden perry_imp_dictionaryWithObjectsAndKeys
+VARIADIC perry_imp_dictionaryWithObjectsAndKeys, perry_foundation_dictionaryWithObjectsAndKeys, 3
+    .hidden perry_imp_appendFormat
+VARIADIC perry_imp_appendFormat, perry_foundation_appendFormat, 3
 
     .section .note.GNU-stack, "", %progbits
 

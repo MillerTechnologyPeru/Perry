@@ -1,5 +1,6 @@
 import CPerryFoundation
 import Glibc
+import PerryObjCInterop
 
 // Foundation is a client of the Objective-C runtime, as on Darwin: it uses
 // libobjc's C API, looked up in libPerryobjc at startup, rather than
@@ -89,6 +90,11 @@ enum ObjC {
         return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, argument)
     }
 
+    static func sendUInt(_ receiver: id?, _ selector: SEL) -> UInt {
+        typealias Fn = @convention(c) (id?, SEL) -> UInt
+        return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector)
+    }
+
     static func sendBool(_ receiver: id?, _ selector: SEL, _ argument: id?) -> Bool {
         typealias Fn = @convention(c) (id?, SEL, id?) -> Bool
         return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, argument)
@@ -110,51 +116,66 @@ enum Selectors {
     nonisolated(unsafe) static let description = ObjC.selector("description")
     nonisolated(unsafe) static let isEqual = ObjC.selector("isEqual:")
     nonisolated(unsafe) static let hash = ObjC.selector("hash")
+    nonisolated(unsafe) static let copyWithZone = ObjC.selector("copyWithZone:")
 }
 
-/// Defines a class in exported storage and adds methods written as Swift
-/// functions with C calling conventions: the Swift side of what
-/// @implementation does in Objective-C.
-struct ClassDefinition {
+/// A class built in exported storage, or an existing class to extend.
+/// @ObjCImplementation method tables install into it.
+struct ClassDefinition: ObjCMethodRegistrar {
     let cls: Class
     let metaclass: Class
 
-    init(_ which: perry_foundation_class_id, name: String, superclass: Class?) {
+    /// Builds a class in Foundation's exported storage, with `tables`'
+    /// methods, and registers it.
+    init(_ which: perry_foundation_class_id, name: String, superclass: Class?, _ tables: any ObjCMethodTable.Type...) {
         cls = perry_foundation_class(which)
         metaclass = perry_foundation_metaclass(which)
         _ = name.withCString { ObjC.initializeClassPair(superclass, $0, cls, metaclass) }
-    }
-
-    func register() {
+        for table in tables { table.register(self) }
         ObjC.registerClassPair(cls)
-    }
-
-    /// Adds an instance method. `imp` must be a @convention(c) function.
-    func method<Function>(_ name: String, _ types: String, _ imp: Function) {
-        Self.add(cls, name, types, imp)
-    }
-
-    /// Adds a class method.
-    func classMethod<Function>(_ name: String, _ types: String, _ imp: Function) {
-        Self.add(metaclass, name, types, imp)
-    }
-
-    func method(_ name: String, _ types: String, address: UnsafeRawPointer) {
-        Self.add(cls, name, types, address)
-    }
-
-    func classMethod(_ name: String, _ types: String, address: UnsafeRawPointer) {
-        Self.add(metaclass, name, types, address)
-    }
-
-    static func add<Function>(_ cls: Class, _ name: String, _ types: String, _ imp: Function) {
-        precondition(MemoryLayout<Function>.size == MemoryLayout<UnsafeRawPointer>.size)
-        let address = unsafeBitCast(imp, to: UnsafeRawPointer.self)
-        let selector = ObjC.selector(name)
-        let encoding = UnsafePointer(strdup(types)!)
-        if !ObjC.addMethod(cls, selector, address, encoding) {
-            _ = ObjC.replaceMethod(cls, selector, address, encoding)
+        // Literal classes read their objects in place and never allocate.
+        if tables.contains(where: { $0 == ImmortalMethods.self }) {
+            Storage.staticClasses.insert(cls)
         }
+    }
+
+    /// Adds methods to a class that already exists, like a category.
+    init(extending cls: Class, _ tables: any ObjCMethodTable.Type...) {
+        self.cls = cls
+        metaclass = cls.pointee.isa
+        for table in tables { table.register(self) }
+    }
+
+    func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool) {
+        let target = isClassMethod ? metaclass : cls
+        let sel = ObjC.selector(selector)
+        let encoding = UnsafePointer(strdup(types)!)
+        if !ObjC.addMethod(target, sel, implementation, encoding) {
+            _ = ObjC.replaceMethod(target, sel, implementation, encoding)
+        }
+    }
+}
+
+/// A variadic method's entry point in variadic.S, as an implementation.
+func variadicEntry(_ entry: @convention(c) () -> Void) -> UnsafeRawPointer {
+    unsafeBitCast(entry, to: UnsafeRawPointer.self)
+}
+
+/// retain, release and autorelease for static objects such as literals.
+@ObjCImplementation
+enum ImmortalMethods {
+    @ObjCMethod("retain") static func retain(_ object: id?) -> id? { object }
+    @ObjCMethod("release", types: "Vv16@0:8") static func release(_ object: id?) {}
+    @ObjCMethod("autorelease") static func autorelease(_ object: id?) -> id? { object }
+    @ObjCMethod("retainCount") static func retainCount(_ object: id?) -> UInt { UInt.max }
+}
+
+/// +alloc for classes whose instances keep Swift state in an extra word.
+@ObjCImplementation
+enum StorageAllocation {
+    @ObjCClassMethod("alloc") static func alloc(_ cls: id?) -> id? { Storage.allocate(cls) }
+    @ObjCClassMethod("allocWithZone:") static func alloc(_ cls: id?, zone: UnsafeMutableRawPointer?) -> id? {
+        Storage.allocate(cls)
     }
 }
 
@@ -163,8 +184,13 @@ struct ClassDefinition {
 enum Storage {
     static let extraBytes = MemoryLayout<UnsafeRawPointer>.size
 
+    /// Classes of static objects the compiler emits (literals), which have
+    /// no extra word.
+    nonisolated(unsafe) static var staticClasses: Set<Class> = []
+
     static func get<T: AnyObject>(_ object: id?, as type: T.Type) -> T? {
-        guard let object, let slot = ObjC.indexedIvars(object),
+        guard let object, let cls = ObjC.objectGetClass(object), !staticClasses.contains(cls),
+              let slot = ObjC.indexedIvars(object),
               let pointer = slot.load(as: UnsafeRawPointer?.self) else { return nil }
         return Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue() as? T
     }
@@ -191,13 +217,3 @@ func foundationFatal(_ message: String) -> Never {
     line.withCString { _ = write(2, $0, strlen($0)) }
     abort()
 }
-
-// Method signatures.
-typealias IMPObject = @convention(c) (id?, SEL) -> id?
-typealias IMPObjectObject = @convention(c) (id?, SEL, id?) -> id?
-typealias IMPVoid = @convention(c) (id?, SEL) -> Void
-typealias IMPVoidObject = @convention(c) (id?, SEL, id?) -> Void
-typealias IMPUInt = @convention(c) (id?, SEL) -> UInt
-typealias IMPInt = @convention(c) (id?, SEL) -> Int
-typealias IMPBoolObject = @convention(c) (id?, SEL, id?) -> Bool
-typealias IMPIntObject = @convention(c) (id?, SEL, id?) -> Int

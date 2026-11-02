@@ -1,9 +1,16 @@
 import CPerryFoundation
 import Glibc
+import PerryObjCInterop
 
 /// An NSString's contents.
 final class StringStorage {
-    let value: String
+    /// Changes only for NSMutableString.
+    var value: String {
+        didSet {
+            free(cString)
+            cString = nil
+        }
+    }
     private var cString: UnsafeMutablePointer<CChar>?
 
     init(_ value: String) {
@@ -100,119 +107,152 @@ enum Strings {
     }
 
     static func install(superclass: Class) {
-        let string = ClassDefinition(PERRY_CLASS_NSString, name: "NSString", superclass: superclass)
+        let string = ClassDefinition(PERRY_CLASS_NSString, name: "NSString", superclass: superclass,
+                                     StorageAllocation.self, NSStringMethods.self)
         stringClass = string.cls
-
-        string.classMethod("alloc", "@16@0:8", { cls, _ in Storage.allocate(cls) } as IMPObject)
-        string.classMethod("allocWithZone:", "@24@0:8^v16", { cls, _, _ in Storage.allocate(cls) } as IMPObjectObject)
-        string.classMethod("string", "@16@0:8", { _, _ in Strings.autoreleased("") } as IMPObject)
-        string.classMethod("stringWithString:", "@24@0:8@16", { _, _, other in
-            Strings.autoreleased(Strings.value(of: other) ?? "")
-        } as IMPObjectObject)
-        string.classMethod("stringWithUTF8String:", "@24@0:8r*16", { _, _, bytes in
-            guard let bytes else { return nil }
-            return Strings.autoreleased(String(cString: bytes.assumingMemoryBound(to: CChar.self)))
-        } as IMPObjectObject)
-        string.classMethod("stringWithFormat:", "@24@0:8@16", address: unsafeBitCast(
-            perry_imp_stringWithFormat as @convention(c) () -> Void, to: UnsafeRawPointer.self))
-
-        string.method("init", "@16@0:8", { object, _ in
-            if let object { Storage.set(object, StringStorage("")) }
-            return object
-        } as IMPObject)
-        string.method("initWithString:", "@24@0:8@16", { object, _, other in
-            if let object { Storage.set(object, StringStorage(Strings.value(of: other) ?? "")) }
-            return object
-        } as IMPObjectObject)
-        string.method("initWithUTF8String:", "@24@0:8r*16", { object, _, bytes in
-            guard let object, let bytes else { return nil }
-            Storage.set(object, StringStorage(String(cString: bytes.assumingMemoryBound(to: CChar.self))))
-            return object
-        } as IMPObjectObject)
-        string.method("initWithFormat:", "@24@0:8@16", address: unsafeBitCast(
-            perry_imp_initWithFormat as @convention(c) () -> Void, to: UnsafeRawPointer.self))
-        string.method("initWithFormat:arguments:", "@32@0:8@16*24", { object, _, format, arguments in
-            guard let object, let arguments else { return object }
-            var darwin = DarwinArguments(arguments)
-            Storage.set(object, StringStorage(Format.string(Strings.value(of: format) ?? "", &darwin)))
-            return object
-        } as @convention(c) (id?, SEL, id?, UnsafeRawPointer?) -> id?)
-        string.method("dealloc", "v16@0:8", { object, _ in
-            guard let object else { return }
-            Storage.set(object, nil)
-            ObjC.superDealloc(object, from: Strings.stringClass)
-        } as IMPVoid)
-
-        string.method("length", "Q16@0:8", { object, _ in
-            UInt(Strings.value(of: object)?.utf16.count ?? 0)
-        } as IMPUInt)
-        string.method("characterAtIndex:", "S24@0:8Q16", { object, _, index in
-            let units = Array((Strings.value(of: object) ?? "").utf16)
-            guard Int(index) < units.count else {
-                foundationFatal("-[NSString characterAtIndex:]: Range or index out of bounds")
-            }
-            return units[Int(index)]
-        } as @convention(c) (id?, SEL, UInt) -> UInt16)
-        string.method("UTF8String", "r*16@0:8", { object, _ in
-            object.flatMap(Strings.utf8)
-        } as @convention(c) (id?, SEL) -> UnsafePointer<CChar>?)
-        string.method("description", "@16@0:8", { object, _ in object } as IMPObject)
-        string.method("copy", "@16@0:8", { object, _ in ObjC.retain(object) } as IMPObject)
-        string.method("copyWithZone:", "@24@0:8^v16", { object, _, _ in ObjC.retain(object) } as IMPObjectObject)
-        string.method("isEqual:", "B24@0:8@16", { object, _, other in
-            object == other || (Strings.value(of: other).map { $0 == Strings.value(of: object) } ?? false)
-        } as IMPBoolObject)
-        string.method("isEqualToString:", "B24@0:8@16", { object, _, other in
-            object == other || Strings.value(of: object) == Strings.value(of: other)
-        } as IMPBoolObject)
-        string.method("hash", "Q16@0:8", { object, _ in
-            Strings.hash(Strings.value(of: object) ?? "")
-        } as IMPUInt)
-        string.method("compare:", "q24@0:8@16", { object, _, other in
-            Strings.compare(Strings.value(of: object) ?? "", Strings.value(of: other) ?? "")
-        } as IMPIntObject)
-        string.method("hasPrefix:", "B24@0:8@16", { object, _, other in
-            (Strings.value(of: object) ?? "").hasPrefix(Strings.value(of: other) ?? "")
-        } as IMPBoolObject)
-        string.method("hasSuffix:", "B24@0:8@16", { object, _, other in
-            (Strings.value(of: object) ?? "").hasSuffix(Strings.value(of: other) ?? "")
-        } as IMPBoolObject)
-        string.method("stringByAppendingString:", "@24@0:8@16", { object, _, other in
-            Strings.autoreleased((Strings.value(of: object) ?? "") + (Strings.value(of: other) ?? ""))
-        } as IMPObjectObject)
-        string.method("stringByAppendingFormat:", "@24@0:8@16", address: unsafeBitCast(
-            perry_imp_stringByAppendingFormat as @convention(c) () -> Void, to: UnsafeRawPointer.self))
-        string.method("uppercaseString", "@16@0:8", { object, _ in
-            Strings.autoreleased((Strings.value(of: object) ?? "").uppercased())
-        } as IMPObject)
-        string.method("lowercaseString", "@16@0:8", { object, _ in
-            Strings.autoreleased((Strings.value(of: object) ?? "").lowercased())
-        } as IMPObject)
-        string.method("integerValue", "q16@0:8", { object, _ in
-            Strings.integerPrefix(Strings.value(of: object) ?? "")
-        } as IMPInt)
-        string.method("intValue", "i16@0:8", { object, _ in
-            Int32(truncatingIfNeeded: Strings.integerPrefix(Strings.value(of: object) ?? ""))
-        } as @convention(c) (id?, SEL) -> Int32)
-        string.method("doubleValue", "d16@0:8", { object, _ in
-            (Strings.value(of: object) ?? "").withCString { strtod($0, nil) }
-        } as @convention(c) (id?, SEL) -> Double)
-        string.register()
+        string.addMethod("stringWithFormat:", types: "@24@0:8@16",
+                         implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
+        string.addMethod("initWithFormat:", types: "@24@0:8@16",
+                         implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
+        string.addMethod("stringByAppendingFormat:", types: "@24@0:8@16",
+                         implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
 
         // String literals: immortal, read in place.
-        let constant = ClassDefinition(PERRY_CLASS_NSConstantString, name: "__NSCFConstantString", superclass: string.cls)
-        constantClass = constant.cls
-        constant.method("retain", "@16@0:8", { object, _ in object } as IMPObject)
-        constant.method("release", "Vv16@0:8", { _, _ in } as IMPVoid)
-        constant.method("autorelease", "@16@0:8", { object, _ in object } as IMPObject)
-        constant.method("retainCount", "Q16@0:8", { _, _ in UInt.max } as IMPUInt)
-        constant.register()
+        constantClass = ClassDefinition(PERRY_CLASS_NSConstantString, name: "__NSCFConstantString",
+                                        superclass: string.cls, ImmortalMethods.self).cls
     }
 
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
     static func integerPrefix(_ value: String) -> Int {
         value.withCString { strtol($0, nil, 10) }
     }
+}
+
+@ObjCImplementation
+enum NSStringMethods {
+    private static func value(_ object: id?) -> String { Strings.value(of: object) ?? "" }
+
+    private static func set(_ object: id?, _ value: String) -> id? {
+        if let object { Storage.set(object, StringStorage(value)) }
+        return object
+    }
+
+    // MARK: Creating
+
+    @ObjCClassMethod("string")
+    static func string(_ cls: id?) -> id? { Strings.autoreleased("") }
+
+    @ObjCClassMethod("stringWithString:")
+    static func string(_ cls: id?, string other: id?) -> id? { Strings.autoreleased(value(other)) }
+
+    @ObjCClassMethod("stringWithUTF8String:")
+    static func string(_ cls: id?, utf8 bytes: UnsafePointer<CChar>?) -> id? {
+        bytes.map { Strings.autoreleased(String(cString: $0)) }
+    }
+
+    @ObjCMethod("init")
+    static func initialize(_ object: id?) -> id? { set(object, "") }
+
+    @ObjCMethod("initWithString:")
+    static func initialize(_ object: id?, string other: id?) -> id? { set(object, value(other)) }
+
+    @ObjCMethod("initWithUTF8String:")
+    static func initialize(_ object: id?, utf8 bytes: UnsafePointer<CChar>?) -> id? {
+        guard let bytes else { return nil }
+        return set(object, String(cString: bytes))
+    }
+
+    /// A Darwin va_list is a pointer to the argument slots.
+    @ObjCMethod("initWithFormat:arguments:", types: "@32@0:8@16*24")
+    static func initialize(_ object: id?, format: id?, arguments: UnsafeRawPointer?) -> id? {
+        guard let arguments else { return object }
+        var darwin = DarwinArguments(arguments)
+        return set(object, Format.string(value(format), &darwin))
+    }
+
+    @ObjCMethod("dealloc")
+    static func dealloc(_ object: id?) {
+        guard let object else { return }
+        Storage.set(object, nil)
+        ObjC.superDealloc(object, from: Strings.stringClass)
+    }
+
+    // MARK: Contents
+
+    @ObjCMethod("length")
+    static func length(_ object: id?) -> UInt { UInt(value(object).utf16.count) }
+
+    @ObjCMethod("characterAtIndex:")
+    static func character(_ object: id?, at index: UInt) -> UInt16 {
+        let units = Array(value(object).utf16)
+        guard Int(index) < units.count else {
+            foundationFatal("-[NSString characterAtIndex:]: Range or index out of bounds")
+        }
+        return units[Int(index)]
+    }
+
+    @ObjCMethod("UTF8String")
+    static func utf8String(_ object: id?) -> UnsafePointer<CChar>? { object.flatMap(Strings.utf8) }
+
+    @ObjCMethod("description")
+    static func description(_ object: id?) -> id? { object }
+
+    @ObjCMethod("copy")
+    static func copy(_ object: id?) -> id? { ObjC.retain(object) }
+
+    @ObjCMethod("copyWithZone:")
+    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    static func mutableCopy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
+        MutableStrings.make(value(object))
+    }
+
+    // MARK: Comparing
+
+    @ObjCMethod("isEqual:")
+    static func isEqual(_ object: id?, _ other: id?) -> Bool {
+        object == other || Strings.value(of: other).map { $0 == value(object) } ?? false
+    }
+
+    @ObjCMethod("isEqualToString:")
+    static func isEqual(_ object: id?, toString other: id?) -> Bool {
+        object == other || value(object) == value(other)
+    }
+
+    @ObjCMethod("hash")
+    static func hash(_ object: id?) -> UInt { Strings.hash(value(object)) }
+
+    @ObjCMethod("compare:")
+    static func compare(_ object: id?, _ other: id?) -> Int { Strings.compare(value(object), value(other)) }
+
+    @ObjCMethod("hasPrefix:")
+    static func hasPrefix(_ object: id?, _ other: id?) -> Bool { value(object).hasPrefix(value(other)) }
+
+    @ObjCMethod("hasSuffix:")
+    static func hasSuffix(_ object: id?, _ other: id?) -> Bool { value(object).hasSuffix(value(other)) }
+
+    // MARK: Deriving
+
+    @ObjCMethod("stringByAppendingString:")
+    static func appending(_ object: id?, _ other: id?) -> id? {
+        Strings.autoreleased(value(object) + value(other))
+    }
+
+    @ObjCMethod("uppercaseString")
+    static func uppercased(_ object: id?) -> id? { Strings.autoreleased(value(object).uppercased()) }
+
+    @ObjCMethod("lowercaseString")
+    static func lowercased(_ object: id?) -> id? { Strings.autoreleased(value(object).lowercased()) }
+
+    @ObjCMethod("integerValue")
+    static func integerValue(_ object: id?) -> Int { Strings.integerPrefix(value(object)) }
+
+    @ObjCMethod("intValue")
+    static func intValue(_ object: id?) -> Int32 { Int32(truncatingIfNeeded: Strings.integerPrefix(value(object))) }
+
+    @ObjCMethod("doubleValue")
+    static func doubleValue(_ object: id?) -> Double { value(object).withCString { strtod($0, nil) } }
 }
 
 // MARK: - Variadic methods

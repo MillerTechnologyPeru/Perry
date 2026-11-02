@@ -1,4 +1,5 @@
 // swift-tools-version: 6.4
+import CompilerPluginSupport
 import PackageDescription
 
 let package = Package(
@@ -12,6 +13,9 @@ let package = Package(
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -33,19 +37,38 @@ let package = Package(
         // Objective-C runtime engine.
         .target(
             name: "PerryObjCRuntime",
-            dependencies: ["CPerryObjC"]
+            dependencies: ["CPerryObjC", "PerryObjCInterop"]
         ),
         // libobjc's C API under Darwin symbol names.
         .target(
             name: "PerryObjC",
             dependencies: ["PerryObjCRuntime", "CPerryObjC", "PerryInterface"]
         ),
+        // @ObjCImplementation and @ObjCMethod: Objective-C classes in Swift.
+        .macro(
+            name: "PerryObjCMacros",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ]
+        ),
+        .target(
+            name: "PerryObjCInterop",
+            dependencies: ["PerryObjCMacros"]
+        ),
+        .testTarget(
+            name: "PerryObjCMacrosTests",
+            dependencies: [
+                "PerryObjCMacros",
+                .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
+            ]
+        ),
         // Foundation: exported class storage and variadic entry points.
         .target(name: "CPerryFoundation"),
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CPerryFoundation", "PerryInterface"]
+            dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"]
         ),
         .testTarget(
             name: "PerryLoaderTests",

@@ -16,6 +16,12 @@ typedef struct perry_class_storage {
     uintptr_t bits;
 } perry_class_storage;
 
+// NSRange, passed by value in two registers.
+typedef struct _NSRange {
+    uintptr_t location;
+    uintptr_t length;
+} NSRange;
+
 typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSString,
     PERRY_CLASS_NSConstantString,   // ___CFConstantStringClassReference
@@ -26,6 +32,13 @@ typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSConstantDoubleNumber,     // @2.5: { isa, double value }
     PERRY_CLASS_NSConstantFloatNumber,      // @2.5f: { isa, float value }
     PERRY_CLASS_NSCFBoolean,                // kCFBooleanTrue/False: { isa, uint64 value }
+    PERRY_CLASS_NSMutableString,
+    PERRY_CLASS_NSDictionary,
+    PERRY_CLASS_NSMutableDictionary,
+    PERRY_CLASS_NSSet,
+    PERRY_CLASS_NSMutableSet,
+    PERRY_CLASS_NSConstantArray,            // @[...]: { isa, uint64 count, id *objects }
+    PERRY_CLASS_NSConstantDictionary,       // @{...}: { isa, uint64 options, uint64 count, id *keys, id *objects }
     PERRY_CLASS_COUNT,
 } perry_foundation_class_id;
 
@@ -43,5 +56,8 @@ void perry_imp_stringWithFormat(void);      // + (id)stringWithFormat:(NSString 
 void perry_imp_initWithFormat(void);        // - (id)initWithFormat:(NSString *)format, ...
 void perry_imp_stringByAppendingFormat(void);
 void perry_imp_arrayWithObjects(void);      // + (id)arrayWithObjects:(id)first, ... nil
+void perry_imp_setWithObjects(void);        // + (id)setWithObjects:(id)first, ... nil
+void perry_imp_dictionaryWithObjectsAndKeys(void); // + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil
+void perry_imp_appendFormat(void);          // - (void)appendFormat:(NSString *)format, ...
 
 #endif

@@ -1,6 +1,7 @@
 import CPerryFoundation
 import Glibc
 import PerryInterface
+import PerryObjCInterop
 
 // libPerryFoundation: the provider for Foundation.framework and
 // CoreFoundation.framework.
@@ -22,14 +23,22 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
 
-    // Foundation's NSObject methods. libobjc's -description returns nil.
-    ClassDefinition.add(nsObject, "description", "@16@0:8", { object, _ in
-        Strings.autoreleased("<\(ObjC.className(object)): \(object.map { "\($0)" } ?? "0x0")>")
-    } as IMPObject)
-
+    _ = ClassDefinition(extending: nsObject, NSObjectFoundationMethods.self)
     Strings.install(superclass: nsObject)
+    MutableStrings.install(superclass: Strings.stringClass)
     Arrays.install(superclass: nsObject)
+    Dictionaries.install(superclass: nsObject)
+    Sets.install(superclass: nsObject)
     Numbers.install(superclass: nsObject)
+}
+
+/// Foundation's additions to NSObject. libobjc's -description returns nil.
+@ObjCImplementation
+enum NSObjectFoundationMethods {
+    @ObjCMethod("description")
+    static func description(_ object: id?) -> id? {
+        Strings.autoreleased("<\(ObjC.className(object)): \(object.map { "\($0)" } ?? "0x0")>")
+    }
 }
 
 // MARK: - NSLog

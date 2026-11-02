@@ -29,6 +29,21 @@ perry_class_storage ns_constant_double_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSC
 perry_class_storage ns_constant_float DARWIN_SYMBOL("_OBJC_CLASS_$_NSConstantFloatNumber");
 perry_class_storage ns_constant_float_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSConstantFloatNumber");
 static perry_class_storage cf_boolean, cf_boolean_meta;
+perry_class_storage ns_mutable_string DARWIN_SYMBOL("_OBJC_CLASS_$_NSMutableString");
+perry_class_storage ns_mutable_string_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSMutableString");
+perry_class_storage ns_dictionary DARWIN_SYMBOL("_OBJC_CLASS_$_NSDictionary");
+perry_class_storage ns_dictionary_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSDictionary");
+perry_class_storage ns_mutable_dictionary DARWIN_SYMBOL("_OBJC_CLASS_$_NSMutableDictionary");
+perry_class_storage ns_mutable_dictionary_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSMutableDictionary");
+perry_class_storage ns_set DARWIN_SYMBOL("_OBJC_CLASS_$_NSSet");
+perry_class_storage ns_set_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSSet");
+perry_class_storage ns_mutable_set DARWIN_SYMBOL("_OBJC_CLASS_$_NSMutableSet");
+perry_class_storage ns_mutable_set_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSMutableSet");
+// Collection literals whose elements are all constants.
+perry_class_storage ns_constant_array DARWIN_SYMBOL("_OBJC_CLASS_$_NSConstantArray");
+perry_class_storage ns_constant_array_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSConstantArray");
+perry_class_storage ns_constant_dictionary DARWIN_SYMBOL("_OBJC_CLASS_$_NSConstantDictionary");
+perry_class_storage ns_constant_dictionary_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSConstantDictionary");
 
 // The boolean objects, which @YES and @NO reference directly, and
 // kCFBooleanTrue/False, which point at them.
@@ -48,6 +63,13 @@ static perry_class_storage *const classes[PERRY_CLASS_COUNT][2] = {
     [PERRY_CLASS_NSConstantDoubleNumber] = { &ns_constant_double, &ns_constant_double_meta },
     [PERRY_CLASS_NSConstantFloatNumber] = { &ns_constant_float, &ns_constant_float_meta },
     [PERRY_CLASS_NSCFBoolean] = { &cf_boolean, &cf_boolean_meta },
+    [PERRY_CLASS_NSMutableString] = { &ns_mutable_string, &ns_mutable_string_meta },
+    [PERRY_CLASS_NSDictionary] = { &ns_dictionary, &ns_dictionary_meta },
+    [PERRY_CLASS_NSMutableDictionary] = { &ns_mutable_dictionary, &ns_mutable_dictionary_meta },
+    [PERRY_CLASS_NSSet] = { &ns_set, &ns_set_meta },
+    [PERRY_CLASS_NSMutableSet] = { &ns_mutable_set, &ns_mutable_set_meta },
+    [PERRY_CLASS_NSConstantArray] = { &ns_constant_array, &ns_constant_array_meta },
+    [PERRY_CLASS_NSConstantDictionary] = { &ns_constant_dictionary, &ns_constant_dictionary_meta },
 };
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which) { return classes[which][0]; }
