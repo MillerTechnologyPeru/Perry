@@ -1,8 +1,9 @@
 // Views, windows and view controllers without drawing: geometry, the view
-// hierarchy and its callbacks, view loading, the key window and the
-// responder chain from a view up to the application.
+// hierarchy and its callbacks, view loading, the key window, the responder
+// chain from a view up to the application, and UIKit's protocols.
 
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -137,6 +138,21 @@ static NSString *name(id object) {
         [chain addObject:name(responder)];
     }
     say([@"chain " stringByAppendingString:[chain componentsJoinedByString:@" > "]]);
+
+    // Protocols UIKit's classes adopt, and the app's delegates.
+    say([NSString stringWithFormat:@"coordinate space: view %d, window %d, controller %d, own list %d",
+         [UIView conformsToProtocol:@protocol(UICoordinateSpace)],
+         [UIWindow conformsToProtocol:@protocol(UICoordinateSpace)],
+         [UIViewController conformsToProtocol:@protocol(UICoordinateSpace)],
+         class_conformsToProtocol(UIView.class, @protocol(UICoordinateSpace))]);
+    say([NSString stringWithFormat:@"scene delegate: window scene %d, scene %d, refines %d, application %d",
+         [self conformsToProtocol:@protocol(UIWindowSceneDelegate)], [self conformsToProtocol:@protocol(UISceneDelegate)],
+         protocol_conformsToProtocol(@protocol(UIWindowSceneDelegate), @protocol(UISceneDelegate)),
+         [self conformsToProtocol:@protocol(UIApplicationDelegate)]]);
+    say([NSString stringWithFormat:@"protocol name %s", protocol_getName(@protocol(UICoordinateSpace))]);
+    CGPoint spaced = [inner convertPoint:CGPointMake(1, 2) toCoordinateSpace:outer];
+    CGRect back = [outer convertRect:CGRectMake(31, 42, 5, 5) fromCoordinateSpace:inner];
+    say([NSString stringWithFormat:@"coordinate spaces %@ %@", NSStringFromCGPoint(spaced), NSStringFromCGRect(back)]);
 
     [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) {
         [outer removeFromSuperview];
