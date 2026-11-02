@@ -112,12 +112,12 @@ enum Dictionaries {
     }
 
     static func install(superclass: Class) {
-        let dictionary = NSDictionary.defineObjCClass(StorageAllocated.registerObjCMethods)
+        let dictionary = NSDictionary.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
         dictionaryClass = dictionary.storage
         dictionary.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
                              implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
         mutableClass = NSMutableDictionary.defineObjCClass().storage
-        constantClass = NSConstantDictionary.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
+        constantClass = NSConstantDictionary.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
     }
 
     /// A new dictionary wrapped for returning, +1.
