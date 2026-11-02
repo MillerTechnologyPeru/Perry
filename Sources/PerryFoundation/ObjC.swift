@@ -27,6 +27,8 @@ enum ObjC {
     nonisolated(unsafe) static var replaceMethod: (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> UnsafeRawPointer?)!
     nonisolated(unsafe) static var createInstance: (@convention(c) (Class, Int) -> id?)!
     nonisolated(unsafe) static var indexedIvars: (@convention(c) (id) -> UnsafeMutableRawPointer?)!
+    nonisolated(unsafe) static var instanceMethod: (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?)!
+    nonisolated(unsafe) static var methodTypes: (@convention(c) (UnsafeMutableRawPointer?) -> SEL?)!
     nonisolated(unsafe) static var registerName: (@convention(c) (SEL) -> SEL)!
     nonisolated(unsafe) static var retainBlock: (@convention(c) (id?) -> id?)!
     nonisolated(unsafe) static var poolPush: (@convention(c) () -> UnsafeMutableRawPointer?)!
@@ -51,6 +53,8 @@ enum ObjC {
         replaceMethod = bind("_class_replaceMethod", (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> UnsafeRawPointer?).self)
         createInstance = bind("_class_createInstance", (@convention(c) (Class, Int) -> id?).self)
         indexedIvars = bind("_object_getIndexedIvars", (@convention(c) (id) -> UnsafeMutableRawPointer?).self)
+        instanceMethod = bind("_class_getInstanceMethod", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
+        methodTypes = bind("_method_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)
         registerName = bind("_sel_registerName", (@convention(c) (SEL) -> SEL).self)
         retainBlock = bind("_objc_retainBlock", (@convention(c) (id?) -> id?).self)
         poolPush = bind("_objc_autoreleasePoolPush", (@convention(c) () -> UnsafeMutableRawPointer?).self)
