@@ -6,10 +6,12 @@ import SwiftSyntaxMacros
 
 // @ObjCClass exposes a Swift class to Objective-C, and @ObjCCategory adds a
 // Swift class's methods to an existing Objective-C class. For each
-// @ObjCMethod and @ObjCClassMethod function in the body they generate a C
+// @ObjCMethod and @ObjCClassMethod function with a body they generate a C
 // thunk that converts the receiver and arguments through ObjCValue
 // (PerryObjCInterop), calls the function and converts the result, plus
-// registerObjCMethods(_:). The method macros only check their functions.
+// registerObjCMethods(_:). A method function without a body calls the
+// selector instead: the method macros give it a body that sends the message,
+// as @ObjCProperty does for a property's accessors.
 
 @main
 struct PerryObjCMacrosPlugin: CompilerPlugin {
@@ -18,6 +20,7 @@ struct PerryObjCMacrosPlugin: CompilerPlugin {
         ObjCCategoryMacro.self,
         ObjCConstantsMacro.self,
         ObjCMethodMacro.self,
+        ObjCPropertyMacro.self,
     ]
 }
 
@@ -101,6 +104,8 @@ struct ObjCMethodDeclaration {
     let returnType: TypeSyntax?
     /// An implementation's leading ObjCClass parameter, for the receiver.
     let takesClass: Bool
+    /// Has no body: calls the selector rather than implementing it.
+    let isCall: Bool
 
     var family: SelectorFamily { SelectorFamily(selector) }
 
@@ -136,9 +141,7 @@ struct ObjCMethodDeclaration {
             signature = function.signature
             modifiers = function.modifiers
             name = function.name.text
-            if function.body == nil {
-                throw ObjCMacroError("an Objective-C method needs a body: it implements the selector", at: function.name)
-            }
+            isCall = function.body == nil
             if function.genericParameterClause != nil {
                 throw ObjCMacroError("Objective-C methods cannot be generic", at: function.name)
             }
@@ -164,7 +167,12 @@ struct ObjCMethodDeclaration {
         for parameter in parameters where parameter.type.is(AttributedTypeSyntax.self) {
             throw ObjCMacroError("inout and attributed parameters are not supported", at: parameter)
         }
-        takesClass = isClassMethod && parameters.first?.type.trimmedDescription == "ObjCClass"
+        takesClass = !isCall && isClassMethod && parameters.first?.type.trimmedDescription == "ObjCClass"
+        if isCall {
+            for parameter in parameters where (parameter.secondName ?? parameter.firstName).tokenKind == .wildcard {
+                throw ObjCMacroError("name the parameter: the message send passes it", at: parameter)
+            }
+        }
 
         let colons = selector.filter { $0 == ":" }.count
         let count = takesClass ? parameters.count - 1 : parameters.count
@@ -194,6 +202,15 @@ struct ObjCMethodDeclaration {
         return "ObjCTypeEncoding.method(returning: \(result), arguments: [\(arguments.joined(separator: ", "))])"
     }
 
+    /// The message send that is a call's body.
+    var sendStatements: [String] {
+        let arguments = parameters.map { parameter in
+            (type: metatype(parameter.type, selfType: nil), value: (parameter.secondName ?? parameter.firstName).text)
+        }
+        return messageSend(selector, toClass: isClassMethod, arguments: arguments,
+                           returning: returnType.map { metatype($0, selfType: nil) })
+    }
+
     /// Call arguments, labelled as the Swift declaration labels them.
     func callArguments(_ values: [String]) -> String {
         zip(parameters, values).map { parameter, value in
@@ -201,6 +218,38 @@ struct ObjCMethodDeclaration {
             return label == "_" ? value : "\(label): \(value)"
         }.joined(separator: ", ")
     }
+}
+
+/// Statements that send `selector` to `self` (the object, or for a class
+/// method the class) through objc_msgSend cast to the method's C signature,
+/// converting the arguments and the result through ObjCValue. init methods
+/// consume the receiver, so they get a new reference; results of alloc,
+/// new, copy and init methods are owned.
+func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, value: String)],
+                 returning returnType: String?) -> [String] {
+    let family = SelectorFamily(selector)
+    let receiver = toClass ? "self.objCClass.pointer"
+        : family == .initializer ? "ObjCRuntime.retain(objcObject)" : "objcObject"
+    // A type alias cannot name Self.ObjCType; every wrapper's is an object pointer.
+    func cType(_ type: String) -> String {
+        type == "Self" || type == "Optional<Self>" ? "UnsafeMutableRawPointer?" : "\(type).ObjCType"
+    }
+    let cArguments = ["UnsafeMutableRawPointer?", "UnsafeRawPointer?"] + arguments.map { cType($0.type) }
+    let send = "message(" + ([receiver, "ObjCRuntime.selector(\(literal(selector)))"]
+        + arguments.map { "\($0.value).objCArgument()" }).joined(separator: ", ") + ")"
+    var statements = [
+        "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cType) ?? "Void")",
+        "let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)",
+    ]
+    let conversion = family.returnsOwned ? "objCOwned" : "objCReturnValue"
+    if returnType == "Optional<Self>" {
+        statements.append("return \(send).map { Self(\(conversion): $0) }")
+    } else if let returnType {
+        statements.append("return \(returnType)(\(conversion): \(send))")
+    } else {
+        statements.append(send)
+    }
+    return statements
 }
 
 func literal(_ string: String) -> String {
@@ -250,8 +299,8 @@ public struct ObjCClassMacro: MemberMacro {
             let decl = member.decl
             guard let attributes = decl.asProtocol(WithAttributesSyntax.self)?.attributes,
                   let attribute = ObjCMethodDeclaration.attribute(in: attributes),
-                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute) else {
-                continue    // errors are reported by @ObjCMethod
+                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute), !method.isCall else {
+                continue    // errors are reported by @ObjCMethod; calls are not implementations
             }
             registrations.append(registration(method, typeName: classDecl.name.text))
         }
@@ -335,8 +384,8 @@ public struct ObjCCategoryMacro: MemberMacro {
             let decl = member.decl
             guard let attributes = decl.asProtocol(WithAttributesSyntax.self)?.attributes,
                   let attribute = ObjCMethodDeclaration.attribute(in: attributes),
-                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute) else {
-                continue    // errors are reported by @ObjCMethod
+                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute), !method.isCall else {
+                continue    // errors are reported by @ObjCMethod; calls are not implementations
             }
             registrations.append(ObjCClassMacro.registration(method, typeName: typeName))
         }
@@ -424,18 +473,66 @@ public struct ObjCConstantsMacro: MemberMacro, ExtensionMacro {
 
 // MARK: - @ObjCMethod and @ObjCClassMethod
 
-/// Marks a function as implementing a selector, and checks it.
-public struct ObjCMethodMacro: PeerMacro {
+/// Checks a method function. A function with a body implements the
+/// selector and keeps its body; one without gets a body that sends the
+/// message.
+public struct ObjCMethodMacro: BodyMacro {
     public static func expansion(
         of node: AttributeSyntax,
-        providingPeersOf declaration: some DeclSyntaxProtocol,
+        providingBodyFor declaration: some DeclSyntaxProtocol & WithOptionalCodeBlockSyntax,
         in context: some MacroExpansionContext
-    ) throws -> [DeclSyntax] {
+    ) throws -> [CodeBlockItemSyntax] {
+        let method: ObjCMethodDeclaration
         do {
-            _ = try ObjCMethodDeclaration(declaration, attribute: node)
+            method = try ObjCMethodDeclaration(declaration, attribute: node)
         } catch let error as ObjCMacroError {
             error.diagnose(in: context)
+            return declaration.body.map { Array($0.statements) } ?? ["fatalError()"]
         }
-        return []
+        if let body = declaration.body { return Array(body.statements) }
+        return method.sendStatements.map { "\(raw: $0)" }
+    }
+}
+
+// MARK: - @ObjCProperty
+
+/// Gives a property accessors that send its getter and, unless it is
+/// read-only, its setter (`setName:`).
+public struct ObjCPropertyMacro: AccessorMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingAccessorsOf declaration: some DeclSyntaxProtocol,
+        in context: some MacroExpansionContext
+    ) throws -> [AccessorDeclSyntax] {
+        guard let variable = declaration.as(VariableDeclSyntax.self),
+              variable.bindingSpecifier.tokenKind == .keyword(.var),
+              let binding = variable.bindings.first, variable.bindings.count == 1,
+              let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text,
+              let type = binding.typeAnnotation?.type,
+              binding.accessorBlock == nil, binding.initializer == nil else {
+            ObjCMacroError("@ObjCProperty applies to a `var` with a type and no value or accessors", at: node)
+                .diagnose(in: context)
+            return []
+        }
+        let arguments = node.arguments?.as(LabeledExprListSyntax.self)
+        func argument(_ label: String) -> ExprSyntax? { arguments?.first { $0.label?.text == label }?.expression }
+        let getter = argument("getter")?.as(StringLiteralExprSyntax.self)?.representedLiteralValue ?? name
+        let readonly = argument("readonly")?.as(BooleanLiteralExprSyntax.self)?.literal.tokenKind == .keyword(.true)
+        let isClassProperty = variable.modifiers.contains {
+            $0.name.tokenKind == .keyword(.static) || $0.name.tokenKind == .keyword(.class)
+        }
+        let typeName = metatype(type, selfType: nil)
+
+        func accessor(_ kind: String, _ statements: [String]) -> AccessorDeclSyntax {
+            "\(raw: kind) {\n\(raw: statements.map { "    " + $0 }.joined(separator: "\n"))\n}"
+        }
+        var accessors = [accessor("get", messageSend(getter, toClass: isClassProperty, arguments: [],
+                                                     returning: typeName))]
+        if !readonly {
+            let setter = "set" + name.prefix(1).uppercased() + name.dropFirst() + ":"
+            accessors.append(accessor("set", messageSend(setter, toClass: isClassProperty,
+                                                         arguments: [(typeName, "newValue")], returning: nil)))
+        }
+        return accessors
     }
 }
