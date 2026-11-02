@@ -69,6 +69,19 @@ perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which)
 // kCFBooleanTrue and kCFBooleanFalse: the objects behind @YES and @NO.
 void *perry_foundation_boolean(int value);
 
+// Key-value observing's setter for any argument type (kvo.S): it calls
+// perry_foundation_kvo_will, which returns the setter it replaces, then
+// perry_foundation_kvo_did.
+void perry_kvo_setter(void);
+
+// Calls a getter that may return a structure: x8 is `indirect`; x0, x1
+// and d0 to d3 are saved in `registers` afterwards.
+void perry_foundation_call_getter(void *object, const char *selector, const void *imp, void *indirect,
+                                  uint64_t registers[6]);
+
+// Calls a setter with x2, x3 and d0 to d3 from `registers`.
+void perry_foundation_call_setter(void *object, const char *selector, const void *imp, const uint64_t registers[6]);
+
 // -[NSProcessInfo operatingSystemVersion]. Larger than 16 bytes, so it is
 // returned through x8 and passed by reference.
 typedef struct NSOperatingSystemVersion {
