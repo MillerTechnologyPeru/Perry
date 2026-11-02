@@ -99,6 +99,12 @@ open class NSObject: AnyObjCObject {
     /// body into `registrar`. @ObjCClass generates each class's own.
     open class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {}
 
+    /// Sets up a class just defined: shared method sets, extra methods,
+    /// singletons. Override it in a class body; the provider's generated
+    /// startup calls it for classes that declare it themselves, so a
+    /// subclass never runs its superclass's set-up.
+    open class func didDefineObjCClass(_ cls: ObjCClass) {}
+
     /// Defines this class in the runtime, with its methods and
     /// `registrations` (other classes' registerObjCMethods, applied like
     /// categories), and registers it.
