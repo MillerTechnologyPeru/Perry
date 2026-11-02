@@ -186,7 +186,18 @@ let package = Package(
         .target(name: "CPerryGeometry"),
         // CoreGraphics: exported constants, and geometry in Swift.
         .target(name: "CPerryCoreGraphics", dependencies: ["CPerryGeometry"]),
-        .target(name: "PerryCoreGraphics", dependencies: ["CPerryCoreGraphics", "CPerryGeometry"]),
+        // ImageIO's codecs over Linux's image libraries.
+        .target(
+            name: "CPerryImageIO",
+            linkerSettings: [.linkedLibrary("png"), .linkedLibrary("jpeg"), .linkedLibrary("gif"), .linkedLibrary("webp"),
+                             .linkedLibrary("heif")]
+        ),
+        // CoreGraphics' images, colors and bitmap contexts, and ImageIO.
+        .target(
+            name: "PerryCoreGraphics",
+            dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
