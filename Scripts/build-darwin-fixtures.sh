@@ -14,6 +14,12 @@
 # are cloned into .build/perry-fixtures/sources rather than kept here.
 # Sources that include <libxml/…>, <zlib.h> and the like are linked with
 # those libraries, and .xcdatamodeld models are compiled with momc.
+#
+# A fixture with an Entitlements.plist (the keychain needs some) records its
+# output from the iOS Simulator instead of macOS: it is built for the
+# simulator with the entitlements in __TEXT,__entitlements, as Xcode puts
+# them, and run with simctl spawn on PERRY_SIMULATOR or the first iPhone
+# simulator, which is booted if it is not running.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -62,6 +68,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<expat.h>' $sources && libraries="$libraries -lexpat"
     grep -q '<iconv.h>' $sources && libraries="$libraries -liconv"
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
+    grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
@@ -73,6 +80,30 @@ for src in Tests/Fixtures/Darwin/*/; do
         model_name=$(basename "$data_model" .xcdatamodeld)
         xcrun momc --iphoneos-deployment-target "$min" "$data_model" "$app/$model_name.momd" >/dev/null
     done
+
+    for resource in "$src"/*; do
+        case "$resource" in
+            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist) ;;
+            *) cp "$resource" "$app/" ;;
+        esac
+    done
+
+    if [ -f "$src/Entitlements.plist" ]; then
+        simulator="${PERRY_SIMULATOR:-$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')}"
+        xcrun simctl boot "$simulator" 2>/dev/null || true
+        xcrun simctl bootstatus "$simulator" -b >/dev/null
+        simulator_binary="$out/simulator/$name"
+        mkdir -p "$out/simulator"
+        xcrun --sdk iphonesimulator clang -target "arm64-apple-ios$min-simulator" \
+            -isysroot "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -fobjc-arc -fmodules -O1 $ios_includes $frameworks $libraries \
+            -Wl,-sectcreate,__TEXT,__entitlements,"$src/Entitlements.plist" \
+            -o "$simulator_binary" $sources
+        perl -e 'alarm 60; exec @ARGV' xcrun simctl spawn "$simulator" "$PWD/$simulator_binary" \
+            > "$out/$name.expected" 2>/dev/null
+        echo "$app"
+        continue
+    fi
 
     # The same app for macOS, whose bundle keeps everything under Contents.
     macos="$out/macos/$name.app/Contents"
@@ -101,8 +132,8 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld) ;;
-            *) cp "$resource" "$app/"; cp "$resource" "$macos/Resources/" ;;
+            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist) ;;
+            *) cp "$resource" "$macos/Resources/" ;;
         esac
     done
 
