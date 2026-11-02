@@ -18,6 +18,7 @@ typedef struct perry_provider {
     void *handle;
     void *base;     // load address, used to reject symbols found in the provider's own dependencies
     void *(*symbol)(const char *name);  // perry_provider_symbol, if the provider has one
+    const char *reexport;   // install name of a library whose symbols it re-exports, as libSystem does libdispatch's
 } perry_provider;
 
 typedef struct perry_dependency {
