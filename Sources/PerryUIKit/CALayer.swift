@@ -415,61 +415,86 @@ extension CALayer {
             CG.setAlpha(context, CGFloat(state.opacity))
             CG.beginTransparencyLayer(context, nil)
         }
-        let bounds = state.bounds
-        let shape = state.cornerRadius > 0 ? roundedRect(bounds, radius: state.cornerRadius, corners: state.maskedCorners) : nil
-
-        if let background = state.backgroundColor {
-            CG.setFillColorWithColor(context, background)
-            if let shape {
-                CG.addPath(context, shape.object)
-                CG.fillPath(context)
-            } else {
-                CG.fillRect(context, bounds)
-            }
-        }
+        drawBackground(of: layer, in: context)
         CG.saveGState(context)
-        if state.masksToBounds {
-            if let shape {
-                CG.addPath(context, shape.object)
-                CG.clip(context)
-            } else {
-                CG.clipToRect(context, bounds)
-            }
+        if state.masksToBounds { clip(to: state, in: context) }
+        drawContent(of: layer, in: context)
+        for sublayer in orderedSublayers(of: state) { render(sublayer, in: context) }
+        CG.restoreGState(context)
+        drawBorder(of: state, in: context)
+        if group { CG.endTransparencyLayer(context) }
+    }
+
+    /// The sublayers back to front: by zPosition, then in order.
+    static func orderedSublayers(of state: LayerState) -> [CALayer] {
+        state.sublayers.enumerated().sorted {
+            ($0.element.state.zPosition, $0.offset) < ($1.element.state.zPosition, $1.offset)
+        }.map(\.element)
+    }
+
+    /// The background color, in the shape of the corners.
+    static func drawBackground(of layer: CALayer, in context: CGRef) {
+        let state = layer.state
+        guard let background = state.backgroundColor else { return }
+        CG.setFillColorWithColor(context, background)
+        if state.cornerRadius > 0, let shape = roundedRect(state.bounds, radius: state.cornerRadius, corners: state.maskedCorners) {
+            CG.addPath(context, shape.object)
+            CG.fillPath(context)
+        } else {
+            CG.fillRect(context, state.bounds)
         }
+    }
+
+    /// Clips to the bounds, in the shape of the corners.
+    static func clip(to state: LayerState, in context: CGRef) {
+        if state.cornerRadius > 0, let shape = roundedRect(state.bounds, radius: state.cornerRadius, corners: state.maskedCorners) {
+            CG.addPath(context, shape.object)
+            CG.clip(context)
+        } else {
+            CG.clipToRect(context, state.bounds)
+        }
+    }
+
+    /// Displays the layer if it needs to, then draws what it displayed and
+    /// its contents.
+    static func drawContent(of layer: CALayer, in context: CGRef) {
+        displayIfNeeded(layer)
+        let state = layer.state
+        if let backing = state.backing {
+            CG.drawFlipped(backing, in: CGRect(origin: state.bounds.origin, size: state.backingSize), context: context)
+        }
+        if let contents = state.contents {
+            drawContents(contents, of: state, in: context)
+        }
+    }
+
+    /// Displays a layer that draws when it needs to.
+    static func displayIfNeeded(_ layer: CALayer) {
+        let state = layer.state
         // A navigation bar draws its items, which change without telling it.
         let redraws = state.delegate.map {
             ObjCRuntime.isKind($0, of: UINavigationBar.objCClass.pointer)
                 && UINavigationBar(objcObject: $0, ownership: .retain).contentChanged()
         } ?? false
-        if layer.draws, redraws || state.needsDisplay || state.backing == nil || state.backingSize != bounds.size {
+        if layer.draws, redraws || state.needsDisplay || state.backing == nil || state.backingSize != state.bounds.size {
             layer.sendDisplay()
         }
-        if let backing = state.backing {
-            CG.drawFlipped(backing, in: CGRect(origin: bounds.origin, size: state.backingSize), context: context)
-        }
-        if let contents = state.contents {
-            drawContents(contents, of: state, in: context)
-        }
-        let ordered = state.sublayers.enumerated().sorted {
-            ($0.element.state.zPosition, $0.offset) < ($1.element.state.zPosition, $1.offset)
-        }
-        for (_, sublayer) in ordered { render(sublayer, in: context) }
-        CG.restoreGState(context)
+    }
 
-        if state.borderWidth > 0, let border = state.borderColor {
-            let half = state.borderWidth / 2
-            let inset = CGRect(x: bounds.minX + half, y: bounds.minY + half, width: bounds.width - state.borderWidth,
-                               height: bounds.height - state.borderWidth)
-            CG.setStrokeColorWithColor(context, border)
-            CG.setLineWidth(context, state.borderWidth)
-            if state.cornerRadius > 0, let path = roundedRect(inset, radius: max(state.cornerRadius - half, 0), corners: state.maskedCorners) {
-                CG.addPath(context, path.object)
-                CG.strokePath(context)
-            } else {
-                CG.strokeRect(context, inset)
-            }
+    /// The border, inside the bounds and over the sublayers.
+    static func drawBorder(of state: LayerState, in context: CGRef) {
+        guard state.borderWidth > 0, let border = state.borderColor else { return }
+        let bounds = state.bounds, half = state.borderWidth / 2
+        let inset = CGRect(x: bounds.minX + half, y: bounds.minY + half, width: bounds.width - state.borderWidth,
+                           height: bounds.height - state.borderWidth)
+        CG.setStrokeColorWithColor(context, border)
+        CG.setLineWidth(context, state.borderWidth)
+        if state.cornerRadius > 0, let path = roundedRect(inset, radius: max(state.cornerRadius - half, 0), corners: state.maskedCorners) {
+            CG.addPath(context, path.object)
+            CG.strokePath(context)
+        } else {
+            CG.strokeRect(context, inset)
         }
-        if group { CG.endTransparencyLayer(context) }
     }
 
     static func roundedRect(_ rect: CGRect, radius: CGFloat, corners: UInt) -> Owned? {
