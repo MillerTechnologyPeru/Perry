@@ -67,6 +67,14 @@ final class NumberStorage {
     }
 }
 
+/// The type encodings -objCType returns, which live as long as the process.
+enum NumberTypes {
+    nonisolated(unsafe) static let signed = UnsafePointer(strdup("q")!)
+    nonisolated(unsafe) static let unsigned = UnsafePointer(strdup("Q")!)
+    nonisolated(unsafe) static let double = UnsafePointer(strdup("d")!)
+    nonisolated(unsafe) static let bool = UnsafePointer(strdup("c")!)
+}
+
 enum Numbers {
     nonisolated(unsafe) static var numberClass: Class!
     nonisolated(unsafe) static var constantIntegerClass: Class!
@@ -197,6 +205,18 @@ public class NSNumber: NSObject {
     @ObjCMethod("unsignedIntegerValue") func unsignedIntegerValue() -> UInt { UInt(truncatingIfNeeded: number.int64) }
     @ObjCMethod("intValue") func intValue() -> Int32 { Int32(truncatingIfNeeded: number.int64) }
     @ObjCMethod("boolValue") func boolValue() -> Bool { number.int64 != 0 || number.double != 0 }
+
+    /// The value's type encoding: "q" and "Q" for integers, "d" for
+    /// floating point, "c" for booleans (CFBoolean), as Darwin reports.
+    @ObjCMethod("objCType")
+    func objCType() -> UnsafePointer<CChar>? {
+        switch number.value {
+        case .signed: return NumberTypes.signed
+        case .unsigned: return NumberTypes.unsigned
+        case .double: return NumberTypes.double
+        case .bool: return NumberTypes.bool
+        }
+    }
     @ObjCMethod("doubleValue") func doubleValue() -> Double { number.double }
     @ObjCMethod("floatValue") func floatValue() -> Float { Float(number.double) }
     @ObjCMethod("stringValue") func stringValue() -> String { number.description }
