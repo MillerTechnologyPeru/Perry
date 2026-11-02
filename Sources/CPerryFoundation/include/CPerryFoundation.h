@@ -65,31 +65,6 @@ perry_class_storage *perry_foundation_class(perry_foundation_class_id which);
 perry_class_storage *perry_foundation_class_named(const char *name, perry_class_storage **metaclass);
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which);
 
-// String constants exported as pointers (NSString *const, CFStringRef),
-// filled in at startup.
-typedef enum perry_foundation_constant_id {
-    PERRY_CONSTANT_NSDefaultRunLoopMode,
-    PERRY_CONSTANT_NSRunLoopCommonModes,
-    PERRY_CONSTANT_kCFRunLoopDefaultMode,
-    PERRY_CONSTANT_kCFRunLoopCommonModes,
-    PERRY_CONSTANT_kCFNull,                 // the NSNull singleton
-    PERRY_CONSTANT_NSCocoaErrorDomain,
-    PERRY_CONSTANT_NSPOSIXErrorDomain,
-    PERRY_CONSTANT_NSLocalizedDescriptionKey,
-    PERRY_CONSTANT_NSFilePathErrorKey,
-    PERRY_CONSTANT_NSUnderlyingErrorKey,
-    PERRY_CONSTANT_NSFileType,
-    PERRY_CONSTANT_NSFileTypeDirectory,
-    PERRY_CONSTANT_NSFileTypeRegular,
-    PERRY_CONSTANT_NSFileTypeSymbolicLink,
-    PERRY_CONSTANT_NSFileSize,
-    PERRY_CONSTANT_NSFileModificationDate,
-    PERRY_CONSTANT_NSFilePosixPermissions,
-    PERRY_CONSTANT_COUNT,
-} perry_foundation_constant_id;
-
-void **perry_foundation_constant(perry_foundation_constant_id which);
-
 // kCFBooleanTrue and kCFBooleanFalse: the objects behind @YES and @NO.
 void *perry_foundation_boolean(int value);
 
