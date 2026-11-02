@@ -9,6 +9,19 @@ import PerryObjCInterop
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
 
+/// The constants Foundation exports as data symbols.
+nonisolated(unsafe) private let constantTables: [any ObjCConstantTable.Type] = [
+    RunLoopModes.self, ErrorConstants.self, FileAttributes.self, NullConstants.self,
+]
+
+/// Hands the loader a slot for each exported constant while images bind.
+@c
+public func perry_provider_symbol(_ name: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {
+    guard let name else { return nil }
+    ObjCConstantExports.shared.register(constantTables)
+    return ObjCConstantExports.shared.symbol(String(cString: name))
+}
+
 @c
 public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     guard let info, info.pointee.version >= 2, let lookup = info.pointee.lookup_symbol else { return }
@@ -45,6 +58,10 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     Threads.install(superclass: nsObject)
     UserDefaults.install()
     FileManagers.install()
+
+    // Fill the constants' slots before any Mach-O code runs.
+    ObjCConstantExports.shared.register(constantTables)
+    ObjCConstantExports.shared.export()
 }
 
 // MARK: - NSLog
