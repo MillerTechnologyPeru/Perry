@@ -102,14 +102,14 @@ static const uint8_t *trie_find(const uint8_t *start, uint32_t size, const char 
     return NULL;
 }
 
-static bool provider_lookup(perry_provider *provider, const char *name, perry_symbol *out);
+static bool provider_lookup(perry_loader *loader, perry_provider *provider, const char *name, perry_symbol *out);
 
 static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, const char *name,
                                  perry_symbol *out, int depth) {
     if (dep->image)
         return perry_exports_lookup(loader, dep->image, name, out, depth + 1);
     if (dep->provider)
-        return provider_lookup(dep->provider, name, out);
+        return provider_lookup(loader, dep->provider, name, out);
     return false;
 }
 
@@ -158,6 +158,32 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 
 // MARK: - Providers
 
+#define LIBDISPATCH "/usr/lib/system/libdispatch.dylib"
+#define LIBOBJC "/usr/lib/libobjc.A.dylib"
+
+// Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
+// objects are Objective-C objects, and Foundation's run loop drains the
+// main queue. Loading them while binding gives them their startup too.
+static const struct {
+    const char *short_name;
+    const char *install_name;
+} provider_links[] = {
+    {"dispatch", LIBOBJC},
+    {"Foundation", LIBDISPATCH},
+};
+
+// Sets up a provider just found under `short_name`: its re-exports and the
+// libraries it needs.
+static void link_provider(perry_loader *loader, perry_provider *provider, const char *short_name) {
+    // libSystem re-exports libdispatch, found the first time libSystem
+    // lacks a symbol, so programs that never use it never load it.
+    if (strcmp(short_name, "System") == 0)
+        provider->reexport = LIBDISPATCH;
+    for (size_t i = 0; i < sizeof(provider_links) / sizeof(provider_links[0]); i++)
+        if (strcmp(provider_links[i].short_name, short_name) == 0)
+            perry_find_provider(loader, provider_links[i].install_name);
+}
+
 // Maps an install name to the provider's short name, following the
 // libPerry<Name>.so convention:
 //   /usr/lib/libSystem.B.dylib                           -> System
@@ -165,7 +191,12 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 //   /usr/lib/libc++.1.dylib                              -> c++
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
+//   /usr/lib/system/libdispatch.dylib                    -> dispatch
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
+    if (strcmp(install_name, LIBDISPATCH) == 0) {
+        snprintf(out, out_size, "dispatch");
+        return true;
+    }
     if (strncmp(install_name, "/usr/lib/system/", 16) == 0) {
         snprintf(out, out_size, "System");
         return true;
@@ -216,6 +247,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
             provider->handle = other->handle;
             provider->base = other->base;
             provider->symbol = other->symbol;
+            provider->reexport = other->reexport;
             return provider;
         }
     }
@@ -238,6 +270,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         if (hook && dladdr(hook, &hook_info) && hook_info.dli_fbase == provider->base)
             provider->symbol = (void *(*)(const char *))hook;
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
+        link_provider(loader, provider, short_name);
         return provider;
     }
     return NULL;
@@ -246,10 +279,10 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
 void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name) {
     perry_provider *provider = perry_find_provider(loader, install_name);
     perry_symbol sym = {0};
-    return provider && provider_lookup(provider, name, &sym) ? sym.address : NULL;
+    return provider && provider_lookup(loader, provider, name, &sym) ? sym.address : NULL;
 }
 
-static bool provider_lookup(perry_provider *provider, const char *name, perry_symbol *out) {
+static bool provider_lookup(perry_loader *loader, perry_provider *provider, const char *name, perry_symbol *out) {
     void *sym = dlsym(provider->handle, name);
     // dlsym also searches the provider's own dependencies (glibc). Only symbols
     // defined in the provider itself count, so that a Darwin name such as
@@ -260,6 +293,10 @@ static bool provider_lookup(perry_provider *provider, const char *name, perry_sy
     // Symbols the provider defines at run time, such as Swift constants.
     if (!sym && provider->symbol)
         sym = provider->symbol(name);
+    if (!sym && provider->reexport) {
+        perry_provider *reexported = perry_find_provider(loader, provider->reexport);
+        return reexported && provider_lookup(loader, reexported, name, out);
+    }
     if (!sym)
         return false;
     out->address = sym;
@@ -388,7 +425,7 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
             perry_exports_lookup(loader, img, name, &sym, 0);
         for (uint32_t i = 0; i < loader->provider_count && !sym.found; i++)
             if (loader->providers[i]->handle)
-                provider_lookup(loader->providers[i], name, &sym);
+                provider_lookup(loader, loader->providers[i], name, &sym);
         if (!sym.found && ordinal == BIND_SPECIAL_DYLIB_WEAK_LOOKUP && weak_import)
             return sym;
     }
