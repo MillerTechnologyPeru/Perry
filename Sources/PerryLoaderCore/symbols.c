@@ -198,6 +198,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
+//   …/QuartzCore.framework/QuartzCore                     -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -222,6 +223,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // Accelerate's sub-frameworks (vecLib, vImage) are the umbrella's provider.
     if (strstr(install_name, "/Accelerate.framework/")) {
         snprintf(out, out_size, "Accelerate");
+        return true;
+    }
+    // UIKit's views are drawn through QuartzCore's layers, which it keeps.
+    if (strstr(install_name, "/QuartzCore.framework/")) {
+        snprintf(out, out_size, "UIKit");
         return true;
     }
     // ImageIO's images are CoreGraphics' own.
