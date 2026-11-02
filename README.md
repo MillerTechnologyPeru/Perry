@@ -107,6 +107,10 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   data, reads, writes and signals), `dispatch_block_create` blocks and
   `dispatch_data`; the main queue runs on the main thread from the main
   run loop or `dispatch_main`
+- Unified logging, in the same library: `os_log_create` and `os_log` at
+  each level, with the argument buffers clang builds read against the
+  format (`%{public}`, `%{BOOL}d`, `%{errno}d`, objects), written to
+  standard error as NSLog writes; signposts and activities
 - UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
