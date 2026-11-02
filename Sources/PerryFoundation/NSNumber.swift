@@ -110,10 +110,10 @@ enum Numbers {
     }
 
     static func install(superclass: Class) {
-        numberClass = NSNumber.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        numberClass = NSNumber.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         // Static numbers: immortal, read in place.
         func constant(_ cls: NSNumber.Type) -> Class {
-            cls.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
+            cls.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
         }
         constantIntegerClass = constant(NSConstantIntegerNumber.self)
         constantDoubleClass = constant(NSConstantDoubleNumber.self)
