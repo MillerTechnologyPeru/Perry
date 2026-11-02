@@ -9,7 +9,7 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 ## Status
 
 The loader runs C and Objective-C iOS binaries and `.app` bundles that use
-libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the start of UIKit.
+libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL loading, Core Data and the start of UIKit.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -56,6 +56,14 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the
 - CommonCrypto, in libSystem: digests, HMAC, `CCCrypt` and `CCCryptor`
   (AES, DES, 3DES, CAST, RC4, RC2, Blowfish in each mode), PBKDF2, AES key
   wrap and random bytes
+- BSD sockets with Darwin's ABI: socket addresses, options, message flags
+  and `getaddrinfo` converted to and from Linux's
+- URL loading (`libPerryCFNetwork`, which Foundation re-exports):
+  `NSURLSession` with data, upload and download tasks, completion handlers
+  and delegates on their delegate queue, redirects, timeouts and
+  cancellation; `NSURLRequest`, `NSMutableURLRequest`, `NSURLResponse`,
+  `NSHTTPURLResponse`, `NSURLSessionConfiguration`, `NSHTTPCookie` and
+  `NSHTTPCookieStorage`
 - Grand Central Dispatch (`libPerrydispatch`, which libSystem re-exports):
   serial, concurrent, global and main queues, sync, async, barriers,
   `dispatch_after`, `dispatch_apply`, queue-specific data, target queues,
@@ -102,6 +110,8 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/CPerryDispatch` | Linux libdispatch's C API under other names, and Darwin libdispatch's exported data (C) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
+| `Sources/PerryCFNetwork` | `libPerryCFNetwork.so`: NSURLSession and the URL loading classes (Swift) |
+| `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
@@ -467,6 +477,22 @@ toolchain's, swift-foundation's build of Apple's ICU, so calendars and
 formatters share one copy and Apple's data. The current locale comes from
 `LANG`, or is `en_US`, an iOS device's own, when that names none, and time
 zone abbreviations are English short names ("EST") as on Darwin.
+
+**URL loading** maps `NSURLSession` to Swift's `URLSession`, from
+swift-corelibs-foundation's FoundationNetworking, which runs on libcurl.
+PerryURLLoading alone imports that Foundation and wraps its requests,
+responses, cookies, configurations, sessions and tasks in types of its
+own, so the CFNetwork provider defining `NSURLSession` and its companions
+never sees corelibs' classes of the same names. A session's delegate and
+its tasks' completion handlers run on its delegate queue, an
+`NSOperationQueue`: each event corelibs delivers hops there and waits,
+which keeps events in order and a download's file in place until its
+handler returns. Delegates' completion handlers are Darwin blocks made
+from Swift closures. Where corelibs differs from Darwin, Darwin wins:
+status code phrases, suggested file names, session-only cookies, request
+equality, and a task's state and byte counts by the time it completes.
+Foundation re-exports CFNetwork as on Darwin, so the provider loads only
+when a program uses it.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
