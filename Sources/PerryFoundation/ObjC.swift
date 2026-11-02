@@ -178,29 +178,6 @@ func variadicEntry(_ entry: @convention(c) () -> Void) -> UnsafeRawPointer {
     unsafeBitCast(entry, to: UnsafeRawPointer.self)
 }
 
-/// retain, release and autorelease for static objects such as literals.
-/// Installed into each literal class.
-@ObjCClass("NSObject")
-final class ImmortalObject: NSObject {
-    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
-    @ObjCMethod("release", types: "Vv16@0:8") func release() {}
-    @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
-    @ObjCMethod("retainCount") func retainCount() -> UInt { UInt.max }
-}
-
-/// +alloc for classes whose instances keep Swift state in an extra word.
-/// Installed into each such class.
-@ObjCClass("NSObject")
-final class StorageAllocated: NSObject {
-    @ObjCClassMethod("alloc")
-    static func alloc(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { Storage.allocate(cls.pointer) }
-
-    @ObjCClassMethod("allocWithZone:")
-    static func alloc(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-        Storage.allocate(cls.pointer)
-    }
-}
-
 /// Each Foundation object keeps its Swift state in one extra word after its
 /// ivars, allocated by +alloc through class_createInstance.
 enum Storage {
