@@ -305,6 +305,20 @@ public class NSMutableArray: NSArray {
         ObjC.release(removed)
     }
 
+    @ObjCMethod("removeObjectsInRange:")
+    func remove(range: NSRange) {
+        let count = storage.objects.count
+        guard range.length > 0 else { return }
+        if Int(range.location) + Int(range.length) > count {
+            foundationFatal("-[NSMutableArray removeObjectsInRange:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(count - 1)]")
+        }
+        let start = Int(range.location)
+        let removed = storage.objects[start..<(start + Int(range.length))]
+        storage.objects.removeSubrange(start..<(start + Int(range.length)))
+        storage.enumeration.mutated()
+        removed.forEach { ObjC.release($0) }
+    }
+
     @ObjCMethod("removeObject:")
     func remove(_ element: ObjCObject?) {
         guard let element else { return }
