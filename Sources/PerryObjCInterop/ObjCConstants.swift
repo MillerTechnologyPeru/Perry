@@ -13,6 +13,12 @@ public enum ObjCConstantValue {
     case alias(String)
     /// An object made at startup.
     case object(() -> UnsafeMutableRawPointer?)
+    /// Numbers, in the slot's bits: NSURLSessionTransferSizeUnknown is an
+    /// int64_t, UIFontWeightBold a CGFloat, NSURLSessionTaskPriorityHigh a
+    /// float in the slot's low four bytes.
+    case integer(Int64)
+    case double(Double)
+    case float(Float)
 }
 
 /// A type whose constants @ObjCConstants collects.
@@ -68,6 +74,9 @@ public final class ObjCConstantExports: @unchecked Sendable {
             switch value {
             case .string(let text): slot(name)?.pointee = text.objCOwnedReturnValue()
             case .object(let make): slot(name)?.pointee = make()
+            case .integer(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: Int(number))
+            case .double(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: UInt(number.bitPattern))
+            case .float(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: UInt(number.bitPattern))
             case .alias: break
             }
         }
