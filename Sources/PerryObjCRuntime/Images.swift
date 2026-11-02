@@ -203,3 +203,45 @@ public enum Protocols {
         return false
     }
 }
+
+// MARK: - Protocol introspection
+
+extension Protocols {
+    /// The protocols a protocol adopts, from its list: count, then pointers.
+    public static func adopted(_ proto: UnsafePointer<perry_protocol>) -> [UnsafeMutablePointer<perry_protocol>] {
+        guard let list = proto.pointee.protocols else { return [] }
+        let count = Int(list.load(as: UInt64.self))
+        return (0..<count).compactMap { list.load(fromByteOffset: 8 + $0 * 8, as: UnsafeMutablePointer<perry_protocol>?.self) }
+    }
+
+    /// The protocols a class lists itself, its categories' included.
+    public static func listed(by info: ClassInfo) -> [UnsafeMutablePointer<perry_protocol>] {
+        let lists = Runtime.lock.withLock { info.protocolLists }
+        return lists.flatMap { list -> [UnsafeMutablePointer<perry_protocol>] in
+            let count = Int(list.load(as: UInt64.self))
+            return (0..<count).compactMap { list.load(fromByteOffset: 8 + $0 * 8, as: UnsafeMutablePointer<perry_protocol>?.self) }
+        }
+    }
+
+    /// A protocol's method descriptions of one kind: selectors and types.
+    public static func methods(_ proto: UnsafePointer<perry_protocol>, required: Bool, instance: Bool) -> [(SEL, UnsafePointer<CChar>?)] {
+        let list: UnsafeRawPointer? = switch (required, instance) {
+        case (true, true): proto.pointee.instance_methods
+        case (true, false): proto.pointee.class_methods
+        case (false, true): proto.pointee.optional_instance_methods
+        case (false, false): proto.pointee.optional_class_methods
+        }
+        guard let list else { return [] }
+        var methods: [(SEL, UnsafePointer<CChar>?)] = []
+        MethodList.forEach(list) { selector, types, _ in methods.append((selector, types)) }
+        return methods
+    }
+
+    /// A protocol's instance properties (property_t: name, attributes).
+    public static func properties(_ proto: UnsafePointer<perry_protocol>) -> [UnsafeRawPointer] {
+        guard let list = proto.pointee.instance_properties else { return [] }
+        let entsize = Int(list.load(as: UInt32.self))
+        let count = Int(list.load(fromByteOffset: 4, as: UInt32.self))
+        return (0..<count).map { list + 8 + $0 * entsize }
+    }
+}
