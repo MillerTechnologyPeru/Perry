@@ -39,11 +39,28 @@ typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSMutableSet,
     PERRY_CLASS_NSConstantArray,            // @[...]: { isa, uint64 count, id *objects }
     PERRY_CLASS_NSConstantDictionary,       // @{...}: { isa, uint64 options, uint64 count, id *keys, id *objects }
+    PERRY_CLASS_NSDate,
+    PERRY_CLASS_NSTimer,
+    PERRY_CLASS_NSRunLoop,
+    PERRY_CLASS_NSNotification,
+    PERRY_CLASS_NSNotificationCenter,
     PERRY_CLASS_COUNT,
 } perry_foundation_class_id;
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which);
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which);
+
+// String constants exported as pointers (NSString *const, CFStringRef),
+// filled in at startup.
+typedef enum perry_foundation_constant_id {
+    PERRY_CONSTANT_NSDefaultRunLoopMode,
+    PERRY_CONSTANT_NSRunLoopCommonModes,
+    PERRY_CONSTANT_kCFRunLoopDefaultMode,
+    PERRY_CONSTANT_kCFRunLoopCommonModes,
+    PERRY_CONSTANT_COUNT,
+} perry_foundation_constant_id;
+
+void **perry_foundation_constant(perry_foundation_constant_id which);
 
 // The calling thread's kernel id, for NSLog lines.
 int perry_foundation_thread_id(void);
