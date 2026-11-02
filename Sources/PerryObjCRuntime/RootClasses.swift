@@ -35,7 +35,7 @@ public enum RootClasses {
         let object = Runtime.makeClass(perry_objc_nsobject_class(), metaclass: perry_objc_nsobject_metaclass(),
                                        superclass: nil, name: permanentCString("NSObject"),
                                        instanceSize: 8, registerName: true)
-        _ = MethodTable(object, NSObject.register)
+        _ = MethodTable(object, RootObject.registerObjCMethods)
         Objects.defaultRetain = Runtime.findMethod(object, Sel.retain)?.pointee.imp
         Objects.defaultRelease = Runtime.findMethod(object, Sel.release)?.pointee.imp
         Objects.defaultAutorelease = Runtime.findMethod(object, Sel.autorelease)?.pointee.imp
@@ -44,7 +44,7 @@ public enum RootClasses {
         let proto = Runtime.makeClass(perry_objc_protocol_class(), metaclass: perry_objc_protocol_metaclass(),
                                       superclass: perry_objc_nsobject_class(), name: permanentCString("Protocol"),
                                       instanceSize: 8, registerName: true)
-        _ = MethodTable(proto, ImmortalObject.register)
+        _ = MethodTable(proto, ImmortalObject.registerObjCMethods)
     }()
 
     /// Points the interop layer at this runtime's functions.
@@ -72,6 +72,22 @@ public enum RootClasses {
                                             types: types.map { permanentCString(String(cString: $0)) },
                                             imp: imp.map(IMP.init(mutating:)), replacing: true)
                 return old.map(UnsafeRawPointer.init)
+            },
+            initializeClassPair: { superclass, name, cls, metaclass in
+                guard let name, let cls, let metaclass else { return nil }
+                return UnsafeMutableRawPointer(Runtime.initializeClassPair(
+                    superclass: superclass?.assumingMemoryBound(to: perry_objc_class.self), name: permanentCString(String(cString: name)),
+                    cls: cls.assumingMemoryBound(to: perry_objc_class.self),
+                    metaclass: metaclass.assumingMemoryBound(to: perry_objc_class.self)))
+            },
+            allocateClassPair: { superclass, name, extraBytes in
+                guard let name, Runtime.lookUpClass(name) == nil else { return nil }
+                return UnsafeMutableRawPointer(Runtime.allocateClassPair(
+                    superclass: superclass?.assumingMemoryBound(to: perry_objc_class.self),
+                    name: permanentCString(String(cString: name)), extraBytes: extraBytes))
+            },
+            registerClassPair: { cls in
+                if let cls { Runtime.registerClassPair(cls.assumingMemoryBound(to: perry_objc_class.self)) }
             }))
         ObjCRuntime.poolFunctions = (push: { AutoreleasePool.push() }, pop: { AutoreleasePool.pop($0) })
     }
@@ -79,19 +95,11 @@ public enum RootClasses {
 
 // MARK: - NSObject
 
-/// The root class, as the runtime implements it. Memory management methods
-/// return raw pointers so ownership passes through untouched.
+/// The root class's methods, as the runtime implements them. Memory
+/// management methods return raw pointers so ownership passes through
+/// untouched.
 @ObjCClass("NSObject")
-struct NSObject {}
-
-extension NSObject {
-    /// -description, sent dynamically.
-    @ObjCMethod("description")
-    func dynamicDescription() -> UnsafeMutableRawPointer?
-}
-
-@ObjCImplementation
-extension NSObject {
+final class RootObject: NSObject {
     // MARK: Identity
 
     @ObjCMethod("init") func initialize() -> Self { self }
@@ -103,7 +111,8 @@ extension NSObject {
     @ObjCMethod("isEqual:") func isEqual(_ other: UnsafeMutableRawPointer?) -> Bool { objcObject == other }
     @ObjCMethod("isProxy") func isProxy() -> Bool { false }
     @ObjCMethod("description") func description() -> UnsafeMutableRawPointer? { nil }
-    @ObjCMethod("debugDescription") func debugDescription() -> UnsafeMutableRawPointer? { dynamicDescription() }
+    @ObjCMethod("debugDescription")
+    func debugDescription() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.description) }
 
     // MARK: Lifetime
 
@@ -261,10 +270,7 @@ extension NSObject {
 
 /// retain, release and autorelease for objects that live forever.
 @ObjCClass("NSObject")
-struct ImmortalObject {}
-
-@ObjCImplementation
-extension ImmortalObject {
+final class ImmortalObject: NSObject {
     @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
     @ObjCMethod("release", types: "Vv16@0:8") func release() {}
     @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
@@ -313,7 +319,7 @@ public enum BlockClasses {
         base.initialize(repeating: perry_objc_class(), count: 2)
         let block = Runtime.makeClass(base, metaclass: base + 1, superclass: RootClasses.nsObject,
                                       name: permanentCString("NSBlock"), instanceSize: 8, registerName: true)
-        _ = MethodTable(block, NSBlock.register)
+        _ = MethodTable(block, NSBlock.registerObjCMethods)
 
         func make(_ name: String, _ storage: UnsafeMutableRawPointer?, _ registrations: ObjCMethodRegistration...) {
             guard let storage else { return }
@@ -325,21 +331,18 @@ public enum BlockClasses {
         }
         // Heap blocks are reference counted by the blocks runtime; stack and
         // global blocks are not, and copying a stack block moves it to the heap.
-        make("__NSMallocBlock__", storage.malloc, HeapBlock.register)
-        make("__NSAutoBlock__", storage.auto, HeapBlock.register)
-        make("__NSFinalizingBlock__", storage.finalizing, HeapBlock.register)
-        make("__NSStackBlock__", storage.stack, ImmortalObject.register)
-        make("__NSGlobalBlock__", storage.global, ImmortalObject.register)
-        make("__NSBlockVariable__", storage.weakVariable, ImmortalObject.register)
+        make("__NSMallocBlock__", storage.malloc, HeapBlock.registerObjCMethods)
+        make("__NSAutoBlock__", storage.auto, HeapBlock.registerObjCMethods)
+        make("__NSFinalizingBlock__", storage.finalizing, HeapBlock.registerObjCMethods)
+        make("__NSStackBlock__", storage.stack, ImmortalObject.registerObjCMethods)
+        make("__NSGlobalBlock__", storage.global, ImmortalObject.registerObjCMethods)
+        make("__NSBlockVariable__", storage.weakVariable, ImmortalObject.registerObjCMethods)
     }
 }
 
 /// Blocks, whose classes are built in libSystem's storage.
 @ObjCClass("NSBlock")
-struct NSBlock {}
-
-@ObjCImplementation
-extension NSBlock {
+class NSBlock: NSObject {
     @ObjCMethod("copy") func copy() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
 
     @ObjCMethod("copyWithZone:")
@@ -355,10 +358,7 @@ extension NSBlock {
 
 /// Heap blocks, reference counted by the blocks runtime.
 @ObjCClass("__NSMallocBlock__")
-struct HeapBlock {}
-
-@ObjCImplementation
-extension HeapBlock {
+final class HeapBlock: NSBlock {
     @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
     @ObjCMethod("release", types: "Vv16@0:8") func release() { BlockClasses.release(objcObject) }
 
