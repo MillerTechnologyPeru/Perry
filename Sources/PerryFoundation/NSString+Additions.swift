@@ -257,6 +257,31 @@ extension NSString {
     @ObjCMethod("rangeOfString:options:")
     func range(of other: String, options: UInt) -> NSRange { PerryFoundation.range(of: other, in: value, options: options) }
 
+    @ObjCMethod("stringByReplacingCharactersInRange:withString:")
+    func replacingCharacters(in range: NSRange, with replacement: String) -> String {
+        var units = Array(value.utf16)
+        let start = Int(range.location), end = Int(range.location + range.length)
+        guard start <= end, end <= units.count else {
+            foundationFatal("-[NSString stringByReplacingCharactersInRange:withString:]: Range {\(range.location), \(range.length)} out of bounds; string length \(units.count)")
+        }
+        units.replaceSubrange(start..<end, with: replacement.utf16)
+        return String(decoding: units, as: UTF16.self)
+    }
+
+    /// The search confined to `scope`, in UTF-16 units; the result counts
+    /// from the start of the string.
+    @ObjCMethod("rangeOfString:options:range:")
+    func range(of other: String, options: UInt, range scope: NSRange) -> NSRange {
+        let units = Array(value.utf16)
+        let start = Int(scope.location), end = Int(scope.location + scope.length)
+        guard start <= end, end <= units.count else {
+            foundationFatal("-[NSString rangeOfString:options:range:]: Range {\(scope.location), \(scope.length)} out of bounds; string length \(units.count)")
+        }
+        let found = PerryFoundation.range(of: other, in: String(decoding: units[start..<end], as: UTF16.self), options: options)
+        guard found.location != notFound else { return found }
+        return NSRange(location: found.location + scope.location, length: found.length)
+    }
+
     @ObjCMethod("containsString:")
     func contains(_ other: String) -> Bool { range(of: other).location != notFound }
 
