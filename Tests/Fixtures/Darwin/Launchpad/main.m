@@ -47,10 +47,6 @@ static NSString *stateName(UIApplicationState state) {
          [self isKindOfClass:UIResponder.class], [application isKindOfClass:UIResponder.class],
          application.nextResponder == (id)self]);
     say([NSString stringWithFormat:@"can become first responder %d", self.canBecomeFirstResponder]);
-    [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) {
-        say([NSString stringWithFormat:@"timer fired: state %@", stateName(UIApplication.sharedApplication.applicationState)]);
-        exit(0);
-    }];
     return YES;
 }
 
@@ -95,6 +91,12 @@ static NSString *sceneStateName(UISceneActivationState state) {
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     say([NSString stringWithFormat:@"scene did become active: state %@, application state %@",
          sceneStateName(scene.activationState), stateName(UIApplication.sharedApplication.applicationState)]);
+    // Scenes connect asynchronously on Darwin, so the exit waits for this
+    // rather than for a time after launch.
+    [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) {
+        say([NSString stringWithFormat:@"timer fired: state %@", stateName(UIApplication.sharedApplication.applicationState)]);
+        exit(0);
+    }];
 }
 
 @end
