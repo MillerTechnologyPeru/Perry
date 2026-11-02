@@ -128,7 +128,7 @@ final class RunLoopState {
 enum RunLoops {
     nonisolated(unsafe) static var runLoopClass: Class!
     nonisolated(unsafe) private static var main: RunLoopState?
-    nonisolated(unsafe) private static var mainThread: pthread_t?
+    nonisolated(unsafe) static var mainThread: pthread_t?
 
     static let key: pthread_key_t = {
         var key = pthread_key_t()
@@ -160,10 +160,6 @@ enum RunLoops {
         Storage.get(object, as: RunLoopState.self)
     }
 
-    static func install(superclass: Class) {
-        mainThread = pthread_self()
-        runLoopClass = NSRunLoop.defineObjCClass().storage
-    }
 }
 
 /// Run loop mode names. NSRunLoop's and CFRunLoop's are the same objects.
@@ -178,6 +174,11 @@ enum RunLoopModes {
 /// NSRunLoop.
 @ObjCClass("NSRunLoop")
 public final class NSRunLoop: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        RunLoops.runLoopClass = cls.storage
+    }
+
     private var state: RunLoopState? { RunLoops.state(objcObject) }
 
     @ObjCClassMethod("currentRunLoop")
