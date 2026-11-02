@@ -45,6 +45,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Runtime.blockCopy = unsafeBitCast(blockCopy, to: Runtime.BlockCopy.self)
     Runtime.blockRelease = unsafeBitCast(blockRelease, to: Runtime.BlockRelease.self)
     Runtime.mallocBlockClass = mallocBlockClass
+    if let name = info.progname { Logging.programName = String(cString: name) }
     return true
 }
 
@@ -57,6 +58,7 @@ func providerDidStart(_ info: perry_startup_info) {
                         linux: perry_linux_queue_attr_concurrent(), flags: QueueAttributes.concurrent)
     Objects.setUpStatic(perry_data_empty(), Classes.emptyData, linux: perry_linux_data_empty())
     Queues.register(main: perry_main_q())
+    Logging.setUp()
     MainQueue.start()
 }
 
