@@ -429,8 +429,20 @@ public func class_addIvar(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ size: 
 
 @c(_objc_allocateClassPair)
 public func objc_allocateClassPair(_ superclass: Class?, _ name: UnsafePointer<CChar>?, _ extraBytes: Int) -> Class? {
+    RootClasses.bootstrap()
     guard let name, Runtime.lookUpClass(name) == nil else { return nil }
     return Runtime.allocateClassPair(superclass: superclass, name: UnsafePointer(strdup(name)!), extraBytes: extraBytes)
+}
+
+/// Builds a class in storage the caller provides, as Foundation does for
+/// classes it exports by symbol. Register it with objc_registerClassPair.
+@c(_objc_initializeClassPair)
+public func objc_initializeClassPair(_ superclass: Class?, _ name: UnsafePointer<CChar>?, _ cls: Class?,
+                                     _ metaclass: Class?) -> Class? {
+    guard let name, let cls, let metaclass else { return nil }
+    RootClasses.bootstrap()
+    return Runtime.initializeClassPair(superclass: superclass, name: UnsafePointer(strdup(name)!),
+                                       cls: cls, metaclass: metaclass)
 }
 
 @c(_objc_registerClassPair)

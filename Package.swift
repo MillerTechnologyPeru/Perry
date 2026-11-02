@@ -10,6 +10,8 @@ let package = Package(
         .library(name: "PerrySystem", type: .dynamic, targets: ["PerrySystem"]),
         // Objective-C runtime, the provider for /usr/lib/libobjc.A.dylib.
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
+        // Foundation and CoreFoundation.
+        .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -37,6 +39,13 @@ let package = Package(
         .target(
             name: "PerryObjC",
             dependencies: ["PerryObjCRuntime", "CPerryObjC", "PerryInterface"]
+        ),
+        // Foundation: exported class storage and variadic entry points.
+        .target(name: "CPerryFoundation"),
+        // Foundation, a client of libobjc's C API.
+        .target(
+            name: "PerryFoundation",
+            dependencies: ["CPerryFoundation", "PerryInterface"]
         ),
         .testTarget(
             name: "PerryLoaderTests",

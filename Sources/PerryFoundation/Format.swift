@@ -1,0 +1,154 @@
+import Glibc
+
+/// Variadic arguments in Apple's arm64 convention: consecutive 8-byte stack
+/// slots, the Darwin va_list. Integers, pointers and doubles take one slot.
+struct DarwinArguments {
+    private var cursor: UnsafeRawPointer
+
+    init(_ pointer: UnsafeRawPointer) {
+        cursor = pointer
+    }
+
+    mutating func next() -> UInt64 {
+        let value = cursor.load(as: UInt64.self)
+        cursor += 8
+        return value
+    }
+
+    mutating func nextPointer() -> UnsafeMutableRawPointer? {
+        UnsafeMutableRawPointer(bitPattern: UInt(next()))
+    }
+}
+
+/// printf-style formatting with Foundation's %@, which inserts an object's
+/// -description. Other conversions are formatted by glibc one at a time.
+enum Format {
+    static func string(_ format: String, _ arguments: inout DarwinArguments) -> String {
+        let bytes = Array(format.utf8)
+        var output = ""
+        var literal: [UInt8] = []
+        var index = 0
+
+        func flushLiteral() {
+            if !literal.isEmpty {
+                output += String(decoding: literal, as: UTF8.self)
+                literal.removeAll(keepingCapacity: true)
+            }
+        }
+
+        while index < bytes.count {
+            let byte = bytes[index]
+            guard byte == UInt8(ascii: "%") else {
+                literal.append(byte)
+                index += 1
+                continue
+            }
+            flushLiteral()
+            index += 1
+
+            // %[flags][width][.precision][length]conversion
+            var spec = "%"
+            while index < bytes.count, "-+ #0'".utf8.contains(bytes[index]) {
+                spec.append(Character(UnicodeScalar(bytes[index])))
+                index += 1
+            }
+            func number() {
+                if index < bytes.count, bytes[index] == UInt8(ascii: "*") {
+                    spec += String(Int32(truncatingIfNeeded: arguments.next()))
+                    index += 1
+                    return
+                }
+                while index < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[index]) {
+                    spec.append(Character(UnicodeScalar(bytes[index])))
+                    index += 1
+                }
+            }
+            number()
+            if index < bytes.count, bytes[index] == UInt8(ascii: ".") {
+                spec += "."
+                index += 1
+                number()
+            }
+            var length = ""
+            while index < bytes.count, "hlqLzjt".utf8.contains(bytes[index]) {
+                length.append(Character(UnicodeScalar(bytes[index])))
+                index += 1
+            }
+            guard index < bytes.count else { break }
+            let conversion = Character(UnicodeScalar(bytes[index]))
+            index += 1
+
+            let wide = ["l", "ll", "q", "z", "j", "t"].contains(length)
+            let cLength = length == "q" ? "ll" : (length == "L" ? "" : length)
+            let raw: UInt64
+            switch conversion {
+            case "%":
+                output += "%"
+            case "@":
+                output += describe(arguments.nextPointer())
+            case "d", "i":
+                raw = arguments.next()
+                output += wide ? c(spec + cLength + String(conversion), Int64(bitPattern: raw))
+                               : c(spec + String(conversion), Int32(truncatingIfNeeded: raw))
+            case "u", "o", "x", "X":
+                raw = arguments.next()
+                output += wide ? c(spec + cLength + String(conversion), raw)
+                               : c(spec + String(conversion), UInt32(truncatingIfNeeded: raw))
+            case "c":
+                output += c(spec + "c", Int32(truncatingIfNeeded: arguments.next()))
+            case "C":
+                let unit = UInt16(truncatingIfNeeded: arguments.next())
+                output += String(decoding: [unit], as: UTF16.self)
+            case "s":
+                if let string = UnsafePointer<CChar>(bitPattern: UInt(arguments.next())) {
+                    output += c(spec + "s", string)
+                } else {
+                    output += "(null)"
+                }
+            case "S":
+                if var unit = UnsafePointer<UInt16>(bitPattern: UInt(arguments.next())) {
+                    var units: [UInt16] = []
+                    while unit.pointee != 0 {
+                        units.append(unit.pointee)
+                        unit += 1
+                    }
+                    output += String(decoding: units, as: UTF16.self)
+                } else {
+                    output += "(null)"
+                }
+            case "p":
+                // Darwin prints a null pointer as 0x0; glibc prints (nil).
+                if let pointer = OpaquePointer(bitPattern: UInt(arguments.next())) {
+                    output += c(spec + "p", pointer)
+                } else {
+                    output += "0x0"
+                }
+            case "f", "F", "e", "E", "g", "G", "a", "A":
+                output += c(spec + String(conversion), Double(bitPattern: arguments.next()))
+            default:
+                // Unknown conversion: keep it as written.
+                output += spec + length + String(conversion)
+            }
+        }
+        flushLiteral()
+        return output
+    }
+
+    /// The text for %@: the object's description, or "(null)".
+    static func describe(_ object: id?) -> String {
+        guard let object else { return "(null)" }
+        return Strings.value(of: ObjC.send(object, Selectors.description)) ?? "(null)"
+    }
+
+    /// Formats one value with glibc.
+    private static func c(_ spec: String, _ value: CVarArg) -> String {
+        var buffer = [CChar](repeating: 0, count: 64)
+        let needed = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
+        if needed >= buffer.count {
+            buffer = [CChar](repeating: 0, count: Int(needed) + 1)
+            _ = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
+        }
+        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}

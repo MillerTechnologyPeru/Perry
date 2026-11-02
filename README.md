@@ -9,7 +9,8 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 ## Status
 
 The loader runs C and Objective-C iOS binaries and `.app` bundles that use
-libSystem and libobjc. Foundation and UIKit are not provided yet.
+libSystem, libobjc and a first subset of Foundation. UIKit is not provided
+yet.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -25,9 +26,14 @@ libSystem and libobjc. Foundation and UIKit are not provided yet.
 - An Objective-C runtime for Apple's arm64 ABI (`libPerryobjc`): classes,
   categories, protocols, `+load` and `+initialize`, message caching, ARC,
   `__weak`, autorelease pools, associated objects and blocks
+- Foundation (`libPerryFoundation`, also standing in for CoreFoundation):
+  `NSString` with string literals and `stringWithFormat:`, `NSNumber` with
+  constant number literals and `@YES`/`@NO`, `NSArray` and `NSMutableArray`
+  with sorting, blocks and fast enumeration, and `NSLog`
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
-`dlopen` from Mach-O code, Objective-C exceptions, Foundation, Swift.
+`dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
+(dictionaries, sets, data, dates, run loops), UIKit, Swift.
 
 ## Layout
 
@@ -39,6 +45,8 @@ Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 | `Sources/PerryObjC` | `libPerryobjc.so`: libobjc's C API under Darwin names (Swift) |
 | `Sources/PerryObjCRuntime` | Objective-C runtime engine (Swift) |
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
+| `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
+| `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryInterface` | Loader/provider interface header |
 | `Tests/PerryLoaderTests` | Swift Testing suite |
 | `Tests/Fixtures` | arm64 iOS test programs and stub `.tbd` link libraries |
@@ -140,6 +148,17 @@ classes are written in Swift and exported with `@c`; only `objc_msgSend`,
 forwarding and the `$`-named data symbols are C and assembly. Blocks are
 classes built inside libSystem's `_NSConcrete*Block` storage, which the
 runtime reaches through the loader's `lookup_symbol`.
+
+**Foundation** is written in Swift as a client of libobjc's C API, which it
+looks up through the loader at startup, so it shares the one runtime rather
+than linking a copy. Its classes are built with `objc_initializeClassPair`
+in storage exported under Mach-O names (`_OBJC_CLASS_$_NSString`,
+`___CFConstantStringClassReference`), and each method is a Swift function
+with C calling conventions. Objects keep their Swift state in one extra
+word. String and number literals are static objects the compiler emits;
+their classes read them in place. Variadic methods and `NSLog` receive
+Apple's stack-slot arguments through two-instruction assembly entry points,
+and a Swift formatter handles `%@` and passes other conversions to glibc.
 
 **Licensing.** The loader is written from Apple's published Mach-O format
 descriptions. It does not use code from Machismo (GPL-3.0), so Perry stays

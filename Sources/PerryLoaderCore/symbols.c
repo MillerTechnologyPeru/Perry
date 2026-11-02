@@ -163,9 +163,16 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 //   /usr/lib/system/libsystem_c.dylib                    -> System
 //   /usr/lib/libc++.1.dylib                              -> c++
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
+//   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strncmp(install_name, "/usr/lib/system/", 16) == 0) {
         snprintf(out, out_size, "System");
+        return true;
+    }
+    // Darwin splits classes such as NSArray between CoreFoundation and
+    // Foundation; one provider keeps a single copy of each.
+    if (strstr(install_name, "/CoreFoundation.framework/")) {
+        snprintf(out, out_size, "Foundation");
         return true;
     }
     const char *base = strrchr(install_name, '/');

@@ -90,7 +90,9 @@ public enum Runtime {
     }
 
     public static func lookUpClass(_ name: UnsafePointer<CChar>) -> ClassPointer? {
-        lock.withLock { classesByName[CStringKey(pointer: name)] }
+        // Other providers may start before libobjc and look up NSObject.
+        RootClasses.bootstrap()
+        return lock.withLock { classesByName[CStringKey(pointer: name)] }
     }
 
     /// Empties every method cache, after methods change.
@@ -290,6 +292,14 @@ extension Runtime {
         let meta = calloc(1, size)!.assumingMemoryBound(to: perry_objc_class.self)
         let superSize = superclass.flatMap { Runtime.info($0)?.instanceSize } ?? 8
         _ = makeClass(cls, metaclass: meta, superclass: superclass, name: name,
+                      instanceSize: superSize, registerName: false)
+        return cls
+    }
+
+    public static func initializeClassPair(superclass: ClassPointer?, name: UnsafePointer<CChar>,
+                                           cls: ClassPointer, metaclass: ClassPointer) -> ClassPointer {
+        let superSize = superclass.flatMap { Runtime.info($0)?.instanceSize } ?? 8
+        _ = makeClass(cls, metaclass: metaclass, superclass: superclass, name: name,
                       instanceSize: superSize, registerName: false)
         return cls
     }
