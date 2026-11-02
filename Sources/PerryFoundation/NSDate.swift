@@ -69,14 +69,17 @@ enum Dates {
         return text + " +0000"
     }
 
-    static func install(superclass: Class) {
-        dateClass = NSDate.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 }
 
 /// NSDate.
 @ObjCClass("NSDate")
 public final class NSDate: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Dates.dateClass = cls.storage
+    }
+
     var date: Date { Dates.date(objcObject) }
 
     private func setDate(_ date: Date) -> Self {
