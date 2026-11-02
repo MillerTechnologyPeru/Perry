@@ -71,12 +71,12 @@ enum Arrays {
     }
 
     static func install(superclass: Class) {
-        let array = NSArray.defineObjCClass(StorageAllocated.registerObjCMethods)
+        let array = NSArray.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
         arrayClass = array.storage
         array.addMethod("arrayWithObjects:", types: "@24@0:8@16",
                         implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
         mutableClass = NSMutableArray.defineObjCClass().storage
-        constantClass = NSConstantArray.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
+        constantClass = NSConstantArray.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
     }
 
     /// A new array wrapped for returning, +1.
