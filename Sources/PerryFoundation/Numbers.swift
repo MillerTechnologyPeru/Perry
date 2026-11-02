@@ -111,145 +111,128 @@ enum Numbers {
 
     static func install(superclass: Class) {
         let number = ClassDefinition(PERRY_CLASS_NSNumber, name: "NSNumber", superclass: superclass,
-                                     StorageAllocation.self, NSNumberMethods.self)
+                                     StorageAllocated.register, NSNumber.register)
         numberClass = number.cls
         // Static numbers: immortal, read in place.
         func constant(_ which: perry_foundation_class_id, _ name: String) -> Class {
-            ClassDefinition(which, name: name, superclass: number.cls, ImmortalMethods.self).cls
+            ClassDefinition(which, name: name, superclass: number.cls, isStatic: true, ImmortalObject.register).cls
         }
         constantIntegerClass = constant(PERRY_CLASS_NSConstantIntegerNumber, "NSConstantIntegerNumber")
         constantDoubleClass = constant(PERRY_CLASS_NSConstantDoubleNumber, "NSConstantDoubleNumber")
         constantFloatClass = constant(PERRY_CLASS_NSConstantFloatNumber, "NSConstantFloatNumber")
         booleanClass = constant(PERRY_CLASS_NSCFBoolean, "__NSCFBoolean")
     }
+
+    /// A new number wrapped for returning, +0.
+    static func wrapped(_ cls: ObjCClass, _ value: NumberStorage.Value) -> NSNumber {
+        NSNumber(objCReturnValue: make(cls.pointer, value))
+    }
 }
 
+/// NSNumber.
+@ObjCClass("NSNumber")
+public struct NSNumber {}
+
 @ObjCImplementation
-enum NSNumberMethods {
-    private static func value(_ object: id?) -> NumberStorage { Numbers.storage(object) }
+extension NSNumber {
+    private var number: NumberStorage { Numbers.storage(objcObject) }
+
+    private func setValue(_ value: NumberStorage.Value) -> Self {
+        Storage.set(objcObject, NumberStorage(value))
+        return self
+    }
 
     // MARK: Creating. Narrow integer arguments are read at their declared
     // width: the caller need not extend them to the full register.
 
     @ObjCClassMethod("numberWithInteger:")
-    static func number(_ cls: id?, integer: Int) -> id? { Numbers.make(cls, .signed(Int64(integer))) }
+    static func number(_ cls: ObjCClass, integer: Int) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(integer))) }
 
     @ObjCClassMethod("numberWithLong:")
-    static func number(_ cls: id?, long: Int) -> id? { Numbers.make(cls, .signed(Int64(long))) }
+    static func number(_ cls: ObjCClass, long: Int) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(long))) }
 
     @ObjCClassMethod("numberWithLongLong:")
-    static func number(_ cls: id?, longLong: Int64) -> id? { Numbers.make(cls, .signed(longLong)) }
+    static func number(_ cls: ObjCClass, longLong: Int64) -> NSNumber { Numbers.wrapped(cls, .signed(longLong)) }
 
     @ObjCClassMethod("numberWithUnsignedInteger:")
-    static func number(_ cls: id?, unsignedInteger: UInt) -> id? { Numbers.make(cls, .unsigned(UInt64(unsignedInteger))) }
-
-    @ObjCClassMethod("numberWithUnsignedLong:")
-    static func number(_ cls: id?, unsignedLong: UInt) -> id? { Numbers.make(cls, .unsigned(UInt64(unsignedLong))) }
-
-    @ObjCClassMethod("numberWithUnsignedLongLong:")
-    static func number(_ cls: id?, unsignedLongLong: UInt64) -> id? { Numbers.make(cls, .unsigned(unsignedLongLong)) }
-
-    @ObjCClassMethod("numberWithInt:")
-    static func number(_ cls: id?, int: Int32) -> id? { Numbers.make(cls, .signed(Int64(int))) }
-
-    @ObjCClassMethod("numberWithUnsignedInt:")
-    static func number(_ cls: id?, unsignedInt: UInt32) -> id? { Numbers.make(cls, .unsigned(UInt64(unsignedInt))) }
-
-    @ObjCClassMethod("numberWithShort:")
-    static func number(_ cls: id?, short: Int16) -> id? { Numbers.make(cls, .signed(Int64(short))) }
-
-    @ObjCClassMethod("numberWithChar:")
-    static func number(_ cls: id?, char: Int8) -> id? { Numbers.make(cls, .signed(Int64(char))) }
-
-    @ObjCClassMethod("numberWithBool:")
-    static func number(_ cls: id?, bool: Bool) -> id? { Numbers.make(cls, .bool(bool)) }
-
-    @ObjCClassMethod("numberWithDouble:")
-    static func number(_ cls: id?, double: Double) -> id? { Numbers.make(cls, .double(double)) }
-
-    @ObjCClassMethod("numberWithFloat:")
-    static func number(_ cls: id?, float: Float) -> id? { Numbers.make(cls, .double(Double(float))) }
-
-    @ObjCMethod("initWithInteger:")
-    static func initialize(_ object: id?, integer: Int) -> id? { Numbers.initialize(object, .signed(Int64(integer))) }
-
-    @ObjCMethod("initWithLongLong:")
-    static func initialize(_ object: id?, longLong: Int64) -> id? { Numbers.initialize(object, .signed(longLong)) }
-
-    @ObjCMethod("initWithUnsignedInteger:")
-    static func initialize(_ object: id?, unsignedInteger: UInt) -> id? {
-        Numbers.initialize(object, .unsigned(UInt64(unsignedInteger)))
+    static func number(_ cls: ObjCClass, unsignedInteger: UInt) -> NSNumber {
+        Numbers.wrapped(cls, .unsigned(UInt64(unsignedInteger)))
     }
 
-    @ObjCMethod("initWithInt:")
-    static func initialize(_ object: id?, int: Int32) -> id? { Numbers.initialize(object, .signed(Int64(int))) }
+    @ObjCClassMethod("numberWithUnsignedLong:")
+    static func number(_ cls: ObjCClass, unsignedLong: UInt) -> NSNumber { Numbers.wrapped(cls, .unsigned(UInt64(unsignedLong))) }
 
-    @ObjCMethod("initWithBool:")
-    static func initialize(_ object: id?, bool: Bool) -> id? { Numbers.initialize(object, .bool(bool)) }
+    @ObjCClassMethod("numberWithUnsignedLongLong:")
+    static func number(_ cls: ObjCClass, unsignedLongLong: UInt64) -> NSNumber { Numbers.wrapped(cls, .unsigned(unsignedLongLong)) }
 
-    @ObjCMethod("initWithDouble:")
-    static func initialize(_ object: id?, double: Double) -> id? { Numbers.initialize(object, .double(double)) }
+    @ObjCClassMethod("numberWithInt:")
+    static func number(_ cls: ObjCClass, int: Int32) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(int))) }
+
+    @ObjCClassMethod("numberWithUnsignedInt:")
+    static func number(_ cls: ObjCClass, unsignedInt: UInt32) -> NSNumber { Numbers.wrapped(cls, .unsigned(UInt64(unsignedInt))) }
+
+    @ObjCClassMethod("numberWithShort:")
+    static func number(_ cls: ObjCClass, short: Int16) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(short))) }
+
+    @ObjCClassMethod("numberWithChar:")
+    static func number(_ cls: ObjCClass, char: Int8) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(char))) }
+
+    @ObjCClassMethod("numberWithBool:")
+    static func number(_ cls: ObjCClass, bool: Bool) -> NSNumber { Numbers.wrapped(cls, .bool(bool)) }
+
+    @ObjCClassMethod("numberWithDouble:")
+    static func number(_ cls: ObjCClass, double: Double) -> NSNumber { Numbers.wrapped(cls, .double(double)) }
+
+    @ObjCClassMethod("numberWithFloat:")
+    static func number(_ cls: ObjCClass, float: Float) -> NSNumber { Numbers.wrapped(cls, .double(Double(float))) }
+
+    @ObjCMethod("initWithInteger:") func initialize(integer: Int) -> Self { setValue(.signed(Int64(integer))) }
+    @ObjCMethod("initWithLongLong:") func initialize(longLong: Int64) -> Self { setValue(.signed(longLong)) }
+    @ObjCMethod("initWithUnsignedInteger:") func initialize(unsignedInteger: UInt) -> Self { setValue(.unsigned(UInt64(unsignedInteger))) }
+    @ObjCMethod("initWithInt:") func initialize(int: Int32) -> Self { setValue(.signed(Int64(int))) }
+    @ObjCMethod("initWithBool:") func initialize(bool: Bool) -> Self { setValue(.bool(bool)) }
+    @ObjCMethod("initWithDouble:") func initialize(double: Double) -> Self { setValue(.double(double)) }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Numbers.numberClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Numbers.numberClass)
     }
 
     // MARK: Values
 
-    @ObjCMethod("integerValue")
-    static func integerValue(_ object: id?) -> Int { Int(value(object).int64) }
-
-    @ObjCMethod("longValue")
-    static func longValue(_ object: id?) -> Int { Int(value(object).int64) }
-
-    @ObjCMethod("longLongValue")
-    static func longLongValue(_ object: id?) -> Int64 { value(object).int64 }
-
-    @ObjCMethod("unsignedIntegerValue")
-    static func unsignedIntegerValue(_ object: id?) -> UInt { UInt(truncatingIfNeeded: value(object).int64) }
-
-    @ObjCMethod("intValue")
-    static func intValue(_ object: id?) -> Int32 { Int32(truncatingIfNeeded: value(object).int64) }
-
-    @ObjCMethod("boolValue")
-    static func boolValue(_ object: id?) -> Bool { value(object).int64 != 0 || value(object).double != 0 }
-
-    @ObjCMethod("doubleValue")
-    static func doubleValue(_ object: id?) -> Double { value(object).double }
-
-    @ObjCMethod("floatValue")
-    static func floatValue(_ object: id?) -> Float { Float(value(object).double) }
-
-    @ObjCMethod("stringValue")
-    static func stringValue(_ object: id?) -> id? { Strings.autoreleased(value(object).description) }
-
-    @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { Strings.autoreleased(value(object).description) }
+    @ObjCMethod("integerValue") func integerValue() -> Int { Int(number.int64) }
+    @ObjCMethod("longValue") func longValue() -> Int { Int(number.int64) }
+    @ObjCMethod("longLongValue") func longLongValue() -> Int64 { number.int64 }
+    @ObjCMethod("unsignedIntegerValue") func unsignedIntegerValue() -> UInt { UInt(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("intValue") func intValue() -> Int32 { Int32(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("boolValue") func boolValue() -> Bool { number.int64 != 0 || number.double != 0 }
+    @ObjCMethod("doubleValue") func doubleValue() -> Double { number.double }
+    @ObjCMethod("floatValue") func floatValue() -> Float { Float(number.double) }
+    @ObjCMethod("stringValue") func stringValue() -> String { number.description }
+    @ObjCMethod("description") func description() -> String { number.description }
 
     // MARK: Comparing
 
     @ObjCMethod("compare:")
-    static func compare(_ object: id?, _ other: id?) -> Int { value(object).compare(value(other)) }
+    func compare(_ other: NSNumber) -> Int { number.compare(Numbers.storage(other.id)) }
 
     @ObjCMethod("isEqualToNumber:")
-    static func isEqual(_ object: id?, toNumber other: id?) -> Bool { value(object).compare(value(other)) == 0 }
+    func isEqual(toNumber other: NSNumber?) -> Bool { other.map { compare($0) == 0 } ?? false }
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        ObjC.isKind(other, of: Numbers.numberClass) && value(object).compare(value(other)) == 0
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other, other.is(NSNumber.self) else { return false }
+        return compare(other.unsafeCast(to: NSNumber.self)) == 0
     }
 
     /// Equal numbers hash equally whatever their type.
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt {
-        let number = value(object)
+    func hash() -> UInt {
         if number.double == number.double.rounded() { return UInt(bitPattern: Int(number.int64)) }
         return UInt(truncatingIfNeeded: number.double.bitPattern)
     }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
 }
