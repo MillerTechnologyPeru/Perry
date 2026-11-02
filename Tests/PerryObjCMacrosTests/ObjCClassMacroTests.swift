@@ -5,6 +5,7 @@ import Testing
 
 private let macros: [String: MacroSpec] = [
     "ObjCClass": MacroSpec(type: ObjCClassMacro.self),
+    "ObjCWrapper": MacroSpec(type: ObjCWrapperMacro.self),
     "ObjCMethod": MacroSpec(type: ObjCMethodMacro.self),
     "ObjCClassMethod": MacroSpec(type: ObjCMethodMacro.self),
     "ObjCProperty": MacroSpec(type: ObjCPropertyMacro.self),
@@ -169,6 +170,42 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 }
             }
             """)
+    }
+
+    @Test("@ObjCWrapper names a class another library defines, and only calls it")
+    func wrapper() {
+        expect("""
+            @ObjCWrapper("NSBundle")
+            class NSBundle: NSObject {
+                @ObjCClassMethod("mainBundle")
+                static func main() -> NSBundle
+
+                @ObjCMethod("bundlePath")
+                func path() -> String { "" }
+            }
+            """, expands: """
+            class NSBundle: NSObject {
+                static func main() -> NSBundle {
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSBundle.ObjCType
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    return NSBundle(objCReturnValue: message(self.objCClass.pointer, ObjCRuntime.selector("mainBundle")))
+                }
+                func path() -> String {
+                    ""
+                }
+
+                override class var objCClassName: String {
+                    "NSBundle"
+                }
+
+                override class var objCSuperclassName: String? {
+                    NSObject.objCClassName
+                }
+            }
+            """, diagnostics: [
+                DiagnosticSpec(message: "a wrapper's methods call the class's and have no body; implement methods with @ObjCClass or @ObjCCategory",
+                               line: 6, column: 5),
+            ])
     }
 
     @Test("@ObjCProperty sends the getter and setter")
