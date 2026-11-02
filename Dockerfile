@@ -55,4 +55,11 @@ RUN curl -fsSLo /tmp/lzfse.tar.gz https://github.com/lzfse/lzfse/archive/refs/ta
  && cd / && rm -rf /tmp/lzfse /tmp/lzfse.tar.gz \
  && ldconfig
 
+# SDL3 and Mesa's drivers, for UIKit's live view: windows, input, and
+# compositing layers on the GPU (through /dev/dri when a container has it).
+# UIKit loads SDL3 at run time, so builds and tests do not need it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libsdl3-0 libgl1-mesa-dri libegl1 libgles2 libgl1 libglx-mesa0 libegl-mesa0 libgbm1 \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /perry
