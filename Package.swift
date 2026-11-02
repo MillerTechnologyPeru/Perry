@@ -24,6 +24,8 @@ let package = Package(
         .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
         // libcompression, Apple's API over open compressors.
         .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
+        // CFNetwork, whose URL loading classes Foundation re-exports.
+        .library(name: "PerryCFNetwork", type: .dynamic, targets: ["PerryCFNetwork"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -124,6 +126,14 @@ let package = Package(
                 .linkedLibrary("z"), .linkedLibrary("lzma"), .linkedLibrary("lz4"),
                 .linkedLibrary("brotlienc"), .linkedLibrary("brotlidec"), .linkedLibrary("lzfse"),
             ]
+        ),
+        // URL loading over swift-corelibs-foundation's URLSession.
+        .target(name: "PerryURLLoading"),
+        // CFNetwork's Objective-C classes over PerryURLLoading.
+        .target(
+            name: "PerryCFNetwork",
+            dependencies: ["PerryInterface", "PerryObjCInterop", "PerryURLLoading"],
+            plugins: ["PerryProviderPlugin"]
         ),
         // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
         // every other store type in memory.
