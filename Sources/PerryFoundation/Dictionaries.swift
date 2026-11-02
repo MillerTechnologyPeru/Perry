@@ -113,116 +113,134 @@ enum Dictionaries {
 
     static func install(superclass: Class) {
         let dictionary = ClassDefinition(PERRY_CLASS_NSDictionary, name: "NSDictionary", superclass: superclass,
-                                         StorageAllocation.self, NSDictionaryMethods.self)
+                                         StorageAllocated.register, NSDictionary.register)
         dictionaryClass = dictionary.cls
         dictionary.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
                              implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
         mutableClass = ClassDefinition(PERRY_CLASS_NSMutableDictionary, name: "NSMutableDictionary",
-                                       superclass: dictionary.cls, NSMutableDictionaryMethods.self).cls
+                                       superclass: dictionary.cls, NSMutableDictionary.register).cls
         constantClass = ClassDefinition(PERRY_CLASS_NSConstantDictionary, name: "NSConstantDictionary",
-                                        superclass: dictionary.cls, ImmortalMethods.self).cls
+                                        superclass: dictionary.cls, isStatic: true, ImmortalObject.register).cls
+    }
+
+    /// A new dictionary wrapped for returning, +1.
+    static func owned(_ entries: [(key: id, value: id)], cls: id? = nil) -> NSDictionary {
+        NSDictionary(objCOwned: make(entries, cls: cls))
     }
 }
 
+/// NSDictionary.
+@ObjCClass("NSDictionary")
+public struct NSDictionary {}
+
 @ObjCImplementation
-enum NSDictionaryMethods {
+extension NSDictionary {
+    var entries: [(key: id, value: id)] { Dictionaries.entries(objcObject) }
+
+    private func setEntries(_ entries: [(key: id, value: id)]) -> Self {
+        _ = Dictionaries.initialize(objcObject, entries)
+        return self
+    }
+
     // MARK: Creating
 
     @ObjCClassMethod("dictionary")
-    static func dictionary(_ cls: id?) -> id? { Dictionaries.autoreleased([], cls: cls) }
+    static func dictionary(_ cls: ObjCClass) -> NSDictionary { Dictionaries.owned([], cls: cls.pointer) }
 
     @ObjCClassMethod("dictionaryWithObject:forKey:")
-    static func dictionary(_ cls: id?, object: id?, forKey key: id?) -> id? {
-        guard let object, let key else { foundationFatal("+[NSDictionary dictionaryWithObject:forKey:]: nil object or key") }
-        return Dictionaries.autoreleased([(key, object)], cls: cls)
+    static func dictionary(_ cls: ObjCClass, object: ObjCObject, forKey key: ObjCObject) -> NSDictionary {
+        Dictionaries.owned([(key.id, object.id)], cls: cls.pointer)
     }
 
     @ObjCClassMethod("dictionaryWithObjects:forKeys:count:")
-    static func dictionary(_ cls: id?, objects: UnsafePointer<id?>?, forKeys keys: UnsafePointer<id?>?, count: UInt) -> id? {
-        Dictionaries.autoreleased(Dictionaries.pairs(objects: objects, keys: keys, count: count,
-                                                     method: "+[NSDictionary dictionaryWithObjects:forKeys:count:]"), cls: cls)
+    static func dictionary(_ cls: ObjCClass, objects: UnsafePointer<id?>?, forKeys keys: UnsafePointer<id?>?,
+                           count: UInt) -> NSDictionary {
+        Dictionaries.owned(Dictionaries.pairs(objects: objects, keys: keys, count: count,
+                                              method: "+[NSDictionary dictionaryWithObjects:forKeys:count:]"),
+                           cls: cls.pointer)
     }
 
     @ObjCClassMethod("dictionaryWithDictionary:")
-    static func dictionary(_ cls: id?, dictionary other: id?) -> id? {
-        Dictionaries.autoreleased(Dictionaries.entries(other), cls: cls)
+    static func dictionary(_ cls: ObjCClass, dictionary other: NSDictionary?) -> NSDictionary {
+        Dictionaries.owned(other?.entries ?? [], cls: cls.pointer)
     }
 
     @ObjCMethod("init")
-    static func initialize(_ object: id?) -> id? { Dictionaries.initialize(object, []) }
+    func initialize() -> Self { setEntries([]) }
 
     @ObjCMethod("initWithObjects:forKeys:count:")
-    static func initialize(_ object: id?, objects: UnsafePointer<id?>?, forKeys keys: UnsafePointer<id?>?, count: UInt) -> id? {
-        Dictionaries.initialize(object, Dictionaries.pairs(objects: objects, keys: keys, count: count,
-                                                           method: "-[NSDictionary initWithObjects:forKeys:count:]"))
+    func initialize(objects: UnsafePointer<id?>?, forKeys keys: UnsafePointer<id?>?, count: UInt) -> Self {
+        setEntries(Dictionaries.pairs(objects: objects, keys: keys, count: count,
+                                      method: "-[NSDictionary initWithObjects:forKeys:count:]"))
     }
 
     @ObjCMethod("initWithDictionary:")
-    static func initialize(_ object: id?, dictionary other: id?) -> id? {
-        Dictionaries.initialize(object, Dictionaries.entries(other))
-    }
+    func initialize(dictionary other: NSDictionary?) -> Self { setEntries(other?.entries ?? []) }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Dictionaries.dictionaryClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Dictionaries.dictionaryClass)
     }
 
     // MARK: Querying
 
     @ObjCMethod("count")
-    static func count(_ object: id?) -> UInt { UInt(Dictionaries.entries(object).count) }
+    func count() -> UInt { UInt(entries.count) }
 
     @ObjCMethod("objectForKey:")
-    static func object(_ object: id?, forKey key: id?) -> id? { Dictionaries.value(object, for: key) }
+    func object(forKey key: ObjCObject?) -> ObjCObject? {
+        Dictionaries.value(objcObject, for: key?.id).map(ObjCObject.init)
+    }
 
     @ObjCMethod("objectForKeyedSubscript:")
-    static func object(_ object: id?, subscript key: id?) -> id? { Dictionaries.value(object, for: key) }
+    func object(subscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
 
     @ObjCMethod("allKeys")
-    static func allKeys(_ object: id?) -> id? { Arrays.autoreleased(Dictionaries.entries(object).map(\.key)) }
+    func allKeys() -> NSArray { Arrays.owned(entries.map(\.key)) }
 
     @ObjCMethod("allValues")
-    static func allValues(_ object: id?) -> id? { Arrays.autoreleased(Dictionaries.entries(object).map(\.value)) }
+    func allValues() -> NSArray { Arrays.owned(entries.map(\.value)) }
 
     @ObjCMethod("isEqualToDictionary:")
-    static func isEqual(_ object: id?, toDictionary other: id?) -> Bool {
-        let mine = Dictionaries.entries(object)
-        guard mine.count == Dictionaries.entries(other).count else { return false }
+    func isEqual(toDictionary other: NSDictionary?) -> Bool {
+        guard let other else { return false }
+        let mine = entries
+        guard mine.count == other.entries.count else { return false }
         return mine.allSatisfy { entry in
-            Dictionaries.value(other, for: entry.key).map { ObjectKey(object: $0) == ObjectKey(object: entry.value) } ?? false
+            Dictionaries.value(other.objcObject, for: entry.key)
+                .map { ObjectKey(object: $0) == ObjectKey(object: entry.value) } ?? false
         }
     }
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        object == other || (ObjC.isKind(other, of: Dictionaries.dictionaryClass) && isEqual(object, toDictionary: other))
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        return other.id == objcObject
+            || (other.is(NSDictionary.self) && isEqual(toDictionary: other.unsafeCast(to: NSDictionary.self)))
     }
 
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt { UInt(Dictionaries.entries(object).count) }
+    func hash() -> UInt { UInt(entries.count) }
 
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { Strings.autoreleased(Describe.object(object, indent: 0)) }
+    func description() -> String { Describe.object(objcObject, indent: 0) }
 
     @ObjCMethod("enumerateKeysAndObjectsUsingBlock:")
-    static func enumerate(_ object: id?, block: ObjCBlock?) {
-        guard let block else { return }
-        let body = Blocks.invoke(block, as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Void).self)
+    func enumerate(block: ObjCBlock) {
+        let body = block.function(as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Void).self)
         var stop = false
-        for entry in Dictionaries.entries(object) {
-            body(block, entry.key, entry.value, &stop)
+        for entry in entries {
+            body(block.object, entry.key, entry.value, &stop)
             if stop { break }
         }
     }
 
     /// for (id key in dictionary) enumerates the keys.
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
-    static func enumerate(_ object: id?, state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?,
-                          count: UInt) -> UInt {
-        let keys = Dictionaries.entries(object).map(\.key)
-        if let storage = Dictionaries.storage(object) {
+    func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        let keys = entries.map(\.key)
+        if let storage = Dictionaries.storage(objcObject) {
             return storage.enumeration.enumerate(keys, state: state)
         }
         return Dictionaries.constantEnumeration.enumerate(keys, state: state)
@@ -231,11 +249,11 @@ enum NSDictionaryMethods {
     // MARK: Copying
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSDictionary { self }
 
     @ObjCMethod("mutableCopyWithZone:")
-    static func mutableCopy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Dictionaries.make(Dictionaries.entries(object), cls: UnsafeMutableRawPointer(Dictionaries.mutableClass))
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> NSDictionary {
+        Dictionaries.owned(entries, cls: UnsafeMutableRawPointer(Dictionaries.mutableClass))
     }
 }
 
@@ -245,56 +263,62 @@ extension Dictionaries {
     nonisolated(unsafe) static let constantEnumeration = EnumerationBuffer()
 }
 
+/// NSMutableDictionary.
+@ObjCClass("NSMutableDictionary")
+public struct NSMutableDictionary {}
+
 @ObjCImplementation
-enum NSMutableDictionaryMethods {
-    private static func storage(_ object: id?) -> DictionaryStorage {
-        guard let storage = Dictionaries.storage(object) else {
+extension NSMutableDictionary {
+    private var storage: DictionaryStorage {
+        guard let storage = Dictionaries.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableDictionary")
         }
         return storage
     }
 
     @ObjCClassMethod("dictionaryWithCapacity:")
-    static func dictionary(_ cls: id?, capacity: UInt) -> id? { Dictionaries.autoreleased([], cls: cls) }
+    static func dictionary(_ cls: ObjCClass, capacity: UInt) -> NSDictionary { Dictionaries.owned([], cls: cls.pointer) }
 
     @ObjCMethod("initWithCapacity:")
-    static func initialize(_ object: id?, capacity: UInt) -> id? { Dictionaries.initialize(object, []) }
-
-    @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Dictionaries.make(Dictionaries.entries(object))
+    func initialize(capacity: UInt) -> Self {
+        _ = Dictionaries.initialize(objcObject, [])
+        return self
     }
 
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> NSDictionary { Dictionaries.owned(Dictionaries.entries(objcObject)) }
+
     @ObjCMethod("setObject:forKey:")
-    static func set(_ object: id?, _ value: id?, forKey key: id?) {
+    func set(_ value: ObjCObject?, forKey key: ObjCObject?) {
         guard let key else { foundationFatal("-[NSMutableDictionary setObject:forKey:]: key cannot be nil") }
-        guard let value else { foundationFatal("-[NSMutableDictionary setObject:forKey:]: object cannot be nil (key: \(Format.describe(key)))") }
-        storage(object).set(value, for: key)
+        guard let value else {
+            foundationFatal("-[NSMutableDictionary setObject:forKey:]: object cannot be nil (key: \(Format.describe(key.id)))")
+        }
+        storage.set(value.id, for: key.id)
     }
 
     /// dictionary[key] = value; nil removes the key.
     @ObjCMethod("setObject:forKeyedSubscript:")
-    static func set(_ object: id?, _ value: id?, subscript key: id?) {
+    func set(_ value: ObjCObject?, subscript key: ObjCObject?) {
         guard let key else { foundationFatal("-[NSMutableDictionary setObject:forKeyedSubscript:]: key cannot be nil") }
         if let value {
-            storage(object).set(value, for: key)
+            storage.set(value.id, for: key.id)
         } else {
-            storage(object).remove(key)
+            storage.remove(key.id)
         }
     }
 
     @ObjCMethod("removeObjectForKey:")
-    static func remove(_ object: id?, forKey key: id?) {
-        if let key { storage(object).remove(key) }
+    func remove(forKey key: ObjCObject?) {
+        if let key { storage.remove(key.id) }
     }
 
     @ObjCMethod("removeAllObjects")
-    static func removeAll(_ object: id?) { storage(object).removeAll() }
+    func removeAll() { storage.removeAll() }
 
     @ObjCMethod("addEntriesFromDictionary:")
-    static func add(_ object: id?, entriesFrom other: id?) {
-        let storage = storage(object)
-        for entry in Dictionaries.entries(other) { storage.set(entry.value, for: entry.key) }
+    func add(entriesFrom other: NSDictionary?) {
+        for entry in other?.entries ?? [] { storage.set(entry.value, for: entry.key) }
     }
 }
 
