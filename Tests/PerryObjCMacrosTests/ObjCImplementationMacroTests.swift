@@ -4,9 +4,10 @@ import SwiftSyntaxMacrosGenericTestSupport
 import Testing
 
 private let macros: [String: MacroSpec] = [
-    "ObjCImplementation": MacroSpec(type: ObjCImplementationMacro.self, conformances: ["ObjCMethodTable"]),
+    "ObjCClass": MacroSpec(type: ObjCClassMacro.self, conformances: ["AnyObjCObject"]),
     "ObjCMethod": MacroSpec(type: ObjCMethodMacro.self),
     "ObjCClassMethod": MacroSpec(type: ObjCMethodMacro.self),
+    "ObjCImplementation": MacroSpec(type: ObjCImplementationMacro.self),
 ]
 
 private func expect(_ source: String, expands expanded: String, diagnostics: [DiagnosticSpec] = [],
@@ -16,106 +17,173 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
     }
 }
 
-@Suite struct ObjCImplementationMacroTests {
+@Suite struct ObjCMacroTests {
 
-    @Test("Methods get C thunks with _cmd and type encodings")
-    func registration() {
+    @Test("@ObjCClass declares a wrapper")
+    func wrapper() {
         expect("""
-            @ObjCImplementation
-            enum StringMethods {
+            @ObjCClass("NSString")
+            public struct NSString {}
+            """, expands: """
+            public struct NSString {
+
+                public let objcHolder: ObjCObjectHolder
+
+                public init(objcHolder: ObjCObjectHolder) {
+                    self.objcHolder = objcHolder
+                }
+
+                public static var objCClassName: String {
+                    "NSString"
+                }
+            }
+
+            extension NSString: AnyObjCObject {
+            }
+            """)
+    }
+
+    @Test("Methods without a body send the message")
+    func sending() {
+        expect("""
+            struct NSString {
                 @ObjCMethod("characterAtIndex:")
-                static func character(_ string: id?, at index: UInt) -> UInt16 { 0 }
+                func character(at index: UInt) -> UInt16
 
-                @ObjCClassMethod("stringWithUTF8String:")
-                static func string(_ cls: id?, _ bytes: UnsafePointer<CChar>?) -> id? { nil }
+                @ObjCMethod("copy")
+                func copy() -> NSString
 
-                @ObjCMethod("setFlag:")
-                static func set(_ object: id?, flag: Bool) {}
+                @ObjCMethod("getCharacters:")
+                func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>)
 
-                static func helper() {}
+                @ObjCMethod("initWithString:")
+                init?(string: String?)
+
+                @ObjCClassMethod("string")
+                static func empty() -> NSString
             }
             """, expands: """
-            enum StringMethods {
-                static func character(_ string: id?, at index: UInt) -> UInt16 { 0 }
-                static func string(_ cls: id?, _ bytes: UnsafePointer<CChar>?) -> id? { nil }
-                static func set(_ object: id?, flag: Bool) {}
-
-                static func helper() {}
-
-                static func register(_ registrar: some ObjCMethodRegistrar) {
-                    registrar.addMethod("characterAtIndex:", types: "S24@0:8Q16", implementation: unsafeBitCast({ (receiver: id?, _: UnsafeRawPointer?, a1: UInt) -> UInt16 in
-                                StringMethods.character(receiver, at: a1)
-                            } as @convention(c) (id?, UnsafeRawPointer?, UInt) -> UInt16, to: UnsafeRawPointer.self), isClassMethod: false)
-                    registrar.addMethod("stringWithUTF8String:", types: "@24@0:8r*16", implementation: unsafeBitCast({ (receiver: id?, _: UnsafeRawPointer?, a1: UnsafePointer<CChar>?) -> id? in
-                                StringMethods.string(receiver, a1)
-                            } as @convention(c) (id?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> id?, to: UnsafeRawPointer.self), isClassMethod: true)
-                    registrar.addMethod("setFlag:", types: "v20@0:8B16", implementation: unsafeBitCast({ (receiver: id?, _: UnsafeRawPointer?, a1: Bool) -> Void in
-                                StringMethods.set(receiver, flag: a1)
-                            } as @convention(c) (id?, UnsafeRawPointer?, Bool) -> Void, to: UnsafeRawPointer.self), isClassMethod: false)
+            struct NSString {
+                func character(at index: UInt) -> UInt16 {
+                    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt.ObjCType) -> UInt16.ObjCType
+                    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+                    return UInt16(objCReturnValue: send(self.objcObject, ObjCRuntime.selector("characterAtIndex:"), index.objCArgument()))
                 }
-            }
-
-            extension StringMethods: ObjCMethodTable {
+                func copy() -> NSString {
+                    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSString.ObjCType
+                    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+                    return NSString(objCOwned: send(self.objcObject, ObjCRuntime.selector("copy")))
+                }
+                func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>) {
+                    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutablePointer<UInt16>.ObjCType) -> Void
+                    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+                    send(self.objcObject, ObjCRuntime.selector("getCharacters:"), buffer.objCArgument())
+                }
+                init?(string: String?) {
+                    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Optional<String>.ObjCType) -> UnsafeMutableRawPointer?
+                    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+                    let allocated = unsafeBitCast(ObjCRuntime.msgSend, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?).self)(Self.objCClass.pointer, ObjCRuntime.selector("alloc"))
+                    let result = send(allocated, ObjCRuntime.selector("initWithString:"), string.objCArgument())
+                    guard let result else {
+                        return nil
+                    }
+                    self.init(objcHolder: ObjCObjectHolder(adopting: result))
+                }
+                static func empty() -> NSString {
+                    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSString.ObjCType
+                    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+                    return NSString(objCReturnValue: send(Self.objCClass.pointer, ObjCRuntime.selector("string")))
+                }
             }
             """)
     }
 
-    @Test("Explicit type encodings are used as written")
-    func explicitTypes() {
+    @Test("Implementations get thunks that convert the receiver and arguments")
+    func implementing() {
         expect("""
-            @ObjCImplementation
-            enum Methods {
-                @ObjCMethod("rect", types: "{CGRect=dddd}16@0:8")
-                static func rect(_ object: id?) -> Rect { Rect() }
+            @ObjCImplementation("registerCore")
+            extension NSString {
+                @ObjCMethod("stringByAppendingString:")
+                func appending(_ other: String) -> String { "" }
+
+                @ObjCMethod("initWithString:")
+                func initialize(string: String?) -> Self? { self }
+
+                @ObjCMethod("dealloc")
+                func dealloc() {}
+
+                @ObjCClassMethod("alloc")
+                static func alloc(_ cls: ObjCClass) -> NSString? { nil }
+
+                func helper() {}
             }
             """, expands: """
-            enum Methods {
-                static func rect(_ object: id?) -> Rect { Rect() }
-
-                static func register(_ registrar: some ObjCMethodRegistrar) {
-                    registrar.addMethod("rect", types: "{CGRect=dddd}16@0:8", implementation: unsafeBitCast({ (receiver: id?, _: UnsafeRawPointer?) -> Rect in
-                                Methods.rect(receiver)
-                            } as @convention(c) (id?, UnsafeRawPointer?) -> Rect, to: UnsafeRawPointer.self), isClassMethod: false)
+            extension NSString {
+                func appending(_ other: String) -> String {
+                    ""
                 }
-            }
+                func initialize(string: String?) -> Self? {
+                    self
+                }
+                func dealloc() {}
+                static func alloc(_ cls: ObjCClass) -> NSString? {
+                    nil
+                }
 
-            extension Methods: ObjCMethodTable {
+                func helper() {}
+
+                static func registerCore(_ registrar: any ObjCMethodRegistrar) {
+                    registrar.addMethod("stringByAppendingString:", types: ObjCTypeEncoding.method(returning: String.self, arguments: [String.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: String.ObjCType) -> String.ObjCType in
+                                let this = NSString(objcHolder: ObjCObjectHolder(retaining: receiver!));
+                                return this.appending(String(objCArgument: a0)).objCReturnValue()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> String.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
+                    registrar.addMethod("initWithString:", types: ObjCTypeEncoding.method(returning: Optional<NSString>.self, arguments: [Optional<String>.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: Optional<String>.ObjCType) -> Optional<NSString>.ObjCType in
+                                let this = NSString(objcHolder: ObjCObjectHolder(adopting: receiver!));
+                                return this.initialize(string: Optional<String>(objCArgument: a0)).objCOwnedReturnValue()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Optional<String>.ObjCType) -> Optional<NSString>.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
+                    registrar.addMethod("dealloc", types: ObjCTypeEncoding.method(returning: nil, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> Void in
+                                let this = NSString(objcHolder: ObjCObjectHolder(borrowing: receiver!));
+                                this.dealloc()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void, to: UnsafeRawPointer.self), isClassMethod: false)
+                    registrar.addMethod("alloc", types: ObjCTypeEncoding.method(returning: Optional<NSString>.self, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> Optional<NSString>.ObjCType in
+                                return NSString.alloc(ObjCClass(receiver!)).objCOwnedReturnValue()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Optional<NSString>.ObjCType, to: UnsafeRawPointer.self), isClassMethod: true)
+                }
             }
             """)
     }
 
-    @Test("Selector and signature mismatches are compile errors")
+    @Test("Mismatched selectors and signatures are compile errors")
     func diagnostics() {
         expect("""
-            @ObjCImplementation
-            enum Methods {
+            struct NSMutableArray {
                 @ObjCMethod("insertObject:atIndex:")
-                static func insert(_ array: id?, _ object: id?) {}
-
-                @ObjCMethod("frame")
-                static func frame(_ view: id?) -> Rect { Rect() }
+                func insert(_ object: ObjCObject)
 
                 @ObjCMethod("count")
-                func count(_ array: id?) -> UInt { 0 }
+                static func count() -> UInt
+
+                @ObjCMethod("description")
+                func describe() async -> String
             }
             """, expands: """
-            enum Methods {
-                static func insert(_ array: id?, _ object: id?) {}
-                static func frame(_ view: id?) -> Rect { Rect() }
-                func count(_ array: id?) -> UInt { 0 }
-
-                static func register(_ registrar: some ObjCMethodRegistrar) {
-
+            struct NSMutableArray {
+                func insert(_ object: ObjCObject) {
+                    fatalError()
+                }
+                static func count() -> UInt {
+                    fatalError()
+                }
+                func describe() async -> String {
+                    fatalError()
                 }
             }
-
-            extension Methods: ObjCMethodTable {
-            }
             """, diagnostics: [
-                DiagnosticSpec(message: "selector 'insertObject:atIndex:' takes 2 arguments, but the function takes 1 after the receiver",
-                               line: 4, column: 23),
-                DiagnosticSpec(message: "cannot encode return type 'Rect'; pass types:", line: 7, column: 39),
-                DiagnosticSpec(message: "Objective-C methods must be static functions", line: 10, column: 10),
+                DiagnosticSpec(message: "selector 'insertObject:atIndex:' takes 2 arguments, but the function takes 1",
+                               line: 3, column: 16),
+                DiagnosticSpec(message: "@ObjCMethod applies to instance methods; use @ObjCClassMethod",
+                               line: 5, column: 5),
+                DiagnosticSpec(message: "Objective-C methods cannot be async or throw", line: 9, column: 18),
             ])
     }
 }
