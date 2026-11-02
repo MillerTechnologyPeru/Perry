@@ -155,13 +155,12 @@ func range(of needle: String, in haystack: String, options: UInt) -> NSRange {
     return NSRange(location: notFound, length: 0)
 }
 
-/// NSString's encodings, paths and searching, installed into NSString like
-/// a category.
-@ObjCClass("NSString")
-final class NSStringAdditions: NSString {
+/// NSString's encodings, paths and searching.
+@ObjCCategory("Additions")
+extension NSString {
     private var units: [UInt16] { Array(value.utf16) }
 
-    private static func string(_ units: ArraySlice<UInt16>) -> String { String(decoding: units, as: UTF16.self) }
+    private static func decoded(_ units: ArraySlice<UInt16>) -> String { String(decoding: units, as: UTF16.self) }
 
     private func check(_ range: NSRange, _ method: String) -> [UInt16] {
         let all = units
@@ -274,17 +273,17 @@ final class NSStringAdditions: NSString {
 
     @ObjCMethod("substringFromIndex:")
     func substring(from index: UInt) -> String {
-        Self.string(check(NSRange(location: index, length: 0), "substringFromIndex:")[Int(index)...])
+        Self.decoded(check(NSRange(location: index, length: 0), "substringFromIndex:")[Int(index)...])
     }
 
     @ObjCMethod("substringToIndex:")
     func substring(to index: UInt) -> String {
-        Self.string(check(NSRange(location: 0, length: index), "substringToIndex:")[..<Int(index)])
+        Self.decoded(check(NSRange(location: 0, length: index), "substringToIndex:")[..<Int(index)])
     }
 
     @ObjCMethod("substringWithRange:")
     func substring(range: NSRange) -> String {
-        Self.string(check(range, "substringWithRange:")[Int(range.location)..<Int(range.location + range.length)])
+        Self.decoded(check(range, "substringWithRange:")[Int(range.location)..<Int(range.location + range.length)])
     }
 
     @ObjCMethod("caseInsensitiveCompare:")
