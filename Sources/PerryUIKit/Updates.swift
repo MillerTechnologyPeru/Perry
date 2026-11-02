@@ -1,3 +1,4 @@
+import Glibc
 import PerryObjCInterop
 
 // UIKit's deferred work, done once the current event or timer callback
@@ -75,5 +76,39 @@ enum Updates {
         let after = afterwards
         afterwards = []
         for body in after { ObjCRuntime.autoreleasepool { body() } }
+        ObjCRuntime.autoreleasepool { Snapshot.writeIfRequested() }
+        Display.markDirty()
     }
+}
+
+/// With PERRY_UIKIT_SNAPSHOT set to a path, each update pass writes the
+/// visible windows there as a PNG at the screen's scale, to look at what
+/// an app shows without a display.
+enum Snapshot {
+    nonisolated(unsafe) static let path: String? = getenv("PERRY_UIKIT_SNAPSHOT").map { String(cString: $0) }
+
+    static func writeIfRequested() {
+        guard let path, !Windows.visible.isEmpty,
+              let context = CG.makeContext(size: Screen.bounds.size, scale: Screen.scale, opaque: true) else { return }
+        defer { CG.release(context) }
+        let black = UIColor.black()
+        withExtendedLifetime(black) {
+            CG.setFillColorWithColor(context, black.state.makeCGColor())
+            CG.fillRect(context, Screen.bounds)
+        }
+        for window in Windows.visible {
+            window.layoutIfNeeded()
+            CG.saveGState(context)
+            CG.concatCTM(context, window.state.geometry.toSuperlayer)
+            CALayer.render(window.state.layer, in: context, root: true)
+            CG.restoreGState(context)
+        }
+        guard let image = CG.bitmapContextCreateImage(context) else { return }
+        defer { CG.release(image) }
+        UIImage.encode(image, type: "public.png")?.sendWrite(toFile: path, atomically: true)
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("writeToFile:atomically:") @discardableResult func sendWrite(toFile path: String, atomically: Bool) -> Bool
 }
