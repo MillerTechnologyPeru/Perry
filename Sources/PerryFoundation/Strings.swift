@@ -107,9 +107,8 @@ enum Strings {
     }
 
     static func install(superclass: Class) {
-        let string = ClassDefinition(PERRY_CLASS_NSString, name: "NSString", superclass: superclass,
-                                     StorageAllocated.register, NSString.register, NSString.registerAdditions)
-        stringClass = string.cls
+        let string = NSString.defineObjCClass(StorageAllocated.registerObjCMethods, NSStringAdditions.registerObjCMethods)
+        stringClass = string.storage
         string.addMethod("stringWithFormat:", types: "@24@0:8@16",
                          implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
         string.addMethod("initWithFormat:", types: "@24@0:8@16",
@@ -118,8 +117,7 @@ enum Strings {
                          implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
 
         // String literals: immortal, read in place.
-        constantClass = ClassDefinition(PERRY_CLASS_NSConstantString, name: "__NSCFConstantString",
-                                        superclass: string.cls, isStatic: true, ImmortalObject.register).cls
+        constantClass = NSCFConstantString.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
     }
 
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
@@ -130,10 +128,7 @@ enum Strings {
 
 /// NSString.
 @ObjCClass("NSString")
-public struct NSString {}
-
-@ObjCImplementation
-extension NSString {
+public class NSString: NSObject {
     /// The receiver's contents.
     var value: String { Strings.value(of: objcObject) ?? "" }
 
@@ -256,6 +251,10 @@ extension NSString {
     @ObjCMethod("doubleValue")
     func doubleValue() -> Double { value.withCString { strtod($0, nil) } }
 }
+
+/// String literals: { isa, flags, characters, length }, read in place.
+@ObjCClass("__NSCFConstantString")
+final class NSCFConstantString: NSString {}
 
 // MARK: - Variadic methods
 
