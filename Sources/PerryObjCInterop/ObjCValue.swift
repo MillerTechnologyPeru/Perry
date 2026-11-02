@@ -1,0 +1,200 @@
+// Swift values that cross the Objective-C boundary. Each has an ABI representation (`ObjCType`), a
+// type encoding, and conversions that follow Objective-C's ownership rules:
+//
+// - arguments are borrowed: valid for the duration of the call;
+// - ordinary results are +0 (autoreleased);
+// - results of alloc, new, copy, mutableCopy and init methods are +1.
+
+/// A Swift type that can be an Objective-C argument or result.
+public protocol ObjCValue {
+    /// The C-representable type the value has in a message send.
+    associatedtype ObjCType
+
+    /// The Objective-C type encoding: "q", "d", "@" and so on.
+    static var objCTypeEncoding: String { get }
+
+    /// From an argument, which the caller keeps alive during the call.
+    init(objCArgument value: ObjCType)
+    /// From a +0 result.
+    init(objCReturnValue value: ObjCType)
+    /// From a +1 result, taking ownership.
+    init(objCOwned value: ObjCType)
+
+    /// As an argument, valid until the current autorelease pool drains.
+    func objCArgument() -> ObjCType
+    /// As a +0 result.
+    func objCReturnValue() -> ObjCType
+    /// As a +1 result, for methods in the owned families.
+    func objCOwnedReturnValue() -> ObjCType
+}
+
+/// A value that crosses unchanged: numbers, Booleans, structs, pointers.
+public protocol ObjCScalar: ObjCValue where ObjCType == Self {}
+
+extension ObjCScalar {
+    @inline(__always) public init(objCArgument value: Self) { self = value }
+    @inline(__always) public init(objCReturnValue value: Self) { self = value }
+    @inline(__always) public init(objCOwned value: Self) { self = value }
+    @inline(__always) public func objCArgument() -> Self { self }
+    @inline(__always) public func objCReturnValue() -> Self { self }
+    @inline(__always) public func objCOwnedReturnValue() -> Self { self }
+}
+
+extension Int: ObjCScalar { public static var objCTypeEncoding: String { "q" } }
+extension UInt: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
+extension Int64: ObjCScalar { public static var objCTypeEncoding: String { "q" } }
+extension UInt64: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
+extension Int32: ObjCScalar { public static var objCTypeEncoding: String { "i" } }
+extension UInt32: ObjCScalar { public static var objCTypeEncoding: String { "I" } }
+extension Int16: ObjCScalar { public static var objCTypeEncoding: String { "s" } }
+extension UInt16: ObjCScalar { public static var objCTypeEncoding: String { "S" } }
+extension Int8: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
+extension UInt8: ObjCScalar { public static var objCTypeEncoding: String { "C" } }
+extension Double: ObjCScalar { public static var objCTypeEncoding: String { "d" } }
+extension Float: ObjCScalar { public static var objCTypeEncoding: String { "f" } }
+extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "B" } }
+
+// MARK: - Nullable values and Optional
+
+/// A value whose ABI form can be nil (objects, selectors, pointers), so
+/// that `Optional` of it is an ObjCValue with the same representation.
+public protocol ObjCNullable: ObjCValue {
+    static var objCNil: ObjCType { get }
+    static func objCIsNil(_ value: ObjCType) -> Bool
+}
+
+extension Optional: ObjCValue where Wrapped: ObjCNullable {
+    public typealias ObjCType = Wrapped.ObjCType
+
+    public static var objCTypeEncoding: String { Wrapped.objCTypeEncoding }
+
+    public init(objCArgument value: ObjCType) {
+        self = Wrapped.objCIsNil(value) ? nil : Wrapped(objCArgument: value)
+    }
+
+    public init(objCReturnValue value: ObjCType) {
+        self = Wrapped.objCIsNil(value) ? nil : Wrapped(objCReturnValue: value)
+    }
+
+    public init(objCOwned value: ObjCType) {
+        self = Wrapped.objCIsNil(value) ? nil : Wrapped(objCOwned: value)
+    }
+
+    public func objCArgument() -> ObjCType { map { $0.objCArgument() } ?? Wrapped.objCNil }
+    public func objCReturnValue() -> ObjCType { map { $0.objCReturnValue() } ?? Wrapped.objCNil }
+    public func objCOwnedReturnValue() -> ObjCType { map { $0.objCOwnedReturnValue() } ?? Wrapped.objCNil }
+}
+
+/// Reports nil where a non-optional Swift type was declared.
+@usableFromInline
+func objCUnexpectedNil(_ type: Any.Type) -> Never {
+    objcInteropFatal("nil was passed where \(type) was expected; declare the parameter or result optional")
+}
+
+/// `value`, which must not be nil for a non-optional `type`.
+@inline(__always)
+func objCRequire<Value>(_ value: Value?, _ type: Any.Type) -> Value {
+    guard let value else { objCUnexpectedNil(type) }
+    return value
+}
+
+// MARK: - Pointers
+
+extension UnsafeRawPointer: ObjCNullable {
+    public typealias ObjCType = UnsafeRawPointer?
+    public static var objCTypeEncoding: String { "^v" }
+    public static var objCNil: UnsafeRawPointer? { nil }
+    public static func objCIsNil(_ value: UnsafeRawPointer?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafeRawPointer?) { self = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafeRawPointer?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafeRawPointer?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafeRawPointer? { self }
+    public func objCReturnValue() -> UnsafeRawPointer? { self }
+    public func objCOwnedReturnValue() -> UnsafeRawPointer? { self }
+}
+
+extension UnsafeMutableRawPointer: ObjCNullable {
+    public typealias ObjCType = UnsafeMutableRawPointer?
+    public static var objCTypeEncoding: String { "^v" }
+    public static var objCNil: UnsafeMutableRawPointer? { nil }
+    public static func objCIsNil(_ value: UnsafeMutableRawPointer?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafeMutableRawPointer?) { self = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafeMutableRawPointer?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafeMutableRawPointer?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafeMutableRawPointer? { self }
+    public func objCReturnValue() -> UnsafeMutableRawPointer? { self }
+    public func objCOwnedReturnValue() -> UnsafeMutableRawPointer? { self }
+}
+
+extension UnsafePointer: ObjCValue, ObjCNullable {
+    public typealias ObjCType = UnsafePointer<Pointee>?
+    /// `const char *` for CChar, `r^v` otherwise.
+    public static var objCTypeEncoding: String { Pointee.self == CChar.self ? "r*" : "r^v" }
+    public static var objCNil: UnsafePointer<Pointee>? { nil }
+    public static func objCIsNil(_ value: UnsafePointer<Pointee>?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafePointer<Pointee>?) { self = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafePointer<Pointee>?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafePointer<Pointee>?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafePointer<Pointee>? { self }
+    public func objCReturnValue() -> UnsafePointer<Pointee>? { self }
+    public func objCOwnedReturnValue() -> UnsafePointer<Pointee>? { self }
+}
+
+extension UnsafeMutablePointer: ObjCValue, ObjCNullable {
+    public typealias ObjCType = UnsafeMutablePointer<Pointee>?
+    public static var objCTypeEncoding: String { Pointee.self == CChar.self ? "*" : "^v" }
+    public static var objCNil: UnsafeMutablePointer<Pointee>? { nil }
+    public static func objCIsNil(_ value: UnsafeMutablePointer<Pointee>?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafeMutablePointer<Pointee>?) { self = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafeMutablePointer<Pointee>?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafeMutablePointer<Pointee>?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafeMutablePointer<Pointee>? { self }
+    public func objCReturnValue() -> UnsafeMutablePointer<Pointee>? { self }
+    public func objCOwnedReturnValue() -> UnsafeMutablePointer<Pointee>? { self }
+}
+
+// MARK: - Selectors and classes
+
+/// A selector (SEL).
+public struct ObjCSelector: ObjCNullable, Hashable {
+    public let pointer: UnsafeRawPointer
+
+    public init(_ pointer: UnsafeRawPointer) { self.pointer = pointer }
+    public init(_ name: String) { pointer = ObjCRuntime.selector(name) }
+
+    public var name: String { String(cString: pointer.assumingMemoryBound(to: CChar.self)) }
+
+    public typealias ObjCType = UnsafeRawPointer?
+    public static var objCTypeEncoding: String { ":" }
+    public static var objCNil: UnsafeRawPointer? { nil }
+    public static func objCIsNil(_ value: UnsafeRawPointer?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafeRawPointer?) { pointer = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafeRawPointer?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafeRawPointer?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafeRawPointer? { pointer }
+    public func objCReturnValue() -> UnsafeRawPointer? { pointer }
+    public func objCOwnedReturnValue() -> UnsafeRawPointer? { pointer }
+}
+
+/// A class object (Class). Classes live forever, so it holds no reference.
+public struct ObjCClass: ObjCNullable, Hashable {
+    public let pointer: UnsafeMutableRawPointer
+
+    public init(_ pointer: UnsafeMutableRawPointer) { self.pointer = pointer }
+    public init(named name: String) { pointer = ObjCRuntime.classObject(name) }
+
+    public var superclass: ObjCClass? {
+        pointer.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self).map(ObjCClass.init)
+    }
+
+    public typealias ObjCType = UnsafeMutableRawPointer?
+    public static var objCTypeEncoding: String { "#" }
+    public static var objCNil: UnsafeMutableRawPointer? { nil }
+    public static func objCIsNil(_ value: UnsafeMutableRawPointer?) -> Bool { value == nil }
+    public init(objCArgument value: UnsafeMutableRawPointer?) { pointer = objCRequire(value, Self.self) }
+    public init(objCReturnValue value: UnsafeMutableRawPointer?) { self.init(objCArgument: value) }
+    public init(objCOwned value: UnsafeMutableRawPointer?) { self.init(objCArgument: value) }
+    public func objCArgument() -> UnsafeMutableRawPointer? { pointer }
+    public func objCReturnValue() -> UnsafeMutableRawPointer? { pointer }
+    public func objCOwnedReturnValue() -> UnsafeMutableRawPointer? { pointer }
+}
