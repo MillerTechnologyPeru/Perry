@@ -2,14 +2,17 @@ import CPerryObjC
 import Glibc
 import PerryObjCInterop
 
-/// Installs @ObjCImplementation method tables into a class the runtime
-/// built.
+/// Installs @ObjCImplementation methods into a class the runtime built.
 struct MethodTable: ObjCMethodRegistrar {
     let info: ClassInfo
 
-    init(_ info: ClassInfo, _ tables: any ObjCMethodTable.Type...) {
+    init(_ info: ClassInfo, _ registrations: ObjCMethodRegistration...) {
+        self.init(info, registrations)
+    }
+
+    init(_ info: ClassInfo, _ registrations: [ObjCMethodRegistration]) {
         self.info = info
-        for table in tables { table.register(self) }
+        for register in registrations { register(self) }
     }
 
     func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool) {
@@ -17,11 +20,6 @@ struct MethodTable: ObjCMethodRegistrar {
         Runtime.addMethod(target, Selectors.register(selector), types: permanentCString(types),
                           imp: IMP(mutating: implementation), replacing: true)
     }
-}
-
-@inline(__always)
-private func asClass(_ object: ObjectPointer?) -> ClassPointer? {
-    object?.assumingMemoryBound(to: perry_objc_class.self)
 }
 
 public enum RootClasses {
@@ -33,10 +31,11 @@ public enum RootClasses {
     }
 
     private static let once: Void = {
+        installInterop()
         let object = Runtime.makeClass(perry_objc_nsobject_class(), metaclass: perry_objc_nsobject_metaclass(),
                                        superclass: nil, name: permanentCString("NSObject"),
                                        instanceSize: 8, registerName: true)
-        _ = MethodTable(object, NSObjectMethods.self)
+        _ = MethodTable(object, NSObject.register)
         Objects.defaultRetain = Runtime.findMethod(object, Sel.retain)?.pointee.imp
         Objects.defaultRelease = Runtime.findMethod(object, Sel.release)?.pointee.imp
         Objects.defaultAutorelease = Runtime.findMethod(object, Sel.autorelease)?.pointee.imp
@@ -45,199 +44,231 @@ public enum RootClasses {
         let proto = Runtime.makeClass(perry_objc_protocol_class(), metaclass: perry_objc_protocol_metaclass(),
                                       superclass: perry_objc_nsobject_class(), name: permanentCString("Protocol"),
                                       instanceSize: 8, registerName: true)
-        _ = MethodTable(proto, ImmortalMethods.self)
+        _ = MethodTable(proto, ImmortalObject.register)
     }()
+
+    /// Points the interop layer at this runtime's functions.
+    private static func installInterop() {
+        ObjCRuntime.install(ObjCRuntimeFunctions(
+            msgSend: perry_objc_msgSend_address(),
+            msgSendSuper2: perry_objc_msgSendSuper2_address(),
+            retain: { $0.map(Objects.retain) },
+            release: { if let object = $0 { Objects.release(object) } },
+            autorelease: { $0.map(Objects.autorelease) },
+            retainBlock: { BlockClasses.copy($0) },
+            getClass: { name in name.flatMap(Runtime.lookUpClass).map(UnsafeMutableRawPointer.init) },
+            objectGetClass: { $0.map { UnsafeMutableRawPointer(classOf($0)) } },
+            registerSelector: { name in name.map { UnsafeRawPointer(Selectors.register($0)) } },
+            addMethod: { cls, selector, imp, types in
+                guard let cls, let selector, let info = Runtime.info(cls.assumingMemoryBound(to: perry_objc_class.self)),
+                      Runtime.findOwnMethod(info, selector.assumingMemoryBound(to: CChar.self)) == nil else { return false }
+                Runtime.addMethod(info, selector.assumingMemoryBound(to: CChar.self), types: types.map { permanentCString(String(cString: $0)) },
+                                  imp: imp.map(IMP.init(mutating:)), replacing: false)
+                return true
+            },
+            replaceMethod: { cls, selector, imp, types in
+                guard let cls, let selector, let info = Runtime.info(cls.assumingMemoryBound(to: perry_objc_class.self)) else { return nil }
+                let old = Runtime.addMethod(info, selector.assumingMemoryBound(to: CChar.self),
+                                            types: types.map { permanentCString(String(cString: $0)) },
+                                            imp: imp.map(IMP.init(mutating:)), replacing: true)
+                return old.map(UnsafeRawPointer.init)
+            }))
+        ObjCRuntime.poolFunctions = (push: { AutoreleasePool.push() }, pop: { AutoreleasePool.pop($0) })
+    }
 }
 
-/// NSObject, the root class.
+// MARK: - NSObject
+
+/// The root class, as the runtime implements it. Memory management methods
+/// return raw pointers so ownership passes through untouched.
+@ObjCClass("NSObject")
+struct NSObject {}
+
+extension NSObject {
+    /// -description, sent dynamically.
+    @ObjCMethod("description")
+    func dynamicDescription() -> UnsafeMutableRawPointer?
+}
+
 @ObjCImplementation
-enum NSObjectMethods {
+extension NSObject {
     // MARK: Identity
 
-    @ObjCMethod("init") static func initialize(_ object: ObjectPointer?) -> ObjectPointer? { object }
-    @ObjCMethod("self") static func this(_ object: ObjectPointer?) -> ObjectPointer? { object }
-
-    @ObjCMethod("class")
-    static func cls(_ object: ObjectPointer?) -> ClassPointer? { object.map(classOf) }
-
-    @ObjCMethod("superclass")
-    static func superclass(_ object: ObjectPointer?) -> ClassPointer? { object.flatMap { classOf($0).pointee.superclass } }
-
-    @ObjCMethod("zone") static func zone(_ object: ObjectPointer?) -> UnsafeMutableRawPointer? { nil }
-    @ObjCMethod("hash") static func hash(_ object: ObjectPointer?) -> UInt { UInt(bitPattern: object) }
-    @ObjCMethod("isEqual:") static func isEqual(_ object: ObjectPointer?, _ other: ObjectPointer?) -> Bool { object == other }
-    @ObjCMethod("isProxy") static func isProxy(_ object: ObjectPointer?) -> Bool { false }
-    @ObjCMethod("description") static func description(_ object: ObjectPointer?) -> ObjectPointer? { nil }
-
-    @ObjCMethod("debugDescription")
-    static func debugDescription(_ object: ObjectPointer?) -> ObjectPointer? { Messages.send(object, Sel.description) }
+    @ObjCMethod("init") func initialize() -> Self { self }
+    @ObjCMethod("self") func this() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("class") func cls() -> ObjCClass { objCClass }
+    @ObjCMethod("superclass") func superclass() -> ObjCClass? { objCClass.superclass }
+    @ObjCMethod("zone") func zone() -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: objcObject) }
+    @ObjCMethod("isEqual:") func isEqual(_ other: UnsafeMutableRawPointer?) -> Bool { objcObject == other }
+    @ObjCMethod("isProxy") func isProxy() -> Bool { false }
+    @ObjCMethod("description") func description() -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("debugDescription") func debugDescription() -> UnsafeMutableRawPointer? { dynamicDescription() }
 
     // MARK: Lifetime
 
-    @ObjCMethod("dealloc")
-    static func dealloc(_ object: ObjectPointer?) {
-        if let object { Objects.dispose(object) }
-    }
+    @ObjCMethod("dealloc") func dealloc() { Objects.dispose(objcObject) }
 
     @ObjCMethod("retain")
-    static func retain(_ object: ObjectPointer?) -> ObjectPointer? {
-        if let object { RetainCounts.retain(object) }
-        return object
+    func retain() -> UnsafeMutableRawPointer {
+        RetainCounts.retain(objcObject)
+        return objcObject
     }
 
     @ObjCMethod("release", types: "Vv16@0:8")
-    static func release(_ object: ObjectPointer?) {
-        if let object, RetainCounts.release(object) {
-            Messages.sendVoid(object, Sel.dealloc)
+    func release() {
+        if RetainCounts.release(objcObject) {
+            Messages.sendVoid(objcObject, Sel.dealloc)
         }
     }
 
     @ObjCMethod("autorelease")
-    static func autorelease(_ object: ObjectPointer?) -> ObjectPointer? {
-        if let object { AutoreleasePool.add(object) }
-        return object
+    func autorelease() -> UnsafeMutableRawPointer {
+        AutoreleasePool.add(objcObject)
+        return objcObject
     }
 
-    @ObjCMethod("retainCount")
-    static func retainCount(_ object: ObjectPointer?) -> UInt { object.map { RetainCounts.count($0) } ?? 0 }
+    @ObjCMethod("retainCount") func retainCount() -> UInt { RetainCounts.count(objcObject) }
 
     @ObjCMethod("copy")
-    static func copy(_ object: ObjectPointer?) -> ObjectPointer? { Messages.send(object, Sel.copyWithZone, nil) }
+    func copy() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.copyWithZone, nil) }
 
     @ObjCMethod("mutableCopy")
-    static func mutableCopy(_ object: ObjectPointer?) -> ObjectPointer? {
-        Messages.send(object, Sel.mutableCopyWithZone, nil)
-    }
+    func mutableCopy() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.mutableCopyWithZone, nil) }
 
     // MARK: Introspection
 
     @ObjCMethod("isKindOfClass:")
-    static func isKind(_ object: ObjectPointer?, of target: ClassPointer?) -> Bool {
-        guard let object else { return false }
-        var cls: ClassPointer? = classOf(object)
-        while let current = cls {
-            if current == target { return true }
-            cls = current.pointee.superclass
+    func isKind(of target: ObjCClass?) -> Bool {
+        var current: ObjCClass? = objCClass
+        while let cls = current {
+            if cls == target { return true }
+            current = cls.superclass
         }
         return false
     }
 
     @ObjCMethod("isMemberOfClass:")
-    static func isMember(_ object: ObjectPointer?, of target: ClassPointer?) -> Bool {
-        object.map { classOf($0) == target } ?? false
-    }
+    func isMember(of target: ObjCClass?) -> Bool { objCClass == target }
 
     @ObjCMethod("respondsToSelector:")
-    static func responds(_ object: ObjectPointer?, to selector: SEL?) -> Bool {
-        guard let object, let selector, let info = Runtime.info(classOf(object)) else { return false }
-        return Runtime.responds(info, selector)
+    func responds(to selector: ObjCSelector?) -> Bool {
+        guard let selector, let info = Runtime.info(classOf(objcObject)) else { return false }
+        return Runtime.responds(info, selector.pointer.assumingMemoryBound(to: CChar.self))
     }
 
     @ObjCMethod("conformsToProtocol:")
-    static func conforms(_ object: ObjectPointer?, to proto: UnsafeMutableRawPointer?) -> Bool {
-        guard let object, let proto, let info = Runtime.info(classOf(object)) else { return false }
+    func conforms(to proto: UnsafeMutableRawPointer?) -> Bool {
+        guard let proto, let info = Runtime.info(classOf(objcObject)) else { return false }
         return Protocols.classOrSuperclassConforms(info, to: proto.assumingMemoryBound(to: perry_protocol.self))
     }
 
     @ObjCMethod("methodForSelector:")
-    static func method(_ object: ObjectPointer?, for selector: SEL?) -> UnsafeMutableRawPointer? {
-        guard let object, let selector else { return nil }
-        return Runtime.lookUpIMP(receiver: object, selector: selector, cls: classOf(object))
+    func method(for selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
+        guard let selector else { return nil }
+        return Runtime.lookUpIMP(receiver: objcObject, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
+                                 cls: classOf(objcObject))
     }
 
     // MARK: Sending
 
     @ObjCMethod("performSelector:")
-    static func perform(_ object: ObjectPointer?, _ selector: SEL?) -> ObjectPointer? {
-        selector.flatMap { Messages.send(object, $0) }
+    func perform(_ selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
+        selector.flatMap { Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self)) }
     }
 
     @ObjCMethod("performSelector:withObject:")
-    static func perform(_ object: ObjectPointer?, _ selector: SEL?, with argument: ObjectPointer?) -> ObjectPointer? {
-        selector.flatMap { Messages.send(object, $0, UnsafeRawPointer(argument)) }
+    func perform(_ selector: ObjCSelector?, with argument: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        selector.flatMap { Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(argument)) }
     }
 
     @ObjCMethod("performSelector:withObject:withObject:")
-    static func perform(_ object: ObjectPointer?, _ selector: SEL?, with first: ObjectPointer?,
-                        with second: ObjectPointer?) -> ObjectPointer? {
-        selector.flatMap { Messages.send(object, $0, UnsafeRawPointer(first), UnsafeRawPointer(second)) }
+    func perform(_ selector: ObjCSelector?, with first: UnsafeMutableRawPointer?,
+                 with second: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        selector.flatMap {
+            Messages.send(objcObject, $0.pointer.assumingMemoryBound(to: CChar.self), UnsafeRawPointer(first), UnsafeRawPointer(second))
+        }
     }
 
     @ObjCMethod("forwardingTargetForSelector:")
-    static func forwardingTarget(_ object: ObjectPointer?, for selector: SEL?) -> ObjectPointer? { nil }
+    func forwardingTarget(for selector: ObjCSelector?) -> UnsafeMutableRawPointer? { nil }
 
     @ObjCMethod("doesNotRecognizeSelector:")
-    static func doesNotRecognize(_ object: ObjectPointer?, _ selector: SEL?) {
-        if let object, let selector { Runtime.unrecognized(object, selector) }
+    func doesNotRecognize(_ selector: ObjCSelector?) {
+        if let selector { Runtime.unrecognized(objcObject, selector.pointer.assumingMemoryBound(to: CChar.self)) }
     }
 
     // MARK: Class methods
 
+    private static func classPointer(_ cls: ObjCClass) -> ClassPointer {
+        cls.pointer.assumingMemoryBound(to: perry_objc_class.self)
+    }
+
     @ObjCClassMethod("alloc")
-    static func alloc(_ cls: ObjectPointer?) -> ObjectPointer? { asClass(cls).flatMap { Objects.createInstance($0) } }
+    static func alloc(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { Objects.createInstance(classPointer(cls)) }
 
     @ObjCClassMethod("allocWithZone:")
-    static func alloc(_ cls: ObjectPointer?, zone: UnsafeMutableRawPointer?) -> ObjectPointer? { alloc(cls) }
+    static func alloc(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { alloc(cls) }
 
     @ObjCClassMethod("new")
-    static func new(_ cls: ObjectPointer?) -> ObjectPointer? { Messages.send(Messages.send(cls, Sel.alloc), Sel.`init`) }
+    static func new(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
+        Messages.send(Messages.send(cls.pointer, Sel.alloc), Sel.`init`)
+    }
 
-    @ObjCClassMethod("class") static func classSelf(_ cls: ObjectPointer?) -> ClassPointer? { asClass(cls) }
-
-    @ObjCClassMethod("superclass")
-    static func classSuperclass(_ cls: ObjectPointer?) -> ClassPointer? { asClass(cls)?.pointee.superclass }
-
-    @ObjCClassMethod("initialize") static func classInitialize(_ cls: ObjectPointer?) {}
-    @ObjCClassMethod("description") static func classDescription(_ cls: ObjectPointer?) -> ObjectPointer? { nil }
+    @ObjCClassMethod("class") static func classSelf(_ cls: ObjCClass) -> ObjCClass { cls }
+    @ObjCClassMethod("superclass") static func classSuperclass(_ cls: ObjCClass) -> ObjCClass? { cls.superclass }
+    @ObjCClassMethod("initialize") static func classInitialize() {}
+    @ObjCClassMethod("description") static func classDescription() -> UnsafeMutableRawPointer? { nil }
 
     @ObjCClassMethod("instancesRespondToSelector:")
-    static func instancesRespond(_ cls: ObjectPointer?, to selector: SEL?) -> Bool {
-        guard let cls = asClass(cls), let selector, let info = Runtime.info(cls) else { return false }
-        return Runtime.responds(info, selector)
+    static func instancesRespond(_ cls: ObjCClass, to selector: ObjCSelector?) -> Bool {
+        guard let selector, let info = Runtime.info(classPointer(cls)) else { return false }
+        return Runtime.responds(info, selector.pointer.assumingMemoryBound(to: CChar.self))
     }
 
     @ObjCClassMethod("isSubclassOfClass:")
-    static func isSubclass(_ cls: ObjectPointer?, of target: ClassPointer?) -> Bool {
-        var current = asClass(cls)
+    static func isSubclass(_ cls: ObjCClass, of target: ObjCClass?) -> Bool {
+        var current: ObjCClass? = cls
         while let c = current {
             if c == target { return true }
-            current = c.pointee.superclass
+            current = c.superclass
         }
         return false
     }
 
     @ObjCClassMethod("conformsToProtocol:")
-    static func classConforms(_ cls: ObjectPointer?, to proto: UnsafeMutableRawPointer?) -> Bool {
-        guard let cls = asClass(cls), let proto, let info = Runtime.info(cls) else { return false }
+    static func classConforms(_ cls: ObjCClass, to proto: UnsafeMutableRawPointer?) -> Bool {
+        guard let proto, let info = Runtime.info(classPointer(cls)) else { return false }
         return Protocols.classOrSuperclassConforms(info, to: proto.assumingMemoryBound(to: perry_protocol.self))
     }
 
-    @ObjCClassMethod("resolveClassMethod:")
-    static func resolveClassMethod(_ cls: ObjectPointer?, _ selector: SEL?) -> Bool { false }
-
-    @ObjCClassMethod("resolveInstanceMethod:")
-    static func resolveInstanceMethod(_ cls: ObjectPointer?, _ selector: SEL?) -> Bool { false }
+    @ObjCClassMethod("resolveClassMethod:") static func resolveClassMethod(_ selector: ObjCSelector?) -> Bool { false }
+    @ObjCClassMethod("resolveInstanceMethod:") static func resolveInstanceMethod(_ selector: ObjCSelector?) -> Bool { false }
 
     @ObjCClassMethod("instanceMethodForSelector:")
-    static func instanceMethod(_ cls: ObjectPointer?, for selector: SEL?) -> UnsafeMutableRawPointer? {
-        guard let cls = asClass(cls), let selector else { return nil }
-        return Runtime.lookUpIMP(receiver: nil, selector: selector, cls: cls)
+    static func instanceMethod(_ cls: ObjCClass, for selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
+        guard let selector else { return nil }
+        return Runtime.lookUpIMP(receiver: nil, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
+                                 cls: classPointer(cls))
     }
 
     // Classes are never deallocated.
-    @ObjCClassMethod("retain") static func classRetain(_ cls: ObjectPointer?) -> ObjectPointer? { cls }
-    @ObjCClassMethod("release", types: "Vv16@0:8") static func classRelease(_ cls: ObjectPointer?) {}
-    @ObjCClassMethod("autorelease") static func classAutorelease(_ cls: ObjectPointer?) -> ObjectPointer? { cls }
-    @ObjCClassMethod("retainCount") static func classRetainCount(_ cls: ObjectPointer?) -> UInt { UInt.max }
+    @ObjCClassMethod("retain") static func classRetain(_ cls: ObjCClass) -> UnsafeMutableRawPointer { cls.pointer }
+    @ObjCClassMethod("release", types: "Vv16@0:8") static func classRelease() {}
+    @ObjCClassMethod("autorelease") static func classAutorelease(_ cls: ObjCClass) -> UnsafeMutableRawPointer { cls.pointer }
+    @ObjCClassMethod("retainCount") static func classRetainCount() -> UInt { UInt.max }
 }
 
 /// retain, release and autorelease for objects that live forever.
+@ObjCClass("NSObject")
+struct ImmortalObject {}
+
 @ObjCImplementation
-enum ImmortalMethods {
-    @ObjCMethod("retain") static func retain(_ object: ObjectPointer?) -> ObjectPointer? { object }
-    @ObjCMethod("release", types: "Vv16@0:8") static func release(_ object: ObjectPointer?) {}
-    @ObjCMethod("autorelease") static func autorelease(_ object: ObjectPointer?) -> ObjectPointer? { object }
-    @ObjCMethod("retainCount") static func retainCount(_ object: ObjectPointer?) -> UInt { UInt.max }
+extension ImmortalObject {
+    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("release", types: "Vv16@0:8") func release() {}
+    @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("retainCount") func retainCount() -> UInt { UInt.max }
 }
 
 /// The block classes, built inside libSystem's _NSConcrete*Block storage
@@ -282,53 +313,60 @@ public enum BlockClasses {
         base.initialize(repeating: perry_objc_class(), count: 2)
         let block = Runtime.makeClass(base, metaclass: base + 1, superclass: RootClasses.nsObject,
                                       name: permanentCString("NSBlock"), instanceSize: 8, registerName: true)
-        _ = MethodTable(block, NSBlockMethods.self)
+        _ = MethodTable(block, NSBlock.register)
 
-        func make(_ name: String, _ storage: UnsafeMutableRawPointer?, _ tables: any ObjCMethodTable.Type...) {
+        func make(_ name: String, _ storage: UnsafeMutableRawPointer?, _ registrations: ObjCMethodRegistration...) {
             guard let storage else { return }
             let info = Runtime.makeClass(storage.assumingMemoryBound(to: perry_objc_class.self),
                                          metaclass: (storage + 128).assumingMemoryBound(to: perry_objc_class.self),
                                          superclass: block.cls, name: permanentCString(name),
                                          instanceSize: 8, registerName: true)
-            for table in tables { table.register(MethodTable(info)) }
+            _ = MethodTable(info, registrations)
         }
         // Heap blocks are reference counted by the blocks runtime; stack and
         // global blocks are not, and copying a stack block moves it to the heap.
-        make("__NSMallocBlock__", storage.malloc, HeapBlockMethods.self)
-        make("__NSAutoBlock__", storage.auto, HeapBlockMethods.self)
-        make("__NSFinalizingBlock__", storage.finalizing, HeapBlockMethods.self)
-        make("__NSStackBlock__", storage.stack, ImmortalMethods.self)
-        make("__NSGlobalBlock__", storage.global, ImmortalMethods.self)
-        make("__NSBlockVariable__", storage.weakVariable, ImmortalMethods.self)
+        make("__NSMallocBlock__", storage.malloc, HeapBlock.register)
+        make("__NSAutoBlock__", storage.auto, HeapBlock.register)
+        make("__NSFinalizingBlock__", storage.finalizing, HeapBlock.register)
+        make("__NSStackBlock__", storage.stack, ImmortalObject.register)
+        make("__NSGlobalBlock__", storage.global, ImmortalObject.register)
+        make("__NSBlockVariable__", storage.weakVariable, ImmortalObject.register)
     }
 }
 
+/// Blocks, whose classes are built in libSystem's storage.
+@ObjCClass("NSBlock")
+struct NSBlock {}
+
 @ObjCImplementation
-enum NSBlockMethods {
-    @ObjCMethod("copy") static func copy(_ block: ObjectPointer?) -> ObjectPointer? { BlockClasses.copy(block) }
+extension NSBlock {
+    @ObjCMethod("copy") func copy() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ block: ObjectPointer?, zone: UnsafeMutableRawPointer?) -> ObjectPointer? { BlockClasses.copy(block) }
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
 
     /// Calls a block that takes no arguments.
     @ObjCMethod("invoke")
-    static func invoke(_ block: ObjectPointer?) {
-        guard let block else { return }
+    func invoke() {
         typealias Invoke = @convention(c) (ObjectPointer) -> Void
-        unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(block)
+        unsafeBitCast(objcObject.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
     }
 }
 
+/// Heap blocks, reference counted by the blocks runtime.
+@ObjCClass("__NSMallocBlock__")
+struct HeapBlock {}
+
 @ObjCImplementation
-enum HeapBlockMethods {
-    @ObjCMethod("retain") static func retain(_ block: ObjectPointer?) -> ObjectPointer? { BlockClasses.copy(block) }
-    @ObjCMethod("release", types: "Vv16@0:8") static func release(_ block: ObjectPointer?) { BlockClasses.release(block) }
+extension HeapBlock {
+    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
+    @ObjCMethod("release", types: "Vv16@0:8") func release() { BlockClasses.release(objcObject) }
 
     @ObjCMethod("autorelease")
-    static func autorelease(_ block: ObjectPointer?) -> ObjectPointer? {
-        if let block { AutoreleasePool.add(block) }
-        return block
+    func autorelease() -> UnsafeMutableRawPointer {
+        AutoreleasePool.add(objcObject)
+        return objcObject
     }
 
-    @ObjCMethod("retainCount") static func retainCount(_ block: ObjectPointer?) -> UInt { 1 }
+    @ObjCMethod("retainCount") func retainCount() -> UInt { 1 }
 }
