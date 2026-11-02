@@ -28,6 +28,8 @@ let package = Package(
         .library(name: "PerryCFNetwork", type: .dynamic, targets: ["PerryCFNetwork"]),
         // Security.
         .library(name: "PerrySecurity", type: .dynamic, targets: ["PerrySecurity"]),
+        // UniformTypeIdentifiers, and MobileCoreServices' UTType functions.
+        .library(name: "PerryUniformTypeIdentifiers", type: .dynamic, targets: ["PerryUniformTypeIdentifiers"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -152,6 +154,12 @@ let package = Package(
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
                 .product(name: "X509", package: "swift-certificates"),
             ],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // UTType and the type database.
+        .target(
+            name: "PerryUniformTypeIdentifiers",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
