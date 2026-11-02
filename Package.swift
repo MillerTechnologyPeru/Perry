@@ -32,6 +32,8 @@ let package = Package(
         .library(name: "PerryUniformTypeIdentifiers", type: .dynamic, targets: ["PerryUniformTypeIdentifiers"]),
         // Accelerate: vDSP, vForce and vImage, with BLAS and LAPACK from OpenBLAS.
         .library(name: "PerryAccelerate", type: .dynamic, targets: ["PerryAccelerate"]),
+        // JavaScriptCore over WebKitGTK's.
+        .library(name: "PerryJavaScriptCore", type: .dynamic, targets: ["PerryJavaScriptCore"]),
         // UserNotifications.
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         // Core Data.
@@ -168,6 +170,15 @@ let package = Package(
         .target(
             name: "PerryUniformTypeIdentifiers",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // WebKitGTK's JavaScriptCore, whose C API is Apple's, and the
+        // Objective-C API built on it.
+        .systemLibrary(name: "CJavaScriptCore", pkgConfig: "javascriptcoregtk-4.1"),
+        .target(name: "CPerryJavaScriptCore"),
+        .target(
+            name: "PerryJavaScriptCore",
+            dependencies: ["CJavaScriptCore", "CPerryJavaScriptCore", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Notification content, triggers and requests, and a center that
