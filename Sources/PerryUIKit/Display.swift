@@ -2,13 +2,16 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-// The live view: with an X11 display (DISPLAY set, PERRY_UIKIT_DISPLAY not
-// "0"), the screen is an X window showing the visible windows, redrawn
-// after each update pass and as touches change things. The mouse is a
-// finger: pressing, dragging and releasing it are a touch, which Touches
-// delivers; the wheel scrolls. libX11 is loaded when the first window
-// appears, so nothing needs it without a display.
-// PERRY_UIKIT_DISPLAY_SCALE sets the window's pixels per point (1).
+// The live view: with a display (DISPLAY or WAYLAND_DISPLAY set,
+// PERRY_UIKIT_DISPLAY not "0"), the screen is a window showing the visible
+// windows, redrawn after each update pass and as touches change things.
+// The mouse is a finger: pressing, dragging and releasing it are a touch,
+// which Touches delivers; the wheel scrolls. With libSDL3, layers are
+// composited on the GPU (Compositor); without it, or with
+// PERRY_UIKIT_RENDERER=software, the window is an X11 window drawn in
+// software. The libraries are loaded when the first window appears, so
+// nothing needs them without a display. PERRY_UIKIT_DISPLAY_SCALE sets the
+// window's pixels per point (1).
 
 enum Display {
     typealias Pointer = UnsafeMutableRawPointer
@@ -43,8 +46,10 @@ enum Display {
         dispatchTime = lookup(library, "_dispatch_time").map { unsafeBitCast($0, to: DispatchTime.self) }
     }
 
+    nonisolated(unsafe) private static var compositor: Compositor?
+
     static var wanted: Bool {
-        guard getenv("DISPLAY") != nil else { return false }
+        guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil else { return false }
         if let setting = getenv("PERRY_UIKIT_DISPLAY"), String(cString: setting) == "0" { return false }
         return true
     }
@@ -54,6 +59,13 @@ enum Display {
         guard !started, wanted else { return }
         started = true
         if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { scale = value }
+        let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
+        let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
+        if !software, SDL.load(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
+            Display.compositor = compositor
+            tick()
+            return
+        }
         guard let library = dlopen("libX11.so.6", RTLD_NOW) else {
             uikitWarning("no libX11 for the display; running without one")
             return
@@ -90,7 +102,6 @@ enum Display {
         let screen = screenOf(display)
         let width = Int((Screen.bounds.width * scale).rounded()), height = Int((Screen.bounds.height * scale).rounded())
         let window = create(display, root(display, screen), 0, 0, UInt32(width), UInt32(height), 0, 0, 0)
-        let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
         _ = title.withCString { storeName(display, window, $0) }
         // Key press, button press and release, pointer motion, exposure.
         _ = selectInput(display, window, 1 << 0 | 1 << 2 | 1 << 3 | 1 << 6 | 1 << 15)
@@ -111,12 +122,28 @@ enum Display {
     static func markDirty() { dirty = true }
 
     /// Whether frames are being shown.
-    static var isLive: Bool { x != nil }
+    static var isLive: Bool { x != nil || compositor != nil }
 
     /// Handles the X events waiting, moves momentum scrolling on, and
     /// redraws when something changed; then again in a sixtieth of a second.
     private static func tick() {
-        if let x, let display {
+        if let compositor {
+            if compositor.handleEvents() { exit(0) }
+            ObjCRuntime.autoreleasepool {
+                Touches.step()
+                Animations.step()
+            }
+            let now = Clock.now
+            if dirty || now - lastDraw > 0.5 {
+                dirty = false
+                lastDraw = now
+                ObjCRuntime.autoreleasepool {
+                    let windows = Windows.visible
+                    for window in windows { window.layoutIfNeeded() }
+                    compositor.draw(windows)
+                }
+            }
+        } else if let x, let display {
             var event = [UInt64](repeating: 0, count: 24)
             while x.pending(display) > 0 {
                 event.withUnsafeMutableBytes { _ = x.nextEvent(display, $0.baseAddress) }
