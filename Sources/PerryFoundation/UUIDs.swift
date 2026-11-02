@@ -29,17 +29,13 @@ enum UUIDs {
     }
 
     static func install(superclass: Class) {
-        uuidClass = ClassDefinition(PERRY_CLASS_NSUUID, name: "NSUUID", superclass: superclass,
-                                    StorageAllocated.register, NSUUID.register).cls
+        uuidClass = NSUUID.defineObjCClass(StorageAllocated.registerObjCMethods).storage
     }
 }
 
 /// NSUUID.
 @ObjCClass("NSUUID")
-public struct NSUUID {}
-
-@ObjCImplementation
-extension NSUUID {
+public final class NSUUID: NSObject {
     var uuid: UUID? { UUIDs.uuid(objcObject) }
 
     private func setUUID(_ uuid: UUID?) -> Self? {
