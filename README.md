@@ -8,7 +8,8 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 
 ## Status
 
-The loader runs C-only iOS binaries and `.app` bundles.
+The loader runs C and Objective-C iOS binaries and `.app` bundles that use
+libSystem and libobjc. Foundation and UIKit are not provided yet.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -21,9 +22,12 @@ The loader runs C-only iOS binaries and `.app` bundles.
 - `LC_BUILD_VERSION` / `LC_VERSION_MIN_*` platforms; encrypted binaries
   (`cryptid != 0`) and arm64e are rejected with a clear error
 - Unresolved imports bind to stubs that name the missing symbol when called
+- An Objective-C runtime for Apple's arm64 ABI (`libPerryobjc`): classes,
+  categories, protocols, `+load` and `+initialize`, message caching, ARC,
+  `__weak`, autorelease pools, associated objects and blocks
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
-`dlopen` from Mach-O code, Objective-C, Swift.
+`dlopen` from Mach-O code, Objective-C exceptions, Foundation, Swift.
 
 ## Layout
 
@@ -31,7 +35,10 @@ Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 | --- | --- |
 | `Sources/PerryLoaderCore` | Mach-O loader library (C) |
 | `Sources/PerryLoader` | `perry` executable |
-| `Sources/PerrySystem` | `libPerrySystem.so`: Darwin libSystem over glibc (C, assembly) |
+| `Sources/PerrySystem` | `libPerrySystem.so`: Darwin libSystem over glibc, and the blocks runtime (C, assembly) |
+| `Sources/PerryObjC` | `libPerryobjc.so`: libobjc's C API under Darwin names (Swift) |
+| `Sources/PerryObjCRuntime` | Objective-C runtime engine (Swift) |
+| `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryInterface` | Loader/provider interface header |
 | `Tests/PerryLoaderTests` | Swift Testing suite |
 | `Tests/Fixtures` | arm64 iOS test programs and stub `.tbd` link libraries |
@@ -119,6 +126,20 @@ numbering through `__error()`, synchronised with glibc's errno.
 Known ABI gaps: struct layouts (`stat`, `dirent`, pthread types),
 `open`/`fcntl` flag values, ctype tables, locale, and stack-passed
 non-variadic arguments narrower than 8 bytes, which Apple packs.
+
+**Objective-C.** `libPerryobjc` reads the metadata clang and ld64 emit
+into Mach-O images: class lists, `class_ro_t`, relative and absolute method
+lists, categories, protocols and ivar offsets. The loader calls
+`perry_provider_image_init` for each image before its initializers, where
+dyld would notify the runtime; the runtime uniques selector references,
+realizes classes, attaches categories and calls `+load`. Each class's
+`cache` field points at the runtime's state, whose first word is a method
+cache that `objc_msgSend` (assembly) probes before calling into Swift.
+Retain counts live in a side table. The runtime, `NSObject` and the block
+classes are written in Swift and exported with `@c`; only `objc_msgSend`,
+forwarding and the `$`-named data symbols are C and assembly. Blocks are
+classes built inside libSystem's `_NSConcrete*Block` storage, which the
+runtime reaches through the loader's `lookup_symbol`.
 
 **Licensing.** The loader is written from Apple's published Mach-O format
 descriptions. It does not use code from Machismo (GPL-3.0), so Perry stays

@@ -118,15 +118,57 @@ struct LoaderTests {
             "objc-class-conforms\tAnimal\tGreeting",
             "objc-protocol-defined\tWagging",
             "objc-category-conforms\tAnimal(Extras)\tWagging",
-            "objc-class-referenced\tNSObject\tunresolved",
+            "objc-class-referenced\tNSObject\tresolved",
             "objc-selector\tsetLegs:",
             "objc-selector\tspeak",
-            "unresolved\t/usr/lib/libobjc.A.dylib\t_objc_msgSend",
-            "unresolved\t/usr/lib/libSystem.B.dylib\t__NSConcreteStackBlock",
-            "dependency\t/usr/lib/libobjc.A.dylib\tmissing",
         ] {
             #expect(lines.contains(expected), "missing report line: \(expected)")
         }
+        // libPerryobjc and libPerrySystem provide every import.
+        #expect(lines.contains { $0.hasPrefix("dependency\t/usr/lib/libobjc.A.dylib\t") && $0.hasSuffix("/libPerryobjc.so") })
+        #expect(!lines.contains { $0.hasPrefix("unresolved\t") })
+    }
+
+    @Test("Objective-C classes, categories, +load and blocks run")
+    func objectiveCRuns() throws {
+        let exe = try FixtureBuilder.executable("zoo.m", variant: "-run", libraries: [FixtureBuilder.stub("libobjc")])
+        let result = try runPerry([exe.path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout == "Dog +load\nwoof legs=4\nwag\n")
+    }
+
+    @Test("The Objective-C runtime initializes, deallocates and zeroes weak references")
+    func objectiveCRuntime() throws {
+        let exe = try FixtureBuilder.executable("runtime.m", libraries: [FixtureBuilder.stub("libobjc")])
+        let result = try runPerry([exe.path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "+initialize Base",
+            "+initialize Derived",
+            "derived base",
+            "responds 1 0",
+            "kind 1 0",
+            "weak set",
+            "dealloc base",          // the scoped object
+            "weak nil",
+            "dealloc base",          // parent, then its ivar
+            "dealloc derived",
+            "dealloc base",          // owner, then its associated object
+            "dealloc derived",
+            "in pool",
+            "dealloc base",          // autoreleased, freed when the pool pops
+            "after pool",
+            "dealloc derived",
+        ])
+    }
+
+    @Test("Unrecognized selectors abort with Apple's message")
+    func unrecognizedSelector() throws {
+        let exe = try FixtureBuilder.executable("runtime.m", variant: "-unrecognized",
+                                                libraries: [FixtureBuilder.stub("libobjc")])
+        let result = try runPerry([exe.path, "crash"], environment: ["SWIFT_BACKTRACE": "enable=no"])
+        #expect(result.signaled)
+        #expect(result.stderr.contains("-[Derived missingMethod]: unrecognized selector sent to instance 0x"))
     }
 
     @Test("Images are mapped in the low 64 GB like dyld")

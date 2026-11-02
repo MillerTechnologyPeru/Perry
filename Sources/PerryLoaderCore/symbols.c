@@ -230,6 +230,12 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
     return NULL;
 }
 
+void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name) {
+    perry_provider *provider = perry_find_provider(loader, install_name);
+    perry_symbol sym = {0};
+    return provider && provider_lookup(provider, name, &sym) ? sym.address : NULL;
+}
+
 static bool provider_lookup(perry_provider *provider, const char *name, perry_symbol *out) {
     void *sym = dlsym(provider->handle, name);
     if (!sym)

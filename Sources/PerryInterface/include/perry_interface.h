@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-#define PERRY_STARTUP_INFO_VERSION 1
+#define PERRY_STARTUP_INFO_VERSION 2
 
 typedef struct perry_startup_info {
     uint32_t version;
@@ -17,11 +17,29 @@ typedef struct perry_startup_info {
     const char *executable_path;
     const char *bundle_path;        // NULL when not launched from a bundle
     const void *main_header;        // mach header of the main executable
+
+    // Version 2.
+    // Looks up a symbol by its Mach-O name ("__Block_copy") in the provider
+    // standing in for `install_name`, loading it if needed. NULL if missing.
+    void *(*lookup_symbol)(const char *install_name, const char *name);
 } perry_startup_info;
 
 // Providers may export this function. The loader calls it after mapping and
 // binding every image, before any Mach-O initializer runs.
 typedef void (*perry_provider_startup_fn)(const perry_startup_info *info);
 #define PERRY_PROVIDER_STARTUP_SYMBOL "perry_provider_startup"
+
+typedef struct perry_image_info {
+    const void *header;             // mach_header_64 in memory
+    intptr_t slide;                 // added to the image's unslid vmaddrs
+    const char *path;
+} perry_image_info;
+
+// Providers may export this function. The loader calls it for each Mach-O
+// image after its dependencies are initialized and just before its own
+// initializers run: where dyld notifies the Objective-C runtime, which
+// registers the image's classes and calls +load here.
+typedef void (*perry_provider_image_fn)(const perry_image_info *image);
+#define PERRY_PROVIDER_IMAGE_INIT_SYMBOL "perry_provider_image_init"
 
 #endif

@@ -601,6 +601,16 @@ static const char *program_name;
 
 typedef void (*initializer_fn)(int, char **, char **, char **, const struct program_vars *);
 
+// Providers' image hooks (perry_provider_image_init), found at startup.
+static perry_provider_image_fn *image_hooks;
+static uint32_t image_hook_count;
+
+static void notify_image_init(perry_image *image) {
+    perry_image_info info = { image->header, image->slide, image->path };
+    for (uint32_t i = 0; i < image_hook_count; i++)
+        image_hooks[i](&info);
+}
+
 static void run_image_initializers(perry_loader *loader, perry_image *image, int argc, char **argv,
                                    char **envp, char **apple) {
     if (image->initialized || image->initializing)
@@ -609,6 +619,8 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
     for (uint32_t i = 0; i < image->dep_count; i++)
         if (image->deps[i].image)
             run_image_initializers(loader, image->deps[i].image, argc, argv, envp, apple);
+
+    notify_image_init(image);
 
     struct program_vars vars = {
         image->header, &program_argc, &program_argv, &program_envp, &program_name,
@@ -638,9 +650,16 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
     image->initialized = true;
 }
 
+static perry_loader *startup_loader;
+
+static void *lookup_symbol(const char *install_name, const char *name) {
+    return perry_provider_symbol(startup_loader, install_name, name);
+}
+
 // Passes the program's arguments and bundle to providers, e.g. for
 // _NSGetArgv in libSystem and the main bundle in Foundation.
 static void start_providers(perry_loader *loader, perry_image *image) {
+    startup_loader = loader;
     perry_startup_info info = {
         .version = PERRY_STARTUP_INFO_VERSION,
         .argc = program_argc,
@@ -650,6 +669,7 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         .executable_path = image->path,
         .bundle_path = loader->bundle_path,
         .main_header = image->header,
+        .lookup_symbol = lookup_symbol,
     };
     // Several install names may share one provider; start each library once.
     for (uint32_t i = 0; i < loader->provider_count; i++) {
@@ -662,6 +682,11 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         perry_provider_startup_fn fn = (perry_provider_startup_fn)dlsym(handle, PERRY_PROVIDER_STARTUP_SYMBOL);
         if (fn)
             fn(&info);
+        perry_provider_image_fn hook = (perry_provider_image_fn)dlsym(handle, PERRY_PROVIDER_IMAGE_INIT_SYMBOL);
+        if (hook) {
+            image_hooks = realloc(image_hooks, sizeof(*image_hooks) * (image_hook_count + 1));
+            image_hooks[image_hook_count++] = hook;
+        }
     }
 }
 

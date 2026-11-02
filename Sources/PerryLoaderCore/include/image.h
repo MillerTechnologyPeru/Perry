@@ -128,6 +128,7 @@ typedef struct perry_symbol {
 perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal, const char *name, bool weak_import);
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth);
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name);
+void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name);
 void *perry_unresolved_stub(const char *library, const char *name);
 
 // Import records, for reports and diagnostics.

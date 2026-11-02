@@ -8,6 +8,8 @@ let package = Package(
         .executable(name: "perry", targets: ["PerryLoader"]),
         // Darwin libSystem ABI over glibc, loaded by perry as a provider.
         .library(name: "PerrySystem", type: .dynamic, targets: ["PerrySystem"]),
+        // Objective-C runtime, the provider for /usr/lib/libobjc.A.dylib.
+        .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -23,6 +25,18 @@ let package = Package(
             name: "PerrySystem",
             dependencies: ["PerryInterface"],
             linkerSettings: [.linkedLibrary("m")]
+        ),
+        // Objective-C runtime: Apple's metadata layouts and objc_msgSend.
+        .target(name: "CPerryObjC"),
+        // Objective-C runtime engine.
+        .target(
+            name: "PerryObjCRuntime",
+            dependencies: ["CPerryObjC"]
+        ),
+        // libobjc's C API under Darwin symbol names.
+        .target(
+            name: "PerryObjC",
+            dependencies: ["PerryObjCRuntime", "CPerryObjC", "PerryInterface"]
         ),
         .testTarget(
             name: "PerryLoaderTests",

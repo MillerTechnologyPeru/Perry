@@ -17,7 +17,7 @@ struct DarwinFixtureTests {
             "bundle\t\(app.resolvingSymlinksInPath().path)\torg.perry.fixture.menagerie",
             "objc-class-defined\tAnimal",
             "objc-class-defined\tDog",
-            "objc-class-referenced\tNSObject\tunresolved",
+            "objc-class-referenced\tNSObject\tresolved",
             "objc-protocol-defined\tGreeting",
             // Protocols are emitted in every image that uses them, so the
             // app carries its own copy of the NSObject protocol.
@@ -27,16 +27,17 @@ struct DarwinFixtureTests {
             "objc-selector\tdescribe",
             "objc-selector\tcompareByLegs:",
             "dependency\t/System/Library/Frameworks/Foundation.framework/Foundation\tmissing",
-            "dependency\t/usr/lib/libobjc.A.dylib\tmissing",
             "dependency\t/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation\tmissing",
             "fixups\tchained",
-            "unresolved\t/usr/lib/libobjc.A.dylib\t_objc_msgSend",
-            "unresolved\t/usr/lib/libobjc.A.dylib\t_objc_msgSendSuper2",
             "unresolved\t/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation\t___CFConstantStringClassReference",
             "unresolved\t/System/Library/Frameworks/Foundation.framework/Foundation\t_NSLog",
         ] {
             #expect(lines.contains(expected), "missing report line: \(expected)")
         }
+        // libPerryobjc provides every libobjc import Xcode's output uses;
+        // only Foundation and CoreFoundation are left.
+        #expect(lines.contains { $0.hasPrefix("dependency\t/usr/lib/libobjc.A.dylib\t") && $0.hasSuffix("/libPerryobjc.so") })
+        #expect(!lines.contains { $0.hasPrefix("unresolved\t/usr/lib/") })
         // Apple's linker merges categories on classes from the same image into
         // the class, so Animal(Sorting) has no __objc_catlist entry; its method
         // still shows up as a selector above.
