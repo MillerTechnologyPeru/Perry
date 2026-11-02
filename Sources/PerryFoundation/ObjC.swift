@@ -28,6 +28,9 @@ enum ObjC {
     nonisolated(unsafe) static var createInstance: (@convention(c) (Class, Int) -> id?)!
     nonisolated(unsafe) static var indexedIvars: (@convention(c) (id) -> UnsafeMutableRawPointer?)!
     nonisolated(unsafe) static var registerName: (@convention(c) (SEL) -> SEL)!
+    nonisolated(unsafe) static var retainBlock: (@convention(c) (id?) -> id?)!
+    nonisolated(unsafe) static var poolPush: (@convention(c) () -> UnsafeMutableRawPointer?)!
+    nonisolated(unsafe) static var poolPop: (@convention(c) (UnsafeMutableRawPointer?) -> Void)!
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -49,10 +52,13 @@ enum ObjC {
         createInstance = bind("_class_createInstance", (@convention(c) (Class, Int) -> id?).self)
         indexedIvars = bind("_object_getIndexedIvars", (@convention(c) (id) -> UnsafeMutableRawPointer?).self)
         registerName = bind("_sel_registerName", (@convention(c) (SEL) -> SEL).self)
+        retainBlock = bind("_objc_retainBlock", (@convention(c) (id?) -> id?).self)
+        poolPush = bind("_objc_autoreleasePoolPush", (@convention(c) () -> UnsafeMutableRawPointer?).self)
+        poolPop = bind("_objc_autoreleasePoolPop", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)
         return msgSend != nil && msgSendSuper2 != nil && retain != nil && release != nil && autorelease != nil
             && initializeClassPair != nil && registerClassPair != nil && getClass != nil && objectGetClass != nil
             && objectGetClassName != nil && addMethod != nil && replaceMethod != nil && createInstance != nil
-            && indexedIvars != nil && registerName != nil
+            && indexedIvars != nil && registerName != nil && retainBlock != nil && poolPush != nil && poolPop != nil
     }
 
     static func selector(_ name: String) -> SEL {
@@ -88,6 +94,18 @@ enum ObjC {
     static func sendInt(_ receiver: id?, _ selector: SEL, _ argument: id?) -> Int {
         typealias Fn = @convention(c) (id?, SEL, id?) -> Int
         return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, argument)
+    }
+
+    static func send(_ receiver: id?, _ selector: SEL, _ first: id?, _ second: id?) -> id? {
+        typealias Fn = @convention(c) (id?, SEL, id?, id?) -> id?
+        return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, first, second)
+    }
+
+    /// Runs `body` in an autorelease pool, as each run loop callout does.
+    static func autoreleasepool<Result>(_ body: () -> Result) -> Result {
+        let pool = poolPush()
+        defer { poolPop(pool) }
+        return body()
     }
 
     static func sendUInt(_ receiver: id?, _ selector: SEL) -> UInt {
