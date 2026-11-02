@@ -23,9 +23,10 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
 
-    _ = ClassDefinition(extending: nsObject, NSObjectFoundationMethods.self, NSObjectDelayedPerformMethods.self)
+    _ = ClassDefinition(extending: nsObject, FoundationObject.register, DelayedPerforms.register)
     Strings.install(superclass: nsObject)
     MutableStrings.install(superclass: Strings.stringClass)
+    Errors.install(superclass: nsObject)
     Arrays.install(superclass: nsObject)
     Dictionaries.install(superclass: nsObject)
     Sets.install(superclass: nsObject)
@@ -34,15 +35,21 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     RunLoops.install(superclass: nsObject)
     Timers.install(superclass: nsObject)
     Notifications.install(superclass: nsObject)
+    Nulls.install(superclass: nsObject)
+    DataObjects.install(superclass: nsObject)
+    URLs.install(superclass: nsObject)
+    UUIDs.install(superclass: nsObject)
+    JSON.install(superclass: nsObject)
 }
 
 /// Foundation's additions to NSObject. libobjc's -description returns nil.
+@ObjCClass("NSObject")
+struct FoundationObject {}
+
 @ObjCImplementation
-enum NSObjectFoundationMethods {
+extension FoundationObject {
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? {
-        Strings.autoreleased("<\(ObjC.className(object)): \(object.map { "\($0)" } ?? "0x0")>")
-    }
+    func description() -> String { "<\(ObjC.className(objcObject)): \(objcObject)>" }
 }
 
 // MARK: - NSLog
