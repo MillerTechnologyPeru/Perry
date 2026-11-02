@@ -160,19 +160,19 @@ enum RunLoops {
         Storage.get(object, as: RunLoopState.self)
     }
 
-    /// The mode name constants, which NSRunLoop and CFRunLoop share.
-    nonisolated(unsafe) static var defaultMode: id!
-
     static func install(superclass: Class) {
         mainThread = pthread_self()
         runLoopClass = NSRunLoop.defineObjCClass().storage
-        defaultMode = Strings.make("kCFRunLoopDefaultMode")
-        let commonModes = Strings.make("kCFRunLoopCommonModes")
-        perry_foundation_constant(PERRY_CONSTANT_NSDefaultRunLoopMode).pointee = defaultMode
-        perry_foundation_constant(PERRY_CONSTANT_kCFRunLoopDefaultMode).pointee = defaultMode
-        perry_foundation_constant(PERRY_CONSTANT_NSRunLoopCommonModes).pointee = commonModes
-        perry_foundation_constant(PERRY_CONSTANT_kCFRunLoopCommonModes).pointee = commonModes
     }
+}
+
+/// Run loop mode names. NSRunLoop's and CFRunLoop's are the same objects.
+@ObjCConstants
+enum RunLoopModes {
+    static let NSDefaultRunLoopMode = "kCFRunLoopDefaultMode"
+    static let NSRunLoopCommonModes = "kCFRunLoopCommonModes"
+    static let kCFRunLoopDefaultMode = NSDefaultRunLoopMode
+    static let kCFRunLoopCommonModes = NSRunLoopCommonModes
 }
 
 /// NSRunLoop.
@@ -195,7 +195,7 @@ public final class NSRunLoop: NSObject {
     func cfRunLoop() -> UnsafeMutableRawPointer { objcObject }
 
     @ObjCMethod("currentMode")
-    func currentMode() -> UnsafeMutableRawPointer? { RunLoops.defaultMode }
+    func currentMode() -> UnsafeMutableRawPointer? { RunLoopModes.NSDefaultRunLoopModeObject }
 
     @ObjCMethod("addTimer:forMode:")
     func add(_ timer: ObjCObject, forMode mode: ObjCObject?) {
