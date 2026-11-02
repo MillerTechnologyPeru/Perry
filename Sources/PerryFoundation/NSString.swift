@@ -106,20 +106,6 @@ enum Strings {
         return left.count == right.count ? 0 : (left.count < right.count ? -1 : 1)
     }
 
-    static func install(superclass: Class) {
-        let string = NSString.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
-        stringClass = string.storage
-        NSString.addObjCCategoryAdditions()
-        string.addMethod("stringWithFormat:", types: "@24@0:8@16",
-                         implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
-        string.addMethod("initWithFormat:", types: "@24@0:8@16",
-                         implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
-        string.addMethod("stringByAppendingFormat:", types: "@24@0:8@16",
-                         implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
-
-        // String literals: immortal, read in place.
-        constantClass = NSCFConstantString.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
-    }
 
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
     static func integerPrefix(_ value: String) -> Int {
@@ -130,6 +116,18 @@ enum Strings {
 /// NSString.
 @ObjCClass("NSString")
 public class NSString: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Strings.stringClass = cls.storage
+        cls.addMethod("stringWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
+        cls.addMethod("initWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
+        cls.addMethod("stringByAppendingFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
+    }
+
     /// The receiver's contents.
     var value: String { Strings.value(of: objcObject) ?? "" }
 
@@ -255,7 +253,13 @@ public class NSString: NSObject {
 
 /// String literals: { isa, flags, characters, length }, read in place.
 @ObjCClass("__NSCFConstantString")
-final class NSCFConstantString: NSString {}
+final class NSCFConstantString: NSString {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Strings.constantClass = cls.markingStatic().storage
+    }
+}
 
 // MARK: - Variadic methods
 
