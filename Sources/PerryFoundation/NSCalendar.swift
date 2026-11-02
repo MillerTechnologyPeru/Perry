@@ -140,12 +140,10 @@ public final class NSCalendar: NSObject {
 
     @ObjCMethod("initWithCalendarIdentifier:")
     func initialize(identifier: String) -> UnsafeMutableRawPointer? {
-        guard let identifier = CalendarIdentifiers.identifier(identifier) else {
-            ObjC.release(objcObject)
-            return nil
-        }
+        guard let identifier = CalendarIdentifiers.identifier(identifier) else { return nil }
         Storage.set(objcObject, CalendarStorage(Calendars.make(identifier)))
-        return objcObject
+        // The receiver's wrapper adopted its reference; the result is +1.
+        return ObjC.retain(objcObject)
     }
 
     @ObjCClassMethod("currentCalendar")
