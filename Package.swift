@@ -30,6 +30,8 @@ let package = Package(
         .library(name: "PerrySecurity", type: .dynamic, targets: ["PerrySecurity"]),
         // UniformTypeIdentifiers, and MobileCoreServices' UTType functions.
         .library(name: "PerryUniformTypeIdentifiers", type: .dynamic, targets: ["PerryUniformTypeIdentifiers"]),
+        // UserNotifications.
+        .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -159,6 +161,13 @@ let package = Package(
         // UTType and the type database.
         .target(
             name: "PerryUniformTypeIdentifiers",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Notification content, triggers and requests, and a center that
+        // delivers them to its delegate.
+        .target(
+            name: "PerryUserNotifications",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
