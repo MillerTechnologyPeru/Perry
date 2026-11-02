@@ -146,8 +146,11 @@ enum FixtureBuilder {
         for source in sources {
             let object = output.deletingLastPathComponent()
                 .appending(path: "\(output.lastPathComponent)-\(URL(fileURLWithPath: source).deletingPathExtension().lastPathComponent).o")
-            let result = try run(bin.appending(path: "clang"), [
-                "-target", "arm64-apple-ios\(minimumOS)", "-O1", "-fno-stack-protector",
+            var flags = ["-target", "arm64-apple-ios\(minimumOS)", "-O1", "-fno-stack-protector"]
+            if source.hasSuffix(".m") {
+                flags += ["-fobjc-arc", "-fblocks"]
+            }
+            let result = try run(bin.appending(path: "clang"), flags + [
                 "-I", TestEnvironment.fixtures.appending(path: "include").path,
                 "-c", TestEnvironment.fixtures.appending(path: source).path,
                 "-o", object.path,
@@ -166,11 +169,17 @@ enum FixtureBuilder {
         guard result.status == 0 else { throw TestError.commandFailed("ld64.lld \(output.lastPathComponent)", result) }
     }
 
+    /// A link stub for a system library in Tests/Fixtures/sdk, e.g. "libobjc".
+    static func stub(_ name: String) -> URL {
+        TestEnvironment.fixtures.appending(path: "sdk/\(name).tbd")
+    }
+
     /// Builds a single-file executable fixture and returns its path.
-    static func executable(_ source: String, variant: String = "", linkFlags: [String] = []) throws -> URL {
+    static func executable(_ source: String, variant: String = "", linkFlags: [String] = [],
+                           libraries: [URL] = []) throws -> URL {
         let name = URL(fileURLWithPath: source).deletingPathExtension().lastPathComponent + variant
         let output = try directory(name).appending(path: name)
-        try build([source], output: output, linkFlags: linkFlags)
+        try build([source], output: output, linkFlags: linkFlags, libraries: libraries)
         return output
     }
 
