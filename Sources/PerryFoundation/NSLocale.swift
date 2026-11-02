@@ -115,6 +115,23 @@ enum LocaleKeys {
     static let NSLocaleAlternateQuotationBeginDelimiterKey = "kCFLocaleAlternateQuotationBeginDelimiterKey"
     static let NSLocaleAlternateQuotationEndDelimiterKey = "kCFLocaleAlternateQuotationEndDelimiterKey"
     static let NSCurrentLocaleDidChangeNotification = "kCFLocaleCurrentLocaleDidChangeNotification"
+    // CoreFoundation's names for the same objects.
+    static let kCFLocaleIdentifier = NSLocaleIdentifier
+    static let kCFLocaleLanguageCode = NSLocaleLanguageCode
+    static let kCFLocaleCountryCode = NSLocaleCountryCode
+    static let kCFLocaleScriptCode = NSLocaleScriptCode
+    static let kCFLocaleVariantCode = NSLocaleVariantCode
+    static let kCFLocaleExemplarCharacterSet = NSLocaleExemplarCharacterSet
+    static let kCFLocaleCalendar = NSLocaleCalendar
+    static let kCFLocaleCollationIdentifier = NSLocaleCollationIdentifier
+    static let kCFLocaleUsesMetricSystem = NSLocaleUsesMetricSystem
+    static let kCFLocaleMeasurementSystem = NSLocaleMeasurementSystem
+    static let kCFLocaleDecimalSeparator = NSLocaleDecimalSeparator
+    static let kCFLocaleGroupingSeparator = NSLocaleGroupingSeparator
+    static let kCFLocaleCurrencySymbol = NSLocaleCurrencySymbol
+    static let kCFLocaleCurrencyCode = NSLocaleCurrencyCode
+    static let kCFLocaleCollatorIdentifier = NSLocaleCollatorIdentifier
+    static let kCFLocaleCurrentLocaleDidChangeNotification = NSCurrentLocaleDidChangeNotification
 }
 
 /// NSLocale.
