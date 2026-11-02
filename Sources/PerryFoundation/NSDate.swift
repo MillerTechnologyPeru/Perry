@@ -70,7 +70,7 @@ enum Dates {
     }
 
     static func install(superclass: Class) {
-        dateClass = NSDate.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        dateClass = NSDate.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
     }
 }
 
