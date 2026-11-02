@@ -13,8 +13,15 @@ let package = Package(
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
-        // libxml2, over Linux's.
+        // C libraries over Linux's builds of the same libraries.
         .library(name: "Perryxml2", type: .dynamic, targets: ["PerryXML2"]),
+        .library(name: "Perryz", type: .dynamic, targets: ["PerryZ"]),
+        .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
+        .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
+        .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
+        .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
+        // libcompression, Apple's API over open compressors.
+        .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
         // CoreGraphics.
         .library(name: "PerryCoreGraphics", type: .dynamic, targets: ["PerryCoreGraphics"]),
         // UIKit.
@@ -79,10 +86,27 @@ let package = Package(
             dependencies: ["CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // Binding a Darwin library's imports to the Linux build of the same
+        // library, and thunks for Darwin's variadic ABI.
+        .target(name: "CPerryWrapped"),
         // libxml2: Linux's, with thunks for Darwin's variadic ABI.
         .target(
             name: "PerryXML2",
+            dependencies: ["CPerryWrapped"],
             linkerSettings: [.linkedLibrary("xml2")]
+        ),
+        .target(name: "PerryZ", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("z")]),
+        .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
+        .target(name: "PerryExpat", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("expat")]),
+        // SQLite 3.54, built in the Docker image as libperry-sqlite3.
+        .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
+        .target(name: "PerryIconv"),
+        .target(
+            name: "PerryCompression",
+            linkerSettings: [
+                .linkedLibrary("z"), .linkedLibrary("lzma"), .linkedLibrary("lz4"),
+                .linkedLibrary("brotlienc"), .linkedLibrary("brotlidec"), .linkedLibrary("lzfse"),
+            ]
         ),
         // CoreGraphics' geometry types, shared by the providers that pass them.
         .target(name: "CPerryGeometry"),
