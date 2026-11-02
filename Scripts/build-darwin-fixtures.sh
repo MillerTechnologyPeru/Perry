@@ -159,6 +159,10 @@ for src in Tests/Fixtures/Darwin/*/; do
         esac
     done
 
+    # Mac Catalyst restores scene sessions an earlier run saved; each run
+    # starts without them.
+    bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Info.plist")
+    rm -rf "$HOME/Library/Saved Application State/$bundle_id~iosmac.savedState"
     # A hung reference run fails the build instead of stalling it.
     perl -e 'alarm 30; exec @ARGV' "$macos/MacOS/$name" > "$out/$name.expected" 2>/dev/null
     echo "$app"
