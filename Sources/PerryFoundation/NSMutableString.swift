@@ -31,17 +31,18 @@ enum MutableStrings {
         storage.value = String(decoding: units, as: UTF16.self)
     }
 
-    static func install(superclass: Class) {
-        let mutable = NSMutableString.defineObjCClass()
-        mutableClass = mutable.storage
-        mutable.addMethod("appendFormat:", types: "v24@0:8@16",
-                          implementation: variadicEntry(perry_imp_appendFormat), isClassMethod: false)
-    }
 }
 
 /// NSMutableString.
 @ObjCClass("NSMutableString")
 public class NSMutableString: NSString {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        MutableStrings.mutableClass = cls.storage
+        cls.addMethod("appendFormat:", types: "v24@0:8@16",
+                      implementation: variadicEntry(perry_imp_appendFormat), isClassMethod: false)
+    }
+
     private var storage: StringStorage { MutableStrings.storage(objcObject) }
 
     @ObjCClassMethod("stringWithCapacity:")
