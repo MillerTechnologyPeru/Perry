@@ -111,14 +111,6 @@ enum Dictionaries {
         }
     }
 
-    static func install(superclass: Class) {
-        let dictionary = NSDictionary.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
-        dictionaryClass = dictionary.storage
-        dictionary.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
-                             implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
-        mutableClass = NSMutableDictionary.defineObjCClass().storage
-        constantClass = NSConstantDictionary.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
-    }
 
     /// A new dictionary wrapped for returning, +1.
     static func owned(_ entries: [(key: id, value: id)], cls: id? = nil) -> NSDictionary {
@@ -129,6 +121,14 @@ enum Dictionaries {
 /// NSDictionary.
 @ObjCClass("NSDictionary")
 public class NSDictionary: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Dictionaries.dictionaryClass = cls.storage
+        cls.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
+    }
+
     var entries: [(key: id, value: id)] { Dictionaries.entries(objcObject) }
 
     private func setEntries(_ entries: [(key: id, value: id)]) -> Self {
@@ -253,7 +253,13 @@ public class NSDictionary: NSObject {
 
 /// @{…} literals of constants: { isa, options, count, keys, objects }.
 @ObjCClass("NSConstantDictionary")
-final class NSConstantDictionary: NSDictionary {}
+final class NSConstantDictionary: NSDictionary {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Dictionaries.constantClass = cls.markingStatic().storage
+    }
+}
 
 extension Dictionaries {
     /// Constant literals have no storage; they share one buffer, which is
@@ -264,6 +270,11 @@ extension Dictionaries {
 /// NSMutableDictionary.
 @ObjCClass("NSMutableDictionary")
 public class NSMutableDictionary: NSDictionary {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        Dictionaries.mutableClass = cls.storage
+    }
+
     private var storage: DictionaryStorage {
         guard let storage = Dictionaries.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableDictionary")
