@@ -552,6 +552,44 @@ public func class_addProtocol(_ cls: Class?, _ proto: ProtocolPointer?) -> Bool 
     return Protocols.add(proto, toClass: info)
 }
 
+// MARK: - Properties
+
+@c(_class_getProperty)
+public func class_getProperty(_ cls: Class?, _ name: UnsafePointer<CChar>?) -> UnsafeRawPointer? {
+    guard let cls, let name, let info = Runtime.info(cls) else { return nil }
+    return Properties.find(info, name)
+}
+
+/// The class's own properties, in a malloc'd array the caller frees.
+@c(_class_copyPropertyList)
+public func class_copyPropertyList(_ cls: Class?, _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafeRawPointer?>? {
+    let properties = cls.flatMap { Runtime.info($0) }.map(Properties.list) ?? []
+    count?.pointee = UInt32(properties.count)
+    guard !properties.isEmpty else { return nil }
+    let array = malloc(MemoryLayout<UnsafeRawPointer?>.stride * (properties.count + 1))!
+        .bindMemory(to: UnsafeRawPointer?.self, capacity: properties.count + 1)
+    for (index, property) in properties.enumerated() { array[index] = property }
+    array[properties.count] = nil
+    return array
+}
+
+@c(_property_getName)
+public func property_getName(_ property: UnsafeRawPointer?) -> UnsafePointer<CChar>? {
+    property.flatMap(Properties.name)
+}
+
+@c(_property_getAttributes)
+public func property_getAttributes(_ property: UnsafeRawPointer?) -> UnsafePointer<CChar>? {
+    property.flatMap(Properties.attributes)
+}
+
+/// One attribute's value, malloc'd for the caller to free.
+@c(_property_copyAttributeValue)
+public func property_copyAttributeValue(_ property: UnsafeRawPointer?, _ name: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let property, let name, let value = Properties.attributeValue(property, name) else { return nil }
+    return strdup(value)
+}
+
 // MARK: - Associated objects
 
 @c(_objc_setAssociatedObject)
