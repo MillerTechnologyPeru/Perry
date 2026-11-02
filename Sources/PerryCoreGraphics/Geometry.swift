@@ -1,5 +1,6 @@
 import CPerryCoreGraphics
 import CPerryGeometry
+import Glibc
 
 // CoreGraphics' geometry functions; the constants are data in
 // CPerryCoreGraphics. Rects with negative sizes are standardized first, as
@@ -127,4 +128,89 @@ public func CGRectIntegral(_ rect: CGRect) -> CGRect {
     let minX = CGRectGetMinX(rect).rounded(.down), minY = CGRectGetMinY(rect).rounded(.down)
     let maxX = CGRectGetMaxX(rect).rounded(.up), maxY = CGRectGetMaxY(rect).rounded(.up)
     return CGRect(origin: CGPoint(x: minX, y: minY), size: CGSize(width: maxX - minX, height: maxY - minY))
+}
+
+// MARK: - Affine transforms
+
+private func transform(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ tx: Double, _ ty: Double) -> CGAffineTransform {
+    CGAffineTransform(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
+}
+
+@c(_CGAffineTransformMake)
+public func CGAffineTransformMake(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat, _ tx: CGFloat, _ ty: CGFloat) -> CGAffineTransform {
+    transform(a, b, c, d, tx, ty)
+}
+
+@c(_CGAffineTransformMakeTranslation)
+public func CGAffineTransformMakeTranslation(_ tx: CGFloat, _ ty: CGFloat) -> CGAffineTransform { transform(1, 0, 0, 1, tx, ty) }
+
+@c(_CGAffineTransformMakeScale)
+public func CGAffineTransformMakeScale(_ sx: CGFloat, _ sy: CGFloat) -> CGAffineTransform { transform(sx, 0, 0, sy, 0, 0) }
+
+@c(_CGAffineTransformMakeRotation)
+public func CGAffineTransformMakeRotation(_ angle: CGFloat) -> CGAffineTransform {
+    transform(cos(angle), sin(angle), -sin(angle), cos(angle), 0, 0)
+}
+
+/// t1 then t2.
+@c(_CGAffineTransformConcat)
+public func CGAffineTransformConcat(_ t1: CGAffineTransform, _ t2: CGAffineTransform) -> CGAffineTransform {
+    transform(t1.a * t2.a + t1.b * t2.c, t1.a * t2.b + t1.b * t2.d, t1.c * t2.a + t1.d * t2.c, t1.c * t2.b + t1.d * t2.d,
+              t1.tx * t2.a + t1.ty * t2.c + t2.tx, t1.tx * t2.b + t1.ty * t2.d + t2.ty)
+}
+
+@c(_CGAffineTransformTranslate)
+public func CGAffineTransformTranslate(_ t: CGAffineTransform, _ tx: CGFloat, _ ty: CGFloat) -> CGAffineTransform {
+    CGAffineTransformConcat(CGAffineTransformMakeTranslation(tx, ty), t)
+}
+
+@c(_CGAffineTransformScale)
+public func CGAffineTransformScale(_ t: CGAffineTransform, _ sx: CGFloat, _ sy: CGFloat) -> CGAffineTransform {
+    CGAffineTransformConcat(CGAffineTransformMakeScale(sx, sy), t)
+}
+
+@c(_CGAffineTransformRotate)
+public func CGAffineTransformRotate(_ t: CGAffineTransform, _ angle: CGFloat) -> CGAffineTransform {
+    CGAffineTransformConcat(CGAffineTransformMakeRotation(angle), t)
+}
+
+/// The inverse; a transform that cannot be inverted comes back unchanged.
+@c(_CGAffineTransformInvert)
+public func CGAffineTransformInvert(_ t: CGAffineTransform) -> CGAffineTransform {
+    let determinant = t.a * t.d - t.b * t.c
+    guard determinant != 0 else { return t }
+    let a = t.d / determinant, b = -t.b / determinant, c = -t.c / determinant, d = t.a / determinant
+    return transform(a, b, c, d, -(t.tx * a + t.ty * c), -(t.tx * b + t.ty * d))
+}
+
+@c(_CGAffineTransformIsIdentity)
+public func CGAffineTransformIsIdentity(_ t: CGAffineTransform) -> Bool {
+    t.a == 1 && t.b == 0 && t.c == 0 && t.d == 1 && t.tx == 0 && t.ty == 0
+}
+
+@c(_CGAffineTransformEqualToTransform)
+public func CGAffineTransformEqualToTransform(_ t1: CGAffineTransform, _ t2: CGAffineTransform) -> Bool {
+    t1.a == t2.a && t1.b == t2.b && t1.c == t2.c && t1.d == t2.d && t1.tx == t2.tx && t1.ty == t2.ty
+}
+
+@c(_CGPointApplyAffineTransform)
+public func CGPointApplyAffineTransform(_ p: CGPoint, _ t: CGAffineTransform) -> CGPoint {
+    CGPoint(x: t.a * p.x + t.c * p.y + t.tx, y: t.b * p.x + t.d * p.y + t.ty)
+}
+
+@c(_CGSizeApplyAffineTransform)
+public func CGSizeApplyAffineTransform(_ s: CGSize, _ t: CGAffineTransform) -> CGSize {
+    CGSize(width: t.a * s.width + t.c * s.height, height: t.b * s.width + t.d * s.height)
+}
+
+/// The bounds of the transformed rect's corners.
+@c(_CGRectApplyAffineTransform)
+public func CGRectApplyAffineTransform(_ rect: CGRect, _ t: CGAffineTransform) -> CGRect {
+    guard !CGRectIsNull(rect) else { return rect }
+    let r = CGRectStandardize(rect)
+    let corners = [CGPoint(x: r.origin.x, y: r.origin.y), CGPoint(x: r.origin.x + r.size.width, y: r.origin.y),
+                   CGPoint(x: r.origin.x, y: r.origin.y + r.size.height),
+                   CGPoint(x: r.origin.x + r.size.width, y: r.origin.y + r.size.height)].map { CGPointApplyAffineTransform($0, t) }
+    let xs = corners.map(\.x), ys = corners.map(\.y)
+    return CGRect(origin: CGPoint(x: xs.min()!, y: ys.min()!), size: CGSize(width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!))
 }
