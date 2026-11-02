@@ -21,6 +21,11 @@
 // void NSLog(NSString *format, ...)
 VARIADIC _NSLog, perry_foundation_log, 1
 
+// CFStringRef CFStringCreateWithFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef, ...)
+VARIADIC _CFStringCreateWithFormat, perry_foundation_cf_create_with_format, 3
+// void CFStringAppendFormat(CFMutableStringRef, CFDictionaryRef, CFStringRef, ...)
+VARIADIC _CFStringAppendFormat, perry_foundation_cf_append_format, 3
+
 // Method implementations: self, _cmd, then the fixed arguments.
     .hidden perry_imp_stringWithFormat
 VARIADIC perry_imp_stringWithFormat, perry_foundation_stringWithFormat, 3
