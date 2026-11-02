@@ -34,7 +34,9 @@ Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 | `Sources/PerrySystem` | `libPerrySystem.so`: Darwin libSystem over glibc (C, assembly) |
 | `Sources/PerryInterface` | Loader/provider interface header |
 | `Tests/PerryLoaderTests` | Swift Testing suite |
-| `Tests/Fixtures` | arm64 iOS test programs and a stub `libSystem.tbd` |
+| `Tests/Fixtures` | arm64 iOS test programs and stub `.tbd` link libraries |
+| `Tests/Fixtures/Darwin` | Objective-C apps built on a Mac with the real iPhoneOS SDK |
+| `Scripts` | Docker test runner and the Mac fixture build |
 
 ## Building
 
@@ -53,6 +55,29 @@ then `$PATH`, and are skipped if it is missing.
 ```sh
 swift test
 ```
+
+### Docker
+
+On a Mac (or any arm64 host), `Scripts/docker-test.sh` builds an arm64
+Linux image with Swift 6.4 and Ubuntu's LLVM, then runs `swift build` and
+`swift test` in it. Linux build products go to `.build/linux`, apart from a
+macOS build. Extra arguments are passed to `swift test`:
+
+```sh
+Scripts/docker-test.sh --filter DarwinFixtureTests
+```
+
+### Objective-C apps from Xcode
+
+Linux has no Apple SDK, so Objective-C apps that use Foundation are built on
+a Mac with Xcode, and the Linux tests run them:
+
+```sh
+Scripts/build-darwin-fixtures.sh   # on the Mac: .build/perry-fixtures/darwin/*.app
+Scripts/docker-test.sh             # DarwinFixtureTests picks them up
+```
+
+`DarwinFixtureTests` is skipped when the apps have not been built.
 
 ## Usage
 
