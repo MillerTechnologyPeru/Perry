@@ -48,8 +48,7 @@ enum Errors {
     }
 
     static func install(superclass: Class) {
-        errorClass = ClassDefinition(PERRY_CLASS_NSError, name: "NSError", superclass: superclass,
-                                     StorageAllocated.register, NSError.register).cls
+        errorClass = NSError.defineObjCClass(StorageAllocated.registerObjCMethods).storage
         func constant(_ which: perry_foundation_constant_id, _ value: String) -> id {
             let string = Strings.make(value)
             perry_foundation_constant(which).pointee = string
@@ -65,10 +64,7 @@ enum Errors {
 
 /// NSError.
 @ObjCClass("NSError")
-public struct NSError {}
-
-@ObjCImplementation
-extension NSError {
+public final class NSError: NSObject {
     private var storage: ErrorStorage? { Errors.storage(objcObject) }
 
     @ObjCClassMethod("errorWithDomain:code:userInfo:")
