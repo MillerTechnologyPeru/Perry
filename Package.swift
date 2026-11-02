@@ -47,6 +47,9 @@ let package = Package(
         // CryptoKit's API with its own BoringSSL, and X.509, for Security.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.0"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
+        // Cairo and FontConfig, which Silica renders CoreGraphics with.
+        .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
+        .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -192,10 +195,23 @@ let package = Package(
             linkerSettings: [.linkedLibrary("png"), .linkedLibrary("jpeg"), .linkedLibrary("gif"), .linkedLibrary("webp"),
                              .linkedLibrary("heif")]
         ),
-        // CoreGraphics' images, colors and bitmap contexts, and ImageIO.
+        // Silica (PureSwift, MIT): CoreGraphics' drawing model in Swift, and
+        // its Cairo renderer. Copied from github.com/PureSwift/Silica.
+        .target(name: "Silica", exclude: ["LICENSE"]),
+        .target(
+            name: "SilicaCairo",
+            dependencies: [
+                "Silica",
+                .product(name: "Cairo", package: "Cairo"),
+                .product(name: "FontConfig", package: "FontConfig"),
+            ]
+        ),
+        // CoreGraphics' images, colors and bitmap contexts, which draw
+        // through Silica's Cairo renderer, and ImageIO.
         .target(
             name: "PerryCoreGraphics",
-            dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop",
+                           "SilicaCairo"],
             plugins: ["PerryProviderPlugin"]
         ),
         // UIKit, a client of libobjc's C API and Foundation's classes.
