@@ -656,17 +656,20 @@ static void *lookup_symbol(const char *install_name, const char *name) {
     return perry_provider_symbol(startup_loader, install_name, name);
 }
 
-// Darwin's layering: libSystem, then libobjc, then Foundation, then the
+// Darwin's layering: libSystem, then libobjc, then libdispatch (whose
+// objects are Objective-C classes here), then Foundation, then the
 // frameworks above them, which may use the layers below at startup.
 static int provider_layer(const perry_provider *provider) {
     const char *name = provider->install_name;
+    if (strcmp(name, "/usr/lib/system/libdispatch.dylib") == 0)
+        return 2;
     if (strncmp(name, "/usr/lib/system/", 16) == 0 || strstr(name, "/libSystem."))
         return 0;
     if (strstr(name, "/libobjc."))
         return 1;
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
-        return 2;
-    return 3;
+        return 3;
+    return 4;
 }
 
 // Passes the program's arguments and bundle to providers, e.g. for
@@ -686,7 +689,7 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         .lookup_symbol = lookup_symbol,
     };
     // Several install names may share one provider; start each library once.
-    for (int layer = 0; layer <= 3; layer++)
+    for (int layer = 0; layer <= 4; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
         bool seen = !handle;
