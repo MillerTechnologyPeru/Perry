@@ -11,6 +11,8 @@ let package = Package(
         .library(name: "PerrySystem", type: .dynamic, targets: ["PerrySystem"]),
         // Objective-C runtime, the provider for /usr/lib/libobjc.A.dylib.
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
+        // libdispatch, which libSystem re-exports.
+        .library(name: "Perrydispatch", type: .dynamic, targets: ["PerryDispatch"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
         // C libraries over Linux's builds of the same libraries.
@@ -80,6 +82,16 @@ let package = Package(
                 "PerryObjCMacros",
                 .product(name: "SwiftSyntaxMacrosGenericTestSupport", package: "swift-syntax"),
             ]
+        ),
+        // libdispatch: Linux's declared under other names, and Darwin's
+        // exported data.
+        .target(name: "CPerryDispatch"),
+        // libdispatch's Darwin API over Linux's libdispatch.
+        .target(
+            name: "PerryDispatch",
+            dependencies: ["CPerryDispatch", "PerryInterface", "PerryObjCInterop"],
+            linkerSettings: [.linkedLibrary("dispatch")],
+            plugins: ["PerryProviderPlugin"]
         ),
         // Foundation: exported class storage and variadic entry points.
         .target(name: "CPerryFoundation"),
