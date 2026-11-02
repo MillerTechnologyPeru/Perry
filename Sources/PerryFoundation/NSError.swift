@@ -1,4 +1,5 @@
 import CPerryFoundation
+import Glibc
 import PerryObjCInterop
 
 /// An NSError's domain, code and user info.
@@ -64,7 +65,17 @@ enum Errors {
             return description
         }
         let domain = Strings.value(of: storage.domain) ?? ""
+        if domain == "NSPOSIXErrorDomain", let message = posixMessage(Int32(truncatingIfNeeded: storage.code)) {
+            return "The operation couldn’t be completed. \(message)"
+        }
         return "The operation couldn’t be completed. (\(domain) error \(storage.code).)"
+    }
+
+    /// strerror for a Darwin errno: libSystem's, which knows Darwin's numbers.
+    static func posixMessage(_ code: Int32) -> String? {
+        typealias StrError = @convention(c) (Int32) -> UnsafePointer<CChar>?
+        let darwin = dlsym(UnsafeMutableRawPointer(bitPattern: 0), "_strerror").map { unsafeBitCast($0, to: StrError.self) }
+        return (darwin?(code) ?? UnsafePointer(strerror(code))).map { String(cString: $0) }
     }
 
 }
@@ -78,6 +89,20 @@ enum ErrorConstants {
     static let NSLocalizedFailureReasonErrorKey = "NSLocalizedFailureReason"
     static let NSFilePathErrorKey = "NSFilePath"
     static let NSUnderlyingErrorKey = "NSUnderlyingError"
+    static let NSOSStatusErrorDomain = "NSOSStatusErrorDomain"
+    static let NSMachErrorDomain = "NSMachErrorDomain"
+    static let NSLocalizedRecoverySuggestionErrorKey = "NSLocalizedRecoverySuggestion"
+    // CoreFoundation's names for the same objects.
+    static let kCFErrorDomainCocoa = NSCocoaErrorDomain
+    static let kCFErrorDomainPOSIX = NSPOSIXErrorDomain
+    static let kCFErrorDomainOSStatus = NSOSStatusErrorDomain
+    static let kCFErrorDomainMach = NSMachErrorDomain
+    static let kCFErrorLocalizedDescriptionKey = NSLocalizedDescriptionKey
+    static let kCFErrorLocalizedFailureReasonKey = NSLocalizedFailureReasonErrorKey
+    static let kCFErrorLocalizedRecoverySuggestionKey = NSLocalizedRecoverySuggestionErrorKey
+    static let kCFErrorUnderlyingErrorKey = NSUnderlyingErrorKey
+    static let kCFErrorFilePathKey = NSFilePathErrorKey
+    static let kCFErrorDescriptionKey = "NSDescription"
 }
 
 /// NSError.
