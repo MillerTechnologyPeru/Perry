@@ -65,20 +65,52 @@ static bool in_image(const perry_image *image, const void *p) {
 enum {
     CLASS_DATA_OFFSET = 32,         // objc_class.bits
     CLASS_RO_NAME_OFFSET = 24,      // class_ro_t.name
+    CLASS_RO_PROTOCOLS_OFFSET = 40, // class_ro_t.baseProtocols
+    PROTOCOL_NAME_OFFSET = 8,       // protocol_t.mangledName
     CATEGORY_NAME_OFFSET = 0,       // category_t.name
     CATEGORY_CLASS_OFFSET = 8,      // category_t.cls
 };
 #define CLASS_DATA_MASK 0x00007ffffffffff8ull
 
-static const char *class_name(const perry_image *image, const uint8_t *cls) {
+static const uint8_t *class_ro(const perry_image *image, const uint8_t *cls) {
     if (!cls || !in_image(image, cls))
         return NULL;
     uint64_t bits = *(const uint64_t *)(cls + CLASS_DATA_OFFSET);
     const uint8_t *ro = (const uint8_t *)(uintptr_t)(bits & CLASS_DATA_MASK);
-    if (!in_image(image, ro))
+    return in_image(image, ro) ? ro : NULL;
+}
+
+static const char *class_name(const perry_image *image, const uint8_t *cls) {
+    const uint8_t *ro = class_ro(image, cls);
+    if (!ro)
         return NULL;
     const char *name = *(const char *const *)(ro + CLASS_RO_NAME_OFFSET);
     return in_image(image, name) ? name : NULL;
+}
+
+static const char *protocol_name(const perry_image *image, const uint8_t *proto) {
+    if (!proto || !in_image(image, proto))
+        return NULL;
+    const char *name = *(const char *const *)(proto + PROTOCOL_NAME_OFFSET);
+    return in_image(image, name) ? name : NULL;
+}
+
+// Reports each protocol in a class's protocol_list_t: a uint64_t count
+// followed by protocol_t pointers. Protocols are always emitted in the image
+// that uses them, so the names are local even for NSObject.
+static void report_conformances(const perry_image *image, const uint8_t *cls, const char *cls_name,
+                                string_list *out) {
+    const uint8_t *ro = class_ro(image, cls);
+    if (!ro)
+        return;
+    const uint64_t *list = *(const uint64_t *const *)(ro + CLASS_RO_PROTOCOLS_OFFSET);
+    if (!list || !in_image(image, list))
+        return;
+    const void *const *protos = (const void *const *)(list + 1);
+    for (uint64_t i = 0; i < list[0] && in_image(image, &protos[i]); i++) {
+        const char *name = protocol_name(image, protos[i]);
+        list_add(out, "objc-class-conforms\t%s\t%s", cls_name, name ? name : "?");
+    }
 }
 
 static const void *const *section_pointers(const perry_image *image, const char *sectname, size_t *count) {
@@ -105,6 +137,13 @@ static void report_objc(const perry_image *image, string_list *out) {
     for (size_t i = 0; i < count; i++) {
         const char *name = class_name(image, ptrs[i]);
         list_add(out, "objc-class-defined\t%s", name ? name : "?");
+        report_conformances(image, ptrs[i], name ? name : "?", out);
+    }
+
+    ptrs = section_pointers(image, "__objc_protolist", &count);
+    for (size_t i = 0; i < count; i++) {
+        const char *name = protocol_name(image, ptrs[i]);
+        list_add(out, "objc-protocol-defined\t%s", name ? name : "?");
     }
 
     ptrs = section_pointers(image, "__objc_catlist", &count);

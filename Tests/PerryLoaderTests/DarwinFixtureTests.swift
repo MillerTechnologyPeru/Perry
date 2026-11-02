@@ -18,6 +18,11 @@ struct DarwinFixtureTests {
             "objc-class-defined\tAnimal",
             "objc-class-defined\tDog",
             "objc-class-referenced\tNSObject\tunresolved",
+            "objc-protocol-defined\tGreeting",
+            // Protocols are emitted in every image that uses them, so the
+            // app carries its own copy of the NSObject protocol.
+            "objc-protocol-defined\tNSObject",
+            "objc-class-conforms\tAnimal\tGreeting",
             "objc-selector\tinitWithName:legs:",
             "objc-selector\tdescribe",
             "objc-selector\tcompareByLegs:",

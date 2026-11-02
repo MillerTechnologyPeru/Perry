@@ -114,6 +114,8 @@ struct LoaderTests {
             "objc-class-defined\tAnimal",
             "objc-class-defined\tDog",
             "objc-category\tAnimal(Extras)",
+            "objc-protocol-defined\tGreeting",
+            "objc-class-conforms\tAnimal\tGreeting",
             "objc-class-referenced\tNSObject\tunresolved",
             "objc-selector\tsetLegs:",
             "objc-selector\tspeak",
