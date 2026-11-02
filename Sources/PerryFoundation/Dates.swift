@@ -70,17 +70,13 @@ enum Dates {
     }
 
     static func install(superclass: Class) {
-        dateClass = ClassDefinition(PERRY_CLASS_NSDate, name: "NSDate", superclass: superclass,
-                                    StorageAllocated.register, NSDate.register).cls
+        dateClass = NSDate.defineObjCClass(StorageAllocated.registerObjCMethods).storage
     }
 }
 
 /// NSDate.
 @ObjCClass("NSDate")
-public struct NSDate {}
-
-@ObjCImplementation
-extension NSDate {
+public final class NSDate: NSObject {
     var date: Date { Dates.date(objcObject) }
 
     private func setDate(_ date: Date) -> Self {
