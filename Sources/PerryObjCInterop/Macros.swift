@@ -64,6 +64,14 @@ public typealias ObjCMethodRegistration = (any ObjCMethodRegistrar) -> Void
 public macro ObjCClass(_ className: String) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCClassMacro")
 
+/// A wrapper for an Objective-C class that another library defines, such
+/// as Foundation's classes in UIKit. It names the class, for casts and
+/// class methods, and its methods have no body: they call the class's.
+/// Providers do not define these classes.
+@attached(member, names: named(objCClassName), named(objCSuperclassName))
+public macro ObjCWrapper(_ className: String) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCWrapperMacro")
+
 /// Adds an extension's methods to the extended wrapper's Objective-C class,
 /// as an Objective-C category does. Generates registerObjCCategory<Name>(_:)
 /// and addObjCCategory<Name>(), named after the category so a class can
