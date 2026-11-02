@@ -55,6 +55,17 @@ public macro ObjCClass(_ className: String) =
 public macro ObjCCategory(_ categoryName: String) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCCategoryMacro")
 
+/// Exports a type's `static let` constants as Objective-C data symbols named
+/// after them: `static let NSCocoaErrorDomain = "NSCocoaErrorDomain"` becomes
+/// `NSString *const NSCocoaErrorDomain`. A string literal is an NSString, the
+/// name of another constant the same object, and any other expression of
+/// type UnsafeMutableRawPointer? is evaluated at export time. Generates the
+/// ObjCConstantTable conformance and `<name>Object` accessors.
+@attached(member, names: named(objCConstants), arbitrary)
+@attached(extension, conformances: ObjCConstantTable)
+public macro ObjCConstants() =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCConstantsMacro")
+
 /// Implements an instance method. The function's arguments are the
 /// selector's.
 @attached(peer)
