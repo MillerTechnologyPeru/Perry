@@ -86,7 +86,7 @@ enum DarwinFixtures {
     /// Fixtures with a recorded Darwin output.
     static var withReference: [String] {
         [
-            "Almanac", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cornerstone", "Courier", "Darkroom", "Foreman", "Gatekeeper", "Herald", "Keyring", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Parsley",
+            "Abacus", "Almanac", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cornerstone", "Courier", "Darkroom", "Foreman", "Gatekeeper", "Herald", "Keyring", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Parsley",
             "Relay", "Satchel", "Scribe", "Sentinel", "Shelf", "Sketchbook", "Telegraph", "Typecast", "Vault", "Viewport",
         ].filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path)
