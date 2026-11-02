@@ -306,6 +306,34 @@ static uint64_t round_up(uint64_t value, uint64_t align) {
     return (value + align - 1) & ~(align - 1);
 }
 
+// Darwin code assumes user addresses are small: the Objective-C runtime masks
+// class data pointers to 47 bits, and iOS processes normally live below
+// 64 GB. Linux hands out mmap addresses just under 2^48, so images are placed
+// upward from 4 GB, where dyld puts them, instead.
+#define PERRY_IMAGE_REGION_START  0x100000000ull
+#define PERRY_IMAGE_REGION_END    0x1000000000ull     // 64 GB
+#define PERRY_IMAGE_ALIGN         0x4000ull           // Mach-O segment alignment
+
+static void *reserve_low(perry_loader *loader, size_t span) {
+    if (!loader->next_image_address)
+        loader->next_image_address = PERRY_IMAGE_REGION_START;
+    for (uint64_t addr = loader->next_image_address; addr + span <= PERRY_IMAGE_REGION_END;) {
+        void *p = mmap((void *)(uintptr_t)addr, span, PROT_NONE,
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        if (p == (void *)(uintptr_t)addr) {
+            loader->next_image_address = round_up(addr + span, PERRY_IMAGE_ALIGN);
+            return p;
+        }
+        if (p != MAP_FAILED)
+            munmap(p, span);    // kernels without MAP_FIXED_NOREPLACE treat it as a hint
+        else if (errno != EEXIST)
+            break;
+        addr += 0x1000000;      // skip past whatever occupies this range
+    }
+    perry_warn("no free address range below 64 GB; mapping image high");
+    return mmap(NULL, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+}
+
 static perry_image *map_image(perry_loader *loader, const char *path, const macho_file *file) {
     const struct mach_header_64 *fmh = (const struct mach_header_64 *)file->data;
     if (fmh->filetype != MH_EXECUTE && fmh->filetype != MH_DYLIB && fmh->filetype != MH_BUNDLE)
@@ -360,13 +388,12 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     if (!pie)
         reserve = mmap((void *)(uintptr_t)vm_start, span, PROT_NONE,
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (reserve == MAP_FAILED) {
-        if (!pie)
-            perry_fatal("%s: cannot map non-PIE executable at 0x%llx", path, (unsigned long long)vm_start);
-        reserve = mmap(NULL, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (reserve == MAP_FAILED)
-            perry_fatal("%s: cannot reserve %zu bytes: %s", path, span, strerror(errno));
-    }
+    if (reserve == MAP_FAILED && !pie)
+        perry_fatal("%s: cannot map non-PIE executable at 0x%llx", path, (unsigned long long)vm_start);
+    if (reserve == MAP_FAILED)
+        reserve = reserve_low(loader, span);
+    if (reserve == MAP_FAILED)
+        perry_fatal("%s: cannot reserve %zu bytes: %s", path, span, strerror(errno));
     image->vm_start = vm_start;
     image->vm_size = span;
     image->slide = (intptr_t)((uintptr_t)reserve - vm_start);
