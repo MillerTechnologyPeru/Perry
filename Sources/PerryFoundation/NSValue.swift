@@ -1,4 +1,5 @@
 import CPerryFoundation
+import FoundationEssentials
 import Glibc
 import PerryObjCInterop
 
@@ -237,19 +238,14 @@ public class NSValue: NSObject {
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSValue { self }
 
-    /// "NSRange: {1, 2}" for ranges; otherwise the bytes in hex, in groups
-    /// of four, as for NSData.
+    /// "NSRange: {1, 2}" for ranges; otherwise the bytes as NSData
+    /// describes them.
     @ObjCMethod("description")
     func description() -> String {
         guard let storage else { return "" }
         if storage.type == NSRange.objCTypeEncoding, let range = load(NSRange.self) {
             return "NSRange: {\(range.location), \(range.length)}"
         }
-        var text = "<"
-        for (index, byte) in storage.bytes.enumerated() {
-            if index > 0 && index % 4 == 0 { text += " " }
-            text += String(byte, radix: 16).count == 1 ? "0" + String(byte, radix: 16) : String(byte, radix: 16)
-        }
-        return text + ">"
+        return DataObjects.description(Data(storage.bytes))
     }
 }
