@@ -35,7 +35,7 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   `NSUUID`, `NSJSONSerialization`, `NSError`, `NSNull`, `NSString`'s
   encodings, paths and searching, `NSBundle` with Info.plist and resources,
   `NSProcessInfo`, `NSThread` with performs between threads,
-  `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSLog`, and the
+  `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSXMLParser`, `NSLog`, and the
   CFString functions KissXML uses (`CFStringTransform` with
   `kCFStringTransformToXMLHex`, `CFStringTrimWhitespace`)
 - libxml2 (`libPerryxml2`): Linux's libxml2 under Darwin's names, with
@@ -360,6 +360,10 @@ their classes read them in place, including constant `@[…]` and `@{…}`
 literals and CoreFoundation's boolean objects. Variadic methods and `NSLog` receive
 Apple's stack-slot arguments through two-instruction assembly entry points,
 and a Swift formatter handles `%@` and passes other conversions to glibc.
+`NSXMLParser` is built, as Darwin's is, over libxml2's SAX2 callbacks, on
+Linux's libxml2: delegates see the events Darwin's parser sends, with text
+split where libxml2 splits it, declared entities resolved but not
+substituted, and the parse stopped by the first error.
 
 **UIKit** is written the same way, as a client of libobjc and of
 Foundation, which it calls through `@ObjCWrapper` classes. It has no C
