@@ -20,6 +20,15 @@ enum ErrorKeys {
     static let NSURLSessionDownloadTaskResumeData = "NSURLSessionDownloadTaskResumeData"
 }
 
+/// NSURLSession's numeric constants.
+@ObjCConstants
+enum SessionNumbers {
+    static let NSURLSessionTransferSizeUnknown: Int64 = -1
+    static let NSURLSessionTaskPriorityDefault: Float = 0.5
+    static let NSURLSessionTaskPriorityLow: Float = 0.25
+    static let NSURLSessionTaskPriorityHigh: Float = 0.75
+}
+
 enum Errors {
     /// An NSError for a failed load, with the failing URL in its user info.
     static func object(_ failure: Failure?) -> NSError? {
@@ -78,6 +87,14 @@ open class NSURLSessionConfiguration: NSObject {
     }
 
     @ObjCMethod("identifier") func identifier() -> String? { configuration.identifier }
+
+    @ObjCMethod("protocolClasses")
+    func protocolClasses() -> NSObject {
+        NSMutableArray.of((configuration.protocolClasses ?? []).map { NSObject($0) })
+    }
+
+    @ObjCMethod("setProtocolClasses:")
+    func setProtocolClasses(_ classes: NSArray?) { configuration.protocolClasses = classes?.elements.map(\.objcObject) }
     @ObjCMethod("timeoutIntervalForRequest") func timeoutForRequest() -> Double { configuration.timeoutForRequest }
     @ObjCMethod("setTimeoutIntervalForRequest:") func setTimeoutForRequest(_ value: Double) { configuration.timeoutForRequest = value }
     @ObjCMethod("timeoutIntervalForResource") func timeoutForResource() -> Double { configuration.timeoutForResource }
@@ -118,8 +135,6 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCMethod("setWaitsForConnectivity:") func setWaitsForConnectivity(_ value: Bool) { configuration.waitsForConnectivity = value }
     @ObjCMethod("HTTPShouldUsePipelining") func usesPipelining() -> Bool { configuration.usesPipelining }
     @ObjCMethod("setHTTPShouldUsePipelining:") func setUsesPipelining(_ value: Bool) { configuration.usesPipelining = value }
-    @ObjCMethod("protocolClasses") func protocolClasses() -> NSArray { NSMutableArray.of([]) }
-    @ObjCMethod("setProtocolClasses:") func setProtocolClasses(_ classes: NSArray?) {}
 }
 
 /// NSURLCache: the shared cache's interface. corelibs keeps its own cache;
@@ -316,6 +331,26 @@ final class DelegateEvents: SessionEvents, @unchecked Sendable {
             }
         }
         Tasks.finish(task)
+    }
+
+    /// The task delegate's answer; without the method, default handling.
+    func task(_ task: Task, didReceive challenge: Challenge, completion: @escaping @Sendable (Int, Credential?) -> Void) {
+        let name = "URLSession:task:didReceiveChallenge:completionHandler:"
+        let answer: @Sendable (Int, Credential?) -> Void = { disposition, credential in
+            guard disposition == 1 else { return completion(disposition, credential) }
+            let (fallback, stored) = CredentialStorage.defaultAnswer(challenge)
+            completion(fallback, stored)
+        }
+        guard responds(name) else { return answer(1, nil) }
+        let once = SenderState(answer, challenge: challenge)
+        run { [self] in
+            let block = Closures.block(integerObject: { disposition, credential in
+                once.give(disposition, Credentials.credential(credential))
+            })
+            send((@convention(c) (Object, UnsafeRawPointer, Object, Object, Object, Object) -> Void).self)(
+                delegate.objcObject, selector(name), session, task.owner, Challenges.object(challenge, answer: once).objcObject,
+                block.objcObject)
+        }
     }
 
     func sessionDidBecomeInvalid(_ error: Failure?) {
