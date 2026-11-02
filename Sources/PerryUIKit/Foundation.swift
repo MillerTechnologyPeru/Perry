@@ -15,6 +15,22 @@ class NSArray: NSObject {
     var elements: [NSObject] { (0..<count()).map { object(at: $0) } }
 }
 
+@ObjCWrapper("NSMutableArray")
+class NSMutableArray: NSArray {
+    @ObjCClassMethod("array")
+    static func empty() -> Self
+
+    @ObjCMethod("addObject:")
+    func add(_ object: NSObject)
+
+    /// A new array of `objects`.
+    static func of(_ objects: [NSObject]) -> NSMutableArray {
+        let array = empty()
+        objects.forEach(array.add)
+        return array
+    }
+}
+
 @ObjCWrapper("NSDictionary")
 class NSDictionary: NSObject {
     @ObjCMethod("objectForKey:")
