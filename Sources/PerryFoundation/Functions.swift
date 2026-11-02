@@ -75,6 +75,34 @@ public func CFRelease(_ object: UnsafeMutableRawPointer?) {
     ObjC.release(object)
 }
 
+@c(_CFEqual)
+public func CFEqual(_ first: UnsafeMutableRawPointer?, _ second: UnsafeMutableRawPointer?) -> Bool {
+    guard let first, let second else { return first == second }
+    return first == second || ObjC.sendBool(first, Selectors.isEqual, second)
+}
+
+@c(_CFHash)
+public func CFHash(_ object: UnsafeMutableRawPointer?) -> UInt {
+    object.map { ObjC.sendUInt($0, Selectors.hash) } ?? 0
+}
+
+/// A CoreFoundation type's ID: what the object's -_cfTypeID answers, as
+/// toll-free bridged classes answer on Darwin.
+@c(_CFGetTypeID)
+public func CFGetTypeID(_ object: UnsafeMutableRawPointer?) -> UInt {
+    guard let object else { return 0 }
+    let selector = ObjC.selector("_cfTypeID")
+    guard ObjC.sendBool(object, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector)) else {
+        return 1
+    }
+    return ObjC.sendUInt(object, selector)
+}
+
+@c(_CFCopyDescription)
+public func CFCopyDescription(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    Strings.make(Format.describe(object))
+}
+
 @c(_NSStringFromProtocol)
 public func NSStringFromProtocol(_ proto: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     // protocol_t: isa, then the name.
