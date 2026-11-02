@@ -258,6 +258,7 @@ final class NSConstantDictionary: NSDictionary {
     override class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryImmortal(cls)
         Dictionaries.constantClass = cls.markingStatic().storage
+        perry_foundation_set_empty_dictionary_class(cls.pointer)
     }
 }
 
