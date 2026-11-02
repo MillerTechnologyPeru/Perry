@@ -63,6 +63,47 @@ public enum ObjCRuntime {
         installed = functions
     }
 
+    /// Binds libobjc's C API through `lookup`, which finds a Mach-O symbol
+    /// name ("_objc_msgSend") in libobjc, and installs it, with the
+    /// autorelease pool functions. False if libobjc lacks one.
+    @discardableResult
+    public static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
+        func bind<Function>(_ name: String, as type: Function.Type) -> Function? {
+            lookup(name).map { unsafeBitCast($0, to: type) }
+        }
+        typealias Object = UnsafeMutableRawPointer?
+        guard let msgSend = lookup("_objc_msgSend"), let msgSendSuper2 = lookup("_objc_msgSendSuper2"),
+              let retain = bind("_objc_retain", as: (@convention(c) (Object) -> Object).self),
+              let release = bind("_objc_release", as: (@convention(c) (Object) -> Void).self),
+              let autorelease = bind("_objc_autorelease", as: (@convention(c) (Object) -> Object).self),
+              let retainBlock = bind("_objc_retainBlock", as: (@convention(c) (Object) -> Object).self),
+              let getClass = bind("_objc_getClass", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
+              let objectGetClass = bind("_object_getClass", as: (@convention(c) (Object) -> Object).self),
+              let registerSelector = bind("_sel_registerName",
+                                          as: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeRawPointer?).self),
+              let addMethod = bind("_class_addMethod", as: (@convention(c) (
+                  Object, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> Bool).self),
+              let replaceMethod = bind("_class_replaceMethod", as: (@convention(c) (
+                  Object, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?).self),
+              let initializeClassPair = bind("_objc_initializeClassPair", as: (@convention(c) (
+                  Object, UnsafePointer<CChar>?, Object, Object) -> Object).self),
+              let allocateClassPair = bind("_objc_allocateClassPair",
+                                           as: (@convention(c) (Object, UnsafePointer<CChar>?, Int) -> Object).self),
+              let registerClassPair = bind("_objc_registerClassPair", as: (@convention(c) (Object) -> Void).self),
+              let poolPush = bind("_objc_autoreleasePoolPush", as: (@convention(c) () -> Object).self),
+              let poolPop = bind("_objc_autoreleasePoolPop", as: (@convention(c) (Object) -> Void).self) else {
+            return false
+        }
+        install(ObjCRuntimeFunctions(
+            msgSend: UnsafeRawPointer(msgSend), msgSendSuper2: UnsafeRawPointer(msgSendSuper2),
+            retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
+            getClass: getClass, objectGetClass: objectGetClass, registerSelector: registerSelector,
+            addMethod: addMethod, replaceMethod: replaceMethod, initializeClassPair: initializeClassPair,
+            allocateClassPair: allocateClassPair, registerClassPair: registerClassPair))
+        poolFunctions = (push: poolPush, pop: poolPop)
+        return true
+    }
+
     @inline(__always)
     public static var functions: ObjCRuntimeFunctions {
         guard let installed else { objcInteropFatal("the Objective-C runtime functions are not installed") }
@@ -89,8 +130,9 @@ public enum ObjCRuntime {
 
     // MARK: - Defining classes
 
-    /// The provider's storage for a class it exports by symbol, if any:
-    /// the class and its metaclass.
+    /// The provider's storage for a class it exports as an ELF symbol, if
+    /// any: the class and its metaclass. Storage handed out through
+    /// ObjCClassExports is used otherwise.
     nonisolated(unsafe) public static var classStorage: ((String) -> (UnsafeMutableRawPointer, UnsafeMutableRawPointer)?)?
 
     /// Defines a class: in the provider's exported storage when it has
@@ -100,7 +142,7 @@ public enum ObjCRuntime {
     public static func defineClass(named name: String, superclass: ObjCClass?,
                                    _ registrations: [ObjCMethodRegistration]) -> ObjCClass {
         let created: UnsafeMutableRawPointer? = name.withCString { cName in
-            if let (cls, metaclass) = classStorage?(name) {
+            if let (cls, metaclass) = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name) {
                 return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
             }
             return functions.allocateClassPair(superclass?.pointer, cName, 0)
