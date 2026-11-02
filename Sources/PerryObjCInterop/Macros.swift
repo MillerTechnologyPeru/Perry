@@ -1,72 +1,51 @@
-// Macros for Objective-C classes in Swift. They work in two directions.
+// Exposing Swift classes to Objective-C.
 //
-// Calling Objective-C:
+//     @ObjCClass("NSMutableString")
+//     public class NSMutableString: NSString {
+//         @ObjCMethod("appendString:")
+//         func append(_ other: String) { … }
 //
-//     @ObjCClass("NSString")
-//     struct NSString {
-//         @ObjCMethod("characterAtIndex:")
-//         func character(at index: UInt) -> UInt16
-//
-//         @ObjCMethod("initWithUTF8String:")
-//         init(utf8 bytes: UnsafePointer<CChar>)
-//
-//         @ObjCClassMethod("string")
-//         static func empty() -> NSString
+//         @ObjCClassMethod("stringWithCapacity:")
+//         static func string(capacity: UInt) -> NSMutableString { … }
 //     }
 //
-//     let length = text.character(at: 0)
+//     NSMutableString.defineObjCClass()
 //
-// Methods without a body get one that sends the message, converting each
-// argument and the result through ObjCValue.
+// The Swift class inherits from the wrapper of the Objective-C superclass.
+// Its @ObjCMethod and @ObjCClassMethod functions implement the selectors:
+// `self` is a wrapper for the receiver and arguments and results are Swift
+// values, converted through ObjCValue. @ObjCClass generates a C thunk for
+// each, the class and superclass names, and registerObjCMethods(_:), which
+// installs them; defineObjCClass(_:) creates the class from them.
 //
-// Implementing Objective-C:
-//
-//     @ObjCImplementation
-//     extension NSString {
-//         @ObjCMethod("stringByAppendingString:")
-//         func appending(_ other: String) -> String { … }
-//     }
-//
-//     NSString.register(classDefinition)
-//
-// Methods with a body are implementations: `self` is the wrapper for the
-// receiver and the arguments are Swift values. The macro generates a C
-// thunk for each (receiver, _cmd, arguments) and `register(_:)`, which
-// installs them into a class.
+// registerObjCMethods can also install a class's methods into another,
+// existing class, the way a category does.
 
-/// Installs the methods an @ObjCImplementation extension defines.
+/// Installs methods into a class.
 public protocol ObjCMethodRegistrar {
     func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool)
 }
 
-/// The function @ObjCImplementation generates, as a value.
+/// A function that installs methods, such as a class's registerObjCMethods.
 public typealias ObjCMethodRegistration = (any ObjCMethodRegistrar) -> Void
 
-/// Declares a struct as the Swift wrapper for an Objective-C class.
-@attached(member, names: named(objcHolder), named(init(objcHolder:)), named(objCClassName))
-@attached(extension, conformances: AnyObjCObject)
+/// Exposes a Swift class, a subclass of an Objective-C class's wrapper, as
+/// that Objective-C class.
+@attached(member, names: named(objCClassName), named(objCSuperclassName), named(registerObjCMethods))
 public macro ObjCClass(_ className: String) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCClassMacro")
 
-/// An instance method. Without a body it sends the message; with a body
-/// in an @ObjCImplementation extension it implements the method.
-@attached(body)
+/// Implements an instance method. The function's arguments are the
+/// selector's.
+@attached(peer)
 public macro ObjCMethod(_ selector: String, types: String? = nil) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCMethodMacro")
 
-/// A class method: a static function. An implementation may take the
+/// Implements a class method: a static or class function. It may take the
 /// receiving class as a first parameter of type ObjCClass.
-@attached(body)
+@attached(peer)
 public macro ObjCClassMethod(_ selector: String, types: String? = nil) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCMethodMacro")
-
-/// Implements the @ObjCMethod and @ObjCClassMethod functions with bodies
-/// in an extension of an @ObjCClass wrapper. Generates a static function,
-/// `register` unless named otherwise, that installs them into a class; name
-/// each extension's function differently when a class has several.
-@attached(member, names: arbitrary)
-public macro ObjCImplementation(_ registrationName: String = "register") =
-    #externalMacro(module: "PerryObjCMacros", type: "ObjCImplementationMacro")
 
 // MARK: - Type encodings
 
