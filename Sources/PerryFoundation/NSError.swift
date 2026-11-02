@@ -49,6 +49,14 @@ enum Errors {
         return Blocks.invoke(provider, as: (@convention(c) (id, id, id) -> id?).self)(provider, object, key)
     }
 
+    /// A new error (+1) whose user info has `entries`.
+    static func make(domain: id?, code: Int, entries: [(String, id)]) -> id? {
+        let userInfo = Dictionaries.autoreleased(entries.map { (key: Strings.autoreleased($0.0), value: $0.1) })
+        guard let error = Storage.allocate(UnsafeMutableRawPointer(errorClass)) else { return nil }
+        Storage.set(error, ErrorStorage(domain: domain, code: code, userInfo: userInfo))
+        return error
+    }
+
     /// The user info's description, or Foundation's generic one.
     static func localizedDescription(_ object: id?) -> String {
         guard let storage = storage(object) else { return "" }
