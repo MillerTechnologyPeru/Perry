@@ -789,3 +789,28 @@ public func perry_foundation_predicateWithFormat(_ cls: id?, _ cmd: SEL?, _ form
     guard let arguments else { return nil }
     return Predicates.parse(Strings.value(of: format) ?? "", .variadic(DarwinArguments(arguments)))
 }
+
+/// Filtering collections with predicates.
+@ObjCCategory("PredicateFiltering")
+extension NSArray {
+    @ObjCMethod("filteredArrayUsingPredicate:")
+    func filtered(using predicate: NSPredicate) -> ObjCObject {
+        ObjCObject(Arrays.autoreleased(Arrays.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }))
+    }
+
+    /// For NSMutableArray: keeps the elements the predicate accepts.
+    @ObjCMethod("filterUsingPredicate:")
+    func filter(using predicate: NSPredicate) {
+        let kept = Arrays.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }
+        _ = ObjC.send(objcObject, ObjC.selector("removeAllObjects"))
+        for element in kept { _ = ObjC.send(objcObject, ObjC.selector("addObject:"), element) }
+    }
+}
+
+@ObjCCategory("SetPredicateFiltering")
+extension NSSet {
+    @ObjCMethod("filteredSetUsingPredicate:")
+    func filtered(using predicate: NSPredicate) -> ObjCObject {
+        ObjCObject(Sets.autoreleased(Sets.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }))
+    }
+}
