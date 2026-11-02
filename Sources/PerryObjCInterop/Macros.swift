@@ -50,9 +50,10 @@ public macro ObjCClass(_ className: String) =
 /// Adds an extension's methods to the extended wrapper's Objective-C class,
 /// as an Objective-C category does. Generates registerObjCCategory<Name>(_:)
 /// and addObjCCategory<Name>(), named after the category so a class can
-/// have several.
+/// have several. A provider's generated startup adds the category unless
+/// `addedAtStartup` is false, for method sets installed into chosen classes.
 @attached(member, names: arbitrary)
-public macro ObjCCategory(_ categoryName: String) =
+public macro ObjCCategory(_ categoryName: String, addedAtStartup: Bool = true) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCCategoryMacro")
 
 /// Exports a type's `static let` constants as Objective-C data symbols named
