@@ -47,9 +47,6 @@ enum Errors {
         return "The operation couldn’t be completed. (\(domain) error \(storage.code).)"
     }
 
-    static func install(superclass: Class) {
-        errorClass = NSError.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 }
 
 /// Error domains and user info keys.
@@ -66,6 +63,12 @@ enum ErrorConstants {
 /// NSError.
 @ObjCClass("NSError")
 public final class NSError: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Errors.errorClass = cls.storage
+    }
+
     private var storage: ErrorStorage? { Errors.storage(objcObject) }
 
     @ObjCClassMethod("errorWithDomain:code:userInfo:")
