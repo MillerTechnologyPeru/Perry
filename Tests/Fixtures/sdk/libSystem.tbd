@@ -8,5 +8,7 @@ exports:
     symbols: [ ___error, ___stderrp, ___stdoutp, _exit, _fflush, _fopen,
                _fprintf, _free, _malloc, _printf, _puts, _snprintf, _strcmp,
                _strerror, _strlen, _strtol, _vsnprintf, dyld_stub_binder,
+               __Block_copy, __Block_object_assign, __Block_object_dispose,
+               __Block_release, __NSConcreteGlobalBlock, __NSConcreteStackBlock,
                _perry_fixture_absent, _perry_fixture_unimplemented ]
 ...
