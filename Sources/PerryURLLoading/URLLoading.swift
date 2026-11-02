@@ -24,7 +24,12 @@ public final class Request: @unchecked Sendable {
         if url == nil { value.url = nil }
     }
 
-    public func copy() -> Request { Request(value) }
+    public func copy() -> Request {
+        let copy = Request(value)
+        copy.properties = properties
+        copy.protocolClasses = protocolClasses
+        return copy
+    }
 
     public var url: URL? {
         get { value.url }
@@ -92,9 +97,87 @@ public final class Request: @unchecked Sendable {
             && value.cachePolicy == other.value.cachePolicy && value.allHTTPHeaderFields == other.value.allHTTPHeaderFields
             && value.httpBody == other.value.httpBody && value.httpMethod == other.value.httpMethod
             && value.httpShouldHandleCookies == other.value.httpShouldHandleCookies
-            && value.mainDocumentURL == other.value.mainDocumentURL
+            && value.mainDocumentURL == other.value.mainDocumentURL && sameProperties(as: other)
     }
     public var hash: Int { value.hashValue }
+
+    /// NSURLProtocol's properties. corelibs' own protocol properties
+    /// never survive into a URLRequest, so a request handed to corelibs
+    /// carries a tag naming them instead (see RequestTags).
+    public var properties: [String: AnyObject] = [:]
+    /// The session configuration's Objective-C protocol classes.
+    var protocolClasses: [UnsafeMutableRawPointer] = []
+
+    public func property(forKey key: String) -> AnyObject? { properties[key] }
+    public func setProperty(_ object: AnyObject?, forKey key: String) { properties[key] = object }
+
+    /// Equal properties: the same keys holding the same objects.
+    func sameProperties(as other: Request) -> Bool {
+        properties.count == other.properties.count && properties.allSatisfy { key, value in other.properties[key] === value }
+    }
+
+    /// The request for corelibs, tagged when it has properties or classes;
+    /// the tag lives as long as the caller keeps it.
+    func forCorelibs() -> (URLRequest, RequestTag?) {
+        guard !properties.isEmpty || !protocolClasses.isEmpty else { return (value, nil) }
+        let tag = RequestTags.register(properties: properties, classes: protocolClasses)
+        var tagged = value
+        tagged.setValue(String(tag.id), forHTTPHeaderField: RequestTags.header)
+        return (tagged, tag)
+    }
+
+    /// A request corelibs hands back, with its tag's properties and classes.
+    init(fromCorelibs request: URLRequest) {
+        var value = request
+        if let id = value.value(forHTTPHeaderField: RequestTags.header) {
+            value.setValue(nil, forHTTPHeaderField: RequestTags.header)
+            if let tag = Int(id).flatMap(RequestTags.tag) {
+                properties = tag.properties
+                protocolClasses = tag.classes
+            }
+        }
+        self.value = value
+    }
+}
+
+/// What a tagged request carries, found by the id in its header.
+final class RequestTag: @unchecked Sendable {
+    let id: Int
+    let properties: [String: AnyObject]
+    let classes: [UnsafeMutableRawPointer]
+
+    init(id: Int, properties: [String: AnyObject], classes: [UnsafeMutableRawPointer]) {
+        self.id = id
+        self.properties = properties
+        self.classes = classes
+    }
+}
+
+enum RequestTags {
+    static let header = "X-Perry-Request-Tag"
+    private final class Weak {
+        weak var tag: RequestTag?
+        init(_ tag: RequestTag) { self.tag = tag }
+    }
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var tags: [Int: Weak] = [:]
+    nonisolated(unsafe) private static var next = 0
+
+    static func register(properties: [String: AnyObject], classes: [UnsafeMutableRawPointer]) -> RequestTag {
+        lock.lock()
+        defer { lock.unlock() }
+        next += 1
+        let tag = RequestTag(id: next, properties: properties, classes: classes)
+        tags = tags.filter { $0.value.tag != nil }
+        tags[next] = Weak(tag)
+        return tag
+    }
+
+    static func tag(_ id: Int) -> RequestTag? {
+        lock.lock()
+        defer { lock.unlock() }
+        return tags[id]?.tag
+    }
 }
 
 // MARK: - Responses
@@ -205,9 +288,15 @@ public struct Failure: Sendable {
 public final class Configuration: @unchecked Sendable {
     let value: URLSessionConfiguration
 
+    /// The bridge to Objective-C protocols comes first, so it sees each
+    /// request before corelibs' own protocols.
     init(_ value: URLSessionConfiguration) {
         self.value = value
+        value.protocolClasses = [BridgedProtocol.self] + (value.protocolClasses ?? []).filter { $0 != BridgedProtocol.self }
     }
+
+    /// The Objective-C protocol classes the program set, unretained classes.
+    public var protocolClasses: [UnsafeMutableRawPointer]?
 
     public static func makeDefault() -> Configuration { Configuration(.default) }
     public static func makeEphemeral() -> Configuration { Configuration(.ephemeral) }
@@ -225,6 +314,7 @@ public final class Configuration: @unchecked Sendable {
         let copy = Configuration(value.copy() as! URLSessionConfiguration)
         copy.identifier = identifier
         copy.waitsForConnectivity = waitsForConnectivity
+        copy.protocolClasses = protocolClasses
         return copy
     }
 
@@ -360,12 +450,59 @@ public enum CookieStorage {
 
 /// A task, which an NSURLSessionTask holds. `owner` is the Objective-C task.
 public final class Task: @unchecked Sendable {
-    let value: URLSessionTask
+    /// The corelibs task first made, and the one running now: a retry
+    /// with a credential replaces it.
+    let first: URLSessionTask
+    private var running: URLSessionTask
+    var value: URLSessionTask {
+        lock.lock()
+        defer { lock.unlock() }
+        return running
+    }
+
+    func replace(with task: URLSessionTask) {
+        lock.lock()
+        running = task
+        lock.unlock()
+    }
+
+    // A 401 response and its body, held while its challenge is answered.
+    private var held: (response: URLResponse, data: Data)?
+    /// Answers given to challenges so far, and the last credential.
+    var failures = 0
+    var lastCredential: Credential?
+
+    func hold(_ response: URLResponse) {
+        lock.lock()
+        held = (response, Data())
+        lock.unlock()
+    }
+
+    /// Keeps data for a held response; false when none is held.
+    func hold(_ data: Data) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard held != nil else { return false }
+        held?.data.append(data)
+        return true
+    }
+
+    func takeHeld() -> (response: URLResponse, data: Data)? {
+        lock.lock()
+        defer {
+            held = nil
+            lock.unlock()
+        }
+        return held
+    }
     public let kind: Kind
     /// The Objective-C object standing for the task, unretained.
     public var owner: UnsafeMutableRawPointer?
 
     public enum Kind: Sendable { case data, upload, download }
+
+    /// The tags its requests carry, kept while it runs.
+    var tags: [RequestTag] = []
 
     private let lock = NSLock()
     private var completed = false
@@ -387,24 +524,27 @@ public final class Task: @unchecked Sendable {
     }
 
     init(_ value: URLSessionTask, kind: Kind) {
-        self.value = value
+        first = value
+        running = value
         self.kind = kind
     }
 
-    public var identifier: Int { value.taskIdentifier }
+    public var identifier: Int { first.taskIdentifier }
     /// NSURLSessionTaskState: running 0, suspended 1, canceling 2, completed 3.
     public var state: Int {
         lock.lock()
         defer { lock.unlock() }
-        return completed ? URLSessionTask.State.completed.rawValue : value.state.rawValue
+        return completed ? URLSessionTask.State.completed.rawValue : running.state.rawValue
     }
-    public var originalRequest: Request? { value.originalRequest.map(Request.init) }
-    public var currentRequest: Request? { value.currentRequest.map(Request.init) }
-    public var response: Response? { value.response.map(Response.init) }
+    public var originalRequest: Request? { first.originalRequest.map { Request(fromCorelibs: $0) } }
+    public var currentRequest: Request? { value.currentRequest.map { Request(fromCorelibs: $0) } }
+    /// None when a challenge was cancelled: the 401 never reached the program.
+    public var response: Response? { cancelledChallenge ? nil : value.response.map(Response.init) }
+    var cancelledChallenge = false
     public var bytesReceived: Int64 {
         lock.lock()
         defer { lock.unlock() }
-        return max(value.countOfBytesReceived, delivered)
+        return max(running.countOfBytesReceived, delivered)
     }
     public var bytesSent: Int64 { value.countOfBytesSent }
     public var bytesExpectedToReceive: Int64 { value.countOfBytesExpectedToReceive }
@@ -441,6 +581,8 @@ public protocol SessionEvents: AnyObject {
     func task(_ task: Task, didFinishDownloadingTo location: URL)
     func task(_ task: Task, didCompleteWith error: Failure?)
     func sessionDidBecomeInvalid(_ error: Failure?)
+    /// Answers with NSURLSessionAuthChallengeDisposition and a credential.
+    func task(_ task: Task, didReceive challenge: Challenge, completion: @escaping @Sendable (Int, Credential?) -> Void)
 }
 
 /// corelibs' delegate: forwards each event to the Objective-C side.
@@ -453,6 +595,11 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let events, let task = task(dataTask) else { return completionHandler(.allow) }
+        // A challenge comes first: the 401 waits for the delegate's answer.
+        if task.kind == .data, let http = response as? HTTPURLResponse, Authentication.space(for: http) != nil {
+            task.hold(response)
+            return completionHandler(.allow)
+        }
         nonisolated(unsafe) let handler = completionHandler
         events.task(task, didReceive: Response(response)) { disposition in
             handler(URLSession.ResponseDisposition(rawValue: disposition) ?? .allow)
@@ -460,7 +607,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let task = task(dataTask) else { return }
+        guard let task = task(dataTask), !task.hold(data) else { return }
         task.count(data.count)
         events?.task(task, didReceive: data)
     }
@@ -469,7 +616,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         guard let events, let wrapper = self.task(task) else { return completionHandler(request) }
         nonisolated(unsafe) let handler = completionHandler
-        events.task(wrapper, willRedirect: Response(response), to: Request(request)) { handler($0?.value) }
+        events.task(wrapper, willRedirect: Response(response), to: Request(fromCorelibs: request)) { handler($0?.value) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64,
@@ -491,6 +638,9 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         guard let wrapper = self.task(task) else { return }
+        if error == nil, let held = wrapper.takeHeld(), let events, let owner = self.session {
+            return Authentication.challenge(wrapper, held, events: events, session: owner)
+        }
         wrapper.markCompleted()
         events?.task(wrapper, didCompleteWith: error.map { Failure($0, url: task.originalRequest?.url) })
         self.session?.forget(task)
@@ -533,6 +683,13 @@ public final class Session: @unchecked Sendable {
         return tasks[ObjectIdentifier(task)]
     }
 
+    /// A retry made for a task, reporting as it.
+    fileprivate func adopt(_ retry: URLSessionTask, for task: Task) {
+        lock.lock()
+        tasks[ObjectIdentifier(retry)] = task
+        lock.unlock()
+    }
+
     fileprivate func forget(_ task: URLSessionTask) {
         lock.lock()
         tasks[ObjectIdentifier(task)] = nil
@@ -542,10 +699,28 @@ public final class Session: @unchecked Sendable {
     private func track(_ task: URLSessionTask, _ kind: Task.Kind) -> Task {
         let wrapper = Task(task, kind: kind)
         lock.lock()
+        wrapper.tags = pendingTags
+        pendingTags = []
+        lock.unlock()
+        lock.lock()
         tasks[ObjectIdentifier(task)] = wrapper
         lock.unlock()
         return wrapper
     }
+
+    /// The request for corelibs, carrying the configuration's Objective-C
+    /// protocol classes and its own properties for the bridge to find. The
+    /// task keeps the tag.
+    private func tagged(_ request: Request) -> URLRequest {
+        let copy = request.copy()
+        copy.protocolClasses = configuration.protocolClasses ?? []
+        let (value, tag) = copy.forCorelibs()
+        if let tag { pendingTags.append(tag) }
+        return value
+    }
+
+    /// Tags for the task being made, which track() hands to it.
+    private var pendingTags: [RequestTag] = []
 
     public typealias DataCompletion = @Sendable (Data?, Response?, Failure?) -> Void
     public typealias DownloadCompletion = @Sendable (URL?, Response?, Failure?) -> Void
@@ -556,26 +731,26 @@ public final class Session: @unchecked Sendable {
     }
 
     public func dataTask(_ request: Request, completion: DataCompletion? = nil) -> Task {
-        guard let completion else { return track(value.dataTask(with: request.value), .data) }
-        return track(value.dataTask(with: request.value, completionHandler: Self.dataHandler(completion, request.url)), .data)
+        guard let completion else { return track(value.dataTask(with: tagged(request)), .data) }
+        return track(value.dataTask(with: tagged(request), completionHandler: Self.dataHandler(completion, request.url)), .data)
     }
 
     public func uploadTask(_ request: Request, data: Data, completion: DataCompletion? = nil) -> Task {
-        guard let completion else { return track(value.uploadTask(with: request.value, from: data), .upload) }
-        return track(value.uploadTask(with: request.value, from: data,
+        guard let completion else { return track(value.uploadTask(with: tagged(request), from: data), .upload) }
+        return track(value.uploadTask(with: tagged(request), from: data,
                                       completionHandler: Self.dataHandler(completion, request.url)), .upload)
     }
 
     public func uploadTask(_ request: Request, file: URL, completion: DataCompletion? = nil) -> Task {
-        guard let completion else { return track(value.uploadTask(with: request.value, fromFile: file), .upload) }
-        return track(value.uploadTask(with: request.value, fromFile: file,
+        guard let completion else { return track(value.uploadTask(with: tagged(request), fromFile: file), .upload) }
+        return track(value.uploadTask(with: tagged(request), fromFile: file,
                                       completionHandler: Self.dataHandler(completion, request.url)), .upload)
     }
 
     public func downloadTask(_ request: Request, completion: DownloadCompletion? = nil) -> Task {
-        guard let completion else { return track(value.downloadTask(with: request.value), .download) }
+        guard let completion else { return track(value.downloadTask(with: tagged(request)), .download) }
         let url = request.url
-        return track(value.downloadTask(with: request.value) { location, response, error in
+        return track(value.downloadTask(with: tagged(request)) { location, response, error in
             completion(location, response.map(Response.init), error.map { Failure($0, url: url) })
         }, .download)
     }
@@ -586,5 +761,273 @@ public final class Session: @unchecked Sendable {
     public var sessionDescription: String? {
         get { value.sessionDescription }
         set { value.sessionDescription = newValue }
+    }
+}
+
+// MARK: - Protocols
+
+/// Loads by Objective-C NSURLProtocol subclasses, which CFNetwork provides.
+public protocol ProtocolLoader: AnyObject, Sendable {
+    /// The class that loads the request: the first of `classes`, then of the
+    /// registered classes, that can.
+    func protocolClass(for request: Request, classes: [UnsafeMutableRawPointer]) -> UnsafeMutableRawPointer?
+    /// Starts a load, returning what stops it.
+    func start(_ cls: UnsafeMutableRawPointer, request: Request, client: ProtocolClient) -> AnyObject
+    func stop(_ load: AnyObject)
+}
+
+public enum Protocols {
+    nonisolated(unsafe) public static var loader: ProtocolLoader?
+}
+
+/// corelibs' protocol for every Objective-C one.
+final class BridgedProtocol: URLProtocol {
+    private var load: AnyObject?
+
+    static func objCClass(_ request: URLRequest) -> UnsafeMutableRawPointer? {
+        let request = Request(fromCorelibs: request)
+        return Protocols.loader?.protocolClass(for: request, classes: request.protocolClasses)
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { objCClass(request) != nil }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    /// Loads start and stop here, off corelibs' queue, as Darwin runs a
+    /// protocol on a thread of its own: a protocol may start a task of the
+    /// same session.
+    private let queue = DispatchQueue(label: "org.perry.urlprotocol")
+
+    override func startLoading() {
+        let request = self.request
+        nonisolated(unsafe) let owner = self
+        queue.async { owner.load(request) }
+    }
+
+    override func stopLoading() {
+        nonisolated(unsafe) let owner = self
+        queue.async {
+            if let load = owner.load { Protocols.loader?.stop(load) }
+            owner.load = nil
+            owner.forwarded?.cancel()
+            owner.forwarded = nil
+        }
+    }
+
+    private var forwarded: URLSessionDataTask?
+
+    /// Loads by the Objective-C protocol that takes the request, or else as
+    /// corelibs would without one: a redirect may lead anywhere.
+    private func load(_ request: URLRequest) {
+        if let loader = Protocols.loader, let cls = Self.objCClass(request) {
+            load = loader.start(cls, request: Request(fromCorelibs: request), client: ProtocolClient(self))
+            return
+        }
+        nonisolated(unsafe) let owner = self
+        let task = Self.plainSession.dataTask(with: Request(fromCorelibs: request).value) { data, response, error in
+            let `self` = owner
+            if let error { return self.client?.urlProtocol(self, didFailWithError: error) ?? () }
+            if let response { self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed) }
+            if let data, !data.isEmpty { self.client?.urlProtocol(self, didLoad: data) }
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        forwarded = task
+        task.resume()
+    }
+
+    /// Without the bridge, for loads it passes on.
+    private static let plainSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = (configuration.protocolClasses ?? []).filter { $0 != BridgedProtocol.self }
+        return URLSession(configuration: configuration)
+    }()
+
+    /// corelibs follows no redirect a protocol reports: the bridge loads the
+    /// new request itself.
+    func redirect(to request: URLRequest) {
+        nonisolated(unsafe) let owner = self
+        queue.async {
+            if let load = owner.load { Protocols.loader?.stop(load) }
+            owner.load = nil
+            owner.load(request)
+        }
+    }
+}
+
+/// What an Objective-C protocol tells its client, passed to corelibs. Data
+/// is passed on whole when the load finishes: corelibs gives a completion
+/// handler only the last piece it was given.
+public final class ProtocolClient: @unchecked Sendable {
+    private let owner: BridgedProtocol
+    private let lock = NSLock()
+    private var data = Data()
+
+    init(_ owner: BridgedProtocol) {
+        self.owner = owner
+    }
+
+    /// NSURLCacheStoragePolicy: allowed 0, in memory only 1, not allowed 2.
+    public func receive(_ response: Response, cachePolicy: Int) {
+        owner.client?.urlProtocol(owner, didReceive: response.value,
+                                  cacheStoragePolicy: URLCache.StoragePolicy(rawValue: UInt(cachePolicy)) ?? .notAllowed)
+    }
+
+    public func load(_ data: Data) {
+        lock.lock()
+        self.data.append(data)
+        lock.unlock()
+    }
+
+    public func finish() {
+        lock.lock()
+        let data = self.data
+        self.data = Data()
+        lock.unlock()
+        if !data.isEmpty { owner.client?.urlProtocol(owner, didLoad: data) }
+        owner.client?.urlProtocolDidFinishLoading(owner)
+    }
+
+    public func fail(domain: String, code: Int, description: String?) {
+        let info: [String: Any] = description.map { [NSLocalizedDescriptionKey: $0] } ?? [:]
+        owner.client?.urlProtocol(owner, didFailWithError: NSError(domain: domain, code: code, userInfo: info))
+    }
+
+    public func redirect(to request: Request, response: Response) {
+        let (value, tag) = request.forCorelibs()
+        tags.append(contentsOf: tag.map { [$0] } ?? [])
+        owner.redirect(to: value)
+    }
+
+    private var tags: [RequestTag] = []
+}
+
+// MARK: - Authentication
+
+/// A protection space's parts.
+public struct ProtectionSpace: Sendable, Hashable {
+    public var host: String
+    public var port: Int
+    public var protocolName: String?
+    public var realm: String?
+    public var method: String
+    public var proxyType: String?
+
+    public init(host: String, port: Int, protocolName: String?, realm: String?, method: String?, proxyType: String? = nil) {
+        self.host = host
+        self.port = port
+        self.protocolName = protocolName
+        self.realm = realm
+        self.method = method ?? "NSURLAuthenticationMethodDefault"
+        self.proxyType = proxyType
+    }
+
+    init(_ space: URLProtectionSpace) {
+        self.init(host: space.host, port: space.port, protocolName: space.protocol, realm: space.realm,
+                  method: space.authenticationMethod, proxyType: space.proxyType)
+    }
+}
+
+/// A credential's parts.
+public struct Credential: Sendable {
+    public var user: String?
+    public var password: String?
+    /// NSURLCredentialPersistence: none 0, for session 1, permanent 2, synchronizable 3.
+    public var persistence: Int
+
+    public init(user: String?, password: String?, persistence: Int) {
+        self.user = user
+        self.password = password
+        self.persistence = persistence
+    }
+
+    init(_ credential: URLCredential) {
+        self.init(user: credential.user, password: credential.password, persistence: Int(credential.persistence.rawValue))
+    }
+
+    var value: URLCredential {
+        URLCredential(user: user ?? "", password: password ?? "",
+                      persistence: URLCredential.Persistence(rawValue: UInt(persistence)) ?? .none)
+    }
+}
+
+/// An authentication challenge's parts.
+public struct Challenge: Sendable {
+    public let space: ProtectionSpace
+    public let proposed: Credential?
+    public let previousFailureCount: Int
+    public let failureResponse: Response?
+    public let error: Failure?
+
+    init(space: ProtectionSpace, proposed: Credential?, previousFailureCount: Int, failureResponse: Response?, error: Failure?) {
+        self.space = space
+        self.proposed = proposed
+        self.previousFailureCount = previousFailureCount
+        self.failureResponse = failureResponse
+        self.error = error
+    }
+}
+
+/// HTTP authentication as Darwin runs it: a 401's challenge goes to the
+/// delegate before the response does; a credential retries the request
+/// with it (Basic), a cancel fails the task, and anything else delivers
+/// the 401 as it came. corelibs' own challenges stop after one attempt.
+enum Authentication {
+    /// The protection space a 401 names, for the methods Perry answers.
+    static func space(for response: HTTPURLResponse) -> ProtectionSpace? {
+        guard response.statusCode == 401, let url = response.url, let host = url.host,
+              let header = response.value(forHTTPHeaderField: "WWW-Authenticate") else { return nil }
+        let scheme = header.prefix { $0 != " " }.lowercased()
+        guard scheme == "basic" else { return nil }
+        var realm: String?
+        if let range = header.range(of: "realm=") {
+            let rest = header[range.upperBound...]
+            realm = rest.hasPrefix("\"") ? String(rest.dropFirst().prefix { $0 != "\"" }) : String(rest.prefix { $0 != "," })
+        }
+        let scheme_ = url.scheme?.lowercased() ?? "http"
+        return ProtectionSpace(host: host, port: url.port ?? (scheme_ == "https" ? 443 : 80), protocolName: scheme_, realm: realm,
+                               method: "NSURLAuthenticationMethodHTTPBasic")
+    }
+
+    static func challenge(_ task: Task, _ held: (response: URLResponse, data: Data), events: SessionEvents, session: Session) {
+        guard let http = held.response as? HTTPURLResponse, let space = space(for: http) else {
+            return deliver(task, held, events: events, session: session)
+        }
+        let challenge = Challenge(space: space, proposed: task.lastCredential, previousFailureCount: task.failures,
+                                  failureResponse: Response(held.response), error: nil)
+        nonisolated(unsafe) let events = events
+        events.task(task, didReceive: challenge) { disposition, credential in
+            switch disposition {
+            case 0 where credential != nil:
+                task.failures += 1
+                task.lastCredential = credential
+                guard var request = task.first.originalRequest else { return deliver(task, held, events: events, session: session) }
+                let pair = "\(credential?.user ?? ""):\(credential?.password ?? "")"
+                request.setValue("Basic " + Data(pair.utf8).base64EncodedString(), forHTTPHeaderField: "Authorization")
+                let old = task.value
+                let retry = session.value.dataTask(with: request)
+                session.adopt(retry, for: task)
+                task.replace(with: retry)
+                session.forget(old)
+                retry.resume()
+            case 2:
+                task.cancelledChallenge = true
+                task.markCompleted()
+                events.task(task, didCompleteWith: Failure(URLError(.cancelled), url: task.first.originalRequest?.url))
+                session.forget(task.value)
+            default:
+                deliver(task, held, events: events, session: session)
+            }
+        }
+    }
+
+    /// The 401 as the server sent it.
+    static func deliver(_ task: Task, _ held: (response: URLResponse, data: Data), events: SessionEvents, session: Session) {
+        events.task(task, didReceive: Response(held.response)) { _ in }
+        if !held.data.isEmpty {
+            task.count(held.data.count)
+            events.task(task, didReceive: held.data)
+        }
+        task.markCompleted()
+        events.task(task, didCompleteWith: nil)
+        session.forget(task.value)
     }
 }
