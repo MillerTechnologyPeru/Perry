@@ -70,14 +70,6 @@ enum Arrays {
         }
     }
 
-    static func install(superclass: Class) {
-        let array = NSArray.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
-        arrayClass = array.storage
-        array.addMethod("arrayWithObjects:", types: "@24@0:8@16",
-                        implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
-        mutableClass = NSMutableArray.defineObjCClass().storage
-        constantClass = NSConstantArray.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
-    }
 
     /// A new array wrapped for returning, +1.
     static func owned(_ elements: [id], cls: id? = nil) -> NSArray {
@@ -92,6 +84,14 @@ enum Arrays {
 /// NSArray.
 @ObjCClass("NSArray")
 public class NSArray: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Arrays.arrayClass = cls.storage
+        cls.addMethod("arrayWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
+    }
+
     var elements: [id] { Arrays.elements(objcObject) }
 
     private func setElements(_ elements: [id]) -> Self {
@@ -253,6 +253,11 @@ public class NSArray: NSObject {
 /// NSMutableArray.
 @ObjCClass("NSMutableArray")
 public class NSMutableArray: NSArray {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        Arrays.mutableClass = cls.storage
+    }
+
     private var storage: ArrayStorage {
         guard let storage = Arrays.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableArray")
@@ -354,6 +359,12 @@ public class NSMutableArray: NSArray {
 /// @[…] literals of constants: { isa, count, objects }, read in place.
 @ObjCClass("NSConstantArray")
 final class NSConstantArray: NSArray {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Arrays.constantClass = cls.markingStatic().storage
+    }
+
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     override func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         guard let state, state.load(as: UInt.self) == 0 else { return 0 }
