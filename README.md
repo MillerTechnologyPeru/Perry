@@ -38,7 +38,11 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSCharacterSet`,
   `NSXMLParser`, `NSPredicate` and `NSExpression` (format parsing,
   printing and evaluation), `NSSortDescriptor`, key-value coding with collection
-  operators, `NSLock`, `NSRecursiveLock`, `NSCondition`, `NSOperation`,
+  operators, `NSRegularExpression` (over ICU, as Darwin's) and
+  `NSTextCheckingResult`, `NSScanner`, `NSAttributedString` and
+  `NSMutableAttributedString`, `NSURLComponents` and `NSURLQueryItem`,
+  `NSIndexSet`, `NSOrderedSet`, `NSCountedSet`, `NSCache`, `NSLock`,
+  `NSRecursiveLock`, `NSCondition`, `NSOperation`,
   `NSBlockOperation` and `NSOperationQueue` (dependencies, priorities,
   cancellation, concurrency limits, barriers, asynchronous operations,
   the main queue), `NSTimeZone`, `NSLocale`, `NSCalendar`,
