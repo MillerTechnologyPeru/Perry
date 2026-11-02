@@ -70,13 +70,6 @@ enum Sets {
         ObjC.autorelease(make(members, cls: cls))!
     }
 
-    static func install(superclass: Class) {
-        let set = NSSet.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
-        setClass = set.storage
-        set.addMethod("setWithObjects:", types: "@24@0:8@16",
-                      implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
-        mutableClass = NSMutableSet.defineObjCClass().storage
-    }
 
     /// A new set wrapped for returning, +1.
     static func owned(_ members: [id], cls: id? = nil) -> NSSet {
@@ -87,6 +80,14 @@ enum Sets {
 /// NSSet.
 @ObjCClass("NSSet")
 public class NSSet: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Sets.setClass = cls.storage
+        cls.addMethod("setWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
+    }
+
     var members: [id] { Sets.elements(objcObject) }
 
     private func setMembers(_ members: [id]) -> Self {
@@ -199,6 +200,11 @@ public class NSSet: NSObject {
 /// NSMutableSet.
 @ObjCClass("NSMutableSet")
 public class NSMutableSet: NSSet {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        Sets.mutableClass = cls.storage
+    }
+
     private var storage: SetStorage {
         guard let storage = Sets.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableSet")
