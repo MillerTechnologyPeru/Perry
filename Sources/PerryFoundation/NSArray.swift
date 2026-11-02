@@ -363,6 +363,7 @@ final class NSConstantArray: NSArray {
     override class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryImmortal(cls)
         Arrays.constantClass = cls.markingStatic().storage
+        perry_foundation_set_empty_array_class(cls.pointer)
     }
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
