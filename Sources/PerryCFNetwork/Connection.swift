@@ -165,6 +165,40 @@ final class ConnectionEvents: SessionEvents, @unchecked Sendable {
     }
 
     func sessionDidBecomeInvalid(_ error: Failure?) {}
+
+    /// connection:willSendRequestForAuthenticationChallenge:, else
+    /// connection:didReceiveAuthenticationChallenge: when the delegate can
+    /// authenticate against the space; else default handling.
+    func task(_ task: Task, didReceive challenge: Challenge, completion: @escaping @Sendable (Int, Credential?) -> Void) {
+        let answer: @Sendable (Int, Credential?) -> Void = { disposition, credential in
+            guard disposition == 1 else { return completion(disposition, credential) }
+            let (fallback, stored) = CredentialStorage.defaultAnswer(challenge)
+            completion(fallback, stored)
+        }
+        guard let delegate else { return answer(1, nil) }
+        let name: String
+        if delegate.responds(to: "connection:willSendRequestForAuthenticationChallenge:") {
+            name = "connection:willSendRequestForAuthenticationChallenge:"
+        } else if delegate.responds(to: "connection:didReceiveAuthenticationChallenge:") {
+            name = "connection:didReceiveAuthenticationChallenge:"
+        } else {
+            return answer(1, nil)
+        }
+        let delivery = state.lock.withLock { state.delivery }
+        delivery.run { [self] in
+            guard !state.isCancelled else { return answer(2, nil) }
+            let object = Challenges.object(challenge, answer: SenderState(answer, challenge: challenge))
+            let check = "connection:canAuthenticateAgainstProtectionSpace:"
+            if name.hasPrefix("connection:didReceive"), delegate.responds(to: check),
+               let space = Challenges.states.get(object.objcObject)?.space,
+               !send((@convention(c) (Object, UnsafeRawPointer, Object, Object) -> Bool).self)(
+                   delegate.objcObject, ObjCRuntime.selector(check), connection, space.objcObject) {
+                return answer(1, nil)
+            }
+            send((@convention(c) (Object, UnsafeRawPointer, Object, Object) -> Void).self)(
+                delegate.objcObject, ObjCRuntime.selector(name), connection, object.objcObject)
+        }
+    }
 }
 
 enum Connections {
