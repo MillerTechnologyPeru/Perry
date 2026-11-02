@@ -84,6 +84,8 @@ extension CGRect {
         minX < other.maxX && other.minX < maxX && minY < other.maxY && other.minY < maxY
     }
 
+    func offsetBy(x: CGFloat) -> CGRect { CGRect(x: minX + x, y: minY, width: width, height: height) }
+
     func inset(by insets: UIEdgeInsets) -> CGRect {
         CGRect(x: minX + insets.left, y: minY + insets.top, width: width - insets.left - insets.right,
                height: height - insets.top - insets.bottom)
