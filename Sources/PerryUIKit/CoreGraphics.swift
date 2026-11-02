@@ -22,6 +22,7 @@ enum CG {
 
     nonisolated(unsafe) static var bitmapContextCreate: (@convention(c) (UnsafeMutableRawPointer?, Int, Int, Int, Int, Ref, UInt32) -> Ref)!
     nonisolated(unsafe) static var bitmapContextCreateImage: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var bitmapContextGetData: (@convention(c) (Ref) -> UnsafeMutableRawPointer?)!
     nonisolated(unsafe) static var saveGState: (@convention(c) (Ref) -> Void)!
     nonisolated(unsafe) static var restoreGState: (@convention(c) (Ref) -> Void)!
     nonisolated(unsafe) static var translateCTM: (@convention(c) (Ref, Double, Double) -> Void)!
@@ -98,6 +99,7 @@ enum CG {
         colorGetComponents = bind("CGColorGetComponents")
         bitmapContextCreate = bind("CGBitmapContextCreate")
         bitmapContextCreateImage = bind("CGBitmapContextCreateImage")
+        bitmapContextGetData = bind("CGBitmapContextGetData")
         saveGState = bind("CGContextSaveGState")
         restoreGState = bind("CGContextRestoreGState")
         translateCTM = bind("CGContextTranslateCTM")
