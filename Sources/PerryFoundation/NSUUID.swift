@@ -29,7 +29,7 @@ enum UUIDs {
     }
 
     static func install(superclass: Class) {
-        uuidClass = NSUUID.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        uuidClass = NSUUID.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
     }
 }
 
