@@ -248,6 +248,28 @@ public class NSData: NSObject {
         memcpy(buffer, bytes + Int(range.location), Int(range.length))
     }
 
+    /// NSDataSearchBackwards is 1, NSDataSearchAnchored 2; not found is
+    /// {NSNotFound, 0}.
+    @ObjCMethod("rangeOfData:options:range:")
+    func range(of other: NSData, options: UInt, range: NSRange) -> NSRange {
+        let data = data, needle = [UInt8](other.data)
+        let start = Int(range.location), end = Int(range.location + range.length)
+        guard end <= data.count else {
+            foundationFatal("-[NSData rangeOfData:options:range:]: range {\(range.location), \(range.length)} exceeds data length \(data.count)")
+        }
+        let notFound = NSRange(location: Int.max, length: 0)
+        guard !needle.isEmpty, needle.count <= end - start else { return notFound }
+        let backwards = options & 1 != 0, anchored = options & 2 != 0
+        let bytes = [UInt8](data[data.startIndex + start ..< data.startIndex + end])
+        var candidates = Array(0...(bytes.count - needle.count))
+        if backwards { candidates.reverse() }
+        if anchored { candidates = candidates.first.map { [$0] } ?? [] }
+        for offset in candidates where bytes[offset ..< offset + needle.count].elementsEqual(needle) {
+            return NSRange(location: start + offset, length: needle.count)
+        }
+        return notFound
+    }
+
     @ObjCMethod("subdataWithRange:")
     func subdata(range: NSRange) -> NSData {
         let data = data
