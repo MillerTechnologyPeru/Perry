@@ -89,6 +89,28 @@ public class NSMutableString: NSString {
         MutableStrings.replace(objcObject, location: range.location, length: range.length, with: other,
                                method: "replaceCharactersInRange:withString:")
     }
+
+    /// Each match in the range, searched with the options; the number replaced.
+    @ObjCMethod("replaceOccurrencesOfString:withString:options:range:")
+    func replaceOccurrences(of target: String, with replacement: String, options: UInt, range: NSRange) -> UInt {
+        guard !target.isEmpty else { return 0 }
+        let search = ObjC.selector("rangeOfString:options:range:")
+        let find = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)
+        let replacementLength = UInt(replacement.utf16.count)
+        var scope = range
+        var count: UInt = 0
+        // Forward only: a backwards search option makes no difference to the result.
+        while true {
+            let found = find(objcObject, search, Strings.autoreleased(target), options & ~4, scope)
+            guard found.location != UInt(Int.max) else { return count }
+            MutableStrings.replace(objcObject, location: found.location, length: found.length, with: replacement,
+                                   method: "replaceOccurrencesOfString:withString:options:range:")
+            count += 1
+            let end = scope.location + scope.length + replacementLength - found.length
+            let next = found.location + replacementLength
+            scope = NSRange(location: next, length: end - next)
+        }
+    }
 }
 
 /// - (void)appendFormat:(NSString *)format, ...
