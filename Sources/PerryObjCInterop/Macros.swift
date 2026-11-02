@@ -106,6 +106,37 @@ public macro ObjCMethod(_ selector: String, types: String? = nil) =
 public macro ObjCClassMethod(_ selector: String, types: String? = nil) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCMethodMacro")
 
+/// A Swift protocol for an Objective-C protocol. Its requirements are
+/// marked @ObjCRequired or @ObjCOptional with their selectors:
+///
+///     @ObjCProtocol("UISceneDelegate")
+///     public protocol UISceneDelegate {
+///         @ObjCOptional("sceneDidBecomeActive:")
+///         func sceneDidBecomeActive(_ scene: UIScene)
+///     }
+///
+/// Generates `AnyUISceneDelegate`, a class wrapping any conforming object
+/// that sends each requirement's message, checking first that the object
+/// implements an optional one; default implementations of the optional
+/// requirements, which do nothing; and the protocol's registration, which
+/// a provider's generated startup runs. An optional method that returns a
+/// value returns an Optional, nil when the object does not implement it. A
+/// protocol may refine one other @ObjCProtocol protocol.
+@attached(peer, names: prefixed(Any))
+@attached(extension, names: arbitrary)
+public macro ObjCProtocol(_ protocolName: String) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCProtocolMacro")
+
+/// A required method of an @ObjCProtocol protocol.
+@attached(peer)
+public macro ObjCRequired(_ selector: String, types: String? = nil) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCRequirementMacro")
+
+/// An optional method of an @ObjCProtocol protocol.
+@attached(peer)
+public macro ObjCOptional(_ selector: String, types: String? = nil) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCRequirementMacro")
+
 /// A property whose accessors send its getter (the property's name, or
 /// `getter`) and setter (`setName:`, unless `readonly`). A static property
 /// is a class property.
