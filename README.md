@@ -54,10 +54,16 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   `NSPropertyListSerialization` (writing XML and binary as CoreFoundation
   writes them; reading XML, binary and OpenStep), `NSKeyedArchiver` and
   `NSKeyedUnarchiver` (binary and XML archives, app classes'
-  `NSSecureCoding`, conditional objects, cycles), `NSLog`, and the CFString
-  functions KissXML uses
-  (`CFStringTransform` with `kCFStringTransformToXMLHex`,
-  `CFStringTrimWhitespace`); `%s` reads bytes as Mac OS Roman, as on Darwin
+  `NSSecureCoding`, conditional objects, cycles), `NSLog`; `%s` reads bytes
+  as Mac OS Roman, as on Darwin
+- CoreFoundation, toll-free bridged to Foundation's classes: `CFArray`,
+  `CFDictionary` and `CFSet` (with CoreFoundation's callbacks, the bridged
+  classes; with the program's own or none, collections of any pointers),
+  `CFString` (encodings, formats, searching, mutation, percent escapes,
+  `CFStringTransform`), `CFNumber`, `CFBoolean`, `CFData`, `CFDate`,
+  `CFURL`, `CFUUID`, `CFError`, `CFCharacterSet`, `CFTimeZone`,
+  `CFLocale`, `CFBundle`, `CFPreferences` (over the user defaults) and
+  Darwin's type IDs
 - C libraries over Linux's builds of the same libraries, with thunks for
   Darwin's variadic ABI: libxml2 (`libPerryxml2`, which KissXML runs on),
   zlib, bzip2, Expat, iconv, and SQLite 3.54 built with Apple's options
