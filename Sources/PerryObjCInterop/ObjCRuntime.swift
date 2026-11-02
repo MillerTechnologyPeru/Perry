@@ -18,6 +18,12 @@ public struct ObjCRuntimeFunctions {
     public var registerSelector: @convention(c) (UnsafePointer<CChar>?) -> UnsafeRawPointer?
     public var addMethod: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> Bool
     public var replaceMethod: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?
+    /// objc_initializeClassPair: builds a class in storage the caller provides.
+    public var initializeClassPair: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    /// objc_allocateClassPair.
+    public var allocateClassPair: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int) -> UnsafeMutableRawPointer?
+    /// objc_registerClassPair.
+    public var registerClassPair: @convention(c) (UnsafeMutableRawPointer?) -> Void
 
     public init(msgSend: UnsafeRawPointer, msgSendSuper2: UnsafeRawPointer,
                 retain: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
@@ -28,7 +34,10 @@ public struct ObjCRuntimeFunctions {
                 objectGetClass: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
                 registerSelector: @escaping @convention(c) (UnsafePointer<CChar>?) -> UnsafeRawPointer?,
                 addMethod: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> Bool,
-                replaceMethod: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?) {
+                replaceMethod: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?,
+                initializeClassPair: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
+                allocateClassPair: @escaping @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int) -> UnsafeMutableRawPointer?,
+                registerClassPair: @escaping @convention(c) (UnsafeMutableRawPointer?) -> Void) {
         self.msgSend = msgSend
         self.msgSendSuper2 = msgSendSuper2
         self.retain = retain
@@ -40,6 +49,9 @@ public struct ObjCRuntimeFunctions {
         self.registerSelector = registerSelector
         self.addMethod = addMethod
         self.replaceMethod = replaceMethod
+        self.initializeClassPair = initializeClassPair
+        self.allocateClassPair = allocateClassPair
+        self.registerClassPair = registerClassPair
     }
 }
 
@@ -73,6 +85,32 @@ public enum ObjCRuntime {
     @discardableResult @inline(__always)
     public static func autorelease(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         functions.autorelease(object)
+    }
+
+    // MARK: - Defining classes
+
+    /// The provider's storage for a class it exports by symbol, if any:
+    /// the class and its metaclass.
+    nonisolated(unsafe) public static var classStorage: ((String) -> (UnsafeMutableRawPointer, UnsafeMutableRawPointer)?)?
+
+    /// Defines a class: in the provider's exported storage when it has
+    /// some, otherwise on the heap; installs `registrations`, then registers
+    /// it. What @ObjCClass's defineObjCClass() calls.
+    @discardableResult
+    public static func defineClass(named name: String, superclass: ObjCClass?,
+                                   _ registrations: [ObjCMethodRegistration]) -> ObjCClass {
+        let created: UnsafeMutableRawPointer? = name.withCString { cName in
+            if let (cls, metaclass) = classStorage?(name) {
+                return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
+            }
+            return functions.allocateClassPair(superclass?.pointer, cName, 0)
+        }
+        guard let created else { objcInteropFatal("cannot define class \(name); is the name taken?") }
+        let cls = ObjCClass(created)
+        for register in registrations { register(cls) }
+        functions.registerClassPair(created)
+        cacheLock.withLock { classes[name] = created }
+        return cls
     }
 
     // MARK: - Selectors and classes
