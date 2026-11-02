@@ -1,4 +1,5 @@
 import Glibc
+import PerryObjCInterop
 
 /// Variadic arguments in Apple's arm64 convention: consecutive 8-byte stack
 /// slots, the Darwin va_list. Integers, pointers and doubles take one slot.
@@ -137,7 +138,7 @@ enum Format {
     /// The text for %@: the object's description, or "(null)".
     static func describe(_ object: id?) -> String {
         guard let object else { return "(null)" }
-        return Strings.value(of: ObjC.send(object, Selectors.description)) ?? "(null)"
+        return ObjCObject(object).describedByObject() ?? "(null)"
     }
 
     /// Formats one value with glibc.
