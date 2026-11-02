@@ -176,7 +176,7 @@ public final class NSNotificationCenter: NSObject {
     /// exist yet, so the block runs on the posting thread whatever `queue` is.
     @ObjCMethod("addObserverForName:object:queue:usingBlock:")
     func add(name: String?, object: ObjCObject?, queue: ObjCObject?, block: ObjCBlock) -> ObjCObject {
-        let token = ObjCObject(objCOwned: ObjC.send(ObjCClass(named: "NSObject").pointer, ObjC.selector("new")))
+        let token = ObjCObject.new()
         observers.observers.append(.init(observer: nil, selector: nil, block: ObjC.retain(block.object),
                                          token: ObjC.retain(token.id), name: name, object: object?.id))
         return token
