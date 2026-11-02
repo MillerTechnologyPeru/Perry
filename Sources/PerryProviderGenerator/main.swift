@@ -3,8 +3,9 @@
 //     PerryProviderGenerator <output.swift> <source.swift>...
 //
 // Reads every @ObjCClass class, @ObjCCategory extension and @ObjCConstants
-// type in the sources and writes perry_provider_startup, which defines the
-// classes (superclasses first), adds the categories and exports the
+// type in the sources and writes perry_provider_startup, which registers
+// the @ObjCProtocol protocols, defines the classes (superclasses first) and
+// adds the protocols they adopt, adds the categories and exports the
 // constants, and perry_provider_symbol, which hands the loader storage for
 // the classes and slots for the constants. Optional global functions add provider steps:
 //
@@ -22,7 +23,15 @@ struct ClassDeclaration {
     let name: String
     let objCName: String
     let superclass: String?
+    /// The other types it inherits: protocols, some of them Objective-C's.
+    let adopted: [String]
     let hasSetUp: Bool
+}
+
+struct ProtocolDeclaration {
+    let name: String
+    let objCName: String
+    let parent: String?
 }
 
 struct CategoryDeclaration {
@@ -32,6 +41,7 @@ struct CategoryDeclaration {
 
 final class Collector: SyntaxVisitor {
     var classes: [ClassDeclaration] = []
+    var protocols: [ProtocolDeclaration] = []
     var categories: [CategoryDeclaration] = []
     var constantTables: [String] = []
     var hasWillStart = false
@@ -56,14 +66,27 @@ final class Collector: SyntaxVisitor {
             let hasSetUp = node.memberBlock.members.contains {
                 $0.decl.as(FunctionDeclSyntax.self)?.name.text == "didDefineObjCClass"
             }
+            let inherited = (node.inheritanceClause?.inheritedTypes ?? []).map(\.type.trimmedDescription)
             classes.append(ClassDeclaration(
                 name: node.name.text,
                 objCName: objCName,
-                superclass: node.inheritanceClause?.inheritedTypes.first?.type.trimmedDescription,
+                superclass: inherited.first,
+                adopted: Array(inherited.dropFirst()),
                 hasSetUp: hasSetUp))
         }
         if attribute("ObjCConstants", in: node.attributes) != nil { constantTables.append(node.name.text) }
         return .visitChildren
+    }
+
+    override func visit(_ node: ProtocolDeclSyntax) -> SyntaxVisitorContinueKind {
+        if let objCProtocol = attribute("ObjCProtocol", in: node.attributes),
+           let objCName = objCProtocol.arguments?.as(LabeledExprListSyntax.self)?.first?
+               .expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue {
+            let parent = node.inheritanceClause?.inheritedTypes.map(\.type.trimmedDescription)
+                .first { $0 != "AnyObject" }
+            protocols.append(ProtocolDeclaration(name: node.name.text, objCName: objCName, parent: parent))
+        }
+        return .skipChildren
     }
 
     override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
@@ -98,6 +121,21 @@ final class Collector: SyntaxVisitor {
         }
         return .skipChildren
     }
+}
+
+/// Protocols ordered so each comes after the one it refines.
+func refinedFirst(_ protocols: [ProtocolDeclaration]) -> [ProtocolDeclaration] {
+    let byName = Dictionary(protocols.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    var ordered: [ProtocolDeclaration] = []
+    var placed: Set<String> = []
+    func place(_ declaration: ProtocolDeclaration) {
+        guard !placed.contains(declaration.name) else { return }
+        placed.insert(declaration.name)
+        if let parent = declaration.parent, let refined = byName[parent] { place(refined) }
+        ordered.append(declaration)
+    }
+    protocols.forEach(place)
+    return ordered
 }
 
 /// Classes ordered so each comes after its superclass when both are here.
@@ -194,6 +232,11 @@ lines += [
 if collector.hasWillStart {
     lines.append("    guard providerWillStart(info.pointee) else { return }")
 }
+let protocols = refinedFirst(collector.protocols)
+if !protocols.isEmpty {
+    lines += ["", "    // Protocols, refined protocols first."]
+    lines += protocols.map { "    Any\($0.name).defineObjCProtocol()" }
+}
 if !classes.isEmpty {
     lines += ["", "    // Classes, superclasses first."]
     for declaration in classes {
@@ -203,6 +246,14 @@ if !classes.isEmpty {
             lines.append("    \(declaration.name).defineObjCClass()")
         }
     }
+}
+let protocolNames = Dictionary(protocols.map { ($0.name, $0.objCName) }, uniquingKeysWith: { first, _ in first })
+let conformances = classes.flatMap { declaration in
+    declaration.adopted.compactMap { protocolNames[$0] }.map { (declaration.name, $0) }
+}
+if !conformances.isEmpty {
+    lines += ["", "    // Classes' adopted protocols."]
+    lines += conformances.map { "    ObjCRuntime.addProtocol(named: \"\($0.1)\", to: \($0.0).objCClass)" }
 }
 if !collector.categories.isEmpty {
     lines += ["", "    // Categories."]
