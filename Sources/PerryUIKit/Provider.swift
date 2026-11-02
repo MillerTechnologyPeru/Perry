@@ -28,6 +28,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         uikitFatal("UIKit needs libPerryCoreGraphics, which is missing or incomplete")
     }
     guard Updates.load(symbol) else { uikitFatal("UIKit needs libdispatch's main queue") }
+    Display.load(symbol)
     return true
 }
 
