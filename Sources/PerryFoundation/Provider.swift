@@ -24,6 +24,9 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard loaded, "NSObject".withCString({ ObjC.getClass($0) }) != nil else {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
+    MainDispatchQueue.load { name in
+        "/usr/lib/libSystem.B.dylib".withCString { library in name.withCString { lookup(library, $0) } }
+    }
     return true
 }
 
