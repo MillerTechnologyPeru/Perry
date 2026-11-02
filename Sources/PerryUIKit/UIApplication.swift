@@ -42,6 +42,10 @@ open class UIApplication: UIResponder {
     @ObjCMethod("openSessions")
     func openSessions() -> NSObject { Application.openSessions ?? NSMutableSet.empty() }
 
+    /// The key window, of any scene.
+    @ObjCMethod("keyWindow")
+    func keyWindow() -> NSObject? { Windows.key.map(NSObject.init) }
+
     @ObjCMethod("supportsMultipleScenes")
     func supportsMultipleScenes() -> Bool { false }
 
