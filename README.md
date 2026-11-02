@@ -9,7 +9,7 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 ## Status
 
 The loader runs C and Objective-C iOS binaries and `.app` bundles that use
-libSystem, libobjc, a first subset of Foundation, Core Data and the start of UIKit.
+libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the start of UIKit.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -37,7 +37,8 @@ libSystem, libobjc, a first subset of Foundation, Core Data and the start of UIK
   `NSProcessInfo`, `NSThread` with performs between threads,
   `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSCharacterSet`,
   `NSXMLParser`, `NSPredicate` and `NSExpression` (format parsing,
-  printing and evaluation), `NSSortDescriptor`, key-value coding,
+  printing and evaluation), `NSSortDescriptor`, key-value coding with collection
+  operators, `NSLock`, `NSRecursiveLock`, `NSCondition`,
   `NSKeyedUnarchiver` (binary archives), `NSLog`, and the CFString
   functions KissXML uses
   (`CFStringTransform` with `kCFStringTransformToXMLHex`,
@@ -50,7 +51,13 @@ libSystem, libobjc, a first subset of Foundation, Core Data and the start of UIK
 - CommonCrypto, in libSystem: digests, HMAC, `CCCrypt` and `CCCryptor`
   (AES, DES, 3DES, CAST, RC4, RC2, Blowfish in each mode), PBKDF2, AES key
   wrap and random bytes
-- `dispatch_once`
+- Grand Central Dispatch (`libPerrydispatch`, which libSystem re-exports):
+  serial, concurrent, global and main queues, sync, async, barriers,
+  `dispatch_after`, `dispatch_apply`, queue-specific data, target queues,
+  suspension and inactive queues, groups, semaphores, sources (timers,
+  data, reads, writes and signals), `dispatch_block_create` blocks and
+  `dispatch_data`; the main queue runs on the main thread from the main
+  run loop or `dispatch_main`
 - UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
@@ -71,7 +78,8 @@ libSystem, libobjc, a first subset of Foundation, Core Data and the start of UIK
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(operation queues, GCD, run loop input sources, formatters, localization),
+(operation queues, run loop input sources, formatters, localization),
+`dispatch_io` and dispatch workloops,
 most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 
 ## Layout
@@ -84,6 +92,8 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryObjC` | `libPerryobjc.so`: libobjc's C API under Darwin names (Swift) |
 | `Sources/PerryObjCRuntime` | Objective-C runtime engine (Swift) |
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
+| `Sources/PerryDispatch` | `libPerrydispatch.so`: libdispatch over Linux's (Swift) |
+| `Sources/CPerryDispatch` | Linux libdispatch's C API under other names, and Darwin libdispatch's exported data (C) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
@@ -415,6 +425,24 @@ and a Swift formatter handles `%@` and passes other conversions to glibc.
 Linux's libxml2: delegates see the events Darwin's parser sends, with text
 split where libxml2 splits it, declared entities resolved but not
 substituted, and the parse stopped by the first error.
+
+**libdispatch** runs its work on Linux's libdispatch, the one the Swift
+toolchain ships. Darwin's dispatch objects are Objective-C objects, which
+ARC code retains and releases, so each Perry queue, group, semaphore,
+source and data object is an instance of an `OS_dispatch_*` class holding
+the Linux object it stands for; the main queue, `DISPATCH_QUEUE_CONCURRENT`
+and `dispatch_data_empty` are static objects the headers' macros take the
+address of. Only the `_f` variants of Linux's API are called: Darwin
+blocks are copied with Darwin's `_Block_copy` and run through a function,
+in an autorelease pool as Darwin's worker threads drain one per item, so
+they never reach Linux's blocks runtime. Sources keep their handlers and
+context in Swift state that their Linux context points to, and
+`dispatch_block_create` makes Darwin heap blocks. The main run loop drains
+the main queue through the hooks CoreFoundation uses on Darwin, waiting in
+`poll()` on the eventfd Linux's libdispatch signals; `dispatch_main` does
+the same without a run loop. libSystem re-exports libdispatch as on
+Darwin: the loader looks for a symbol libSystem lacks in libdispatch,
+loading it then, and libdispatch brings libobjc with it.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
