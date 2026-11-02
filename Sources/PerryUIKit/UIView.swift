@@ -1,18 +1,27 @@
 import CPerryGeometry
 import PerryObjCInterop
 
-// UIView without drawing: geometry, the view hierarchy with UIKit's
-// callbacks, coordinate conversion, layout and the responder chain.
+// UIView: geometry, the view hierarchy with UIKit's callbacks, coordinate
+// conversion, layout, drawing and the responder chain. Each view has a
+// layer, made with the view, whose delegate it is; the view's geometry,
+// visibility and opacity are the layer's, and its subviews' layers are
+// the layer's sublayers in the same order.
 
 final class ViewState: ObjectState {
-    /// The frame is derived from the center and the bounds' size.
-    var center = CGPoint.zero
-    var bounds = CGRect.zero
-    var hidden = false
-    var alpha: CGFloat = 1
+    /// The view's layer, and the layer's state.
+    var layer: CALayer!
+    var geometry: LayerState!
     var tag = 0
     var userInteractionEnabled = true
-    var backgroundColor: NSObject?
+    var backgroundColor: UIColor?
+    var tintColor: UIColor?
+    /// UIViewContentMode: scale to fill 0.
+    var contentMode = 0
+    var autoresizingMask: UInt = 0
+    var autoresizesSubviews = true
+    var multipleTouchEnabled = false
+    var exclusiveTouch = false
+    var gestureRecognizers: [UIGestureRecognizer] = []
     var accessibilityIdentifier: String?
     var needsLayout = true
     /// The superview, which retains this view; not retained.
@@ -21,16 +30,39 @@ final class ViewState: ObjectState {
     /// The view controller whose view this is; not retained.
     var viewController: UnsafeMutableRawPointer?
 
+    var center: CGPoint {
+        get { geometry.position }
+        set { geometry.position = newValue }
+    }
+
+    var bounds: CGRect {
+        get { geometry.bounds }
+        set { geometry.bounds = newValue }
+    }
+
     var frame: CGRect {
-        CGRect(x: center.x - bounds.size.width / 2, y: center.y - bounds.size.height / 2,
-               width: bounds.size.width, height: bounds.size.height)
+        get { geometry.frame }
+        set { geometry.frame = newValue }
+    }
+
+    var hidden: Bool {
+        get { geometry.hidden }
+        set { geometry.hidden = newValue }
+    }
+
+    var alpha: CGFloat {
+        get { CGFloat(geometry.opacity) }
+        set { geometry.opacity = Float(newValue) }
     }
 }
 
 /// The default size of views a controller makes for itself, and of
-/// windows: an iPhone's screen, in points.
+/// windows: an iPhone's screen, in points, at three pixels a point.
 enum Screen {
     static let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
+    static let scale: CGFloat = 3
+    /// Under the status bar and the home indicator.
+    static let safeAreaInsets = UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
 }
 
 /// A coordinate space: one with bounds that converts to and from others.
@@ -55,9 +87,30 @@ protocol UICoordinateSpace {
 @ObjCClass("UIView")
 open class UIView: UIResponder, UICoordinateSpace {
     static let states = StateTable<ViewState>()
-    var state: ViewState { UIView.states[objcObject] }
+
+    /// The view's state, with its layer, made on first use.
+    var state: ViewState {
+        let state = UIView.states[objcObject]
+        if state.layer == nil { makeLayer(state) }
+        return state
+    }
+
+    static func state(of view: UnsafeMutableRawPointer) -> ViewState { wrap(view).state }
 
     static func wrap(_ object: UnsafeMutableRawPointer) -> UIView { UIView(objcObject: object, ownership: .retain) }
+
+    /// A layer of the class's +layerClass, with the view as its delegate.
+    private func makeLayer(_ state: ViewState) {
+        let cls = NSObject(ObjCRuntime.objectClass(objcObject)!).sendLayerClass()
+        let layer = cls.object.allocated().initializeLayer().unsafeCast(to: CALayer.self)
+        state.layer = layer
+        state.geometry = layer.state
+        state.geometry.delegate = objcObject
+        state.geometry.contentsScale = Screen.scale
+    }
+
+    @ObjCClassMethod("layerClass") static func layerClass() -> ObjCClass { CALayer.objCClass }
+    @ObjCMethod("layer") func layer() -> CALayer { state.layer }
 
     // MARK: Creating
 
@@ -75,6 +128,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("dealloc")
     func dealloc() {
         for subview in state.subviews { subview.state.superview = nil }
+        state.geometry.delegate = nil
         UIView.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
@@ -85,9 +139,11 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setFrame:")
     func setFrame(_ frame: CGRect) {
-        state.bounds.size = frame.size
-        state.center = CGPoint(x: frame.origin.x + frame.size.width / 2, y: frame.origin.y + frame.size.height / 2)
+        let state = state
+        let size = state.bounds.size
+        state.frame = frame
         state.needsLayout = true
+        if state.bounds.size != size { boundsSizeChanged() }
     }
 
     @ObjCMethod("bounds") func bounds() -> CGRect { state.bounds }
@@ -95,9 +151,21 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// Keeps the center, so the frame grows or shrinks around it.
     @ObjCMethod("setBounds:")
     func setBounds(_ bounds: CGRect) {
+        let state = state
+        let size = state.bounds.size
         state.bounds = bounds
         state.needsLayout = true
+        if state.bounds.size != size { boundsSizeChanged() }
     }
+
+    /// A view that draws redraws at its new size, as with the redraw
+    /// content mode.
+    private func boundsSizeChanged() {
+        if state.contentMode == 3 { state.geometry.needsDisplay = true }
+    }
+
+    @ObjCMethod("transform") func transform() -> CGAffineTransform { state.geometry.transform }
+    @ObjCMethod("setTransform:") func setTransform(_ transform: CGAffineTransform) { state.geometry.transform = transform }
 
     @ObjCMethod("center") func center() -> CGPoint { state.center }
     @ObjCMethod("setCenter:") func setCenter(_ center: CGPoint) { state.center = center }
@@ -108,8 +176,43 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) { state.hidden = hidden }
     @ObjCMethod("alpha") func alpha() -> CGFloat { state.alpha }
     @ObjCMethod("setAlpha:") func setAlpha(_ alpha: CGFloat) { state.alpha = alpha }
-    @ObjCMethod("backgroundColor") func backgroundColor() -> NSObject? { state.backgroundColor }
-    @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: NSObject?) { state.backgroundColor = color }
+    @ObjCMethod("backgroundColor") func backgroundColor() -> UIColor? { state.backgroundColor }
+
+    @ObjCMethod("setBackgroundColor:")
+    func setBackgroundColor(_ color: UIColor?) {
+        let state = state
+        state.backgroundColor = color
+        LayerState.setColor(&state.geometry.backgroundColor, color?.sendCGColor())
+    }
+
+    @ObjCMethod("clipsToBounds") func clipsToBounds() -> Bool { state.geometry.masksToBounds }
+    @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ clips: Bool) { state.geometry.masksToBounds = clips }
+    @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.geometry.isOpaque }
+    @ObjCMethod("setOpaque:") func setOpaque(_ opaque: Bool) { state.geometry.isOpaque = opaque }
+    @ObjCMethod("contentMode") func contentMode() -> Int { state.contentMode }
+    @ObjCMethod("setContentMode:") func setContentMode(_ mode: Int) { state.contentMode = mode }
+    @ObjCMethod("autoresizingMask") func autoresizingMask() -> UInt { state.autoresizingMask }
+    @ObjCMethod("setAutoresizingMask:") func setAutoresizingMask(_ mask: UInt) { state.autoresizingMask = mask }
+    @ObjCMethod("autoresizesSubviews") func autoresizesSubviews() -> Bool { state.autoresizesSubviews }
+    @ObjCMethod("setAutoresizesSubviews:") func setAutoresizesSubviews(_ autoresizes: Bool) { state.autoresizesSubviews = autoresizes }
+    @ObjCMethod("isMultipleTouchEnabled") func isMultipleTouchEnabled() -> Bool { state.multipleTouchEnabled }
+    @ObjCMethod("setMultipleTouchEnabled:") func setMultipleTouchEnabled(_ enabled: Bool) { state.multipleTouchEnabled = enabled }
+    @ObjCMethod("isExclusiveTouch") func isExclusiveTouch() -> Bool { state.exclusiveTouch }
+    @ObjCMethod("setExclusiveTouch:") func setExclusiveTouch(_ exclusive: Bool) { state.exclusiveTouch = exclusive }
+
+    /// The view's tint color, else its superview's, else the system blue.
+    @ObjCMethod("tintColor")
+    func tintColor() -> UIColor {
+        var current: UnsafeMutableRawPointer? = objcObject
+        while let view = current {
+            let state = UIView.states[view]
+            if let tint = state.tintColor { return tint }
+            current = state.superview
+        }
+        return UIColor.systemBlue()
+    }
+
+    @ObjCMethod("setTintColor:") func setTintColor(_ color: UIColor?) { state.tintColor = color }
     @ObjCMethod("tag") func tag() -> Int { state.tag }
     @ObjCMethod("setTag:") func setTag(_ tag: Int) { state.tag = tag }
     @ObjCMethod("isUserInteractionEnabled") func isUserInteractionEnabled() -> Bool { state.userInteractionEnabled }
@@ -159,12 +262,37 @@ open class UIView: UIResponder, UICoordinateSpace {
     func bringSubviewToFront(_ view: UIView) {
         guard let index = index(of: view) else { return }
         state.subviews.append(state.subviews.remove(at: index))
+        placeLayer(of: view)
     }
 
     @ObjCMethod("sendSubviewToBack:")
     func sendSubviewToBack(_ view: UIView) {
         guard let index = index(of: view) else { return }
         state.subviews.insert(state.subviews.remove(at: index), at: 0)
+        placeLayer(of: view)
+    }
+
+    @ObjCMethod("exchangeSubviewAtIndex:withSubviewAtIndex:")
+    func exchangeSubview(at first: Int, withSubviewAt second: Int) {
+        let subviews = state.subviews
+        guard subviews.indices.contains(first), subviews.indices.contains(second) else { return }
+        state.subviews.swapAt(first, second)
+        placeLayer(of: subviews[first])
+        placeLayer(of: subviews[second])
+    }
+
+    /// Puts a subview's layer among the layer's sublayers where the
+    /// subview is among the subviews: below the next subview's layer.
+    private func placeLayer(of view: UIView) {
+        let subviews = state.subviews
+        guard let index = index(of: view) else { return }
+        let layer = state.layer!, sublayer = view.state.layer!
+        if index + 1 < subviews.count, let next = layer.index(of: subviews[index + 1].state.layer) {
+            let current = layer.index(of: sublayer)
+            layer.insert(sublayer, at: current.map { $0 < next ? next - 1 : next } ?? next)
+        } else {
+            layer.insert(sublayer, at: layer.state.sublayers.count)
+        }
     }
 
     @ObjCMethod("removeFromSuperview")
@@ -177,6 +305,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         if window != nil { UIView.willMove(self, toWindow: nil) }
         superview.state.subviews.removeAll { $0.objcObject == objcObject }
         state.superview = nil
+        state.layer.removeFromSuperlayer()
         if window != nil { UIView.didMoveToWindow(self) }
         sendDidMoveToSuperview()
     }
@@ -190,6 +319,7 @@ open class UIView: UIResponder, UICoordinateSpace {
             guard let current = self.index(of: view) else { return }
             let moved = state.subviews.remove(at: current)
             state.subviews.insert(moved, at: min(max(index, 0), state.subviews.count))
+            placeLayer(of: moved)
             return
         }
         let oldSuperview = view.state.superview.map(UIView.wrap)
@@ -200,6 +330,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         oldSuperview?.state.subviews.removeAll { $0.objcObject == view.objcObject }
         state.subviews.insert(view, at: min(max(index, 0), state.subviews.count))
         view.state.superview = objcObject
+        placeLayer(of: view)
         if oldWindow != newWindow { UIView.didMoveToWindow(view) }
         view.sendDidMoveToSuperview()
         sendDidAddSubview(view)
@@ -212,6 +343,7 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     /// -willMoveToWindow: to a subtree, each view before its subviews.
     static func willMove(_ view: UIView, toWindow window: UnsafeMutableRawPointer?) {
+        if let controller = view.state.viewController { UIViewController.wrap(controller).viewWillMove(toWindow: window) }
         view.sendWillMoveToWindow(window.map(UIView.wrap))
         for subview in view.state.subviews { willMove(subview, toWindow: window) }
     }
@@ -257,7 +389,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         var point = point
         var current: UnsafeMutableRawPointer? = objcObject
         while let view = current {
-            let state = UIView.states[view]
+            let state = UIView.state(of: view)
             guard let superview = state.superview else { break }
             let frame = state.frame
             point = CGPoint(x: point.x - state.bounds.origin.x + frame.origin.x,
@@ -314,14 +446,86 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setNeedsLayout") func setNeedsLayout() { state.needsLayout = true }
 
     /// Lays out the subtree's views that need it, each before its subviews.
+    /// A controller's view is laid out between its controller's
+    /// -viewWillLayoutSubviews and -viewDidLayoutSubviews.
     @ObjCMethod("layoutIfNeeded")
     func layoutIfNeeded() {
         if state.needsLayout {
             state.needsLayout = false
+            let controller = state.viewController.map { NSObject($0) }
+            controller?.sendViewWillLayoutSubviews()
             sendLayoutSubviews()
+            controller?.sendViewDidLayoutSubviews()
         }
         for subview in state.subviews { subview.layoutIfNeeded() }
     }
+
+    // MARK: Gesture recognizers
+
+    @ObjCMethod("gestureRecognizers")
+    func gestureRecognizers() -> NSObject? { state.gestureRecognizers.isEmpty ? nil : NSMutableArray.of(state.gestureRecognizers) }
+
+    @ObjCMethod("addGestureRecognizer:")
+    func addGestureRecognizer(_ recognizer: UIGestureRecognizer) {
+        if let old = recognizer.state.view, old != objcObject { UIView.wrap(old).removeGestureRecognizer(recognizer) }
+        guard !state.gestureRecognizers.contains(where: { $0.objcObject == recognizer.objcObject }) else { return }
+        state.gestureRecognizers.append(recognizer)
+        recognizer.state.view = objcObject
+    }
+
+    @ObjCMethod("removeGestureRecognizer:")
+    func removeGestureRecognizer(_ recognizer: UIGestureRecognizer) {
+        state.gestureRecognizers.removeAll { $0.objcObject == recognizer.objcObject }
+        if recognizer.state.view == objcObject { recognizer.state.view = nil }
+    }
+
+    // MARK: Safe area and margins
+
+    /// The parts of the view under its window's unsafe edges and under the
+    /// bars of the navigation controller its controller is in, plus its
+    /// controller's additional insets.
+    @ObjCMethod("safeAreaInsets")
+    func safeAreaInsets() -> UIEdgeInsets { safeAreaInsets(ignoringController: false) }
+
+    func safeAreaInsets(ignoringController: Bool) -> UIEdgeInsets {
+        if self.is(UIWindow.self) { return Screen.safeAreaInsets }
+        let state = state
+        guard let superviewObject = state.superview, windowObject != nil else { return .zero }
+        let superview = UIView.wrap(superviewObject)
+        let safe = superview.state.bounds.inset(by: superview.safeAreaInsets(ignoringController: false))
+        let frame = convert(state.bounds, to: superview)
+        var insets = UIEdgeInsets(top: max(0, safe.minY - frame.minY), left: max(0, safe.minX - frame.minX),
+                                  bottom: max(0, frame.maxY - safe.maxY), right: max(0, frame.maxX - safe.maxX))
+        if !ignoringController, let controllerObject = state.viewController {
+            let controller = UIViewController.wrap(controllerObject)
+            if let parent = controller.state.parent, ObjCRuntime.isKind(parent, of: UINavigationController.objCClass.pointer) {
+                let navigation = UINavigationController(objcObject: parent, ownership: .retain)
+                let bar = navigation.navigationBar()
+                if !navigation.navigation.barHidden, !bar.state.hidden, bar.windowObject != nil {
+                    insets.top = max(insets.top, bar.convert(bar.state.bounds, to: self).maxY - state.bounds.minY)
+                }
+            }
+            let extra = controller.state.additionalSafeAreaInsets
+            insets = UIEdgeInsets(top: insets.top + extra.top, left: insets.left + extra.left,
+                                  bottom: insets.bottom + extra.bottom, right: insets.right + extra.right)
+        }
+        return insets
+    }
+
+    @ObjCMethod("layoutMargins")
+    func layoutMargins() -> UIEdgeInsets {
+        let safe = safeAreaInsets()
+        let side: CGFloat = state.viewController != nil ? 16 : 8
+        return UIEdgeInsets(top: safe.top + 8, left: max(safe.left, side), bottom: safe.bottom + 8, right: max(safe.right, side))
+    }
+
+    @ObjCMethod("setLayoutMargins:") func setLayoutMargins(_ margins: UIEdgeInsets) {}
+    @ObjCMethod("insetsLayoutMarginsFromSafeArea") func insetsLayoutMarginsFromSafeArea() -> Bool { true }
+    @ObjCMethod("setInsetsLayoutMarginsFromSafeArea:") func setInsetsLayoutMarginsFromSafeArea(_ insets: Bool) {}
+    @ObjCMethod("preservesSuperviewLayoutMargins") func preservesSuperviewLayoutMargins() -> Bool { false }
+    @ObjCMethod("setPreservesSuperviewLayoutMargins:") func setPreservesSuperviewLayoutMargins(_ preserves: Bool) {}
+    @ObjCMethod("safeAreaInsetsDidChange") func safeAreaInsetsDidChange() {}
+    @ObjCMethod("layoutMarginsDidChange") func layoutMarginsDidChange() {}
 
     @ObjCMethod("layoutSubviews") func layoutSubviews() {}
 
@@ -334,6 +538,57 @@ open class UIView: UIResponder, UICoordinateSpace {
         let frame = state.frame
         setFrame(CGRect(origin: frame.origin, size: size))
     }
+
+    // MARK: Drawing
+
+    /// Draws nothing; a subclass that implements it draws its layer's
+    /// content.
+    @ObjCMethod("drawRect:") func draw(_ rect: CGRect) {}
+
+    @ObjCMethod("setNeedsDisplay") func setNeedsDisplay() { state.geometry.needsDisplay = true }
+    @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { state.geometry.needsDisplay = true }
+
+    /// The layer's content: -drawRect: with the layer's context current.
+    @ObjCMethod("drawLayer:inContext:")
+    func drawLayer(_ layer: CALayer, in context: UnsafeMutableRawPointer?) {
+        guard let context else { return }
+        let bounds = state.bounds
+        Graphics.drawing(in: context) { sendDraw(bounds) }
+    }
+
+    /// Renders the view's hierarchy, laid out, into the current context,
+    /// scaled to `rect`.
+    @ObjCMethod("drawViewHierarchyInRect:afterScreenUpdates:")
+    func drawHierarchy(in rect: CGRect, afterScreenUpdates: Bool) -> Bool {
+        guard let context = Graphics.current else { return false }
+        layoutIfNeeded()
+        let bounds = state.bounds
+        CG.saveGState(context)
+        CG.translateCTM(context, rect.minX, rect.minY)
+        if bounds.width > 0, bounds.height > 0 { CG.scaleCTM(context, rect.width / bounds.width, rect.height / bounds.height) }
+        CG.translateCTM(context, -bounds.minX, -bounds.minY)
+        CALayer.render(state.layer, in: context, root: true)
+        CG.restoreGState(context)
+        return true
+    }
+
+    // MARK: Hit testing
+
+    /// The deepest visible, interactive descendant containing `point`,
+    /// front to back.
+    @ObjCMethod("hitTest:withEvent:")
+    func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let state = state
+        guard !state.hidden, state.userInteractionEnabled, state.alpha > 0.01, sendPointInside(point, with: event) else { return nil }
+        for subview in state.subviews.reversed() {
+            let local = subview.convert(point, from: self)
+            if let hit = subview.sendHitTest(local, with: event) { return hit }
+        }
+        return self
+    }
+
+    @ObjCMethod("pointInside:withEvent:")
+    func pointInside(_ point: CGPoint, with event: NSObject?) -> Bool { state.bounds.contains(point) }
 
     // MARK: Responder chain
 
@@ -366,4 +621,8 @@ extension NSObject {
     @ObjCMethod("willRemoveSubview:") func sendWillRemoveSubview(_ subview: UIView)
     @ObjCMethod("layoutSubviews") func sendLayoutSubviews()
     @ObjCMethod("sizeThatFits:") func sendSizeThatFits(_ size: CGSize) -> CGSize
+    @ObjCMethod("layerClass") func sendLayerClass() -> ObjCClass
+    @ObjCMethod("drawRect:") func sendDraw(_ rect: CGRect)
+    @ObjCMethod("hitTest:withEvent:") func sendHitTest(_ point: CGPoint, with event: NSObject?) -> UIView?
+    @ObjCMethod("pointInside:withEvent:") func sendPointInside(_ point: CGPoint, with event: NSObject?) -> Bool
 }
