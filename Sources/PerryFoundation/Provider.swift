@@ -8,14 +8,11 @@ import PerryObjCInterop
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
-nonisolated(unsafe) private var programName = "perry"
 
 @c
 public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     guard let info, info.pointee.version >= 2, let lookup = info.pointee.lookup_symbol else { return }
-    if let name = info.pointee.progname {
-        programName = String(decoding: UnsafeRawBufferPointer(start: name, count: strlen(name)), as: UTF8.self)
-    }
+    Process.start(info.pointee)
     let loaded = ObjC.load { name in
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }
@@ -23,7 +20,12 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
 
-    _ = ClassDefinition(extending: nsObject, FoundationObject.register, DelayedPerforms.register)
+    // Foundation's additions to NSObject, installed like categories.
+    let root = ObjCClass(UnsafeMutableRawPointer(nsObject))
+    for register in [FoundationObject.registerObjCMethods, DelayedPerforms.registerObjCMethods,
+                     ThreadPerforms.registerObjCMethods] {
+        register(root)
+    }
     Strings.install(superclass: nsObject)
     MutableStrings.install(superclass: Strings.stringClass)
     Errors.install(superclass: nsObject)
@@ -39,15 +41,17 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     DataObjects.install(superclass: nsObject)
     URLs.install(superclass: nsObject)
     UUIDs.install(superclass: nsObject)
-    JSON.install(superclass: nsObject)
+    NSJSONSerialization.defineObjCClass()
+    Process.install(superclass: nsObject)
+    Bundles.install(superclass: nsObject)
+    Threads.install(superclass: nsObject)
+    UserDefaults.install()
+    FileManagers.install()
 }
 
 /// Foundation's additions to NSObject. libobjc's -description returns nil.
 @ObjCClass("NSObject")
-struct FoundationObject {}
-
-@ObjCImplementation
-extension FoundationObject {
+final class FoundationObject: NSObject {
     @ObjCMethod("description")
     func description() -> String { "<\(ObjC.className(objcObject)): \(objcObject)>" }
 }
@@ -66,7 +70,7 @@ private func log(_ message: String) {
     strftime(&date, date.count, "%Y-%m-%d %H:%M:%S", &local)
     let milliseconds = String(now.tv_nsec / 1_000_000)
     let padded = String(repeating: "0", count: 3 - milliseconds.count) + milliseconds
-    var line = "\(String(decoding: date.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)).\(padded) \(programName)[\(getpid()):\(perry_foundation_thread_id())] \(message)"
+    var line = "\(String(decoding: date.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)).\(padded) \(Process.name)[\(getpid()):\(perry_foundation_thread_id())] \(message)"
     if !line.hasSuffix("\n") { line += "\n" }
     line.withCString { _ = write(2, $0, strlen($0)) }
 }
