@@ -15,6 +15,8 @@ final class NavigationState: ObjectState {
     var toolbarHidden = true
     var delegate: UnsafeMutableRawPointer?
     var transitionScheduled = false
+    /// Whether a transition's views are sliding.
+    var animating = false
 }
 
 /// The navigation bar's height on an iPhone.
@@ -178,12 +180,16 @@ open class UINavigationController: UIViewController {
     /// Shows the top controller's view in place of the one shown, with
     /// appearance callbacks when the navigation controller is on screen.
     func runTransition(animated: Bool) {
-        guard let view = state.view, let top = navigation.viewControllers.last else { return }
+        guard !navigation.animating, let view = state.view, let top = navigation.viewControllers.last else { return }
         let from = navigation.displayed
         guard from?.objcObject != top.objcObject else { return }
         let onScreen = view.windowObject != nil && (state.appearance == .appeared || state.appearance == .appearing)
         let delegate = navigation.delegate.map { NSObject($0) }
         let topView = top.loadedView
+        let fromView = from?.state.view
+        // Whether the views slide: asked for, on screen, from another view,
+        // with a live view to show it. The callbacks are told the same.
+        let animated = animated && onScreen && fromView != nil && Animations.live
         if let delegate, delegate.responds(to: "navigationController:willShowViewController:animated:") {
             delegate.sendNavigationController(self, willShow: top, animated: animated)
         }
@@ -191,18 +197,47 @@ open class UINavigationController: UIViewController {
             _ = from?.beginAppearance(false, animated: animated)
             _ = top.beginAppearance(true, animated: animated)
         }
-        topView.sendSetFrame(view.state.bounds)
-        from?.state.view?.removeFromSuperview()
-        view.insertSubview(topView, below: navigationBar())
+        let bounds = view.state.bounds
+        topView.sendSetFrame(bounds)
+        // A push brings the new view in over the old; a pop uncovers the
+        // one beneath.
+        let pushing = from.map { old in !navigation.viewControllers.contains { $0.objcObject == old.objcObject } } == false
+        if pushing || fromView == nil {
+            view.insertSubview(topView, below: navigationBar())
+        } else {
+            view.insertSubview(topView, below: fromView)
+        }
         navigation.displayed = top
         layoutContent()
-        if onScreen {
-            from?.finishAppearance()
-            top.finishAppearance()
+
+        let finish = { [self] in
+            fromView?.removeFromSuperview()
+            fromView?.sendSetFrame(bounds)
+            topView.sendSetFrame(bounds)
+            navigation.animating = false
+            if onScreen {
+                from?.finishAppearance()
+                top.finishAppearance()
+            }
+            if let delegate, delegate.responds(to: "navigationController:didShowViewController:animated:") {
+                delegate.sendNavigationController(self, didShow: top, animated: animated)
+            }
+            // A change to the stack while sliding shows once it is over.
+            if navigation.viewControllers.last?.objcObject != top.objcObject { scheduleTransition(animated: false) }
         }
-        if let delegate, delegate.responds(to: "navigationController:didShowViewController:animated:") {
-            delegate.sendNavigationController(self, didShow: top, animated: animated)
+        guard animated, let fromView else {
+            finish()
+            return
         }
+        // The new view slides in from the trailing edge as the old one
+        // moves a third of the way out, or the reverse for a pop.
+        navigation.animating = true
+        let width = bounds.width
+        let (fromStart, fromEnd, topStart): (CGFloat, CGFloat, CGFloat) = pushing ? (0, -width / 3, width) : (0, width, -width / 3)
+        Animations.run(duration: 0.35, { progress in
+            fromView.sendSetFrame(bounds.offsetBy(x: fromStart + (fromEnd - fromStart) * progress))
+            topView.sendSetFrame(bounds.offsetBy(x: topStart * (1 - progress)))
+        }, completion: finish)
     }
 
     @ObjCMethod("viewWillLayoutSubviews")
@@ -216,6 +251,7 @@ open class UINavigationController: UIViewController {
         let bar = navigationBar()
         let top = view.windowObject != nil ? view.safeAreaInsets(ignoringController: true).top : 0
         bar.sendSetFrame(CGRect(x: 0, y: top, width: bounds.width, height: barHeight))
+        bar.extendBackground(above: top)
         if let displayed = navigation.displayed?.state.view {
             displayed.sendSetFrame(bounds)
         }
@@ -280,6 +316,10 @@ final class NavigationBarState: ObjectState {
     var scrollEdgeAppearance: NSObject?
     var compactAppearance: NSObject?
     var shadowImage: NSObject?
+    /// What the bar last drew, to tell when its items have changed.
+    var drawn = ""
+    /// The bar's background above it, behind the status bar.
+    var extensionView: UIView?
 }
 
 @ObjCClass("UINavigationBar")
@@ -336,6 +376,7 @@ open class UINavigationBar: UIView {
     @ObjCMethod("barTintColor") func barTintColor() -> UIColor? { barState.barTintColor }
     @ObjCMethod("setBarTintColor:") func setBarTintColor(_ color: UIColor?) {
         barState.barTintColor = color
+        barState.extensionView?.setBackgroundColor(backgroundColor)
         setNeedsDisplay()
     }
     @ObjCMethod("titleTextAttributes") func titleTextAttributes() -> NSObject? { barState.titleTextAttributes }
@@ -358,6 +399,121 @@ open class UINavigationBar: UIView {
 
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width, height: barHeight) }
+
+    /// Where the bar's buttons go: the back button at the leading edge,
+    /// then the left items, the right items from the trailing edge.
+    struct Buttons {
+        var back: (title: String, frame: CGRect)?
+        var left: [(item: UIBarButtonItem, frame: CGRect)] = []
+        var right: [(item: UIBarButtonItem, frame: CGRect)] = []
+    }
+
+    func buttons() -> Buttons {
+        var buttons = Buttons()
+        let bounds = state.bounds
+        let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
+        guard let top = barState.items.last else { return buttons }
+        var left: CGFloat = 16
+        if let back = backItem(), !top.state.hidesBackButton {
+            let title = "\u{2039} " + (back.state.backButtonTitle ?? back.state.title ?? "Back")
+            let width = Text.size(title, font: font).width
+            buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: bounds.height))
+            left = 8 + width + 16
+        }
+        for item in top.state.leftItems {
+            let width = Text.size(item.displayTitle, font: font).width
+            buttons.left.append((item, CGRect(x: left, y: 0, width: width, height: bounds.height)))
+            left += width + 16
+        }
+        var right = bounds.width - 16
+        for item in top.state.rightItems {
+            let width = Text.size(item.displayTitle, font: item.state.style == 2 ? bold : font).width
+            right -= width
+            buttons.right.append((item, CGRect(x: right, y: 0, width: width, height: bounds.height)))
+            right -= 16
+        }
+        return buttons
+    }
+
+    /// A light background with a hairline below; the top item's title
+    /// centered, the back button and the items' titles in the tint color.
+    @ObjCMethod("drawRect:")
+    override func draw(_ rect: CGRect) {
+        guard let context = Graphics.current else { return }
+        let bounds = state.bounds
+        // The colors own their CGColors, so they stay alive while used.
+        let background = backgroundColor, separator = UIColor.separator()
+        withExtendedLifetime((background, separator)) {
+            CG.setFillColorWithColor(context, background.state.makeCGColor())
+            CG.fillRect(context, bounds)
+            CG.setFillColorWithColor(context, separator.state.makeCGColor())
+            CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - 1 / Screen.scale, width: bounds.width, height: 1 / Screen.scale))
+        }
+        let tint = tintColor()
+        let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
+        func middle(_ font: UIFont) -> CGFloat { bounds.midY - Text.size("A", font: font).height / 2 }
+        let buttons = buttons()
+        if let back = buttons.back { Text.draw(back.title, at: CGPoint(x: back.frame.minX, y: middle(font)), font: font, color: tint) }
+        for (item, frame) in buttons.left + buttons.right {
+            let itemFont = item.state.style == 2 ? bold : font
+            Text.draw(item.displayTitle, at: CGPoint(x: frame.minX, y: middle(itemFont)), font: itemFont,
+                      color: item.state.enabled ? (item.state.tintColor ?? tint) : UIColor.systemGray())
+        }
+        if let title = barState.items.last?.state.title {
+            let width = Text.size(title, font: bold).width
+            Text.draw(title, at: CGPoint(x: bounds.midX - width / 2, y: middle(bold)), font: bold, color: UIColor.label())
+        }
+    }
+
+    var backgroundColor: UIColor { barState.barTintColor ?? UIColor.gray(0.97) }
+
+    /// Continues the bar's background `height` points up, to the top of
+    /// the screen, as UIKit's bars do behind the status bar.
+    func extendBackground(above height: CGFloat) {
+        let view: UIView
+        if let existing = barState.extensionView {
+            view = existing
+        } else {
+            view = UIView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIView.self)
+            view.setUserInteractionEnabled(false)
+            barState.extensionView = view
+            addSubview(view)
+        }
+        view.setBackgroundColor(backgroundColor)
+        view.sendSetFrame(CGRect(x: 0, y: -height, width: state.bounds.width, height: height))
+    }
+
+    /// Whether what the bar shows has changed since it last drew.
+    func contentChanged() -> Bool {
+        let items = barState.items.suffix(2)
+        var content = "\(state.bounds.width) \(barState.barTintColor.map { $0.description() } ?? "")"
+        for item in items {
+            content += "|\(item.state.title ?? "")|\(item.state.backButtonTitle ?? "")|\(item.state.hidesBackButton)"
+            for button in item.state.leftItems + item.state.rightItems {
+                content += "|\(button.displayTitle)|\(button.state.style)|\(button.state.enabled)"
+            }
+        }
+        guard content != barState.drawn else { return false }
+        barState.drawn = content
+        return true
+    }
+
+    /// A tap: the back button pops, an item sends its action.
+    func tap(at point: CGPoint) {
+        let buttons = buttons()
+        let slop: CGFloat = 8
+        func hit(_ frame: CGRect) -> Bool {
+            point.x >= frame.minX - slop && point.x <= frame.maxX + slop && point.y >= frame.minY && point.y <= frame.maxY
+        }
+        if let back = buttons.back, hit(back.frame), let navigation = barState.navigationController {
+            _ = UINavigationController(objcObject: navigation, ownership: .retain).pop(animated: true)
+            return
+        }
+        for (item, frame) in buttons.left + buttons.right where hit(frame) && item.state.enabled {
+            item.sendAction(from: self)
+            return
+        }
+    }
 }
 
 // MARK: - UINavigationItem
@@ -518,6 +674,14 @@ open class UIBarButtonItem: UIBarItem {
         state.action = action
     }
 
+    /// The title shown for the item, or its system item's.
+    var displayTitle: String {
+        if let title = state.title { return title }
+        let system = ["Done", "Cancel", "Edit", "Save", "+", "", "", "Compose", "Reply", "Action", "Organize", "Bookmarks",
+                      "Search", "Refresh", "Stop", "Camera", "Trash", "Play", "Pause", "Rewind", "Fast Forward", "Undo", "Redo"]
+        return system.indices.contains(state.systemItem) ? system[state.systemItem] : ""
+    }
+
     @ObjCMethod("init") func initialize() -> Self { self }
 
     @ObjCMethod("initWithTitle:style:target:action:")
@@ -578,4 +742,20 @@ open class UIBarButtonItem: UIBarItem {
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) { state.menu = menu }
     @ObjCMethod("isHidden") func isHidden() -> Bool { false }
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) {}
+
+    /// Sends the action to the target, or without one up the responder
+    /// chain from the top view controller, to the first that handles it.
+    func sendAction(from bar: UINavigationBar) {
+        guard let action = state.action else { return }
+        var receiver: NSObject? = state.target.map { NSObject($0) }
+        if receiver == nil, let navigation = bar.barState.navigationController {
+            var responder: NSObject? = UINavigationController(objcObject: navigation, ownership: .retain).topViewController()
+            let name = String(cString: action.assumingMemoryBound(to: CChar.self))
+            while let candidate = responder, !candidate.responds(to: name) { responder = candidate.sendNextResponder() }
+            receiver = responder
+        }
+        guard let receiver else { return }
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(receiver.objcObject, action, objcObject)
+    }
 }
