@@ -13,11 +13,6 @@ enum JSON {
     static let writingFragmentsAllowed: UInt = 1 << 2
     static let withoutEscapingSlashes: UInt = 1 << 3
 
-    static func install(superclass: Class) {
-        _ = ClassDefinition(PERRY_CLASS_NSJSONSerialization, name: "NSJSONSerialization", superclass: superclass,
-                            NSJSONSerialization.register)
-    }
-
     /// Stores an NSError in `error` (NSError **), as Foundation reports failures.
     static func report(_ error: UnsafeMutablePointer<id?>?, code: Int, description: String) {
         error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: code, description: description)
@@ -38,10 +33,7 @@ enum JSON {
 
 /// NSJSONSerialization.
 @ObjCClass("NSJSONSerialization")
-public struct NSJSONSerialization {}
-
-@ObjCImplementation
-extension NSJSONSerialization {
+public final class NSJSONSerialization: NSObject {
     @ObjCClassMethod("JSONObjectWithData:options:error:")
     static func object(data: NSData, options: UInt, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
         let decoder = JSONDecoder()
