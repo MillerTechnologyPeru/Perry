@@ -81,3 +81,14 @@ _Noreturn void darwin_dyld_stub_binder(void) {
     fputs("perry: dyld_stub_binder called; lazy binding is not supported\n", stderr);
     abort();
 }
+
+// MARK: - Unwinding
+
+// Cleanups in unwind tables end by resuming the exception. Perry cannot
+// unwind Mach-O frames, so an exception never gets here, but the symbol
+// must resolve.
+_Noreturn void darwin_unwind_resume(void *exception) DARWIN_SYMBOL(_Unwind_Resume);
+_Noreturn void darwin_unwind_resume(void *exception) {
+    fputs("perry: _Unwind_Resume called; unwinding Mach-O frames is not supported\n", stderr);
+    abort();
+}
