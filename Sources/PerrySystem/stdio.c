@@ -136,3 +136,26 @@ void darwin_perror(const char *prefix) {
     else
         fprintf(stderr, "%s\n", message);
 }
+
+// MARK: - %p
+
+// Darwin prints pointers as 0x followed by lowercase hex, "0x0" for NULL,
+// where glibc prints "(nil)". glibc's printf takes a handler for the
+// conversion, which every printf function then uses.
+#include <printf.h>
+
+static int darwin_pointer(FILE *stream, const struct printf_info *info, const void *const *args) {
+    const void *pointer = *(const void *const *)args[0];
+    char digits[32];
+    snprintf(digits, sizeof(digits), "0x%lx", (unsigned long)pointer);
+    return fprintf(stream, info->left ? "%-*s" : "%*s", info->width, digits);
+}
+
+static int darwin_pointer_arguments(const struct printf_info *info, size_t count, int *types, int *sizes) {
+    if (count > 0) types[0] = PA_POINTER;
+    return 1;
+}
+
+__attribute__((constructor)) static void init_pointer_conversion(void) {
+    register_printf_specifier('p', darwin_pointer, darwin_pointer_arguments);
+}
