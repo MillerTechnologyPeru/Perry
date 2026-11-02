@@ -33,8 +33,8 @@ enum Objects {
         word(object).map { Unmanaged<AnyObject>.fromOpaque($0).takeUnretainedValue() } as? State
     }
 
-    /// A new object of `cls` (+1) taking over a reference to `linux`.
-    static func make(_ cls: Object, linux: Object, state: AnyObject? = nil) -> Object {
+    /// A new object of `cls` (+1) taking over a reference to `linux`, if any.
+    static func make(_ cls: Object, linux: Object?, state: AnyObject? = nil) -> Object {
         guard let object = Runtime.createInstance(cls, extraBytes) else { dispatchFatal("out of memory") }
         object.storeBytes(of: linux, toByteOffset: 8, as: Object?.self)
         object.storeBytes(of: state.map { Unmanaged.passRetained($0).toOpaque() }, toByteOffset: 16,
