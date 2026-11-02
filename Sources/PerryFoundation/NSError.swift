@@ -48,7 +48,7 @@ enum Errors {
     }
 
     static func install(superclass: Class) {
-        errorClass = NSError.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        errorClass = NSError.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         func constant(_ which: perry_foundation_constant_id, _ value: String) -> id {
             let string = Strings.make(value)
             perry_foundation_constant(which).pointee = string
