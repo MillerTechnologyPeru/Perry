@@ -109,17 +109,6 @@ enum Numbers {
         return object
     }
 
-    static func install(superclass: Class) {
-        numberClass = NSNumber.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-        // Static numbers: immortal, read in place.
-        func constant(_ cls: NSNumber.Type) -> Class {
-            cls.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
-        }
-        constantIntegerClass = constant(NSConstantIntegerNumber.self)
-        constantDoubleClass = constant(NSConstantDoubleNumber.self)
-        constantFloatClass = constant(NSConstantFloatNumber.self)
-        booleanClass = constant(NSCFBoolean.self)
-    }
 
     /// A new number wrapped for returning, +0.
     static func wrapped(_ cls: ObjCClass, _ value: NumberStorage.Value) -> NSNumber {
@@ -130,6 +119,12 @@ enum Numbers {
 /// NSNumber.
 @ObjCClass("NSNumber")
 public class NSNumber: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Numbers.numberClass = cls.storage
+    }
+
     private var number: NumberStorage { Numbers.storage(objcObject) }
 
     private func setValue(_ value: NumberStorage.Value) -> Self {
@@ -234,16 +229,40 @@ public class NSNumber: NSObject {
 
 /// @42: { isa, const char *encoding, int64 value }.
 @ObjCClass("NSConstantIntegerNumber")
-final class NSConstantIntegerNumber: NSNumber {}
+final class NSConstantIntegerNumber: NSNumber {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Numbers.constantIntegerClass = cls.markingStatic().storage
+    }
+}
 
 /// @2.5: { isa, double value }.
 @ObjCClass("NSConstantDoubleNumber")
-final class NSConstantDoubleNumber: NSNumber {}
+final class NSConstantDoubleNumber: NSNumber {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Numbers.constantDoubleClass = cls.markingStatic().storage
+    }
+}
 
 /// @2.5f: { isa, float value }.
 @ObjCClass("NSConstantFloatNumber")
-final class NSConstantFloatNumber: NSNumber {}
+final class NSConstantFloatNumber: NSNumber {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Numbers.constantFloatClass = cls.markingStatic().storage
+    }
+}
 
 /// kCFBooleanTrue and kCFBooleanFalse: { isa, uint64 value }.
 @ObjCClass("__NSCFBoolean")
-final class NSCFBoolean: NSNumber {}
+final class NSCFBoolean: NSNumber {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        Numbers.booleanClass = cls.markingStatic().storage
+    }
+}
