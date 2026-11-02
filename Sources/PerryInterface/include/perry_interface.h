@@ -42,4 +42,12 @@ typedef struct perry_image_info {
 typedef void (*perry_provider_image_fn)(const perry_image_info *image);
 #define PERRY_PROVIDER_IMAGE_INIT_SYMBOL "perry_provider_image_init"
 
+// Providers may export this function. The loader calls it, while binding,
+// for a symbol (by Mach-O name, "_NSCocoaErrorDomain") the provider does not
+// define as an ELF symbol; it returns the symbol's address, or NULL. Lets a
+// provider define data symbols, such as exported constants, at run time.
+// Called before perry_provider_startup.
+typedef void *(*perry_provider_symbol_fn)(const char *name);
+#define PERRY_PROVIDER_SYMBOL_SYMBOL "perry_provider_symbol"
+
 #endif
