@@ -197,6 +197,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
+//   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -216,6 +217,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // with UTType.
     if (strstr(install_name, "/MobileCoreServices.framework/") || strstr(install_name, "/CoreServices.framework/")) {
         snprintf(out, out_size, "UniformTypeIdentifiers");
+        return true;
+    }
+    // ImageIO's images are CoreGraphics' own.
+    if (strstr(install_name, "/ImageIO.framework/")) {
+        snprintf(out, out_size, "CoreGraphics");
         return true;
     }
     const char *base = strrchr(install_name, '/');
