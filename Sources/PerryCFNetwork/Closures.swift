@@ -68,6 +68,11 @@ enum Closures {
         (Closures.box(block)?.body as? (UnsafeMutableRawPointer?) -> Void)?(object)
     }
 
+    private static let invokeIntegerObject: @convention(c) (UnsafeMutableRawPointer?, Int, UnsafeMutableRawPointer?) -> Void = {
+        block, value, object in
+        (Closures.box(block)?.body as? (Int, UnsafeMutableRawPointer?) -> Void)?(value, object)
+    }
+
     /// void (^)(void)
     static func block(_ body: @escaping () -> Void) -> NSObject {
         NSObject(objCOwned: make(body, invoke: unsafeBitCast(invokeVoid, to: UnsafeRawPointer.self)))
@@ -76,6 +81,11 @@ enum Closures {
     /// void (^)(NSInteger)
     static func block(integer body: @escaping (Int) -> Void) -> NSObject {
         NSObject(objCOwned: make(body, invoke: unsafeBitCast(invokeInteger, to: UnsafeRawPointer.self)))
+    }
+
+    /// void (^)(NSInteger, id)
+    static func block(integerObject body: @escaping (Int, UnsafeMutableRawPointer?) -> Void) -> NSObject {
+        NSObject(objCOwned: make(body, invoke: unsafeBitCast(invokeIntegerObject, to: UnsafeRawPointer.self)))
     }
 
     /// void (^)(id)
