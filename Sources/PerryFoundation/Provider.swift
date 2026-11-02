@@ -20,12 +20,10 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
 
-    // Foundation's additions to NSObject, installed like categories.
-    let root = ObjCClass(UnsafeMutableRawPointer(nsObject))
-    for register in [FoundationObject.registerObjCMethods, DelayedPerforms.registerObjCMethods,
-                     ThreadPerforms.registerObjCMethods] {
-        register(root)
-    }
+    // Foundation's categories on NSObject.
+    NSObject.addObjCCategoryFoundation()
+    NSObject.addObjCCategoryDelayedPerforms()
+    NSObject.addObjCCategoryThreadPerforms()
     Strings.install(superclass: nsObject)
     MutableStrings.install(superclass: Strings.stringClass)
     Errors.install(superclass: nsObject)
@@ -47,13 +45,6 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     Threads.install(superclass: nsObject)
     UserDefaults.install()
     FileManagers.install()
-}
-
-/// Foundation's additions to NSObject. libobjc's -description returns nil.
-@ObjCClass("NSObject")
-final class FoundationObject: NSObject {
-    @ObjCMethod("description")
-    func description() -> String { "<\(ObjC.className(objcObject)): \(objcObject)>" }
 }
 
 // MARK: - NSLog
