@@ -461,8 +461,6 @@ open class NSManagedObject: NSObject {
         return NSMutableDictionary.of(entries)
     }
 
-    @ObjCMethod("willChangeValueForKey:") func willChangeValue(forKey key: String?) {}
-    @ObjCMethod("didChangeValueForKey:") func didChangeValue(forKey key: String?) {}
     @ObjCMethod("willAccessValueForKey:") func willAccessValue(forKey key: String?) {}
     @ObjCMethod("didAccessValueForKey:") func didAccessValue(forKey key: String?) {}
 
