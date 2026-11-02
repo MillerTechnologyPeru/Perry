@@ -1,0 +1,791 @@
+import CPerryFoundation
+import Glibc
+import PerryObjCInterop
+
+// NSPredicate, NSComparisonPredicate, NSCompoundPredicate and NSExpression:
+// a predicate tree parsed from Apple's format syntax, printed back as
+// Darwin prints it, and evaluated against objects through key-value
+// coding. Core Data reads the tree through the public API to run fetches.
+
+/// An expression's value.
+indirect enum ExpressionNode {
+    case keyPath(String)
+    case constant(ObjCObject?)
+    case evaluatedObject
+    case aggregate([ExpressionNode])
+
+    /// NSExpressionType.
+    var type: UInt {
+        switch self {
+        case .constant: return 0
+        case .evaluatedObject: return 1
+        case .keyPath: return 3
+        case .aggregate: return 14
+        }
+    }
+}
+
+/// A predicate.
+indirect enum PredicateNode {
+    case truth(Bool)
+    case comparison(Comparison)
+    case compound(UInt, [PredicateNode])
+
+    struct Comparison {
+        var left: ExpressionNode
+        var right: ExpressionNode
+        var operation: UInt
+        var modifier: UInt
+        var options: UInt
+    }
+}
+
+/// NSPredicateOperatorType and the other enums, as Darwin numbers them.
+enum PredicateOperator {
+    static let lessThan: UInt = 0, lessThanOrEqualTo: UInt = 1, greaterThan: UInt = 2, greaterThanOrEqualTo: UInt = 3
+    static let equalTo: UInt = 4, notEqualTo: UInt = 5, matches: UInt = 6, like: UInt = 7, beginsWith: UInt = 8
+    static let endsWith: UInt = 9, `in`: UInt = 10, contains: UInt = 99, between: UInt = 100
+
+    static let names: [UInt: String] = [
+        lessThan: "<", lessThanOrEqualTo: "<=", greaterThan: ">", greaterThanOrEqualTo: ">=", equalTo: "==",
+        notEqualTo: "!=", matches: "MATCHES", like: "LIKE", beginsWith: "BEGINSWITH", endsWith: "ENDSWITH",
+        `in`: "IN", contains: "CONTAINS", between: "BETWEEN",
+    ]
+}
+
+enum PredicateModifier { static let direct: UInt = 0, all: UInt = 1, any: UInt = 2 }
+enum PredicateOptions { static let caseInsensitive: UInt = 1, diacriticInsensitive: UInt = 2, normalized: UInt = 4 }
+enum CompoundType { static let not: UInt = 0, and: UInt = 1, or: UInt = 2 }
+
+// MARK: - Printing
+
+enum PredicateFormat {
+    static func expression(_ node: ExpressionNode) -> String {
+        switch node {
+        case .keyPath(let path): return path
+        case .evaluatedObject: return "SELF"
+        case .aggregate(let elements): return "{" + elements.map(expression).joined(separator: ", ") + "}"
+        case .constant(let value): return constant(value?.objcObject)
+        }
+    }
+
+    static func constant(_ object: id?) -> String {
+        guard let object, object != Nulls.null else { return "nil" }
+        if let string = Strings.value(of: object) {
+            return "\"" + string.replacingAll("\\", "\\\\").replacingAll("\"", "\\\"") + "\""
+        }
+        if ObjC.isKind(object, of: Arrays.arrayClass) || ObjC.isKind(object, of: Sets.setClass) {
+            let elements = ObjC.isKind(object, of: Arrays.arrayClass) ? Arrays.elements(object) : Sets.elements(object)
+            return "{" + elements.map(constant).joined(separator: ", ") + "}"
+        }
+        return Format.describe(object)
+    }
+
+    static func predicate(_ node: PredicateNode) -> String {
+        switch node {
+        case .truth(let value):
+            return value ? "TRUEPREDICATE" : "FALSEPREDICATE"
+        case .comparison(let c):
+            let modifier = c.modifier == PredicateModifier.any ? "ANY " : c.modifier == PredicateModifier.all ? "ALL " : ""
+            var flags = ""
+            if c.options & PredicateOptions.caseInsensitive != 0 { flags += "c" }
+            if c.options & PredicateOptions.diacriticInsensitive != 0 { flags += "d" }
+            if c.options & PredicateOptions.normalized != 0 { flags += "n" }
+            let operation = (PredicateOperator.names[c.operation] ?? "?") + (flags.isEmpty ? "" : "[\(flags)]")
+            return "\(modifier)\(expression(c.left)) \(operation) \(expression(c.right))"
+        case .compound(let type, let subpredicates):
+            // Compound subpredicates are parenthesized.
+            let parts = subpredicates.map { sub -> String in
+                if case .compound = sub { return "(" + predicate(sub) + ")" }
+                return predicate(sub)
+            }
+            if type == CompoundType.not { return "NOT " + (parts.first ?? "") }
+            return parts.joined(separator: type == CompoundType.and ? " AND " : " OR ")
+        }
+    }
+}
+
+private extension String {
+    func replacingAll(_ target: String, _ replacement: String) -> String {
+        var result = "", rest = Substring(self)
+        while let range = rest.firstRange(of: target) {
+            result += rest[..<range.lowerBound] + replacement
+            rest = rest[range.upperBound...]
+        }
+        return result + rest
+    }
+}
+
+// MARK: - Parsing
+
+/// Where a format's substitutions come from: Darwin's variadic arguments or
+/// an argument array.
+enum PredicateArguments {
+    case variadic(DarwinArguments)
+    case array([id])
+
+    mutating func object() -> id? {
+        switch self {
+        case .variadic(var arguments):
+            let value = arguments.nextPointer()
+            self = .variadic(arguments)
+            return value
+        case .array(var values):
+            guard !values.isEmpty else { foundationFatal("Insufficient arguments for conversion characters specified in format string.") }
+            let value = values.removeFirst()
+            self = .array(values)
+            return value
+        }
+    }
+
+    mutating func word() -> UInt64 {
+        switch self {
+        case .variadic(var arguments):
+            let value = arguments.next()
+            self = .variadic(arguments)
+            return value
+        case .array:
+            // An argument array holds objects: numbers in NSNumbers.
+            let number = object()
+            return UInt64(bitPattern: Numbers.storage(number).int64)
+        }
+    }
+}
+
+struct PredicateParser {
+    enum Token: Equatable {
+        case word(String)       // identifiers, key paths and keywords
+        case string(String)
+        case number(String)
+        case symbol(String)
+        case format(String)     // %@, %K, %d…
+        case end
+    }
+
+    let format: String
+    private var tokens: [Token] = []
+    private var position = 0
+    var arguments: PredicateArguments
+
+    init(_ format: String, arguments: PredicateArguments) {
+        self.format = format
+        self.arguments = arguments
+        tokens = Self.tokenize(format)
+    }
+
+    static func tokenize(_ format: String) -> [Token] {
+        var tokens: [Token] = []
+        let characters = Array(format)
+        var i = 0
+        func peek(_ offset: Int = 0) -> Character? { i + offset < characters.count ? characters[i + offset] : nil }
+        while let c = peek() {
+            if c.isWhitespace { i += 1; continue }
+            if c == "\"" || c == "'" {
+                var text = ""
+                i += 1
+                while let d = peek(), d != c {
+                    if d == "\\", let escaped = peek(1) {
+                        text.append(escaped == "n" ? "\n" : escaped == "t" ? "\t" : escaped)
+                        i += 2
+                    } else {
+                        text.append(d)
+                        i += 1
+                    }
+                }
+                i += 1
+                tokens.append(.string(text))
+            } else if c == "%" {
+                var spec = "%"
+                i += 1
+                while let d = peek(), "lqhLzjt".contains(d) { spec.append(d); i += 1 }
+                if let d = peek() { spec.append(d); i += 1 }
+                tokens.append(.format(spec))
+            } else if c.isNumber || (c == "-" && (peek(1)?.isNumber ?? false) && Self.expectsValue(tokens)) {
+                var text = String(c)
+                i += 1
+                while let d = peek(), d.isNumber || d == "." || d == "e" || d == "E" || d == "x" || d.isHexDigit { text.append(d); i += 1 }
+                tokens.append(.number(text))
+            } else if c.isLetter || c == "_" || c == "$" || c == "@" || c == "#" {
+                var text = ""
+                while let d = peek(), d.isLetter || d.isNumber || d == "_" || d == "$" || d == "@" || d == "." || d == "#" {
+                    text.append(d)
+                    i += 1
+                }
+                tokens.append(.word(text))
+            } else {
+                let two = peek(1).map { String(c) + String($0) } ?? ""
+                if ["==", "!=", "<>", "<=", "=<", ">=", "=>", "&&", "||"].contains(two) {
+                    tokens.append(.symbol(two))
+                    i += 2
+                } else {
+                    tokens.append(.symbol(String(c)))
+                    i += 1
+                }
+            }
+        }
+        tokens.append(.end)
+        return tokens
+    }
+
+    /// Whether a minus sign here starts a number rather than an operator.
+    private static func expectsValue(_ tokens: [Token]) -> Bool {
+        guard let last = tokens.last else { return true }
+        switch last {
+        case .symbol(let s): return s != ")" && s != "}"
+        case .word(let w): return Self.keyword(w) != nil && !["SELF"].contains(w.uppercased())
+        default: return false
+        }
+    }
+
+    static func keyword(_ word: String) -> String? {
+        let upper = word.uppercased()
+        let keywords: Set<String> = ["AND", "OR", "NOT", "ANY", "ALL", "SOME", "NONE", "IN", "LIKE", "MATCHES", "BEGINSWITH",
+                                     "ENDSWITH", "CONTAINS", "BETWEEN", "TRUEPREDICATE", "FALSEPREDICATE", "YES", "NO",
+                                     "TRUE", "FALSE", "NIL", "NULL", "SELF"]
+        return keywords.contains(upper) ? upper : nil
+    }
+
+    private var current: Token { tokens[position] }
+
+    private mutating func advance() { if position < tokens.count - 1 { position += 1 } }
+
+    private func fail(_ reason: String) -> Never {
+        foundationFatal("Unable to parse the format string \"\(format)\": \(reason)")
+    }
+
+    private func isKeyword(_ name: String) -> Bool {
+        if case .word(let w) = current { return Self.keyword(w) == name }
+        return false
+    }
+
+    private func isSymbol(_ symbols: String...) -> Bool {
+        if case .symbol(let s) = current { return symbols.contains(s) }
+        return false
+    }
+
+    mutating func parse() -> PredicateNode {
+        let node = parseOr()
+        guard current == .end else { fail("unexpected \(current)") }
+        return node
+    }
+
+    private mutating func parseOr() -> PredicateNode {
+        var parts = [parseAnd()]
+        while isKeyword("OR") || isSymbol("||") {
+            advance()
+            parts.append(parseAnd())
+        }
+        return parts.count == 1 ? parts[0] : .compound(CompoundType.or, parts)
+    }
+
+    private mutating func parseAnd() -> PredicateNode {
+        var parts = [parseNot()]
+        while isKeyword("AND") || isSymbol("&&") {
+            advance()
+            parts.append(parseNot())
+        }
+        return parts.count == 1 ? parts[0] : .compound(CompoundType.and, parts)
+    }
+
+    private mutating func parseNot() -> PredicateNode {
+        if isKeyword("NOT") || isSymbol("!") {
+            advance()
+            return .compound(CompoundType.not, [parseNot()])
+        }
+        return parsePrimary()
+    }
+
+    private mutating func parsePrimary() -> PredicateNode {
+        if isSymbol("(") {
+            advance()
+            let node = parseOr()
+            guard isSymbol(")") else { fail("missing )") }
+            advance()
+            return node
+        }
+        if isKeyword("TRUEPREDICATE") { advance(); return .truth(true) }
+        if isKeyword("FALSEPREDICATE") { advance(); return .truth(false) }
+        return parseComparison()
+    }
+
+    private mutating func parseComparison() -> PredicateNode {
+        var modifier = PredicateModifier.direct
+        var negate = false
+        if isKeyword("ANY") || isKeyword("SOME") { modifier = PredicateModifier.any; advance() }
+        else if isKeyword("ALL") { modifier = PredicateModifier.all; advance() }
+        else if isKeyword("NONE") { modifier = PredicateModifier.any; negate = true; advance() }
+        let left = parseExpression()
+        let operation: UInt
+        switch current {
+        case .symbol("=="), .symbol("="): operation = PredicateOperator.equalTo
+        case .symbol("!="), .symbol("<>"): operation = PredicateOperator.notEqualTo
+        case .symbol("<"): operation = PredicateOperator.lessThan
+        case .symbol("<="), .symbol("=<"): operation = PredicateOperator.lessThanOrEqualTo
+        case .symbol(">"): operation = PredicateOperator.greaterThan
+        case .symbol(">="), .symbol("=>"): operation = PredicateOperator.greaterThanOrEqualTo
+        case .word(let w):
+            switch Self.keyword(w) {
+            case "IN": operation = PredicateOperator.in
+            case "LIKE": operation = PredicateOperator.like
+            case "MATCHES": operation = PredicateOperator.matches
+            case "BEGINSWITH": operation = PredicateOperator.beginsWith
+            case "ENDSWITH": operation = PredicateOperator.endsWith
+            case "CONTAINS": operation = PredicateOperator.contains
+            case "BETWEEN": operation = PredicateOperator.between
+            default: fail("expected an operator, found \(w)")
+            }
+        default: fail("expected an operator")
+        }
+        advance()
+        var options: UInt = 0
+        if isSymbol("[") {
+            advance()
+            if case .word(let flags) = current {
+                for flag in flags.lowercased() {
+                    switch flag {
+                    case "c": options |= PredicateOptions.caseInsensitive
+                    case "d": options |= PredicateOptions.diacriticInsensitive
+                    case "n": options |= PredicateOptions.normalized
+                    default: fail("unknown option \(flag)")
+                    }
+                }
+                advance()
+            }
+            guard isSymbol("]") else { fail("missing ]") }
+            advance()
+        }
+        let right = parseExpression()
+        let comparison = PredicateNode.comparison(.init(left: left, right: right, operation: operation,
+                                                        modifier: modifier, options: options))
+        return negate ? .compound(CompoundType.not, [comparison]) : comparison
+    }
+
+    private mutating func parseExpression() -> ExpressionNode {
+        let token = current
+        advance()
+        switch token {
+        case .string(let text):
+            return .constant(ObjCObject(Strings.autoreleased(text)))
+        case .number(let text):
+            return .constant(ObjCObject(Self.number(text)))
+        case .word(let word):
+            switch Self.keyword(word) {
+            case "YES", "TRUE": return .constant(ObjCObject(perry_foundation_boolean(1)))
+            case "NO", "FALSE": return .constant(ObjCObject(perry_foundation_boolean(0)))
+            case "NIL", "NULL": return .constant(nil)
+            case "SELF": return .evaluatedObject
+            default: return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
+            }
+        case .symbol("{"):
+            var elements: [ExpressionNode] = []
+            while !isSymbol("}") {
+                elements.append(parseExpression())
+                if isSymbol(",") { advance() } else if !isSymbol("}") { fail("missing }") }
+            }
+            advance()
+            return .aggregate(elements)
+        case .format(let spec):
+            return substitution(spec)
+        default:
+            fail("unexpected \(token)")
+        }
+    }
+
+    private mutating func substitution(_ spec: String) -> ExpressionNode {
+        switch spec {
+        case "%@":
+            return .constant(arguments.object().map(ObjCObject.init))
+        case "%K":
+            guard let path = Strings.value(of: arguments.object()) else { fail("%K needs a key path string") }
+            return .keyPath(path)
+        case "%f", "%lf", "%g", "%e", "%F", "%Lf":
+            return .constant(ObjCObject(Numbers.make(nil, .double(Double(bitPattern: arguments.word())))!))
+        case "%u", "%lu", "%llu", "%qu", "%zu", "%x", "%lx", "%llx":
+            let raw = arguments.word()
+            let value = spec == "%u" || spec == "%x" ? UInt64(UInt32(truncatingIfNeeded: raw)) : raw
+            return .constant(ObjCObject(Numbers.make(nil, .unsigned(value))!))
+        case "%d", "%i", "%hd", "%hhd", "%c":
+            return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(Int32(truncatingIfNeeded: arguments.word()))))!))
+        case "%ld", "%li", "%lld", "%lli", "%qd", "%zd":
+            return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(bitPattern: arguments.word())))!))
+        case "%s":
+            let pointer = arguments.object()
+            return .constant(ObjCObject(Strings.autoreleased(pointer.map { String(cString: $0.assumingMemoryBound(to: CChar.self)) } ?? "")))
+        default:
+            fail("unsupported conversion \(spec)")
+        }
+    }
+
+    static func number(_ text: String) -> id {
+        if text.lowercased().hasPrefix("0x"), let value = Int64(text.dropFirst(2), radix: 16) {
+            return Numbers.make(nil, .signed(value))!
+        }
+        if let value = Int64(text) { return Numbers.make(nil, .signed(value))! }
+        return Numbers.make(nil, .double(Double(text) ?? 0))!
+    }
+}
+
+// MARK: - Evaluation
+
+enum PredicateEvaluation {
+    /// A key path's value through key-value coding: -valueForKey: for each
+    /// key, when the object responds to it.
+    static func value(of path: String, in object: id?) -> id? {
+        var current = object
+        for key in path.split(separator: ".") {
+            guard let target = current else { return nil }
+            let keyObject = Strings.autoreleased(String(key))
+            if ObjC.isKind(target, of: Dictionaries.dictionaryClass) {
+                current = Dictionaries.value(target, for: keyObject)
+            } else {
+                current = ObjC.send(target, ObjC.selector("valueForKey:"), keyObject)
+            }
+        }
+        return current
+    }
+
+    static func value(_ node: ExpressionNode, _ object: id?) -> id? {
+        switch node {
+        case .keyPath(let path): return value(of: path, in: object)
+        case .constant(let value): return value?.objcObject
+        case .evaluatedObject: return object
+        case .aggregate(let elements): return Arrays.autoreleased(elements.compactMap { value($0, object) })
+        }
+    }
+
+    static func elements(_ value: id?) -> [id]? {
+        guard let value else { return nil }
+        if ObjC.isKind(value, of: Arrays.arrayClass) { return Arrays.elements(value) }
+        if ObjC.isKind(value, of: Sets.setClass) { return Sets.elements(value) }
+        return nil
+    }
+
+    static func evaluate(_ node: PredicateNode, _ object: id?) -> Bool {
+        switch node {
+        case .truth(let value): return value
+        case .compound(let type, let parts):
+            if type == CompoundType.not { return !evaluate(parts[0], object) }
+            if type == CompoundType.and { return parts.allSatisfy { evaluate($0, object) } }
+            return parts.contains { evaluate($0, object) }
+        case .comparison(let c):
+            let left = value(c.left, object), right = value(c.right, object)
+            if c.modifier != PredicateModifier.direct {
+                let items = elements(left) ?? []
+                let test: (id?) -> Bool = { compare($0, right, c) }
+                return c.modifier == PredicateModifier.any ? items.contains(where: test) : items.allSatisfy(test)
+            }
+            return compare(left, right, c)
+        }
+    }
+
+    private static func text(_ value: id?, _ options: UInt) -> String? {
+        guard var string = Strings.value(of: value) else { return nil }
+        if options & PredicateOptions.caseInsensitive != 0 { string = string.lowercased() }
+        return string
+    }
+
+    /// -compare: order of two values, when they can be ordered.
+    private static func order(_ a: id?, _ b: id?) -> Int? {
+        guard let a, let b else { return nil }
+        return ObjC.sendInt(a, ObjC.selector("compare:"), b)
+    }
+
+    static func compare(_ left: id?, _ right: id?, _ c: PredicateNode.Comparison) -> Bool {
+        let nullish: (id?) -> Bool = { $0 == nil || $0 == Nulls.null }
+        switch c.operation {
+        case PredicateOperator.equalTo, PredicateOperator.notEqualTo:
+            var equal: Bool
+            if nullish(left) || nullish(right) {
+                equal = nullish(left) && nullish(right)
+            } else if let l = text(left, c.options), let r = text(right, c.options) {
+                equal = l == r
+            } else {
+                equal = ObjC.sendBool(left, Selectors.isEqual, right)
+            }
+            return c.operation == PredicateOperator.equalTo ? equal : !equal
+        case PredicateOperator.lessThan: return (order(left, right) ?? 0) < 0 && !nullish(left) && !nullish(right)
+        case PredicateOperator.lessThanOrEqualTo: return order(left, right).map { $0 <= 0 } ?? false
+        case PredicateOperator.greaterThan: return (order(left, right) ?? 0) > 0
+        case PredicateOperator.greaterThanOrEqualTo: return order(left, right).map { $0 >= 0 } ?? false
+        case PredicateOperator.beginsWith:
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            return l.hasPrefix(r)
+        case PredicateOperator.endsWith:
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            return l.hasSuffix(r)
+        case PredicateOperator.contains:
+            if let items = elements(left) { return items.contains { compare($0, right, .init(left: c.left, right: c.right, operation: PredicateOperator.equalTo, modifier: 0, options: c.options)) } }
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            return r.isEmpty || l.firstRange(of: r) != nil
+        case PredicateOperator.in:
+            if let items = elements(right) {
+                return items.contains { compare(left, $0, .init(left: c.left, right: c.right, operation: PredicateOperator.equalTo, modifier: 0, options: c.options)) }
+            }
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            return l.isEmpty || r.firstRange(of: l) != nil
+        case PredicateOperator.between:
+            guard let bounds = elements(right), bounds.count == 2 else { return false }
+            return (order(left, bounds[0]) ?? -1) >= 0 && (order(left, bounds[1]) ?? 1) <= 0
+        case PredicateOperator.like:
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            return wildcard(Array(l), Array(r))
+        case PredicateOperator.matches:
+            guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
+            var expression = regex_t()
+            guard regcomp(&expression, "^(" + r + ")$", REG_EXTENDED | REG_NOSUB) == 0 else { return false }
+            defer { regfree(&expression) }
+            return regexec(&expression, l, 0, nil, 0) == 0
+        default:
+            return false
+        }
+    }
+
+    /// LIKE: * matches any run of characters, ? any one.
+    private static func wildcard(_ text: [Character], _ pattern: [Character]) -> Bool {
+        guard let first = pattern.first else { return text.isEmpty }
+        if first == "*" {
+            for index in 0...text.count where wildcard(Array(text[index...]), Array(pattern.dropFirst())) { return true }
+            return false
+        }
+        guard let c = text.first, first == "?" || first == c else { return false }
+        return wildcard(Array(text.dropFirst()), Array(pattern.dropFirst()))
+    }
+}
+
+// MARK: - Classes
+
+/// A predicate object's tree.
+final class PredicateStorage {
+    let node: PredicateNode
+    init(_ node: PredicateNode) { self.node = node }
+}
+
+final class ExpressionStorage {
+    let node: ExpressionNode
+    init(_ node: ExpressionNode) { self.node = node }
+}
+
+enum Predicates {
+    nonisolated(unsafe) static var predicateClass: Class!
+    nonisolated(unsafe) static var comparisonClass: Class!
+    nonisolated(unsafe) static var compoundClass: Class!
+    nonisolated(unsafe) static var trueClass: Class!
+    nonisolated(unsafe) static var falseClass: Class!
+    nonisolated(unsafe) static var expressionClass: Class!
+
+    static func node(_ object: id?) -> PredicateNode {
+        Storage.get(object, as: PredicateStorage.self)?.node ?? .truth(true)
+    }
+
+    static func expressionNode(_ object: id?) -> ExpressionNode {
+        Storage.get(object, as: ExpressionStorage.self)?.node ?? .constant(nil)
+    }
+
+    /// An autoreleased object for a tree, of the class Darwin uses for it.
+    static func object(_ node: PredicateNode) -> id {
+        let cls: Class
+        switch node {
+        case .truth(let value): cls = value ? trueClass : falseClass
+        case .comparison: cls = comparisonClass
+        case .compound: cls = compoundClass
+        }
+        let object = Storage.allocate(UnsafeMutableRawPointer(cls))!
+        Storage.set(object, PredicateStorage(node))
+        return ObjC.autorelease(object)!
+    }
+
+    static func expression(_ node: ExpressionNode) -> id {
+        let object = Storage.allocate(UnsafeMutableRawPointer(expressionClass))!
+        Storage.set(object, ExpressionStorage(node))
+        return ObjC.autorelease(object)!
+    }
+
+    static func parse(_ format: String, _ arguments: PredicateArguments) -> id {
+        var parser = PredicateParser(format, arguments: arguments)
+        return object(parser.parse())
+    }
+}
+
+/// NSPredicate.
+@ObjCClass("NSPredicate")
+public class NSPredicate: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Predicates.predicateClass = cls.storage
+        cls.addMethod("predicateWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_predicateWithFormat), isClassMethod: true)
+    }
+
+    var node: PredicateNode { Predicates.node(objcObject) }
+
+    @ObjCClassMethod("predicateWithFormat:argumentArray:")
+    static func predicate(format: String, argumentArray: ObjCObject?) -> ObjCObject {
+        ObjCObject(Predicates.parse(format, .array(argumentArray.map { Arrays.elements($0.objcObject) } ?? [])))
+    }
+
+    @ObjCClassMethod("predicateWithValue:")
+    static func predicate(value: Bool) -> ObjCObject { ObjCObject(Predicates.object(.truth(value))) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Predicates.predicateClass)
+    }
+
+    @ObjCMethod("predicateFormat") func predicateFormat() -> String { PredicateFormat.predicate(node) }
+    @ObjCMethod("description") func description() -> String { PredicateFormat.predicate(node) }
+
+    @ObjCMethod("evaluateWithObject:")
+    func evaluate(with object: ObjCObject?) -> Bool { PredicateEvaluation.evaluate(node, object?.objcObject) }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSPredicate { self }
+
+    @ObjCMethod("isEqual:")
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        return other.objcObject == objcObject
+            || (other.is(NSPredicate.self) && Strings.value(of: ObjC.send(other.objcObject, ObjC.selector("predicateFormat"))) == predicateFormat())
+    }
+
+    @ObjCMethod("hash") func hash() -> UInt { Strings.hash(predicateFormat()) }
+}
+
+@ObjCClass("NSTruePredicate")
+public class NSTruePredicate: NSPredicate {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.trueClass = cls.storage }
+}
+
+@ObjCClass("NSFalsePredicate")
+public class NSFalsePredicate: NSPredicate {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.falseClass = cls.storage }
+}
+
+/// NSComparisonPredicate.
+@ObjCClass("NSComparisonPredicate")
+public class NSComparisonPredicate: NSPredicate {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.comparisonClass = cls.storage }
+
+    private var comparison: PredicateNode.Comparison? {
+        if case .comparison(let c) = node { return c }
+        return nil
+    }
+
+    @ObjCClassMethod("predicateWithLeftExpression:rightExpression:modifier:type:options:")
+    static func predicate(left: ObjCObject, right: ObjCObject, modifier: UInt, type: UInt, options: UInt) -> ObjCObject {
+        ObjCObject(Predicates.object(.comparison(.init(left: Predicates.expressionNode(left.objcObject),
+                                                        right: Predicates.expressionNode(right.objcObject),
+                                                        operation: type, modifier: modifier, options: options))))
+    }
+
+    @ObjCMethod("leftExpression")
+    func leftExpression() -> ObjCObject? { comparison.map { ObjCObject(Predicates.expression($0.left)) } }
+    @ObjCMethod("rightExpression")
+    func rightExpression() -> ObjCObject? { comparison.map { ObjCObject(Predicates.expression($0.right)) } }
+    @ObjCMethod("predicateOperatorType") func predicateOperatorType() -> UInt { comparison?.operation ?? 0 }
+    @ObjCMethod("comparisonPredicateModifier") func comparisonPredicateModifier() -> UInt { comparison?.modifier ?? 0 }
+    @ObjCMethod("options") func options() -> UInt { comparison?.options ?? 0 }
+}
+
+/// NSCompoundPredicate.
+@ObjCClass("NSCompoundPredicate")
+public class NSCompoundPredicate: NSPredicate {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.compoundClass = cls.storage }
+
+    private static func make(_ type: UInt, _ subpredicates: ObjCObject?) -> ObjCObject {
+        let nodes = (subpredicates.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.node)
+        return ObjCObject(Predicates.object(.compound(type, nodes)))
+    }
+
+    @ObjCClassMethod("andPredicateWithSubpredicates:")
+    static func and(_ subpredicates: ObjCObject?) -> ObjCObject { make(CompoundType.and, subpredicates) }
+    @ObjCClassMethod("orPredicateWithSubpredicates:")
+    static func or(_ subpredicates: ObjCObject?) -> ObjCObject { make(CompoundType.or, subpredicates) }
+
+    @ObjCClassMethod("notPredicateWithSubpredicate:")
+    static func not(_ subpredicate: ObjCObject) -> ObjCObject {
+        ObjCObject(Predicates.object(.compound(CompoundType.not, [Predicates.node(subpredicate.objcObject)])))
+    }
+
+    @ObjCMethod("compoundPredicateType")
+    func compoundPredicateType() -> UInt {
+        if case .compound(let type, _) = node { return type }
+        return 0
+    }
+
+    @ObjCMethod("subpredicates")
+    func subpredicates() -> ObjCObject {
+        guard case .compound(_, let parts) = node else { return ObjCObject(Arrays.autoreleased([])) }
+        return ObjCObject(Arrays.autoreleased(parts.map(Predicates.object)))
+    }
+}
+
+/// NSExpression.
+@ObjCClass("NSExpression")
+public class NSExpression: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Predicates.expressionClass = cls.storage
+    }
+
+    private var node: ExpressionNode { Predicates.expressionNode(objcObject) }
+
+    @ObjCClassMethod("expressionForKeyPath:")
+    static func keyPath(_ path: String) -> ObjCObject { ObjCObject(Predicates.expression(.keyPath(path))) }
+
+    @ObjCClassMethod("expressionForConstantValue:")
+    static func constant(_ value: ObjCObject?) -> ObjCObject { ObjCObject(Predicates.expression(.constant(value))) }
+
+    @ObjCClassMethod("expressionForEvaluatedObject")
+    static func evaluatedObject() -> ObjCObject { ObjCObject(Predicates.expression(.evaluatedObject)) }
+
+    @ObjCClassMethod("expressionForAggregate:")
+    static func aggregate(_ expressions: ObjCObject?) -> ObjCObject {
+        let nodes = (expressions.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.expressionNode)
+        return ObjCObject(Predicates.expression(.aggregate(nodes)))
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Predicates.expressionClass)
+    }
+
+    @ObjCMethod("expressionType") func expressionType() -> UInt { node.type }
+
+    @ObjCMethod("keyPath")
+    func keyPath() -> String? {
+        if case .keyPath(let path) = node { return path }
+        return nil
+    }
+
+    @ObjCMethod("constantValue")
+    func constantValue() -> ObjCObject? {
+        if case .constant(let value) = node { return value }
+        return nil
+    }
+
+    /// An aggregate's expressions.
+    @ObjCMethod("collection")
+    func collection() -> ObjCObject? {
+        guard case .aggregate(let elements) = node else { return nil }
+        return ObjCObject(Arrays.autoreleased(elements.map(Predicates.expression)))
+    }
+
+    @ObjCMethod("expressionValueWithObject:context:")
+    func value(with object: ObjCObject?, context: ObjCObject?) -> ObjCObject? {
+        PredicateEvaluation.value(node, object?.objcObject).map(ObjCObject.init)
+    }
+
+    @ObjCMethod("description") func description() -> String { PredicateFormat.expression(node) }
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSExpression { self }
+}
+
+// MARK: - Variadic methods
+
+@c
+public func perry_foundation_predicateWithFormat(_ cls: id?, _ cmd: SEL?, _ format: id?,
+                                                 _ arguments: UnsafeRawPointer?) -> id? {
+    guard let arguments else { return nil }
+    return Predicates.parse(Strings.value(of: format) ?? "", .variadic(DarwinArguments(arguments)))
+}
