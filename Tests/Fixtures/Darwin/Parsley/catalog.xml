@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE catalog [
+  <!ENTITY who "the reader">
+]>
+<?render mode="fast"?>
+<!-- top -->
+<catalog xmlns="urn:books" xmlns:p="urn:price" region="eu">
+  <book id="7" p:currency="EUR" lang="pl">
+    <title>Kraków &amp; Gdańsk</title>
+    <p:price>12.50</p:price>
+    <note><![CDATA[<raw> & text]]> for &who;</note>
+    <empty/>
+  </book>
+</catalog>
