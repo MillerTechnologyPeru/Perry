@@ -182,6 +182,26 @@ extern perry_dispatch_static_object perry_dispatch_main_q __asm__("__dispatch_ma
 extern perry_dispatch_static_object perry_dispatch_queue_attr_concurrent __asm__("__dispatch_queue_attr_concurrent");
 extern perry_dispatch_static_object perry_dispatch_data_empty __asm__("__dispatch_data_empty");
 
+// Unified logging's static objects: OS_LOG_DEFAULT and OS_LOG_DISABLED,
+// and OS_ACTIVITY_CURRENT and OS_ACTIVITY_NONE.
+extern perry_dispatch_static_object perry_os_log_default __asm__("__os_log_default");
+extern perry_dispatch_static_object perry_os_log_disabled __asm__("__os_log_disabled");
+extern perry_dispatch_static_object perry_os_activity_current __asm__("__os_activity_current");
+extern perry_dispatch_static_object perry_os_activity_none __asm__("__os_activity_none");
+static inline void *perry_log_default(void) { return &perry_os_log_default; }
+static inline void *perry_log_disabled(void) { return &perry_os_log_disabled; }
+static inline void *perry_activity_current(void) { return &perry_os_activity_current; }
+static inline void *perry_activity_none(void) { return &perry_os_activity_none; }
+
+// One printf conversion of a value, for os_log's messages: `spec` is the
+// conversion ("%5.2f"), with length modifiers.
+int perry_format_integer(char *buffer, unsigned long size, const char *spec, long long value);
+int perry_format_double(char *buffer, unsigned long size, const char *spec, double value);
+
+// The process's short name and the calling thread's kernel id, for log lines.
+const char *perry_dispatch_program_name(void);
+int perry_dispatch_thread_id(void);
+
 // DISPATCH_SOURCE_TYPE_*: only their addresses matter.
 enum perry_dispatch_source_kind {
     PERRY_SOURCE_DATA_ADD, PERRY_SOURCE_DATA_OR, PERRY_SOURCE_DATA_REPLACE, PERRY_SOURCE_MACH_SEND,
