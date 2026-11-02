@@ -1,9 +1,9 @@
 import CPerryCoreGraphics
 import CPerryGeometry
 
-// libPerryCoreGraphics: the provider for CoreGraphics.framework. So far,
-// the geometry functions; the constants are data in CPerryCoreGraphics.
-// Rects with negative sizes are standardized first, as CoreGraphics does.
+// CoreGraphics' geometry functions; the constants are data in
+// CPerryCoreGraphics. Rects with negative sizes are standardized first, as
+// CoreGraphics does.
 
 /// CoreGraphics' scalar: double on 64-bit Darwin.
 public typealias CGFloat = Double
