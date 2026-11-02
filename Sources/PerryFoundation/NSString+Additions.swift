@@ -143,6 +143,8 @@ let notFound = UInt(Int.max)
 
 /// The range of `needle` in `haystack`, in UTF-16 units.
 func range(of needle: String, in haystack: String, options: UInt) -> NSRange {
+    // NSRegularExpressionSearch: the needle is a pattern.
+    if options & 1024 != 0 { return Regexes.search(needle, in: haystack, options: options) }
     let fold: (String) -> [UInt16] = { options & caseInsensitive != 0 ? Array($0.lowercased().utf16) : Array($0.utf16) }
     let text = fold(haystack), pattern = fold(needle)
     guard !pattern.isEmpty, pattern.count <= text.count else { return NSRange(location: notFound, length: 0) }
