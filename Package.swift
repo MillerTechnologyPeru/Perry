@@ -13,6 +13,8 @@ let package = Package(
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
+        // UIKit.
+        .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
@@ -44,7 +46,7 @@ let package = Package(
             name: "PerryObjC",
             dependencies: ["PerryObjCRuntime", "CPerryObjC", "PerryInterface"]
         ),
-        // @ObjCImplementation and @ObjCMethod: Objective-C classes in Swift.
+        // @ObjCClass, @ObjCMethod and the other Objective-C macros.
         .macro(
             name: "PerryObjCMacros",
             dependencies: [
@@ -69,6 +71,12 @@ let package = Package(
         .target(
             name: "PerryFoundation",
             dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // UIKit, a client of libobjc's C API and Foundation's classes.
+        .target(
+            name: "PerryUIKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Generates a provider's perry_provider_startup and perry_provider_symbol
