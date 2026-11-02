@@ -44,6 +44,17 @@ typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSRunLoop,
     PERRY_CLASS_NSNotification,
     PERRY_CLASS_NSNotificationCenter,
+    PERRY_CLASS_NSData,
+    PERRY_CLASS_NSMutableData,
+    PERRY_CLASS_NSURL,
+    PERRY_CLASS_NSUUID,
+    PERRY_CLASS_NSNull,
+    PERRY_CLASS_NSJSONSerialization,
+    PERRY_CLASS_NSProcessInfo,
+    PERRY_CLASS_NSBundle,
+    PERRY_CLASS_NSError,
+    PERRY_CLASS_NSThread,
+    PERRY_CLASS_NSUserDefaults,
     PERRY_CLASS_COUNT,
 } perry_foundation_class_id;
 
@@ -57,10 +68,27 @@ typedef enum perry_foundation_constant_id {
     PERRY_CONSTANT_NSRunLoopCommonModes,
     PERRY_CONSTANT_kCFRunLoopDefaultMode,
     PERRY_CONSTANT_kCFRunLoopCommonModes,
+    PERRY_CONSTANT_kCFNull,                 // the NSNull singleton
+    PERRY_CONSTANT_NSCocoaErrorDomain,
+    PERRY_CONSTANT_NSPOSIXErrorDomain,
+    PERRY_CONSTANT_NSLocalizedDescriptionKey,
+    PERRY_CONSTANT_NSFilePathErrorKey,
+    PERRY_CONSTANT_NSUnderlyingErrorKey,
     PERRY_CONSTANT_COUNT,
 } perry_foundation_constant_id;
 
 void **perry_foundation_constant(perry_foundation_constant_id which);
+
+// kCFBooleanTrue and kCFBooleanFalse: the objects behind @YES and @NO.
+void *perry_foundation_boolean(int value);
+
+// -[NSProcessInfo operatingSystemVersion]. Larger than 16 bytes, so it is
+// returned through x8 and passed by reference.
+typedef struct NSOperatingSystemVersion {
+    intptr_t majorVersion;
+    intptr_t minorVersion;
+    intptr_t patchVersion;
+} NSOperatingSystemVersion;
 
 // The calling thread's kernel id, for NSLog lines.
 int perry_foundation_thread_id(void);
