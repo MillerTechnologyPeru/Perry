@@ -4,6 +4,7 @@
 #include "image.h"
 #include "leb128.h"
 #include "log.h"
+#include "perry_interface.h"
 
 #include <dlfcn.h>
 #include <limits.h>
@@ -214,6 +215,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
             provider->path = other->path;
             provider->handle = other->handle;
             provider->base = other->base;
+            provider->symbol = other->symbol;
             return provider;
         }
     }
@@ -231,6 +233,10 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         provider->path = strdup(path);
         provider->handle = handle;
         provider->base = map ? (void *)map->l_addr : NULL;
+        void *hook = dlsym(handle, PERRY_PROVIDER_SYMBOL_SYMBOL);
+        Dl_info hook_info;
+        if (hook && dladdr(hook, &hook_info) && hook_info.dli_fbase == provider->base)
+            provider->symbol = (void *(*)(const char *))hook;
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
         return provider;
     }
@@ -245,13 +251,16 @@ void *perry_provider_symbol(perry_loader *loader, const char *install_name, cons
 
 static bool provider_lookup(perry_provider *provider, const char *name, perry_symbol *out) {
     void *sym = dlsym(provider->handle, name);
-    if (!sym)
-        return false;
     // dlsym also searches the provider's own dependencies (glibc). Only symbols
     // defined in the provider itself count, so that a Darwin name such as
     // "__exit" never binds to an unrelated glibc symbol.
     Dl_info info;
-    if (!dladdr(sym, &info) || info.dli_fbase != provider->base)
+    if (sym && (!dladdr(sym, &info) || info.dli_fbase != provider->base))
+        sym = NULL;
+    // Symbols the provider defines at run time, such as Swift constants.
+    if (!sym && provider->symbol)
+        sym = provider->symbol(name);
+    if (!sym)
         return false;
     out->address = sym;
     out->found = true;
