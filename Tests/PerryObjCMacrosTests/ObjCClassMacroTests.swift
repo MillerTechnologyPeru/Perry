@@ -165,3 +165,62 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             ])
     }
 }
+
+@Suite struct ObjCCategoryMacroTests {
+
+    private let specs: [String: MacroSpec] = [
+        "ObjCCategory": MacroSpec(type: ObjCCategoryMacro.self),
+        "ObjCMethod": MacroSpec(type: ObjCMethodMacro.self),
+    ]
+
+    @Test("@ObjCCategory adds an extension's methods to the extended class")
+    func category() {
+        assertMacroExpansion("""
+            @ObjCCategory("Paths")
+            public extension NSString {
+                @ObjCMethod("lastPathComponent")
+                func lastPathComponent() -> String { "" }
+            }
+            """, expandedSource: """
+            public extension NSString {
+                func lastPathComponent() -> String { "" }
+
+                /// Installs the Paths category's methods into `registrar`.
+                public static func registerObjCCategoryPaths(_ registrar: any ObjCMethodRegistrar) {
+                    registrar.addMethod("lastPathComponent", types: ObjCTypeEncoding.method(returning: String.self, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> String.ObjCType in
+                                let this = NSString(objcObject: receiver!, ownership: .retain);
+                                return this.lastPathComponent().objCReturnValue()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> String.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
+                }
+
+                /// Adds the Paths category's methods to NSString's class.
+                public static func addObjCCategoryPaths() {
+                    registerObjCCategoryPaths(objCClass)
+                }
+            }
+            """, macroSpecs: specs) { failure in
+            Issue.record(Comment(rawValue: failure.message))
+        }
+    }
+
+    @Test("@ObjCCategory needs an extension and an identifier name")
+    func diagnostics() {
+        assertMacroExpansion("""
+            @ObjCCategory("Loose")
+            class Loose: NSObject {}
+
+            @ObjCCategory("Two words")
+            extension NSString {}
+            """, expandedSource: """
+            class Loose: NSObject {}
+            extension NSString {}
+            """, diagnostics: [
+                DiagnosticSpec(message: "@ObjCCategory applies to an extension of an Objective-C class's wrapper",
+                               line: 1, column: 1),
+                DiagnosticSpec(message: "the category name must be a string literal that is a Swift identifier",
+                               line: 4, column: 1),
+            ], macroSpecs: specs) { failure in
+            Issue.record(Comment(rawValue: failure.message))
+        }
+    }
+}
