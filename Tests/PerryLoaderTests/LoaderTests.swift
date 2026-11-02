@@ -104,6 +104,40 @@ struct LoaderTests {
         #expect(report.stdout.contains("dependency\t@rpath/libGreet.dylib\t\(app.path)/Frameworks/libGreet.dylib"))
     }
 
+    @Test("Objective-C metadata is reported by name")
+    func objectiveCReport() throws {
+        let exe = try FixtureBuilder.executable("zoo.m", libraries: [FixtureBuilder.stub("libobjc")])
+        let report = try runPerry(["--report", exe.path])
+        #expect(report.status == 0)
+        let lines = Set(report.stdout.lines)
+        for expected in [
+            "objc-class-defined\tAnimal",
+            "objc-class-defined\tDog",
+            "objc-category\tAnimal(Extras)",
+            "objc-class-referenced\tNSObject\tunresolved",
+            "objc-selector\tsetLegs:",
+            "objc-selector\tspeak",
+            "unresolved\t/usr/lib/libobjc.A.dylib\t_objc_msgSend",
+            "unresolved\t/usr/lib/libSystem.B.dylib\t__NSConcreteStackBlock",
+            "dependency\t/usr/lib/libobjc.A.dylib\tmissing",
+        ] {
+            #expect(lines.contains(expected), "missing report line: \(expected)")
+        }
+    }
+
+    @Test("Images are mapped in the low 64 GB like dyld")
+    func lowAddresses() throws {
+        let app = try FixtureBuilder.greeterApp(variant: "addresses", binaryPlist: false)
+        let report = try runPerry(["--report", app.path])
+        let bases = report.stdout.lines.filter { $0.hasPrefix("base\t0x") }.compactMap {
+            UInt64($0.dropFirst("base\t0x".count), radix: 16)
+        }
+        #expect(bases.count == 2)
+        for base in bases {
+            #expect(base >= 0x1_0000_0000 && base < 0x10_0000_0000, "image base 0x\(String(base, radix: 16))")
+        }
+    }
+
     @Test("Encrypted binaries are rejected with a clear error")
     func encrypted() throws {
         let exe = try FixtureBuilder.executable("hello.c", variant: "-encrypted")
