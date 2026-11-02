@@ -8,6 +8,13 @@ import PerryObjCInterop
 extension NSObject {
     @ObjCMethod("description")
     func objectDescription() -> String { "<\(ObjC.className(objcObject)): \(objcObject)>" }
+
+    /// A class describes itself by its name.
+    @ObjCClassMethod("description")
+    static func classDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
+
+    @ObjCClassMethod("debugDescription")
+    static func classDebugDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
 }
 
 /// retain, release and autorelease for static objects such as literals.
