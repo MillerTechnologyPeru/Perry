@@ -155,8 +155,10 @@ func range(of needle: String, in haystack: String, options: UInt) -> NSRange {
     return NSRange(location: notFound, length: 0)
 }
 
-@ObjCImplementation("registerAdditions")
-extension NSString {
+/// NSString's encodings, paths and searching, installed into NSString like
+/// a category.
+@ObjCClass("NSString")
+final class NSStringAdditions: NSString {
     private var units: [UInt16] { Array(value.utf16) }
 
     private static func string(_ units: ArraySlice<UInt16>) -> String { String(decoding: units, as: UTF16.self) }
