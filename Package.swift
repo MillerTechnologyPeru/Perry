@@ -13,6 +13,8 @@ let package = Package(
         .library(name: "Perryobjc", type: .dynamic, targets: ["PerryObjC"]),
         // Foundation and CoreFoundation.
         .library(name: "PerryFoundation", type: .dynamic, targets: ["PerryFoundation"]),
+        // libxml2, over Linux's.
+        .library(name: "Perryxml2", type: .dynamic, targets: ["PerryXML2"]),
         // CoreGraphics.
         .library(name: "PerryCoreGraphics", type: .dynamic, targets: ["PerryCoreGraphics"]),
         // UIKit.
@@ -74,6 +76,11 @@ let package = Package(
             name: "PerryFoundation",
             dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
+        ),
+        // libxml2: Linux's, with thunks for Darwin's variadic ABI.
+        .target(
+            name: "PerryXML2",
+            linkerSettings: [.linkedLibrary("xml2")]
         ),
         // CoreGraphics' geometry types, shared by the providers that pass them.
         .target(name: "CPerryGeometry"),
