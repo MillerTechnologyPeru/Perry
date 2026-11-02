@@ -190,9 +190,34 @@ final class Canvas {
     func clear(_ x: Double, _ y: Double, _ w: Double, _ h: Double) { context.clear(rect: CGRect(x: x, y: y, width: w, height: h)) }
 
     /// Premultiplied RGBA, rows from the top, upright in the rect.
-    func draw(_ bitmap: Bitmap, _ x: Double, _ y: Double, _ w: Double, _ h: Double) {
-        let image = Silica.CGImage(width: bitmap.width, height: bitmap.height, data: Data(bitmap.pixels))
-        context.draw(image, in: CGRect(x: x, y: y, width: w, height: h))
+    /// Draws an image through its Cairo surface, made the first time the
+    /// image is drawn and kept with it.
+    func draw(_ image: ImageState, _ x: Double, _ y: Double, _ w: Double, _ h: Double) {
+        guard let surface = Canvas.surface(for: image) else { return }
+        context.draw(surface: surface, width: image.width, height: image.height, in: CGRect(x: x, y: y, width: w, height: h))
+    }
+
+    /// The image's pixels as an ARGB32 surface: B, G, R, A in memory.
+    private static func surface(for image: ImageState) -> Cairo.Surface.Image? {
+        if let surface = image.renderCache as? Cairo.Surface.Image { return surface }
+        let bitmap = image.bitmap
+        guard bitmap.width > 0, bitmap.height > 0,
+              let surface = try? Cairo.Surface.Image(format: .argb32, width: bitmap.width, height: bitmap.height) else { return nil }
+        let stride = surface.stride
+        bitmap.pixels.withUnsafeBufferPointer { source in
+            _ = surface.withUnsafeMutableBytes { destination in
+                for y in 0..<bitmap.height {
+                    let from = source.baseAddress! + y * bitmap.width * 4, to = destination + y * stride
+                    for x in 0..<bitmap.width {
+                        let i = x * 4
+                        (to[i], to[i + 1], to[i + 2], to[i + 3]) = (from[i + 2], from[i + 1], from[i], from[i + 3])
+                    }
+                }
+            }
+        }
+        surface.markDirty()
+        image.renderCache = surface
+        return surface
     }
 
     func linearGradient(_ stops: [(Double, (Double, Double, Double, Double))], from: (Double, Double), to: (Double, Double), extend: Bool) {
