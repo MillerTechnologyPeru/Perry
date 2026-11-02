@@ -15,6 +15,31 @@ import Silica
 
 public extension CairoContext {
 
+    // MARK: Images
+
+    /// Draws an ARGB32 surface of `width` by `height` pixels into `rect`, as
+    /// draw(_:in:) draws an image: for callers that keep the surface, so
+    /// drawing the same image again converts nothing.
+    func draw(surface: Cairo.Surface.Image, width: Int, height: Int, in rect: CGRect) {
+        internalContext.save()
+        let pattern = Pattern(surface: surface)
+        var matrix = Matrix.identity
+        matrix.translate(x: Double(rect.origin.x), y: Double(rect.origin.y))
+        matrix.scale(x: Double(rect.size.width) / Double(width), y: Double(rect.size.height) / Double(height))
+        matrix.scale(x: 1, y: -1)
+        matrix.translate(x: 0, y: -Double(height))
+        matrix.invert()
+        pattern.matrix = matrix
+        pattern.extend = .pad
+        internalContext.operator = CAIRO_OPERATOR_OVER
+        internalContext.source = pattern
+        internalContext.addRectangle(x: Double(rect.origin.x), y: Double(rect.origin.y),
+                                     width: Double(rect.size.width), height: Double(rect.size.height))
+        internalContext.clip()
+        internalContext.paint(alpha: Double(internalState.alpha))
+        internalContext.restore()
+    }
+
     // MARK: Painting
 
     /// The fill color with the global alpha applied.
