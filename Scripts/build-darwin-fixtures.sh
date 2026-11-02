@@ -7,7 +7,12 @@
 # real Foundation, is saved as <name>.expected for the tests to compare
 # against. Fixtures that import UIKit are built for Mac Catalyst instead,
 # which runs the iOS UIKit. Files in a fixture's directory other than
-# sources and Info.plist are the app's resources.
+# sources, Info.plist and `dependencies` are the app's resources.
+#
+# A fixture's `dependencies` file lists third-party sources it builds with,
+# one per line: a git URL, a commit and the directory of sources in it. They
+# are cloned into .build/perry-fixtures/sources rather than kept here.
+# Sources that include <libxml/…> are built with libxml2.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -15,6 +20,7 @@ cd "$(dirname "$0")/.."
 sdk=$(xcrun --sdk iphoneos --show-sdk-path)
 macsdk=$(xcrun --sdk macosx --show-sdk-path)
 out=.build/perry-fixtures/darwin
+deps=.build/perry-fixtures/sources
 min=15.0
 
 for src in Tests/Fixtures/Darwin/*/; do
@@ -22,11 +28,35 @@ for src in Tests/Fixtures/Darwin/*/; do
     app="$out/$name.app"
     rm -rf "$app"
     mkdir -p "$app"
-    if grep -q '<UIKit/' "$src"/*.m; then frameworks="-framework Foundation -framework UIKit"; else frameworks="-framework Foundation"; fi
+    sources=$(ls "$src"/*.m)
+    includes=""
+    if [ -f "$src/dependencies" ]; then
+        while read -r url commit dir; do
+            [ -n "$url" ] || continue
+            checkout="$deps/$(basename "$url" .git)"
+            if [ ! -d "$checkout" ]; then
+                git clone -q "$url" "$checkout"
+            fi
+            git -C "$checkout" checkout -q "$commit"
+            sources="$sources $(find "$checkout/$dir" -name '*.m' | sort)"
+            for header_dir in $(find "$checkout/$dir" -name '*.h' -exec dirname {} \; | sort -u); do
+                includes="$includes -I$header_dir"
+            done
+        done < "$src/dependencies"
+    fi
+    if grep -q '<UIKit/' $sources; then frameworks="-framework Foundation -framework UIKit"; else frameworks="-framework Foundation"; fi
+    libraries=""
+    ios_includes="$includes"
+    mac_includes="$includes"
+    if grep -q '<libxml/' $sources; then
+        libraries="-lxml2"
+        ios_includes="$ios_includes -I$sdk/usr/include/libxml2"
+        mac_includes="$mac_includes -I$macsdk/usr/include/libxml2"
+    fi
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
-        -fobjc-arc -fmodules -O1 \
-        $frameworks \
-        -o "$app/$name" "$src"/*.m
+        -fobjc-arc -fmodules -O1 $ios_includes \
+        $frameworks $libraries \
+        -o "$app/$name" $sources
     plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
 
     # The same app for macOS, whose bundle keeps everything under Contents.
@@ -38,20 +68,20 @@ for src in Tests/Fixtures/Darwin/*/; do
             xcrun --sdk macosx clang -target "arm64-apple-ios$min-macabi" -isysroot "$macsdk" \
                 -iframework "$macsdk/System/iOSSupport/System/Library/Frameworks" \
                 -L"$macsdk/System/iOSSupport/usr/lib" \
-                -fobjc-arc -fmodules -O1 \
-                $frameworks \
-                -o "$macos/MacOS/$name" "$src"/*.m ;;
+                -fobjc-arc -fmodules -O1 $mac_includes \
+                $frameworks $libraries \
+                -o "$macos/MacOS/$name" $sources ;;
         *)
             xcrun --sdk macosx clang -target arm64-apple-macos13 \
-                -fobjc-arc -fmodules -O1 \
-                $frameworks \
-                -o "$macos/MacOS/$name" "$src"/*.m ;;
+                -fobjc-arc -fmodules -O1 $mac_includes \
+                $frameworks $libraries \
+                -o "$macos/MacOS/$name" $sources ;;
     esac
     cp "$src/Info.plist" "$macos/Info.plist"
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist) ;;
+            *.m|*/Info.plist|*/dependencies) ;;
             *) cp "$resource" "$app/"; cp "$resource" "$macos/Resources/" ;;
         esac
     done
