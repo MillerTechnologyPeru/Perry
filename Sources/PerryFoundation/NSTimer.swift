@@ -122,7 +122,7 @@ enum Timers {
     }
 
     static func install(superclass: Class) {
-        timerClass = NSTimer.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        timerClass = NSTimer.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
     }
 
     /// Repeating timers fire at least every 0.1 ms, as Foundation clamps them.
@@ -215,8 +215,8 @@ public final class NSTimer: NSObject {
 }
 
 /// Delayed performs, which Foundation adds to NSObject.
-@ObjCClass("NSObject")
-final class DelayedPerforms: NSObject {
+@ObjCCategory("DelayedPerforms")
+extension NSObject {
     @ObjCMethod("performSelector:withObject:afterDelay:")
     func perform(_ selector: ObjCSelector, with argument: ObjCObject?, afterDelay delay: Double) {
         let request = Timers.make(TimerStorage(fireDate: absoluteTimeNow() + delay, interval: 0, repeats: false,
