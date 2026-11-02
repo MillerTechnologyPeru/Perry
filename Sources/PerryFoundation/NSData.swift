@@ -124,7 +124,7 @@ enum DataObjects {
     }
 
     static func install(superclass: Class) {
-        dataClass = NSData.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        dataClass = NSData.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         mutableClass = NSMutableData.defineObjCClass().storage
     }
 
@@ -377,7 +377,7 @@ enum Nulls {
     nonisolated(unsafe) static var null: id!
 
     static func install(superclass: Class) {
-        let cls = NSNull.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
+        let cls = NSNull.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
         null = ObjC.createInstance(cls, 0)
         perry_foundation_constant(PERRY_CONSTANT_kCFNull).pointee = null
     }
