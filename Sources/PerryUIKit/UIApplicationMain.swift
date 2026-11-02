@@ -133,11 +133,16 @@ enum Scenes {
 
         sceneDelegate?.sceneWillEnterForeground(scene)
         Application.post(Notifications.UISceneWillEnterForegroundNotification, object: scene)
-        scene.state.activationState = .foregroundActive
-        sceneDelegate?.sceneDidBecomeActive(scene)
-        Application.post(Notifications.UISceneDidActivateNotification, object: scene)
 
-        Application.state = .active
-        Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
+        // The scene becomes active once the windows it showed have been
+        // updated, as on iOS.
+        Updates.afterPass {
+            scene.state.activationState = .foregroundActive
+            sceneDelegate?.sceneDidBecomeActive(scene)
+            Application.post(Notifications.UISceneDidActivateNotification, object: scene)
+
+            Application.state = .active
+            Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
+        }
     }
 }
