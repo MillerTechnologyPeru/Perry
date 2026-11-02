@@ -7,6 +7,7 @@ private let macros: [String: MacroSpec] = [
     "ObjCClass": MacroSpec(type: ObjCClassMacro.self),
     "ObjCMethod": MacroSpec(type: ObjCMethodMacro.self),
     "ObjCClassMethod": MacroSpec(type: ObjCMethodMacro.self),
+    "ObjCProperty": MacroSpec(type: ObjCPropertyMacro.self),
 ]
 
 private func expect(_ source: String, expands expanded: String, diagnostics: [DiagnosticSpec] = [],
@@ -43,10 +44,16 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             """, expands: """
             public class NSMutableString: NSString {
                 func append(_ other: String) {}
-                func character(at index: UInt) -> UInt16 { 0 }
-                func initialize(capacity: UInt) -> Self { self }
+                func character(at index: UInt) -> UInt16 {
+                    0
+                }
+                func initialize(capacity: UInt) -> Self {
+                    self
+                }
                 func release() {}
-                static func string(_ cls: ObjCClass, capacity: UInt) -> NSMutableString? { nil }
+                static func string(_ cls: ObjCClass, capacity: UInt) -> NSMutableString? {
+                    nil
+                }
 
                 func helper() {}
 
@@ -93,7 +100,9 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             }
             """, expands: """
             class Shape: NSObject {
-                func frame() -> Rect { Rect() }
+                func frame() -> Rect {
+                    Rect()
+                }
 
                 override class var objCClassName: String {
                     "Shape"
@@ -113,6 +122,95 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             """)
     }
 
+    @Test("Functions without a body send their message, and are not registered")
+    func calls() {
+        expect("""
+            @ObjCClass("Shape")
+            class Shape: NSObject {
+                @ObjCMethod("insertObject:atIndex:")
+                func insert(_ object: NSObject?, at index: UInt)
+
+                @ObjCMethod("initWithName:")
+                func initialize(name: String) -> Self?
+
+                @ObjCClassMethod("new")
+                static func new() -> Self
+            }
+            """, expands: """
+            class Shape: NSObject {
+                func insert(_ object: NSObject?, at index: UInt) {
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Optional<NSObject>.ObjCType, UInt.ObjCType) -> Void
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    message(objcObject, ObjCRuntime.selector("insertObject:atIndex:"), object.objCArgument(), index.objCArgument())
+                }
+                func initialize(name: String) -> Self? {
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> UnsafeMutableRawPointer?
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    return message(ObjCRuntime.retain(objcObject), ObjCRuntime.selector("initWithName:"), name.objCArgument()).map {
+                        Self(objCOwned: $0)
+                    }
+                }
+                static func new() -> Self {
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    return Self(objCOwned: message(self.objCClass.pointer, ObjCRuntime.selector("new")))
+                }
+
+                override class var objCClassName: String {
+                    "Shape"
+                }
+
+                override class var objCSuperclassName: String? {
+                    NSObject.objCClassName
+                }
+
+                override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
+
+                }
+            }
+            """)
+    }
+
+    @Test("@ObjCProperty sends the getter and setter")
+    func properties() {
+        expect("""
+            extension NSObject {
+                @ObjCProperty var tag: Int
+                @ObjCProperty(getter: "isHidden", readonly: true) var hidden: Bool
+                @ObjCProperty(readonly: true) static var count: UInt
+            }
+            """, expands: """
+            extension NSObject {
+                var tag: Int {
+                    get {
+                        typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Int.ObjCType
+                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        return Int(objCReturnValue: message(objcObject, ObjCRuntime.selector("tag")))
+                    }
+                    set {
+                        typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Int.ObjCType) -> Void
+                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        message(objcObject, ObjCRuntime.selector("setTag:"), newValue.objCArgument())
+                    }
+                }
+                var hidden: Bool {
+                    get {
+                        typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Bool.ObjCType
+                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        return Bool(objCReturnValue: message(objcObject, ObjCRuntime.selector("isHidden")))
+                    }
+                }
+                static var count: UInt {
+                    get {
+                        typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UInt.ObjCType
+                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        return UInt(objCReturnValue: message(self.objCClass.pointer, ObjCRuntime.selector("count")))
+                    }
+                }
+            }
+            """)
+    }
+
     @Test("Mismatched selectors and signatures are compile errors")
     func diagnostics() {
         expect("""
@@ -126,15 +224,21 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 @ObjCMethod("description")
                 func describe() async -> String { "" }
 
-                @ObjCMethod("lastObject")
-                func last() -> NSObject?
+                @ObjCMethod("objectAtIndex:")
+                func object(_: UInt) -> NSObject
             }
             """, expands: """
             class NSMutableArray: NSArray {
                 func insert(_ object: NSObject) {}
-                static func count() -> UInt { 0 }
-                func describe() async -> String { "" }
-                func last() -> NSObject?
+                static func count() -> UInt {
+                    0
+                }
+                func describe() async -> String {
+                    ""
+                }
+                func object(_: UInt) -> NSObject {
+                    fatalError()
+                }
             }
             """, diagnostics: [
                 DiagnosticSpec(message: "selector 'insertObject:atIndex:' takes 2 arguments, but the function takes 1",
@@ -142,8 +246,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 DiagnosticSpec(message: "@ObjCMethod applies to instance methods; use @ObjCClassMethod",
                                line: 5, column: 5),
                 DiagnosticSpec(message: "Objective-C methods cannot be async or throw", line: 9, column: 18),
-                DiagnosticSpec(message: "an Objective-C method needs a body: it implements the selector",
-                               line: 12, column: 10),
+                DiagnosticSpec(message: "name the parameter: the message send passes it", line: 12, column: 17),
             ])
     }
 
@@ -183,7 +286,9 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             }
             """, expandedSource: """
             public extension NSString {
-                func lastPathComponent() -> String { "" }
+                func lastPathComponent() -> String {
+                    ""
+                }
 
                 /// Installs the Paths category's methods into `registrar`.
                 public static func registerObjCCategoryPaths(_ registrar: any ObjCMethodRegistrar) {
