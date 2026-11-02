@@ -2,10 +2,12 @@ import CPerryFoundation
 import Glibc
 import PerryObjCInterop
 
-/// A thread's run loop. Perry's run loops have timers and no other input
-/// sources yet, and every mode runs every timer. The main run loop behaves
-/// as if it had an input source, as it always does in a Darwin app: it waits
-/// for work instead of finishing when it has no timers.
+/// A thread's run loop. Perry's run loops have timers and, on the main
+/// thread, the main dispatch queue, and every mode runs every timer. The
+/// main run loop behaves as if it had an input source, as it always does in
+/// a Darwin app: it waits for work instead of finishing when it has no
+/// timers. A run loop sleeps in poll(), woken through an eventfd and, on
+/// the main thread, by the main queue's port.
 ///
 /// Like CFRunLoop, a run returns when it is stopped, when its time limit
 /// passes, or when it has nothing left to run ("finished").
@@ -19,14 +21,16 @@ final class RunLoopState {
     private var timers: [id] = []
     private var stopRequested = false
     private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
-    private let condition = UnsafeMutablePointer<pthread_cond_t>.allocate(capacity: 1)
+    private let wakeFile = eventfd(0, Int32(EFD_CLOEXEC | EFD_NONBLOCK))
 
     let isMain: Bool
+
+    /// Whether this run loop drains the main dispatch queue.
+    var servesMainQueue: Bool { isMain && MainDispatchQueue.port >= 0 }
 
     init(isMain: Bool = false) {
         self.isMain = isMain
         pthread_mutex_init(mutex, nil)
-        pthread_cond_init(condition, nil)
         let object = Storage.allocate(UnsafeMutableRawPointer(RunLoops.runLoopClass))!
         Storage.set(object, self)
         self.object = object
@@ -68,9 +72,7 @@ final class RunLoopState {
     }
 
     func wakeUp() {
-        pthread_mutex_lock(mutex)
-        pthread_cond_broadcast(condition)
-        pthread_mutex_unlock(mutex)
+        _ = eventfd_write(wakeFile, 1)
     }
 
     /// Runs timers until `limit` (absolute time), a stop, or no timers.
@@ -79,6 +81,10 @@ final class RunLoopState {
     func run(until limit: Double, returnAfterSourceHandled: Bool = false, waitWhenEmpty: Bool? = nil) -> Result {
         let waitWhenEmpty = waitWhenEmpty ?? isMain
         while true {
+            if servesMainQueue, MainDispatchQueue.isReady() {
+                MainDispatchQueue.drain()
+                if returnAfterSourceHandled { return .handledSource }
+            }
             let next: (timer: id?, fire: Double)? = locked {
                 if stopRequested {
                     stopRequested = false
@@ -107,21 +113,45 @@ final class RunLoopState {
         }
     }
 
-    /// Sleeps until `deadline` or a wake-up.
+    /// Sleeps until `deadline`, a wake-up or, on the main thread, work for
+    /// the main queue.
     private func wait(until deadline: Double) {
-        let unix = deadline + referenceDateOffset
-        var time = timespec()
-        if unix.isFinite && unix < Double(Int32.max) {
-            time.tv_sec = Int(unix)
-            time.tv_nsec = Int((unix - floor(unix)) * 1e9)
-        } else {
-            time.tv_sec = Int(Int32.max)
-        }
-        pthread_mutex_lock(mutex)
-        if !stopRequested {
-            _ = pthread_cond_timedwait(condition, mutex, &time)
-        }
-        pthread_mutex_unlock(mutex)
+        if locked({ stopRequested }) { return }
+        let remaining = deadline - absoluteTimeNow()
+        // Milliseconds, rounded up so a timer is never woken for early.
+        let timeout = remaining.isFinite ? Int32(min(max(ceil(remaining * 1000), 0), Double(Int32.max))) : -1
+        var files = [pollfd(fd: wakeFile, events: Int16(POLLIN), revents: 0)]
+        if servesMainQueue { files.append(pollfd(fd: MainDispatchQueue.port, events: Int16(POLLIN), revents: 0)) }
+        _ = poll(&files, nfds_t(files.count), timeout)
+        var value: eventfd_t = 0
+        _ = eventfd_read(wakeFile, &value)
+    }
+}
+
+/// The main dispatch queue, drained by the main run loop through the
+/// hooks libdispatch gives CoreFoundation's run loop. Its port is a file
+/// descriptor that becomes readable when the queue has work.
+enum MainDispatchQueue {
+    typealias Callback = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    nonisolated(unsafe) static var port: Int32 = -1
+    nonisolated(unsafe) static var callback: Callback?
+
+    /// Binds libdispatch's hooks, which libSystem re-exports.
+    static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) {
+        typealias GetPort = @convention(c) () -> Int32
+        guard let getPort = lookup("__dispatch_get_main_queue_port_4CF"),
+              let callback = lookup("__dispatch_main_queue_callback_4CF") else { return }
+        self.callback = unsafeBitCast(callback, to: Callback.self)
+        port = unsafeBitCast(getPort, to: GetPort.self)()
+    }
+
+    static func isReady() -> Bool {
+        var file = pollfd(fd: port, events: Int16(POLLIN), revents: 0)
+        return poll(&file, 1, 0) > 0
+    }
+
+    static func drain() {
+        callback?(nil)
     }
 }
 
@@ -226,7 +256,7 @@ public final class NSRunLoop: NSObject {
     /// `date`, as on Darwin. NO when there is nothing to run.
     @ObjCMethod("runMode:beforeDate:")
     func run(mode: ObjCObject?, before date: NSDate) -> Bool {
-        guard let state, state.hasTimers else { return false }
+        guard let state, state.hasTimers || state.servesMainQueue else { return false }
         _ = state.run(until: date.date.timeIntervalSinceReferenceDate)
         return true
     }
