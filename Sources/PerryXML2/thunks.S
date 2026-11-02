@@ -1,55 +1,9 @@
-// Darwin entry points for libxml2's variadic and va_list functions.
-//
-// Apple's arm64 ABI passes variadic arguments on the stack in 8-byte slots
-// and makes va_list a plain pointer to them; AAPCS64 (Linux) starts
-// variadic arguments in registers and makes va_list a 32-byte struct,
-// passed by reference. Both thunks build an AAPCS64 va_list whose register
-// save areas are empty (gr_offs and vr_offs are 0), so va_arg reads every
-// argument from Darwin's stack slots, and call libxml2's va_list function.
+// Darwin entry points for libxml2's variadic and va_list functions, made
+// with perry_wrapped.h's VARIADIC and VA_LIST.
+
+#include "perry_wrapped.h"
 
 #if defined(__aarch64__) && defined(__ELF__)
-
-// VARIADIC darwin_name, va_function, fixed_count
-//
-// For f(fixed..., ...): the variadic arguments start at the caller's sp,
-// and the va_list goes in the register after the fixed arguments.
-.macro VARIADIC name, target, nfixed
-    .globl \name
-    .type \name, %function
-    .p2align 2
-\name:
-    stp x29, x30, [sp, #-48]!
-    mov x29, sp
-    add x9, sp, #48             // variadic arguments start at the caller's sp
-    stp x9, xzr, [sp, #16]      // __stack, __gr_top
-    stp xzr, xzr, [sp, #32]     // __vr_top, __gr_offs = 0, __vr_offs = 0
-    add x\nfixed, sp, #16
-    bl \target
-    ldp x29, x30, [sp], #48
-    ret
-    .size \name, . - \name
-.endm
-
-// VA_LIST darwin_name, va_function, index
-//
-// For f(fixed..., va_list): register x<index> holds Darwin's va_list, the
-// address of the next stack slot; it is replaced by an AAPCS64 va_list
-// over the same slots.
-.macro VA_LIST name, target, index
-    .globl \name
-    .type \name, %function
-    .p2align 2
-\name:
-    stp x29, x30, [sp, #-48]!
-    mov x29, sp
-    stp x\index, xzr, [sp, #16] // __stack, __gr_top
-    stp xzr, xzr, [sp, #32]     // __vr_top, __gr_offs = 0, __vr_offs = 0
-    add x\index, sp, #16
-    bl \target
-    ldp x29, x30, [sp], #48
-    ret
-    .size \name, . - \name
-.endm
 
 .text
 
