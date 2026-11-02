@@ -105,6 +105,44 @@ enum KeyValueCoding {
     }
 }
 
+/// Key-value coding's collection operators: @count, @sum, @avg, @max,
+/// @min, @unionOfObjects and @distinctUnionOfObjects, over arrays and sets.
+enum CollectionOperators {
+    static func apply(_ name: String, to collection: id, path: String) -> id? {
+        let members = ObjC.isKind(collection, of: Sets.setClass) ? Sets.elements(collection) : Arrays.elements(collection)
+        if name == "@count" { return Numbers.make(nil, .signed(Int64(members.count))) }
+        let values = members.compactMap { member -> id? in
+            let value = path.isEmpty ? member : ObjC.send(member, ObjC.selector("valueForKeyPath:"), Strings.autoreleased(path))
+            return value == Nulls.null ? nil : value
+        }
+        switch name {
+        case "@sum", "@avg":
+            let numbers = values.map { Numbers.storage($0).double }
+            let total = numbers.reduce(0, +)
+            let result = name == "@sum" ? total : (numbers.isEmpty ? 0 : total / Double(numbers.count))
+            if result == result.rounded(), abs(result) < 9e18 { return Numbers.make(nil, .signed(Int64(result))) }
+            return Numbers.make(nil, .double(result))
+        case "@max", "@min":
+            let compare = ObjC.selector("compare:")
+            return values.reduce(nil as id?) { best, value in
+                guard let best else { return value }
+                let order = ObjC.sendInt(value, compare, best)
+                return (name == "@max" ? order > 0 : order < 0) ? value : best
+            }
+        case "@unionOfObjects":
+            return Arrays.autoreleased(values)
+        case "@distinctUnionOfObjects":
+            var distinct: [id] = []
+            for value in values where !distinct.contains(where: { ObjC.sendBool($0, Selectors.isEqual, value) }) {
+                distinct.append(value)
+            }
+            return Arrays.autoreleased(distinct)
+        default:
+            foundationFatal("[<\(ObjC.className(collection)) \(collection)> valueForKeyPath:]: this class does not implement the \(name.dropFirst()) operation.")
+        }
+    }
+}
+
 @ObjCCategory("KeyValueCoding")
 extension NSObject {
     @ObjCMethod("valueForKey:")
@@ -114,12 +152,18 @@ extension NSObject {
     func setKeyValue(_ value: ObjCObject?, forKey key: String) { KeyValueCoding.setValue(objcObject, key, value?.objcObject) }
 
     /// Each key in turn, by -valueForKey:, so classes' own versions apply.
+    /// A key starting with @ is a collection operator, applied to the
+    /// collection so far with the rest of the path.
     @ObjCMethod("valueForKeyPath:")
     func keyValue(forKeyPath path: String) -> ObjCObject? {
         var current: id? = objcObject
-        for key in path.split(separator: ".") {
+        var keys = path.split(separator: ".", omittingEmptySubsequences: false).map(String.init)[...]
+        while let key = keys.popFirst() {
             guard let object = current else { return nil }
-            current = ObjC.send(object, ObjC.selector("valueForKey:"), Strings.autoreleased(String(key)))
+            if key.hasPrefix("@") {
+                return CollectionOperators.apply(key, to: object, path: keys.joined(separator: ".")).map(ObjCObject.init)
+            }
+            current = ObjC.send(object, ObjC.selector("valueForKey:"), Strings.autoreleased(key))
         }
         return current.map(ObjCObject.init)
     }
