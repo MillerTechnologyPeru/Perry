@@ -32,3 +32,14 @@ extension NSObject {
         Storage.allocate(cls.pointer)
     }
 }
+
+/// Messages Foundation sends to objects of any class.
+extension NSObject {
+    /// The object's -description, as %@ prints it.
+    @ObjCMethod("description")
+    func describedByObject() -> String?
+
+    /// A new instance of the class, +new.
+    @ObjCClassMethod("new")
+    static func new() -> Self
+}
