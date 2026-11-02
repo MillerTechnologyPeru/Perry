@@ -352,20 +352,16 @@ public final class NSBlockOperation: NSOperation {
     }
 }
 
-/// Key-value observing's change notices. An operation's say it has become
-/// finished or ready, which its queue acts on.
-@ObjCCategory("ChangeNotices")
-extension NSObject {
-    @ObjCMethod("willChangeValueForKey:") func willChangeValue(forKey key: ObjCObject?) {}
-
-    @ObjCMethod("didChangeValueForKey:")
-    func didChangeValue(forKey key: ObjCObject?) {
-        guard Operations.isOperation(objcObject), let key = Strings.value(of: key?.id) else { return }
+extension Operations {
+    /// An operation's change notices say it has become finished or ready,
+    /// which its queue acts on; -didChangeValueForKey: passes them here.
+    static func didChangeValue(_ object: id, forKey key: String) {
+        guard isOperation(object) else { return }
         switch key {
         case "isFinished", "finished":
-            if Messages.bool(objcObject, "isFinished") { Operations.didFinish(objcObject) }
+            if Messages.bool(object, "isFinished") { didFinish(object) }
         case "isReady", "ready":
-            Operations.storage(objcObject).queue?.schedule()
+            storage(object).queue?.schedule()
         default:
             break
         }
