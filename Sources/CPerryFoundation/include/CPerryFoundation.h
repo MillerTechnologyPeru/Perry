@@ -69,6 +69,17 @@ perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which)
 // kCFBooleanTrue and kCFBooleanFalse: the objects behind @YES and @NO.
 void *perry_foundation_boolean(int value);
 
+// CoreFoundation's value types.
+typedef struct {
+    long location;
+    long length;
+} CFRange;
+
+typedef struct {
+    uint8_t byte0, byte1, byte2, byte3, byte4, byte5, byte6, byte7;
+    uint8_t byte8, byte9, byte10, byte11, byte12, byte13, byte14, byte15;
+} CFUUIDBytes;
+
 // Key-value observing's setter for any argument type (kvo.S): it calls
 // perry_foundation_kvo_will, which returns the setter it replaces, then
 // perry_foundation_kvo_did.
