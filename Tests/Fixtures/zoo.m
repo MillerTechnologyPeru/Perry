@@ -1,4 +1,4 @@
-// Objective-C classes, a category, a protocol, a property, ARC and a block.
+// Objective-C classes, a category, protocols, a property, ARC and a block.
 // There is no SDK, so the root class is declared here; the runtime defines it.
 int printf(const char *, ...);
 typedef struct objc_object *id;
@@ -31,7 +31,11 @@ __attribute__((objc_root_class))
 + (void)load { printf("Dog +load\n"); }
 @end
 
-@interface Animal (Extras)
+@protocol Wagging
+- (void)wag;
+@end
+
+@interface Animal (Extras) <Wagging>
 - (void)wag;
 @end
 

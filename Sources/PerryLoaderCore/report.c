@@ -69,6 +69,7 @@ enum {
     PROTOCOL_NAME_OFFSET = 8,       // protocol_t.mangledName
     CATEGORY_NAME_OFFSET = 0,       // category_t.name
     CATEGORY_CLASS_OFFSET = 8,      // category_t.cls
+    CATEGORY_PROTOCOLS_OFFSET = 32, // category_t.protocols
 };
 #define CLASS_DATA_MASK 0x00007ffffffffff8ull
 
@@ -95,22 +96,26 @@ static const char *protocol_name(const perry_image *image, const uint8_t *proto)
     return in_image(image, name) ? name : NULL;
 }
 
-// Reports each protocol in a class's protocol_list_t: a uint64_t count
-// followed by protocol_t pointers. Protocols are always emitted in the image
-// that uses them, so the names are local even for NSObject.
-static void report_conformances(const perry_image *image, const uint8_t *cls, const char *cls_name,
-                                string_list *out) {
-    const uint8_t *ro = class_ro(image, cls);
-    if (!ro)
-        return;
-    const uint64_t *list = *(const uint64_t *const *)(ro + CLASS_RO_PROTOCOLS_OFFSET);
+// Reports each protocol in a protocol_list_t: a uint64_t count followed by
+// protocol_t pointers. Protocols are always emitted in the image that uses
+// them, so the names are local even for NSObject.
+static void report_protocol_list(const perry_image *image, const uint64_t *list, const char *kind,
+                                 const char *owner, string_list *out) {
     if (!list || !in_image(image, list))
         return;
     const void *const *protos = (const void *const *)(list + 1);
     for (uint64_t i = 0; i < list[0] && in_image(image, &protos[i]); i++) {
         const char *name = protocol_name(image, protos[i]);
-        list_add(out, "objc-class-conforms\t%s\t%s", cls_name, name ? name : "?");
+        list_add(out, "%s\t%s\t%s", kind, owner, name ? name : "?");
     }
+}
+
+static void report_conformances(const perry_image *image, const uint8_t *cls, const char *cls_name,
+                                string_list *out) {
+    const uint8_t *ro = class_ro(image, cls);
+    if (ro)
+        report_protocol_list(image, *(const uint64_t *const *)(ro + CLASS_RO_PROTOCOLS_OFFSET),
+                             "objc-class-conforms", cls_name, out);
 }
 
 static const void *const *section_pointers(const perry_image *image, const char *sectname, size_t *count) {
@@ -157,7 +162,11 @@ static void report_objc(const perry_image *image, string_list *out) {
         const char *bound = perry_bind_name_at(cls_slot);
         if (!cls && bound)
             cls = strip_prefix(bound, "_OBJC_CLASS_$_");
-        list_add(out, "objc-category\t%s(%s)", cls ? cls : "?", in_image(image, cat_name) ? cat_name : "?");
+        char owner[256];
+        snprintf(owner, sizeof owner, "%s(%s)", cls ? cls : "?", in_image(image, cat_name) ? cat_name : "?");
+        list_add(out, "objc-category\t%s", owner);
+        report_protocol_list(image, *(const uint64_t *const *)(cat + CATEGORY_PROTOCOLS_OFFSET),
+                             "objc-category-conforms", owner, out);
     }
 
     ptrs = section_pointers(image, "__objc_selrefs", &count);

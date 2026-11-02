@@ -87,8 +87,8 @@ perry [--report] [--strict] <executable | App.app> [arguments...]
 
 - `--report` loads and binds without running and prints one line per fact:
   dependencies, `unresolved` and `weak-missing` imports grouped by library,
-  and Objective-C classes, categories, protocols, protocol conformances
-  and selectors. This is the API to-do
+  and Objective-C classes, categories, protocols, class and category
+  protocol conformances, and selectors. This is the API to-do
   list for an app.
 - `--strict` fails on the first unresolved non-weak import.
 - `PERRY_TRACE=load,bind,init` (or `all`) traces loading.
