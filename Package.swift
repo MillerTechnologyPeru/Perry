@@ -26,6 +26,8 @@ let package = Package(
         .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
         // CFNetwork, whose URL loading classes Foundation re-exports.
         .library(name: "PerryCFNetwork", type: .dynamic, targets: ["PerryCFNetwork"]),
+        // Security.
+        .library(name: "PerrySecurity", type: .dynamic, targets: ["PerrySecurity"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -38,6 +40,9 @@ let package = Package(
         .package(url: "https://github.com/swiftlang/swift-syntax.git", "603.0.1"..<"605.0.0"),
         .package(url: "https://github.com/PureSwift/CoreModel.git", from: "2.11.0"),
         .package(url: "https://github.com/PureSwift/CoreModel-SQLite.git", from: "0.3.3"),
+        // CryptoKit's API with its own BoringSSL, and X.509, for Security.
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.0"),
+        .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -133,6 +138,20 @@ let package = Package(
         .target(
             name: "PerryCFNetwork",
             dependencies: ["PerryInterface", "PerryObjCInterop", "PerryURLLoading"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Security's exported data that Swift cannot define.
+        .target(name: "CPerrySecurity"),
+        // Security over swift-crypto and swift-certificates: keys,
+        // certificates, trust and the keychain.
+        .target(
+            name: "PerrySecurity",
+            dependencies: [
+                "CPerrySecurity", "PerryInterface", "PerryObjCInterop",
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
