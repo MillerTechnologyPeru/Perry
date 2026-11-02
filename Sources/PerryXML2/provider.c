@@ -12,8 +12,8 @@
 
 #define _GNU_SOURCE
 #include "PerryXML2.h"
+#include "perry_wrapped.h"
 
-#include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -42,31 +42,11 @@ INTERNAL extern void perry_xml_generic_error_darwin(void *ctx, const char *msg, 
 
 // MARK: - Binding to Linux's libxml2
 
-/// Linux's libxml2, and where it is loaded.
-static void *libxml2;
-static void *libxml2_base;
+static perry_wrapped_library libxml2 = PERRY_WRAPPED_LIBRARY(xmlStrlen);
 
-static void find_libxml2(void) {
-    Dl_info info;
-    if (dladdr((void *)xmlStrlen, &info)) {
-        libxml2_base = info.dli_fbase;
-        libxml2 = dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD);
-    }
-}
-
-/// Symbols libxml2 only imports (from libc and the like) are not libxml2's
-/// API, so they never bind here.
 __attribute__((visibility("default")))
 void *perry_provider_symbol(const char *name) {
-    static pthread_once_t once = PTHREAD_ONCE_INIT;
-    pthread_once(&once, find_libxml2);
-    if (!libxml2 || name[0] != '_')
-        return NULL;
-    void *symbol = dlsym(libxml2, name + 1);
-    Dl_info info;
-    if (!symbol || !dladdr(symbol, &info) || info.dli_fbase != libxml2_base)
-        return NULL;
-    return symbol;
+    return perry_wrapped_symbol(&libxml2, name, NULL);
 }
 
 // MARK: - Formatting
