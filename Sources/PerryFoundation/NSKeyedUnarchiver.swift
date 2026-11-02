@@ -116,7 +116,7 @@ final class UnarchiverStorage {
     var requiresSecureCoding = false
 
     init?(_ data: [UInt8]) {
-        guard let list = BinaryPropertyList(data), case .dictionary(let root) = list.value(list.top),
+        guard let (value, _) = PropertyLists.parse(data), case .dictionary(let root) = value,
               case .array(let objects)? = root["$objects"], case .dictionary(let top)? = root["$top"] else { return nil }
         self.objects = objects
         self.top = top
@@ -303,13 +303,23 @@ public class NSKeyedUnarchiver: NSObject {
     @ObjCClassMethod("unarchivedObjectOfClass:fromData:error:")
     static func unarchived(ofClass cls: ObjCClass?, from data: ObjCObject?,
                            error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
-        unarchiveTopLevel(data, error: error)
+        checked(unarchiveTopLevel(data, error: error), [cls?.pointer].compactMap { $0 }, error: error)
+    }
+
+    /// The object if it is one of `classes`; otherwise nil and error 4864.
+    private static func checked(_ object: ObjCObject?, _ classes: [UnsafeMutableRawPointer],
+                                error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
+        guard let object else { return nil }
+        if classes.contains(where: { ObjC.isKind(object.objcObject, of: $0.assumingMemoryBound(to: perry_class_storage.self)) }) { return object }
+        error?.pointee = Unarchivers.error().objCReturnValue()
+        return nil
     }
 
     @ObjCClassMethod("unarchivedObjectOfClasses:fromData:error:")
     static func unarchived(ofClasses classes: ObjCObject?, from data: ObjCObject?,
                            error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
-        unarchiveTopLevel(data, error: error)
+        let allowed = classes.map { Sets.elements($0.objcObject) } ?? []
+        return checked(unarchiveTopLevel(data, error: error), allowed, error: error)
     }
 
     @ObjCMethod("initForReadingFromData:error:")
@@ -350,6 +360,33 @@ public class NSKeyedUnarchiver: NSObject {
 
     @ObjCMethod("decodeObjectOfClasses:forKey:")
     func decodeObject(ofClasses classes: ObjCObject?, forKey key: String) -> ObjCObject? { decodeObject(forKey: key) }
+
+    @ObjCMethod("decodeArrayOfObjectsOfClass:forKey:")
+    func decodeArray(ofClass cls: ObjCClass?, forKey key: String) -> ObjCObject? { decodeObject(forKey: key) }
+
+    @ObjCMethod("decodeArrayOfObjectsOfClasses:forKey:")
+    func decodeArray(ofClasses classes: ObjCObject?, forKey key: String) -> ObjCObject? { decodeObject(forKey: key) }
+
+    @ObjCMethod("decodeDictionaryWithKeysOfClass:objectsOfClass:forKey:")
+    func decodeDictionary(keysOfClass keys: ObjCClass?, objectsOfClass objects: ObjCClass?, forKey key: String) -> ObjCObject? {
+        decodeObject(forKey: key)
+    }
+
+    @ObjCMethod("decodeDictionaryWithKeysOfClasses:objectsOfClasses:forKey:")
+    func decodeDictionary(keysOfClasses keys: ObjCObject?, objectsOfClasses objects: ObjCObject?, forKey key: String) -> ObjCObject? {
+        decodeObject(forKey: key)
+    }
+
+    @ObjCMethod("decodeBytesForKey:returnedLength:")
+    func decodeBytes(forKey key: String, length: UnsafeMutablePointer<UInt>?) -> UnsafeRawPointer? {
+        guard case .data(let bytes)? = storage?.field(key) else {
+            length?.pointee = 0
+            return nil
+        }
+        length?.pointee = UInt(bytes.count)
+        let data = DataObjects.autoreleased(Data(bytes))
+        return ObjC.send(data, ObjC.selector("bytes")).map { UnsafeRawPointer($0) }
+    }
 
     @ObjCMethod("decodeTopLevelObjectForKey:error:")
     func decodeTopLevelObject(forKey key: String, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
