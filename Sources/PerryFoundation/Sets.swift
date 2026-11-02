@@ -71,13 +71,11 @@ enum Sets {
     }
 
     static func install(superclass: Class) {
-        let set = ClassDefinition(PERRY_CLASS_NSSet, name: "NSSet", superclass: superclass,
-                                  StorageAllocated.register, NSSet.register)
-        setClass = set.cls
+        let set = NSSet.defineObjCClass(StorageAllocated.registerObjCMethods)
+        setClass = set.storage
         set.addMethod("setWithObjects:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
-        mutableClass = ClassDefinition(PERRY_CLASS_NSMutableSet, name: "NSMutableSet", superclass: set.cls,
-                                       NSMutableSet.register).cls
+        mutableClass = NSMutableSet.defineObjCClass().storage
     }
 
     /// A new set wrapped for returning, +1.
@@ -88,10 +86,7 @@ enum Sets {
 
 /// NSSet.
 @ObjCClass("NSSet")
-public struct NSSet {}
-
-@ObjCImplementation
-extension NSSet {
+public class NSSet: NSObject {
     var members: [id] { Sets.elements(objcObject) }
 
     private func setMembers(_ members: [id]) -> Self {
@@ -203,10 +198,7 @@ extension NSSet {
 
 /// NSMutableSet.
 @ObjCClass("NSMutableSet")
-public struct NSMutableSet {}
-
-@ObjCImplementation
-extension NSMutableSet {
+public class NSMutableSet: NSSet {
     private var storage: SetStorage {
         guard let storage = Sets.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableSet")
@@ -224,7 +216,7 @@ extension NSMutableSet {
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSSet { Sets.owned(storage.members) }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSSet { Sets.owned(storage.members) }
 
     @ObjCMethod("addObject:")
     func add(_ member: ObjCObject) { storage.add(member.id) }
