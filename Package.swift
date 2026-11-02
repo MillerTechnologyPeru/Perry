@@ -68,7 +68,22 @@ let package = Package(
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"]
+            dependencies: ["CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Generates a provider's perry_provider_startup and perry_provider_symbol
+        // from its Objective-C declarations.
+        .executableTarget(
+            name: "PerryProviderGenerator",
+            dependencies: [
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+            ]
+        ),
+        .plugin(
+            name: "PerryProviderPlugin",
+            capability: .buildTool(),
+            dependencies: ["PerryProviderGenerator"]
         ),
         .testTarget(
             name: "PerryLoaderTests",
