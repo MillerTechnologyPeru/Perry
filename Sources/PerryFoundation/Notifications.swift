@@ -89,11 +89,8 @@ enum Notifications {
     }
 
     static func install(superclass: Class) {
-        notificationClass = ClassDefinition(PERRY_CLASS_NSNotification, name: "NSNotification", superclass: superclass,
-                                            StorageAllocated.register, NSNotification.register).cls
-        centerClass = ClassDefinition(PERRY_CLASS_NSNotificationCenter, name: "NSNotificationCenter",
-                                      superclass: superclass, StorageAllocated.register,
-                                      NSNotificationCenter.register).cls
+        notificationClass = NSNotification.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        centerClass = NSNotificationCenter.defineObjCClass(StorageAllocated.registerObjCMethods).storage
         // The default center lives for the whole process.
         defaultCenter = Storage.allocate(UnsafeMutableRawPointer(centerClass))
         Storage.set(defaultCenter, NotificationCenterStorage())
@@ -102,10 +99,7 @@ enum Notifications {
 
 /// NSNotification.
 @ObjCClass("NSNotification")
-public struct NSNotification {}
-
-@ObjCImplementation
-extension NSNotification {
+public final class NSNotification: NSObject {
     private var storage: NotificationStorage? { Notifications.storage(objcObject) }
 
     @ObjCClassMethod("notificationWithName:object:")
@@ -141,10 +135,7 @@ extension NSNotification {
 
 /// NSNotificationCenter.
 @ObjCClass("NSNotificationCenter")
-public struct NSNotificationCenter {}
-
-@ObjCImplementation
-extension NSNotificationCenter {
+public final class NSNotificationCenter: NSObject {
     private var observers: NotificationCenterStorage {
         guard let storage = Notifications.center(objcObject) else {
             foundationFatal("message sent to an uninitialized NSNotificationCenter")
