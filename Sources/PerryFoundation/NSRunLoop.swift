@@ -181,7 +181,10 @@ enum RunLoops {
         if let pointer = pthread_getspecific(key) {
             return Unmanaged<RunLoopState>.fromOpaque(pointer).takeUnretainedValue()
         }
-        let created = RunLoopState()
+        // One a perform onto this thread made, or a new one.
+        let storage = Threads.storage(Threads.current)
+        let created = storage?.runLoop ?? RunLoopState()
+        storage?.runLoop = created
         pthread_setspecific(key, Unmanaged.passRetained(created).toOpaque())
         return created
     }
