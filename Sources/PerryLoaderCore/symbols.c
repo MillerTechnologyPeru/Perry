@@ -219,6 +219,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UniformTypeIdentifiers");
         return true;
     }
+    // Accelerate's sub-frameworks (vecLib, vImage) are the umbrella's provider.
+    if (strstr(install_name, "/Accelerate.framework/")) {
+        snprintf(out, out_size, "Accelerate");
+        return true;
+    }
     // ImageIO's images are CoreGraphics' own.
     if (strstr(install_name, "/ImageIO.framework/")) {
         snprintf(out, out_size, "CoreGraphics");
