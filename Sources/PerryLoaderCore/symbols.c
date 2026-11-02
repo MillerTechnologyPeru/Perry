@@ -196,6 +196,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
+//   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -209,6 +210,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // Foundation; one provider keeps a single copy of each.
     if (strstr(install_name, "/CoreFoundation.framework/")) {
         snprintf(out, out_size, "Foundation");
+        return true;
+    }
+    // MobileCoreServices' (and macOS CoreServices') UTType functions live
+    // with UTType.
+    if (strstr(install_name, "/MobileCoreServices.framework/") || strstr(install_name, "/CoreServices.framework/")) {
+        snprintf(out, out_size, "UniformTypeIdentifiers");
         return true;
     }
     const char *base = strrchr(install_name, '/');
