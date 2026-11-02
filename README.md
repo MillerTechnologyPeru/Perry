@@ -35,12 +35,19 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   `NSUUID`, `NSJSONSerialization`, `NSError`, `NSNull`, `NSString`'s
   encodings, paths and searching, `NSBundle` with Info.plist and resources,
   `NSProcessInfo`, `NSThread` with performs between threads,
-  `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSXMLParser`, `NSLog`, and the
-  CFString functions KissXML uses (`CFStringTransform` with
-  `kCFStringTransformToXMLHex`, `CFStringTrimWhitespace`)
-- libxml2 (`libPerryxml2`): Linux's libxml2 under Darwin's names, with
-  thunks for its variadic and `va_list` functions and bridges for
-  variadic error handlers; KissXML runs on it
+  `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSCharacterSet`,
+  `NSXMLParser`, `NSLog`, and the CFString functions KissXML uses
+  (`CFStringTransform` with `kCFStringTransformToXMLHex`,
+  `CFStringTrimWhitespace`); `%s` reads bytes as Mac OS Roman, as on Darwin
+- C libraries over Linux's builds of the same libraries, with thunks for
+  Darwin's variadic ABI: libxml2 (`libPerryxml2`, which KissXML runs on),
+  zlib, bzip2, Expat, iconv, and SQLite 3.54 built with Apple's options
+- libcompression (`libPerrycompression`): Apple's API over zlib, liblzma,
+  LZ4, Brotli and LZFSE, reading what Apple's encoders write
+- CommonCrypto, in libSystem: digests, HMAC, `CCCrypt` and `CCCryptor`
+  (AES, DES, 3DES, CAST, RC4, RC2, Blowfish in each mode), PBKDF2, AES key
+  wrap and random bytes
+- `dispatch_once`
 - UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
@@ -71,6 +78,9 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
+| `Sources/PerryZ`, `PerryBZ2`, `PerryExpat`, `PerrySQLite3`, `PerryIconv` | zlib, bzip2, Expat, SQLite and iconv over Linux's (C, assembly) |
+| `Sources/PerryCompression` | `libPerrycompression.so`: libcompression (C) |
+| `Sources/CPerryWrapped` | Symbol lookup and variadic thunk macros the wrapped libraries share |
 | `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry (Swift) |
 | `Sources/CPerryCoreGraphics` | CoreGraphics' exported constants (C) |
 | `Sources/CPerryGeometry` | `CGPoint`, `CGSize`, `CGRect` as C structs, shared by providers |
@@ -105,7 +115,8 @@ swift test
 ### Docker
 
 On a Mac (or any arm64 host), `Scripts/docker-test.sh` builds an arm64
-Linux image with Swift 6.4 and Ubuntu's LLVM, then runs `swift build` and
+Linux image (Debian 13) with Swift 6.4 and Debian's LLVM, the C libraries
+the providers bind to, SQLite 3.54 and LZFSE, then runs `swift build` and
 `swift test` in it. Linux build products go to `.build/linux`, apart from a
 macOS build. Extra arguments are passed to `swift test`:
 
@@ -172,10 +183,14 @@ numbering through `__error()`, synchronised with glibc's errno.
 
 Known ABI gaps: struct layouts (`stat`, `dirent`, pthread types),
 `open`/`fcntl` flag values, ctype tables, locale, and stack-passed
-non-variadic arguments narrower than 8 bytes, which Apple packs.
+non-variadic arguments narrower than 8 bytes, which Apple packs; functions
+that take them read the packed slot as one argument
+(`CCCryptorCreateWithMode`).
 
 **Wrapped C libraries.** Some Darwin libraries are mapped onto the Linux
-build of the same library rather than reimplemented. box64 does this for
+build of the same library rather than reimplemented. `CPerryWrapped` is
+what they share: the lookup below, and the `VARIADIC` and `VA_LIST`
+assembler macros for their thunks. box64 does this for
 x86 code with a list of every function and its signature: each call
 crosses from emulated to native code through a generated wrapper, and
 functions that take callbacks get hand-written wrappers that swap guest
@@ -184,7 +199,7 @@ the app's code natively, so only the ABI differences need code.
 `libPerryxml2` (for `/usr/lib/libxml2.2.dylib`) binds each import to Linux's
 libxml2 through `perry_provider_symbol`, which `dlsym`s the name and accepts
 only symbols libxml2 itself defines. The iOS SDK's libxml2 (2.9.13) and
-Ubuntu's (2.9.14) share their public structs, which apps such as KissXML
+Debian's (2.9.14) share their public structs, which apps such as KissXML
 walk directly. The exceptions are variadic: `PerryXML2/thunks.S` gives
 `xmlStrPrintf` and the text writer's `…Format…` functions Darwin entry
 points that build an AAPCS64 `va_list` over Darwin's stack arguments, and
@@ -195,6 +210,30 @@ and calls the Darwin handler with `"%s"` and the text, its way.
 `xmlGenericError` reads back the Darwin handler. Variadic callbacks
 elsewhere (SAX handler and validation context fields, the schema and
 Relax-NG error setters) are not bridged yet.
+
+The others work the same way. zlib (`libPerryz`) needs a thunk only for
+`gzprintf`; bzip2 (`libPerrybz2`) and Expat (`libPerryexpat`) none. SQLite
+(`libPerrysqlite3`) binds to SQLite 3.54.0, the SDK's version, which the
+Docker image builds as `libperry-sqlite3` with the compile options of
+Apple's that change behaviour (`PRAGMA compile_options` on a Mac lists
+them); `sqlite3_open` and its variants also turn on what Apple's opens
+every connection with: defensive mode, legacy `ALTER TABLE` and fast
+secure delete. Its formatting functions have `va_list` forms to thunk to;
+`sqlite3_config`, `sqlite3_db_config`, `sqlite3_vtab_config` and
+`sqlite3_test_control` do not, but take only integers and pointers, so
+their thunks forward Darwin's stack slots as words, which the callee reads
+as it would have read Linux's registers. iconv (`libPerryiconv`) is part of
+glibc on Linux, so it defines `iconv_open`, `iconv`, `iconv_close` and
+`iconvctl` itself over glibc's rather than binding any libc name.
+
+libcompression and CommonCrypto are Apple's own APIs, so Perry implements
+them. `libPerrycompression` writes and reads each format: raw DEFLATE,
+XZ, raw LZ4 and LZ4 in Apple's `bv41` blocks, Brotli and LZFSE, with
+Darwin's truncation results. CommonCrypto lives in libSystem: its digests
+and HMAC are implemented to fit the contexts callers allocate at Apple's
+sizes, and its ciphers use OpenSSL's EVP interface, loaded on first use,
+with CommonCrypto's lenient PKCS#7 removal (the last byte's count,
+unchecked) rather than OpenSSL's.
 
 **Objective-C.** `libPerryobjc` reads the metadata clang and ld64 emit
 into Mach-O images: class lists, `class_ro_t`, relative and absolute method
