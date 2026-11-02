@@ -96,13 +96,13 @@ enum Format {
                 output += wide ? c(spec + cLength + String(conversion), raw)
                                : c(spec + String(conversion), UInt32(truncatingIfNeeded: raw))
             case "c":
-                output += c(spec + "c", Int32(truncatingIfNeeded: arguments.next()))
+                output += c(spec + "c", Int32(truncatingIfNeeded: arguments.next()), encoding: .macOSRoman)
             case "C":
                 let unit = UInt16(truncatingIfNeeded: arguments.next())
                 output += String(decoding: [unit], as: UTF16.self)
             case "s":
                 if let string = UnsafePointer<CChar>(bitPattern: UInt(arguments.next())) {
-                    output += c(spec + "s", string)
+                    output += c(spec + "s", string, encoding: .macOSRoman)
                 } else {
                     output += "(null)"
                 }
@@ -142,7 +142,7 @@ enum Format {
     }
 
     /// Formats one value with glibc.
-    private static func c(_ spec: String, _ value: CVarArg) -> String {
+    private static func c(_ spec: String, _ value: CVarArg, encoding: CStringEncoding = .utf8) -> String {
         var buffer = [CChar](repeating: 0, count: 64)
         let needed = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
         if needed >= buffer.count {
@@ -150,6 +150,28 @@ enum Format {
             _ = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
         }
         let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-        return String(decoding: bytes, as: UTF8.self)
+        switch encoding {
+        case .utf8: return String(decoding: bytes, as: UTF8.self)
+        case .macOSRoman: return MacOSRoman.decode(bytes)
+        }
+    }
+
+    enum CStringEncoding { case utf8, macOSRoman }
+}
+
+/// Mac OS Roman, Darwin's default C string encoding, which %s and %c
+/// read bytes in: "ł" in UTF-8 (C5 82) formats as "≈Ç".
+enum MacOSRoman {
+    /// 0x80 through 0xFF; 0x00 through 0x7F are ASCII.
+    private static let high: [Unicode.Scalar] = Array((
+        "ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞±≤≥¥µ∂∑∏π∫ªºΩæø"
+        + "¿¡¬√ƒ≈∆«»…\u{A0}ÀÃÕŒœ–—“”‘’÷◊ÿŸ⁄€‹›ﬁﬂ‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔ\u{F8FF}ÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ").unicodeScalars)
+
+    static func decode(_ bytes: [UInt8]) -> String {
+        var text = String.UnicodeScalarView()
+        for byte in bytes {
+            text.append(byte < 0x80 ? Unicode.Scalar(byte) : high[Int(byte) - 0x80])
+        }
+        return String(text)
     }
 }
