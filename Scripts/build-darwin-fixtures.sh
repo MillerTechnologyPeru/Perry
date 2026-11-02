@@ -19,7 +19,9 @@
 # output from the iOS Simulator instead of macOS: it is built for the
 # simulator with the entitlements in __TEXT,__entitlements, as Xcode puts
 # them, and run with simctl spawn on PERRY_SIMULATOR or the first iPhone
-# simulator, which is booted if it is not running.
+# simulator, which is booted if it is not running. One that calls
+# UIApplicationMain is installed as an app and launched instead, as UIKit
+# needs a bundle identifier.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -99,8 +101,28 @@ for src in Tests/Fixtures/Darwin/*/; do
             -fobjc-arc -fmodules -O1 $ios_includes $frameworks $libraries \
             -Wl,-sectcreate,__TEXT,__entitlements,"$src/Entitlements.plist" \
             -o "$simulator_binary" $sources
-        perl -e 'alarm 60; exec @ARGV' xcrun simctl spawn "$simulator" "$PWD/$simulator_binary" \
-            > "$out/$name.expected" 2>/dev/null
+        # The simulator's dyld can block opening binaries on an external
+        # volume, so the fixture runs from a copy on the system disk.
+        spawn_dir=$(mktemp -d)
+        if grep -q UIApplicationMain $sources; then
+            # UIKit apps need a bundle identifier: install and launch the
+            # app, keeping its output without the launch's "id: pid" line.
+            bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Info.plist")
+            sim_app="$spawn_dir/$name.app"
+            mkdir -p "$sim_app"
+            cp "$simulator_binary" "$src/Info.plist" "$sim_app/"
+            codesign -s - -f --entitlements "$src/Entitlements.plist" "$sim_app" 2>/dev/null
+            xcrun simctl install "$simulator" "$sim_app"
+            perl -e 'alarm 60; exec @ARGV' xcrun simctl launch --console-pty --terminate-running-process \
+                "$simulator" "$bundle_id" 2>/dev/null | tr -d '\r' | grep -v "^$bundle_id: [0-9]*\$" \
+                > "$out/$name.expected" || true
+            xcrun simctl uninstall "$simulator" "$bundle_id"
+        else
+            cp "$simulator_binary" "$spawn_dir/$name"
+            perl -e 'alarm 60; exec @ARGV' xcrun simctl spawn "$simulator" "$spawn_dir/$name" \
+                > "$out/$name.expected" 2>/dev/null
+        fi
+        rm -rf "$spawn_dir"
         echo "$app"
         continue
     fi
