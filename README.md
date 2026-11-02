@@ -79,6 +79,11 @@ symbols with the exact Mach-O names (`_printf`, `___stdoutp`,
 defined in the provider itself count, so a Darwin name can never bind to
 an unrelated glibc symbol by accident.
 
+**Low addresses.** Images are placed upward from 4 GB, below 64 GB, as dyld
+does. Linux hands out `mmap` addresses just under 2^48, but Darwin code
+assumes smaller pointers: Apple's Objective-C runtime masks class data
+pointers to 47 bits, and iOS processes normally live below 64 GB.
+
 **Darwin ABI at the boundary.** Apple's arm64 ABI passes variadic arguments
 on the stack. `PerrySystem/thunks.S` wraps glibc's `v*` functions in thunks
 that build an AAPCS64 `va_list` over the caller's stack slots. Functions
