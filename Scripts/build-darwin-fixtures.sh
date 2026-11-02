@@ -13,7 +13,7 @@
 # one per line: a git URL, a commit and the directory of sources in it. They
 # are cloned into .build/perry-fixtures/sources rather than kept here.
 # Sources that include <libxml/…>, <zlib.h> and the like are linked with
-# those libraries.
+# those libraries, and .xcdatamodeld models are compiled with momc.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -61,11 +61,18 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<sqlite3.h>' $sources && libraries="$libraries -lsqlite3"
     grep -q '<expat.h>' $sources && libraries="$libraries -lexpat"
     grep -q '<iconv.h>' $sources && libraries="$libraries -liconv"
+    grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
         -o "$app/$name" $sources
     plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
+    # Core Data models, compiled as Xcode does.
+    for data_model in "$src"/*.xcdatamodeld; do
+        [ -d "$data_model" ] || continue
+        model_name=$(basename "$data_model" .xcdatamodeld)
+        xcrun momc --iphoneos-deployment-target "$min" "$data_model" "$app/$model_name.momd" >/dev/null
+    done
 
     # The same app for macOS, whose bundle keeps everything under Contents.
     macos="$out/macos/$name.app/Contents"
@@ -86,10 +93,15 @@ for src in Tests/Fixtures/Darwin/*/; do
                 -o "$macos/MacOS/$name" $sources ;;
     esac
     cp "$src/Info.plist" "$macos/Info.plist"
+    for data_model in "$src"/*.xcdatamodeld; do
+        [ -d "$data_model" ] || continue
+        model_name=$(basename "$data_model" .xcdatamodeld)
+        xcrun momc --macosx-deployment-target 13.0 "$data_model" "$macos/Resources/$model_name.momd" >/dev/null
+    done
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies) ;;
+            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld) ;;
             *) cp "$resource" "$app/"; cp "$resource" "$macos/Resources/" ;;
         esac
     done
