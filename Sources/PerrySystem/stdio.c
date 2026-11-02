@@ -1,0 +1,138 @@
+// Darwin stdio: standard stream variables and va_list functions.
+
+#define _GNU_SOURCE
+#include "PerrySystem.h"
+
+#include <stdarg.h>
+#include <stdio.h>
+#include <string.h>
+#include <syslog.h>
+
+// MARK: - Standard streams
+
+// Darwin declares `extern FILE *__stdinp` and friends. Darwin code only uses
+// FILE * opaquely through functions, so glibc streams are handed out as-is.
+FILE *darwin_stdinp DARWIN_SYMBOL(__stdinp);
+FILE *darwin_stdoutp DARWIN_SYMBOL(__stdoutp);
+FILE *darwin_stderrp DARWIN_SYMBOL(__stderrp);
+
+__attribute__((constructor)) static void init_streams(void) {
+    darwin_stdinp = stdin;
+    darwin_stdoutp = stdout;
+    darwin_stderrp = stderr;
+}
+
+// MARK: - Darwin va_list
+
+// A Darwin arm64 va_list is a pointer to 8-byte stack slots. An AAPCS64
+// va_list with empty register save areas reads the same slots.
+typedef struct aapcs64_va_list {
+    void *stack;
+    void *gr_top;
+    void *vr_top;
+    int gr_offs;
+    int vr_offs;
+} aapcs64_va_list;
+
+_Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list layout");
+
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name; \
+    do { \
+        aapcs64_va_list tmp_ = { (darwin_ap), NULL, NULL, 0, 0 }; \
+        memcpy(&name, &tmp_, sizeof(name)); \
+    } while (0)
+
+typedef void *darwin_va_list;
+
+int darwin_vprintf(const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vprintf);
+int darwin_vprintf(const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vprintf(fmt, va);
+}
+
+int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfprintf);
+int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vfprintf(f, fmt, va);
+}
+
+int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vdprintf);
+int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vdprintf(fd, fmt, va);
+}
+
+int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsprintf);
+int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vsprintf(buf, fmt, va);
+}
+
+int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsnprintf);
+int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vsnprintf(buf, size, fmt, va);
+}
+
+int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vasprintf);
+int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vasprintf(out, fmt, va);
+}
+
+int darwin_vscanf(const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vscanf);
+int darwin_vscanf(const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vscanf(fmt, va);
+}
+
+int darwin_vfscanf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfscanf);
+int darwin_vfscanf(FILE *f, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vfscanf(f, fmt, va);
+}
+
+int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsscanf);
+int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vsscanf(str, fmt, va);
+}
+
+void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsyslog);
+void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    vsyslog(priority, fmt, va);
+}
+
+int __vsprintf_chk(char *, int, size_t, const char *, va_list);
+int __vsnprintf_chk(char *, size_t, int, size_t, const char *, va_list);
+
+int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(__vsprintf_chk);
+int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return __vsprintf_chk(buf, flag, slen, fmt, va);
+}
+
+int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap)
+    DARWIN_SYMBOL(__vsnprintf_chk);
+int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return __vsnprintf_chk(buf, maxlen, flag, slen, fmt, va);
+}
+
+// MARK: - Errors
+
+char *darwin_strerror(int darwin_errno) DARWIN_SYMBOL(strerror);
+char *darwin_strerror(int darwin_errno) {
+    return strerror(perry_linux_errno_from_darwin(darwin_errno));
+}
+
+void darwin_perror(const char *prefix) DARWIN_SYMBOL(perror);
+void darwin_perror(const char *prefix) {
+    const char *message = darwin_strerror(*darwin_error());
+    if (prefix && *prefix)
+        fprintf(stderr, "%s: %s\n", prefix, message);
+    else
+        fprintf(stderr, "%s\n", message);
+}
