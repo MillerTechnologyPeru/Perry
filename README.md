@@ -9,8 +9,7 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 ## Status
 
 The loader runs C and Objective-C iOS binaries and `.app` bundles that use
-libSystem, libobjc and a first subset of Foundation. UIKit is not provided
-yet.
+libSystem, libobjc, a first subset of Foundation and the start of UIKit.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -37,11 +36,16 @@ yet.
   encodings, paths and searching, `NSBundle` with Info.plist and resources,
   `NSProcessInfo`, `NSThread` with performs between threads,
   `NSUserDefaults`, `NSFileManager`, and `NSLog`
+- UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
+  app delegate's launch callbacks, the scene lifecycle from the Info.plist's
+  scene manifest (`UIWindowScene`, `UISceneSession`,
+  `UISceneConfiguration`), application and scene states, launch
+  notifications and the responder chain
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
 (operation queues, GCD, run loop input sources, formatters, localization),
-UIKit, Swift.
+most of UIKit (views, windows, drawing, events), Swift.
 
 ## Layout
 
@@ -55,6 +59,7 @@ UIKit, Swift.
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
+| `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes in Swift, and calls into Objective-C |
 | `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
 | `Plugins/PerryProviderPlugin` | Build plugin that generates a provider's entry points from its declarations |
@@ -105,8 +110,10 @@ Scripts/docker-test.sh             # DarwinFixtureTests picks them up
 ```
 
 The script also builds each app as a macOS app, with the fixture's other
-files as resources, and records its output with Apple's Foundation; `DarwinFixtureTests` requires Perry's output to match it
-byte for byte. The suite is skipped when the apps have not been built.
+files as resources, and records its output with Apple's Foundation; apps
+that use UIKit are built for Mac Catalyst, which runs iOS's UIKit.
+`DarwinFixtureTests` requires Perry's output to match it byte for byte. The
+suite is skipped when the apps have not been built.
 
 ## Usage
 
@@ -132,7 +139,9 @@ library by convention: `/usr/lib/libSystem.B.dylib` → `libPerrySystem.so`,
 symbols with the exact Mach-O names (`_printf`, `___stdoutp`,
 `_OBJC_CLASS_$_UIView`), so binding is a `dlsym` by name. Only symbols
 defined in the provider itself count, so a Darwin name can never bind to
-an unrelated glibc symbol by accident.
+an unrelated glibc symbol by accident. Providers start in Darwin's layer
+order, libSystem, libobjc, Foundation, then the frameworks above them,
+whatever order the app lists them in.
 
 **Low addresses.** Images are placed upward from 4 GB, below 64 GB, as dyld
 does. Linux hands out `mmap` addresses just under 2^48, but Darwin code
@@ -236,8 +245,21 @@ enum RunLoopModes {
 Swift cannot define a data symbol by name, so providers may export
 `perry_provider_symbol`: while images bind, the loader asks it for imports
 the provider does not define as ELF symbols, and it returns a slot for each
-constant. At startup the provider fills the slots, before any Mach-O code
-runs.
+constant and storage for each class (`_OBJC_CLASS_$_UIResponder`). At
+startup the provider fills the slots and builds its classes in that
+storage, before any Mach-O code runs.
+
+`@ObjCWrapper` wraps a class another library defines, such as Foundation's
+classes in UIKit: it names the class, for casts and class methods, and its
+methods have no body, so they call the class's:
+
+```swift
+@ObjCWrapper("NSBundle")
+class NSBundle: NSObject {
+    @ObjCClassMethod("mainBundle")
+    static func main() -> NSBundle
+}
+```
 
 `PerryProviderPlugin` writes a provider's `perry_provider_startup` and
 `perry_provider_symbol`. It scans the module for `@ObjCClass`,
@@ -273,6 +295,14 @@ their classes read them in place, including constant `@[…]` and `@{…}`
 literals and CoreFoundation's boolean objects. Variadic methods and `NSLog` receive
 Apple's stack-slot arguments through two-instruction assembly entry points,
 and a Swift formatter handles `%@` and passes other conversions to glibc.
+
+**UIKit** is written the same way, as a client of libobjc and of
+Foundation, which it calls through `@ObjCWrapper` classes. It has no C
+part: its classes live in storage handed out through
+`perry_provider_symbol`, and its objects keep their Swift state in a table
+per class until they are deallocated. `UIApplicationMain` follows UIKit's
+launch order, which current SDKs require to include scenes, and then runs
+the main run loop.
 
 **Licensing.** The loader is written from Apple's published Mach-O format
 descriptions. It does not use code from Machismo (GPL-3.0), so Perry stays
