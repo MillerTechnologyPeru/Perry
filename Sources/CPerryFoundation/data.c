@@ -76,47 +76,6 @@ perry_class_storage ns_user_defaults_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUse
 perry_class_storage ns_file_manager DARWIN_SYMBOL("_OBJC_CLASS_$_NSFileManager");
 perry_class_storage ns_file_manager_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSFileManager");
 
-// Run loop mode names. Both frameworks' names point at the same strings.
-void *ns_default_run_loop_mode DARWIN_SYMBOL("_NSDefaultRunLoopMode");
-void *ns_run_loop_common_modes DARWIN_SYMBOL("_NSRunLoopCommonModes");
-void *cf_run_loop_default_mode DARWIN_SYMBOL("_kCFRunLoopDefaultMode");
-void *cf_run_loop_common_modes DARWIN_SYMBOL("_kCFRunLoopCommonModes");
-void *cf_null DARWIN_SYMBOL("_kCFNull");
-void *ns_cocoa_error_domain DARWIN_SYMBOL("_NSCocoaErrorDomain");
-void *ns_posix_error_domain DARWIN_SYMBOL("_NSPOSIXErrorDomain");
-void *ns_localized_description_key DARWIN_SYMBOL("_NSLocalizedDescriptionKey");
-void *ns_file_path_error_key DARWIN_SYMBOL("_NSFilePathErrorKey");
-void *ns_underlying_error_key DARWIN_SYMBOL("_NSUnderlyingErrorKey");
-// NSFileManager attribute keys and values.
-void *constant_NSFileType DARWIN_SYMBOL("_NSFileType");
-void *constant_NSFileTypeDirectory DARWIN_SYMBOL("_NSFileTypeDirectory");
-void *constant_NSFileTypeRegular DARWIN_SYMBOL("_NSFileTypeRegular");
-void *constant_NSFileTypeSymbolicLink DARWIN_SYMBOL("_NSFileTypeSymbolicLink");
-void *constant_NSFileSize DARWIN_SYMBOL("_NSFileSize");
-void *constant_NSFileModificationDate DARWIN_SYMBOL("_NSFileModificationDate");
-void *constant_NSFilePosixPermissions DARWIN_SYMBOL("_NSFilePosixPermissions");
-
-static void **const constants[PERRY_CONSTANT_COUNT] = {
-    [PERRY_CONSTANT_NSDefaultRunLoopMode] = &ns_default_run_loop_mode,
-    [PERRY_CONSTANT_NSRunLoopCommonModes] = &ns_run_loop_common_modes,
-    [PERRY_CONSTANT_kCFRunLoopDefaultMode] = &cf_run_loop_default_mode,
-    [PERRY_CONSTANT_kCFRunLoopCommonModes] = &cf_run_loop_common_modes,
-    [PERRY_CONSTANT_kCFNull] = &cf_null,
-    [PERRY_CONSTANT_NSCocoaErrorDomain] = &ns_cocoa_error_domain,
-    [PERRY_CONSTANT_NSPOSIXErrorDomain] = &ns_posix_error_domain,
-    [PERRY_CONSTANT_NSLocalizedDescriptionKey] = &ns_localized_description_key,
-    [PERRY_CONSTANT_NSFilePathErrorKey] = &ns_file_path_error_key,
-    [PERRY_CONSTANT_NSUnderlyingErrorKey] = &ns_underlying_error_key,
-    [PERRY_CONSTANT_NSFileType] = &constant_NSFileType,
-    [PERRY_CONSTANT_NSFileTypeDirectory] = &constant_NSFileTypeDirectory,
-    [PERRY_CONSTANT_NSFileTypeRegular] = &constant_NSFileTypeRegular,
-    [PERRY_CONSTANT_NSFileTypeSymbolicLink] = &constant_NSFileTypeSymbolicLink,
-    [PERRY_CONSTANT_NSFileSize] = &constant_NSFileSize,
-    [PERRY_CONSTANT_NSFileModificationDate] = &constant_NSFileModificationDate,
-    [PERRY_CONSTANT_NSFilePosixPermissions] = &constant_NSFilePosixPermissions,
-};
-
-void **perry_foundation_constant(perry_foundation_constant_id which) { return constants[which]; }
 
 // Collection literals whose elements are all constants.
 perry_class_storage ns_constant_array DARWIN_SYMBOL("_OBJC_CLASS_$_NSConstantArray");
