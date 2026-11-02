@@ -16,6 +16,7 @@ struct PerryObjCMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ObjCClassMacro.self,
         ObjCCategoryMacro.self,
+        ObjCConstantsMacro.self,
         ObjCMethodMacro.self,
     ]
 }
@@ -354,6 +355,70 @@ public struct ObjCCategoryMacro: MemberMacro {
             }
             """,
         ]
+    }
+}
+
+// MARK: - @ObjCConstants
+
+/// Collects a type's `static let` constants into an ObjCConstantTable.
+public struct ObjCConstantsMacro: MemberMacro, ExtensionMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        var constants: [(name: String, value: ExprSyntax?)] = []
+        for member in declaration.memberBlock.members {
+            guard let variable = member.decl.as(VariableDeclSyntax.self),
+                  variable.bindingSpecifier.tokenKind == .keyword(.let),
+                  variable.modifiers.contains(where: { $0.name.tokenKind == .keyword(.static) }) else { continue }
+            for binding in variable.bindings {
+                guard let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text else { continue }
+                constants.append((name, binding.initializer?.value))
+            }
+        }
+        let names = Set(constants.map(\.name))
+        let access = declaration.modifiers.contains { $0.name.tokenKind == .keyword(.public) } ? "public " : ""
+        let entries = constants.map { constant -> String in
+            let value: String
+            if constant.value?.is(StringLiteralExprSyntax.self) == true {
+                value = ".string(\(constant.name))"
+            } else if let reference = constant.value?.as(DeclReferenceExprSyntax.self),
+                      names.contains(reference.baseName.text) {
+                value = ".alias(\(literal(reference.baseName.text)))"
+            } else {
+                value = ".object({ \(constant.name) })"
+            }
+            return "        (\(literal(constant.name)), \(value)),"
+        }
+        var members: [DeclSyntax] = ["""
+            \(raw: access)static var objCConstants: [(name: String, value: ObjCConstantValue)] {
+                [
+            \(raw: entries.joined(separator: "\n"))
+                ]
+            }
+            """]
+        for constant in constants {
+            members.append("""
+                /// \(raw: constant.name)'s exported object.
+                \(raw: access)static var \(raw: constant.name)Object: UnsafeMutableRawPointer {
+                    ObjCConstantExports.shared.object(\(literal: constant.name))
+                }
+                """)
+        }
+        return members
+    }
+
+    public static func expansion(
+        of node: AttributeSyntax,
+        attachedTo declaration: some DeclGroupSyntax,
+        providingExtensionsOf type: some TypeSyntaxProtocol,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [ExtensionDeclSyntax] {
+        guard !protocols.isEmpty else { return [] }
+        return [try ExtensionDeclSyntax("extension \(type.trimmed): ObjCConstantTable {}")]
     }
 }
 
