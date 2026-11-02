@@ -30,6 +30,8 @@ let package = Package(
         .library(name: "PerrySecurity", type: .dynamic, targets: ["PerrySecurity"]),
         // UniformTypeIdentifiers, and MobileCoreServices' UTType functions.
         .library(name: "PerryUniformTypeIdentifiers", type: .dynamic, targets: ["PerryUniformTypeIdentifiers"]),
+        // Accelerate: vDSP, vForce and vImage, with BLAS and LAPACK from OpenBLAS.
+        .library(name: "PerryAccelerate", type: .dynamic, targets: ["PerryAccelerate"]),
         // UserNotifications.
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         // Core Data.
@@ -132,6 +134,7 @@ let package = Package(
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
         .target(name: "PerryIconv"),
+        .target(name: "PerryAccelerate", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("openblas")]),
         .target(
             name: "PerryCompression",
             linkerSettings: [
