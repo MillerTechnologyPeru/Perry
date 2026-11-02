@@ -50,17 +50,52 @@ perry_class_storage ns_notification_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSNoti
 perry_class_storage ns_notification_center DARWIN_SYMBOL("_OBJC_CLASS_$_NSNotificationCenter");
 perry_class_storage ns_notification_center_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSNotificationCenter");
 
+perry_class_storage ns_data DARWIN_SYMBOL("_OBJC_CLASS_$_NSData");
+perry_class_storage ns_data_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSData");
+perry_class_storage ns_mutable_data DARWIN_SYMBOL("_OBJC_CLASS_$_NSMutableData");
+perry_class_storage ns_mutable_data_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSMutableData");
+perry_class_storage ns_url DARWIN_SYMBOL("_OBJC_CLASS_$_NSURL");
+perry_class_storage ns_url_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSURL");
+perry_class_storage ns_uuid DARWIN_SYMBOL("_OBJC_CLASS_$_NSUUID");
+perry_class_storage ns_uuid_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUUID");
+perry_class_storage ns_null DARWIN_SYMBOL("_OBJC_CLASS_$_NSNull");
+perry_class_storage ns_null_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSNull");
+perry_class_storage ns_json_serialization DARWIN_SYMBOL("_OBJC_CLASS_$_NSJSONSerialization");
+perry_class_storage ns_json_serialization_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSJSONSerialization");
+perry_class_storage ns_process_info DARWIN_SYMBOL("_OBJC_CLASS_$_NSProcessInfo");
+perry_class_storage ns_process_info_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSProcessInfo");
+perry_class_storage ns_bundle DARWIN_SYMBOL("_OBJC_CLASS_$_NSBundle");
+perry_class_storage ns_bundle_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSBundle");
+perry_class_storage ns_error DARWIN_SYMBOL("_OBJC_CLASS_$_NSError");
+perry_class_storage ns_error_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSError");
+perry_class_storage ns_thread DARWIN_SYMBOL("_OBJC_CLASS_$_NSThread");
+perry_class_storage ns_thread_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSThread");
+perry_class_storage ns_user_defaults DARWIN_SYMBOL("_OBJC_CLASS_$_NSUserDefaults");
+perry_class_storage ns_user_defaults_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUserDefaults");
+
 // Run loop mode names. Both frameworks' names point at the same strings.
 void *ns_default_run_loop_mode DARWIN_SYMBOL("_NSDefaultRunLoopMode");
 void *ns_run_loop_common_modes DARWIN_SYMBOL("_NSRunLoopCommonModes");
 void *cf_run_loop_default_mode DARWIN_SYMBOL("_kCFRunLoopDefaultMode");
 void *cf_run_loop_common_modes DARWIN_SYMBOL("_kCFRunLoopCommonModes");
+void *cf_null DARWIN_SYMBOL("_kCFNull");
+void *ns_cocoa_error_domain DARWIN_SYMBOL("_NSCocoaErrorDomain");
+void *ns_posix_error_domain DARWIN_SYMBOL("_NSPOSIXErrorDomain");
+void *ns_localized_description_key DARWIN_SYMBOL("_NSLocalizedDescriptionKey");
+void *ns_file_path_error_key DARWIN_SYMBOL("_NSFilePathErrorKey");
+void *ns_underlying_error_key DARWIN_SYMBOL("_NSUnderlyingErrorKey");
 
 static void **const constants[PERRY_CONSTANT_COUNT] = {
     [PERRY_CONSTANT_NSDefaultRunLoopMode] = &ns_default_run_loop_mode,
     [PERRY_CONSTANT_NSRunLoopCommonModes] = &ns_run_loop_common_modes,
     [PERRY_CONSTANT_kCFRunLoopDefaultMode] = &cf_run_loop_default_mode,
     [PERRY_CONSTANT_kCFRunLoopCommonModes] = &cf_run_loop_common_modes,
+    [PERRY_CONSTANT_kCFNull] = &cf_null,
+    [PERRY_CONSTANT_NSCocoaErrorDomain] = &ns_cocoa_error_domain,
+    [PERRY_CONSTANT_NSPOSIXErrorDomain] = &ns_posix_error_domain,
+    [PERRY_CONSTANT_NSLocalizedDescriptionKey] = &ns_localized_description_key,
+    [PERRY_CONSTANT_NSFilePathErrorKey] = &ns_file_path_error_key,
+    [PERRY_CONSTANT_NSUnderlyingErrorKey] = &ns_underlying_error_key,
 };
 
 void **perry_foundation_constant(perry_foundation_constant_id which) { return constants[which]; }
@@ -101,7 +136,20 @@ static perry_class_storage *const classes[PERRY_CLASS_COUNT][2] = {
     [PERRY_CLASS_NSRunLoop] = { &ns_run_loop, &ns_run_loop_meta },
     [PERRY_CLASS_NSNotification] = { &ns_notification, &ns_notification_meta },
     [PERRY_CLASS_NSNotificationCenter] = { &ns_notification_center, &ns_notification_center_meta },
+    [PERRY_CLASS_NSData] = { &ns_data, &ns_data_meta },
+    [PERRY_CLASS_NSMutableData] = { &ns_mutable_data, &ns_mutable_data_meta },
+    [PERRY_CLASS_NSURL] = { &ns_url, &ns_url_meta },
+    [PERRY_CLASS_NSUUID] = { &ns_uuid, &ns_uuid_meta },
+    [PERRY_CLASS_NSNull] = { &ns_null, &ns_null_meta },
+    [PERRY_CLASS_NSJSONSerialization] = { &ns_json_serialization, &ns_json_serialization_meta },
+    [PERRY_CLASS_NSProcessInfo] = { &ns_process_info, &ns_process_info_meta },
+    [PERRY_CLASS_NSBundle] = { &ns_bundle, &ns_bundle_meta },
+    [PERRY_CLASS_NSError] = { &ns_error, &ns_error_meta },
+    [PERRY_CLASS_NSThread] = { &ns_thread, &ns_thread_meta },
+    [PERRY_CLASS_NSUserDefaults] = { &ns_user_defaults, &ns_user_defaults_meta },
 };
+
+void *perry_foundation_boolean(int value) { return value ? (void *)&boolean_true : (void *)&boolean_false; }
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which) { return classes[which][0]; }
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which) { return classes[which][1]; }
