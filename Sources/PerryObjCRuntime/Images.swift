@@ -132,6 +132,9 @@ extension Runtime {
             if let protocols = category.pointee.protocols {
                 info.protocolLists.append(protocols)
             }
+            if let properties = category.pointee.instance_properties {
+                info.propertyLists.append(properties)
+            }
         }
         flushCaches()
     }
