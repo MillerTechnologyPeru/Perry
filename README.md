@@ -48,7 +48,10 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   the main queue), `NSTimeZone`, `NSLocale`, `NSCalendar`,
   `NSDateComponents`, `NSDateFormatter`, `NSISO8601DateFormatter` and
   `NSNumberFormatter`,
-  `NSKeyedUnarchiver` (binary archives), `NSLog`, and the CFString
+  `NSPropertyListSerialization` (writing XML and binary as CoreFoundation
+  writes them; reading XML, binary and OpenStep), `NSKeyedArchiver` and
+  `NSKeyedUnarchiver` (binary and XML archives, app classes'
+  `NSSecureCoding`, conditional objects, cycles), `NSLog`, and the CFString
   functions KissXML uses
   (`CFStringTransform` with `kCFStringTransformToXMLHex`,
   `CFStringTrimWhitespace`); `%s` reads bytes as Mac OS Roman, as on Darwin
