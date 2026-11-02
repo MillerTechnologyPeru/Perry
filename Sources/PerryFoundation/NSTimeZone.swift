@@ -30,13 +30,12 @@ enum TimeZones {
     /// The zone formatters and calendars use when given none.
     static var current: TimeZone { defaultZone ?? TimeZone.current }
 
+    /// For an init method: the receiver's wrapper adopted its reference,
+    /// so a result is +1 and a failure drops nothing more.
     static func initialize(_ object: id, _ zone: TimeZone?) -> id? {
-        guard let zone else {
-            ObjC.release(object)
-            return nil
-        }
+        guard let zone else { return nil }
         Storage.set(object, TimeZoneStorage(zone))
-        return object
+        return ObjC.retain(object)
     }
 
     /// The abbreviation as Darwin gives it: the short name in English
