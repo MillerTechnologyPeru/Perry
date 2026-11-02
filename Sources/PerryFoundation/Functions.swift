@@ -57,6 +57,24 @@ public func NSClassFromString(_ string: UnsafeMutableRawPointer?) -> UnsafeMutab
     Strings.value(of: string).flatMap { name in name.withCString { ObjC.getClass($0) } }.map(UnsafeMutableRawPointer.init)
 }
 
+@c(_NSProtocolFromString)
+public func NSProtocolFromString(_ string: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let name = Strings.value(of: string) else { return nil }
+    return name.withCString { ObjCRuntime.protocolFunctions?.getProtocol($0) }
+}
+
+/// CFRetain and CFRelease: every CoreFoundation object here is an
+/// Objective-C object.
+@c(_CFRetain)
+public func CFRetain(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    ObjC.retain(object)
+}
+
+@c(_CFRelease)
+public func CFRelease(_ object: UnsafeMutableRawPointer?) {
+    ObjC.release(object)
+}
+
 @c(_NSStringFromProtocol)
 public func NSStringFromProtocol(_ proto: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     // protocol_t: isa, then the name.
