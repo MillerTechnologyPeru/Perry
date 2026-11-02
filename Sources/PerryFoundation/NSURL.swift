@@ -64,7 +64,7 @@ enum URLs {
     }
 
     static func install(superclass: Class) {
-        urlClass = NSURL.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        urlClass = NSURL.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
     }
 
     /// A new NSURL wrapped for returning, +0; nil for no URL.
