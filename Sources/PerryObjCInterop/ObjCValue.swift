@@ -1,3 +1,9 @@
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
+
 // Swift values that cross the Objective-C boundary. Each has an ABI representation (`ObjCType`), a
 // type encoding, and conversions that follow Objective-C's ownership rules:
 //
@@ -177,7 +183,8 @@ public struct ObjCSelector: ObjCNullable, Hashable {
 }
 
 /// A class object (Class). Classes live forever, so it holds no reference.
-public struct ObjCClass: ObjCNullable, Hashable {
+/// It is also a registrar: @ObjCImplementation methods install into it.
+public struct ObjCClass: ObjCNullable, Hashable, ObjCMethodRegistrar {
     public let pointer: UnsafeMutableRawPointer
 
     public init(_ pointer: UnsafeMutableRawPointer) { self.pointer = pointer }
@@ -185,6 +192,22 @@ public struct ObjCClass: ObjCNullable, Hashable {
 
     public var superclass: ObjCClass? {
         pointer.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self).map(ObjCClass.init)
+    }
+
+    /// The metaclass, where class methods live.
+    public var metaclass: ObjCClass {
+        ObjCClass(pointer.load(as: UnsafeMutableRawPointer.self))
+    }
+
+    /// Adds a method, replacing one the class itself already defines.
+    public func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool) {
+        let target = isClassMethod ? metaclass.pointer : pointer
+        let sel = ObjCRuntime.selector(selector)
+        // The runtime keeps the encoding, so it must outlive this call.
+        let encoding = UnsafePointer(strdup(types)!)
+        if !ObjCRuntime.functions.addMethod(target, sel, implementation, encoding) {
+            _ = ObjCRuntime.functions.replaceMethod(target, sel, implementation, encoding)
+        }
     }
 
     public typealias ObjCType = UnsafeMutableRawPointer?
