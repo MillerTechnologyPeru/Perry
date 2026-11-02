@@ -200,6 +200,23 @@ NSString.addObjCCategoryAdditions()
 
 Swift does not let subclasses override methods declared in extensions, so a
 category's functions take Swift names its class's subclasses do not use.
+
+`@ObjCConstants` exports a type's `static let` constants as the data symbols
+Objective-C code reads, such as `NSString *const NSCocoaErrorDomain`:
+
+```swift
+@ObjCConstants
+enum RunLoopModes {
+    static let NSDefaultRunLoopMode = "kCFRunLoopDefaultMode"
+    static let kCFRunLoopDefaultMode = NSDefaultRunLoopMode   // the same object
+}
+```
+
+Swift cannot define a data symbol by name, so providers may export
+`perry_provider_symbol`: while images bind, the loader asks it for imports
+the provider does not define as ELF symbols, and it returns a slot for each
+constant. At startup the provider fills the slots, before any Mach-O code
+runs.
 Values cross through the `ObjCValue` protocol, which gives each Swift type
 its C representation, its type encoding and Objective-C's ownership rules:
 numbers and pointers pass as they are, `String` becomes an `NSString`,
