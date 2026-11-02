@@ -8,10 +8,6 @@ enum FileManagers {
     nonisolated(unsafe) static var managerClass: Class!
     nonisolated(unsafe) static var defaultManager: id!
 
-    static func install() {
-        managerClass = NSFileManager.defineObjCClass().storage
-        defaultManager = ObjC.createInstance(managerClass, 0)
-    }
 
     static func isDirectory(_ path: String) -> Bool? {
         var info = stat()
@@ -47,6 +43,12 @@ enum FileAttributes {
 /// NSFileManager.
 @ObjCClass("NSFileManager")
 final class NSFileManager: NSObject {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        FileManagers.managerClass = cls.storage
+        FileManagers.defaultManager = ObjC.createInstance(cls.storage, 0)
+    }
+
     private var files: FileManager { FileManager.default }
 
     @ObjCClassMethod("defaultManager")
