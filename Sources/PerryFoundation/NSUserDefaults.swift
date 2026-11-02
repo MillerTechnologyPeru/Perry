@@ -55,14 +55,17 @@ enum UserDefaults {
         Storage.get(object, as: UserDefaultsStorage.self)
     }
 
-    static func install() {
-        defaultsClass = NSUserDefaults.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 }
 
 /// NSUserDefaults.
 @ObjCClass("NSUserDefaults")
 final class NSUserDefaults: NSObject {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        UserDefaults.defaultsClass = cls.storage
+    }
+
     private var storage: UserDefaultsStorage {
         guard let storage = UserDefaults.storage(objcObject) else {
             foundationFatal("message sent to an uninitialized NSUserDefaults")
