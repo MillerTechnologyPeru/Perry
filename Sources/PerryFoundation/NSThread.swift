@@ -50,7 +50,7 @@ final class ThreadStorage {
 enum Threads {
     nonisolated(unsafe) static var threadClass: Class!
     nonisolated(unsafe) static var main: id!
-    nonisolated(unsafe) private static var mainThread: pthread_t?
+    nonisolated(unsafe) static var mainThread: pthread_t?
 
     /// The NSThread object of each thread that has one.
     static let key: pthread_key_t = {
@@ -112,13 +112,6 @@ enum Threads {
         }
     }
 
-    static func install(superclass: Class) {
-        mainThread = pthread_self()
-        threadClass = NSThread.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-        main = make(ThreadStorage(isMain: true))
-        storage(main)?.name = "main"
-        storage(main)?.isExecuting = true
-    }
 
     /// Runs `selector` on the main thread from its run loop, or at once when
     /// already there and waiting; with `wait`, blocks until it has run.
@@ -161,6 +154,15 @@ enum Threads {
 /// NSThread.
 @ObjCClass("NSThread")
 public final class NSThread: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Threads.threadClass = cls.storage
+        Threads.main = Threads.make(ThreadStorage(isMain: true))
+        Threads.storage(Threads.main)?.name = "main"
+        Threads.storage(Threads.main)?.isExecuting = true
+    }
+
     private var storage: ThreadStorage? { Threads.storage(objcObject) }
 
     // MARK: Class methods
