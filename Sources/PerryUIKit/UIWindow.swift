@@ -100,7 +100,11 @@ open class UIWindow: UIView {
     @ObjCMethod("setHidden:")
     override func setHidden(_ hidden: Bool) {
         state.hidden = hidden
-        if !hidden { installRootView() }
+        if !hidden {
+            installRootView()
+            Display.startIfWanted()
+        }
+        Updates.schedule()
     }
 
     @ObjCMethod("makeKeyAndVisible")
