@@ -32,6 +32,20 @@ enum CharacterSets {
     }
 
     static let newlines: Set<UInt32> = [0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029]
+
+    static func isWhitespaceOrNewline(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value == 0x09 || newlines.contains(scalar.value)
+            || [.spaceSeparator, .lineSeparator, .paragraphSeparator].contains(scalar.properties.generalCategory)
+    }
+
+    /// One whitespace-and-newline set, made when first used, kept forever.
+    nonisolated(unsafe) private static var whitespaceAndNewlineObject: id?
+    static var whitespaceAndNewline: id {
+        if let object = whitespaceAndNewlineObject { return object }
+        let object = make(UnsafeMutableRawPointer(setClass), isWhitespaceOrNewline)!
+        whitespaceAndNewlineObject = object
+        return object
+    }
     static let letterCategories: Set<Unicode.GeneralCategory> = [
         .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
         .nonspacingMark, .spacingMark, .enclosingMark,
@@ -62,10 +76,7 @@ public class NSCharacterSet: NSObject {
     /// Separators (Z*), tab and newlines.
     @ObjCClassMethod("whitespaceAndNewlineCharacterSet")
     static func whitespaceAndNewline(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls) { scalar in
-            scalar.value == 0x09 || CharacterSets.newlines.contains(scalar.value)
-                || [.spaceSeparator, .lineSeparator, .paragraphSeparator].contains(scalar.properties.generalCategory)
-        }
+        set(cls, CharacterSets.isWhitespaceOrNewline)
     }
 
     @ObjCClassMethod("newlineCharacterSet")
