@@ -101,6 +101,20 @@ public enum ObjCRuntime {
             addMethod: addMethod, replaceMethod: replaceMethod, initializeClassPair: initializeClassPair,
             allocateClassPair: allocateClassPair, registerClassPair: registerClassPair))
         poolFunctions = (push: poolPush, pop: poolPop)
+        guard let getProtocol = bind("_objc_getProtocol", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
+              let allocateProtocol = bind("_objc_allocateProtocol",
+                                          as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
+              let addProtocol = bind("_protocol_addProtocol", as: (@convention(c) (Object, Object) -> Void).self),
+              let addMethodDescription = bind("_protocol_addMethodDescription", as: (@convention(c) (
+                  Object, UnsafeRawPointer?, UnsafePointer<CChar>?, Bool, Bool) -> Void).self),
+              let registerProtocol = bind("_objc_registerProtocol", as: (@convention(c) (Object) -> Void).self),
+              let classAddProtocol = bind("_class_addProtocol", as: (@convention(c) (Object, Object) -> Bool).self) else {
+            return false
+        }
+        protocolFunctions = ObjCProtocolFunctions(
+            getProtocol: getProtocol, allocateProtocol: allocateProtocol, addProtocol: addProtocol,
+            addMethodDescription: addMethodDescription, registerProtocol: registerProtocol,
+            classAddProtocol: classAddProtocol)
         return true
     }
 
