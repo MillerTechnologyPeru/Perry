@@ -18,8 +18,20 @@
 // each, the class and superclass names, and registerObjCMethods(_:), which
 // installs them; defineObjCClass(_:) creates the class from them.
 //
-// registerObjCMethods can also install a class's methods into another,
-// existing class, the way a category does.
+// Categories add methods to a class that already exists, from an extension
+// of its wrapper:
+//
+//     @ObjCCategory("Paths")
+//     public extension NSString {
+//         @ObjCMethod("lastPathComponent")
+//         func lastPathComponent() -> String { … }
+//     }
+//
+//     NSString.addObjCCategoryPaths()
+//
+// Swift does not let subclasses override methods declared in extensions, so
+// a category's functions need Swift names that the class's subclasses do
+// not also use.
 
 /// Installs methods into a class.
 public protocol ObjCMethodRegistrar {
@@ -34,6 +46,14 @@ public typealias ObjCMethodRegistration = (any ObjCMethodRegistrar) -> Void
 @attached(member, names: named(objCClassName), named(objCSuperclassName), named(registerObjCMethods))
 public macro ObjCClass(_ className: String) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCClassMacro")
+
+/// Adds an extension's methods to the extended wrapper's Objective-C class,
+/// as an Objective-C category does. Generates registerObjCCategory<Name>(_:)
+/// and addObjCCategory<Name>(), named after the category so a class can
+/// have several.
+@attached(member, names: arbitrary)
+public macro ObjCCategory(_ categoryName: String) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCCategoryMacro")
 
 /// Implements an instance method. The function's arguments are the
 /// selector's.
