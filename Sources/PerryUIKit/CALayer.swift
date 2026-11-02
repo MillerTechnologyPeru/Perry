@@ -436,7 +436,12 @@ extension CALayer {
                 CG.clipToRect(context, bounds)
             }
         }
-        if layer.draws, state.needsDisplay || state.backing == nil || state.backingSize != bounds.size {
+        // A navigation bar draws its items, which change without telling it.
+        let redraws = state.delegate.map {
+            ObjCRuntime.isKind($0, of: UINavigationBar.objCClass.pointer)
+                && UINavigationBar(objcObject: $0, ownership: .retain).contentChanged()
+        } ?? false
+        if layer.draws, redraws || state.needsDisplay || state.backing == nil || state.backingSize != bounds.size {
             layer.sendDisplay()
         }
         if let backing = state.backing {
