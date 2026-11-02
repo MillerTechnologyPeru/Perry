@@ -12,7 +12,8 @@
 # A fixture's `dependencies` file lists third-party sources it builds with,
 # one per line: a git URL, a commit and the directory of sources in it. They
 # are cloned into .build/perry-fixtures/sources rather than kept here.
-# Sources that include <libxml/…> are built with libxml2.
+# Sources that include <libxml/…>, <zlib.h> and the like are linked with
+# those libraries.
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -53,6 +54,13 @@ for src in Tests/Fixtures/Darwin/*/; do
         ios_includes="$ios_includes -I$sdk/usr/include/libxml2"
         mac_includes="$mac_includes -I$macsdk/usr/include/libxml2"
     fi
+    # Other system libraries, by the header a source includes.
+    grep -q '<zlib.h>' $sources && libraries="$libraries -lz"
+    grep -q '<bzlib.h>' $sources && libraries="$libraries -lbz2"
+    grep -q '<compression.h>' $sources && libraries="$libraries -lcompression"
+    grep -q '<sqlite3.h>' $sources && libraries="$libraries -lsqlite3"
+    grep -q '<expat.h>' $sources && libraries="$libraries -lexpat"
+    grep -q '<iconv.h>' $sources && libraries="$libraries -liconv"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
