@@ -72,170 +72,190 @@ enum Sets {
 
     static func install(superclass: Class) {
         let set = ClassDefinition(PERRY_CLASS_NSSet, name: "NSSet", superclass: superclass,
-                                  StorageAllocation.self, NSSetMethods.self)
+                                  StorageAllocated.register, NSSet.register)
         setClass = set.cls
         set.addMethod("setWithObjects:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
         mutableClass = ClassDefinition(PERRY_CLASS_NSMutableSet, name: "NSMutableSet", superclass: set.cls,
-                                       NSMutableSetMethods.self).cls
+                                       NSMutableSet.register).cls
+    }
+
+    /// A new set wrapped for returning, +1.
+    static func owned(_ members: [id], cls: id? = nil) -> NSSet {
+        NSSet(objCOwned: make(members, cls: cls))
     }
 }
 
+/// NSSet.
+@ObjCClass("NSSet")
+public struct NSSet {}
+
 @ObjCImplementation
-enum NSSetMethods {
+extension NSSet {
+    var members: [id] { Sets.elements(objcObject) }
+
+    private func setMembers(_ members: [id]) -> Self {
+        _ = Sets.initialize(objcObject, members)
+        return self
+    }
+
     @ObjCClassMethod("set")
-    static func set(_ cls: id?) -> id? { Sets.autoreleased([], cls: cls) }
+    static func set(_ cls: ObjCClass) -> NSSet { Sets.owned([], cls: cls.pointer) }
 
     @ObjCClassMethod("setWithObject:")
-    static func set(_ cls: id?, object: id?) -> id? { Sets.autoreleased(object.map { [$0] } ?? [], cls: cls) }
+    static func set(_ cls: ObjCClass, object: ObjCObject) -> NSSet { Sets.owned([object.id], cls: cls.pointer) }
 
     @ObjCClassMethod("setWithArray:")
-    static func set(_ cls: id?, array: id?) -> id? { Sets.autoreleased(Arrays.elements(array), cls: cls) }
+    static func set(_ cls: ObjCClass, array: NSArray?) -> NSSet { Sets.owned(array?.elements ?? [], cls: cls.pointer) }
 
     @ObjCClassMethod("setWithObjects:count:")
-    static func set(_ cls: id?, objects: UnsafePointer<id?>?, count: UInt) -> id? {
-        Sets.autoreleased(Arrays.objects(objects, count: count, method: "+[NSSet setWithObjects:count:]"), cls: cls)
+    static func set(_ cls: ObjCClass, objects: UnsafePointer<id?>?, count: UInt) -> NSSet {
+        Sets.owned(Arrays.objects(objects, count: count, method: "+[NSSet setWithObjects:count:]"), cls: cls.pointer)
     }
 
     @ObjCMethod("init")
-    static func initialize(_ object: id?) -> id? { Sets.initialize(object, []) }
+    func initialize() -> Self { setMembers([]) }
 
     @ObjCMethod("initWithArray:")
-    static func initialize(_ object: id?, array: id?) -> id? { Sets.initialize(object, Arrays.elements(array)) }
+    func initialize(array: NSArray?) -> Self { setMembers(array?.elements ?? []) }
 
     @ObjCMethod("initWithObjects:count:")
-    static func initialize(_ object: id?, objects: UnsafePointer<id?>?, count: UInt) -> id? {
-        Sets.initialize(object, Arrays.objects(objects, count: count, method: "-[NSSet initWithObjects:count:]"))
+    func initialize(objects: UnsafePointer<id?>?, count: UInt) -> Self {
+        setMembers(Arrays.objects(objects, count: count, method: "-[NSSet initWithObjects:count:]"))
     }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Sets.setClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Sets.setClass)
     }
 
     @ObjCMethod("count")
-    static func count(_ object: id?) -> UInt { UInt(Sets.elements(object).count) }
+    func count() -> UInt { UInt(members.count) }
 
     @ObjCMethod("member:")
-    static func member(_ object: id?, _ candidate: id?) -> id? {
-        guard let candidate else { return nil }
-        return Sets.storage(object)?.member(candidate)
+    func member(_ candidate: ObjCObject?) -> ObjCObject? {
+        candidate.flatMap { Sets.storage(objcObject)?.member($0.id) }.map(ObjCObject.init)
     }
 
     @ObjCMethod("containsObject:")
-    static func contains(_ object: id?, _ candidate: id?) -> Bool { member(object, candidate) != nil }
+    func contains(_ candidate: ObjCObject?) -> Bool { member(candidate) != nil }
 
     @ObjCMethod("allObjects")
-    static func allObjects(_ object: id?) -> id? { Arrays.autoreleased(Sets.elements(object)) }
+    func allObjects() -> NSArray { Arrays.owned(members) }
 
     @ObjCMethod("anyObject")
-    static func anyObject(_ object: id?) -> id? { Sets.elements(object).first }
+    func anyObject() -> ObjCObject? { members.first.map(ObjCObject.init) }
 
     @ObjCMethod("isSubsetOfSet:")
-    static func isSubset(_ object: id?, of other: id?) -> Bool {
-        Sets.elements(object).allSatisfy { contains(other, $0) }
+    func isSubset(of other: NSSet?) -> Bool {
+        guard let other else { return members.isEmpty }
+        return members.allSatisfy { other.contains(ObjCObject($0)) }
     }
 
     @ObjCMethod("intersectsSet:")
-    static func intersects(_ object: id?, _ other: id?) -> Bool {
-        Sets.elements(object).contains { contains(other, $0) }
+    func intersects(_ other: NSSet?) -> Bool {
+        guard let other else { return false }
+        return members.contains { other.contains(ObjCObject($0)) }
     }
 
     @ObjCMethod("isEqualToSet:")
-    static func isEqual(_ object: id?, toSet other: id?) -> Bool {
-        count(object) == count(other) && isSubset(object, of: other)
+    func isEqual(toSet other: NSSet?) -> Bool {
+        guard let other else { return false }
+        return count() == other.count() && isSubset(of: other)
     }
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        object == other || (ObjC.isKind(other, of: Sets.setClass) && isEqual(object, toSet: other))
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        return other.id == objcObject || (other.is(NSSet.self) && isEqual(toSet: other.unsafeCast(to: NSSet.self)))
     }
 
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt { count(object) }
+    func hash() -> UInt { count() }
 
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { Strings.autoreleased(Describe.object(object, indent: 0)) }
+    func description() -> String { Describe.object(objcObject, indent: 0) }
 
     @ObjCMethod("enumerateObjectsUsingBlock:")
-    static func enumerate(_ object: id?, block: ObjCBlock?) {
-        guard let block else { return }
-        let body = Blocks.invoke(block, as: (@convention(c) (id, id?, UnsafeMutablePointer<Bool>) -> Void).self)
+    func enumerate(block: ObjCBlock) {
+        let body = block.function(as: (@convention(c) (id, id?, UnsafeMutablePointer<Bool>) -> Void).self)
         var stop = false
-        for member in Sets.elements(object) {
-            body(block, member, &stop)
+        for member in members {
+            body(block.object, member, &stop)
             if stop { break }
         }
     }
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
-    static func enumerate(_ object: id?, state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?,
-                          count: UInt) -> UInt {
-        Sets.storage(object)?.enumeration.enumerate(Sets.elements(object), state: state) ?? 0
+    func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        Sets.storage(objcObject)?.enumeration.enumerate(members, state: state) ?? 0
     }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSSet { self }
 
     @ObjCMethod("mutableCopyWithZone:")
-    static func mutableCopy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Sets.make(Sets.elements(object), cls: UnsafeMutableRawPointer(Sets.mutableClass))
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> NSSet {
+        Sets.owned(members, cls: UnsafeMutableRawPointer(Sets.mutableClass))
     }
 }
 
+/// NSMutableSet.
+@ObjCClass("NSMutableSet")
+public struct NSMutableSet {}
+
 @ObjCImplementation
-enum NSMutableSetMethods {
-    private static func storage(_ object: id?) -> SetStorage {
-        guard let storage = Sets.storage(object) else {
+extension NSMutableSet {
+    private var storage: SetStorage {
+        guard let storage = Sets.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableSet")
         }
         return storage
     }
 
     @ObjCClassMethod("setWithCapacity:")
-    static func set(_ cls: id?, capacity: UInt) -> id? { Sets.autoreleased([], cls: cls) }
+    static func set(_ cls: ObjCClass, capacity: UInt) -> NSSet { Sets.owned([], cls: cls.pointer) }
 
     @ObjCMethod("initWithCapacity:")
-    static func initialize(_ object: id?, capacity: UInt) -> id? { Sets.initialize(object, []) }
-
-    @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { Sets.make(Sets.elements(object)) }
-
-    @ObjCMethod("addObject:")
-    static func add(_ object: id?, _ member: id?) {
-        guard let member else { foundationFatal("-[NSMutableSet addObject:]: object cannot be nil") }
-        storage(object).add(member)
+    func initialize(capacity: UInt) -> Self {
+        _ = Sets.initialize(objcObject, [])
+        return self
     }
 
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> NSSet { Sets.owned(storage.members) }
+
+    @ObjCMethod("addObject:")
+    func add(_ member: ObjCObject) { storage.add(member.id) }
+
     @ObjCMethod("addObjectsFromArray:")
-    static func add(_ object: id?, objectsFrom array: id?) {
-        for member in Arrays.elements(array) { storage(object).add(member) }
+    func add(objectsFrom array: NSArray?) {
+        for member in array?.elements ?? [] { storage.add(member) }
     }
 
     @ObjCMethod("removeObject:")
-    static func remove(_ object: id?, _ member: id?) {
-        if let member { storage(object).remove(member) }
+    func remove(_ member: ObjCObject?) {
+        if let member { storage.remove(member.id) }
     }
 
     @ObjCMethod("removeAllObjects")
-    static func removeAll(_ object: id?) { storage(object).removeAll() }
+    func removeAll() { storage.removeAll() }
 
     @ObjCMethod("unionSet:")
-    static func union(_ object: id?, _ other: id?) {
-        for member in Sets.elements(other) { storage(object).add(member) }
+    func union(_ other: NSSet?) {
+        for member in other?.members ?? [] { storage.add(member) }
     }
 
     @ObjCMethod("minusSet:")
-    static func minus(_ object: id?, _ other: id?) {
-        for member in Sets.elements(other) { storage(object).remove(member) }
+    func minus(_ other: NSSet?) {
+        for member in other?.members ?? [] { storage.remove(member) }
     }
 
     @ObjCMethod("intersectSet:")
-    static func intersect(_ object: id?, _ other: id?) {
-        for member in Sets.elements(object) where !NSSetMethods.contains(other, member) {
-            storage(object).remove(member)
+    func intersect(_ other: NSSet?) {
+        for member in storage.members where !(other?.contains(ObjCObject(member)) ?? false) {
+            storage.remove(member)
         }
     }
 }
