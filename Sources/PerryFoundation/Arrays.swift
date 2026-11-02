@@ -71,15 +71,12 @@ enum Arrays {
     }
 
     static func install(superclass: Class) {
-        let array = ClassDefinition(PERRY_CLASS_NSArray, name: "NSArray", superclass: superclass,
-                                    StorageAllocated.register, NSArray.register)
-        arrayClass = array.cls
+        let array = NSArray.defineObjCClass(StorageAllocated.registerObjCMethods)
+        arrayClass = array.storage
         array.addMethod("arrayWithObjects:", types: "@24@0:8@16",
                         implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
-        mutableClass = ClassDefinition(PERRY_CLASS_NSMutableArray, name: "NSMutableArray", superclass: array.cls,
-                                       NSMutableArray.register).cls
-        constantClass = ClassDefinition(PERRY_CLASS_NSConstantArray, name: "NSConstantArray", superclass: array.cls,
-                                        isStatic: true, ImmortalObject.register, NSConstantArray.register).cls
+        mutableClass = NSMutableArray.defineObjCClass().storage
+        constantClass = NSConstantArray.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
     }
 
     /// A new array wrapped for returning, +1.
@@ -94,10 +91,7 @@ enum Arrays {
 
 /// NSArray.
 @ObjCClass("NSArray")
-public struct NSArray {}
-
-@ObjCImplementation
-extension NSArray {
+public class NSArray: NSObject {
     var elements: [id] { Arrays.elements(objcObject) }
 
     private func setElements(_ elements: [id]) -> Self {
@@ -258,10 +252,7 @@ extension NSArray {
 
 /// NSMutableArray.
 @ObjCClass("NSMutableArray")
-public struct NSMutableArray {}
-
-@ObjCImplementation
-extension NSMutableArray {
+public class NSMutableArray: NSArray {
     private var storage: ArrayStorage {
         guard let storage = Arrays.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableArray")
@@ -279,7 +270,7 @@ extension NSMutableArray {
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSArray { Arrays.owned(storage.objects) }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSArray { Arrays.owned(storage.objects) }
 
     @ObjCMethod("addObject:")
     func add(_ element: ObjCObject) {
@@ -362,12 +353,9 @@ extension NSMutableArray {
 
 /// @[…] literals of constants: { isa, count, objects }, read in place.
 @ObjCClass("NSConstantArray")
-struct NSConstantArray {}
-
-@ObjCImplementation
-extension NSConstantArray {
+final class NSConstantArray: NSArray {
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
-    func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+    override func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         guard let state, state.load(as: UInt.self) == 0 else { return 0 }
         state.storeBytes(of: 1, as: UInt.self)
         state.storeBytes(of: objcObject.load(fromByteOffset: 16, as: UnsafeMutableRawPointer?.self),
