@@ -9,6 +9,7 @@ RUN apt-get update \
         libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev \
         libssl-dev openssl-provider-legacy liblzma-dev liblz4-dev libbrotli-dev curl ca-certificates \
         libpng-dev libjpeg62-turbo-dev libgif-dev libwebp-dev libheif-dev \
+        libcairo2-dev libfreetype-dev libfontconfig-dev pkgconf fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PERRY_LLVM_BIN=/usr/lib/llvm-19/bin
