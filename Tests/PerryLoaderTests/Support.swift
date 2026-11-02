@@ -123,10 +123,20 @@ enum FixtureBuilder {
     static let minimumOS = "15.0"
     static let sdkVersion = "17.0"
 
+    /// A new, empty directory for one build of fixture `name`. Each build
+    /// gets a path of its own, and earlier builds are removed: deleting a
+    /// directory and recreating it under the same name races on the Docker
+    /// bind mount, where the recreated directory can vanish mid-build.
     static func directory(_ name: String) throws -> URL {
-        let dir = TestEnvironment.fixtureBuild.appending(path: name)
-        try? FileManager.default.removeItem(at: dir)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let root = TestEnvironment.fixtureBuild
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        for earlier in (try? fm.contentsOfDirectory(atPath: root.path)) ?? []
+        where earlier == name || earlier.hasPrefix(name + ".") {
+            try? fm.removeItem(at: root.appending(path: earlier))
+        }
+        let dir = root.appending(path: "\(name).\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
