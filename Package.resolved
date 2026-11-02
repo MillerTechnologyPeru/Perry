@@ -1,6 +1,15 @@
 {
-  "originHash" : "8497fcb1a0392c07757d3765c24c7fff73763097abae47a1ff2bf0243ab24b69",
+  "originHash" : "993c978f940a80a6149a0ec9902b6c4ae8b3957efe2d3fead64c3c4a3a2a42ff",
   "pins" : [
+    {
+      "identity" : "cairo",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/PureSwift/Cairo.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "af9fa9d203b0598d9a4697a05ba868bf87424d32"
+      }
+    },
     {
       "identity" : "coremodel",
       "kind" : "remoteSourceControl",
@@ -17,6 +26,15 @@
       "state" : {
         "revision" : "b413e5d6df1581836eb2c11eb4a5e21e9d32c6b0",
         "version" : "0.3.3"
+      }
+    },
+    {
+      "identity" : "fontconfig",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/PureSwift/FontConfig.git",
+      "state" : {
+        "branch" : "master",
+        "revision" : "02b7b628cfff1406731dde5e912e020f0f6f00c1"
       }
     },
     {
