@@ -55,10 +55,14 @@ typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSError,
     PERRY_CLASS_NSThread,
     PERRY_CLASS_NSUserDefaults,
+    PERRY_CLASS_NSFileManager,
     PERRY_CLASS_COUNT,
 } perry_foundation_class_id;
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which);
+
+// The storage for the class named `name`, or NULL; sets `*metaclass`.
+perry_class_storage *perry_foundation_class_named(const char *name, perry_class_storage **metaclass);
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which);
 
 // String constants exported as pointers (NSString *const, CFStringRef),
@@ -74,6 +78,13 @@ typedef enum perry_foundation_constant_id {
     PERRY_CONSTANT_NSLocalizedDescriptionKey,
     PERRY_CONSTANT_NSFilePathErrorKey,
     PERRY_CONSTANT_NSUnderlyingErrorKey,
+    PERRY_CONSTANT_NSFileType,
+    PERRY_CONSTANT_NSFileTypeDirectory,
+    PERRY_CONSTANT_NSFileTypeRegular,
+    PERRY_CONSTANT_NSFileTypeSymbolicLink,
+    PERRY_CONSTANT_NSFileSize,
+    PERRY_CONSTANT_NSFileModificationDate,
+    PERRY_CONSTANT_NSFilePosixPermissions,
     PERRY_CONSTANT_COUNT,
 } perry_foundation_constant_id;
 
