@@ -48,6 +48,11 @@ enum Dates {
         autoreleased(Date(timeIntervalSinceReferenceDate: interval), cls: cls)
     }
 
+    /// A new NSDate wrapped for returning, +0.
+    static func wrapped(_ date: Date, cls: ObjCClass? = nil) -> NSDate {
+        NSDate(objCReturnValue: autoreleased(date, cls: cls?.pointer))
+    }
+
     static func initialize(_ object: id?, _ date: Date) -> id? {
         if let object { Storage.set(object, DateStorage(date)) }
         return object
@@ -66,115 +71,114 @@ enum Dates {
 
     static func install(superclass: Class) {
         dateClass = ClassDefinition(PERRY_CLASS_NSDate, name: "NSDate", superclass: superclass,
-                                    StorageAllocation.self, NSDateMethods.self).cls
+                                    StorageAllocated.register, NSDate.register).cls
     }
 }
 
+/// NSDate.
+@ObjCClass("NSDate")
+public struct NSDate {}
+
 @ObjCImplementation
-enum NSDateMethods {
+extension NSDate {
+    var date: Date { Dates.date(objcObject) }
+
+    private func setDate(_ date: Date) -> Self {
+        Storage.set(objcObject, DateStorage(date))
+        return self
+    }
+
     // MARK: Creating
 
     @ObjCClassMethod("date")
-    static func date(_ cls: id?) -> id? { Dates.autoreleased(Date.now, cls: cls) }
+    static func now(_ cls: ObjCClass) -> NSDate { Dates.wrapped(.now, cls: cls) }
 
     @ObjCClassMethod("dateWithTimeIntervalSinceNow:")
-    static func date(_ cls: id?, sinceNow seconds: Double) -> id? {
-        Dates.autoreleased(Date(timeIntervalSinceNow: seconds), cls: cls)
+    static func date(_ cls: ObjCClass, sinceNow seconds: Double) -> NSDate {
+        Dates.wrapped(Date(timeIntervalSinceNow: seconds), cls: cls)
     }
 
     @ObjCClassMethod("dateWithTimeIntervalSince1970:")
-    static func date(_ cls: id?, since1970 seconds: Double) -> id? {
-        Dates.autoreleased(Date(timeIntervalSince1970: seconds), cls: cls)
+    static func date(_ cls: ObjCClass, since1970 seconds: Double) -> NSDate {
+        Dates.wrapped(Date(timeIntervalSince1970: seconds), cls: cls)
     }
 
     @ObjCClassMethod("dateWithTimeIntervalSinceReferenceDate:")
-    static func date(_ cls: id?, sinceReferenceDate seconds: Double) -> id? { Dates.autoreleased(Date(timeIntervalSinceReferenceDate: seconds), cls: cls) }
+    static func date(_ cls: ObjCClass, sinceReferenceDate seconds: Double) -> NSDate {
+        Dates.wrapped(Date(timeIntervalSinceReferenceDate: seconds), cls: cls)
+    }
 
     @ObjCClassMethod("distantFuture")
-    static func distantFuture(_ cls: id?) -> id? { Dates.autoreleased(Date.distantFuture, cls: cls) }
+    static func distantFuture(_ cls: ObjCClass) -> NSDate { Dates.wrapped(.distantFuture, cls: cls) }
 
     @ObjCClassMethod("distantPast")
-    static func distantPast(_ cls: id?) -> id? { Dates.autoreleased(Date.distantPast, cls: cls) }
+    static func distantPast(_ cls: ObjCClass) -> NSDate { Dates.wrapped(.distantPast, cls: cls) }
 
     @ObjCClassMethod("timeIntervalSinceReferenceDate")
-    static func now(_ cls: id?) -> Double { absoluteTimeNow() }
+    static func timeIntervalSinceReferenceDate() -> Double { Date.now.timeIntervalSinceReferenceDate }
 
-    @ObjCMethod("init")
-    static func initialize(_ object: id?) -> id? { Dates.initialize(object, Date.now) }
+    @ObjCMethod("init") func initialize() -> Self { setDate(.now) }
 
     @ObjCMethod("initWithTimeIntervalSinceNow:")
-    static func initialize(_ object: id?, sinceNow seconds: Double) -> id? {
-        Dates.initialize(object, Date(timeIntervalSinceNow: seconds))
-    }
+    func initialize(sinceNow seconds: Double) -> Self { setDate(Date(timeIntervalSinceNow: seconds)) }
 
     @ObjCMethod("initWithTimeIntervalSince1970:")
-    static func initialize(_ object: id?, since1970 seconds: Double) -> id? {
-        Dates.initialize(object, Date(timeIntervalSince1970: seconds))
-    }
+    func initialize(since1970 seconds: Double) -> Self { setDate(Date(timeIntervalSince1970: seconds)) }
 
     @ObjCMethod("initWithTimeIntervalSinceReferenceDate:")
-    static func initialize(_ object: id?, sinceReferenceDate seconds: Double) -> id? {
-        Dates.initialize(object, Date(timeIntervalSinceReferenceDate: seconds))
-    }
+    func initialize(sinceReferenceDate seconds: Double) -> Self { setDate(Date(timeIntervalSinceReferenceDate: seconds)) }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Dates.dateClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Dates.dateClass)
     }
 
     // MARK: Intervals
 
     @ObjCMethod("timeIntervalSinceReferenceDate")
-    static func sinceReferenceDate(_ object: id?) -> Double { Dates.interval(object) }
+    func sinceReferenceDate() -> Double { date.timeIntervalSinceReferenceDate }
 
     @ObjCMethod("timeIntervalSince1970")
-    static func since1970(_ object: id?) -> Double { Dates.date(object).timeIntervalSince1970 }
+    func since1970() -> Double { date.timeIntervalSince1970 }
 
     @ObjCMethod("timeIntervalSinceNow")
-    static func sinceNow(_ object: id?) -> Double { Dates.date(object).timeIntervalSinceNow }
+    func sinceNow() -> Double { date.timeIntervalSinceNow }
 
     @ObjCMethod("timeIntervalSinceDate:")
-    static func since(_ object: id?, date other: id?) -> Double { Dates.date(object).timeIntervalSince(Dates.date(other)) }
+    func since(_ other: NSDate) -> Double { date.timeIntervalSince(other.date) }
 
     @ObjCMethod("dateByAddingTimeInterval:")
-    static func adding(_ object: id?, _ seconds: Double) -> id? { Dates.autoreleased(Dates.date(object).addingTimeInterval(seconds)) }
+    func adding(_ seconds: Double) -> NSDate { Dates.wrapped(date.addingTimeInterval(seconds)) }
 
     // MARK: Comparing
 
     @ObjCMethod("compare:")
-    static func compare(_ object: id?, _ other: id?) -> Int {
-        let a = Dates.date(object), b = Dates.date(other)
-        return a < b ? -1 : (a > b ? 1 : 0)
-    }
+    func compare(_ other: NSDate) -> Int { date < other.date ? -1 : (date > other.date ? 1 : 0) }
 
     @ObjCMethod("isEqualToDate:")
-    static func isEqual(_ object: id?, toDate other: id?) -> Bool { Dates.date(object) == Dates.date(other) }
+    func isEqual(toDate other: NSDate?) -> Bool { other?.date == date }
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        ObjC.isKind(other, of: Dates.dateClass) && isEqual(object, toDate: other)
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other, other.is(NSDate.self) else { return false }
+        return isEqual(toDate: other.unsafeCast(to: NSDate.self))
     }
 
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt { UInt(bitPattern: Dates.date(object).hashValue) }
+    func hash() -> UInt { UInt(bitPattern: date.hashValue) }
 
     @ObjCMethod("earlierDate:")
-    static func earlier(_ object: id?, _ other: id?) -> id? {
-        Dates.interval(other) < Dates.interval(object) ? other : object
-    }
+    func earlier(_ other: NSDate) -> NSDate { other.date < date ? other : self }
 
     @ObjCMethod("laterDate:")
-    static func later(_ object: id?, _ other: id?) -> id? {
-        Dates.interval(other) > Dates.interval(object) ? other : object
-    }
+    func later(_ other: NSDate) -> NSDate { other.date > date ? other : self }
 
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { Strings.autoreleased(Dates.description(Dates.date(object))) }
+    func description() -> String { Dates.description(date) }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSDate { self }
 }
 
 @c(_CFAbsoluteTimeGetCurrent)
