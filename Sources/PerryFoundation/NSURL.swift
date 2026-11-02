@@ -63,9 +63,6 @@ enum URLs {
         return URL(filePath: absolute, directoryHint: .checkFileSystem)
     }
 
-    static func install(superclass: Class) {
-        urlClass = NSURL.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 
     /// A new NSURL wrapped for returning, +0; nil for no URL.
     static func wrapped(_ url: URL?, cls: ObjCClass? = nil) -> NSURL? {
@@ -76,6 +73,12 @@ enum URLs {
 /// NSURL.
 @ObjCClass("NSURL")
 public final class NSURL: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        URLs.urlClass = cls.storage
+    }
+
     /// Every NSURL has a URL once initialized.
     var url: URL { URLs.url(objcObject) ?? URL(filePath: "/") }
 
