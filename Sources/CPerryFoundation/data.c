@@ -39,6 +39,32 @@ perry_class_storage ns_set DARWIN_SYMBOL("_OBJC_CLASS_$_NSSet");
 perry_class_storage ns_set_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSSet");
 perry_class_storage ns_mutable_set DARWIN_SYMBOL("_OBJC_CLASS_$_NSMutableSet");
 perry_class_storage ns_mutable_set_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSMutableSet");
+perry_class_storage ns_date DARWIN_SYMBOL("_OBJC_CLASS_$_NSDate");
+perry_class_storage ns_date_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSDate");
+perry_class_storage ns_timer DARWIN_SYMBOL("_OBJC_CLASS_$_NSTimer");
+perry_class_storage ns_timer_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSTimer");
+perry_class_storage ns_run_loop DARWIN_SYMBOL("_OBJC_CLASS_$_NSRunLoop");
+perry_class_storage ns_run_loop_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSRunLoop");
+perry_class_storage ns_notification DARWIN_SYMBOL("_OBJC_CLASS_$_NSNotification");
+perry_class_storage ns_notification_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSNotification");
+perry_class_storage ns_notification_center DARWIN_SYMBOL("_OBJC_CLASS_$_NSNotificationCenter");
+perry_class_storage ns_notification_center_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSNotificationCenter");
+
+// Run loop mode names. Both frameworks' names point at the same strings.
+void *ns_default_run_loop_mode DARWIN_SYMBOL("_NSDefaultRunLoopMode");
+void *ns_run_loop_common_modes DARWIN_SYMBOL("_NSRunLoopCommonModes");
+void *cf_run_loop_default_mode DARWIN_SYMBOL("_kCFRunLoopDefaultMode");
+void *cf_run_loop_common_modes DARWIN_SYMBOL("_kCFRunLoopCommonModes");
+
+static void **const constants[PERRY_CONSTANT_COUNT] = {
+    [PERRY_CONSTANT_NSDefaultRunLoopMode] = &ns_default_run_loop_mode,
+    [PERRY_CONSTANT_NSRunLoopCommonModes] = &ns_run_loop_common_modes,
+    [PERRY_CONSTANT_kCFRunLoopDefaultMode] = &cf_run_loop_default_mode,
+    [PERRY_CONSTANT_kCFRunLoopCommonModes] = &cf_run_loop_common_modes,
+};
+
+void **perry_foundation_constant(perry_foundation_constant_id which) { return constants[which]; }
+
 // Collection literals whose elements are all constants.
 perry_class_storage ns_constant_array DARWIN_SYMBOL("_OBJC_CLASS_$_NSConstantArray");
 perry_class_storage ns_constant_array_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSConstantArray");
@@ -70,6 +96,11 @@ static perry_class_storage *const classes[PERRY_CLASS_COUNT][2] = {
     [PERRY_CLASS_NSMutableSet] = { &ns_mutable_set, &ns_mutable_set_meta },
     [PERRY_CLASS_NSConstantArray] = { &ns_constant_array, &ns_constant_array_meta },
     [PERRY_CLASS_NSConstantDictionary] = { &ns_constant_dictionary, &ns_constant_dictionary_meta },
+    [PERRY_CLASS_NSDate] = { &ns_date, &ns_date_meta },
+    [PERRY_CLASS_NSTimer] = { &ns_timer, &ns_timer_meta },
+    [PERRY_CLASS_NSRunLoop] = { &ns_run_loop, &ns_run_loop_meta },
+    [PERRY_CLASS_NSNotification] = { &ns_notification, &ns_notification_meta },
+    [PERRY_CLASS_NSNotificationCenter] = { &ns_notification_center, &ns_notification_center_meta },
 };
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which) { return classes[which][0]; }
