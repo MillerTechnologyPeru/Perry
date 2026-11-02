@@ -160,7 +160,7 @@ enum RunLoops {
     static func install(superclass: Class) {
         mainThread = pthread_self()
         runLoopClass = ClassDefinition(PERRY_CLASS_NSRunLoop, name: "NSRunLoop", superclass: superclass,
-                                       NSRunLoopMethods.self).cls
+                                       NSRunLoop.register).cls
         defaultMode = Strings.make("kCFRunLoopDefaultMode")
         let commonModes = Strings.make("kCFRunLoopCommonModes")
         perry_foundation_constant(PERRY_CONSTANT_NSDefaultRunLoopMode).pointee = defaultMode
@@ -170,43 +170,49 @@ enum RunLoops {
     }
 }
 
+/// NSRunLoop.
+@ObjCClass("NSRunLoop")
+public struct NSRunLoop {}
+
 @ObjCImplementation
-enum NSRunLoopMethods {
+extension NSRunLoop {
+    private var state: RunLoopState? { RunLoops.state(objcObject) }
+
     @ObjCClassMethod("currentRunLoop")
-    static func current(_ cls: id?) -> id? { RunLoops.current.object }
+    static func current() -> UnsafeMutableRawPointer? { RunLoops.current.object }
 
     @ObjCClassMethod("mainRunLoop")
-    static func main(_ cls: id?) -> id? { RunLoops.mainLoop.object }
+    static func main() -> UnsafeMutableRawPointer? { RunLoops.mainLoop.object }
 
     // Run loops live as long as their thread.
-    @ObjCMethod("retain") static func retain(_ object: id?) -> id? { object }
-    @ObjCMethod("release", types: "Vv16@0:8") static func release(_ object: id?) {}
-    @ObjCMethod("autorelease") static func autorelease(_ object: id?) -> id? { object }
+    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("release", types: "Vv16@0:8") func release() {}
+    @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
 
     @ObjCMethod("getCFRunLoop")
-    static func cfRunLoop(_ object: id?) -> UnsafeMutableRawPointer? { object }
+    func cfRunLoop() -> UnsafeMutableRawPointer { objcObject }
 
     @ObjCMethod("currentMode")
-    static func currentMode(_ object: id?) -> id? { RunLoops.defaultMode }
+    func currentMode() -> UnsafeMutableRawPointer? { RunLoops.defaultMode }
 
     @ObjCMethod("addTimer:forMode:")
-    static func add(_ object: id?, timer: id?, forMode mode: id?) {
-        if let timer, Timers.isValid(timer) { RunLoops.state(object)?.add(timer) }
+    func add(_ timer: ObjCObject, forMode mode: ObjCObject?) {
+        if Timers.isValid(timer.id) { state?.add(timer.id) }
     }
 
     /// Runs until nothing is left to run. Stopping does not end -run.
     @ObjCMethod("run")
-    static func run(_ object: id?) {
-        guard let state = RunLoops.state(object) else { return }
+    func run() {
+        guard let state else { return }
         while state.run(until: .infinity) != .finished {}
     }
 
     /// Runs until `date`. Apps' run loops always have input sources on
     /// Darwin, so this lasts until `date` even when no timers remain.
     @ObjCMethod("runUntilDate:")
-    static func run(_ object: id?, until date: id?) {
-        guard let state = RunLoops.state(object) else { return }
-        let limit = Dates.interval(date)
+    func run(until date: NSDate) {
+        guard let state else { return }
+        let limit = date.date.timeIntervalSinceReferenceDate
         while true {
             let result = state.run(until: limit, waitWhenEmpty: true)
             if result == .finished || result == .timedOut { return }
@@ -216,9 +222,9 @@ enum NSRunLoopMethods {
     /// Timers are not input sources, so a run with only timers lasts until
     /// `date`, as on Darwin. NO when there is nothing to run.
     @ObjCMethod("runMode:beforeDate:")
-    static func run(_ object: id?, mode: id?, before date: id?) -> Bool {
-        guard let state = RunLoops.state(object), state.hasTimers else { return false }
-        _ = state.run(until: Dates.interval(date))
+    func run(mode: ObjCObject?, before date: NSDate) -> Bool {
+        guard let state, state.hasTimers else { return false }
+        _ = state.run(until: date.date.timeIntervalSinceReferenceDate)
         return true
     }
 }
