@@ -76,8 +76,8 @@ int main(int argc, char *argv[]) {
         NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:@"e621e1f8-c36c-495a-93fc-0c247a3e6e5f"];
         uuid_t raw;
         [uuid getUUIDBytes:raw];
-        print([NSString stringWithFormat:@"%@ %02x%02x %d %d", uuid.UUIDString, raw[0], raw[15],
-               [[NSUUID alloc] initWithUUIDString:@"not a uuid"] == nil, [NSUUID UUID].UUIDString.length]);
+        print([NSString stringWithFormat:@"%@ %02x%02x %d %lu", uuid.UUIDString, raw[0], raw[15],
+               [[NSUUID alloc] initWithUUIDString:@"not a uuid"] == nil, (unsigned long)[NSUUID UUID].UUIDString.length]);
 
         // JSON
         NSData *json = [@"{\"name\":\"Perry\",\"tags\":[\"a\",\"b\"],\"count\":3,\"ratio\":0.5,\"ok\":true,\"none\":null}"
