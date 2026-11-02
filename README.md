@@ -41,7 +41,9 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the
   operators, `NSLock`, `NSRecursiveLock`, `NSCondition`, `NSOperation`,
   `NSBlockOperation` and `NSOperationQueue` (dependencies, priorities,
   cancellation, concurrency limits, barriers, asynchronous operations,
-  the main queue),
+  the main queue), `NSTimeZone`, `NSLocale`, `NSCalendar`,
+  `NSDateComponents`, `NSDateFormatter`, `NSISO8601DateFormatter` and
+  `NSNumberFormatter`,
   `NSKeyedUnarchiver` (binary archives), `NSLog`, and the CFString
   functions KissXML uses
   (`CFStringTransform` with `kCFStringTransformToXMLHex`,
@@ -81,7 +83,8 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, Core Data and the
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(run loop input sources, formatters, localization, key-value observing),
+(run loop input sources, string localization, the other formatters,
+key-value observing),
 `dispatch_io` and dispatch workloops,
 most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 
@@ -454,6 +457,16 @@ limit, on a global dispatch queue, or on the main dispatch queue for
 subclasses' `-isReady` and `-isFinished` apply, and an asynchronous
 operation's `-didChangeValueForKey:@"isFinished"` tells its queue it has
 finished, the one part of key-value observing Perry has.
+
+Time zones, locales, calendars and date components wrap swift-foundation's
+`TimeZone`, `Locale`, `Calendar` and `DateComponents`, the implementation
+Darwin's Foundation uses. The formatters work as CoreFoundation's do on
+Darwin, over ICU's C API (`udat`, `udatpg`, `unum`): each keeps its
+settings and opens an ICU formatter from them. The ICU is the Swift
+toolchain's, swift-foundation's build of Apple's ICU, so calendars and
+formatters share one copy and Apple's data. The current locale comes from
+`LANG`, or is `en_US`, an iOS device's own, when that names none, and time
+zone abbreviations are English short names ("EST") as on Darwin.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
