@@ -115,6 +115,27 @@ enum Strings {
     }
 
 
+    /// Compares runs of digits by their value ("file9" before "file10").
+    static func numericCompare(_ lhs: String, _ rhs: String) -> Int {
+        var a = Array(lhs.unicodeScalars)[...], b = Array(rhs.unicodeScalars)[...]
+        func isDigit(_ s: Unicode.Scalar) -> Bool { ("0"..."9").contains(s) }
+        while let x = a.first, let y = b.first {
+            if isDigit(x) && isDigit(y) {
+                let left = a.prefix(while: isDigit), right = b.prefix(while: isDigit)
+                let l = left.drop { $0 == "0" }, r = right.drop { $0 == "0" }
+                if l.count != r.count { return l.count < r.count ? -1 : 1 }
+                for (p, q) in zip(l, r) where p != q { return p.value < q.value ? -1 : 1 }
+                a = a.dropFirst(left.count)
+                b = b.dropFirst(right.count)
+            } else {
+                if x != y { return x.value < y.value ? -1 : 1 }
+                a = a.dropFirst()
+                b = b.dropFirst()
+            }
+        }
+        return a.isEmpty && b.isEmpty ? 0 : (a.isEmpty ? -1 : 1)
+    }
+
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
     static func integerPrefix(_ value: String) -> Int {
         value.withCString { strtol($0, nil, 10) }
