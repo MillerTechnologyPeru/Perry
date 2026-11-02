@@ -86,9 +86,6 @@ class NSUUID: NSObject {
 }
 
 extension NSObject {
-    @ObjCMethod("respondsToSelector:")
-    func respondsTo(_ selector: ObjCSelector) -> Bool
-
     /// +new, sent to a class object.
     @ObjCMethod("new")
     func newInstance() -> NSObject
@@ -102,9 +99,6 @@ extension NSObject {
 
     /// The text of an NSString.
     var stringValue: String { String(objCArgument: objcObject) }
-
-    /// Whether the object responds to `selector`.
-    func responds(to selector: String) -> Bool { respondsTo(ObjCSelector(selector)) }
 }
 
 extension ObjCClass {
