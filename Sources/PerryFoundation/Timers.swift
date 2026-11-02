@@ -1,4 +1,5 @@
 import CPerryFoundation
+import FoundationEssentials
 import Glibc
 import PerryObjCInterop
 
@@ -74,10 +75,10 @@ enum Timers {
     }
 
     /// Schedules `storage` on the current run loop; returns it autoreleased.
-    static func schedule(_ storage: TimerStorage) -> id? {
+    static func schedule(_ storage: TimerStorage) -> NSTimer {
         let timer = make(storage)
         add(timer, to: RunLoops.current)
-        return ObjC.autorelease(timer)
+        return NSTimer(objCOwned: timer)
     }
 
     static func add(_ timer: id, to runLoop: RunLoopState) {
@@ -119,7 +120,7 @@ enum Timers {
 
     static func install(superclass: Class) {
         timerClass = ClassDefinition(PERRY_CLASS_NSTimer, name: "NSTimer", superclass: superclass,
-                                     StorageAllocation.self, NSTimerMethods.self).cls
+                                     StorageAllocated.register, NSTimer.register).cls
     }
 
     /// Repeating timers fire at least every 0.1 ms, as Foundation clamps them.
@@ -128,115 +129,121 @@ enum Timers {
     }
 }
 
+/// NSTimer.
+@ObjCClass("NSTimer")
+public struct NSTimer {}
+
 @ObjCImplementation
-enum NSTimerMethods {
+extension NSTimer {
+    private var storage: TimerStorage? { Timers.storage(objcObject) }
+
+    private static func make(_ interval: Double, repeats: Bool, target: ObjCObject?, selector: ObjCSelector?,
+                             userInfo: ObjCObject?, block: ObjCBlock?) -> TimerStorage {
+        TimerStorage(fireDate: absoluteTimeNow() + interval, interval: Timers.clamp(interval), repeats: repeats,
+                     target: target?.id, selector: selector?.pointer.assumingMemoryBound(to: CChar.self),
+                     userInfo: userInfo?.id, block: block?.object)
+    }
+
     @ObjCClassMethod("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:")
-    static func scheduled(_ cls: id?, interval: Double, target: id?, selector: SEL?, userInfo: id?,
-                          repeats: Bool) -> id? {
-        Timers.schedule(TimerStorage(fireDate: absoluteTimeNow() + interval, interval: Timers.clamp(interval),
-                                     repeats: repeats, target: target, selector: selector, userInfo: userInfo,
-                                     block: nil))
+    static func scheduled(interval: Double, target: ObjCObject, selector: ObjCSelector, userInfo: ObjCObject?,
+                          repeats: Bool) -> NSTimer {
+        Timers.schedule(make(interval, repeats: repeats, target: target, selector: selector, userInfo: userInfo, block: nil))
     }
 
     @ObjCClassMethod("timerWithTimeInterval:target:selector:userInfo:repeats:")
-    static func timer(_ cls: id?, interval: Double, target: id?, selector: SEL?, userInfo: id?, repeats: Bool) -> id? {
-        ObjC.autorelease(Timers.make(TimerStorage(fireDate: absoluteTimeNow() + interval,
-                                                  interval: Timers.clamp(interval), repeats: repeats, target: target,
-                                                  selector: selector, userInfo: userInfo, block: nil)))
+    static func timer(interval: Double, target: ObjCObject, selector: ObjCSelector, userInfo: ObjCObject?,
+                      repeats: Bool) -> NSTimer {
+        NSTimer(objCOwned: Timers.make(make(interval, repeats: repeats, target: target, selector: selector,
+                                            userInfo: userInfo, block: nil)))
     }
 
     @ObjCClassMethod("scheduledTimerWithTimeInterval:repeats:block:")
-    static func scheduled(_ cls: id?, interval: Double, repeats: Bool, block: ObjCBlock?) -> id? {
-        Timers.schedule(TimerStorage(fireDate: absoluteTimeNow() + interval, interval: Timers.clamp(interval),
-                                     repeats: repeats, target: nil, selector: nil, userInfo: nil, block: block))
+    static func scheduled(interval: Double, repeats: Bool, block: ObjCBlock) -> NSTimer {
+        Timers.schedule(make(interval, repeats: repeats, target: nil, selector: nil, userInfo: nil, block: block))
     }
 
     @ObjCClassMethod("timerWithTimeInterval:repeats:block:")
-    static func timer(_ cls: id?, interval: Double, repeats: Bool, block: ObjCBlock?) -> id? {
-        ObjC.autorelease(Timers.make(TimerStorage(fireDate: absoluteTimeNow() + interval,
-                                                  interval: Timers.clamp(interval), repeats: repeats, target: nil,
-                                                  selector: nil, userInfo: nil, block: block)))
+    static func timer(interval: Double, repeats: Bool, block: ObjCBlock) -> NSTimer {
+        NSTimer(objCOwned: Timers.make(make(interval, repeats: repeats, target: nil, selector: nil, userInfo: nil,
+                                            block: block)))
     }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ timer: id?) {
-        guard let timer else { return }
-        Storage.set(timer, nil)
-        ObjC.superDealloc(timer, from: Timers.timerClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Timers.timerClass)
     }
 
     @ObjCMethod("invalidate")
-    static func invalidate(_ timer: id?) {
-        if let timer { Timers.invalidate(timer) }
-    }
+    func invalidate() { Timers.invalidate(objcObject) }
 
     @ObjCMethod("isValid")
-    static func isValid(_ timer: id?) -> Bool { timer.map(Timers.isValid) ?? false }
+    func isValid() -> Bool { Timers.isValid(objcObject) }
 
     /// Fires now without changing the schedule of a repeating timer.
     @ObjCMethod("fire")
-    static func fire(_ timer: id?) {
-        guard let timer, let storage = Timers.storage(timer), storage.isValid else { return }
+    func fire() {
+        guard let storage, storage.isValid else { return }
         if storage.repeats {
             let next = storage.fireDate
-            Timers.fire(timer, from: nil)
+            Timers.fire(objcObject, from: nil)
             storage.fireDate = next
         } else {
-            Timers.fire(timer, from: nil)
+            Timers.fire(objcObject, from: nil)
         }
     }
 
     @ObjCMethod("fireDate")
-    static func fireDate(_ timer: id?) -> id? { Dates.autoreleased(Timers.storage(timer)?.fireDate ?? 0) }
+    func fireDate() -> NSDate { Dates.wrapped(Date(timeIntervalSinceReferenceDate: storage?.fireDate ?? 0)) }
 
     @ObjCMethod("setFireDate:")
-    static func setFireDate(_ timer: id?, _ date: id?) {
-        Timers.storage(timer)?.fireDate = Dates.interval(date)
-        Timers.storage(timer)?.runLoops.forEach { $0.wakeUp() }
+    func setFireDate(_ date: NSDate) {
+        storage?.fireDate = date.date.timeIntervalSinceReferenceDate
+        storage?.runLoops.forEach { $0.wakeUp() }
     }
 
     @ObjCMethod("timeInterval")
-    static func timeInterval(_ timer: id?) -> Double {
-        guard let storage = Timers.storage(timer), storage.repeats else { return 0 }
+    func timeInterval() -> Double {
+        guard let storage, storage.repeats else { return 0 }
         return storage.interval
     }
 
     @ObjCMethod("userInfo")
-    static func userInfo(_ timer: id?) -> id? { Timers.storage(timer)?.userInfo }
+    func userInfo() -> ObjCObject? { storage?.userInfo.map(ObjCObject.init) }
 
-    @ObjCMethod("tolerance")
-    static func tolerance(_ timer: id?) -> Double { 0 }
-
-    @ObjCMethod("setTolerance:")
-    static func setTolerance(_ timer: id?, _ tolerance: Double) {}
+    @ObjCMethod("tolerance") func tolerance() -> Double { 0 }
+    @ObjCMethod("setTolerance:") func setTolerance(_ tolerance: Double) {}
 }
 
 /// Delayed performs, which Foundation adds to NSObject.
+@ObjCClass("NSObject")
+struct DelayedPerforms {}
+
 @ObjCImplementation
-enum NSObjectDelayedPerformMethods {
+extension DelayedPerforms {
     @ObjCMethod("performSelector:withObject:afterDelay:")
-    static func perform(_ object: id?, _ selector: SEL?, with argument: id?, afterDelay delay: Double) {
+    func perform(_ selector: ObjCSelector, with argument: ObjCObject?, afterDelay delay: Double) {
         let request = Timers.make(TimerStorage(fireDate: absoluteTimeNow() + delay, interval: 0, repeats: false,
-                                               target: object, selector: selector, userInfo: nil, block: nil,
-                                               argument: argument, isPerformRequest: true))
+                                               target: objcObject, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
+                                               userInfo: nil, block: nil, argument: argument?.id, isPerformRequest: true))
         Timers.add(request, to: RunLoops.current)
         ObjC.release(request)
     }
 
     @ObjCMethod("performSelector:withObject:afterDelay:inModes:")
-    static func perform(_ object: id?, _ selector: SEL?, with argument: id?, afterDelay delay: Double, inModes modes: id?) {
-        perform(object, selector, with: argument, afterDelay: delay)
+    func perform(_ selector: ObjCSelector, with argument: ObjCObject?, afterDelay delay: Double, inModes modes: ObjCObject?) {
+        perform(selector, with: argument, afterDelay: delay)
     }
 
     @ObjCClassMethod("cancelPreviousPerformRequestsWithTarget:")
-    static func cancel(_ cls: id?, target: id?) {
-        RunLoops.current.cancelPerformRequests { $0.target == target }
+    static func cancel(target: ObjCObject?) {
+        RunLoops.current.cancelPerformRequests { $0.target == target?.id }
     }
 
     @ObjCClassMethod("cancelPreviousPerformRequestsWithTarget:selector:object:")
-    static func cancel(_ cls: id?, target: id?, selector: SEL?, object argument: id?) {
+    static func cancel(target: ObjCObject?, selector: ObjCSelector?, object argument: ObjCObject?) {
         RunLoops.current.cancelPerformRequests {
-            $0.target == target && $0.selector == selector && $0.argument == argument
+            $0.target == target?.id && UnsafeRawPointer($0.selector) == selector?.pointer && $0.argument == argument?.id
         }
     }
 }
