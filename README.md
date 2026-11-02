@@ -55,7 +55,7 @@ UIKit, Swift.
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
-| `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants` and `@ObjCMethod`: Objective-C classes in Swift |
+| `Sources/PerryObjCInterop` | `@ObjCClass`, `@ObjCCategory`, `@ObjCConstants`, `@ObjCMethod` and `@ObjCProperty`: Objective-C classes in Swift, and calls into Objective-C |
 | `Sources/PerryObjCMacros` | The macros' implementation (swift-syntax) |
 | `Plugins/PerryProviderPlugin` | Build plugin that generates a provider's entry points from its declarations |
 | `Sources/PerryProviderGenerator` | The plugin's generator (swift-syntax) |
@@ -202,6 +202,25 @@ NSString.addObjCCategoryAdditions()
 
 Swift does not let subclasses override methods declared in extensions, so a
 category's functions take Swift names its class's subclasses do not use.
+
+The same attributes call Objective-C from Swift. A method function without a
+body sends its selector, and `@ObjCProperty` sends a property's getter and
+setter, each through `objc_msgSend` cast to the method's C signature:
+
+```swift
+extension NSObject {
+    @ObjCMethod("description")
+    func describedByObject() -> String?
+
+    @ObjCClassMethod("new")
+    static func new() -> Self
+
+    @ObjCProperty(getter: "isProxy", readonly: true)
+    var isProxy: Bool
+}
+```
+
+`@ObjCClass` and `@ObjCCategory` register only the functions with bodies.
 
 `@ObjCConstants` exports a type's `static let` constants as the data symbols
 Objective-C code reads, such as `NSString *const NSCocoaErrorDomain`:
