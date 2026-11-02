@@ -152,6 +152,17 @@ PASSTHROUGH _exit, exit
 PASSTHROUGH __exit, _exit
 PASSTHROUGH _atexit, atexit
 
+// MARK: - unistd
+
+PASSTHROUGH _getpid, getpid
+PASSTHROUGH _getppid, getppid
+PASSTHROUGH _getuid, getuid
+PASSTHROUGH _geteuid, geteuid
+PASSTHROUGH _getgid, getgid
+PASSTHROUGH _getegid, getegid
+PASSTHROUGH _sleep, sleep
+PASSTHROUGH _usleep, usleep
+
 // MARK: - math
 PASSTHROUGH _sin, sin
 PASSTHROUGH _cos, cos
