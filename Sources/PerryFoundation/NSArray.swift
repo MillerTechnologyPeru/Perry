@@ -330,6 +330,16 @@ public class NSMutableArray: NSArray {
         for element in removed { ObjC.release(element) }
     }
 
+    @ObjCMethod("setArray:")
+    func setArray(_ other: ObjCObject?) {
+        let replacement = Arrays.elements(other?.objcObject)
+        for element in replacement { _ = ObjC.retain(element) }
+        let removed = storage.objects
+        storage.objects = replacement
+        storage.enumeration.mutated()
+        for element in removed { ObjC.release(element) }
+    }
+
     @ObjCMethod("replaceObjectAtIndex:withObject:")
     func replace(at index: UInt, with element: ObjCObject) {
         Arrays.checkIndex(index, storage.objects.count, "replaceObjectAtIndex:withObject:")
