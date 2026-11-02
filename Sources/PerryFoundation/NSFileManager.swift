@@ -7,26 +7,10 @@ import PerryObjCInterop
 enum FileManagers {
     nonisolated(unsafe) static var managerClass: Class!
     nonisolated(unsafe) static var defaultManager: id!
-    nonisolated(unsafe) static var keys: [String: id] = [:]
 
     static func install() {
         managerClass = NSFileManager.defineObjCClass().storage
         defaultManager = ObjC.createInstance(managerClass, 0)
-        // Attribute keys and values, exported as NSString constants.
-        let constants: [(perry_foundation_constant_id, String)] = [
-            (PERRY_CONSTANT_NSFileType, "NSFileType"),
-            (PERRY_CONSTANT_NSFileTypeDirectory, "NSFileTypeDirectory"),
-            (PERRY_CONSTANT_NSFileTypeRegular, "NSFileTypeRegular"),
-            (PERRY_CONSTANT_NSFileTypeSymbolicLink, "NSFileTypeSymbolicLink"),
-            (PERRY_CONSTANT_NSFileSize, "NSFileSize"),
-            (PERRY_CONSTANT_NSFileModificationDate, "NSFileModificationDate"),
-            (PERRY_CONSTANT_NSFilePosixPermissions, "NSFilePosixPermissions"),
-        ]
-        for (which, name) in constants {
-            let string = Strings.make(name)
-            perry_foundation_constant(which).pointee = string
-            keys[name] = string
-        }
     }
 
     static func isDirectory(_ path: String) -> Bool? {
@@ -46,6 +30,18 @@ enum FileManagers {
         default: return nil
         }
     }
+}
+
+/// Item attribute keys and file types.
+@ObjCConstants
+enum FileAttributes {
+    static let NSFileType = "NSFileType"
+    static let NSFileTypeDirectory = "NSFileTypeDirectory"
+    static let NSFileTypeRegular = "NSFileTypeRegular"
+    static let NSFileTypeSymbolicLink = "NSFileTypeSymbolicLink"
+    static let NSFileSize = "NSFileSize"
+    static let NSFileModificationDate = "NSFileModificationDate"
+    static let NSFilePosixPermissions = "NSFilePosixPermissions"
 }
 
 /// NSFileManager.
@@ -173,9 +169,9 @@ final class NSFileManager: NSObject {
         let modified = Date(timeIntervalSince1970: Double(info.st_mtim.tv_sec) + Double(info.st_mtim.tv_nsec) / 1e9)
         var entries: [(key: id, value: id)] = []
         func add(_ key: String, _ value: id?) {
-            if let name = FileManagers.keys[key], let value { entries.append((name, value)) }
+            if let value { entries.append((ObjCConstantExports.shared.object(key), value)) }
         }
-        add("NSFileType", FileManagers.keys[type])
+        add("NSFileType", ObjCConstantExports.shared.object(type))
         add("NSFileSize", Numbers.make(nil, .unsigned(UInt64(info.st_size))))
         add("NSFileModificationDate", Dates.autoreleased(modified))
         add("NSFilePosixPermissions", Numbers.make(nil, .unsigned(UInt64(info.st_mode & 0o7777))))
