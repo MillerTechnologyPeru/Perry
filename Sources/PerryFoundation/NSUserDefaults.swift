@@ -56,7 +56,7 @@ enum UserDefaults {
     }
 
     static func install() {
-        defaultsClass = NSUserDefaults.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        defaultsClass = NSUserDefaults.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
     }
 }
 
