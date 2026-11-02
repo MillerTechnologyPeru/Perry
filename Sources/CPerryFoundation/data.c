@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "CPerryFoundation.h"
 
+#include <string.h>
 #include <unistd.h>
 
 int perry_foundation_thread_id(void) { return (int)gettid(); }
@@ -72,6 +73,8 @@ perry_class_storage ns_thread DARWIN_SYMBOL("_OBJC_CLASS_$_NSThread");
 perry_class_storage ns_thread_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSThread");
 perry_class_storage ns_user_defaults DARWIN_SYMBOL("_OBJC_CLASS_$_NSUserDefaults");
 perry_class_storage ns_user_defaults_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUserDefaults");
+perry_class_storage ns_file_manager DARWIN_SYMBOL("_OBJC_CLASS_$_NSFileManager");
+perry_class_storage ns_file_manager_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSFileManager");
 
 // Run loop mode names. Both frameworks' names point at the same strings.
 void *ns_default_run_loop_mode DARWIN_SYMBOL("_NSDefaultRunLoopMode");
@@ -84,6 +87,14 @@ void *ns_posix_error_domain DARWIN_SYMBOL("_NSPOSIXErrorDomain");
 void *ns_localized_description_key DARWIN_SYMBOL("_NSLocalizedDescriptionKey");
 void *ns_file_path_error_key DARWIN_SYMBOL("_NSFilePathErrorKey");
 void *ns_underlying_error_key DARWIN_SYMBOL("_NSUnderlyingErrorKey");
+// NSFileManager attribute keys and values.
+void *constant_NSFileType DARWIN_SYMBOL("_NSFileType");
+void *constant_NSFileTypeDirectory DARWIN_SYMBOL("_NSFileTypeDirectory");
+void *constant_NSFileTypeRegular DARWIN_SYMBOL("_NSFileTypeRegular");
+void *constant_NSFileTypeSymbolicLink DARWIN_SYMBOL("_NSFileTypeSymbolicLink");
+void *constant_NSFileSize DARWIN_SYMBOL("_NSFileSize");
+void *constant_NSFileModificationDate DARWIN_SYMBOL("_NSFileModificationDate");
+void *constant_NSFilePosixPermissions DARWIN_SYMBOL("_NSFilePosixPermissions");
 
 static void **const constants[PERRY_CONSTANT_COUNT] = {
     [PERRY_CONSTANT_NSDefaultRunLoopMode] = &ns_default_run_loop_mode,
@@ -96,6 +107,13 @@ static void **const constants[PERRY_CONSTANT_COUNT] = {
     [PERRY_CONSTANT_NSLocalizedDescriptionKey] = &ns_localized_description_key,
     [PERRY_CONSTANT_NSFilePathErrorKey] = &ns_file_path_error_key,
     [PERRY_CONSTANT_NSUnderlyingErrorKey] = &ns_underlying_error_key,
+    [PERRY_CONSTANT_NSFileType] = &constant_NSFileType,
+    [PERRY_CONSTANT_NSFileTypeDirectory] = &constant_NSFileTypeDirectory,
+    [PERRY_CONSTANT_NSFileTypeRegular] = &constant_NSFileTypeRegular,
+    [PERRY_CONSTANT_NSFileTypeSymbolicLink] = &constant_NSFileTypeSymbolicLink,
+    [PERRY_CONSTANT_NSFileSize] = &constant_NSFileSize,
+    [PERRY_CONSTANT_NSFileModificationDate] = &constant_NSFileModificationDate,
+    [PERRY_CONSTANT_NSFilePosixPermissions] = &constant_NSFilePosixPermissions,
 };
 
 void **perry_foundation_constant(perry_foundation_constant_id which) { return constants[which]; }
@@ -147,9 +165,57 @@ static perry_class_storage *const classes[PERRY_CLASS_COUNT][2] = {
     [PERRY_CLASS_NSError] = { &ns_error, &ns_error_meta },
     [PERRY_CLASS_NSThread] = { &ns_thread, &ns_thread_meta },
     [PERRY_CLASS_NSUserDefaults] = { &ns_user_defaults, &ns_user_defaults_meta },
+    [PERRY_CLASS_NSFileManager] = { &ns_file_manager, &ns_file_manager_meta },
 };
 
 void *perry_foundation_boolean(int value) { return value ? (void *)&boolean_true : (void *)&boolean_false; }
+
+// Objective-C class names, for defining classes by name.
+static const char *const class_names[PERRY_CLASS_COUNT] = {
+    [PERRY_CLASS_NSString] = "NSString",
+    [PERRY_CLASS_NSConstantString] = "__NSCFConstantString",
+    [PERRY_CLASS_NSArray] = "NSArray",
+    [PERRY_CLASS_NSMutableArray] = "NSMutableArray",
+    [PERRY_CLASS_NSNumber] = "NSNumber",
+    [PERRY_CLASS_NSConstantIntegerNumber] = "NSConstantIntegerNumber",
+    [PERRY_CLASS_NSConstantDoubleNumber] = "NSConstantDoubleNumber",
+    [PERRY_CLASS_NSConstantFloatNumber] = "NSConstantFloatNumber",
+    [PERRY_CLASS_NSCFBoolean] = "__NSCFBoolean",
+    [PERRY_CLASS_NSMutableString] = "NSMutableString",
+    [PERRY_CLASS_NSDictionary] = "NSDictionary",
+    [PERRY_CLASS_NSMutableDictionary] = "NSMutableDictionary",
+    [PERRY_CLASS_NSSet] = "NSSet",
+    [PERRY_CLASS_NSMutableSet] = "NSMutableSet",
+    [PERRY_CLASS_NSConstantArray] = "NSConstantArray",
+    [PERRY_CLASS_NSConstantDictionary] = "NSConstantDictionary",
+    [PERRY_CLASS_NSDate] = "NSDate",
+    [PERRY_CLASS_NSTimer] = "NSTimer",
+    [PERRY_CLASS_NSRunLoop] = "NSRunLoop",
+    [PERRY_CLASS_NSNotification] = "NSNotification",
+    [PERRY_CLASS_NSNotificationCenter] = "NSNotificationCenter",
+    [PERRY_CLASS_NSData] = "NSData",
+    [PERRY_CLASS_NSMutableData] = "NSMutableData",
+    [PERRY_CLASS_NSURL] = "NSURL",
+    [PERRY_CLASS_NSUUID] = "NSUUID",
+    [PERRY_CLASS_NSNull] = "NSNull",
+    [PERRY_CLASS_NSJSONSerialization] = "NSJSONSerialization",
+    [PERRY_CLASS_NSProcessInfo] = "NSProcessInfo",
+    [PERRY_CLASS_NSBundle] = "NSBundle",
+    [PERRY_CLASS_NSError] = "NSError",
+    [PERRY_CLASS_NSThread] = "NSThread",
+    [PERRY_CLASS_NSUserDefaults] = "NSUserDefaults",
+    [PERRY_CLASS_NSFileManager] = "NSFileManager",
+};
+
+perry_class_storage *perry_foundation_class_named(const char *name, perry_class_storage **metaclass) {
+    for (int which = 0; which < PERRY_CLASS_COUNT; which++) {
+        if (class_names[which] && strcmp(class_names[which], name) == 0) {
+            *metaclass = classes[which][1];
+            return classes[which][0];
+        }
+    }
+    return NULL;
+}
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which) { return classes[which][0]; }
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which) { return classes[which][1]; }
