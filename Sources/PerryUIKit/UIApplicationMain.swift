@@ -37,14 +37,9 @@ enum Launch {
             }
             Application.delegate = delegateClass.object.newInstance()
         }
-        let delegate = Application.delegate
-
-        if let delegate, delegate.responds(to: "application:willFinishLaunchingWithOptions:") {
-            _ = delegate.applicationWillFinishLaunching(application, options: nil)
-        }
-        if let delegate, delegate.responds(to: "application:didFinishLaunchingWithOptions:") {
-            _ = delegate.applicationDidFinishLaunching(application, options: nil)
-        }
+        let delegate = Application.delegate?.unsafeCast(to: AnyUIApplicationDelegate.self)
+        _ = delegate?.application(application, willFinishLaunchingWithOptions: nil)
+        _ = delegate?.application(application, didFinishLaunchingWithOptions: nil)
         Application.post(Notifications.UIApplicationDidFinishLaunchingNotification, object: application)
 
         if let manifest = SceneManifest(info) {
@@ -52,9 +47,7 @@ enum Launch {
         } else {
             // Without a scene manifest, the application itself goes active.
             Application.state = .active
-            if let delegate, delegate.responds(to: "applicationDidBecomeActive:") {
-                delegate.applicationDidBecomeActive(application)
-            }
+            delegate?.applicationDidBecomeActive(application)
             Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
         }
     }
@@ -104,7 +97,7 @@ enum Scenes {
     /// does once the app has finished launching.
     static func connectFirstScene(_ application: UIApplication, manifest: SceneManifest) {
         let role = SessionRoles.UIWindowSceneSessionRoleApplication
-        let delegate = Application.delegate
+        let delegate = Application.delegate?.unsafeCast(to: AnyUIApplicationDelegate.self)
         let options = UISceneConnectionOptions.objCClass.object.newInstance().unsafeCast(to: UISceneConnectionOptions.self)
 
         // The Info.plist's configuration, unless the app delegate picks one;
@@ -112,8 +105,7 @@ enum Scenes {
         let launchEntry = manifest.entry(role: role, name: nil)
         var configuration = UISceneConfiguration.make(name: launchEntry?.name, role: role)
         let session = UISceneSession.make(role: role, configuration: configuration)
-        if let delegate, delegate.responds(to: "application:configurationForConnectingSceneSession:options:"),
-           let chosen = delegate.applicationConfiguration(application, connecting: session, options: options) {
+        if let chosen = delegate?.application(application, configurationForConnecting: session, options: options) {
             configuration = chosen
         }
         let entry = manifest.entry(role: role, name: configuration.state.name)
@@ -134,21 +126,15 @@ enum Scenes {
         }
         Application.connectedScenes?.add(scene)
 
-        let sceneDelegate = scene.state.delegate
+        let sceneDelegate = scene.state.delegate?.unsafeCast(to: AnyUISceneDelegate.self)
         Application.post(Notifications.UISceneWillConnectNotification, object: scene)
-        if let sceneDelegate, sceneDelegate.responds(to: "scene:willConnectToSession:options:") {
-            sceneDelegate.sceneWillConnect(scene, to: session, options: options)
-        }
+        sceneDelegate?.scene(scene, willConnectTo: session, options: options)
         session.state.scene = scene.objcObject
 
-        if let sceneDelegate, sceneDelegate.responds(to: "sceneWillEnterForeground:") {
-            sceneDelegate.sceneWillEnterForeground(scene)
-        }
+        sceneDelegate?.sceneWillEnterForeground(scene)
         Application.post(Notifications.UISceneWillEnterForegroundNotification, object: scene)
         scene.state.activationState = .foregroundActive
-        if let sceneDelegate, sceneDelegate.responds(to: "sceneDidBecomeActive:") {
-            sceneDelegate.sceneDidBecomeActive(scene)
-        }
+        sceneDelegate?.sceneDidBecomeActive(scene)
         Application.post(Notifications.UISceneDidActivateNotification, object: scene)
 
         Application.state = .active
