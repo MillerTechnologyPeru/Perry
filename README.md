@@ -182,8 +182,24 @@ The macro generates a C-convention thunk per method and
 `registerObjCMethods(_:)`, which installs them, and rejects selectors whose
 argument count does not match at compile time. `defineObjCClass(_:)` creates
 the class in the runtime (in the provider's exported `_OBJC_CLASS_$_…`
-storage when it has some), installs its methods and any other classes'
-`registerObjCMethods`, the way categories add methods, and registers it.
+storage when it has some), installs its methods and any extra registrations,
+and registers it.
+
+`@ObjCCategory` adds methods to a class that already exists, from an
+extension of its wrapper, as an Objective-C category does:
+
+```swift
+@ObjCCategory("Additions")
+public extension NSString {
+    @ObjCMethod("lastPathComponent")
+    func lastPathComponent() -> String { Paths.lastComponent(value) }
+}
+
+NSString.addObjCCategoryAdditions()
+```
+
+Swift does not let subclasses override methods declared in extensions, so a
+category's functions take Swift names its class's subclasses do not use.
 Values cross through the `ObjCValue` protocol, which gives each Swift type
 its C representation, its type encoding and Objective-C's ownership rules:
 numbers and pointers pass as they are, `String` becomes an `NSString`,
