@@ -72,14 +72,19 @@ enum Arrays {
 
     static func install(superclass: Class) {
         let array = ClassDefinition(PERRY_CLASS_NSArray, name: "NSArray", superclass: superclass,
-                                    StorageAllocation.self, NSArrayMethods.self)
+                                    StorageAllocated.register, NSArray.register)
         arrayClass = array.cls
         array.addMethod("arrayWithObjects:", types: "@24@0:8@16",
                         implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
         mutableClass = ClassDefinition(PERRY_CLASS_NSMutableArray, name: "NSMutableArray", superclass: array.cls,
-                                       NSMutableArrayMethods.self).cls
+                                       NSMutableArray.register).cls
         constantClass = ClassDefinition(PERRY_CLASS_NSConstantArray, name: "NSConstantArray", superclass: array.cls,
-                                        ImmortalMethods.self, NSConstantArrayMethods.self).cls
+                                        isStatic: true, ImmortalObject.register, NSConstantArray.register).cls
+    }
+
+    /// A new array wrapped for returning, +1.
+    static func owned(_ elements: [id], cls: id? = nil) -> NSArray {
+        NSArray(objCOwned: make(elements, cls: cls))
     }
 
     static var constantMutationCounter: UnsafeMutablePointer<UInt> {
@@ -87,216 +92,217 @@ enum Arrays {
     }
 }
 
+/// NSArray.
+@ObjCClass("NSArray")
+public struct NSArray {}
+
 @ObjCImplementation
-enum NSArrayMethods {
-    private static func elements(_ object: id?) -> [id] { Arrays.elements(object) }
+extension NSArray {
+    var elements: [id] { Arrays.elements(objcObject) }
+
+    private func setElements(_ elements: [id]) -> Self {
+        _ = Arrays.initialize(objcObject, elements)
+        return self
+    }
 
     // MARK: Creating
 
     @ObjCClassMethod("array")
-    static func array(_ cls: id?) -> id? { Arrays.autoreleased([], cls: cls) }
+    static func array(_ cls: ObjCClass) -> NSArray { Arrays.owned([], cls: cls.pointer) }
 
     @ObjCClassMethod("arrayWithObject:")
-    static func array(_ cls: id?, object: id?) -> id? { Arrays.autoreleased(object.map { [$0] } ?? [], cls: cls) }
+    static func array(_ cls: ObjCClass, object: ObjCObject) -> NSArray { Arrays.owned([object.id], cls: cls.pointer) }
 
     @ObjCClassMethod("arrayWithArray:")
-    static func array(_ cls: id?, array other: id?) -> id? { Arrays.autoreleased(elements(other), cls: cls) }
+    static func array(_ cls: ObjCClass, array other: NSArray?) -> NSArray {
+        Arrays.owned(other?.elements ?? [], cls: cls.pointer)
+    }
 
     @ObjCClassMethod("arrayWithObjects:count:")
-    static func array(_ cls: id?, objects: UnsafePointer<id?>?, count: UInt) -> id? {
-        Arrays.autoreleased(Arrays.objects(objects, count: count, method: "+[NSArray arrayWithObjects:count:]"), cls: cls)
+    static func array(_ cls: ObjCClass, objects: UnsafePointer<id?>?, count: UInt) -> NSArray {
+        Arrays.owned(Arrays.objects(objects, count: count, method: "+[NSArray arrayWithObjects:count:]"), cls: cls.pointer)
     }
 
     @ObjCMethod("init")
-    static func initialize(_ object: id?) -> id? { Arrays.initialize(object, []) }
+    func initialize() -> Self { setElements([]) }
 
     @ObjCMethod("initWithObjects:count:")
-    static func initialize(_ object: id?, objects: UnsafePointer<id?>?, count: UInt) -> id? {
-        Arrays.initialize(object, Arrays.objects(objects, count: count, method: "-[NSArray initWithObjects:count:]"))
+    func initialize(objects: UnsafePointer<id?>?, count: UInt) -> Self {
+        setElements(Arrays.objects(objects, count: count, method: "-[NSArray initWithObjects:count:]"))
     }
 
     @ObjCMethod("initWithArray:")
-    static func initialize(_ object: id?, array other: id?) -> id? { Arrays.initialize(object, elements(other)) }
+    func initialize(array other: NSArray?) -> Self { setElements(other?.elements ?? []) }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Arrays.arrayClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Arrays.arrayClass)
     }
 
     // MARK: Querying
 
     @ObjCMethod("count")
-    static func count(_ object: id?) -> UInt { UInt(elements(object).count) }
+    func count() -> UInt { UInt(elements.count) }
 
     @ObjCMethod("objectAtIndex:")
-    static func object(_ object: id?, at index: UInt) -> id? {
-        let all = elements(object)
+    func object(at index: UInt) -> ObjCObject {
+        let all = elements
         Arrays.checkIndex(index, all.count, "objectAtIndex:")
-        return all[Int(index)]
+        return ObjCObject(all[Int(index)])
     }
 
     @ObjCMethod("objectAtIndexedSubscript:")
-    static func object(_ object: id?, subscript index: UInt) -> id? {
-        let all = elements(object)
+    func object(subscript index: UInt) -> ObjCObject {
+        let all = elements
         Arrays.checkIndex(index, all.count, "objectAtIndexedSubscript:")
-        return all[Int(index)]
+        return ObjCObject(all[Int(index)])
     }
 
     @ObjCMethod("firstObject")
-    static func first(_ object: id?) -> id? { elements(object).first }
+    func first() -> ObjCObject? { elements.first.map(ObjCObject.init) }
 
     @ObjCMethod("lastObject")
-    static func last(_ object: id?) -> id? { elements(object).last }
+    func last() -> ObjCObject? { elements.last.map(ObjCObject.init) }
 
     @ObjCMethod("indexOfObject:")
-    static func index(_ object: id?, of target: id?) -> UInt {
-        guard let target else { return UInt(Int.max) }
-        let index = elements(object).firstIndex { ObjectKey(object: $0) == ObjectKey(object: target) }
-        return index.map(UInt.init) ?? UInt(Int.max)    // NSNotFound
+    func index(of target: ObjCObject?) -> UInt {
+        guard let target else { return notFound }
+        return elements.firstIndex { ObjectKey(object: $0) == ObjectKey(object: target.id) }.map(UInt.init) ?? notFound
     }
 
     @ObjCMethod("containsObject:")
-    static func contains(_ object: id?, _ target: id?) -> Bool { index(object, of: target) != UInt(Int.max) }
+    func contains(_ target: ObjCObject?) -> Bool { index(of: target) != notFound }
 
     @ObjCMethod("isEqualToArray:")
-    static func isEqual(_ object: id?, toArray other: id?) -> Bool {
-        let a = elements(object), b = elements(other)
-        return a.count == b.count && zip(a, b).allSatisfy { ObjectKey(object: $0) == ObjectKey(object: $1) }
+    func isEqual(toArray other: NSArray?) -> Bool {
+        let a = elements, b = other?.elements ?? []
+        return other != nil && a.count == b.count
+            && zip(a, b).allSatisfy { ObjectKey(object: $0) == ObjectKey(object: $1) }
     }
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        object == other || (ObjC.isKind(other, of: Arrays.arrayClass) && isEqual(object, toArray: other))
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        return other.id == objcObject || (other.is(NSArray.self) && isEqual(toArray: other.unsafeCast(to: NSArray.self)))
     }
 
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt { UInt(elements(object).count) }
+    func hash() -> UInt { UInt(elements.count) }
 
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { Strings.autoreleased(Describe.object(object, indent: 0)) }
+    func description() -> String { Describe.object(objcObject, indent: 0) }
 
     // MARK: Copying
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSArray { self }
 
     @ObjCMethod("mutableCopyWithZone:")
-    static func mutableCopy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Arrays.make(elements(object), cls: UnsafeMutableRawPointer(Arrays.mutableClass))
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> NSArray {
+        Arrays.owned(elements, cls: UnsafeMutableRawPointer(Arrays.mutableClass))
     }
 
     // MARK: Deriving
 
     @ObjCMethod("arrayByAddingObject:")
-    static func adding(_ object: id?, _ element: id?) -> id? {
-        Arrays.autoreleased(elements(object) + (element.map { [$0] } ?? []))
-    }
+    func adding(_ element: ObjCObject) -> NSArray { Arrays.owned(elements + [element.id]) }
 
     @ObjCMethod("arrayByAddingObjectsFromArray:")
-    static func adding(_ object: id?, objectsFrom other: id?) -> id? {
-        Arrays.autoreleased(elements(object) + elements(other))
-    }
+    func adding(objectsFrom other: NSArray?) -> NSArray { Arrays.owned(elements + (other?.elements ?? [])) }
 
     @ObjCMethod("subarrayWithRange:")
-    static func subarray(_ object: id?, range: NSRange) -> id? {
-        let location = range.location, length = range.length
-        let all = elements(object)
-        guard Int(location + length) <= all.count else {
-            foundationFatal("-[NSArray subarrayWithRange:]: range {\(location), \(length)} extends beyond bounds [0 .. \(all.count - 1)]")
+    func subarray(range: NSRange) -> NSArray {
+        let all = elements
+        guard Int(range.location + range.length) <= all.count else {
+            foundationFatal("-[NSArray subarrayWithRange:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(all.count - 1)]")
         }
-        return Arrays.autoreleased(Array(all[Int(location)..<Int(location + length)]))
+        return Arrays.owned(Array(all[Int(range.location)..<Int(range.location + range.length)]))
     }
 
     @ObjCMethod("componentsJoinedByString:")
-    static func joined(_ object: id?, separator: id?) -> id? {
-        let parts = elements(object).map { Format.describe($0) }
-        return Strings.autoreleased(parts.joined(separator: Strings.value(of: separator) ?? ""))
-    }
+    func joined(separator: String) -> String { elements.map { Format.describe($0) }.joined(separator: separator) }
 
     @ObjCMethod("makeObjectsPerformSelector:")
-    static func makeObjectsPerform(_ object: id?, _ selector: SEL?) {
-        guard let selector else { return }
-        for element in elements(object) { _ = ObjC.send(element, selector) }
+    func makeObjectsPerform(_ selector: ObjCSelector) {
+        for element in elements { _ = ObjC.send(element, selector.pointer.assumingMemoryBound(to: CChar.self)) }
     }
 
     @ObjCMethod("sortedArrayUsingSelector:")
-    static func sorted(_ object: id?, using selector: SEL?) -> id? {
-        guard let selector else { return nil }
-        return Arrays.autoreleased(elements(object).sorted { ObjC.sendInt($0, selector, $1) < 0 })
+    func sorted(using selector: ObjCSelector) -> NSArray {
+        let sel = selector.pointer.assumingMemoryBound(to: CChar.self)
+        return Arrays.owned(elements.sorted { ObjC.sendInt($0, sel, $1) < 0 })
     }
 
     @ObjCMethod("sortedArrayUsingComparator:")
-    static func sorted(_ object: id?, comparator: ObjCBlock?) -> id? {
-        guard let comparator else { return nil }
-        let compare = Blocks.invoke(comparator, as: (@convention(c) (id, id?, id?) -> Int).self)
-        return Arrays.autoreleased(elements(object).sorted { compare(comparator, $0, $1) < 0 })
+    func sorted(comparator: ObjCBlock) -> NSArray {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        return Arrays.owned(elements.sorted { compare(comparator.object, $0, $1) < 0 })
     }
 
     @ObjCMethod("enumerateObjectsUsingBlock:")
-    static func enumerate(_ object: id?, block: ObjCBlock?) {
-        guard let block else { return }
-        let body = Blocks.invoke(block, as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)
+    func enumerate(block: ObjCBlock) {
+        let body = block.function(as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)
         var stop = false
-        for (index, element) in elements(object).enumerated() {
-            body(block, element, UInt(index), &stop)
+        for (index, element) in elements.enumerated() {
+            body(block.object, element, UInt(index), &stop)
             if stop { break }
         }
     }
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
-    static func enumerate(_ object: id?, state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?,
-                          count: UInt) -> UInt {
-        Arrays.storage(object)?.enumeration.enumerate(elements(object), state: state) ?? 0
+    func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state) ?? 0
     }
 }
 
+/// NSMutableArray.
+@ObjCClass("NSMutableArray")
+public struct NSMutableArray {}
+
 @ObjCImplementation
-enum NSMutableArrayMethods {
-    private static func storage(_ object: id?) -> ArrayStorage {
-        guard let storage = Arrays.storage(object) else {
+extension NSMutableArray {
+    private var storage: ArrayStorage {
+        guard let storage = Arrays.storage(objcObject) else {
             foundationFatal("mutating method sent to an uninitialized NSMutableArray")
         }
         return storage
     }
 
     @ObjCClassMethod("arrayWithCapacity:")
-    static func array(_ cls: id?, capacity: UInt) -> id? { Arrays.autoreleased([], cls: cls) }
+    static func array(_ cls: ObjCClass, capacity: UInt) -> NSArray { Arrays.owned([], cls: cls.pointer) }
 
     @ObjCMethod("initWithCapacity:")
-    static func initialize(_ object: id?, capacity: UInt) -> id? { Arrays.initialize(object, []) }
+    func initialize(capacity: UInt) -> Self {
+        _ = Arrays.initialize(objcObject, [])
+        return self
+    }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { Arrays.make(Arrays.elements(object)) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSArray { Arrays.owned(storage.objects) }
 
     @ObjCMethod("addObject:")
-    static func add(_ object: id?, _ element: id?) {
-        guard let element else { foundationFatal("-[NSMutableArray addObject:]: object cannot be nil") }
-        let storage = storage(object)
-        storage.objects.append(ObjC.retain(element)!)
+    func add(_ element: ObjCObject) {
+        storage.objects.append(ObjC.retain(element.id)!)
         storage.enumeration.mutated()
     }
 
     @ObjCMethod("addObjectsFromArray:")
-    static func add(_ object: id?, objectsFrom other: id?) {
-        for element in Arrays.elements(other) { add(object, element) }
+    func add(objectsFrom other: NSArray?) {
+        for element in other?.elements ?? [] { add(ObjCObject(element)) }
     }
 
     @ObjCMethod("insertObject:atIndex:")
-    static func insert(_ object: id?, _ element: id?, at index: UInt) {
-        guard let element else { foundationFatal("-[NSMutableArray insertObject:atIndex:]: object cannot be nil") }
-        let storage = storage(object)
+    func insert(_ element: ObjCObject, at index: UInt) {
         if Int(index) > storage.objects.count {
             Arrays.checkIndex(index, storage.objects.count, "insertObject:atIndex:")
         }
-        storage.objects.insert(ObjC.retain(element)!, at: Int(index))
+        storage.objects.insert(ObjC.retain(element.id)!, at: Int(index))
         storage.enumeration.mutated()
     }
 
     @ObjCMethod("removeObjectAtIndex:")
-    static func remove(_ object: id?, at index: UInt) {
-        let storage = storage(object)
+    func remove(at index: UInt) {
         Arrays.checkIndex(index, storage.objects.count, "removeObjectAtIndex:")
         let removed = storage.objects.remove(at: Int(index))
         storage.enumeration.mutated()
@@ -304,26 +310,24 @@ enum NSMutableArrayMethods {
     }
 
     @ObjCMethod("removeObject:")
-    static func remove(_ object: id?, _ element: id?) {
+    func remove(_ element: ObjCObject?) {
         guard let element else { return }
-        let storage = storage(object)
-        let removed = storage.objects.filter { ObjectKey(object: $0) == ObjectKey(object: element) }
-        storage.objects.removeAll { ObjectKey(object: $0) == ObjectKey(object: element) }
+        let matches = { (object: id) in ObjectKey(object: object) == ObjectKey(object: element.id) }
+        let removed = storage.objects.filter(matches)
+        storage.objects.removeAll(where: matches)
         storage.enumeration.mutated()
         for item in removed { ObjC.release(item) }
     }
 
     @ObjCMethod("removeLastObject")
-    static func removeLast(_ object: id?) {
-        let storage = storage(object)
+    func removeLast() {
         guard let last = storage.objects.popLast() else { return }
         storage.enumeration.mutated()
         ObjC.release(last)
     }
 
     @ObjCMethod("removeAllObjects")
-    static func removeAll(_ object: id?) {
-        let storage = storage(object)
+    func removeAll() {
         let removed = storage.objects
         storage.objects.removeAll()
         storage.enumeration.mutated()
@@ -331,47 +335,46 @@ enum NSMutableArrayMethods {
     }
 
     @ObjCMethod("replaceObjectAtIndex:withObject:")
-    static func replace(_ object: id?, at index: UInt, with element: id?) {
-        guard let element else { foundationFatal("-[NSMutableArray replaceObjectAtIndex:withObject:]: object cannot be nil") }
-        let storage = storage(object)
+    func replace(at index: UInt, with element: ObjCObject) {
         Arrays.checkIndex(index, storage.objects.count, "replaceObjectAtIndex:withObject:")
         let old = storage.objects[Int(index)]
-        storage.objects[Int(index)] = ObjC.retain(element)!
+        storage.objects[Int(index)] = ObjC.retain(element.id)!
         storage.enumeration.mutated()
         ObjC.release(old)
     }
 
     @ObjCMethod("setObject:atIndexedSubscript:")
-    static func set(_ object: id?, _ element: id?, subscript index: UInt) {
-        if Int(index) == storage(object).objects.count {
-            add(object, element)
+    func set(_ element: ObjCObject, subscript index: UInt) {
+        if Int(index) == storage.objects.count {
+            add(element)
         } else {
-            replace(object, at: index, with: element)
+            replace(at: index, with: element)
         }
     }
 
     @ObjCMethod("sortUsingSelector:")
-    static func sort(_ object: id?, using selector: SEL?) {
-        guard let selector else { return }
-        let storage = storage(object)
-        storage.objects.sort { ObjC.sendInt($0, selector, $1) < 0 }
+    func sort(using selector: ObjCSelector) {
+        let sel = selector.pointer.assumingMemoryBound(to: CChar.self)
+        storage.objects.sort { ObjC.sendInt($0, sel, $1) < 0 }
         storage.enumeration.mutated()
     }
 }
 
 /// @[…] literals of constants: { isa, count, objects }, read in place.
+@ObjCClass("NSConstantArray")
+struct NSConstantArray {}
+
 @ObjCImplementation
-enum NSConstantArrayMethods {
+extension NSConstantArray {
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
-    static func enumerate(_ object: id?, state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?,
-                          count: UInt) -> UInt {
-        guard let object, let state, state.load(as: UInt.self) == 0 else { return 0 }
+    func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        guard let state, state.load(as: UInt.self) == 0 else { return 0 }
         state.storeBytes(of: 1, as: UInt.self)
-        state.storeBytes(of: object.load(fromByteOffset: 16, as: UnsafeMutableRawPointer?.self),
+        state.storeBytes(of: objcObject.load(fromByteOffset: 16, as: UnsafeMutableRawPointer?.self),
                          toByteOffset: 8, as: UnsafeMutableRawPointer?.self)
         state.storeBytes(of: UnsafeMutableRawPointer(Arrays.constantMutationCounter), toByteOffset: 16,
                          as: UnsafeMutableRawPointer.self)
-        return UInt(object.load(fromByteOffset: 8, as: UInt64.self))
+        return UInt(objcObject.load(fromByteOffset: 8, as: UInt64.self))
     }
 }
 
