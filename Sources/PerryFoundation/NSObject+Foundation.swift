@@ -12,7 +12,7 @@ extension NSObject {
 
 /// retain, release and autorelease for static objects such as literals.
 /// A category of NSObject's methods that each literal class gets.
-@ObjCCategory("Immortal")
+@ObjCCategory("Immortal", addedAtStartup: false)
 extension NSObject {
     @ObjCMethod("retain") func immortalRetain() -> UnsafeMutableRawPointer { objcObject }
     @ObjCMethod("release", types: "Vv16@0:8") func immortalRelease() {}
@@ -22,7 +22,7 @@ extension NSObject {
 
 /// +alloc for classes whose instances keep Swift state in an extra word.
 /// A category of NSObject's methods that each such class gets.
-@ObjCCategory("StorageAllocated")
+@ObjCCategory("StorageAllocated", addedAtStartup: false)
 extension NSObject {
     @ObjCClassMethod("alloc")
     static func allocateWithStorage(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { Storage.allocate(cls.pointer) }
