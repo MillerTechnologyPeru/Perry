@@ -37,10 +37,22 @@ enum Errors {
         return ObjC.autorelease(error)
     }
 
+    /// Blocks that supply user info values an error's dictionary lacks, by
+    /// domain: id (^)(NSError *error, NSString *key).
+    nonisolated(unsafe) static var providers: [String: id] = [:]
+
+    /// The user info's value for `key`, or else its domain's provider's.
+    static func value(_ object: id?, _ key: id) -> id? {
+        guard let storage = storage(object) else { return nil }
+        if let value = Dictionaries.value(storage.userInfo, for: key) { return value }
+        guard let object, let domain = Strings.value(of: storage.domain), let provider = providers[domain] else { return nil }
+        return Blocks.invoke(provider, as: (@convention(c) (id, id, id) -> id?).self)(provider, object, key)
+    }
+
     /// The user info's description, or Foundation's generic one.
     static func localizedDescription(_ object: id?) -> String {
         guard let storage = storage(object) else { return "" }
-        if let description = Strings.value(of: Dictionaries.value(storage.userInfo, for: localizedDescriptionKey)) {
+        if let description = Strings.value(of: value(object, localizedDescriptionKey)) {
             return description
         }
         let domain = Strings.value(of: storage.domain) ?? ""
@@ -76,6 +88,17 @@ public final class NSError: NSObject {
         guard let error = Storage.allocate(cls.pointer) else { return nil }
         Storage.set(error, ErrorStorage(domain: domain.id, code: code, userInfo: userInfo?.id))
         return NSError(objCOwned: error)
+    }
+
+    @ObjCClassMethod("setUserInfoValueProviderForDomain:provider:")
+    static func setUserInfoValueProvider(_ cls: ObjCClass, domain: String, provider: ObjCObject?) {
+        ObjC.release(Errors.providers[domain])
+        Errors.providers[domain] = provider.flatMap { ObjC.retainBlock($0.id) }
+    }
+
+    @ObjCClassMethod("userInfoValueProviderForDomain:")
+    static func userInfoValueProvider(_ cls: ObjCClass, domain: String) -> ObjCObject? {
+        Errors.providers[domain].map(ObjCObject.init)
     }
 
     @ObjCMethod("initWithDomain:code:userInfo:")
