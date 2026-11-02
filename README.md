@@ -31,11 +31,12 @@ yet.
   `stringWithFormat:`, `NSNumber` with number literals and `@YES`/`@NO`,
   `NSArray`, `NSDictionary` and `NSSet` with their mutable subclasses,
   constant collection literals, sorting, blocks and fast enumeration,
-  Foundation's description format, and `NSLog`
+  Foundation's description format, `NSDate`, `NSTimer`, `NSRunLoop` and
+  `CFRunLoop` (timers only), `NSNotificationCenter`, and `NSLog`
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
-(data, dates, run loops, notifications), UIKit, Swift.
+(data, URLs, operation queues, run loop input sources), UIKit, Swift.
 
 ## Layout
 
@@ -179,7 +180,8 @@ than linking a copy. Its classes are built with `objc_initializeClassPair`
 in storage exported under Mach-O names (`_OBJC_CLASS_$_NSString`,
 `___CFConstantStringClassReference`), and each method is a Swift function
 with C calling conventions. Objects keep their Swift state in one extra
-word. String and number literals are static objects the compiler emits;
+word, which wraps a swift-foundation value where one exists (`NSDate`
+holds a `Date` from FoundationEssentials). String and number literals are static objects the compiler emits;
 their classes read them in place, including constant `@[…]` and `@{…}`
 literals and CoreFoundation's boolean objects. Variadic methods and `NSLog` receive
 Apple's stack-slot arguments through two-instruction assembly entry points,
