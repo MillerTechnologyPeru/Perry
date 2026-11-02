@@ -80,6 +80,10 @@ typedef struct NSOperatingSystemVersion {
 // The calling thread's kernel id, for NSLog lines.
 int perry_foundation_thread_id(void);
 
+// Gives the empty @[] and @{} singletons their classes.
+void perry_foundation_set_empty_array_class(void *cls);
+void perry_foundation_set_empty_dictionary_class(void *cls);
+
 // Variadic entry points (variadic.S). Apple's arm64 ABI passes variadic
 // arguments in 8-byte stack slots; each entry point passes a pointer to
 // them (a Darwin va_list) after the fixed arguments and branches to Swift.
