@@ -9,7 +9,7 @@ Darwin ABI. Frameworks are Linux ELF code; only the ABI boundary is Darwin.
 ## Status
 
 The loader runs C and Objective-C iOS binaries and `.app` bundles that use
-libSystem, libobjc, a first subset of Foundation and the start of UIKit.
+libSystem, libobjc, a first subset of Foundation, Core Data and the start of UIKit.
 
 - Thin and universal arm64 Mach-O executables, dylibs and bundles
 - Chained fixups (`DYLD_CHAINED_PTR_64`, `_64_OFFSET`) and classic dyld
@@ -36,7 +36,10 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   encodings, paths and searching, `NSBundle` with Info.plist and resources,
   `NSProcessInfo`, `NSThread` with performs between threads,
   `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSCharacterSet`,
-  `NSXMLParser`, `NSLog`, and the CFString functions KissXML uses
+  `NSXMLParser`, `NSPredicate` and `NSExpression` (format parsing,
+  printing and evaluation), `NSSortDescriptor`, key-value coding,
+  `NSKeyedUnarchiver` (binary archives), `NSLog`, and the CFString
+  functions KissXML uses
   (`CFStringTransform` with `kCFStringTransformToXMLHex`,
   `CFStringTrimWhitespace`); `%s` reads bytes as Mac OS Roman, as on Darwin
 - C libraries over Linux's builds of the same libraries, with thunks for
@@ -56,6 +59,13 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   conversion and layout passes; `UIWindow` with its scene, root view
   controller and key window; `UIViewController` view loading; the
   responder chain from a view to the app delegate; `NSStringFromCGRect`
+- Core Data (`libPerryCoreData`), over CoreModel: compiled `.momd`
+  models and programmatic ones, `NSManagedObject` subclasses with
+  `@dynamic` accessors generated from their declared properties, SQLite
+  and in-memory stores (other store types, such as binary and XML, are
+  kept in memory), contexts with insertion, deletion and its delete rules,
+  validation, saving, rollback, merging and private queues, fetch requests
+  with predicates, sorting, limits and counts, and `NSPersistentContainer`
 - CoreGraphics (`libPerryCoreGraphics`): geometry constants and functions
   (`CGRectZero`, `CGRectIntersection`, `CGRectInset`…)
 
@@ -76,6 +86,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/CPerryObjC` | Runtime metadata layouts, exported class storage, `objc_msgSend` (C, assembly) |
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
+| `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
 | `Sources/PerryZ`, `PerryBZ2`, `PerryExpat`, `PerrySQLite3`, `PerryIconv` | zlib, bzip2, Expat, SQLite and iconv over Linux's (C, assembly) |
@@ -139,6 +150,7 @@ files as resources, and records its output with Apple's Foundation; apps
 that use UIKit are built for Mac Catalyst, which runs iOS's UIKit. A
 fixture's `dependencies` file names third-party sources by git URL and
 commit, such as KissXML for Scribe; the script clones them into `.build`.
+A fixture's `.xcdatamodeld` is compiled with `momc` into both apps.
 `DarwinFixtureTests` requires Perry's output to match it byte for byte. The
 suite is skipped when the apps have not been built.
 
@@ -403,6 +415,19 @@ and a Swift formatter handles `%@` and passes other conversions to glibc.
 Linux's libxml2: delegates see the events Darwin's parser sends, with text
 split where libxml2 splits it, declared entities resolved but not
 substituted, and the parse stopped by the first error.
+
+**Core Data** is a client of libobjc and Foundation too, and keeps its
+data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
+compiled model with Foundation's `NSKeyedUnarchiver`, converts it to a
+CoreModel model, and saves each context's changes to a CoreModel store,
+`SQLiteDatabase` for SQLite and `InMemoryModelStorage` for every other
+type. Fetch requests become CoreModel fetch requests, their `NSPredicate`
+converted to CoreModel's predicate. Accessors for a subclass's `@dynamic`
+properties are added when a coordinator takes the model, typed from the
+property's declaration, which the runtime reads from the class's
+property lists. As on Darwin, deletions propagate when changes are
+processed, before a fetch or save, and errors' descriptions that their
+user info lacks come from a user info value provider.
 
 **UIKit** is written the same way, as a client of libobjc and of
 Foundation, which it calls through `@ObjCWrapper` classes. It has no C
