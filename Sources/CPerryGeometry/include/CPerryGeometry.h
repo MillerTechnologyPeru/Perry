@@ -26,4 +26,8 @@ typedef struct CGAffineTransform {
     double tx, ty;
 } CGAffineTransform;
 
+typedef struct UIEdgeInsets {
+    double top, left, bottom, right;
+} UIEdgeInsets;
+
 #endif
