@@ -55,24 +55,8 @@ enum ObjC {
         retainBlock = bind("_objc_retainBlock", (@convention(c) (id?) -> id?).self)
         poolPush = bind("_objc_autoreleasePoolPush", (@convention(c) () -> UnsafeMutableRawPointer?).self)
         poolPop = bind("_objc_autoreleasePoolPop", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)
-        guard let msgSend, let msgSendSuper2, let retain, let release, let autorelease, let retainBlock,
-              let getClassRaw = lookup("_objc_getClass"), let objectGetClassRaw = lookup("_object_getClass"),
-              let registerRaw = lookup("_sel_registerName"), let addRaw = lookup("_class_addMethod"),
-              let replaceRaw = lookup("_class_replaceMethod"), let poolPush, let poolPop,
-              let initializeRaw = lookup("_objc_initializeClassPair"), let allocateRaw = lookup("_objc_allocateClassPair"),
-              let registerPairRaw = lookup("_objc_registerClassPair") else { return false }
-        ObjCRuntime.install(ObjCRuntimeFunctions(
-            msgSend: msgSend, msgSendSuper2: msgSendSuper2,
-            retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
-            getClass: unsafeBitCast(getClassRaw, to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?).self),
-            objectGetClass: unsafeBitCast(objectGetClassRaw, to: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?).self),
-            registerSelector: unsafeBitCast(registerRaw, to: (@convention(c) (UnsafePointer<CChar>?) -> UnsafeRawPointer?).self),
-            addMethod: unsafeBitCast(addRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> Bool).self),
-            replaceMethod: unsafeBitCast(replaceRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeRawPointer?).self),
-            initializeClassPair: unsafeBitCast(initializeRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?).self),
-            allocateClassPair: unsafeBitCast(allocateRaw, to: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int) -> UnsafeMutableRawPointer?).self),
-            registerClassPair: unsafeBitCast(registerPairRaw, to: (@convention(c) (UnsafeMutableRawPointer?) -> Void).self)))
-        ObjCRuntime.poolFunctions = (push: poolPush, pop: poolPop)
+        // The interop layer's wrappers call the runtime through its own table.
+        guard ObjCRuntime.load(lookup) else { return false }
         // Classes Foundation defines live in its exported storage.
         ObjCRuntime.classStorage = { name in
             var metaclass: Class?
