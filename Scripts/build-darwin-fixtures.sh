@@ -29,6 +29,7 @@ for src in Tests/Fixtures/Darwin/*/; do
         -fobjc-arc -fmodules -O1 \
         -framework Foundation \
         -o "$reference" "$src"/*.m
-    "$reference" > "$out/$name.expected" 2>/dev/null
+    # A hung reference run fails the build instead of stalling it.
+    perl -e 'alarm 30; exec @ARGV' "$reference" > "$out/$name.expected" 2>/dev/null
     echo "$app"
 done
