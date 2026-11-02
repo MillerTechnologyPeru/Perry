@@ -17,6 +17,7 @@ typedef struct perry_provider {
     char *path;
     void *handle;
     void *base;     // load address, used to reject symbols found in the provider's own dependencies
+    void *(*symbol)(const char *name);  // perry_provider_symbol, if the provider has one
 } perry_provider;
 
 typedef struct perry_dependency {
