@@ -379,8 +379,13 @@ enum Nulls {
     static func install(superclass: Class) {
         let cls = NSNull.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
         null = ObjC.createInstance(cls, 0)
-        perry_foundation_constant(PERRY_CONSTANT_kCFNull).pointee = null
     }
+}
+
+/// CoreFoundation's name for the NSNull instance.
+@ObjCConstants
+enum NullConstants {
+    nonisolated(unsafe) static let kCFNull: UnsafeMutableRawPointer? = Nulls.null
 }
 
 /// NSNull.
