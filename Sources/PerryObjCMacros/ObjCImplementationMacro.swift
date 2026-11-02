@@ -4,25 +4,18 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-// Macros for implementing Objective-C classes in Swift.
-//
-//     @ObjCImplementation
-//     enum NSStringMethods {
-//         @ObjCMethod("characterAtIndex:")
-//         static func character(_ string: id?, at index: UInt) -> UInt16 { … }
-//     }
-//
-// @ObjCImplementation generates `register(_:)`, which installs every marked
-// method through an ObjCMethodRegistrar. Each method gets a C-convention
-// thunk that takes the receiver, then _cmd, then the arguments, and a type
-// encoding derived from its Swift types. @ObjCMethod and @ObjCClassMethod
-// check each signature against its selector.
+// Macros for Objective-C classes in Swift: @ObjCClass declares a wrapper type, @ObjCMethod and
+// @ObjCClassMethod either send a message (no body) or implement one (with a
+// body), and @ObjCImplementation generates the C thunks and registration
+// for an extension's implementations. Values cross through the ObjCValue
+// protocol in PerryObjCInterop.
 
 @main
 struct PerryObjCMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
-        ObjCImplementationMacro.self,
+        ObjCClassMacro.self,
         ObjCMethodMacro.self,
+        ObjCImplementationMacro.self,
     ]
 }
 
@@ -35,18 +28,88 @@ struct ObjCMacroDiagnostic: DiagnosticMessage {
 struct ObjCMacroError: Error {
     let message: String
     let node: Syntax
+
+    init(_ message: String, at node: some SyntaxProtocol) {
+        self.message = message
+        self.node = Syntax(node)
+    }
+
+    func diagnose(in context: some MacroExpansionContext) {
+        context.diagnose(Diagnostic(node: node, message: ObjCMacroDiagnostic(message: message)))
+    }
 }
 
-/// One method marked with @ObjCMethod or @ObjCClassMethod.
-struct ObjCMethod {
-    let selector: String
-    let types: String
-    let isClassMethod: Bool
-    let function: FunctionDeclSyntax
+// MARK: - Reading declarations
 
-    /// The marking attribute, or nil if the function has none.
-    static func attribute(of function: FunctionDeclSyntax) -> AttributeSyntax? {
-        for element in function.attributes {
+/// The type name to use in `T.ObjCType` and `T(objCArgument:)`: optionals
+/// spelled out, `Self` replaced by the wrapper type.
+func metatype(_ type: TypeSyntax, selfType: String?) -> String {
+    if let optional = type.as(OptionalTypeSyntax.self) {
+        return "Optional<\(metatype(optional.wrappedType, selfType: selfType))>"
+    }
+    if let unwrapped = type.as(ImplicitlyUnwrappedOptionalTypeSyntax.self) {
+        return "Optional<\(metatype(unwrapped.wrappedType, selfType: selfType))>"
+    }
+    let text = type.trimmedDescription
+    if text == "Self", let selfType { return selfType }
+    return text
+}
+
+/// Objective-C's ownership families, from the selector's first word.
+enum SelectorFamily {
+    case alloc, new, copy, mutableCopy, initializer, memoryManagement, none
+
+    init(_ selector: String) {
+        let memory: Set<String> = ["retain", "release", "autorelease", "retainCount", "dealloc", "_tryRetain",
+                                   "_isDeallocating", "allowsWeakReference", "retainWeakReference"]
+        if memory.contains(selector) {
+            self = .memoryManagement
+            return
+        }
+        let name = selector.drop { $0 == "_" }
+        func starts(_ word: String) -> Bool {
+            guard name.hasPrefix(word) else { return false }
+            let next = name.dropFirst(word.count).first
+            return next == nil || !(next!.isLowercase)
+        }
+        if starts("alloc") { self = .alloc }
+        else if starts("new") { self = .new }
+        else if starts("mutableCopy") { self = .mutableCopy }
+        else if starts("copy") { self = .copy }
+        else if starts("init") { self = .initializer }
+        else { self = .none }
+    }
+
+    /// Results of these methods are +1.
+    var returnsOwned: Bool {
+        switch self {
+        case .alloc, .new, .copy, .mutableCopy, .initializer: return true
+        default: return false
+        }
+    }
+}
+
+/// A function or initializer marked @ObjCMethod or @ObjCClassMethod.
+struct ObjCMethodDeclaration {
+    let selector: String
+    let explicitTypes: String?
+    let isClassMethod: Bool
+    let name: String
+    let parameters: [FunctionParameterSyntax]
+    let returnType: TypeSyntax?
+    let isInitializer: Bool
+    let isFailable: Bool
+    let hasBody: Bool
+    /// An implementation's leading ObjCClass parameter, for the receiver.
+    let takesClass: Bool
+
+    var family: SelectorFamily { SelectorFamily(selector) }
+
+    /// The parameters that are the selector's arguments.
+    var arguments: ArraySlice<FunctionParameterSyntax> { takesClass ? parameters.dropFirst() : parameters[...] }
+
+    static func attribute(in attributes: AttributeListSyntax) -> AttributeSyntax? {
+        for element in attributes {
             if case .attribute(let attribute) = element,
                let name = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
                name == "ObjCMethod" || name == "ObjCClassMethod" {
@@ -56,182 +119,131 @@ struct ObjCMethod {
         return nil
     }
 
-    /// Reads and checks a marked method.
-    init(_ function: FunctionDeclSyntax, attribute: AttributeSyntax) throws {
-        self.function = function
+    init(_ declaration: some DeclSyntaxProtocol, attribute: AttributeSyntax) throws {
         isClassMethod = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "ObjCClassMethod"
-
         guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
               let first = arguments.first, first.label == nil,
               let selector = first.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue,
               !selector.isEmpty else {
-            throw ObjCMacroError(message: "the selector must be a string literal", node: Syntax(attribute))
+            throw ObjCMacroError("the selector must be a string literal", at: attribute)
         }
         self.selector = selector
-        var explicitTypes: String?
-        for argument in arguments.dropFirst() where argument.label?.text == "types" {
-            guard let value = argument.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue else {
-                throw ObjCMacroError(message: "types: must be a string literal", node: Syntax(argument))
+        explicitTypes = arguments.dropFirst().first { $0.label?.text == "types" }
+            .flatMap { $0.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue }
+
+        let signature: FunctionSignatureSyntax
+        let modifiers: DeclModifierListSyntax
+        if let function = declaration.as(FunctionDeclSyntax.self) {
+            signature = function.signature
+            modifiers = function.modifiers
+            name = function.name.text
+            isInitializer = false
+            isFailable = false
+            hasBody = function.body != nil
+            if function.genericParameterClause != nil {
+                throw ObjCMacroError("Objective-C methods cannot be generic", at: function.name)
             }
-            explicitTypes = value
+        } else if let initializer = declaration.as(InitializerDeclSyntax.self) {
+            signature = initializer.signature
+            modifiers = initializer.modifiers
+            name = "init"
+            isInitializer = true
+            isFailable = initializer.optionalMark != nil
+            hasBody = initializer.body != nil
+            if hasBody {
+                throw ObjCMacroError("implement init methods as functions that return Self, not as Swift initializers",
+                                     at: initializer.initKeyword)
+            }
+            if isClassMethod || SelectorFamily(selector) != .initializer {
+                throw ObjCMacroError("a Swift initializer must send an init method", at: attribute)
+            }
+        } else {
+            throw ObjCMacroError("@ObjCMethod applies to functions and initializers", at: attribute)
         }
 
-        guard function.modifiers.contains(where: { $0.name.tokenKind == .keyword(.static) }) else {
-            throw ObjCMacroError(message: "Objective-C methods must be static functions", node: Syntax(function.name))
+        if signature.effectSpecifiers?.asyncSpecifier != nil || signature.effectSpecifiers?.throwsClause != nil {
+            throw ObjCMacroError("Objective-C methods cannot be async or throw", at: signature)
         }
-        if function.signature.effectSpecifiers?.asyncSpecifier != nil
-            || function.signature.effectSpecifiers?.throwsClause != nil {
-            throw ObjCMacroError(message: "Objective-C methods cannot be async or throw", node: Syntax(function.signature))
+        let isStatic = modifiers.contains { $0.name.tokenKind == .keyword(.static) || $0.name.tokenKind == .keyword(.class) }
+        if isClassMethod && !isStatic {
+            throw ObjCMacroError("@ObjCClassMethod applies to static functions", at: attribute)
         }
-        if function.genericParameterClause != nil {
-            throw ObjCMacroError(message: "Objective-C methods cannot be generic", node: Syntax(function.name))
+        if !isClassMethod && isStatic {
+            throw ObjCMacroError("@ObjCMethod applies to instance methods; use @ObjCClassMethod", at: attribute)
         }
-        let parameters = Array(function.signature.parameterClause.parameters)
-        guard !parameters.isEmpty else {
-            throw ObjCMacroError(message: "the first parameter must be the receiver (self)", node: Syntax(function.signature))
-        }
+        parameters = Array(signature.parameterClause.parameters)
+        returnType = signature.returnClause?.type
         for parameter in parameters where parameter.type.is(AttributedTypeSyntax.self) {
-            throw ObjCMacroError(message: "inout and attributed parameters are not supported", node: Syntax(parameter))
+            throw ObjCMacroError("inout and attributed parameters are not supported", at: parameter)
         }
+        takesClass = isClassMethod && hasBody && parameters.first?.type.trimmedDescription == "ObjCClass"
+
         let colons = selector.filter { $0 == ":" }.count
-        guard colons == parameters.count - 1 else {
+        let count = takesClass ? parameters.count - 1 : parameters.count
+        guard colons == count else {
             throw ObjCMacroError(
-                message: "selector '\(selector)' takes \(colons) argument\(colons == 1 ? "" : "s"), but the function takes \(parameters.count - 1) after the receiver",
-                node: Syntax(function.signature.parameterClause))
-        }
-
-        if let explicitTypes {
-            types = explicitTypes
-        } else {
-            types = try TypeEncoding.methodTypes(
-                returning: function.signature.returnClause?.type,
-                arguments: parameters.dropFirst().map(\.type))
+                "selector '\(selector)' takes \(colons) argument\(colons == 1 ? "" : "s"), but the \(isInitializer ? "initializer" : "function") takes \(count)",
+                at: signature.parameterClause)
         }
     }
 
-    /// `registrar.addMethod(…)` with a C-convention thunk.
-    func registration(typeName: String) -> String {
-        let parameters = Array(function.signature.parameterClause.parameters)
-        let returnType = function.signature.returnClause?.type.trimmedDescription ?? "Void"
-        var closureParameters = ["receiver: \(parameters[0].type.trimmedDescription)", "_: UnsafeRawPointer?"]
-        var convention = [parameters[0].type.trimmedDescription, "UnsafeRawPointer?"]
-        var call: [String] = []
-        for (index, parameter) in parameters.enumerated() {
-            let name = index == 0 ? "receiver" : "a\(index)"
-            if index > 0 {
-                closureParameters.append("\(name): \(parameter.type.trimmedDescription)")
-                convention.append(parameter.type.trimmedDescription)
-            }
+    /// The C signature of the method: receiver, _cmd, then arguments.
+    func cSignature(selfType: String?) -> String {
+        let arguments = arguments.map { "\(metatype($0.type, selfType: selfType)).ObjCType" }
+        return "@convention(c) (" + (["UnsafeMutableRawPointer?", "UnsafeRawPointer?"] + arguments).joined(separator: ", ")
+            + ") -> " + cReturnType(selfType: selfType)
+    }
+
+    func cReturnType(selfType: String?) -> String {
+        if isInitializer { return "UnsafeMutableRawPointer?" }
+        return returnType.map { "\(metatype($0, selfType: selfType)).ObjCType" } ?? "Void"
+    }
+
+    /// `ObjCTypeEncoding.method(…)`, or the explicit encoding.
+    func typesExpression(selfType: String?) -> String {
+        if let explicitTypes { return literal(explicitTypes) }
+        let result = returnType.map { "\(metatype($0, selfType: selfType)).self" } ?? "nil"
+        let arguments = arguments.map { "\(metatype($0.type, selfType: selfType)).self" }
+        return "ObjCTypeEncoding.method(returning: \(result), arguments: [\(arguments.joined(separator: ", "))])"
+    }
+
+    /// Call arguments, labelled as the Swift declaration labels them.
+    func callArguments(_ values: [String]) -> String {
+        zip(parameters, values).map { parameter, value in
             let label = parameter.firstName.text
-            call.append(label == "_" ? name : "\(label): \(name)")
-        }
-        let thunk = "{ (\(closureParameters.joined(separator: ", "))) -> \(returnType) in "
-            + "\(typeName).\(function.name.text)(\(call.joined(separator: ", "))) }"
-            + " as @convention(c) (\(convention.joined(separator: ", "))) -> \(returnType)"
-        return "registrar.addMethod(\(literal(selector)), types: \(literal(types)), "
-            + "implementation: unsafeBitCast(\(thunk), to: UnsafeRawPointer.self), "
-            + "isClassMethod: \(isClassMethod))"
-    }
-
-    private func literal(_ string: String) -> String {
-        "\"" + string.replacing("\\", with: "\\\\").replacing("\"", with: "\\\"") + "\""
+            return label == "_" ? value : "\(label): \(value)"
+        }.joined(separator: ", ")
     }
 }
 
-/// Objective-C type encodings for the Swift types methods use.
-enum TypeEncoding {
-    /// Encoding and argument size (arguments narrower than int take 4).
-    static func encode(_ type: TypeSyntax) -> (code: String, size: Int)? {
-        var text = type.trimmedDescription.filter { !$0.isWhitespace }
-        while text.hasSuffix("?") || text.hasSuffix("!") {
-            text.removeLast()
-        }
-        switch text {
-        case "id", "ObjectPointer", "ObjCObject": return ("@", 8)
-        case "Class", "ClassPointer": return ("#", 8)
-        case "SEL", "Selector": return (":", 8)
-        case "ObjCBlock", "Block": return ("@?", 8)
-        case "UnsafeRawPointer", "UnsafeMutableRawPointer", "OpaquePointer": return ("^v", 8)
-        case "UnsafePointer<CChar>", "UnsafePointer<Int8>": return ("r*", 8)
-        case "UnsafeMutablePointer<CChar>", "UnsafeMutablePointer<Int8>": return ("*", 8)
-        case "Bool": return ("B", 4)
-        case "Int", "Int64": return ("q", 8)
-        case "UInt", "UInt64": return ("Q", 8)
-        case "Int32": return ("i", 4)
-        case "UInt32": return ("I", 4)
-        case "Int16": return ("s", 4)
-        case "UInt16": return ("S", 4)
-        case "Int8", "CChar": return ("c", 4)
-        case "UInt8": return ("C", 4)
-        case "Double", "CGFloat": return ("d", 8)
-        case "Float": return ("f", 4)
-        case "Void", "()": return ("v", 0)
-        case "NSRange", "_NSRange": return ("{_NSRange=QQ}", 16)
-        default: break
-        }
-        for (prefix, marker) in [("UnsafeMutablePointer<", "^"), ("UnsafePointer<", "r^")] where text.hasPrefix(prefix) && text.hasSuffix(">") {
-            let pointee = String(text.dropFirst(prefix.count).dropLast())
-            let inner = encode(TypeSyntax(stringLiteral: pointee))?.code ?? "v"
-            return (marker + inner, 8)
-        }
-        return nil
-    }
-
-    /// A method's encoding: return type, frame size, then each argument at
-    /// its offset, as clang writes them: "S24@0:8Q16".
-    static func methodTypes(returning returnType: TypeSyntax?, arguments: [TypeSyntax]) throws -> String {
-        let result: String
-        if let returnType {
-            guard let encoded = encode(returnType) else {
-                throw ObjCMacroError(message: "cannot encode return type '\(returnType.trimmedDescription)'; pass types:", node: Syntax(returnType))
-            }
-            result = encoded.code
-        } else {
-            result = "v"
-        }
-        var offset = 16
-        var encodedArguments = "@0:8"
-        for argument in arguments {
-            guard let encoded = encode(argument) else {
-                throw ObjCMacroError(message: "cannot encode parameter type '\(argument.trimmedDescription)'; pass types:", node: Syntax(argument))
-            }
-            encodedArguments += "\(encoded.code)\(offset)"
-            offset += encoded.size
-        }
-        return "\(result)\(offset)\(encodedArguments)"
-    }
+func literal(_ string: String) -> String {
+    "\"" + string.replacing("\\", with: "\\\\").replacing("\"", with: "\\\"") + "\""
 }
 
-/// @ObjCImplementation: generates `register(_:)` and the ObjCMethodTable
-/// conformance.
-public struct ObjCImplementationMacro: MemberMacro, ExtensionMacro {
+// MARK: - @ObjCClass
+
+public struct ObjCClassMacro: MemberMacro, ExtensionMacro {
     public static func expansion(
         of node: AttributeSyntax,
         providingMembersOf declaration: some DeclGroupSyntax,
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        guard let typeName = typeName(of: declaration) else {
-            context.diagnose(Diagnostic(node: node, message: ObjCMacroDiagnostic(
-                message: "@ObjCImplementation applies to an enum, struct or class")))
+        guard declaration.is(StructDeclSyntax.self) else {
+            ObjCMacroError("@ObjCClass applies to a struct", at: node).diagnose(in: context)
             return []
         }
-        var registrations: [String] = []
-        for member in declaration.memberBlock.members {
-            guard let function = member.decl.as(FunctionDeclSyntax.self),
-                  let attribute = ObjCMethod.attribute(of: function),
-                  let method = try? ObjCMethod(function, attribute: attribute) else {
-                continue    // @ObjCMethod reports the error at the method
-            }
-            registrations.append(method.registration(typeName: typeName))
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
+              let className = arguments.first?.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue else {
+            ObjCMacroError("the class name must be a string literal", at: node).diagnose(in: context)
+            return []
         }
-        let isPublic = declaration.modifiers.contains { $0.name.tokenKind == .keyword(.public) }
-        let body = registrations.map { "    " + $0 }.joined(separator: "\n")
-        return ["""
-            \(raw: isPublic ? "public " : "")static func register(_ registrar: some ObjCMethodRegistrar) {
-            \(raw: body)
-            }
-            """]
+        let access = declaration.modifiers.contains { $0.name.tokenKind == .keyword(.public) } ? "public " : ""
+        return [
+            "\(raw: access)let objcHolder: ObjCObjectHolder",
+            "\(raw: access)init(objcHolder: ObjCObjectHolder) { self.objcHolder = objcHolder }",
+            "\(raw: access)static var objCClassName: String { \(literal: className) }",
+        ]
     }
 
     public static func expansion(
@@ -242,35 +254,145 @@ public struct ObjCImplementationMacro: MemberMacro, ExtensionMacro {
         in context: some MacroExpansionContext
     ) throws -> [ExtensionDeclSyntax] {
         guard !protocols.isEmpty else { return [] }
-        return [try ExtensionDeclSyntax("extension \(type.trimmed): ObjCMethodTable {}")]
-    }
-
-    private static func typeName(of declaration: some DeclGroupSyntax) -> String? {
-        if let decl = declaration.as(EnumDeclSyntax.self) { return decl.name.text }
-        if let decl = declaration.as(StructDeclSyntax.self) { return decl.name.text }
-        if let decl = declaration.as(ClassDeclSyntax.self) { return decl.name.text }
-        return nil
+        return [try ExtensionDeclSyntax("extension \(type.trimmed): AnyObjCObject {}")]
     }
 }
 
-/// @ObjCMethod and @ObjCClassMethod: mark a method and check it. They
-/// generate nothing themselves.
-public struct ObjCMethodMacro: PeerMacro {
+// MARK: - @ObjCMethod and @ObjCClassMethod
+
+/// Without a body, sends the message. With one, it is an implementation and
+/// is left as written; @ObjCImplementation registers it.
+public struct ObjCMethodMacro: BodyMacro {
     public static func expansion(
         of node: AttributeSyntax,
-        providingPeersOf declaration: some DeclSyntaxProtocol,
+        providingBodyFor declaration: some DeclSyntaxProtocol & WithOptionalCodeBlockSyntax,
+        in context: some MacroExpansionContext
+    ) throws -> [CodeBlockItemSyntax] {
+        let method: ObjCMethodDeclaration
+        do {
+            method = try ObjCMethodDeclaration(declaration, attribute: node)
+        } catch let error as ObjCMacroError {
+            error.diagnose(in: context)
+            return declaration.body.map { Array($0.statements) } ?? ["fatalError()"]
+        }
+        if let body = declaration.body {
+            return Array(body.statements)
+        }
+        return sendBody(method)
+    }
+
+    /// The body that sends the message and converts the result.
+    static func sendBody(_ method: ObjCMethodDeclaration) -> [CodeBlockItemSyntax] {
+        let receiver = method.isClassMethod || method.isInitializer ? "Self.objCClass.pointer" : "self.objcObject"
+        let values = method.arguments.map { "\($0.secondName?.text ?? $0.firstName.text).objCArgument()" }
+        var statements: [CodeBlockItemSyntax] = [
+            "typealias Send = \(raw: method.cSignature(selfType: nil))",
+            "let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)",
+        ]
+        if method.isInitializer {
+            let allocate = "@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?"
+            statements += [
+                "let allocated = unsafeBitCast(ObjCRuntime.msgSend, to: (\(raw: allocate)).self)(\(raw: receiver), ObjCRuntime.selector(\"alloc\"))",
+                "let result = send(\(raw: (["allocated", "ObjCRuntime.selector(\(literal(method.selector)))"] + values).joined(separator: ", ")))",
+                method.isFailable
+                    ? "guard let result else { return nil }"
+                    : "guard let result else { objcInteropFatal(\(raw: literal("-\(method.selector) returned nil"))) }",
+                "self.init(objcHolder: ObjCObjectHolder(adopting: result))",
+            ]
+            return statements
+        }
+        let call = "send(" + ([receiver, "ObjCRuntime.selector(\(literal(method.selector)))"] + values).joined(separator: ", ") + ")"
+        if let returnType = method.returnType {
+            let conversion = method.family.returnsOwned ? "objCOwned" : "objCReturnValue"
+            statements.append("return \(raw: metatype(returnType, selfType: nil))(\(raw: conversion): \(raw: call))")
+        } else {
+            statements.append("\(raw: call)")
+        }
+        return statements
+    }
+}
+
+// MARK: - @ObjCImplementation
+
+public struct ObjCImplementationMacro: MemberMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        guard let function = declaration.as(FunctionDeclSyntax.self) else {
-            context.diagnose(Diagnostic(node: node, message: ObjCMacroDiagnostic(
-                message: "@ObjCMethod applies to a static function")))
+        let typeName: String
+        if let extensionDecl = declaration.as(ExtensionDeclSyntax.self) {
+            typeName = extensionDecl.extendedType.trimmedDescription
+        } else if let structDecl = declaration.as(StructDeclSyntax.self) {
+            typeName = structDecl.name.text
+        } else {
+            ObjCMacroError("@ObjCImplementation applies to an extension of an @ObjCClass wrapper", at: node)
+                .diagnose(in: context)
             return []
         }
-        do {
-            _ = try ObjCMethod(function, attribute: node)
-        } catch let error as ObjCMacroError {
-            context.diagnose(Diagnostic(node: error.node, message: ObjCMacroDiagnostic(message: error.message)))
+        let registrationName = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression
+            .as(StringLiteralExprSyntax.self)?.representedLiteralValue ?? "register"
+
+        var registrations: [String] = []
+        for member in declaration.memberBlock.members {
+            let decl = member.decl
+            guard let attributes = decl.asProtocol(WithAttributesSyntax.self)?.attributes,
+                  let attribute = ObjCMethodDeclaration.attribute(in: attributes),
+                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute),
+                  method.hasBody else {
+                continue    // errors are reported by @ObjCMethod
+            }
+            registrations.append(registration(method, typeName: typeName))
         }
-        return []
+        let isPublic = declaration.modifiers.contains { $0.name.tokenKind == .keyword(.public) }
+        let body = registrations.map { "    " + $0 }.joined(separator: "\n")
+        return ["""
+            \(raw: isPublic ? "public " : "")static func \(raw: registrationName)(_ registrar: any ObjCMethodRegistrar) {
+            \(raw: body)
+            }
+            """]
+    }
+
+    /// `registrar.addMethod(…)` with a thunk that converts the receiver and
+    /// arguments, calls the implementation and converts its result.
+    static func registration(_ method: ObjCMethodDeclaration, typeName: String) -> String {
+        var closureParameters = ["receiver: UnsafeMutableRawPointer?", "_: UnsafeRawPointer?"]
+        var values: [String] = method.takesClass ? ["ObjCClass(receiver!)"] : []
+        for (index, parameter) in method.arguments.enumerated() {
+            let type = metatype(parameter.type, selfType: typeName)
+            closureParameters.append("a\(index): \(type).ObjCType")
+            values.append("\(type)(objCArgument: a\(index))")
+        }
+        let returnType = method.cReturnType(selfType: typeName)
+
+        var body: [String] = []
+        let target: String
+        if method.isClassMethod {
+            target = typeName
+        } else {
+            // init methods consume the receiver; retain, release and dealloc
+            // must not retain it; everything else holds a reference.
+            let ownership: String
+            switch method.family {
+            case .initializer: ownership = "adopting"
+            case .memoryManagement: ownership = "borrowing"
+            default: ownership = "retaining"
+            }
+            body.append("let this = \(typeName)(objcHolder: ObjCObjectHolder(\(ownership): receiver!))")
+            target = "this"
+        }
+        let call = "\(target).\(method.name)(\(method.callArguments(values)))"
+        if method.returnType != nil {
+            let conversion = method.family.returnsOwned ? "objCOwnedReturnValue" : "objCReturnValue"
+            body.append("return \(call).\(conversion)()")
+        } else {
+            body.append(call)
+        }
+
+        let thunk = "{ (\(closureParameters.joined(separator: ", "))) -> \(returnType) in "
+            + body.joined(separator: "; ") + " } as " + method.cSignature(selfType: typeName)
+        return "registrar.addMethod(\(literal(method.selector)), types: \(method.typesExpression(selfType: typeName)), "
+            + "implementation: unsafeBitCast(\(thunk), to: UnsafeRawPointer.self), isClassMethod: \(method.isClassMethod))"
     }
 }
