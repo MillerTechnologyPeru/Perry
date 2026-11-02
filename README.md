@@ -63,7 +63,8 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   and delegates on their delegate queue, redirects, timeouts and
   cancellation; `NSURLRequest`, `NSMutableURLRequest`, `NSURLResponse`,
   `NSHTTPURLResponse`, `NSURLSessionConfiguration`, `NSHTTPCookie` and
-  `NSHTTPCookieStorage`
+  `NSHTTPCookieStorage`; `NSURLConnection` with synchronous and
+  asynchronous requests and delegates on the run loop or a queue
 - Grand Central Dispatch (`libPerrydispatch`, which libSystem re-exports):
   serial, concurrent, global and main queues, sync, async, barriers,
   `dispatch_after`, `dispatch_apply`, queue-specific data, target queues,
@@ -492,7 +493,11 @@ from Swift closures. Where corelibs differs from Darwin, Darwin wins:
 status code phrases, suggested file names, session-only cookies, request
 equality, and a task's state and byte counts by the time it completes.
 Foundation re-exports CFNetwork as on Darwin, so the provider loads only
-when a program uses it.
+when a program uses it. `NSURLConnection` runs on the same `URLSession`: its
+delegate hears from it on the run loop of the thread that made or started
+it, through `-performSelector:onThread:withObject:waitUntilDone:`, or on its
+delegate queue, first with `connection:willSendRequest:redirectResponse:`
+for the original request, and nothing after `-cancel`.
 
 **Core Data** is a client of libobjc and Foundation too, and keeps its
 data in [CoreModel](https://github.com/PureSwift/CoreModel): it reads a
