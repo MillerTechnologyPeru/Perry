@@ -67,6 +67,13 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
 - C libraries over Linux's builds of the same libraries, with thunks for
   Darwin's variadic ABI: libxml2 (`libPerryxml2`, which KissXML runs on),
   zlib, bzip2, Expat, iconv, and SQLite 3.54 built with Apple's options
+- JavaScriptCore (`libPerryJavaScriptCore`): the C API, which is
+  WebKitGTK's JavaScriptCore itself; and the Objective-C API on it:
+  `JSVirtualMachine`, `JSContext` with exceptions and the exception
+  handler, `JSValue` with conversions both ways, properties, calling and
+  constructing, blocks as JavaScript functions with the current context,
+  this and arguments, objects and classes exported through `JSExport`
+  (and `JSExportAs`), and `JSManagedValue`
 - Accelerate (`libPerryAccelerate`): vDSP's arithmetic, reductions,
   conversions, matrices, correlation, windows and Fourier transforms with
   Apple's scaling and packing; vForce; vImage's buffers, channel
@@ -177,6 +184,8 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
 | `Sources/PerrySecurity` | `libPerrySecurity.so`: Security over swift-crypto and swift-certificates (Swift) |
 | `Sources/CPerrySecurity` | `kSecRandomDefault`, the one export Swift cannot define (C) |
+| `Sources/PerryJavaScriptCore` | `libPerryJavaScriptCore.so`: JavaScriptCore's Objective-C API over WebKitGTK's JavaScriptCore (Swift) |
+| `Sources/CJavaScriptCore`, `Sources/CPerryJavaScriptCore` | WebKitGTK's JavaScriptCore headers, and the call that passes arguments to exported methods and blocks (assembly) |
 | `Sources/PerryAccelerate` | `libPerryAccelerate.so`: vDSP, vForce and vImage, and OpenBLAS's BLAS and LAPACK (C) |
 | `Sources/PerryUserNotifications` | `libPerryUserNotifications.so`: notification content, triggers, requests and the center (Swift) |
 | `Sources/PerryUniformTypeIdentifiers` | `libPerryUniformTypeIdentifiers.so`: UTType, MobileCoreServices' UTType functions and the type database (Swift) |
