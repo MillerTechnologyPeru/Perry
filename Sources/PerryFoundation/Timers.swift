@@ -17,6 +17,8 @@ final class TimerStorage {
     /// rather than the timer.
     private(set) var argument: id?
     let isPerformRequest: Bool
+    /// Called after the timer fires, for performSelectorOnMainThread:…waitUntilDone:.
+    var onFired: (() -> Void)?
     private(set) var isValid = true
     var runLoops: [RunLoopState] = []
 
@@ -107,6 +109,7 @@ enum Timers {
         } else if let selector = storage.selector {
             _ = ObjC.send(storage.target, selector, storage.isPerformRequest ? storage.argument : timer)
         }
+        storage.onFired?()
         guard storage.isValid else { return }
         if storage.repeats {
             let now = absoluteTimeNow()
@@ -119,8 +122,7 @@ enum Timers {
     }
 
     static func install(superclass: Class) {
-        timerClass = ClassDefinition(PERRY_CLASS_NSTimer, name: "NSTimer", superclass: superclass,
-                                     StorageAllocated.register, NSTimer.register).cls
+        timerClass = NSTimer.defineObjCClass(StorageAllocated.registerObjCMethods).storage
     }
 
     /// Repeating timers fire at least every 0.1 ms, as Foundation clamps them.
@@ -131,10 +133,7 @@ enum Timers {
 
 /// NSTimer.
 @ObjCClass("NSTimer")
-public struct NSTimer {}
-
-@ObjCImplementation
-extension NSTimer {
+public final class NSTimer: NSObject {
     private var storage: TimerStorage? { Timers.storage(objcObject) }
 
     private static func make(_ interval: Double, repeats: Bool, target: ObjCObject?, selector: ObjCSelector?,
@@ -217,10 +216,7 @@ extension NSTimer {
 
 /// Delayed performs, which Foundation adds to NSObject.
 @ObjCClass("NSObject")
-struct DelayedPerforms {}
-
-@ObjCImplementation
-extension DelayedPerforms {
+final class DelayedPerforms: NSObject {
     @ObjCMethod("performSelector:withObject:afterDelay:")
     func perform(_ selector: ObjCSelector, with argument: ObjCObject?, afterDelay delay: Double) {
         let request = Timers.make(TimerStorage(fireDate: absoluteTimeNow() + delay, interval: 0, repeats: false,
