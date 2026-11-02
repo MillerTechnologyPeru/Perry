@@ -107,8 +107,9 @@ enum Strings {
     }
 
     static func install(superclass: Class) {
-        let string = NSString.defineObjCClass(StorageAllocated.registerObjCMethods, NSStringAdditions.registerObjCMethods)
+        let string = NSString.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated)
         stringClass = string.storage
+        NSString.addObjCCategoryAdditions()
         string.addMethod("stringWithFormat:", types: "@24@0:8@16",
                          implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
         string.addMethod("initWithFormat:", types: "@24@0:8@16",
@@ -117,7 +118,7 @@ enum Strings {
                          implementation: variadicEntry(perry_imp_stringByAppendingFormat), isClassMethod: false)
 
         // String literals: immortal, read in place.
-        constantClass = NSCFConstantString.defineObjCClass(ImmortalObject.registerObjCMethods).markingStatic().storage
+        constantClass = NSCFConstantString.defineObjCClass(NSObject.registerObjCCategoryImmortal).markingStatic().storage
     }
 
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
