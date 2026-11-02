@@ -35,7 +35,12 @@ libSystem, libobjc, a first subset of Foundation and the start of UIKit.
   `NSUUID`, `NSJSONSerialization`, `NSError`, `NSNull`, `NSString`'s
   encodings, paths and searching, `NSBundle` with Info.plist and resources,
   `NSProcessInfo`, `NSThread` with performs between threads,
-  `NSUserDefaults`, `NSFileManager`, and `NSLog`
+  `NSUserDefaults`, `NSFileManager`, `NSValue`, `NSLog`, and the
+  CFString functions KissXML uses (`CFStringTransform` with
+  `kCFStringTransformToXMLHex`, `CFStringTrimWhitespace`)
+- libxml2 (`libPerryxml2`): Linux's libxml2 under Darwin's names, with
+  thunks for its variadic and `va_list` functions and bridges for
+  variadic error handlers; KissXML runs on it
 - UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
@@ -65,6 +70,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryFoundation` | `libPerryFoundation.so`: Foundation and CoreFoundation (Swift) |
 | `Sources/CPerryFoundation` | Foundation's exported class storage and variadic entry points (C, assembly) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
+| `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
 | `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry (Swift) |
 | `Sources/CPerryCoreGraphics` | CoreGraphics' exported constants (C) |
 | `Sources/CPerryGeometry` | `CGPoint`, `CGSize`, `CGRect` as C structs, shared by providers |
@@ -119,7 +125,9 @@ Scripts/docker-test.sh             # DarwinFixtureTests picks them up
 
 The script also builds each app as a macOS app, with the fixture's other
 files as resources, and records its output with Apple's Foundation; apps
-that use UIKit are built for Mac Catalyst, which runs iOS's UIKit.
+that use UIKit are built for Mac Catalyst, which runs iOS's UIKit. A
+fixture's `dependencies` file names third-party sources by git URL and
+commit, such as KissXML for Scribe; the script clones them into `.build`.
 `DarwinFixtureTests` requires Perry's output to match it byte for byte. The
 suite is skipped when the apps have not been built.
 
@@ -165,6 +173,28 @@ numbering through `__error()`, synchronised with glibc's errno.
 Known ABI gaps: struct layouts (`stat`, `dirent`, pthread types),
 `open`/`fcntl` flag values, ctype tables, locale, and stack-passed
 non-variadic arguments narrower than 8 bytes, which Apple packs.
+
+**Wrapped C libraries.** Some Darwin libraries are mapped onto the Linux
+build of the same library rather than reimplemented. box64 does this for
+x86 code with a list of every function and its signature: each call
+crosses from emulated to native code through a generated wrapper, and
+functions that take callbacks get hand-written wrappers that swap guest
+function pointers for native trampolines from a fixed pool. Perry runs
+the app's code natively, so only the ABI differences need code.
+`libPerryxml2` (for `/usr/lib/libxml2.2.dylib`) binds each import to Linux's
+libxml2 through `perry_provider_symbol`, which `dlsym`s the name and accepts
+only symbols libxml2 itself defines. The iOS SDK's libxml2 (2.9.13) and
+Ubuntu's (2.9.14) share their public structs, which apps such as KissXML
+walk directly. The exceptions are variadic: `PerryXML2/thunks.S` gives
+`xmlStrPrintf` and the text writer's `…Format…` functions Darwin entry
+points that build an AAPCS64 `va_list` over Darwin's stack arguments, and
+their `…V…` forms one over Darwin's `va_list` pointer. Generic error
+handlers, which libxml2 calls back with variadic arguments, get native
+trampolines from a pool of eight, as in box64: each formats the message
+and calls the Darwin handler with `"%s"` and the text, its way.
+`xmlGenericError` reads back the Darwin handler. Variadic callbacks
+elsewhere (SAX handler and validation context fields, the schema and
+Relax-NG error setters) are not bridged yet.
 
 **Objective-C.** `libPerryobjc` reads the metadata clang and ld64 emit
 into Mach-O images: class lists, `class_ro_t`, relative and absolute method
