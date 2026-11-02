@@ -17,6 +17,7 @@ import SwiftSyntaxMacros
 struct PerryObjCMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ObjCClassMacro.self,
+        ObjCWrapperMacro.self,
         ObjCCategoryMacro.self,
         ObjCConstantsMacro.self,
         ObjCMethodMacro.self,
@@ -352,6 +353,46 @@ public struct ObjCClassMacro: MemberMacro {
             + body.joined(separator: "; ") + " } as " + method.cSignature(selfType: typeName)
         return "registrar.addMethod(\(literal(method.selector)), types: \(method.typesExpression(selfType: typeName)), "
             + "implementation: unsafeBitCast(\(thunk), to: UnsafeRawPointer.self), isClassMethod: \(method.isClassMethod))"
+    }
+}
+
+// MARK: - @ObjCWrapper
+
+/// A wrapper for a class another library defines: its names, and only
+/// methods that call the class's.
+public struct ObjCWrapperMacro: MemberMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
+            ObjCMacroError("@ObjCWrapper applies to a class", at: node).diagnose(in: context)
+            return []
+        }
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
+              let className = arguments.first?.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue else {
+            ObjCMacroError("the class name must be a string literal", at: node).diagnose(in: context)
+            return []
+        }
+        guard let superclass = classDecl.inheritanceClause?.inheritedTypes.first?.type.trimmedDescription else {
+            ObjCMacroError("an @ObjCWrapper class inherits from its Objective-C superclass's class, such as NSObject",
+                           at: classDecl.name).diagnose(in: context)
+            return []
+        }
+        for member in classDecl.memberBlock.members {
+            guard let attributes = member.decl.asProtocol(WithAttributesSyntax.self)?.attributes,
+                  let attribute = ObjCMethodDeclaration.attribute(in: attributes),
+                  let method = try? ObjCMethodDeclaration(member.decl, attribute: attribute), !method.isCall else { continue }
+            ObjCMacroError("a wrapper's methods call the class's and have no body; implement methods with @ObjCClass or @ObjCCategory",
+                           at: attribute).diagnose(in: context)
+        }
+        let access = ObjCClassMacro.accessLevel(of: classDecl)
+        return [
+            "\(raw: access)override class var objCClassName: String { \(literal: className) }",
+            "\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }",
+        ]
     }
 }
 
