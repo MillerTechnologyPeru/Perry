@@ -28,14 +28,17 @@ enum UUIDs {
         return object
     }
 
-    static func install(superclass: Class) {
-        uuidClass = NSUUID.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 }
 
 /// NSUUID.
 @ObjCClass("NSUUID")
 public final class NSUUID: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        UUIDs.uuidClass = cls.storage
+    }
+
     var uuid: UUID? { UUIDs.uuid(objcObject) }
 
     private func setUUID(_ uuid: UUID?) -> Self? {
