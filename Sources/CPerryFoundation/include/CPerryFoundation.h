@@ -89,6 +89,7 @@ void perry_imp_stringByAppendingFormat(void);
 void perry_imp_arrayWithObjects(void);      // + (id)arrayWithObjects:(id)first, ... nil
 void perry_imp_setWithObjects(void);        // + (id)setWithObjects:(id)first, ... nil
 void perry_imp_dictionaryWithObjectsAndKeys(void); // + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil
+void perry_imp_predicateWithFormat(void);   // + (NSPredicate *)predicateWithFormat:(NSString *)format, ...
 void perry_imp_appendFormat(void);          // - (void)appendFormat:(NSString *)format, ...
 
 #endif
