@@ -56,8 +56,15 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
 - CommonCrypto, in libSystem: digests, HMAC, `CCCrypt` and `CCCryptor`
   (AES, DES, 3DES, CAST, RC4, RC2, Blowfish in each mode), PBKDF2, AES key
   wrap and random bytes
-- BSD sockets with Darwin's ABI: socket addresses, options, message flags
-  and `getaddrinfo` converted to and from Linux's
+- BSD sockets with Darwin's ABI: socket addresses, options, message flags,
+  `getaddrinfo`, `sendmsg` and `recvmsg` with their control messages,
+  `select` and `poll`, converted to and from Linux's
+- POSIX with Darwin's ABI: pthread mutexes, conditions, read-write locks
+  and once with Darwin's sizes and static initializers; `open`, `openat`
+  and `fcntl` (variadic on Darwin) with their flags and file locks;
+  `stat`, `struct dirent` and the `*at` functions; clocks and Mach time;
+  `mmap`, `uname` (reporting an iPhone, or `PERRY_DEVICE_MODEL`) and
+  `sysconf`
 - URL loading (`libPerryCFNetwork`, which Foundation re-exports):
   `NSURLSession` with data, upload and download tasks, completion handlers
   and delegates on their delegate queue, redirects, timeouts and
