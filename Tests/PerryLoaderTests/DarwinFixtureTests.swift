@@ -87,7 +87,7 @@ enum DarwinFixtures {
     static var withReference: [String] {
         [
             "Almanac", "Atlas", "Babel", "Cipher", "Clock", "Courier", "Launchpad", "Ledger", "Menagerie", "Parsley",
-            "Satchel", "Scribe", "Vault", "Viewport",
+            "Satchel", "Scribe", "Shelf", "Vault", "Viewport",
         ].filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path)
         }
