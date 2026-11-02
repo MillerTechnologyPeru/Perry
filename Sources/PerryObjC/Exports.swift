@@ -656,3 +656,51 @@ public func objc_personality_v0(_ version: Int32, _ actions: Int32, _ exceptionC
                                 _ context: UnsafeMutableRawPointer?) -> Int32 {
     objcFatal("an exception is unwinding through Objective-C code, which Perry cannot do")
 }
+
+// MARK: - Protocol introspection
+
+/// A malloc'd array of `items` with a NULL after them, and its count.
+private func copyList<T>(_ items: [T], _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<T>? {
+    count?.pointee = UInt32(items.count)
+    guard !items.isEmpty else { return nil }
+    let buffer = malloc((items.count + 1) * MemoryLayout<T>.stride)!.assumingMemoryBound(to: T.self)
+    buffer.initialize(from: items, count: items.count)
+    memset(buffer + items.count, 0, MemoryLayout<T>.stride)
+    return buffer
+}
+
+@c(_class_copyProtocolList)
+public func class_copyProtocolList(_ cls: Class?, _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<ProtocolPointer>? {
+    guard let cls, let info = Runtime.info(cls) else {
+        count?.pointee = 0
+        return nil
+    }
+    return copyList(Protocols.listed(by: info), count)
+}
+
+@c(_protocol_copyProtocolList)
+public func protocol_copyProtocolList(_ proto: ProtocolPointer?, _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<ProtocolPointer>? {
+    copyList(proto.map { Protocols.adopted(UnsafePointer($0)) } ?? [], count)
+}
+
+/// objc_method_description: the selector and its types.
+@c(_protocol_copyMethodDescriptionList)
+public func protocol_copyMethodDescriptionList(_ proto: ProtocolPointer?, _ required: Bool, _ instance: Bool,
+                                               _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer? {
+    let methods = proto.map { Protocols.methods($0, required: required, instance: instance) } ?? []
+    count?.pointee = UInt32(methods.count)
+    guard !methods.isEmpty else { return nil }
+    let buffer = calloc(methods.count + 1, 16)!
+    for (index, method) in methods.enumerated() {
+        buffer.storeBytes(of: method.0, toByteOffset: index * 16, as: SEL.self)
+        buffer.storeBytes(of: method.1, toByteOffset: index * 16 + 8, as: UnsafePointer<CChar>?.self)
+    }
+    return buffer
+}
+
+@c(_protocol_copyPropertyList)
+public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<UnsafeRawPointer>? {
+    copyList(proto.map { Protocols.properties(UnsafePointer($0)) } ?? [], count)
+}
