@@ -98,6 +98,11 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   types, lookups by filename extension and MIME type, conformance, the
   app's exported and imported types and dynamic types; MobileCoreServices'
   `UTTypeCreatePreferredIdentifierForTag` family and `kUTType` constants
+- User notifications (`libPerryUserNotifications`): content, sounds,
+  time interval and calendar triggers with their next dates, requests,
+  actions and categories, all secure-coded; a notification center that
+  grants authorization, fires pending requests when their triggers say
+  and hands them to its delegate on the main queue
 - Security (`libPerrySecurity`): `SecRandomCopyBytes`; the keychain's
   generic and internet passwords, keys and certificates (`SecItemAdd`,
   `SecItemCopyMatching`, `SecItemUpdate`, `SecItemDelete`) with iOS's
@@ -159,6 +164,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryURLLoading` | URL loading over swift-corelibs-foundation's URLSession, for PerryCFNetwork (Swift) |
 | `Sources/PerrySecurity` | `libPerrySecurity.so`: Security over swift-crypto and swift-certificates (Swift) |
 | `Sources/CPerrySecurity` | `kSecRandomDefault`, the one export Swift cannot define (C) |
+| `Sources/PerryUserNotifications` | `libPerryUserNotifications.so`: notification content, triggers, requests and the center (Swift) |
 | `Sources/PerryUniformTypeIdentifiers` | `libPerryUniformTypeIdentifiers.so`: UTType, MobileCoreServices' UTType functions and the type database (Swift) |
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
