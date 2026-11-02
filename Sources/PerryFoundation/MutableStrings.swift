@@ -33,63 +33,64 @@ enum MutableStrings {
 
     static func install(superclass: Class) {
         let mutable = ClassDefinition(PERRY_CLASS_NSMutableString, name: "NSMutableString", superclass: superclass,
-                                      NSMutableStringMethods.self)
+                                      NSMutableString.register)
         mutableClass = mutable.cls
         mutable.addMethod("appendFormat:", types: "v24@0:8@16",
                           implementation: variadicEntry(perry_imp_appendFormat), isClassMethod: false)
     }
 }
 
+/// NSMutableString.
+@ObjCClass("NSMutableString")
+public struct NSMutableString {}
+
 @ObjCImplementation
-enum NSMutableStringMethods {
+extension NSMutableString {
+    private var storage: StringStorage { MutableStrings.storage(objcObject) }
+
     @ObjCClassMethod("stringWithCapacity:")
-    static func string(_ cls: id?, capacity: UInt) -> id? {
-        let object = Storage.allocate(cls)
-        if let object { Storage.set(object, StringStorage("")) }
-        return ObjC.autorelease(object)
+    static func string(_ cls: ObjCClass, capacity: UInt) -> ObjCObject? {
+        guard let object = Storage.allocate(cls.pointer) else { return nil }
+        Storage.set(object, StringStorage(""))
+        return ObjCObject(objCOwned: object)
     }
 
     @ObjCMethod("initWithCapacity:")
-    static func initialize(_ object: id?, capacity: UInt) -> id? {
-        if let object { Storage.set(object, StringStorage("")) }
-        return object
+    func initialize(capacity: UInt) -> Self {
+        Storage.set(objcObject, StringStorage(""))
+        return self
     }
 
     /// Copies of a mutable string are immutable.
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        Strings.make(Strings.value(of: object) ?? "")
+    func copy(zone: UnsafeMutableRawPointer?) -> ObjCObject {
+        ObjCObject(objCOwned: Strings.make(storage.value))
     }
 
     @ObjCMethod("copy")
-    static func copy(_ object: id?) -> id? { copy(object, zone: nil) }
+    func copy() -> ObjCObject { copy(zone: nil) }
 
     @ObjCMethod("appendString:")
-    static func append(_ object: id?, _ other: id?) {
-        MutableStrings.storage(object).value += Strings.value(of: other) ?? ""
-    }
+    func append(_ other: String) { storage.value += other }
 
     @ObjCMethod("setString:")
-    static func set(_ object: id?, string other: id?) {
-        MutableStrings.storage(object).value = Strings.value(of: other) ?? ""
-    }
+    func set(string other: String) { storage.value = other }
 
     @ObjCMethod("insertString:atIndex:")
-    static func insert(_ object: id?, _ other: id?, at index: UInt) {
-        MutableStrings.replace(object, location: index, length: 0, with: Strings.value(of: other) ?? "",
-                               method: "insertString:atIndex:")
+    func insert(_ other: String, at index: UInt) {
+        MutableStrings.replace(objcObject, location: index, length: 0, with: other, method: "insertString:atIndex:")
     }
 
     @ObjCMethod("deleteCharactersInRange:")
-    static func delete(_ object: id?, range: NSRange) {
-        MutableStrings.replace(object, location: range.location, length: range.length, with: "",
+    func delete(range: NSRange) {
+        MutableStrings.replace(objcObject, location: range.location, length: range.length, with: "",
                                method: "deleteCharactersInRange:")
     }
 
     @ObjCMethod("replaceCharactersInRange:withString:")
-    static func replace(_ object: id?, range: NSRange, with other: id?) {
-        MutableStrings.replace(object, location: range.location, length: range.length,
-                               with: Strings.value(of: other) ?? "", method: "replaceCharactersInRange:withString:")
+    func replace(range: NSRange, with other: String) {
+        MutableStrings.replace(objcObject, location: range.location, length: range.length, with: other,
+                               method: "replaceCharactersInRange:withString:")
     }
 }
 
