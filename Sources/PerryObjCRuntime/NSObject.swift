@@ -35,7 +35,7 @@ public enum RootClasses {
         let object = Runtime.makeClass(perry_objc_nsobject_class(), metaclass: perry_objc_nsobject_metaclass(),
                                        superclass: nil, name: permanentCString("NSObject"),
                                        instanceSize: 8, registerName: true)
-        _ = MethodTable(object, RootObject.registerObjCMethods)
+        _ = MethodTable(object, NSObject.registerObjCCategoryRuntime)
         Objects.defaultRetain = Runtime.findMethod(object, Sel.retain)?.pointee.imp
         Objects.defaultRelease = Runtime.findMethod(object, Sel.release)?.pointee.imp
         Objects.defaultAutorelease = Runtime.findMethod(object, Sel.autorelease)?.pointee.imp
@@ -44,7 +44,7 @@ public enum RootClasses {
         let proto = Runtime.makeClass(perry_objc_protocol_class(), metaclass: perry_objc_protocol_metaclass(),
                                       superclass: perry_objc_nsobject_class(), name: permanentCString("Protocol"),
                                       instanceSize: 8, registerName: true)
-        _ = MethodTable(proto, ImmortalObject.registerObjCMethods)
+        _ = MethodTable(proto, NSObject.registerObjCCategoryImmortal)
     }()
 
     /// Points the interop layer at this runtime's functions.
@@ -95,11 +95,11 @@ public enum RootClasses {
 
 // MARK: - NSObject
 
-/// The root class's methods, as the runtime implements them. Memory
-/// management methods return raw pointers so ownership passes through
-/// untouched.
-@ObjCClass("NSObject")
-final class RootObject: NSObject {
+/// The root class's methods, as the runtime implements them: installed into
+/// NSObject, which the runtime builds itself. Memory management methods
+/// return raw pointers so ownership passes through untouched.
+@ObjCCategory("Runtime")
+extension NSObject {
     // MARK: Identity
 
     @ObjCMethod("init") func initialize() -> Self { self }
@@ -209,7 +209,7 @@ final class RootObject: NSObject {
 
     // MARK: Class methods
 
-    private static func classPointer(_ cls: ObjCClass) -> ClassPointer {
+    fileprivate static func classPointer(_ cls: ObjCClass) -> ClassPointer {
         cls.pointer.assumingMemoryBound(to: perry_objc_class.self)
     }
 
@@ -268,105 +268,13 @@ final class RootObject: NSObject {
     @ObjCClassMethod("retainCount") static func classRetainCount() -> UInt { UInt.max }
 }
 
-/// retain, release and autorelease for objects that live forever.
-@ObjCClass("NSObject")
-final class ImmortalObject: NSObject {
-    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
-    @ObjCMethod("release", types: "Vv16@0:8") func release() {}
-    @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
-    @ObjCMethod("retainCount") func retainCount() -> UInt { UInt.max }
-}
-
-/// The block classes, built inside libSystem's _NSConcrete*Block storage
-/// so blocks can be messaged: retained, released and copied.
-public enum BlockClasses {
-    typealias BlockCopy = @convention(c) (UnsafeRawPointer?) -> UnsafeMutableRawPointer?
-    typealias BlockRelease = @convention(c) (UnsafeRawPointer?) -> Void
-
-    nonisolated(unsafe) static var blockCopy: BlockCopy?
-    nonisolated(unsafe) static var blockRelease: BlockRelease?
-
-    /// _Block_copy, or the block itself when libSystem has no blocks runtime.
-    public static func copy(_ block: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
-        blockCopy.map { $0(block) } ?? UnsafeMutableRawPointer(mutating: block)
-    }
-
-    public static func release(_ block: UnsafeRawPointer?) {
-        blockRelease?(block)
-    }
-
-    /// Storage for each class: libSystem's symbol, class in words 0-15 and
-    /// metaclass in words 16-31.
-    public struct Storage {
-        public var stack, malloc, global, auto, finalizing, weakVariable: UnsafeMutableRawPointer?
-        public init(stack: UnsafeMutableRawPointer?, malloc: UnsafeMutableRawPointer?, global: UnsafeMutableRawPointer?,
-                    auto: UnsafeMutableRawPointer?, finalizing: UnsafeMutableRawPointer?,
-                    weakVariable: UnsafeMutableRawPointer?) {
-            self.stack = stack
-            self.malloc = malloc
-            self.global = global
-            self.auto = auto
-            self.finalizing = finalizing
-            self.weakVariable = weakVariable
-        }
-    }
-
-    public static func install(_ storage: Storage, copy: UnsafeMutableRawPointer?, release: UnsafeMutableRawPointer?) {
-        blockCopy = copy.map { unsafeBitCast($0, to: BlockCopy.self) }
-        blockRelease = release.map { unsafeBitCast($0, to: BlockRelease.self) }
-
-        let base = UnsafeMutablePointer<perry_objc_class>.allocate(capacity: 2)
-        base.initialize(repeating: perry_objc_class(), count: 2)
-        let block = Runtime.makeClass(base, metaclass: base + 1, superclass: RootClasses.nsObject,
-                                      name: permanentCString("NSBlock"), instanceSize: 8, registerName: true)
-        _ = MethodTable(block, NSBlock.registerObjCMethods)
-
-        func make(_ name: String, _ storage: UnsafeMutableRawPointer?, _ registrations: ObjCMethodRegistration...) {
-            guard let storage else { return }
-            let info = Runtime.makeClass(storage.assumingMemoryBound(to: perry_objc_class.self),
-                                         metaclass: (storage + 128).assumingMemoryBound(to: perry_objc_class.self),
-                                         superclass: block.cls, name: permanentCString(name),
-                                         instanceSize: 8, registerName: true)
-            _ = MethodTable(info, registrations)
-        }
-        // Heap blocks are reference counted by the blocks runtime; stack and
-        // global blocks are not, and copying a stack block moves it to the heap.
-        make("__NSMallocBlock__", storage.malloc, HeapBlock.registerObjCMethods)
-        make("__NSAutoBlock__", storage.auto, HeapBlock.registerObjCMethods)
-        make("__NSFinalizingBlock__", storage.finalizing, HeapBlock.registerObjCMethods)
-        make("__NSStackBlock__", storage.stack, ImmortalObject.registerObjCMethods)
-        make("__NSGlobalBlock__", storage.global, ImmortalObject.registerObjCMethods)
-        make("__NSBlockVariable__", storage.weakVariable, ImmortalObject.registerObjCMethods)
-    }
-}
-
-/// Blocks, whose classes are built in libSystem's storage.
-@ObjCClass("NSBlock")
-class NSBlock: NSObject {
-    @ObjCMethod("copy") func copy() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
-
-    @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
-
-    /// Calls a block that takes no arguments.
-    @ObjCMethod("invoke")
-    func invoke() {
-        typealias Invoke = @convention(c) (ObjectPointer) -> Void
-        unsafeBitCast(objcObject.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
-    }
-}
-
-/// Heap blocks, reference counted by the blocks runtime.
-@ObjCClass("__NSMallocBlock__")
-final class HeapBlock: NSBlock {
-    @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer? { BlockClasses.copy(objcObject) }
-    @ObjCMethod("release", types: "Vv16@0:8") func release() { BlockClasses.release(objcObject) }
-
-    @ObjCMethod("autorelease")
-    func autorelease() -> UnsafeMutableRawPointer {
-        AutoreleasePool.add(objcObject)
-        return objcObject
-    }
-
-    @ObjCMethod("retainCount") func retainCount() -> UInt { 1 }
+/// retain, release and autorelease for objects that live forever, installed
+/// into Protocol and the stack and global block classes. The Swift names
+/// differ from the Runtime category's, as extension methods must.
+@ObjCCategory("Immortal")
+extension NSObject {
+    @ObjCMethod("retain") func immortalRetain() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("release", types: "Vv16@0:8") func immortalRelease() {}
+    @ObjCMethod("autorelease") func immortalAutorelease() -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("retainCount") func immortalRetainCount() -> UInt { UInt.max }
 }
