@@ -32,6 +32,23 @@
 // Swift does not let subclasses override methods declared in extensions, so
 // a category's functions need Swift names that the class's subclasses do
 // not also use.
+//
+// Swift calls Objective-C through the same attributes, on functions without
+// a body, and through @ObjCProperty:
+//
+//     extension NSObject {
+//         @ObjCMethod("isEqual:")
+//         func isEqualTo(_ other: NSObject?) -> Bool
+//
+//         @ObjCClassMethod("new")
+//         static func new() -> Self
+//
+//         @ObjCProperty(getter: "isProxy", readonly: true)
+//         var isProxy: Bool
+//     }
+//
+// Each sends the message through objc_msgSend, converting the arguments and
+// the result through ObjCValue.
 
 /// Installs methods into a class.
 public protocol ObjCMethodRegistrar {
@@ -67,17 +84,26 @@ public macro ObjCCategory(_ categoryName: String, addedAtStartup: Bool = true) =
 public macro ObjCConstants() =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCConstantsMacro")
 
-/// Implements an instance method. The function's arguments are the
-/// selector's.
-@attached(peer)
+/// An instance method. With a body, the function implements the selector;
+/// without one, calling it sends the message. The function's arguments are
+/// the selector's.
+@attached(body)
 public macro ObjCMethod(_ selector: String, types: String? = nil) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCMethodMacro")
 
-/// Implements a class method: a static or class function. It may take the
-/// receiving class as a first parameter of type ObjCClass.
-@attached(peer)
+/// A class method: a static or class function. With a body it implements
+/// the selector, and may take the receiving class as a first parameter of
+/// type ObjCClass; without one, calling it sends the message to the class.
+@attached(body)
 public macro ObjCClassMethod(_ selector: String, types: String? = nil) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCMethodMacro")
+
+/// A property whose accessors send its getter (the property's name, or
+/// `getter`) and setter (`setName:`, unless `readonly`). A static property
+/// is a class property.
+@attached(accessor)
+public macro ObjCProperty(getter: String? = nil, readonly: Bool = false) =
+    #externalMacro(module: "PerryObjCMacros", type: "ObjCPropertyMacro")
 
 // MARK: - Type encodings
 
