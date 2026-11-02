@@ -57,18 +57,31 @@ open class UIApplication: UIResponder {
     }
 }
 
-/// UIApplicationDelegate's messages.
-extension NSObject {
-    @ObjCMethod("application:willFinishLaunchingWithOptions:")
-    func applicationWillFinishLaunching(_ application: UIApplication, options: NSDictionary?) -> Bool
+/// The application's delegate.
+@ObjCProtocol("UIApplicationDelegate")
+protocol UIApplicationDelegate {
+    @ObjCOptional("application:willFinishLaunchingWithOptions:")
+    func application(_ application: UIApplication, willFinishLaunchingWithOptions options: NSDictionary?) -> Bool?
 
-    @ObjCMethod("application:didFinishLaunchingWithOptions:")
-    func applicationDidFinishLaunching(_ application: UIApplication, options: NSDictionary?) -> Bool
+    @ObjCOptional("application:didFinishLaunchingWithOptions:")
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: NSDictionary?) -> Bool?
 
-    @ObjCMethod("applicationDidBecomeActive:")
+    @ObjCOptional("applicationDidBecomeActive:")
     func applicationDidBecomeActive(_ application: UIApplication)
 
-    @ObjCMethod("application:configurationForConnectingSceneSession:options:")
-    func applicationConfiguration(_ application: UIApplication, connecting session: UISceneSession,
-                                  options: UISceneConnectionOptions) -> UISceneConfiguration?
+    @ObjCOptional("applicationWillResignActive:")
+    func applicationWillResignActive(_ application: UIApplication)
+
+    @ObjCOptional("applicationDidEnterBackground:")
+    func applicationDidEnterBackground(_ application: UIApplication)
+
+    @ObjCOptional("applicationWillEnterForeground:")
+    func applicationWillEnterForeground(_ application: UIApplication)
+
+    @ObjCOptional("applicationWillTerminate:")
+    func applicationWillTerminate(_ application: UIApplication)
+
+    @ObjCOptional("application:configurationForConnectingSceneSession:options:")
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
+                     options: UISceneConnectionOptions) -> UISceneConfiguration?
 }
