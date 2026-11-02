@@ -4,16 +4,18 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
-// @ObjCClass exposes a Swift class to Objective-C: for each @ObjCMethod and
-// @ObjCClassMethod function in its body it generates a C thunk that converts
-// the receiver and arguments through ObjCValue (PerryObjCInterop), calls the
-// function and converts the result, plus the class's names and
+// @ObjCClass exposes a Swift class to Objective-C, and @ObjCCategory adds a
+// Swift class's methods to an existing Objective-C class. For each
+// @ObjCMethod and @ObjCClassMethod function in the body they generate a C
+// thunk that converts the receiver and arguments through ObjCValue
+// (PerryObjCInterop), calls the function and converts the result, plus
 // registerObjCMethods(_:). The method macros only check their functions.
 
 @main
 struct PerryObjCMacrosPlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ObjCClassMacro.self,
+        ObjCCategoryMacro.self,
         ObjCMethodMacro.self,
     ]
 }
@@ -227,10 +229,21 @@ public struct ObjCClassMacro: MemberMacro {
                            at: classDecl.name).diagnose(in: context)
             return []
         }
-        let typeName = classDecl.name.text
-        let access = classDecl.modifiers.contains { [.keyword(.public), .keyword(.open)].contains($0.name.tokenKind) }
-            ? "public " : ""
+        let access = accessLevel(of: classDecl)
+        return [
+            "\(raw: access)override class var objCClassName: String { \(literal: className) }",
+            "\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }",
+            registerMethods(classDecl, access: access),
+        ]
+    }
 
+    static func accessLevel(of classDecl: ClassDeclSyntax) -> String {
+        classDecl.modifiers.contains { [.keyword(.public), .keyword(.open)].contains($0.name.tokenKind) } ? "public " : ""
+    }
+
+    /// registerObjCMethods(_:) for the @ObjCMethod and @ObjCClassMethod
+    /// functions in the class body.
+    static func registerMethods(_ classDecl: ClassDeclSyntax, access: String) -> DeclSyntax {
         var registrations: [String] = []
         for member in classDecl.memberBlock.members {
             let decl = member.decl
@@ -239,18 +252,14 @@ public struct ObjCClassMacro: MemberMacro {
                   let method = try? ObjCMethodDeclaration(decl, attribute: attribute) else {
                 continue    // errors are reported by @ObjCMethod
             }
-            registrations.append(registration(method, typeName: typeName))
+            registrations.append(registration(method, typeName: classDecl.name.text))
         }
         let body = registrations.map { "    " + $0 }.joined(separator: "\n")
-        return [
-            "\(raw: access)override class var objCClassName: String { \(literal: className) }",
-            "\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }",
-            """
+        return """
             \(raw: access)override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
             \(raw: body)
             }
-            """,
-        ]
+            """
     }
 
     /// `registrar.addMethod(…)` with a thunk that converts the receiver and
@@ -293,6 +302,58 @@ public struct ObjCClassMacro: MemberMacro {
             + body.joined(separator: "; ") + " } as " + method.cSignature(selfType: typeName)
         return "registrar.addMethod(\(literal(method.selector)), types: \(method.typesExpression(selfType: typeName)), "
             + "implementation: unsafeBitCast(\(thunk), to: UnsafeRawPointer.self), isClassMethod: \(method.isClassMethod))"
+    }
+}
+
+// MARK: - @ObjCCategory
+
+public struct ObjCCategoryMacro: MemberMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        guard let extensionDecl = declaration.as(ExtensionDeclSyntax.self) else {
+            ObjCMacroError("@ObjCCategory applies to an extension of an Objective-C class's wrapper", at: node)
+                .diagnose(in: context)
+            return []
+        }
+        guard let arguments = node.arguments?.as(LabeledExprListSyntax.self),
+              let name = arguments.first?.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue,
+              let first = name.first, first.isLetter || first == "_",
+              name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
+            ObjCMacroError("the category name must be a string literal that is a Swift identifier", at: node)
+                .diagnose(in: context)
+            return []
+        }
+        let typeName = extensionDecl.extendedType.trimmedDescription
+        let access = extensionDecl.modifiers.contains { $0.name.tokenKind == .keyword(.public) } ? "public " : ""
+        var registrations: [String] = []
+        for member in extensionDecl.memberBlock.members {
+            let decl = member.decl
+            guard let attributes = decl.asProtocol(WithAttributesSyntax.self)?.attributes,
+                  let attribute = ObjCMethodDeclaration.attribute(in: attributes),
+                  let method = try? ObjCMethodDeclaration(decl, attribute: attribute) else {
+                continue    // errors are reported by @ObjCMethod
+            }
+            registrations.append(ObjCClassMacro.registration(method, typeName: typeName))
+        }
+        let body = registrations.map { "    " + $0 }.joined(separator: "\n")
+        return [
+            """
+            /// Installs the \(raw: name) category's methods into `registrar`.
+            \(raw: access)static func registerObjCCategory\(raw: name)(_ registrar: any ObjCMethodRegistrar) {
+            \(raw: body)
+            }
+            """,
+            """
+            /// Adds the \(raw: name) category's methods to \(raw: typeName)'s class.
+            \(raw: access)static func addObjCCategory\(raw: name)() {
+                registerObjCCategory\(raw: name)(objCClass)
+            }
+            """,
+        ]
     }
 }
 
