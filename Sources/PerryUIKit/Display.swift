@@ -1,0 +1,249 @@
+import CPerryGeometry
+import Glibc
+import PerryObjCInterop
+
+// The live view: with an X11 display (DISPLAY set, PERRY_UIKIT_DISPLAY not
+// "0"), the screen is an X window showing the visible windows, redrawn
+// after each update pass and as touches change things. The mouse is a
+// finger: pressing, dragging and releasing it are a touch, which Touches
+// delivers; the wheel scrolls. libX11 is loaded when the first window
+// appears, so nothing needs it without a display.
+// PERRY_UIKIT_DISPLAY_SCALE sets the window's pixels per point (1).
+
+enum Display {
+    typealias Pointer = UnsafeMutableRawPointer
+    nonisolated(unsafe) private static var started = false
+    nonisolated(unsafe) private static var display: Pointer?
+    nonisolated(unsafe) private static var window: UInt = 0
+    nonisolated(unsafe) private static var gc: Pointer?
+    nonisolated(unsafe) private static var image: Pointer?
+    nonisolated(unsafe) private static var context: CGRef?
+    nonisolated(unsafe) private static var deleteAtom: UInt = 0
+    nonisolated(unsafe) private static var dirty = true
+    nonisolated(unsafe) private static var lastDraw = 0.0
+    nonisolated(unsafe) static var scale: CGFloat = 1
+
+    private struct X {
+        var pending: @convention(c) (Pointer?) -> Int32
+        var nextEvent: @convention(c) (Pointer?, Pointer?) -> Int32
+        var putImage: @convention(c) (Pointer?, UInt, Pointer?, Pointer?, Int32, Int32, Int32, Int32, UInt32, UInt32) -> Int32
+        var flush: @convention(c) (Pointer?) -> Int32
+    }
+    nonisolated(unsafe) private static var x: X?
+
+    typealias Function = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    typealias DispatchAfter = @convention(c) (UInt64, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Function) -> Void
+    typealias DispatchTime = @convention(c) (UInt64, Int64) -> UInt64
+    nonisolated(unsafe) static var dispatchAfter: DispatchAfter?
+    nonisolated(unsafe) static var dispatchTime: DispatchTime?
+
+    static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) {
+        let library = "/usr/lib/system/libdispatch.dylib"
+        dispatchAfter = lookup(library, "_dispatch_after_f").map { unsafeBitCast($0, to: DispatchAfter.self) }
+        dispatchTime = lookup(library, "_dispatch_time").map { unsafeBitCast($0, to: DispatchTime.self) }
+    }
+
+    static var wanted: Bool {
+        guard getenv("DISPLAY") != nil else { return false }
+        if let setting = getenv("PERRY_UIKIT_DISPLAY"), String(cString: setting) == "0" { return false }
+        return true
+    }
+
+    /// Opens the window, once, when a window first shows.
+    static func startIfWanted() {
+        guard !started, wanted else { return }
+        started = true
+        if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { scale = value }
+        guard let library = dlopen("libX11.so.6", RTLD_NOW) else {
+            uikitWarning("no libX11 for the display; running without one")
+            return
+        }
+        func bind<T>(_ name: String, _ type: T.Type) -> T? { dlsym(library, name).map { unsafeBitCast($0, to: T.self) } }
+        typealias OpenDisplay = @convention(c) (UnsafePointer<CChar>?) -> Pointer?
+        typealias ScreenOf = @convention(c) (Pointer?) -> Int32
+        typealias RootWindow = @convention(c) (Pointer?, Int32) -> UInt
+        typealias PointerOf = @convention(c) (Pointer?, Int32) -> Pointer?
+        typealias DepthOf = @convention(c) (Pointer?, Int32) -> Int32
+        typealias CreateWindow = @convention(c) (Pointer?, UInt, Int32, Int32, UInt32, UInt32, UInt32, UInt, UInt) -> UInt
+        typealias StoreName = @convention(c) (Pointer?, UInt, UnsafePointer<CChar>?) -> Int32
+        typealias SelectInput = @convention(c) (Pointer?, UInt, Int) -> Int32
+        typealias MapWindow = @convention(c) (Pointer?, UInt) -> Int32
+        typealias InternAtom = @convention(c) (Pointer?, UnsafePointer<CChar>?, Int32) -> UInt
+        typealias SetProtocols = @convention(c) (Pointer?, UInt, UnsafeMutablePointer<UInt>?, Int32) -> Int32
+        typealias CreateImage = @convention(c) (Pointer?, Pointer?, UInt32, Int32, Int32, Pointer?, UInt32, UInt32, Int32, Int32) -> Pointer?
+        guard let open = bind("XOpenDisplay", OpenDisplay.self), let screenOf = bind("XDefaultScreen", ScreenOf.self),
+              let root = bind("XRootWindow", RootWindow.self), let visualOf = bind("XDefaultVisual", PointerOf.self),
+              let depthOf = bind("XDefaultDepth", DepthOf.self), let gcOf = bind("XDefaultGC", PointerOf.self),
+              let create = bind("XCreateSimpleWindow", CreateWindow.self), let storeName = bind("XStoreName", StoreName.self),
+              let selectInput = bind("XSelectInput", SelectInput.self), let map = bind("XMapWindow", MapWindow.self),
+              let internAtom = bind("XInternAtom", InternAtom.self), let setProtocols = bind("XSetWMProtocols", SetProtocols.self),
+              let createImage = bind("XCreateImage", CreateImage.self),
+              let pending = bind("XPending", (@convention(c) (Pointer?) -> Int32).self),
+              let nextEvent = bind("XNextEvent", (@convention(c) (Pointer?, Pointer?) -> Int32).self),
+              let putImage = bind("XPutImage", (@convention(c) (Pointer?, UInt, Pointer?, Pointer?, Int32, Int32, Int32, Int32, UInt32,
+                                                                 UInt32) -> Int32).self),
+              let flush = bind("XFlush", (@convention(c) (Pointer?) -> Int32).self),
+              let display = open(nil) else {
+            uikitWarning("cannot open the X display; running without one")
+            return
+        }
+        let screen = screenOf(display)
+        let width = Int((Screen.bounds.width * scale).rounded()), height = Int((Screen.bounds.height * scale).rounded())
+        let window = create(display, root(display, screen), 0, 0, UInt32(width), UInt32(height), 0, 0, 0)
+        let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
+        _ = title.withCString { storeName(display, window, $0) }
+        // Key press, button press and release, pointer motion, exposure.
+        _ = selectInput(display, window, 1 << 0 | 1 << 2 | 1 << 3 | 1 << 6 | 1 << 15)
+        var atom = "WM_DELETE_WINDOW".withCString { internAtom(display, $0, 0) }
+        _ = setProtocols(display, window, &atom, 1)
+        deleteAtom = atom
+        _ = map(display, window)
+        guard let context = CG.makeContext(size: Screen.bounds.size, scale: scale, opaque: true),
+              let data = CG.bitmapContextGetData(context),
+              let image = createImage(display, visualOf(display, screen), UInt32(depthOf(display, screen)), 2, 0, data,
+                                      UInt32(width), UInt32(height), 32, Int32(width * 4)) else { return }
+        (Display.display, Display.window, Display.gc, Display.image, Display.context) = (display, window, gcOf(display, screen), image, context)
+        x = X(pending: pending, nextEvent: nextEvent, putImage: putImage, flush: flush)
+        _ = flush(display)
+        tick()
+    }
+
+    static func markDirty() { dirty = true }
+
+    /// Whether frames are being shown.
+    static var isLive: Bool { x != nil }
+
+    /// Handles the X events waiting, moves momentum scrolling on, and
+    /// redraws when something changed; then again in a sixtieth of a second.
+    private static func tick() {
+        if let x, let display {
+            var event = [UInt64](repeating: 0, count: 24)
+            while x.pending(display) > 0 {
+                event.withUnsafeMutableBytes { _ = x.nextEvent(display, $0.baseAddress) }
+                ObjCRuntime.autoreleasepool { handle(event) }
+            }
+            ObjCRuntime.autoreleasepool {
+                Touches.step()
+                Animations.step()
+            }
+            let now = Clock.now
+            if dirty || now - lastDraw > 0.5 {
+                dirty = false
+                lastDraw = now
+                ObjCRuntime.autoreleasepool { draw() }
+            }
+        }
+        guard let dispatchAfter, let dispatchTime else { return }
+        dispatchAfter(dispatchTime(0, 16_000_000), Updates.mainQueue, nil) { _ in Display.tick() }
+    }
+
+    private static func handle(_ event: [UInt64]) {
+        event.withUnsafeBytes { raw in
+            let type = raw.load(fromByteOffset: 0, as: Int32.self)
+            func point() -> CGPoint {
+                CGPoint(x: CGFloat(raw.load(fromByteOffset: 64, as: Int32.self)) / scale,
+                        y: CGFloat(raw.load(fromByteOffset: 68, as: Int32.self)) / scale)
+            }
+            switch type {
+            case 4: // ButtonPress
+                let button = raw.load(fromByteOffset: 84, as: UInt32.self)
+                switch button {
+                case 1: Touches.down(at: point())
+                case 4: Touches.wheel(at: point(), by: -40)
+                case 5: Touches.wheel(at: point(), by: 40)
+                default: break
+                }
+                dirty = true
+            case 5: // ButtonRelease
+                if raw.load(fromByteOffset: 84, as: UInt32.self) == 1 { Touches.up(at: point()) }
+                dirty = true
+            case 6: // MotionNotify
+                Touches.move(to: point())
+            case 12: // Expose
+                dirty = true
+            case 33: // ClientMessage: the window was closed.
+                if raw.load(fromByteOffset: 56, as: UInt.self) == deleteAtom { exit(0) }
+            default:
+                break
+            }
+        }
+    }
+
+    /// Lays out and renders the visible windows into the X window.
+    static func draw() {
+        guard let context, let x, let display, let image else { return }
+        for window in Windows.visible { window.layoutIfNeeded() }
+        let black = UIColor.black()
+        withExtendedLifetime(black) {
+            CG.setFillColorWithColor(context, black.state.makeCGColor())
+            CG.fillRect(context, Screen.bounds)
+        }
+        for window in Windows.visible {
+            CG.saveGState(context)
+            CG.concatCTM(context, window.state.geometry.toSuperlayer)
+            CALayer.render(window.state.layer, in: context, root: true)
+            CG.restoreGState(context)
+        }
+        let width = UInt32((Screen.bounds.width * scale).rounded()), height = UInt32((Screen.bounds.height * scale).rounded())
+        _ = x.putImage(display, window, gc, image, 0, 0, 0, 0, width, height)
+        _ = x.flush(display)
+    }
+}
+
+/// Monotonic seconds.
+enum Clock {
+    static var now: Double {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+    }
+}
+
+func uikitWarning(_ message: String) {
+    let line = "perry: UIKit: \(message)\n"
+    line.withCString { _ = write(2, $0, strlen($0)) }
+}
+
+/// Animations the live view runs, a step each frame: each calls its update
+/// with its progress, eased, then its completion. Without a live view
+/// nothing would show the steps, so an animation ends at once.
+enum Animations {
+    private struct Running {
+        let start: Double
+        let duration: Double
+        let update: (CGFloat) -> Void
+        let completion: () -> Void
+    }
+
+    nonisolated(unsafe) private static var running: [Running] = []
+
+    static var live: Bool { Display.isLive }
+
+    static func run(duration: Double, _ update: @escaping (CGFloat) -> Void, completion: @escaping () -> Void) {
+        guard live, duration > 0 else {
+            update(1)
+            completion()
+            return
+        }
+        update(0)
+        running.append(Running(start: Clock.now, duration: duration, update: update, completion: completion))
+        Display.markDirty()
+    }
+
+    static func step() {
+        guard !running.isEmpty else { return }
+        let now = Clock.now
+        let current = running
+        running = []
+        var finished: [Running] = []
+        for animation in current {
+            let t = min(max((now - animation.start) / animation.duration, 0), 1)
+            // Ease out: fast at first, settling at the end.
+            animation.update(CGFloat(1 - pow(1 - t, 3)))
+            if t >= 1 { finished.append(animation) } else { running.append(animation) }
+        }
+        Display.markDirty()
+        for animation in finished { animation.completion() }
+        if !finished.isEmpty { Updates.schedule() }
+    }
+}
