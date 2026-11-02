@@ -121,9 +121,6 @@ enum Timers {
         }
     }
 
-    static func install(superclass: Class) {
-        timerClass = NSTimer.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
-    }
 
     /// Repeating timers fire at least every 0.1 ms, as Foundation clamps them.
     static func clamp(_ interval: Double) -> Double {
@@ -134,6 +131,12 @@ enum Timers {
 /// NSTimer.
 @ObjCClass("NSTimer")
 public final class NSTimer: NSObject {
+    /// Set-up after the class is defined.
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        Timers.timerClass = cls.storage
+    }
+
     private var storage: TimerStorage? { Timers.storage(objcObject) }
 
     private static func make(_ interval: Double, repeats: Bool, target: ObjCObject?, selector: ObjCSelector?,
