@@ -108,7 +108,7 @@ enum Strings {
 
     static func install(superclass: Class) {
         let string = ClassDefinition(PERRY_CLASS_NSString, name: "NSString", superclass: superclass,
-                                     StorageAllocation.self, NSStringMethods.self)
+                                     StorageAllocated.register, NSString.register, NSString.registerAdditions)
         stringClass = string.cls
         string.addMethod("stringWithFormat:", types: "@24@0:8@16",
                          implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
@@ -119,7 +119,7 @@ enum Strings {
 
         // String literals: immortal, read in place.
         constantClass = ClassDefinition(PERRY_CLASS_NSConstantString, name: "__NSCFConstantString",
-                                        superclass: string.cls, ImmortalMethods.self).cls
+                                        superclass: string.cls, isStatic: true, ImmortalObject.register).cls
     }
 
     /// Leading integer, as -integerValue reads it ("42abc" is 42).
@@ -128,63 +128,68 @@ enum Strings {
     }
 }
 
-@ObjCImplementation
-enum NSStringMethods {
-    private static func value(_ object: id?) -> String { Strings.value(of: object) ?? "" }
+/// NSString.
+@ObjCClass("NSString")
+public struct NSString {}
 
-    private static func set(_ object: id?, _ value: String) -> id? {
-        if let object { Storage.set(object, StringStorage(value)) }
-        return object
+@ObjCImplementation
+extension NSString {
+    /// The receiver's contents.
+    var value: String { Strings.value(of: objcObject) ?? "" }
+
+    private func setValue(_ value: String) -> Self {
+        Storage.set(objcObject, StringStorage(value))
+        return self
     }
 
     // MARK: Creating
 
     @ObjCClassMethod("string")
-    static func string(_ cls: id?) -> id? { Strings.autoreleased("") }
+    static func empty() -> String { "" }
 
     @ObjCClassMethod("stringWithString:")
-    static func string(_ cls: id?, string other: id?) -> id? { Strings.autoreleased(value(other)) }
+    static func string(with other: String) -> String { other }
 
     @ObjCClassMethod("stringWithUTF8String:")
-    static func string(_ cls: id?, utf8 bytes: UnsafePointer<CChar>?) -> id? {
-        bytes.map { Strings.autoreleased(String(cString: $0)) }
-    }
+    static func string(utf8 bytes: UnsafePointer<CChar>?) -> String? { bytes.map { String(cString: $0) } }
 
     @ObjCMethod("init")
-    static func initialize(_ object: id?) -> id? { set(object, "") }
+    func initialize() -> Self { setValue("") }
 
     @ObjCMethod("initWithString:")
-    static func initialize(_ object: id?, string other: id?) -> id? { set(object, value(other)) }
+    func initialize(string other: String) -> Self { setValue(other) }
 
     @ObjCMethod("initWithUTF8String:")
-    static func initialize(_ object: id?, utf8 bytes: UnsafePointer<CChar>?) -> id? {
-        guard let bytes else { return nil }
-        return set(object, String(cString: bytes))
+    func initialize(utf8 bytes: UnsafePointer<CChar>?) -> Self? { bytes.map { setValue(String(cString: $0)) } }
+
+    /// NSStringEncoding; String's own conversion to NSString relies on this.
+    @ObjCMethod("initWithBytes:length:encoding:")
+    func initialize(bytes: UnsafeRawPointer?, length: UInt, encoding: UInt) -> Self? {
+        StringEncoding.decode(UnsafeRawBufferPointer(start: bytes, count: Int(length)), encoding).map(setValue)
     }
 
     /// A Darwin va_list is a pointer to the argument slots.
     @ObjCMethod("initWithFormat:arguments:", types: "@32@0:8@16*24")
-    static func initialize(_ object: id?, format: id?, arguments: UnsafeRawPointer?) -> id? {
-        guard let arguments else { return object }
+    func initialize(format: String, arguments: UnsafeRawPointer?) -> Self {
+        guard let arguments else { return setValue(format) }
         var darwin = DarwinArguments(arguments)
-        return set(object, Format.string(value(format), &darwin))
+        return setValue(Format.string(format, &darwin))
     }
 
     @ObjCMethod("dealloc")
-    static func dealloc(_ object: id?) {
-        guard let object else { return }
-        Storage.set(object, nil)
-        ObjC.superDealloc(object, from: Strings.stringClass)
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: Strings.stringClass)
     }
 
     // MARK: Contents
 
     @ObjCMethod("length")
-    static func length(_ object: id?) -> UInt { UInt(value(object).utf16.count) }
+    func length() -> UInt { UInt(value.utf16.count) }
 
     @ObjCMethod("characterAtIndex:")
-    static func character(_ object: id?, at index: UInt) -> UInt16 {
-        let units = Array(value(object).utf16)
+    func character(at index: UInt) -> UInt16 {
+        let units = Array(value.utf16)
         guard Int(index) < units.count else {
             foundationFatal("-[NSString characterAtIndex:]: Range or index out of bounds")
         }
@@ -192,67 +197,64 @@ enum NSStringMethods {
     }
 
     @ObjCMethod("UTF8String")
-    static func utf8String(_ object: id?) -> UnsafePointer<CChar>? { object.flatMap(Strings.utf8) }
+    func utf8String() -> UnsafePointer<CChar>? { Strings.utf8(objcObject) }
 
     @ObjCMethod("description")
-    static func description(_ object: id?) -> id? { object }
+    func description() -> NSString { self }
 
     @ObjCMethod("copy")
-    static func copy(_ object: id?) -> id? { ObjC.retain(object) }
+    func copy() -> NSString { self }
 
     @ObjCMethod("copyWithZone:")
-    static func copy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? { ObjC.retain(object) }
+    func copy(zone: UnsafeMutableRawPointer?) -> NSString { self }
 
     @ObjCMethod("mutableCopyWithZone:")
-    static func mutableCopy(_ object: id?, zone: UnsafeMutableRawPointer?) -> id? {
-        MutableStrings.make(value(object))
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> ObjCObject {
+        ObjCObject(objCOwned: MutableStrings.make(value))
     }
 
     // MARK: Comparing
 
     @ObjCMethod("isEqual:")
-    static func isEqual(_ object: id?, _ other: id?) -> Bool {
-        object == other || Strings.value(of: other).map { $0 == value(object) } ?? false
+    func isEqual(_ other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        return other.objcObject == objcObject || Strings.value(of: other.objcObject) == value
     }
 
     @ObjCMethod("isEqualToString:")
-    static func isEqual(_ object: id?, toString other: id?) -> Bool {
-        object == other || value(object) == value(other)
-    }
+    func isEqual(toString other: String?) -> Bool { other == value }
 
     @ObjCMethod("hash")
-    static func hash(_ object: id?) -> UInt { Strings.hash(value(object)) }
+    func hash() -> UInt { Strings.hash(value) }
 
     @ObjCMethod("compare:")
-    static func compare(_ object: id?, _ other: id?) -> Int { Strings.compare(value(object), value(other)) }
+    func compare(_ other: String) -> Int { Strings.compare(value, other) }
 
     @ObjCMethod("hasPrefix:")
-    static func hasPrefix(_ object: id?, _ other: id?) -> Bool { value(object).hasPrefix(value(other)) }
+    func hasPrefix(_ prefix: String) -> Bool { value.hasPrefix(prefix) }
 
     @ObjCMethod("hasSuffix:")
-    static func hasSuffix(_ object: id?, _ other: id?) -> Bool { value(object).hasSuffix(value(other)) }
+    func hasSuffix(_ suffix: String) -> Bool { value.hasSuffix(suffix) }
 
     // MARK: Deriving
 
     @ObjCMethod("stringByAppendingString:")
-    static func appending(_ object: id?, _ other: id?) -> id? {
-        Strings.autoreleased(value(object) + value(other))
-    }
+    func appending(_ other: String) -> String { value + other }
 
     @ObjCMethod("uppercaseString")
-    static func uppercased(_ object: id?) -> id? { Strings.autoreleased(value(object).uppercased()) }
+    func uppercased() -> String { value.uppercased() }
 
     @ObjCMethod("lowercaseString")
-    static func lowercased(_ object: id?) -> id? { Strings.autoreleased(value(object).lowercased()) }
+    func lowercased() -> String { value.lowercased() }
 
     @ObjCMethod("integerValue")
-    static func integerValue(_ object: id?) -> Int { Strings.integerPrefix(value(object)) }
+    func integerValue() -> Int { Strings.integerPrefix(value) }
 
     @ObjCMethod("intValue")
-    static func intValue(_ object: id?) -> Int32 { Int32(truncatingIfNeeded: Strings.integerPrefix(value(object))) }
+    func intValue() -> Int32 { Int32(truncatingIfNeeded: Strings.integerPrefix(value)) }
 
     @ObjCMethod("doubleValue")
-    static func doubleValue(_ object: id?) -> Double { value(object).withCString { strtod($0, nil) } }
+    func doubleValue() -> Double { value.withCString { strtod($0, nil) } }
 }
 
 // MARK: - Variadic methods
