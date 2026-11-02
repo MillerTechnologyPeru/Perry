@@ -482,21 +482,33 @@ public struct ObjCConstantsMacro: MemberMacro, ExtensionMacro {
         conformingTo protocols: [TypeSyntax],
         in context: some MacroExpansionContext
     ) throws -> [DeclSyntax] {
-        var constants: [(name: String, value: ExprSyntax?)] = []
+        var constants: [(name: String, value: ExprSyntax?, type: String?)] = []
         for member in declaration.memberBlock.members {
             guard let variable = member.decl.as(VariableDeclSyntax.self),
                   variable.bindingSpecifier.tokenKind == .keyword(.let),
                   variable.modifiers.contains(where: { $0.name.tokenKind == .keyword(.static) }) else { continue }
             for binding in variable.bindings {
                 guard let name = binding.pattern.as(IdentifierPatternSyntax.self)?.identifier.text else { continue }
-                constants.append((name, binding.initializer?.value))
+                constants.append((name, binding.initializer?.value, binding.typeAnnotation?.type.trimmedDescription))
             }
         }
         let names = Set(constants.map(\.name))
         let access = declaration.modifiers.contains { $0.name.tokenKind == .keyword(.public) } ? "public " : ""
+        let integers: Set<String> = ["Int", "Int64", "Int32", "Int16", "Int8", "UInt", "UInt64", "UInt32", "UInt16", "UInt8"]
         let entries = constants.map { constant -> String in
             let value: String
-            if constant.value?.is(StringLiteralExprSyntax.self) == true {
+            // A number's bits sit in its 8-byte slot, as a C constant's do.
+            var number = constant.value
+            if let prefix = number?.as(PrefixOperatorExprSyntax.self) { number = prefix.expression }
+            if constant.type == "Float" {
+                value = ".float(\(constant.name))"
+            } else if constant.type.map({ ["Double", "CGFloat", "TimeInterval"].contains($0) }) == true
+                        || (constant.type == nil && number?.is(FloatLiteralExprSyntax.self) == true) {
+                value = ".double(Double(\(constant.name)))"
+            } else if constant.type.map(integers.contains) == true
+                        || (constant.type == nil && number?.is(IntegerLiteralExprSyntax.self) == true) {
+                value = ".integer(Int64(truncatingIfNeeded: \(constant.name)))"
+            } else if constant.value?.is(StringLiteralExprSyntax.self) == true {
                 value = ".string(\(constant.name))"
             } else if let reference = constant.value?.as(DeclReferenceExprSyntax.self),
                       names.contains(reference.baseName.text) {
@@ -513,7 +525,9 @@ public struct ObjCConstantsMacro: MemberMacro, ExtensionMacro {
                 ]
             }
             """]
-        for constant in constants {
+        for constant in constants where constant.type.map({ integers.contains($0) || ["Float", "Double", "CGFloat", "TimeInterval"].contains($0) }) != true
+            && constant.value.map({ !$0.is(IntegerLiteralExprSyntax.self) && !$0.is(FloatLiteralExprSyntax.self)
+                                    && !$0.is(PrefixOperatorExprSyntax.self) }) ?? true {
             members.append("""
                 /// \(raw: constant.name)'s exported object.
                 \(raw: access)static var \(raw: constant.name)Object: UnsafeMutableRawPointer {
