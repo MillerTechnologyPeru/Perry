@@ -419,3 +419,121 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
         }
     }
 }
+
+@Suite struct ObjCProtocolMacroTests {
+
+    private let specs: [String: MacroSpec] = [
+        "ObjCProtocol": MacroSpec(type: ObjCProtocolMacro.self),
+        "ObjCRequired": MacroSpec(type: ObjCRequirementMacro.self),
+        "ObjCOptional": MacroSpec(type: ObjCRequirementMacro.self),
+    ]
+
+    @Test("@ObjCProtocol makes a wrapper that sends each requirement, and defaults for optional ones")
+    func wrapper() {
+        assertMacroExpansion("""
+            @ObjCProtocol("UIWindowSceneDelegate")
+            public protocol UIWindowSceneDelegate: UISceneDelegate {
+                @ObjCRequired("windowScene")
+                func windowScene() -> UIWindowScene
+
+                @ObjCOptional("sceneDidBecomeActive:")
+                func sceneDidBecomeActive(_ scene: UIScene)
+
+                @ObjCOptional("shouldConnect:")
+                func shouldConnect(_ scene: UIScene) -> Bool?
+            }
+            """, expandedSource: """
+            public protocol UIWindowSceneDelegate: UISceneDelegate {
+                func windowScene() -> UIWindowScene
+                func sceneDidBecomeActive(_ scene: UIScene)
+                func shouldConnect(_ scene: UIScene) -> Bool?
+            }
+
+            /// Any object that conforms to UIWindowSceneDelegate, called through messages.
+            open class AnyUIWindowSceneDelegate: AnyUISceneDelegate, UIWindowSceneDelegate {
+                override public class var objCProtocolName: String {
+                    "UIWindowSceneDelegate"
+                }
+
+                public func windowScene() -> UIWindowScene {
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UIWindowScene.ObjCType
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    return UIWindowScene(objCReturnValue: message(objcObject, ObjCRuntime.selector("windowScene")))
+                }
+
+                public func sceneDidBecomeActive(_ scene: UIScene) {
+                    guard responds(to: "sceneDidBecomeActive:") else {
+                        return
+                    }
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UIScene.ObjCType) -> Void
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    message(objcObject, ObjCRuntime.selector("sceneDidBecomeActive:"), scene.objCArgument())
+                }
+
+                public func shouldConnect(_ scene: UIScene) -> Bool? {
+                    guard responds(to: "shouldConnect:") else {
+                        return nil
+                    }
+                    typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UIScene.ObjCType) -> Bool.ObjCType
+                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    return objCOptionalResult(message(objcObject, ObjCRuntime.selector("shouldConnect:"), scene.objCArgument()), as: Bool.self, owned: false)
+                }
+
+                override public class func defineObjCProtocol() {
+                    ObjCRuntime.defineProtocol(named: "UIWindowSceneDelegate", adopting: [AnyUISceneDelegate.objCProtocolName], methods: [
+                        ObjCProtocolMethod("windowScene", types: ObjCTypeEncoding.method(returning: UIWindowScene.self, arguments: []), isRequired: true),
+                        ObjCProtocolMethod("sceneDidBecomeActive:", types: ObjCTypeEncoding.method(returning: nil, arguments: [UIScene.self]), isRequired: false),
+                        ObjCProtocolMethod("shouldConnect:", types: ObjCTypeEncoding.method(returning: Bool.self, arguments: [UIScene.self]), isRequired: false),
+                    ])
+                }
+            }
+
+            /// Optional methods do nothing unless a conformer implements them.
+            extension UIWindowSceneDelegate {
+                public func sceneDidBecomeActive(_ scene: UIScene) {
+                }
+                public func shouldConnect(_ scene: UIScene) -> Bool? {
+                    nil
+                }
+            }
+            """, macroSpecs: specs) { failure in
+            Issue.record(Comment(rawValue: failure.message))
+        }
+    }
+
+    @Test("Optional results must be Optional, and requirements must be instance methods")
+    func diagnostics() {
+        assertMacroExpansion("""
+            @ObjCProtocol("Source")
+            protocol Source {
+                @ObjCOptional("count")
+                func count() -> Int
+
+                @ObjCRequired("shared")
+                static func shared() -> NSObject
+            }
+            """, expandedSource: """
+            protocol Source {
+                func count() -> Int
+                static func shared() -> NSObject
+            }
+
+            /// Any object that conforms to Source, called through messages.
+            class AnySource: ObjCProtocolObject, Source {
+                override class var objCProtocolName: String {
+                    "Source"
+                }
+
+                override class func defineObjCProtocol() {
+                    ObjCRuntime.defineProtocol(named: "Source", adopting: [], methods: [])
+                }
+            }
+            """, diagnostics: [
+                DiagnosticSpec(message: "protocol class methods are not supported yet", line: 6, column: 5),
+                DiagnosticSpec(message: "an optional method returns an Optional, which is nil when the object does not implement it",
+                               line: 4, column: 21),
+            ], macroSpecs: specs) { failure in
+            Issue.record(Comment(rawValue: failure.message))
+        }
+    }
+}
