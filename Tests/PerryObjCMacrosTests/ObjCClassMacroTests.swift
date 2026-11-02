@@ -224,3 +224,56 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
         }
     }
 }
+
+@Suite struct ObjCConstantsMacroTests {
+
+    @Test("@ObjCConstants exports strings, aliases and objects")
+    func constants() {
+        assertMacroExpansion("""
+            @ObjCConstants
+            enum Modes {
+                static let NSDefaultRunLoopMode = "kCFRunLoopDefaultMode"
+                static let kCFRunLoopDefaultMode = NSDefaultRunLoopMode
+                static let kCFNull: UnsafeMutableRawPointer? = makeNull()
+                static var notExported = 0
+            }
+            """, expandedSource: """
+            enum Modes {
+                static let NSDefaultRunLoopMode = "kCFRunLoopDefaultMode"
+                static let kCFRunLoopDefaultMode = NSDefaultRunLoopMode
+                static let kCFNull: UnsafeMutableRawPointer? = makeNull()
+                static var notExported = 0
+
+                static var objCConstants: [(name: String, value: ObjCConstantValue)] {
+                    [
+                        ("NSDefaultRunLoopMode", .string(NSDefaultRunLoopMode)),
+                        ("kCFRunLoopDefaultMode", .alias("NSDefaultRunLoopMode")),
+                        ("kCFNull", .object({
+                                    kCFNull
+                                })),
+                    ]
+                }
+
+                /// NSDefaultRunLoopMode's exported object.
+                static var NSDefaultRunLoopModeObject: UnsafeMutableRawPointer {
+                    ObjCConstantExports.shared.object("NSDefaultRunLoopMode")
+                }
+
+                /// kCFRunLoopDefaultMode's exported object.
+                static var kCFRunLoopDefaultModeObject: UnsafeMutableRawPointer {
+                    ObjCConstantExports.shared.object("kCFRunLoopDefaultMode")
+                }
+
+                /// kCFNull's exported object.
+                static var kCFNullObject: UnsafeMutableRawPointer {
+                    ObjCConstantExports.shared.object("kCFNull")
+                }
+            }
+
+            extension Modes: ObjCConstantTable {
+            }
+            """, macroSpecs: ["ObjCConstants": MacroSpec(type: ObjCConstantsMacro.self, conformances: ["ObjCConstantTable"])]) { failure in
+            Issue.record(Comment(rawValue: failure.message))
+        }
+    }
+}
