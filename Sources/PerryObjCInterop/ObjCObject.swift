@@ -92,6 +92,14 @@ open class NSObject: AnyObjCObject {
 
     open class var objCClassName: String { "NSObject" }
 
+    /// Whether the object implements `selector` (-respondsToSelector:), as
+    /// a caller checks before sending an optional protocol method.
+    public final func responds(to selector: String) -> Bool {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(
+            objcObject, ObjCRuntime.selector("respondsToSelector:"), ObjCRuntime.selector(selector))
+    }
+
     /// The superclass's name; nil for a root class.
     open class var objCSuperclassName: String? { nil }
 
