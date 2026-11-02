@@ -22,6 +22,8 @@ struct PerryObjCMacrosPlugin: CompilerPlugin {
         ObjCConstantsMacro.self,
         ObjCMethodMacro.self,
         ObjCPropertyMacro.self,
+        ObjCProtocolMacro.self,
+        ObjCRequirementMacro.self,
     ]
 }
 
@@ -107,6 +109,8 @@ struct ObjCMethodDeclaration {
     let takesClass: Bool
     /// Has no body: calls the selector rather than implementing it.
     let isCall: Bool
+    /// A protocol requirement marked @ObjCOptional.
+    let isOptional: Bool
 
     var family: SelectorFamily { SelectorFamily(selector) }
 
@@ -124,8 +128,22 @@ struct ObjCMethodDeclaration {
         return nil
     }
 
+    /// A protocol requirement's @ObjCRequired or @ObjCOptional.
+    static func requirementAttribute(in attributes: AttributeListSyntax) -> AttributeSyntax? {
+        for element in attributes {
+            if case .attribute(let attribute) = element,
+               let name = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text,
+               name == "ObjCRequired" || name == "ObjCOptional" {
+                return attribute
+            }
+        }
+        return nil
+    }
+
     init(_ declaration: some DeclSyntaxProtocol, attribute: AttributeSyntax) throws {
-        isClassMethod = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text == "ObjCClassMethod"
+        let attributeName = attribute.attributeName.as(IdentifierTypeSyntax.self)?.name.text
+        isClassMethod = attributeName == "ObjCClassMethod"
+        isOptional = attributeName == "ObjCOptional"
         guard let arguments = attribute.arguments?.as(LabeledExprListSyntax.self),
               let first = arguments.first, first.label == nil,
               let selector = first.expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue,
@@ -157,6 +175,9 @@ struct ObjCMethodDeclaration {
             throw ObjCMacroError("Objective-C methods cannot be async or throw", at: signature)
         }
         let isStatic = modifiers.contains { $0.name.tokenKind == .keyword(.static) || $0.name.tokenKind == .keyword(.class) }
+        if (attributeName == "ObjCRequired" || attributeName == "ObjCOptional") && isStatic {
+            throw ObjCMacroError("protocol class methods are not supported yet", at: attribute)
+        }
         if isClassMethod && !isStatic {
             throw ObjCMacroError("@ObjCClassMethod applies to static functions", at: attribute)
         }
@@ -227,7 +248,7 @@ struct ObjCMethodDeclaration {
 /// consume the receiver, so they get a new reference; results of alloc,
 /// new, copy and init methods are owned.
 func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, value: String)],
-                 returning returnType: String?) -> [String] {
+                 returning returnType: String?, optionalResult: Bool = false) -> [String] {
     let family = SelectorFamily(selector)
     let receiver = toClass ? "self.objCClass.pointer"
         : family == .initializer ? "ObjCRuntime.retain(objcObject)" : "objcObject"
@@ -243,7 +264,10 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
         "let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)",
     ]
     let conversion = family.returnsOwned ? "objCOwned" : "objCReturnValue"
-    if returnType == "Optional<Self>" {
+    if optionalResult, let returnType {
+        // An optional method's result: `returnType` is the Optional's Wrapped.
+        statements.append("return objCOptionalResult(\(send), as: \(returnType).self, owned: \(family.returnsOwned))")
+    } else if returnType == "Optional<Self>" {
         statements.append("return \(send).map { Self(\(conversion): $0) }")
     } else if let returnType {
         statements.append("return \(returnType)(\(conversion): \(send))")
@@ -575,5 +599,166 @@ public struct ObjCPropertyMacro: AccessorMacro {
                                                          arguments: [(typeName, "newValue")], returning: nil)))
         }
         return accessors
+    }
+}
+
+// MARK: - @ObjCProtocol
+
+/// A Swift protocol for an Objective-C protocol. Generates `Any<Name>`, a
+/// class that conforms by sending each requirement's message to the
+/// object it wraps, and default implementations of the optional
+/// requirements, so Swift conformers implement only what they need.
+public struct ObjCProtocolMacro: PeerMacro, ExtensionMacro {
+    struct Requirement {
+        let method: ObjCMethodDeclaration
+        let function: FunctionDeclSyntax
+        /// An optional method's result type without its Optional.
+        let optionalResult: TypeSyntax?
+    }
+
+    struct Parsed {
+        let objCName: String
+        let swiftName: String
+        let access: String
+        /// The refined protocol, whose `Any` class the wrapper inherits.
+        let parent: String?
+        let requirements: [Requirement]
+    }
+
+    /// The protocol's requirements. Only the peer expansion reports
+    /// errors, so each is reported once.
+    static func parse(_ node: AttributeSyntax, _ declaration: some SyntaxProtocol,
+                      in context: some MacroExpansionContext, reporting: Bool = true) -> Parsed? {
+        func report(_ error: ObjCMacroError) {
+            if reporting { error.diagnose(in: context) }
+        }
+        guard let protocolDecl = declaration.as(ProtocolDeclSyntax.self) else {
+            report(ObjCMacroError("@ObjCProtocol applies to a protocol", at: node))
+            return nil
+        }
+        guard let objCName = node.arguments?.as(LabeledExprListSyntax.self)?.first?
+            .expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue else {
+            report(ObjCMacroError("the protocol name must be a string literal", at: node))
+            return nil
+        }
+        let parents = (protocolDecl.inheritanceClause?.inheritedTypes ?? []).map(\.type.trimmedDescription)
+            .filter { $0 != "AnyObject" }
+        if parents.count > 1 {
+            report(ObjCMacroError("an Objective-C protocol here refines at most one other", at: protocolDecl.name))
+            return nil
+        }
+        var requirements: [Requirement] = []
+        for member in protocolDecl.memberBlock.members {
+            guard let function = member.decl.as(FunctionDeclSyntax.self),
+                  let attribute = ObjCMethodDeclaration.requirementAttribute(in: function.attributes),
+                  let method = try? ObjCMethodDeclaration(function, attribute: attribute) else { continue }
+            var optionalResult: TypeSyntax?
+            if method.isOptional, let returnType = method.returnType {
+                if let optional = returnType.as(OptionalTypeSyntax.self) {
+                    optionalResult = optional.wrappedType
+                } else {
+                    report(ObjCMacroError("an optional method returns an Optional, which is nil when the object does not implement it",
+                                   at: returnType))
+                    continue
+                }
+            }
+            requirements.append(Requirement(method: method, function: function, optionalResult: optionalResult))
+        }
+        let isPublic = protocolDecl.modifiers.contains { $0.name.tokenKind == .keyword(.public) }
+        return Parsed(objCName: objCName, swiftName: protocolDecl.name.text, access: isPublic ? "public " : "",
+                      parent: parents.first, requirements: requirements)
+    }
+
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingPeersOf declaration: some DeclSyntaxProtocol,
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        guard let parsed = parse(node, declaration, in: context) else { return [] }
+        let superclass = parsed.parent.map { "Any\($0)" } ?? "ObjCProtocolObject"
+        let classAccess = parsed.access.isEmpty ? "" : "open "
+        var members: [String] = [
+            "override \(parsed.access)class var objCProtocolName: String { \(literal(parsed.objCName)) }",
+        ]
+
+        var descriptions: [String] = []
+        for requirement in parsed.requirements {
+            let method = requirement.method
+            let result = requirement.optionalResult.map { metatype($0, selfType: nil) }
+                ?? method.returnType.map { metatype($0, selfType: nil) }
+            let types = method.explicitTypes.map(literal) ?? "ObjCTypeEncoding.method(returning: "
+                + (result.map { "\($0).self" } ?? "nil") + ", arguments: ["
+                + method.arguments.map { "\(metatype($0.type, selfType: nil)).self" }.joined(separator: ", ") + "])"
+            descriptions.append("ObjCProtocolMethod(\(literal(method.selector)), types: \(types), isRequired: \(!method.isOptional))")
+
+            let arguments = method.parameters.map { parameter in
+                (type: metatype(parameter.type, selfType: nil), value: (parameter.secondName ?? parameter.firstName).text)
+            }
+            var body = messageSend(method.selector, toClass: false, arguments: arguments, returning: result,
+                                   optionalResult: requirement.optionalResult != nil)
+            if method.isOptional {
+                let fallback = method.returnType == nil ? "return" : "return nil"
+                body.insert("guard responds(to: \(literal(method.selector))) else { \(fallback) }", at: 0)
+            }
+            let signature = requirement.function.signature.trimmedDescription
+            members.append("\(parsed.access)func \(method.name)\(signature) {\n"
+                + body.map { "    " + $0 }.joined(separator: "\n") + "\n}")
+        }
+        let adopted = parsed.parent.map { "[Any\($0).objCProtocolName]" } ?? "[]"
+        let methods = descriptions.isEmpty ? "[]"
+            : "[\n" + descriptions.map { "        " + $0 + ",\n" }.joined() + "    ]"
+        members.append("""
+            override \(parsed.access)class func defineObjCProtocol() {
+                ObjCRuntime.defineProtocol(named: \(literal(parsed.objCName)), adopting: \(adopted), methods: \(methods))
+            }
+            """)
+        return ["""
+            /// Any object that conforms to \(raw: parsed.objCName), called through messages.
+            \(raw: classAccess)class Any\(raw: parsed.swiftName): \(raw: superclass), \(raw: parsed.swiftName) {
+            \(raw: members.joined(separator: "\n\n"))
+            }
+            """]
+    }
+
+    public static func expansion(
+        of node: AttributeSyntax,
+        attachedTo declaration: some DeclGroupSyntax,
+        providingExtensionsOf type: some TypeSyntaxProtocol,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [ExtensionDeclSyntax] {
+        guard let parsed = parse(node, declaration, in: context, reporting: false) else { return [] }
+        let defaults = parsed.requirements.filter(\.method.isOptional).map { requirement in
+            let signature = requirement.function.signature.trimmedDescription
+            let body = requirement.method.returnType == nil ? "" : " nil "
+            return "    \(parsed.access)func \(requirement.method.name)\(signature) {\(body)}"
+        }
+        guard !defaults.isEmpty else { return [] }
+        return [try ExtensionDeclSyntax("""
+            /// Optional methods do nothing unless a conformer implements them.
+            extension \(type.trimmed) {
+            \(raw: defaults.joined(separator: "\n"))
+            }
+            """)]
+    }
+}
+
+/// @ObjCRequired and @ObjCOptional: a protocol requirement's selector.
+/// They only check the requirement; @ObjCProtocol reads them.
+public struct ObjCRequirementMacro: PeerMacro {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingPeersOf declaration: some DeclSyntaxProtocol,
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
+        do {
+            let method = try ObjCMethodDeclaration(declaration, attribute: node)
+            if !method.isCall {
+                throw ObjCMacroError("a protocol requirement has no body", at: node)
+            }
+        } catch let error as ObjCMacroError {
+            error.diagnose(in: context)
+        }
+        return []
     }
 }
