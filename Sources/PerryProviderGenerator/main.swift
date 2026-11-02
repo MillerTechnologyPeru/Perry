@@ -5,8 +5,8 @@
 // Reads every @ObjCClass class, @ObjCCategory extension and @ObjCConstants
 // type in the sources and writes perry_provider_startup, which defines the
 // classes (superclasses first), adds the categories and exports the
-// constants, and perry_provider_symbol, which hands the loader the
-// constants' slots. Optional global functions add provider steps:
+// constants, and perry_provider_symbol, which hands the loader storage for
+// the classes and slots for the constants. Optional global functions add provider steps:
 //
 //     func providerWillStart(_ info: perry_startup_info) -> Bool  // before; false stops
 //     func providerDidStart(_ info: perry_startup_info)           // after
@@ -20,6 +20,7 @@ import SwiftSyntax
 
 struct ClassDeclaration {
     let name: String
+    let objCName: String
     let superclass: String?
     let hasSetUp: Bool
 }
@@ -49,12 +50,15 @@ final class Collector: SyntaxVisitor {
     }
 
     override func visit(_ node: ClassDeclSyntax) -> SyntaxVisitorContinueKind {
-        if attribute("ObjCClass", in: node.attributes) != nil {
+        if let objCClass = attribute("ObjCClass", in: node.attributes),
+           let objCName = objCClass.arguments?.as(LabeledExprListSyntax.self)?.first?
+               .expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue {
             let hasSetUp = node.memberBlock.members.contains {
                 $0.decl.as(FunctionDeclSyntax.self)?.name.text == "didDefineObjCClass"
             }
             classes.append(ClassDeclaration(
                 name: node.name.text,
+                objCName: objCName,
                 superclass: node.inheritanceClause?.inheritedTypes.first?.type.trimmedDescription,
                 hasSetUp: hasSetUp))
         }
@@ -135,6 +139,16 @@ var lines: [String] = [
 ]
 
 let constants = collector.constantTables.sorted()
+let classes = superclassesFirst(collector.classes)
+if !classes.isEmpty {
+    lines += [
+        "/// The Objective-C classes this module defines.",
+        "private let perryObjCClassNames: [String] = [",
+    ] + classes.map { "    \"\($0.objCName)\"," } + [
+        "]",
+        "",
+    ]
+}
 if !constants.isEmpty {
     lines += [
         "/// The constant tables of this module's @ObjCConstants types.",
@@ -142,15 +156,32 @@ if !constants.isEmpty {
     ] + constants.map { "    \($0).self," } + [
         "]",
         "",
-        "/// Hands the loader a slot for each exported constant while images bind.",
+    ]
+}
+if !classes.isEmpty || !constants.isEmpty {
+    lines += [
+        "/// Hands the loader storage for each class and a slot for each constant",
+        "/// while images bind.",
         "@c",
         "public func perry_provider_symbol(_ name: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {",
         "    guard let name else { return nil }",
-        "    ObjCConstantExports.shared.register(perryObjCConstantTables)",
-        "    return ObjCConstantExports.shared.symbol(String(cString: name))",
-        "}",
-        "",
+        "    let symbol = String(cString: name)",
     ]
+    if !classes.isEmpty {
+        lines += [
+            "    ObjCClassExports.shared.register(perryObjCClassNames)",
+            "    if let storage = ObjCClassExports.shared.symbol(symbol) { return storage }",
+        ]
+    }
+    if !constants.isEmpty {
+        lines += [
+            "    ObjCConstantExports.shared.register(perryObjCConstantTables)",
+            "    return ObjCConstantExports.shared.symbol(symbol)",
+        ]
+    } else {
+        lines.append("    return nil")
+    }
+    lines += ["}", ""]
 }
 
 lines += [
@@ -163,7 +194,6 @@ lines += [
 if collector.hasWillStart {
     lines.append("    guard providerWillStart(info.pointee) else { return }")
 }
-let classes = superclassesFirst(collector.classes)
 if !classes.isEmpty {
     lines += ["", "    // Classes, superclasses first."]
     for declaration in classes {
