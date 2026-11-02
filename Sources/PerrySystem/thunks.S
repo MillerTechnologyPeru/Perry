@@ -59,6 +59,43 @@ VARIADIC _syslog, vsyslog, 2
 // The v* variants take a Darwin va_list (a plain pointer to stack slots)
 // and are implemented in stdio.c.
 
+
+// File descriptors, threads and sockets whose ABIs agree. Calls that take
+// socket addresses or options are converted in sockets.c.
+PASSTHROUGH _read, read
+PASSTHROUGH _write, write
+PASSTHROUGH _close, close
+PASSTHROUGH _pread, pread
+PASSTHROUGH _pwrite, pwrite
+PASSTHROUGH _lseek, lseek
+PASSTHROUGH _dup, dup
+PASSTHROUGH _dup2, dup2
+PASSTHROUGH _pipe, pipe
+PASSTHROUGH _fsync, fsync
+PASSTHROUGH _unlink, unlink
+PASSTHROUGH _rmdir, rmdir
+PASSTHROUGH _isatty, isatty
+PASSTHROUGH _listen, listen
+PASSTHROUGH _shutdown, shutdown
+PASSTHROUGH _poll, poll
+PASSTHROUGH _inet_addr, inet_addr
+PASSTHROUGH _inet_ntoa, inet_ntoa
+PASSTHROUGH _sched_yield, sched_yield
+PASSTHROUGH _pthread_create, pthread_create
+PASSTHROUGH _pthread_join, pthread_join
+PASSTHROUGH _pthread_detach, pthread_detach
+PASSTHROUGH _pthread_self, pthread_self
+PASSTHROUGH _pthread_equal, pthread_equal
+
+// ___chkstk_darwin probes each page of a large stack frame, which Darwin
+// needs below its guard pages; Linux grows stacks on its own.
+    .globl ___chkstk_darwin
+    .type ___chkstk_darwin, %function
+    .p2align 2
+___chkstk_darwin:
+    ret
+    .size ___chkstk_darwin, . - ___chkstk_darwin
+
 PASSTHROUGH _puts, puts
 PASSTHROUGH _putchar, putchar
 PASSTHROUGH _fputs, fputs
