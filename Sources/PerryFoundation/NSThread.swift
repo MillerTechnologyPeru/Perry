@@ -114,7 +114,7 @@ enum Threads {
 
     static func install(superclass: Class) {
         mainThread = pthread_self()
-        threadClass = NSThread.defineObjCClass(StorageAllocated.registerObjCMethods).storage
+        threadClass = NSThread.defineObjCClass(NSObject.registerObjCCategoryStorageAllocated).storage
         main = make(ThreadStorage(isMain: true))
         storage(main)?.name = "main"
         storage(main)?.isExecuting = true
@@ -247,8 +247,8 @@ public final class NSThread: NSObject {
 }
 
 /// NSObject's thread performs, which Foundation adds.
-@ObjCClass("NSObject")
-final class ThreadPerforms: NSObject {
+@ObjCCategory("ThreadPerforms")
+extension NSObject {
     @ObjCMethod("performSelectorOnMainThread:withObject:waitUntilDone:")
     func performOnMain(_ selector: ObjCSelector, with argument: ObjCObject?, waitUntilDone wait: Bool) {
         Threads.performOnMain(objcObject, selector.pointer.assumingMemoryBound(to: CChar.self), argument?.id, wait: wait)
