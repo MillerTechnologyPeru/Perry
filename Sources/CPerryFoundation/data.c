@@ -188,3 +188,45 @@ perry_class_storage *perry_foundation_class_named(const char *name, perry_class_
 
 perry_class_storage *perry_foundation_class(perry_foundation_class_id which) { return classes[which][0]; }
 perry_class_storage *perry_foundation_metaclass(perry_foundation_class_id which) { return classes[which][1]; }
+
+// CoreFoundation's collection callbacks: { version, retain, release,
+// copyDescription, equal, hash }. The functions are Foundation's; a
+// collection given these (or copies of them) is the bridged NS class.
+struct perry_cf_callbacks {
+    long version;
+    const void *retain, *release, *copy_description, *equal, *hash;
+};
+
+extern const void *perry_foundation_cf_retain(const void *, const void *);
+extern const void *perry_foundation_cf_copy_string(const void *, const void *);
+extern void perry_foundation_cf_release(const void *, const void *);
+extern const void *perry_foundation_cf_copy_description(const void *);
+extern unsigned char perry_foundation_cf_equal(const void *, const void *);
+extern unsigned long perry_foundation_cf_hash(const void *);
+
+#define CF_CALLBACKS(retain, hash) \
+    { 0, (const void *)retain, (const void *)perry_foundation_cf_release, \
+      (const void *)perry_foundation_cf_copy_description, (const void *)perry_foundation_cf_equal, (const void *)hash }
+
+const struct perry_cf_callbacks cf_type_array_callbacks DARWIN_SYMBOL("_kCFTypeArrayCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_retain, 0);
+const struct perry_cf_callbacks cf_type_dictionary_key_callbacks DARWIN_SYMBOL("_kCFTypeDictionaryKeyCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_retain, perry_foundation_cf_hash);
+const struct perry_cf_callbacks cf_copy_string_dictionary_key_callbacks DARWIN_SYMBOL("_kCFCopyStringDictionaryKeyCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_copy_string, perry_foundation_cf_hash);
+const struct perry_cf_callbacks cf_type_dictionary_value_callbacks DARWIN_SYMBOL("_kCFTypeDictionaryValueCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_retain, 0);
+const struct perry_cf_callbacks cf_type_set_callbacks DARWIN_SYMBOL("_kCFTypeSetCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_retain, perry_foundation_cf_hash);
+const struct perry_cf_callbacks cf_copy_string_set_callbacks DARWIN_SYMBOL("_kCFCopyStringSetCallBacks") =
+    CF_CALLBACKS(perry_foundation_cf_copy_string, perry_foundation_cf_hash);
+
+// The default allocators: CoreFoundation's allocator arguments are ignored,
+// so any non-null objects do.
+static long cf_allocator_objects[6][2];
+const void *const cf_allocator_default DARWIN_SYMBOL("_kCFAllocatorDefault") = 0;
+const void *const cf_allocator_system_default DARWIN_SYMBOL("_kCFAllocatorSystemDefault") = &cf_allocator_objects[0];
+const void *const cf_allocator_malloc DARWIN_SYMBOL("_kCFAllocatorMalloc") = &cf_allocator_objects[1];
+const void *const cf_allocator_malloc_zone DARWIN_SYMBOL("_kCFAllocatorMallocZone") = &cf_allocator_objects[2];
+const void *const cf_allocator_null DARWIN_SYMBOL("_kCFAllocatorNull") = &cf_allocator_objects[3];
+const void *const cf_allocator_use_context DARWIN_SYMBOL("_kCFAllocatorUseContext") = &cf_allocator_objects[4];
