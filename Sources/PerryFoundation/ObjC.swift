@@ -180,15 +180,26 @@ enum Storage {
     /// no extra word.
     nonisolated(unsafe) static var staticClasses: Set<Class> = []
 
+    /// The object's state word, when it has one: not a static object's,
+    /// nor that of an object a program allocated itself at its class's
+    /// instance size (JSONKit's JKArray, made with calloc), whose memory
+    /// ends at its ivars. Instances come from malloc, so the allocation's
+    /// usable size tells.
+    private static func slot(_ object: id) -> UnsafeMutableRawPointer? {
+        guard let cls = ObjC.objectGetClass(object), !staticClasses.contains(cls),
+              let slot = ObjC.indexedIvars(object) else { return nil }
+        let end = object.distance(to: slot) + extraBytes
+        return end > 0 && perry_foundation_usable_size(object) >= end ? slot : nil
+    }
+
     static func get<T: AnyObject>(_ object: id?, as type: T.Type) -> T? {
-        guard let object, let cls = ObjC.objectGetClass(object), !staticClasses.contains(cls),
-              let slot = ObjC.indexedIvars(object),
+        guard let object, let slot = slot(object),
               let pointer = slot.load(as: UnsafeRawPointer?.self) else { return nil }
         return Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue() as? T
     }
 
     static func set(_ object: id, _ value: AnyObject?) {
-        guard let slot = ObjC.indexedIvars(object) else { return }
+        guard let slot = slot(object) else { return }
         if let old = slot.load(as: UnsafeRawPointer?.self) {
             Unmanaged<AnyObject>.fromOpaque(old).release()
         }
