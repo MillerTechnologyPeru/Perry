@@ -47,6 +47,13 @@ public enum Runtime {
                 return nil
             }
             let superInfo = cls.pointee.superclass.flatMap { Runtime.info($0) }
+            // A superclass the loader could not find has no class_ro_t, and
+            // its name where the vtable goes.
+            if let superclass = cls.pointee.superclass, superInfo == nil, superclass.pointee.bits == 0,
+               let name = UnsafeRawPointer(superclass).load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
+                let own = ro.pointee.name.map { String(cString: $0) } ?? "?"
+                objcFatal("class \(own) inherits from \(String(cString: name)), which is not available")
+            }
             let info = ClassInfo(cls: cls, ro: ro, superInfo: superInfo)
 
             // Non-fragile ivars: when the superclass grew, move this
