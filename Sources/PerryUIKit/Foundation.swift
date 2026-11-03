@@ -97,6 +97,9 @@ extension NSObject {
     @ObjCMethod("copy")
     func copied() -> NSObject
 
+    @ObjCMethod("description")
+    func describedByObject() -> String?
+
     /// The text of an NSString.
     var stringValue: String { String(objCArgument: objcObject) }
 }
