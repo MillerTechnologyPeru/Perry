@@ -32,6 +32,14 @@ enum PropertyLists {
 
     static let openStep: UInt = 1, xml: UInt = 100, binary: UInt = 200
 
+    /// Writes a collection to a file URL as an XML property list, as
+    /// -writeToFile:atomically: does; false if it holds a value a property
+    /// list cannot.
+    static func write(_ object: id?, to url: URL, atomically: Bool) -> Bool {
+        guard url.isFileURL, let value = value(object) else { return false }
+        return (try? Data(xml(value).utf8).write(to: url, options: atomically ? .atomic : [])) != nil
+    }
+
     // MARK: Objects
 
     /// An object as a property list value; nil if it is not one (NSNull,
