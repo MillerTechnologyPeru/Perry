@@ -235,6 +235,8 @@ const void *const cf_allocator_malloc_zone DARWIN_SYMBOL("_kCFAllocatorMallocZon
 const void *const cf_allocator_null DARWIN_SYMBOL("_kCFAllocatorNull") = &cf_allocator_objects[3];
 const void *const cf_allocator_use_context DARWIN_SYMBOL("_kCFAllocatorUseContext") = &cf_allocator_objects[4];
 
+const void *perry_foundation_cf_allocator(int which) { return &cf_allocator_objects[which]; }
+
 // CoreFoundation's version: iOS 15's.
 const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFoundationVersionNumber") = 1854.0;
 
