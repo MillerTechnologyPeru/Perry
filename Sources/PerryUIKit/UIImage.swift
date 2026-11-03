@@ -160,6 +160,10 @@ open class UIImage: NSObject {
         return CG.imageDestinationFinalize(destination) ? data : nil
     }
 
+    /// Images are immutable, so a copy property holds the image itself.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+
     // MARK: Properties
 
     @ObjCMethod("size") func size() -> CGSize { state.size }
