@@ -71,7 +71,7 @@ enum Screen {
     nonisolated(unsafe) static let orientation: Int = {
         let bundle = NSBundle.main()
         let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
-            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map(\.stringValue) ?? []
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
         if names.isEmpty || names.contains("UIInterfaceOrientationPortrait") { return 1 }
         for name in names {
             if name == "UIInterfaceOrientationLandscapeRight" { return 3 }
@@ -82,7 +82,46 @@ enum Screen {
 
     static var isLandscape: Bool { orientation == 3 || orientation == 4 }
 
-    nonisolated(unsafe) static let bounds = isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844)
+    /// The screen's points; a resizable app's change with its window.
+    nonisolated(unsafe) static var bounds = isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844)
+
+    /// Whether the app runs in a window of any size, as an iPad app that
+    /// supports multitasking does: it supports the iPad, both portrait and
+    /// landscape, and does not require the full screen. PERRY_UIKIT_RESIZABLE
+    /// set to 1 or 0 decides it instead.
+    nonisolated(unsafe) static let isResizable: Bool = {
+        if let setting = getenv("PERRY_UIKIT_RESIZABLE") { return String(cString: setting) != "0" }
+        let bundle = NSBundle.main()
+        let families = bundle.infoObject(forKey: "UIDeviceFamily")?.as(NSArray.self)?.elements.map { $0.sendIntegerValue() } ?? []
+        guard families.contains(2) else { return false }
+        if let required = bundle.infoObject(forKey: "UIRequiresFullScreen"), required.sendIntegerValue() != 0 { return false }
+        let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~ipad")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        let portrait = names.isEmpty || names.contains { $0.hasPrefix("UIInterfaceOrientationPortrait") }
+        let landscape = names.isEmpty || names.contains { $0.hasPrefix("UIInterfaceOrientationLandscape") }
+        return portrait && landscape
+    }()
+
+    /// The screen takes a new size: windows that filled it fill it again,
+    /// their view hierarchies following by autoresizing and layout, and
+    /// root view controllers hear of it first.
+    static func resize(to size: CGSize) {
+        let old = bounds
+        guard size.width > 0, size.height > 0, size != old.size else { return }
+        bounds = CGRect(origin: .zero, size: size)
+        for window in Windows.all.map({ UIWindow(objcObject: $0, ownership: .retain) }) where window.state.frame == old {
+            if let root = window.windowState.rootViewController, root.responds(to: "viewWillTransitionToSize:withTransitionCoordinator:") {
+                root.sendViewWillTransition(to: size, with: nil)
+            }
+            window.sendSetFrame(bounds)
+            window.setNeedsLayout()
+        }
+        Display.markDirty()
+        Updates.schedule()
+    }
+    /// Pixels per point, the iPhone's: apps size what they draw from it (a
+    /// game its renderbuffer and its interface), so it stays three whatever
+    /// the live view's scale.
     static let scale: CGFloat = 3
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
@@ -93,6 +132,8 @@ enum Screen {
     /// iPhone); none is drawn, so by default it has none.
     /// In landscape, beside the sensor housing and above the home indicator.
     nonisolated(unsafe) static let safeAreaInsets: UIEdgeInsets = {
+        // A window on a desktop has no sensor housing or home indicator.
+        if isResizable { return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
         if isLandscape { return UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47) }
         let statusBar = getenv("PERRY_UIKIT_STATUS_BAR_HEIGHT").flatMap { Double(String(cString: $0)) } ?? 0
         return UIEdgeInsets(top: max(statusBar, 0), left: 0, bottom: 34, right: 0)
@@ -802,4 +843,9 @@ enum Autoresizing {
         }
         return (leading + share(parts[0]), max(length + share(parts[1]), 0))
     }
+}
+
+extension NSObject {
+    @ObjCMethod("viewWillTransitionToSize:withTransitionCoordinator:")
+    func sendViewWillTransition(to size: CGSize, with coordinator: NSObject?)
 }
