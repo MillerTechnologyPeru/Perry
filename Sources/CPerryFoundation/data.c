@@ -89,6 +89,8 @@ perry_class_storage ns_user_defaults DARWIN_SYMBOL("_OBJC_CLASS_$_NSUserDefaults
 perry_class_storage ns_user_defaults_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUserDefaults");
 perry_class_storage ns_file_manager DARWIN_SYMBOL("_OBJC_CLASS_$_NSFileManager");
 perry_class_storage ns_file_manager_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSFileManager");
+perry_class_storage ns_user_activity DARWIN_SYMBOL("_OBJC_CLASS_$_NSUserActivity");
+perry_class_storage ns_user_activity_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSUserActivity");
 
 
 // Collection literals whose elements are all constants.
@@ -139,6 +141,7 @@ static perry_class_storage *const classes[PERRY_CLASS_COUNT][2] = {
     [PERRY_CLASS_NSThread] = { &ns_thread, &ns_thread_meta },
     [PERRY_CLASS_NSUserDefaults] = { &ns_user_defaults, &ns_user_defaults_meta },
     [PERRY_CLASS_NSFileManager] = { &ns_file_manager, &ns_file_manager_meta },
+    [PERRY_CLASS_NSUserActivity] = { &ns_user_activity, &ns_user_activity_meta },
 };
 
 void *perry_foundation_boolean(int value) { return value ? (void *)&boolean_true : (void *)&boolean_false; }
@@ -178,6 +181,7 @@ static const char *const class_names[PERRY_CLASS_COUNT] = {
     [PERRY_CLASS_NSThread] = "NSThread",
     [PERRY_CLASS_NSUserDefaults] = "NSUserDefaults",
     [PERRY_CLASS_NSFileManager] = "NSFileManager",
+    [PERRY_CLASS_NSUserActivity] = "NSUserActivity",
 };
 
 perry_class_storage *perry_foundation_class_named(const char *name, perry_class_storage **metaclass) {
