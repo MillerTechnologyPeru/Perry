@@ -93,7 +93,15 @@ enum DataObjects {
     }
 
     static func data(_ object: id?) -> Data {
-        storage(object)?.data ?? Data()
+        guard let object else { return Data() }
+        // Another library's subclass, such as Swift's bridged Data, keeps its
+        // own bytes, even when it was made with NSData's -init.
+        let foreign = ObjC.overrides(object, Selectors.length, of: dataClass)
+            && ObjC.overrides(object, Selectors.length, of: mutableClass)
+        if !foreign { return storage(object)?.data ?? Data() }
+        let length = Int(ObjC.sendUInt(object, Selectors.length))
+        guard length > 0, let bytes = ObjC.sendPointer(object, Selectors.bytes) else { return Data() }
+        return Data(bytes: bytes, count: length)
     }
 
     static func make(_ storage: DataStorage, cls: id? = nil) -> id? {
