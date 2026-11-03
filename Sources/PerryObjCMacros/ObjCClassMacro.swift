@@ -12,6 +12,12 @@ import SwiftSyntaxMacros
 // registerObjCMethods(_:). A method function without a body calls the
 // selector instead: the method macros give it a body that sends the message,
 // as @ObjCProperty does for a property's accessors.
+//
+// An @ObjCMethod initializer implements an -init method, as Swift's
+// initializers do on Darwin: its thunk runs the initializer of the
+// receiver's Swift class (ObjCPeers.initializing), which makes the Swift
+// object that is the object. A class with such initializers has deinit
+// rather than a -dealloc method.
 
 @main
 struct PerryObjCMacrosPlugin: CompilerPlugin {
@@ -111,6 +117,13 @@ struct ObjCMethodDeclaration {
     let isCall: Bool
     /// A protocol requirement marked @ObjCOptional.
     let isOptional: Bool
+    /// A Swift initializer for an -init method.
+    let isInitializer: Bool
+    /// An initializer that can fail, `init?`.
+    let isFailable: Bool
+    /// A `required` initializer, which subclasses inherit or override, so
+    /// it can build the receiver's own class.
+    let isRequired: Bool
 
     var family: SelectorFamily { SelectorFamily(selector) }
 
@@ -161,12 +174,31 @@ struct ObjCMethodDeclaration {
             modifiers = function.modifiers
             name = function.name.text
             isCall = function.body == nil
+            (isInitializer, isFailable, isRequired) = (false, false, false)
             if function.genericParameterClause != nil {
                 throw ObjCMacroError("Objective-C methods cannot be generic", at: function.name)
             }
         } else if let initializer = declaration.as(InitializerDeclSyntax.self) {
-            throw ObjCMacroError("implement init methods as functions that return Self, not as Swift initializers",
-                                 at: initializer.initKeyword)
+            signature = initializer.signature
+            modifiers = initializer.modifiers
+            name = "init"
+            isCall = false
+            isInitializer = true
+            isFailable = initializer.optionalMark != nil
+            isRequired = initializer.modifiers.contains { $0.name.tokenKind == .keyword(.required) }
+            if attributeName != "ObjCMethod" {
+                throw ObjCMacroError("an initializer implements an -init instance method; mark it @ObjCMethod", at: attribute)
+            }
+            if SelectorFamily(selector) != .initializer {
+                throw ObjCMacroError("an initializer implements an -init method; '\(selector)' is not one", at: attribute)
+            }
+            if initializer.modifiers.contains(where: { $0.name.tokenKind == .keyword(.convenience) }) {
+                throw ObjCMacroError("a convenience initializer cannot be an -init method; make it designated, or a method that sends the -init it delegates to",
+                                     at: initializer.initKeyword)
+            }
+            if initializer.body == nil {
+                throw ObjCMacroError("an initializer needs a body", at: initializer.initKeyword)
+            }
         } else {
             throw ObjCMacroError("@ObjCMethod applies to functions and initializers", at: attribute)
         }
@@ -205,7 +237,8 @@ struct ObjCMethodDeclaration {
         }
     }
 
-    /// The C signature of the method: receiver, _cmd, then arguments.
+    /// The C signature of the method: receiver, _cmd, then arguments; an
+    /// initializer returns the object.
     func cSignature(selfType: String?) -> String {
         let arguments = arguments.map { "\(metatype($0.type, selfType: selfType)).ObjCType" }
         return "@convention(c) (" + (["UnsafeMutableRawPointer?", "UnsafeRawPointer?"] + arguments).joined(separator: ", ")
@@ -213,13 +246,14 @@ struct ObjCMethodDeclaration {
     }
 
     func cReturnType(selfType: String?) -> String {
+        if isInitializer { return "UnsafeMutableRawPointer?" }
         return returnType.map { "\(metatype($0, selfType: selfType)).ObjCType" } ?? "Void"
     }
 
     /// `ObjCTypeEncoding.method(…)`, or the explicit encoding.
     func typesExpression(selfType: String?) -> String {
         if let explicitTypes { return literal(explicitTypes) }
-        let result = returnType.map { "\(metatype($0, selfType: selfType)).self" } ?? "nil"
+        let result = isInitializer ? "\(selfType ?? "NSObject").self" : returnType.map { "\(metatype($0, selfType: selfType)).self" } ?? "nil"
         let arguments = arguments.map { "\(metatype($0.type, selfType: selfType)).self" }
         return "ObjCTypeEncoding.method(returning: \(result), arguments: [\(arguments.joined(separator: ", "))])"
     }
@@ -263,14 +297,14 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
         "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cType) ?? "Void")",
         "let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)",
     ]
-    let conversion = family.returnsOwned ? "objCOwned" : "objCReturnValue"
+    let conversion = family.returnsOwned ? "owned" : "returnValue"
     if optionalResult, let returnType {
         // An optional method's result: `returnType` is the Optional's Wrapped.
         statements.append("return objCOptionalResult(\(send), as: \(returnType).self, owned: \(family.returnsOwned))")
     } else if returnType == "Optional<Self>" {
-        statements.append("return \(send).map { Self(\(conversion): $0) }")
+        statements.append("return \(send).map { Self.objCValue(\(conversion): $0) }")
     } else if let returnType {
-        statements.append("return \(returnType)(\(conversion): \(send))")
+        statements.append("return \(returnType).objCValue(\(conversion): \(send))")
     } else {
         statements.append(send)
     }
@@ -305,11 +339,36 @@ public struct ObjCClassMacro: MemberMacro {
             return []
         }
         let access = accessLevel(of: classDecl)
-        return [
+        var members: [DeclSyntax] = [
             "\(raw: access)override class var objCClassName: String { \(literal: className) }",
             "\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }",
             registerMethods(classDecl, access: access),
         ]
+        // A class with designated initializers does not inherit the one that
+        // wraps an object of a class that has no Swift object; it gets it.
+        let initializers = classDecl.memberBlock.members.compactMap { $0.decl.as(InitializerDeclSyntax.self) }
+        let designated = initializers.filter { !$0.modifiers.contains { $0.name.tokenKind == .keyword(.convenience) } }
+        let declaresWrapping = initializers.contains { $0.signature.parameterClause.parameters.first?.firstName.text == "objcObject" }
+        if !designated.isEmpty, !declaresWrapping {
+            members.append("""
+                \(raw: access)required init(objcObject: UnsafeMutableRawPointer, ownership: ObjCOwnership) {
+                    super.init(objcObject: objcObject, ownership: ownership)
+                }
+                """)
+        }
+        let implementsInit = initializers.contains { initializer in
+            ObjCMethodDeclaration.attribute(in: initializer.attributes) != nil
+        }
+        if implementsInit {
+            for member in classDecl.memberBlock.members {
+                guard let function = member.decl.as(FunctionDeclSyntax.self),
+                      let attribute = ObjCMethodDeclaration.attribute(in: function.attributes),
+                      let method = try? ObjCMethodDeclaration(function, attribute: attribute), method.selector == "dealloc" else { continue }
+                ObjCMacroError("a class with Swift initializers ends its objects in deinit, not -dealloc", at: attribute)
+                    .diagnose(in: context)
+            }
+        }
+        return members
     }
 
     static func accessLevel(of classDecl: ClassDeclSyntax) -> String {
@@ -345,9 +404,20 @@ public struct ObjCClassMacro: MemberMacro {
         for (index, parameter) in method.arguments.enumerated() {
             let type = metatype(parameter.type, selfType: typeName)
             closureParameters.append("a\(index): \(type).ObjCType")
-            values.append("\(type)(objCArgument: a\(index))")
+            values.append("\(type).objCValue(argument: a\(index))")
         }
         let returnType = method.cReturnType(selfType: typeName)
+
+        if method.isInitializer {
+            // The receiver's Swift class, when the initializer is required.
+            let make = method.isRequired ? "type.init(\(method.callArguments(values)))" : "\(typeName)(\(method.callArguments(values)))"
+            let parameter = method.isRequired ? "type" : "_"
+            let body = "ObjCPeers.initializing(receiver!, \(typeName).self, required: \(method.isRequired)) { \(parameter) in \(make) }"
+            let thunk = "{ (\(closureParameters.joined(separator: ", "))) -> \(returnType) in \(body) } as "
+                + method.cSignature(selfType: typeName)
+            return "registrar.addMethod(\(literal(method.selector)), types: \(method.typesExpression(selfType: typeName)), "
+                + "implementation: unsafeBitCast(\(thunk), to: UnsafeRawPointer.self), isClassMethod: false)"
+        }
 
         var body: [String] = []
         let target: String
@@ -362,7 +432,7 @@ public struct ObjCClassMacro: MemberMacro {
             case .memoryManagement: ownership = ".borrow"
             default: ownership = ".retain"
             }
-            body.append("let this = \(typeName)(objcObject: receiver!, ownership: \(ownership))")
+            body.append("let this = \(typeName).objCInstance(receiver!, ownership: \(ownership))")
             target = "this"
         }
         let call = "\(target).\(method.name)(\(method.callArguments(values)))"
