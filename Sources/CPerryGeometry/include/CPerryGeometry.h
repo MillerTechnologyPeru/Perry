@@ -30,4 +30,14 @@ typedef struct UIEdgeInsets {
     double top, left, bottom, right;
 } UIEdgeInsets;
 
+// GLKit's vectors, quaternions and matrices: floats, the matrices in
+// column-major order, as unions of these layouts are on Darwin.
+typedef struct GLKVector2 { float v[2]; } GLKVector2;
+typedef struct GLKVector3 { float v[3]; } GLKVector3;
+typedef struct GLKVector4 { float v[4]; } GLKVector4;
+typedef struct GLKQuaternion { float q[4]; } GLKQuaternion;
+typedef struct GLKMatrix2 { float m[4]; } GLKMatrix2;
+typedef struct GLKMatrix3 { float m[9]; } GLKMatrix3;
+typedef struct GLKMatrix4 { float m[16]; } GLKMatrix4;
+
 #endif
