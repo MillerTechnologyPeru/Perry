@@ -149,8 +149,12 @@ public final class NSDate: NSObject {
     @ObjCMethod("timeIntervalSinceNow")
     func sinceNow() -> Double { date.timeIntervalSinceNow }
 
+    /// A nil date counts as the reference date, as a message to nil gives 0
+    /// on Darwin; so for -compare:, -earlierDate: and -laterDate:.
     @ObjCMethod("timeIntervalSinceDate:")
-    func since(_ other: NSDate) -> Double { date.timeIntervalSince(other.date) }
+    func since(_ other: NSDate?) -> Double { date.timeIntervalSince(NSDate.orReference(other)) }
+
+    private static func orReference(_ other: NSDate?) -> Date { other?.date ?? Date(timeIntervalSinceReferenceDate: 0) }
 
     @ObjCMethod("dateByAddingTimeInterval:")
     func adding(_ seconds: Double) -> NSDate { Dates.wrapped(date.addingTimeInterval(seconds)) }
@@ -158,7 +162,10 @@ public final class NSDate: NSObject {
     // MARK: Comparing
 
     @ObjCMethod("compare:")
-    func compare(_ other: NSDate) -> Int { date < other.date ? -1 : (date > other.date ? 1 : 0) }
+    func compare(_ other: NSDate?) -> Int {
+        let other = NSDate.orReference(other)
+        return date < other ? -1 : (date > other ? 1 : 0)
+    }
 
     @ObjCMethod("isEqualToDate:")
     func isEqual(toDate other: NSDate?) -> Bool { other?.date == date }
@@ -173,10 +180,16 @@ public final class NSDate: NSObject {
     func hash() -> UInt { UInt(bitPattern: date.hashValue) }
 
     @ObjCMethod("earlierDate:")
-    func earlier(_ other: NSDate) -> NSDate { other.date < date ? other : self }
+    func earlier(_ other: NSDate?) -> NSDate {
+        guard let other else { return self }
+        return other.date < date ? other : self
+    }
 
     @ObjCMethod("laterDate:")
-    func later(_ other: NSDate) -> NSDate { other.date > date ? other : self }
+    func later(_ other: NSDate?) -> NSDate {
+        guard let other else { return self }
+        return other.date > date ? other : self
+    }
 
     @ObjCMethod("description")
     func description() -> String { Dates.description(date) }
