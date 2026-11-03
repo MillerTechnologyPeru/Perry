@@ -107,6 +107,18 @@ typedef struct perry_ivar {
     uint32_t size;
 } perry_ivar;
 
+// objc_method_description and objc_property_attribute_t, returned and
+// filled in by value.
+typedef struct perry_method_description {
+    const char *name;
+    const char *types;
+} perry_method_description;
+
+typedef struct perry_property_attribute {
+    const char *name;
+    const char *value;
+} perry_property_attribute;
+
 // MARK: - Runtime state read by objc_msgSend
 
 // What a realized class's `cache` points to. objc_msgSend loads `cache`
