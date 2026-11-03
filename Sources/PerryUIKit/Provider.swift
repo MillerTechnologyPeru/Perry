@@ -29,6 +29,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     }
     guard Updates.load(symbol) else { uikitFatal("UIKit needs libdispatch's main queue") }
     Display.load(symbol)
+    Accessibility.load { symbol(libobjc, $0) }
     return true
 }
 
@@ -50,6 +51,15 @@ enum Constants {
             "_UITableViewAutomaticDimension": value(CGFloat(-1)),
             "_UIViewNoIntrinsicMetric": value(CGFloat(-1)),
             "_UIEdgeInsetsZero": value(UIEdgeInsets.zero),
+            "_UIOffsetZero": value(CGSize.zero),
+            "_UIWindowLevelNormal": value(CGFloat(0)),
+            "_UIWindowLevelStatusBar": value(CGFloat(1000)),
+            "_UIWindowLevelAlert": value(CGFloat(2000)),
+            "_UIBackgroundTaskInvalid": value(UInt(0)),
+            // UIAccessibilityNotifications.
+            "_UIAccessibilityScreenChangedNotification": value(UInt32(1000)),
+            "_UIAccessibilityLayoutChangedNotification": value(UInt32(1001)),
+            "_UIAccessibilityAnnouncementNotification": value(UInt32(1008)),
             "_UILayoutFittingCompressedSize": value(CGSize.zero),
             "_UILayoutFittingExpandedSize": value(CGSize(width: 1e7, height: 1e7)),
             "_UIFontWeightUltraLight": value(CGFloat(-0.8)),
@@ -81,3 +91,8 @@ enum Classes {
         name.withCString { ObjCRuntime.functions.getClass($0) }.map(ObjCClass.init)
     }
 }
+
+/// void UIAccessibilityPostNotification(UIAccessibilityNotifications, id):
+/// there is no assistive technology to tell.
+@c(_UIAccessibilityPostNotification)
+public func UIAccessibilityPostNotification(_ notification: UInt32, _ argument: UnsafeMutableRawPointer?) {}
