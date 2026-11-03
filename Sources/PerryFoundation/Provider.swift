@@ -24,6 +24,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard loaded, "NSObject".withCString({ ObjC.getClass($0) }) != nil else {
         foundationFatal("Foundation needs libPerryobjc, which is missing or incomplete")
     }
+    Exceptions.load { name in libobjc.withCString { library in name.withCString { lookup(library, $0) } } }
     let libSystem = { (name: String) in
         "/usr/lib/libSystem.B.dylib".withCString { library in name.withCString { lookup(library, $0) } }
     }
@@ -36,7 +37,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 
 /// Writes one NSLog line to stderr in Foundation's format:
 /// "2026-11-01 21:30:00.123 App[pid:tid] message".
-private func log(_ message: String) {
+func log(_ message: String) {
     var now = timespec()
     clock_gettime(CLOCK_REALTIME, &now)
     var seconds = now.tv_sec
