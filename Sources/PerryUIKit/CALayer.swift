@@ -477,10 +477,13 @@ extension CALayer {
     /// Displays a layer that draws when it needs to.
     static func displayIfNeeded(_ layer: CALayer) {
         let state = layer.state
-        // A navigation bar draws its items, which change without telling it.
+        // Navigation and tab bars draw their items, which change without
+        // telling them.
         let redraws = state.delegate.map {
             ObjCRuntime.isKind($0, of: UINavigationBar.objCClass.pointer)
-                && UINavigationBar(objcObject: $0, ownership: .retain).contentChanged()
+                ? UINavigationBar(objcObject: $0, ownership: .retain).contentChanged()
+                : ObjCRuntime.isKind($0, of: UITabBar.objCClass.pointer)
+                    && UITabBar(objcObject: $0, ownership: .retain).contentChanged()
         } ?? false
         let undrawn = state.backing == nil && !state.displayedByDelegate
         if layer.draws, redraws || state.needsDisplay || undrawn || state.backingSize != state.bounds.size {
@@ -557,6 +560,12 @@ extension NSObject {
 @ObjCConstants
 enum LayerConstants {
     static let kCAGravityCenter = "center"
+    static let kCALineCapButt = "butt"
+    static let kCALineCapRound = "round"
+    static let kCALineCapSquare = "square"
+    static let kCALineJoinMiter = "miter"
+    static let kCALineJoinRound = "round"
+    static let kCALineJoinBevel = "bevel"
     static let kCAGravityTop = "top"
     static let kCAGravityBottom = "bottom"
     static let kCAGravityLeft = "left"
