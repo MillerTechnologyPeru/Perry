@@ -1,22 +1,26 @@
 import CPerryGeometry
 import PerryObjCInterop
 
-// CLLocationManager, with no location to give: location services are on,
-// but the app is denied them, as when a user declines. Asking for
-// authorization changes it from not determined to denied; updates,
-// region monitoring and beacon ranging fail with kCLErrorDenied. The
-// delegate hears of each on the main queue, as on Darwin.
+// CLLocationManager, at a fixed location (FakeLocation): the user allows
+// the app what it asks for, and updates deliver the location once, on the
+// main queue, as on Darwin. Apps of iOS 7 and before, which start updates
+// without asking, are allowed when they do. With no location, the user
+// declines and updates fail with kCLErrorDenied. Region monitoring and
+// beacon ranging always fail.
 
-/// CLAuthorizationStatus: not determined 0, denied 2.
+/// CLAuthorizationStatus: not determined 0, denied 2, authorized always 3,
+/// authorized when in use 4.
 enum Authorization {
     nonisolated(unsafe) static var status: Int32 = 0
+
+    static var allowed: Bool { status == 3 || status == 4 }
 }
 
 /// CLError codes.
 private enum LocationError {
-    static let locationUnknown = 0
     static let denied = 1
     static let regionMonitoringDenied = 4
+    static let regionMonitoringFailure = 5
     static let rangingUnavailable = 16
 }
 
@@ -99,7 +103,8 @@ open class CLLocationManager: NSObject {
     @ObjCMethod("purpose") func purpose() -> String? { manager.purpose }
     @ObjCMethod("setPurpose:") func setPurpose(_ purpose: String?) { manager.purpose = purpose }
 
-    @ObjCMethod("location") func location() -> NSObject? { nil }
+    /// The last location delivered.
+    @ObjCMethod("location") func location() -> NSObject? { Authorization.allowed ? FakeLocation.location() : nil }
     @ObjCMethod("heading") func heading() -> NSObject? { nil }
     @ObjCMethod("maximumRegionMonitoringDistance") func maximumRegionMonitoringDistance() -> Double { -1 }
     @ObjCMethod("monitoredRegions") func monitoredRegions() -> NSObject { NSMutableSet.of(manager.monitoredRegions) }
@@ -107,15 +112,16 @@ open class CLLocationManager: NSObject {
 
     // MARK: Authorization
 
-    @ObjCMethod("requestWhenInUseAuthorization") func requestWhenInUseAuthorization() { deny() }
-    @ObjCMethod("requestAlwaysAuthorization") func requestAlwaysAuthorization() { deny() }
+    @ObjCMethod("requestWhenInUseAuthorization") func requestWhenInUseAuthorization() { answer(allowing: 4) }
+    @ObjCMethod("requestAlwaysAuthorization") func requestAlwaysAuthorization() { answer(allowing: 3) }
     @ObjCMethod("requestTemporaryFullAccuracyAuthorizationWithPurposeKey:")
     func requestTemporaryFullAccuracyAuthorization(purposeKey: String?) {}
 
-    /// The user is asked once, and declines.
-    private func deny() {
+    /// The user is asked once, and allows `status` if there is a location,
+    /// else declines.
+    private func answer(allowing status: Int32) {
         guard Authorization.status == 0 else { return }
-        Authorization.status = 2
+        Authorization.status = FakeLocation.coordinate == nil ? 2 : status
         let owner = self
         Dispatch.onMain { owner.authorizationChanged() }
     }
@@ -132,9 +138,9 @@ open class CLLocationManager: NSObject {
 
     // MARK: Updates
 
-    @ObjCMethod("startUpdatingLocation") func startUpdatingLocation() { failUpdates() }
-    @ObjCMethod("requestLocation") func requestLocation() { failUpdates() }
-    @ObjCMethod("startMonitoringSignificantLocationChanges") func startMonitoringSignificantLocationChanges() { failUpdates() }
+    @ObjCMethod("startUpdatingLocation") func startUpdatingLocation() { update() }
+    @ObjCMethod("requestLocation") func requestLocation() { update() }
+    @ObjCMethod("startMonitoringSignificantLocationChanges") func startMonitoringSignificantLocationChanges() { update() }
     @ObjCMethod("startMonitoringVisits") func startMonitoringVisits() {}
     @ObjCMethod("stopUpdatingLocation") func stopUpdatingLocation() {}
     @ObjCMethod("stopMonitoringSignificantLocationChanges") func stopMonitoringSignificantLocationChanges() {}
@@ -146,10 +152,26 @@ open class CLLocationManager: NSObject {
     func allowDeferredLocationUpdates(untilTraveled distance: Double, timeout: Double) {}
     @ObjCMethod("disallowDeferredLocationUpdates") func disallowDeferredLocationUpdates() {}
 
-    /// Denied once the user has declined; until then the location is
-    /// unknown.
+    /// The location, once: to -locationManager:didUpdateLocations:, or
+    /// iOS 2's -locationManager:didUpdateToLocation:fromLocation:. Starting
+    /// without having asked asks for when in use, as iOS 7 did.
+    private func update() {
+        answer(allowing: 4)
+        guard Authorization.allowed else { return failUpdates() }
+        let owner = self
+        Dispatch.onMain {
+            guard let delegate = owner.delegate(), let location = FakeLocation.location() else { return }
+            if delegate.responds(to: "locationManager:didUpdateLocations:") {
+                delegate.sendLocationManager(owner, didUpdateLocations: NSMutableArray.of([location]))
+            } else if delegate.responds(to: "locationManager:didUpdateToLocation:fromLocation:") {
+                delegate.sendLocationManager(owner, didUpdateTo: location, from: nil)
+            }
+        }
+    }
+
+    /// Denied once the user has declined.
     private func failUpdates() {
-        let code = Authorization.status == 2 ? LocationError.denied : LocationError.locationUnknown
+        let code = LocationError.denied
         let owner = self
         Dispatch.onMain {
             guard let delegate = owner.delegate(), delegate.responds(to: "locationManager:didFailWithError:") else { return }
@@ -165,7 +187,8 @@ open class CLLocationManager: NSObject {
         let owner = self
         Dispatch.onMain {
             guard let delegate = owner.delegate(), delegate.responds(to: "locationManager:monitoringDidFailForRegion:withError:") else { return }
-            delegate.sendLocationManager(owner, monitoringDidFailFor: region, withError: NSError.location(LocationError.regionMonitoringDenied))
+            let code = Authorization.allowed ? LocationError.regionMonitoringFailure : LocationError.regionMonitoringDenied
+            delegate.sendLocationManager(owner, monitoringDidFailFor: region, withError: NSError.location(code))
         }
     }
 
@@ -199,6 +222,12 @@ extension NSObject {
     @ObjCMethod("locationManager:didChangeAuthorizationStatus:")
     func sendLocationManager(_ manager: CLLocationManager, didChangeAuthorization status: Int32)
 
+    @ObjCMethod("locationManager:didUpdateLocations:")
+    func sendLocationManager(_ manager: CLLocationManager, didUpdateLocations locations: NSMutableArray)
+
+    @ObjCMethod("locationManager:didUpdateToLocation:fromLocation:")
+    func sendLocationManager(_ manager: CLLocationManager, didUpdateTo location: CLLocation, from previous: CLLocation?)
+
     @ObjCMethod("locationManager:didFailWithError:")
     func sendLocationManager(_ manager: CLLocationManager, didFailWithError error: NSError)
 
@@ -218,5 +247,17 @@ class NSMutableSet: NSObject {
         let set = empty()
         objects.forEach(set.add)
         return set
+    }
+}
+
+@ObjCWrapper("NSMutableArray")
+class NSMutableArray: NSObject {
+    @ObjCClassMethod("array") static func empty() -> NSMutableArray
+    @ObjCMethod("addObject:") func add(_ object: NSObject)
+
+    static func of(_ objects: [NSObject]) -> NSMutableArray {
+        let array = empty()
+        objects.forEach(array.add)
+        return array
     }
 }
