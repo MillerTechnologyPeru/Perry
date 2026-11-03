@@ -240,4 +240,20 @@ enum Keys {
     static let NSValidationValueErrorKey = "NSValidationErrorValue"
     static let NSDetailedErrorsKey = "NSDetailedErrors"
     static let NSAffectedObjectsErrorKey = "NSAffectedObjectsErrorKey"
+    static let NSPersistentStoreUbiquitousContentNameKey = "NSPersistentStoreUbiquitousContentNameKey"
+    static let NSPersistentStoreUbiquitousContentURLKey = "NSPersistentStoreUbiquitousContentURLKey"
+    static let NSPersistentStoreRemoveUbiquitousMetadataOption = "NSPersistentStoreRemoveUbiquitousMetadataOption"
+}
+
+/// The coordinator's store-change notifications, which a store that does not
+/// sync through iCloud never posts.
+@ObjCConstants
+enum StoreNotifications {
+    static let NSPersistentStoreCoordinatorStoresDidChangeNotification = "NSPersistentStoreCoordinatorStoresDidChangeNotification"
+    static let NSPersistentStoreCoordinatorStoresWillChangeNotification = "NSPersistentStoreCoordinatorStoresWillChangeNotification"
+    static let NSPersistentStoreCoordinatorWillRemoveStoreNotification = "NSPersistentStoreCoordinatorWillRemoveStoreNotification"
+    static let NSPersistentStoreDidImportUbiquitousContentChangesNotification = "com.apple.coredata.ubiquity.importer.didfinishimport"
+    static let NSAddedPersistentStoresKey = "added"
+    static let NSRemovedPersistentStoresKey = "removed"
+    static let NSUUIDChangedPersistentStoresKey = "UUIDChangedPersistentStores"
 }
