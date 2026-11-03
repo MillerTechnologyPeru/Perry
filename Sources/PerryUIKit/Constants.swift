@@ -73,11 +73,6 @@ enum MoreNotifications {
     static let UITextFieldTextDidChangeNotification = "UITextFieldTextDidChangeNotification"
     static let UITextFieldTextDidBeginEditingNotification = "UITextFieldTextDidBeginEditingNotification"
     static let UITextFieldTextDidEndEditingNotification = "UITextFieldTextDidEndEditingNotification"
-    static let kCATransition = "transition"
-    static let kCATransactionDisableActions = "disableActions"
-    static let kCATransactionAnimationDuration = "animationDuration"
-    static let kCATransactionAnimationTimingFunction = "animationTimingFunction"
-    static let kCATransactionCompletionBlock = "completionBlock"
 }
 
 /// NSAttributedString's attribute names, as UIKit adds them.
