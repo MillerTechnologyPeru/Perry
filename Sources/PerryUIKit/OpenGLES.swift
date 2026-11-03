@@ -17,6 +17,7 @@ enum GLES {
     nonisolated(unsafe) private static var libraries: [Pointer] = []
     nonisolated(unsafe) static var display: Pointer?
 
+    nonisolated(unsafe) static var getProcAddress: (@convention(c) (UnsafePointer<CChar>) -> UnsafeMutableRawPointer?)?
     nonisolated(unsafe) static var getPlatformDisplay: (@convention(c) (UInt32, Pointer?, UnsafePointer<Int>?) -> Pointer?)?
     nonisolated(unsafe) static var initialize: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> UInt32)?
     nonisolated(unsafe) static var bindAPI: (@convention(c) (UInt32) -> UInt32)?
@@ -60,6 +61,7 @@ enum GLES {
             if let library = dlopen(name, RTLD_NOW) { libraries.append(library) }
         }
         func bind<T>(_ library: Pointer, _ name: String) -> T? { dlsym(library, name).map { unsafeBitCast($0, to: T.self) } }
+        getProcAddress = bind(egl, "eglGetProcAddress")
         getPlatformDisplay = bind(egl, "eglGetPlatformDisplay")
         initialize = bind(egl, "eglInitialize")
         bindAPI = bind(egl, "eglBindAPI")
@@ -92,8 +94,10 @@ enum GLES {
         return true
     }
 
-    /// The host's function for an import such as "_glDrawArrays"; nil
-    /// when the host has none. glGetString answers as iOS's does.
+    /// The host's function for an import such as "_glDrawArrays", or an
+    /// extension's such as "_glBindFramebufferOES", which the libraries
+    /// do not export; nil when the host has none. glGetString answers as
+    /// iOS's does.
     static func symbol(_ name: String) -> UnsafeMutableRawPointer? {
         guard name.hasPrefix("_gl") else { return nil }
         if name == "_glGetString" { return unsafeBitCast(getStringFunction, to: UnsafeMutableRawPointer.self) }
@@ -102,7 +106,7 @@ enum GLES {
         for library in libraries {
             if let symbol = dlsym(library, cName) { return symbol }
         }
-        return nil
+        return getProcAddress?(cName)
     }
 
     /// The version strings for the current context's API, as iOS gives
