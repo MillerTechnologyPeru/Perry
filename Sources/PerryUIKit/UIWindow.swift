@@ -103,6 +103,7 @@ open class UIWindow: UIView {
         if !hidden {
             installRootView()
             Display.startIfWanted()
+            TapScript.startIfRequested()
         }
         Updates.schedule()
     }
