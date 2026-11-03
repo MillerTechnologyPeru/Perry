@@ -113,7 +113,8 @@ open class UIImage: NSObject {
     }
 
     /// An image in the main bundle: the PNG for the screen's scale if
-    /// there is one, else the next larger, else the smaller.
+    /// there is one, else the next larger, else the smaller; else the
+    /// asset catalog's.
     @ObjCClassMethod("imageNamed:")
     static func image(_ cls: ObjCClass, named name: String) -> UIImage? {
         let bundle = NSBundle.main()
@@ -125,7 +126,7 @@ open class UIImage: NSObject {
                 return image
             }
         }
-        return nil
+        return AssetCatalog.image(named: name).map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
     }
 
     @ObjCClassMethod("imageNamed:inBundle:compatibleWithTraitCollection:")
