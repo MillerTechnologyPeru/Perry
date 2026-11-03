@@ -59,11 +59,13 @@ final class NSFileManager: NSObject {
     @ObjCClassMethod("defaultManager")
     static func defaultManager() -> UnsafeMutableRawPointer? { FileManagers.defaultManager }
 
+    /// No path names no file.
     @ObjCMethod("fileExistsAtPath:")
-    func exists(atPath path: String) -> Bool { files.fileExists(atPath: path) }
+    func exists(atPath path: String?) -> Bool { path.map { files.fileExists(atPath: $0) } ?? false }
 
     @ObjCMethod("fileExistsAtPath:isDirectory:")
-    func exists(atPath path: String, isDirectory: UnsafeMutablePointer<Bool>?) -> Bool {
+    func exists(atPath path: String?, isDirectory: UnsafeMutablePointer<Bool>?) -> Bool {
+        guard let path else { return false }
         guard let directory = FileManagers.isDirectory(path) else { return false }
         isDirectory?.pointee = directory
         return true
