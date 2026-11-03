@@ -1,5 +1,6 @@
 // Assertions, signals, sysctl, interface addresses and memory helpers that
-// Darwin's libSystem has and glibc lacks or defines differently.
+// Darwin's libSystem has and glibc lacks or defines differently. Signal
+// handlers get Darwin's signal frames.
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
@@ -10,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 // MARK: - Assertions
@@ -73,51 +75,143 @@ void darwin_memset_pattern4(void *bytes, const void *pattern, size_t length) {
 
 // MARK: - Signals
 
-// Darwin's numbers for the signals whose Linux numbers differ.
-static int signal_to_linux(int signal) {
-    switch (signal) {
-    case 7: return -1;          // SIGEMT
-    case 10: return SIGBUS;
-    case 12: return SIGSYS;
-    case 16: return SIGURG;
-    case 17: return SIGSTOP;
-    case 18: return SIGTSTP;
-    case 19: return SIGCONT;
-    case 20: return SIGCHLD;
-    case 23: return SIGIO;
-    case 29: return -1;         // SIGINFO
-    case 30: return SIGUSR1;
-    case 31: return SIGUSR2;
-    default: return signal >= 1 && signal <= 31 ? signal : -1;
-    }
-}
-
 typedef struct darwin_sigaction {
     void *handler;
     uint32_t mask;
     int flags;
 } darwin_sigaction;
 
-// Ignoring a signal, or restoring its default, takes effect. Handlers are
-// not installed: Darwin apps' handlers are crash reporters, which would
-// stand in the way of Perry's own report. The previous action is reported
-// as the default.
+enum {
+    DARWIN_SA_ONSTACK = 0x1, DARWIN_SA_RESTART = 0x2, DARWIN_SA_RESETHAND = 0x4, DARWIN_SA_NODEFER = 0x10,
+    DARWIN_SA_SIGINFO = 0x40,
+};
+
+// Darwin's arm64 signal frame: siginfo_t, ucontext_t and the machine
+// context it points to.
+// (Fields named without si_, which glibc defines as macros.)
+typedef struct {
+    int signo, error, code;
+    pid_t pid;
+    uid_t uid;
+    int status;
+    void *address;
+    void *value;
+    long band;
+    unsigned long pad[7];
+} darwin_siginfo;
+
+typedef struct {
+    struct { uint64_t far; uint32_t esr, exception; } es;
+    struct { uint64_t x[29], fp, lr, sp, pc; uint32_t cpsr, pad; } ss;
+    struct { __uint128_t v[32]; uint32_t fpsr, fpcr; } __attribute__((aligned(16))) ns;
+} darwin_mcontext;
+
+typedef struct {
+    int uc_onstack;
+    uint32_t uc_sigmask;
+    struct { void *ss_sp; size_t ss_size; int ss_flags; } uc_stack;
+    void *uc_link;
+    size_t uc_mcsize;
+    darwin_mcontext *uc_mcontext;
+} darwin_ucontext;
+
+// The apps' handlers, by Linux signal number.
+static darwin_sigaction handlers[65];
+
+static struct fpsimd_context *fpsimd(ucontext_t *context) {
+    struct _aarch64_ctx *header = (struct _aarch64_ctx *)context->uc_mcontext.__reserved;
+    while (header->magic) {
+        if (header->magic == FPSIMD_MAGIC)
+            return (struct fpsimd_context *)header;
+        header = (struct _aarch64_ctx *)((char *)header + header->size);
+    }
+    return NULL;
+}
+
+// Calls the app's handler with Darwin's signal frame, made from Linux's,
+// then copies back the registers it changed: runtimes such as Mono turn
+// a fault into an exception by sending the thread elsewhere.
+static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
+    darwin_sigaction action = handlers[linux_signal];
+    int darwin_signal = 0;
+    for (int candidate = 1; candidate <= 31; candidate++)
+        if (perry_signal_to_linux(candidate) == linux_signal)
+            darwin_signal = candidate;
+    if (!(action.flags & DARWIN_SA_SIGINFO)) {
+        ((void (*)(int))action.handler)(darwin_signal);
+        return;
+    }
+    ucontext_t *context = raw_context;
+    mcontext_t *machine = &context->uc_mcontext;
+    darwin_siginfo darwin_info;
+    memset(&darwin_info, 0, sizeof(darwin_info));
+    darwin_info.signo = darwin_signal;
+    darwin_info.error = info->si_errno;
+    darwin_info.code = info->si_code;
+    darwin_info.pid = info->si_pid;
+    darwin_info.uid = info->si_uid;
+    darwin_info.address = info->si_addr;
+    darwin_mcontext darwin_machine;
+    memset(&darwin_machine, 0, sizeof(darwin_machine));
+    darwin_machine.es.far = machine->fault_address;
+    memcpy(darwin_machine.ss.x, machine->regs, sizeof(darwin_machine.ss.x));
+    darwin_machine.ss.fp = machine->regs[29];
+    darwin_machine.ss.lr = machine->regs[30];
+    darwin_machine.ss.sp = machine->sp;
+    darwin_machine.ss.pc = machine->pc;
+    darwin_machine.ss.cpsr = (uint32_t)machine->pstate;
+    struct fpsimd_context *neon = fpsimd(context);
+    if (neon) {
+        memcpy(darwin_machine.ns.v, neon->vregs, sizeof(darwin_machine.ns.v));
+        darwin_machine.ns.fpsr = neon->fpsr;
+        darwin_machine.ns.fpcr = neon->fpcr;
+    }
+    darwin_ucontext darwin_context;
+    memset(&darwin_context, 0, sizeof(darwin_context));
+    darwin_context.uc_mcsize = sizeof(darwin_machine);
+    darwin_context.uc_mcontext = &darwin_machine;
+    ((void (*)(int, darwin_siginfo *, darwin_ucontext *))action.handler)(darwin_signal, &darwin_info, &darwin_context);
+    memcpy(machine->regs, darwin_machine.ss.x, sizeof(darwin_machine.ss.x));
+    machine->regs[29] = darwin_machine.ss.fp;
+    machine->regs[30] = darwin_machine.ss.lr;
+    machine->sp = darwin_machine.ss.sp;
+    machine->pc = darwin_machine.ss.pc;
+    if (neon) {
+        memcpy(neon->vregs, darwin_machine.ns.v, sizeof(darwin_machine.ns.v));
+        neon->fpsr = darwin_machine.ns.fpsr;
+        neon->fpcr = darwin_machine.ns.fpcr;
+    }
+}
+
+// An app's handler is installed behind a translation of the signal frame.
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) DARWIN_SYMBOL(sigaction);
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) {
-    int linux_signal = signal_to_linux(signal);
-    if (linux_signal < 0) {
+    int linux_signal = perry_signal_to_linux(signal);
+    if (linux_signal <= 0) {
         errno = EINVAL;
         return -1;
     }
     if (previous)
-        memset(previous, 0, sizeof(*previous));
-    if (action && (action->handler == (void *)SIG_IGN || action->handler == (void *)SIG_DFL)) {
-        struct sigaction linux_action;
-        memset(&linux_action, 0, sizeof(linux_action));
+        *previous = handlers[linux_signal];
+    if (!action)
+        return 0;
+    struct sigaction linux_action;
+    memset(&linux_action, 0, sizeof(linux_action));
+    for (int darwin = 1; darwin <= 31; darwin++)
+        if (action->mask & (1u << (darwin - 1)) && perry_signal_to_linux(darwin) > 0)
+            sigaddset(&linux_action.sa_mask, perry_signal_to_linux(darwin));
+    if (action->handler == (void *)SIG_IGN || action->handler == (void *)SIG_DFL) {
         linux_action.sa_handler = (void (*)(int))action->handler;
-        return sigaction(linux_signal, &linux_action, NULL);
+    } else {
+        linux_action.sa_sigaction = deliver;
+        linux_action.sa_flags = SA_SIGINFO;
     }
-    return 0;
+    if (action->flags & DARWIN_SA_ONSTACK) linux_action.sa_flags |= SA_ONSTACK;
+    if (action->flags & DARWIN_SA_RESTART) linux_action.sa_flags |= SA_RESTART;
+    if (action->flags & DARWIN_SA_NODEFER) linux_action.sa_flags |= SA_NODEFER;
+    if (action->flags & DARWIN_SA_RESETHAND) linux_action.sa_flags |= SA_RESETHAND;
+    handlers[linux_signal] = *action;
+    return sigaction(linux_signal, &linux_action, NULL);
 }
 
 // MARK: - sysctl
