@@ -38,11 +38,17 @@ enum Launch {
             Application.delegate = delegateClass.object.newInstance()
         }
         let delegate = Application.delegate?.unsafeCast(to: AnyUIApplicationDelegate.self)
+        // Without scenes, the main storyboard's initial controller is the
+        // root of a window the delegate is given before it hears of the
+        // launch, and which shows once it has.
+        let manifest = SceneManifest(info)
+        let window = manifest == nil ? mainStoryboardWindow(info) : nil
         _ = delegate?.application(application, willFinishLaunchingWithOptions: nil)
         _ = delegate?.application(application, didFinishLaunchingWithOptions: nil)
         Application.post(Notifications.UIApplicationDidFinishLaunchingNotification, object: application)
+        window?.makeKeyAndVisible()
 
-        if let manifest = SceneManifest(info) {
+        if let manifest {
             Scenes.connectFirstScene(application, manifest: manifest)
         } else {
             // Without a scene manifest, the application itself goes active.
@@ -50,6 +56,23 @@ enum Launch {
             delegate?.applicationDidBecomeActive(application)
             Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
         }
+    }
+}
+
+extension Launch {
+    /// A window with the main storyboard's initial controller, set as the
+    /// delegate's window.
+    static func mainStoryboardWindow(_ info: NSBundle) -> UIWindow? {
+        guard let name = (info.infoObject(forKey: "UIMainStoryboardFile~iphone") ?? info.infoObject(forKey: "UIMainStoryboardFile"))?
+                .stringValue,
+              let storyboard = UIStoryboard.storyboard(name: name, bundle: info),
+              let controller = storyboard.instantiateInitialViewController() else { return nil }
+        let window = UIWindow.objCClass.object.allocated().initializeView(frame: Screen.bounds).unsafeCast(to: UIWindow.self)
+        if let delegate = Application.delegate, delegate.responds(to: "setWindow:") {
+            Outlets.set(delegate, "window", window)
+        }
+        window.setRootViewController(controller)
+        return window
     }
 }
 
