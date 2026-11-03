@@ -653,7 +653,28 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
 static perry_loader *startup_loader;
 
 static void *lookup_symbol(const char *install_name, const char *name) {
-    return perry_provider_symbol(startup_loader, install_name, name);
+    perry_loader *loader = startup_loader;
+    for (perry_image *image = loader->images; image; image = image->next) {
+        if (install_name && !(image->install_name && strcmp(image->install_name, install_name) == 0) &&
+            !(image == loader->main_image && image->path && strcmp(image->path, install_name) == 0))
+            continue;
+        perry_symbol sym = {0};
+        if (perry_exports_lookup(loader, image, name, &sym, 0) && sym.found)
+            return sym.address;
+        if (install_name)
+            return NULL;
+    }
+    if (install_name)
+        return perry_provider_symbol(loader, install_name, name);
+    for (uint32_t i = 0; i < loader->provider_count; i++) {
+        perry_provider *provider = loader->providers[i];
+        if (!provider->handle)
+            continue;
+        void *address = perry_provider_symbol(loader, provider->install_name, name);
+        if (address)
+            return address;
+    }
+    return NULL;
 }
 
 // Darwin's layering: libSystem, then libobjc, then libdispatch (whose
