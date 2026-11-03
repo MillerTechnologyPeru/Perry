@@ -61,6 +61,10 @@ extension CGAffineTransform: ObjCScalar {
     }
 }
 
+extension PerryRange: ObjCScalar {
+    public static var objCTypeEncoding: String { "{_NSRange=QQ}" }
+}
+
 extension UIEdgeInsets: ObjCScalar {
     public static var objCTypeEncoding: String { "{UIEdgeInsets=dddd}" }
     static let zero = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
