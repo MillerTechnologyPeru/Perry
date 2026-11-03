@@ -51,7 +51,21 @@ public enum Objects {
         if entry.weaklyReferenced {
             WeakReferences.clear(object)
         }
+        // The Swift object that is this object goes with it: its deinit runs
+        // while the object's memory is still there.
+        if let peer = entry.peer { Unmanaged<AnyObject>.fromOpaque(peer).release() }
     }
+
+    // MARK: - Peers
+
+    /// Makes `peer` the Swift object that is `object` (RetainCounts).
+    public static func bindPeer(_ object: ObjectPointer, _ peer: UnsafeMutableRawPointer, retained: Bool) {
+        RetainCounts.bindPeer(object, peer, retained: retained)
+    }
+
+    public static func peer(_ object: ObjectPointer) -> UnsafeMutableRawPointer? { RetainCounts.peer(object) }
+
+    public static func peerWillDeinitialize(_ object: ObjectPointer) -> Bool { RetainCounts.peerWillDeinitialize(object) }
 
     public static func dispose(_ object: ObjectPointer) {
         destructInstance(object)
@@ -113,12 +127,24 @@ public enum Objects {
 
 /// Retain counts beyond the first, in a side table keyed by address, as
 /// Apple's runtime keeps them for objects without an inline count.
+///
+/// An object a Swift class defines has a peer: the Swift object that is
+/// the Objective-C object, bound when its Swift initializer runs. As in
+/// Darwin's Swift, the two share one reference count, the Swift object's:
+/// retains and releases from either side count there, the last release
+/// from Objective-C deallocates the object, and the Swift object's deinit
+/// runs as the object is destroyed.
 enum RetainCounts {
     struct Entry {
         var extra: UInt = 0
         var deallocating = false
         var weaklyReferenced = false
         var hasAssociations = false
+        /// The peer's address, holding one Swift reference for the object's
+        /// own; 0 for none. (An address, as the table must be Sendable.)
+        var peerAddress: UInt = 0
+
+        var peer: UnsafeMutableRawPointer? { UnsafeMutableRawPointer(bitPattern: peerAddress) }
     }
 
     final class Shard: Sendable {
@@ -134,35 +160,98 @@ enum RetainCounts {
     }
 
     static func retain(_ object: ObjectPointer) {
-        shard(object).table.withLock { table in
-            table[UInt(bitPattern: object), default: Entry()].extra += 1
+        let peerAddress = shard(object).table.withLock { table -> UInt in
+            let key = UInt(bitPattern: object)
+            if let address = table[key]?.peerAddress, address != 0 { return address }
+            table[key, default: Entry()].extra += 1
+            return 0
         }
+        if let peer = UnsafeMutableRawPointer(bitPattern: peerAddress) { _ = Unmanaged<AnyObject>.fromOpaque(peer).retain() }
     }
 
     /// Drops a reference; true when it was the last and the object should be
     /// deallocated. The object is marked deallocating so later releases are
-    /// ignored.
+    /// ignored. A peer's count drops outside the lock, as its deinit may
+    /// run if Swift let go at the same moment.
     static func release(_ object: ObjectPointer) -> Bool {
-        shard(object).table.withLock { table in
+        enum Outcome { case keep, deallocate, releasePeer(UInt) }
+        let outcome = shard(object).table.withLock { table -> Outcome in
             let key = UInt(bitPattern: object)
             var entry = table[key] ?? Entry()
             if entry.deallocating {
-                return false
+                return .keep
+            }
+            if let peer = entry.peer {
+                // The last reference is the object's own.
+                guard swift_retainCount(peer) <= 1 else { return .releasePeer(entry.peerAddress) }
+                entry.deallocating = true
+                table[key] = entry
+                return .deallocate
             }
             if entry.extra > 0 {
                 entry.extra -= 1
                 table[key] = entry
-                return false
+                return .keep
             }
             entry.deallocating = true
             table[key] = entry
-            return true
+            return .deallocate
+        }
+        switch outcome {
+        case .keep: return false
+        case .deallocate: return true
+        case .releasePeer(let address):
+            if let peer = UnsafeMutableRawPointer(bitPattern: address) { Unmanaged<AnyObject>.fromOpaque(peer).release() }
+            return false
         }
     }
 
     static func count(_ object: ObjectPointer) -> UInt {
+        let (extra, peerAddress) = shard(object).table.withLock { table -> (UInt, UInt) in
+            let entry = table[UInt(bitPattern: object)]
+            return (entry?.extra ?? 0, entry?.peerAddress ?? 0)
+        }
+        if let peer = UnsafeMutableRawPointer(bitPattern: peerAddress) { return UInt(max(swift_retainCount(peer), 1)) }
+        return extra + 1
+    }
+
+    // MARK: Peers
+
+    /// Makes `peer` the object's Swift object. Its references take over the
+    /// object's: one for each it has beyond the first, and, when `retained`,
+    /// one for the first, which an -init's caller is given; otherwise the
+    /// Swift reference that made the object is the first.
+    static func bindPeer(_ object: ObjectPointer, _ peer: UnsafeMutableRawPointer, retained: Bool) {
+        let extra = shard(object).table.withLock { table -> UInt in
+            let key = UInt(bitPattern: object)
+            var entry = table[key] ?? Entry()
+            let extra = entry.extra
+            entry.extra = 0
+            entry.peerAddress = UInt(bitPattern: peer)
+            table[key] = entry
+            return extra
+        }
+        let unmanaged = Unmanaged<AnyObject>.fromOpaque(peer)
+        for _ in 0..<(extra + (retained ? 1 : 0)) { _ = unmanaged.retain() }
+    }
+
+    static func peer(_ object: ObjectPointer) -> UnsafeMutableRawPointer? {
+        let address = shard(object).table.withLock { table in table[UInt(bitPattern: object)]?.peerAddress ?? 0 }
+        return UnsafeMutableRawPointer(bitPattern: address)
+    }
+
+    /// The peer's last Swift reference went before the object's did: true
+    /// when the object, no longer counted by it, should now be deallocated;
+    /// false when it is already being deallocated.
+    static func peerWillDeinitialize(_ object: ObjectPointer) -> Bool {
         shard(object).table.withLock { table in
-            (table[UInt(bitPattern: object)]?.extra ?? 0) + 1
+            let key = UInt(bitPattern: object)
+            guard var entry = table[key], entry.peerAddress != 0 else { return false }
+            entry.peerAddress = 0
+            let deallocate = !entry.deallocating
+            entry.deallocating = true
+            table[key] = entry
+            return deallocate
         }
     }
 
@@ -184,6 +273,10 @@ enum RetainCounts {
         }
     }
 }
+
+/// The Swift runtime's strong reference count of an object.
+@_silgen_name("swift_retainCount")
+func swift_retainCount(_ object: UnsafeMutableRawPointer) -> Int
 
 /// __weak variables: the slots pointing at each object, cleared when it is
 /// deallocated.
