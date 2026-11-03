@@ -43,16 +43,26 @@ final class BundleStorage {
         return (isMacOSLayout ? contentsPath + "/MacOS/" : path + "/") + name
     }
 
+    /// The localization directories searched after the unlocalized resources.
+    static let localizations = ["Base.lproj", "en.lproj", "English.lproj"]
+
     /// pathForResource:ofType:inDirectory: — the file name, with the type
-    /// appended unless empty, in the resources directory or a subdirectory.
+    /// appended unless empty, in the resources directory or a subdirectory,
+    /// then in the localization directories; an iPhone variant (name~iphone)
+    /// is preferred in each.
     func resource(_ name: String?, type: String?, directory: String?) -> String? {
         guard let name, !name.isEmpty else { return nil }
-        var file = name
-        if let type, !type.isEmpty { file += "." + type }
+        let suffix = type.map { $0.isEmpty ? "" : "." + $0 } ?? ""
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
-        let candidate = Paths.appending(directoryPath, file)
-        return FileManager.default.fileExists(atPath: candidate) ? candidate : nil
+        for localization in [""] + BundleStorage.localizations {
+            let base = localization.isEmpty ? directoryPath : Paths.appending(directoryPath, localization)
+            for file in [name + "~iphone" + suffix, name + suffix] {
+                let candidate = Paths.appending(base, file)
+                if FileManager.default.fileExists(atPath: candidate) { return candidate }
+            }
+        }
+        return nil
     }
 
     func resources(type: String?, directory: String?) -> [String] {
@@ -107,6 +117,11 @@ public final class NSBundle: NSObject {
     @ObjCClassMethod("mainBundle")
     static func mainBundle() -> UnsafeMutableRawPointer? { Bundles.main }
 
+    /// The app's classes are all in its executable, and Perry's framework
+    /// classes have no bundle of their own: the main bundle.
+    @ObjCClassMethod("bundleForClass:")
+    static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Bundles.main }
+
     @ObjCClassMethod("bundleWithPath:")
     static func bundle(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
 
@@ -157,6 +172,16 @@ public final class NSBundle: NSObject {
     @ObjCMethod("pathForResource:ofType:inDirectory:")
     func path(forResource name: String?, ofType type: String?, inDirectory directory: String?) -> String? {
         storage.resource(name, type: type, directory: directory)
+    }
+
+    /// A localization's resource: in its .lproj, else as for no localization.
+    @ObjCMethod("pathForResource:ofType:inDirectory:forLocalization:")
+    func path(forResource name: String?, ofType type: String?, inDirectory directory: String?, forLocalization localization: String?) -> String? {
+        if let localization, !localization.isEmpty,
+           let path = storage.resource(name, type: type, directory: Paths.appending(directory ?? "", localization + ".lproj")) {
+            return path
+        }
+        return storage.resource(name, type: type, directory: directory)
     }
 
     @ObjCMethod("URLForResource:withExtension:")
