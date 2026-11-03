@@ -614,8 +614,8 @@ final class LayoutConstraintState: ObjectState {
     var identifier: String?
 }
 
-/// A constraint, kept; Auto Layout does not solve them yet, so views stay
-/// at the frames they were given.
+/// A constraint, which the view that holds it solves when it lays out its
+/// subviews (AutoLayout).
 @ObjCClass("NSLayoutConstraint")
 open class NSLayoutConstraint: NSObject {
     static let states = StateTable<LayoutConstraintState>()
@@ -633,11 +633,20 @@ open class NSLayoutConstraint: NSObject {
         let state = state
         state.firstItem = decoded.object("NSFirstItem")?.objcObject
         state.secondItem = decoded.object("NSSecondItem")?.objcObject
-        state.firstAttribute = decoded.integer("NSFirstAttribute")
-        state.secondAttribute = decoded.integer("NSSecondAttribute")
+        // The V2 forms name margins where the others name edges with the
+        // margins of Xcode's time added to the constant; a V2 constant
+        // left out is zero.
+        if decoded.has("NSFirstAttributeV2") {
+            state.firstAttribute = decoded.integer("NSFirstAttributeV2")
+            state.secondAttribute = decoded.integer("NSSecondAttributeV2")
+            state.constant = decoded.double("NSConstantV2")
+        } else {
+            state.firstAttribute = decoded.integer("NSFirstAttribute")
+            state.secondAttribute = decoded.integer("NSSecondAttribute")
+            state.constant = decoded.double("NSConstant")
+        }
         state.relation = decoded.integer("NSRelation")
         state.multiplier = decoded.has("NSMultiplier") ? decoded.double("NSMultiplier") : 1
-        state.constant = decoded.double("NSConstant")
         state.priority = decoded.has("NSPriority") ? Float(decoded.double("NSPriority")) : 1000
         state.identifier = decoded.string("NSLayoutIdentifier")
         state.active = true
@@ -657,14 +666,30 @@ open class NSLayoutConstraint: NSObject {
     @ObjCClassMethod("constraintsWithVisualFormat:options:metrics:views:")
     static func constraints(visualFormat: String, options: UInt, metrics: NSObject?, views: NSObject?) -> NSObject { NSMutableArray.of([]) }
 
+    /// Activating a constraint adds it to the views' closest common
+    /// ancestor, as UIKit does; deactivating removes it.
     @ObjCClassMethod("activateConstraints:")
     static func activate(_ constraints: NSArray) {
-        for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.state.active = true }
+        for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.setActive(true) }
     }
 
     @ObjCClassMethod("deactivateConstraints:")
     static func deactivate(_ constraints: NSArray) {
-        for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.state.active = false }
+        for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.setActive(false) }
+    }
+
+    /// The closest view both items are in.
+    private var holder: UIView? {
+        guard let first = state.firstItem.map({ UIView.wrap($0) }), first.is(UIView.self) else { return nil }
+        guard let secondObject = state.secondItem else { return first }
+        let second = UIView.wrap(secondObject)
+        guard second.is(UIView.self) else { return first }
+        var candidate: UIView? = first
+        while let view = candidate {
+            if view.objcObject == second.objcObject || second.isDescendant(of: view) { return view }
+            candidate = view.state.superview.map { UIView.wrap($0) }
+        }
+        return nil
     }
 
     @ObjCMethod("firstItem") func firstItem() -> NSObject? { state.firstItem.map { NSObject($0) } }
@@ -674,11 +699,30 @@ open class NSLayoutConstraint: NSObject {
     @ObjCMethod("relation") func relation() -> Int { state.relation }
     @ObjCMethod("multiplier") func multiplier() -> CGFloat { state.multiplier }
     @ObjCMethod("constant") func constant() -> CGFloat { state.constant }
-    @ObjCMethod("setConstant:") func setConstant(_ constant: CGFloat) { state.constant = constant }
+    @ObjCMethod("setConstant:") func setConstant(_ constant: CGFloat) {
+        state.constant = constant
+        invalidate()
+    }
+
+    private func invalidate() {
+        for item in [state.firstItem, state.secondItem].compactMap({ $0 }) {
+            let view = UIView.wrap(item)
+            guard view.is(UIView.self) else { continue }
+            view.setNeedsLayout()
+            view.superviewNeedsLayout()
+        }
+    }
     @ObjCMethod("priority") func priority() -> Float { state.priority }
     @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { state.priority = priority }
     @ObjCMethod("isActive") func isActive() -> Bool { state.active }
-    @ObjCMethod("setActive:") func setActive(_ active: Bool) { state.active = active }
+    @ObjCMethod("setActive:")
+    func setActive(_ active: Bool) {
+        state.active = active
+        if active, let holder, !holder.state.constraints.contains(where: { $0.objcObject == objcObject }) {
+            holder.state.constraints.append(self)
+        }
+        invalidate()
+    }
     @ObjCMethod("identifier") func identifier() -> String? { state.identifier }
     @ObjCMethod("setIdentifier:") func setIdentifier(_ identifier: String?) { state.identifier = identifier }
     @ObjCMethod("shouldBeArchived") func shouldBeArchived() -> Bool { true }
@@ -942,7 +986,7 @@ open class UIAlertController: UIViewController {
         }
         y += 16
         for action in alert.actions {
-            let separator = UIView.objCClass.object.allocated().initializeView(frame: CGRect(x: 0, y: y, width: width, height: 1 / Screen.scale))
+            let separator = UIView.objCClass.object.allocated().initializeView(frame: CGRect(x: 0, y: y, width: width, height: Screen.pixel))
                 .unsafeCast(to: UIView.self)
             separator.setBackgroundColor(UIColor.separator())
             panel.addSubview(separator)
