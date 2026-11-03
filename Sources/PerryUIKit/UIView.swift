@@ -25,6 +25,9 @@ final class ViewState: ObjectState {
     var gestureRecognizers: [UIGestureRecognizer] = []
     var constraints: [NSObject] = []
     var translatesAutoresizingMaskIntoConstraints = true
+    /// Content hugging and compression resistance, per axis.
+    var contentHuggingPriority = (width: Float(250), height: Float(250))
+    var compressionResistancePriority = (width: Float(750), height: Float(750))
     var accessibilityIdentifier: String?
     var needsLayout = true
     /// The superview, which retains this view; not retained.
@@ -64,6 +67,10 @@ final class ViewState: ObjectState {
 enum Screen {
     static let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
     static let scale: CGFloat = 3
+    /// One pixel of what is drawn: of the live view at its scale, else of
+    /// the screen. Hairlines are a pixel thick, and layout rounds to
+    /// pixels, so lines are not lost between them.
+    static var pixel: CGFloat { 1 / (Display.isLive ? max(Display.scale, 1) : scale) }
     /// Under the home indicator, and under a status bar when
     /// PERRY_UIKIT_STATUS_BAR_HEIGHT gives it a height (47 on this
     /// iPhone); none is drawn, so by default it has none.
@@ -156,6 +163,10 @@ open class UIView: UIResponder, UICoordinateSpace {
         if let color = decoded.object("UIBackgroundColor")?.as(UIColor.self) { setBackgroundColor(color) }
         state.translatesAutoresizingMaskIntoConstraints = !decoded.bool("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints")
         state.constraints = decoded.array("UIViewAutolayoutConstraints")
+        if let hugging = UIView.priorities(decoded.string("UIViewContentHuggingPriority")) { state.contentHuggingPriority = hugging }
+        if let compression = UIView.priorities(decoded.string("UIViewContentCompressionResistancePriority")) {
+            state.compressionResistancePriority = compression
+        }
         for subview in decoded.array("UISubviews") {
             if let view = subview.as(UIView.self) { addSubview(view) }
         }
@@ -167,8 +178,8 @@ open class UIView: UIResponder, UICoordinateSpace {
     // MARK: Constraints, kept for Auto Layout
 
     @ObjCMethod("constraints") func constraints() -> NSObject { NSMutableArray.of(state.constraints) }
-    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { state.constraints.append(constraint) }
-    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) { state.constraints += constraints.elements }
+    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { state.constraints.append(constraint); setNeedsLayout() }
+    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) { state.constraints += constraints.elements; setNeedsLayout() }
     @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) {
         state.constraints.removeAll { $0.objcObject == constraint.objcObject }
     }
@@ -186,13 +197,45 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("updateConstraintsIfNeeded") func updateConstraintsIfNeeded() {}
     @ObjCMethod("updateConstraints") func updateConstraints() {}
     @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
-    @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { setNeedsLayout() }
+    @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { setNeedsLayout(); superviewNeedsLayout() }
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSizeOfView() -> CGSize { CGSize(width: -1, height: -1) }
-    @ObjCMethod("systemLayoutSizeFittingSize:") func systemLayoutSizeFitting(_ size: CGSize) -> CGSize { state.bounds.size }
-    @ObjCMethod("setContentHuggingPriority:forAxis:") func setContentHuggingPriority(_ priority: Float, for axis: Int) {}
-    @ObjCMethod("contentHuggingPriorityForAxis:") func contentHuggingPriority(for axis: Int) -> Float { 250 }
-    @ObjCMethod("setContentCompressionResistancePriority:forAxis:") func setContentCompressionResistancePriority(_ priority: Float, for axis: Int) {}
-    @ObjCMethod("contentCompressionResistancePriorityForAxis:") func contentCompressionResistancePriority(for axis: Int) -> Float { 750 }
+
+    /// The width given, and the least height the constraints allow there.
+    @ObjCMethod("systemLayoutSizeFittingSize:")
+    func systemLayoutSizeFitting(_ size: CGSize) -> CGSize {
+        let width = size.width > 0 ? size.width : state.bounds.width
+        return CGSize(width: width, height: AutoLayout.fittingHeight(self, width: width) ?? state.bounds.height)
+    }
+
+    @ObjCMethod("systemLayoutSizeFittingSize:withHorizontalFittingPriority:verticalFittingPriority:")
+    func systemLayoutSizeFitting(_ size: CGSize, horizontalPriority: Float, verticalPriority: Float) -> CGSize {
+        systemLayoutSizeFitting(size)
+    }
+
+    /// UILayoutConstraintAxis: horizontal 0, vertical 1.
+    @ObjCMethod("setContentHuggingPriority:forAxis:")
+    func setContentHuggingPriority(_ priority: Float, for axis: Int) {
+        if axis == 0 { state.contentHuggingPriority.width = priority } else { state.contentHuggingPriority.height = priority }
+        superviewNeedsLayout()
+    }
+    @ObjCMethod("contentHuggingPriorityForAxis:")
+    func contentHuggingPriority(for axis: Int) -> Float { axis == 0 ? state.contentHuggingPriority.width : state.contentHuggingPriority.height }
+    @ObjCMethod("setContentCompressionResistancePriority:forAxis:")
+    func setContentCompressionResistancePriority(_ priority: Float, for axis: Int) {
+        if axis == 0 { state.compressionResistancePriority.width = priority } else { state.compressionResistancePriority.height = priority }
+        superviewNeedsLayout()
+    }
+    @ObjCMethod("contentCompressionResistancePriorityForAxis:")
+    func contentCompressionResistancePriority(for axis: Int) -> Float {
+        axis == 0 ? state.compressionResistancePriority.width : state.compressionResistancePriority.height
+    }
+
+    /// A nib's priorities, "{horizontal, vertical}".
+    static func priorities(_ text: String?) -> (width: Float, height: Float)? {
+        guard let text else { return nil }
+        let values = text.split(whereSeparator: { "{}, ".contains($0) }).compactMap { Float($0) }
+        return values.count == 2 ? (values[0], values[1]) : nil
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -535,6 +578,11 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setNeedsLayout") func setNeedsLayout() { state.needsLayout = true }
 
+    /// A change to the view's intrinsic size: its superview lays it out again.
+    func superviewNeedsLayout() {
+        if let superview = state.superview { UIView.wrap(superview).state.needsLayout = true }
+    }
+
     /// Lays out the subtree's views that need it, each before its subviews.
     /// A controller's view is laid out between its controller's
     /// -viewWillLayoutSubviews and -viewDidLayoutSubviews.
@@ -617,7 +665,8 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("safeAreaInsetsDidChange") func safeAreaInsetsDidChange() {}
     @ObjCMethod("layoutMarginsDidChange") func layoutMarginsDidChange() {}
 
-    @ObjCMethod("layoutSubviews") func layoutSubviews() {}
+    /// Subviews laid out by constraints get their frames.
+    @ObjCMethod("layoutSubviews") func layoutSubviews() { AutoLayout.layOut(self) }
 
     /// A plain view fits its current size.
     @ObjCMethod("sizeThatFits:") func sizeThatFits(_ size: CGSize) -> CGSize { state.bounds.size }
