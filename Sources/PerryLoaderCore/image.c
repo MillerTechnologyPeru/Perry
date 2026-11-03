@@ -45,6 +45,13 @@ void perry_loader_init(perry_loader *loader) {
         free(copy);
     }
 
+    // Swift's runtime and overlays are Darwin's own Mach-O libraries, such
+    // as the iOS Simulator's (RuntimeRoot/usr/lib/swift), loaded like the
+    // app's: their classes are Objective-C classes, laid out as Darwin's.
+    const char *swift = getenv("PERRY_SWIFT_RUNTIME");
+    if (swift && *swift)
+        loader->swift_runtime_dir = strdup(swift);
+
     char exe[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
     if (len > 0) {
@@ -448,6 +455,17 @@ static void protect_image(perry_image *image) {
 
 static perry_image *load_image(perry_loader *loader, const char *path);
 
+#define SWIFT_LIBRARY_DIR "/usr/lib/swift/"
+
+// Where a library of Darwin's /usr/lib/swift is in the Swift runtime
+// given, if it is there.
+static bool swift_runtime_file(perry_loader *loader, const char *path, char *out, size_t out_size) {
+    if (!loader->swift_runtime_dir || strncmp(path, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) != 0)
+        return false;
+    snprintf(out, out_size, "%s/%s", loader->swift_runtime_dir, path + strlen(SWIFT_LIBRARY_DIR));
+    return file_exists(out);
+}
+
 // Expands @executable_path, @loader_path and @rpath. Returns a malloc'd path
 // to an existing file, or NULL.
 static char *expand_install_name(perry_loader *loader, perry_image *image, const char *name) {
@@ -486,9 +504,20 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
                     snprintf(base, sizeof(base), "%s", rpath);
                 }
                 snprintf(buf, sizeof(buf), "%s/%s", base, name + 7);
+                char mapped[PATH_MAX];
+                if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                    return strdup(mapped);
                 if (file_exists(buf))
                     return strdup(buf);
             }
+        }
+        // Swift's overlays name the runtime and each other by @rpath, and
+        // have no rpaths of their own: the libraries beside them.
+        if (strncmp(name + 7, "libswift", 8) == 0) {
+            snprintf(buf, sizeof(buf), "%s%s", SWIFT_LIBRARY_DIR, name + 7);
+            char mapped[PATH_MAX];
+            if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                return strdup(mapped);
         }
         return NULL;
     }
@@ -511,6 +540,15 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
         const char *name = dep->install_name;
+
+        // Swift's libraries, from the Darwin runtime given, when it has them.
+        char swift_path[PATH_MAX];
+        if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path))) {
+            dep->image = find_loaded(loader, swift_path);
+            if (!dep->image)
+                dep->image = load_image(loader, swift_path);
+            continue;
+        }
 
         // Linux providers stand in for system libraries.
         if (name[0] == '/')
