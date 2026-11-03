@@ -8,12 +8,14 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <locale.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,6 +273,62 @@ int darwin___tolower(int c) { return c >= 0 && c < 256 ? tolower(c) : c; }
 int darwin___toupper(int c) DARWIN_SYMBOL(__toupper);
 int darwin___toupper(int c) { return c >= 0 && c < 256 ? toupper(c) : c; }
 
+// The fortified strlcpy and strlcat: abort if the size given exceeds the
+// destination's.
+size_t darwin_strlcpy_chk(char *destination, const char *source, size_t size, size_t destination_size)
+    DARWIN_SYMBOL(__strlcpy_chk);
+size_t darwin_strlcpy_chk(char *destination, const char *source, size_t size, size_t destination_size) {
+    if (size > destination_size) abort();
+    return strlcpy(destination, source, size);
+}
+
+size_t darwin_strlcat_chk(char *destination, const char *source, size_t size, size_t destination_size)
+    DARWIN_SYMBOL(__strlcat_chk);
+size_t darwin_strlcat_chk(char *destination, const char *source, size_t size, size_t destination_size) {
+    if (size > destination_size) abort();
+    return strlcat(destination, source, size);
+}
+
+// MARK: - Configuration strings
+
+enum {
+    DARWIN_CS_PATH = 1,
+    DARWIN_CS_DARWIN_USER_DIR = 65536,
+    DARWIN_CS_DARWIN_USER_TEMP_DIR = 65537,
+    DARWIN_CS_DARWIN_USER_CACHE_DIR = 65538,
+};
+
+// The per-user directories are the temporary directory, as NSTemporaryDirectory
+// gives it, and its caches; each ends in a slash, as on Darwin.
+size_t darwin_confstr(int name, char *buffer, size_t length) DARWIN_SYMBOL(confstr);
+size_t darwin_confstr(int name, char *buffer, size_t length) {
+    char value[PATH_MAX];
+    const char *temporary = getenv("TMPDIR");
+    if (!temporary || !*temporary) temporary = "/tmp/";
+    const char *slash = temporary[strlen(temporary) - 1] == '/' ? "" : "/";
+    switch (name) {
+    case DARWIN_CS_PATH:
+        return confstr(_CS_PATH, buffer, length);
+    case DARWIN_CS_DARWIN_USER_DIR:
+    case DARWIN_CS_DARWIN_USER_TEMP_DIR:
+        snprintf(value, sizeof value, "%s%s", temporary, slash);
+        break;
+    case DARWIN_CS_DARWIN_USER_CACHE_DIR:
+        snprintf(value, sizeof value, "%s%sCaches/", temporary, slash);
+        break;
+    default:
+        errno = EINVAL;
+        return 0;
+    }
+    if (buffer && length) snprintf(buffer, length, "%s", value);
+    return strlen(value) + 1;
+}
+
+// MARK: - Random numbers
+
+void darwin_srandomdev(void) DARWIN_SYMBOL(srandomdev);
+void darwin_srandomdev(void) { srandom(arc4random()); }
+
 // MARK: - sysctl
 
 enum { CTL_KERN = 1, CTL_HW = 6, KERN_OSTYPE = 1, KERN_OSRELEASE = 2, KERN_PROC = 14, KERN_OSVERSION = 65,
@@ -371,3 +429,21 @@ int64_t darwin_OSAtomicAdd64(int64_t amount, volatile int64_t *value) { return _
 
 int64_t darwin_OSAtomicAdd64Barrier(int64_t amount, volatile int64_t *value) DARWIN_SYMBOL(OSAtomicAdd64Barrier);
 int64_t darwin_OSAtomicAdd64Barrier(int64_t amount, volatile int64_t *value) { return __atomic_add_fetch(value, amount, __ATOMIC_SEQ_CST); }
+
+// OSAtomicCompareAndSwap: whether *value was old and is now new.
+#define COMPARE_AND_SWAP(name, type, order) \
+    bool darwin_##name(type old, type new, type volatile *value) DARWIN_SYMBOL(name); \
+    bool darwin_##name(type old, type new, type volatile *value) { \
+        return __atomic_compare_exchange_n(value, &old, new, false, order, __ATOMIC_RELAXED); \
+    }
+
+COMPARE_AND_SWAP(OSAtomicCompareAndSwap32, int32_t, __ATOMIC_RELAXED)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwap32Barrier, int32_t, __ATOMIC_SEQ_CST)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapInt, int, __ATOMIC_RELAXED)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapIntBarrier, int, __ATOMIC_SEQ_CST)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwap64, int64_t, __ATOMIC_RELAXED)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwap64Barrier, int64_t, __ATOMIC_SEQ_CST)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapLong, long, __ATOMIC_RELAXED)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapLongBarrier, long, __ATOMIC_SEQ_CST)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtr, void *, __ATOMIC_RELAXED)
+COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtrBarrier, void *, __ATOMIC_SEQ_CST)
