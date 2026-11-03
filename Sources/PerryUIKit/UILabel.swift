@@ -142,7 +142,50 @@ enum Text {
 
     /// The size of `text` on one line.
     static func size(_ text: String, font: UIFont) -> CGSize {
-        CGSize(width: (width(text, font: font)).rounded(.up), height: (font.state.pointSize * 1.19).rounded(.up))
+        CGSize(width: (width(text, font: font)).rounded(.up), height: lineHeight(font))
+    }
+
+    static func lineHeight(_ font: UIFont) -> CGFloat { (font.state.pointSize * 1.19).rounded(.up) }
+
+    /// `text` broken into lines no wider than `width`: at its newlines, then
+    /// between words, and within a word too long for a line. With `limit`
+    /// lines at most (0 for any number), the last shown ends in an ellipsis
+    /// if text was left out.
+    static func lines(_ text: String, font: UIFont, width: CGFloat, limit: Int) -> [String] {
+        var lines: [String] = []
+        for paragraph in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            var line = ""
+            for word in paragraph.split(separator: " ", omittingEmptySubsequences: false) {
+                let candidate = line.isEmpty ? String(word) : line + " " + word
+                if self.width(candidate, font: font) <= width || line.isEmpty && word.isEmpty {
+                    line = candidate
+                    continue
+                }
+                if !line.isEmpty { lines.append(line) }
+                // A word wider than the line is broken between characters.
+                line = ""
+                for character in word {
+                    if !line.isEmpty, self.width(line + String(character), font: font) > width {
+                        lines.append(line)
+                        line = ""
+                    }
+                    line.append(character)
+                }
+            }
+            lines.append(line)
+        }
+        guard limit > 0, lines.count > limit else { return lines }
+        var shown = Array(lines.prefix(limit))
+        shown[limit - 1] = truncated(lines[limit - 1] + " " + lines[limit...].joined(separator: " "), font: font, width: width)
+        return shown
+    }
+
+    /// `text` cut short with an ellipsis to fit `width`, if it does not.
+    static func truncated(_ text: String, font: UIFont, width: CGFloat) -> String {
+        guard self.width(text, font: font) > width else { return text }
+        var kept = Substring(text)
+        while !kept.isEmpty, self.width(kept.trimmingSuffixSpaces() + "…", font: font) > width { kept = kept.dropLast() }
+        return kept.trimmingSuffixSpaces() + "…"
     }
 
     /// Draws one line of `text` in the current context with its top left
@@ -211,6 +254,8 @@ open class UILabel: UIView {
         label.highlightedTextColor = decoded.object("UIHighlightedColor")?.as(UIColor.self)
         if decoded.has("UITextAlignment") { label.textAlignment = decoded.integer("UITextAlignment") }
         if decoded.has("UINumberOfLines") { label.numberOfLines = decoded.integer("UINumberOfLines") }
+        if decoded.has("UILineBreakMode") { label.lineBreakMode = decoded.integer("UILineBreakMode") }
+        if decoded.has("UIPreferredMaxLayoutWidth") { label.preferredMaxLayoutWidth = decoded.double("UIPreferredMaxLayoutWidth") }
         label.adjustsFontSizeToFitWidth = decoded.bool("UIAdjustsFontSizeToFit")
         return self
     }
@@ -229,6 +274,7 @@ open class UILabel: UIView {
     func setText(_ text: String?) {
         label.text = text
         setNeedsDisplay()
+        superviewNeedsLayout()
     }
 
     @ObjCMethod("attributedText") func attributedText() -> NSObject? { label.attributedText }
@@ -241,7 +287,7 @@ open class UILabel: UIView {
     }
 
     @ObjCMethod("font") func fontObject() -> UIFont { font }
-    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { label.font = font; setNeedsDisplay() }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { label.font = font; setNeedsDisplay(); superviewNeedsLayout() }
     @ObjCMethod("textColor") func textColor() -> UIColor { label.textColor ?? UIColor.label() }
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { label.textColor = color; setNeedsDisplay() }
     @ObjCMethod("highlightedTextColor") func highlightedTextColor() -> UIColor? { label.highlightedTextColor }
@@ -249,7 +295,7 @@ open class UILabel: UIView {
     @ObjCMethod("textAlignment") func textAlignment() -> Int { label.textAlignment }
     @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { label.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("numberOfLines") func numberOfLines() -> Int { label.numberOfLines }
-    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) { label.numberOfLines = lines }
+    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) { label.numberOfLines = lines; setNeedsDisplay(); superviewNeedsLayout() }
     @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { label.lineBreakMode }
     @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { label.lineBreakMode = mode }
     @ObjCMethod("adjustsFontSizeToFitWidth") func adjustsFontSizeToFitWidth() -> Bool { label.adjustsFontSizeToFitWidth }
@@ -263,11 +309,28 @@ open class UILabel: UIView {
     @ObjCMethod("preferredMaxLayoutWidth") func preferredMaxLayoutWidth() -> CGFloat { label.preferredMaxLayoutWidth }
     @ObjCMethod("setPreferredMaxLayoutWidth:") func setPreferredMaxLayoutWidth(_ width: CGFloat) { label.preferredMaxLayoutWidth = width }
 
-    /// One line of the text; empty text has no size.
+    /// The lines the text takes at `width`: one, shortened with an
+    /// ellipsis in the truncating line break modes, unless the label has
+    /// more lines.
+    func lines(width: CGFloat) -> [String] {
+        guard let text = label.text, !text.isEmpty else { return [] }
+        if label.numberOfLines == 1 {
+            let line = text.replacingNewlines()
+            return [(3...5).contains(label.lineBreakMode) ? Text.truncated(line, font: font, width: width) : line]
+        }
+        return Text.lines(text, font: font, width: width, limit: label.numberOfLines)
+    }
+
+    /// The text's size: on one line, or wrapped at the width given (else
+    /// the preferred maximum width) when the label has more lines.
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         guard let text = label.text, !text.isEmpty else { return .zero }
-        return Text.size(text, font: font)
+        guard label.numberOfLines != 1 else { return Text.size(text.replacingNewlines(), font: font) }
+        let width = size.width > 0 ? size.width : label.preferredMaxLayoutWidth > 0 ? label.preferredMaxLayoutWidth : .greatestFiniteMagnitude
+        let lines = lines(width: width)
+        let widest = lines.map { Text.width($0, font: font).rounded(.up) }.max() ?? 0
+        return CGSize(width: min(widest, width), height: CGFloat(lines.count) * Text.lineHeight(font))
     }
 
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { sizeThatFits(.zero) }
@@ -275,19 +338,27 @@ open class UILabel: UIView {
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) { sendDrawText(in: state.bounds) }
 
-    /// The text centered vertically, placed by the alignment.
+    /// The lines centered vertically as a block, each placed by the alignment.
     @ObjCMethod("drawTextInRect:")
     func drawText(in rect: CGRect) {
-        guard let text = label.text, !text.isEmpty else { return }
-        let size = Text.size(text, font: font)
-        let x: CGFloat
-        switch label.textAlignment {
-        case 1: x = rect.midX - size.width / 2
-        case 2: x = rect.maxX - size.width
-        default: x = rect.minX
-        }
+        let lines = lines(width: rect.width)
+        guard !lines.isEmpty else { return }
+        let lineHeight = Text.lineHeight(font)
+        // As many whole lines as fit, when the label is too short for all.
+        let shown = label.numberOfLines == 1 ? lines : Array(lines.prefix(max(1, Int((rect.height + 0.5) / lineHeight))))
+        var y = rect.midY - CGFloat(shown.count) * lineHeight / 2
         let color = label.highlighted ? (label.highlightedTextColor ?? textColor()) : textColor()
-        Text.draw(text, at: CGPoint(x: x, y: rect.midY - size.height / 2), font: font, color: color)
+        for line in shown {
+            let width = Text.width(line, font: font).rounded(.up)
+            let x: CGFloat
+            switch label.textAlignment {
+            case 1: x = rect.midX - width / 2
+            case 2: x = rect.maxX - width
+            default: x = rect.minX
+            }
+            Text.draw(line, at: CGPoint(x: x, y: y), font: font, color: color)
+            y += lineHeight
+        }
     }
 }
 
@@ -376,4 +447,14 @@ open class UIImageView: UIView {
                          "topLeft", "topRight", "bottomLeft", "bottomRight"]
         geometry.contentsGravity = gravities.indices.contains(state.contentMode) ? gravities[state.contentMode] : "resize"
     }
+}
+
+extension StringProtocol {
+    func trimmingSuffixSpaces() -> String {
+        var text = String(self)
+        while text.last == " " { text.removeLast() }
+        return text
+    }
+
+    func replacingNewlines() -> String { split(separator: "\n", omittingEmptySubsequences: false).joined(separator: " ") }
 }
