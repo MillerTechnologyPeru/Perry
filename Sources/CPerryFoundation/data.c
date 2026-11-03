@@ -1,8 +1,10 @@
 // Class storage Mach-O images bind to, under Darwin's symbol names.
 
 #define _GNU_SOURCE
+
 #include "CPerryFoundation.h"
 
+#include <malloc.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -14,6 +16,8 @@ int perry_foundation_thread_id(void) { return (int)gettid(); }
 // NSConstantDictionary's classes at startup.
 void *ns_array0[3] __asm__("___NSArray0__struct") __attribute__((visibility("default"), used));
 void *ns_dictionary0[5] __asm__("___NSDictionary0__struct") __attribute__((visibility("default"), used));
+
+size_t perry_foundation_usable_size(void *block) { return malloc_usable_size(block); }
 
 void perry_foundation_set_empty_array_class(void *cls) { ns_array0[0] = cls; }
 void perry_foundation_set_empty_dictionary_class(void *cls) { ns_dictionary0[0] = cls; }
@@ -230,3 +234,6 @@ const void *const cf_allocator_malloc DARWIN_SYMBOL("_kCFAllocatorMalloc") = &cf
 const void *const cf_allocator_malloc_zone DARWIN_SYMBOL("_kCFAllocatorMallocZone") = &cf_allocator_objects[2];
 const void *const cf_allocator_null DARWIN_SYMBOL("_kCFAllocatorNull") = &cf_allocator_objects[3];
 const void *const cf_allocator_use_context DARWIN_SYMBOL("_kCFAllocatorUseContext") = &cf_allocator_objects[4];
+
+// CoreFoundation's version: iOS 15's.
+const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFoundationVersionNumber") = 1854.0;
