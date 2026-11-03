@@ -59,6 +59,24 @@ open class UIScrollView: UIView {
         return self
     }
 
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        let pan = UIScrollViewPanGestureRecognizer.objCClass.object.allocated().unsafeCast(to: UIGestureRecognizer.self)
+        scroll.panGestureRecognizer = pan
+        addGestureRecognizer(pan)
+        scroll.contentSize = decoded.size("UIContentSize")
+        scroll.contentInset = decoded.insets("UIContentInset")
+        scroll.alwaysBounceVertical = decoded.bool("UIAlwaysBounceVertical")
+        scroll.alwaysBounceHorizontal = decoded.bool("UIAlwaysBounceHorizontal")
+        if decoded.has("UIScrollDisabled") { scroll.scrollEnabled = !decoded.bool("UIScrollDisabled") }
+        scroll.pagingEnabled = decoded.bool("UIPagingEnabled")
+        if decoded.has("UIShowsVerticalScrollIndicator") { scroll.showsVerticalIndicator = decoded.bool("UIShowsVerticalScrollIndicator") }
+        if decoded.has("UIContentInsetAdjustmentBehavior") { scroll.adjustmentBehavior = decoded.integer("UIContentInsetAdjustmentBehavior") }
+        return self
+    }
+
     @ObjCMethod("dealloc")
     override func dealloc() {
         UIScrollView.scrollStates.remove(objcObject)
