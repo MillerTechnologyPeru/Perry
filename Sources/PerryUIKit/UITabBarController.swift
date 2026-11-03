@@ -416,13 +416,18 @@ open class UITabBar: UIView {
         let badge = CGRect(x: origin.x, y: origin.y, width: width, height: height)
         withExtendedLifetime(color) {
             CG.setFillColorWithColor(context, color.state.makeCGColor())
-            if let path = CALayer.roundedRect(badge, radius: height / 2, corners: 15) {
+            if let path = roundedRectPath(badge, radius: height / 2, corners: 15) {
                 CG.addPath(context, path.object)
                 CG.fillPath(context)
             }
         }
         Text.draw(text, at: CGPoint(x: badge.midX - size.width / 2, y: badge.midY - size.height / 2), font: font, color: UIColor.white())
     }
+
+    /// QuartzCore asks before drawing: what the bar shows changes without
+    /// its saying so.
+    @ObjCMethod("_perryLayerContentChanged:")
+    func layerContentChanged(_ layer: NSObject) -> Bool { contentChanged() }
 
     /// Whether what the bar shows has changed since it last drew.
     func contentChanged() -> Bool {
