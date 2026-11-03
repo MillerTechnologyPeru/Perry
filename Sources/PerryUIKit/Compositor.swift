@@ -99,6 +99,9 @@ final class Compositor {
     }
 
     private var textures: [Key: Entry] = [:]
+    /// SDL's renderer's EGL context, which an app's EAGLContext displaces
+    /// when it draws on the same thread.
+    private var rendererContext: EAGLContexts.Saved?
 
     /// A window `size` points across at `scale` pixels a point, on the GPU
     /// when SDL has a renderer for it.
@@ -114,6 +117,7 @@ final class Compositor {
             return nil
         }
         (self.window, self.renderer, self.scale) = (window, renderer, scale)
+        rendererContext = EAGLContexts.save()
         let name = SDL.rendererName(renderer).map { String(cString: $0) } ?? "unknown"
         uikitWarning("live view composited by SDL's \(name) renderer")
     }
@@ -156,6 +160,10 @@ final class Compositor {
 
     /// Composites the windows, back to front, and shows the frame.
     func draw(_ windows: [UIWindow]) {
+        // Layers display first, as an app's OpenGL ES drawing for a layer
+        // makes its own context current; then the renderer's is again.
+        for window in windows { display(window.state.layer) }
+        rendererContext?.restore()
         for key in textures.keys { textures[key]?.used = false }
         _ = SDL.setDrawColor(renderer, 0, 0, 0, 1)
         _ = SDL.setClipRect(renderer, nil)
@@ -168,6 +176,17 @@ final class Compositor {
             textures[key] = nil
         }
         _ = SDL.present(renderer)
+        // The renderer's context was current while it drew; the app's is
+        // again.
+        EAGLContexts.restore()
+    }
+
+    /// Displays the visible layers that need it.
+    private func display(_ layer: CALayer) {
+        let state = layer.state
+        guard !state.hidden, state.opacity > 0 else { return }
+        CALayer.displayIfNeeded(layer)
+        for sublayer in state.sublayers { display(sublayer) }
     }
 
     /// A layer, then its sublayers, then its border; `toScreen` takes the
@@ -177,7 +196,6 @@ final class Compositor {
         guard !state.hidden, state.opacity > 0 else { return }
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
-        CALayer.displayIfNeeded(layer)
         setClip(clip)
         let textured = state.backing != nil || state.contents != nil || (state.cornerRadius > 0 && state.backgroundColor != nil)
         if textured {
