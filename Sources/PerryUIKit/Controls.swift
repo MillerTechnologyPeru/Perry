@@ -751,7 +751,8 @@ open class UIDevice: NSObject {
     /// UIUserInterfaceIdiom: phone 0.
     @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { 0 }
     /// UIDeviceOrientation: portrait 1.
-    @ObjCMethod("orientation") func orientation() -> Int { 1 }
+    /// UIDeviceOrientation, which numbers landscape as the interface does.
+    @ObjCMethod("orientation") func orientation() -> Int { Screen.orientation }
     @ObjCMethod("isMultitaskingSupported") func isMultitaskingSupported() -> Bool { true }
     @ObjCMethod("identifierForVendor") func identifierForVendor() -> NSObject { NSUUID.make() }
     @ObjCMethod("isBatteryMonitoringEnabled") func isBatteryMonitoringEnabled() -> Bool { false }
@@ -782,8 +783,10 @@ open class UIScreen: NSObject {
     @ObjCClassMethod("screens") static func screens() -> NSObject { NSMutableArray.of([mainScreen()]) }
 
     @ObjCMethod("bounds") func bounds() -> CGRect { Screen.bounds }
+    /// The panel's pixels, which stay in portrait as the interface turns.
     @ObjCMethod("nativeBounds") func nativeBounds() -> CGRect {
-        CGRect(x: 0, y: 0, width: Screen.bounds.width * Screen.scale, height: Screen.bounds.height * Screen.scale)
+        let size = Screen.bounds.size
+        return CGRect(x: 0, y: 0, width: min(size.width, size.height) * Screen.scale, height: max(size.width, size.height) * Screen.scale)
     }
     @ObjCMethod("applicationFrame") func applicationFrame() -> CGRect { Screen.bounds }
     @ObjCMethod("scale") func scale() -> CGFloat { Screen.scale }
@@ -792,6 +795,12 @@ open class UIScreen: NSObject {
     @ObjCMethod("setBrightness:") func setBrightness(_ brightness: CGFloat) {}
     @ObjCMethod("maximumFramesPerSecond") func maximumFramesPerSecond() -> Int { 60 }
     @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { Windows.key.map { NSObject($0) } }
+
+    /// A display link for this screen, the only one.
+    @ObjCMethod("displayLinkWithTarget:selector:")
+    func displayLink(target: NSObject, selector: ObjCSelector) -> CADisplayLink {
+        CADisplayLink.make(CADisplayLink.objCClass, target: target, selector: selector)
+    }
     @ObjCMethod("traitCollection") func traitCollection() -> NSObject? { nil }
 }
 
