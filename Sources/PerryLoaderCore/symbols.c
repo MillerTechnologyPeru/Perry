@@ -178,11 +178,15 @@ static const struct {
 static void link_provider(perry_loader *loader, perry_provider *provider, const char *short_name) {
     // libSystem re-exports libdispatch, and Foundation CFNetwork's URL
     // loading classes, each found the first time the library lacks a
-    // symbol, so programs that never use them never load them.
+    // symbol, so programs that never use them never load them. Programs
+    // linked against older SDKs bind NSObject to CoreFoundation, which
+    // re-exported libobjc's root classes.
     if (strcmp(short_name, "System") == 0)
-        provider->reexport = LIBDISPATCH;
-    if (strcmp(short_name, "Foundation") == 0)
-        provider->reexport = CFNETWORK;
+        provider->reexports[0] = LIBDISPATCH;
+    if (strcmp(short_name, "Foundation") == 0) {
+        provider->reexports[0] = CFNETWORK;
+        provider->reexports[1] = LIBOBJC;
+    }
     for (size_t i = 0; i < sizeof(provider_links) / sizeof(provider_links[0]); i++)
         if (strcmp(provider_links[i].short_name, short_name) == 0)
             perry_find_provider(loader, provider_links[i].install_name);
@@ -192,7 +196,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 // libPerry<Name>.so convention:
 //   /usr/lib/libSystem.B.dylib                           -> System
 //   /usr/lib/system/libsystem_c.dylib                    -> System
-//   /usr/lib/libc++.1.dylib                              -> c++
+//   /usr/lib/libc++.1.dylib, /usr/lib/libc++abi.dylib     -> CXX
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
@@ -215,6 +219,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Foundation");
         return true;
     }
+    // libc++ and libc++abi are one provider.
+    if (strncmp(install_name, "/usr/lib/libc++", 15) == 0) {
+        snprintf(out, out_size, "CXX");
+        return true;
+    }
     // MobileCoreServices' (and macOS CoreServices') UTType functions live
     // with UTType.
     if (strstr(install_name, "/MobileCoreServices.framework/") || strstr(install_name, "/CoreServices.framework/")) {
@@ -229,7 +238,7 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // UIKit's views are drawn through QuartzCore's layers, which it keeps,
     // as it keeps OpenGL ES's contexts and GLKit's views built on them.
     if (strstr(install_name, "/QuartzCore.framework/") || strstr(install_name, "/OpenGLES.framework/") ||
-        strstr(install_name, "/GLKit.framework/")) {
+        strstr(install_name, "/GLKit.framework/") || strstr(install_name, "/WebKit.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
@@ -278,7 +287,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
             provider->handle = other->handle;
             provider->base = other->base;
             provider->symbol = other->symbol;
-            provider->reexport = other->reexport;
+            memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
             return provider;
         }
     }
@@ -324,9 +333,10 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
     // Symbols the provider defines at run time, such as Swift constants.
     if (!sym && provider->symbol)
         sym = provider->symbol(name);
-    if (!sym && provider->reexport) {
-        perry_provider *reexported = perry_find_provider(loader, provider->reexport);
-        return reexported && provider_lookup(loader, reexported, name, out);
+    for (size_t i = 0; !sym && i < sizeof(provider->reexports) / sizeof(provider->reexports[0]); i++) {
+        if (!provider->reexports[i]) continue;
+        perry_provider *reexported = perry_find_provider(loader, provider->reexports[i]);
+        if (reexported && provider_lookup(loader, reexported, name, out)) return true;
     }
     if (!sym)
         return false;
