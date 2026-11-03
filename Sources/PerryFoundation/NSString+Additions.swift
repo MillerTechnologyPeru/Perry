@@ -301,6 +301,45 @@ extension NSString {
         return true
     }
 
+    /// Converts the characters in `range` to `encoding`, as many whole
+    /// characters as fit in `maxLength` bytes (any number, without a
+    /// buffer), stopping at one the encoding lacks unless lossy conversion
+    /// (option 1) is allowed. Swift reads NSStrings' contents this way.
+    @ObjCMethod("getBytes:maxLength:usedLength:encoding:options:range:remainingRange:")
+    func getBytes(_ buffer: UnsafeMutableRawPointer?, maxLength: UInt, usedLength: UnsafeMutablePointer<UInt>?, encoding: UInt,
+                  options: UInt, range: NSRange, remainingRange: UnsafeMutablePointer<NSRange>?) -> Bool {
+        let all = check(range, "getBytes:maxLength:usedLength:encoding:options:range:remainingRange:")
+        let start = Int(range.location), end = start + Int(range.length)
+        var used = 0, index = start
+        while index < end {
+            let width = UTF16.isLeadSurrogate(all[index]) && index + 1 < end && UTF16.isTrailSurrogate(all[index + 1]) ? 2 : 1
+            guard let bytes = StringEncoding.encode(NSString.decoded(all[index..<index + width]), encoding, lossy: options & 1 != 0) else {
+                break
+            }
+            if let buffer {
+                guard used + bytes.count <= Int(maxLength) else { break }
+                bytes.withUnsafeBytes { (buffer + used).copyMemory(from: $0.baseAddress!, byteCount: bytes.count) }
+            }
+            used += bytes.count
+            index += width
+        }
+        usedLength?.pointee = UInt(used)
+        remainingRange?.pointee = NSRange(location: UInt(index), length: UInt(end - index))
+        return index > start
+    }
+
+    /// The encoding the contents convert to fastest: they are Unicode.
+    @ObjCMethod("fastestEncoding")
+    func fastestEncoding() -> UInt { StringEncoding.unicode }
+
+    /// Pointers straight to the contents, which Swift tries before copying
+    /// them out. Strings here keep neither form, so there are none.
+    @ObjCMethod("_fastCStringContents:")
+    func fastCStringContents(_ nullTerminated: Bool) -> UnsafePointer<CChar>? { nil }
+
+    @ObjCMethod("_fastCharacterContents")
+    func fastCharacterContents() -> UnsafePointer<UInt16>? { nil }
+
     @ObjCMethod("initWithData:encoding:")
     func initialize(data: NSData, encoding: UInt) -> Self? {
         data.data.withUnsafeBytes { StringEncoding.decode($0, encoding) }.map { decoded in
@@ -465,6 +504,12 @@ extension NSString {
         let part = substring(range: range)
         let a = options & 1 != 0 ? part.lowercased() : part, b = options & 1 != 0 ? other.lowercased() : other
         return options & 64 != 0 ? Strings.numericCompare(a, b) : Strings.compare(a, b)
+    }
+
+    /// The locale changes nothing: comparisons are not localized here.
+    @ObjCMethod("compare:options:range:locale:")
+    func compare(_ other: String, options: UInt, range: NSRange, locale: ObjCObject?) -> Int {
+        compare(other, options: options, range: range)
     }
 
     @ObjCMethod("localizedStandardCompare:")
