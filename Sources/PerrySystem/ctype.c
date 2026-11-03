@@ -64,3 +64,15 @@ static void make_rune_locale(void) {
     }
     darwin_CurrentRuneLocale = locale;
 }
+
+// The value of a hexadecimal digit, or 0.
+int darwin_digittoint(int c) DARWIN_SYMBOL(digittoint);
+int darwin_digittoint(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+int darwin_isxdigit(int c) DARWIN_SYMBOL(isxdigit);
+int darwin_isxdigit(int c) { return (c >= 0 && c < 256) && (darwin_DefaultRuneLocale.runetype[c] & X) != 0; }
