@@ -539,6 +539,11 @@ open class UINavigationBar: UIView {
         view.sendSetFrame(CGRect(x: 0, y: -height, width: state.bounds.width, height: height))
     }
 
+    /// QuartzCore asks before drawing: what the bar shows changes without
+    /// its saying so.
+    @ObjCMethod("_perryLayerContentChanged:")
+    func layerContentChanged(_ layer: NSObject) -> Bool { contentChanged() }
+
     /// Whether what the bar shows has changed since it last drew.
     func contentChanged() -> Bool {
         let items = barState.items.suffix(2)
