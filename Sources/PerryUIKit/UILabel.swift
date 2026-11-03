@@ -336,7 +336,12 @@ open class UILabel: UIView {
     @ObjCMethod("setAdjustsFontForContentSizeCategory:")
     func setAdjustsFontForContentSizeCategory(_ adjusts: Bool) { label.adjustsFontForContentSizeCategory = adjusts }
     @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { label.highlighted }
-    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { label.highlighted = highlighted }
+    @ObjCMethod("setHighlighted:")
+    func setHighlighted(_ highlighted: Bool) {
+        guard highlighted != label.highlighted else { return }
+        label.highlighted = highlighted
+        setNeedsDisplay()
+    }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { label.enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { label.enabled = enabled }
     @ObjCMethod("preferredMaxLayoutWidth") func preferredMaxLayoutWidth() -> CGFloat { label.preferredMaxLayoutWidth }
