@@ -315,6 +315,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         let size = state.bounds.size
         state.frame = frame
         state.needsLayout = true
+        Updates.schedule()
         if state.bounds.size != size { boundsSizeChanged(from: size) }
     }
 
@@ -636,7 +637,14 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Layout
 
-    @ObjCMethod("setNeedsLayout") func setNeedsLayout() { state.needsLayout = true }
+    /// Marks the view, and has the next update pass lay it out, as Core
+    /// Animation commits at the end of the run loop's turn: changes made
+    /// from a timer or a message performed on the main thread show too.
+    @ObjCMethod("setNeedsLayout")
+    func setNeedsLayout() {
+        state.needsLayout = true
+        Updates.schedule()
+    }
 
     /// A change to the view's intrinsic size: its superview lays it out again.
     func superviewNeedsLayout() {
@@ -744,8 +752,13 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// content.
     @ObjCMethod("drawRect:") func draw(_ rect: CGRect) {}
 
-    @ObjCMethod("setNeedsDisplay") func setNeedsDisplay() { state.geometry.needsDisplay = true }
-    @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { state.geometry.needsDisplay = true }
+    @ObjCMethod("setNeedsDisplay")
+    func setNeedsDisplay() {
+        state.geometry.needsDisplay = true
+        Updates.schedule()
+    }
+
+    @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { setNeedsDisplay() }
 
     /// The layer's content: -drawRect: with the layer's context current.
     @ObjCMethod("drawLayer:inContext:")
