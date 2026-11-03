@@ -445,12 +445,23 @@ enum AutoLayout {
         return found
     }
 
+    /// The stack views whose arrangements a layout of `view` solves: its
+    /// own, and those of the subviews constraints lay out.
+    static func stackViews(in view: UIView) -> [UIStackView] {
+        var found = view.as(UIStackView.self).map { [$0] } ?? []
+        for subview in view.state.subviews where !subview.state.translatesAutoresizingMaskIntoConstraints {
+            found += stackViews(in: subview)
+        }
+        return found
+    }
+
     /// Lays out `view`'s subviews from their constraints.
     static func layOut(_ view: UIView) {
-        let constraints = constraints(of: view)
-        guard !constraints.isEmpty else { return }
+        let constraints = constraints(of: view), stacks = stackViews(in: view)
+        guard !constraints.isEmpty || !stacks.isEmpty else { return }
         let system = System(root: view)
         for constraint in constraints { system.add(constraint) }
+        for stack in stacks { system.arrange(stack) }
         system.solve()
         system.apply()
     }
@@ -459,8 +470,8 @@ enum AutoLayout {
     /// -systemLayoutSizeFittingSize: finds with a fixed width; nil when
     /// none bear on it.
     static func fittingHeight(_ view: UIView, width: CGFloat) -> CGFloat? {
-        let constraints = constraints(of: view)
-        guard !constraints.isEmpty else { return nil }
+        let constraints = constraints(of: view), stacks = stackViews(in: view)
+        guard !constraints.isEmpty || !stacks.isEmpty else { return nil }
         let system = System(root: view)
         // The root's width is fixed and its height free, as small as can be.
         let root = Item(view, solved: false)
@@ -471,6 +482,7 @@ enum AutoLayout {
         system.solver.add(LayoutExpression(root.height), .greaterOrEqual, strength: LayoutSolver.required)
         system.solver.add(LayoutExpression(root.height), .equal, strength: strength(50))
         for constraint in constraints { system.add(constraint) }
+        for stack in stacks { system.arrange(stack) }
         system.solve()
         return root.height.value.rounded(.up)
     }
