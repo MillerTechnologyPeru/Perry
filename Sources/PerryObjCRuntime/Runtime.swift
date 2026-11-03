@@ -101,7 +101,18 @@ public enum Runtime {
     public static func lookUpClass(_ name: UnsafePointer<CChar>) -> ClassPointer? {
         // Other providers may start before libobjc and look up NSObject.
         RootClasses.bootstrap()
-        return lock.withLock { classesByName[CStringKey(pointer: name)] }
+        if let cls = lock.withLock({ classesByName[CStringKey(pointer: name)] }) {
+            return cls
+        }
+        // A Swift class by its demangled name.
+        if let mangled = SwiftNames.mangle(name),
+           let cls = mangled.withCString({ mangled in lock.withLock { classesByName[CStringKey(pointer: mangled)] } }) {
+            return cls
+        }
+        // Classes not yet known by name, such as Swift's, which its runtime
+        // finds from their mangled names.
+        var found: ClassPointer?
+        return Hooks.getClass(name, &found) ? found : nil
     }
 
     /// Empties every method cache, after methods change.
