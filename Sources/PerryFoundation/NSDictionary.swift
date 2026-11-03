@@ -1,3 +1,4 @@
+import FoundationEssentials
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
@@ -101,6 +102,15 @@ enum Dictionaries {
         ObjC.autorelease(make(entries, cls: cls))!
     }
 
+    /// Pairs from two arrays of the same length.
+    static func pairs(objects: id?, keys: id?, method: String) -> [(key: id, value: id)] {
+        let values = Arrays.elements(objects), keys = Arrays.elements(keys)
+        guard values.count == keys.count else {
+            foundationFatal("\(method): count of objects (\(values.count)) differs from count of keys (\(keys.count))")
+        }
+        return zip(keys, values).map { (key: $0, value: $1) }
+    }
+
     static func pairs(objects: UnsafePointer<id?>?, keys: UnsafePointer<id?>?, count: UInt, method: String) -> [(key: id, value: id)] {
         guard let objects, let keys else { return [] }
         return (0..<Int(count)).map { index in
@@ -127,6 +137,8 @@ public class NSDictionary: NSObject {
         Dictionaries.dictionaryClass = cls.storage
         cls.addMethod("dictionaryWithObjectsAndKeys:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_dictionaryWithObjectsAndKeys), isClassMethod: true)
+        cls.addMethod("initWithObjectsAndKeys:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_initWithObjectsAndKeys), isClassMethod: false)
     }
 
     var entries: [(key: id, value: id)] { Dictionaries.entries(objcObject) }
@@ -154,6 +166,25 @@ public class NSDictionary: NSObject {
                            cls: cls.pointer)
     }
 
+    @ObjCClassMethod("dictionaryWithObjects:forKeys:")
+    static func dictionary(_ cls: ObjCClass, objects: ObjCObject?, forKeys keys: ObjCObject?) -> NSDictionary {
+        Dictionaries.owned(Dictionaries.pairs(objects: objects?.id, keys: keys?.id,
+                                              method: "+[NSDictionary dictionaryWithObjects:forKeys:]"),
+                           cls: cls.pointer)
+    }
+
+    /// A property list file's dictionary; mutable throughout when sent to
+    /// a mutable class.
+    @ObjCClassMethod("dictionaryWithContentsOfFile:")
+    static func dictionary(_ cls: ObjCClass, contentsOfFile path: String) -> UnsafeMutableRawPointer? {
+        PropertyLists.contents(of: URL(filePath: path), cls, expecting: .dictionary)
+    }
+
+    @ObjCClassMethod("dictionaryWithContentsOfURL:")
+    static func dictionary(_ cls: ObjCClass, contentsOfURL url: NSURL) -> UnsafeMutableRawPointer? {
+        PropertyLists.contents(of: url.url, cls, expecting: .dictionary)
+    }
+
     @ObjCClassMethod("dictionaryWithDictionary:")
     static func dictionary(_ cls: ObjCClass, dictionary other: NSDictionary?) -> NSDictionary {
         Dictionaries.owned(other?.entries ?? [], cls: cls.pointer)
@@ -168,8 +199,25 @@ public class NSDictionary: NSObject {
                                       method: "-[NSDictionary initWithObjects:forKeys:count:]"))
     }
 
+    @ObjCMethod("initWithObjects:forKeys:")
+    func initialize(objects: ObjCObject?, forKeys keys: ObjCObject?) -> Self {
+        setEntries(Dictionaries.pairs(objects: objects?.id, keys: keys?.id, method: "-[NSDictionary initWithObjects:forKeys:]"))
+    }
+
     @ObjCMethod("initWithDictionary:")
     func initialize(dictionary other: NSDictionary?) -> Self { setEntries(other?.entries ?? []) }
+
+    /// A property list file's dictionary; nil when the file holds none.
+    @ObjCMethod("initWithContentsOfFile:")
+    func initialize(contentsOfFile path: String) -> Self? { initialize(contentsOf: URL(filePath: path)) }
+
+    @ObjCMethod("initWithContentsOfURL:")
+    func initialize(contentsOfURL url: NSURL) -> Self? { initialize(contentsOf: url.url) }
+
+    private func initialize(contentsOf url: URL) -> Self? {
+        guard let object = PropertyLists.contents(of: url, ObjCClass(named: "NSDictionary"), expecting: .dictionary) else { return nil }
+        return setEntries(NSDictionary(objcObject: object, ownership: .retain).entries)
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -341,4 +389,17 @@ public func perry_foundation_dictionaryWithObjectsAndKeys(_ cls: id?, _ cmd: SEL
         index += 2
     }
     return Dictionaries.autoreleased(entries, cls: cls)
+}
+
+/// - (id)initWithObjectsAndKeys:(id)first, ... nil — value, key pairs.
+@c
+public func perry_foundation_initWithObjectsAndKeys(_ object: id?, _ cmd: SEL?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    let objects = nilTerminated(first, arguments)
+    var entries: [(key: id, value: id)] = []
+    var index = 0
+    while index + 1 < objects.count {
+        entries.append((key: objects[index + 1], value: objects[index]))
+        index += 2
+    }
+    return Dictionaries.initialize(object, entries)
 }
