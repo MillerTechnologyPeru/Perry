@@ -19,6 +19,9 @@ final class RunLoopState {
     /// The NSRunLoop object, which also serves as the CFRunLoopRef.
     private(set) var object: id!
     private var timers: [id] = []
+    /// Observers added, retained, and blocks to perform, copied.
+    private var observers: [id] = []
+    private var blocks: [id] = []
     /// Ports added, which keep the loop running as input sources do.
     var ports = 0
     private var stopRequested = false
@@ -66,6 +69,59 @@ final class RunLoopState {
 
     var hasTimers: Bool { locked { !timers.isEmpty } }
 
+    func add(observer: id) {
+        let added = locked {
+            guard !observers.contains(observer) else { return false }
+            observers.append(observer)
+            return true
+        }
+        if added { _ = ObjC.retain(observer) }
+    }
+
+    func remove(observer: id) {
+        let removed = locked {
+            guard let index = observers.firstIndex(of: observer) else { return false }
+            observers.remove(at: index)
+            return true
+        }
+        if removed { ObjC.release(observer) }
+    }
+
+    func contains(observer: id) -> Bool { locked { observers.contains(observer) } }
+
+    /// Runs a block on the loop's next pass. Safe from any thread.
+    func perform(_ block: id) {
+        guard let copied = ObjC.retainBlock(block) else { return }
+        locked { blocks.append(copied) }
+        wakeUp()
+    }
+
+    /// Calls the observers of `activity`, in their order; an observer that
+    /// does not repeat is removed after its first call.
+    private func notify(_ activity: UInt) {
+        let observing = locked { observers.filter { RunLoopObservers.activities($0) & activity != 0 } }
+            .sorted { RunLoopObservers.order($0) < RunLoopObservers.order($1) }
+        for observer in observing {
+            _ = ObjC.retain(observer)
+            ObjC.autoreleasepool { RunLoopObservers.call(observer, activity) }
+            if !RunLoopObservers.repeats(observer) { remove(observer: observer) }
+            ObjC.release(observer)
+        }
+    }
+
+    /// Runs the blocks performed so far; whether there were any.
+    private func runBlocks() -> Bool {
+        let pending = locked { () -> [id] in
+            defer { blocks.removeAll() }
+            return blocks
+        }
+        for block in pending {
+            ObjC.autoreleasepool { Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block) }
+            ObjC.release(block)
+        }
+        return !pending.isEmpty
+    }
+
     func snapshotTimers() -> [id] { locked { timers } }
 
     func stop() {
@@ -81,8 +137,17 @@ final class RunLoopState {
     /// With `waitWhenEmpty`, running out of timers waits for `limit` instead,
     /// as a Darwin run loop with an input source does.
     func run(until limit: Double, returnAfterSourceHandled: Bool = false, waitWhenEmpty: Bool? = nil) -> Result {
+        notify(RunLoopActivity.entry)
+        let result = runPasses(until: limit, returnAfterSourceHandled: returnAfterSourceHandled, waitWhenEmpty: waitWhenEmpty)
+        notify(RunLoopActivity.exit)
+        return result
+    }
+
+    private func runPasses(until limit: Double, returnAfterSourceHandled: Bool, waitWhenEmpty: Bool?) -> Result {
         let waitWhenEmpty = waitWhenEmpty ?? isMain
         while true {
+            if runBlocks(), returnAfterSourceHandled { return .handledSource }
+            notify(RunLoopActivity.beforeTimers)
             if servesMainQueue, MainDispatchQueue.isReady() {
                 MainDispatchQueue.drain()
                 if returnAfterSourceHandled { return .handledSource }
@@ -118,7 +183,9 @@ final class RunLoopState {
     /// Sleeps until `deadline`, a wake-up or, on the main thread, work for
     /// the main queue.
     private func wait(until deadline: Double) {
-        if locked({ stopRequested }) { return }
+        if locked({ stopRequested || !blocks.isEmpty }) { return }
+        notify(RunLoopActivity.beforeWaiting)
+        defer { notify(RunLoopActivity.afterWaiting) }
         let remaining = deadline - absoluteTimeNow()
         // Milliseconds, rounded up so a timer is never woken for early.
         let timeout = remaining.isFinite ? Int32(min(max(ceil(remaining * 1000), 0), Double(Int32.max))) : -1
@@ -309,4 +376,147 @@ public func CFRunLoopStop(_ runLoop: UnsafeMutableRawPointer?) {
 @c(_CFRunLoopWakeUp)
 public func CFRunLoopWakeUp(_ runLoop: UnsafeMutableRawPointer?) {
     RunLoops.state(runLoop)?.wakeUp()
+}
+
+// MARK: - Observers and blocks
+
+/// CFRunLoopActivity.
+enum RunLoopActivity {
+    static let entry: UInt = 1 << 0
+    static let beforeTimers: UInt = 1 << 1
+    static let beforeSources: UInt = 1 << 2
+    static let beforeWaiting: UInt = 1 << 5
+    static let afterWaiting: UInt = 1 << 6
+    static let exit: UInt = 1 << 7
+}
+
+/// A CFRunLoopObserver: the activities it watches, and a block or a
+/// callout with its context's info.
+final class RunLoopObserverStorage {
+    typealias Callout = @convention(c) (id?, UInt, UnsafeMutableRawPointer?) -> Void
+    typealias Release = @convention(c) (UnsafeRawPointer?) -> Void
+
+    let activities: UInt
+    let repeats: Bool
+    let order: Int
+    let block: id?
+    let callout: Callout?
+    let info: UnsafeMutableRawPointer?
+    let release: Release?
+    var valid = true
+
+    init(activities: UInt, repeats: Bool, order: Int, block: id?, callout: Callout?, info: UnsafeMutableRawPointer?,
+         release: Release?) {
+        (self.activities, self.repeats, self.order) = (activities, repeats, order)
+        (self.block, self.callout, self.info, self.release) = (block.flatMap(ObjC.retainBlock), callout, info, release)
+    }
+
+    deinit {
+        if let block { ObjC.release(block) }
+        release?(info)
+    }
+}
+
+enum RunLoopObservers {
+    nonisolated(unsafe) static var observerClass: Class!
+
+    static func storage(_ observer: id?) -> RunLoopObserverStorage? { Storage.get(observer, as: RunLoopObserverStorage.self) }
+    static func activities(_ observer: id) -> UInt { storage(observer).map { $0.valid ? $0.activities : 0 } ?? 0 }
+    static func order(_ observer: id) -> Int { storage(observer)?.order ?? 0 }
+    static func repeats(_ observer: id) -> Bool { storage(observer)?.repeats ?? false }
+
+    static func call(_ observer: id, _ activity: UInt) {
+        guard let storage = storage(observer), storage.valid else { return }
+        if let block = storage.block {
+            Blocks.invoke(block, as: (@convention(c) (id, id?, UInt) -> Void).self)(block, observer, activity)
+        } else {
+            storage.callout?(observer, activity, storage.info)
+        }
+    }
+
+    static func make(_ storage: RunLoopObserverStorage) -> id? {
+        guard let object = Storage.allocate(UnsafeMutableRawPointer(observerClass)) else { return nil }
+        Storage.set(object, storage)
+        return object
+    }
+}
+
+@ObjCClass("__NSCFRunLoopObserver")
+final class NSCFRunLoopObserver: NSObject {
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        RunLoopObservers.observerClass = cls.storage
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: RunLoopObservers.observerClass)
+    }
+}
+
+@c(_CFRunLoopObserverCreateWithHandler)
+public func CFRunLoopObserverCreateWithHandler(_ allocator: UnsafeMutableRawPointer?, _ activities: UInt, _ repeats: Bool,
+                                               _ order: Int, _ block: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    RunLoopObservers.make(RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: block,
+                                                 callout: nil, info: nil, release: nil))
+}
+
+/// The context is { version, info, retain, release, copyDescription }.
+@c(_CFRunLoopObserverCreate)
+public func CFRunLoopObserverCreate(_ allocator: UnsafeMutableRawPointer?, _ activities: UInt, _ repeats: Bool, _ order: Int,
+                                    _ callout: (@convention(c) (UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> Void)?,
+                                    _ context: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+    typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
+    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+        info = UnsafeMutableRawPointer(mutating: retain(info))
+    }
+    let release = context?.load(fromByteOffset: 24, as: RunLoopObserverStorage.Release?.self)
+    return RunLoopObservers.make(RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: nil,
+                                                        callout: callout, info: info, release: release))
+}
+
+/// Every mode is the same run loop here.
+@c(_CFRunLoopAddObserver)
+public func CFRunLoopAddObserver(_ runLoop: UnsafeMutableRawPointer?, _ observer: UnsafeMutableRawPointer?,
+                                 _ mode: UnsafeMutableRawPointer?) {
+    guard let observer else { return }
+    RunLoops.state(runLoop)?.add(observer: observer)
+}
+
+@c(_CFRunLoopRemoveObserver)
+public func CFRunLoopRemoveObserver(_ runLoop: UnsafeMutableRawPointer?, _ observer: UnsafeMutableRawPointer?,
+                                    _ mode: UnsafeMutableRawPointer?) {
+    guard let observer else { return }
+    RunLoops.state(runLoop)?.remove(observer: observer)
+}
+
+@c(_CFRunLoopContainsObserver)
+public func CFRunLoopContainsObserver(_ runLoop: UnsafeMutableRawPointer?, _ observer: UnsafeMutableRawPointer?,
+                                      _ mode: UnsafeMutableRawPointer?) -> Bool {
+    guard let observer else { return false }
+    return RunLoops.state(runLoop)?.contains(observer: observer) ?? false
+}
+
+@c(_CFRunLoopObserverInvalidate)
+public func CFRunLoopObserverInvalidate(_ observer: UnsafeMutableRawPointer?) {
+    RunLoopObservers.storage(observer)?.valid = false
+}
+
+@c(_CFRunLoopObserverIsValid)
+public func CFRunLoopObserverIsValid(_ observer: UnsafeMutableRawPointer?) -> Bool {
+    RunLoopObservers.storage(observer)?.valid ?? false
+}
+
+@c(_CFRunLoopObserverGetActivities)
+public func CFRunLoopObserverGetActivities(_ observer: UnsafeMutableRawPointer?) -> UInt {
+    RunLoopObservers.storage(observer)?.activities ?? 0
+}
+
+@c(_CFRunLoopPerformBlock)
+public func CFRunLoopPerformBlock(_ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?,
+                                  _ block: UnsafeMutableRawPointer?) {
+    guard let block else { return }
+    RunLoops.state(runLoop)?.perform(block)
 }
