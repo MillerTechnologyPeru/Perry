@@ -465,14 +465,19 @@ open class UIImageView: UIView {
         showImage()
     }
 
+    @ObjCMethod("tintColorDidChange")
+    override func tintColorDidChange() { showImage() }
+
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { imageState.image?.state.size ?? .zero }
 
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { imageState.image?.state.size ?? CGSize(width: -1, height: -1) }
 
     /// The layer shows the image, placed by the content mode.
+    /// A template image shows in the tint color.
     private func showImage() {
-        let image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        var image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        if let template = image, template.state.renderingMode == 2 { image = template.withTintColor(tintColor()) }
         let geometry = state.geometry!
         geometry.contents = image.flatMap { $0.state.cgImage.map { NSObject($0) } }
         geometry.contentsScale = image?.state.scale ?? 1
