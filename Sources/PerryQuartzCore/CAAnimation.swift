@@ -9,7 +9,7 @@ import PerryObjCInterop
 // offset, repeats, autoreversing and fill modes, then a timing function's
 // cubic Bézier curve.
 
-final class AnimationState: ObjectState {
+final class AnimationState {
     var values: [String: NSObject] = [:]
     var duration = 0.0
     var delegate: NSObject?
@@ -37,14 +37,9 @@ final class AnimationState: ObjectState {
 
 @ObjCClass("CAAnimation")
 open class CAAnimation: NSObject {
-    static let states = StateTable<AnimationState>()
-    var state: AnimationState { CAAnimation.states[objcObject] }
+    var state = AnimationState()
 
-    @ObjCMethod("dealloc")
-    func dealloc() {
-        CAAnimation.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CAAnimation.objCClass.pointer)
-    }
+    @ObjCMethod("init") public required override init() { super.init() }
 
     @ObjCClassMethod("animation") static func animation(_ cls: ObjCClass) -> NSObject { cls.object.allocated().initialized() }
 
@@ -63,7 +58,7 @@ open class CAAnimation: NSObject {
         return ObjCRuntime.retain(copy.objcObject)
     }
 
-    func copied() -> CAAnimation { CAAnimation(objcObject: copy(zone: nil)!, ownership: .adopt) }
+    func copied() -> CAAnimation { CAAnimation.objCInstance(copy(zone: nil)!, ownership: .adopt) }
 
     @ObjCMethod("duration") func duration() -> Double { state.duration }
     @ObjCMethod("setDuration:") func setDuration(_ duration: Double) { state.duration = duration }
@@ -172,13 +167,14 @@ open class CAPropertyAnimation: CAAnimation {
 /// as the spring takes to settle unless told otherwise.
 @ObjCClass("CASpringAnimation")
 open class CASpringAnimation: CABasicAnimation {
+    @ObjCMethod("init") public required init() { super.init() }
+
     @ObjCMethod("initWithPerceptualDuration:bounce:")
-    func initialize(perceptualDuration duration: Double, bounce: Double) -> Self {
-        let state = state
+    public required init(perceptualDuration duration: Double, bounce: Double) {
+        super.init()
         state.mass = 1
         state.stiffness = pow(2 * .pi / max(duration, 0.01), 2)
         state.damping = 4 * .pi * (1 - min(max(bounce, -1), 1)) / max(duration, 0.01)
-        return self
     }
 }
 
@@ -188,20 +184,15 @@ open class CASpringAnimation: CABasicAnimation {
 
 /// The function pacing an animation: a cubic Bézier curve from (0, 0) to
 /// (1, 1) through two control points.
-final class TimingFunctionState: ObjectState {
+final class TimingFunctionState {
     var points: (Double, Double, Double, Double) = (0, 0, 1, 1)
 }
 
 @ObjCClass("CAMediaTimingFunction")
 open class CAMediaTimingFunction: NSObject {
-    static let states = StateTable<TimingFunctionState>()
-    var state: TimingFunctionState { CAMediaTimingFunction.states[objcObject] }
+    var state = TimingFunctionState()
 
-    @ObjCMethod("dealloc")
-    func dealloc() {
-        CAMediaTimingFunction.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CAMediaTimingFunction.objCClass.pointer)
-    }
+    @ObjCMethod("init") public required override init() { super.init() }
 
     static func points(named name: String) -> (Double, Double, Double, Double) {
         switch name {
@@ -214,7 +205,7 @@ open class CAMediaTimingFunction: NSObject {
     }
 
     static func named(_ name: String) -> CAMediaTimingFunction {
-        let function = objCClass.object.allocated().initialized().unsafeCast(to: CAMediaTimingFunction.self)
+        let function = CAMediaTimingFunction()
         function.state.points = points(named: name)
         return function
     }
@@ -234,9 +225,9 @@ open class CAMediaTimingFunction: NSObject {
     }
 
     @ObjCMethod("initWithControlPoints::::")
-    func initialize(x1: Float, y1: Float, x2: Float, y2: Float) -> Self {
+    public required init(x1: Float, y1: Float, x2: Float, y2: Float) {
+        super.init()
         state.points = (Double(x1), Double(y1), Double(x2), Double(y2))
-        return self
     }
 
     /// Point 0 is (0, 0), 1 and 2 the control points, 3 is (1, 1).
