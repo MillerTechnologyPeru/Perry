@@ -9,9 +9,9 @@ import PerryObjCInterop
 // the layer's sublayers in the same order.
 
 final class ViewState: ObjectState {
-    /// The view's layer, and the layer's state.
+    /// The view's layer, and its properties.
     var layer: CALayer!
-    var geometry: LayerState!
+    var geometry: LayerGeometry!
     var tag = 0
     var userInteractionEnabled = true
     var backgroundColor: UIColor?
@@ -179,9 +179,9 @@ open class UIView: UIResponder, UICoordinateSpace {
         let cls = NSObject(ObjCRuntime.objectClass(objcObject)!).sendLayerClass()
         let layer = cls.object.allocated().initializeLayer().unsafeCast(to: CALayer.self)
         state.layer = layer
-        state.geometry = layer.state
-        state.geometry.delegate = objcObject
-        state.geometry.contentsScale = Screen.scale
+        state.geometry = LayerGeometry(layer)
+        layer.setDelegate(self)
+        layer.setContentsScale(Screen.scale)
     }
 
     @ObjCClassMethod("layerClass") static func layerClass() -> ObjCClass { CALayer.objCClass }
@@ -300,7 +300,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("dealloc")
     func dealloc() {
         for subview in state.subviews { subview.state.superview = nil }
-        state.geometry.delegate = nil
+        state.layer.setDelegate(nil)
         UIView.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
@@ -384,7 +384,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     func setBackgroundColor(_ color: UIColor?) {
         let state = state
         state.backgroundColor = color
-        LayerState.setColor(&state.geometry.backgroundColor, color?.sendCGColor())
+        state.geometry.backgroundColor = color?.sendCGColor()
     }
 
     /// Pixels per point of the layer's content.
@@ -498,11 +498,10 @@ open class UIView: UIResponder, UICoordinateSpace {
         let subviews = state.subviews
         guard let index = index(of: view) else { return }
         let layer = state.layer!, sublayer = view.state.layer!
-        if index + 1 < subviews.count, let next = layer.index(of: subviews[index + 1].state.layer) {
-            let current = layer.index(of: sublayer)
-            layer.insert(sublayer, at: current.map { $0 < next ? next - 1 : next } ?? next)
+        if index + 1 < subviews.count {
+            layer.insertSublayer(sublayer, below: subviews[index + 1].state.layer)
         } else {
-            layer.insert(sublayer, at: layer.state.sublayers.count)
+            layer.addSublayer(sublayer)
         }
     }
 
@@ -787,6 +786,17 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { setNeedsDisplay() }
 
+    /// Whether the view draws its layer's content: its class has -drawRect:.
+    @ObjCMethod("_perryDrawsLayer:")
+    func drawsLayer(_ layer: NSObject) -> Bool { Methods.overrides(objcObject, "drawRect:", of: UIView.objCClass.pointer) }
+
+    /// The animation for a change to the layer inside an animation block;
+    /// outside one, none, as a view's layer does not animate by itself.
+    @ObjCMethod("actionForLayer:forKey:")
+    func action(for layer: NSObject, forKey key: String) -> NSObject? {
+        ViewAnimations.action(forKey: key) ?? NSNull.null()
+    }
+
     /// The layer's content: -drawRect: with the layer's context current.
     @ObjCMethod("drawLayer:inContext:")
     func drawLayer(_ layer: CALayer, in context: UnsafeMutableRawPointer?) {
@@ -806,7 +816,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         CG.translateCTM(context, rect.minX, rect.minY)
         if bounds.width > 0, bounds.height > 0 { CG.scaleCTM(context, rect.width / bounds.width, rect.height / bounds.height) }
         CG.translateCTM(context, -bounds.minX, -bounds.minY)
-        CALayer.render(state.layer, in: context, root: true)
+        state.layer.render(in: context)
         CG.restoreGState(context)
         return true
     }
