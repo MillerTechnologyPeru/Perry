@@ -141,6 +141,20 @@ public final class NSURL: NSObject {
     @ObjCMethod("password") func password() -> String? { url.password(percentEncoded: false) }
 
     /// Decoded, with no trailing slash, as NSURL's path is.
+    /// Resource values are not kept (excluding from backup is moot), so
+    /// setting one succeeds and reading one finds none.
+    @ObjCMethod("setResourceValue:forKey:error:")
+    func setResourceValue(_ value: ObjCObject?, forKey key: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool { true }
+
+    @ObjCMethod("setResourceValues:error:")
+    func setResourceValues(_ values: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool { true }
+
+    @ObjCMethod("getResourceValue:forKey:error:")
+    func getResourceValue(_ value: UnsafeMutablePointer<id?>?, forKey key: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool {
+        value?.pointee = nil
+        return true
+    }
+
     @ObjCMethod("path")
     func path() -> String {
         var path = url.path(percentEncoded: false)
