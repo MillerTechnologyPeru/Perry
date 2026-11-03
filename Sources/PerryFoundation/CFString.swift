@@ -16,6 +16,39 @@ public func CFStringGetLength(_ string: UnsafeMutableRawPointer?) -> Int {
     Strings.value(of: string)?.utf16.count ?? 0
 }
 
+// MARK: - Swift's bridging
+
+// Swift's runtime makes its strings NSStrings with these, and hashes
+// them as NSString does, so a bridged string finds its equal in an
+// NSDictionary or NSSet.
+
+/// Whether an object is an NSString, of any subclass.
+@c(__NSIsNSString)
+public func _NSIsNSString(_ object: UnsafeMutableRawPointer?) -> Bool {
+    guard let object else { return false }
+    return ObjC.isKind(object, of: Strings.stringClass)
+}
+
+/// NSString's hash of `length` ASCII bytes.
+@c(_CFStringHashCString)
+public func CFStringHashCString(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> UInt {
+    guard let bytes, length > 0 else { return Strings.hash("") }
+    return Strings.hash(String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self))
+}
+
+/// NSString's hash of a string, from its characters: never its -hash,
+/// which Swift's strings implement with this.
+@c(_CFStringHashNSString)
+public func CFStringHashNSString(_ string: UnsafeMutableRawPointer?) -> UInt {
+    Strings.hash(Strings.value(of: string) ?? "")
+}
+
+/// Strings are never tagged pointers here: nil has Swift make an object.
+@c(__CFStringCreateTaggedPointerString)
+public func _CFStringCreateTaggedPointerString(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> UnsafeMutableRawPointer? {
+    nil
+}
+
 /// void CFStringTrimWhitespace(CFMutableStringRef): removes whitespace and
 /// newlines from both ends.
 @c(_CFStringTrimWhitespace)
