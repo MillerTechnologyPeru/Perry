@@ -470,6 +470,16 @@ static bool swift_runtime_file(perry_loader *loader, const char *path, char *out
 static const perry_image *loading[64];   // beyond 64 deep, the outermost 64
 static uint32_t loading_count;
 
+// A framework the Swift runtime given holds as Name.framework/Name, for
+// /System/Library/Frameworks/Name.framework/Name.
+static bool swift_runtime_framework(perry_loader *loader, const char *path, char *out, size_t out_size) {
+    static const char frameworks[] = "/System/Library/Frameworks/";
+    if (!loader->swift_runtime_dir || strncmp(path, frameworks, strlen(frameworks)) != 0)
+        return false;
+    snprintf(out, out_size, "%s/%s", loader->swift_runtime_dir, path + strlen(frameworks));
+    return file_exists(out);
+}
+
 // Expands @executable_path, @loader_path and @rpath. Returns a malloc'd path
 // to an existing file, or NULL.
 static char *expand_install_name(perry_loader *loader, perry_image *image, const char *name) {
@@ -578,13 +588,29 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         perry_dependency *dep = &image->deps[i];
         const char *name = dep->install_name;
 
-        // Swift's libraries, from the Darwin runtime given, when it has them.
+        // Swift's libraries, from the Darwin runtime given, when it has them,
+        // and frameworks written in Swift that it holds (Combine).
         char swift_path[PATH_MAX];
-        if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path))) {
+        if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path)) ||
+            swift_runtime_framework(loader, name, swift_path, sizeof(swift_path))) {
             dep->image = find_loaded(loader, swift_path);
             if (!dep->image)
                 dep->image = load_image(loader, swift_path);
             continue;
+        }
+
+        // Frameworks built for Perry as Mach-O, such as Combine, beside the
+        // Swift runtime, which their Swift code needs.
+        static const char frameworks[] = "/System/Library/Frameworks/";
+        if (loader->swift_runtime_dir && strncmp(name, frameworks, strlen(frameworks)) == 0) {
+            char framework_path[PATH_MAX];
+            snprintf(framework_path, sizeof(framework_path), "%s/%s", loader->swift_runtime_dir, name + strlen(frameworks));
+            if (file_exists(framework_path)) {
+                dep->image = find_loaded(loader, framework_path);
+                if (!dep->image)
+                    dep->image = load_image(loader, framework_path);
+                continue;
+            }
         }
 
         // Linux providers stand in for system libraries.
