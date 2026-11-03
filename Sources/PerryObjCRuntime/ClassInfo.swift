@@ -14,7 +14,8 @@ public final class ClassInfo {
     public let name: UnsafePointer<CChar>
     public let isMeta: Bool
     public let isRoot: Bool
-    public let superInfo: ClassInfo?
+    /// Swift's runtime may move a class under another (class_setSuperclass).
+    public internal(set) var superInfo: ClassInfo?
     let hasCxxStructors: Bool
     let baseMethods: UnsafeRawPointer?
 
@@ -44,7 +45,8 @@ public final class ClassInfo {
         isMeta = flags & ROFlags.meta != 0
         isRoot = flags & ROFlags.root != 0
         hasCxxStructors = flags & ROFlags.hasCxxStructors != 0
-        name = ro.pointee.name ?? ClassInfo.unnamed
+        // Swift's generic classes are named when first asked for.
+        name = ro.pointee.name ?? Hooks.lazyClassNamer(cls) ?? ClassInfo.unnamed
         baseMethods = ro.pointee.base_methods
         self.superInfo = superInfo
         instanceSize = Int(ro.pointee.instance_size)
