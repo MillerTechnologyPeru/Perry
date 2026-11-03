@@ -86,6 +86,8 @@ public class NSSet: NSObject {
         Sets.setClass = cls.storage
         cls.addMethod("setWithObjects:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_setWithObjects), isClassMethod: true)
+        cls.addMethod("initWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_initSetWithObjects), isClassMethod: false)
     }
 
     var members: [id] { Sets.elements(objcObject) }
@@ -263,4 +265,10 @@ public class NSMutableSet: NSSet {
 public func perry_foundation_setWithObjects(_ cls: id?, _ cmd: SEL?, _ first: id?,
                                             _ arguments: UnsafeRawPointer?) -> id? {
     Sets.autoreleased(nilTerminated(first, arguments), cls: cls)
+}
+
+/// - (id)initWithObjects:(id)first, ... nil
+@c
+public func perry_foundation_initSetWithObjects(_ object: id?, _ cmd: SEL?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    Sets.initialize(object, nilTerminated(first, arguments))
 }
