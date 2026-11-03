@@ -73,6 +73,9 @@ final class CellState: ObjectState {
     var selectedBackgroundView: UIView?
     var accessoryView: UIView?
     var accessoryType = 0
+    /// A cell from a nib: its height as designed, which stands for the
+    /// height its constraints would give it.
+    var designHeight: CGFloat = 0
     /// UITableViewCellSelectionStyle: default 3.
     var selectionStyle = 3
     var selected = false
@@ -107,9 +110,28 @@ open class UITableViewCell: UIView {
         return cell
     }
 
-    @ObjCMethod("initWithCoder:") func initialize(coder: NSObject?) -> NSObject { initializeView(frame: CGRect(x: 0, y: 0, width: 320, height: 44)) }
+    /// From a nib: the content view and labels it decoded, the reuse
+    /// identifier, the accessory and the selection style.
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        let cell = cell
+        cell.style = decoded.integer("UITableViewCellStyle")
+        cell.designHeight = state.bounds.height
+        cell.reuseIdentifier = decoded.string("UIReuseIdentifier")
+        cell.contentView = decoded.object("UIContentView")?.as(UIView.self)
+        cell.textLabel = decoded.object("UITextLabel")?.as(UILabel.self)
+        cell.detailTextLabel = decoded.object("UIDetailTextLabel")?.as(UILabel.self)
+        cell.imageView = decoded.object("UIImageView")?.as(UIImageView.self)
+        cell.accessoryType = decoded.integer("UIAccessoryType")
+        if decoded.has("UISelectionStyle") { cell.selectionStyle = decoded.integer("UISelectionStyle") }
+        if cell.contentView == nil { setUp(style: cell.style, reuseIdentifier: cell.reuseIdentifier) }
+        if state.backgroundColor == nil { setBackgroundColor(UIColor.systemBackground()) }
+        return self
+    }
 
-    private func setUp(style: Int, reuseIdentifier: String?) {
+    func setUp(style: Int, reuseIdentifier: String?) {
         let cell = cell
         cell.style = style
         cell.reuseIdentifier = reuseIdentifier
@@ -397,6 +419,8 @@ final class TableState: ObjectState {
     var allowsSelectionDuringEditing = false
     var editing = false
     var cellClasses: [String: ObjCClass] = [:]
+    /// Nibs cells are made from, with what their placeholders stand for.
+    var cellNibs: [String: (nib: UINib, external: [String: NSObject])] = [:]
     var headerClasses: [String: ObjCClass] = [:]
     var reusableCells: [String: [UITableViewCell]] = [:]
     var reusableHeaders: [String: [UIView]] = [:]
@@ -407,6 +431,10 @@ final class TableState: ObjectState {
     var tableFooterView: UIView?
     var backgroundView: UIView?
     var layout: TableLayout?
+    /// Rows the delegate leaves to size themselves (UITableViewAutomaticDimension),
+    /// and the heights their cells have given them.
+    var automaticRows: Set<RowPath> = []
+    var measuredHeights: [RowPath: CGFloat] = [:]
     var updating = 0
 }
 
@@ -419,6 +447,32 @@ open class UITableView: UIScrollView {
     override func initialize(frame: CGRect) -> Self {
         _ = super.initialize(frame: frame)
         setBackgroundColor(UIColor.systemBackground())
+        return self
+    }
+
+    /// From a nib: the style, heights, header and footer, and the
+    /// prototype cells' nibs, registered by reuse identifier.
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        let table = table
+        table.style = decoded.integer("UIStyle")
+        if decoded.has("UIRowHeight") { table.rowHeight = decoded.double("UIRowHeight") }
+        if decoded.has("UISectionHeaderHeight") { table.sectionHeaderHeight = decoded.double("UISectionHeaderHeight") }
+        if decoded.has("UISectionFooterHeight") { table.sectionFooterHeight = decoded.double("UISectionFooterHeight") }
+        if decoded.has("UIEstimatedRowHeight") { table.estimatedRowHeight = decoded.double("UIEstimatedRowHeight") }
+        if decoded.has("UISeparatorStyle") { table.separatorStyle = decoded.integer("UISeparatorStyle") }
+        table.allowsMultipleSelection = decoded.bool("UIAllowsMultipleSelection")
+        if decoded.has("UIAllowsSelection") { table.allowsSelection = decoded.bool("UIAllowsSelection") }
+        let external = decoded.dictionary("UITableViewCellPrototypeNibExternalObjects")
+        for (identifier, nib) in decoded.dictionary("UITableViewCellPrototypeNibs") {
+            guard let nib = nib.as(UINib.self) else { continue }
+            table.cellNibs[identifier] = (nib, Nibs.strings(external[identifier]))
+        }
+        if let header = decoded.object("UITableHeaderView")?.as(UIView.self) { setTableHeaderView(header) }
+        if let footer = decoded.object("UITableFooterView")?.as(UIView.self) { setTableFooterView(footer) }
+        if state.backgroundColor == nil { setBackgroundColor(UIColor.systemBackground()) }
         return self
     }
 
@@ -486,6 +540,8 @@ open class UITableView: UIScrollView {
     @ObjCMethod("setAllowsSelectionDuringEditing:") func setAllowsSelectionDuringEditing(_ allows: Bool) {
         table.allowsSelectionDuringEditing = allows
     }
+    @ObjCMethod("allowsMultipleSelectionDuringEditing") func allowsMultipleSelectionDuringEditing() -> Bool { false }
+    @ObjCMethod("setAllowsMultipleSelectionDuringEditing:") func setAllowsMultipleSelectionDuringEditing(_ allows: Bool) {}
     @ObjCMethod("isEditing") func isEditing() -> Bool { table.editing }
     @ObjCMethod("setEditing:") func setEditing(_ editing: Bool) { table.editing = editing }
     @ObjCMethod("setEditing:animated:") func setEditing(_ editing: Bool, animated: Bool) { table.editing = editing }
@@ -527,7 +583,9 @@ open class UITableView: UIScrollView {
     func register(_ cls: ObjCClass?, forCellReuseIdentifier identifier: String) { table.cellClasses[identifier] = cls }
 
     @ObjCMethod("registerNib:forCellReuseIdentifier:")
-    func register(nib: NSObject?, forCellReuseIdentifier identifier: String) {}
+    func register(nib: NSObject?, forCellReuseIdentifier identifier: String) {
+        table.cellNibs[identifier] = nib?.as(UINib.self).map { ($0, [:]) }
+    }
 
     @ObjCMethod("registerClass:forHeaderFooterViewReuseIdentifier:")
     func register(_ cls: ObjCClass?, forHeaderFooterViewReuseIdentifier identifier: String) { table.headerClasses[identifier] = cls }
@@ -539,6 +597,10 @@ open class UITableView: UIScrollView {
         if let cell = table.reusableCells[identifier]?.popLast() {
             cell.sendPrepareForReuse()
             return cell
+        }
+        if let (nib, external) = table.cellNibs[identifier] {
+            return nib.instantiate(owner: nil, external: external).first { $0.is(UITableViewCell.self) }?
+                .unsafeCast(to: UITableViewCell.self)
         }
         guard let cls = table.cellClasses[identifier] else { return nil }
         return cls.object.allocated().initializeCell(style: 0, reuseIdentifier: identifier).unsafeCast(to: UITableViewCell.self)
@@ -584,6 +646,7 @@ open class UITableView: UIScrollView {
         var y: CGFloat = table.tableHeaderView?.state.bounds.height ?? 0
         var layout = TableLayout()
         let source = source, delegate = delegate()
+        table.automaticRows = []
         let sections = source.map { $0.responds(to: "numberOfSectionsInTableView:") ? $0.sendNumberOfSections(in: self) : 1 } ?? 0
         for section in 0..<max(sections, 0) {
             let header = headerHeight(section, source: source, delegate: delegate)
@@ -596,8 +659,13 @@ open class UITableView: UIScrollView {
             rows.reserveCapacity(count)
             let asks = delegate?.responds(to: "tableView:heightForRowAtIndexPath:") ?? false
             for row in 0..<max(count, 0) {
-                let height = asks ? delegate!.sendTableView(self, heightForRowAt: IndexPaths.make(section: section, row: row))
-                    : (table.rowHeight >= 0 ? table.rowHeight : 44)
+                var height = asks ? delegate!.sendTableView(self, heightForRowAt: IndexPaths.make(section: section, row: row))
+                    : table.rowHeight
+                if height < 0 {
+                    let path = RowPath(section: section, row: row)
+                    table.automaticRows.insert(path)
+                    height = table.measuredHeights[path] ?? automaticRowHeight
+                }
                 rows.append(CGRect(x: 0, y: y, width: width, height: height))
                 y += height
             }
@@ -609,6 +677,10 @@ open class UITableView: UIScrollView {
         layout.height = y + (table.tableFooterView?.state.bounds.height ?? 0)
         return layout
     }
+
+    /// UITableViewAutomaticDimension's height until the row's cell is made:
+    /// the estimate, else the standard row height.
+    private var automaticRowHeight: CGFloat { table.estimatedRowHeight > 0 ? table.estimatedRowHeight : 44 }
 
     /// The delegate's height, else the table's when the section has a
     /// header, else none.
@@ -740,10 +812,16 @@ open class UITableView: UIScrollView {
             guard let cell = source?.sendTableView(self, cellForRowAt: path.object) else {
                 uikitFatal("UITableView dataSource returned a nil cell for row at index path: \(path.section).\(path.row)")
             }
+            measure(cell, at: path)
             show(cell, at: path)
             if let delegate, delegate.responds(to: "tableView:willDisplayCell:forRowAtIndexPath:") {
                 delegate.sendTableView(self, willDisplay: cell, forRowAt: path.object)
             }
+        }
+        // Rows that sized themselves move the rows after them: lay out again.
+        if table.layout == nil {
+            layoutSubviews()
+            return
         }
         for (path, cell) in table.visibleCells where !wanted.contains(path) {
             table.visibleCells[path] = nil
@@ -756,6 +834,16 @@ open class UITableView: UIScrollView {
             if let frame = rect(path), cell.state.frame != frame { cell.sendSetFrame(frame) }
         }
         layOutHeaders(layout, bounds: bounds)
+    }
+
+    /// A self-sizing row takes its cell's designed height, there being no
+    /// constraints solved to size it; the layout is redone if that changes it.
+    private func measure(_ cell: UITableViewCell, at path: RowPath) {
+        guard table.automaticRows.contains(path), cell.cell.designHeight > 0,
+              table.measuredHeights[path] != cell.cell.designHeight else { return }
+        let estimated = table.measuredHeights[path] ?? automaticRowHeight
+        table.measuredHeights[path] = cell.cell.designHeight
+        if estimated != cell.cell.designHeight { table.layout = nil }
     }
 
     private func show(_ cell: UITableViewCell, at path: RowPath) {
@@ -837,6 +925,7 @@ open class UITableView: UIScrollView {
         for (_, view) in table.visibleHeaders { view.removeFromSuperview() }
         table.visibleHeaders = [:]
         table.selected = []
+        table.measuredHeights = [:]
         invalidate()
     }
 
@@ -1018,6 +1107,13 @@ open class UITableViewController: UIViewController {
     static let tableControllerStates = StateTable<TableControllerState>()
     var tableController: TableControllerState { UITableViewController.tableControllerStates[objcObject] }
 
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        tableController.style = Coder(coder: coder).integer("UIStyle")
+        return self
+    }
+
     @ObjCMethod("initWithStyle:")
     func initialize(style: Int) -> NSObject {
         let controller = initializeViewController(nibName: nil, bundle: nil).unsafeCast(to: UITableViewController.self)
@@ -1035,6 +1131,7 @@ open class UITableViewController: UIViewController {
     /// the controller is.
     @ObjCMethod("loadView")
     override func loadView() {
+        if loadViewFromNib() { return }
         let table = UITableView.objCClass.object.allocated().initializeTable(frame: Screen.bounds, style: tableController.style)
             .unsafeCast(to: UITableView.self)
         table.setDataSource(self)
