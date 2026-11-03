@@ -48,6 +48,8 @@ VARIADIC _fprintf, vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
 VARIADIC _sprintf, vsprintf, 2
 VARIADIC _snprintf, vsnprintf, 3
+VARIADIC _ioctl, perry_ioctl, 2
+VARIADIC _asl_log, perry_asl_log, 4
 VARIADIC _asprintf, vasprintf, 2
 VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
@@ -224,6 +226,35 @@ PASSTHROUGH _exit, exit
 PASSTHROUGH __exit, _exit
 PASSTHROUGH _atexit, atexit
 PASSTHROUGH ___cxa_atexit, __cxa_atexit
+PASSTHROUGH _stpcpy, stpcpy
+PASSTHROUGH _strlcat, strlcat
+PASSTHROUGH _strlcpy, strlcpy
+PASSTHROUGH _strftime, strftime
+PASSTHROUGH _localtime_r, localtime_r
+PASSTHROUGH _modf, modf
+PASSTHROUGH _logb, logb
+PASSTHROUGH _scalbn, scalbn
+PASSTHROUGH _cabs, cabs
+PASSTHROUGH _getrusage, getrusage
+PASSTHROUGH _utime, utime
+PASSTHROUGH _utimes, utimes
+PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _getprotobyname, getprotobyname
+PASSTHROUGH _if_nametoindex, if_nametoindex
+PASSTHROUGH _fork, fork
+PASSTHROUGH _execv, execv
+PASSTHROUGH _execve, execve
+PASSTHROUGH _waitpid, waitpid
+PASSTHROUGH _setpgid, setpgid
+PASSTHROUGH _getloadavg, getloadavg
+PASSTHROUGH _getdomainname, getdomainname
+PASSTHROUGH _gethostname, gethostname
+PASSTHROUGH _backtrace, backtrace
+PASSTHROUGH _backtrace_symbols, backtrace_symbols
+PASSTHROUGH _pthread_exit, pthread_exit
+PASSTHROUGH __Unwind_Backtrace, _Unwind_Backtrace
+PASSTHROUGH __Unwind_GetIP, _Unwind_GetIP
+PASSTHROUGH "_fopen$DARWIN_EXTSN", fopen
 PASSTHROUGH _acosf, acosf
 PASSTHROUGH _atanf, atanf
 PASSTHROUGH _frexp, frexp
