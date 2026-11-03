@@ -79,6 +79,19 @@ enum MapGeometry {
     }
 }
 
+/// Where the device is, as CoreLocation's provider reports it:
+/// PERRY_LOCATION's "latitude,longitude", Apple Park by default, or none.
+enum DeviceLocation {
+    nonisolated(unsafe) static let coordinate: CLLocationCoordinate2D? = {
+        guard let setting = getenv("PERRY_LOCATION").map({ String(cString: $0) }) else {
+            return CLLocationCoordinate2D(latitude: 37.334_886, longitude: -122.008_988)
+        }
+        let values = setting.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+        guard values.count == 2, abs(values[0]) <= 90, abs(values[1]) <= 180 else { return nil }
+        return CLLocationCoordinate2D(latitude: values[0], longitude: values[1])
+    }()
+}
+
 @c(_MKCoordinateSpanMake)
 public func MKCoordinateSpanMake(_ latitudeDelta: Double, _ longitudeDelta: Double) -> MKCoordinateSpan {
     MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
