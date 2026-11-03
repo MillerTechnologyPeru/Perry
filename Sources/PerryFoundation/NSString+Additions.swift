@@ -340,9 +340,10 @@ extension NSString {
     @ObjCMethod("_fastCharacterContents")
     func fastCharacterContents() -> UnsafePointer<UInt16>? { nil }
 
+    /// No data makes an empty string, as it does on Darwin.
     @ObjCMethod("initWithData:encoding:")
-    func initialize(data: NSData, encoding: UInt) -> Self? {
-        data.data.withUnsafeBytes { StringEncoding.decode($0, encoding) }.map { decoded in
+    func initialize(data: NSData?, encoding: UInt) -> Self? {
+        (data?.data ?? Data()).withUnsafeBytes { StringEncoding.decode($0, encoding) }.map { decoded in
             Storage.set(objcObject, StringStorage(decoded))
             return self
         }
@@ -351,6 +352,16 @@ extension NSString {
     @ObjCClassMethod("stringWithContentsOfFile:encoding:error:")
     static func string(contentsOfFile path: String, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> String? {
         let decoded = (try? Data(contentsOf: URL(filePath: path))).flatMap { $0.withUnsafeBytes { StringEncoding.decode($0, encoding) } }
+        if decoded == nil {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+        }
+        return decoded
+    }
+
+    /// A file's contents, or what NSURLConnection loads for other schemes.
+    @ObjCClassMethod("stringWithContentsOfURL:encoding:error:")
+    static func string(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> String? {
+        let decoded = url.flatMap(NSData.contents).flatMap { $0.withUnsafeBytes { StringEncoding.decode($0, encoding) } }
         if decoded == nil {
             error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
         }
@@ -367,6 +378,16 @@ extension NSString {
         return true
     }
 
+    /// Only file URLs can be written.
+    @ObjCMethod("writeToURL:atomically:encoding:error:")
+    func write(to url: NSURL, atomically: Bool, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard url.url.isFileURL else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 518, description: "The file couldn’t be saved.")
+            return false
+        }
+        return write(toFile: url.url.path(percentEncoded: false), atomically: atomically, encoding: encoding, error: error)
+    }
+
     // MARK: Paths
 
     @ObjCMethod("lastPathComponent") func lastPathComponent() -> String { Paths.lastComponent(value) }
@@ -379,6 +400,13 @@ extension NSString {
 
     @ObjCMethod("stringByAppendingPathExtension:")
     func appending(pathExtension: String) -> String { Paths.normalized(value) + "." + pathExtension }
+
+    /// The path the components make, as -pathComponents gives them: "/"
+    /// first for an absolute path.
+    @ObjCClassMethod("pathWithComponents:")
+    static func path(components: NSArray) -> String {
+        components.elements.compactMap { Strings.value(of: $0) }.reduce("") { Paths.appending($0, $1) }
+    }
 
     @ObjCMethod("pathComponents")
     func pathComponents() -> NSArray { Arrays.owned(Paths.components(value).map { Strings.autoreleased($0) }) }
@@ -437,6 +465,27 @@ extension NSString {
     @ObjCMethod("stringByReplacingOccurrencesOfString:withString:")
     func replacing(_ target: String, with replacement: String) -> String {
         target.isEmpty ? value : value.replacing(target, with: replacement)
+    }
+
+    /// Replaces matches within `scope`, found as -rangeOfString:options:range:
+    /// finds them: each in turn, or only one when searching backwards (4) or
+    /// anchored (8). A regular expression's replacement is taken literally.
+    @ObjCMethod("stringByReplacingOccurrencesOfString:withString:options:range:")
+    func replacing(_ target: String, with replacement: String, options: UInt, range scope: NSRange) -> String {
+        let all = check(scope, "stringByReplacingOccurrencesOfString:withString:options:range:")
+        guard !target.isEmpty else { return value }
+        let end = Int(scope.location + scope.length)
+        var result = Array(all[..<Int(scope.location)]), position = Int(scope.location)
+        while position <= end {
+            let found = self.range(of: target, options: options, range: NSRange(location: position, length: end - position))
+            guard found.location != notFound, found.length > 0 else { break }
+            result += all[position..<Int(found.location)]
+            result += replacement.utf16
+            position = Int(found.location + found.length)
+            if options & 0xC != 0 { break }
+        }
+        result += all[position...]
+        return String(decoding: result, as: UTF16.self)
     }
 
     // MARK: Composed characters
