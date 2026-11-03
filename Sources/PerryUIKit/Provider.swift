@@ -118,6 +118,30 @@ enum Classes {
 /// No assistive settings are on.
 @c(_UIAccessibilityIsBoldTextEnabled) public func UIAccessibilityIsBoldTextEnabled() -> Bool { false }
 @c(_UIAccessibilityIsGuidedAccessEnabled) public func UIAccessibilityIsGuidedAccessEnabled() -> Bool { false }
+@c(_UIAccessibilityIsVoiceOverRunning) public func UIAccessibilityIsVoiceOverRunning() -> Bool { false }
+@c(_UIAccessibilityIsSwitchControlRunning) public func UIAccessibilityIsSwitchControlRunning() -> Bool { false }
+@c(_UIAccessibilityIsReduceMotionEnabled) public func UIAccessibilityIsReduceMotionEnabled() -> Bool { false }
+@c(_UIAccessibilityIsReduceTransparencyEnabled) public func UIAccessibilityIsReduceTransparencyEnabled() -> Bool { false }
+@c(_UIAccessibilityIsInvertColorsEnabled) public func UIAccessibilityIsInvertColorsEnabled() -> Bool { false }
+@c(_UIAccessibilityButtonShapesEnabled) public func UIAccessibilityButtonShapesEnabled() -> Bool { false }
+@c(_UIAccessibilityPrefersCrossFadeTransitions) public func UIAccessibilityPrefersCrossFadeTransitions() -> Bool { false }
+@c(_UIAccessibilityShouldDifferentiateWithoutColor)
+public func UIAccessibilityShouldDifferentiateWithoutColor() -> Bool { false }
+
+/// libAccessibility's settings, which UIKit and SwiftUI read: all off.
+@c(__AXSCommandAndControlEnabled) public func _AXSCommandAndControlEnabled() -> UInt8 { 0 }
+@c(__AXSFullKeyboardAccessEnabled) public func _AXSFullKeyboardAccessEnabled() -> UInt8 { 0 }
+@c(__AXSHoverTextEnabled) public func _AXSHoverTextEnabled() -> UInt8 { 0 }
+@c(__AXSIncreaseButtonLegibility) public func _AXSIncreaseButtonLegibility() -> UInt8 { 0 }
+@c(__AXSPhotosensitiveMitigationEnabled) public func _AXSPhotosensitiveMitigationEnabled() -> UInt8 { 0 }
+
+/// Accessibility.framework's Assistive Access, the simplified interface: off.
+@c(_AXAssistiveAccessEnabled) public func AXAssistiveAccessEnabled() -> Bool { false }
+
+/// Accessibility's Swift AccessibilitySettings.animatedImagesEnabled: images
+/// animate, as they do unless the setting turns them off.
+@_silgen_name("_$sSo21AccessibilitySettingsV0A0E21animatedImagesEnabledSbvgZ")
+public func AccessibilitySettingsAnimatedImagesEnabled() -> Bool { true }
 
 /// void UIAccessibilityPostNotification(UIAccessibilityNotifications, id):
 /// there is no assistive technology to tell.
