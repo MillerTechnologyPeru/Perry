@@ -180,6 +180,16 @@ public class NSAttributedString: NSObject {
         return self
     }
 
+    /// From a keyed archive or nib: the string and its attributes.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject) -> Self {
+        let decode = { (key: String) in ObjC.send(coder.id, ObjC.selector("decodeObjectForKey:"), Strings.autoreleased(key)) }
+        let text = decode("NSString").flatMap { Strings.value(of: $0) } ?? ""
+        let attributes = decode("NSAttributes").flatMap { ObjC.isKind($0, of: Dictionaries.dictionaryClass) ? $0 : nil }
+        Storage.set(objcObject, AttributedStorage(units: Array(text.utf16), attributes: attributes))
+        return self
+    }
+
     @ObjCMethod("initWithString:attributes:")
     func initialize(string: String, attributes: ObjCObject?) -> Self {
         Storage.set(objcObject, AttributedStorage(units: Array(string.utf16), attributes: attributes?.id))
