@@ -23,8 +23,20 @@ public enum Hooks {
 extension Runtime {
     /// objc_readClassPair and _objc_realizeClassFromSwift: realizes a class
     /// Swift's runtime has built or updated, and registers its name.
+    ///
+    /// A class whose layout depends on types from other modules is laid out
+    /// when its metadata is first initialized, after its image was mapped
+    /// and the class realized: Swift's runtime then writes the class_ro_t's
+    /// instance size and the ivar offsets afresh, and realizes it again, so
+    /// a class already realized takes its size anew.
     public static func realizeFromSwift(_ cls: ClassPointer) -> ClassPointer {
-        _ = info(cls)
+        lock.withLock {
+            let known = perry_load_acquire(cacheSlot(cls)).map { $0 != emptyCache } ?? false
+            guard let info = info(cls), known,
+                  let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7) else { return }
+            info.instanceSize = Int(ro.pointee.instance_size)
+            slideIvars(info, ro: ro)
+        }
         return cls
     }
 
