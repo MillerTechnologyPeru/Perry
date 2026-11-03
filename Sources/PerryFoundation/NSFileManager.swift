@@ -38,6 +38,11 @@ enum FileAttributes {
     static let NSFileSize = "NSFileSize"
     static let NSFileModificationDate = "NSFileModificationDate"
     static let NSFilePosixPermissions = "NSFilePosixPermissions"
+    static let NSFileSystemSize = "NSFileSystemSize"
+    static let NSFileSystemFreeSize = "NSFileSystemFreeSize"
+    static let NSFileSystemNodes = "NSFileSystemNodes"
+    static let NSFileSystemFreeNodes = "NSFileSystemFreeNodes"
+    static let NSFileSystemNumber = "NSFileSystemNumber"
 }
 
 /// NSFileManager.
@@ -119,6 +124,10 @@ final class NSFileManager: NSObject {
         }
     }
 
+    /// The deprecated form, with no error: nil when the path is missing.
+    @ObjCMethod("subpathsAtPath:")
+    func subpaths(atPath path: String) -> NSArray? { subpaths(atPath: path, error: nil) }
+
     // MARK: Changing
 
     @ObjCMethod("removeItemAtPath:error:")
@@ -182,6 +191,57 @@ final class NSFileManager: NSObject {
         add("NSFileSize", Numbers.make(nil, .unsigned(UInt64(info.st_size))))
         add("NSFileModificationDate", Dates.autoreleased(modified))
         add("NSFilePosixPermissions", Numbers.make(nil, .unsigned(UInt64(info.st_mode & 0o7777))))
+        return Dictionaries.owned(entries)
+    }
+
+    /// The deprecated form: the item's attributes, or the link's target's.
+    @ObjCMethod("fileAttributesAtPath:traverseLink:")
+    func fileAttributes(atPath path: String, traverseLink: Bool) -> NSDictionary? {
+        guard traverseLink, let resolved = realpath(path, nil) else { return attributes(atPath: path, error: nil) }
+        defer { free(resolved) }
+        return attributes(atPath: String(cString: resolved), error: nil)
+    }
+
+    /// Permissions and the modification date are applied; other keys are
+    /// accepted and left as they are.
+    @ObjCMethod("setAttributes:ofItemAtPath:error:")
+    func setAttributes(_ attributes: NSDictionary?, ofItemAtPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard access(path, F_OK) == 0 else {
+            FileManagers.report(errorPointer, path)
+            return false
+        }
+        let constants = ObjCConstantExports.shared
+        if let permissions = Dictionaries.value(attributes?.objcObject, for: constants.object("NSFilePosixPermissions")) {
+            _ = chmod(path, mode_t(truncatingIfNeeded: ObjC.sendUInt(permissions, ObjC.selector("unsignedLongValue"))))
+        }
+        if let date = Dictionaries.value(attributes?.objcObject, for: constants.object("NSFileModificationDate")) {
+            let seconds = Dates.date(date).timeIntervalSince1970
+            var times = [timespec(tv_sec: 0, tv_nsec: (1 << 30) - 2), // UTIME_OMIT: the access time stays
+                         timespec(tv_sec: Int(seconds), tv_nsec: Int((seconds - seconds.rounded(.down)) * 1e9))]
+            _ = utimensat(AT_FDCWD, path, &times, 0)
+        }
+        return true
+    }
+
+    /// The size and free space of the file system holding `path`.
+    @ObjCMethod("attributesOfFileSystemForPath:error:")
+    func fileSystemAttributes(forPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
+        var info = statvfs()
+        guard statvfs(path, &info) == 0 else {
+            FileManagers.report(errorPointer, path)
+            return nil
+        }
+        let constants = ObjCConstantExports.shared
+        let block = UInt64(info.f_frsize)
+        var entries: [(key: id, value: id)] = []
+        func add(_ key: String, _ value: UInt64) {
+            if let number = Numbers.make(nil, .unsigned(value)) { entries.append((constants.object(key), number)) }
+        }
+        add("NSFileSystemSize", UInt64(info.f_blocks) * block)
+        add("NSFileSystemFreeSize", UInt64(info.f_bavail) * block)
+        add("NSFileSystemNodes", UInt64(info.f_files))
+        add("NSFileSystemFreeNodes", UInt64(info.f_favail))
+        add("NSFileSystemNumber", UInt64(info.f_fsid))
         return Dictionaries.owned(entries)
     }
 
