@@ -279,14 +279,20 @@ enum Touches {
         highlighted = nil
     }
 
-    /// The table cell `view` is in, if any.
+    /// The table cell `view` is in, if any, unless the touch is an
+    /// enabled control's, which takes it from the cell.
     private static func tableCell(of view: UIView) -> UITableViewCell? {
         var current: UIView? = view
         while let candidate = current {
+            if isEnabledControl(candidate) { return nil }
             if candidate.is(UITableViewCell.self) { return candidate.unsafeCast(to: UITableViewCell.self) }
             current = candidate.state.superview.map(UIView.wrap)
         }
         return nil
+    }
+
+    private static func isEnabledControl(_ view: UIView) -> Bool {
+        view.is(UIControl.self) && view.unsafeCast(to: UIControl.self).control.enabled
     }
 
     /// The nearest enclosing scroll view that scrolls.
@@ -319,10 +325,13 @@ enum Touches {
         delivered = true
     }
 
-    /// A tap on a navigation bar's buttons or a table's row.
+    /// A tap on a navigation bar's buttons or a table's row. A tap on an
+    /// enabled control in a cell is the control's, and selects no row.
     private static func tapped(_ touch: UITouch) {
         var current = touch.state.view
+        var inControl = false
         while let view = current {
+            if isEnabledControl(view) { inControl = true }
             if view.is(UINavigationBar.self) {
                 view.unsafeCast(to: UINavigationBar.self).tap(at: touch.location(in: view))
                 return
@@ -335,6 +344,7 @@ enum Touches {
                 view.unsafeCast(to: UITabBar.self).tap(at: touch.location(in: view))
                 return
             }
+            if view.is(UITableViewCell.self), inControl { return }
             if view.is(UITableViewCell.self), let tableObject = view.state.superview, ObjCRuntime.isKind(tableObject, of: UITableView.objCClass.pointer) {
                 let table = UITableView(objcObject: tableObject, ownership: .retain)
                 if let path = table.table.visibleCells.first(where: { $0.value.objcObject == view.objcObject })?.key {
