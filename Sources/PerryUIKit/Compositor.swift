@@ -20,6 +20,7 @@ enum SDL {
     nonisolated(unsafe) static var setWindowMinimumSize: (@convention(c) (Pointer?, Int32, Int32) -> Bool)?
     nonisolated(unsafe) static var primaryDisplay: (@convention(c) () -> UInt32)?
     nonisolated(unsafe) static var displayContentScale: (@convention(c) (UInt32) -> Float)?
+    nonisolated(unsafe) static var displayUsableBounds: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool)?
     nonisolated(unsafe) static var startTextInput: (@convention(c) (Pointer?) -> Bool)?
     nonisolated(unsafe) static var stopTextInput: (@convention(c) (Pointer?) -> Bool)?
 
@@ -54,6 +55,17 @@ enum SDL {
         return scale > 0 ? CGFloat(scale) : nil
     }
 
+    /// The primary display's usable area, without the desktop's panels, in
+    /// pixels; nil without SDL or a display.
+    static func usableDisplaySize() -> CGSize? {
+        prepareEnvironment()
+        guard loadOnce(), initialize(0x20), let primaryDisplay, let displayUsableBounds else { return nil }
+        let display = primaryDisplay()
+        var rect = [Int32](repeating: 0, count: 4)     // SDL_Rect: x, y, w, h
+        guard display != 0, displayUsableBounds(display, &rect), rect[2] > 0, rect[3] > 0 else { return nil }
+        return CGSize(width: CGFloat(rect[2]), height: CGFloat(rect[3]))
+    }
+
     /// Binds SDL3's functions; false without libSDL3.
     static func load() -> Bool {
         guard let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return false }
@@ -75,6 +87,8 @@ enum SDL {
             .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Int32, Int32) -> Bool).self) }
         primaryDisplay = dlsym(library, "SDL_GetPrimaryDisplay").map { unsafeBitCast($0, to: (@convention(c) () -> UInt32).self) }
         displayContentScale = dlsym(library, "SDL_GetDisplayContentScale").map { unsafeBitCast($0, to: (@convention(c) (UInt32) -> Float).self) }
+        displayUsableBounds = dlsym(library, "SDL_GetDisplayUsableBounds")
+            .map { unsafeBitCast($0, to: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool).self) }
         startTextInput = dlsym(library, "SDL_StartTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
         stopTextInput = dlsym(library, "SDL_StopTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
         return complete
