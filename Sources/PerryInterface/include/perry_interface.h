@@ -20,7 +20,10 @@ typedef struct perry_startup_info {
 
     // Version 2.
     // Looks up a symbol by its Mach-O name ("__Block_copy") in the provider
-    // standing in for `install_name`, loading it if needed. NULL if missing.
+    // standing in for `install_name`, loading it if needed, or in the Mach-O
+    // image with that install name. A NULL install name searches as
+    // dlsym(RTLD_DEFAULT) does: the program's images in load order, then the
+    // providers loaded. NULL if missing.
     void *(*lookup_symbol)(const char *install_name, const char *name);
 } perry_startup_info;
 
