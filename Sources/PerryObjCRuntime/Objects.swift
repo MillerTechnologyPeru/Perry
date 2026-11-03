@@ -446,7 +446,7 @@ public enum AutoreleasePool {
         }
     }
 
-    static func add(_ object: ObjectPointer) {
+    public static func add(_ object: ObjectPointer) {
         current.objects.append(object)
     }
 }
