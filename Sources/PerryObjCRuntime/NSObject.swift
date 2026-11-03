@@ -90,6 +90,12 @@ public enum RootClasses {
                 if let cls { Runtime.registerClassPair(cls.assumingMemoryBound(to: perry_objc_class.self)) }
             }))
         ObjCRuntime.poolFunctions = (push: { AutoreleasePool.push() }, pop: { AutoreleasePool.pop($0) })
+        ObjCPeers.install(
+            bind: { object, peer, retained in
+                if let object, let peer { Objects.bindPeer(object, peer, retained: retained) }
+            },
+            peer: { $0.flatMap(Objects.peer) },
+            willDeinitialize: { $0.map(Objects.peerWillDeinitialize) ?? false })
     }
 }
 
