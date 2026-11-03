@@ -55,6 +55,13 @@ RUN curl -fsSLo /tmp/lzfse.tar.gz https://github.com/lzfse/lzfse/archive/refs/ta
  && cd / && rm -rf /tmp/lzfse /tmp/lzfse.tar.gz \
  && ldconfig
 
+# LLVM's libc++ and libc++abi, which C++ in iOS apps was built against,
+# and OpenAL Soft, for OpenAL.framework's API. Their providers open them
+# at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libc++1-19 libc++abi1-19 libopenal1 \
+ && rm -rf /var/lib/apt/lists/*
+
 # SDL3 and Mesa's drivers, for UIKit's live view: windows, input, and
 # compositing layers on the GPU (through /dev/dri when a container has it);
 # and Mesa's EGL and OpenGL ES, which EAGLContext and apps' gl* calls use,
