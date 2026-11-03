@@ -22,6 +22,11 @@ public enum Properties {
         property.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self)
     }
 
+    /// Adds a property list to a class, as class_addProperty does.
+    public static func add(_ list: UnsafeRawPointer, to info: ClassInfo) {
+        Runtime.lock.withLock { info.propertyLists.append(list) }
+    }
+
     /// A class's own properties, its categories' included.
     public static func list(_ info: ClassInfo) -> [PropertyPointer] {
         let lists = Runtime.lock.withLock { info.propertyLists }
