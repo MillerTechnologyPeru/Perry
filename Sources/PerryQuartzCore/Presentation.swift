@@ -46,22 +46,24 @@ enum Presentation {
 
     /// The animation's values at `now`, given to `emit` by key path; nothing
     /// when it has no effect then.
-    static func evaluate(_ animation: CAAnimation, at now: Double, keyPath inherited: String?,
+    /// A group's animations without durations of their own last as long as
+    /// it does.
+    static func evaluate(_ animation: CAAnimation, at now: Double, keyPath inherited: String?, groupDuration: Double? = nil,
                          model: (String) -> AnimatedValue?, emit: (String, AnimatedValue) -> Void) {
         let state = animation.state
         if animation.is(CAAnimationGroup.self) {
-            let duration = state.duration > 0 ? state.duration : 0.25
+            let duration = state.duration > 0 ? state.duration : groupDuration ?? 0.25
             guard let fraction = fraction(state, at: now, duration: duration) else { return }
             let local = fraction * duration
             for child in state.values["animations"]?.as(NSArray.self)?.elements ?? [] {
                 guard let child = child.as(CAAnimation.self) else { continue }
-                evaluate(child, at: local, keyPath: nil, model: model, emit: emit)
+                evaluate(child, at: local, keyPath: nil, groupDuration: duration, model: model, emit: emit)
             }
             return
         }
         guard !animation.is(CATransition.self), let key = animation.keyPath() ?? inherited, let base = model(key) else { return }
         let spring = animation.is(CASpringAnimation.self) ? Spring(state) : nil
-        let duration = state.duration > 0 ? state.duration : spring?.settlingDuration ?? 0.25
+        let duration = state.duration > 0 ? state.duration : spring?.settlingDuration ?? groupDuration ?? 0.25
         guard let fraction = fraction(state, at: now, duration: duration) else { return }
         let value: AnimatedValue?
         if animation.is(CAKeyframeAnimation.self) {
