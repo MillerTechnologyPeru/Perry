@@ -191,6 +191,15 @@ open class UIView: UIResponder, UICoordinateSpace {
         LayerState.setColor(&state.geometry.backgroundColor, color?.sendCGColor())
     }
 
+    /// Pixels per point of the layer's content.
+    @ObjCMethod("contentScaleFactor") func contentScaleFactor() -> CGFloat { state.geometry.contentsScale }
+
+    @ObjCMethod("setContentScaleFactor:")
+    func setContentScaleFactor(_ scale: CGFloat) {
+        state.geometry.contentsScale = scale
+        state.geometry.needsDisplay = true
+    }
+
     @ObjCMethod("clipsToBounds") func clipsToBounds() -> Bool { state.geometry.masksToBounds }
     @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ clips: Bool) { state.geometry.masksToBounds = clips }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.geometry.isOpaque }
