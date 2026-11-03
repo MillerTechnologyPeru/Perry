@@ -166,11 +166,15 @@ class MKMapView: UIView {
     @ObjCMethod("showsPointsOfInterest") func showsPointsOfInterest() -> Bool { map.showsPointsOfInterest }
     @ObjCMethod("setShowsPointsOfInterest:") func setShowsPointsOfInterest(_ shows: Bool) { map.showsPointsOfInterest = shows }
 
-    // MARK: The user's location, which is never known
+    // MARK: The user's location
 
     @ObjCMethod("showsUserLocation") func showsUserLocation() -> Bool { map.showsUserLocation }
     @ObjCMethod("setShowsUserLocation:") func setShowsUserLocation(_ shows: Bool) { map.showsUserLocation = shows }
-    @ObjCMethod("isUserLocationVisible") func isUserLocationVisible() -> Bool { false }
+    @ObjCMethod("isUserLocationVisible")
+    func isUserLocationVisible() -> Bool {
+        guard map.showsUserLocation, let coordinate = DeviceLocation.coordinate else { return false }
+        return MapGeometry.contains(MapGeometry.rect(map.region), MapGeometry.point(coordinate))
+    }
     @ObjCMethod("userLocation")
     func userLocation() -> NSObject {
         if let location = map.userLocation { return location }
