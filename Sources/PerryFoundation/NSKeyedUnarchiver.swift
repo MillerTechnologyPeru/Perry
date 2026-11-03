@@ -1,3 +1,4 @@
+import Glibc
 import CPerryFoundation
 import FoundationEssentials
 import PerryObjCInterop
@@ -108,6 +109,8 @@ struct BinaryPropertyList {
 final class UnarchiverStorage {
     let objects: [ArchiveValue]
     let top: [String: ArchiveValue]
+    /// The next key for unkeyed coding: "$0", "$1", and so on.
+    var unkeyed = 0
     /// Decoded objects by UID, retained; also those still being decoded, so
     /// cycles resolve to them.
     var decoded: [Int: id] = [:]
@@ -353,6 +356,43 @@ public class NSKeyedUnarchiver: NSObject {
     @ObjCMethod("decodeObjectForKey:")
     func decodeObject(forKey key: String) -> ObjCObject? {
         storage.flatMap { $0.object($0.field(key)) }.map(ObjCObject.init)
+    }
+
+    // MARK: Unkeyed coding, under generated keys
+
+    private func nextKey() -> String {
+        guard let storage else { return "$0" }
+        defer { storage.unkeyed += 1 }
+        return "$\(storage.unkeyed)"
+    }
+
+    @ObjCMethod("decodeObject") func decodeObject() -> ObjCObject? { decodeObject(forKey: nextKey()) }
+
+    @ObjCMethod("decodeValueOfObjCType:at:")
+    func decodeValue(ofObjCType type: UnsafePointer<CChar>?, at address: UnsafeMutableRawPointer?) {
+        guard let type, let address else { return }
+        let key = nextKey()
+        let (integer, real) = number(key) ?? (0, 0)
+        switch UInt8(bitPattern: type.pointee) {
+        case UInt8(ascii: "c"): address.storeBytes(of: Int8(truncatingIfNeeded: integer), as: Int8.self)
+        case UInt8(ascii: "C"), UInt8(ascii: "B"): address.storeBytes(of: UInt8(truncatingIfNeeded: integer), as: UInt8.self)
+        case UInt8(ascii: "s"): address.storeBytes(of: Int16(truncatingIfNeeded: integer), as: Int16.self)
+        case UInt8(ascii: "S"): address.storeBytes(of: UInt16(truncatingIfNeeded: integer), as: UInt16.self)
+        case UInt8(ascii: "i"): address.storeBytes(of: Int32(truncatingIfNeeded: integer), as: Int32.self)
+        case UInt8(ascii: "I"): address.storeBytes(of: UInt32(truncatingIfNeeded: integer), as: UInt32.self)
+        case UInt8(ascii: "l"), UInt8(ascii: "q"), UInt8(ascii: "L"), UInt8(ascii: "Q"): address.storeBytes(of: integer, as: Int64.self)
+        case UInt8(ascii: "f"): address.storeBytes(of: Float(real), as: Float.self)
+        case UInt8(ascii: "d"): address.storeBytes(of: real, as: Double.self)
+        case UInt8(ascii: "@"):
+            // Returned retained, as -decodeValueOfObjCType:at: gives objects.
+            let object = decodeObject(forKey: key)?.id
+            address.storeBytes(of: ObjC.retain(object), as: UnsafeMutableRawPointer?.self)
+        case UInt8(ascii: "*"):
+            let string = Strings.value(of: decodeObject(forKey: key)?.id)
+            address.storeBytes(of: string.map { UnsafePointer(strdup($0)!) }, as: UnsafePointer<CChar>?.self)
+        default:
+            foundationFatal("-[NSKeyedUnarchiver decodeValueOfObjCType:at:]: unsupported type \(String(cString: type))")
+        }
     }
 
     @ObjCMethod("decodeObjectOfClass:forKey:")
