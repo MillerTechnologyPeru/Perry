@@ -691,8 +691,13 @@ static int provider_layer(const perry_provider *provider) {
         return 1;
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
         return 3;
-    if (strstr(name, "/MapKit.framework/"))
+    // UIKit's views are QuartzCore's layers' delegates, and MapKit's views
+    // are UIKit's.
+    if (strstr(name, "/UIKit.framework/") || strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") ||
+        strstr(name, "/WebKit.framework/"))
         return 5;
+    if (strstr(name, "/MapKit.framework/"))
+        return 6;
     return 4;
 }
 
@@ -713,7 +718,7 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         .lookup_symbol = lookup_symbol,
     };
     // Several install names may share one provider; start each library once.
-    for (int layer = 0; layer <= 5; layer++)
+    for (int layer = 0; layer <= 6; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
         bool seen = !handle;
