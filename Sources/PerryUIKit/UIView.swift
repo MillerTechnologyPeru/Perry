@@ -357,18 +357,27 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Appearance
 
+    /// The device's, for every view.
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
-    /// A stack view closes up around an arranged subview that hides.
+    /// A stack view closes up around an arranged subview that hides. As
+    /// with the other changes that show, the next update pass draws it.
     @ObjCMethod("setHidden:")
     func setHidden(_ hidden: Bool) {
         guard hidden != state.hidden else { return }
         state.hidden = hidden
+        Updates.schedule()
         if let superview = state.superview, ObjCRuntime.isKind(superview, of: UIStackView.objCClass.pointer) {
             UIView.wrap(superview).unsafeCast(to: UIStackView.self).arrangementChanged()
         }
     }
     @ObjCMethod("alpha") func alpha() -> CGFloat { state.alpha }
-    @ObjCMethod("setAlpha:") func setAlpha(_ alpha: CGFloat) { state.alpha = alpha }
+    @ObjCMethod("setAlpha:")
+    func setAlpha(_ alpha: CGFloat) {
+        state.alpha = alpha
+        Updates.schedule()
+    }
     @ObjCMethod("backgroundColor") func backgroundColor() -> UIColor? { state.backgroundColor }
 
     @ObjCMethod("setBackgroundColor:")
@@ -510,6 +519,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         state.layer.removeFromSuperlayer()
         if window != nil { UIView.didMoveToWindow(self) }
         sendDidMoveToSuperview()
+        Updates.schedule()
     }
 
     /// Adds or moves `view` here, with UIKit's callbacks: the superview
