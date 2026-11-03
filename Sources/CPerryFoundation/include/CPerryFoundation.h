@@ -5,6 +5,7 @@
 // exported under Mach-O names, and entry points for variadic methods and
 // functions.
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/eventfd.h>
@@ -104,6 +105,11 @@ typedef struct NSOperatingSystemVersion {
 
 // The calling thread's kernel id, for NSLog lines.
 int perry_foundation_thread_id(void);
+
+// Runs an NSThread's body, from which perry_foundation_thread_exit jumps
+// back out; false if the calling thread is not running one.
+void perry_foundation_thread_run(void (*body)(void *), void *context);
+bool perry_foundation_thread_exit(void);
 
 // The usable size of a malloc'd block (malloc_usable_size).
 size_t perry_foundation_usable_size(void *block);
