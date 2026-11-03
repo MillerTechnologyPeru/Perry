@@ -169,6 +169,12 @@ public class NSNumber: NSObject {
     @ObjCClassMethod("numberWithUnsignedInt:")
     static func number(_ cls: ObjCClass, unsignedInt: UInt32) -> NSNumber { Numbers.wrapped(cls, .unsigned(UInt64(unsignedInt))) }
 
+    @ObjCClassMethod("numberWithUnsignedShort:")
+    static func number(_ cls: ObjCClass, unsignedShort: UInt16) -> NSNumber { Numbers.wrapped(cls, .unsigned(UInt64(unsignedShort))) }
+
+    @ObjCClassMethod("numberWithUnsignedChar:")
+    static func number(_ cls: ObjCClass, unsignedChar: UInt8) -> NSNumber { Numbers.wrapped(cls, .unsigned(UInt64(unsignedChar))) }
+
     @ObjCClassMethod("numberWithShort:")
     static func number(_ cls: ObjCClass, short: Int16) -> NSNumber { Numbers.wrapped(cls, .signed(Int64(short))) }
 
@@ -190,6 +196,15 @@ public class NSNumber: NSObject {
     @ObjCMethod("initWithInt:") func initialize(int: Int32) -> Self { setValue(.signed(Int64(int))) }
     @ObjCMethod("initWithBool:") func initialize(bool: Bool) -> Self { setValue(.bool(bool)) }
     @ObjCMethod("initWithDouble:") func initialize(double: Double) -> Self { setValue(.double(double)) }
+    @ObjCMethod("initWithFloat:") func initialize(float: Float) -> Self { setValue(.double(Double(float))) }
+    @ObjCMethod("initWithLong:") func initialize(long: Int) -> Self { setValue(.signed(Int64(long))) }
+    @ObjCMethod("initWithUnsignedLong:") func initialize(unsignedLong: UInt) -> Self { setValue(.unsigned(UInt64(unsignedLong))) }
+    @ObjCMethod("initWithUnsignedLongLong:") func initialize(unsignedLongLong: UInt64) -> Self { setValue(.unsigned(unsignedLongLong)) }
+    @ObjCMethod("initWithUnsignedInt:") func initialize(unsignedInt: UInt32) -> Self { setValue(.unsigned(UInt64(unsignedInt))) }
+    @ObjCMethod("initWithShort:") func initialize(short: Int16) -> Self { setValue(.signed(Int64(short))) }
+    @ObjCMethod("initWithUnsignedShort:") func initialize(unsignedShort: UInt16) -> Self { setValue(.unsigned(UInt64(unsignedShort))) }
+    @ObjCMethod("initWithChar:") func initialize(char: Int8) -> Self { setValue(.signed(Int64(char))) }
+    @ObjCMethod("initWithUnsignedChar:") func initialize(unsignedChar: UInt8) -> Self { setValue(.unsigned(UInt64(unsignedChar))) }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -204,6 +219,13 @@ public class NSNumber: NSObject {
     @ObjCMethod("longLongValue") func longLongValue() -> Int64 { number.int64 }
     @ObjCMethod("unsignedIntegerValue") func unsignedIntegerValue() -> UInt { UInt(truncatingIfNeeded: number.int64) }
     @ObjCMethod("intValue") func intValue() -> Int32 { Int32(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("unsignedIntValue") func unsignedIntValue() -> UInt32 { UInt32(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("unsignedLongValue") func unsignedLongValue() -> UInt { UInt(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("unsignedLongLongValue") func unsignedLongLongValue() -> UInt64 { UInt64(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("shortValue") func shortValue() -> Int16 { Int16(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("unsignedShortValue") func unsignedShortValue() -> UInt16 { UInt16(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("charValue") func charValue() -> Int8 { Int8(truncatingIfNeeded: number.int64) }
+    @ObjCMethod("unsignedCharValue") func unsignedCharValue() -> UInt8 { UInt8(truncatingIfNeeded: number.int64) }
     @ObjCMethod("boolValue") func boolValue() -> Bool { number.int64 != 0 || number.double != 0 }
 
     /// The value's type encoding: "q" and "Q" for integers, "d" for
