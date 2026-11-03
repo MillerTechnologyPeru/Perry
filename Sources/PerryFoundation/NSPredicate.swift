@@ -13,6 +13,8 @@ indirect enum ExpressionNode {
     case constant(ObjCObject?)
     case evaluatedObject
     case aggregate([ExpressionNode])
+    /// A function by name ("count:", "max:") of argument expressions.
+    case function(String, [ExpressionNode])
 
     /// NSExpressionType.
     var type: UInt {
@@ -21,6 +23,7 @@ indirect enum ExpressionNode {
         case .evaluatedObject: return 1
         case .keyPath: return 3
         case .aggregate: return 14
+        case .function: return 4
         }
     }
 }
@@ -66,6 +69,8 @@ enum PredicateFormat {
         case .evaluatedObject: return "SELF"
         case .aggregate(let elements): return "{" + elements.map(expression).joined(separator: ", ") + "}"
         case .constant(let value): return constant(value?.objcObject)
+        case .function(let name, let arguments):
+            return String(name.prefix { $0 != ":" }) + "(" + arguments.map(expression).joined(separator: ", ") + ")"
         }
     }
 
@@ -450,6 +455,27 @@ enum PredicateEvaluation {
         case .constant(let value): return value?.objcObject
         case .evaluatedObject: return object
         case .aggregate(let elements): return Arrays.autoreleased(elements.compactMap { value($0, object) })
+        case .function(let name, let arguments): return function(name, arguments.map { value($0, object) })
+        }
+    }
+
+    /// The aggregate functions over an argument's collection, and the case
+    /// changes over a string.
+    static func function(_ name: String, _ arguments: [id?]) -> id? {
+        let items = arguments.first.flatMap { elements($0) } ?? []
+        typealias DoubleValue = @convention(c) (id?, SEL) -> Double
+        let doubleValue = unsafeBitCast(ObjC.msgSend, to: DoubleValue.self)
+        let numbers = items.map { doubleValue($0, ObjC.selector("doubleValue")) }
+        switch name {
+        case "count:": return Numbers.make(nil, .signed(Int64(items.count)))
+        case "sum:": return Numbers.make(nil, .double(numbers.reduce(0, +)))
+        case "average:": return Numbers.make(nil, .double(numbers.isEmpty ? 0 : numbers.reduce(0, +) / Double(numbers.count)))
+        case "max:": return items.max { ObjC.sendInt($0, ObjC.selector("compare:"), $1) < 0 }
+        case "min:": return items.min { ObjC.sendInt($0, ObjC.selector("compare:"), $1) < 0 }
+        case "lowercase:", "uppercase:":
+            guard let text = arguments.first.flatMap({ Strings.value(of: $0) }) else { return nil }
+            return Strings.autoreleased(name == "lowercase:" ? text.lowercased() : text.uppercased())
+        default: return nil
         }
     }
 
@@ -735,6 +761,24 @@ public class NSExpression: NSObject {
 
     @ObjCClassMethod("expressionForConstantValue:")
     static func constant(_ value: ObjCObject?) -> ObjCObject { ObjCObject(Predicates.expression(.constant(value))) }
+
+    @ObjCClassMethod("expressionForFunction:arguments:")
+    static func function(_ name: String, arguments: ObjCObject?) -> ObjCObject {
+        let nodes = (arguments.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.expressionNode)
+        return ObjCObject(Predicates.expression(.function(name, nodes)))
+    }
+
+    @ObjCMethod("function")
+    func function() -> String? {
+        if case .function(let name, _) = node { return name }
+        return nil
+    }
+
+    @ObjCMethod("arguments")
+    func arguments() -> ObjCObject? {
+        guard case .function(_, let arguments) = node else { return nil }
+        return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression)))
+    }
 
     @ObjCClassMethod("expressionForEvaluatedObject")
     static func evaluatedObject() -> ObjCObject { ObjCObject(Predicates.expression(.evaluatedObject)) }
