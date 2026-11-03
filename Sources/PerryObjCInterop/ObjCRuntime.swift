@@ -94,6 +94,7 @@ public enum ObjCRuntime {
               let poolPop = bind("_objc_autoreleasePoolPop", as: (@convention(c) (Object) -> Void).self) else {
             return false
         }
+        ObjCPeers.load(lookup)
         install(ObjCRuntimeFunctions(
             msgSend: UnsafeRawPointer(msgSend), msgSendSuper2: UnsafeRawPointer(msgSendSuper2),
             retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
