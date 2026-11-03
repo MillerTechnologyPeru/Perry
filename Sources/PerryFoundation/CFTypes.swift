@@ -180,7 +180,7 @@ public func CFDataCreateWithBytesNoCopy(_ allocator: UnsafeRawPointer?, _ bytes:
 
 @c(_CFDataCreateMutable)
 public func CFDataCreateMutable(_ allocator: UnsafeRawPointer?, _ capacity: Int) -> id? {
-    ObjC.retain(DataObjects.autoreleased(Data(), cls: UnsafeMutableRawPointer(DataObjects.mutableClass)))
+    DataObjects.make(DataStorage(reserving: capacity), cls: UnsafeMutableRawPointer(DataObjects.mutableClass))
 }
 
 @c(_CFDataCreateCopy)
