@@ -531,9 +531,9 @@ static void reserve_keys(void) {
 
 // Darwin also reserves fixed keys for its own libraries, below the first
 // key pthread_key_create makes: Swift's runtime has 100 to 109, and other
-// frameworks the keys up to 119. They are set up with pthread_key_init_np,
-// which makes a key for each here, and pthread_key_create never numbers a
-// key in their range.
+// frameworks the keys up to 119. Each gets a key here when first used or set
+// up with pthread_key_init_np (which gives its destructor), and
+// pthread_key_create never numbers a key in their range.
 enum { FIXED_RANGE_START = 100, FIXED_RANGE_END = 120 };
 
 static bool is_fixed_number(unsigned long key) { return key >= FIXED_RANGE_START && key < FIXED_RANGE_END; }
@@ -556,10 +556,14 @@ int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
     return result(error);
 }
 
+// A fixed key exists whether or not it was initialized, as on Darwin: Swift
+// uses its own without pthread_key_init_np when they need no destructor.
 static pthread_key_t key_to_linux_or_fixed(unsigned long key) {
-    if (is_fixed_number(key) && atomic_load_explicit(&fixed_keys_made[key], memory_order_acquire))
-        return fixed_keys[key];
-    return key_to_linux(key);
+    if (!is_fixed_number(key))
+        return key_to_linux(key);
+    if (!atomic_load_explicit(&fixed_keys_made[key], memory_order_acquire))
+        darwin_pthread_key_init_np((int)key, NULL);
+    return fixed_keys[key];
 }
 
 int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_create);
