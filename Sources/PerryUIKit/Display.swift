@@ -24,7 +24,14 @@ enum Display {
     nonisolated(unsafe) private static var deleteAtom: UInt = 0
     nonisolated(unsafe) private static var dirty = true
     nonisolated(unsafe) private static var lastDraw = 0.0
-    nonisolated(unsafe) static var scale: CGFloat = 1
+    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else the
+    /// desktop's scaling of its display as SDL finds it, else 1.
+    nonisolated(unsafe) static let scale: CGFloat = {
+        if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { return value }
+        let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
+        guard wanted, !software, let native = SDL.nativeScale() else { return 1 }
+        return native
+    }()
 
     private struct X {
         var pending: @convention(c) (Pointer?) -> Int32
@@ -58,14 +65,10 @@ enum Display {
     static func startIfWanted() {
         guard !started, wanted else { return }
         started = true
-        if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { scale = value }
         let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
-        // SDL's renderer makes its GL contexts through EGL, as EAGLContext
-        // does, so the two can take turns being current on one thread.
-        setenv("SDL_VIDEO_FORCE_EGL", "1", 0)
-        setenv("SDL_RENDER_DRIVER", "opengles2", 0)
-        if !software, SDL.load(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
+        SDL.prepareEnvironment()
+        if !software, SDL.loadOnce(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
             tick()
             return
@@ -124,6 +127,9 @@ enum Display {
     }
 
     static func markDirty() { dirty = true }
+
+    /// Turns the live view's text input on while something takes typing.
+    static func setTextInput(_ on: Bool) { compositor?.setTextInput(on) }
 
     /// Whether frames are being shown.
     static var isLive: Bool { x != nil || compositor != nil }
