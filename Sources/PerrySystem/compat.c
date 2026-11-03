@@ -641,3 +641,74 @@ size_t darwin_regerror(int error, const struct darwin_regex *regex, char *buffer
 size_t darwin_regerror(int error, const struct darwin_regex *regex, char *buffer, size_t size) {
     return regerror(error, regex && regex->magic == DARWIN_REGEX_MAGIC ? regex->linux_regex : NULL, buffer, size);
 }
+
+// MARK: - Tracing and OS variants
+
+// kdebug: kernel trace points, which nothing records here.
+bool darwin_kdebug_is_enabled(uint32_t debugid) DARWIN_SYMBOL(kdebug_is_enabled);
+bool darwin_kdebug_is_enabled(uint32_t debugid) {
+    (void)debugid;
+    return false;
+}
+
+int darwin_kdebug_trace(uint32_t debugid, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4)
+    DARWIN_SYMBOL(kdebug_trace);
+int darwin_kdebug_trace(uint32_t debugid, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4) {
+    (void)debugid, (void)arg1, (void)arg2, (void)arg3, (void)arg4;
+    return 0;
+}
+
+uint64_t darwin_kdebug_trace_string(uint32_t debugid, uint64_t string_id, const char *string)
+    DARWIN_SYMBOL(kdebug_trace_string);
+uint64_t darwin_kdebug_trace_string(uint32_t debugid, uint64_t string_id, const char *string) {
+    (void)debugid, (void)string;
+    return string_id;
+}
+
+// A customer build of the OS: no internal content or policies.
+bool darwin_os_variant_has_internal_content(const char *subsystem) DARWIN_SYMBOL(os_variant_has_internal_content);
+bool darwin_os_variant_has_internal_content(const char *subsystem) {
+    (void)subsystem;
+    return false;
+}
+
+bool darwin_os_variant_allows_internal_security_policies(const char *subsystem)
+    DARWIN_SYMBOL(os_variant_allows_internal_security_policies);
+bool darwin_os_variant_allows_internal_security_policies(const char *subsystem) {
+    (void)subsystem;
+    return false;
+}
+
+// MARK: - Crash reports
+
+void darwin_abort_report_np(const char *format, ...) DARWIN_SYMBOL(abort_report_np);
+void darwin_abort_report_np(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fputc('\n', stderr);
+    abort();
+}
+
+// Each address's image UUID and offset, which crash reports use; none here.
+struct darwin_image_offset {
+    uint8_t uuid[16];
+    uint32_t offset;
+};
+
+void darwin_backtrace_image_offsets(void *const *array, struct darwin_image_offset *offsets, int size)
+    DARWIN_SYMBOL(backtrace_image_offsets);
+void darwin_backtrace_image_offsets(void *const *array, struct darwin_image_offset *offsets, int size) {
+    (void)array;
+    if (size > 0)
+        memset(offsets, 0, (size_t)size * sizeof(*offsets));
+}
+
+// dyld's thread-local variable bootstrap, which descriptors are bound to
+// until the loader points them at its own (PerryLoaderCore's tlv.c).
+void darwin_tlv_bootstrap(void) DARWIN_SYMBOL(_tlv_bootstrap);
+void darwin_tlv_bootstrap(void) {
+    fprintf(stderr, "perry: thread-local variable used before its image was set up\n");
+    abort();
+}
