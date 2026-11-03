@@ -23,6 +23,7 @@ final class ViewState: ObjectState {
     var multipleTouchEnabled = false
     var exclusiveTouch = false
     var gestureRecognizers: [UIGestureRecognizer] = []
+    var motionEffects: [NSObject] = []
     var constraints: [NSObject] = []
     var translatesAutoresizingMaskIntoConstraints = true
     /// Content hugging and compression resistance, per axis.
@@ -423,7 +424,19 @@ open class UIView: UIResponder, UICoordinateSpace {
         return UIColor.systemBlue()
     }
 
-    @ObjCMethod("setTintColor:") func setTintColor(_ color: UIColor?) { state.tintColor = color }
+    /// The view and those under it that take its tint hear of the change.
+    @ObjCMethod("setTintColor:")
+    func setTintColor(_ color: UIColor?) {
+        state.tintColor = color
+        UIView.tintChanged(self)
+    }
+
+    private static func tintChanged(_ view: UIView) {
+        view.sendTintColorDidChange()
+        for subview in view.state.subviews where subview.state.tintColor == nil { tintChanged(subview) }
+    }
+
+    @ObjCMethod("tintColorDidChange") func tintColorDidChange() {}
     @ObjCMethod("tag") func tag() -> Int { state.tag }
     @ObjCMethod("setTag:") func setTag(_ tag: Int) { state.tag = tag }
     @ObjCMethod("isUserInteractionEnabled") func isUserInteractionEnabled() -> Bool { state.userInteractionEnabled }
@@ -869,6 +882,7 @@ extension NSObject {
     @ObjCMethod("didAddSubview:") func sendDidAddSubview(_ subview: UIView)
     @ObjCMethod("willRemoveSubview:") func sendWillRemoveSubview(_ subview: UIView)
     @ObjCMethod("layoutSubviews") func sendLayoutSubviews()
+    @ObjCMethod("tintColorDidChange") func sendTintColorDidChange()
     @ObjCMethod("sizeThatFits:") func sendSizeThatFits(_ size: CGSize) -> CGSize
     @ObjCMethod("layerClass") func sendLayerClass() -> ObjCClass
     @ObjCMethod("drawRect:") func sendDraw(_ rect: CGRect)
