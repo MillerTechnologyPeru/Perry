@@ -15,7 +15,7 @@ import PerryObjCInterop
 // (a view whose class has -drawRect:), and -_perryLayerContentChanged:
 // whether what it draws has changed without its saying so.
 
-final class LayerState: ObjectState {
+final class LayerState {
     var bounds = CGRect.zero
     var position = CGPoint.zero
     var anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -112,7 +112,7 @@ final class LayerState: ObjectState {
     }
 
     /// From this layer's coordinates to its superlayer's.
-    var toSuperlayer: CGAffineTransform { toSuperlayer(within: superlayer.map { CALayer.states[$0] }) }
+    var toSuperlayer: CGAffineTransform { toSuperlayer(within: superlayer.map(CALayer.state(of:))) }
 
     static func setColor(_ slot: inout CGRef?, _ color: CGRef?) {
         let retained = ObjCRuntime.retain(color)
@@ -140,44 +140,45 @@ final class LayerState: ObjectState {
 
 @ObjCClass("CALayer")
 open class CALayer: NSObject {
-    static let states = StateTable<LayerState>()
-    var state: LayerState { CALayer.states[objcObject] }
+    /// The model values.
+    var state = LayerState()
 
-    static func wrap(_ object: UnsafeMutableRawPointer) -> CALayer { CALayer(objcObject: object, ownership: .retain) }
+    /// The layer at `object`: its Swift object.
+    static func wrap(_ object: UnsafeMutableRawPointer) -> CALayer { CALayer.objCInstance(object, ownership: .retain) }
+
+    /// The model values of the layer at `object`.
+    static func state(of object: UnsafeMutableRawPointer) -> LayerState { wrap(object).state }
 
     @ObjCClassMethod("layer")
     static func layer(_ cls: ObjCClass) -> NSObject { cls.object.allocated().initialized() }
 
     @ObjCMethod("init")
-    func initialize() -> Self {
+    public required override init() {
+        super.init()
         state.borderColor = CG.colorCreateGenericGray(0, 1)
-        return self
     }
 
     /// A copy of the model layer, as -presentationLayer's starting point.
     @ObjCMethod("initWithLayer:")
-    func initialize(layer: CALayer) -> Self {
+    public required init(layer: CALayer) {
         let copy = layer.state.copy()
         copy.sublayers = []
         copy.superlayer = nil
-        CALayer.states.set(objcObject, copy)
-        return self
+        state = copy
+        super.init()
     }
 
-    @ObjCMethod("dealloc")
-    func dealloc() {
+    deinit {
         for sublayer in state.sublayers { sublayer.state.superlayer = nil }
         Presentation.forget(objcObject)
-        CALayer.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CALayer.objCClass.pointer)
     }
 
     /// The layer as it presents now: a copy with its animations applied.
     @ObjCMethod("presentationLayer")
     func presentationLayer() -> CALayer? {
         guard !state.animations.isEmpty else { return self }
-        let presented = CALayer.objCClass.object.allocated().unsafeCast(to: CALayer.self)
-        CALayer.states.set(presented.objcObject, Presentation.state(of: self))
+        let presented = CALayer()
+        presented.state = Presentation.state(of: self)
         return presented
     }
 
@@ -346,7 +347,7 @@ open class CALayer: NSObject {
     @ObjCClassMethod("defaultActionForKey:")
     static func defaultAction(forKey key: String) -> NSObject? {
         guard AnimatedValue.animatable(key) else { return nil }
-        let animation = CABasicAnimation.objCClass.object.allocated().initialized().unsafeCast(to: CABasicAnimation.self)
+        let animation = CABasicAnimation()
         animation.setKeyPath(key)
         animation.state.duration = CATransaction.animationDuration()
         animation.state.timingFunction = CATransaction.animationTimingFunction()
@@ -443,7 +444,7 @@ open class CALayer: NSObject {
     func removeFromSuperlayer() {
         guard let superlayer = state.superlayer else { return }
         let retained = self
-        CALayer.states[superlayer].sublayers.removeAll { $0.objcObject == objcObject }
+        CALayer.state(of: superlayer).sublayers.removeAll { $0.objcObject == objcObject }
         retained.state.superlayer = nil
         retained.state.rendered = false
         Compositing.changed()
@@ -456,7 +457,7 @@ open class CALayer: NSObject {
         var index = index
         // Moving within the same layer: the index counts the layer itself.
         if retained.state.superlayer == objcObject, let current = self.index(of: layer), current < index { index -= 1 }
-        if let old = retained.state.superlayer { CALayer.states[old].sublayers.removeAll { $0.objcObject == layer.objcObject } }
+        if let old = retained.state.superlayer { CALayer.state(of: old).sublayers.removeAll { $0.objcObject == layer.objcObject } }
         state.sublayers.insert(retained, at: min(max(index, 0), state.sublayers.count))
         retained.state.superlayer = objcObject
         Compositing.changed()
@@ -471,7 +472,7 @@ open class CALayer: NSObject {
         var transform = CGAffineTransform.identity
         var current: UnsafeMutableRawPointer? = objcObject
         while let layer = current {
-            let state = CALayer.states[layer]
+            let state = CALayer.state(of: layer)
             guard state.superlayer != nil else { break }
             transform = transform.concatenating(state.toSuperlayer)
             current = state.superlayer
