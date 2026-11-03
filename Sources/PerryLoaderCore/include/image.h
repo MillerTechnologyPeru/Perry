@@ -101,6 +101,8 @@ typedef struct perry_loader {
 
     const char *bundle_path;    // .app bundle, when launched from one
 
+    char *swift_runtime_dir;    // Darwin's Swift runtime libraries (/usr/lib/swift), from PERRY_SWIFT_RUNTIME
+
     bool report;                // collect unresolved symbols instead of failing
     bool strict;                // fail on unresolved non-weak imports
 } perry_loader;
