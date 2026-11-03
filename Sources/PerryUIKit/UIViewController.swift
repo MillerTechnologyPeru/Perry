@@ -47,9 +47,21 @@ final class ViewControllerState: ObjectState {
     var modalInPresentation = false
     var additionalSafeAreaInsets = UIEdgeInsets.zero
     var hidesBottomBarWhenPushed = false
+    /// UIRectEdge: the edges whose bars the view extends under; all 15.
+    var edgesForExtendedLayout = 15
+    var extendedLayoutIncludesOpaqueBars = false
     var preferredContentSize = CGSize.zero
     var editing = false
     var restorationIdentifier: String?
+    /// From a storyboard: the storyboard, its identifier for the
+    /// controller, the segues from it, and the objects its view nib's
+    /// placeholders stand for.
+    var storyboard: UIStoryboard?
+    var storyboardIdentifier: String?
+    var segueTemplates: [UIStoryboardSegueTemplate] = []
+    var externalObjects: [String: NSObject] = [:]
+    /// Where the controller's nib is, from its bundle.
+    var nibBundlePath: String?
 }
 
 @ObjCClass("UIViewController")
@@ -69,11 +81,36 @@ open class UIViewController: UIResponder {
     @ObjCMethod("initWithNibName:bundle:")
     func initialize(nibName: String?, bundle: NSObject?) -> Self {
         state.nibName = nibName
+        state.nibBundlePath = bundle?.as(NSBundle.self)?.bundlePath()
         return self
     }
 
+    /// From a storyboard or nib: the view's nib, the navigation item, the
+    /// segues and the view nib's placeholders.
     @ObjCMethod("initWithCoder:")
-    func initialize(coder: NSObject?) -> Self { self }
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        let state = state
+        state.nibName = decoded.string("UINibName")
+        state.storyboardIdentifier = decoded.string("UIStoryboardIdentifier")
+        state.restorationIdentifier = decoded.string("UIRestorationIdentifier")
+        state.title = decoded.string("UITitle")
+        if let item = decoded.object("UINavigationItem")?.as(UINavigationItem.self) {
+            state.navigationItem = item
+            if state.title == nil { state.title = item.state.title }
+        }
+        state.segueTemplates = decoded.array("UIStoryboardSegueTemplates").compactMap { $0.as(UIStoryboardSegueTemplate.self) }
+        for template in state.segueTemplates { template.state.viewController = objcObject }
+        state.externalObjects = decoded.dictionary("UIExternalObjectsTableForViewLoading")
+        if decoded.has("UIModalPresentationStyle") { state.modalPresentationStyle = decoded.integer("UIModalPresentationStyle") }
+        if decoded.has("UIModalTransitionStyle") { state.modalTransitionStyle = decoded.integer("UIModalTransitionStyle") }
+        state.definesPresentationContext = decoded.bool("UIDefinesPresentationContext")
+        if decoded.has("UIKeyEdgesForExtendedLayout") { state.edgesForExtendedLayout = decoded.integer("UIKeyEdgesForExtendedLayout") }
+        state.extendedLayoutIncludesOpaqueBars = decoded.bool("UIKeyExtendedLayoutIncludesOpaqueBars")
+        state.hidesBottomBarWhenPushed = decoded.bool("UIHidesBottomBarWhenPushed")
+        if decoded.has("UIPreferredContentSize") { state.preferredContentSize = decoded.size("UIPreferredContentSize") }
+        return self
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -114,9 +151,11 @@ open class UIViewController: UIResponder {
     @ObjCMethod("isViewLoaded") func isViewLoaded() -> Bool { state.view != nil }
     @ObjCMethod("loadViewIfNeeded") func loadViewIfNeeded() { _ = loadedView }
 
-    /// A plain view the size of the screen.
+    /// The view from the controller's nib when it has one, else a plain
+    /// view the size of the screen.
     @ObjCMethod("loadView")
     func loadView() {
+        if loadViewFromNib() { return }
         let view = UIView.objCClass.object.allocated().initializeView(frame: Screen.bounds).unsafeCast(to: UIView.self)
         setView(view)
     }
@@ -187,6 +226,12 @@ open class UIViewController: UIResponder {
         state.view?.setNeedsLayout()
     }
     @ObjCMethod("hidesBottomBarWhenPushed") func hidesBottomBarWhenPushed() -> Bool { state.hidesBottomBarWhenPushed }
+    @ObjCMethod("edgesForExtendedLayout") func edgesForExtendedLayout() -> Int { state.edgesForExtendedLayout }
+    @ObjCMethod("setEdgesForExtendedLayout:") func setEdgesForExtendedLayout(_ edges: Int) { state.edgesForExtendedLayout = edges }
+    @ObjCMethod("extendedLayoutIncludesOpaqueBars") func extendedLayoutIncludesOpaqueBars() -> Bool { state.extendedLayoutIncludesOpaqueBars }
+    @ObjCMethod("setExtendedLayoutIncludesOpaqueBars:") func setExtendedLayoutIncludesOpaqueBars(_ includes: Bool) {
+        state.extendedLayoutIncludesOpaqueBars = includes
+    }
     @ObjCMethod("setHidesBottomBarWhenPushed:") func setHidesBottomBarWhenPushed(_ hides: Bool) { state.hidesBottomBarWhenPushed = hides }
     @ObjCMethod("preferredContentSize") func preferredContentSize() -> CGSize { state.preferredContentSize }
     @ObjCMethod("setPreferredContentSize:") func setPreferredContentSize(_ size: CGSize) { state.preferredContentSize = size }
@@ -262,6 +307,8 @@ open class UIViewController: UIResponder {
     }
 
     @ObjCMethod("tabBarController") func tabBarController() -> UIViewController? { nil }
+    @ObjCMethod("popoverPresentationController") func popoverPresentationController() -> NSObject? { nil }
+    @ObjCMethod("presentationController") func presentationController() -> NSObject? { nil }
     @ObjCMethod("splitViewController") func splitViewController() -> UIViewController? { nil }
 
     @ObjCMethod("shouldAutomaticallyForwardAppearanceMethods") func shouldAutomaticallyForwardAppearanceMethods() -> Bool { true }
