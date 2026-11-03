@@ -40,6 +40,38 @@ typedef struct GLKMatrix2 { float m[4]; } GLKMatrix2;
 typedef struct GLKMatrix3 { float m[9]; } GLKMatrix3;
 typedef struct GLKMatrix4 { float m[16]; } GLKMatrix4;
 
+// Core Location's coordinates and MapKit's regions and map geometry: all
+// doubles, so they pass in floating-point registers as on Darwin.
+typedef struct CLLocationCoordinate2D {
+    double latitude;
+    double longitude;
+} CLLocationCoordinate2D;
+
+typedef struct MKCoordinateSpan {
+    double latitudeDelta;
+    double longitudeDelta;
+} MKCoordinateSpan;
+
+typedef struct MKCoordinateRegion {
+    CLLocationCoordinate2D center;
+    MKCoordinateSpan span;
+} MKCoordinateRegion;
+
+typedef struct MKMapPoint {
+    double x;
+    double y;
+} MKMapPoint;
+
+typedef struct MKMapSize {
+    double width;
+    double height;
+} MKMapSize;
+
+typedef struct MKMapRect {
+    MKMapPoint origin;
+    MKMapSize size;
+} MKMapRect;
+
 // Foundation's NSRange, as UIKit's methods take it.
 typedef struct PerryRange {
     unsigned long location;
