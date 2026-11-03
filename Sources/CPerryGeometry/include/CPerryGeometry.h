@@ -30,6 +30,14 @@ typedef struct UIEdgeInsets {
     double top, left, bottom, right;
 } UIEdgeInsets;
 
+// Core Animation's 4x4 transform, row by row, as CATransform3D is.
+typedef struct CATransform3D {
+    double m11, m12, m13, m14;
+    double m21, m22, m23, m24;
+    double m31, m32, m33, m34;
+    double m41, m42, m43, m44;
+} CATransform3D;
+
 // GLKit's vectors, quaternions and matrices: floats, the matrices in
 // column-major order, as unions of these layouts are on Darwin.
 typedef struct GLKVector2 { float v[2]; } GLKVector2;
