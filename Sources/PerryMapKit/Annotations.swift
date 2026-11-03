@@ -45,18 +45,18 @@ open class MKPointAnnotation: MKShape {
     @ObjCMethod("setCoordinate:") func setCoordinate(_ coordinate: CLLocationCoordinate2D) { shape.coordinate = coordinate }
 }
 
-/// The user's location, which is never known.
+/// The user's location: where CoreLocation says the device is.
 @ObjCClass("MKUserLocation")
 open class MKUserLocation: MKShape {
     @ObjCMethod("init")
     func initialize() -> Self {
         shape.title = "My Location"
-        shape.coordinate = CLLocationCoordinate2D(latitude: -180, longitude: -180)
+        shape.coordinate = DeviceLocation.coordinate ?? CLLocationCoordinate2D(latitude: -180, longitude: -180)
         return self
     }
 
     @ObjCMethod("coordinate") func coordinate() -> CLLocationCoordinate2D { shape.coordinate }
-    @ObjCMethod("location") func location() -> NSObject? { nil }
+    @ObjCMethod("location") func location() -> NSObject? { DeviceLocation.coordinate.map { CLLocation.make($0) } }
     @ObjCMethod("heading") func heading() -> NSObject? { nil }
     @ObjCMethod("isUpdating") func isUpdating() -> Bool { false }
 }
