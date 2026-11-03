@@ -7,7 +7,7 @@ import PerryObjCInterop
 // and strokeEnd is drawn, measured along the path's length, as progress
 // rings use it; both animate, as do the line width and the colors.
 
-final class ShapeLayerState: ObjectState {
+final class ShapeLayerState {
     var path: CGRef?
     var fillColor: CGRef? = CG.colorCreateGenericGray(0, 1)
     var strokeColor: CGRef?
@@ -39,14 +39,7 @@ final class ShapeLayerState: ObjectState {
 
 @ObjCClass("CAShapeLayer")
 open class CAShapeLayer: CALayer {
-    static let shapeStates = StateTable<ShapeLayerState>()
-    var shape: ShapeLayerState { CAShapeLayer.shapeStates[objcObject] }
-
-    @ObjCMethod("dealloc")
-    override func dealloc() {
-        CAShapeLayer.shapeStates.remove(objcObject)
-        super.dealloc()
-    }
+    var shape = ShapeLayerState()
 
     @ObjCMethod("path") func path() -> UnsafeMutableRawPointer? { shape.path }
     @ObjCMethod("setPath:") func setPath(_ path: UnsafeMutableRawPointer?) { change("path") { LayerState.setColor(&shape.path, path) } }
