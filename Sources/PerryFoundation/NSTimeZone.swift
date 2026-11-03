@@ -126,6 +126,15 @@ public final class NSTimeZone: NSObject {
     @ObjCClassMethod("timeZoneDataVersion") static func dataVersion() -> String { TimeZone.timeZoneDataVersion }
 
     @ObjCMethod("name") func name() -> String { zone.identifier }
+
+    /// The zone's rules as a TZif file, from the system's zone database;
+    /// a fixed offset's (GMT+1 and the like) has none.
+    @ObjCMethod("data")
+    func data() -> ObjCObject? {
+        let identifier = zone.identifier == "GMT" ? "Etc/UTC" : zone.identifier
+        guard let contents = try? Data(contentsOf: URL(filePath: "/usr/share/zoneinfo/" + identifier)) else { return nil }
+        return DataObjects.autoreleased(contents).map(ObjCObject.init)
+    }
     @ObjCMethod("abbreviation") func abbreviation() -> String? { TimeZones.abbreviation(zone, Date()) }
     @ObjCMethod("abbreviationForDate:") func abbreviation(for date: NSDate) -> String? { TimeZones.abbreviation(zone, date.date) }
     @ObjCMethod("secondsFromGMT") func secondsFromGMT() -> Int { zone.secondsFromGMT() }
