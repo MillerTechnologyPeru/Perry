@@ -199,6 +199,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> UIKit
+//   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -225,8 +226,10 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Accelerate");
         return true;
     }
-    // UIKit's views are drawn through QuartzCore's layers, which it keeps.
-    if (strstr(install_name, "/QuartzCore.framework/")) {
+    // UIKit's views are drawn through QuartzCore's layers, which it keeps,
+    // as it keeps OpenGL ES's contexts and GLKit's views built on them.
+    if (strstr(install_name, "/QuartzCore.framework/") || strstr(install_name, "/OpenGLES.framework/") ||
+        strstr(install_name, "/GLKit.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
