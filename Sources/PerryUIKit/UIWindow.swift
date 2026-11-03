@@ -38,6 +38,17 @@ open class UIWindow: UIView {
         return self
     }
 
+    /// From a nib, as a main nib's window: hidden until shown, and the
+    /// size of the screen when it resizes to fill it, as nib windows do.
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        state.hidden = true
+        if Coder(coder: coder).bool("UIResizesToFullScreen") { sendSetFrame(Screen.bounds) }
+        if !Windows.all.contains(objcObject) { Windows.all.append(objcObject) }
+        return self
+    }
+
     /// A window in `scene`, the size of the screen.
     @ObjCMethod("initWithWindowScene:")
     func initialize(windowScene scene: UIWindowScene) -> NSObject {
@@ -89,6 +100,8 @@ open class UIWindow: UIView {
             .unsafeCast(to: UIView.self)
         let root = controller.sendView()
         root.sendSetFrame(bounds)
+        // All three follow the window's size, as the screen's can change.
+        for view in [transition, shadow, root] { view.setAutoresizingMask(18) }
         shadow.addSubview(root)
         transition.addSubview(shadow)
         windowState.transitionView = transition
