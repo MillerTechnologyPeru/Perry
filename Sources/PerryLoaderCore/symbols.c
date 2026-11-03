@@ -474,6 +474,19 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     if (loader->strict)
         perry_fatal("%s: unresolved symbol %s from %s", image->path, name, library);
     perry_trace(PERRY_TRACE_BIND, "unresolved %s from %s", name, library);
+    // A class is data, which libobjc reads rather than calls: it gets an
+    // empty class, with no class_ro_t, holding its name where the vtable
+    // goes, so libobjc can name it if an app's class inherits from it.
+    if (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0) {
+        const char *class_name = strchr(name, '$') + 2;
+        void **placeholder = calloc(5, sizeof(void *));
+        placeholder[3] = strdup(class_name);
+        if (name[6] == 'C') {
+            fprintf(stderr, "perry: warning: %s: class %s (%s) is not available\n", image->path, class_name, library);
+        }
+        sym.address = placeholder;
+        return sym;
+    }
     sym.address = perry_unresolved_stub(library, name);
     return sym;
 }
