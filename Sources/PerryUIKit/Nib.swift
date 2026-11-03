@@ -229,11 +229,12 @@ final class NibUnarchiving {
     }
 
     /// Allocates the object, so references back to it while it decodes
-    /// find it, then initializes it from the coder.
+    /// find it, then initializes it from the coder; an object that cannot
+    /// be decoded, such as an app delegate, is initialized plainly.
     private func instantiate(_ cls: ObjCClass, at index: Int, decoder: NSObject) -> NSObject? {
         let allocated = cls.object.allocated()
         decoded[index] = allocated
-        let object = allocated.sendInitWithCoder(decoder)
+        let object = allocated.responds(to: "initWithCoder:") ? allocated.sendInitWithCoder(decoder) : allocated.initialized()
         decoded[index] = object
         return object
     }
@@ -306,6 +307,7 @@ extension NSObject {
     }
 
     @ObjCMethod("initWithCoder:") func sendInitWithCoder(_ coder: NSObject) -> NSObject
+    @ObjCMethod("init") func initialized() -> NSObject
     @ObjCMethod("awakeFromNib") func sendAwakeFromNib()
     @ObjCMethod("connect") func sendConnect()
     @ObjCMethod("mutableCopy") func mutableCopied() -> NSObject
