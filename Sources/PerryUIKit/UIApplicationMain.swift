@@ -36,6 +36,8 @@ enum Launch {
                 uikitFatal("Unable to instantiate the UIApplication delegate instance. No class named \(delegateClassName) is loaded.")
             }
             Application.delegate = delegateClass.object.newInstance()
+        } else {
+            loadMainNib(info, owner: application)
         }
         let delegate = Application.delegate?.unsafeCast(to: AnyUIApplicationDelegate.self)
         // Without scenes, the main storyboard's initial controller is the
@@ -60,6 +62,18 @@ enum Launch {
 }
 
 extension Launch {
+    /// The main nib's objects, kept for the life of the app.
+    nonisolated(unsafe) static var mainNibObjects: [NSObject] = []
+
+    /// The main nib, its File's Owner the application: it usually makes the
+    /// delegate, connected through the application's delegate outlet, and
+    /// the delegate's window.
+    static func loadMainNib(_ info: NSBundle, owner application: UIApplication) {
+        guard let name = (info.infoObject(forKey: "NSMainNibFile~iphone") ?? info.infoObject(forKey: "NSMainNibFile"))?.stringValue,
+              let nib = UINib.nib(named: name, bundle: info) else { return }
+        mainNibObjects = nib.instantiate(owner: application, external: [:])
+    }
+
     /// A window with the main storyboard's initial controller, set as the
     /// delegate's window.
     static func mainStoryboardWindow(_ info: NSBundle) -> UIWindow? {
