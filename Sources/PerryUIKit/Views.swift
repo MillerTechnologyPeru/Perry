@@ -30,7 +30,9 @@ final class ToolbarState: ObjectState {
     var delegate: UnsafeMutableRawPointer?
 }
 
-/// A bar of items along the bottom, their titles in the tint color.
+/// A bar of items along the bottom, in the tint color: titles, or icons
+/// for the system items that have them, spread by fixed and flexible
+/// spaces. A tap on an item sends its action.
 @ObjCClass("UIToolbar")
 open class UIToolbar: UIView {
     static let toolbarStates = StateTable<ToolbarState>()
@@ -69,6 +71,54 @@ open class UIToolbar: UIView {
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width, height: 44) }
 
+    nonisolated(unsafe) private static let font = UIFont.systemFont(size: 17)
+
+    /// UIBarButtonSystemItem: flexible space 5, fixed space 6.
+    private func isSpace(_ item: UIBarButtonItem) -> Bool { item.state.systemItem == 5 || item.state.systemItem == 6 }
+
+    /// The width an item takes: its icon's, its title's, or a fixed space's.
+    private func width(of item: UIBarButtonItem) -> CGFloat {
+        if item.state.systemItem == 6 { return item.state.width }
+        if item.state.systemItem == 5 { return 0 }
+        if item.state.width > 0 { return item.state.width }
+        if let view = item.state.customView { return view.state.bounds.width }
+        if BarIcons.has(item.state.systemItem) { return 28 }
+        return Text.size(item.displayTitle, font: UIToolbar.font).width
+    }
+
+    /// Each item's frame: 16 points in from the edges, 8 between items
+    /// that are not spaces, flexible spaces sharing what is left.
+    func itemFrames() -> [(item: UIBarButtonItem, frame: CGRect)] {
+        let bounds = state.bounds, items = toolbar.items
+        var fixed: CGFloat = 32
+        var flexible = 0
+        for (index, item) in items.enumerated() {
+            fixed += width(of: item)
+            if item.state.systemItem == 5 { flexible += 1 }
+            if index > 0, !isSpace(item), !isSpace(items[index - 1]) { fixed += 8 }
+        }
+        let share = flexible > 0 ? max(0, bounds.width - fixed) / CGFloat(flexible) : 0
+        var x: CGFloat = 16
+        var frames: [(UIBarButtonItem, CGRect)] = []
+        for (index, item) in items.enumerated() {
+            if index > 0, !isSpace(item), !isSpace(items[index - 1]) { x += 8 }
+            let width = item.state.systemItem == 5 ? share : width(of: item)
+            frames.append((item, CGRect(x: x, y: 0, width: width, height: bounds.height)))
+            x += width
+        }
+        return frames
+    }
+
+    @ObjCMethod("layoutSubviews")
+    override func layoutSubviews() {
+        for (item, frame) in itemFrames() {
+            guard let view = item.state.customView else { continue }
+            if view.state.superview != objcObject { addSubview(view) }
+            let size = view.state.bounds.size
+            view.sendSetFrame(CGRect(x: frame.minX, y: frame.midY - size.height / 2, width: size.width, height: size.height))
+        }
+    }
+
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard let context = Graphics.current else { return }
@@ -78,15 +128,74 @@ open class UIToolbar: UIView {
             CG.setFillColorWithColor(context, background.state.makeCGColor())
             CG.fillRect(context, bounds)
             CG.setFillColorWithColor(context, separator.state.makeCGColor())
-            CG.fillRect(context, CGRect(x: 0, y: 0, width: bounds.width, height: 1 / Screen.scale))
+            CG.fillRect(context, CGRect(x: 0, y: 0, width: bounds.width, height: Screen.pixel))
         }
-        let font = UIFont.systemFont(size: 17)
-        var x: CGFloat = 16
-        for item in toolbar.items where !item.displayTitle.isEmpty {
+        for (item, frame) in itemFrames() where !isSpace(item) && item.state.customView == nil {
+            let color = item.state.tintColor ?? tintColor()
+            if BarIcons.draw(item.state.systemItem, in: frame, color: color, context: context) { continue }
             let title = item.displayTitle
-            Text.draw(title, at: CGPoint(x: x, y: bounds.midY - Text.size(title, font: font).height / 2), font: font, color: tintColor())
-            x += Text.size(title, font: font).width + 20
+            Text.draw(title, at: CGPoint(x: frame.minX, y: frame.midY - Text.size(title, font: UIToolbar.font).height / 2),
+                      font: UIToolbar.font, color: color)
         }
+    }
+
+    /// A tap sends the action of the item under it.
+    func tap(at point: CGPoint) {
+        for (item, frame) in itemFrames() where !isSpace(item) && item.state.enabled
+            && point.x >= frame.minX - 8 && point.x <= frame.maxX + 8 {
+            item.sendAction(startingAt: self)
+            return
+        }
+    }
+}
+
+/// Icons for the system bar items that are drawn as icons, in place of
+/// the SF Symbols iOS draws: lines in the item's tint color.
+enum BarIcons {
+    /// UIBarButtonSystemItem: add 4, compose 7, reply 8, action 9,
+    /// search 12, refresh 13, stop 14, trash 16.
+    static func has(_ item: Int) -> Bool { [4, 7, 8, 9, 12, 13, 14, 16].contains(item) }
+
+    static func draw(_ item: Int, in frame: CGRect, color: UIColor, context: CGRef) -> Bool {
+        guard has(item) else { return false }
+        let path = CG.pathCreateMutable()
+        defer { CG.release(path) }
+        let cx = frame.midX, cy = frame.midY
+        func line(_ points: [(CGFloat, CGFloat)]) {
+            guard let first = points.first else { return }
+            CG.pathMoveToPoint(path, nil, cx + first.0, cy + first.1)
+            for point in points.dropFirst() { CG.pathAddLineToPoint(path, nil, cx + point.0, cy + point.1) }
+        }
+        switch item {
+        case 4: // add: a plus
+            line([(-9, 0), (9, 0)]); line([(0, -9), (0, 9)])
+        case 7: // compose: a square and a pencil
+            line([(2, -8), (-8, -8), (-8, 9), (9, 9), (9, -1)]); line([(9, -10), (-1, 0), (-2, 2), (0, 1), (10, -9)])
+        case 8: // reply: a curved arrow
+            line([(-4, -7), (-10, -1), (-4, 5)]); line([(-10, -1), (4, -1), (9, 3), (9, 8)])
+        case 9: // action: a box open at the top, an arrow out of it
+            line([(-4, -4), (-8, -4), (-8, 10), (8, 10), (8, -4), (4, -4)])
+            line([(0, 3), (0, -12)]); line([(-4, -8), (0, -12), (4, -8)])
+        case 12: // search: a magnifying glass
+            CG.pathAddEllipseInRect(path, nil, CGRect(x: cx - 9, y: cy - 9, width: 13, height: 13)); line([(2.5, 2.5), (9, 9)])
+        case 13: // refresh: an arc with an arrowhead
+            CG.pathAddArc(path, nil, cx, cy + 1, 8, -0.5 * .pi, 1.6 * .pi, false); line([(-2, -11), (1, -7), (-3, -4)])
+        case 14: // stop: a cross
+            line([(-7, -7), (7, 7)]); line([(-7, 7), (7, -7)])
+        default: // trash: a can and its lid
+            line([(-9, -6), (9, -6)]); line([(-3, -6), (-3, -9), (3, -9), (3, -6)]); line([(-7, -6), (-6, 10), (6, 10), (7, -6)])
+        }
+        CG.saveGState(context)
+        defer { CG.restoreGState(context) }
+        withExtendedLifetime(color) {
+            CG.setStrokeColorWithColor(context, color.state.makeCGColor())
+            CG.setLineWidth(context, 1.8)
+            CG.setLineCap(context, 1)
+            CG.setLineJoin(context, 1)
+            CG.addPath(context, path)
+            CG.strokePath(context)
+        }
+        return true
     }
 }
 
