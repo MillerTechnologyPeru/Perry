@@ -7,21 +7,13 @@
 
 // swiftlint:disable attributes
 
-#if canImport(_Concurrency) && compiler(>=5.5)
 import _Concurrency
-#endif
 
 extension Subscribers {
 
-    /// A requested number of items, sent to a publisher from a subscriber through
-    /// the subscription.
+    /// A requested number of items, sent to a publisher from a subscriber through the subscription.
     @frozen
-    public struct Demand: Equatable,
-                          Comparable,
-                          Hashable,
-                          Codable,
-                          CustomStringConvertible
-    {
+    public struct Demand: Equatable, Comparable, Hashable, Codable, CustomStringConvertible {
         @usableFromInline
         internal let rawValue: UInt
 
@@ -31,16 +23,12 @@ extension Subscribers {
         }
 
         /// A request for as many values as the publisher can produce.
-        @inline(__always)
-        public static var unlimited: Demand {
-            return Demand(rawValue: .max)
-        }
+        public static var unlimited: Demand { Demand(rawValue: .max) }
 
         /// A request for no elements from the publisher.
         ///
         /// This is equivalent to `Demand.max(0)`.
-        @inline(__always)
-        public static var none: Demand { return .max(0) }
+        public static var none: Demand { Demand(rawValue: .zero) }
 
         /// Creates a demand for the given maximum number of elements.
         ///
@@ -51,7 +39,7 @@ extension Subscribers {
         /// for this parameter results in a fatal error.
         @inline(__always)
         public static func max(_ value: Int) -> Demand {
-            precondition(value >= 0, "demand cannot be negative")
+            precondition(value >= 0, "Demand cannot be negative")
             return Demand(rawValue: UInt(value))
         }
 
@@ -67,15 +55,21 @@ extension Subscribers {
         /// When adding any value to `.unlimited`, the result is `.unlimited`.
         @inline(__always)
         public static func + (lhs: Demand, rhs: Demand) -> Demand {
-            switch (lhs, rhs) {
-            case (.unlimited, _):
+            if lhs == .unlimited {
                 return .unlimited
-            case (_, .unlimited):
-                return .unlimited
-            default:
-                let (sum, isOverflow) = Int(lhs.rawValue)
-                    .addingReportingOverflow(Int(rhs.rawValue))
-                return isOverflow ? .unlimited : .max(sum)
+            } else {
+                if rhs == .unlimited {
+                    return .unlimited
+                } else {
+                    let lhsValue: Int = numericCast(lhs.rawValue)
+                    let rhsvalue: Int = numericCast(rhs.rawValue)
+                    let r = lhsValue.addingReportingOverflow(rhsvalue)
+                    if r.overflow {
+                        return .unlimited
+                    } else {
+                        return .max(r.partialValue)
+                    }
+                }
             }
         }
 
@@ -93,9 +87,15 @@ extension Subscribers {
         public static func + (lhs: Demand, rhs: Int) -> Demand {
             if lhs == .unlimited {
                 return .unlimited
+            } else {
+                let lhsValue: Int = numericCast(lhs.rawValue)
+                let r = lhsValue.addingReportingOverflow(rhs)
+                if r.overflow {
+                    return .unlimited
+                } else {
+                    return .max(r.partialValue)
+                }
             }
-            let (sum, isOverflow) = Int(lhs.rawValue).addingReportingOverflow(rhs)
-            return isOverflow ? .unlimited : .max(sum)
         }
 
         /// Adds an integer to a demand, and assigns the result to the demand.
@@ -111,10 +111,15 @@ extension Subscribers {
         public static func * (lhs: Demand, rhs: Int) -> Demand {
             if lhs == .unlimited {
                 return .unlimited
+            } else {
+                let lhsValue: Int = numericCast(lhs.rawValue)
+                let r = lhsValue.multipliedReportingOverflow(by: rhs)
+                if r.overflow {
+                    return .unlimited
+                } else {
+                    return .max(r.partialValue)
+                }
             }
-            let (product, isOverflow) = Int(lhs.rawValue)
-                .multipliedReportingOverflow(by: rhs)
-            return isOverflow ? .unlimited : .max(product)
         }
 
         /// Multiplies a demand by an integer, and assigns the result to the demand.
@@ -132,15 +137,21 @@ extension Subscribers {
         /// any operation that would result in a negative value is clamped to `.max(0)`.
         @inline(__always)
         public static func - (lhs: Demand, rhs: Demand) -> Demand {
-            switch (lhs, rhs) {
-            case (.unlimited, _):
+            if lhs == .unlimited {
                 return .unlimited
-            case (_, .unlimited):
-                return .none
-            default:
-                let (difference, isOverflow) = Int(lhs.rawValue)
-                    .subtractingReportingOverflow(Int(rhs.rawValue))
-                return isOverflow ? .none : .max(difference)
+            } else {
+                if rhs == .unlimited {
+                    return .none
+                } else {
+                    let lhsValue: Int = numericCast(lhs.rawValue)
+                    let rhsValue: Int = numericCast(rhs.rawValue)
+                    let r = lhsValue.subtractingReportingOverflow(rhsValue)
+                    if r.overflow {
+                        return .max(0)
+                    } else {
+                        return .max(r.partialValue)
+                    }
+                }
             }
         }
 
@@ -164,11 +175,15 @@ extension Subscribers {
         public static func - (lhs: Demand, rhs: Int) -> Demand {
             if lhs == .unlimited {
                 return .unlimited
+            } else {
+                let lhsValue: Int = numericCast(lhs.rawValue)
+                let r = lhsValue.subtractingReportingOverflow(rhs)
+                if r.overflow {
+                    return .max(0)
+                } else {
+                    return .max(r.partialValue)
+                }
             }
-
-            let (difference, isOverflow) = Int(lhs.rawValue)
-                .subtractingReportingOverflow(rhs)
-            return isOverflow ? .none : .max(difference)
         }
 
         /// Subtracts an integer from a demand, and assigns the result to the demand.
@@ -191,7 +206,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return true
             } else {
-                return Int(lhs.rawValue) > rhs
+                return numericCast(lhs.rawValue) > rhs
             }
         }
 
@@ -204,7 +219,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return true
             } else {
-                return Int(lhs.rawValue) >= rhs
+                return numericCast(lhs.rawValue) >= rhs
             }
         }
 
@@ -217,7 +232,7 @@ extension Subscribers {
             if rhs == .unlimited {
                 return false
             } else {
-                return lhs > Int(rhs.rawValue)
+                return lhs > numericCast(rhs.rawValue)
             }
         }
 
@@ -230,7 +245,7 @@ extension Subscribers {
             if rhs == .unlimited {
                 return false
             } else {
-                return lhs >= Int(rhs.rawValue)
+                return lhs >= numericCast(rhs.rawValue)
             }
         }
 
@@ -243,7 +258,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return false
             } else {
-                return Int(lhs.rawValue) < rhs
+                return numericCast(lhs.rawValue) < rhs
             }
         }
 
@@ -256,7 +271,7 @@ extension Subscribers {
             if rhs == .unlimited {
                 return true
             } else {
-                return lhs < Int(rhs.rawValue)
+                return lhs < numericCast(rhs.rawValue)
             }
         }
 
@@ -269,7 +284,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return false
             } else {
-                return Int(lhs.rawValue) <= rhs
+                return numericCast(lhs.rawValue) <= rhs
             }
         }
 
@@ -282,7 +297,7 @@ extension Subscribers {
             if rhs == .unlimited {
                 return true
             } else {
-                return lhs <= Int(rhs.rawValue)
+                return lhs <= numericCast(rhs.rawValue)
             }
         }
 
@@ -295,6 +310,8 @@ extension Subscribers {
         @inline(__always)
         public static func < (lhs: Demand, rhs: Demand) -> Bool {
             switch (lhs, rhs) {
+            case (.unlimited, .unlimited):
+                return false
             case (.unlimited, _):
                 return false
             case (_, .unlimited):
@@ -372,7 +389,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return false
             } else {
-                return Int(lhs.rawValue) == rhs
+                return numericCast(lhs.rawValue) == rhs
             }
         }
 
@@ -383,7 +400,7 @@ extension Subscribers {
             if lhs == .unlimited {
                 return true
             } else {
-                return Int(lhs.rawValue) != rhs
+                return numericCast(lhs.rawValue) != rhs
             }
         }
 
@@ -409,24 +426,20 @@ extension Subscribers {
             }
         }
 
-        public static func == (lhs: Demand, rhs: Demand) -> Bool {
-            return lhs.rawValue == rhs.rawValue
-        }
-
         /// The number of requested values.
         ///
-        /// The value is `nil` if the demand is `Subscribers.Demand.unlimited`.
+        /// The value is `nil` if the demand is ``Subscribers/Demand/unlimited``.
         public var max: Int? {
             if self == .unlimited {
                 return nil
             } else {
-                return Int(rawValue)
+                return numericCast(rawValue)
             }
         }
 
         /// Creates a demand instance from a decoder.
         ///
-        /// - Parameter decoder: The decoder of a previously-encoded `Subscribers.Demand`
+        /// - Parameter decoder: The decoder of a previously-encoded ``Subscribers/Demand``
         ///   instance.
         public init(from decoder: Decoder) throws {
             try self.init(rawValue: decoder.singleValueContainer().decode(UInt.self))
@@ -439,9 +452,11 @@ extension Subscribers {
             var container = encoder.singleValueContainer()
             try container.encode(rawValue)
         }
+
+        public static func == (lhs: Demand, rhs: Demand) -> Bool {
+            return lhs.rawValue == rhs.rawValue
+        }
     }
 }
 
-#if canImport(_Concurrency) && compiler(>=5.5) || compiler(>=5.5.1)
 extension Subscribers.Demand: Sendable {}
-#endif
