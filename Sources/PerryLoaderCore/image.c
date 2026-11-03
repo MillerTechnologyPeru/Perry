@@ -542,6 +542,37 @@ static perry_image *find_loaded(perry_loader *loader, const char *path) {
     return NULL;
 }
 
+// Since iOS 17, a framework's Swift API (Foundation's Data, String.Encoding,
+// UIKit's extensions) is in the framework itself, and Swift code built for
+// iOS 17 binds it there. Providers have no Swift code: a Swift image's
+// frameworks get the Swift overlay of the same name from the runtime given,
+// where their Swift symbols are looked for when the provider lacks them.
+static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
+    if (!loader->swift_runtime_dir)
+        return;
+    bool is_swift = false;
+    for (uint32_t i = 0; i < image->dep_count && !is_swift; i++)
+        is_swift = strncmp(image->deps[i].install_name, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) == 0;
+    if (!is_swift)
+        return;
+    for (uint32_t i = 0; i < image->dep_count; i++) {
+        perry_dependency *dep = &image->deps[i];
+        const char *framework = strstr(dep->install_name, "/System/Library/Frameworks/");
+        if (!dep->provider || !framework)
+            continue;
+        const char *base = strrchr(dep->install_name, '/') + 1;
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/libswift%s.dylib", loader->swift_runtime_dir, base);
+        if (!file_exists(path))
+            continue;
+        perry_image *overlay = find_loaded(loader, path);
+        if (!overlay)
+            overlay = load_image(loader, path);
+        if (overlay != image)
+            dep->swift_overlay = overlay;
+    }
+}
+
 static void load_dependencies(perry_loader *loader, perry_image *image) {
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
@@ -580,6 +611,7 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         else if (!loader->report)
             perry_warn("%s: library not available: %s", image->path, name);
     }
+    attach_swift_overlays(loader, image);
 }
 
 static perry_image *load_image(perry_loader *loader, const char *path) {
