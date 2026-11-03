@@ -20,7 +20,7 @@ enum Presentation {
     static func forget(_ layer: UnsafeMutableRawPointer) { layers.removeAll { $0 == layer } }
 
     /// Whether anything is animating: frames must keep coming.
-    static var animating: Bool { layers.contains { !CALayer.states[$0].animations.isEmpty } }
+    static var animating: Bool { layers.contains { !CALayer.state(of: $0).animations.isEmpty } }
 
     /// The layer as it presents now.
     static func state(of layer: CALayer) -> LayerState { presented(layer).state }
@@ -192,7 +192,7 @@ enum Presentation {
         let now = Clock.now
         var next = Double.infinity
         for layerObject in layers {
-            let state = CALayer.states[layerObject]
+            let state = CALayer.state(of: layerObject)
             var finished: [(key: String, animation: CAAnimation)] = []
             for entry in state.animations {
                 let animation = entry.animation
@@ -212,7 +212,7 @@ enum Presentation {
                 stopped(entry.animation, on: CALayer.wrap(layerObject), finished: true)
             }
         }
-        layers.removeAll { CALayer.states[$0].animations.isEmpty }
+        layers.removeAll { CALayer.state(of: $0).animations.isEmpty }
         Compositing.changed()
         guard next.isFinite, next != settleAt else { return }
         settleAt = next
@@ -295,20 +295,15 @@ public func PerryCANeedsDisplay() -> Bool {
 
 /// Transforms from a value, by name, as an animation of "transform"
 /// applies its numbers.
-final class ValueFunctionState: ObjectState {
+final class ValueFunctionState {
     var name = ""
 }
 
 @ObjCClass("CAValueFunction")
 open class CAValueFunction: NSObject {
-    static let states = StateTable<ValueFunctionState>()
-    var state: ValueFunctionState { CAValueFunction.states[objcObject] }
+    var state = ValueFunctionState()
 
-    @ObjCMethod("dealloc")
-    func dealloc() {
-        CAValueFunction.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CAValueFunction.objCClass.pointer)
-    }
+    @ObjCMethod("init") public required override init() { super.init() }
 
     @ObjCClassMethod("functionWithName:")
     static func function(_ cls: ObjCClass, name: String) -> NSObject {
