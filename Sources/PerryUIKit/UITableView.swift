@@ -88,6 +88,13 @@ final class CellState: ObjectState {
     /// The gray behind the content while highlighted or selected, unless
     /// the app gives a selected background view.
     var highlight: UIView?
+    /// The background colors of the content's views, cleared while the
+    /// cell shows highlighted.
+    var clearedBackgrounds: [(view: UIView, color: UIColor)] = []
+    /// A storyboard prototype's segues, performed when the cell or its
+    /// accessory is tapped.
+    var selectionSegueTemplate: UIStoryboardSegueTemplate?
+    var accessoryActionSegueTemplate: UIStoryboardSegueTemplate?
 }
 
 @ObjCClass("UITableViewCell")
@@ -101,6 +108,14 @@ open class UITableViewCell: UIView {
         setUp(style: 0, reuseIdentifier: nil)
         return self
     }
+
+    @ObjCMethod("selectionSegueTemplate") func selectionSegueTemplate() -> UIStoryboardSegueTemplate? { cell.selectionSegueTemplate }
+    @ObjCMethod("setSelectionSegueTemplate:")
+    func setSelectionSegueTemplate(_ template: UIStoryboardSegueTemplate?) { cell.selectionSegueTemplate = template }
+    @ObjCMethod("accessoryActionSegueTemplate")
+    func accessoryActionSegueTemplate() -> UIStoryboardSegueTemplate? { cell.accessoryActionSegueTemplate }
+    @ObjCMethod("setAccessoryActionSegueTemplate:")
+    func setAccessoryActionSegueTemplate(_ template: UIStoryboardSegueTemplate?) { cell.accessoryActionSegueTemplate = template }
 
     /// A cell 320 by 44 points, until the table sizes it.
     @ObjCMethod("initWithStyle:reuseIdentifier:")
@@ -248,7 +263,37 @@ open class UITableViewCell: UIView {
         } else {
             background.removeFromSuperview()
         }
-        for label in [cell.textLabel, cell.detailTextLabel].compactMap({ $0 }) { label.setHighlighted(shown) }
+        if let contentView = cell.contentView { showContent(highlighted: shown, contentView) }
+    }
+
+    /// While highlighted, the content's labels and image views outside
+    /// controls show their highlighted colors and images, and its views'
+    /// background colors are cleared so the selection shows through, as
+    /// UIKit does; then they are as they were.
+    private func showContent(highlighted: Bool, _ contentView: UIView) {
+        let cell = cell
+        if !highlighted {
+            for (view, color) in cell.clearedBackgrounds { view.setBackgroundColor(color) }
+            cell.clearedBackgrounds = []
+        } else if cell.clearedBackgrounds.isEmpty {
+            func clear(_ view: UIView) {
+                for subview in view.state.subviews where !subview.is(UIControl.self) {
+                    if let color = subview.state.backgroundColor, color.state.alpha > 0 {
+                        cell.clearedBackgrounds.append((subview, color))
+                        subview.setBackgroundColor(UIColor.clear())
+                    }
+                    clear(subview)
+                }
+            }
+            clear(contentView)
+        }
+        func highlight(_ view: UIView) {
+            for subview in view.state.subviews where !subview.is(UIControl.self) {
+                if subview.is(UILabel.self) || subview.is(UIImageView.self) { subview.sendHighlighted(highlighted) }
+                highlight(subview)
+            }
+        }
+        highlight(contentView)
     }
     @ObjCMethod("isEditing") func isEditing() -> Bool { cell.editing }
     @ObjCMethod("setEditing:") func setEditing(_ editing: Bool) { cell.editing = editing }
@@ -1070,6 +1115,10 @@ open class UITableView: UIScrollView {
         if let delegate, delegate.responds(to: "tableView:didSelectRowAtIndexPath:") {
             delegate.sendTableView(self, didSelectRowAt: chosen)
         }
+        // A prototype cell's segue, with the cell as sender.
+        if let cell = table.visibleCells[RowPath(chosen)], let template = cell.cell.selectionSegueTemplate {
+            template.perform(cell)
+        }
     }
 
     // MARK: Scrolling
@@ -1192,3 +1241,11 @@ open class UITableViewController: UIViewController {
 extension NSObject {
     @ObjCMethod("initWithFrame:style:") func initializeTable(frame: CGRect, style: Int) -> NSObject
 }
+
+/// UIKit's private classes table view cells archive their labels and
+/// separators as.
+@ObjCClass("UITableViewLabel")
+open class UITableViewLabel: UILabel {}
+
+@ObjCClass("_UITableViewCellSeparatorView")
+open class UITableViewCellSeparatorView: UIView {}

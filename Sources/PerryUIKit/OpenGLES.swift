@@ -8,7 +8,7 @@ import PerryObjCInterop
 // runs on the GPU when there is one and in software otherwise. A context
 // for an API the host lacks is nil, as on a device without it. As on iOS
 // there is no default framebuffer: apps draw into renderbuffers, which a
-// CAEAGLLayer gives storage and shows when presented.
+// QuartzCore's CAEAGLLayer gives storage and shows when presented.
 
 enum GLES {
     typealias Pointer = UnsafeMutableRawPointer
@@ -277,9 +277,9 @@ open class EAGLContext: NSObject {
     @ObjCMethod("renderbufferStorage:fromDrawable:")
     func renderbufferStorage(_ target: UInt, fromDrawable drawable: NSObject?) -> Bool {
         guard let layer = drawable?.as(CAEAGLLayer.self) else { return false }
-        let geometry = layer.state
-        let width = Int32((geometry.bounds.width * geometry.contentsScale).rounded())
-        let height = Int32((geometry.bounds.height * geometry.contentsScale).rounded())
+        let bounds = layer.bounds(), scale = layer.contentsScale()
+        let width = Int32((bounds.width * scale).rounded())
+        let height = Int32((bounds.height * scale).rounded())
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard name != 0, width > 0, height > 0 else { return false }
@@ -294,9 +294,9 @@ open class EAGLContext: NSObject {
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard let layerObject = state.drawables[UInt32(name)] else { return false }
-        let layer = CALayer.wrap(layerObject)
-        guard let image = Renderbuffers.image(UInt32(name), opaque: layer.state.isOpaque) else { return false }
-        layer.state.contents = NSObject(image.object)
+        let layer = CALayer(objcObject: layerObject, ownership: .retain)
+        guard let image = Renderbuffers.image(UInt32(name), opaque: layer.isOpaque()) else { return false }
+        layer.setContents(NSObject(image.object))
         Display.markDirty()
         Updates.schedule()
         return true
@@ -357,38 +357,11 @@ enum Renderbuffers {
 
 // MARK: - CAEAGLLayer
 
-final class EAGLLayerState: ObjectState {
-    var drawableProperties: NSObject?
-    var presentsWithTransaction = false
-}
-
-@ObjCClass("CAEAGLLayer")
-open class CAEAGLLayer: CALayer {
-    static let eaglStates = StateTable<EAGLLayerState>()
-    var eagl: EAGLLayerState { CAEAGLLayer.eaglStates[objcObject] }
-
-    /// Opaque, as Core Animation's.
-    @ObjCMethod("init")
-    override func initialize() -> Self {
-        _ = super.initialize()
-        state.isOpaque = true
-        return self
-    }
-
-    @ObjCMethod("dealloc")
-    override func dealloc() {
-        CAEAGLLayer.eaglStates.remove(objcObject)
-        super.dealloc()
-    }
-
-    @ObjCMethod("drawableProperties") func drawableProperties() -> NSObject? { eagl.drawableProperties }
-    @ObjCMethod("setDrawableProperties:") func setDrawableProperties(_ properties: NSObject?) { eagl.drawableProperties = properties }
-    @ObjCMethod("presentsWithTransaction") func presentsWithTransaction() -> Bool { eagl.presentsWithTransaction }
-    @ObjCMethod("setPresentsWithTransaction:") func setPresentsWithTransaction(_ presents: Bool) { eagl.presentsWithTransaction = presents }
-
+/// QuartzCore's CAEAGLLayer keeps the drawable's properties.
+extension CAEAGLLayer {
     /// The renderbuffer format for the drawable's color format.
     var colorFormat: UInt32 {
-        let format = eagl.drawableProperties?.as(NSDictionary.self)?.object(forKey: GLConstants.kEAGLDrawablePropertyColorFormat)?.stringValue
+        let format = drawableProperties()?.as(NSDictionary.self)?.object(forKey: GLConstants.kEAGLDrawablePropertyColorFormat)?.stringValue
         switch format {
         case GLConstants.kEAGLColorFormatRGB565: return GLES.rgb565
         case GLConstants.kEAGLColorFormatSRGBA8: return GLES.srgb8Alpha8

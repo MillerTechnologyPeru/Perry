@@ -9,9 +9,9 @@ import PerryObjCInterop
 // the layer's sublayers in the same order.
 
 final class ViewState: ObjectState {
-    /// The view's layer, and the layer's state.
+    /// The view's layer, and its properties.
     var layer: CALayer!
-    var geometry: LayerState!
+    var geometry: LayerGeometry!
     var tag = 0
     var userInteractionEnabled = true
     var backgroundColor: UIColor?
@@ -23,6 +23,7 @@ final class ViewState: ObjectState {
     var multipleTouchEnabled = false
     var exclusiveTouch = false
     var gestureRecognizers: [UIGestureRecognizer] = []
+    var motionEffects: [NSObject] = []
     var constraints: [NSObject] = []
     var translatesAutoresizingMaskIntoConstraints = true
     /// Content hugging and compression resistance, per axis.
@@ -82,15 +83,29 @@ enum Screen {
 
     static var isLandscape: Bool { orientation == 3 || orientation == 4 }
 
+    /// With a live view, the screen is the display's own: its usable area,
+    /// in points at the desktop's scale (one pixel a point unless it scales
+    /// its display). PERRY_UIKIT_SCREEN=iphone keeps an iPhone's instead, as
+    /// without a display.
+    nonisolated(unsafe) static let nativeSize: CGSize? = {
+        if let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" { return nil }
+        guard Display.wanted, let pixels = SDL.usableDisplaySize() else { return nil }
+        let scale = max(Display.scale, 1)
+        return CGSize(width: (pixels.width / scale).rounded(.down), height: (pixels.height / scale).rounded(.down))
+    }()
+
     /// The screen's points; a resizable app's change with its window.
-    nonisolated(unsafe) static var bounds = isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844)
+    nonisolated(unsafe) static var bounds = nativeSize.map { CGRect(origin: .zero, size: $0) }
+        ?? (isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844))
 
     /// Whether the app runs in a window of any size, as an iPad app that
     /// supports multitasking does: it supports the iPad, both portrait and
-    /// landscape, and does not require the full screen. PERRY_UIKIT_RESIZABLE
-    /// set to 1 or 0 decides it instead.
+    /// landscape, and does not require the full screen; or the screen is the
+    /// display's. PERRY_UIKIT_RESIZABLE set to 1 or 0 decides it instead.
     nonisolated(unsafe) static let isResizable: Bool = {
         if let setting = getenv("PERRY_UIKIT_RESIZABLE") { return String(cString: setting) != "0" }
+        // The display's screen is a desktop window's.
+        if nativeSize != nil { return true }
         let bundle = NSBundle.main()
         let families = bundle.infoObject(forKey: "UIDeviceFamily")?.as(NSArray.self)?.elements.map { $0.sendIntegerValue() } ?? []
         guard families.contains(2) else { return false }
@@ -119,10 +134,11 @@ enum Screen {
         Display.markDirty()
         Updates.schedule()
     }
-    /// Pixels per point, the iPhone's: apps size what they draw from it (a
-    /// game its renderbuffer and its interface), so it stays three whatever
-    /// the live view's scale.
-    static let scale: CGFloat = 3
+    /// Pixels per point: the display's when the screen is the display's,
+    /// else the iPhone's. Apps size what they draw from it (a game its
+    /// renderbuffer and its interface), so an iPhone's screen keeps three
+    /// whatever the live view's scale.
+    nonisolated(unsafe) static let scale: CGFloat = nativeSize != nil ? max(Display.scale, 1) : 3
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
     /// pixels, so lines are not lost between them.
@@ -179,9 +195,9 @@ open class UIView: UIResponder, UICoordinateSpace {
         let cls = NSObject(ObjCRuntime.objectClass(objcObject)!).sendLayerClass()
         let layer = cls.object.allocated().initializeLayer().unsafeCast(to: CALayer.self)
         state.layer = layer
-        state.geometry = layer.state
-        state.geometry.delegate = objcObject
-        state.geometry.contentsScale = Screen.scale
+        state.geometry = LayerGeometry(layer)
+        layer.setDelegate(self)
+        layer.setContentsScale(Screen.scale)
     }
 
     @ObjCClassMethod("layerClass") static func layerClass() -> ObjCClass { CALayer.objCClass }
@@ -300,7 +316,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("dealloc")
     func dealloc() {
         for subview in state.subviews { subview.state.superview = nil }
-        state.geometry.delegate = nil
+        state.layer.setDelegate(nil)
         UIView.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
@@ -357,25 +373,34 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Appearance
 
+    /// The device's, for every view.
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
-    /// A stack view closes up around an arranged subview that hides.
+    /// A stack view closes up around an arranged subview that hides. As
+    /// with the other changes that show, the next update pass draws it.
     @ObjCMethod("setHidden:")
     func setHidden(_ hidden: Bool) {
         guard hidden != state.hidden else { return }
         state.hidden = hidden
+        Updates.schedule()
         if let superview = state.superview, ObjCRuntime.isKind(superview, of: UIStackView.objCClass.pointer) {
             UIView.wrap(superview).unsafeCast(to: UIStackView.self).arrangementChanged()
         }
     }
     @ObjCMethod("alpha") func alpha() -> CGFloat { state.alpha }
-    @ObjCMethod("setAlpha:") func setAlpha(_ alpha: CGFloat) { state.alpha = alpha }
+    @ObjCMethod("setAlpha:")
+    func setAlpha(_ alpha: CGFloat) {
+        state.alpha = alpha
+        Updates.schedule()
+    }
     @ObjCMethod("backgroundColor") func backgroundColor() -> UIColor? { state.backgroundColor }
 
     @ObjCMethod("setBackgroundColor:")
     func setBackgroundColor(_ color: UIColor?) {
         let state = state
         state.backgroundColor = color
-        LayerState.setColor(&state.geometry.backgroundColor, color?.sendCGColor())
+        state.geometry.backgroundColor = color?.sendCGColor()
     }
 
     /// Pixels per point of the layer's content.
@@ -414,7 +439,19 @@ open class UIView: UIResponder, UICoordinateSpace {
         return UIColor.systemBlue()
     }
 
-    @ObjCMethod("setTintColor:") func setTintColor(_ color: UIColor?) { state.tintColor = color }
+    /// The view and those under it that take its tint hear of the change.
+    @ObjCMethod("setTintColor:")
+    func setTintColor(_ color: UIColor?) {
+        state.tintColor = color
+        UIView.tintChanged(self)
+    }
+
+    private static func tintChanged(_ view: UIView) {
+        view.sendTintColorDidChange()
+        for subview in view.state.subviews where subview.state.tintColor == nil { tintChanged(subview) }
+    }
+
+    @ObjCMethod("tintColorDidChange") func tintColorDidChange() {}
     @ObjCMethod("tag") func tag() -> Int { state.tag }
     @ObjCMethod("setTag:") func setTag(_ tag: Int) { state.tag = tag }
     @ObjCMethod("isUserInteractionEnabled") func isUserInteractionEnabled() -> Bool { state.userInteractionEnabled }
@@ -489,11 +526,10 @@ open class UIView: UIResponder, UICoordinateSpace {
         let subviews = state.subviews
         guard let index = index(of: view) else { return }
         let layer = state.layer!, sublayer = view.state.layer!
-        if index + 1 < subviews.count, let next = layer.index(of: subviews[index + 1].state.layer) {
-            let current = layer.index(of: sublayer)
-            layer.insert(sublayer, at: current.map { $0 < next ? next - 1 : next } ?? next)
+        if index + 1 < subviews.count {
+            layer.insertSublayer(sublayer, below: subviews[index + 1].state.layer)
         } else {
-            layer.insert(sublayer, at: layer.state.sublayers.count)
+            layer.addSublayer(sublayer)
         }
     }
 
@@ -510,6 +546,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         state.layer.removeFromSuperlayer()
         if window != nil { UIView.didMoveToWindow(self) }
         sendDidMoveToSuperview()
+        Updates.schedule()
     }
 
     /// Adds or moves `view` here, with UIKit's callbacks: the superview
@@ -777,6 +814,17 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { setNeedsDisplay() }
 
+    /// Whether the view draws its layer's content: its class has -drawRect:.
+    @ObjCMethod("_perryDrawsLayer:")
+    func drawsLayer(_ layer: NSObject) -> Bool { Methods.overrides(objcObject, "drawRect:", of: UIView.objCClass.pointer) }
+
+    /// The animation for a change to the layer inside an animation block;
+    /// outside one, none, as a view's layer does not animate by itself.
+    @ObjCMethod("actionForLayer:forKey:")
+    func action(for layer: NSObject, forKey key: String) -> NSObject? {
+        ViewAnimations.action(forKey: key) ?? NSNull.null()
+    }
+
     /// The layer's content: -drawRect: with the layer's context current.
     @ObjCMethod("drawLayer:inContext:")
     func drawLayer(_ layer: CALayer, in context: UnsafeMutableRawPointer?) {
@@ -796,7 +844,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         CG.translateCTM(context, rect.minX, rect.minY)
         if bounds.width > 0, bounds.height > 0 { CG.scaleCTM(context, rect.width / bounds.width, rect.height / bounds.height) }
         CG.translateCTM(context, -bounds.minX, -bounds.minY)
-        CALayer.render(state.layer, in: context, root: true)
+        state.layer.render(in: context)
         CG.restoreGState(context)
         return true
     }
@@ -849,6 +897,7 @@ extension NSObject {
     @ObjCMethod("didAddSubview:") func sendDidAddSubview(_ subview: UIView)
     @ObjCMethod("willRemoveSubview:") func sendWillRemoveSubview(_ subview: UIView)
     @ObjCMethod("layoutSubviews") func sendLayoutSubviews()
+    @ObjCMethod("tintColorDidChange") func sendTintColorDidChange()
     @ObjCMethod("sizeThatFits:") func sendSizeThatFits(_ size: CGSize) -> CGSize
     @ObjCMethod("layerClass") func sendLayerClass() -> ObjCClass
     @ObjCMethod("drawRect:") func sendDraw(_ rect: CGRect)

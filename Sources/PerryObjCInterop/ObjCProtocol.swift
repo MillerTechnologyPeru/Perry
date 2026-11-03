@@ -92,11 +92,11 @@ open class ObjCProtocolObject: NSObject {
 /// An optional method's result as an Optional: a scalar is always present
 /// once the method ran.
 public func objCOptionalResult<Value: ObjCValue>(_ value: Value.ObjCType, as type: Value.Type, owned: Bool) -> Value? {
-    owned ? Value(objCOwned: value) : Value(objCReturnValue: value)
+    owned ? Value.objCValue(owned: value) : Value.objCValue(returnValue: value)
 }
 
 /// An object result is nil when the method returned nil.
 public func objCOptionalResult<Value: ObjCNullable>(_ value: Value.ObjCType, as type: Value.Type, owned: Bool) -> Value? {
     if Value.objCIsNil(value) { return nil }
-    return owned ? Value(objCOwned: value) : Value(objCReturnValue: value)
+    return owned ? Value.objCValue(owned: value) : Value.objCValue(returnValue: value)
 }

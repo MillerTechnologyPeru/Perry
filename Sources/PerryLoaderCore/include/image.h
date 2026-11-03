@@ -27,6 +27,7 @@ typedef struct perry_dependency {
     bool reexport;
     struct perry_image *image;  // set when the dependency is a Mach-O image
     perry_provider *provider;   // set when a Linux provider stands in for it
+    struct perry_image *swift_overlay; // a framework's Swift code, for a Swift image
 } perry_dependency;
 
 typedef struct perry_segment {
@@ -100,6 +101,8 @@ typedef struct perry_loader {
     uint32_t library_dir_count;
 
     const char *bundle_path;    // .app bundle, when launched from one
+
+    char *swift_runtime_dir;    // Darwin's Swift runtime libraries (/usr/lib/swift), from PERRY_SWIFT_RUNTIME
 
     bool report;                // collect unresolved symbols instead of failing
     bool strict;                // fail on unresolved non-weak imports

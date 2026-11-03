@@ -51,7 +51,13 @@ enum Sets {
     }
 
     static func elements(_ object: id?) -> [id] {
-        storage(object)?.members ?? []
+        guard let object else { return [] }
+        if let storage = storage(object) {
+            return storage.members
+        }
+        // Another library's set, such as Swift's: what it enumerates.
+        guard ObjC.overrides(object, Selectors.count, of: setClass) else { return [] }
+        return ObjC.enumerated(ObjC.send(object, Selectors.objectEnumerator))
     }
 
     static func initialize(_ object: id?, _ members: [id]) -> id? {

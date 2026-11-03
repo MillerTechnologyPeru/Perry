@@ -1,13 +1,17 @@
 // dyld's image list: the Mach-O images the loader has mapped, recorded as
 // each initializes, which is how the loader tells providers about them.
 // Callbacks registered for added images hear of those already loaded at
-// once, then of each new one.
+// once, then of each new one. Also what dyld finds in images for the Swift
+// runtime: sections, the image holding an address, and the SDK the program
+// was built with.
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 #include "perry_interface.h"
 
+#include <dlfcn.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,4 +89,187 @@ const void *darwin_NSGetMachExecuteHeader(void) {
         if (header && header[3] == 2) return header;
     }
     return image_count ? images[0].header : NULL;
+}
+
+// MARK: - Sections
+
+// How far an image moved from where it was linked: its header's address
+// less its __TEXT segment's.
+static intptr_t image_slide(const void *header) {
+    const uint32_t *mach = header;
+    const uint8_t *command = (const uint8_t *)header + 32;
+    for (uint32_t i = 0; i < mach[4]; i++) {
+        uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
+        if (kind == 0x19 /* LC_SEGMENT_64 */ && strncmp((const char *)command + 8, "__TEXT", 16) == 0)
+            return (intptr_t)header - (intptr_t)*(const uint64_t *)(command + 24);
+        command += size;
+    }
+    return 0;
+}
+
+// A section's contents in a mapped image, and their size.
+uint8_t *darwin_getsectiondata(const void *header, const char *segment, const char *section, unsigned long *size)
+    DARWIN_SYMBOL(getsectiondata);
+uint8_t *darwin_getsectiondata(const void *header, const char *segment, const char *section, unsigned long *size) {
+    const struct darwin_section_64 *entry = darwin_getsectbynamefromheader_64(header, segment, section);
+    if (!entry) {
+        *size = 0;
+        return NULL;
+    }
+    *size = (unsigned long)entry->size;
+    return (uint8_t *)(uintptr_t)(entry->addr + (uint64_t)image_slide(header));
+}
+
+// The Swift runtime's sections, which dyld finds for it by kind.
+struct section_info { const void *buffer; size_t size; };
+
+struct section_info darwin_dyld_lookup_section_info(const void *header, void *location, int kind)
+    DARWIN_SYMBOL(_dyld_lookup_section_info);
+struct section_info darwin_dyld_lookup_section_info(const void *header, void *location, int kind) {
+    (void)location;
+    static const char *const names[] = {
+        "__swift5_protos", "__swift5_proto", "__swift5_types", "__swift5_replace", "__swift5_replac2",
+        "__swift5_acfuncs",
+    };
+    struct section_info info = { NULL, 0 };
+    if (kind >= 0 && (size_t)kind < sizeof(names) / sizeof(names[0])) {
+        unsigned long size;
+        info.buffer = darwin_getsectiondata(header, "__TEXT", names[kind], &size);
+        info.size = size;
+    }
+    return info;
+}
+
+// MARK: - Addresses
+
+// The loaded image whose segments hold `address`, or -1.
+static int image_containing(const void *address) {
+    uintptr_t target = (uintptr_t)address;
+    for (uint32_t i = 0; i < image_count; i++) {
+        const uint32_t *mach = images[i].header;
+        const uint8_t *command = (const uint8_t *)mach + 32;
+        for (uint32_t c = 0; c < mach[4]; c++) {
+            uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
+            if (kind == 0x19 /* LC_SEGMENT_64 */ && *(const uint64_t *)(command + 48) /* filesize */) {
+                uintptr_t start = (uintptr_t)(*(const uint64_t *)(command + 24) + (uint64_t)images[i].slide);
+                if (target >= start && target - start < *(const uint64_t *)(command + 32))
+                    return (int)i;
+            }
+            command += size;
+        }
+    }
+    return -1;
+}
+
+const char *darwin_dyld_image_path_containing_address(const void *address) DARWIN_SYMBOL(dyld_image_path_containing_address);
+const char *darwin_dyld_image_path_containing_address(const void *address) {
+    pthread_mutex_lock(&lock);
+    int index = image_containing(address);
+    const char *path = index < 0 ? NULL : images[index].path;
+    pthread_mutex_unlock(&lock);
+    return path;
+}
+
+const void *darwin_dyld_image_header_containing_address(const void *address) DARWIN_SYMBOL(dyld_image_header_containing_address);
+const void *darwin_dyld_image_header_containing_address(const void *address) {
+    pthread_mutex_lock(&lock);
+    int index = image_containing(address);
+    const void *header = index < 0 ? NULL : images[index].header;
+    pthread_mutex_unlock(&lock);
+    return header;
+}
+
+// Dl_info has the same layout on both. Mach-O images are named by path,
+// without their symbols; anything else is glibc's to describe.
+int darwin_dladdr(const void *address, Dl_info *info) DARWIN_SYMBOL(dladdr);
+int darwin_dladdr(const void *address, Dl_info *info) {
+    pthread_mutex_lock(&lock);
+    int index = image_containing(address);
+    if (index >= 0) {
+        info->dli_fname = images[index].path;
+        info->dli_fbase = (void *)images[index].header;
+        info->dli_sname = NULL;
+        info->dli_saddr = NULL;
+    }
+    pthread_mutex_unlock(&lock);
+    return index >= 0 ? 1 : dladdr(address, info);
+}
+
+// MARK: - Versions
+
+// The executable's SDK, as dyld_get_program_sdk_version gives it: from
+// LC_BUILD_VERSION, or the older LC_VERSION_MIN_IPHONEOS.
+static uint32_t program_sdk(void) {
+    const uint32_t *mach = darwin_NSGetMachExecuteHeader();
+    if (!mach)
+        return 0;
+    const uint8_t *command = (const uint8_t *)mach + 32;
+    for (uint32_t i = 0; i < mach[4]; i++) {
+        const uint32_t *words = (const uint32_t *)command;
+        if (words[0] == 0x32 /* LC_BUILD_VERSION */)
+            return words[4];
+        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */)
+            return words[3];
+        command += words[1];
+    }
+    return 0;
+}
+
+// Whether the program was built with an SDK at least `version`: a
+// platform's own version, or a yearly set of them (platform 0xffffffff,
+// version year << 16 | month << 8 | day), whose iOS version is the year
+// less 2006.
+typedef struct { uint32_t platform; uint32_t version; } build_version;
+
+bool darwin_dyld_program_sdk_at_least(build_version version) DARWIN_SYMBOL(dyld_program_sdk_at_least);
+bool darwin_dyld_program_sdk_at_least(build_version version) {
+    uint32_t wanted = version.version;
+    if (version.platform == 0xffffffff)
+        wanted = ((version.version >> 16) - 2006) << 16;
+    return program_sdk() >= wanted;
+}
+
+// The OS is as new as anything a program checks for with @available.
+bool darwin_availability_version_check(uint32_t count, const build_version *versions) DARWIN_SYMBOL(_availability_version_check);
+bool darwin_availability_version_check(uint32_t count, const build_version *versions) {
+    (void)count;
+    (void)versions;
+    return true;
+}
+
+// MARK: - Shared cache
+
+// There is no shared cache, and nothing is prebuilt in it: no Objective-C
+// or Swift optimizations, no prespecialized Swift metadata.
+const void *darwin_dyld_get_shared_cache_range(size_t *length) DARWIN_SYMBOL(_dyld_get_shared_cache_range);
+const void *darwin_dyld_get_shared_cache_range(size_t *length) {
+    *length = 0;
+    return NULL;
+}
+
+bool darwin_dyld_shared_cache_some_image_overridden(void) DARWIN_SYMBOL(dyld_shared_cache_some_image_overridden);
+bool darwin_dyld_shared_cache_some_image_overridden(void) { return false; }
+
+bool darwin_dyld_is_preoptimized_objc_image_loaded(const void *header) DARWIN_SYMBOL(_dyld_is_preoptimized_objc_image_loaded);
+bool darwin_dyld_is_preoptimized_objc_image_loaded(const void *header) {
+    (void)header;
+    return false;
+}
+
+const void *darwin_dyld_get_swift_prespecialized_data(void) DARWIN_SYMBOL(_dyld_get_swift_prespecialized_data);
+const void *darwin_dyld_get_swift_prespecialized_data(void) { return NULL; }
+
+const void *darwin_dyld_find_pointer_hash_table_entry(const void *table, const void *key, size_t count, const void **keys)
+    DARWIN_SYMBOL(_dyld_find_pointer_hash_table_entry);
+const void *darwin_dyld_find_pointer_hash_table_entry(const void *table, const void *key, size_t count, const void **keys) {
+    (void)table, (void)key, (void)count, (void)keys;
+    return NULL;
+}
+
+// A handle's image, for libraries opened as Mach-O: none are, as dlopen
+// finds symbols through the loader.
+const void *darwin_dyld_get_dlopen_image_header(void *handle) DARWIN_SYMBOL(_dyld_get_dlopen_image_header);
+const void *darwin_dyld_get_dlopen_image_header(void *handle) {
+    (void)handle;
+    return NULL;
 }

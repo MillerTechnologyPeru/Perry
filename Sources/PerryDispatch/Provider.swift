@@ -26,6 +26,9 @@ enum Runtime {
     nonisolated(unsafe) static var blockRelease: BlockRelease!
     /// Heap blocks' class, for the blocks dispatch_block_create makes.
     nonisolated(unsafe) static var mallocBlockClass: Pointer!
+    /// libSystem's errno conversion, for I/O handlers' errors.
+    typealias ErrnoFromLinux = @convention(c) (Int32) -> Int32
+    nonisolated(unsafe) static var darwinErrno: ErrnoFromLinux?
 }
 
 /// Before the generated startup defines the classes: binds libobjc and the
@@ -45,6 +48,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Runtime.blockCopy = unsafeBitCast(blockCopy, to: Runtime.BlockCopy.self)
     Runtime.blockRelease = unsafeBitCast(blockRelease, to: Runtime.BlockRelease.self)
     Runtime.mallocBlockClass = mallocBlockClass
+    Runtime.darwinErrno = symbol(libSystem, "perry_darwin_errno_from_linux").map { unsafeBitCast($0, to: Runtime.ErrnoFromLinux.self) }
     if let name = info.progname { Logging.programName = String(cString: name) }
     return true
 }

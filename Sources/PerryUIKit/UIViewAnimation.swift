@@ -2,10 +2,12 @@ import CPerryGeometry
 import PerryObjCInterop
 
 // UIView's animations, both the block-based API and the older
-// +beginAnimations:context: / +commitAnimations one. Changes take effect at
-// once; what an app waits for still comes when it would on iOS: completion
-// blocks, and the delegate's will-start and did-stop selectors, after the
-// delay and duration. A delegate with no did-stop selector set gets
+// +beginAnimations:context: / +commitAnimations one. A change to a view's
+// layer inside a block animates: the layer asks the view for its action,
+// and the view gives a basic animation with the block's duration, delay
+// and curve, which QuartzCore runs. Completion blocks, and the delegate's
+// will-start and did-stop selectors, come after the delay and duration. A
+// delegate with no did-stop selector set gets
 // -animationDidStop:finished:context: if it has it, as early iOS did.
 
 /// Work for the main queue after a delay.
@@ -37,17 +39,74 @@ struct AnimationBlock {
     var delegate: NSObject?
     var willStart: ObjCSelector?
     var didStop: ObjCSelector?
+    var curve = 0
+    var repeatCount: Float = 0
+    var autoreverses = false
 }
 
 enum ViewAnimations {
     nonisolated(unsafe) static var blocks: [AnimationBlock] = []
     nonisolated(unsafe) static var enabled = true
 
+    /// The animation blocks running their changes: each change to a view's
+    /// layer inside one animates with its timing.
+    struct Context {
+        var duration: Double
+        var delay: Double
+        /// UIViewAnimationCurve: ease in out 0, ease in 1, ease out 2, linear 3.
+        var curve: Int
+        var repeats = false
+        var autoreverses = false
+    }
+
+    nonisolated(unsafe) static var contexts: [Context] = []
+
+    /// The keys of a view's layer that animate.
+    static let animatedKeys: Set<String> = ["position", "bounds", "opacity", "transform", "backgroundColor", "cornerRadius",
+                                            "borderWidth", "borderColor", "shadowOpacity", "contentsRect"]
+
+    /// Runs `animations` with changes animating as `context` says.
+    static func run(_ context: Context, _ animations: ObjCBlock?) {
+        contexts.append(context)
+        animations.map { Blocks.call($0) }
+        contexts.removeLast()
+    }
+
+    /// The animation for a change to `key` now, if one is animating.
+    static func action(forKey key: String) -> NSObject? {
+        guard enabled, animatedKeys.contains(key) else { return nil }
+        let context: Context
+        if let last = contexts.last {
+            context = last
+        } else if let block = blocks.last {
+            context = Context(duration: block.duration, delay: block.delay, curve: block.curve, repeats: block.repeatCount > 0,
+                              autoreverses: block.autoreverses)
+        } else {
+            return nil
+        }
+        guard context.duration > 0 else { return nil }
+        let animation = CABasicAnimation.make(keyPath: key)
+        animation.setDuration(context.duration)
+        if context.delay > 0 {
+            animation.setBeginTime(Clock.now + context.delay)
+            // The old value holds until the animation begins.
+            animation.setFillMode("backwards")
+        }
+        let names = ["easeInEaseOut", "easeIn", "easeOut", "linear"]
+        animation.setTimingFunction(CAMediaTimingFunction.named(names[min(max(context.curve, 0), 3)]))
+        if context.repeats { animation.setRepeatCount(.infinity) }
+        if context.autoreverses { animation.setAutoreverses(true) }
+        return animation
+    }
+
     /// Runs `completion` (a block taking BOOL finished) when the animation
     /// would have finished.
     static func complete(_ completion: ObjCBlock?, delay: Double, duration: Double) {
         guard let completion else { return }
-        Deferred.run(after: delay + duration) { Blocks.call(completion, true) }
+        Deferred.run(after: delay + duration) {
+            Blocks.call(completion, true)
+            Updates.schedule()
+        }
     }
 
     /// The delegate's callbacks for a committed block.
@@ -95,8 +154,12 @@ extension UIView {
     }
 
     @ObjCClassMethod("animateWithDuration:delay:options:animations:completion:")
+    /// UIViewAnimationOptions: repeat 1 << 3, autoreverse 1 << 4, the
+    /// curve in bits 16 and 17.
     static func animate(duration: Double, delay: Double, options: UInt, animations: ObjCBlock?, completion: ObjCBlock?) {
-        animations.map { Blocks.call($0) }
+        let context = ViewAnimations.Context(duration: duration, delay: delay, curve: Int((options >> 16) & 3),
+                                             repeats: options & (1 << 3) != 0, autoreverses: options & (1 << 4) != 0)
+        ViewAnimations.run(context, animations)
         ViewAnimations.complete(completion, delay: delay, duration: ViewAnimations.enabled ? duration : 0)
     }
 
@@ -112,7 +175,15 @@ extension UIView {
     }
 
     @ObjCClassMethod("addKeyframeWithRelativeStartTime:relativeDuration:animations:")
-    static func addKeyframe(start: Double, duration: Double, animations: ObjCBlock?) { animations.map { Blocks.call($0) } }
+    static func addKeyframe(start: Double, duration: Double, animations: ObjCBlock?) {
+        // Within the keyframe animation's block: this part of its time.
+        guard let outer = ViewAnimations.contexts.last else {
+            animations.map { Blocks.call($0) }
+            return
+        }
+        let context = ViewAnimations.Context(duration: outer.duration * duration, delay: outer.delay + outer.duration * start, curve: 3)
+        ViewAnimations.run(context, animations)
+    }
 
     @ObjCClassMethod("transitionWithView:duration:options:animations:completion:")
     static func transition(with view: UIView?, duration: Double, options: UInt, animations: ObjCBlock?, completion: ObjCBlock?) {
@@ -171,9 +242,11 @@ extension UIView {
     @ObjCClassMethod("setAnimationDidStopSelector:")
     static func setAnimationDidStopSelector(_ selector: ObjCSelector?) { ViewAnimations.modify { $0.didStop = selector } }
     @ObjCClassMethod("setAnimationStartDate:") static func setAnimationStartDate(_ date: NSObject?) {}
-    @ObjCClassMethod("setAnimationCurve:") static func setAnimationCurve(_ curve: Int) {}
-    @ObjCClassMethod("setAnimationRepeatCount:") static func setAnimationRepeatCount(_ count: Float) {}
-    @ObjCClassMethod("setAnimationRepeatAutoreverses:") static func setAnimationRepeatAutoreverses(_ autoreverses: Bool) {}
+    @ObjCClassMethod("setAnimationCurve:") static func setAnimationCurve(_ curve: Int) { ViewAnimations.modify { $0.curve = curve } }
+    @ObjCClassMethod("setAnimationRepeatCount:")
+    static func setAnimationRepeatCount(_ count: Float) { ViewAnimations.modify { $0.repeatCount = count } }
+    @ObjCClassMethod("setAnimationRepeatAutoreverses:")
+    static func setAnimationRepeatAutoreverses(_ autoreverses: Bool) { ViewAnimations.modify { $0.autoreverses = autoreverses } }
     @ObjCClassMethod("setAnimationBeginsFromCurrentState:") static func setAnimationBeginsFromCurrentState(_ begins: Bool) {}
     @ObjCClassMethod("setAnimationTransition:forView:cache:")
     static func setAnimationTransition(_ transition: Int, for view: UIView?, cache: Bool) {}

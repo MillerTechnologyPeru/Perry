@@ -325,7 +325,7 @@ open class UISegmentedControl: UIControl {
         withExtendedLifetime((track, tile, separator, pressed)) {
             func fill(_ rect: CGRect, radius: CGFloat, _ color: UIColor) {
                 CG.setFillColorWithColor(context, color.state.makeCGColor())
-                if let shape = CALayer.roundedRect(rect, radius: radius, corners: 0xf) {
+                if let shape = roundedRectPath(rect, radius: radius, corners: 0xf) {
                     CG.addPath(context, shape.object)
                     CG.fillPath(context)
                 }

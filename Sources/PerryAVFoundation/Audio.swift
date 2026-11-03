@@ -157,6 +157,60 @@ open class AVAudioSession: NSObject {
     @ObjCMethod("isInputAvailable") func isInputAvailable() -> Bool { false }
     @ObjCMethod("delegate") func delegate() -> NSObject? { session.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { session.delegate = delegate?.objcObject }
+
+    /// Sound would go to the built-in speaker; nothing comes in.
+    @ObjCMethod("currentRoute")
+    func currentRoute() -> AVAudioSessionRouteDescription {
+        let route = AVAudioSessionRouteDescription()
+        route.outputs = [AVAudioSessionPortDescription(type: SessionConstants.AVAudioSessionPortBuiltInSpeaker, name: "Speaker")]
+        return route
+    }
+
+    @ObjCMethod("availableInputs") func availableInputs() -> NSObject { NSObject(ObjCClass(named: "NSArray").pointer).sendArray() }
+}
+
+/// The ports sound goes in and out through.
+@ObjCClass("AVAudioSessionRouteDescription")
+open class AVAudioSessionRouteDescription: NSObject {
+    var inputs: [AVAudioSessionPortDescription] = []
+    var outputs: [AVAudioSessionPortDescription] = []
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("inputs") func inputsArray() -> NSObject { Arrays.of(inputs) }
+    @ObjCMethod("outputs") func outputsArray() -> NSObject { Arrays.of(outputs) }
+}
+
+@ObjCClass("AVAudioSessionPortDescription")
+open class AVAudioSessionPortDescription: NSObject {
+    var type = ""
+    var name = ""
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    convenience init(type: String, name: String) {
+        self.init()
+        (self.type, self.name) = (type, name)
+    }
+
+    @ObjCMethod("portType") func portType() -> String { type }
+    @ObjCMethod("portName") func portName() -> String { name }
+    @ObjCMethod("UID") func uid() -> String { type }
+    @ObjCMethod("channels") func channels() -> NSObject? { nil }
+    @ObjCMethod("dataSources") func dataSources() -> NSObject? { nil }
+}
+
+/// NSArrays, made by Foundation.
+enum Arrays {
+    static func of(_ objects: [NSObject]) -> NSObject {
+        let array = NSObject(ObjCClass(named: "NSMutableArray").pointer).sendArray()
+        for object in objects { array.sendAddObject(object) }
+        return array
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("addObject:") func sendAddObject(_ object: NSObject)
 }
 
 extension NSObject {
@@ -191,4 +245,13 @@ enum SessionConstants {
     static let AVAudioSessionRouteChangeReasonKey = "AVAudioSessionRouteChangeReasonKey"
     static let AVAudioSessionRouteChangePreviousRouteKey = "AVAudioSessionRouteChangePreviousRouteKey"
     static let AVAudioSessionSilenceSecondaryAudioHintTypeKey = "AVAudioSessionSilenceSecondaryAudioHintTypeKey"
+    static let AVAudioSessionPortAirPlay = "AirPlay"
+    static let AVAudioSessionPortBluetoothA2DP = "BluetoothA2DPOutput"
+    static let AVAudioSessionPortBluetoothHFP = "BluetoothHFP"
+    static let AVAudioSessionPortBuiltInMic = "MicrophoneBuiltIn"
+    static let AVAudioSessionPortBuiltInReceiver = "Receiver"
+    static let AVAudioSessionPortBuiltInSpeaker = "Speaker"
+    static let AVAudioSessionPortHDMI = "HDMIOutput"
+    static let AVAudioSessionPortHeadphones = "Headphones"
+    static let AVAudioSessionPortLineOut = "LineOut"
 }

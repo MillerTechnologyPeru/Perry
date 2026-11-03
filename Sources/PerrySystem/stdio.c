@@ -159,3 +159,13 @@ static int darwin_pointer_arguments(const struct printf_info *info, size_t count
 __attribute__((constructor)) static void init_pointer_conversion(void) {
     register_printf_specifier('p', darwin_pointer, darwin_pointer_arguments);
 }
+
+// snprintf_l's body: the C locale's formatting, whatever locale is given.
+int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_list arguments) {
+    (void)locale;
+    return vsnprintf(buf, size, fmt, arguments);
+}
+
+// putc's slow path, which Darwin's putc macro calls when the buffer fills.
+int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
+int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }

@@ -136,6 +136,13 @@ int perry_vopenat(int directory, const char *path, int flags, va_list arguments)
     return lock_on_open(openat(directory_to_linux(directory), path, open_flags_to_linux(flags), mode), flags);
 }
 
+// open with a data protection class, which Linux files do not have.
+int perry_vopen_dprotected(const char *path, int flags, int protection_class, int dpflags, va_list arguments) {
+    (void)protection_class;
+    (void)dpflags;
+    return perry_vopen(path, flags, arguments);
+}
+
 int darwin_creat(const char *path, mode_t mode) DARWIN_SYMBOL(creat);
 int darwin_creat(const char *path, mode_t mode) {
     return creat(path, mode);

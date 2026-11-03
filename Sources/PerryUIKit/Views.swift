@@ -292,6 +292,13 @@ final class WebViewState: ObjectState {
     var request: NSObject?
     var scalesPageToFit = false
     var configuration: NSObject?
+    var allowsInlineMediaPlayback = false
+    var mediaPlaybackRequiresUserAction = true
+    var mediaPlaybackAllowsAirPlay = true
+    var suppressesIncrementalRendering = false
+    var keyboardDisplayRequiresUserAction = true
+    var allowsLinkPreview = false
+    var dataDetectorTypes: UInt = 0
 }
 
 /// UIWebView: takes what it is asked to load and tells its delegate the
@@ -311,6 +318,24 @@ open class UIWebView: UIView {
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { web.delegate = delegate?.objcObject }
     @ObjCMethod("scalesPageToFit") func scalesPageToFit() -> Bool { web.scalesPageToFit }
     @ObjCMethod("setScalesPageToFit:") func setScalesPageToFit(_ scales: Bool) { web.scalesPageToFit = scales }
+    @ObjCMethod("allowsInlineMediaPlayback") func allowsInlineMediaPlayback() -> Bool { web.allowsInlineMediaPlayback }
+    @ObjCMethod("setAllowsInlineMediaPlayback:") func setAllowsInlineMediaPlayback(_ value: Bool) { web.allowsInlineMediaPlayback = value }
+    @ObjCMethod("mediaPlaybackRequiresUserAction") func mediaPlaybackRequiresUserAction() -> Bool { web.mediaPlaybackRequiresUserAction }
+    @ObjCMethod("setMediaPlaybackRequiresUserAction:")
+    func setMediaPlaybackRequiresUserAction(_ value: Bool) { web.mediaPlaybackRequiresUserAction = value }
+    @ObjCMethod("mediaPlaybackAllowsAirPlay") func mediaPlaybackAllowsAirPlay() -> Bool { web.mediaPlaybackAllowsAirPlay }
+    @ObjCMethod("setMediaPlaybackAllowsAirPlay:") func setMediaPlaybackAllowsAirPlay(_ value: Bool) { web.mediaPlaybackAllowsAirPlay = value }
+    @ObjCMethod("suppressesIncrementalRendering") func suppressesIncrementalRendering() -> Bool { web.suppressesIncrementalRendering }
+    @ObjCMethod("setSuppressesIncrementalRendering:")
+    func setSuppressesIncrementalRendering(_ value: Bool) { web.suppressesIncrementalRendering = value }
+    @ObjCMethod("keyboardDisplayRequiresUserAction")
+    func keyboardDisplayRequiresUserAction() -> Bool { web.keyboardDisplayRequiresUserAction }
+    @ObjCMethod("setKeyboardDisplayRequiresUserAction:")
+    func setKeyboardDisplayRequiresUserAction(_ value: Bool) { web.keyboardDisplayRequiresUserAction = value }
+    @ObjCMethod("allowsLinkPreview") func allowsLinkPreview() -> Bool { web.allowsLinkPreview }
+    @ObjCMethod("setAllowsLinkPreview:") func setAllowsLinkPreview(_ value: Bool) { web.allowsLinkPreview = value }
+    @ObjCMethod("dataDetectorTypes") func dataDetectorTypes() -> UInt { web.dataDetectorTypes }
+    @ObjCMethod("setDataDetectorTypes:") func setDataDetectorTypes(_ value: UInt) { web.dataDetectorTypes = value }
     @ObjCMethod("request") func request() -> NSObject? { web.request }
     @ObjCMethod("isLoading") func isLoading() -> Bool { false }
     @ObjCMethod("canGoBack") func canGoBack() -> Bool { false }
@@ -350,11 +375,6 @@ open class UIWebView: UIView {
 extension NSObject {
     @ObjCMethod("webViewDidStartLoad:") func sendWebViewDidStartLoad(_ view: UIView)
     @ObjCMethod("webViewDidFinishLoad:") func sendWebViewDidFinishLoad(_ view: UIView)
-}
-
-@ObjCClass("WKWebViewConfiguration")
-open class WKWebViewConfiguration: NSObject {
-    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 }
 
 /// WKWebView: an empty view that takes its loads.

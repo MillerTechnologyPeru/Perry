@@ -55,12 +55,39 @@ RUN curl -fsSLo /tmp/lzfse.tar.gz https://github.com/lzfse/lzfse/archive/refs/ta
  && cd / && rm -rf /tmp/lzfse /tmp/lzfse.tar.gz \
  && ldconfig
 
-# LLVM's libc++ and libc++abi, which C++ in iOS apps was built against,
-# and OpenAL Soft, for OpenAL.framework's API. Their providers open them
-# at run time.
+# OpenAL Soft, for OpenAL.framework's API, which its provider opens at run
+# time.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libc++1-19 libc++abi1-19 libopenal1 \
+ && apt-get install -y --no-install-recommends libopenal1 \
  && rm -rf /var/lib/apt/lists/*
+
+# LLVM's libc++ and libc++abi as Apple builds them for arm64, which C++ in
+# iOS apps and Swift's runtime were built against: std::string in the
+# alternate layout (its data pointer first), and type_info compared as
+# Apple's arm64 compares it, by name for types marked not unique. Named
+# libperry-c++ so they never stand in for the system's; the CXX provider
+# opens them at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends cmake ninja-build python3 xz-utils \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSLo /tmp/llvm.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/llvm-project-19.1.7.src.tar.xz \
+ && echo "82401fea7b79d0078043f7598b835284d6650a75b93e64b6f761ea7b63097501  /tmp/llvm.tar.xz" | sha256sum -c - \
+ && mkdir /tmp/llvm && tar -xJf /tmp/llvm.tar.xz -C /tmp/llvm --strip-components=1 \
+        llvm-project-19.1.7.src/runtimes llvm-project-19.1.7.src/libcxx llvm-project-19.1.7.src/libcxxabi \
+        llvm-project-19.1.7.src/libunwind llvm-project-19.1.7.src/cmake llvm-project-19.1.7.src/llvm/cmake \
+        llvm-project-19.1.7.src/llvm/utils \
+ && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm-build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
+        -DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 \
+        -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
+        -DLIBCXX_ABI_DEFINES=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT \
+        -DLIBCXX_SHARED_OUTPUT_NAME=perry-c++ -DLIBCXXABI_SHARED_OUTPUT_NAME=perry-c++abi \
+        -DLIBCXX_ENABLE_STATIC=OFF -DLIBCXXABI_ENABLE_STATIC=OFF -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
+        -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF \
+ && ninja -C /tmp/llvm-build cxx cxxabi \
+ && cp -P /tmp/llvm-build/lib/libperry-c++*.so.1* /usr/lib/aarch64-linux-gnu/ \
+ && rm -rf /tmp/llvm /tmp/llvm-build /tmp/llvm.tar.xz \
+ && ldconfig
 
 # SDL3 and Mesa's drivers, for UIKit's live view: windows, input, and
 # compositing layers on the GPU (through /dev/dri when a container has it);

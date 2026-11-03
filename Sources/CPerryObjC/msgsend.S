@@ -95,6 +95,7 @@ ENTRY _objc_msgSend
 
 // Messages to nil return zero in every result register.
 .Lnil:
+    mov x0, #0                      // a placeholder receiver is not returned
     mov x1, #0
     movi d0, #0
     movi d1, #0

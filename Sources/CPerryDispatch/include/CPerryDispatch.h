@@ -141,6 +141,52 @@ bool linux_dispatch_data_apply_f(linux_dispatch_object data, void *context,
                                                  const void *buffer, size_t size))
     LINUX_DISPATCH(dispatch_data_apply_f);
 
+// I/O channels and whole-file reads and writes. off_t is 64-bit.
+typedef void (*linux_dispatch_io_cleanup)(void *context, int error);
+typedef void (*linux_dispatch_io_handler)(void *context, bool done, linux_dispatch_object data, int error);
+typedef void (*linux_dispatch_data_handler)(void *context, linux_dispatch_object data, int error);
+
+linux_dispatch_object linux_dispatch_io_create_f(unsigned long type, int fd, linux_dispatch_object queue, void *context,
+                                                 linux_dispatch_io_cleanup cleanup)
+    LINUX_DISPATCH(dispatch_io_create_f);
+linux_dispatch_object linux_dispatch_io_create_with_path_f(unsigned long type, const char *path, int oflag,
+                                                           unsigned int mode, linux_dispatch_object queue,
+                                                           void *context, linux_dispatch_io_cleanup cleanup)
+    LINUX_DISPATCH(dispatch_io_create_with_path_f);
+linux_dispatch_object linux_dispatch_io_create_with_io_f(unsigned long type, linux_dispatch_object io,
+                                                         linux_dispatch_object queue, void *context,
+                                                         linux_dispatch_io_cleanup cleanup)
+    LINUX_DISPATCH(dispatch_io_create_with_io_f);
+void linux_dispatch_io_read_f(linux_dispatch_object channel, int64_t offset, size_t length, linux_dispatch_object queue,
+                              void *context, linux_dispatch_io_handler handler)
+    LINUX_DISPATCH(dispatch_io_read_f);
+void linux_dispatch_io_write_f(linux_dispatch_object channel, int64_t offset, linux_dispatch_object data,
+                               linux_dispatch_object queue, void *context, linux_dispatch_io_handler handler)
+    LINUX_DISPATCH(dispatch_io_write_f);
+void linux_dispatch_io_close(linux_dispatch_object channel, unsigned long flags) LINUX_DISPATCH(dispatch_io_close);
+void linux_dispatch_io_barrier_f(linux_dispatch_object channel, void *context, linux_dispatch_function barrier)
+    LINUX_DISPATCH(dispatch_io_barrier_f);
+int linux_dispatch_io_get_descriptor(linux_dispatch_object channel) LINUX_DISPATCH(dispatch_io_get_descriptor);
+void linux_dispatch_io_set_high_water(linux_dispatch_object channel, size_t high_water)
+    LINUX_DISPATCH(dispatch_io_set_high_water);
+void linux_dispatch_io_set_low_water(linux_dispatch_object channel, size_t low_water)
+    LINUX_DISPATCH(dispatch_io_set_low_water);
+void linux_dispatch_io_set_interval(linux_dispatch_object channel, uint64_t interval, unsigned long flags)
+    LINUX_DISPATCH(dispatch_io_set_interval);
+void linux_dispatch_read_f(int fd, size_t length, linux_dispatch_object queue, void *context,
+                           linux_dispatch_data_handler handler)
+    LINUX_DISPATCH(dispatch_read_f);
+void linux_dispatch_write_f(int fd, linux_dispatch_object data, linux_dispatch_object queue, void *context,
+                            linux_dispatch_data_handler handler)
+    LINUX_DISPATCH(dispatch_write_f);
+
+// Workloops: serial queues with their own threads.
+linux_dispatch_object linux_dispatch_workloop_create(const char *label) LINUX_DISPATCH(dispatch_workloop_create);
+linux_dispatch_object linux_dispatch_workloop_create_inactive(const char *label)
+    LINUX_DISPATCH(dispatch_workloop_create_inactive);
+void linux_dispatch_workloop_set_autorelease_frequency(linux_dispatch_object workloop, unsigned long frequency)
+    LINUX_DISPATCH(dispatch_workloop_set_autorelease_frequency);
+
 // The main queue, and the hooks CoreFoundation's run loop drains it with.
 // On Linux the handle is an eventfd.
 int linux_dispatch_get_main_queue_handle_4CF(void) LINUX_DISPATCH(_dispatch_get_main_queue_handle_4CF);
@@ -158,6 +204,11 @@ extern char linux_dispatch_source_type_signal LINUX_DISPATCH(_dispatch_source_ty
 extern char linux_dispatch_source_type_timer LINUX_DISPATCH(_dispatch_source_type_timer);
 extern void *const linux_dispatch_data_destructor_free LINUX_DISPATCH(_dispatch_data_destructor_free);
 extern void *const linux_dispatch_data_destructor_munmap LINUX_DISPATCH(_dispatch_data_destructor_munmap);
+
+// Whether the calling thread is the main thread: its ID is the process's.
+#include <sys/syscall.h>
+#include <unistd.h>
+static inline bool perry_dispatch_is_main_thread(void) { return syscall(SYS_gettid) == getpid(); }
 
 // Their addresses, for Swift.
 static inline void *perry_linux_main_q(void) { return &linux_dispatch_main_q; }

@@ -1,4 +1,5 @@
 import CPerryFoundation
+import FoundationEssentials
 import PerryObjCInterop
 
 // NSCharacterSet: a set of Unicode scalars, as a membership test. The
@@ -6,7 +7,8 @@ import PerryObjCInterop
 
 /// A character set's members.
 final class CharacterSetStorage {
-    let contains: (Unicode.Scalar) -> Bool
+    /// Changes only for NSMutableCharacterSet.
+    var contains: (Unicode.Scalar) -> Bool
 
     init(_ contains: @escaping (Unicode.Scalar) -> Bool) {
         self.contains = contains
@@ -15,6 +17,7 @@ final class CharacterSetStorage {
 
 enum CharacterSets {
     nonisolated(unsafe) static var setClass: Class!
+    nonisolated(unsafe) static var mutableClass: Class!
 
     static func storage(_ object: id?) -> CharacterSetStorage? {
         Storage.get(object, as: CharacterSetStorage.self)
@@ -117,6 +120,20 @@ public class NSCharacterSet: NSObject {
     @ObjCClassMethod("controlCharacterSet")
     static func control(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.control, .format])) }
 
+    /// Combining marks: general categories Mn, Mc and Me.
+    @ObjCClassMethod("nonBaseCharacterSet")
+    static func nonBase(_ cls: ObjCClass) -> NSCharacterSet? {
+        set(cls, CharacterSets.categories([.nonspacingMark, .spacingMark, .enclosingMark]))
+    }
+
+    /// Titlecase letters (Lt).
+    @ObjCClassMethod("capitalizedLetterCharacterSet")
+    static func capitalizedLetter(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.titlecaseLetter])) }
+
+    /// Code points Unicode has not assigned (Cn).
+    @ObjCClassMethod("illegalCharacterSet")
+    static func illegal(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.unassigned])) }
+
     @ObjCClassMethod("characterSetWithCharactersInString:")
     static func characters(_ cls: ObjCClass, in string: String) -> NSCharacterSet? {
         let members = Set(string.unicodeScalars.map(\.value))
@@ -153,6 +170,231 @@ public class NSCharacterSet: NSObject {
     }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSCharacterSet { self }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.mutableClass), contains)
+    }
+
+    @ObjCMethod("isSupersetOfSet:")
+    func isSuperset(of other: NSCharacterSet) -> Bool { CharacterSets.isSuperset(contains, of: other.contains) }
+
+    /// Plane 0 is the Basic Multilingual Plane.
+    @ObjCMethod("hasMemberInPlane:")
+    func hasMember(inPlane plane: UInt8) -> Bool { CharacterSets.hasMember(contains, inPlane: plane) }
+
+    @ObjCMethod("bitmapRepresentation")
+    func bitmapRepresentation() -> UnsafeMutableRawPointer? { DataObjects.autoreleased(CharacterSets.bitmap(contains)) }
+}
+
+/// A character set whose members change.
+@ObjCClass("NSMutableCharacterSet")
+public class NSMutableCharacterSet: NSCharacterSet {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        CharacterSets.mutableClass = cls.storage
+    }
+
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        Storage.set(objcObject, CharacterSetStorage { _ in false })
+        return self
+    }
+
+    @ObjCMethod("copyWithZone:")
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSCharacterSet {
+        let contains = contains
+        return NSCharacterSet(objCOwned: CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.setClass), contains)!)
+    }
+
+    private func update(_ change: (@escaping (Unicode.Scalar) -> Bool) -> (Unicode.Scalar) -> Bool) {
+        guard let storage = CharacterSets.storage(objcObject) else { return }
+        storage.contains = change(storage.contains)
+    }
+
+    @ObjCMethod("addCharactersInString:")
+    func addCharacters(in string: String) {
+        let members = Set(string.unicodeScalars.map(\.value))
+        update { old in { old($0) || members.contains($0.value) } }
+    }
+
+    @ObjCMethod("removeCharactersInString:")
+    func removeCharacters(in string: String) {
+        let members = Set(string.unicodeScalars.map(\.value))
+        update { old in { old($0) && !members.contains($0.value) } }
+    }
+
+    @ObjCMethod("addCharactersInRange:")
+    func addCharacters(in range: NSRange) {
+        let start = UInt32(range.location), end = UInt32(range.location + range.length)
+        update { old in { old($0) || ($0.value >= start && $0.value < end) } }
+    }
+
+    @ObjCMethod("removeCharactersInRange:")
+    func removeCharacters(in range: NSRange) {
+        let start = UInt32(range.location), end = UInt32(range.location + range.length)
+        update { old in { old($0) && !($0.value >= start && $0.value < end) } }
+    }
+
+    @ObjCMethod("formUnionWithCharacterSet:")
+    func formUnion(with other: NSCharacterSet) {
+        let theirs = other.contains
+        update { old in { old($0) || theirs($0) } }
+    }
+
+    @ObjCMethod("formIntersectionWithCharacterSet:")
+    func formIntersection(with other: NSCharacterSet) {
+        let theirs = other.contains
+        update { old in { old($0) && theirs($0) } }
+    }
+
+    @ObjCMethod("invert")
+    func invert() { update { old in { !old($0) } } }
+}
+
+extension CharacterSets {
+    /// The scalars of a plane, 65,536 code points from plane << 16.
+    static func scalars(inPlane plane: UInt8) -> some Sequence<Unicode.Scalar> {
+        let base = UInt32(plane) << 16
+        return (base..<base + 0x10000).lazy.compactMap(Unicode.Scalar.init)
+    }
+
+    static func hasMember(_ contains: (Unicode.Scalar) -> Bool, inPlane plane: UInt8) -> Bool {
+        plane <= 16 && scalars(inPlane: plane).contains(where: contains)
+    }
+
+    static func isSuperset(_ contains: (Unicode.Scalar) -> Bool, of other: (Unicode.Scalar) -> Bool) -> Bool {
+        (0...16).allSatisfy { plane in scalars(inPlane: UInt8(plane)).allSatisfy { !other($0) || contains($0) } }
+    }
+
+    /// The bitmap representation: 8,192 bytes for the Basic Multilingual
+    /// Plane, a bit per code point, low bit first, then for each other plane
+    /// with members its number and its 8,192 bytes.
+    static func bitmap(_ contains: (Unicode.Scalar) -> Bool) -> Data {
+        func plane(_ number: UInt8) -> [UInt8] {
+            var bytes = [UInt8](repeating: 0, count: 8192)
+            for scalar in scalars(inPlane: number) where contains(scalar) {
+                let offset = Int(scalar.value & 0xFFFF)
+                bytes[offset >> 3] |= 1 << (offset & 7)
+            }
+            return bytes
+        }
+        var data = Data(plane(0))
+        for number in 1...16 where hasMember(contains, inPlane: UInt8(number)) {
+            data.append(UInt8(number))
+            data.append(contentsOf: plane(UInt8(number)))
+        }
+        return data
+    }
+
+    /// The members a bitmap representation lists.
+    static func members(fromBitmap data: Data) -> Set<UInt32> {
+        var members = Set<UInt32>()
+        let bytes = [UInt8](data)
+        func read(_ plane: UInt32, from start: Int) {
+            for index in 0..<min(8192, bytes.count - start) where bytes[start + index] != 0 {
+                for bit in 0..<8 where bytes[start + index] & (1 << bit) != 0 {
+                    members.insert(plane << 16 | UInt32(index * 8 + bit))
+                }
+            }
+        }
+        read(0, from: 0)
+        var offset = 8192
+        while offset < bytes.count {
+            read(UInt32(bytes[offset]), from: offset + 1)
+            offset += 8193
+        }
+        return members
+    }
+}
+
+// MARK: - CFCharacterSet
+
+// CFCharacterSetRef is NSCharacterSet, and CFMutableCharacterSetRef
+// NSMutableCharacterSet. CFRange is { location, length }.
+
+private func characterSet(_ object: id?) -> (Unicode.Scalar) -> Bool {
+    CharacterSets.storage(object)?.contains ?? { _ in false }
+}
+
+private func mutate(_ object: id?, _ change: (@escaping (Unicode.Scalar) -> Bool) -> (Unicode.Scalar) -> Bool) {
+    guard let storage = CharacterSets.storage(object) else { return }
+    storage.contains = change(storage.contains)
+}
+
+@c(_CFCharacterSetCreateMutable)
+public func CFCharacterSetCreateMutable(_ allocator: id?) -> id? {
+    CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.mutableClass)) { _ in false }
+}
+
+@c(_CFCharacterSetCreateMutableCopy)
+public func CFCharacterSetCreateMutableCopy(_ allocator: id?, _ set: id?) -> id? {
+    CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.mutableClass), characterSet(set))
+}
+
+@c(_CFCharacterSetCreateWithCharactersInRange)
+public func CFCharacterSetCreateWithCharactersInRange(_ allocator: id?, _ location: Int, _ length: Int) -> id? {
+    let start = UInt32(max(location, 0)), end = UInt32(max(location + length, 0))
+    return CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.setClass)) { $0.value >= start && $0.value < end }
+}
+
+@c(_CFCharacterSetCreateWithBitmapRepresentation)
+public func CFCharacterSetCreateWithBitmapRepresentation(_ allocator: id?, _ data: id?) -> id? {
+    let members = CharacterSets.members(fromBitmap: DataObjects.data(data))
+    return CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.setClass)) { members.contains($0.value) }
+}
+
+@c(_CFCharacterSetCreateBitmapRepresentation)
+public func CFCharacterSetCreateBitmapRepresentation(_ allocator: id?, _ set: id?) -> id? {
+    ObjC.retain(DataObjects.autoreleased(CharacterSets.bitmap(characterSet(set))))
+}
+
+@c(_CFCharacterSetAddCharactersInRange)
+public func CFCharacterSetAddCharactersInRange(_ set: id?, _ location: Int, _ length: Int) {
+    let start = UInt32(max(location, 0)), end = UInt32(max(location + length, 0))
+    mutate(set) { old in { old($0) || ($0.value >= start && $0.value < end) } }
+}
+
+@c(_CFCharacterSetRemoveCharactersInRange)
+public func CFCharacterSetRemoveCharactersInRange(_ set: id?, _ location: Int, _ length: Int) {
+    let start = UInt32(max(location, 0)), end = UInt32(max(location + length, 0))
+    mutate(set) { old in { old($0) && !($0.value >= start && $0.value < end) } }
+}
+
+@c(_CFCharacterSetAddCharactersInString)
+public func CFCharacterSetAddCharactersInString(_ set: id?, _ string: id?) {
+    let members = Set((Strings.value(of: string) ?? "").unicodeScalars.map(\.value))
+    mutate(set) { old in { old($0) || members.contains($0.value) } }
+}
+
+@c(_CFCharacterSetRemoveCharactersInString)
+public func CFCharacterSetRemoveCharactersInString(_ set: id?, _ string: id?) {
+    let members = Set((Strings.value(of: string) ?? "").unicodeScalars.map(\.value))
+    mutate(set) { old in { old($0) && !members.contains($0.value) } }
+}
+
+@c(_CFCharacterSetUnion)
+public func CFCharacterSetUnion(_ set: id?, _ other: id?) {
+    let theirs = characterSet(other)
+    mutate(set) { old in { old($0) || theirs($0) } }
+}
+
+@c(_CFCharacterSetIntersect)
+public func CFCharacterSetIntersect(_ set: id?, _ other: id?) {
+    let theirs = characterSet(other)
+    mutate(set) { old in { old($0) && theirs($0) } }
+}
+
+@c(_CFCharacterSetInvert)
+public func CFCharacterSetInvert(_ set: id?) { mutate(set) { old in { !old($0) } } }
+
+@c(_CFCharacterSetIsSupersetOfSet)
+public func CFCharacterSetIsSupersetOfSet(_ set: id?, _ other: id?) -> Bool {
+    CharacterSets.isSuperset(characterSet(set), of: characterSet(other))
+}
+
+@c(_CFCharacterSetHasMemberInPlane)
+public func CFCharacterSetHasMemberInPlane(_ set: id?, _ plane: Int) -> Bool {
+    plane >= 0 && plane <= 16 && CharacterSets.hasMember(characterSet(set), inPlane: UInt8(plane))
 }
 
 /// NSString's methods that take character sets.

@@ -444,7 +444,7 @@ open class UISearchBar: UIView {
         let fill = UIColor.rgb(118.0 / 255, 118.0 / 255, 128.0 / 255, 0.12)
         withExtendedLifetime(fill) {
             CG.setFillColorWithColor(context, fill.state.makeCGColor())
-            if let shape = CALayer.roundedRect(field, radius: 10, corners: 0xf) {
+            if let shape = roundedRectPath(field, radius: 10, corners: 0xf) {
                 CG.addPath(context, shape.object)
                 CG.fillPath(context)
             }
@@ -799,9 +799,9 @@ open class UIScreen: NSObject {
     /// A display link for this screen, the only one.
     @ObjCMethod("displayLinkWithTarget:selector:")
     func displayLink(target: NSObject, selector: ObjCSelector) -> CADisplayLink {
-        CADisplayLink.make(CADisplayLink.objCClass, target: target, selector: selector)
+        CADisplayLink.make(target: target, selector: selector)
     }
-    @ObjCMethod("traitCollection") func traitCollection() -> NSObject? { nil }
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
 }
 
 final class PasteboardState: ObjectState {
@@ -1052,146 +1052,8 @@ extension Blocks {
     }
 }
 
-// MARK: - Core Animation's animations
-
-final class AnimationState: ObjectState {
-    var values: [String: NSObject] = [:]
-    var duration = 0.25
-    var delegate: NSObject?
-    var timingFunction: NSObject?
-    var removedOnCompletion = true
-    var repeatCount: Float = 0
-    var repeatDuration: Double = 0
-    var autoreverses = false
-    var beginTime: Double = 0
-    var timeOffset: Double = 0
-    var speed: Float = 1
-    var additive = false
-    var cumulative = false
-}
-
-/// Animations, which apply at once: there is no animation engine, so an
-/// added animation's delegate hears that it started and stopped.
-@ObjCClass("CAAnimation")
-open class CAAnimation: NSObject {
-    static let states = StateTable<AnimationState>()
-    var state: AnimationState { CAAnimation.states[objcObject] }
-
-    @ObjCMethod("dealloc")
-    func dealloc() {
-        CAAnimation.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CAAnimation.objCClass.pointer)
-    }
-
-    @ObjCClassMethod("animation") static func animation(_ cls: ObjCClass) -> NSObject { cls.object.allocated().unsafeCast(to: NSObject.self) }
-
-    @ObjCMethod("duration") func duration() -> Double { state.duration }
-    @ObjCMethod("setDuration:") func setDuration(_ duration: Double) { state.duration = duration }
-    @ObjCMethod("delegate") func delegate() -> NSObject? { state.delegate }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { state.delegate = delegate }
-    @ObjCMethod("timingFunction") func timingFunction() -> NSObject? { state.timingFunction }
-    @ObjCMethod("setTimingFunction:") func setTimingFunction(_ function: NSObject?) { state.timingFunction = function }
-    @ObjCMethod("isRemovedOnCompletion") func isRemovedOnCompletion() -> Bool { state.removedOnCompletion }
-    @ObjCMethod("setRemovedOnCompletion:") func setRemovedOnCompletion(_ removed: Bool) { state.removedOnCompletion = removed }
-
-    /// The other properties (type, subtype, fromValue, keyPath...), kept.
-    @ObjCMethod("valueForKey:") func value(forKey key: String) -> NSObject? { state.values[key] }
-    @ObjCMethod("setValue:forKey:") func setValue(_ value: NSObject?, forKey key: String) { state.values[key] = value }
-    @ObjCMethod("type") func type() -> String? { state.values["type"]?.stringValue }
-    @ObjCMethod("setType:") func setType(_ type: String?) { state.values["type"] = type.map { NSObject.nibString($0, mutable: false) } }
-    @ObjCMethod("subtype") func subtype() -> String? { state.values["subtype"]?.stringValue }
-    @ObjCMethod("setSubtype:") func setSubtype(_ subtype: String?) {
-        state.values["subtype"] = subtype.map { NSObject.nibString($0, mutable: false) }
-    }
-    @ObjCMethod("keyPath") func keyPath() -> String? { state.values["keyPath"]?.stringValue }
-    @ObjCMethod("setKeyPath:") func setKeyPath(_ keyPath: String?) {
-        state.values["keyPath"] = keyPath.map { NSObject.nibString($0, mutable: false) }
-    }
-    @ObjCMethod("fromValue") func fromValue() -> NSObject? { state.values["fromValue"] }
-    @ObjCMethod("setFromValue:") func setFromValue(_ value: NSObject?) { state.values["fromValue"] = value }
-    @ObjCMethod("toValue") func toValue() -> NSObject? { state.values["toValue"] }
-    @ObjCMethod("setToValue:") func setToValue(_ value: NSObject?) { state.values["toValue"] = value }
-    @ObjCMethod("byValue") func byValue() -> NSObject? { state.values["byValue"] }
-    @ObjCMethod("setByValue:") func setByValue(_ value: NSObject?) { state.values["byValue"] = value }
-    @ObjCMethod("fillMode") func fillMode() -> String? { state.values["fillMode"]?.stringValue ?? "removed" }
-    @ObjCMethod("setFillMode:") func setFillMode(_ mode: String?) {
-        state.values["fillMode"] = mode.map { NSObject.nibString($0, mutable: false) }
-    }
-
-    // CAMediaTiming.
-    @ObjCMethod("repeatCount") func repeatCount() -> Float { state.repeatCount }
-    @ObjCMethod("setRepeatCount:") func setRepeatCount(_ count: Float) { state.repeatCount = count }
-    @ObjCMethod("repeatDuration") func repeatDuration() -> Double { state.repeatDuration }
-    @ObjCMethod("setRepeatDuration:") func setRepeatDuration(_ duration: Double) { state.repeatDuration = duration }
-    @ObjCMethod("autoreverses") func autoreverses() -> Bool { state.autoreverses }
-    @ObjCMethod("setAutoreverses:") func setAutoreverses(_ autoreverses: Bool) { state.autoreverses = autoreverses }
-    @ObjCMethod("beginTime") func beginTime() -> Double { state.beginTime }
-    @ObjCMethod("setBeginTime:") func setBeginTime(_ time: Double) { state.beginTime = time }
-    @ObjCMethod("timeOffset") func timeOffset() -> Double { state.timeOffset }
-    @ObjCMethod("setTimeOffset:") func setTimeOffset(_ offset: Double) { state.timeOffset = offset }
-    @ObjCMethod("speed") func speed() -> Float { state.speed }
-    @ObjCMethod("setSpeed:") func setSpeed(_ speed: Float) { state.speed = speed }
-
-    @ObjCMethod("isAdditive") func isAdditive() -> Bool { state.additive }
-    @ObjCMethod("setAdditive:") func setAdditive(_ additive: Bool) { state.additive = additive }
-    @ObjCMethod("isCumulative") func isCumulative() -> Bool { state.cumulative }
-    @ObjCMethod("setCumulative:") func setCumulative(_ cumulative: Bool) { state.cumulative = cumulative }
-
-    // CAKeyframeAnimation's and CAAnimationGroup's, kept.
-    @ObjCMethod("values") func values() -> NSObject? { state.values["values"] }
-    @ObjCMethod("setValues:") func setValues(_ values: NSObject?) { state.values["values"] = values }
-    @ObjCMethod("keyTimes") func keyTimes() -> NSObject? { state.values["keyTimes"] }
-    @ObjCMethod("setKeyTimes:") func setKeyTimes(_ times: NSObject?) { state.values["keyTimes"] = times }
-    @ObjCMethod("timingFunctions") func timingFunctions() -> NSObject? { state.values["timingFunctions"] }
-    @ObjCMethod("setTimingFunctions:") func setTimingFunctions(_ functions: NSObject?) { state.values["timingFunctions"] = functions }
-    @ObjCMethod("calculationMode") func calculationMode() -> String? { state.values["calculationMode"]?.stringValue }
-    @ObjCMethod("setCalculationMode:") func setCalculationMode(_ mode: String?) {
-        state.values["calculationMode"] = mode.map { NSObject.nibString($0, mutable: false) }
-    }
-    @ObjCMethod("animations") func animations() -> NSObject? { state.values["animations"] }
-    @ObjCMethod("setAnimations:") func setAnimations(_ animations: NSObject?) { state.values["animations"] = animations }
-}
-
-@ObjCClass("CAPropertyAnimation")
-open class CAPropertyAnimation: CAAnimation {
-    @ObjCClassMethod("animationWithKeyPath:")
-    static func animation(_ cls: ObjCClass, keyPath: String?) -> NSObject {
-        let animation = cls.object.newInstance().unsafeCast(to: CAAnimation.self)
-        animation.setKeyPath(keyPath)
-        return animation
-    }
-}
-@ObjCClass("CABasicAnimation") open class CABasicAnimation: CAPropertyAnimation {}
-@ObjCClass("CAKeyframeAnimation") open class CAKeyframeAnimation: CAPropertyAnimation {}
-@ObjCClass("CASpringAnimation") open class CASpringAnimation: CABasicAnimation {}
-@ObjCClass("CATransition") open class CATransition: CAAnimation {}
-@ObjCClass("CAAnimationGroup") open class CAAnimationGroup: CAAnimation {}
-
-@ObjCClass("CAMediaTimingFunction")
-open class CAMediaTimingFunction: NSObject {
-    @ObjCClassMethod("functionWithName:")
-    static func function(_ cls: ObjCClass, name: String) -> NSObject { cls.object.allocated().unsafeCast(to: NSObject.self) }
-
-    @ObjCClassMethod("functionWithControlPoints::::")
-    static func function(_ cls: ObjCClass, x1: Float, y1: Float, x2: Float, y2: Float) -> NSObject {
-        cls.object.allocated().unsafeCast(to: NSObject.self)
-    }
-}
-
 /// UIFontDescriptor, as nibs keep fonts' attributes.
 @ObjCClass("UIFontDescriptor")
 open class UIFontDescriptor: NSObject {
     @ObjCMethod("initWithCoder:") func initialize(coder: NSObject) -> Self { self }
-}
-
-@ObjCConstants
-enum AnimationConstants {
-    static let kCATransitionFade = "fade"
-    static let kCATransitionMoveIn = "moveIn"
-    static let kCATransitionPush = "push"
-    static let kCATransitionReveal = "reveal"
-    static let kCATransitionFromRight = "fromRight"
-    static let kCATransitionFromLeft = "fromLeft"
-    static let kCATransitionFromTop = "fromTop"
-    static let kCATransitionFromBottom = "fromBottom"
 }

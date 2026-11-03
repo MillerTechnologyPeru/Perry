@@ -20,6 +20,119 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
 
 @Suite struct ObjCClassMacroTests {
 
+    @Test("Initializers implement -init methods, building the receiver's Swift class when required")
+    func initializers() {
+        expect("""
+            @ObjCClass("View")
+            class View: NSObject {
+                var tag = 0
+
+                @ObjCMethod("initWithFrame:")
+                required init(frame: Rect) { super.init() }
+
+                @ObjCMethod("initWithName:")
+                init?(name: String) { super.init() }
+            }
+            """, expands: """
+            class View: NSObject {
+                var tag = 0
+                required init(frame: Rect) {
+                    super.init()
+                }
+                init?(name: String) {
+                    super.init()
+                }
+
+                override class var objCClassName: String {
+                    "View"
+                }
+
+                override class var objCSuperclassName: String? {
+                    NSObject.objCClassName
+                }
+
+                override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
+                    registrar.addMethod("initWithFrame:", types: ObjCTypeEncoding.method(returning: View.self, arguments: [Rect.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: Rect.ObjCType) -> UnsafeMutableRawPointer? in
+                                ObjCPeers.initializing(receiver!, View.self, required: true) { type in
+                                    type.init(frame: Rect.objCValue(argument: a0))
+                                }
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Rect.ObjCType) -> UnsafeMutableRawPointer?, to: UnsafeRawPointer.self), isClassMethod: false)
+                    registrar.addMethod("initWithName:", types: ObjCTypeEncoding.method(returning: View.self, arguments: [String.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: String.ObjCType) -> UnsafeMutableRawPointer? in
+                                ObjCPeers.initializing(receiver!, View.self, required: false) { _ in
+                                    View(name: String.objCValue(argument: a0))
+                                }
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> UnsafeMutableRawPointer?, to: UnsafeRawPointer.self), isClassMethod: false)
+                }
+
+                required init(objcObject: UnsafeMutableRawPointer, ownership: ObjCOwnership) {
+                    super.init(objcObject: objcObject, ownership: ownership)
+                }
+            }
+            """)
+    }
+
+    @Test("Initializers are designated, and their classes end objects in deinit")
+    func initializerDiagnostics() {
+        expect("""
+            @ObjCClass("View")
+            class View: NSObject {
+                @ObjCMethod("init")
+                convenience init() { self.init(frame: Rect()) }
+
+                @ObjCMethod("initWithFrame:")
+                required init(frame: Rect) { super.init() }
+
+                @ObjCMethod("dealloc")
+                func dealloc() {}
+
+                @ObjCMethod("frame")
+                init(other: Rect) { super.init() }
+            }
+            """, expands: """
+            class View: NSObject {
+                convenience init() {
+                    self.init(frame: Rect())
+                }
+                required init(frame: Rect) {
+                    super.init()
+                }
+                func dealloc() {}
+                init(other: Rect) {
+                    super.init()
+                }
+
+                override class var objCClassName: String {
+                    "View"
+                }
+
+                override class var objCSuperclassName: String? {
+                    NSObject.objCClassName
+                }
+
+                override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
+                    registrar.addMethod("initWithFrame:", types: ObjCTypeEncoding.method(returning: View.self, arguments: [Rect.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: Rect.ObjCType) -> UnsafeMutableRawPointer? in
+                                ObjCPeers.initializing(receiver!, View.self, required: true) { type in
+                                    type.init(frame: Rect.objCValue(argument: a0))
+                                }
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Rect.ObjCType) -> UnsafeMutableRawPointer?, to: UnsafeRawPointer.self), isClassMethod: false)
+                    registrar.addMethod("dealloc", types: ObjCTypeEncoding.method(returning: nil, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> Void in
+                                let this = View.objCInstance(receiver!, ownership: .borrow);
+                                this.dealloc()
+                            } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void, to: UnsafeRawPointer.self), isClassMethod: false)
+                }
+
+                required init(objcObject: UnsafeMutableRawPointer, ownership: ObjCOwnership) {
+                    super.init(objcObject: objcObject, ownership: ownership)
+                }
+            }
+            """, diagnostics: [
+                DiagnosticSpec(message: "a convenience initializer cannot be an -init method; make it designated, or a method that sends the -init it delegates to",
+                               line: 4, column: 17),
+                DiagnosticSpec(message: "an initializer implements an -init method; 'frame' is not one", line: 12, column: 5),
+                DiagnosticSpec(message: "a class with Swift initializers ends its objects in deinit, not -dealloc", line: 9, column: 5),
+            ])
+    }
+
     @Test("Methods get thunks that convert the receiver, arguments and result")
     func registration() {
         expect("""
@@ -68,23 +181,23 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
 
                 public override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
                     registrar.addMethod("appendString:", types: ObjCTypeEncoding.method(returning: nil, arguments: [String.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: String.ObjCType) -> Void in
-                                let this = NSMutableString(objcObject: receiver!, ownership: .retain);
-                                this.append(String(objCArgument: a0))
+                                let this = NSMutableString.objCInstance(receiver!, ownership: .retain);
+                                this.append(String.objCValue(argument: a0))
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> Void, to: UnsafeRawPointer.self), isClassMethod: false)
                     registrar.addMethod("characterAtIndex:", types: ObjCTypeEncoding.method(returning: UInt16.self, arguments: [UInt.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: UInt.ObjCType) -> UInt16.ObjCType in
-                                let this = NSMutableString(objcObject: receiver!, ownership: .retain);
-                                return this.character(at: UInt(objCArgument: a0)).objCReturnValue()
+                                let this = NSMutableString.objCInstance(receiver!, ownership: .retain);
+                                return this.character(at: UInt.objCValue(argument: a0)).objCReturnValue()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt.ObjCType) -> UInt16.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
                     registrar.addMethod("initWithCapacity:", types: ObjCTypeEncoding.method(returning: NSMutableString.self, arguments: [UInt.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: UInt.ObjCType) -> NSMutableString.ObjCType in
-                                let this = NSMutableString(objcObject: receiver!, ownership: .adopt);
-                                return this.initialize(capacity: UInt(objCArgument: a0)).objCOwnedReturnValue()
+                                let this = NSMutableString.objCInstance(receiver!, ownership: .adopt);
+                                return this.initialize(capacity: UInt.objCValue(argument: a0)).objCOwnedReturnValue()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt.ObjCType) -> NSMutableString.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
                     registrar.addMethod("release", types: ObjCTypeEncoding.method(returning: nil, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> Void in
-                                let this = NSMutableString(objcObject: receiver!, ownership: .borrow);
+                                let this = NSMutableString.objCInstance(receiver!, ownership: .borrow);
                                 this.release()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void, to: UnsafeRawPointer.self), isClassMethod: false)
                     registrar.addMethod("stringWithCapacity:", types: ObjCTypeEncoding.method(returning: Optional<NSMutableString>.self, arguments: [UInt.self]), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?, a0: UInt.ObjCType) -> Optional<NSMutableString>.ObjCType in
-                                return NSMutableString.string(ObjCClass(receiver!), capacity: UInt(objCArgument: a0)).objCReturnValue()
+                                return NSMutableString.string(ObjCClass(receiver!), capacity: UInt.objCValue(argument: a0)).objCReturnValue()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt.ObjCType) -> Optional<NSMutableString>.ObjCType, to: UnsafeRawPointer.self), isClassMethod: true)
                 }
             }
@@ -115,7 +228,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
 
                 override class func registerObjCMethods(_ registrar: any ObjCMethodRegistrar) {
                     registrar.addMethod("frame", types: "{CGRect=dddd}16@0:8", implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> Rect.ObjCType in
-                                let this = Shape(objcObject: receiver!, ownership: .retain);
+                                let this = Shape.objCInstance(receiver!, ownership: .retain);
                                 return this.frame().objCReturnValue()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Rect.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
                 }
@@ -148,13 +261,13 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, String.ObjCType) -> UnsafeMutableRawPointer?
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
                     return message(ObjCRuntime.retain(objcObject), ObjCRuntime.selector("initWithName:"), name.objCArgument()).map {
-                        Self(objCOwned: $0)
+                        Self.objCValue(owned: $0)
                     }
                 }
                 static func new() -> Self {
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    return Self(objCOwned: message(self.objCClass.pointer, ObjCRuntime.selector("new")))
+                    return Self.objCValue(owned: message(self.objCClass.pointer, ObjCRuntime.selector("new")))
                 }
 
                 override class var objCClassName: String {
@@ -188,7 +301,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 static func main() -> NSBundle {
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSBundle.ObjCType
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    return NSBundle(objCReturnValue: message(self.objCClass.pointer, ObjCRuntime.selector("mainBundle")))
+                    return NSBundle.objCValue(returnValue: message(self.objCClass.pointer, ObjCRuntime.selector("mainBundle")))
                 }
                 func path() -> String {
                     ""
@@ -222,7 +335,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Int.ObjCType
                         let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                        return Int(objCReturnValue: message(objcObject, ObjCRuntime.selector("tag")))
+                        return Int.objCValue(returnValue: message(objcObject, ObjCRuntime.selector("tag")))
                     }
                     set {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Int.ObjCType) -> Void
@@ -234,14 +347,14 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Bool.ObjCType
                         let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                        return Bool(objCReturnValue: message(objcObject, ObjCRuntime.selector("isHidden")))
+                        return Bool.objCValue(returnValue: message(objcObject, ObjCRuntime.selector("isHidden")))
                     }
                 }
                 static var count: UInt {
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UInt.ObjCType
                         let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                        return UInt(objCReturnValue: message(self.objCClass.pointer, ObjCRuntime.selector("count")))
+                        return UInt.objCValue(returnValue: message(self.objCClass.pointer, ObjCRuntime.selector("count")))
                     }
                 }
             }
@@ -330,7 +443,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 /// Installs the Paths category's methods into `registrar`.
                 public static func registerObjCCategoryPaths(_ registrar: any ObjCMethodRegistrar) {
                     registrar.addMethod("lastPathComponent", types: ObjCTypeEncoding.method(returning: String.self, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> String.ObjCType in
-                                let this = NSString(objcObject: receiver!, ownership: .retain);
+                                let this = NSString.objCInstance(receiver!, ownership: .retain);
                                 return this.lastPathComponent().objCReturnValue()
                             } as @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> String.ObjCType, to: UnsafeRawPointer.self), isClassMethod: false)
                 }
@@ -458,7 +571,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 public func windowScene() -> UIWindowScene {
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UIWindowScene.ObjCType
                     let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
-                    return UIWindowScene(objCReturnValue: message(objcObject, ObjCRuntime.selector("windowScene")))
+                    return UIWindowScene.objCValue(returnValue: message(objcObject, ObjCRuntime.selector("windowScene")))
                 }
 
                 public func sceneDidBecomeActive(_ scene: UIScene) {

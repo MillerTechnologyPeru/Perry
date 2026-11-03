@@ -19,7 +19,8 @@ public extension CairoContext {
 
     /// Draws an ARGB32 surface of `width` by `height` pixels into `rect`, as
     /// draw(_:in:) draws an image: for callers that keep the surface, so
-    /// drawing the same image again converts nothing.
+    /// drawing the same image again converts nothing. The context's blend
+    /// mode applies, as CGContextDrawImage's does.
     func draw(surface: Cairo.Surface.Image, width: Int, height: Int, in rect: CGRect) {
         internalContext.save()
         let pattern = Pattern(surface: surface)
@@ -31,7 +32,6 @@ public extension CairoContext {
         matrix.invert()
         pattern.matrix = matrix
         pattern.extend = .pad
-        internalContext.operator = CAIRO_OPERATOR_OVER
         internalContext.source = pattern
         internalContext.addRectangle(x: Double(rect.origin.x), y: Double(rect.origin.y),
                                      width: Double(rect.size.width), height: Double(rect.size.height))

@@ -31,9 +31,11 @@ extension CGAffineTransform: CairoConvertible {
     @inline(__always)
     public init(cairo matrix: CairoType) {
 
+        // Cairo's x' = xx x + xy y + x0, y' = yx x + yy y + y0; CoreGraphics'
+        // x' = a x + c y + tx, y' = b x + d y + ty.
         self.init(a: CGFloat(matrix.xx),
-                  b: CGFloat(matrix.xy),
-                  c: CGFloat(matrix.yx),
+                  b: CGFloat(matrix.yx),
+                  c: CGFloat(matrix.xy),
                   d: CGFloat(matrix.yy),
                   tx: CGFloat(matrix.x0),
                   ty: CGFloat(matrix.y0))
@@ -45,8 +47,8 @@ extension CGAffineTransform: CairoConvertible {
         var matrix = Matrix()
 
         matrix.xx = Double(a)
-        matrix.xy = Double(b)
-        matrix.yx = Double(c)
+        matrix.yx = Double(b)
+        matrix.xy = Double(c)
         matrix.yy = Double(d)
         matrix.x0 = Double(tx)
         matrix.y0 = Double(ty)

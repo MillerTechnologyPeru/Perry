@@ -19,6 +19,12 @@ static const char *program_executable_path;
 char **darwin_environ DARWIN_SYMBOL(environ);
 const char *darwin_progname DARWIN_SYMBOL(__progname);
 
+// glibc defines _environ and __progname too, and this library's own uses
+// of a default-visibility name bind to the first definition loaded:
+// glibc's. These aliases are this library's variables.
+extern char **local_environ __attribute__((alias("_environ"), visibility("hidden")));
+extern const char *local_progname __attribute__((alias("___progname"), visibility("hidden")));
+
 __attribute__((visibility("default")))
 void perry_provider_startup(const perry_startup_info *info) {
     if (info->version < PERRY_STARTUP_INFO_VERSION)
@@ -26,8 +32,8 @@ void perry_provider_startup(const perry_startup_info *info) {
     program_argc = info->argc;
     program_argv = info->argv;
     program_executable_path = info->executable_path;
-    darwin_environ = info->envp;
-    darwin_progname = info->progname;
+    local_environ = info->envp;
+    local_progname = info->progname;
     perry_system_lookup = info->lookup_symbol;
 }
 
@@ -40,10 +46,10 @@ char ***darwin_NSGetArgv(void) DARWIN_SYMBOL(_NSGetArgv);
 char ***darwin_NSGetArgv(void) { return &program_argv; }
 
 char ***darwin_NSGetEnviron(void) DARWIN_SYMBOL(_NSGetEnviron);
-char ***darwin_NSGetEnviron(void) { return &darwin_environ; }
+char ***darwin_NSGetEnviron(void) { return &local_environ; }
 
 const char **darwin_NSGetProgname(void) DARWIN_SYMBOL(_NSGetProgname);
-const char **darwin_NSGetProgname(void) { return &darwin_progname; }
+const char **darwin_NSGetProgname(void) { return &local_progname; }
 
 int darwin_NSGetExecutablePath(char *buf, uint32_t *size) DARWIN_SYMBOL(_NSGetExecutablePath);
 int darwin_NSGetExecutablePath(char *buf, uint32_t *size) {

@@ -1,6 +1,7 @@
 // Swift classes exposed to Objective-C. Each @ObjCClass class mirrors an
-// Objective-C class and an instance stands for one object, holding one
-// reference to it.
+// Objective-C class. An instance of a class with Swift initializers is its
+// object's peer, the one Swift object that is that object (ObjCPeers);
+// otherwise an instance wraps one object, holding one reference to it.
 
 /// How a wrapper holds its object.
 public enum ObjCOwnership {
@@ -11,6 +12,8 @@ public enum ObjCOwnership {
     /// Holds no reference, for receivers of retain, release and dealloc,
     /// which must not be retained.
     case borrow
+    /// Is the object: its peer, sharing its reference count.
+    case peer
 }
 
 /// A Swift class standing for an Objective-C class.
@@ -44,6 +47,17 @@ extension AnyObjCObject {
         self.init(objcObject: objCRequire(value, Self.self), ownership: .adopt)
     }
 
+    /// The object as this type: its peer when it has one of this type,
+    /// otherwise a wrapper holding it as `ownership` says.
+    public static func objCInstance(_ object: UnsafeMutableRawPointer, ownership: ObjCOwnership) -> Self {
+        if let peer = ObjCPeers.peer(of: object) as? Self {
+            // The peer is the object; the caller's reference is not needed.
+            if ownership == .adopt { ObjCRuntime.release(object) }
+            return peer
+        }
+        return Self(objcObject: object, ownership: ownership)
+    }
+
     public func objCArgument() -> UnsafeMutableRawPointer? { objcObject }
 
     public func objCReturnValue() -> UnsafeMutableRawPointer? {
@@ -61,12 +75,12 @@ extension AnyObjCObject {
 
     /// The object as `type`, if it is an instance of that class.
     public func `as`<Other: AnyObjCObject>(_ type: Other.Type) -> Other? {
-        self.is(type) ? Other(objcObject: objcObject, ownership: .retain) : nil
+        self.is(type) ? Other.objCInstance(objcObject, ownership: .retain) : nil
     }
 
     /// The same object as `type`, without checking.
     public func unsafeCast<Other: AnyObjCObject>(to type: Other.Type) -> Other {
-        Other(objcObject: objcObject, ownership: .retain)
+        Other.objCInstance(objcObject, ownership: .retain)
     }
 }
 
@@ -81,16 +95,53 @@ open class NSObject: AnyObjCObject {
         self.ownership = ownership
     }
 
+    /// Makes the Swift object that is an object of this class: the one an
+    /// -init message was sent to, while that method's Swift initializer
+    /// runs, else a new one. Swift initializers of @ObjCClass classes end
+    /// here, through super.init(…).
+    public init() {
+        let receiver = ObjCPeers.takeReceiver(for: Self.self)
+        objcObject = receiver ?? ObjCPeers.allocate(Self.objCClass)
+        ownership = .peer
+        // The -init's caller is given a reference; a Swift caller's own is
+        // the object's first.
+        ObjCPeers.bind(objcObject, self, retained: receiver != nil)
+    }
+
     /// Wraps an object, taking a new reference.
     public convenience init(_ object: UnsafeMutableRawPointer) {
         self.init(objcObject: object, ownership: .retain)
     }
 
     deinit {
-        if ownership != .borrow { ObjCRuntime.release(objcObject) }
+        switch ownership {
+        case .borrow:
+            break
+        case .peer:
+            // Swift let go last: the object goes now, through -dealloc.
+            if ObjCPeers.willDeinitialize(objcObject) {
+                typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void
+                unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(objcObject, ObjCRuntime.selector("dealloc"))
+            }
+        case .retain, .adopt:
+            ObjCRuntime.release(objcObject)
+        }
     }
 
     open class var objCClassName: String { "NSObject" }
+
+    // ObjCValue's conversions, which give an object's peer when it has one.
+    public class func objCValue(argument value: UnsafeMutableRawPointer?) -> Self {
+        objCInstance(objCRequire(value, Self.self), ownership: .retain)
+    }
+
+    public class func objCValue(returnValue value: UnsafeMutableRawPointer?) -> Self {
+        objCInstance(objCRequire(value, Self.self), ownership: .retain)
+    }
+
+    public class func objCValue(owned value: UnsafeMutableRawPointer?) -> Self {
+        objCInstance(objCRequire(value, Self.self), ownership: .adopt)
+    }
 
     /// Whether the object implements `selector` (-respondsToSelector:), as
     /// a caller checks before sending an optional protocol method.
@@ -118,8 +169,10 @@ open class NSObject: AnyObjCObject {
     /// categories), and registers it.
     @discardableResult
     public class func defineObjCClass(_ registrations: ObjCMethodRegistration...) -> ObjCClass {
-        ObjCRuntime.defineClass(named: objCClassName, superclass: objCSuperclassName.map { ObjCClass(named: $0) },
-                                [registerObjCMethods] + registrations)
+        let cls = ObjCRuntime.defineClass(named: objCClassName, superclass: objCSuperclassName.map { ObjCClass(named: $0) },
+                                          [registerObjCMethods] + registrations)
+        ObjCPeers.register(cls.pointer, self)
+        return cls
     }
 }
 

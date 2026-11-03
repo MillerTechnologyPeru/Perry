@@ -37,12 +37,45 @@ struct MachOImage {
 extension Runtime {
     nonisolated(unsafe) static var protocolsByName: [CStringKey: UnsafeMutablePointer<perry_protocol>] = [:]
 
+    /// Called with each image's header as its metadata is registered, and
+    /// a handle for dyld's section lookup, which is nil here.
+    public typealias LoadImageFunction = @convention(c) (UnsafeRawPointer, UnsafeMutableRawPointer?) -> Void
+
+    nonisolated(unsafe) static var mappedImages: [UnsafeRawPointer] = []
+    /// Each image's path, and the names of the classes it defines.
+    nonisolated(unsafe) static var imageClassNames: [(path: UnsafePointer<CChar>, classes: [UnsafePointer<CChar>])] = []
+
+    /// objc_copyImageNames: the images mapped, by path.
+    public static func imageNames() -> [UnsafePointer<CChar>] {
+        lock.withLock { imageClassNames.map(\.path) }
+    }
+
+    /// objc_copyClassNamesForImage: the classes an image defines.
+    public static func classNames(forImage path: UnsafePointer<CChar>) -> [UnsafePointer<CChar>] {
+        lock.withLock { imageClassNames.first { strcmp($0.path, path) == 0 }?.classes ?? [] }
+    }
+    nonisolated(unsafe) static var loadImageFunctions: [LoadImageFunction] = []
+
+    /// objc_addLoadImageFunc: calls `function` for every image mapped so
+    /// far, then for each one mapped later, before its +load methods. The
+    /// Swift runtime registers its types and conformances this way.
+    public static func addLoadImageFunction(_ function: LoadImageFunction) {
+        let images = lock.withLock { () -> [UnsafeRawPointer] in
+            loadImageFunctions.append(function)
+            return mappedImages
+        }
+        for header in images {
+            function(header, nil)
+        }
+    }
+
     /// Registers an image's Objective-C metadata and calls its +load
     /// methods, as Apple's runtime does when dyld maps and initializes an
     /// image. Dependencies are mapped first, so superclasses and the classes
     /// categories extend are already known.
-    public static func mapImage(header: UnsafeRawPointer, slide: Int) {
+    public static func mapImage(header: UnsafeRawPointer, slide: Int, path: UnsafePointer<CChar>? = nil) {
         let image = MachOImage(header: header, slide: slide)
+        var classNames: [UnsafePointer<CChar>] = []
         var loadClasses: [ClassInfo] = []
         var loadCategories: [UnsafeMutablePointer<perry_category>] = []
 
@@ -81,9 +114,12 @@ extension Runtime {
             }
 
             for slot in image.pointers("__objc_classlist") ?? .init(start: nil, count: 0) {
-                if let cls = slot?.assumingMemoryBound(to: perry_objc_class.self) {
-                    _ = Runtime.info(cls)
+                if let cls = slot?.assumingMemoryBound(to: perry_objc_class.self), let info = Runtime.info(cls) {
+                    classNames.append(info.name)
                 }
+            }
+            if let path {
+                imageClassNames.append((permanentCString(String(cString: path)), classNames))
             }
 
             for slot in image.pointers("__objc_catlist") ?? .init(start: nil, count: 0) {
@@ -102,6 +138,14 @@ extension Runtime {
                     loadCategories.append(category)
                 }
             }
+        }
+
+        let functions = lock.withLock { () -> [LoadImageFunction] in
+            mappedImages.append(header)
+            return loadImageFunctions
+        }
+        for function in functions {
+            function(header, nil)
         }
 
         // +load runs without the runtime lock, classes before categories.

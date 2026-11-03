@@ -116,8 +116,11 @@ open class UIImage: NSObject {
     /// there is one, else the next larger, else the smaller; else the
     /// asset catalog's.
     @ObjCClassMethod("imageNamed:")
-    static func image(_ cls: ObjCClass, named name: String) -> UIImage? {
-        let bundle = NSBundle.main()
+    static func image(_ cls: ObjCClass, named name: String) -> UIImage? { image(cls, named: name, in: NSBundle.main(), catalog: true) }
+
+    /// The named image's file in `bundle`, else, for the main bundle, the
+    /// asset catalog's.
+    static func image(_ cls: ObjCClass, named name: String, in bundle: NSBundle, catalog: Bool) -> UIImage? {
         let base = name.hasSuffix(".png") || name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name
         let type = name.hasSuffix(".jpg") ? "jpg" : "png"
         let suffixes = Screen.scale >= 3 ? ["@3x", "@2x", ""] : Screen.scale >= 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
@@ -126,16 +129,25 @@ open class UIImage: NSObject {
                 return image
             }
         }
+        guard catalog else { return nil }
         return AssetCatalog.image(named: name).map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
     }
 
+    /// In the bundle given, the main bundle when none is.
     @ObjCClassMethod("imageNamed:inBundle:compatibleWithTraitCollection:")
     static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIImage? {
-        image(cls, named: name)
+        guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else { return image(cls, named: name) }
+        return image(cls, named: name, in: bundle, catalog: false)
     }
 
-    /// SF Symbols are not available.
-    @ObjCClassMethod("systemImageNamed:") static func systemImage(named name: String) -> UIImage? { nil }
+    /// The common SF Symbols, drawn as templates (Symbols).
+    @ObjCClassMethod("systemImageNamed:") static func systemImage(named name: String) -> UIImage? { Symbols.image(named: name) }
+
+    @ObjCClassMethod("systemImageNamed:withConfiguration:")
+    static func systemImage(named name: String, configuration: NSObject?) -> UIImage? { Symbols.image(named: name) }
+
+    @ObjCClassMethod("systemImageNamed:compatibleWithTraitCollection:")
+    static func systemImage(named name: String, compatibleWith traits: NSObject?) -> UIImage? { Symbols.image(named: name) }
 
     /// A file's image; a name ending in @2x or @3x gives the scale.
     private static func load(_ path: String) -> (image: Owned, scale: CGFloat)? {

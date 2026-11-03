@@ -45,6 +45,13 @@ void perry_loader_init(perry_loader *loader) {
         free(copy);
     }
 
+    // Swift's runtime and overlays are Darwin's own Mach-O libraries, such
+    // as the iOS Simulator's (RuntimeRoot/usr/lib/swift), loaded like the
+    // app's: their classes are Objective-C classes, laid out as Darwin's.
+    const char *swift = getenv("PERRY_SWIFT_RUNTIME");
+    if (swift && *swift)
+        loader->swift_runtime_dir = strdup(swift);
+
     char exe[PATH_MAX];
     ssize_t len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
     if (len > 0) {
@@ -448,6 +455,21 @@ static void protect_image(perry_image *image) {
 
 static perry_image *load_image(perry_loader *loader, const char *path);
 
+#define SWIFT_LIBRARY_DIR "/usr/lib/swift/"
+
+// Where a library of Darwin's /usr/lib/swift is in the Swift runtime
+// given, if it is there.
+static bool swift_runtime_file(perry_loader *loader, const char *path, char *out, size_t out_size) {
+    if (!loader->swift_runtime_dir || strncmp(path, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) != 0)
+        return false;
+    snprintf(out, out_size, "%s/%s", loader->swift_runtime_dir, path + strlen(SWIFT_LIBRARY_DIR));
+    return file_exists(out);
+}
+
+// The images whose dependencies are being loaded, outermost first.
+static const perry_image *loading[64];   // beyond 64 deep, the outermost 64
+static uint32_t loading_count;
+
 // Expands @executable_path, @loader_path and @rpath. Returns a malloc'd path
 // to an existing file, or NULL.
 static char *expand_install_name(perry_loader *loader, perry_image *image, const char *name) {
@@ -465,11 +487,13 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@rpath/", 7) == 0) {
-        // Search the loading image's rpaths, then the main executable's.
-        const perry_image *sources[2] = { image, loader->main_image };
-        for (int s = 0; s < 2; s++) {
-            const perry_image *src = sources[s];
-            if (!src || (s == 1 && src == image))
+        // As dyld does, search the rpaths of the loading image, then of each
+        // image that led to loading it, out to the main executable: Swift's
+        // embedded overlays have none of their own.
+        uint32_t depth = loading_count < 64 ? loading_count : 64;
+        for (int s = (int)depth; s >= 0; s--) {
+            const perry_image *src = s == (int)depth ? image : loading[s];
+            if (!src || (s < (int)depth && src == image))
                 continue;
             for (uint32_t i = 0; i < src->rpath_count; i++) {
                 char base[PATH_MAX];
@@ -486,9 +510,20 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
                     snprintf(base, sizeof(base), "%s", rpath);
                 }
                 snprintf(buf, sizeof(buf), "%s/%s", base, name + 7);
+                char mapped[PATH_MAX];
+                if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                    return strdup(mapped);
                 if (file_exists(buf))
                     return strdup(buf);
             }
+        }
+        // Swift's overlays name the runtime and each other by @rpath, and
+        // have no rpaths of their own: the libraries beside them.
+        if (strncmp(name + 7, "libswift", 8) == 0) {
+            snprintf(buf, sizeof(buf), "%s%s", SWIFT_LIBRARY_DIR, name + 7);
+            char mapped[PATH_MAX];
+            if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                return strdup(mapped);
         }
         return NULL;
     }
@@ -507,10 +542,50 @@ static perry_image *find_loaded(perry_loader *loader, const char *path) {
     return NULL;
 }
 
+// Since iOS 17, a framework's Swift API (Foundation's Data, String.Encoding,
+// UIKit's extensions) is in the framework itself, and Swift code built for
+// iOS 17 binds it there. Providers have no Swift code: a Swift image's
+// frameworks get the Swift overlay of the same name from the runtime given,
+// where their Swift symbols are looked for when the provider lacks them.
+static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
+    if (!loader->swift_runtime_dir)
+        return;
+    bool is_swift = false;
+    for (uint32_t i = 0; i < image->dep_count && !is_swift; i++)
+        is_swift = strncmp(image->deps[i].install_name, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) == 0;
+    if (!is_swift)
+        return;
+    for (uint32_t i = 0; i < image->dep_count; i++) {
+        perry_dependency *dep = &image->deps[i];
+        const char *framework = strstr(dep->install_name, "/System/Library/Frameworks/");
+        if (!dep->provider || !framework)
+            continue;
+        const char *base = strrchr(dep->install_name, '/') + 1;
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/libswift%s.dylib", loader->swift_runtime_dir, base);
+        if (!file_exists(path))
+            continue;
+        perry_image *overlay = find_loaded(loader, path);
+        if (!overlay)
+            overlay = load_image(loader, path);
+        if (overlay != image)
+            dep->swift_overlay = overlay;
+    }
+}
+
 static void load_dependencies(perry_loader *loader, perry_image *image) {
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
         const char *name = dep->install_name;
+
+        // Swift's libraries, from the Darwin runtime given, when it has them.
+        char swift_path[PATH_MAX];
+        if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path))) {
+            dep->image = find_loaded(loader, swift_path);
+            if (!dep->image)
+                dep->image = load_image(loader, swift_path);
+            continue;
+        }
 
         // Linux providers stand in for system libraries.
         if (name[0] == '/')
@@ -536,6 +611,7 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         else if (!loader->report)
             perry_warn("%s: library not available: %s", image->path, name);
     }
+    attach_swift_overlays(loader, image);
 }
 
 static perry_image *load_image(perry_loader *loader, const char *path) {
@@ -553,7 +629,11 @@ static perry_image *load_image(perry_loader *loader, const char *path) {
         perry_warn("%s: built for %s; only iOS and macOS binaries are supported",
                    path, perry_platform_name(image->platform));
 
+    if (loading_count < sizeof(loading) / sizeof(loading[0]))
+        loading[loading_count] = image;
+    loading_count++;
     load_dependencies(loader, image);
+    loading_count--;
     return image;
 }
 
@@ -691,8 +771,13 @@ static int provider_layer(const perry_provider *provider) {
         return 1;
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
         return 3;
-    if (strstr(name, "/MapKit.framework/"))
+    // UIKit's views are QuartzCore's layers' delegates, and MapKit's views
+    // are UIKit's.
+    if (strstr(name, "/UIKit.framework/") || strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") ||
+        strstr(name, "/WebKit.framework/"))
         return 5;
+    if (strstr(name, "/MapKit.framework/"))
+        return 6;
     return 4;
 }
 
@@ -713,7 +798,7 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         .lookup_symbol = lookup_symbol,
     };
     // Several install names may share one provider; start each library once.
-    for (int layer = 0; layer <= 5; layer++)
+    for (int layer = 0; layer <= 6; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
         bool seen = !handle;

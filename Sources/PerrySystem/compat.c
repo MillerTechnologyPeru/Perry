@@ -1,7 +1,8 @@
 // More of libSystem where Darwin's numbering or layouts differ from glibc's:
 // signal masks and numbers, locale categories, resource limits, password
 // entries, scheduling priorities, sysctl names, ioctl requests; and
-// Darwin's own functions (asl_log, OSAtomic, __maskrune).
+// Darwin's own functions (asl_log, OSAtomic, __maskrune); UUIDs, and POSIX
+// regular expressions in Darwin's layouts.
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
@@ -12,6 +13,7 @@
 #include <locale.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <regex.h>
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -418,6 +420,44 @@ int perry_asl_log(void *client, void *message, int level, const char *format, va
     return 0;
 }
 
+// A client only identifies the caller; its messages go to stderr too, and
+// files added as outputs get nothing more.
+void *darwin_asl_open(const char *ident, const char *facility, uint32_t options) DARWIN_SYMBOL(asl_open);
+void *darwin_asl_open(const char *ident, const char *facility, uint32_t options) {
+    (void)ident; (void)facility; (void)options;
+    return calloc(1, 16);
+}
+
+void darwin_asl_close(void *client) DARWIN_SYMBOL(asl_close);
+void darwin_asl_close(void *client) { free(client); }
+
+// Every level passes the filter; the previous filter is reported as that.
+int darwin_asl_set_filter(void *client, int filter) DARWIN_SYMBOL(asl_set_filter);
+int darwin_asl_set_filter(void *client, int filter) {
+    (void)client; (void)filter;
+    return 0xff;
+}
+
+int darwin_asl_add_output_file(void *client, int fd, const char *message_format, const char *time_format, int filter,
+                               int encoding) DARWIN_SYMBOL(asl_add_output_file);
+int darwin_asl_add_output_file(void *client, int fd, const char *message_format, const char *time_format, int filter,
+                               int encoding) {
+    (void)client; (void)fd; (void)message_format; (void)time_format; (void)filter; (void)encoding;
+    return 0;
+}
+
+int darwin_asl_add_log_file(void *client, int fd) DARWIN_SYMBOL(asl_add_log_file);
+int darwin_asl_add_log_file(void *client, int fd) {
+    (void)client; (void)fd;
+    return 0;
+}
+
+int darwin_asl_remove_log_file(void *client, int fd) DARWIN_SYMBOL(asl_remove_log_file);
+int darwin_asl_remove_log_file(void *client, int fd) {
+    (void)client; (void)fd;
+    return 0;
+}
+
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) DARWIN_SYMBOL(OSAtomicAdd32);
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) { return __atomic_add_fetch(value, amount, __ATOMIC_RELAXED); }
 
@@ -447,3 +487,157 @@ COMPARE_AND_SWAP(OSAtomicCompareAndSwapLong, long, __ATOMIC_RELAXED)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapLongBarrier, long, __ATOMIC_SEQ_CST)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtr, void *, __ATOMIC_RELAXED)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtrBarrier, void *, __ATOMIC_SEQ_CST)
+
+// MARK: - Feature flags and tracing
+
+// Feature flags are as they ship: each one's default.
+bool darwin_os_feature_enabled_simple_impl(const char *domain, const char *feature, bool enabled)
+    DARWIN_SYMBOL(_os_feature_enabled_simple_impl);
+bool darwin_os_feature_enabled_simple_impl(const char *domain, const char *feature, bool enabled) {
+    (void)domain;
+    (void)feature;
+    return enabled;
+}
+
+// Swift's runtime traces through os_log once the tracing system has
+// started, which it never does here.
+bool darwin_os_trace_lazy_init_completed_4swift(void) DARWIN_SYMBOL(_os_trace_lazy_init_completed_4swift);
+bool darwin_os_trace_lazy_init_completed_4swift(void) { return false; }
+
+// MARK: - UUIDs
+
+int darwin_digittoint(int c) DARWIN_SYMBOL(digittoint);
+
+// uuid_t is 16 bytes. Darwin unparses in upper case.
+void darwin_uuid_generate_random(uint8_t *uuid) DARWIN_SYMBOL(uuid_generate_random);
+void darwin_uuid_generate_random(uint8_t *uuid) {
+    arc4random_buf(uuid, 16);
+    uuid[6] = (uuid[6] & 0x0f) | 0x40;      // version 4
+    uuid[8] = (uuid[8] & 0x3f) | 0x80;      // RFC 4122 variant
+}
+
+void darwin_uuid_generate(uint8_t *uuid) DARWIN_SYMBOL(uuid_generate);
+void darwin_uuid_generate(uint8_t *uuid) { darwin_uuid_generate_random(uuid); }
+
+static void uuid_format(const uint8_t *uuid, char *out, const char *digits) {
+    for (int i = 0, j = 0; i < 16; i++) {
+        if (i == 4 || i == 6 || i == 8 || i == 10)
+            out[j++] = '-';
+        out[j++] = digits[uuid[i] >> 4];
+        out[j++] = digits[uuid[i] & 15];
+        out[j] = 0;
+    }
+}
+
+void darwin_uuid_unparse_upper(const uint8_t *uuid, char *out) DARWIN_SYMBOL(uuid_unparse_upper);
+void darwin_uuid_unparse_upper(const uint8_t *uuid, char *out) { uuid_format(uuid, out, "0123456789ABCDEF"); }
+
+void darwin_uuid_unparse_lower(const uint8_t *uuid, char *out) DARWIN_SYMBOL(uuid_unparse_lower);
+void darwin_uuid_unparse_lower(const uint8_t *uuid, char *out) { uuid_format(uuid, out, "0123456789abcdef"); }
+
+void darwin_uuid_unparse(const uint8_t *uuid, char *out) DARWIN_SYMBOL(uuid_unparse);
+void darwin_uuid_unparse(const uint8_t *uuid, char *out) { darwin_uuid_unparse_upper(uuid, out); }
+
+// 0 for a string in the 8-4-4-4-12 form, else -1.
+int darwin_uuid_parse(const char *in, uint8_t *uuid) DARWIN_SYMBOL(uuid_parse);
+int darwin_uuid_parse(const char *in, uint8_t *uuid) {
+    if (strlen(in) != 36)
+        return -1;
+    for (int i = 0, j = 0; i < 16; i++) {
+        if (j == 8 || j == 13 || j == 18 || j == 23) {
+            if (in[j] != '-')
+                return -1;
+            j++;
+        }
+        int high = darwin_digittoint(in[j]), low = darwin_digittoint(in[j + 1]);
+        if (!isxdigit((unsigned char)in[j]) || !isxdigit((unsigned char)in[j + 1]))
+            return -1;
+        uuid[i] = (uint8_t)(high << 4 | low);
+        j += 2;
+    }
+    return 0;
+}
+
+void darwin_uuid_copy(uint8_t *destination, const uint8_t *source) DARWIN_SYMBOL(uuid_copy);
+void darwin_uuid_copy(uint8_t *destination, const uint8_t *source) { memcpy(destination, source, 16); }
+
+void darwin_uuid_clear(uint8_t *uuid) DARWIN_SYMBOL(uuid_clear);
+void darwin_uuid_clear(uint8_t *uuid) { memset(uuid, 0, 16); }
+
+int darwin_uuid_compare(const uint8_t *a, const uint8_t *b) DARWIN_SYMBOL(uuid_compare);
+int darwin_uuid_compare(const uint8_t *a, const uint8_t *b) { return memcmp(a, b, 16); }
+
+int darwin_uuid_is_null(const uint8_t *uuid) DARWIN_SYMBOL(uuid_is_null);
+int darwin_uuid_is_null(const uint8_t *uuid) {
+    static const uint8_t zero[16];
+    return memcmp(uuid, zero, 16) == 0;
+}
+
+// MARK: - Regular expressions
+
+// Darwin's regex_t is { re_magic, re_nsub, re_endp, re_g }, 32 bytes,
+// smaller than glibc's: re_g holds a glibc regex_t. Match offsets are
+// 64-bit on Darwin and 32-bit in glibc.
+struct darwin_regex {
+    int magic;
+    size_t nsub;
+    const char *endp;
+    regex_t *linux_regex;
+};
+
+struct darwin_regmatch { int64_t so, eo; };
+
+enum { DARWIN_REGEX_MAGIC = 0xf265 };
+
+int darwin_regcomp(struct darwin_regex *regex, const char *pattern, int flags) DARWIN_SYMBOL(regcomp);
+int darwin_regcomp(struct darwin_regex *regex, const char *pattern, int flags) {
+    int linux_flags = (flags & 1 ? REG_EXTENDED : 0) | (flags & 2 ? REG_ICASE : 0) | (flags & 4 ? REG_NOSUB : 0) |
+                      (flags & 8 ? REG_NEWLINE : 0);
+    regex_t *compiled = calloc(1, sizeof(*compiled));
+    int error = regcomp(compiled, pattern, linux_flags);
+    if (error) {
+        free(compiled);
+        return error;
+    }
+    regex->magic = DARWIN_REGEX_MAGIC;
+    regex->nsub = compiled->re_nsub;
+    regex->endp = NULL;
+    regex->linux_regex = compiled;
+    return 0;
+}
+
+int darwin_regexec(const struct darwin_regex *regex, const char *string, size_t count, struct darwin_regmatch *matches,
+                   int flags) DARWIN_SYMBOL(regexec);
+int darwin_regexec(const struct darwin_regex *regex, const char *string, size_t count, struct darwin_regmatch *matches,
+                   int flags) {
+    if (regex->magic != DARWIN_REGEX_MAGIC)
+        return REG_BADPAT;
+    regmatch_t *linux_matches = count ? calloc(count, sizeof(*linux_matches)) : NULL;
+    // REG_STARTEND reads the range from the first match.
+    if (count && (flags & REG_STARTEND)) {
+        linux_matches[0].rm_so = (regoff_t)matches[0].so;
+        linux_matches[0].rm_eo = (regoff_t)matches[0].eo;
+    }
+    int result = regexec(regex->linux_regex, string, count, linux_matches, flags & (REG_NOTBOL | REG_NOTEOL | REG_STARTEND));
+    for (size_t i = 0; result == 0 && i < count; i++) {
+        matches[i].so = linux_matches[i].rm_so;
+        matches[i].eo = linux_matches[i].rm_eo;
+    }
+    free(linux_matches);
+    return result;
+}
+
+void darwin_regfree(struct darwin_regex *regex) DARWIN_SYMBOL(regfree);
+void darwin_regfree(struct darwin_regex *regex) {
+    if (regex->magic != DARWIN_REGEX_MAGIC)
+        return;
+    regfree(regex->linux_regex);
+    free(regex->linux_regex);
+    regex->magic = 0;
+    regex->linux_regex = NULL;
+}
+
+size_t darwin_regerror(int error, const struct darwin_regex *regex, char *buffer, size_t size) DARWIN_SYMBOL(regerror);
+size_t darwin_regerror(int error, const struct darwin_regex *regex, char *buffer, size_t size) {
+    return regerror(error, regex && regex->magic == DARWIN_REGEX_MAGIC ? regex->linux_regex : NULL, buffer, size);
+}

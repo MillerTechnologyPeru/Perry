@@ -68,6 +68,8 @@ enum Classes {
     nonisolated(unsafe) static var semaphore: Object!
     nonisolated(unsafe) static var source: Object!
     nonisolated(unsafe) static var data: Object!
+    nonisolated(unsafe) static var io: Object!
+    nonisolated(unsafe) static var workloop: Object!
     nonisolated(unsafe) static var emptyData: Object!
 
     static func load() {
@@ -78,6 +80,8 @@ enum Classes {
         queueAttribute = OSDispatchQueueAttr.objCClass.pointer
         group = OSDispatchGroup.objCClass.pointer
         semaphore = OSDispatchSemaphore.objCClass.pointer
+        io = OSDispatchIO.objCClass.pointer
+        workloop = OSDispatchWorkloop.objCClass.pointer
         source = OSDispatchSource.objCClass.pointer
         data = OSDispatchData.objCClass.pointer
         emptyData = OSDispatchDataEmpty.objCClass.pointer
@@ -122,6 +126,12 @@ protocol OSDispatchSourceProtocol: OSDispatchObjectProtocol {}
 @ObjCProtocol("OS_dispatch_data")
 protocol OSDispatchDataProtocol: OSDispatchObjectProtocol {}
 
+@ObjCProtocol("OS_dispatch_io")
+protocol OSDispatchIOProtocol: OSDispatchObjectProtocol {}
+
+@ObjCProtocol("OS_dispatch_workloop")
+protocol OSDispatchWorkloopProtocol: OSDispatchQueueProtocol {}
+
 // MARK: - Classes
 
 @ObjCClass("OS_object")
@@ -153,6 +163,14 @@ open class OSDispatchQueueSerial: OSDispatchQueue, OSDispatchQueueSerialProtocol
 
 @ObjCClass("OS_dispatch_queue_concurrent")
 open class OSDispatchQueueConcurrent: OSDispatchQueue, OSDispatchQueueConcurrentProtocol {}
+
+/// Serial queues as Swift's executors: Swift's DispatchSerialQueue.
+@ObjCClass("OS_dispatch_queue_serial_executor")
+open class OSDispatchQueueSerialExecutor: OSDispatchQueueSerial {}
+
+/// A serial queue that runs on threads of its own.
+@ObjCClass("OS_dispatch_workloop")
+open class OSDispatchWorkloop: OSDispatchQueue, OSDispatchWorkloopProtocol {}
 
 /// The root queues, which live as long as the process.
 @ObjCClass("OS_dispatch_queue_global")
@@ -198,6 +216,9 @@ open class OSDispatchSource: OSDispatchObject, OSDispatchSourceProtocol {
 
 @ObjCClass("OS_dispatch_data")
 open class OSDispatchData: OSDispatchObject, OSDispatchDataProtocol {}
+
+@ObjCClass("OS_dispatch_io")
+open class OSDispatchIO: OSDispatchObject, OSDispatchIOProtocol {}
 
 /// dispatch_data_empty.
 @ObjCClass("OS_dispatch_data_empty")

@@ -108,8 +108,11 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
                                  perry_symbol *out, int depth) {
     if (dep->image)
         return perry_exports_lookup(loader, dep->image, name, out, depth + 1);
-    if (dep->provider)
-        return provider_lookup(loader, dep->provider, name, out);
+    if (dep->provider && provider_lookup(loader, dep->provider, name, out))
+        return true;
+    // Swift symbols of a framework whose Swift code the provider lacks.
+    if (dep->swift_overlay && strncmp(name, "_$s", 3) == 0)
+        return perry_exports_lookup(loader, dep->swift_overlay, name, out, depth + 1);
     return false;
 }
 
@@ -161,16 +164,19 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define LIBDISPATCH "/usr/lib/system/libdispatch.dylib"
 #define LIBOBJC "/usr/lib/libobjc.A.dylib"
 #define CFNETWORK "/System/Library/Frameworks/CFNetwork.framework/CFNetwork"
+#define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
-// objects are Objective-C objects, and Foundation's run loop drains the
-// main queue. Loading them while binding gives them their startup too.
+// objects are Objective-C objects, Foundation's run loop drains the main
+// queue, and UIKit's views are backed by QuartzCore's layers. Loading them
+// while binding gives them their startup too.
 static const struct {
     const char *short_name;
     const char *install_name;
 } provider_links[] = {
     {"dispatch", LIBOBJC},
     {"Foundation", LIBDISPATCH},
+    {"UIKit", QUARTZCORE},
 };
 
 // Sets up a provider just found under `short_name`: its re-exports and the
@@ -202,7 +208,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
-//   …/QuartzCore.framework/QuartzCore                     -> UIKit
+//   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
@@ -235,10 +241,9 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Accelerate");
         return true;
     }
-    // UIKit's views are drawn through QuartzCore's layers, which it keeps,
-    // as it keeps OpenGL ES's contexts and GLKit's views built on them.
-    if (strstr(install_name, "/QuartzCore.framework/") || strstr(install_name, "/OpenGLES.framework/") ||
-        strstr(install_name, "/GLKit.framework/") || strstr(install_name, "/WebKit.framework/")) {
+    // UIKit keeps OpenGL ES's contexts and GLKit's views built on them.
+    if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
+        strstr(install_name, "/WebKit.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }

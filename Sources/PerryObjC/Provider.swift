@@ -48,7 +48,7 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
 public func perry_provider_image_init(_ image: UnsafePointer<perry_image_info>?) {
     guard let image, let header = image.pointee.header else { return }
     RootClasses.bootstrap()
-    Runtime.mapImage(header: header, slide: image.pointee.slide)
+    Runtime.mapImage(header: header, slide: image.pointee.slide, path: image.pointee.path)
 }
 
 // MARK: - objc_msgSend's slow paths

@@ -26,12 +26,24 @@ public protocol ObjCValue {
     /// From a +1 result, taking ownership.
     init(objCOwned value: ObjCType)
 
+    /// The same conversions, which for an object give its Swift object (its
+    /// peer) when it has one, rather than a new wrapper.
+    static func objCValue(argument value: ObjCType) -> Self
+    static func objCValue(returnValue value: ObjCType) -> Self
+    static func objCValue(owned value: ObjCType) -> Self
+
     /// As an argument, valid until the current autorelease pool drains.
     func objCArgument() -> ObjCType
     /// As a +0 result.
     func objCReturnValue() -> ObjCType
     /// As a +1 result, for methods in the owned families.
     func objCOwnedReturnValue() -> ObjCType
+}
+
+extension ObjCValue {
+    public static func objCValue(argument value: ObjCType) -> Self { Self(objCArgument: value) }
+    public static func objCValue(returnValue value: ObjCType) -> Self { Self(objCReturnValue: value) }
+    public static func objCValue(owned value: ObjCType) -> Self { Self(objCOwned: value) }
 }
 
 /// A value that crosses unchanged: numbers, Booleans, structs, pointers.
@@ -84,6 +96,18 @@ extension Optional: ObjCValue where Wrapped: ObjCNullable {
 
     public init(objCOwned value: ObjCType) {
         self = Wrapped.objCIsNil(value) ? nil : Wrapped(objCOwned: value)
+    }
+
+    public static func objCValue(argument value: ObjCType) -> Self {
+        Wrapped.objCIsNil(value) ? nil : Wrapped.objCValue(argument: value)
+    }
+
+    public static func objCValue(returnValue value: ObjCType) -> Self {
+        Wrapped.objCIsNil(value) ? nil : Wrapped.objCValue(returnValue: value)
+    }
+
+    public static func objCValue(owned value: ObjCType) -> Self {
+        Wrapped.objCIsNil(value) ? nil : Wrapped.objCValue(owned: value)
     }
 
     public func objCArgument() -> ObjCType { map { $0.objCArgument() } ?? Wrapped.objCNil }

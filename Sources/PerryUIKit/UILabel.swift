@@ -336,7 +336,12 @@ open class UILabel: UIView {
     @ObjCMethod("setAdjustsFontForContentSizeCategory:")
     func setAdjustsFontForContentSizeCategory(_ adjusts: Bool) { label.adjustsFontForContentSizeCategory = adjusts }
     @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { label.highlighted }
-    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { label.highlighted = highlighted }
+    @ObjCMethod("setHighlighted:")
+    func setHighlighted(_ highlighted: Bool) {
+        guard highlighted != label.highlighted else { return }
+        label.highlighted = highlighted
+        setNeedsDisplay()
+    }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { label.enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { label.enabled = enabled }
     @ObjCMethod("preferredMaxLayoutWidth") func preferredMaxLayoutWidth() -> CGFloat { label.preferredMaxLayoutWidth }
@@ -465,14 +470,19 @@ open class UIImageView: UIView {
         showImage()
     }
 
+    @ObjCMethod("tintColorDidChange")
+    override func tintColorDidChange() { showImage() }
+
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { imageState.image?.state.size ?? .zero }
 
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { imageState.image?.state.size ?? CGSize(width: -1, height: -1) }
 
     /// The layer shows the image, placed by the content mode.
+    /// A template image shows in the tint color.
     private func showImage() {
-        let image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        var image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        if let template = image, template.state.renderingMode == 2 { image = template.withTintColor(tintColor()) }
         let geometry = state.geometry!
         geometry.contents = image.flatMap { $0.state.cgImage.map { NSObject($0) } }
         geometry.contentsScale = image?.state.scale ?? 1

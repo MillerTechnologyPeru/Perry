@@ -91,6 +91,8 @@ final class SegueState: ObjectState {
     var source: UIViewController?
     var destination: UIViewController?
     var handler: ObjCBlock?
+    /// Where an embed segue puts the destination's view.
+    var containerView: UIView?
 }
 
 @ObjCClass("UIStoryboardSegue")
@@ -144,6 +146,23 @@ open class UIStoryboardShowSegue: UIStoryboardSegue {
 @ObjCClass("UIStoryboardShowDetailSegue")
 open class UIStoryboardShowDetailSegue: UIStoryboardShowSegue {}
 
+/// Makes the destination a child of the source, its view filling the
+/// container view, as a storyboard's container views do.
+@ObjCClass("UIStoryboardEmbedSegue")
+open class UIStoryboardEmbedSegue: UIStoryboardSegue {
+    @ObjCMethod("perform")
+    override func perform() {
+        guard let source = state.source, let destination = state.destination else { return }
+        let container = state.containerView ?? source.loadedView
+        source.addChild(destination)
+        let view = destination.loadedView
+        view.setFrame(container.bounds())
+        view.setAutoresizingMask(18)
+        container.addSubview(view)
+        destination.sendDidMove(toParent: source)
+    }
+}
+
 @ObjCClass("UIStoryboardPushSegue")
 open class UIStoryboardPushSegue: UIStoryboardShowSegue {}
 
@@ -178,6 +197,8 @@ final class SegueTemplateState: ObjectState {
     var segueClassName: String?
     var actionName: String?
     var performOnViewLoad = false
+    /// An embed segue's container view, connected by the source's view nib.
+    var containerView: UIView?
     /// The controller the segue starts from; not retained.
     var viewController: UnsafeMutableRawPointer?
 }
@@ -214,6 +235,7 @@ open class UIStoryboardSegueTemplate: NSObject {
     var defaultSegueClass: ObjCClass {
         if self.is(UIStoryboardPresentationSegueTemplate.self) { return UIStoryboardPresentationSegue.objCClass }
         if self.is(UIStoryboardShowSegueTemplate.self) { return UIStoryboardShowSegue.objCClass }
+        if self.is(UIStoryboardEmbedSegueTemplate.self) { return UIStoryboardEmbedSegue.objCClass }
         return UIStoryboardSegue.objCClass
     }
 
@@ -242,6 +264,13 @@ open class UIStoryboardShowDetailSegueTemplate: UIStoryboardShowSegueTemplate {}
 
 @ObjCClass("UIStoryboardPushSegueTemplate")
 open class UIStoryboardPushSegueTemplate: UIStoryboardShowSegueTemplate {}
+
+/// A container view's segue, performed as the source's view loads.
+@ObjCClass("UIStoryboardEmbedSegueTemplate")
+open class UIStoryboardEmbedSegueTemplate: UIStoryboardSegueTemplate {
+    @ObjCMethod("containerView") func containerView() -> UIView? { state.containerView }
+    @ObjCMethod("setContainerView:") func setContainerView(_ view: UIView?) { state.containerView = view }
+}
 
 @ObjCClass("UIStoryboardPresentationSegueTemplate")
 open class UIStoryboardPresentationSegueTemplate: UIStoryboardSegueTemplate {}
@@ -275,6 +304,17 @@ extension UIViewController {
 
     @ObjCMethod("shouldPerformSegueWithIdentifier:sender:")
     func shouldPerformSegue(identifier: String, sender: NSObject?) -> Bool { true }
+
+    /// Embeds container views' controllers once the view has loaded,
+    /// before -viewDidLoad, as UIKit does: -prepareForSegue:sender: first.
+    func performSeguesOnViewLoad() {
+        for template in state.segueTemplates where template.state.performOnViewLoad {
+            guard let segue = template.segue(from: self) else { continue }
+            segue.state.containerView = template.state.containerView
+            sendPrepare(for: segue, sender: nil)
+            segue.sendPerform()
+        }
+    }
 
     @ObjCMethod("prepareForSegue:sender:")
     func prepare(for segue: NSObject, sender: NSObject?) {}

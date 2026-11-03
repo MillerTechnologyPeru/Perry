@@ -93,7 +93,15 @@ enum DataObjects {
     }
 
     static func data(_ object: id?) -> Data {
-        storage(object)?.data ?? Data()
+        guard let object else { return Data() }
+        // Another library's subclass, such as Swift's bridged Data, keeps its
+        // own bytes, even when it was made with NSData's -init.
+        let foreign = ObjC.overrides(object, Selectors.length, of: dataClass)
+            && ObjC.overrides(object, Selectors.length, of: mutableClass)
+        if !foreign { return storage(object)?.data ?? Data() }
+        let length = Int(ObjC.sendUInt(object, Selectors.length))
+        guard length > 0, let bytes = ObjC.sendPointer(object, Selectors.bytes) else { return Data() }
+        return Data(bytes: bytes, count: length)
     }
 
     static func make(_ storage: DataStorage, cls: id? = nil) -> id? {
@@ -187,8 +195,9 @@ public class NSData: NSObject {
         DataObjects.owned(DataStorage(adopting: bytes, count: Int(length), freeWhenDone: freeWhenDone), cls: cls)
     }
 
+    /// Nil makes empty data, as on Darwin.
     @ObjCClassMethod("dataWithData:")
-    static func data(_ cls: ObjCClass, data other: NSData) -> NSData { DataObjects.owned(DataStorage(other.data), cls: cls) }
+    static func data(_ cls: ObjCClass, data other: NSData?) -> NSData { DataObjects.owned(DataStorage(other?.data ?? Data()), cls: cls) }
 
     @ObjCClassMethod("dataWithContentsOfFile:")
     static func data(_ cls: ObjCClass, contentsOfFile path: String?) -> NSData? {
@@ -197,9 +206,25 @@ public class NSData: NSObject {
     }
 
     @ObjCClassMethod("dataWithContentsOfURL:")
-    static func data(_ cls: ObjCClass, contentsOfURL url: NSURL) -> NSData? {
-        guard url.url.isFileURL else { return nil }
-        return (try? Data(contentsOf: url.url)).map { DataObjects.owned(DataStorage($0), cls: cls) }
+    static func data(_ cls: ObjCClass, contentsOfURL url: NSURL?) -> NSData? {
+        url.flatMap(contents).map { DataObjects.owned(DataStorage($0), cls: cls) }
+    }
+
+    /// A file's bytes, or what NSURLConnection loads for other schemes,
+    /// waiting for it as Darwin does; nil when CFNetwork is not loaded.
+    static func contents(of url: NSURL) -> Data? {
+        if url.url.isFileURL { return try? Data(contentsOf: url.url) }
+        let requestClass = ObjC.getClass("NSURLRequest").map(UnsafeMutableRawPointer.init)
+        let connectionClass = ObjC.getClass("NSURLConnection").map(UnsafeMutableRawPointer.init)
+        guard let requestClass, let connectionClass,
+              let request = ObjC.send(requestClass, ObjC.selector("requestWithURL:"), url.objcObject) else { return nil }
+        // Without a response or error to return.
+        typealias Send = @convention(c) (id?, SEL, id?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> id?
+        let selector = ObjC.selector("sendSynchronousRequest:returningResponse:error:")
+        let result = ObjC.autoreleasepool {
+            unsafeBitCast(ObjC.msgSend, to: Send.self)(connectionClass, selector, request, nil, nil).map(DataObjects.data)
+        }
+        return result
     }
 
     @ObjCMethod("init")
@@ -216,13 +241,16 @@ public class NSData: NSObject {
     }
 
     @ObjCMethod("initWithData:")
-    func initialize(data other: NSData) -> Self { setStorage(DataStorage(other.data)) }
+    func initialize(data other: NSData?) -> Self { setStorage(DataStorage(other?.data ?? Data())) }
 
     @ObjCMethod("initWithContentsOfFile:")
     func initialize(contentsOfFile path: String?) -> Self? {
         guard let path else { return nil }
         return (try? Data(contentsOf: URL(filePath: path))).map { setStorage(DataStorage($0)) }
     }
+
+    @ObjCMethod("initWithContentsOfURL:")
+    func initialize(contentsOfURL url: NSURL?) -> Self? { url.flatMap(NSData.contents).map { setStorage(DataStorage($0)) } }
 
     /// NSDataBase64DecodingOptions: 1 ignores unknown characters.
     @ObjCMethod("initWithBase64EncodedString:options:")

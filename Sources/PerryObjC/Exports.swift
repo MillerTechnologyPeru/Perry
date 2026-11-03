@@ -38,6 +38,22 @@ public func objc_release(_ object: id?) {
     if let object { Objects.release(object) }
 }
 
+/// Binds a Swift object as an object's peer (RetainCounts), for the interop
+/// layer's initializers.
+@c(_perry_objc_bindPeer)
+public func perry_objc_bindPeer(_ object: id?, _ peer: UnsafeMutableRawPointer?, _ retained: Bool) {
+    guard let object, let peer else { return }
+    Objects.bindPeer(object, peer, retained: retained)
+}
+
+/// The object's peer, unretained; nil if it has none.
+@c(_perry_objc_peer)
+public func perry_objc_peer(_ object: id?) -> UnsafeMutableRawPointer? { object.flatMap(Objects.peer) }
+
+/// A peer's deinit has begun: true when the object should be deallocated.
+@c(_perry_objc_peerWillDeinitialize)
+public func perry_objc_peerWillDeinitialize(_ object: id?) -> Bool { object.map(Objects.peerWillDeinitialize) ?? false }
+
 @c(_objc_autorelease)
 public func objc_autorelease(_ object: id?) -> id? {
     object.map(Objects.autorelease)
@@ -97,6 +113,31 @@ public func objc_autoreleasePoolPush() -> UnsafeMutableRawPointer? {
 @c(_objc_autoreleasePoolPop)
 public func objc_autoreleasePoolPop(_ token: UnsafeMutableRawPointer?) {
     AutoreleasePool.pop(token)
+}
+
+// The pool functions' names in Darwin's private API, which the Swift
+// runtime calls.
+@c(__objc_autoreleasePoolPush)
+public func _objc_autoreleasePoolPush() -> UnsafeMutableRawPointer? {
+    AutoreleasePool.push()
+}
+
+@c(__objc_autoreleasePoolPop)
+public func _objc_autoreleasePoolPop(_ token: UnsafeMutableRawPointer?) {
+    AutoreleasePool.pop(token)
+}
+
+/// Autoreleases an object of a class that overrides -autorelease, from
+/// its override, as NSObject's would.
+@c(__objc_rootAutorelease)
+public func _objc_rootAutorelease(_ object: id?) -> id? {
+    if let object { AutoreleasePool.add(object) }
+    return object
+}
+
+@c(_objc_isUniquelyReferenced)
+public func objc_isUniquelyReferenced(_ object: id?) -> Bool {
+    object.map(Objects.isUniquelyReferenced) ?? false
 }
 
 @c(_objc_retainedObject)
@@ -346,13 +387,14 @@ private func permanentName(_ string: String) -> UnsafePointer<CChar> {
 @c(_object_getClassName)
 public func object_getClassName(_ object: id?) -> UnsafePointer<CChar>? {
     guard let object, let info = Runtime.info(classOf(object)) else { return nilClassName }
-    return info.name
+    return SwiftNames.demangle(info.name) ?? info.name
 }
 
+/// Swift's classes by their demangled names, as Apple's libobjc gives them.
 @c(_class_getName)
 public func class_getName(_ cls: Class?) -> UnsafePointer<CChar>? {
     guard let cls, let info = Runtime.info(cls) else { return nilClassName }
-    return info.name
+    return SwiftNames.demangle(info.name) ?? info.name
 }
 
 @c(_class_getSuperclass)
@@ -701,11 +743,29 @@ public func object_setIvar(_ object: id?, _ ivar: UnsafeMutablePointer<perry_iva
 }
 
 /// Images are not named to libobjc here, so no image lists its classes.
+/// The paths of the images whose classes are registered, in a malloc'd
+/// array with a NULL after them.
+@c(_objc_copyImageNames)
+public func objc_copyImageNames(_ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
+    copyNames(Runtime.imageNames(), count)
+}
+
+/// The names of the classes an image, named by path, defines.
 @c(_objc_copyClassNamesForImage)
 public func objc_copyClassNamesForImage(_ image: UnsafePointer<CChar>?, _ count: UnsafeMutablePointer<UInt32>?)
     -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
-    count?.pointee = 0
-    return nil
+    copyNames(image.map(Runtime.classNames(forImage:)) ?? [], count)
+}
+
+private func copyNames(_ names: [UnsafePointer<CChar>], _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
+    count?.pointee = UInt32(names.count)
+    guard !names.isEmpty else { return nil }
+    let buffer = malloc((names.count + 1) * MemoryLayout<UnsafePointer<CChar>?>.stride)!
+        .assumingMemoryBound(to: UnsafePointer<CChar>?.self)
+    for (index, name) in names.enumerated() { buffer[index] = name }
+    buffer[names.count] = nil
+    return buffer
 }
 
 // MARK: - Associated objects
@@ -762,6 +822,91 @@ public func objc_enumerationMutation(_ object: id?) {
 @c(_objc_setForwardHandler)
 public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwardStret: UnsafeMutableRawPointer?) {
     Runtime.forwardHandler = forward
+}
+
+// MARK: - Blocks as methods
+
+/// An IMP that calls a copy of `block` with the receiver and the method's
+/// arguments, the selector left out.
+@c(_imp_implementationWithBlock)
+public func imp_implementationWithBlock(_ block: id?) -> UnsafeMutableRawPointer? {
+    guard let copy = BlockClasses.copy(block) else { return nil }
+    return perry_objc_trampoline_create(copy)
+}
+
+@c(_imp_getBlock)
+public func imp_getBlock(_ imp: UnsafeMutableRawPointer?) -> id? {
+    perry_objc_trampoline_block(imp)
+}
+
+/// Releases the block; the trampoline is reused. Methods still using it
+/// must have been replaced, as on Darwin.
+@c(_imp_removeBlock)
+public func imp_removeBlock(_ imp: UnsafeMutableRawPointer?) -> Bool {
+    guard let imp, let block = perry_objc_trampoline_block(imp) else { return false }
+    Objects.release(block)
+    perry_objc_trampoline_remove(imp)
+    return true
+}
+
+// MARK: - Swift
+
+// Swift's runtime registers its types and conformances as images load,
+// finds and names its classes through these hooks, and has classes it
+// builds realized. Each hook setter hands back the previous hook.
+
+@c(_objc_addLoadImageFunc2)
+public func objc_addLoadImageFunc2(_ function: Runtime.LoadImageFunction?) {
+    if let function { Runtime.addLoadImageFunction(function) }
+}
+
+/// The older form's function takes only the header; the handle passed
+/// after it goes unread.
+@c(_objc_addLoadImageFunc)
+public func objc_addLoadImageFunc(_ function: Runtime.LoadImageFunction?) {
+    if let function { Runtime.addLoadImageFunction(function) }
+}
+
+@c(_objc_setHook_getClass)
+public func objc_setHook_getClass(_ hook: Hooks.GetClass?, _ previous: UnsafeMutablePointer<Hooks.GetClass>?) {
+    guard let hook else { return }
+    previous?.pointee = Hooks.getClass
+    Hooks.getClass = hook
+}
+
+@c(_objc_setHook_getImageName)
+public func objc_setHook_getImageName(_ hook: Hooks.GetImageName?, _ previous: UnsafeMutablePointer<Hooks.GetImageName>?) {
+    guard let hook else { return }
+    previous?.pointee = Hooks.getImageName
+    Hooks.getImageName = hook
+}
+
+@c(_objc_setHook_lazyClassNamer)
+public func objc_setHook_lazyClassNamer(_ hook: Hooks.LazyClassNamer?, _ previous: UnsafeMutablePointer<Hooks.LazyClassNamer>?) {
+    guard let hook else { return }
+    previous?.pointee = Hooks.lazyClassNamer
+    Hooks.lazyClassNamer = hook
+}
+
+@c(__objc_realizeClassFromSwift)
+public func _objc_realizeClassFromSwift(_ cls: Class?, _ previously: UnsafeMutableRawPointer?) -> Class? {
+    cls.map(Runtime.realizeFromSwift)
+}
+
+@c(_objc_readClassPair)
+public func objc_readClassPair(_ cls: Class?, _ imageInfo: UnsafeRawPointer?) -> Class? {
+    cls.map(Runtime.realizeFromSwift)
+}
+
+/// Classes are realized when first messaged, not when first looked at:
+/// Swift's runtime messages a class before using it.
+@c(__objc_supportsLazyRealization)
+public func _objc_supportsLazyRealization() -> Bool { false }
+
+@c(_class_setSuperclass)
+public func class_setSuperclass(_ cls: Class?, _ superclass: Class?) -> Class? {
+    guard let cls, let superclass else { return nil }
+    return Runtime.setSuperclass(cls, superclass)
 }
 
 // MARK: - Exceptions

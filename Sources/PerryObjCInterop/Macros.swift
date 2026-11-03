@@ -60,7 +60,7 @@ public typealias ObjCMethodRegistration = (any ObjCMethodRegistrar) -> Void
 
 /// Exposes a Swift class, a subclass of an Objective-C class's wrapper, as
 /// that Objective-C class.
-@attached(member, names: named(objCClassName), named(objCSuperclassName), named(registerObjCMethods))
+@attached(member, names: named(objCClassName), named(objCSuperclassName), named(registerObjCMethods), named(init))
 public macro ObjCClass(_ className: String) =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCClassMacro")
 

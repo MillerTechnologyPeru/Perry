@@ -3,7 +3,7 @@ import PerryObjCInterop
 
 // UIAlertView and UIPopoverController, which UIAlertController and
 // popover presentation replaced, UIUserNotificationSettings, which
-// UNUserNotificationCenter replaced, and CATransaction.
+// UNUserNotificationCenter replaced.
 
 final class AlertViewState: ObjectState {
     var title: String?
@@ -297,69 +297,4 @@ open class UIUserNotificationSettings: NSObject {
 
     @ObjCMethod("types") func types() -> UInt { settings.types }
     @ObjCMethod("categories") func categories() -> NSObject? { settings.categories }
-}
-
-/// CATransaction: layer changes take effect at once, so a transaction
-/// keeps only its settings, and its completion block runs when the
-/// outermost transaction commits.
-@ObjCClass("CATransaction")
-open class CATransaction: NSObject {
-    struct Transaction {
-        var values: [String: NSObject] = [:]
-        var completion: ObjCBlock?
-    }
-
-    nonisolated(unsafe) static var stack: [Transaction] = []
-    /// Settings outside any explicit transaction.
-    nonisolated(unsafe) static var implicit = Transaction()
-
-    private static var current: Transaction {
-        get { stack.last ?? implicit }
-        set { if stack.isEmpty { implicit = newValue } else { stack[stack.count - 1] = newValue } }
-    }
-
-    @ObjCClassMethod("begin") static func begin() { stack.append(Transaction()) }
-
-    @ObjCClassMethod("commit")
-    static func commit() {
-        guard let transaction = stack.popLast() else { return }
-        if let completion = transaction.completion {
-            if stack.isEmpty { Blocks.call(completion) } else if current.completion == nil { current.completion = completion }
-        }
-    }
-
-    @ObjCClassMethod("flush") static func flush() {}
-    @ObjCClassMethod("lock") static func lock() {}
-    @ObjCClassMethod("unlock") static func unlock() {}
-
-    @ObjCClassMethod("valueForKey:") static func value(forKey key: String) -> NSObject? { current.values[key] }
-    @ObjCClassMethod("setValue:forKey:")
-    static func setValue(_ value: NSObject?, forKey key: String) { current.values[key] = value }
-
-    @ObjCClassMethod("disableActions")
-    static func disableActions() -> Bool { current.values["disableActions"].map { $0.transactionBoolValue() } ?? false }
-    @ObjCClassMethod("setDisableActions:")
-    static func setDisableActions(_ disable: Bool) { current.values["disableActions"] = NSNumber.make(bool: disable) }
-
-    @ObjCClassMethod("animationDuration")
-    static func animationDuration() -> Double { current.values["animationDuration"].map { $0.transactionDoubleValue() } ?? 0.25 }
-    @ObjCClassMethod("setAnimationDuration:")
-    static func setAnimationDuration(_ duration: Double) { current.values["animationDuration"] = NSNumber.make(double: duration) }
-
-    @ObjCClassMethod("animationTimingFunction") static func animationTimingFunction() -> NSObject? { current.values["animationTimingFunction"] }
-    @ObjCClassMethod("setAnimationTimingFunction:")
-    static func setAnimationTimingFunction(_ function: NSObject?) { current.values["animationTimingFunction"] = function }
-
-    @ObjCClassMethod("completionBlock") static func completionBlock() -> ObjCBlock? { current.completion }
-    @ObjCClassMethod("setCompletionBlock:")
-    static func setCompletionBlock(_ block: ObjCBlock?) {
-        guard let block else { current.completion = nil; return }
-        // Outside a transaction, the block runs once the current work is done.
-        if stack.isEmpty { Updates.afterPass { Blocks.call(block) } } else { current.completion = block }
-    }
-}
-
-extension NSObject {
-    @ObjCMethod("boolValue") func transactionBoolValue() -> Bool
-    @ObjCMethod("doubleValue") func transactionDoubleValue() -> Double
 }

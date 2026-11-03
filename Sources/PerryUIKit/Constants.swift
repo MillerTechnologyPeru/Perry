@@ -25,6 +25,97 @@ enum Notifications {
     static let UISceneWillConnectNotification = "UISceneWillConnectNotification"
     static let UISceneWillEnterForegroundNotification = "UISceneWillEnterForegroundNotification"
     static let UISceneDidActivateNotification = "UISceneDidActivateNotification"
+    static let UISceneWillDeactivateNotification = "UISceneWillDeactivateNotification"
+    static let UISceneDidEnterBackgroundNotification = "UISceneDidEnterBackgroundNotification"
+    static let UISceneDidDisconnectNotification = "UISceneDidDisconnectNotification"
+    static let UIScreenCapturedDidChangeNotification = "UIScreenCapturedDidChangeNotification"
+    static let UITextViewTextDidBeginEditingNotification = "UITextViewTextDidBeginEditingNotification"
+    static let UITextViewTextDidEndEditingNotification = "UITextViewTextDidEndEditingNotification"
+    static let UIApplicationOpenURLOptionsAnnotationKey = "UIApplicationOpenURLOptionsAnnotationKey"
+    static let UIApplicationOpenURLOptionsSourceApplicationKey = "UIApplicationOpenURLOptionsSourceApplicationKey"
+    static let UIApplicationOpenSettingsURLString = "app-settings:"
+    static let UITransitionContextFromViewControllerKey = "UITransitionContextFromViewControllerKey"
+    static let UITransitionContextToViewControllerKey = "UITransitionContextToViewControllerKey"
+    static let UICollectionElementKindSectionHeader = "UICollectionElementKindSectionHeader"
+    static let UICollectionElementKindSectionFooter = "UICollectionElementKindSectionFooter"
+    static let UIImagePickerControllerOriginalImage = "UIImagePickerControllerOriginalImage"
+    static let UIImagePickerControllerEditedImage = "UIImagePickerControllerEditedImage"
+    static let UIActivityTypeSaveToCameraRoll = "com.apple.UIKit.activity.SaveToCameraRoll"
+    static let UIPasteboardNameGeneral = "com.apple.UIKit.pboard.general"
+    static let NSDocumentTypeDocumentOption = "DocumentType"
+    static let NSHTMLTextDocumentType = "NSHTML"
+}
+
+/// Content size categories, as UIKit names them.
+@ObjCConstants
+enum ContentSizeCategories {
+    static let UIContentSizeCategoryUnspecified = "_UICTContentSizeCategoryUnspecified"
+    static let UIContentSizeCategoryExtraSmall = "UICTContentSizeCategoryXS"
+    static let UIContentSizeCategorySmall = "UICTContentSizeCategoryS"
+    static let UIContentSizeCategoryMedium = "UICTContentSizeCategoryM"
+    static let UIContentSizeCategoryLarge = "UICTContentSizeCategoryL"
+    static let UIContentSizeCategoryExtraLarge = "UICTContentSizeCategoryXL"
+    static let UIContentSizeCategoryExtraExtraLarge = "UICTContentSizeCategoryXXL"
+    static let UIContentSizeCategoryExtraExtraExtraLarge = "UICTContentSizeCategoryXXXL"
+    static let UIContentSizeCategoryAccessibilityMedium = "UICTContentSizeCategoryAccessibilityM"
+    static let UIContentSizeCategoryAccessibilityLarge = "UICTContentSizeCategoryAccessibilityL"
+    static let UIContentSizeCategoryAccessibilityExtraLarge = "UICTContentSizeCategoryAccessibilityXL"
+    static let UIContentSizeCategoryAccessibilityExtraExtraLarge = "UICTContentSizeCategoryAccessibilityXXL"
+    static let UIContentSizeCategoryAccessibilityExtraExtraExtraLarge = "UICTContentSizeCategoryAccessibilityXXXL"
+}
+
+/// Font descriptor attributes and traits.
+@ObjCConstants
+enum FontDescriptorKeys {
+    static let UIFontDescriptorFamilyAttribute = "NSFontFamilyAttribute"
+    static let UIFontDescriptorNameAttribute = "NSFontNameAttribute"
+    static let UIFontDescriptorFaceAttribute = "NSFontFaceAttribute"
+    static let UIFontDescriptorSizeAttribute = "NSFontSizeAttribute"
+    static let UIFontDescriptorTraitsAttribute = "NSCTFontTraitsAttribute"
+    static let UIFontWeightTrait = "NSCTFontWeightTrait"
+    static let UIFontWidthTrait = "NSCTFontProportionTrait"
+    static let UIFontSlantTrait = "NSCTFontSlantTrait"
+}
+
+/// Text content types, the autofill hints.
+@ObjCConstants
+enum TextContentTypes {
+    static let UITextContentTypeGivenName = "given-name"
+    static let UITextContentTypeFamilyName = "family-name"
+    static let UITextContentTypeEmailAddress = "email"
+    static let UITextContentTypeTelephoneNumber = "tel"
+    static let UITextContentTypeStreetAddressLine1 = "address-line1"
+    static let UITextContentTypeAddressCity = "address-level2"
+    static let UITextContentTypeAddressState = "address-level1"
+    static let UITextContentTypePostalCode = "postal-code"
+    static let UITextContentTypeOneTimeCode = "one-time-code"
+    static let UITextContentTypeDateTime = "date-time"
+    static let UITextContentTypeBirthdateDay = "bday-day"
+    static let UITextContentTypeBirthdateMonth = "bday-month"
+}
+
+/// Content size categories in order, for comparing them.
+private let sizeCategoryOrder = [
+    "UICTContentSizeCategoryXS", "UICTContentSizeCategoryS", "UICTContentSizeCategoryM", "UICTContentSizeCategoryL",
+    "UICTContentSizeCategoryXL", "UICTContentSizeCategoryXXL", "UICTContentSizeCategoryXXXL",
+    "UICTContentSizeCategoryAccessibilityM", "UICTContentSizeCategoryAccessibilityL",
+    "UICTContentSizeCategoryAccessibilityXL", "UICTContentSizeCategoryAccessibilityXXL",
+    "UICTContentSizeCategoryAccessibilityXXXL",
+]
+
+/// NSComparisonResult of two content size categories.
+@c(_UIContentSizeCategoryCompareToCategory)
+public func UIContentSizeCategoryCompareToCategory(_ lhs: UnsafeMutableRawPointer?, _ rhs: UnsafeMutableRawPointer?) -> Int {
+    func rank(_ category: UnsafeMutableRawPointer?) -> Int {
+        category.flatMap { sizeCategoryOrder.firstIndex(of: NSObject($0).stringValue) } ?? 3
+    }
+    let (a, b) = (rank(lhs), rank(rhs))
+    return a < b ? -1 : a > b ? 1 : 0
+}
+
+@c(_UIContentSizeCategoryIsAccessibilityCategory)
+public func UIContentSizeCategoryIsAccessibilityCategory(_ category: UnsafeMutableRawPointer?) -> Bool {
+    category.map { NSObject($0).stringValue.hasPrefix("UICTContentSizeCategoryAccessibility") } ?? false
 }
 
 /// Scene session roles.
@@ -69,15 +160,13 @@ enum MoreNotifications {
     static let UIKeyboardFrameBeginUserInfoKey = "UIKeyboardFrameBeginUserInfoKey"
     static let UIKeyboardAnimationDurationUserInfoKey = "UIKeyboardAnimationDurationUserInfoKey"
     static let UIDeviceOrientationDidChangeNotification = "UIDeviceOrientationDidChangeNotification"
+    static let UIDeviceBatteryLevelDidChangeNotification = "UIDeviceBatteryLevelDidChangeNotification"
+    static let UIDeviceBatteryStateDidChangeNotification = "UIDeviceBatteryStateDidChangeNotification"
+    static let UIWindowDidResignKeyNotification = "UIWindowDidResignKeyNotification"
     static let UITextViewTextDidChangeNotification = "UITextViewTextDidChangeNotification"
     static let UITextFieldTextDidChangeNotification = "UITextFieldTextDidChangeNotification"
     static let UITextFieldTextDidBeginEditingNotification = "UITextFieldTextDidBeginEditingNotification"
     static let UITextFieldTextDidEndEditingNotification = "UITextFieldTextDidEndEditingNotification"
-    static let kCATransition = "transition"
-    static let kCATransactionDisableActions = "disableActions"
-    static let kCATransactionAnimationDuration = "animationDuration"
-    static let kCATransactionAnimationTimingFunction = "animationTimingFunction"
-    static let kCATransactionCompletionBlock = "completionBlock"
 }
 
 /// NSAttributedString's attribute names, as UIKit adds them.

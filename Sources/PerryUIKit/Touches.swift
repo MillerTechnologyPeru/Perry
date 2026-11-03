@@ -380,7 +380,8 @@ extension UIResponder {
 /// first shows: "195,120" taps a point; "type:Hello" types text, and
 /// "key:return", "key:backspace" and "key:escape" press those keys, for
 /// the first responder. To reach an app's later screens without a display,
-/// along with PERRY_UIKIT_SNAPSHOT.
+/// along with PERRY_UIKIT_SNAPSHOT, which then also keeps what shows a
+/// second after each step, numbered from 1.
 enum TapScript {
     enum Step {
         case tap(CGPoint)
@@ -391,6 +392,7 @@ enum TapScript {
     nonisolated(unsafe) private static var steps: [Step]?
     nonisolated(unsafe) private static var started = false
     nonisolated(unsafe) private static var lastTap = CGPoint.zero
+    nonisolated(unsafe) private static var stepsDone = 0
 
     static func startIfRequested() {
         guard !started, let setting = getenv("PERRY_UIKIT_TAPS") else { return }
@@ -425,6 +427,9 @@ enum TapScript {
                 default: break
                 }
             }
+            TapScript.stepsDone += 1
+            let number = TapScript.stepsDone
+            Deferred.run(after: 1) { Snapshot.writeNumbered(number) }
             TapScript.next()
         }
     }

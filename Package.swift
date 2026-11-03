@@ -42,6 +42,8 @@ let package = Package(
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
+        // CoreTelephony, on a device without a cellular radio.
+        .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
         .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
@@ -50,6 +52,8 @@ let package = Package(
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
         .library(name: "PerryCoreGraphics", type: .dynamic, targets: ["PerryCoreGraphics"]),
+        // QuartzCore: Core Animation's layers, their rendering and animations.
+        .library(name: "PerryQuartzCore", type: .dynamic, targets: ["PerryQuartzCore"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
     ],
@@ -232,6 +236,12 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // CoreTelephony, with no SIM and no carrier.
+        .target(
+            name: "PerryCoreTelephony",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // AVFoundation's audio player and session, without sound.
         .target(
             name: "PerryAVFoundation",
@@ -276,6 +286,13 @@ let package = Package(
             name: "PerryCoreGraphics",
             dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop",
                            "SilicaCairo"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Core Animation: the layer tree UIKit's views are backed by, drawn
+        // through CoreGraphics and composited on the GPU, and its animations.
+        .target(
+            name: "PerryQuartzCore",
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // UIKit, a client of libobjc's C API and Foundation's classes.

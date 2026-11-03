@@ -314,6 +314,14 @@ extension NSObject {
     @ObjCMethod("setValue:forKey:") func sendSetValue(_ value: NSObject?, forKey key: String)
 }
 
+/// What every object a nib makes can be sent, as UIKit adds it to NSObject:
+/// subclasses call super's.
+@ObjCCategory("UINibAwaking")
+extension NSObject {
+    @ObjCMethod("awakeFromNib") func nibAwakeFromNib() {}
+    @ObjCMethod("prepareForInterfaceBuilder") func nibPrepareForInterfaceBuilder() {}
+}
+
 // MARK: - UINibDecoder
 
 final class NibDecoderState: ObjectState {

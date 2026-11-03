@@ -49,12 +49,18 @@ public enum Runtime {
                 return nil
             }
             let superInfo = cls.pointee.superclass.flatMap { Runtime.info($0) }
-            // A superclass the loader could not find has no class_ro_t, and
-            // its name where the vtable goes.
-            if let superclass = cls.pointee.superclass, superInfo == nil, superclass.pointee.bits == 0,
-               let name = UnsafeRawPointer(superclass).load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
-                let own = ro.pointee.name.map { String(cString: $0) } ?? "?"
-                objcFatal("class \(own) inherits from \(String(cString: name)), which is not available")
+            // A class whose superclass is not available is not available
+            // either, as on Darwin when a weak-linked superclass is missing:
+            // it is never realized, and the program goes on until it uses
+            // it. A superclass the loader could not find has no class_ro_t,
+            // and its name where the vtable goes.
+            if let superclass = cls.pointee.superclass, superInfo == nil {
+                if superclass.pointee.bits == 0,
+                   let name = UnsafeRawPointer(superclass).load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
+                    let own = ro.pointee.name.map { String(cString: $0) } ?? "?"
+                    objcWarning("class \(own) inherits from \(String(cString: name)), which is not available")
+                }
+                return nil
             }
             let info = ClassInfo(cls: cls, ro: ro, superInfo: superInfo)
 
@@ -101,7 +107,18 @@ public enum Runtime {
     public static func lookUpClass(_ name: UnsafePointer<CChar>) -> ClassPointer? {
         // Other providers may start before libobjc and look up NSObject.
         RootClasses.bootstrap()
-        return lock.withLock { classesByName[CStringKey(pointer: name)] }
+        if let cls = lock.withLock({ classesByName[CStringKey(pointer: name)] }) {
+            return cls
+        }
+        // A Swift class by its demangled name.
+        if let mangled = SwiftNames.mangle(name),
+           let cls = mangled.withCString({ mangled in lock.withLock { classesByName[CStringKey(pointer: mangled)] } }) {
+            return cls
+        }
+        // Classes not yet known by name, such as Swift's, which its runtime
+        // finds from their mangled names.
+        var found: ClassPointer?
+        return Hooks.getClass(name, &found) ? found : nil
     }
 
     /// Empties every method cache, after methods change.
