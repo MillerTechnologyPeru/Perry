@@ -743,11 +743,29 @@ public func object_setIvar(_ object: id?, _ ivar: UnsafeMutablePointer<perry_iva
 }
 
 /// Images are not named to libobjc here, so no image lists its classes.
+/// The paths of the images whose classes are registered, in a malloc'd
+/// array with a NULL after them.
+@c(_objc_copyImageNames)
+public func objc_copyImageNames(_ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
+    copyNames(Runtime.imageNames(), count)
+}
+
+/// The names of the classes an image, named by path, defines.
 @c(_objc_copyClassNamesForImage)
 public func objc_copyClassNamesForImage(_ image: UnsafePointer<CChar>?, _ count: UnsafeMutablePointer<UInt32>?)
     -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
-    count?.pointee = 0
-    return nil
+    copyNames(image.map(Runtime.classNames(forImage:)) ?? [], count)
+}
+
+private func copyNames(_ names: [UnsafePointer<CChar>], _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
+    count?.pointee = UInt32(names.count)
+    guard !names.isEmpty else { return nil }
+    let buffer = malloc((names.count + 1) * MemoryLayout<UnsafePointer<CChar>?>.stride)!
+        .assumingMemoryBound(to: UnsafePointer<CChar>?.self)
+    for (index, name) in names.enumerated() { buffer[index] = name }
+    buffer[names.count] = nil
+    return buffer
 }
 
 // MARK: - Associated objects
