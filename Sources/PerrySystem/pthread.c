@@ -319,6 +319,14 @@ int darwin_pthread_cond_broadcast(darwin_cond *cond) {
     return value ? result(pthread_cond_broadcast(value)) : 22;
 }
 
+// Wakes the thread given, if it waits: waking every waiter instead is one
+// of the spurious wakeups condition variables allow.
+int darwin_pthread_cond_signal_thread_np(darwin_cond *cond, pthread_t thread)
+    DARWIN_SYMBOL(pthread_cond_signal_thread_np);
+int darwin_pthread_cond_signal_thread_np(darwin_cond *cond, pthread_t thread) {
+    return thread ? darwin_pthread_cond_broadcast(cond) : darwin_pthread_cond_signal(cond);
+}
+
 int darwin_pthread_condattr_init(darwin_condattr *attributes) DARWIN_SYMBOL(pthread_condattr_init);
 int darwin_pthread_condattr_init(darwin_condattr *attributes) {
     attributes->sig = SIG_READY;
@@ -639,6 +647,19 @@ int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) {
 int darwin_pthread_main_np(void) DARWIN_SYMBOL(pthread_main_np);
 int darwin_pthread_main_np(void) {
     return gettid() == getpid();
+}
+
+// The main thread, recorded as the library loads, which the loader does on it.
+static pthread_t main_thread;
+
+__attribute__((constructor))
+static void record_main_thread(void) {
+    main_thread = pthread_self();
+}
+
+pthread_t darwin_pthread_main_thread_np(void) DARWIN_SYMBOL(pthread_main_thread_np);
+pthread_t darwin_pthread_main_thread_np(void) {
+    return main_thread;
 }
 
 int darwin_pthread_threadid_np(pthread_t thread, uint64_t *id) DARWIN_SYMBOL(pthread_threadid_np);
