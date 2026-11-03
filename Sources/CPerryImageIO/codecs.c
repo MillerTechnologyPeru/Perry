@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <webp/decode.h>
+#include <zlib.h>
 
 void perry_decoded_free(perry_decoded *decoded) {
     for (int i = 0; i < decoded->count; i++) free(decoded->frames[i].rgba);
@@ -32,7 +33,126 @@ static int one_frame(perry_decoded *out, uint8_t *rgba, int width, int height) {
 
 // MARK: - PNG
 
+static uint32_t read_be32(const uint8_t *bytes) {
+    return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | bytes[3];
+}
+
+static void write_be32(uint8_t *bytes, uint32_t value) {
+    bytes[0] = value >> 24; bytes[1] = value >> 16; bytes[2] = value >> 8; bytes[3] = value;
+}
+
+/// Appends a chunk, with its length and CRC, at `out`; returns its end.
+static uint8_t *write_chunk(uint8_t *out, const char *type, const uint8_t *body, size_t length) {
+    write_be32(out, (uint32_t)length);
+    memcpy(out + 4, type, 4);
+    if (length) memcpy(out + 8, body, length);
+    uLong crc = crc32(crc32(0, NULL, 0), out + 4, (uInt)length + 4);
+    write_be32(out + 8 + length, (uint32_t)crc);
+    return out + 12 + length;
+}
+
+/// Xcode's iPhone PNGs ("CgBI"): a CgBI chunk first, image data as raw
+/// deflate without zlib's header and checksum, and pixels as BGRA with
+/// alpha premultiplied. Rewrites one as a standard PNG, for libpng; the
+/// caller swaps and divides the decoded pixels. Null if `data` is not one.
+static uint8_t *cgbi_normalize(const uint8_t *data, size_t size, size_t *out_size) {
+    if (size < 8 + 12 + 25 || memcmp(data + 12, "CgBI", 4) != 0) return NULL;
+    // The image data, joined; and the size of everything else.
+    size_t idat_size = 0, other_size = 0, position = 8;
+    uint32_t width = 0, height = 0;
+    while (position + 12 <= size) {
+        uint32_t length = read_be32(data + position);
+        if (length > size - position - 12) return NULL;
+        const uint8_t *type = data + position + 4;
+        if (memcmp(type, "IDAT", 4) == 0) idat_size += length;
+        else if (memcmp(type, "CgBI", 4) != 0) other_size += length + 12;
+        if (memcmp(type, "IHDR", 4) == 0 && length >= 13) {
+            width = read_be32(type + 4);
+            height = read_be32(type + 8);
+            // Only 8-bit, non-interlaced, as Xcode writes them.
+            if (type[4 + 8] != 8 || type[4 + 12] != 0) return NULL;
+        }
+        position += length + 12;
+        if (memcmp(type, "IEND", 4) == 0) break;
+    }
+    if (!width || !height || width > 32768 || height > 32768) return NULL;
+    uint8_t *deflated = malloc(idat_size ? idat_size : 1);
+    if (!deflated) return NULL;
+    size_t joined = 0;
+    for (position = 8; position + 12 <= size;) {
+        uint32_t length = read_be32(data + position);
+        if (memcmp(data + position + 4, "IDAT", 4) == 0) { memcpy(deflated + joined, data + position + 8, length); joined += length; }
+        if (memcmp(data + position + 4, "IEND", 4) == 0) break;
+        position += length + 12;
+    }
+    // Four bytes a pixel and a filter byte a row at most.
+    size_t raw_capacity = ((size_t)width * 4 + 1) * height;
+    uint8_t *raw = malloc(raw_capacity);
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+    if (!raw || inflateInit2(&stream, -MAX_WBITS) != Z_OK) { free(raw); free(deflated); return NULL; }
+    stream.next_in = deflated;
+    stream.avail_in = (uInt)joined;
+    stream.next_out = raw;
+    stream.avail_out = (uInt)raw_capacity;
+    int status = inflate(&stream, Z_FINISH);
+    size_t raw_size = stream.total_out;
+    inflateEnd(&stream);
+    free(deflated);
+    if (status != Z_STREAM_END && status != Z_BUF_ERROR) { free(raw); return NULL; }
+    uLongf compressed_size = compressBound((uLong)raw_size);
+    uint8_t *compressed = malloc(compressed_size);
+    if (!compressed || compress2(compressed, &compressed_size, raw, (uLong)raw_size, 6) != Z_OK) {
+        free(compressed); free(raw); return NULL;
+    }
+    free(raw);
+    uint8_t *png = malloc(8 + other_size + 12 + compressed_size);
+    if (!png) { free(compressed); return NULL; }
+    memcpy(png, data, 8);
+    uint8_t *end = png + 8;
+    int wrote_data = 0;
+    for (position = 8; position + 12 <= size;) {
+        uint32_t length = read_be32(data + position);
+        const uint8_t *type = data + position + 4;
+        if (memcmp(type, "IDAT", 4) == 0) {
+            if (!wrote_data) end = write_chunk(end, "IDAT", compressed, compressed_size);
+            wrote_data = 1;
+        } else if (memcmp(type, "CgBI", 4) != 0) {
+            // Other chunks keep their bytes, with their CRCs recomputed.
+            end = write_chunk(end, (const char *)type, type + 4, length);
+        }
+        position += length + 12;
+        if (memcmp(type, "IEND", 4) == 0) break;
+    }
+    free(compressed);
+    *out_size = (size_t)(end - png);
+    return png;
+}
+
+/// CgBI pixels, decoded as RGBA: really BGRA, with alpha premultiplied.
+static void cgbi_unswizzle(uint8_t *rgba, size_t pixels) {
+    for (size_t i = 0; i < pixels; i++) {
+        uint8_t *pixel = rgba + i * 4, blue = pixel[0], alpha = pixel[3];
+        pixel[0] = pixel[2];
+        pixel[2] = blue;
+        if (alpha && alpha != 255) {
+            for (int c = 0; c < 3; c++) {
+                unsigned value = (pixel[c] * 255u + alpha / 2) / alpha;
+                pixel[c] = value > 255 ? 255 : (uint8_t)value;
+            }
+        }
+    }
+}
+
 int perry_png_decode(const uint8_t *data, size_t size, perry_decoded *out) {
+    size_t normalized_size = 0;
+    uint8_t *normalized = cgbi_normalize(data, size, &normalized_size);
+    if (normalized) {
+        int ok = perry_png_decode(normalized, normalized_size, out);
+        free(normalized);
+        if (ok) cgbi_unswizzle(out->frames[0].rgba, (size_t)out->frames[0].width * out->frames[0].height);
+        return ok;
+    }
     memset(out, 0, sizeof(*out));
     png_image image;
     memset(&image, 0, sizeof(image));
