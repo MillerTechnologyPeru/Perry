@@ -55,7 +55,32 @@ enum Strings {
         if ObjC.objectGetClass(object) == constantClass {
             return constantValue(object)
         }
-        return Storage.get(object, as: StringStorage.self)?.value ?? ""
+        if let storage = Storage.get(object, as: StringStorage.self) {
+            return storage.value
+        }
+        return primitiveValue(of: object) ?? ""
+    }
+
+    nonisolated(unsafe) private static let lengthSelector = ObjC.selector("length")
+    nonisolated(unsafe) private static let getCharactersSelector = ObjC.selector("getCharacters:range:")
+
+    /// The contents of a string of a subclass this library does not
+    /// define, such as Swift's bridged strings, which keep their own
+    /// characters: through the primitive methods it overrides, as NSString
+    /// subclasses do. Nil if it overrides none.
+    private static func primitiveValue(of object: id) -> String? {
+        let cls = ObjC.objectGetClass(object)
+        guard ObjC.methodImplementation(cls, lengthSelector) != ObjC.methodImplementation(stringClass, lengthSelector) else {
+            return nil
+        }
+        let length = Int(ObjC.sendUInt(object, lengthSelector))
+        guard length > 0 else { return "" }
+        typealias GetCharacters = @convention(c) (id?, SEL, UnsafeMutablePointer<UInt16>?, UInt, UInt) -> Void
+        let units = [UInt16](unsafeUninitializedCapacity: length) { buffer, count in
+            unsafeBitCast(ObjC.msgSend, to: GetCharacters.self)(object, getCharactersSelector, buffer.baseAddress, 0, UInt(length))
+            count = length
+        }
+        return String(decoding: units, as: UTF16.self)
     }
 
     /// UTF-16 literals have no C string; keep one per literal.
@@ -193,6 +218,15 @@ public class NSString: NSObject {
     @ObjCMethod("initWithBytes:length:encoding:")
     func initialize(bytes: UnsafeRawPointer?, length: UInt, encoding: UInt) -> Self? {
         StringEncoding.decode(UnsafeRawBufferPointer(start: bytes, count: Int(length)), encoding).map(setValue)
+    }
+
+    /// The bytes are copied, so the string frees them at once when it would
+    /// own them. A string that cannot be made leaves them to the caller.
+    @ObjCMethod("initWithBytesNoCopy:length:encoding:freeWhenDone:")
+    func initialize(bytesNoCopy bytes: UnsafeMutableRawPointer?, length: UInt, encoding: UInt, freeWhenDone: Bool) -> Self? {
+        guard let string = initialize(bytes: bytes, length: length, encoding: encoding) else { return nil }
+        if freeWhenDone { free(bytes) }
+        return string
     }
 
     /// A Darwin va_list is a pointer to the argument slots.
