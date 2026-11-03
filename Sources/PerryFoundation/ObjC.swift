@@ -36,6 +36,7 @@ enum ObjC {
     nonisolated(unsafe) static var allocateClassPair: (@convention(c) (Class?, SEL, Int) -> Class?)!
     nonisolated(unsafe) static var objectSetClass: (@convention(c) (id?, Class) -> Class?)!
     nonisolated(unsafe) static var methodImplementation: (@convention(c) (Class?, SEL) -> UnsafeRawPointer?)!
+    nonisolated(unsafe) static var dispose: (@convention(c) (id?) -> id?)!
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -65,6 +66,7 @@ enum ObjC {
         allocateClassPair = bind("_objc_allocateClassPair", (@convention(c) (Class?, SEL, Int) -> Class?).self)
         objectSetClass = bind("_object_setClass", (@convention(c) (id?, Class) -> Class?).self)
         methodImplementation = bind("_class_getMethodImplementation", (@convention(c) (Class?, SEL) -> UnsafeRawPointer?).self)
+        dispose = bind("_object_dispose", (@convention(c) (id?) -> id?).self)
         // The interop layer's wrappers call the runtime through its own table.
         guard ObjCRuntime.load(lookup) else { return false }
         // Classes Foundation defines live in its exported storage.
