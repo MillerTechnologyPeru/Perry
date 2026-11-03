@@ -2,8 +2,9 @@ import CPerryGeometry
 import PerryObjCInterop
 
 // UITextField: one line of text, or its placeholder, drawn inside its
-// border style. It takes no keyboard input yet; what an app sets, it shows
-// and reads back.
+// border style. A tap makes it first responder, and then what is typed in
+// the live view goes into it (Keyboard), through its delegate as on iOS:
+// it is asked before editing begins, before each change and on Return.
 
 final class TextFieldState: ObjectState {
     var text: String?
@@ -34,6 +35,8 @@ final class TextFieldState: ObjectState {
     var adjustsFontSizeToFitWidth = false
     var minimumFontSize: CGFloat = 0
     var editing = false
+    /// The whole text is selected: typing replaces it.
+    var allSelected = false
 }
 
 @ObjCClass("UITextField")
@@ -137,10 +140,137 @@ open class UITextField: UIControl {
     @ObjCMethod("setMinimumFontSize:") func setMinimumFontSize(_ size: CGFloat) { field.minimumFontSize = size }
     @ObjCMethod("isEditing") func isEditing() -> Bool { field.editing }
 
-    /// Without a keyboard, a field does not become first responder.
-    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { false }
-    @ObjCMethod("becomeFirstResponder") override func becomeFirstResponder() -> Bool { false }
-    @ObjCMethod("resignFirstResponder") override func resignFirstResponder() -> Bool { true }
+    // MARK: Editing
+
+    private var fieldDelegate: NSObject? { field.delegate.map { NSObject($0) } }
+
+    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { control.enabled }
+    @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(self) }
+
+    @ObjCMethod("becomeFirstResponder")
+    override func becomeFirstResponder() -> Bool {
+        if Keyboard.isFirstResponder(self) { return true }
+        guard control.enabled else { return false }
+        let delegate = fieldDelegate
+        if let delegate, delegate.responds(to: "textFieldShouldBeginEditing:"), !delegate.sendTextFieldShouldBeginEditing(self) {
+            return false
+        }
+        // The field that was editing stops first.
+        if let current = Keyboard.responder, !current.sendResignFirstResponder() { return false }
+        if field.clearsOnBeginEditing { field.text = "" }
+        field.editing = true
+        Keyboard.focus(self)
+        if let delegate, delegate.responds(to: "textFieldDidBeginEditing:") { delegate.sendTextFieldDidBeginEditing(self) }
+        sendActions(for: 1 << 16)
+        Application.post(MoreNotifications.UITextFieldTextDidBeginEditingNotification, object: self)
+        setNeedsDisplay()
+        return true
+    }
+
+    @ObjCMethod("resignFirstResponder")
+    override func resignFirstResponder() -> Bool {
+        guard Keyboard.isFirstResponder(self) else { return true }
+        let delegate = fieldDelegate
+        if let delegate, delegate.responds(to: "textFieldShouldEndEditing:"), !delegate.sendTextFieldShouldEndEditing(self) {
+            return false
+        }
+        field.editing = false
+        field.allSelected = false
+        Keyboard.focus(nil)
+        if let delegate, delegate.responds(to: "textFieldDidEndEditing:") { delegate.sendTextFieldDidEndEditing(self) }
+        sendActions(for: 1 << 18)
+        Application.post(MoreNotifications.UITextFieldTextDidEndEditingNotification, object: self)
+        setNeedsDisplay()
+        return true
+    }
+
+    /// Replaces `range` (in UTF-16) of the text, if the delegate allows it.
+    private func replace(location: Int, length: Int, with replacement: String) {
+        let text = field.text ?? ""
+        if let delegate = fieldDelegate, delegate.responds(to: "textField:shouldChangeCharactersInRange:replacementString:"),
+           !delegate.sendTextField(self, shouldChangeCharactersIn: PerryRange(location: UInt(location), length: UInt(length)),
+                                   replacementString: replacement) {
+            return
+        }
+        var units = Array(text.utf16)
+        units.replaceSubrange(location..<(location + length), with: Array(replacement.utf16))
+        field.text = String(decoding: units, as: UTF16.self)
+        field.attributedText = nil
+        setNeedsDisplay()
+        sendActions(for: 1 << 17)
+        Application.post(MoreNotifications.UITextFieldTextDidChangeNotification, object: self)
+    }
+
+    /// Typing goes at the end, or replaces the selection; newlines do not
+    /// belong in one line.
+    func insert(_ text: String) {
+        let line = text.filter { $0 != "\n" && $0 != "\r" }
+        guard !line.isEmpty else { return }
+        let count = (field.text ?? "").utf16.count
+        if field.allSelected {
+            field.allSelected = false
+            replace(location: 0, length: count, with: line)
+        } else {
+            replace(location: count, length: 0, with: line)
+        }
+    }
+
+    /// The selection, or else the last character (all its UTF-16 units).
+    func deleteBackward() {
+        let text = field.text ?? ""
+        if field.allSelected {
+            field.allSelected = false
+            replace(location: 0, length: text.utf16.count, with: "")
+            return
+        }
+        guard let last = text.last else { return }
+        let length = String(last).utf16.count
+        replace(location: text.utf16.count - length, length: length, with: "")
+    }
+
+    /// The delegate decides what Return does; editing-did-end-on-exit is sent.
+    func returnKey() {
+        if let delegate = fieldDelegate, delegate.responds(to: "textFieldShouldReturn:") {
+            _ = delegate.sendTextFieldShouldReturn(self)
+        }
+        sendActions(for: 1 << 19)
+    }
+
+    // MARK: Selection and the pasteboard
+
+    @ObjCMethod("selectAll:")
+    override func selectAll(_ sender: NSObject?) {
+        field.allSelected = !(field.text ?? "").isEmpty
+        setNeedsDisplay()
+    }
+
+    @ObjCMethod("select:") override func select(_ sender: NSObject?) { selectAll(sender) }
+
+    @ObjCMethod("copy:")
+    override func copy(_ sender: NSObject?) {
+        guard field.allSelected, !field.secure else { return }
+        UIPasteboard.generalPasteboard().setString(field.text)
+    }
+
+    @ObjCMethod("cut:")
+    override func cut(_ sender: NSObject?) {
+        copy(sender)
+        if field.allSelected { deleteBackward() }
+    }
+
+    @ObjCMethod("paste:")
+    override func paste(_ sender: NSObject?) {
+        if let text = UIPasteboard.generalPasteboard().string() { insert(text) }
+    }
+
+    @ObjCMethod("delete:") override func delete(_ sender: NSObject?) { if field.allSelected { deleteBackward() } }
+
+    /// A tap begins editing.
+    @ObjCMethod("touchesEnded:withEvent:")
+    override func touchesEnded(_ touches: NSObject, with event: NSObject?) {
+        super.touchesEnded(touches, with: event)
+        _ = sendBecomeFirstResponder()
+    }
 
     /// One line, with the border's insets.
     @ObjCMethod("intrinsicContentSize")
@@ -214,8 +344,29 @@ open class UITextField: UIControl {
         } else if field.secure {
             shown = String(repeating: "•", count: shown.count)
         }
+        let editing = Keyboard.isFirstResponder(self)
+        // The caret follows the text while editing.
+        if editing {
+            let typed = field.text ?? ""
+            let caretX = typed.isEmpty ? area.minX : min(area.maxX, area.minX + Text.width(field.secure ? String(repeating: "•", count: typed.count) : typed,
+                                                                                       font: font).rounded(.up) + 1)
+            let tint = tintColor()
+            withExtendedLifetime(tint) {
+                CG.setFillColorWithColor(context, tint.state.makeCGColor())
+                CG.fillRect(context, CGRect(x: caretX, y: area.midY - Text.lineHeight(font) / 2, width: 2, height: Text.lineHeight(font)))
+            }
+        }
         guard !shown.isEmpty else { return }
         let line = Text.truncated(shown, font: font, width: area.width)
+        // The selection, behind the text.
+        if editing && field.allSelected {
+            let highlight = tintColor().withAlphaComponent(0.25)
+            withExtendedLifetime(highlight) {
+                CG.setFillColorWithColor(context, highlight.state.makeCGColor())
+                CG.fillRect(context, CGRect(x: area.minX, y: area.midY - Text.lineHeight(font) / 2,
+                                            width: min(area.width, Text.width(line, font: font).rounded(.up)), height: Text.lineHeight(font)))
+            }
+        }
         let width = Text.width(line, font: font).rounded(.up)
         let x: CGFloat
         switch field.textAlignment {
@@ -225,4 +376,14 @@ open class UITextField: UIControl {
         }
         Text.draw(line, at: CGPoint(x: x, y: area.midY - Text.lineHeight(font) / 2), font: font, color: color)
     }
+}
+
+extension NSObject {
+    @ObjCMethod("textFieldShouldBeginEditing:") func sendTextFieldShouldBeginEditing(_ field: UITextField) -> Bool
+    @ObjCMethod("textFieldDidBeginEditing:") func sendTextFieldDidBeginEditing(_ field: UITextField)
+    @ObjCMethod("textFieldShouldEndEditing:") func sendTextFieldShouldEndEditing(_ field: UITextField) -> Bool
+    @ObjCMethod("textFieldDidEndEditing:") func sendTextFieldDidEndEditing(_ field: UITextField)
+    @ObjCMethod("textField:shouldChangeCharactersInRange:replacementString:")
+    func sendTextField(_ field: UITextField, shouldChangeCharactersIn range: PerryRange, replacementString string: String) -> Bool
+    @ObjCMethod("textFieldShouldReturn:") func sendTextFieldShouldReturn(_ field: UITextField) -> Bool
 }
