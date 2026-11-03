@@ -11,12 +11,15 @@
 #include "PerrySystem.h"
 
 #include <errno.h>
+#include <linux/futex.h>
 #include <pthread.h>
 #include <sched.h>
+#include <stdbool.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -186,6 +189,50 @@ int darwin_pthread_mutexattr_setprotocol(darwin_mutexattr *attributes, int proto
     (void)protocol;
     return 0;
 }
+
+// MARK: - Unfair locks
+
+// os_unfair_lock: a 32-bit word, 0 when unlocked, which Darwin code
+// initializes itself (OS_UNFAIR_LOCK_INIT). A futex lock over it: 1 when
+// held, 2 when held with waiters.
+static void unfair_wait(_Atomic uint32_t *word) {
+    syscall(SYS_futex, word, FUTEX_WAIT_PRIVATE, 2, NULL, NULL, 0);
+}
+
+void darwin_os_unfair_lock_lock(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_lock);
+void darwin_os_unfair_lock_lock(_Atomic uint32_t *lock) {
+    uint32_t expected = 0;
+    if (atomic_compare_exchange_strong_explicit(lock, &expected, 1, memory_order_acquire, memory_order_relaxed))
+        return;
+    while (atomic_exchange_explicit(lock, 2, memory_order_acquire) != 0)
+        unfair_wait(lock);
+}
+
+// Darwin's options (spinning, data synchronization) only tune waiting.
+void darwin_os_unfair_lock_lock_with_options(_Atomic uint32_t *lock, uint32_t options) DARWIN_SYMBOL(os_unfair_lock_lock_with_options);
+void darwin_os_unfair_lock_lock_with_options(_Atomic uint32_t *lock, uint32_t options) {
+    (void)options;
+    darwin_os_unfair_lock_lock(lock);
+}
+
+bool darwin_os_unfair_lock_trylock(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_trylock);
+bool darwin_os_unfair_lock_trylock(_Atomic uint32_t *lock) {
+    uint32_t expected = 0;
+    return atomic_compare_exchange_strong_explicit(lock, &expected, 1, memory_order_acquire, memory_order_relaxed);
+}
+
+void darwin_os_unfair_lock_unlock(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_unlock);
+void darwin_os_unfair_lock_unlock(_Atomic uint32_t *lock) {
+    if (atomic_exchange_explicit(lock, 0, memory_order_release) == 2)
+        syscall(SYS_futex, lock, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+}
+
+// The word records no owner, so ownership cannot be checked.
+void darwin_os_unfair_lock_assert_owner(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_assert_owner);
+void darwin_os_unfair_lock_assert_owner(_Atomic uint32_t *lock) { (void)lock; }
+
+void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_assert_not_owner);
+void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) { (void)lock; }
 
 // MARK: - Conditions
 
@@ -482,11 +529,44 @@ static void reserve_keys(void) {
     }
 }
 
+// Darwin also reserves fixed keys for its own libraries, below the first
+// key pthread_key_create makes: Swift's runtime has 100 to 109, and other
+// frameworks the keys up to 119. They are set up with pthread_key_init_np,
+// which makes a key for each here, and pthread_key_create never numbers a
+// key in their range.
+enum { FIXED_RANGE_START = 100, FIXED_RANGE_END = 120 };
+
+static bool is_fixed_number(unsigned long key) { return key >= FIXED_RANGE_START && key < FIXED_RANGE_END; }
+
+static pthread_key_t fixed_keys[FIXED_RANGE_END];
+static _Atomic bool fixed_keys_made[FIXED_RANGE_END];
+
+int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_init_np);
+int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
+    if (key < 0 || !is_fixed_number((unsigned long)key))
+        return result(EINVAL);
+    pthread_mutex_lock(&reserved_lock);
+    int error = 0;
+    if (!fixed_keys_made[key]) {
+        error = pthread_key_create(&fixed_keys[key], destructor);
+        if (!error)
+            atomic_store_explicit(&fixed_keys_made[key], true, memory_order_release);
+    }
+    pthread_mutex_unlock(&reserved_lock);
+    return result(error);
+}
+
+static pthread_key_t key_to_linux_or_fixed(unsigned long key) {
+    if (is_fixed_number(key) && atomic_load_explicit(&fixed_keys_made[key], memory_order_acquire))
+        return fixed_keys[key];
+    return key_to_linux(key);
+}
+
 int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_create);
 int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) {
     pthread_mutex_lock(&reserved_lock);
     for (int i = 0; i < RESERVED_KEYS; i++) {
-        if (reserved_state[i] == 1) {
+        if (reserved_state[i] == 1 && !is_fixed_number(key_to_darwin(reserved_keys[i]))) {
             reserved_state[i] = 2;
             reserved_destructors[i] = destructor;
             pthread_mutex_unlock(&reserved_lock);
@@ -495,8 +575,10 @@ int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) {
         }
     }
     pthread_mutex_unlock(&reserved_lock);
+    // A key numbered in the fixed range is kept, unused, so it is not made again.
     pthread_key_t linux_key;
-    int error = pthread_key_create(&linux_key, destructor);
+    int error;
+    while (!(error = pthread_key_create(&linux_key, destructor)) && is_fixed_number(key_to_darwin(linux_key))) {}
     if (!error)
         *key = key_to_darwin(linux_key);
     return result(error);
@@ -521,12 +603,12 @@ int darwin_pthread_key_delete(unsigned long key) {
 
 void *darwin_pthread_getspecific(unsigned long key) DARWIN_SYMBOL(pthread_getspecific);
 void *darwin_pthread_getspecific(unsigned long key) {
-    return pthread_getspecific(key_to_linux(key));
+    return pthread_getspecific(key_to_linux_or_fixed(key));
 }
 
 int darwin_pthread_setspecific(unsigned long key, const void *value) DARWIN_SYMBOL(pthread_setspecific);
 int darwin_pthread_setspecific(unsigned long key, const void *value) {
-    return result(pthread_setspecific(key_to_linux(key), value));
+    return result(pthread_setspecific(key_to_linux_or_fixed(key), value));
 }
 
 // Darwin names only the calling thread. Linux keeps 15 bytes of a name.
