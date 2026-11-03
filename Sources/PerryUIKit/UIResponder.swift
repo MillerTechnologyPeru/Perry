@@ -12,4 +12,12 @@ open class UIResponder: NSObject {
     @ObjCMethod("canResignFirstResponder") func canResignFirstResponder() -> Bool { true }
     @ObjCMethod("resignFirstResponder") func resignFirstResponder() -> Bool { true }
     @ObjCMethod("isFirstResponder") func isFirstResponder() -> Bool { false }
+
+    // UIResponderStandardEditActions, which responders that edit override.
+    @ObjCMethod("selectAll:") func selectAll(_ sender: NSObject?) {}
+    @ObjCMethod("select:") func select(_ sender: NSObject?) {}
+    @ObjCMethod("copy:") func copy(_ sender: NSObject?) {}
+    @ObjCMethod("cut:") func cut(_ sender: NSObject?) {}
+    @ObjCMethod("paste:") func paste(_ sender: NSObject?) {}
+    @ObjCMethod("delete:") func delete(_ sender: NSObject?) {}
 }
