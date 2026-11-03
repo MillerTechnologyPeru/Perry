@@ -92,6 +92,41 @@ open class NSURLRequest: NSObject {
         ObjCRuntime.retain(Requests.object(request.copy()).objcObject)!
     }
 
+    // MARK: NSSecureCoding
+
+    @ObjCClassMethod("supportsSecureCoding") static func supportsSecureCoding() -> Bool { true }
+
+    /// The URL, method, headers, body and loading settings, by name.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject) {
+        coder.sendEncode(url(), forKey: "URL")
+        coder.sendEncode(NSObject.string(request.method), forKey: "HTTPMethod")
+        coder.sendEncode(allHTTPHeaderFields(), forKey: "allHTTPHeaderFields")
+        coder.sendEncode(httpBody(), forKey: "HTTPBody")
+        coder.sendEncode(double: request.timeout, forKey: "timeoutInterval")
+        coder.sendEncode(integer: request.cachePolicy, forKey: "cachePolicy")
+        coder.sendEncode(bool: request.handlesCookies, forKey: "HTTPShouldHandleCookies")
+        coder.sendEncode(bool: request.allowsCellularAccess, forKey: "allowsCellularAccess")
+    }
+
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Request(url: coder.sendDecodeObject(forKey: "URL")?.as(NSURL.self)?.url)
+        if let method = coder.sendDecodeObject(forKey: "HTTPMethod") { decoded.method = method.stringValue }
+        decoded.headers = coder.sendDecodeObject(forKey: "allHTTPHeaderFields")?.as(NSDictionary.self)?.strings
+        decoded.body = coder.sendDecodeObject(forKey: "HTTPBody")?.as(NSData.self)?.data
+        if coder.sendContainsValue(forKey: "timeoutInterval") { decoded.timeout = coder.sendDecodeDouble(forKey: "timeoutInterval") }
+        decoded.cachePolicy = coder.sendDecodeInteger(forKey: "cachePolicy")
+        if coder.sendContainsValue(forKey: "HTTPShouldHandleCookies") {
+            decoded.handlesCookies = coder.sendDecodeBool(forKey: "HTTPShouldHandleCookies")
+        }
+        if coder.sendContainsValue(forKey: "allowsCellularAccess") {
+            decoded.allowsCellularAccess = coder.sendDecodeBool(forKey: "allowsCellularAccess")
+        }
+        Requests.states.set(objcObject, decoded)
+        return self
+    }
+
     @ObjCMethod("mutableCopyWithZone:")
     func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
         ObjCRuntime.retain(Requests.object(request.copy(), mutable: true).objcObject)!
@@ -135,4 +170,17 @@ open class NSMutableURLRequest: NSURLRequest {
     @ObjCMethod("setMainDocumentURL:") func setMainDocumentURL(_ url: NSURL?) { request.mainDocumentURL = url?.url }
     @ObjCMethod("setAllowsCellularAccess:") func setAllowsCellularAccess(_ value: Bool) { request.allowsCellularAccess = value }
     @ObjCMethod("setNetworkServiceType:") func setNetworkServiceType(_ value: UInt) { request.networkServiceType = Int(value) }
+}
+
+/// NSCoder's keyed messages.
+extension NSObject {
+    @ObjCMethod("encodeObject:forKey:") func sendEncode(_ object: NSObject?, forKey key: String)
+    @ObjCMethod("encodeDouble:forKey:") func sendEncode(double value: Double, forKey key: String)
+    @ObjCMethod("encodeInteger:forKey:") func sendEncode(integer value: Int, forKey key: String)
+    @ObjCMethod("encodeBool:forKey:") func sendEncode(bool value: Bool, forKey key: String)
+    @ObjCMethod("decodeObjectForKey:") func sendDecodeObject(forKey key: String) -> NSObject?
+    @ObjCMethod("decodeDoubleForKey:") func sendDecodeDouble(forKey key: String) -> Double
+    @ObjCMethod("decodeIntegerForKey:") func sendDecodeInteger(forKey key: String) -> Int
+    @ObjCMethod("decodeBoolForKey:") func sendDecodeBool(forKey key: String) -> Bool
+    @ObjCMethod("containsValueForKey:") func sendContainsValue(forKey key: String) -> Bool
 }
