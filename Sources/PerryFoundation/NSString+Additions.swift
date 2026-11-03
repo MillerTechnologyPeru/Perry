@@ -199,6 +199,108 @@ extension NSString {
         return UnsafePointer(DataObjects.storage(data)?.bytes?.assumingMemoryBound(to: CChar.self))
     }
 
+    @ObjCClassMethod("stringWithCString:encoding:")
+    static func string(cString: UnsafePointer<CChar>?, encoding: UInt) -> String? {
+        guard let cString else { return nil }
+        return StringEncoding.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding)
+    }
+
+    @ObjCMethod("initWithCString:encoding:")
+    func initialize(cString: UnsafePointer<CChar>?, encoding: UInt) -> Self? {
+        guard let cString, let decoded = StringEncoding.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding) else {
+            return nil
+        }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
+    /// The deprecated C string methods, in the default C string encoding:
+    /// UTF-8, or Latin-1 for bytes that are not.
+    static func decodeDefault(_ cString: UnsafePointer<CChar>) -> String {
+        let bytes = UnsafeRawBufferPointer(start: cString, count: strlen(cString))
+        return StringEncoding.decode(bytes, 4) ?? StringEncoding.decode(bytes, 5) ?? ""
+    }
+
+    @ObjCClassMethod("stringWithCString:")
+    static func string(cString: UnsafePointer<CChar>?) -> String? { cString.map(decodeDefault) }
+
+    @ObjCMethod("initWithCString:")
+    func initialize(cString: UnsafePointer<CChar>?) -> Self? {
+        guard let cString else { return nil }
+        Storage.set(objcObject, StringStorage(NSString.decodeDefault(cString)))
+        return self
+    }
+
+    @ObjCClassMethod("defaultCStringEncoding") static func defaultCStringEncoding() -> UInt { 4 }
+
+    @ObjCClassMethod("stringWithCharacters:length:")
+    static func string(characters: UnsafePointer<UInt16>?, length: UInt) -> String {
+        guard let characters else { return "" }
+        return String(decoding: UnsafeBufferPointer(start: characters, count: Int(length)), as: UTF16.self)
+    }
+
+    @ObjCMethod("initWithCharacters:length:")
+    func initialize(characters: UnsafePointer<UInt16>?, length: UInt) -> Self {
+        Storage.set(objcObject, StringStorage(NSString.string(characters: characters, length: length)))
+        return self
+    }
+
+    @ObjCMethod("getCharacters:range:")
+    func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>?, range: NSRange) {
+        let units = Array(value.utf16), location = Int(range.location), length = Int(range.length)
+        guard let buffer, location + length <= units.count else {
+            foundationFatal("-[NSString getCharacters:range:]: Range \(location),\(length) out of bounds")
+        }
+        for index in 0..<length { buffer[index] = units[location + index] }
+    }
+
+    @ObjCMethod("getCharacters:")
+    func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>?) {
+        guard let buffer else { return }
+        for (index, unit) in value.utf16.enumerated() { buffer[index] = unit }
+    }
+
+    /// Escapes what may not appear in a URL, keeping what may, '%' among it.
+    @ObjCMethod("stringByAddingPercentEscapesUsingEncoding:")
+    func addingPercentEscapes(encoding: UInt) -> String? {
+        let legal = Set("!$&'()*+,-./:;=?@_~#[]%".utf8)
+        var escaped = ""
+        for byte in value.utf8 {
+            if (byte >= 0x30 && byte <= 0x39) || (byte >= 0x41 && byte <= 0x5A) || (byte >= 0x61 && byte <= 0x7A) || legal.contains(byte) {
+                escaped.unicodeScalars.append(Unicode.Scalar(byte))
+            } else {
+                escaped += "%" + String(byte, radix: 16, uppercase: true).leftPadded(to: 2)
+            }
+        }
+        return escaped
+    }
+
+    @ObjCMethod("stringByReplacingPercentEscapesUsingEncoding:")
+    func replacingPercentEscapes(encoding: UInt) -> String? {
+        var bytes: [UInt8] = []
+        var utf8 = Array(value.utf8)[...]
+        while let byte = utf8.popFirst() {
+            if byte == 0x25 {
+                guard utf8.count >= 2, let decoded = UInt8(String(decoding: utf8.prefix(2), as: UTF8.self), radix: 16) else { return nil }
+                bytes.append(decoded)
+                utf8 = utf8.dropFirst(2)
+            } else {
+                bytes.append(byte)
+            }
+        }
+        return bytes.withUnsafeBytes { StringEncoding.decode($0, encoding) }
+    }
+
+    /// The string in `encoding` and a terminating zero, when that fits in
+    /// `maxLength` bytes.
+    @ObjCMethod("getCString:maxLength:encoding:")
+    func getCString(_ buffer: UnsafeMutablePointer<CChar>?, maxLength: UInt, encoding: UInt) -> Bool {
+        guard let buffer, let bytes = StringEncoding.encode(value, encoding), bytes.count < Int(maxLength) else { return false }
+        for (index, byte) in bytes.enumerated() { buffer[index] = CChar(bitPattern: byte) }
+        buffer[bytes.count] = 0
+        return true
+    }
+
     @ObjCMethod("initWithData:encoding:")
     func initialize(data: NSData, encoding: UInt) -> Self? {
         data.data.withUnsafeBytes { StringEncoding.decode($0, encoding) }.map { decoded in
@@ -357,4 +459,8 @@ extension NSString {
 
     @ObjCMethod("longLongValue") func longLongValue() -> Int64 { Int64(Strings.integerPrefix(value)) }
     @ObjCMethod("floatValue") func floatValue() -> Float { value.withCString { strtof($0, nil) } }
+}
+
+extension String {
+    func leftPadded(to length: Int) -> String { String(repeating: "0", count: max(0, length - count)) + self }
 }
