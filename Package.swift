@@ -18,6 +18,8 @@ let package = Package(
         // C libraries over Linux's builds of the same libraries.
         .library(name: "Perryxml2", type: .dynamic, targets: ["PerryXML2"]),
         .library(name: "Perryz", type: .dynamic, targets: ["PerryZ"]),
+        .library(name: "PerryCXX", type: .dynamic, targets: ["PerryCXX"]),
+        .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
         .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
@@ -34,8 +36,12 @@ let package = Package(
         .library(name: "PerryAccelerate", type: .dynamic, targets: ["PerryAccelerate"]),
         // JavaScriptCore over WebKitGTK's.
         .library(name: "PerryJavaScriptCore", type: .dynamic, targets: ["PerryJavaScriptCore"]),
+        // AudioToolbox's system sounds, without audio output.
+        .library(name: "PerryAudioToolbox", type: .dynamic, targets: ["PerryAudioToolbox"]),
         // UserNotifications.
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
+        .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
+        .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -131,12 +137,16 @@ let package = Package(
             linkerSettings: [.linkedLibrary("xml2")]
         ),
         .target(name: "PerryZ", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("z")]),
+        // libc++ and libc++abi, and OpenAL: LLVM's and OpenAL Soft, opened at run time.
+        .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
+        .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
         .target(name: "PerryExpat", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("expat")]),
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
         .target(name: "PerryIconv"),
         .target(name: "PerryAccelerate", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("openblas")]),
+        .target(name: "PerryAudioToolbox"),
         .target(
             name: "PerryCompression",
             linkerSettings: [
@@ -188,6 +198,18 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // SystemConfiguration's network reachability, always offline.
+        .target(
+            name: "PerrySystemConfiguration",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // AVFoundation's audio player and session, without sound.
+        .target(
+            name: "PerryAVFoundation",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
         // every other store type in memory.
         .target(
@@ -207,7 +229,7 @@ let package = Package(
         .target(
             name: "CPerryImageIO",
             linkerSettings: [.linkedLibrary("png"), .linkedLibrary("jpeg"), .linkedLibrary("gif"), .linkedLibrary("webp"),
-                             .linkedLibrary("heif")]
+                             .linkedLibrary("heif"), .linkedLibrary("z")]
         ),
         // Silica (PureSwift, MIT): CoreGraphics' drawing model in Swift, and
         // its Cairo renderer. Copied from github.com/PureSwift/Silica.
