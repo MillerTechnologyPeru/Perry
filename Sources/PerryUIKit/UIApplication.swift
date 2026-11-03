@@ -1,3 +1,4 @@
+import CPerryGeometry
 import PerryObjCInterop
 
 /// UIApplicationState.
@@ -14,6 +15,10 @@ enum Application {
     nonisolated(unsafe) static var state = ApplicationState.background
     nonisolated(unsafe) static var connectedScenes: NSMutableSet?
     nonisolated(unsafe) static var openSessions: NSMutableSet?
+    /// The status bar, which is not drawn: what apps set, read back.
+    nonisolated(unsafe) static var statusBarHidden = false
+    nonisolated(unsafe) static var statusBarStyle = 0
+    nonisolated(unsafe) static var ignoringInteractionEvents = 0
 
     /// Posts a notification from the default center.
     static func post(_ name: String, object: NSObject?) {
@@ -35,6 +40,27 @@ open class UIApplication: UIResponder {
 
     @ObjCMethod("applicationState")
     func applicationState() -> Int { Application.state.rawValue }
+
+    // MARK: The status bar
+
+    @ObjCMethod("isStatusBarHidden") func isStatusBarHidden() -> Bool { Application.statusBarHidden }
+    @ObjCMethod("setStatusBarHidden:") func setStatusBarHidden(_ hidden: Bool) { Application.statusBarHidden = hidden }
+    @ObjCMethod("setStatusBarHidden:animated:") func setStatusBarHidden(_ hidden: Bool, animated: Bool) { Application.statusBarHidden = hidden }
+    @ObjCMethod("setStatusBarHidden:withAnimation:") func setStatusBarHidden(_ hidden: Bool, withAnimation animation: Int) {
+        Application.statusBarHidden = hidden
+    }
+    @ObjCMethod("statusBarStyle") func statusBarStyle() -> Int { Application.statusBarStyle }
+    @ObjCMethod("setStatusBarStyle:") func setStatusBarStyle(_ style: Int) { Application.statusBarStyle = style }
+    @ObjCMethod("setStatusBarStyle:animated:") func setStatusBarStyle(_ style: Int, animated: Bool) { Application.statusBarStyle = style }
+    @ObjCMethod("statusBarOrientation") func statusBarOrientation() -> Int { Screen.orientation }
+    @ObjCMethod("setStatusBarOrientation:") func setStatusBarOrientation(_ orientation: Int) {}
+    @ObjCMethod("setStatusBarOrientation:animated:") func setStatusBarOrientation(_ orientation: Int, animated: Bool) {}
+    @ObjCMethod("statusBarOrientationAnimationDuration") func statusBarOrientationAnimationDuration() -> Double { 0.3 }
+    @ObjCMethod("statusBarFrame")
+    func statusBarFrame() -> CGRect {
+        CGRect(x: 0, y: 0, width: Screen.bounds.width, height: Application.statusBarHidden ? 0 : Screen.safeAreaInsets.top)
+    }
+    @ObjCMethod("isIgnoringInteractionEvents") func isIgnoringInteractionEvents() -> Bool { Application.ignoringInteractionEvents > 0 }
 
     @ObjCMethod("connectedScenes")
     func connectedScenes() -> NSObject { Application.connectedScenes ?? NSMutableSet.empty() }
@@ -67,8 +93,10 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
     @ObjCMethod("applicationIconBadgeNumber") func applicationIconBadgeNumber() -> Int { 0 }
     @ObjCMethod("setApplicationIconBadgeNumber:") func setApplicationIconBadgeNumber(_ number: Int) {}
-    @ObjCMethod("beginIgnoringInteractionEvents") func beginIgnoringInteractionEvents() {}
-    @ObjCMethod("endIgnoringInteractionEvents") func endIgnoringInteractionEvents() {}
+    @ObjCMethod("beginIgnoringInteractionEvents") func beginIgnoringInteractionEvents() { Application.ignoringInteractionEvents += 1 }
+    @ObjCMethod("endIgnoringInteractionEvents") func endIgnoringInteractionEvents() {
+        Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
+    }
     @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
     @ObjCMethod("windows") func windows() -> NSObject { NSMutableArray.of(Windows.all.map { NSObject($0) }) }
 
