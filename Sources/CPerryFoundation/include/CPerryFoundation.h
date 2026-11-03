@@ -59,6 +59,7 @@ typedef enum perry_foundation_class_id {
     PERRY_CLASS_NSThread,
     PERRY_CLASS_NSUserDefaults,
     PERRY_CLASS_NSFileManager,
+    PERRY_CLASS_NSUserActivity,
     PERRY_CLASS_COUNT,
 } perry_foundation_class_id;
 
