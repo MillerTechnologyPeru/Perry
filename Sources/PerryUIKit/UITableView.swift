@@ -131,6 +131,9 @@ open class UITableViewCell: UIView {
         return self
     }
 
+    /// The width the accessory takes from the content view.
+    var accessoryWidth: CGFloat { cell.accessoryView.map { $0.state.bounds.width + 16 } ?? (cell.accessoryType != 0 ? 38 : 0) }
+
     func setUp(style: Int, reuseIdentifier: String?) {
         let cell = cell
         cell.style = style
@@ -270,7 +273,7 @@ open class UITableViewCell: UIView {
     @ObjCMethod("layoutSubviews")
     override func layoutSubviews() {
         let bounds = state.bounds
-        let accessoryWidth: CGFloat = cell.accessoryView.map { $0.state.bounds.width + 16 } ?? (cell.accessoryType != 0 ? 38 : 0)
+        let accessoryWidth = self.accessoryWidth
         let content = CGRect(x: 0, y: 0, width: bounds.width - accessoryWidth, height: bounds.height)
         cell.contentView?.sendSetFrame(content)
         cell.backgroundView?.sendSetFrame(bounds)
@@ -286,7 +289,7 @@ open class UITableViewCell: UIView {
             cell.separator = line
             addSubview(line)
         }
-        let hairline = 1 / Screen.scale
+        let hairline = Screen.pixel
         cell.separator?.sendSetFrame(CGRect(x: cell.separatorInset.left, y: bounds.height - hairline,
                                             width: max(bounds.width - cell.separatorInset.left - cell.separatorInset.right, 0),
                                             height: hairline))
@@ -312,8 +315,12 @@ open class UITableViewCell: UIView {
     }
 }
 
+/// Its margins are a cell's: 11 points above and below, 16 at the sides.
 @ObjCClass("UITableViewCellContentView")
-open class UITableViewCellContentView: UIView {}
+open class UITableViewCellContentView: UIView {
+    @ObjCMethod("layoutMargins")
+    override func layoutMargins() -> UIEdgeInsets { UIEdgeInsets(top: 11, left: 16, bottom: 11, right: 16) }
+}
 
 extension NSObject {
     @ObjCMethod("setSelected:animated:") func sendSetSelected(_ selected: Bool, animated: Bool)
@@ -426,6 +433,8 @@ final class TableState: ObjectState {
     var reusableHeaders: [String: [UIView]] = [:]
     var visibleCells: [RowPath: UITableViewCell] = [:]
     var visibleHeaders: [Int: UIView] = [:]
+    /// Header views asked for to measure, until they are shown.
+    var headerViews: [Int: UIView] = [:]
     var selected: Set<RowPath> = []
     var tableHeaderView: UIView?
     var tableFooterView: UIView?
@@ -690,7 +699,16 @@ open class UITableView: UIScrollView {
             if height >= 0 { return height }
         }
         guard hasHeader(section, source: source, delegate: delegate) else { return 0 }
-        return table.sectionHeaderHeight >= 0 ? table.sectionHeaderHeight : 28
+        if table.sectionHeaderHeight >= 0 { return table.sectionHeaderHeight }
+        // UITableViewAutomaticDimension: the delegate's view, sized by its
+        // constraints, which is kept to be shown.
+        if let delegate, delegate.responds(to: "tableView:viewForHeaderInSection:"),
+           let view = table.headerViews[section] ?? delegate.sendTableView(self, viewForHeaderInSection: section) {
+            table.headerViews[section] = view
+            let measured = view.as(UITableViewCell.self)?.cell.contentView ?? view
+            if let height = AutoLayout.fittingHeight(measured, width: state.bounds.width) { return height }
+        }
+        return 28
     }
 
     private func footerHeight(_ section: Int, source: NSObject?, delegate: NSObject?) -> CGFloat {
@@ -836,14 +854,20 @@ open class UITableView: UIScrollView {
         layOutHeaders(layout, bounds: bounds)
     }
 
-    /// A self-sizing row takes its cell's designed height, there being no
-    /// constraints solved to size it; the layout is redone if that changes it.
+    /// A self-sizing row takes the height its content view's constraints
+    /// give it at the row's width, and the separator's; else the height the
+    /// cell was designed at. The layout is redone if that changes it.
     private func measure(_ cell: UITableViewCell, at path: RowPath) {
-        guard table.automaticRows.contains(path), cell.cell.designHeight > 0,
-              table.measuredHeights[path] != cell.cell.designHeight else { return }
+        guard table.automaticRows.contains(path) else { return }
+        var height = cell.cell.designHeight
+        if let content = cell.cell.contentView {
+            let width = state.bounds.width - cell.accessoryWidth
+            if let fitting = AutoLayout.fittingHeight(content, width: width) { height = fitting + Screen.pixel }
+        }
+        guard height > 0, table.measuredHeights[path] != height else { return }
         let estimated = table.measuredHeights[path] ?? automaticRowHeight
-        table.measuredHeights[path] = cell.cell.designHeight
-        if estimated != cell.cell.designHeight { table.layout = nil }
+        table.measuredHeights[path] = height
+        if estimated != height { table.layout = nil }
     }
 
     private func show(_ cell: UITableViewCell, at path: RowPath) {
@@ -899,7 +923,7 @@ open class UITableView: UIScrollView {
             if let shown = table.visibleHeaders[section] {
                 view = shown
             } else if let delegate, delegate.responds(to: "tableView:viewForHeaderInSection:"),
-                      let custom = delegate.sendTableView(self, viewForHeaderInSection: section) {
+                      let custom = table.headerViews.removeValue(forKey: section) ?? delegate.sendTableView(self, viewForHeaderInSection: section) {
                 view = custom
                 table.visibleHeaders[section] = view
             } else {
@@ -926,6 +950,7 @@ open class UITableView: UIScrollView {
         table.visibleHeaders = [:]
         table.selected = []
         table.measuredHeights = [:]
+        table.headerViews = [:]
         invalidate()
     }
 
