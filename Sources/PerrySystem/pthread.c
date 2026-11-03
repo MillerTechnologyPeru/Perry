@@ -405,28 +405,128 @@ int darwin_pthread_attr_getdetachstate(const pthread_attr_t *attributes, int *st
 }
 
 // pthread_key_t is 8 bytes on Darwin and 4 on Linux: write all 8.
+// Darwin keeps a thread's values in an array of words in its pthread_t,
+// and runtimes such as Mono read another thread's values there directly,
+// at an offset they find by probing: thread + offset + key * 8. glibc
+// keeps its first 32 keys' values in its pthread_t too, as {sequence,
+// value} pairs of 16 bytes. So Darwin keys are numbered from where their
+// values are: key_base + 2 * the glibc key, key_base found at startup so
+// that the offset such reading needs is iOS's on arm64, 0xe0, which Mono
+// tries first.
+//
+// Only glibc's first 32 keys live in its pthread_t, and the process's own
+// libraries take keys before Darwin code runs, so the low keys still free
+// are kept back as early as can be, for Darwin code first. Each is made with a
+// destructor of its own that calls the one Darwin code gives.
+enum { RESERVED_KEYS = 30 };
+static pthread_key_t reserved_keys[RESERVED_KEYS];
+static void (*reserved_destructors[RESERVED_KEYS])(void *);
+static int reserved_state[RESERVED_KEYS];   // 0 missing, 1 free, 2 in use
+static pthread_mutex_t reserved_lock = PTHREAD_MUTEX_INITIALIZER;
+static long key_base;
+
+enum { DARWIN_TSD_OFFSET = 0xe0 };
+
+static unsigned long key_to_darwin(pthread_key_t key) { return (unsigned long)(key_base + 2 * (long)key); }
+static pthread_key_t key_to_linux(unsigned long key) { return (pthread_key_t)(((long)key - key_base) / 2); }
+
+#define RESERVED_DESTRUCTOR(n) \
+    static void reserved_destructor_##n(void *value) { if (reserved_destructors[n]) reserved_destructors[n](value); }
+RESERVED_DESTRUCTOR(0) RESERVED_DESTRUCTOR(1) RESERVED_DESTRUCTOR(2) RESERVED_DESTRUCTOR(3)
+RESERVED_DESTRUCTOR(4) RESERVED_DESTRUCTOR(5) RESERVED_DESTRUCTOR(6) RESERVED_DESTRUCTOR(7)
+RESERVED_DESTRUCTOR(8) RESERVED_DESTRUCTOR(9) RESERVED_DESTRUCTOR(10) RESERVED_DESTRUCTOR(11)
+RESERVED_DESTRUCTOR(12) RESERVED_DESTRUCTOR(13) RESERVED_DESTRUCTOR(14) RESERVED_DESTRUCTOR(15)
+RESERVED_DESTRUCTOR(16) RESERVED_DESTRUCTOR(17) RESERVED_DESTRUCTOR(18) RESERVED_DESTRUCTOR(19)
+RESERVED_DESTRUCTOR(20) RESERVED_DESTRUCTOR(21) RESERVED_DESTRUCTOR(22) RESERVED_DESTRUCTOR(23)
+RESERVED_DESTRUCTOR(24) RESERVED_DESTRUCTOR(25) RESERVED_DESTRUCTOR(26) RESERVED_DESTRUCTOR(27)
+RESERVED_DESTRUCTOR(28) RESERVED_DESTRUCTOR(29)
+
+static void (*const reserved_trampolines[RESERVED_KEYS])(void *) = {
+    reserved_destructor_0, reserved_destructor_1, reserved_destructor_2, reserved_destructor_3,
+    reserved_destructor_4, reserved_destructor_5, reserved_destructor_6, reserved_destructor_7,
+    reserved_destructor_8, reserved_destructor_9, reserved_destructor_10, reserved_destructor_11,
+    reserved_destructor_12, reserved_destructor_13, reserved_destructor_14, reserved_destructor_15,
+    reserved_destructor_16, reserved_destructor_17, reserved_destructor_18, reserved_destructor_19,
+    reserved_destructor_20, reserved_destructor_21, reserved_destructor_22, reserved_destructor_23,
+    reserved_destructor_24, reserved_destructor_25, reserved_destructor_26, reserved_destructor_27,
+    reserved_destructor_28, reserved_destructor_29,
+};
+
+__attribute__((constructor(101)))
+static void reserve_keys(void) {
+    for (int i = 0; i < RESERVED_KEYS; i++) {
+        pthread_key_t key;
+        if (pthread_key_create(&key, reserved_trampolines[i]) != 0)
+            break;
+        // Past the first block it is no use for this.
+        if (key >= 32) {
+            pthread_key_delete(key);
+            break;
+        }
+        reserved_keys[i] = key;
+        reserved_state[i] = 1;
+    }
+    // Where the first reserved key's value is, in words from the pthread_t.
+    if (reserved_state[0]) {
+        static int canary;
+        pthread_setspecific(reserved_keys[0], &canary);
+        void **words = (void **)pthread_self();
+        for (unsigned long word = 0; word < 512; word++) {
+            // The value's word is DARWIN_TSD_OFFSET / 8 + its Darwin key.
+            if (words[word] == &canary) {
+                key_base = (long)word - DARWIN_TSD_OFFSET / 8 - 2 * (long)reserved_keys[0];
+                break;
+            }
+        }
+        pthread_setspecific(reserved_keys[0], NULL);
+    }
+}
+
 int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_create);
 int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) {
+    pthread_mutex_lock(&reserved_lock);
+    for (int i = 0; i < RESERVED_KEYS; i++) {
+        if (reserved_state[i] == 1) {
+            reserved_state[i] = 2;
+            reserved_destructors[i] = destructor;
+            pthread_mutex_unlock(&reserved_lock);
+            *key = key_to_darwin(reserved_keys[i]);
+            return 0;
+        }
+    }
+    pthread_mutex_unlock(&reserved_lock);
     pthread_key_t linux_key;
     int error = pthread_key_create(&linux_key, destructor);
     if (!error)
-        *key = linux_key;
+        *key = key_to_darwin(linux_key);
     return result(error);
 }
 
 int darwin_pthread_key_delete(unsigned long key) DARWIN_SYMBOL(pthread_key_delete);
 int darwin_pthread_key_delete(unsigned long key) {
-    return result(pthread_key_delete((pthread_key_t)key));
+    pthread_mutex_lock(&reserved_lock);
+    for (int i = 0; i < RESERVED_KEYS; i++) {
+        if (reserved_state[i] == 2 && reserved_keys[i] == key_to_linux(key)) {
+            // Kept for reuse: the calling thread's value goes, as with deletion.
+            reserved_state[i] = 1;
+            reserved_destructors[i] = NULL;
+            pthread_setspecific(reserved_keys[i], NULL);
+            pthread_mutex_unlock(&reserved_lock);
+            return 0;
+        }
+    }
+    pthread_mutex_unlock(&reserved_lock);
+    return result(pthread_key_delete(key_to_linux(key)));
 }
 
 void *darwin_pthread_getspecific(unsigned long key) DARWIN_SYMBOL(pthread_getspecific);
 void *darwin_pthread_getspecific(unsigned long key) {
-    return pthread_getspecific((pthread_key_t)key);
+    return pthread_getspecific(key_to_linux(key));
 }
 
 int darwin_pthread_setspecific(unsigned long key, const void *value) DARWIN_SYMBOL(pthread_setspecific);
 int darwin_pthread_setspecific(unsigned long key, const void *value) {
-    return result(pthread_setspecific((pthread_key_t)key, value));
+    return result(pthread_setspecific(key_to_linux(key), value));
 }
 
 // Darwin names only the calling thread. Linux keeps 15 bytes of a name.
