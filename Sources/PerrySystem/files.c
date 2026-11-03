@@ -19,7 +19,10 @@
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 // MARK: - Flags
@@ -313,6 +316,96 @@ int darwin_fstat(int fd, struct darwin_stat *out) {
 int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int flags) DARWIN_SYMBOL(fstatat);
 int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int flags) {
     return stat_at(directory_to_linux(directory), path, at_flags_to_linux(flags), out);
+}
+
+// MARK: - File systems
+
+// struct statfs with 64-bit inodes, as on arm64.
+struct darwin_statfs {
+    uint32_t f_bsize;
+    int32_t f_iosize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    int32_t f_fsid[2];
+    uint32_t f_owner;
+    uint32_t f_type;
+    uint32_t f_flags;
+    uint32_t f_fssubtype;
+    char f_fstypename[16];
+    char f_mntonname[1024];
+    char f_mntfromname[1024];
+    uint32_t f_flags_ext;
+    uint32_t f_reserved[7];
+};
+
+_Static_assert(sizeof(struct darwin_statfs) == 2168, "struct statfs is 2168 bytes on Darwin");
+
+enum { DARWIN_MNT_RDONLY = 0x1, DARWIN_MNT_NOSUID = 0x8, DARWIN_MNT_LOCAL = 0x1000 };
+
+// Every file system is a local APFS volume mounted at /, as an app's
+// container is on iOS: the sizes are the real ones.
+static void statfs_to_darwin(const struct statfs *info, struct darwin_statfs *out) {
+    memset(out, 0, sizeof *out);
+    out->f_bsize = (uint32_t)info->f_bsize;
+    out->f_iosize = (int32_t)info->f_bsize;
+    out->f_blocks = info->f_blocks;
+    out->f_bfree = info->f_bfree;
+    out->f_bavail = info->f_bavail;
+    out->f_files = info->f_files;
+    out->f_ffree = info->f_ffree;
+    memcpy(out->f_fsid, &info->f_fsid, sizeof out->f_fsid);
+    out->f_owner = 0;
+    out->f_type = 0x1a;
+    out->f_flags = DARWIN_MNT_LOCAL | (info->f_flags & ST_RDONLY ? DARWIN_MNT_RDONLY : 0) |
+                   (info->f_flags & ST_NOSUID ? DARWIN_MNT_NOSUID : 0);
+    strcpy(out->f_fstypename, "apfs");
+    strcpy(out->f_mntonname, "/");
+    strcpy(out->f_mntfromname, "/dev/disk1s1");
+}
+
+int darwin_statfs_path(const char *path, struct darwin_statfs *out) DARWIN_SYMBOL(statfs);
+int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
+    struct statfs info;
+    if (statfs(path, &info) != 0) return -1;
+    statfs_to_darwin(&info, out);
+    return 0;
+}
+
+int darwin_fstatfs(int fd, struct darwin_statfs *out) DARWIN_SYMBOL(fstatfs);
+int darwin_fstatfs(int fd, struct darwin_statfs *out) {
+    struct statfs info;
+    if (fstatfs(fd, &info) != 0) return -1;
+    statfs_to_darwin(&info, out);
+    return 0;
+}
+
+// MARK: - Times and file system control
+
+// Darwin's struct timeval: a 32-bit tv_usec, then padding.
+struct darwin_file_timeval {
+    int64_t tv_sec;
+    int32_t tv_usec;
+};
+
+int darwin_futimes(int fd, const struct darwin_file_timeval times[2]) DARWIN_SYMBOL(futimes);
+int darwin_futimes(int fd, const struct darwin_file_timeval times[2]) {
+    if (!times) return futimes(fd, NULL);
+    struct timeval converted[2] = {
+        { .tv_sec = times[0].tv_sec, .tv_usec = times[0].tv_usec },
+        { .tv_sec = times[1].tv_sec, .tv_usec = times[1].tv_usec },
+    };
+    return futimes(fd, converted);
+}
+
+// File system controls are HFS's and APFS's, which no Linux file system has.
+int darwin_fsctl(const char *path, unsigned long request, void *data, unsigned options) DARWIN_SYMBOL(fsctl);
+int darwin_fsctl(const char *path, unsigned long request, void *data, unsigned options) {
+    (void)path; (void)request; (void)data; (void)options;
+    errno = ENOTSUP;
+    return -1;
 }
 
 // MARK: - The other *at functions
