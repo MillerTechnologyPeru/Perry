@@ -231,8 +231,8 @@ enum MethodList {
 }
 
 /// Reads ivar lists.
-enum IvarList {
-    static func forEach(_ list: UnsafeRawPointer, _ body: (UnsafeMutablePointer<perry_ivar>) -> Void) {
+public enum IvarList {
+    public static func forEach(_ list: UnsafeRawPointer, _ body: (UnsafeMutablePointer<perry_ivar>) -> Void) {
         let entsize = Int(list.load(as: UInt32.self) & MethodList.entsizeMask)
         let count = Int(list.load(fromByteOffset: 4, as: UInt32.self))
         for index in 0..<count {
