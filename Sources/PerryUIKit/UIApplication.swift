@@ -46,6 +46,32 @@ open class UIApplication: UIResponder {
     @ObjCMethod("keyWindow")
     func keyWindow() -> NSObject? { Windows.key.map(NSObject.init) }
 
+    /// No other app can open URLs here: each request says so.
+    @ObjCMethod("canOpenURL:") func canOpenURL(_ url: NSObject?) -> Bool { false }
+
+    @ObjCMethod("openURL:")
+    func openURL(_ url: NSObject?) -> Bool {
+        uikitWarning("no app to open \(url?.describedByObject() ?? "a URL")")
+        return false
+    }
+
+    @ObjCMethod("openURL:options:completionHandler:")
+    func openURL(_ url: NSObject?, options: NSObject?, completionHandler: ObjCBlock?) {
+        _ = openURL(url)
+        completionHandler.map { Blocks.call($0, false) }
+    }
+
+    @ObjCMethod("isIdleTimerDisabled") func isIdleTimerDisabled() -> Bool { false }
+    @ObjCMethod("setIdleTimerDisabled:") func setIdleTimerDisabled(_ disabled: Bool) {}
+    @ObjCMethod("isNetworkActivityIndicatorVisible") func isNetworkActivityIndicatorVisible() -> Bool { false }
+    @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
+    @ObjCMethod("applicationIconBadgeNumber") func applicationIconBadgeNumber() -> Int { 0 }
+    @ObjCMethod("setApplicationIconBadgeNumber:") func setApplicationIconBadgeNumber(_ number: Int) {}
+    @ObjCMethod("beginIgnoringInteractionEvents") func beginIgnoringInteractionEvents() {}
+    @ObjCMethod("endIgnoringInteractionEvents") func endIgnoringInteractionEvents() {}
+    @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
+    @ObjCMethod("windows") func windows() -> NSObject { NSMutableArray.of(Windows.all.map { NSObject($0) }) }
+
     @ObjCMethod("supportsMultipleScenes")
     func supportsMultipleScenes() -> Bool { false }
 
