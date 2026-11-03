@@ -14,6 +14,7 @@ final class StoreDescriptionState: ObjectState {
     var addsAsynchronously = false
     var migratesAutomatically = true
     var infersMappingModel = true
+    var cloudKitContainerOptions: NSObject?
 }
 
 @ObjCClass("NSPersistentStoreDescription")
@@ -40,6 +41,12 @@ open class NSPersistentStoreDescription: NSObject {
     func dealloc() {
         NSPersistentStoreDescription.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: NSPersistentStoreDescription.objCClass.pointer)
+    }
+
+    /// Kept; the store does not sync through CloudKit.
+    @ObjCMethod("cloudKitContainerOptions") func cloudKitContainerOptions() -> NSObject? { state.cloudKitContainerOptions }
+    @ObjCMethod("setCloudKitContainerOptions:") func setCloudKitContainerOptions(_ options: NSObject?) {
+        state.cloudKitContainerOptions = options
     }
 
     @ObjCMethod("type") func type() -> String { state.type }
@@ -243,6 +250,9 @@ enum Keys {
     static let NSPersistentStoreUbiquitousContentNameKey = "NSPersistentStoreUbiquitousContentNameKey"
     static let NSPersistentStoreUbiquitousContentURLKey = "NSPersistentStoreUbiquitousContentURLKey"
     static let NSPersistentStoreRemoveUbiquitousMetadataOption = "NSPersistentStoreRemoveUbiquitousMetadataOption"
+    static let NSPersistentHistoryTrackingKey = "NSPersistentHistoryTrackingKey"
+    static let NSPersistentStoreRemoteChangeNotificationPostOptionKey = "NSPersistentStoreRemoteChangeNotificationOptionKey"
+    static let NSPersistentStoreRemoteChangeNotification = "NSPersistentStoreRemoteChangeNotification"
 }
 
 /// The coordinator's store-change notifications, which a store that does not
@@ -256,4 +266,46 @@ enum StoreNotifications {
     static let NSAddedPersistentStoresKey = "added"
     static let NSRemovedPersistentStoresKey = "removed"
     static let NSUUIDChangedPersistentStoresKey = "UUIDChangedPersistentStores"
+}
+
+// MARK: - CloudKit
+
+/// A container whose stores would sync through CloudKit. With no iCloud
+/// account here, it is a local container: its stores never sync.
+@ObjCClass("NSPersistentCloudKitContainer")
+open class NSPersistentCloudKitContainer: NSPersistentContainer {
+    @ObjCMethod("initializeCloudKitSchemaWithOptions:error:")
+    func initializeCloudKitSchema(options: UInt, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool { true }
+
+    @ObjCMethod("canUpdateRecordForManagedObjectWithID:") func canUpdateRecord(forManagedObjectWithID id: NSObject?) -> Bool { true }
+    @ObjCMethod("canDeleteRecordForManagedObjectWithID:") func canDeleteRecord(forManagedObjectWithID id: NSObject?) -> Bool { true }
+    @ObjCMethod("canModifyManagedObjectsInStore:") func canModifyManagedObjects(in store: NSObject?) -> Bool { true }
+}
+
+final class CloudKitOptionsState: ObjectState {
+    var containerIdentifier: String?
+    /// CKDatabaseScope: private 2.
+    var databaseScope = 2
+}
+
+@ObjCClass("NSPersistentCloudKitContainerOptions")
+open class NSPersistentCloudKitContainerOptions: NSObject {
+    static let states = StateTable<CloudKitOptionsState>()
+    var state: CloudKitOptionsState { NSPersistentCloudKitContainerOptions.states[objcObject] }
+
+    @ObjCMethod("initWithContainerIdentifier:")
+    func initialize(containerIdentifier: String?) -> Self {
+        state.containerIdentifier = containerIdentifier
+        return self
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        NSPersistentCloudKitContainerOptions.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSPersistentCloudKitContainerOptions.objCClass.pointer)
+    }
+
+    @ObjCMethod("containerIdentifier") func containerIdentifier() -> String? { state.containerIdentifier }
+    @ObjCMethod("databaseScope") func databaseScope() -> Int { state.databaseScope }
+    @ObjCMethod("setDatabaseScope:") func setDatabaseScope(_ scope: Int) { state.databaseScope = scope }
 }
