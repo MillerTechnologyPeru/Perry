@@ -91,6 +91,10 @@ final class CellState: ObjectState {
     /// The background colors of the content's views, cleared while the
     /// cell shows highlighted.
     var clearedBackgrounds: [(view: UIView, color: UIColor)] = []
+    /// A storyboard prototype's segues, performed when the cell or its
+    /// accessory is tapped.
+    var selectionSegueTemplate: UIStoryboardSegueTemplate?
+    var accessoryActionSegueTemplate: UIStoryboardSegueTemplate?
 }
 
 @ObjCClass("UITableViewCell")
@@ -104,6 +108,14 @@ open class UITableViewCell: UIView {
         setUp(style: 0, reuseIdentifier: nil)
         return self
     }
+
+    @ObjCMethod("selectionSegueTemplate") func selectionSegueTemplate() -> UIStoryboardSegueTemplate? { cell.selectionSegueTemplate }
+    @ObjCMethod("setSelectionSegueTemplate:")
+    func setSelectionSegueTemplate(_ template: UIStoryboardSegueTemplate?) { cell.selectionSegueTemplate = template }
+    @ObjCMethod("accessoryActionSegueTemplate")
+    func accessoryActionSegueTemplate() -> UIStoryboardSegueTemplate? { cell.accessoryActionSegueTemplate }
+    @ObjCMethod("setAccessoryActionSegueTemplate:")
+    func setAccessoryActionSegueTemplate(_ template: UIStoryboardSegueTemplate?) { cell.accessoryActionSegueTemplate = template }
 
     /// A cell 320 by 44 points, until the table sizes it.
     @ObjCMethod("initWithStyle:reuseIdentifier:")
@@ -1103,6 +1115,10 @@ open class UITableView: UIScrollView {
         if let delegate, delegate.responds(to: "tableView:didSelectRowAtIndexPath:") {
             delegate.sendTableView(self, didSelectRowAt: chosen)
         }
+        // A prototype cell's segue, with the cell as sender.
+        if let cell = table.visibleCells[RowPath(chosen)], let template = cell.cell.selectionSegueTemplate {
+            template.perform(cell)
+        }
     }
 
     // MARK: Scrolling
@@ -1225,3 +1241,11 @@ open class UITableViewController: UIViewController {
 extension NSObject {
     @ObjCMethod("initWithFrame:style:") func initializeTable(frame: CGRect, style: Int) -> NSObject
 }
+
+/// UIKit's private classes table view cells archive their labels and
+/// separators as.
+@ObjCClass("UITableViewLabel")
+open class UITableViewLabel: UILabel {}
+
+@ObjCClass("_UITableViewCellSeparatorView")
+open class UITableViewCellSeparatorView: UIView {}
