@@ -1,6 +1,8 @@
 #ifndef PERRY_SYSTEM_H
 #define PERRY_SYSTEM_H
 
+#include <stdint.h>
+
 // libPerrySystem: the Darwin libSystem ABI implemented over glibc.
 //
 // Exported ELF symbols use the exact Mach-O symbol names (with the leading
@@ -20,6 +22,17 @@ int *darwin_error(void) DARWIN_SYMBOL(__error);
 
 // Linux's number for a Darwin signal, or -1 where Linux has none.
 int perry_signal_to_linux(int signal);
+
+// A section's header in a Mach-O image's load commands (section_64).
+struct darwin_section_64 {
+    char sectname[16], segname[16];
+    uint64_t addr, size;
+    uint32_t offset, align, reloff, nreloc, flags, reserved1, reserved2, reserved3;
+};
+
+// The section's header in a mapped image, or NULL.
+const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section)
+    DARWIN_SYMBOL(getsectbynamefromheader_64);
 
 // The loader's symbol lookup (perry_startup_info.lookup_symbol), once
 // libSystem has started: by Mach-O name, in a library or (NULL) anywhere.
