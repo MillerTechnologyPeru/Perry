@@ -33,6 +33,31 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     return true
 }
 
+/// Foundation's data symbols, which the loader asks for while binding
+/// images: the empty array and dictionary @[] and @{} compile to.
+func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { EmptyCollections.slots[name].map(UnsafeMutableRawPointer.init) }
+
+/// Once Foundation's classes are defined: the empty collections.
+func providerDidStart(_ info: perry_startup_info) { EmptyCollections.fill() }
+
+/// __NSArray0__ and __NSDictionary0__: variables holding the empty array
+/// and dictionary every empty literal shares.
+enum EmptyCollections {
+    nonisolated(unsafe) static let slots: [String: UnsafeMutablePointer<UnsafeMutableRawPointer?>] = {
+        func slot() -> UnsafeMutablePointer<UnsafeMutableRawPointer?> {
+            let slot = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 1)
+            slot.initialize(to: nil)
+            return slot
+        }
+        return ["___NSArray0__": slot(), "___NSDictionary0__": slot()]
+    }()
+
+    static func fill() {
+        slots["___NSArray0__"]?.pointee = Arrays.make([])
+        slots["___NSDictionary0__"]?.pointee = Dictionaries.make([])
+    }
+}
+
 // MARK: - NSLog
 
 /// Writes one NSLog line to stderr in Foundation's format:
