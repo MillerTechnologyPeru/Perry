@@ -59,6 +59,9 @@ enum MoreNotifications {
     static let UIMenuControllerDidHideMenuNotification = "UIMenuControllerDidHideMenuNotification"
     static let UIContentSizeCategoryDidChangeNotification = "UIContentSizeCategoryDidChangeNotification"
     static let UIKeyboardWillShowNotification = "UIKeyboardWillShowNotification"
+    static let UIKeyboardWillChangeFrameNotification = "UIKeyboardWillChangeFrameNotification"
+    static let UIKeyboardDidChangeFrameNotification = "UIKeyboardDidChangeFrameNotification"
+    static let UILocalNotificationDefaultSoundName = "UILocalNotificationDefaultSoundName"
     static let UIKeyboardDidShowNotification = "UIKeyboardDidShowNotification"
     static let UIKeyboardWillHideNotification = "UIKeyboardWillHideNotification"
     static let UIKeyboardDidHideNotification = "UIKeyboardDidHideNotification"
@@ -68,9 +71,24 @@ enum MoreNotifications {
     static let UIDeviceOrientationDidChangeNotification = "UIDeviceOrientationDidChangeNotification"
     static let UITextViewTextDidChangeNotification = "UITextViewTextDidChangeNotification"
     static let UITextFieldTextDidChangeNotification = "UITextFieldTextDidChangeNotification"
+    static let UITextFieldTextDidBeginEditingNotification = "UITextFieldTextDidBeginEditingNotification"
+    static let UITextFieldTextDidEndEditingNotification = "UITextFieldTextDidEndEditingNotification"
     static let kCATransition = "transition"
     static let kCATransactionDisableActions = "disableActions"
     static let kCATransactionAnimationDuration = "animationDuration"
     static let kCATransactionAnimationTimingFunction = "animationTimingFunction"
     static let kCATransactionCompletionBlock = "completionBlock"
+}
+
+/// NSAttributedString's attribute names, as UIKit adds them.
+@ObjCConstants
+enum AttributeNames {
+    static let NSFontAttributeName = "NSFont"
+    static let NSForegroundColorAttributeName = "NSColor"
+    static let NSBackgroundColorAttributeName = "NSBackgroundColor"
+    static let NSParagraphStyleAttributeName = "NSParagraphStyle"
+    static let NSLinkAttributeName = "NSLink"
+    static let NSKernAttributeName = "NSKern"
+    static let NSUnderlineStyleAttributeName = "NSUnderline"
+    static let NSStrikethroughStyleAttributeName = "NSStrikethrough"
 }
