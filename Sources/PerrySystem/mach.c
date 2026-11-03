@@ -1,0 +1,631 @@
+// The Mach calls runtimes such as Mono make: task and thread ports,
+// semaphores, clocks, memory, and suspending threads to read and set their
+// registers, which garbage collectors do. A thread's port is its Linux
+// thread ID. Suspending a thread sends it a signal whose handler records
+// the interrupted context and waits until the thread is resumed; its
+// registers are read from and written to that context, in Darwin's
+// layouts. Also dlopen and dlsym, which find symbols as the loader does,
+// and the Mach-O section lookup.
+
+#define _GNU_SOURCE
+#include "PerrySystem.h"
+
+#include <dirent.h>
+#include <errno.h>
+#include <linux/futex.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <time.h>
+#include <ucontext.h>
+#include <unistd.h>
+
+typedef uint32_t mach_port_t;
+typedef int kern_return_t;
+
+enum {
+    KERN_SUCCESS = 0,
+    KERN_INVALID_ADDRESS = 1,
+    KERN_INVALID_ARGUMENT = 4,
+    KERN_FAILURE = 5,
+    KERN_RESOURCE_SHORTAGE = 6,
+    KERN_ABORTED = 14,
+    KERN_OPERATION_TIMED_OUT = 49,
+    TASK_PORT = 0x103,
+    HOST_PORT = 0x203,
+};
+
+static pid_t thread_id(void) { return (pid_t)syscall(SYS_gettid); }
+
+// MARK: - Ports
+
+mach_port_t darwin_mach_task_self DARWIN_SYMBOL(mach_task_self_) = TASK_PORT;
+
+mach_port_t darwin_mach_thread_self(void) DARWIN_SYMBOL(mach_thread_self);
+mach_port_t darwin_mach_thread_self(void) { return (mach_port_t)thread_id(); }
+
+mach_port_t darwin_mach_host_self(void) DARWIN_SYMBOL(mach_host_self);
+mach_port_t darwin_mach_host_self(void) { return HOST_PORT; }
+
+mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) DARWIN_SYMBOL(pthread_mach_thread_np);
+mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) {
+    // glibc keeps the kernel thread ID in its thread descriptor; only the
+    // calling thread's is asked for in practice.
+    return pthread_equal(thread, pthread_self()) ? (mach_port_t)thread_id() : 0;
+}
+
+kern_return_t darwin_mach_port_deallocate(mach_port_t task, mach_port_t port) DARWIN_SYMBOL(mach_port_deallocate);
+kern_return_t darwin_mach_port_deallocate(mach_port_t task, mach_port_t port) { (void)task; (void)port; return KERN_SUCCESS; }
+
+kern_return_t darwin_task_for_pid(mach_port_t task, int pid, mach_port_t *target) DARWIN_SYMBOL(task_for_pid);
+kern_return_t darwin_task_for_pid(mach_port_t task, int pid, mach_port_t *target) {
+    (void)task;
+    if (pid != getpid())
+        return KERN_FAILURE;
+    *target = TASK_PORT;
+    return KERN_SUCCESS;
+}
+
+// MARK: - Memory
+
+kern_return_t darwin_vm_allocate(mach_port_t task, uintptr_t *address, size_t size, int flags) DARWIN_SYMBOL(vm_allocate);
+kern_return_t darwin_vm_allocate(mach_port_t task, uintptr_t *address, size_t size, int flags) {
+    (void)task;
+    // VM_FLAGS_ANYWHERE is 1; otherwise at the address given.
+    void *hint = (flags & 1) ? NULL : (void *)*address;
+    void *memory = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | (hint ? MAP_FIXED_NOREPLACE : 0), -1, 0);
+    if (memory == MAP_FAILED)
+        return KERN_RESOURCE_SHORTAGE;
+    *address = (uintptr_t)memory;
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) DARWIN_SYMBOL(vm_deallocate);
+kern_return_t darwin_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) {
+    (void)task;
+    if (size && munmap((void *)address, size) != 0)
+        return KERN_INVALID_ADDRESS;
+    return KERN_SUCCESS;
+}
+
+// Maps `size` bytes from `source_address` again at `*address` (fixed, or
+// anywhere with VM_FLAGS_ANYWHERE): as a copy, which is the same for what
+// is remapped here, read-only code such as Mono's trampoline pages. The
+// copy keeps the source's protection.
+kern_return_t darwin_vm_remap(mach_port_t target, uintptr_t *address, size_t size, uintptr_t mask, int flags, mach_port_t source,
+                              uintptr_t source_address, int copy, int *current, int *maximum, unsigned inheritance)
+    DARWIN_SYMBOL(vm_remap);
+kern_return_t darwin_vm_remap(mach_port_t target, uintptr_t *address, size_t size, uintptr_t mask, int flags, mach_port_t source,
+                              uintptr_t source_address, int copy, int *current, int *maximum, unsigned inheritance) {
+    (void)target; (void)mask; (void)source; (void)copy; (void)inheritance;
+    int protection = PROT_READ;
+    FILE *maps = fopen("/proc/self/maps", "r");
+    if (maps) {
+        char line[512];
+        while (fgets(line, sizeof(line), maps)) {
+            unsigned long start, end;
+            char perms[5];
+            if (sscanf(line, "%lx-%lx %4s", &start, &end, perms) == 3 && source_address >= start && source_address < end) {
+                protection = (perms[0] == 'r' ? PROT_READ : 0) | (perms[1] == 'w' ? PROT_WRITE : 0) | (perms[2] == 'x' ? PROT_EXEC : 0);
+                break;
+            }
+        }
+        fclose(maps);
+    }
+    void *hint = (flags & 1) ? NULL : (void *)*address;
+    void *memory = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | (hint ? MAP_FIXED : 0), -1, 0);
+    if (memory == MAP_FAILED)
+        return KERN_RESOURCE_SHORTAGE;
+    memcpy(memory, (const void *)source_address, size);
+    if (mprotect(memory, size, protection) != 0) {
+        munmap(memory, size);
+        return KERN_FAILURE;
+    }
+    if (protection & PROT_EXEC)
+        __builtin___clear_cache((char *)memory, (char *)memory + size);
+    *address = (uintptr_t)memory;
+    // VM_PROT_READ 1, VM_PROT_WRITE 2, VM_PROT_EXECUTE 4, as Linux's.
+    if (current)
+        *current = protection;
+    if (maximum)
+        *maximum = protection;
+    return KERN_SUCCESS;
+}
+
+void darwin_sys_icache_invalidate(void *start, size_t length) DARWIN_SYMBOL(sys_icache_invalidate);
+void darwin_sys_icache_invalidate(void *start, size_t length) {
+    __builtin___clear_cache((char *)start, (char *)start + length);
+}
+
+// MARK: - Clocks
+
+typedef struct { uint32_t tv_sec; int32_t tv_nsec; } mach_timespec;
+
+kern_return_t darwin_host_get_clock_service(mach_port_t host, int clock, mach_port_t *service) DARWIN_SYMBOL(host_get_clock_service);
+kern_return_t darwin_host_get_clock_service(mach_port_t host, int clock, mach_port_t *service) {
+    (void)host;
+    // SYSTEM_CLOCK 0 counts from boot; CALENDAR_CLOCK 1 is the time of day.
+    *service = (mach_port_t)clock + 1;
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_clock_get_time(mach_port_t service, mach_timespec *time) DARWIN_SYMBOL(clock_get_time);
+kern_return_t darwin_clock_get_time(mach_port_t service, mach_timespec *time) {
+    struct timespec now;
+    clock_gettime(service == 2 ? CLOCK_REALTIME : CLOCK_MONOTONIC, &now);
+    time->tv_sec = (uint32_t)now.tv_sec;
+    time->tv_nsec = (int32_t)now.tv_nsec;
+    return KERN_SUCCESS;
+}
+
+// TIME_ABSOLUTE 0 sleeps until a time of the clock; TIME_RELATIVE 1 for a while.
+kern_return_t darwin_clock_sleep(mach_port_t service, int type, mach_timespec time, mach_timespec *remaining) DARWIN_SYMBOL(clock_sleep);
+kern_return_t darwin_clock_sleep(mach_port_t service, int type, mach_timespec time, mach_timespec *remaining) {
+    struct timespec request = { time.tv_sec, time.tv_nsec };
+    int result = type == 0 ? clock_nanosleep(service == 2 ? CLOCK_REALTIME : CLOCK_MONOTONIC, TIMER_ABSTIME, &request, NULL)
+                           : nanosleep(&request, NULL);
+    if (remaining)
+        darwin_clock_get_time(service, remaining);
+    return result == 0 ? KERN_SUCCESS : KERN_ABORTED;
+}
+
+// MARK: - Semaphores
+
+// A semaphore's port indexes this table; ports start at 1.
+static sem_t *semaphores[4096];
+static pthread_mutex_t semaphore_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static sem_t *semaphore(mach_port_t port) { return port > 0 && port <= 4096 ? semaphores[port - 1] : NULL; }
+
+kern_return_t darwin_semaphore_create(mach_port_t task, mach_port_t *port, int policy, int value) DARWIN_SYMBOL(semaphore_create);
+kern_return_t darwin_semaphore_create(mach_port_t task, mach_port_t *port, int policy, int value) {
+    (void)task; (void)policy;
+    sem_t *created = malloc(sizeof(sem_t));
+    if (!created || sem_init(created, 0, (unsigned)value) != 0) {
+        free(created);
+        return KERN_INVALID_ARGUMENT;
+    }
+    pthread_mutex_lock(&semaphore_lock);
+    for (mach_port_t i = 0; i < 4096; i++) {
+        if (!semaphores[i]) {
+            semaphores[i] = created;
+            pthread_mutex_unlock(&semaphore_lock);
+            *port = i + 1;
+            return KERN_SUCCESS;
+        }
+    }
+    pthread_mutex_unlock(&semaphore_lock);
+    sem_destroy(created);
+    free(created);
+    return KERN_RESOURCE_SHORTAGE;
+}
+
+kern_return_t darwin_semaphore_destroy(mach_port_t task, mach_port_t port) DARWIN_SYMBOL(semaphore_destroy);
+kern_return_t darwin_semaphore_destroy(mach_port_t task, mach_port_t port) {
+    (void)task;
+    pthread_mutex_lock(&semaphore_lock);
+    sem_t *destroyed = semaphore(port);
+    if (destroyed)
+        semaphores[port - 1] = NULL;
+    pthread_mutex_unlock(&semaphore_lock);
+    if (!destroyed)
+        return KERN_INVALID_ARGUMENT;
+    sem_destroy(destroyed);
+    free(destroyed);
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_semaphore_signal(mach_port_t port) DARWIN_SYMBOL(semaphore_signal);
+kern_return_t darwin_semaphore_signal(mach_port_t port) {
+    sem_t *target = semaphore(port);
+    return target && sem_post(target) == 0 ? KERN_SUCCESS : KERN_INVALID_ARGUMENT;
+}
+
+kern_return_t darwin_semaphore_wait(mach_port_t port) DARWIN_SYMBOL(semaphore_wait);
+kern_return_t darwin_semaphore_wait(mach_port_t port) {
+    sem_t *target = semaphore(port);
+    if (!target)
+        return KERN_INVALID_ARGUMENT;
+    return sem_wait(target) == 0 ? KERN_SUCCESS : KERN_ABORTED;
+}
+
+// Waits for at most `wait`, a relative time.
+kern_return_t darwin_semaphore_timedwait(mach_port_t port, mach_timespec wait) DARWIN_SYMBOL(semaphore_timedwait);
+kern_return_t darwin_semaphore_timedwait(mach_port_t port, mach_timespec wait) {
+    sem_t *target = semaphore(port);
+    if (!target)
+        return KERN_INVALID_ARGUMENT;
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += wait.tv_sec;
+    deadline.tv_nsec += wait.tv_nsec;
+    if (deadline.tv_nsec >= 1000000000) {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000;
+    }
+    if (sem_timedwait(target, &deadline) == 0)
+        return KERN_SUCCESS;
+    return errno == ETIMEDOUT ? KERN_OPERATION_TIMED_OUT : KERN_ABORTED;
+}
+
+// MARK: - Suspending threads
+
+// What a suspended thread's signal handler shares with the threads that
+// suspend and resume it.
+typedef struct suspension {
+    pid_t thread;
+    int count;                  // suspends not yet resumed
+    ucontext_t *_Atomic context;  // while stopped in the handler
+    sem_t stopped;
+    _Atomic int resume;         // futex word: 1 lets the handler return
+    struct suspension *next;
+} suspension;
+
+static suspension *suspensions;
+static pthread_mutex_t suspension_lock = PTHREAD_MUTEX_INITIALIZER;
+static int suspend_signal;
+
+static suspension *find_suspension(pid_t thread, int create) {
+    for (suspension *entry = suspensions; entry; entry = entry->next)
+        if (entry->thread == thread)
+            return entry;
+    if (!create)
+        return NULL;
+    suspension *entry = calloc(1, sizeof(*entry));
+    entry->thread = thread;
+    sem_init(&entry->stopped, 0, 0);
+    entry->next = suspensions;
+    suspensions = entry;
+    return entry;
+}
+
+static void stop_here(int signal, siginfo_t *info, void *context) {
+    (void)signal; (void)info;
+    int saved = errno;
+    // Entries are only added, never removed, so the list may be read here.
+    suspension *entry = suspensions;
+    pid_t self = thread_id();
+    while (entry && entry->thread != self)
+        entry = entry->next;
+    if (entry) {
+        atomic_store(&entry->context, (ucontext_t *)context);
+        sem_post(&entry->stopped);
+        while (!atomic_load(&entry->resume))
+            syscall(SYS_futex, &entry->resume, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+        atomic_store(&entry->context, NULL);
+    }
+    errno = saved;
+}
+
+static void install_suspend_handler(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_sigaction = stop_here;
+    action.sa_flags = SA_SIGINFO | SA_RESTART;
+    sigfillset(&action.sa_mask);
+    suspend_signal = SIGRTMIN + 4;
+    sigaction(suspend_signal, &action, NULL);
+}
+
+kern_return_t darwin_thread_suspend(mach_port_t port) DARWIN_SYMBOL(thread_suspend);
+kern_return_t darwin_thread_suspend(mach_port_t port) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, install_suspend_handler);
+    pid_t thread = (pid_t)port;
+    if (thread == thread_id())
+        return KERN_INVALID_ARGUMENT;
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension(thread, 1);
+    if (entry->count++ > 0) {
+        pthread_mutex_unlock(&suspension_lock);
+        return KERN_SUCCESS;
+    }
+    atomic_store(&entry->resume, 0);
+    if (syscall(SYS_tgkill, getpid(), thread, suspend_signal) != 0) {
+        entry->count = 0;
+        pthread_mutex_unlock(&suspension_lock);
+        return KERN_INVALID_ARGUMENT;
+    }
+    pthread_mutex_unlock(&suspension_lock);
+    while (sem_wait(&entry->stopped) != 0 && errno == EINTR) {}
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_thread_resume(mach_port_t port) DARWIN_SYMBOL(thread_resume);
+kern_return_t darwin_thread_resume(mach_port_t port) {
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension((pid_t)port, 0);
+    if (!entry || entry->count == 0) {
+        pthread_mutex_unlock(&suspension_lock);
+        return KERN_FAILURE;
+    }
+    if (--entry->count == 0) {
+        atomic_store(&entry->resume, 1);
+        syscall(SYS_futex, &entry->resume, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    }
+    pthread_mutex_unlock(&suspension_lock);
+    return KERN_SUCCESS;
+}
+
+// Interrupting a thread's system call: the suspension's signal already does.
+kern_return_t darwin_thread_abort(mach_port_t port) DARWIN_SYMBOL(thread_abort);
+kern_return_t darwin_thread_abort(mach_port_t port) { (void)port; return KERN_SUCCESS; }
+
+kern_return_t darwin_thread_abort_safely(mach_port_t port) DARWIN_SYMBOL(thread_abort_safely);
+kern_return_t darwin_thread_abort_safely(mach_port_t port) { (void)port; return KERN_SUCCESS; }
+
+// Darwin's arm64 states.
+typedef struct { uint64_t x[29], fp, lr, sp, pc; uint32_t cpsr, pad; } darwin_thread_state;
+typedef struct { __uint128_t v[32]; uint32_t fpsr, fpcr; } darwin_neon_state;
+typedef struct { uint64_t far; uint32_t esr, exception; } darwin_exception_state;
+
+enum {
+    ARM_THREAD_STATE64 = 6, ARM_THREAD_STATE64_COUNT = sizeof(darwin_thread_state) / 4,
+    ARM_EXCEPTION_STATE64 = 7, ARM_EXCEPTION_STATE64_COUNT = sizeof(darwin_exception_state) / 4,
+    ARM_NEON_STATE64 = 17, ARM_NEON_STATE64_COUNT = sizeof(darwin_neon_state) / 4,
+};
+
+static struct fpsimd_context *neon_context(ucontext_t *context) {
+    struct _aarch64_ctx *header = (struct _aarch64_ctx *)context->uc_mcontext.__reserved;
+    while (header->magic) {
+        if (header->magic == FPSIMD_MAGIC)
+            return (struct fpsimd_context *)header;
+        header = (struct _aarch64_ctx *)((char *)header + header->size);
+    }
+    return NULL;
+}
+
+static ucontext_t *stopped_context(mach_port_t port) {
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension((pid_t)port, 0);
+    ucontext_t *context = entry && entry->count > 0 ? atomic_load(&entry->context) : NULL;
+    pthread_mutex_unlock(&suspension_lock);
+    return context;
+}
+
+kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) DARWIN_SYMBOL(thread_get_state);
+kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) {
+    ucontext_t *context = stopped_context(port);
+    if (!context)
+        return KERN_FAILURE;
+    mcontext_t *machine = &context->uc_mcontext;
+    if (flavor == ARM_THREAD_STATE64 && *count >= ARM_THREAD_STATE64_COUNT) {
+        darwin_thread_state *out = (darwin_thread_state *)state;
+        memcpy(out->x, machine->regs, sizeof(out->x));
+        out->fp = machine->regs[29];
+        out->lr = machine->regs[30];
+        out->sp = machine->sp;
+        out->pc = machine->pc;
+        out->cpsr = (uint32_t)machine->pstate;
+        out->pad = 0;
+        *count = ARM_THREAD_STATE64_COUNT;
+        return KERN_SUCCESS;
+    }
+    if (flavor == ARM_NEON_STATE64 && *count >= ARM_NEON_STATE64_COUNT) {
+        darwin_neon_state *out = (darwin_neon_state *)state;
+        struct fpsimd_context *neon = neon_context(context);
+        if (neon) {
+            memcpy(out->v, neon->vregs, sizeof(out->v));
+            out->fpsr = neon->fpsr;
+            out->fpcr = neon->fpcr;
+        } else {
+            memset(out, 0, sizeof(*out));
+        }
+        *count = ARM_NEON_STATE64_COUNT;
+        return KERN_SUCCESS;
+    }
+    if (flavor == ARM_EXCEPTION_STATE64 && *count >= ARM_EXCEPTION_STATE64_COUNT) {
+        darwin_exception_state *out = (darwin_exception_state *)state;
+        out->far = machine->fault_address;
+        out->esr = 0;
+        out->exception = 0;
+        *count = ARM_EXCEPTION_STATE64_COUNT;
+        return KERN_SUCCESS;
+    }
+    return KERN_INVALID_ARGUMENT;
+}
+
+// The registers take effect when the thread resumes.
+kern_return_t darwin_thread_set_state(mach_port_t port, int flavor, const uint32_t *state, uint32_t count) DARWIN_SYMBOL(thread_set_state);
+kern_return_t darwin_thread_set_state(mach_port_t port, int flavor, const uint32_t *state, uint32_t count) {
+    ucontext_t *context = stopped_context(port);
+    if (!context)
+        return KERN_FAILURE;
+    mcontext_t *machine = &context->uc_mcontext;
+    if (flavor == ARM_THREAD_STATE64 && count >= ARM_THREAD_STATE64_COUNT) {
+        const darwin_thread_state *in = (const darwin_thread_state *)state;
+        memcpy(machine->regs, in->x, sizeof(in->x));
+        machine->regs[29] = in->fp;
+        machine->regs[30] = in->lr;
+        machine->sp = in->sp;
+        machine->pc = in->pc;
+        return KERN_SUCCESS;
+    }
+    if (flavor == ARM_NEON_STATE64 && count >= ARM_NEON_STATE64_COUNT) {
+        const darwin_neon_state *in = (const darwin_neon_state *)state;
+        struct fpsimd_context *neon = neon_context(context);
+        if (neon) {
+            memcpy(neon->vregs, in->v, sizeof(in->v));
+            neon->fpsr = in->fpsr;
+            neon->fpcr = in->fpcr;
+        }
+        return KERN_SUCCESS;
+    }
+    return KERN_INVALID_ARGUMENT;
+}
+
+// MARK: - Threads and the task
+
+// The process's threads, in memory vm_deallocate frees.
+kern_return_t darwin_task_threads(mach_port_t task, mach_port_t **list, uint32_t *count) DARWIN_SYMBOL(task_threads);
+kern_return_t darwin_task_threads(mach_port_t task, mach_port_t **list, uint32_t *count) {
+    (void)task;
+    DIR *directory = opendir("/proc/self/task");
+    if (!directory)
+        return KERN_FAILURE;
+    uint32_t capacity = 64, found = 0;
+    mach_port_t *ports = malloc(capacity * sizeof(*ports));
+    struct dirent *entry;
+    while ((entry = readdir(directory))) {
+        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
+            continue;
+        if (found == capacity)
+            ports = realloc(ports, (capacity *= 2) * sizeof(*ports));
+        ports[found++] = (mach_port_t)atoi(entry->d_name);
+    }
+    closedir(directory);
+    uintptr_t address = 0;
+    if (darwin_vm_allocate(TASK_PORT, &address, found * sizeof(*ports) + 1, 1) != KERN_SUCCESS) {
+        free(ports);
+        return KERN_RESOURCE_SHORTAGE;
+    }
+    memcpy((void *)address, ports, found * sizeof(*ports));
+    free(ports);
+    *list = (mach_port_t *)address;
+    *count = found;
+    return KERN_SUCCESS;
+}
+
+// THREAD_BASIC_INFO 3: times, a running or stopped state, the suspend count.
+kern_return_t darwin_thread_info(mach_port_t port, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(thread_info);
+kern_return_t darwin_thread_info(mach_port_t port, int flavor, int32_t *info, uint32_t *count) {
+    if (flavor != 3 || *count < 10)
+        return KERN_INVALID_ARGUMENT;
+    memset(info, 0, 10 * sizeof(int32_t));
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension((pid_t)port, 0);
+    int suspended = entry ? entry->count : 0;
+    pthread_mutex_unlock(&suspension_lock);
+    info[6] = 1;                            // policy: POLICY_TIMESHARE
+    info[7] = suspended ? 2 : 1;            // run_state: TH_STATE_STOPPED or RUNNING
+    info[9] = suspended;                    // suspend_count
+    *count = 10;
+    return KERN_SUCCESS;
+}
+
+// MACH_TASK_BASIC_INFO 20 and TASK_BASIC_INFO_64 5: the memory used.
+kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(task_info);
+kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) {
+    (void)task;
+    if ((flavor != 20 && flavor != 5) || *count < 10)
+        return KERN_INVALID_ARGUMENT;
+    long pages = 0, resident = 0;
+    FILE *statm = fopen("/proc/self/statm", "r");
+    if (statm) {
+        if (fscanf(statm, "%ld %ld", &pages, &resident) != 2)
+            pages = resident = 0;
+        fclose(statm);
+    }
+    long page = sysconf(_SC_PAGESIZE);
+    memset(info, 0, *count * sizeof(int32_t));
+    if (flavor == 20) {
+        // virtual_size, resident_size, resident_size_max (64-bit), then times.
+        uint64_t values[3] = { (uint64_t)(pages * page), (uint64_t)(resident * page), (uint64_t)(resident * page) };
+        memcpy(info, values, sizeof(values));
+        *count = 12;
+    } else {
+        // suspend_count, then virtual and resident sizes (64-bit, packed).
+        uint64_t values[2] = { (uint64_t)(pages * page), (uint64_t)(resident * page) };
+        memcpy(info + 1, values, sizeof(values));
+        *count = 10;
+    }
+    return KERN_SUCCESS;
+}
+
+// MARK: - Mach-O sections
+
+struct darwin_section_64 {
+    char sectname[16], segname[16];
+    uint64_t addr, size;
+    uint32_t offset, align, reloff, nreloc, flags, reserved1, reserved2, reserved3;
+};
+
+// The section's header in the image's load commands, or NULL.
+const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section)
+    DARWIN_SYMBOL(getsectbynamefromheader_64);
+const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section) {
+    if (!header)
+        return NULL;
+    const uint32_t *mach = header;
+    uint32_t command_count = mach[4];
+    const uint8_t *command = (const uint8_t *)header + 32;
+    for (uint32_t i = 0; i < command_count; i++) {
+        uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
+        if (kind == 0x19 /* LC_SEGMENT_64 */ && strncmp((const char *)command + 8, segment, 16) == 0) {
+            uint32_t sections = *(const uint32_t *)(command + 64);
+            const struct darwin_section_64 *entry = (const struct darwin_section_64 *)(command + 72);
+            for (uint32_t j = 0; j < sections; j++, entry++)
+                if (strncmp(entry->sectname, section, 16) == 0)
+                    return entry;
+        }
+        command += size;
+    }
+    return NULL;
+}
+
+// MARK: - dlopen
+
+// A handle names a library by install name; the program's own is NULL.
+typedef struct { char *name; } library_handle;
+
+static __thread char *dl_error;
+
+enum { DARWIN_RTLD_NEXT = -1, DARWIN_RTLD_DEFAULT = -2, DARWIN_RTLD_SELF = -3, DARWIN_RTLD_MAIN_ONLY = -5 };
+
+void *darwin_dlopen(const char *path, int mode) DARWIN_SYMBOL(dlopen);
+void *darwin_dlopen(const char *path, int mode) {
+    (void)mode;
+    library_handle *handle = calloc(1, sizeof(*handle));
+    // The program, and libraries such as Mono's "__Internal" in it.
+    if (path && *path && strcmp(path, "__Internal") != 0)
+        handle->name = strdup(path);
+    return handle;
+}
+
+int darwin_dlclose(void *handle) DARWIN_SYMBOL(dlclose);
+int darwin_dlclose(void *handle) {
+    if ((intptr_t)handle < 0)
+        return 0;
+    library_handle *library = handle;
+    if (library) {
+        free(library->name);
+        free(library);
+    }
+    return 0;
+}
+
+const char *darwin_dlerror(void) DARWIN_SYMBOL(dlerror);
+const char *darwin_dlerror(void) {
+    char *error = dl_error;
+    dl_error = NULL;
+    return error;
+}
+
+void *darwin_dlsym(void *handle, const char *symbol) DARWIN_SYMBOL(dlsym);
+void *darwin_dlsym(void *handle, const char *symbol) {
+    if (!symbol || !perry_system_lookup)
+        return NULL;
+    size_t length = strlen(symbol);
+    char *name = malloc(length + 2);
+    name[0] = '_';
+    memcpy(name + 1, symbol, length + 1);
+    const char *library = (intptr_t)handle < 0 || !handle ? NULL : ((library_handle *)handle)->name;
+    void *address = perry_system_lookup(library, name);
+    // A library's handle also finds what it re-exports and depends on.
+    if (!address && library)
+        address = perry_system_lookup(NULL, name);
+    free(name);
+    if (!address) {
+        static __thread char message[256];
+        snprintf(message, sizeof(message), "dlsym(%p, %s): symbol not found", handle, symbol);
+        dl_error = message;
+    }
+    return address;
+}
