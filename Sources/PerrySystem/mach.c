@@ -176,6 +176,99 @@ kern_return_t darwin_clock_sleep(mach_port_t service, int type, mach_timespec ti
     return result == 0 ? KERN_SUCCESS : KERN_ABORTED;
 }
 
+// MARK: - Host statistics
+
+// The host's memory is counted in iOS's 16 KB pages, read from Linux's
+// /proc/meminfo, and its processor time from /proc/stat.
+enum { HOST_PAGE_SIZE = 0x4000 };
+
+kern_return_t darwin_host_page_size(mach_port_t host, uintptr_t *size) DARWIN_SYMBOL(host_page_size);
+kern_return_t darwin_host_page_size(mach_port_t host, uintptr_t *size) {
+    (void)host;
+    *size = HOST_PAGE_SIZE;
+    return KERN_SUCCESS;
+}
+
+// A /proc/meminfo field, in host pages.
+static uint32_t meminfo_pages(const char *field) {
+    FILE *file = fopen("/proc/meminfo", "r");
+    if (!file)
+        return 0;
+    char line[256];
+    unsigned long long kilobytes = 0;
+    size_t length = strlen(field);
+    while (fgets(line, sizeof(line), file)) {
+        if (strncmp(line, field, length) == 0 && line[length] == ':') {
+            sscanf(line + length + 1, "%llu", &kilobytes);
+            break;
+        }
+    }
+    fclose(file);
+    return (uint32_t)(kilobytes * 1024 / HOST_PAGE_SIZE);
+}
+
+enum { HOST_LOAD_INFO = 1, HOST_VM_INFO = 2, HOST_CPU_LOAD_INFO = 3, HOST_VM_INFO64 = 4 };
+
+kern_return_t darwin_host_statistics(mach_port_t host, int flavor, uint32_t *info, uint32_t *count)
+    DARWIN_SYMBOL(host_statistics);
+kern_return_t darwin_host_statistics(mach_port_t host, int flavor, uint32_t *info, uint32_t *count) {
+    (void)host;
+    switch (flavor) {
+    case HOST_VM_INFO:
+    case HOST_VM_INFO64: {
+        uint32_t needed = flavor == HOST_VM_INFO ? 15 : 38;
+        if (*count < needed)
+            return KERN_FAILURE;
+        memset(info, 0, needed * sizeof(uint32_t));
+        // free, active, inactive and wired, first in both layouts.
+        info[0] = meminfo_pages("MemFree");
+        info[1] = meminfo_pages("Active");
+        info[2] = meminfo_pages("Inactive");
+        info[3] = meminfo_pages("Unevictable") + meminfo_pages("Mlocked");
+        *count = needed;
+        return KERN_SUCCESS;
+    }
+    case HOST_CPU_LOAD_INFO: {
+        if (*count < 4)
+            return KERN_FAILURE;
+        // Darwin's order: user, system, idle, nice.
+        unsigned long long user = 0, nice = 0, system = 0, idle = 0;
+        FILE *file = fopen("/proc/stat", "r");
+        if (file) {
+            if (fscanf(file, "cpu %llu %llu %llu %llu", &user, &nice, &system, &idle) != 4)
+                user = nice = system = idle = 0;
+            fclose(file);
+        }
+        info[0] = (uint32_t)user;
+        info[1] = (uint32_t)system;
+        info[2] = (uint32_t)idle;
+        info[3] = (uint32_t)nice;
+        *count = 4;
+        return KERN_SUCCESS;
+    }
+    case HOST_LOAD_INFO: {
+        if (*count < 6)
+            return KERN_FAILURE;
+        double loads[3] = {0, 0, 0};
+        getloadavg(loads, 3);
+        for (int i = 0; i < 3; i++) {
+            info[i] = (uint32_t)(loads[i] * 1000);     // LOAD_SCALE
+            info[3 + i] = 0;
+        }
+        *count = 6;
+        return KERN_SUCCESS;
+    }
+    default:
+        return KERN_INVALID_ARGUMENT;
+    }
+}
+
+kern_return_t darwin_host_statistics64(mach_port_t host, int flavor, uint32_t *info, uint32_t *count)
+    DARWIN_SYMBOL(host_statistics64);
+kern_return_t darwin_host_statistics64(mach_port_t host, int flavor, uint32_t *info, uint32_t *count) {
+    return darwin_host_statistics(host, flavor, info, count);
+}
+
 // MARK: - Semaphores
 
 // A semaphore's port indexes this table; ports start at 1.
