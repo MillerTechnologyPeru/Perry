@@ -265,7 +265,7 @@ open class UIViewController: UIResponder {
     @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
     @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { Screen.orientation }
     @ObjCMethod("shouldAutorotate") func shouldAutorotate() -> Bool { true }
-    @ObjCMethod("traitCollection") func traitCollection() -> NSObject? { nil }
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
 
     // MARK: Containment
 
