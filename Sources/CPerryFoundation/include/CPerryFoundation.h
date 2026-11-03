@@ -116,6 +116,10 @@ size_t perry_foundation_usable_size(void *block);
 
 // Gives the empty @[] and @{} singletons their classes.
 void perry_foundation_set_empty_array_class(void *cls);
+
+// The predefined allocators: 0 system default, 1 malloc, 2 malloc zone,
+// 3 null, 4 use context.
+const void *perry_foundation_cf_allocator(int which);
 void perry_foundation_set_empty_dictionary_class(void *cls);
 
 // Variadic entry points (variadic.S). Apple's arm64 ABI passes variadic
