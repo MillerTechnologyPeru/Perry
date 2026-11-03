@@ -48,6 +48,7 @@ VARIADIC _fprintf, vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
 VARIADIC _sprintf, vsprintf, 2
 VARIADIC _snprintf, vsnprintf, 3
+VARIADIC _snprintf_l, perry_vsnprintf_l, 4
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
 VARIADIC _asprintf, vasprintf, 2
@@ -122,6 +123,7 @@ PASSTHROUGH _flock, flock
 
 // open, openat and fcntl are variadic on Darwin.
 VARIADIC _open, perry_vopen, 2
+VARIADIC _open_dprotected_np, perry_vopen_dprotected, 4
 VARIADIC _openat, perry_vopenat, 3
 VARIADIC _fcntl, perry_vfcntl, 2
 
@@ -358,6 +360,10 @@ PASSTHROUGH _remainderf, remainderf
 PASSTHROUGH _remquof, remquof
 PASSTHROUGH _lgammaf_r, lgammaf_r
 PASSTHROUGH _tgammaf, tgammaf
+PASSTHROUGH _nextafter, nextafter
+// long double is double on Darwin arm64.
+PASSTHROUGH _fmodl, fmod
+PASSTHROUGH _lgammal_r, lgamma_r
 
 // MARK: - compiler runtime
 // 128-bit division, which Darwin's libSystem exports (compiler-rt's).
