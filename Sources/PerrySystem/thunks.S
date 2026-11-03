@@ -118,6 +118,7 @@ PASSTHROUGH _munlock, munlock
 PASSTHROUGH _arc4random, arc4random
 PASSTHROUGH _arc4random_buf, arc4random_buf
 PASSTHROUGH _arc4random_uniform, arc4random_uniform
+PASSTHROUGH _flock, flock
 
 // open, openat and fcntl are variadic on Darwin.
 VARIADIC _open, perry_vopen, 2
