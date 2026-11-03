@@ -71,6 +71,9 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<iconv.h>' $sources && libraries="$libraries -liconv"
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
+    # OpenGL ES works on iOS, deprecated; the warnings are not the point.
+    grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
+    grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
