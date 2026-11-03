@@ -42,6 +42,8 @@ let package = Package(
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
+        // CoreTelephony, on a device without a cellular radio.
+        .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
         .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
@@ -231,6 +233,12 @@ let package = Package(
         // SystemConfiguration's network reachability, always offline.
         .target(
             name: "PerrySystemConfiguration",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CoreTelephony, with no SIM and no carrier.
+        .target(
+            name: "PerryCoreTelephony",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
