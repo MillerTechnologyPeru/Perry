@@ -21,6 +21,16 @@ final class DataStorage {
         if let bytes, let source { memcpy(bytes, source, count) }
     }
 
+    /// Empty, with a buffer of `capacity` bytes (16 at least) already
+    /// there: CFDataCreateMutable's caller may write up to its capacity
+    /// through CFDataGetMutableBytePtr before setting the length.
+    init(reserving capacity: Int) {
+        count = 0
+        self.capacity = max(capacity, 16)
+        freeWhenDone = true
+        bytes = malloc(self.capacity)
+    }
+
     init(adopting buffer: UnsafeMutableRawPointer?, count: Int, freeWhenDone: Bool) {
         bytes = buffer
         self.count = count
@@ -181,8 +191,9 @@ public class NSData: NSObject {
     static func data(_ cls: ObjCClass, data other: NSData) -> NSData { DataObjects.owned(DataStorage(other.data), cls: cls) }
 
     @ObjCClassMethod("dataWithContentsOfFile:")
-    static func data(_ cls: ObjCClass, contentsOfFile path: String) -> NSData? {
-        (try? Data(contentsOf: URL(filePath: path))).map { DataObjects.owned(DataStorage($0), cls: cls) }
+    static func data(_ cls: ObjCClass, contentsOfFile path: String?) -> NSData? {
+        guard let path else { return nil }
+        return (try? Data(contentsOf: URL(filePath: path))).map { DataObjects.owned(DataStorage($0), cls: cls) }
     }
 
     @ObjCClassMethod("dataWithContentsOfURL:")
@@ -208,8 +219,9 @@ public class NSData: NSObject {
     func initialize(data other: NSData) -> Self { setStorage(DataStorage(other.data)) }
 
     @ObjCMethod("initWithContentsOfFile:")
-    func initialize(contentsOfFile path: String) -> Self? {
-        (try? Data(contentsOf: URL(filePath: path))).map { setStorage(DataStorage($0)) }
+    func initialize(contentsOfFile path: String?) -> Self? {
+        guard let path else { return nil }
+        return (try? Data(contentsOf: URL(filePath: path))).map { setStorage(DataStorage($0)) }
     }
 
     /// NSDataBase64DecodingOptions: 1 ignores unknown characters.
@@ -339,7 +351,7 @@ public class NSMutableData: NSData {
     }
 
     @ObjCClassMethod("dataWithCapacity:")
-    static func data(_ cls: ObjCClass, capacity: UInt) -> NSData { DataObjects.owned(DataStorage(Data()), cls: cls) }
+    static func data(_ cls: ObjCClass, capacity: UInt) -> NSData { DataObjects.owned(DataStorage(reserving: Int(capacity)), cls: cls) }
 
     @ObjCClassMethod("dataWithLength:")
     static func data(_ cls: ObjCClass, length: UInt) -> NSData {
@@ -348,7 +360,7 @@ public class NSMutableData: NSData {
 
     @ObjCMethod("initWithCapacity:")
     func initialize(capacity: UInt) -> Self {
-        Storage.set(objcObject, DataStorage(copying: nil, count: 0))
+        Storage.set(objcObject, DataStorage(reserving: Int(capacity)))
         return self
     }
 
