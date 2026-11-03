@@ -189,13 +189,13 @@ enum Text {
     }
 
     /// Draws one line of `text` in the current context with its top left
-    /// at `point`.
-    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor) {
+    /// at `point`, in `color`, or the context's fill color.
+    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor?) {
         guard let context = Graphics.current else { return }
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         font.drawingName.withCString { CG.selectFont(context, $0, font.state.pointSize, 1) }
-        CG.setFillColorWithColor(context, color.state.makeCGColor())
+        if let color { CG.setFillColorWithColor(context, color.state.makeCGColor()) }
         CG.setTextDrawingMode(context, 0)
         // Glyphs are drawn upright in UIKit's flipped coordinates.
         CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0))
@@ -221,6 +221,12 @@ final class LabelState: ObjectState {
     var lineBreakMode = 4
     var adjustsFontSizeToFitWidth = false
     var minimumScaleFactor: CGFloat = 0
+    /// UIBaselineAdjustment: align baselines 0.
+    var baselineAdjustment = 0
+    var shadowColor: UIColor?
+    var shadowOffset = CGSize(width: 0, height: -1)
+    var allowsDefaultTighteningForTruncation = false
+    var adjustsFontForContentSizeCategory = false
     var highlighted = false
     var enabled = true
     var preferredMaxLayoutWidth: CGFloat = 0
@@ -302,6 +308,26 @@ open class UILabel: UIView {
     @ObjCMethod("setAdjustsFontSizeToFitWidth:") func setAdjustsFontSizeToFitWidth(_ adjusts: Bool) { label.adjustsFontSizeToFitWidth = adjusts }
     @ObjCMethod("minimumScaleFactor") func minimumScaleFactor() -> CGFloat { label.minimumScaleFactor }
     @ObjCMethod("setMinimumScaleFactor:") func setMinimumScaleFactor(_ factor: CGFloat) { label.minimumScaleFactor = factor }
+    /// iOS 6's minimum size, as a scale of the font's.
+    @ObjCMethod("minimumFontSize")
+    func minimumFontSize() -> CGFloat { label.minimumScaleFactor * (label.font?.state.pointSize ?? 17) }
+    @ObjCMethod("setMinimumFontSize:")
+    func setMinimumFontSize(_ size: CGFloat) { label.minimumScaleFactor = size / max(label.font?.state.pointSize ?? 17, 1) }
+    @ObjCMethod("baselineAdjustment") func baselineAdjustment() -> Int { label.baselineAdjustment }
+    @ObjCMethod("setBaselineAdjustment:") func setBaselineAdjustment(_ adjustment: Int) { label.baselineAdjustment = adjustment }
+    /// The shadow is kept but not drawn.
+    @ObjCMethod("shadowColor") func shadowColor() -> UIColor? { label.shadowColor }
+    @ObjCMethod("setShadowColor:") func setShadowColor(_ color: UIColor?) { label.shadowColor = color }
+    @ObjCMethod("shadowOffset") func shadowOffset() -> CGSize { label.shadowOffset }
+    @ObjCMethod("setShadowOffset:") func setShadowOffset(_ offset: CGSize) { label.shadowOffset = offset }
+    @ObjCMethod("allowsDefaultTighteningForTruncation")
+    func allowsDefaultTighteningForTruncation() -> Bool { label.allowsDefaultTighteningForTruncation }
+    @ObjCMethod("setAllowsDefaultTighteningForTruncation:")
+    func setAllowsDefaultTighteningForTruncation(_ allows: Bool) { label.allowsDefaultTighteningForTruncation = allows }
+    @ObjCMethod("adjustsFontForContentSizeCategory")
+    func adjustsFontForContentSizeCategory() -> Bool { label.adjustsFontForContentSizeCategory }
+    @ObjCMethod("setAdjustsFontForContentSizeCategory:")
+    func setAdjustsFontForContentSizeCategory(_ adjusts: Bool) { label.adjustsFontForContentSizeCategory = adjusts }
     @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { label.highlighted }
     @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { label.highlighted = highlighted }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { label.enabled }
