@@ -61,6 +61,9 @@ final class ViewControllerState: ObjectState {
     var storyboardIdentifier: String?
     var segueTemplates: [UIStoryboardSegueTemplate] = []
     var externalObjects: [String: NSObject] = [:]
+    /// Objects in the controller's storyboard scene that nothing else
+    /// holds, such as a delegate the scene makes: kept as long as it is.
+    var storyboardObjects: [NSObject] = []
     /// Where the controller's nib is, from its bundle.
     var nibBundlePath: String?
 }
@@ -104,6 +107,7 @@ open class UIViewController: UIResponder {
         state.segueTemplates = decoded.array("UIStoryboardSegueTemplates").compactMap { $0.as(UIStoryboardSegueTemplate.self) }
         for template in state.segueTemplates { template.state.viewController = objcObject }
         state.externalObjects = decoded.dictionary("UIExternalObjectsTableForViewLoading")
+        state.storyboardObjects = decoded.array("UITopLevelObjectsToKeepAliveFromStoryboard")
         if decoded.has("UIModalPresentationStyle") { state.modalPresentationStyle = decoded.integer("UIModalPresentationStyle") }
         if decoded.has("UIModalTransitionStyle") { state.modalTransitionStyle = decoded.integer("UIModalTransitionStyle") }
         state.definesPresentationContext = decoded.bool("UIDefinesPresentationContext")
@@ -134,6 +138,7 @@ open class UIViewController: UIResponder {
             guard state.view != nil else {
                 uikitFatal("-loadView did not set the view controller's view")
             }
+            performSeguesOnViewLoad()
             sendViewDidLoad()
         }
         return state.view
@@ -337,7 +342,17 @@ open class UIViewController: UIResponder {
     }
     @ObjCMethod("popoverPresentationController") func popoverPresentationController() -> NSObject? { nil }
     @ObjCMethod("presentationController") func presentationController() -> NSObject? { nil }
-    @ObjCMethod("splitViewController") func splitViewController() -> UIViewController? { nil }
+    /// The nearest split view controller among the controller's ancestors.
+    @ObjCMethod("splitViewController")
+    func splitViewController() -> UIViewController? {
+        var current = state.parent
+        while let parent = current {
+            let controller = UIViewController.wrap(parent)
+            if controller.is(UISplitViewController.self) { return controller }
+            current = controller.state.parent
+        }
+        return nil
+    }
 
     @ObjCMethod("shouldAutomaticallyForwardAppearanceMethods") func shouldAutomaticallyForwardAppearanceMethods() -> Bool { true }
 
@@ -502,8 +517,16 @@ open class UIViewController: UIResponder {
         }
     }
 
+    /// The split view controller's, when there is one: it pushes the
+    /// controller onto its primary navigation controller.
     @ObjCMethod("showDetailViewController:sender:")
-    func showDetail(_ controller: UIViewController, sender: NSObject?) { show(controller, sender: sender) }
+    func showDetail(_ controller: UIViewController, sender: NSObject?) {
+        if let split = splitViewController() {
+            split.sendShowDetail(controller, sender: sender)
+        } else {
+            show(controller, sender: sender)
+        }
+    }
 
     /// The view's superview: the controller sits between its view and the
     /// view's superview in the responder chain.
@@ -598,6 +621,7 @@ extension NSObject {
     @ObjCMethod("viewDidLayoutSubviews") func sendViewDidLayoutSubviews()
     @ObjCMethod("willMoveToParentViewController:") func sendWillMove(toParent parent: UIViewController?)
     @ObjCMethod("didMoveToParentViewController:") func sendDidMove(toParent parent: UIViewController?)
+    @ObjCMethod("showDetailViewController:sender:") func sendShowDetail(_ controller: UIViewController, sender: NSObject?)
     @ObjCMethod("shouldAutomaticallyForwardAppearanceMethods") func sendShouldAutomaticallyForwardAppearanceMethods() -> Bool
     @ObjCMethod("setEditing:animated:") func sendSetEditing(_ editing: Bool, animated: Bool)
 }
