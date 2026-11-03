@@ -127,6 +127,11 @@ public final class NSDate: NSObject {
     @ObjCMethod("initWithTimeIntervalSinceReferenceDate:")
     func initialize(sinceReferenceDate seconds: Double) -> Self { setDate(Date(timeIntervalSinceReferenceDate: seconds)) }
 
+    @ObjCMethod("initWithTimeInterval:sinceDate:")
+    func initialize(timeInterval seconds: Double, since date: ObjCObject?) -> Self {
+        setDate(Dates.date(date?.id).addingTimeInterval(seconds))
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
