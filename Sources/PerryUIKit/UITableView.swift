@@ -88,6 +88,9 @@ final class CellState: ObjectState {
     /// The gray behind the content while highlighted or selected, unless
     /// the app gives a selected background view.
     var highlight: UIView?
+    /// The background colors of the content's views, cleared while the
+    /// cell shows highlighted.
+    var clearedBackgrounds: [(view: UIView, color: UIColor)] = []
 }
 
 @ObjCClass("UITableViewCell")
@@ -248,7 +251,37 @@ open class UITableViewCell: UIView {
         } else {
             background.removeFromSuperview()
         }
-        for label in [cell.textLabel, cell.detailTextLabel].compactMap({ $0 }) { label.setHighlighted(shown) }
+        if let contentView = cell.contentView { showContent(highlighted: shown, contentView) }
+    }
+
+    /// While highlighted, the content's labels and image views outside
+    /// controls show their highlighted colors and images, and its views'
+    /// background colors are cleared so the selection shows through, as
+    /// UIKit does; then they are as they were.
+    private func showContent(highlighted: Bool, _ contentView: UIView) {
+        let cell = cell
+        if !highlighted {
+            for (view, color) in cell.clearedBackgrounds { view.setBackgroundColor(color) }
+            cell.clearedBackgrounds = []
+        } else if cell.clearedBackgrounds.isEmpty {
+            func clear(_ view: UIView) {
+                for subview in view.state.subviews where !subview.is(UIControl.self) {
+                    if let color = subview.state.backgroundColor, color.state.alpha > 0 {
+                        cell.clearedBackgrounds.append((subview, color))
+                        subview.setBackgroundColor(UIColor.clear())
+                    }
+                    clear(subview)
+                }
+            }
+            clear(contentView)
+        }
+        func highlight(_ view: UIView) {
+            for subview in view.state.subviews where !subview.is(UIControl.self) {
+                if subview.is(UILabel.self) || subview.is(UIImageView.self) { subview.sendHighlighted(highlighted) }
+                highlight(subview)
+            }
+        }
+        highlight(contentView)
     }
     @ObjCMethod("isEditing") func isEditing() -> Bool { cell.editing }
     @ObjCMethod("setEditing:") func setEditing(_ editing: Bool) { cell.editing = editing }
