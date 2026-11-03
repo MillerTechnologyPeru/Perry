@@ -341,9 +341,17 @@ public struct ObjCClassMacro: MemberMacro {
         let access = accessLevel(of: classDecl)
         var members: [DeclSyntax] = [
             "\(raw: access)override class var objCClassName: String { \(literal: className) }",
-            "\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }",
             registerMethods(classDecl, access: access),
         ]
+        // A root class, such as NSProxy, declares its superclass name nil.
+        let declaresSuperclass = classDecl.memberBlock.members.contains { member in
+            member.decl.as(VariableDeclSyntax.self)?.bindings.contains {
+                $0.pattern.as(IdentifierPatternSyntax.self)?.identifier.text == "objCSuperclassName"
+            } ?? false
+        }
+        if !declaresSuperclass {
+            members.insert("\(raw: access)override class var objCSuperclassName: String? { \(raw: superclass).objCClassName }", at: 1)
+        }
         // A class with designated initializers does not inherit the one that
         // wraps an object of a class that has no Swift object; it gets it.
         let initializers = classDecl.memberBlock.members.compactMap { $0.decl.as(InitializerDeclSyntax.self) }
