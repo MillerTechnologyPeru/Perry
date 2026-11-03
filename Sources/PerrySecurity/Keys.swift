@@ -572,6 +572,33 @@ public func SecKeyCreateWithData(_ data: UnsafeMutableRawPointer?, _ attributes:
     return Keys.object(state)
 }
 
+/// OSStatus SecKeyGeneratePair(CFDictionaryRef, SecKeyRef *, SecKeyRef *):
+/// SecKeyCreateRandomKey's older form, which also keeps the public key in
+/// the keychain when its attributes ask for that.
+@c(_SecKeyGeneratePair)
+public func SecKeyGeneratePair(_ parameters: UnsafeMutableRawPointer?, _ publicKey: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                               _ privateKey: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    var error: UnsafeMutableRawPointer?
+    guard let parameters, let created = SecKeyCreateRandomKey(parameters, &error) else {
+        return error.map { Int32(truncatingIfNeeded: NSObject(objcObject: $0, ownership: .adopt).sendErrorCode()) } ?? Status.param
+    }
+    guard let state = Keys.state(created), let publicState = try? state.publicKey else { return Status.param }
+    let publicAttributes = NSDictionary(parameters).object(ItemKeys.kSecPublicKeyAttrs).map { NSDictionary($0.objcObject) }
+    if let publicAttributes {
+        if let label = publicAttributes.object(ItemKeys.kSecAttrLabel), label.isString { publicState.label = label.stringValue }
+        if let tag = publicAttributes.object(ItemKeys.kSecAttrApplicationTag) {
+            publicState.tag = tag.isData ? NSData(tag.objcObject).data : tag.isString ? Data(tag.stringValue.utf8) : nil
+        }
+        if publicAttributes.object(ItemKeys.kSecAttrIsPermanent)?.truth ?? false {
+            let status = Keychain.shared.add(key: publicState, attributes: publicAttributes)
+            if status != Status.success { return status }
+        }
+    }
+    privateKey?.pointee = created
+    publicKey?.pointee = Keys.object(publicState)
+    return Status.success
+}
+
 @c(_SecKeyCopyPublicKey)
 public func SecKeyCopyPublicKey(_ key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     guard let state = Keys.state(key), let publicKey = try? state.publicKey else { return nil }
@@ -731,4 +758,8 @@ public func SecKeyDecrypt(_ key: UnsafeMutableRawPointer?, _ padding: UInt32, _ 
     guard let state = Keys.state(key), let cipher, let algorithm = paddedAlgorithm(padding, signing: false, rsa: state.isRSA),
           let decrypted = try? state.decrypt(algorithm, Data(bytes: cipher, count: length)) else { return Status.param }
     return output(decrypted, plain, plainLength)
+}
+
+extension NSObject {
+    @ObjCMethod("code") func sendErrorCode() -> Int
 }
