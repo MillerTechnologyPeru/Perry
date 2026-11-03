@@ -687,6 +687,10 @@ public final class NSNumberFormatter: NSFormatter {
 
     // MARK: Grouping and padding
 
+    @ObjCMethod("alwaysShowsDecimalSeparator")
+    func alwaysShowsDecimalSeparator() -> Bool { storage.attribute(UNUM_DECIMAL_ALWAYS_SHOWN) != 0 }
+    @ObjCMethod("setAlwaysShowsDecimalSeparator:")
+    func setAlwaysShowsDecimalSeparator(_ value: Bool) { storage.setAttribute(UNUM_DECIMAL_ALWAYS_SHOWN, value ? 1 : 0) }
     @ObjCMethod("usesGroupingSeparator") func usesGroupingSeparator() -> Bool { storage.attribute(UNUM_GROUPING_USED) != 0 }
     @ObjCMethod("setUsesGroupingSeparator:")
     func setUsesGroupingSeparator(_ value: Bool) { storage.setAttribute(UNUM_GROUPING_USED, value ? 1 : 0) }
