@@ -103,6 +103,12 @@ public final class NSURL: NSObject {
         URLs.wrapped(URLs.fileURL(path, isDirectory: nil), cls: cls)
     }
 
+    /// The file URL of the path the components make (+[NSString pathWithComponents:]).
+    @ObjCClassMethod("fileURLWithPathComponents:")
+    static func fileURL(_ cls: ObjCClass, pathComponents components: NSArray) -> NSURL? {
+        URLs.wrapped(URLs.fileURL(NSString.path(components: components), isDirectory: nil), cls: cls)
+    }
+
     @ObjCClassMethod("fileURLWithPath:isDirectory:")
     static func fileURL(_ cls: ObjCClass, path: String, isDirectory: Bool) -> NSURL? {
         URLs.wrapped(URLs.fileURL(path, isDirectory: isDirectory), cls: cls)
@@ -149,10 +155,58 @@ public final class NSURL: NSObject {
     @ObjCMethod("setResourceValues:error:")
     func setResourceValues(_ values: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool { true }
 
+    /// A file's attributes, from stat: nil for other keys and other URLs,
+    /// as for a key the file has no value for.
+    func resourceValue(forKey key: String) -> id? {
+        guard url.isFileURL else { return nil }
+        let filePath = path()
+        if key == URLResourceKeys.NSURLNameKey || key == URLResourceKeys.NSURLLocalizedNameKey {
+            return Strings.autoreleased(Paths.lastComponent(filePath))
+        }
+        if key == URLResourceKeys.NSURLPathKey { return Strings.autoreleased(filePath) }
+        if key == URLResourceKeys.NSURLIsExcludedFromBackupKey || key == URLResourceKeys.NSURLIsHiddenKey && !Paths.lastComponent(filePath).hasPrefix(".") {
+            return Numbers.make(nil, .bool(false))
+        }
+        if key == URLResourceKeys.NSURLIsHiddenKey { return Numbers.make(nil, .bool(true)) }
+        var info = stat()
+        guard lstat(filePath, &info) == 0 else { return nil }
+        let type = info.st_mode & S_IFMT
+        func date(_ time: timespec) -> id? {
+            Dates.autoreleased(Date(timeIntervalSince1970: Double(time.tv_sec) + Double(time.tv_nsec) / 1e9))
+        }
+        switch key {
+        case URLResourceKeys.NSURLIsDirectoryKey: return Numbers.make(nil, .bool(type == S_IFDIR))
+        case URLResourceKeys.NSURLIsRegularFileKey: return Numbers.make(nil, .bool(type == S_IFREG))
+        case URLResourceKeys.NSURLIsSymbolicLinkKey: return Numbers.make(nil, .bool(type == S_IFLNK))
+        case URLResourceKeys.NSURLIsReadableKey: return Numbers.make(nil, .bool(access(filePath, R_OK) == 0))
+        case URLResourceKeys.NSURLIsWritableKey: return Numbers.make(nil, .bool(access(filePath, W_OK) == 0))
+        case URLResourceKeys.NSURLIsExecutableKey: return Numbers.make(nil, .bool(access(filePath, X_OK) == 0))
+        case URLResourceKeys.NSURLFileSizeKey, URLResourceKeys.NSURLTotalFileSizeKey:
+            return type == S_IFREG ? Numbers.make(nil, .signed(Int64(info.st_size))) : nil
+        case URLResourceKeys.NSURLFileAllocatedSizeKey, URLResourceKeys.NSURLTotalFileAllocatedSizeKey:
+            return Numbers.make(nil, .signed(Int64(info.st_blocks) * 512))
+        case URLResourceKeys.NSURLContentModificationDateKey, URLResourceKeys.NSURLAttributeModificationDateKey: return date(info.st_mtim)
+        case URLResourceKeys.NSURLCreationDateKey: return date(info.st_ctim)
+        case URLResourceKeys.NSURLContentAccessDateKey: return date(info.st_atim)
+        case URLResourceKeys.NSURLLinkCountKey: return Numbers.make(nil, .signed(Int64(info.st_nlink)))
+        default: return nil
+        }
+    }
+
     @ObjCMethod("getResourceValue:forKey:error:")
     func getResourceValue(_ value: UnsafeMutablePointer<id?>?, forKey key: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool {
-        value?.pointee = nil
+        value?.pointee = key.flatMap { Strings.value(of: $0.id) }.flatMap(resourceValue(forKey:))
         return true
+    }
+
+    /// The keys' values the file has.
+    @ObjCMethod("resourceValuesForKeys:error:")
+    func resourceValues(forKeys keys: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        let entries = Arrays.elements(keys?.id).compactMap { key -> (key: id, value: id)? in
+            guard let name = Strings.value(of: key), let value = resourceValue(forKey: name) else { return nil }
+            return (key, value)
+        }
+        return Dictionaries.autoreleased(entries)
     }
 
     @ObjCMethod("path")
@@ -221,6 +275,8 @@ public final class NSURL: NSObject {
 }
 
 /// Resource keys, which name the values a URL's file has.
+/// Resource keys, which name the values a URL's file has; each one's value
+/// is its name.
 @ObjCConstants
 enum URLResourceKeys {
     static let NSURLNameKey = "NSURLNameKey"
@@ -230,4 +286,94 @@ enum URLResourceKeys {
     static let NSURLCreationDateKey = "NSURLCreationDateKey"
     static let NSURLContentModificationDateKey = "NSURLContentModificationDateKey"
     static let NSURLIsExcludedFromBackupKey = "NSURLIsExcludedFromBackupKey"
+    static let NSURLLocalizedNameKey = "NSURLLocalizedNameKey"
+    static let NSURLPathKey = "NSURLPathKey"
+    static let NSURLIsHiddenKey = "NSURLIsHiddenKey"
+    static let NSURLIsSymbolicLinkKey = "NSURLIsSymbolicLinkKey"
+    static let NSURLIsReadableKey = "NSURLIsReadableKey"
+    static let NSURLIsWritableKey = "NSURLIsWritableKey"
+    static let NSURLIsExecutableKey = "NSURLIsExecutableKey"
+    static let NSURLTotalFileSizeKey = "NSURLTotalFileSizeKey"
+    static let NSURLFileAllocatedSizeKey = "NSURLFileAllocatedSizeKey"
+    static let NSURLTotalFileAllocatedSizeKey = "NSURLTotalFileAllocatedSizeKey"
+    static let NSURLAttributeModificationDateKey = "NSURLAttributeModificationDateKey"
+    static let NSURLContentAccessDateKey = "NSURLContentAccessDateKey"
+    static let NSURLLinkCountKey = "NSURLLinkCountKey"
+    static let NSURLAddedToDirectoryDateKey = "NSURLAddedToDirectoryDateKey"
+    static let NSURLCanonicalPathKey = "NSURLCanonicalPathKey"
+    static let NSURLDocumentIdentifierKey = "NSURLDocumentIdentifierKey"
+    static let NSURLErrorKey = "NSURLErrorKey"
+    static let NSURLFileProtectionKey = "NSURLFileProtectionKey"
+    static let NSURLFileResourceIdentifierKey = "NSURLFileResourceIdentifierKey"
+    static let NSURLFileResourceTypeKey = "NSURLFileResourceTypeKey"
+    static let NSURLFileSecurityKey = "NSURLFileSecurityKey"
+    static let NSURLGenerationIdentifierKey = "NSURLGenerationIdentifierKey"
+    static let NSURLHasHiddenExtensionKey = "NSURLHasHiddenExtensionKey"
+    static let NSURLIsAliasFileKey = "NSURLIsAliasFileKey"
+    static let NSURLIsApplicationKey = "NSURLIsApplicationKey"
+    static let NSURLIsMountTriggerKey = "NSURLIsMountTriggerKey"
+    static let NSURLIsPackageKey = "NSURLIsPackageKey"
+    static let NSURLIsSystemImmutableKey = "NSURLIsSystemImmutableKey"
+    static let NSURLIsUbiquitousItemKey = "NSURLIsUbiquitousItemKey"
+    static let NSURLIsUserImmutableKey = "NSURLIsUserImmutableKey"
+    static let NSURLIsVolumeKey = "NSURLIsVolumeKey"
+    static let NSURLLabelNumberKey = "NSURLLabelNumberKey"
+    static let NSURLLocalizedLabelKey = "NSURLLocalizedLabelKey"
+    static let NSURLLocalizedTypeDescriptionKey = "NSURLLocalizedTypeDescriptionKey"
+    static let NSURLParentDirectoryURLKey = "NSURLParentDirectoryURLKey"
+    static let NSURLPreferredIOBlockSizeKey = "NSURLPreferredIOBlockSizeKey"
+    static let NSURLThumbnailDictionaryKey = "NSURLThumbnailDictionaryKey"
+    static let NSURLTypeIdentifierKey = "NSURLTypeIdentifierKey"
+    static let NSURLUbiquitousItemContainerDisplayNameKey = "NSURLUbiquitousItemContainerDisplayNameKey"
+    static let NSURLUbiquitousItemDownloadRequestedKey = "NSURLUbiquitousItemDownloadRequestedKey"
+    static let NSURLUbiquitousItemDownloadingErrorKey = "NSURLUbiquitousItemDownloadingErrorKey"
+    static let NSURLUbiquitousItemDownloadingStatusKey = "NSURLUbiquitousItemDownloadingStatusKey"
+    static let NSURLUbiquitousItemHasUnresolvedConflictsKey = "NSURLUbiquitousItemHasUnresolvedConflictsKey"
+    static let NSURLUbiquitousItemIsDownloadingKey = "NSURLUbiquitousItemIsDownloadingKey"
+    static let NSURLUbiquitousItemIsSharedKey = "NSURLUbiquitousItemIsSharedKey"
+    static let NSURLUbiquitousItemIsUploadedKey = "NSURLUbiquitousItemIsUploadedKey"
+    static let NSURLUbiquitousItemIsUploadingKey = "NSURLUbiquitousItemIsUploadingKey"
+    static let NSURLUbiquitousItemUploadingErrorKey = "NSURLUbiquitousItemUploadingErrorKey"
+    static let NSURLUbiquitousSharedItemCurrentUserPermissionsKey = "NSURLUbiquitousSharedItemCurrentUserPermissionsKey"
+    static let NSURLUbiquitousSharedItemCurrentUserRoleKey = "NSURLUbiquitousSharedItemCurrentUserRoleKey"
+    static let NSURLUbiquitousSharedItemMostRecentEditorNameComponentsKey = "NSURLUbiquitousSharedItemMostRecentEditorNameComponentsKey"
+    static let NSURLUbiquitousSharedItemOwnerNameComponentsKey = "NSURLUbiquitousSharedItemOwnerNameComponentsKey"
+    static let NSURLVolumeAvailableCapacityForImportantUsageKey = "NSURLVolumeAvailableCapacityForImportantUsageKey"
+    static let NSURLVolumeAvailableCapacityForOpportunisticUsageKey = "NSURLVolumeAvailableCapacityForOpportunisticUsageKey"
+    static let NSURLVolumeAvailableCapacityKey = "NSURLVolumeAvailableCapacityKey"
+    static let NSURLVolumeCreationDateKey = "NSURLVolumeCreationDateKey"
+    static let NSURLVolumeIdentifierKey = "NSURLVolumeIdentifierKey"
+    static let NSURLVolumeIsAutomountedKey = "NSURLVolumeIsAutomountedKey"
+    static let NSURLVolumeIsBrowsableKey = "NSURLVolumeIsBrowsableKey"
+    static let NSURLVolumeIsEjectableKey = "NSURLVolumeIsEjectableKey"
+    static let NSURLVolumeIsEncryptedKey = "NSURLVolumeIsEncryptedKey"
+    static let NSURLVolumeIsInternalKey = "NSURLVolumeIsInternalKey"
+    static let NSURLVolumeIsJournalingKey = "NSURLVolumeIsJournalingKey"
+    static let NSURLVolumeIsLocalKey = "NSURLVolumeIsLocalKey"
+    static let NSURLVolumeIsReadOnlyKey = "NSURLVolumeIsReadOnlyKey"
+    static let NSURLVolumeIsRemovableKey = "NSURLVolumeIsRemovableKey"
+    static let NSURLVolumeIsRootFileSystemKey = "NSURLVolumeIsRootFileSystemKey"
+    static let NSURLVolumeLocalizedFormatDescriptionKey = "NSURLVolumeLocalizedFormatDescriptionKey"
+    static let NSURLVolumeLocalizedNameKey = "NSURLVolumeLocalizedNameKey"
+    static let NSURLVolumeMaximumFileSizeKey = "NSURLVolumeMaximumFileSizeKey"
+    static let NSURLVolumeNameKey = "NSURLVolumeNameKey"
+    static let NSURLVolumeResourceCountKey = "NSURLVolumeResourceCountKey"
+    static let NSURLVolumeSupportsAdvisoryFileLockingKey = "NSURLVolumeSupportsAdvisoryFileLockingKey"
+    static let NSURLVolumeSupportsCasePreservedNamesKey = "NSURLVolumeSupportsCasePreservedNamesKey"
+    static let NSURLVolumeSupportsCaseSensitiveNamesKey = "NSURLVolumeSupportsCaseSensitiveNamesKey"
+    static let NSURLVolumeSupportsCompressionKey = "NSURLVolumeSupportsCompressionKey"
+    static let NSURLVolumeSupportsExtendedSecurityKey = "NSURLVolumeSupportsExtendedSecurityKey"
+    static let NSURLVolumeSupportsHardLinksKey = "NSURLVolumeSupportsHardLinksKey"
+    static let NSURLVolumeSupportsJournalingKey = "NSURLVolumeSupportsJournalingKey"
+    static let NSURLVolumeSupportsPersistentIDsKey = "NSURLVolumeSupportsPersistentIDsKey"
+    static let NSURLVolumeSupportsRenamingKey = "NSURLVolumeSupportsRenamingKey"
+    static let NSURLVolumeSupportsRootDirectoryDatesKey = "NSURLVolumeSupportsRootDirectoryDatesKey"
+    static let NSURLVolumeSupportsSparseFilesKey = "NSURLVolumeSupportsSparseFilesKey"
+    static let NSURLVolumeSupportsSymbolicLinksKey = "NSURLVolumeSupportsSymbolicLinksKey"
+    static let NSURLVolumeSupportsVolumeSizesKey = "NSURLVolumeSupportsVolumeSizesKey"
+    static let NSURLVolumeSupportsZeroRunsKey = "NSURLVolumeSupportsZeroRunsKey"
+    static let NSURLVolumeTotalCapacityKey = "NSURLVolumeTotalCapacityKey"
+    static let NSURLVolumeURLForRemountingKey = "NSURLVolumeURLForRemountingKey"
+    static let NSURLVolumeURLKey = "NSURLVolumeURLKey"
+    static let NSURLVolumeUUIDStringKey = "NSURLVolumeUUIDStringKey"
 }
