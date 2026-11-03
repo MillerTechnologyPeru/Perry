@@ -59,6 +59,7 @@ open class UINavigationController: UIViewController {
         }
         navigation.viewControllers = controllers
         navigationBar().setItemsFromStack(controllers.map { $0.navigationItem() })
+        if decoded.bool("UINavigationBarHidden") { setNavigationBarHidden(true, animated: false) }
         return self
     }
 
@@ -84,6 +85,7 @@ open class UINavigationController: UIViewController {
     @ObjCMethod("loadView")
     override func loadView() {
         let view = UILayoutContainerView.objCClass.object.allocated().initializeView(frame: Screen.bounds).unsafeCast(to: UIView.self)
+        view.setAutoresizingMask(18)
         setView(view)
         view.addSubview(navigationBar())
     }
