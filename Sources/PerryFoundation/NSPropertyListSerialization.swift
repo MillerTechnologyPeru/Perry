@@ -9,6 +9,27 @@ import PerryObjCInterop
 // ArchiveValue trees, which also carry keyed archives' UIDs.
 
 enum PropertyLists {
+    enum Kind { case dictionary, array }
+
+    /// The property list in a file, when it is of `kind`; mutable
+    /// throughout when `cls` is NSMutableDictionary or NSMutableArray or a
+    /// subclass.
+    static func contents(of url: URL, _ cls: ObjCClass, expecting kind: Kind) -> UnsafeMutableRawPointer? {
+        guard url.isFileURL, let bytes = try? Data(contentsOf: url), let (value, _) = parse(Array(bytes)) else { return nil }
+        switch (value, kind) {
+        case (.dictionary, .dictionary), (.array, .array): break
+        default: return nil
+        }
+        let mutableName = kind == .dictionary ? "NSMutableDictionary" : "NSMutableArray"
+        var mutable = false
+        var current: ObjCClass? = cls
+        while let candidate = current {
+            if candidate.pointer == ObjCClass(named: mutableName).pointer { mutable = true }
+            current = candidate.superclass
+        }
+        return object(value, mutability: mutable ? 1 : 0)
+    }
+
     static let openStep: UInt = 1, xml: UInt = 100, binary: UInt = 200
 
     // MARK: Objects
@@ -583,6 +604,8 @@ public final class NSPropertyListSerialization: NSObject {
 
 final class ArchiverStorage {
     var objects: [ArchiveValue] = [.string("$null")]
+    /// The next key for unkeyed coding: "$0", "$1", and so on.
+    var unkeyed = 0
     var top: [String: ArchiveValue] = [:]
     /// The fields of the objects being encoded, innermost last.
     var fields: [[String: ArchiveValue]] = []
@@ -827,6 +850,43 @@ public class NSKeyedArchiver: NSObject {
 
     @ObjCMethod("encodeRootObject:")
     func encodeRoot(_ object: ObjCObject?) { encode(object, forKey: "root") }
+
+    // MARK: Unkeyed coding, under generated keys
+
+    private func nextKey() -> String {
+        defer { storage.unkeyed += 1 }
+        return "$\(storage.unkeyed)"
+    }
+
+    @ObjCMethod("encodeObject:") func encode(_ object: ObjCObject?) { encode(object, forKey: nextKey()) }
+
+    /// A value of the scalar types an Objective-C type encoding names, a
+    /// C string, or an object.
+    @ObjCMethod("encodeValueOfObjCType:at:")
+    func encodeValue(ofObjCType type: UnsafePointer<CChar>?, at address: UnsafeRawPointer?) {
+        guard let type, let address else { return }
+        let key = nextKey()
+        switch UInt8(bitPattern: type.pointee) {
+        case UInt8(ascii: "c"): storage.set(key, .integer(Int64(address.load(as: Int8.self))))
+        case UInt8(ascii: "C"), UInt8(ascii: "B"): storage.set(key, .integer(Int64(address.load(as: UInt8.self))))
+        case UInt8(ascii: "s"): storage.set(key, .integer(Int64(address.load(as: Int16.self))))
+        case UInt8(ascii: "S"): storage.set(key, .integer(Int64(address.load(as: UInt16.self))))
+        case UInt8(ascii: "i"): storage.set(key, .integer(Int64(address.load(as: Int32.self))))
+        case UInt8(ascii: "I"): storage.set(key, .integer(Int64(address.load(as: UInt32.self))))
+        case UInt8(ascii: "l"), UInt8(ascii: "q"): storage.set(key, .integer(address.load(as: Int64.self)))
+        case UInt8(ascii: "L"), UInt8(ascii: "Q"): storage.set(key, .integer(Int64(bitPattern: address.load(as: UInt64.self))))
+        case UInt8(ascii: "f"): storage.set(key, .real(Double(address.load(as: Float.self))))
+        case UInt8(ascii: "d"): storage.set(key, .real(address.load(as: Double.self)))
+        case UInt8(ascii: "@"):
+            let object = address.load(as: UnsafeMutableRawPointer?.self)
+            storage.set(key, Archivers.encode(object, in: objcObject, storage: storage))
+        case UInt8(ascii: "*"):
+            let string = address.load(as: UnsafePointer<CChar>?.self).map { String(cString: $0) }
+            storage.set(key, Archivers.encode(string.map { Strings.autoreleased($0) }, in: objcObject, storage: storage))
+        default:
+            foundationFatal("-[NSKeyedArchiver encodeValueOfObjCType:at:]: unsupported type \(String(cString: type))")
+        }
+    }
 
     @ObjCMethod("encodeBool:forKey:") func encode(bool value: Bool, forKey key: String) { storage.set(key, .bool(value)) }
     @ObjCMethod("encodeInt:forKey:") func encode(int value: Int32, forKey key: String) { storage.set(key, .integer(Int64(value))) }
