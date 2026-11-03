@@ -9,8 +9,9 @@ import PerryObjCInterop
 // CoreGraphics only when they change; each frame places them as the layers
 // present, by their geometry, opacity and clipping. Rotated layers turn
 // about their centers. Plain rectangular backgrounds are filled without a
-// texture. Clipping is to rectangles, so a layer that masks to rounded
-// corners clips its sublayers square.
+// texture. The GPU clips to rectangles, so a layer that clips to rounded
+// corners, or has a mask, is drawn with its sublayers as one texture,
+// through CoreGraphics, each frame.
 
 /// The SDL3 functions compositing calls, from the library UIKit loaded.
 enum SDL {
@@ -166,10 +167,10 @@ final class Compositor {
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
         setClip(clip)
-        // A masked layer and its sublayers are one texture, drawn again
-        // each frame.
-        if state.mask != nil {
-            drawMasked(layer, state: state, shape: shape, toScreen: toScreen, alpha: alpha)
+        // A masked layer, or one clipping to rounded corners, and its
+        // sublayers are one texture, drawn again each frame.
+        if state.mask != nil || (state.masksToBounds && state.cornerRadius > 0) {
+            drawFlattened(layer, state: state, shape: shape, toScreen: toScreen, alpha: alpha)
             return
         }
         let aligned = toScreen.isAxisAligned
@@ -219,14 +220,19 @@ final class Compositor {
         _ = SDL.fillRect(renderer, &target)
     }
 
-    private func drawMasked(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
+    private func drawFlattened(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
         let key = Key(layer: layer.objcObject, border: false)
         if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
         let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
-        guard width > 0, height > 0, let image = CALayer.maskedImage(of: layer, state: state, shape: shape),
-              let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
+        guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
         defer { CG.release(context) }
-        CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: state.bounds.size), context: context)
+        if state.mask != nil {
+            guard let image = CALayer.maskedImage(of: layer, state: state, shape: shape) else { return }
+            CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: state.bounds.size), context: context)
+        } else {
+            CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
+            CALayer.drawTree(of: layer, state: state, shape: shape, in: context)
+        }
         guard let data = CG.bitmapContextGetData(context),
               let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return }
         _ = SDL.updateTexture(texture, nil, data, width * 4)
