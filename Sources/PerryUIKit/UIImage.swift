@@ -113,13 +113,14 @@ open class UIImage: NSObject {
     }
 
     /// An image in the main bundle: the PNG for the screen's scale if
-    /// there is one, else the nearest.
+    /// there is one, else the next larger, else the smaller.
     @ObjCClassMethod("imageNamed:")
     static func image(_ cls: ObjCClass, named name: String) -> UIImage? {
         let bundle = NSBundle.main()
         let base = name.hasSuffix(".png") || name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name
         let type = name.hasSuffix(".jpg") ? "jpg" : "png"
-        for suffix in ["@3x", "@2x", ""] {
+        let suffixes = Screen.scale >= 3 ? ["@3x", "@2x", ""] : Screen.scale >= 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
+        for suffix in suffixes {
             if let path = bundle.path(forResource: base + suffix, ofType: type), let image = image(cls, contentsOfFile: path) {
                 return image
             }
