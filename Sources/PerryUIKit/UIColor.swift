@@ -121,6 +121,27 @@ open class UIColor: NSObject {
     }
 
     /// A dynamic color is its light appearance.
+    /// From a nib: a named system color, or components.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        if let name = decoded.string("UISystemColorName"), UIColor.objCClass.object.responds(to: name) {
+            typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+            if let named = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(UIColor.objCClass.pointer, ObjCRuntime.selector(name)) {
+                let source = UIColor.states[named]
+                (state.red, state.green, state.blue, state.alpha, state.white) = (source.red, source.green, source.blue, source.alpha, source.white)
+                return self
+            }
+        }
+        let alpha = decoded.has("UIAlpha") ? decoded.double("UIAlpha") : 1
+        if decoded.integer("UIColorComponentCount") == 2 || (decoded.has("UIWhite") && !decoded.has("UIRed")) {
+            state.set(white: decoded.double("UIWhite"), alpha: alpha)
+        } else {
+            state.set(red: decoded.double("UIRed"), green: decoded.double("UIGreen"), blue: decoded.double("UIBlue"), alpha: alpha)
+        }
+        return self
+    }
+
     @ObjCClassMethod("colorWithDynamicProvider:")
     static func color(_ cls: ObjCClass, dynamicProvider provider: ObjCBlock) -> NSObject? {
         typealias Provider = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
