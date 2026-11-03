@@ -39,12 +39,46 @@ enum SDL {
     nonisolated(unsafe) static var setClipRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
     nonisolated(unsafe) static var pollEvent: (@convention(c) (Pointer?) -> Bool)!
     nonisolated(unsafe) static var error: (@convention(c) () -> UnsafePointer<CChar>?)!
+    nonisolated(unsafe) static var setWindowMinimumSize: (@convention(c) (Pointer?, Int32, Int32) -> Bool)?
+    nonisolated(unsafe) static var primaryDisplay: (@convention(c) () -> UInt32)?
+    nonisolated(unsafe) static var displayContentScale: (@convention(c) (UInt32) -> Float)?
+    nonisolated(unsafe) static var startTextInput: (@convention(c) (Pointer?) -> Bool)?
+    nonisolated(unsafe) static var stopTextInput: (@convention(c) (Pointer?) -> Bool)?
 
     static let pixelFormatARGB8888: UInt32 = 0x1636_2004
     static let blendBlend: UInt32 = 0x1
     static let blendPremultiplied: UInt32 = 0x10
 
     static var lastError: String { error().map { String(cString: $0) } ?? "" }
+
+    nonisolated(unsafe) private static var loaded: Bool?
+
+    /// Before SDL starts: its renderer makes its GL contexts through EGL,
+    /// as EAGLContext does, so the two can take turns being current on one
+    /// thread, and renders with OpenGL ES 2.
+    static func prepareEnvironment() {
+        setenv("SDL_VIDEO_FORCE_EGL", "1", 0)
+        setenv("SDL_RENDER_DRIVER", "opengles2", 0)
+    }
+
+    /// Binds SDL3 once; false without it.
+    static func loadOnce() -> Bool {
+        if let loaded { return loaded }
+        let result = load()
+        loaded = result
+        return result
+    }
+
+    /// The desktop's scaling of the primary display (2 on a HiDPI desktop),
+    /// starting SDL's video for the question; nil without SDL or a display.
+    static func nativeScale() -> CGFloat? {
+        prepareEnvironment()
+        guard loadOnce(), initialize(0x20), let primaryDisplay, let displayContentScale else { return nil }
+        let display = primaryDisplay()
+        guard display != 0 else { return nil }
+        let scale = displayContentScale(display)
+        return scale > 0 ? CGFloat(scale) : nil
+    }
 
     /// Binds SDL3's functions; false without libSDL3.
     static func load() -> Bool {
@@ -77,6 +111,12 @@ enum SDL {
         setClipRect = bind("SDL_SetRenderClipRect")
         pollEvent = bind("SDL_PollEvent")
         error = bind("SDL_GetError")
+        setWindowMinimumSize = dlsym(library, "SDL_SetWindowMinimumSize")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Int32, Int32) -> Bool).self) }
+        primaryDisplay = dlsym(library, "SDL_GetPrimaryDisplay").map { unsafeBitCast($0, to: (@convention(c) () -> UInt32).self) }
+        displayContentScale = dlsym(library, "SDL_GetDisplayContentScale").map { unsafeBitCast($0, to: (@convention(c) (UInt32) -> Float).self) }
+        startTextInput = dlsym(library, "SDL_StartTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
+        stopTextInput = dlsym(library, "SDL_StopTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
         return complete
     }
 }
@@ -104,26 +144,35 @@ final class Compositor {
     private var rendererContext: EAGLContexts.Saved?
 
     /// A window `size` points across at `scale` pixels a point, on the GPU
-    /// when SDL has a renderer for it.
+    /// when SDL has a renderer for it. A resizable app's window can be
+    /// resized, and its screen takes the window's size.
     init?(title: String, size: CGSize, scale: CGFloat) {
         guard SDL.initialize(0x20) else {
             uikitWarning("SDL could not start its video: \(SDL.lastError)")
             return nil
         }
-        guard let window = title.withCString({ SDL.createWindow($0, Int32((size.width * scale).rounded()),
-                                                                 Int32((size.height * scale).rounded()), 0) }),
+        let width = Int32((size.width * scale).rounded()), height = Int32((size.height * scale).rounded())
+        // SDL_WINDOW_RESIZABLE.
+        guard let window = title.withCString({ SDL.createWindow($0, width, height, Screen.isResizable ? 0x20 : 0) }),
               let renderer = SDL.createRenderer(window, nil) else {
             uikitWarning("SDL could not make a window: \(SDL.lastError)")
             return nil
         }
+        // The smallest an iPad app's window gets.
+        if Screen.isResizable { _ = SDL.setWindowMinimumSize?(window, Int32(320 * scale), Int32(320 * scale)) }
         (self.window, self.renderer, self.scale) = (window, renderer, scale)
         rendererContext = EAGLContexts.save()
         let name = SDL.rendererName(renderer).map { String(cString: $0) } ?? "unknown"
         uikitWarning("live view composited by SDL's \(name) renderer")
     }
 
-    /// Mouse buttons, motion and the wheel as touches; true when the window
-    /// was closed.
+    /// Typed text arrives while text input is on, as for a keyboard on screen.
+    func setTextInput(_ on: Bool) {
+        _ = on ? SDL.startTextInput?(window) : SDL.stopTextInput?(window)
+    }
+
+    /// Mouse buttons, motion and the wheel as touches, and the keyboard's
+    /// text and editing keys; true when the window was closed.
     func handleEvents() -> Bool {
         var event = [UInt64](repeating: 0, count: 16)
         var closed = false
@@ -143,6 +192,21 @@ final class Compositor {
                     guard raw.load(fromByteOffset: 24, as: UInt8.self) == 1 else { break }
                     if type == 0x401 { Touches.down(at: point()) } else { Touches.up(at: point()) }
                     Display.markDirty()
+                case 0x206: // window resized: its size at 20 and 24
+                    let size = CGSize(width: CGFloat(raw.load(fromByteOffset: 20, as: Int32.self)) / scale,
+                                      height: CGFloat(raw.load(fromByteOffset: 24, as: Int32.self)) / scale)
+                    Screen.resize(to: size)
+                case 0x300: // key down: SDL_Keycode at 28
+                    switch raw.load(fromByteOffset: 28, as: UInt32.self) {
+                    case 0x08: Keyboard.deleteBackward()
+                    case 0x0D, 0x4000_0058: Keyboard.returnKey()   // return, keypad enter
+                    case 0x1B: Keyboard.escape()
+                    default: break
+                    }
+                case 0x303: // text input: UTF-8 at 24
+                    if let text = raw.load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
+                        Keyboard.insert(String(cString: text))
+                    }
                 case 0x403: // wheel: positive y scrolls up, unless flipped
                     let flipped = raw.load(fromByteOffset: 32, as: UInt32.self) == 1
                     let y = CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) * (flipped ? -1 : 1)
