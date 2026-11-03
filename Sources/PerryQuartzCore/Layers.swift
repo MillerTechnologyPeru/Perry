@@ -8,29 +8,24 @@ import PerryObjCInterop
 
 // MARK: - CAEAGLLayer
 
-final class EAGLLayerState: ObjectState {
+final class EAGLLayerState {
     var drawableProperties: NSObject?
     var presentsWithTransaction = false
 }
 
 @ObjCClass("CAEAGLLayer")
 open class CAEAGLLayer: CALayer {
-    static let eaglStates = StateTable<EAGLLayerState>()
-    var eagl: EAGLLayerState { CAEAGLLayer.eaglStates[objcObject] }
+    var eagl = EAGLLayerState()
 
     /// Opaque, as Core Animation's.
     @ObjCMethod("init")
-    override func initialize() -> Self {
-        _ = super.initialize()
+    public required init() {
+        super.init()
         state.isOpaque = true
-        return self
     }
 
-    @ObjCMethod("dealloc")
-    override func dealloc() {
-        CAEAGLLayer.eaglStates.remove(objcObject)
-        super.dealloc()
-    }
+    @ObjCMethod("initWithLayer:")
+    public required init(layer: CALayer) { super.init(layer: layer) }
 
     @ObjCMethod("drawableProperties") func drawableProperties() -> NSObject? { eagl.drawableProperties }
     @ObjCMethod("setDrawableProperties:") func setDrawableProperties(_ properties: NSObject?) { eagl.drawableProperties = properties }
@@ -80,7 +75,7 @@ enum Frames {
     }
 }
 
-final class DisplayLinkState: ObjectState {
+final class DisplayLinkState {
     var target: NSObject?
     var selector: UnsafeRawPointer?
     var paused = false
@@ -94,19 +89,15 @@ final class DisplayLinkState: ObjectState {
 /// preferred rate, while added to a run loop and not paused.
 @ObjCClass("CADisplayLink")
 open class CADisplayLink: NSObject {
-    static let states = StateTable<DisplayLinkState>()
-    var state: DisplayLinkState { CADisplayLink.states[objcObject] }
+    var state = DisplayLinkState()
 
-    @ObjCMethod("dealloc")
-    func dealloc() {
-        Frames.remove(CADisplayLink.states[objcObject])
-        CADisplayLink.states.remove(objcObject)
-        ObjCRuntime.superDealloc(objcObject, definedOn: CADisplayLink.objCClass.pointer)
-    }
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    deinit { Frames.remove(state) }
 
     @ObjCClassMethod("displayLinkWithTarget:selector:")
     static func make(_ cls: ObjCClass, target: NSObject, selector: ObjCSelector) -> CADisplayLink {
-        let link = cls.object.allocated().unsafeCast(to: CADisplayLink.self)
+        let link = cls.object.allocated().initialized().unsafeCast(to: CADisplayLink.self)
         (link.state.target, link.state.selector) = (target, selector.pointer)
         return link
     }
@@ -140,7 +131,7 @@ open class CADisplayLink: NSObject {
         state.duration = 1 / 60
         let object = objcObject
         Frames.add(state, framesPerSecond: rate) { time in
-            let link = CADisplayLink(objcObject: object, ownership: .retain)
+            let link = CADisplayLink.objCInstance(object, ownership: .retain)
             link.state.timestamp = time
             guard let target = link.state.target, let selector = link.state.selector else { return }
             typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
