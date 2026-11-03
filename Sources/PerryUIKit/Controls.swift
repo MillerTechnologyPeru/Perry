@@ -994,20 +994,40 @@ open class UIAlertController: UIViewController {
             y += 4
         }
         y += 16
-        for action in alert.actions {
-            let separator = UIView.objCClass.object.allocated().initializeView(frame: CGRect(x: 0, y: y, width: width, height: Screen.pixel))
-                .unsafeCast(to: UIView.self)
-            separator.setBackgroundColor(UIColor.separator())
-            panel.addSubview(separator)
+        func separator(_ frame: CGRect) {
+            let line = UIView.objCClass.object.allocated().initializeView(frame: frame).unsafeCast(to: UIView.self)
+            line.setBackgroundColor(UIColor.separator())
+            panel.addSubview(line)
+        }
+        func addButton(_ action: UIAlertAction, _ frame: CGRect) {
             let button = UIButton.button(UIButton.objCClass, type: 1).unsafeCast(to: UIButton.self)
-            button.sendSetFrame(CGRect(x: 0, y: y, width: width, height: 44))
+            button.sendSetFrame(frame)
             button.setTitle(action.state.title, for: 0)
             button.titleLabel().setFont(action.state.style == 1 ? UIFont.boldSystemFont(size: 17) : UIFont.systemFont(size: 17))
             if action.state.style == 2 { button.setTitleColor(UIColor.systemRed(), for: 0) }
             button.addTarget(self, action: ObjCSelector("_perryChoose:"), for: 1 << 6)
             button.setTag(alert.actions.firstIndex { $0.objcObject == action.objcObject } ?? 0)
             panel.addSubview(button)
+        }
+        // An alert's two actions sit side by side, divided, cancel first;
+        // otherwise they are stacked, cancel last.
+        var actions = alert.actions
+        if let cancel = actions.firstIndex(where: { $0.state.style == 1 }) {
+            let action = actions.remove(at: cancel)
+            if actions.count == 1 && alert.style == 1 { actions.insert(action, at: 0) } else { actions.append(action) }
+        }
+        if actions.count == 2 && alert.style == 1 {
+            separator(CGRect(x: 0, y: y, width: width, height: Screen.pixel))
+            separator(CGRect(x: width / 2, y: y, width: Screen.pixel, height: 44))
+            addButton(actions[0], CGRect(x: 0, y: y, width: width / 2, height: 44))
+            addButton(actions[1], CGRect(x: width / 2, y: y, width: width / 2, height: 44))
             y += 44
+        } else {
+            for action in actions {
+                separator(CGRect(x: 0, y: y, width: width, height: Screen.pixel))
+                addButton(action, CGRect(x: 0, y: y, width: width, height: 44))
+                y += 44
+            }
         }
         panel.sendSetFrame(CGRect(x: (Screen.bounds.width - width) / 2, y: (Screen.bounds.height - y) / 2, width: width, height: y))
         view.addSubview(panel)
