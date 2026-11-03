@@ -38,6 +38,22 @@ public func objc_release(_ object: id?) {
     if let object { Objects.release(object) }
 }
 
+/// Binds a Swift object as an object's peer (RetainCounts), for the interop
+/// layer's initializers.
+@c(_perry_objc_bindPeer)
+public func perry_objc_bindPeer(_ object: id?, _ peer: UnsafeMutableRawPointer?, _ retained: Bool) {
+    guard let object, let peer else { return }
+    Objects.bindPeer(object, peer, retained: retained)
+}
+
+/// The object's peer, unretained; nil if it has none.
+@c(_perry_objc_peer)
+public func perry_objc_peer(_ object: id?) -> UnsafeMutableRawPointer? { object.flatMap(Objects.peer) }
+
+/// A peer's deinit has begun: true when the object should be deallocated.
+@c(_perry_objc_peerWillDeinitialize)
+public func perry_objc_peerWillDeinitialize(_ object: id?) -> Bool { object.map(Objects.peerWillDeinitialize) ?? false }
+
 @c(_objc_autorelease)
 public func objc_autorelease(_ object: id?) -> id? {
     object.map(Objects.autorelease)
