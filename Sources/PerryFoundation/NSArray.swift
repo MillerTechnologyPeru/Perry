@@ -1,3 +1,4 @@
+import FoundationEssentials
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
@@ -90,6 +91,8 @@ public class NSArray: NSObject {
         Arrays.arrayClass = cls.storage
         cls.addMethod("arrayWithObjects:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_arrayWithObjects), isClassMethod: true)
+        cls.addMethod("initWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_initArrayWithObjects), isClassMethod: false)
     }
 
     var elements: [id] { Arrays.elements(objcObject) }
@@ -106,6 +109,18 @@ public class NSArray: NSObject {
 
     @ObjCClassMethod("arrayWithObject:")
     static func array(_ cls: ObjCClass, object: ObjCObject) -> NSArray { Arrays.owned([object.id], cls: cls.pointer) }
+
+    /// A property list file's array; mutable throughout when sent to a
+    /// mutable class.
+    @ObjCClassMethod("arrayWithContentsOfFile:")
+    static func array(_ cls: ObjCClass, contentsOfFile path: String) -> UnsafeMutableRawPointer? {
+        PropertyLists.contents(of: URL(filePath: path), cls, expecting: .array)
+    }
+
+    @ObjCClassMethod("arrayWithContentsOfURL:")
+    static func array(_ cls: ObjCClass, contentsOfURL url: NSURL) -> UnsafeMutableRawPointer? {
+        PropertyLists.contents(of: url.url, cls, expecting: .array)
+    }
 
     @ObjCClassMethod("arrayWithArray:")
     static func array(_ cls: ObjCClass, array other: NSArray?) -> NSArray {
@@ -127,6 +142,18 @@ public class NSArray: NSObject {
 
     @ObjCMethod("initWithArray:")
     func initialize(array other: NSArray?) -> Self { setElements(other?.elements ?? []) }
+
+    /// A property list file's array; nil when the file holds none.
+    @ObjCMethod("initWithContentsOfFile:")
+    func initialize(contentsOfFile path: String) -> Self? { initialize(contentsOf: URL(filePath: path)) }
+
+    @ObjCMethod("initWithContentsOfURL:")
+    func initialize(contentsOfURL url: NSURL) -> Self? { initialize(contentsOf: url.url) }
+
+    private func initialize(contentsOf url: URL) -> Self? {
+        guard let object = PropertyLists.contents(of: url, ObjCClass(named: "NSArray"), expecting: .array) else { return nil }
+        return setElements(NSArray(objcObject: object, ownership: .retain).elements)
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -407,6 +434,12 @@ final class NSConstantArray: NSArray {
 public func perry_foundation_arrayWithObjects(_ cls: id?, _ cmd: SEL?, _ first: id?,
                                               _ arguments: UnsafeRawPointer?) -> id? {
     Arrays.autoreleased(nilTerminated(first, arguments), cls: cls)
+}
+
+/// - (id)initWithObjects:(id)first, ... nil
+@c
+public func perry_foundation_initArrayWithObjects(_ object: id?, _ cmd: SEL?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    Arrays.initialize(object, nilTerminated(first, arguments))
 }
 
 /// The objects of a nil-terminated variadic list.
