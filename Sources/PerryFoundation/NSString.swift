@@ -55,10 +55,12 @@ enum Strings {
         if ObjC.objectGetClass(object) == constantClass {
             return constantValue(object)
         }
-        if let storage = Storage.get(object, as: StringStorage.self) {
-            return storage.value
+        // Another library's subclass keeps its own characters, even when it
+        // was made with NSString's -init.
+        if let primitive = primitiveValue(of: object) {
+            return primitive
         }
-        return primitiveValue(of: object) ?? ""
+        return Storage.get(object, as: StringStorage.self)?.value ?? ""
     }
 
     nonisolated(unsafe) private static let lengthSelector = ObjC.selector("length")
