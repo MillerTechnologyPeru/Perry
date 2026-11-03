@@ -29,12 +29,17 @@ open class UIFont: NSObject {
         ObjCRuntime.superDealloc(objcObject, definedOn: UIFont.objCClass.pointer)
     }
 
-    /// From a nib: the font's name and size, or the system font.
+    /// From a nib: the font's name and size, or the system font. A text
+    /// style's font, archived with no size, takes the style's, else the size
+    /// it was designed at.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
         let traits = decoded.integer("UIFontTraits")
-        state.pointSize = decoded.has("UIFontPointSize") ? decoded.double("UIFontPointSize") : 17
+        let size = decoded.double("UIFontPointSize")
+        state.pointSize = size > 0 ? size
+            : decoded.string("UIIBTextStyle").flatMap { UIFont.textStyleSizes[$0] }
+            ?? (decoded.double("NSSize") > 0 ? decoded.double("NSSize") : 17)
         if decoded.bool("UISystemFont") || decoded.string("UIFontName")?.hasPrefix(".") == true {
             state.name = ".SFUI-Regular"
             state.weight = traits & 2 != 0 || decoded.string("UIFontName")?.contains("Bold") == true
@@ -61,16 +66,18 @@ open class UIFont: NSObject {
     @ObjCClassMethod("fontWithName:size:")
     static func font(name: String, size: CGFloat) -> UIFont? { make(name: name, size: size) }
 
+    /// Text styles' sizes at the default content size.
+    static let textStyleSizes: [String: CGFloat] = [
+        "UICTFontTextStyleLargeTitle": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
+        "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubhead": 15,
+        "UICTFontTextStyleBody": 17, "UICTFontTextStyleCallout": 16, "UICTFontTextStyleFootnote": 13,
+        "UICTFontTextStyleCaption1": 12, "UICTFontTextStyleCaption2": 11,
+    ]
+
     /// Text styles at their default sizes.
     @ObjCClassMethod("preferredFontForTextStyle:")
     static func preferredFont(textStyle: String) -> UIFont {
-        let sizes: [String: CGFloat] = [
-            "UICTFontTextStyleLargeTitle": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
-            "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubhead": 15,
-            "UICTFontTextStyleBody": 17, "UICTFontTextStyleCallout": 16, "UICTFontTextStyleFootnote": 13,
-            "UICTFontTextStyleCaption1": 12, "UICTFontTextStyleCaption2": 11,
-        ]
-        return make(name: ".SFUI-Regular", size: sizes[textStyle] ?? 17, weight: textStyle == "UICTFontTextStyleHeadline" ? 0.3 : 0)
+        make(name: ".SFUI-Regular", size: textStyleSizes[textStyle] ?? 17, weight: textStyle == "UICTFontTextStyleHeadline" ? 0.3 : 0)
     }
 
     @ObjCClassMethod("systemFontSize") static func systemFontSize() -> CGFloat { 14 }
