@@ -35,7 +35,12 @@ enum Arrays {
             guard let objects = object.load(fromByteOffset: 16, as: UnsafePointer<id>?.self) else { return [] }
             return Array(UnsafeBufferPointer(start: objects, count: count))
         }
-        return storage(object)?.objects ?? []
+        if let storage = storage(object) {
+            return storage.objects
+        }
+        // Another library's array, such as Swift's: its count and elements.
+        guard ObjC.overrides(object, Selectors.count, of: arrayClass) else { return [] }
+        return (0..<ObjC.sendUInt(object, Selectors.count)).compactMap { ObjC.sendIndex(object, Selectors.objectAtIndex, $0) }
     }
 
     /// Fills `object` with `elements`, retaining each.
