@@ -40,4 +40,10 @@ typedef struct GLKMatrix2 { float m[4]; } GLKMatrix2;
 typedef struct GLKMatrix3 { float m[9]; } GLKMatrix3;
 typedef struct GLKMatrix4 { float m[16]; } GLKMatrix4;
 
+// Foundation's NSRange, as UIKit's methods take it.
+typedef struct PerryRange {
+    unsigned long location;
+    unsigned long length;
+} PerryRange;
+
 #endif
