@@ -43,6 +43,14 @@ VARIADIC perry_imp_predicateWithFormat, perry_foundation_predicateWithFormat, 3
 VARIADIC perry_imp_dictionaryWithObjectsAndKeys, perry_foundation_dictionaryWithObjectsAndKeys, 3
     .hidden perry_imp_appendFormat
 VARIADIC perry_imp_appendFormat, perry_foundation_appendFormat, 3
+    .hidden perry_imp_initArrayWithObjects
+VARIADIC perry_imp_initArrayWithObjects, perry_foundation_initArrayWithObjects, 3
+    .hidden perry_imp_initSetWithObjects
+VARIADIC perry_imp_initSetWithObjects, perry_foundation_initSetWithObjects, 3
+    .hidden perry_imp_initWithObjectsAndKeys
+VARIADIC perry_imp_initWithObjectsAndKeys, perry_foundation_initWithObjectsAndKeys, 3
+    .hidden perry_imp_raiseFormat
+VARIADIC perry_imp_raiseFormat, perry_foundation_raiseFormat, 4
 
     .section .note.GNU-stack, "", %progbits
 
