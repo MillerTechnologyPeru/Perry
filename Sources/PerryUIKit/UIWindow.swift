@@ -108,6 +108,10 @@ open class UIWindow: UIView {
         Updates.schedule()
     }
 
+    /// The one screen.
+    @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
+    @ObjCMethod("setScreen:") func setScreen(_ screen: UIScreen?) {}
+
     @ObjCMethod("makeKeyAndVisible")
     func makeKeyAndVisible() {
         sendSetHidden(false)
