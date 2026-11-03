@@ -679,7 +679,8 @@ static void *lookup_symbol(const char *install_name, const char *name) {
 
 // Darwin's layering: libSystem, then libobjc, then libdispatch (whose
 // objects are Objective-C classes here), then Foundation, then the
-// frameworks above them, which may use the layers below at startup.
+// frameworks above them, which may use the layers below at startup, then
+// the frameworks whose classes subclass UIKit's.
 static int provider_layer(const perry_provider *provider) {
     const char *name = provider->install_name;
     if (strcmp(name, "/usr/lib/system/libdispatch.dylib") == 0)
@@ -690,6 +691,8 @@ static int provider_layer(const perry_provider *provider) {
         return 1;
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
         return 3;
+    if (strstr(name, "/MapKit.framework/"))
+        return 5;
     return 4;
 }
 
@@ -710,7 +713,7 @@ static void start_providers(perry_loader *loader, perry_image *image) {
         .lookup_symbol = lookup_symbol,
     };
     // Several install names may share one provider; start each library once.
-    for (int layer = 0; layer <= 4; layer++)
+    for (int layer = 0; layer <= 5; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
         bool seen = !handle;
