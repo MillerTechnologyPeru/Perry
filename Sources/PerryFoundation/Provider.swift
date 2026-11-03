@@ -37,8 +37,53 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 /// images: the empty array and dictionary @[] and @{} compile to.
 func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { EmptyCollections.slots[name].map(UnsafeMutableRawPointer.init) }
 
-/// Once Foundation's classes are defined: the empty collections.
-func providerDidStart(_ info: perry_startup_info) { EmptyCollections.fill() }
+/// Once Foundation's classes are defined: their protocols, and the empty
+/// collections.
+func providerDidStart(_ info: perry_startup_info) {
+    Conformances.adopt()
+    EmptyCollections.fill()
+}
+
+/// The protocols Foundation's value classes adopt, which casts check: Swift
+/// casts its strings, bridged as NSString subclasses, to NSCopying.
+enum Conformances {
+    static let protocols = ["NSCopying", "NSMutableCopying", "NSCoding", "NSSecureCoding", "NSFastEnumeration"]
+
+    static let classes: [(name: String, protocols: [String])] = [
+        ("NSString", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSAttributedString", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSArray", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
+        ("NSDictionary", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
+        ("NSSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
+        ("NSOrderedSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
+        ("NSData", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSValue", ["NSCopying", "NSSecureCoding"]),
+        ("NSDate", ["NSCopying", "NSSecureCoding"]),
+        ("NSURL", ["NSCopying", "NSSecureCoding"]),
+        ("NSUUID", ["NSCopying", "NSSecureCoding"]),
+        ("NSIndexPath", ["NSCopying", "NSSecureCoding"]),
+        ("NSIndexSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSCharacterSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
+        ("NSLocale", ["NSCopying", "NSSecureCoding"]),
+        ("NSTimeZone", ["NSCopying", "NSSecureCoding"]),
+        ("NSError", ["NSCopying", "NSSecureCoding"]),
+        ("NSNull", ["NSCopying", "NSSecureCoding"]),
+        ("NSEnumerator", ["NSFastEnumeration"]),
+    ]
+
+    /// Declares the protocols, unless an image already has, and adds them
+    /// to the classes.
+    static func adopt() {
+        for name in protocols where ObjCRuntime.protocolObject(name) == nil {
+            ObjCRuntime.defineProtocol(named: name, adopting: [], methods: [])
+        }
+        for (name, adopted) in classes where name.withCString({ ObjC.getClass($0) }) != nil {
+            for proto in adopted {
+                ObjCRuntime.addProtocol(named: proto, to: ObjCClass(named: name))
+            }
+        }
+    }
+}
 
 /// __NSArray0__ and __NSDictionary0__: variables holding the empty array
 /// and dictionary every empty literal shares.
