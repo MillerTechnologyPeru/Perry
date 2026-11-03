@@ -37,6 +37,26 @@ struct MachOImage {
 extension Runtime {
     nonisolated(unsafe) static var protocolsByName: [CStringKey: UnsafeMutablePointer<perry_protocol>] = [:]
 
+    /// Called with each image's header as its metadata is registered, and
+    /// a handle for dyld's section lookup, which is nil here.
+    public typealias LoadImageFunction = @convention(c) (UnsafeRawPointer, UnsafeMutableRawPointer?) -> Void
+
+    nonisolated(unsafe) static var mappedImages: [UnsafeRawPointer] = []
+    nonisolated(unsafe) static var loadImageFunctions: [LoadImageFunction] = []
+
+    /// objc_addLoadImageFunc: calls `function` for every image mapped so
+    /// far, then for each one mapped later, before its +load methods. The
+    /// Swift runtime registers its types and conformances this way.
+    public static func addLoadImageFunction(_ function: LoadImageFunction) {
+        let images = lock.withLock { () -> [UnsafeRawPointer] in
+            loadImageFunctions.append(function)
+            return mappedImages
+        }
+        for header in images {
+            function(header, nil)
+        }
+    }
+
     /// Registers an image's Objective-C metadata and calls its +load
     /// methods, as Apple's runtime does when dyld maps and initializes an
     /// image. Dependencies are mapped first, so superclasses and the classes
@@ -102,6 +122,14 @@ extension Runtime {
                     loadCategories.append(category)
                 }
             }
+        }
+
+        let functions = lock.withLock { () -> [LoadImageFunction] in
+            mappedImages.append(header)
+            return loadImageFunctions
+        }
+        for function in functions {
+            function(header, nil)
         }
 
         // +load runs without the runtime lock, classes before categories.
