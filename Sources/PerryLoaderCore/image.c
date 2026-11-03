@@ -466,6 +466,10 @@ static bool swift_runtime_file(perry_loader *loader, const char *path, char *out
     return file_exists(out);
 }
 
+// The images whose dependencies are being loaded, outermost first.
+static const perry_image *loading[64];   // beyond 64 deep, the outermost 64
+static uint32_t loading_count;
+
 // Expands @executable_path, @loader_path and @rpath. Returns a malloc'd path
 // to an existing file, or NULL.
 static char *expand_install_name(perry_loader *loader, perry_image *image, const char *name) {
@@ -483,11 +487,13 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@rpath/", 7) == 0) {
-        // Search the loading image's rpaths, then the main executable's.
-        const perry_image *sources[2] = { image, loader->main_image };
-        for (int s = 0; s < 2; s++) {
-            const perry_image *src = sources[s];
-            if (!src || (s == 1 && src == image))
+        // As dyld does, search the rpaths of the loading image, then of each
+        // image that led to loading it, out to the main executable: Swift's
+        // embedded overlays have none of their own.
+        uint32_t depth = loading_count < 64 ? loading_count : 64;
+        for (int s = (int)depth; s >= 0; s--) {
+            const perry_image *src = s == (int)depth ? image : loading[s];
+            if (!src || (s < (int)depth && src == image))
                 continue;
             for (uint32_t i = 0; i < src->rpath_count; i++) {
                 char base[PATH_MAX];
@@ -591,7 +597,11 @@ static perry_image *load_image(perry_loader *loader, const char *path) {
         perry_warn("%s: built for %s; only iOS and macOS binaries are supported",
                    path, perry_platform_name(image->platform));
 
+    if (loading_count < sizeof(loading) / sizeof(loading[0]))
+        loading[loading_count] = image;
+    loading_count++;
     load_dependencies(loader, image);
+    loading_count--;
     return image;
 }
 
