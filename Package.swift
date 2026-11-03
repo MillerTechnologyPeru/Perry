@@ -42,6 +42,8 @@ let package = Package(
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
+        .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
+        .library(name: "PerryCloudKit", type: .dynamic, targets: ["PerryCloudKit"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
         // CoreGraphics.
@@ -74,7 +76,7 @@ let package = Package(
         .target(
             name: "PerrySystem",
             dependencies: ["PerryInterface"],
-            linkerSettings: [.linkedLibrary("m")]
+            linkerSettings: [.linkedLibrary("m"), .linkedLibrary("gcc_s")]
         ),
         // Objective-C runtime: Apple's metadata layouts and objc_msgSend.
         .target(name: "CPerryObjC"),
@@ -195,6 +197,18 @@ let package = Package(
         // delivers them to its delegate.
         .target(
             name: "PerryUserNotifications",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CloudKit, with no iCloud account.
+        .target(
+            name: "PerryCloudKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // GameController, with no controllers connected.
+        .target(
+            name: "PerryGameController",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
