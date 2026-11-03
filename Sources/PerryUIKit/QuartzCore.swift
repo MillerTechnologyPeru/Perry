@@ -48,6 +48,8 @@ class CALayer: NSObject {
     @ObjCMethod("removeFromSuperlayer") func removeFromSuperlayer()
     @ObjCMethod("renderInContext:") func render(in context: UnsafeMutableRawPointer?)
     @ObjCMethod("_perryTransformToSuperlayer") func transformToSuperlayer() -> CGAffineTransform
+    @ObjCMethod("addAnimation:forKey:") func addAnimation(_ animation: NSObject, forKey key: String?)
+    @ObjCMethod("removeAnimationForKey:") func removeAnimation(forKey key: String)
 
     /// The position of `layer` among the sublayers.
     func index(of layer: CALayer) -> Int? { sublayers()?.elements.firstIndex { $0.objcObject == layer.objcObject } }
@@ -68,6 +70,16 @@ class CABasicAnimation: NSObject {
     @ObjCMethod("setFillMode:") func setFillMode(_ mode: String)
     @ObjCMethod("setRepeatCount:") func setRepeatCount(_ count: Float)
     @ObjCMethod("setAutoreverses:") func setAutoreverses(_ autoreverses: Bool)
+}
+
+/// Steps through values, as an activity indicator turns.
+@ObjCWrapper("CAKeyframeAnimation")
+class CAKeyframeAnimation: NSObject {
+    @ObjCClassMethod("animationWithKeyPath:") static func make(keyPath: String) -> CAKeyframeAnimation
+    @ObjCMethod("setValues:") func setValues(_ values: NSObject?)
+    @ObjCMethod("setCalculationMode:") func setCalculationMode(_ mode: String)
+    @ObjCMethod("setDuration:") func setDuration(_ duration: Double)
+    @ObjCMethod("setRepeatCount:") func setRepeatCount(_ count: Float)
 }
 
 @ObjCWrapper("CAMediaTimingFunction")
