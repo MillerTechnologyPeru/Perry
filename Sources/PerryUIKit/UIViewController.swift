@@ -245,8 +245,10 @@ open class UIViewController: UIResponder {
     @ObjCMethod("setNeedsStatusBarAppearanceUpdate") func setNeedsStatusBarAppearanceUpdate() {}
     @ObjCMethod("setNeedsUpdateOfHomeIndicatorAutoHidden") func setNeedsUpdateOfHomeIndicatorAutoHidden() {}
     @ObjCMethod("supportedInterfaceOrientations") func supportedInterfaceOrientations() -> UInt { 2 }
+    /// The screen's orientation (deprecated in iOS 8).
+    @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
+    @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { Screen.orientation }
     @ObjCMethod("shouldAutorotate") func shouldAutorotate() -> Bool { true }
-    @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { 1 }
     @ObjCMethod("traitCollection") func traitCollection() -> NSObject? { nil }
 
     // MARK: Containment
