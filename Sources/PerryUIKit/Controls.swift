@@ -801,7 +801,7 @@ open class UIScreen: NSObject {
     func displayLink(target: NSObject, selector: ObjCSelector) -> CADisplayLink {
         CADisplayLink.make(CADisplayLink.objCClass, target: target, selector: selector)
     }
-    @ObjCMethod("traitCollection") func traitCollection() -> NSObject? { nil }
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
 }
 
 final class PasteboardState: ObjectState {
