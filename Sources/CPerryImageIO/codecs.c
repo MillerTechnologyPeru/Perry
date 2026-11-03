@@ -189,8 +189,8 @@ int perry_png_encode(const uint8_t *rgba, int width, int height, int has_alpha, 
         image.format = PNG_FORMAT_RGB;
         pixels = rgb;
     }
-    png_alloc_size_t size = 0;
-    if (!png_image_write_to_memory(&image, NULL, &size, 0, pixels, 0, NULL)) { free(rgb); return 0; }
+    // Written once, into room for the largest it can be.
+    png_alloc_size_t size = PNG_IMAGE_PNG_SIZE_MAX(image);
     *out = malloc(size);
     int ok = *out && png_image_write_to_memory(&image, *out, &size, 0, pixels, 0, NULL);
     free(rgb);
