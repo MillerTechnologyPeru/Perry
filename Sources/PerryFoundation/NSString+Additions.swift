@@ -400,6 +400,40 @@ extension NSString {
         target.isEmpty ? value : value.replacing(target, with: replacement)
     }
 
+    // MARK: Composed characters
+
+    /// The UTF-16 offsets where grapheme clusters begin, and the end.
+    private var clusterBoundaries: [Int] {
+        var offsets = [0], offset = 0
+        for character in value {
+            offset += character.utf16.count
+            offsets.append(offset)
+        }
+        return offsets
+    }
+
+    /// The cluster around the character at `index`, as a user sees it.
+    @ObjCMethod("rangeOfComposedCharacterSequenceAtIndex:")
+    func rangeOfComposedCharacterSequence(at index: UInt) -> NSRange {
+        let boundaries = clusterBoundaries
+        guard Int(index) < boundaries.last! else {
+            foundationFatal("-[NSString rangeOfComposedCharacterSequenceAtIndex:]: Index \(index) out of bounds; string length \(boundaries.last!)")
+        }
+        let end = boundaries.first { $0 > Int(index) }!, start = boundaries.last { $0 <= Int(index) }!
+        return NSRange(location: UInt(start), length: UInt(end - start))
+    }
+
+    /// `range` grown to whole clusters at both ends.
+    @ObjCMethod("rangeOfComposedCharacterSequencesForRange:")
+    func rangeOfComposedCharacterSequences(for range: NSRange) -> NSRange {
+        _ = check(range, "rangeOfComposedCharacterSequencesForRange:")
+        let boundaries = clusterBoundaries
+        let location = Int(range.location), last = location + max(Int(range.length), 1)
+        let start = boundaries.last { $0 <= location }!
+        let end = boundaries.first { $0 >= last } ?? boundaries.last!
+        return NSRange(location: UInt(start), length: UInt(end - start))
+    }
+
     @ObjCMethod("substringFromIndex:")
     func substring(from index: UInt) -> String {
         Self.decoded(check(NSRange(location: index, length: 0), "substringFromIndex:")[Int(index)...])
