@@ -1,3 +1,4 @@
+import FoundationEssentials
 import Glibc
 import PerryObjCInterop
 
@@ -106,6 +107,21 @@ enum Snapshot {
         guard let image = CG.bitmapContextCreateImage(context) else { return }
         defer { CG.release(image) }
         UIImage.encode(image, type: "public.png")?.sendWrite(toFile: path, atomically: true)
+        var tree = ""
+        for window in Windows.visible { describe(window, depth: 0, into: &tree) }
+        FileManager.default.createFile(atPath: path + ".txt", contents: Data(tree.utf8))
+    }
+
+    /// The view tree beside the image: each view's class, frame, bounds
+    /// origin when scrolled, and whether it is hidden.
+    private static func describe(_ view: UIView, depth: Int, into tree: inout String) {
+        let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+        let frame = view.state.frame
+        tree += String(repeating: "  ", count: depth) + "\(name) (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))"
+        let origin = view.state.bounds.origin
+        if origin != .zero { tree += " bounds origin (\(origin.x), \(origin.y))" }
+        tree += view.state.hidden ? " hidden\n" : "\n"
+        for subview in view.state.subviews { describe(subview, depth: depth + 1, into: &tree) }
     }
 }
 
