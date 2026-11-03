@@ -77,6 +77,25 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setStatusBarStyle:") func setStatusBarStyle(_ style: Int) { Application.statusBarStyle = style }
     @ObjCMethod("setStatusBarStyle:animated:") func setStatusBarStyle(_ style: Int, animated: Bool) { Application.statusBarStyle = style }
     @ObjCMethod("statusBarOrientation") func statusBarOrientation() -> Int { Screen.orientation }
+
+    /// The delegate's answer, else the orientations Info.plist lists, as a
+    /// UIInterfaceOrientationMask (portrait 2, upside down 4, landscape
+    /// left 16, landscape right 8).
+    @ObjCMethod("supportedInterfaceOrientationsForWindow:")
+    func supportedInterfaceOrientations(for window: UIWindow?) -> UInt {
+        if let delegate = Application.delegate, delegate.responds(to: "application:supportedInterfaceOrientationsForWindow:") {
+            return delegate.sendSupportedInterfaceOrientations(self, for: window)
+        }
+        let bundle = NSBundle.main()
+        let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        let masks: [String: UInt] = [
+            "UIInterfaceOrientationPortrait": 2, "UIInterfaceOrientationPortraitUpsideDown": 4,
+            "UIInterfaceOrientationLandscapeLeft": 16, "UIInterfaceOrientationLandscapeRight": 8,
+        ]
+        let mask = names.reduce(0) { $0 | (masks[$1] ?? 0) }
+        return mask == 0 ? 26 : mask
+    }
     @ObjCMethod("setStatusBarOrientation:") func setStatusBarOrientation(_ orientation: Int) {}
     @ObjCMethod("setStatusBarOrientation:animated:") func setStatusBarOrientation(_ orientation: Int, animated: Bool) {}
     @ObjCMethod("statusBarOrientationAnimationDuration") func statusBarOrientationAnimationDuration() -> Double { 0.3 }
@@ -187,4 +206,9 @@ protocol UIApplicationDelegate {
 extension NSObject {
     @ObjCMethod("application:didRegisterUserNotificationSettings:")
     func sendApplication(_ application: UIApplication, didRegister settings: UIUserNotificationSettings)
+}
+
+extension NSObject {
+    @ObjCMethod("application:supportedInterfaceOrientationsForWindow:")
+    func sendSupportedInterfaceOrientations(_ application: UIApplication, for window: UIWindow?) -> UInt
 }
