@@ -305,6 +305,17 @@ public final class NSRunLoop: NSObject {
         if Timers.isValid(timer.id) { state?.add(timer.id) }
     }
 
+    /// Runs a block on the loop's next pass; the loop runs one mode here.
+    @ObjCMethod("performBlock:")
+    func perform(block: ObjCObject?) {
+        if let block { state?.perform(block.id) }
+    }
+
+    @ObjCMethod("performInModes:block:")
+    func perform(inModes modes: ObjCObject?, block: ObjCObject?) {
+        if let block { state?.perform(block.id) }
+    }
+
     /// Runs until nothing is left to run. Stopping does not end -run.
     @ObjCMethod("run")
     func run() {
