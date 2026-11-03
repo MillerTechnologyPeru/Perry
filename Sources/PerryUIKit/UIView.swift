@@ -63,9 +63,26 @@ final class ViewState: ObjectState {
 }
 
 /// The default size of views a controller makes for itself, and of
-/// windows: an iPhone's screen, in points, at three pixels a point.
+/// windows: an iPhone's screen, in points, at three pixels a point, held
+/// as the app's Info.plist allows: in portrait, unless it supports only
+/// landscape orientations.
 enum Screen {
-    static let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
+    /// UIInterfaceOrientation: portrait 1, landscape right 3, landscape left 4.
+    nonisolated(unsafe) static let orientation: Int = {
+        let bundle = NSBundle.main()
+        let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map(\.stringValue) ?? []
+        if names.isEmpty || names.contains("UIInterfaceOrientationPortrait") { return 1 }
+        for name in names {
+            if name == "UIInterfaceOrientationLandscapeRight" { return 3 }
+            if name == "UIInterfaceOrientationLandscapeLeft" { return 4 }
+        }
+        return 1
+    }()
+
+    static var isLandscape: Bool { orientation == 3 || orientation == 4 }
+
+    nonisolated(unsafe) static let bounds = isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844)
     static let scale: CGFloat = 3
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
@@ -74,7 +91,9 @@ enum Screen {
     /// Under the home indicator, and under a status bar when
     /// PERRY_UIKIT_STATUS_BAR_HEIGHT gives it a height (47 on this
     /// iPhone); none is drawn, so by default it has none.
+    /// In landscape, beside the sensor housing and above the home indicator.
     nonisolated(unsafe) static let safeAreaInsets: UIEdgeInsets = {
+        if isLandscape { return UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47) }
         let statusBar = getenv("PERRY_UIKIT_STATUS_BAR_HEIGHT").flatMap { Double(String(cString: $0)) } ?? 0
         return UIEdgeInsets(top: max(statusBar, 0), left: 0, bottom: 34, right: 0)
     }()
