@@ -27,6 +27,7 @@ typedef struct perry_dependency {
     bool reexport;
     struct perry_image *image;  // set when the dependency is a Mach-O image
     perry_provider *provider;   // set when a Linux provider stands in for it
+    struct perry_image *swift_overlay; // a framework's Swift code, for a Swift image
 } perry_dependency;
 
 typedef struct perry_segment {
