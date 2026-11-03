@@ -501,7 +501,7 @@ open class UINavigationBar: UIView {
             CG.setFillColorWithColor(context, background.state.makeCGColor())
             CG.fillRect(context, bounds)
             CG.setFillColorWithColor(context, separator.state.makeCGColor())
-            CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - 1 / Screen.scale, width: bounds.width, height: 1 / Screen.scale))
+            CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
         }
         let tint = tintColor()
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
@@ -832,6 +832,22 @@ open class UIBarButtonItem: UIBarItem {
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) { state.menu = menu }
     @ObjCMethod("isHidden") func isHidden() -> Bool { false }
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) {}
+
+    /// Sends the action to the target, or without one up the responder
+    /// chain from `responder`, to the first that handles it.
+    func sendAction(startingAt responder: NSObject) {
+        guard let action = state.action else { return }
+        var receiver: NSObject? = state.target.map { NSObject($0) }
+        if receiver == nil {
+            var candidate: NSObject? = responder
+            let name = String(cString: action.assumingMemoryBound(to: CChar.self))
+            while let current = candidate, !current.responds(to: name) { candidate = current.sendNextResponder() }
+            receiver = candidate
+        }
+        guard let receiver else { return }
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(receiver.objcObject, action, objcObject)
+    }
 
     /// Sends the action to the target, or without one up the responder
     /// chain from the top view controller, to the first that handles it.
