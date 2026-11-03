@@ -11,10 +11,15 @@
 
 #include <pthread.h>
 
-/// The Linux library a provider wraps, found from one function in it.
+/// The Linux library a provider wraps, found from one function in it, or
+/// opened by its soname.
 typedef struct perry_wrapped_library {
     /// A function the library defines, to locate it by.
     const void *anchor;
+    /// Or the library's soname, opened on its own (RTLD_LOCAL): for a
+    /// library that the process may also have a namesake of, as libc++abi's
+    /// __cxa functions are libstdc++'s too, or that it may not have at all.
+    const char *soname;
     pthread_mutex_t lock;
     int loaded;
     void *handle;
@@ -22,7 +27,10 @@ typedef struct perry_wrapped_library {
 } perry_wrapped_library;
 
 #define PERRY_WRAPPED_LIBRARY(anchor_function) \
-    { (const void *)(anchor_function), PTHREAD_MUTEX_INITIALIZER, 0, 0, 0 }
+    { (const void *)(anchor_function), 0, PTHREAD_MUTEX_INITIALIZER, 0, 0, 0 }
+
+#define PERRY_WRAPPED_SONAME(name) \
+    { 0, (name), PTHREAD_MUTEX_INITIALIZER, 0, 0, 0 }
 
 /// The library's symbol for a Mach-O name ("_deflate" is deflate), or NULL.
 /// Only symbols the library itself defines count: names it imports from
