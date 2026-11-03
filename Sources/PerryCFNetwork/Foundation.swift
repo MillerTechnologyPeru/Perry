@@ -41,6 +41,17 @@ class NSData: NSObject {
     }
 }
 
+/// Loaded bodies are mutable, as CFNetwork's are, which apps that call
+/// -mutableBytes on them depend on.
+@ObjCWrapper("NSMutableData")
+class NSMutableData: NSData {
+    @ObjCClassMethod("dataWithBytes:length:") static func makeMutable(bytes: UnsafeRawPointer?, length: UInt) -> NSMutableData
+
+    static func mutable(_ data: Data) -> NSMutableData {
+        data.withUnsafeBytes { makeMutable(bytes: $0.baseAddress, length: UInt($0.count)) }
+    }
+}
+
 @ObjCWrapper("NSURL")
 class NSURL: NSObject {
     @ObjCClassMethod("URLWithString:") static func make(string: String) -> NSURL?
