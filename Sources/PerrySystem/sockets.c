@@ -566,6 +566,20 @@ static int gai_error_to_darwin(int error) {
     }
 }
 
+// Darwin's flags: NI_NOFQDN 1, NI_NUMERICHOST 2, NI_NAMEREQD 4,
+// NI_NUMERICSERV 8, NI_DGRAM 16.
+int darwin_getnameinfo(const void *address, socklen_t length, char *host, socklen_t host_length, char *service,
+                       socklen_t service_length, int flags) DARWIN_SYMBOL(getnameinfo);
+int darwin_getnameinfo(const void *address, socklen_t length, char *host, socklen_t host_length, char *service,
+                       socklen_t service_length, int flags) {
+    struct sockaddr_storage linux_address;
+    socklen_t linux_length = address_to_linux(address, length, &linux_address);
+    int linux_flags = (flags & 1 ? NI_NOFQDN : 0) | (flags & 2 ? NI_NUMERICHOST : 0) | (flags & 4 ? NI_NAMEREQD : 0) |
+                      (flags & 8 ? NI_NUMERICSERV : 0) | (flags & 16 ? NI_DGRAM : 0);
+    return gai_error_to_darwin(getnameinfo((struct sockaddr *)&linux_address, linux_length, host, host_length, service,
+                                           service_length, linux_flags));
+}
+
 int darwin_getaddrinfo(const char *node, const char *service, const struct darwin_addrinfo *hints,
                        struct darwin_addrinfo **result) DARWIN_SYMBOL(getaddrinfo);
 int darwin_getaddrinfo(const char *node, const char *service, const struct darwin_addrinfo *hints,
