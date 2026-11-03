@@ -5,6 +5,7 @@
 // exported under Mach-O names, and entry points for variadic methods and
 // functions.
 
+#include <stddef.h>
 #include <stdint.h>
 #include <sys/eventfd.h>
 
@@ -104,6 +105,9 @@ typedef struct NSOperatingSystemVersion {
 // The calling thread's kernel id, for NSLog lines.
 int perry_foundation_thread_id(void);
 
+// The usable size of a malloc'd block (malloc_usable_size).
+size_t perry_foundation_usable_size(void *block);
+
 // Gives the empty @[] and @{} singletons their classes.
 void perry_foundation_set_empty_array_class(void *cls);
 void perry_foundation_set_empty_dictionary_class(void *cls);
@@ -120,5 +124,9 @@ void perry_imp_setWithObjects(void);        // + (id)setWithObjects:(id)first, .
 void perry_imp_dictionaryWithObjectsAndKeys(void); // + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil
 void perry_imp_predicateWithFormat(void);   // + (NSPredicate *)predicateWithFormat:(NSString *)format, ...
 void perry_imp_appendFormat(void);          // - (void)appendFormat:(NSString *)format, ...
+void perry_imp_initArrayWithObjects(void);  // - (id)initWithObjects:(id)first, ... nil, for arrays
+void perry_imp_initSetWithObjects(void);    // - (id)initWithObjects:(id)first, ... nil, for sets
+void perry_imp_initWithObjectsAndKeys(void); // - (id)initWithObjectsAndKeys:(id)first, ... nil
+void perry_imp_raiseFormat(void);          // + (void)raise:(NSString *)name format:(NSString *)format, ...
 
 #endif
