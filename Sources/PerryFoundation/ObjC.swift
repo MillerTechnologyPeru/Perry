@@ -118,6 +118,11 @@ enum ObjC {
         return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, first, second)
     }
 
+    static func sendPointer(_ receiver: id?, _ selector: SEL) -> UnsafeRawPointer? {
+        typealias Fn = @convention(c) (id?, SEL) -> UnsafeRawPointer?
+        return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector)
+    }
+
     static func sendIndex(_ receiver: id?, _ selector: SEL, _ index: UInt) -> id? {
         typealias Fn = @convention(c) (id?, SEL, UInt) -> id?
         return unsafeBitCast(msgSend, to: Fn.self)(receiver, selector, index)
@@ -180,6 +185,8 @@ enum Selectors {
     nonisolated(unsafe) static let keyEnumerator = ObjC.selector("keyEnumerator")
     nonisolated(unsafe) static let objectEnumerator = ObjC.selector("objectEnumerator")
     nonisolated(unsafe) static let nextObject = ObjC.selector("nextObject")
+    nonisolated(unsafe) static let length = ObjC.selector("length")
+    nonisolated(unsafe) static let bytes = ObjC.selector("bytes")
 }
 
 extension ObjCClass {
@@ -207,11 +214,17 @@ func variadicEntry(_ entry: @convention(c) () -> Void) -> UnsafeRawPointer {
 /// strings Swift's runtime allocates itself, whose memory after their
 /// ivars holds their elements.
 enum Storage {
-    static let extraBytes = 2 * MemoryLayout<UnsafeRawPointer>.size
+    /// The cookie and the state, and room to align them: a class's
+    /// instance size need not be a multiple of 8.
+    static let extraBytes = 3 * MemoryLayout<UnsafeRawPointer>.size
 
     /// Classes of static objects the compiler emits (literals), which have
     /// no extra words.
     nonisolated(unsafe) static var staticClasses: Set<Class> = []
+
+    private static func aligned(_ pointer: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer {
+        pointer.alignedUp(for: UInt.self)
+    }
 
     private static func cookie(_ object: id) -> UInt { UInt(bitPattern: object) ^ 0x5065_7272_7953_7461 }
 
@@ -223,8 +236,8 @@ enum Storage {
     /// there, and the cookie whether they are this library's.
     private static func slot(_ object: id) -> UnsafeMutableRawPointer? {
         guard let cls = ObjC.objectGetClass(object), !staticClasses.contains(cls),
-              let extra = ObjC.indexedIvars(object) else { return nil }
-        let end = object.distance(to: extra) + extraBytes
+              let extra = ObjC.indexedIvars(object).map(aligned) else { return nil }
+        let end = object.distance(to: extra) + 2 * MemoryLayout<UInt>.size
         guard end > 0, perry_foundation_usable_size(object) >= end, extra.load(as: UInt.self) == cookie(object) else {
             return nil
         }
@@ -249,7 +262,7 @@ enum Storage {
     static func allocate(_ cls: id?) -> id? {
         guard let cls,
               let object = ObjC.createInstance(cls.assumingMemoryBound(to: perry_class_storage.self), extraBytes),
-              let extra = ObjC.indexedIvars(object) else { return nil }
+              let extra = ObjC.indexedIvars(object).map(aligned) else { return nil }
         extra.storeBytes(of: cookie(object), as: UInt.self)
         return object
     }
