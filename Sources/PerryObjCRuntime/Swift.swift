@@ -1,0 +1,105 @@
+import CPerryObjC
+import Glibc
+
+// What Darwin's Swift runtime asks of libobjc, whose classes are its
+// classes: hooks through which it finds classes by mangled name, names
+// generic classes and says which image a class came from; realizing the
+// classes whose metadata it builds or updates; and moving a class under
+// a superclass found at run time.
+
+/// The hooks Swift's runtime installs. Each starts as a function that
+/// finds nothing, which a hook installed later calls for what it does not
+/// handle.
+public enum Hooks {
+    public typealias GetClass = @convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<ClassPointer?>?) -> Bool
+    public typealias GetImageName = @convention(c) (ClassPointer?, UnsafeMutablePointer<UnsafePointer<CChar>?>?) -> Bool
+    public typealias LazyClassNamer = @convention(c) (ClassPointer?) -> UnsafePointer<CChar>?
+
+    nonisolated(unsafe) public static var getClass: GetClass = { _, _ in false }
+    nonisolated(unsafe) public static var getImageName: GetImageName = { _, _ in false }
+    nonisolated(unsafe) public static var lazyClassNamer: LazyClassNamer = { _ in nil }
+}
+
+extension Runtime {
+    /// objc_readClassPair and _objc_realizeClassFromSwift: realizes a class
+    /// Swift's runtime has built or updated, and registers its name.
+    public static func realizeFromSwift(_ cls: ClassPointer) -> ClassPointer {
+        _ = info(cls)
+        return cls
+    }
+
+    /// class_setSuperclass: moves `cls`, and its metaclass, under
+    /// `superclass`. Swift's runtime does so for its classes that subclass
+    /// Foundation's, such as its NSError.
+    public static func setSuperclass(_ cls: ClassPointer, _ superclass: ClassPointer) -> ClassPointer? {
+        lock.withLock {
+            let old = cls.pointee.superclass
+            cls.pointee.superclass = superclass
+            cls.pointee.isa?.pointee.superclass = superclass.pointee.isa
+            if let classInfo = info(cls), let superInfo = info(superclass) {
+                classInfo.superInfo = superInfo
+                classInfo.partner?.superInfo = superInfo.partner
+            }
+            flushCaches()
+            return old
+        }
+    }
+}
+
+extension Objects {
+    /// objc_isUniquelyReferenced: whether `object` has one reference.
+    public static func isUniquelyReferenced(_ object: ObjectPointer) -> Bool {
+        guard let info = Runtime.info(classOf(object)) else { return false }
+        if usesDefaultRetainRelease(info) {
+            return RetainCounts.count(object) == 1
+        }
+        typealias RetainCount = @convention(c) (ObjectPointer, SEL) -> UInt
+        guard let imp = Runtime.findMethod(info, Sel.retainCount)?.pointee.imp else { return false }
+        return unsafeBitCast(imp, to: RetainCount.self)(object, Sel.retainCount) == 1
+    }
+}
+
+/// Swift's class names, which Objective-C sees mangled ("_TtC6Module4Name")
+/// and libobjc gives out demangled ("Module.Name"), as Apple's does for a
+/// class at the top level of its module; others keep their mangled names.
+/// Lookups take either.
+public enum SwiftNames {
+    nonisolated(unsafe) private static var demangled: [CStringKey: UnsafePointer<CChar>] = [:]
+    private static let lock = RecursiveLock()
+
+    /// "Module.Name" for "_TtC6Module4Name" ("_TtCs…" is module Swift's).
+    public static func demangle(_ name: UnsafePointer<CChar>) -> UnsafePointer<CChar>? {
+        guard strncmp(name, "_TtC", 4) == 0 else { return nil }
+        return lock.withLock {
+            let key = CStringKey(pointer: name)
+            if let known = demangled[key] { return known }
+            var rest = Substring(String(cString: name).dropFirst(4))
+            func component() -> Substring? {
+                let digits = rest.prefix { $0.isNumber }
+                guard let length = Int(digits), length > 0, rest.count >= digits.count + length else { return nil }
+                rest = rest.dropFirst(digits.count)
+                defer { rest = rest.dropFirst(length) }
+                return rest.prefix(length)
+            }
+            let module: Substring?
+            if rest.first == "s" {
+                rest = rest.dropFirst()
+                module = "Swift"
+            } else {
+                module = component()
+            }
+            guard let module, let type = component(), rest.isEmpty else { return nil }
+            let result = UnsafePointer(strdup("\(module).\(type)")!)
+            demangled[key] = result
+            return result
+        }
+    }
+
+    /// "_TtC6Module4Name" for "Module.Name".
+    public static func mangle(_ name: UnsafePointer<CChar>) -> String? {
+        let parts = String(cString: name).split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        let module = parts[0] == "Swift" ? "s" : "\(parts[0].utf8.count)\(parts[0])"
+        return "_TtC\(module)\(parts[1].utf8.count)\(parts[1])"
+    }
+}
