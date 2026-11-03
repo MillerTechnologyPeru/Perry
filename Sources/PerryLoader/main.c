@@ -10,7 +10,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/personality.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 extern char **environ;
 
@@ -69,7 +73,57 @@ static void usage(FILE *out) {
           out);
 }
 
+// Darwin's runtimes keep pointers in 47 bits: libobjc's class_rw/ro data
+// pointers, which Swift's runtime masks with 0x7ffffffffff8, for one. Its
+// heap is there, but arm64 Linux maps memory from the top of its 48-bit
+// address space down, and puts the brk heap above 2^47 too. The legacy
+// layout maps from a quarter of the address space (2^46) up instead: the
+// kernel takes it with ADDR_COMPAT_LAYOUT, which container seccomp profiles
+// often refuse, or an unlimited stack, and both only for a new program, so
+// perry runs itself again. The brk heap then gets a page placed above it,
+// so that glibc's malloc grows its main arena by mapping memory instead.
+static bool maps_low(void) {
+    void *probe = mmap(NULL, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (probe == MAP_FAILED)
+        return false;
+    munmap(probe, 4096);
+    return (uintptr_t)probe < (1ull << 47);
+}
+
+static void use_low_addresses(char **argv) {
+    const uint64_t limit = 1ull << 47;
+    bool low = maps_low();
+    if (!low && !getenv("PERRY_REEXECUTED")) {
+        int persona = personality(0xffffffff);
+        bool changed = persona != -1 && personality((unsigned long)persona | ADDR_COMPAT_LAYOUT) != -1;
+        struct rlimit stack;
+        if (!changed && getrlimit(RLIMIT_STACK, &stack) == 0 && stack.rlim_max == RLIM_INFINITY) {
+            stack.rlim_cur = RLIM_INFINITY;
+            changed = setrlimit(RLIMIT_STACK, &stack) == 0;
+        }
+        if (changed) {
+            // By its own path, so that it keeps its name.
+            char self[PATH_MAX];
+            ssize_t length = readlink("/proc/self/exe", self, sizeof(self) - 1);
+            if (length > 0) {
+                self[length] = 0;
+                setenv("PERRY_REEXECUTED", "1", 1);
+                execv(self, argv);
+            }
+        }
+    }
+    unsetenv("PERRY_REEXECUTED");
+    if (!low && !maps_low())
+        perry_warn("memory is mapped above 2^47, where Darwin's runtimes cannot use it");
+
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t top = ((uintptr_t)sbrk(0) + page - 1) & ~(page - 1);
+    if (top >= limit)
+        mmap((void *)top, page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+}
+
 int main(int argc, char **argv) {
+    use_low_addresses(argv);
     perry_log_init();
 
     bool report = false, strict = false;
