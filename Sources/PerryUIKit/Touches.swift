@@ -331,6 +331,10 @@ enum Touches {
                 view.unsafeCast(to: UIToolbar.self).tap(at: touch.location(in: view))
                 return
             }
+            if view.is(UITabBar.self) {
+                view.unsafeCast(to: UITabBar.self).tap(at: touch.location(in: view))
+                return
+            }
             if view.is(UITableViewCell.self), let tableObject = view.state.superview, ObjCRuntime.isKind(tableObject, of: UITableView.objCClass.pointer) {
                 let table = UITableView(objcObject: tableObject, ownership: .retain)
                 if let path = table.table.visibleCells.first(where: { $0.value.objcObject == view.objcObject })?.key {
@@ -361,30 +365,56 @@ extension UIResponder {
     }
 }
 
-/// With PERRY_UIKIT_TAPS set to points separated by semicolons
-/// ("195,120;30,22"), each is tapped in turn, two seconds apart, beginning
-/// two seconds after a window first shows: to reach an app's later screens
-/// without a display, along with PERRY_UIKIT_SNAPSHOT.
+/// With PERRY_UIKIT_TAPS set to steps separated by semicolons, each is
+/// done in turn, two seconds apart, beginning two seconds after a window
+/// first shows: "195,120" taps a point; "type:Hello" types text, and
+/// "key:return", "key:backspace" and "key:escape" press those keys, for
+/// the first responder. To reach an app's later screens without a display,
+/// along with PERRY_UIKIT_SNAPSHOT.
 enum TapScript {
-    nonisolated(unsafe) private static var points: [CGPoint]?
+    enum Step {
+        case tap(CGPoint)
+        case type(String)
+        case key(String)
+    }
+
+    nonisolated(unsafe) private static var steps: [Step]?
     nonisolated(unsafe) private static var started = false
+    nonisolated(unsafe) private static var lastTap = CGPoint.zero
 
     static func startIfRequested() {
         guard !started, let setting = getenv("PERRY_UIKIT_TAPS") else { return }
         started = true
-        points = String(cString: setting).split(separator: ";").compactMap { pair in
-            let values = pair.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
-            return values.count == 2 ? CGPoint(x: values[0], y: values[1]) : nil
+        steps = String(cString: setting).split(separator: ";").compactMap { item in
+            if item.hasPrefix("type:") { return .type(String(item.dropFirst(5))) }
+            if item.hasPrefix("key:") { return .key(String(item.dropFirst(4))) }
+            let values = item.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+            return values.count == 2 ? .tap(CGPoint(x: values[0], y: values[1])) : nil
         }
         next()
     }
 
     private static func next() {
-        guard let after = Display.dispatchAfter, let time = Display.dispatchTime, points?.isEmpty == false else { return }
+        guard let after = Display.dispatchAfter, let time = Display.dispatchTime, steps?.isEmpty == false else { return }
         after(time(0, 2_000_000_000), Updates.mainQueue, nil) { _ in
-            guard let point = TapScript.points?.removeFirst() else { return }
-            Touches.down(at: point)
-            Touches.up(at: point)
+            guard let step = TapScript.steps?.removeFirst() else { return }
+            switch step {
+            case .tap(let point):
+                // Held for a few frames, as a finger is, so games polling
+                // touches each frame see it.
+                TapScript.lastTap = point
+                Touches.down(at: point)
+                Display.dispatchAfter?(Display.dispatchTime!(0, 150_000_000), Updates.mainQueue, nil) { _ in Touches.up(at: TapScript.lastTap) }
+            case .type(let text):
+                Keyboard.insert(text)
+            case .key(let name):
+                switch name {
+                case "return": Keyboard.returnKey()
+                case "backspace": Keyboard.deleteBackward()
+                case "escape": Keyboard.escape()
+                default: break
+                }
+            }
             TapScript.next()
         }
     }
