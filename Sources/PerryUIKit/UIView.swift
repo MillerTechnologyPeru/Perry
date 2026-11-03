@@ -83,15 +83,29 @@ enum Screen {
 
     static var isLandscape: Bool { orientation == 3 || orientation == 4 }
 
+    /// With a live view, the screen is the display's own: its usable area,
+    /// in points at the desktop's scale (one pixel a point unless it scales
+    /// its display). PERRY_UIKIT_SCREEN=iphone keeps an iPhone's instead, as
+    /// without a display.
+    nonisolated(unsafe) static let nativeSize: CGSize? = {
+        if let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" { return nil }
+        guard Display.wanted, let pixels = SDL.usableDisplaySize() else { return nil }
+        let scale = max(Display.scale, 1)
+        return CGSize(width: (pixels.width / scale).rounded(.down), height: (pixels.height / scale).rounded(.down))
+    }()
+
     /// The screen's points; a resizable app's change with its window.
-    nonisolated(unsafe) static var bounds = isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844)
+    nonisolated(unsafe) static var bounds = nativeSize.map { CGRect(origin: .zero, size: $0) }
+        ?? (isLandscape ? CGRect(x: 0, y: 0, width: 844, height: 390) : CGRect(x: 0, y: 0, width: 390, height: 844))
 
     /// Whether the app runs in a window of any size, as an iPad app that
     /// supports multitasking does: it supports the iPad, both portrait and
-    /// landscape, and does not require the full screen. PERRY_UIKIT_RESIZABLE
-    /// set to 1 or 0 decides it instead.
+    /// landscape, and does not require the full screen; or the screen is the
+    /// display's. PERRY_UIKIT_RESIZABLE set to 1 or 0 decides it instead.
     nonisolated(unsafe) static let isResizable: Bool = {
         if let setting = getenv("PERRY_UIKIT_RESIZABLE") { return String(cString: setting) != "0" }
+        // The display's screen is a desktop window's.
+        if nativeSize != nil { return true }
         let bundle = NSBundle.main()
         let families = bundle.infoObject(forKey: "UIDeviceFamily")?.as(NSArray.self)?.elements.map { $0.sendIntegerValue() } ?? []
         guard families.contains(2) else { return false }
@@ -120,10 +134,11 @@ enum Screen {
         Display.markDirty()
         Updates.schedule()
     }
-    /// Pixels per point, the iPhone's: apps size what they draw from it (a
-    /// game its renderbuffer and its interface), so it stays three whatever
-    /// the live view's scale.
-    static let scale: CGFloat = 3
+    /// Pixels per point: the display's when the screen is the display's,
+    /// else the iPhone's. Apps size what they draw from it (a game its
+    /// renderbuffer and its interface), so an iPhone's screen keeps three
+    /// whatever the live view's scale.
+    nonisolated(unsafe) static let scale: CGFloat = nativeSize != nil ? max(Display.scale, 1) : 3
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
     /// pixels, so lines are not lost between them.
