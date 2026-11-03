@@ -353,6 +353,11 @@ open class NSURLConnection: NSObject {
         return ["http", "https", "data", "file"].contains(scheme)
     }
 
+    /// The session the class methods load in, shared and never
+    /// invalidated, as a session per load would make and tear down a
+    /// transfer engine each time.
+    private static let oneShotSession = Session(configuration: .makeDefault(), events: nil)
+
     /// Loads at once on the calling thread, which waits.
     @ObjCClassMethod("sendSynchronousRequest:returningResponse:error:")
     static func sendSynchronous(_ request: NSObject, returningResponse response: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
@@ -370,18 +375,16 @@ open class NSURLConnection: NSObject {
             var failure: Failure?
         }
         let result = Result()
-        let session = Session(configuration: .makeDefault(), events: nil)
-        session.dataTask(Requests.request(request.objcObject).copy()) { data, response, failure in
+        oneShotSession.dataTask(Requests.request(request.objcObject).copy()) { data, response, failure in
             result.data = data
             result.response = response
             result.failure = failure
             sem_post(signal)
         }.resume()
         while sem_wait(done) != 0 {}
-        session.finishTasksAndInvalidate()
         response?.pointee = result.response.map(Responses.object)?.objcObject
         error?.pointee = Errors.object(result.failure)?.objcObject
-        return result.failure == nil ? NSData.of(result.data ?? Data()) : nil
+        return result.failure == nil ? NSMutableData.mutable(result.data ?? Data()) : nil
     }
 
     /// Loads, then runs the handler on `queue`: (response, data, error).
@@ -389,8 +392,7 @@ open class NSURLConnection: NSObject {
     static func sendAsynchronous(_ request: NSObject, queue: NSOperationQueue, completionHandler: ObjCBlock) {
         nonisolated(unsafe) let queue = queue
         nonisolated(unsafe) let block = completionHandler
-        let session = Session(configuration: .makeDefault(), events: nil)
-        session.dataTask(Requests.request(request.objcObject).copy()) { data, response, failure in
+        oneShotSession.dataTask(Requests.request(request.objcObject).copy()) { data, response, failure in
             Hops.run(on: queue) {
                 ObjCRuntime.autoreleasepool {
                     Blocks.call(block, response.map(Responses.object)?.objcObject,
@@ -398,7 +400,6 @@ open class NSURLConnection: NSObject {
                                 Errors.object(failure)?.objcObject)
                 }
             }
-            session.finishTasksAndInvalidate()
         }.resume()
     }
 }
