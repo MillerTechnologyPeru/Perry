@@ -148,6 +148,20 @@ public class NSSet: NSObject {
     @ObjCMethod("allObjects")
     func allObjects() -> NSArray { Arrays.owned(members) }
 
+    /// The members, unretained, into a buffer of count slots; Swift's Set
+    /// copies a bridged set this way.
+    @ObjCMethod("getObjects:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        guard let buffer else { return }
+        for (index, member) in members.enumerated() { buffer[index] = member }
+    }
+
+    @ObjCMethod("getObjects:count:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, count: UInt) {
+        guard let buffer else { return }
+        for (index, member) in members.prefix(Int(count)).enumerated() { buffer[index] = member }
+    }
+
     @ObjCMethod("anyObject")
     func anyObject() -> ObjCObject? { members.first.map(ObjCObject.init) }
 
