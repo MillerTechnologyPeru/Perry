@@ -156,6 +156,9 @@ PASSTHROUGH _ferror, ferror
 PASSTHROUGH _clearerr, clearerr
 PASSTHROUGH _rewind, rewind
 PASSTHROUGH _setvbuf, setvbuf
+PASSTHROUGH _getline, getline
+PASSTHROUGH _flockfile, flockfile
+PASSTHROUGH _funlockfile, funlockfile
 
 // MARK: - string
 PASSTHROUGH _strlen, strlen
@@ -199,6 +202,12 @@ PASSTHROUGH _calloc, calloc
 PASSTHROUGH _realloc, realloc
 PASSTHROUGH _free, free
 PASSTHROUGH _posix_memalign, posix_memalign
+// Typed allocation takes the type's descriptor last, which glibc's
+// allocator has no use for.
+PASSTHROUGH _malloc_type_malloc, malloc
+PASSTHROUGH _malloc_type_calloc, calloc
+PASSTHROUGH _malloc_type_realloc, realloc
+PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
 PASSTHROUGH _aligned_alloc, aligned_alloc
 PASSTHROUGH _getenv, getenv
 PASSTHROUGH _setenv, setenv
@@ -213,6 +222,11 @@ PASSTHROUGH _strtoll, strtoll
 PASSTHROUGH _strtoull, strtoull
 PASSTHROUGH _strtod, strtod
 PASSTHROUGH _strtof, strtof
+// The C locale's; the locale argument is ignored. long double is double on
+// Darwin arm64.
+PASSTHROUGH _strtod_l, strtod
+PASSTHROUGH _strtof_l, strtof
+PASSTHROUGH _strtold_l, strtod
 PASSTHROUGH _abs, abs
 PASSTHROUGH _labs, labs
 PASSTHROUGH _llabs, llabs
@@ -313,6 +327,44 @@ PASSTHROUGH _floorf, floorf
 PASSTHROUGH _ceilf, ceilf
 PASSTHROUGH _roundf, roundf
 PASSTHROUGH _fmodf, fmodf
+PASSTHROUGH _exp2, exp2
+PASSTHROUGH _log2, log2
+PASSTHROUGH _remainder, remainder
+PASSTHROUGH _remquo, remquo
+PASSTHROUGH _lgamma_r, lgamma_r
+PASSTHROUGH _jn, jn
+PASSTHROUGH _yn, yn
+PASSTHROUGH _asinf, asinf
+PASSTHROUGH _acoshf, acoshf
+PASSTHROUGH _asinhf, asinhf
+PASSTHROUGH _atanhf, atanhf
+PASSTHROUGH _coshf, coshf
+PASSTHROUGH _sinhf, sinhf
+PASSTHROUGH _tanhf, tanhf
+PASSTHROUGH _cbrtf, cbrtf
+PASSTHROUGH _copysignf, copysignf
+PASSTHROUGH _erff, erff
+PASSTHROUGH _erfcf, erfcf
+PASSTHROUGH _exp2f, exp2f
+PASSTHROUGH _expm1f, expm1f
+PASSTHROUGH _log1pf, log1pf
+PASSTHROUGH _log2f, log2f
+PASSTHROUGH _logbf, logbf
+PASSTHROUGH _fdimf, fdimf
+PASSTHROUGH _hypotf, hypotf
+PASSTHROUGH _nanf, nanf
+PASSTHROUGH _nextafterf, nextafterf
+PASSTHROUGH _remainderf, remainderf
+PASSTHROUGH _remquof, remquof
+PASSTHROUGH _lgammaf_r, lgammaf_r
+PASSTHROUGH _tgammaf, tgammaf
+
+// MARK: - compiler runtime
+// 128-bit division, which Darwin's libSystem exports (compiler-rt's).
+PASSTHROUGH ___divti3, __divti3
+PASSTHROUGH ___modti3, __modti3
+PASSTHROUGH ___udivti3, __udivti3
+PASSTHROUGH ___umodti3, __umodti3
 
 #endif
 
