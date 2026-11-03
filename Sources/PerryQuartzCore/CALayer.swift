@@ -620,6 +620,16 @@ extension CALayer {
             CG.setAlpha(context, CGFloat(state.opacity))
             CG.beginTransparencyLayer(context, nil)
         }
+        if let masked = maskedImage(of: layer, state: state, shape: shape) {
+            CG.drawFlipped(masked.object, in: state.bounds, context: context)
+        } else {
+            drawTree(of: layer, state: state, shape: shape, in: context)
+        }
+        if group { CG.endTransparencyLayer(context) }
+    }
+
+    /// The layer's own drawing and its sublayers', in its coordinates.
+    static func drawTree(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, in context: CGRef) {
         drawBackground(of: state, in: context)
         CG.saveGState(context)
         if state.masksToBounds { clip(to: state, in: context) }
@@ -627,7 +637,32 @@ extension CALayer {
         for sublayer in orderedSublayers(of: state) { render(sublayer, in: context, parent: state) }
         CG.restoreGState(context)
         drawBorder(of: state, in: context)
-        if group { CG.endTransparencyLayer(context) }
+    }
+
+    /// A layer with a mask, drawn with its sublayers into an image of its
+    /// bounds where the mask layer, drawn in its coordinates, is opaque;
+    /// nil without a mask.
+    static func maskedImage(of layer: CALayer, state: LayerState, shape: ShapeLayerState?) -> Owned? {
+        guard let mask = state.mask, state.bounds.width > 0, state.bounds.height > 0 else { return nil }
+        let scale = max(state.contentsScale, mask.state.contentsScale, 1)
+        guard let content = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false),
+              let alpha = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return nil }
+        defer {
+            CG.release(content)
+            CG.release(alpha)
+        }
+        CG.translateCTM(content, -state.bounds.minX, -state.bounds.minY)
+        drawTree(of: layer, state: state, shape: shape, in: content)
+        CG.translateCTM(alpha, -state.bounds.minX, -state.bounds.minY)
+        render(mask, in: alpha, parent: state)
+        guard let maskImage = CG.bitmapContextCreateImage(alpha) else { return nil }
+        defer { CG.release(maskImage) }
+        // kCGBlendModeDestinationIn: the content stays where the mask is.
+        CG.saveGState(content)
+        CG.setBlendMode(content, 22)
+        CG.drawFlipped(maskImage, in: state.bounds, context: content)
+        CG.restoreGState(content)
+        return CG.bitmapContextCreateImage(content).map(Owned.init)
     }
 
     /// The sublayers back to front: by zPosition, then in order.
