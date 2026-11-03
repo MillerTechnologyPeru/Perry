@@ -34,6 +34,34 @@ open class UINavigationController: UIViewController {
         return self
     }
 
+    /// From a storyboard: the controller's own properties, then its
+    /// stack, adopted as -setViewControllers: does.
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        _ = loadedView
+        let decoded = Coder(coder: coder)
+        if let archived = decoded.object("UINavigationBar")?.as(UINavigationBar.self) {
+            let bar = navigationBar()
+            bar.barState.barStyle = archived.barState.barStyle
+            bar.barState.translucent = archived.barState.translucent
+            bar.barState.barTintColor = archived.barState.barTintColor
+        }
+        let controllers = decoded.array("UIViewControllers").compactMap { $0.as(UIViewController.self) }
+        for (index, controller) in controllers.enumerated() {
+            controller.sendWillMove(toParent: self)
+            state.children.append(controller)
+            controller.state.parent = objcObject
+            if index < controllers.count - 1 {
+                controller.sendDidMove(toParent: self)
+                controller.state.movingToParent = false
+            }
+        }
+        navigation.viewControllers = controllers
+        navigationBar().setItemsFromStack(controllers.map { $0.navigationItem() })
+        return self
+    }
+
     @ObjCMethod("initWithRootViewController:")
     func initialize(rootViewController root: UIViewController) -> NSObject {
         let navigation = initializeViewController(nibName: nil, bundle: nil).unsafeCast(to: UINavigationController.self)
@@ -197,7 +225,7 @@ open class UINavigationController: UIViewController {
             _ = from?.beginAppearance(false, animated: animated)
             _ = top.beginAppearance(true, animated: animated)
         }
-        let bounds = view.state.bounds
+        let bounds = contentFrame(for: top), fromBounds = contentFrame(for: from)
         topView.sendSetFrame(bounds)
         // A push brings the new view in over the old; a pop uncovers the
         // one beneath.
@@ -212,7 +240,7 @@ open class UINavigationController: UIViewController {
 
         let finish = { [self] in
             fromView?.removeFromSuperview()
-            fromView?.sendSetFrame(bounds)
+            fromView?.sendSetFrame(fromBounds)
             topView.sendSetFrame(bounds)
             navigation.animating = false
             if onScreen {
@@ -235,13 +263,28 @@ open class UINavigationController: UIViewController {
         let width = bounds.width
         let (fromStart, fromEnd, topStart): (CGFloat, CGFloat, CGFloat) = pushing ? (0, -width / 3, width) : (0, width, -width / 3)
         Animations.run(duration: 0.35, { progress in
-            fromView.sendSetFrame(bounds.offsetBy(x: fromStart + (fromEnd - fromStart) * progress))
+            fromView.sendSetFrame(fromBounds.offsetBy(x: fromStart + (fromEnd - fromStart) * progress))
             topView.sendSetFrame(bounds.offsetBy(x: topStart * (1 - progress)))
         }, completion: finish)
     }
 
     @ObjCMethod("viewWillLayoutSubviews")
     override func viewWillLayoutSubviews() { layoutContent() }
+
+    /// Where a child's view goes: the whole view, under the bar, unless
+    /// the bar is opaque and the child does not extend under opaque bars,
+    /// or does not extend under the top bar at all; then below the bar.
+    func contentFrame(for controller: UIViewController?) -> CGRect {
+        guard let view = state.view else { return .zero }
+        let bounds = view.state.bounds
+        let bar = navigationBar()
+        guard let controller, !navigation.barHidden, !bar.state.hidden else { return bounds }
+        let extends = controller.state.edgesForExtendedLayout & 1 != 0
+            && (bar.barState.translucent || controller.state.extendedLayoutIncludesOpaqueBars)
+        guard !extends else { return bounds }
+        let top = min(bar.state.frame.maxY, bounds.maxY)
+        return CGRect(x: bounds.minX, y: top, width: bounds.width, height: bounds.maxY - top)
+    }
 
     /// The bar across the top of the safe area, the content filling the
     /// view beneath it.
@@ -252,8 +295,8 @@ open class UINavigationController: UIViewController {
         let top = view.windowObject != nil ? view.safeAreaInsets(ignoringController: true).top : 0
         bar.sendSetFrame(CGRect(x: 0, y: top, width: bounds.width, height: barHeight))
         bar.extendBackground(above: top)
-        if let displayed = navigation.displayed?.state.view {
-            displayed.sendSetFrame(bounds)
+        if let displayed = navigation.displayed, let displayedView = displayed.state.view, !navigation.animating {
+            displayedView.sendSetFrame(contentFrame(for: displayed))
         }
     }
 
@@ -326,6 +369,17 @@ final class NavigationBarState: ObjectState {
 open class UINavigationBar: UIView {
     static let barStates = StateTable<NavigationBarState>()
     var barState: NavigationBarState { UINavigationBar.barStates[objcObject] }
+
+    /// From a storyboard. _UIBarTranslucence: default 0, translucent 1, opaque 2.
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        barState.barStyle = decoded.integer("UIBarStyle")
+        barState.translucent = decoded.integer("UIBarTranslucence") != 2
+        barState.barTintColor = decoded.object("UIBarTintColor")?.as(UIColor.self)
+        return self
+    }
 
     @ObjCMethod("dealloc")
     override func dealloc() {
@@ -554,7 +608,24 @@ open class UINavigationItem: NSObject {
         return self
     }
 
-    @ObjCMethod("initWithCoder:") func initialize(coder: NSObject?) -> Self { self }
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        let state = state
+        state.title = decoded.string("UITitle")
+        state.titleView = decoded.object("UITitleView")?.as(UIView.self)
+        state.prompt = decoded.string("UIPrompt")
+        state.backButtonTitle = decoded.string("UIBackButtonTitle")
+        state.backBarButtonItem = decoded.object("UIBackBarButtonItem")?.as(UIBarButtonItem.self)
+        state.hidesBackButton = decoded.bool("UIHidesBackButton")
+        func items(_ many: String, _ one: String) -> [UIBarButtonItem] {
+            let list = decoded.array(many).compactMap { $0.as(UIBarButtonItem.self) }
+            return list.isEmpty ? (decoded.object(one)?.as(UIBarButtonItem.self).map { [$0] } ?? []) : list
+        }
+        state.leftItems = items("UILeftBarButtonItems", "UILeftBarButtonItem")
+        state.rightItems = items("UIRightBarButtonItems", "UIRightBarButtonItem")
+        return self
+    }
 
     @ObjCMethod("title") func title() -> String? { state.title }
     @ObjCMethod("setTitle:") func setTitle(_ title: String?) { state.title = title }
@@ -683,6 +754,25 @@ open class UIBarButtonItem: UIBarItem {
     }
 
     @ObjCMethod("init") func initialize() -> Self { self }
+
+    /// From a nib: the title or image, style, system item and tag.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        let state = state
+        state.title = decoded.string("UITitle")
+        state.image = decoded.object("UIImage")?.as(UIImage.self)
+        state.style = decoded.integer("UIStyle")
+        state.enabled = decoded.has("UIEnabled") ? decoded.bool("UIEnabled") : true
+        state.tag = decoded.integer("UITag")
+        state.customView = decoded.object("UICustomView")?.as(UIView.self)
+        state.width = decoded.double("UIWidth")
+        if decoded.bool("UIIsSystemItem") {
+            state.systemItem = decoded.integer("UISystemItem")
+            if state.systemItem == 0 || state.systemItem == 3 { state.style = 2 }
+        }
+        return self
+    }
 
     @ObjCMethod("initWithTitle:style:target:action:")
     func initialize(title: String?, style: Int, target: NSObject?, action: ObjCSelector?) -> Self {
