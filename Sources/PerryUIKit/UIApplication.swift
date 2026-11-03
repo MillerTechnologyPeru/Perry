@@ -19,6 +19,15 @@ enum Application {
     nonisolated(unsafe) static var statusBarHidden = false
     nonisolated(unsafe) static var statusBarStyle = 0
     nonisolated(unsafe) static var ignoringInteractionEvents = 0
+    nonisolated(unsafe) static var userNotificationSettings: UIUserNotificationSettings?
+    /// The last background task identifier given out;
+    /// UIBackgroundTaskInvalid is 0.
+    nonisolated(unsafe) static var lastBackgroundTask: UInt = 0
+
+    static func nextBackgroundTask() -> UInt {
+        lastBackgroundTask += 1
+        return lastBackgroundTask
+    }
 
     /// Posts a notification from the default center.
     static func post(_ name: String, object: NSObject?) {
@@ -40,6 +49,21 @@ open class UIApplication: UIResponder {
 
     @ObjCMethod("applicationState")
     func applicationState() -> Int { Application.state.rawValue }
+
+    // MARK: Background tasks
+
+    /// Background tasks: the app is never suspended, so a task runs until
+    /// it ends and its expiration handler is never called.
+    @ObjCMethod("beginBackgroundTaskWithExpirationHandler:")
+    func beginBackgroundTask(expirationHandler handler: UnsafeMutableRawPointer?) -> UInt { Application.nextBackgroundTask() }
+
+    @ObjCMethod("beginBackgroundTaskWithName:expirationHandler:")
+    func beginBackgroundTask(name: NSObject?, expirationHandler handler: UnsafeMutableRawPointer?) -> UInt {
+        Application.nextBackgroundTask()
+    }
+
+    @ObjCMethod("endBackgroundTask:") func endBackgroundTask(_ identifier: UInt) {}
+    @ObjCMethod("backgroundTimeRemaining") func backgroundTimeRemaining() -> Double { .greatestFiniteMagnitude }
 
     // MARK: The status bar
 
@@ -98,6 +122,26 @@ open class UIApplication: UIResponder {
         Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
     }
     @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
+    @ObjCMethod("isRegisteredForRemoteNotifications") func isRegisteredForRemoteNotifications() -> Bool { false }
+
+    /// Notification settings are granted as asked, and the delegate hears
+    /// so afterwards, as on iOS once the user has answered.
+    @ObjCMethod("registerUserNotificationSettings:")
+    func registerUserNotificationSettings(_ settings: UIUserNotificationSettings?) {
+        Application.userNotificationSettings = settings
+        Updates.afterPass {
+            guard let delegate = Application.delegate, let settings,
+                  delegate.responds(to: "application:didRegisterUserNotificationSettings:") else { return }
+            delegate.sendApplication(self, didRegister: settings)
+        }
+    }
+
+    @ObjCMethod("currentUserNotificationSettings")
+    func currentUserNotificationSettings() -> UIUserNotificationSettings? {
+        Application.userNotificationSettings
+            ?? UIUserNotificationSettings.settings(UIUserNotificationSettings.objCClass, types: 0, categories: nil)
+                .unsafeCast(to: UIUserNotificationSettings.self)
+    }
     @ObjCMethod("windows") func windows() -> NSObject { NSMutableArray.of(Windows.all.map { NSObject($0) }) }
 
     @ObjCMethod("supportsMultipleScenes")
@@ -138,4 +182,9 @@ protocol UIApplicationDelegate {
     @ObjCOptional("application:configurationForConnectingSceneSession:options:")
     func application(_ application: UIApplication, configurationForConnecting session: UISceneSession,
                      options: UISceneConnectionOptions) -> UISceneConfiguration?
+}
+
+extension NSObject {
+    @ObjCMethod("application:didRegisterUserNotificationSettings:")
+    func sendApplication(_ application: UIApplication, didRegister settings: UIUserNotificationSettings)
 }
