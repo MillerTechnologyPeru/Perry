@@ -19,6 +19,8 @@ final class RunLoopState {
     /// The NSRunLoop object, which also serves as the CFRunLoopRef.
     private(set) var object: id!
     private var timers: [id] = []
+    /// Ports added, which keep the loop running as input sources do.
+    var ports = 0
     private var stopRequested = false
     private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
     private let wakeFile = eventfd(0, Int32(EFD_CLOEXEC | EFD_NONBLOCK))
@@ -259,10 +261,15 @@ public final class NSRunLoop: NSObject {
     /// `date`, as on Darwin. NO when there is nothing to run.
     @ObjCMethod("runMode:beforeDate:")
     func run(mode: ObjCObject?, before date: NSDate) -> Bool {
-        guard let state, state.hasTimers || state.servesMainQueue else { return false }
-        _ = state.run(until: date.date.timeIntervalSinceReferenceDate)
+        guard let state, state.hasTimers || state.servesMainQueue || state.ports > 0 else { return false }
+        _ = state.run(until: date.date.timeIntervalSinceReferenceDate, waitWhenEmpty: state.ports > 0)
         return true
     }
+
+    /// No messages arrive on ports, but one keeps the loop running.
+    @ObjCMethod("addPort:forMode:") func add(port: ObjCObject?, forMode mode: ObjCObject?) { state?.ports += 1 }
+    @ObjCMethod("removePort:forMode:")
+    func remove(port: ObjCObject?, forMode mode: ObjCObject?) { if let state, state.ports > 0 { state.ports -= 1 } }
 }
 
 // MARK: - CFRunLoop
