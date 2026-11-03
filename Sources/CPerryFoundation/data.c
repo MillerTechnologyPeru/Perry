@@ -237,3 +237,6 @@ const void *const cf_allocator_use_context DARWIN_SYMBOL("_kCFAllocatorUseContex
 
 // CoreFoundation's version: iOS 15's.
 const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFoundationVersionNumber") = 1854.0;
+
+// Foundation's version, the same: iOS 15's.
+const double darwin_NSFoundationVersionNumber DARWIN_SYMBOL("_NSFoundationVersionNumber") = 1854.0;
