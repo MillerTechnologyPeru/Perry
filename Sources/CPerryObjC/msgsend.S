@@ -64,6 +64,7 @@ ENTRY _objc_msgSend
 .Lmsgsend:
     cbz x0, .Lnil
     ldr x16, [x0]                   // isa
+    cbz x16, .Lnil                  // a missing class's placeholder: as nil
 .Llookup:                           // x0 = receiver, x1 = SEL, x16 = class
     ldr x9, [x16, #16]              // class->cache
     cbz x9, .Lmiss
