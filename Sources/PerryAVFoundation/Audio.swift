@@ -162,3 +162,33 @@ open class AVAudioSession: NSObject {
 extension NSObject {
     @ObjCMethod("new") func newInstance() -> NSObject
 }
+
+/// The session's categories, modes, notifications and their keys.
+@ObjCConstants
+enum SessionConstants {
+    static let AVAudioSessionCategoryAmbient = "AVAudioSessionCategoryAmbient"
+    static let AVAudioSessionCategorySoloAmbient = "AVAudioSessionCategorySoloAmbient"
+    static let AVAudioSessionCategoryPlayback = "AVAudioSessionCategoryPlayback"
+    static let AVAudioSessionCategoryRecord = "AVAudioSessionCategoryRecord"
+    static let AVAudioSessionCategoryPlayAndRecord = "AVAudioSessionCategoryPlayAndRecord"
+    static let AVAudioSessionCategoryAudioProcessing = "AVAudioSessionCategoryAudioProcessing"
+    static let AVAudioSessionCategoryMultiRoute = "AVAudioSessionCategoryMultiRoute"
+    static let AVAudioSessionModeDefault = "AVAudioSessionModeDefault"
+    static let AVAudioSessionModeGameChat = "AVAudioSessionModeGameChat"
+    static let AVAudioSessionModeMeasurement = "AVAudioSessionModeMeasurement"
+    static let AVAudioSessionModeMoviePlayback = "AVAudioSessionModeMoviePlayback"
+    static let AVAudioSessionModeSpokenAudio = "AVAudioSessionModeSpokenAudio"
+    static let AVAudioSessionModeVideoChat = "AVAudioSessionModeVideoChat"
+    static let AVAudioSessionModeVideoRecording = "AVAudioSessionModeVideoRecording"
+    static let AVAudioSessionModeVoiceChat = "AVAudioSessionModeVoiceChat"
+    static let AVAudioSessionInterruptionNotification = "AVAudioSessionInterruptionNotification"
+    static let AVAudioSessionRouteChangeNotification = "AVAudioSessionRouteChangeNotification"
+    static let AVAudioSessionMediaServicesWereLostNotification = "AVAudioSessionMediaServicesWereLostNotification"
+    static let AVAudioSessionMediaServicesWereResetNotification = "AVAudioSessionMediaServicesWereResetNotification"
+    static let AVAudioSessionSilenceSecondaryAudioHintNotification = "AVAudioSessionSilenceSecondaryAudioHintNotification"
+    static let AVAudioSessionInterruptionTypeKey = "AVAudioSessionInterruptionTypeKey"
+    static let AVAudioSessionInterruptionOptionKey = "AVAudioSessionInterruptionOptionKey"
+    static let AVAudioSessionRouteChangeReasonKey = "AVAudioSessionRouteChangeReasonKey"
+    static let AVAudioSessionRouteChangePreviousRouteKey = "AVAudioSessionRouteChangePreviousRouteKey"
+    static let AVAudioSessionSilenceSecondaryAudioHintTypeKey = "AVAudioSessionSilenceSecondaryAudioHintTypeKey"
+}
