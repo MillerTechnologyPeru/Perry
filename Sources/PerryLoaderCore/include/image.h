@@ -116,6 +116,9 @@ _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc
 
 // Address helpers
 void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
+
+// Points the image's thread-local variable descriptors at Perry's tlv_get_addr.
+void perry_setup_thread_locals(perry_image *image);
 void *perry_image_fileoff(const perry_image *image, uint64_t fileoff);
 const struct section_64 *perry_image_section(const perry_image *image, const char *segname, const char *sectname);
 const char *perry_platform_name(uint32_t platform);
