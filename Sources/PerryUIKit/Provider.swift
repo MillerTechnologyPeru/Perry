@@ -73,6 +73,27 @@ enum Constants {
             "_UIFontWeightBold": value(CGFloat(0.4)),
             "_UIFontWeightHeavy": value(CGFloat(0.56)),
             "_UIFontWeightBlack": value(CGFloat(0.62)),
+            // UIAccessibilityTraits.
+            "_UIAccessibilityTraitNone": value(UInt64(0)),
+            "_UIAccessibilityTraitButton": value(UInt64(1 << 0)),
+            "_UIAccessibilityTraitLink": value(UInt64(1 << 1)),
+            "_UIAccessibilityTraitImage": value(UInt64(1 << 2)),
+            "_UIAccessibilityTraitSelected": value(UInt64(1 << 3)),
+            "_UIAccessibilityTraitPlaysSound": value(UInt64(1 << 4)),
+            "_UIAccessibilityTraitKeyboardKey": value(UInt64(1 << 5)),
+            "_UIAccessibilityTraitStaticText": value(UInt64(1 << 6)),
+            "_UIAccessibilityTraitSummaryElement": value(UInt64(1 << 7)),
+            "_UIAccessibilityTraitNotEnabled": value(UInt64(1 << 8)),
+            "_UIAccessibilityTraitUpdatesFrequently": value(UInt64(1 << 9)),
+            "_UIAccessibilityTraitSearchField": value(UInt64(1 << 10)),
+            "_UIAccessibilityTraitStartsMediaSession": value(UInt64(1 << 11)),
+            "_UIAccessibilityTraitAdjustable": value(UInt64(1 << 12)),
+            "_UIAccessibilityTraitAllowsDirectInteraction": value(UInt64(1 << 13)),
+            "_UIAccessibilityTraitCausesPageTurn": value(UInt64(1 << 14)),
+            "_UIAccessibilityTraitTabBar": value(UInt64(1 << 15)),
+            "_UIAccessibilityTraitHeader": value(UInt64(1 << 16)),
+            "_UICollectionViewFlowLayoutAutomaticSize": value(CGSize(width: CGFloat.greatestFiniteMagnitude,
+                                                                     height: CGFloat.greatestFiniteMagnitude)),
             "_GLKMatrix4Identity": value(GLKMath.identity4),
             "_GLKMatrix3Identity": value(GLKMath.identity3),
             "_GLKQuaternionIdentity": value(GLKQuaternion(q: (0, 0, 0, 1))),
@@ -93,6 +114,10 @@ enum Classes {
         name.withCString { ObjCRuntime.functions.getClass($0) }.map(ObjCClass.init)
     }
 }
+
+/// No assistive settings are on.
+@c(_UIAccessibilityIsBoldTextEnabled) public func UIAccessibilityIsBoldTextEnabled() -> Bool { false }
+@c(_UIAccessibilityIsGuidedAccessEnabled) public func UIAccessibilityIsGuidedAccessEnabled() -> Bool { false }
 
 /// void UIAccessibilityPostNotification(UIAccessibilityNotifications, id):
 /// there is no assistive technology to tell.
