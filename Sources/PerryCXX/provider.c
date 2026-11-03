@@ -1,12 +1,12 @@
 // libPerryCXX: the provider for /usr/lib/libc++.1.dylib and
-// /usr/lib/libc++abi.dylib, over LLVM's libc++ and libc++abi for Linux.
+// /usr/lib/libc++abi.dylib, over LLVM's libc++ and libc++abi built as
+// Apple builds them for arm64 (libperry-c++, see the Dockerfile).
 //
 // Darwin's libc++ is LLVM's, with the same Itanium mangling and the same
 // std::__1 inline namespace, so its imports bind by name ("__ZNSt3__1…" is
-// "_ZNSt3__1…"). Its layouts match but for std::string's, whose members
-// code calls are in string.c, found first. Each library is opened on
-// its own: the process already has libstdc++, whose __cxa functions and
-// type_info vtables share libc++abi's names but are not the same objects.
+// "_ZNSt3__1…"). Each library is opened on its own: the process already
+// has libstdc++, whose __cxa functions and type_info vtables share
+// libc++abi's names but are not the same objects.
 
 #include "PerryCXX.h"
 #include "perry_wrapped.h"
@@ -15,8 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
-static perry_wrapped_library cxx = PERRY_WRAPPED_SONAME("libc++.so.1");
-static perry_wrapped_library cxxabi = PERRY_WRAPPED_SONAME("libc++abi.so.1");
+static perry_wrapped_library cxx = PERRY_WRAPPED_SONAME("libperry-c++.so.1");
+static perry_wrapped_library cxxabi = PERRY_WRAPPED_SONAME("libperry-c++abi.so.1");
 
 // Darwin's typed operator new and delete take the allocated type's
 // descriptor as an extra last argument, for its allocator to sort memory
