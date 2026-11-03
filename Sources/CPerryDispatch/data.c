@@ -36,6 +36,10 @@ SOURCE_TYPE(timer, PERRY_SOURCE_TIMER);
 SOURCE_TYPE(vnode, PERRY_SOURCE_VNODE);
 SOURCE_TYPE(write, PERRY_SOURCE_WRITE);
 
+// Exclaves' notifications, which no device here has: a source of this
+// type cannot be made.
+SOURCE_TYPE(exclaves_notification, -1);
+
 static const source_type *const source_types[PERRY_SOURCE_COUNT] = {
     &darwin_dispatch_source_type_data_add, &darwin_dispatch_source_type_data_or,
     &darwin_dispatch_source_type_data_replace, &darwin_dispatch_source_type_mach_send,
