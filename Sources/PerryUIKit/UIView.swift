@@ -358,7 +358,15 @@ open class UIView: UIResponder, UICoordinateSpace {
     // MARK: Appearance
 
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
-    @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) { state.hidden = hidden }
+    /// A stack view closes up around an arranged subview that hides.
+    @ObjCMethod("setHidden:")
+    func setHidden(_ hidden: Bool) {
+        guard hidden != state.hidden else { return }
+        state.hidden = hidden
+        if let superview = state.superview, ObjCRuntime.isKind(superview, of: UIStackView.objCClass.pointer) {
+            UIView.wrap(superview).unsafeCast(to: UIStackView.self).arrangementChanged()
+        }
+    }
     @ObjCMethod("alpha") func alpha() -> CGFloat { state.alpha }
     @ObjCMethod("setAlpha:") func setAlpha(_ alpha: CGFloat) { state.alpha = alpha }
     @ObjCMethod("backgroundColor") func backgroundColor() -> UIColor? { state.backgroundColor }
@@ -646,9 +654,18 @@ open class UIView: UIResponder, UICoordinateSpace {
         Updates.schedule()
     }
 
-    /// A change to the view's intrinsic size: its superview lays it out again.
+    /// A change to the view's intrinsic size: its superview lays it out
+    /// again, and so does each ancestor whose layout solves the view, up
+    /// through those constraints lay out.
     func superviewNeedsLayout() {
-        if let superview = state.superview { UIView.wrap(superview).state.needsLayout = true }
+        var view = self
+        while let superview = view.state.superview {
+            let next = UIView.wrap(superview)
+            next.state.needsLayout = true
+            guard !next.state.translatesAutoresizingMaskIntoConstraints else { break }
+            view = next
+        }
+        Updates.schedule()
     }
 
     /// Lays out the subtree's views that need it, each before its subviews.
