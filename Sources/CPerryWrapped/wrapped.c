@@ -4,11 +4,17 @@
 #include "perry_wrapped.h"
 
 #include <dlfcn.h>
+#include <link.h>
 #include <string.h>
 
 static void load(perry_wrapped_library *library) {
     Dl_info info;
-    if (dladdr(library->anchor, &info)) {
+    if (library->soname) {
+        library->handle = dlopen(library->soname, RTLD_NOW | RTLD_LOCAL);
+        struct link_map *map = NULL;
+        if (library->handle && dlinfo(library->handle, RTLD_DI_LINKMAP, &map) == 0 && map)
+            library->base = (void *)map->l_addr;
+    } else if (dladdr(library->anchor, &info)) {
         library->base = info.dli_fbase;
         library->handle = dlopen(info.dli_fname, RTLD_NOW | RTLD_NOLOAD);
     }
