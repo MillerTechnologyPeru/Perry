@@ -29,6 +29,22 @@ open class UIFont: NSObject {
         ObjCRuntime.superDealloc(objcObject, definedOn: UIFont.objCClass.pointer)
     }
 
+    /// From a nib: the font's name and size, or the system font.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        let traits = decoded.integer("UIFontTraits")
+        state.pointSize = decoded.has("UIFontPointSize") ? decoded.double("UIFontPointSize") : 17
+        if decoded.bool("UISystemFont") || decoded.string("UIFontName")?.hasPrefix(".") == true {
+            state.name = ".SFUI-Regular"
+            state.weight = traits & 2 != 0 || decoded.string("UIFontName")?.contains("Bold") == true
+                || decoded.string("UIFontName")?.contains("Semibold") == true ? 0.4 : 0
+        } else {
+            state.name = decoded.string("UIFontName") ?? "Helvetica"
+        }
+        return self
+    }
+
     @ObjCClassMethod("systemFontOfSize:") static func systemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size) }
     @ObjCClassMethod("boldSystemFontOfSize:") static func boldSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Semibold", size: size, weight: 0.4) }
     @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-RegularItalic", size: size) }
@@ -50,7 +66,7 @@ open class UIFont: NSObject {
     static func preferredFont(textStyle: String) -> UIFont {
         let sizes: [String: CGFloat] = [
             "UICTFontTextStyleLargeTitle": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
-            "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubheadline": 15,
+            "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubhead": 15,
             "UICTFontTextStyleBody": 17, "UICTFontTextStyleCallout": 16, "UICTFontTextStyleFootnote": 13,
             "UICTFontTextStyleCaption1": 12, "UICTFontTextStyleCaption2": 11,
         ]
@@ -180,6 +196,25 @@ open class UILabel: UIView {
         return self
     }
 
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        let label = label
+        label.text = decoded.string("UIText")
+        if let attributed = decoded.object("UIAttributedText") {
+            label.attributedText = attributed
+            label.text = attributed.sendString() ?? label.text
+        }
+        label.font = decoded.object("UIFont")?.as(UIFont.self)
+        label.textColor = decoded.object("UITextColor")?.as(UIColor.self)
+        label.highlightedTextColor = decoded.object("UIHighlightedColor")?.as(UIColor.self)
+        if decoded.has("UITextAlignment") { label.textAlignment = decoded.integer("UITextAlignment") }
+        if decoded.has("UINumberOfLines") { label.numberOfLines = decoded.integer("UINumberOfLines") }
+        label.adjustsFontSizeToFitWidth = decoded.bool("UIAdjustsFontSizeToFit")
+        return self
+    }
+
     @ObjCMethod("dealloc")
     override func dealloc() {
         UILabel.labelStates.remove(objcObject)
@@ -287,6 +322,15 @@ open class UIImageView: UIView {
         let view = initializeView(frame: CGRect(origin: .zero, size: image?.state.size ?? .zero)).unsafeCast(to: UIImageView.self)
         view.setImage(image)
         return view
+    }
+
+    @ObjCMethod("initWithCoder:")
+    override func initialize(coder: NSObject) -> Self {
+        _ = super.initialize(coder: coder)
+        let decoded = Coder(coder: coder)
+        imageState.highlightedImage = decoded.object("UIHighlightedImage")?.as(UIImage.self)
+        setImage(decoded.object("UIImage")?.as(UIImage.self))
+        return self
     }
 
     @ObjCMethod("dealloc")
