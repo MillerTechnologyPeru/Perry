@@ -96,6 +96,13 @@ final class NSFileManager: NSObject {
         }
     }
 
+    @ObjCMethod("createDirectoryAtURL:withIntermediateDirectories:attributes:error:")
+    func createDirectory(at url: ObjCObject, intermediates: Bool, attributes: ObjCObject?,
+                         error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        createDirectory(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", intermediates: intermediates,
+                        attributes: attributes, error: errorPointer)
+    }
+
     @ObjCMethod("createFileAtPath:contents:attributes:")
     func createFile(atPath path: String, contents: NSData?, attributes: ObjCObject?) -> Bool {
         files.createFile(atPath: path, contents: contents?.data)
@@ -110,6 +117,22 @@ final class NSFileManager: NSObject {
     func contentsOfDirectory(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
         do {
             return Arrays.owned(try files.contentsOfDirectory(atPath: path).map { Strings.autoreleased($0) })
+        } catch {
+            FileManagers.report(errorPointer, path)
+            return nil
+        }
+    }
+
+    /// The directory's entries as file URLs. Properties are not prefetched;
+    /// option 4 (NSDirectoryEnumerationSkipsHiddenFiles) leaves out names
+    /// starting with ".".
+    @ObjCMethod("contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:")
+    func contentsOfDirectory(at url: ObjCObject, keys: ObjCObject?, options: UInt,
+                             error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
+        let path = URLs.url(url.id)?.path(percentEncoded: false) ?? ""
+        do {
+            let names = try files.contentsOfDirectory(atPath: path).filter { options & 4 == 0 || !$0.hasPrefix(".") }
+            return Arrays.owned(names.compactMap { URLs.autoreleased(URLs.fileURL(Paths.appending(path, $0), isDirectory: nil)) })
         } catch {
             FileManagers.report(errorPointer, path)
             return nil
