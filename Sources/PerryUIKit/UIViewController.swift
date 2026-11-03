@@ -27,6 +27,7 @@ final class ViewControllerState: ObjectState {
     var parent: UnsafeMutableRawPointer?
     var children: [UIViewController] = []
     var navigationItem: UINavigationItem?
+    var tabBarItem: UITabBarItem?
     var appearance = Appearance.disappeared
     var animated = false
     var movingToParent = false
@@ -99,6 +100,7 @@ open class UIViewController: UIResponder {
             state.navigationItem = item
             if state.title == nil { state.title = item.state.title }
         }
+        state.tabBarItem = decoded.object("UITabBarItem")?.as(UITabBarItem.self)
         state.segueTemplates = decoded.array("UIStoryboardSegueTemplates").compactMap { $0.as(UIStoryboardSegueTemplate.self) }
         for template in state.segueTemplates { template.state.viewController = objcObject }
         state.externalObjects = decoded.dictionary("UIExternalObjectsTableForViewLoading")
@@ -152,11 +154,12 @@ open class UIViewController: UIResponder {
     @ObjCMethod("loadViewIfNeeded") func loadViewIfNeeded() { _ = loadedView }
 
     /// The view from the controller's nib when it has one, else a plain
-    /// view the size of the screen.
+    /// view the size of the screen that follows its superview's size.
     @ObjCMethod("loadView")
     func loadView() {
         if loadViewFromNib() { return }
         let view = UIView.objCClass.object.allocated().initializeView(frame: Screen.bounds).unsafeCast(to: UIView.self)
+        view.setAutoresizingMask(18)
         setView(view)
     }
 
@@ -184,6 +187,7 @@ open class UIViewController: UIResponder {
     func setTitle(_ title: String?) {
         state.title = title
         state.navigationItem?.state.title = title
+        state.tabBarItem?.state.title = title
     }
 
     @ObjCMethod("nibName") func nibName() -> String? { state.nibName }
@@ -191,6 +195,18 @@ open class UIViewController: UIResponder {
     @ObjCMethod("storyboard") func storyboard() -> NSObject? { nil }
 
     /// Made on first use, titled with the controller's title.
+    /// The controller's tab, titled as the controller is.
+    @ObjCMethod("tabBarItem")
+    func tabBarItem() -> UITabBarItem {
+        if let item = state.tabBarItem { return item }
+        let item = UITabBarItem.objCClass.object.newInstance().unsafeCast(to: UITabBarItem.self)
+        item.state.title = state.title
+        state.tabBarItem = item
+        return item
+    }
+
+    @ObjCMethod("setTabBarItem:") func setTabBarItem(_ item: UITabBarItem?) { state.tabBarItem = item }
+
     @ObjCMethod("navigationItem")
     func navigationItem() -> UINavigationItem {
         if let item = state.navigationItem { return item }
@@ -308,7 +324,17 @@ open class UIViewController: UIResponder {
         return nil
     }
 
-    @ObjCMethod("tabBarController") func tabBarController() -> UIViewController? { nil }
+    /// The nearest tab bar controller at or above the parent.
+    @ObjCMethod("tabBarController")
+    func tabBarController() -> UIViewController? {
+        var current = state.parent
+        while let controller = current {
+            let wrapped = UIViewController.wrap(controller)
+            if wrapped.is(UITabBarController.self) { return wrapped }
+            current = wrapped.state.parent
+        }
+        return nil
+    }
     @ObjCMethod("popoverPresentationController") func popoverPresentationController() -> NSObject? { nil }
     @ObjCMethod("presentationController") func presentationController() -> NSObject? { nil }
     @ObjCMethod("splitViewController") func splitViewController() -> UIViewController? { nil }
@@ -336,6 +362,12 @@ open class UIViewController: UIResponder {
                 let navigation = unsafeCast(to: UINavigationController.self)
                 navigation.layoutContent()
                 navigation.scheduleTransition(animated: false)
+            }
+            // A tab bar controller that appears shows its selected controller.
+            if self.is(UITabBarController.self) {
+                let tabs = unsafeCast(to: UITabBarController.self)
+                tabs.layoutContent()
+                tabs.scheduleTransition()
             }
         } else {
             guard state.appearance == .appeared || state.appearance == .appearing else { return false }
@@ -494,6 +526,8 @@ enum Presentations {
         let container = UITransitionView.objCClass.object.allocated().initializeView(frame: bounds).unsafeCast(to: UIView.self)
         let view = controller.loadedView
         view.sendSetFrame(covers || controller.state.modalPresentationStyle == 5 ? bounds : sheetFrame(in: window))
+        container.setAutoresizingMask(18)
+        if covers || controller.state.modalPresentationStyle == 5 { view.setAutoresizingMask(18) }
         container.addSubview(view)
         window.addSubview(container)
         if covers, let superview = presenterView.superview() {
