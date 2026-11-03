@@ -74,8 +74,15 @@ enum Dictionaries {
                   let values = object.load(fromByteOffset: 32, as: UnsafePointer<id>?.self) else { return [] }
             return (0..<count).map { (keys[$0], values[$0]) }
         }
-        guard let storage = storage(object) else { return [] }
-        return Array(zip(storage.keys, storage.values)).map { (key: $0.0, value: $0.1) }
+        if let storage = storage(object) {
+            return Array(zip(storage.keys, storage.values)).map { (key: $0.0, value: $0.1) }
+        }
+        // Another library's dictionary, such as Swift's: its keys, and the
+        // value for each.
+        guard ObjC.overrides(object, Selectors.count, of: dictionaryClass) else { return [] }
+        return ObjC.enumerated(ObjC.send(object, Selectors.keyEnumerator)).compactMap { key in
+            ObjC.send(object, Selectors.objectForKey, key).map { (key: key, value: $0) }
+        }
     }
 
     static func value(_ object: id?, for key: id?) -> id? {
