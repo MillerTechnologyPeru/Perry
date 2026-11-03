@@ -71,6 +71,17 @@ open class UIImage: NSObject {
         return self
     }
 
+    /// From a nib: the named image in the main bundle.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        if let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName"),
+           let image = UIImage.image(UIImage.objCClass, named: name) {
+            state.set(image.state.cgImage, scale: image.state.scale, orientation: 0)
+        }
+        return self
+    }
+
     @ObjCClassMethod("imageWithData:")
     static func image(_ cls: ObjCClass, data: NSObject?) -> UIImage? { image(cls, data: data, scale: 1) }
 
