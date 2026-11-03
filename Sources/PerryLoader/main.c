@@ -5,12 +5,52 @@
 #include "image.h"
 #include "log.h"
 
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 extern char **environ;
+
+// Makes a directory and its parents, as mkdir -p does.
+static void make_directories(const char *path) {
+    char partial[PATH_MAX];
+    snprintf(partial, sizeof(partial), "%s", path);
+    for (char *slash = partial + 1; *slash; slash++) {
+        if (*slash != '/')
+            continue;
+        *slash = 0;
+        mkdir(partial, 0755);
+        *slash = '/';
+    }
+    if (mkdir(partial, 0755) != 0 && errno != EEXIST)
+        perry_fatal("cannot make %s", path);
+}
+
+// An app's container, as iOS gives each app: its home directory, with
+// Documents, Library (Caches, Preferences) and tmp, which HOME and TMPDIR
+// name while it runs.
+static void enter_container(const perry_bundle *bundle) {
+    const char *container = getenv("PERRY_CONTAINER");
+    char path[PATH_MAX];
+    if (!container) {
+        const char *home = getenv("HOME");
+        snprintf(path, sizeof(path), "%s/.perry/Containers/%s", home ? home : "/tmp", bundle->identifier);
+        container = path;
+    }
+    const char *directories[] = { "Documents", "Library/Caches", "Library/Preferences", "tmp" };
+    for (size_t index = 0; index < sizeof(directories) / sizeof(directories[0]); index++) {
+        char directory[PATH_MAX];
+        snprintf(directory, sizeof(directory), "%s/%s", container, directories[index]);
+        make_directories(directory);
+    }
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s/tmp/", container);
+    setenv("HOME", container, 1);
+    setenv("TMPDIR", tmp, 1);
+}
 
 static void usage(FILE *out) {
     fputs("usage: perry [options] <executable | App.app> [arguments...]\n"
@@ -23,7 +63,9 @@ static void usage(FILE *out) {
           "\n"
           "environment:\n"
           "  PERRY_TRACE         comma-separated: load, bind, init, all\n"
-          "  PERRY_LIBRARY_PATH  colon-separated directories with provider libraries\n",
+          "  PERRY_LIBRARY_PATH  colon-separated directories with provider libraries\n"
+          "  PERRY_CONTAINER     an app's home directory; ~/.perry/Containers/<bundle id>\n"
+          "                      unless set\n",
           out);
 }
 
@@ -75,6 +117,9 @@ int main(int argc, char **argv) {
         perry_print_report(&loader);
         return 0;
     }
+
+    if (has_bundle && bundle.identifier)
+        enter_container(&bundle);
 
     // The program sees its own path as argv[0], as it would under dyld.
     int app_argc = argc - i;
