@@ -23,6 +23,7 @@ final class FetchRequestState: ObjectState {
     var includesPendingChanges = true
     var returnsObjectsAsFaults = true
     var propertiesToFetch: NSObject?
+    var propertiesToGroupBy: NSObject?
 }
 
 @ObjCClass("NSPersistentStoreRequest")
@@ -78,6 +79,8 @@ open class NSFetchRequest: NSPersistentStoreRequest {
     @ObjCMethod("setReturnsObjectsAsFaults:") func setReturnsObjectsAsFaults(_ value: Bool) { state.returnsObjectsAsFaults = value }
     @ObjCMethod("propertiesToFetch") func propertiesToFetch() -> NSObject? { state.propertiesToFetch }
     @ObjCMethod("setPropertiesToFetch:") func setPropertiesToFetch(_ value: NSObject?) { state.propertiesToFetch = value }
+    @ObjCMethod("propertiesToGroupBy") func propertiesToGroupBy() -> NSObject? { state.propertiesToGroupBy }
+    @ObjCMethod("setPropertiesToGroupBy:") func setPropertiesToGroupBy(_ value: NSObject?) { state.propertiesToGroupBy = value }
     @ObjCMethod("setRelationshipKeyPathsForPrefetching:") func setRelationshipKeyPathsForPrefetching(_ value: NSObject?) {}
     @ObjCMethod("setIncludesSubentities:") func setIncludesSubentities(_ value: Bool) {}
     @ObjCMethod("setReturnsDistinctResults:") func setReturnsDistinctResults(_ value: Bool) {}
