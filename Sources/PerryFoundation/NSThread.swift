@@ -98,9 +98,10 @@ enum Threads {
         let result = pthread_create(&handle, &attributes, { context in
             guard let thread = context else { return nil }
             pthread_setspecific(Threads.key, thread)
-            ObjC.autoreleasepool {
-                Threads.storage(thread)?.main(thread)
-            }
+            // +exit jumps out of the body, past its frames, to here.
+            let pool = ObjC.poolPush()
+            perry_foundation_thread_run({ thread in Threads.storage(thread)?.main(thread!) }, thread)
+            ObjC.poolPop(pool)
             if let storage = Threads.storage(thread) {
                 storage.isExecuting = false
                 storage.isFinished = true
@@ -192,6 +193,17 @@ public final class NSThread: NSObject {
     @ObjCClassMethod("mainThread") static func main() -> UnsafeMutableRawPointer? { Threads.main }
     @ObjCClassMethod("isMainThread") static func isMainThread() -> Bool { Threads.isMainThread }
     @ObjCClassMethod("isMultiThreaded") static func isMultiThreaded() -> Bool { true }
+
+    /// Ends the calling thread: one NSThread started returns from its
+    /// main at once; any other exits.
+    @ObjCClassMethod("exit")
+    static func exit() {
+        if let storage = Threads.storage(Threads.current) {
+            storage.isExecuting = false
+            storage.isFinished = true
+        }
+        if !perry_foundation_thread_exit() { pthread_exit(nil) }
+    }
 
     @ObjCClassMethod("sleepForTimeInterval:")
     static func sleep(forTimeInterval seconds: Double) {
