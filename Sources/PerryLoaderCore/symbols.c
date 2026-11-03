@@ -242,6 +242,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UIKit");
         return true;
     }
+    // AVFAudio's classes are AVFoundation's, which re-exports them.
+    if (strstr(install_name, "/AVFAudio.framework/")) {
+        snprintf(out, out_size, "AVFoundation");
+        return true;
+    }
     // ImageIO's images are CoreGraphics' own.
     if (strstr(install_name, "/ImageIO.framework/")) {
         snprintf(out, out_size, "CoreGraphics");
@@ -471,6 +476,15 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
             return sym;
     }
 
+    // Objective-C classes are global, and move between frameworks from
+    // one SDK to the next (NSLayoutConstraint, bound to Foundation by newer
+    // SDKs, or AVAudioPlayer to AVFAudio): one another provider defines is
+    // the same class.
+    bool is_class = strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0;
+    for (uint32_t i = 0; is_class && !sym.found && i < loader->provider_count; i++)
+        if (loader->providers[i]->handle)
+            provider_lookup(loader, loader->providers[i], name, &sym);
+
     if (sym.found) {
         perry_record_import(image, library, name, PERRY_IMPORT_RESOLVED);
         return sym;
@@ -487,7 +501,7 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     // A class is data, which libobjc reads rather than calls: it gets an
     // empty class, with no class_ro_t, holding its name where the vtable
     // goes, so libobjc can name it if an app's class inherits from it.
-    if (strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0) {
+    if (is_class) {
         const char *class_name = strchr(name, '$') + 2;
         void **placeholder = calloc(5, sizeof(void *));
         placeholder[3] = strdup(class_name);
