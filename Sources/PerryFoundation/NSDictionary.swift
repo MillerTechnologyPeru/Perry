@@ -219,6 +219,15 @@ public class NSDictionary: NSObject {
         return setEntries(NSDictionary(objcObject: object, ownership: .retain).entries)
     }
 
+    /// The dictionary as an XML property list file.
+    @ObjCMethod("writeToFile:atomically:")
+    func write(toFile path: String, atomically: Bool) -> Bool {
+        PropertyLists.write(objcObject, to: URL(filePath: path), atomically: atomically)
+    }
+
+    @ObjCMethod("writeToURL:atomically:")
+    func write(toURL url: NSURL, atomically: Bool) -> Bool { PropertyLists.write(objcObject, to: url.url, atomically: atomically) }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
