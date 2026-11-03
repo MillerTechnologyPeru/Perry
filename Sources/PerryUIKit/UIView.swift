@@ -23,6 +23,8 @@ final class ViewState: ObjectState {
     var multipleTouchEnabled = false
     var exclusiveTouch = false
     var gestureRecognizers: [UIGestureRecognizer] = []
+    var constraints: [NSObject] = []
+    var translatesAutoresizingMaskIntoConstraints = true
     var accessibilityIdentifier: String?
     var needsLayout = true
     /// The superview, which retains this view; not retained.
@@ -131,6 +133,67 @@ open class UIView: UIResponder, UICoordinateSpace {
         return self
     }
 
+    /// From a nib: the geometry, appearance and behavior Interface Builder
+    /// set, the constraints, then the subviews.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: NSObject) -> Self {
+        let decoded = Coder(coder: coder)
+        let state = state
+        state.bounds = decoded.rect("UIBounds")
+        state.center = decoded.point("UICenter")
+        state.needsLayout = true
+        if decoded.has("UIAlpha") { state.alpha = decoded.double("UIAlpha") }
+        state.hidden = decoded.bool("UIHidden")
+        state.tag = decoded.integer("UITag")
+        state.geometry.isOpaque = decoded.bool("UIOpaque")
+        state.geometry.masksToBounds = decoded.bool("UIClipsToBounds")
+        state.autoresizingMask = UInt(bitPattern: decoded.integer("UIAutoresizingMask"))
+        state.autoresizesSubviews = decoded.has("UIAutoresizeSubviews") ? decoded.bool("UIAutoresizeSubviews") : true
+        state.contentMode = decoded.integer("UIContentMode")
+        state.userInteractionEnabled = !decoded.bool("UIUserInteractionDisabled")
+        state.multipleTouchEnabled = decoded.bool("UIMultipleTouchEnabled")
+        state.tintColor = decoded.object("UITintColor")?.as(UIColor.self)
+        if let color = decoded.object("UIBackgroundColor")?.as(UIColor.self) { setBackgroundColor(color) }
+        state.translatesAutoresizingMaskIntoConstraints = !decoded.bool("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints")
+        state.constraints = decoded.array("UIViewAutolayoutConstraints")
+        for subview in decoded.array("UISubviews") {
+            if let view = subview.as(UIView.self) { addSubview(view) }
+        }
+        return self
+    }
+
+    @ObjCMethod("awakeFromNib") func awakeFromNib() {}
+
+    // MARK: Constraints, kept for Auto Layout
+
+    @ObjCMethod("constraints") func constraints() -> NSObject { NSMutableArray.of(state.constraints) }
+    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { state.constraints.append(constraint) }
+    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) { state.constraints += constraints.elements }
+    @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) {
+        state.constraints.removeAll { $0.objcObject == constraint.objcObject }
+    }
+    @ObjCMethod("removeConstraints:") func removeConstraints(_ constraints: NSArray) {
+        let removed = Set(constraints.elements.map(\.objcObject))
+        state.constraints.removeAll { removed.contains($0.objcObject) }
+    }
+    @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool {
+        state.translatesAutoresizingMaskIntoConstraints
+    }
+    @ObjCMethod("setTranslatesAutoresizingMaskIntoConstraints:") func setTranslatesAutoresizingMaskIntoConstraints(_ translates: Bool) {
+        state.translatesAutoresizingMaskIntoConstraints = translates
+    }
+    @ObjCMethod("setNeedsUpdateConstraints") func setNeedsUpdateConstraints() {}
+    @ObjCMethod("updateConstraintsIfNeeded") func updateConstraintsIfNeeded() {}
+    @ObjCMethod("updateConstraints") func updateConstraints() {}
+    @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
+    @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { setNeedsLayout() }
+    @ObjCMethod("intrinsicContentSize") func intrinsicContentSizeOfView() -> CGSize { CGSize(width: -1, height: -1) }
+    @ObjCMethod("systemLayoutSizeFittingSize:") func systemLayoutSizeFitting(_ size: CGSize) -> CGSize { state.bounds.size }
+    @ObjCMethod("setContentHuggingPriority:forAxis:") func setContentHuggingPriority(_ priority: Float, for axis: Int) {}
+    @ObjCMethod("contentHuggingPriorityForAxis:") func contentHuggingPriority(for axis: Int) -> Float { 250 }
+    @ObjCMethod("setContentCompressionResistancePriority:forAxis:") func setContentCompressionResistancePriority(_ priority: Float, for axis: Int) {}
+    @ObjCMethod("contentCompressionResistancePriorityForAxis:") func contentCompressionResistancePriority(for axis: Int) -> Float { 750 }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         for subview in state.subviews { subview.state.superview = nil }
@@ -149,7 +212,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         let size = state.bounds.size
         state.frame = frame
         state.needsLayout = true
-        if state.bounds.size != size { boundsSizeChanged() }
+        if state.bounds.size != size { boundsSizeChanged(from: size) }
     }
 
     @ObjCMethod("bounds") func bounds() -> CGRect { state.bounds }
@@ -161,13 +224,25 @@ open class UIView: UIResponder, UICoordinateSpace {
         let size = state.bounds.size
         state.bounds = bounds
         state.needsLayout = true
-        if state.bounds.size != size { boundsSizeChanged() }
+        if state.bounds.size != size { boundsSizeChanged(from: size) }
     }
 
     /// A view that draws redraws at its new size, as with the redraw
-    /// content mode.
-    private func boundsSizeChanged() {
+    /// content mode; its subviews resize by their autoresizing masks.
+    private func boundsSizeChanged(from size: CGSize) {
+        let state = state
         if state.contentMode == 3 { state.geometry.needsDisplay = true }
+        guard state.autoresizesSubviews else { return }
+        let delta = CGSize(width: state.bounds.width - size.width, height: state.bounds.height - size.height)
+        for subview in state.subviews where subview.state.autoresizingMask != 0 {
+            let mask = subview.state.autoresizingMask, frame = subview.state.frame
+            let (x, width) = Autoresizing.resize(frame.minX, frame.width, size.width - frame.maxX, by: delta.width,
+                                                 flexible: (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0))
+            let (y, height) = Autoresizing.resize(frame.minY, frame.height, size.height - frame.maxY, by: delta.height,
+                                                  flexible: (mask & 8 != 0, mask & 16 != 0, mask & 32 != 0))
+            let resized = CGRect(x: x, y: y, width: width, height: height)
+            if resized != frame { subview.sendSetFrame(resized) }
+        }
     }
 
     @ObjCMethod("transform") func transform() -> CGAffineTransform { state.geometry.transform }
@@ -640,4 +715,23 @@ extension NSObject {
     @ObjCMethod("drawRect:") func sendDraw(_ rect: CGRect)
     @ObjCMethod("hitTest:withEvent:") func sendHitTest(_ point: CGPoint, with event: NSObject?) -> UIView?
     @ObjCMethod("pointInside:withEvent:") func sendPointInside(_ point: CGPoint, with event: NSObject?) -> Bool
+}
+
+/// UIViewAutoresizing: a superview's change in size is shared among a
+/// subview's flexible leading margin, size and trailing margin, in
+/// proportion to their current lengths, or evenly when those are all zero.
+enum Autoresizing {
+    static func resize(_ leading: CGFloat, _ length: CGFloat, _ trailing: CGFloat, by delta: CGFloat,
+                       flexible: (leading: Bool, length: Bool, trailing: Bool)) -> (CGFloat, CGFloat) {
+        guard delta != 0 else { return (leading, length) }
+        let parts = [(flexible.leading, max(leading, 0)), (flexible.length, max(length, 0)), (flexible.trailing, max(trailing, 0))]
+        let count = parts.filter(\.0).count
+        guard count > 0 else { return (leading, length) }
+        let total = parts.reduce(0) { $0 + ($1.0 ? $1.1 : 0) }
+        func share(_ part: (Bool, CGFloat)) -> CGFloat {
+            guard part.0 else { return 0 }
+            return total > 0 ? delta * part.1 / total : delta / CGFloat(count)
+        }
+        return (leading + share(parts[0]), max(length + share(parts[1]), 0))
+    }
 }
