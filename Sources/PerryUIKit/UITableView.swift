@@ -440,6 +440,8 @@ final class TableState: ObjectState {
     var tableFooterView: UIView?
     var backgroundView: UIView?
     var layout: TableLayout?
+    /// The width the layout was computed at.
+    var layoutWidth: CGFloat = 0
     /// Rows the delegate leaves to size themselves (UITableViewAutomaticDimension),
     /// and the heights their cells have given them.
     var automaticRows: Set<RowPath> = []
@@ -635,11 +637,13 @@ open class UITableView: UIScrollView {
     private var source: NSObject? { dataSource() }
 
     /// The geometry, computed from the data source and delegate when the
-    /// data or heights change.
+    /// data, heights or width change.
     var layout: TableLayout {
-        if let layout = table.layout { return layout }
+        let width = state.bounds.width
+        if let layout = table.layout, table.layoutWidth == width { return layout }
         let layout = computeLayout()
         table.layout = layout
+        table.layoutWidth = width
         let size = CGSize(width: state.bounds.width, height: layout.height)
         if scroll.contentSize != size { scroll.contentSize = size }
         return layout
@@ -1152,13 +1156,14 @@ open class UITableViewController: UIViewController {
         super.dealloc()
     }
 
-    /// A table view the size of the screen, whose data source and delegate
-    /// the controller is.
+    /// A table view the size of the screen, following its superview's size,
+    /// whose data source and delegate the controller is.
     @ObjCMethod("loadView")
     override func loadView() {
         if loadViewFromNib() { return }
         let table = UITableView.objCClass.object.allocated().initializeTable(frame: Screen.bounds, style: tableController.style)
             .unsafeCast(to: UITableView.self)
+        table.setAutoresizingMask(18)
         table.setDataSource(self)
         table.setDelegate(self)
         setView(table)
