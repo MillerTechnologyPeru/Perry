@@ -89,7 +89,20 @@ enum Snapshot {
     nonisolated(unsafe) static let path: String? = getenv("PERRY_UIKIT_SNAPSHOT").map { String(cString: $0) }
 
     static func writeIfRequested() {
-        guard let path, !Windows.visible.isEmpty,
+        guard let path else { return }
+        write(to: path)
+    }
+
+    /// The image beside the latest, numbered: "shot.png" and 3 make
+    /// "shot-3.png".
+    static func writeNumbered(_ number: Int) {
+        guard let path else { return }
+        let stem = path.hasSuffix(".png") ? String(path.dropLast(4)) : path
+        write(to: "\(stem)-\(number).png")
+    }
+
+    static func write(to path: String) {
+        guard !Windows.visible.isEmpty,
               let context = CG.makeContext(size: Screen.bounds.size, scale: Screen.scale, opaque: true) else { return }
         defer { CG.release(context) }
         let black = UIColor.black()
