@@ -34,7 +34,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 
 /// UIKit's numeric and structure constants, which the loader asks for
 /// while binding images, before the provider starts.
-func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { Constants.values[name] }
+func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { Constants.values[name] ?? GLES.symbol(name) }
 
 enum Constants {
     /// Storage for each constant, made once.
@@ -61,6 +61,9 @@ enum Constants {
             "_UIFontWeightBold": value(CGFloat(0.4)),
             "_UIFontWeightHeavy": value(CGFloat(0.56)),
             "_UIFontWeightBlack": value(CGFloat(0.62)),
+            "_GLKMatrix4Identity": value(GLKMath.identity4),
+            "_GLKMatrix3Identity": value(GLKMath.identity3),
+            "_GLKQuaternionIdentity": value(GLKQuaternion(q: (0, 0, 0, 1))),
         ]
     }()
 }
