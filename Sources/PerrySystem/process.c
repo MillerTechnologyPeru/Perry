@@ -6,6 +6,7 @@
 #include "PerrySystem.h"
 
 #include <errno.h>
+#include <math.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -85,6 +86,26 @@ void darwin_memset_pattern4(void *bytes, const void *pattern, size_t length) {
     }
     memcpy(out, pattern, length);
 }
+
+// MARK: - Floating point
+
+// fpclassify's out-of-line forms, in Darwin's numbering: FP_NAN 1,
+// FP_INFINITE 2, FP_ZERO 3, FP_NORMAL 4, FP_SUBNORMAL 5.
+static int darwin_fp_class(int linux_class) {
+    switch (linux_class) {
+    case FP_NAN: return 1;
+    case FP_INFINITE: return 2;
+    case FP_ZERO: return 3;
+    case FP_SUBNORMAL: return 5;
+    default: return 4;
+    }
+}
+
+int darwin_fpclassifyd(double x) DARWIN_SYMBOL(__fpclassifyd);
+int darwin_fpclassifyd(double x) { return darwin_fp_class(fpclassify(x)); }
+
+int darwin_fpclassifyf(float x) DARWIN_SYMBOL(__fpclassifyf);
+int darwin_fpclassifyf(float x) { return darwin_fp_class(fpclassify(x)); }
 
 // MARK: - Credentials
 
