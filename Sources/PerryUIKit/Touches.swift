@@ -356,3 +356,32 @@ extension UIResponder {
         sendNextResponder()?.sendTouchesCancelled(touches, with: event)
     }
 }
+
+/// With PERRY_UIKIT_TAPS set to points separated by semicolons
+/// ("195,120;30,22"), each is tapped in turn, two seconds apart, beginning
+/// two seconds after a window first shows: to reach an app's later screens
+/// without a display, along with PERRY_UIKIT_SNAPSHOT.
+enum TapScript {
+    nonisolated(unsafe) private static var points: [CGPoint]?
+    nonisolated(unsafe) private static var started = false
+
+    static func startIfRequested() {
+        guard !started, let setting = getenv("PERRY_UIKIT_TAPS") else { return }
+        started = true
+        points = String(cString: setting).split(separator: ";").compactMap { pair in
+            let values = pair.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+            return values.count == 2 ? CGPoint(x: values[0], y: values[1]) : nil
+        }
+        next()
+    }
+
+    private static func next() {
+        guard let after = Display.dispatchAfter, let time = Display.dispatchTime, points?.isEmpty == false else { return }
+        after(time(0, 2_000_000_000), Updates.mainQueue, nil) { _ in
+            guard let point = TapScript.points?.removeFirst() else { return }
+            Touches.down(at: point)
+            Touches.up(at: point)
+            TapScript.next()
+        }
+    }
+}
