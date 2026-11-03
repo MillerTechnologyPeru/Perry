@@ -223,6 +223,23 @@ PASSTHROUGH _abort, abort
 PASSTHROUGH _exit, exit
 PASSTHROUGH __exit, _exit
 PASSTHROUGH _atexit, atexit
+PASSTHROUGH ___cxa_atexit, __cxa_atexit
+PASSTHROUGH _acosf, acosf
+PASSTHROUGH _atanf, atanf
+PASSTHROUGH _frexp, frexp
+PASSTHROUGH _ldexp, ldexp
+PASSTHROUGH _log10f, log10f
+PASSTHROUGH _lround, lround
+PASSTHROUGH _lroundf, lroundf
+PASSTHROUGH _modff, modff
+PASSTHROUGH ___exp10f, exp10f
+PASSTHROUGH ___exp10, exp10
+PASSTHROUGH _bcopy, bcopy
+PASSTHROUGH _difftime, difftime
+PASSTHROUGH _fseek, fseek
+PASSTHROUGH _ftell, ftell
+PASSTHROUGH _localtime, localtime
+PASSTHROUGH _pthread_cancel, pthread_cancel
 
 // MARK: - unistd
 
