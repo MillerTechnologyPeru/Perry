@@ -168,6 +168,16 @@ public final class NSURL: NSObject {
     @ObjCMethod("pathExtension") func pathExtension() -> String { url.pathExtension }
     @ObjCMethod("pathComponents") func pathComponents() -> NSArray { Arrays.owned(url.pathComponents.map { Strings.autoreleased($0) }) }
     @ObjCMethod("isFileURL") func isFileURL() -> Bool { url.isFileURL }
+
+    /// Whether a file URL's file exists; any other URL cannot be checked.
+    @ObjCMethod("checkResourceIsReachableAndReturnError:")
+    func checkResourceIsReachable(error: UnsafeMutablePointer<id?>?) -> Bool {
+        if url.isFileURL, access(path(), F_OK) == 0 { return true }
+        error?.pointee = url.isFileURL
+            ? Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened because there is no such file.")
+            : Errors.autoreleased(domain: Errors.cocoaDomain, code: 262, description: "The operation couldn’t be completed.")
+        return false
+    }
     @ObjCMethod("hasDirectoryPath") func hasDirectoryPath() -> Bool { url.hasDirectoryPath }
 
     @ObjCMethod("fileSystemRepresentation")
@@ -208,4 +218,16 @@ public final class NSURL: NSObject {
 
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: url.hashValue) }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSURL { self }
+}
+
+/// Resource keys, which name the values a URL's file has.
+@ObjCConstants
+enum URLResourceKeys {
+    static let NSURLNameKey = "NSURLNameKey"
+    static let NSURLIsDirectoryKey = "NSURLIsDirectoryKey"
+    static let NSURLIsRegularFileKey = "NSURLIsRegularFileKey"
+    static let NSURLFileSizeKey = "NSURLFileSizeKey"
+    static let NSURLCreationDateKey = "NSURLCreationDateKey"
+    static let NSURLContentModificationDateKey = "NSURLContentModificationDateKey"
+    static let NSURLIsExcludedFromBackupKey = "NSURLIsExcludedFromBackupKey"
 }
