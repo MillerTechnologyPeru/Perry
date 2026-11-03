@@ -447,3 +447,19 @@ COMPARE_AND_SWAP(OSAtomicCompareAndSwapLong, long, __ATOMIC_RELAXED)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapLongBarrier, long, __ATOMIC_SEQ_CST)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtr, void *, __ATOMIC_RELAXED)
 COMPARE_AND_SWAP(OSAtomicCompareAndSwapPtrBarrier, void *, __ATOMIC_SEQ_CST)
+
+// MARK: - Feature flags and tracing
+
+// Feature flags are as they ship: each one's default.
+bool darwin_os_feature_enabled_simple_impl(const char *domain, const char *feature, bool enabled)
+    DARWIN_SYMBOL(_os_feature_enabled_simple_impl);
+bool darwin_os_feature_enabled_simple_impl(const char *domain, const char *feature, bool enabled) {
+    (void)domain;
+    (void)feature;
+    return enabled;
+}
+
+// Swift's runtime traces through os_log once the tracing system has
+// started, which it never does here.
+bool darwin_os_trace_lazy_init_completed_4swift(void) DARWIN_SYMBOL(_os_trace_lazy_init_completed_4swift);
+bool darwin_os_trace_lazy_init_completed_4swift(void) { return false; }
