@@ -77,20 +77,34 @@ enum Updates {
         let after = afterwards
         afterwards = []
         for body in after { ObjCRuntime.autoreleasepool { body() } }
-        ObjCRuntime.autoreleasepool { Snapshot.writeIfRequested() }
+        Snapshot.requestWrite()
         Display.markDirty()
     }
 }
 
-/// With PERRY_UIKIT_SNAPSHOT set to a path, each update pass writes the
-/// visible windows there as a PNG at the screen's scale, to look at what
-/// an app shows without a display.
+/// With PERRY_UIKIT_SNAPSHOT set to a path, the visible windows are
+/// written there as a PNG at the screen's scale after update passes and
+/// changes to layers, to look at what an app shows without a display.
 enum Snapshot {
     nonisolated(unsafe) static let path: String? = getenv("PERRY_UIKIT_SNAPSHOT").map { String(cString: $0) }
 
     static func writeIfRequested() {
         guard let path else { return }
         write(to: path)
+    }
+
+    nonisolated(unsafe) private static var requested = false
+
+    /// Writes the snapshot a second after an update pass or a change to
+    /// layers, at most once a second: encoding it is slow. The numbered
+    /// snapshots are written when they are due.
+    static func requestWrite() {
+        guard path != nil, !requested else { return }
+        requested = true
+        Deferred.run(after: 1) {
+            Snapshot.requested = false
+            ObjCRuntime.autoreleasepool { Snapshot.writeIfRequested() }
+        }
     }
 
     /// The image beside the latest, numbered: "shot.png" and 3 make
@@ -114,7 +128,7 @@ enum Snapshot {
             window.layoutIfNeeded()
             CG.saveGState(context)
             CG.concatCTM(context, window.state.geometry.toSuperlayer)
-            CALayer.render(window.state.layer, in: context, root: true)
+            window.state.layer.render(in: context)
             CG.restoreGState(context)
         }
         guard let image = CG.bitmapContextCreateImage(context) else { return }
