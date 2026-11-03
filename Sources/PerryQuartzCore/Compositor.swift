@@ -166,6 +166,12 @@ final class Compositor {
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
         setClip(clip)
+        // A masked layer and its sublayers are one texture, drawn again
+        // each frame.
+        if state.mask != nil {
+            drawMasked(layer, state: state, shape: shape, toScreen: toScreen, alpha: alpha)
+            return
+        }
         let aligned = toScreen.isAxisAligned
         let rounded = state.cornerRadius > 0 && state.backgroundColor != nil
         let textured = layer.state.backing != nil || state.contents != nil || rounded || shape != nil
@@ -213,11 +219,32 @@ final class Compositor {
         _ = SDL.fillRect(renderer, &target)
     }
 
+    private func drawMasked(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
+        let key = Key(layer: layer.objcObject, border: false)
+        if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
+        let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
+        guard width > 0, height > 0, let image = CALayer.maskedImage(of: layer, state: state, shape: shape),
+              let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
+        defer { CG.release(context) }
+        CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: state.bounds.size), context: context)
+        guard let data = CG.bitmapContextGetData(context),
+              let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return }
+        _ = SDL.updateTexture(texture, nil, data, width * 4)
+        _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
+        _ = SDL.setTextureScaleMode(texture, 1)
+        textures[key] = Entry(texture: texture, signature: "", used: true)
+        place(texture, state: state, toScreen: toScreen, alpha: alpha)
+    }
+
     /// The texture placed by `toScreen`: as its bounding box when that
     /// keeps it upright, else turned about its center.
     private func drawTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool, toScreen: CGAffineTransform,
                              alpha: CGFloat) {
         guard let texture = texture(of: layer, state: state, shape: shape, border: border) else { return }
+        place(texture, state: state, toScreen: toScreen, alpha: alpha)
+    }
+
+    private func place(_ texture: SDL.Pointer, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
