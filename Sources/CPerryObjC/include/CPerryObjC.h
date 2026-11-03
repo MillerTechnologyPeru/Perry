@@ -189,4 +189,11 @@ typedef struct perry_block_callbacks {
     void (*destruct_instance)(const void *object);
 } perry_block_callbacks;
 
+// Trampolines for imp_implementationWithBlock (trampolines.c): an IMP that
+// calls `block` with the receiver and the method's arguments; the block a
+// trampoline calls, or NULL for any other IMP; and giving one up for reuse.
+void *perry_objc_trampoline_create(void *block);
+void *perry_objc_trampoline_block(const void *imp);
+void perry_objc_trampoline_remove(void *imp);
+
 #endif
