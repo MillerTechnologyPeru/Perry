@@ -61,6 +61,10 @@ enum Display {
         if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { scale = value }
         let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
+        // SDL's renderer makes its GL contexts through EGL, as EAGLContext
+        // does, so the two can take turns being current on one thread.
+        setenv("SDL_VIDEO_FORCE_EGL", "1", 0)
+        setenv("SDL_RENDER_DRIVER", "opengles2", 0)
         if !software, SDL.load(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
             tick()
