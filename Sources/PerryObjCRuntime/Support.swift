@@ -25,6 +25,11 @@ public func objcFatal(_ message: String) -> Never {
     abort()
 }
 
+public func objcWarning(_ message: String) {
+    let line = "perry: objc: warning: \(message)\n"
+    line.withCString { _ = write(2, $0, strlen($0)) }
+}
+
 /// A C string that lives for the rest of the process.
 func permanentCString(_ string: String) -> UnsafePointer<CChar> {
     UnsafePointer(strdup(string)!)
