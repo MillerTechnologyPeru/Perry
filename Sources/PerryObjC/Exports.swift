@@ -824,6 +824,31 @@ public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwar
     Runtime.forwardHandler = forward
 }
 
+// MARK: - Blocks as methods
+
+/// An IMP that calls a copy of `block` with the receiver and the method's
+/// arguments, the selector left out.
+@c(_imp_implementationWithBlock)
+public func imp_implementationWithBlock(_ block: id?) -> UnsafeMutableRawPointer? {
+    guard let copy = BlockClasses.copy(block) else { return nil }
+    return perry_objc_trampoline_create(copy)
+}
+
+@c(_imp_getBlock)
+public func imp_getBlock(_ imp: UnsafeMutableRawPointer?) -> id? {
+    perry_objc_trampoline_block(imp)
+}
+
+/// Releases the block; the trampoline is reused. Methods still using it
+/// must have been replaced, as on Darwin.
+@c(_imp_removeBlock)
+public func imp_removeBlock(_ imp: UnsafeMutableRawPointer?) -> Bool {
+    guard let imp, let block = perry_objc_trampoline_block(imp) else { return false }
+    Objects.release(block)
+    perry_objc_trampoline_remove(imp)
+    return true
+}
+
 // MARK: - Swift
 
 // Swift's runtime registers its types and conformances as images load,
