@@ -30,6 +30,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard Updates.load(symbol) else { uikitFatal("UIKit needs libdispatch's main queue") }
     Display.load(symbol)
     Accessibility.load { symbol(libobjc, $0) }
+    AssetCatalog.load(symbol)
     return true
 }
 
