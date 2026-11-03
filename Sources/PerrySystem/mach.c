@@ -541,15 +541,7 @@ kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint
 
 // MARK: - Mach-O sections
 
-struct darwin_section_64 {
-    char sectname[16], segname[16];
-    uint64_t addr, size;
-    uint32_t offset, align, reloff, nreloc, flags, reserved1, reserved2, reserved3;
-};
-
 // The section's header in the image's load commands, or NULL.
-const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section)
-    DARWIN_SYMBOL(getsectbynamefromheader_64);
 const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section) {
     if (!header)
         return NULL;
