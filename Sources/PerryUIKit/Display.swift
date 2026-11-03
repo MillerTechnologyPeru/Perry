@@ -4,7 +4,8 @@ import PerryObjCInterop
 
 // The live view: with a display (DISPLAY or WAYLAND_DISPLAY set,
 // PERRY_UIKIT_DISPLAY not "0"), the screen is a window showing the visible
-// windows, redrawn after each update pass and as touches change things.
+// windows, redrawn after each update pass, as touches change things, and
+// each frame while QuartzCore's layers change or animate.
 // The mouse is a finger: pressing, dragging and releasing it are a touch,
 // which Touches delivers; the wheel scrolls. With libSDL3, layers are
 // composited on the GPU (Compositor); without it, or with
@@ -128,6 +129,12 @@ enum Display {
 
     static func markDirty() { dirty = true }
 
+    /// QuartzCore's layers changed: the live view and the snapshot show it.
+    static func layersChanged() {
+        dirty = true
+        Snapshot.requestWrite()
+    }
+
     /// Turns the live view's text input on while something takes typing.
     static func setTextInput(_ on: Bool) { compositor?.setTextInput(on) }
 
@@ -144,6 +151,8 @@ enum Display {
                 Animations.step()
             }
             let now = Clock.now
+            // QuartzCore's layers changed, or are animating.
+            if QuartzCore.needsDisplay?() == true { dirty = true }
             if dirty || now - lastDraw > 0.5 {
                 dirty = false
                 lastDraw = now
@@ -164,6 +173,7 @@ enum Display {
                 Animations.step()
             }
             let now = Clock.now
+            if QuartzCore.needsDisplay?() == true { dirty = true }
             if dirty || now - lastDraw > 0.5 {
                 dirty = false
                 lastDraw = now
@@ -218,7 +228,7 @@ enum Display {
         for window in Windows.visible {
             CG.saveGState(context)
             CG.concatCTM(context, window.state.geometry.toSuperlayer)
-            CALayer.render(window.state.layer, in: context, root: true)
+            window.state.layer.render(in: context)
             CG.restoreGState(context)
         }
         let width = UInt32((Screen.bounds.width * scale).rounded()), height = UInt32((Screen.bounds.height * scale).rounded())
