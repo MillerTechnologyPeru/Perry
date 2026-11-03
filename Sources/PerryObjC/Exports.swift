@@ -590,6 +590,124 @@ public func property_copyAttributeValue(_ property: UnsafeRawPointer?, _ name: U
     return strdup(value)
 }
 
+/// The attributes as a list of name and value strings, in one malloc'd
+/// block the caller frees.
+@c(_property_copyAttributeList)
+public func property_copyAttributeList(_ property: UnsafeRawPointer?, _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<perry_property_attribute>? {
+    let parts = property.flatMap(Properties.attributes).map { String(cString: $0).split(separator: ",").map(String.init) } ?? []
+    count?.pointee = UInt32(parts.count)
+    guard !parts.isEmpty else { return nil }
+    let header = MemoryLayout<perry_property_attribute>.stride * (parts.count + 1)
+    let text = parts.reduce(0) { $0 + $1.utf8.count + 2 }
+    let block = calloc(1, header + text)!
+    let attributes = block.bindMemory(to: perry_property_attribute.self, capacity: parts.count + 1)
+    var strings = block.advanced(by: header).assumingMemoryBound(to: CChar.self)
+    func store(_ string: Substring) -> UnsafePointer<CChar> {
+        let start = strings
+        for byte in string.utf8 {
+            strings.pointee = CChar(bitPattern: byte)
+            strings += 1
+        }
+        strings.pointee = 0
+        strings += 1
+        return UnsafePointer(start)
+    }
+    for (index, part) in parts.enumerated() {
+        attributes[index] = perry_property_attribute(name: store(part.prefix(1)), value: store(part.dropFirst()))
+    }
+    return attributes
+}
+
+/// Adds a property declaration; false when the class already has one by
+/// that name.
+@c(_class_addProperty)
+public func class_addProperty(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ attributes: UnsafePointer<perry_property_attribute>?,
+                              _ count: UInt32) -> Bool {
+    guard let cls, let name, let info = Runtime.info(cls), Properties.find(info, name) == nil else { return false }
+    let text = (0..<Int(count)).compactMap { index -> String? in
+        guard let attribute = attributes?[index], let key = attribute.name else { return nil }
+        return String(cString: key) + (attribute.value.map { String(cString: $0) } ?? "")
+    }.joined(separator: ",")
+    // A property list of one entry: entsize and count, then name and attributes.
+    let list = malloc(8 + 16)!
+    list.storeBytes(of: UInt32(16), as: UInt32.self)
+    list.storeBytes(of: UInt32(1), toByteOffset: 4, as: UInt32.self)
+    list.storeBytes(of: UnsafePointer(strdup(name)), toByteOffset: 8, as: UnsafePointer<CChar>?.self)
+    list.storeBytes(of: UnsafePointer(strdup(text)), toByteOffset: 16, as: UnsafePointer<CChar>?.self)
+    Properties.add(UnsafeRawPointer(list), to: info)
+    return true
+}
+
+// MARK: - Instance variables
+
+/// The class's own ivar_t entries, from its class_ro_t.
+private func ivars(of cls: Class) -> [UnsafeMutablePointer<perry_ivar>] {
+    guard let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7), let list = ro.pointee.ivars else { return [] }
+    var result: [UnsafeMutablePointer<perry_ivar>] = []
+    IvarList.forEach(list) { result.append($0) }
+    return result
+}
+
+/// The instance variable named `name` in the class or a superclass.
+@c(_class_getInstanceVariable)
+public func class_getInstanceVariable(_ cls: Class?, _ name: UnsafePointer<CChar>?) -> UnsafeMutablePointer<perry_ivar>? {
+    guard let name else { return nil }
+    var current = cls
+    while let candidate = current {
+        _ = Runtime.info(candidate)
+        if let ivar = ivars(of: candidate).first(where: { $0.pointee.name.map { strcmp($0, name) == 0 } ?? false }) { return ivar }
+        current = candidate.pointee.superclass
+    }
+    return nil
+}
+
+@c(_class_copyIvarList)
+public func class_copyIvarList(_ cls: Class?, _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafeMutablePointer<perry_ivar>?>? {
+    let list = cls.map { cls -> [UnsafeMutablePointer<perry_ivar>] in
+        _ = Runtime.info(cls)
+        return ivars(of: cls)
+    } ?? []
+    count?.pointee = UInt32(list.count)
+    guard !list.isEmpty else { return nil }
+    let array = malloc(MemoryLayout<UnsafeMutablePointer<perry_ivar>?>.stride * (list.count + 1))!
+        .bindMemory(to: UnsafeMutablePointer<perry_ivar>?.self, capacity: list.count + 1)
+    for (index, ivar) in list.enumerated() { array[index] = ivar }
+    array[list.count] = nil
+    return array
+}
+
+@c(_ivar_getName)
+public func ivar_getName(_ ivar: UnsafeMutablePointer<perry_ivar>?) -> UnsafePointer<CChar>? { ivar?.pointee.name }
+
+@c(_ivar_getTypeEncoding)
+public func ivar_getTypeEncoding(_ ivar: UnsafeMutablePointer<perry_ivar>?) -> UnsafePointer<CChar>? { ivar?.pointee.type }
+
+@c(_ivar_getOffset)
+public func ivar_getOffset(_ ivar: UnsafeMutablePointer<perry_ivar>?) -> Int { Int(ivar?.pointee.offset?.pointee ?? 0) }
+
+/// An object ivar's value, unretained.
+@c(_object_getIvar)
+public func object_getIvar(_ object: id?, _ ivar: UnsafeMutablePointer<perry_ivar>?) -> id? {
+    guard let object, let offset = ivar?.pointee.offset?.pointee else { return nil }
+    return object.load(fromByteOffset: Int(offset), as: id?.self)
+}
+
+/// Stores an object ivar without retaining, as for an unretained ivar.
+@c(_object_setIvar)
+public func object_setIvar(_ object: id?, _ ivar: UnsafeMutablePointer<perry_ivar>?, _ value: id?) {
+    guard let object, let offset = ivar?.pointee.offset?.pointee else { return }
+    object.storeBytes(of: value, toByteOffset: Int(offset), as: id?.self)
+}
+
+/// Images are not named to libobjc here, so no image lists its classes.
+@c(_objc_copyClassNamesForImage)
+public func objc_copyClassNamesForImage(_ image: UnsafePointer<CChar>?, _ count: UnsafeMutablePointer<UInt32>?)
+    -> UnsafeMutablePointer<UnsafePointer<CChar>?>? {
+    count?.pointee = 0
+    return nil
+}
+
 // MARK: - Associated objects
 
 @c(_objc_setAssociatedObject)
@@ -648,6 +766,37 @@ public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwar
 
 // MARK: - Exceptions
 
+/// The function an exception no @catch handles goes to before the process
+/// ends; Foundation sets one that reports the exception.
+nonisolated(unsafe) private var uncaughtExceptionHandler: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
+
+@c(_objc_setUncaughtExceptionHandler)
+public func objc_setUncaughtExceptionHandler(_ handler: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?)
+    -> (@convention(c) (UnsafeMutableRawPointer?) -> Void)? {
+    let previous = uncaughtExceptionHandler
+    uncaughtExceptionHandler = handler
+    return previous
+}
+
+/// Throws an exception. Perry cannot unwind Mach-O frames to a @catch, so
+/// every exception is uncaught: the handler reports it, and the process
+/// ends as Darwin's does after an uncaught exception.
+@c(_objc_exception_throw)
+public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
+    if let handler = uncaughtExceptionHandler { handler(exception) }
+    objcFatal("terminating with uncaught exception of type NSException")
+}
+
+@c(_objc_exception_rethrow)
+public func objc_exception_rethrow() -> Never {
+    objcFatal("an exception was rethrown, which Perry cannot unwind")
+}
+
+@c(_objc_terminate)
+public func objc_terminate() -> Never {
+    objcFatal("terminating")
+}
+
 /// The personality routine Objective-C code's unwind tables name. Code
 /// that only cleans up (ARC, @autoreleasepool) refers to it without
 /// throwing; Perry cannot unwind Mach-O frames, so reaching it stops.
@@ -697,6 +846,17 @@ public func protocol_copyMethodDescriptionList(_ proto: ProtocolPointer?, _ requ
         buffer.storeBytes(of: method.1, toByteOffset: index * 16 + 8, as: UnsafePointer<CChar>?.self)
     }
     return buffer
+}
+
+/// The protocol's method for `selector`, or one of nils.
+@c(_protocol_getMethodDescription)
+public func protocol_getMethodDescription(_ proto: ProtocolPointer?, _ selector: SEL?, _ required: Bool, _ instance: Bool)
+    -> perry_method_description {
+    guard let proto, let selector,
+          let method = Protocols.methods(proto, required: required, instance: instance).first(where: { $0.0 == selector }) else {
+        return perry_method_description(name: nil, types: nil)
+    }
+    return perry_method_description(name: method.0, types: method.1)
 }
 
 @c(_protocol_copyPropertyList)
