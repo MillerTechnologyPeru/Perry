@@ -10,6 +10,8 @@ final class WindowState: ObjectState {
     var rootViewController: UIViewController?
     /// The view between the window and the root view, once installed.
     var transitionView: UIView?
+    /// UIWindowLevel: normal 0, status bar 1000, alert 2000.
+    var level: CGFloat = 0
 }
 
 enum Windows {
@@ -18,9 +20,12 @@ enum Windows {
     /// Every window, in the order made; not retained.
     nonisolated(unsafe) static var all: [UnsafeMutableRawPointer] = []
 
-    /// The windows that are not hidden, back to front.
+    /// The windows that are not hidden, back to front: by level, then in
+    /// the order made.
     static var visible: [UIWindow] {
         all.map { UIWindow(objcObject: $0, ownership: .retain) }.filter { !$0.state.hidden }
+            .enumerated().sorted { ($0.element.windowState.level, $0.offset) < ($1.element.windowState.level, $1.offset) }
+            .map(\.element)
     }
 }
 
@@ -47,6 +52,14 @@ open class UIWindow: UIView {
         if Coder(coder: coder).bool("UIResizesToFullScreen") { sendSetFrame(Screen.bounds) }
         if !Windows.all.contains(objcObject) { Windows.all.append(objcObject) }
         return self
+    }
+
+    @ObjCMethod("windowLevel") func windowLevel() -> CGFloat { windowState.level }
+    @ObjCMethod("setWindowLevel:")
+    func setWindowLevel(_ level: CGFloat) {
+        windowState.level = level
+        Display.markDirty()
+        Updates.schedule()
     }
 
     /// A window in `scene`, the size of the screen.
