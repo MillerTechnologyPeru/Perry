@@ -103,50 +103,6 @@ enum Clock {
     }
 }
 
-/// A recursive mutex.
-final class Lock: @unchecked Sendable {
-    private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
-
-    init() {
-        var attributes = pthread_mutexattr_t()
-        pthread_mutexattr_init(&attributes)
-        pthread_mutexattr_settype(&attributes, Int32(PTHREAD_MUTEX_RECURSIVE))
-        pthread_mutex_init(mutex, &attributes)
-        pthread_mutexattr_destroy(&attributes)
-    }
-
-    func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        pthread_mutex_lock(mutex)
-        defer { pthread_mutex_unlock(mutex) }
-        return try body()
-    }
-}
-
-/// Swift state for an Objective-C object, from creation until -dealloc.
-class ObjectState {
-    required init() {}
-}
-
-final class StateTable<State: ObjectState>: @unchecked Sendable {
-    private let lock = Lock()
-    private var states: [UnsafeMutableRawPointer: State] = [:]
-
-    /// The object's state, made on first use.
-    subscript(object: UnsafeMutableRawPointer) -> State {
-        lock.withLock {
-            if let state = states[object] { return state }
-            let state = State()
-            states[object] = state
-            return state
-        }
-    }
-
-    func remove(_ object: UnsafeMutableRawPointer) { _ = lock.withLock { states.removeValue(forKey: object) } }
-
-    /// Gives the object `state`, as a presentation layer's copy.
-    func set(_ object: UnsafeMutableRawPointer, _ state: State) { lock.withLock { states[object] = state } }
-}
-
 /// Method lookups, to tell whether a class overrides a method.
 enum Methods {
     typealias Implementation = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeRawPointer?
