@@ -43,6 +43,8 @@ let package = Package(
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
+        .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
+        .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
         .library(name: "PerryCloudKit", type: .dynamic, targets: ["PerryCloudKit"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
@@ -204,6 +206,18 @@ let package = Package(
         .target(
             name: "PerryCloudKit",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CoreLocation, with location services denied to the app.
+        .target(
+            name: "PerryCoreLocation",
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // MapKit, with no map tiles; its views are UIKit's.
+        .target(
+            name: "PerryMapKit",
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // GameController, with no controllers connected.
