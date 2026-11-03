@@ -27,6 +27,27 @@ enum Coordinates {
     }
 }
 
+/// Where the device is: PERRY_LOCATION's "latitude,longitude", or Apple
+/// Park as in Simulator; none, and location denied, when it is "none".
+enum FakeLocation {
+    nonisolated(unsafe) static let coordinate: CLLocationCoordinate2D? = {
+        guard let setting = getenv("PERRY_LOCATION").map({ String(cString: $0) }) else {
+            return CLLocationCoordinate2D(latitude: 37.334_886, longitude: -122.008_988)
+        }
+        let values = setting.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+        guard values.count == 2 else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: values[0], longitude: values[1])
+        return Coordinates.isValid(coordinate) ? coordinate : nil
+    }()
+
+    /// A fix at the location now, to within 5 meters.
+    static func location() -> CLLocation? {
+        guard let coordinate else { return nil }
+        return CLLocation.objCClass.object.allocated().unsafeCast(to: CLLocation.self)
+            .initialize(coordinate: coordinate, altitude: 0, horizontalAccuracy: 5, verticalAccuracy: 5, timestamp: nil)
+    }
+}
+
 @c(_CLLocationCoordinate2DMake)
 public func CLLocationCoordinate2DMake(_ latitude: Double, _ longitude: Double) -> CLLocationCoordinate2D {
     CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
