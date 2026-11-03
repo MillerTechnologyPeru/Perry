@@ -76,6 +76,7 @@ final class SceneSessionState: ObjectState {
     var configuration: UISceneConfiguration?
     /// The scene, which holds the session; not retained.
     var scene: UnsafeMutableRawPointer?
+    var userInfo: NSObject?
 }
 
 /// A scene's session: its role, configuration and identity.
@@ -97,7 +98,10 @@ open class UISceneSession: NSObject {
     @ObjCMethod("persistentIdentifier") func persistentIdentifier() -> String { state.identifier }
     @ObjCMethod("configuration") func configuration() -> UISceneConfiguration? { state.configuration }
     @ObjCMethod("scene") func scene() -> NSObject? { state.scene.map(NSObject.init) }
-    @ObjCMethod("userInfo") func userInfo() -> NSObject? { nil }
+    @ObjCMethod("userInfo") func userInfo() -> NSObject? { state.userInfo }
+    @ObjCMethod("setUserInfo:") func setUserInfo(_ userInfo: NSObject?) { state.userInfo = userInfo }
+    /// No state is restored: every launch is a first launch.
+    @ObjCMethod("stateRestorationActivity") func stateRestorationActivity() -> NSObject? { nil }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -109,6 +113,14 @@ open class UISceneSession: NSObject {
 // MARK: - UISceneConnectionOptions
 
 /// Why a scene connected: URLs, activities and the like. Empty for a launch.
+/// A URL a scene is asked to open, and how. Scenes here are opened by no
+/// URL, so these exist for apps' types to refer to.
+@ObjCClass("UIOpenURLContext")
+open class UIOpenURLContext: NSObject {
+    @ObjCMethod("URL") func url() -> NSObject? { nil }
+    @ObjCMethod("options") func options() -> NSObject? { nil }
+}
+
 @ObjCClass("UISceneConnectionOptions")
 open class UISceneConnectionOptions: NSObject {
     @ObjCMethod("URLContexts") func urlContexts() -> NSObject { NSMutableSet.empty() }
