@@ -27,6 +27,8 @@ public enum Runtime {
     /// memory that is not a class this runtime can read.
     @inline(__always)
     public static func info(_ cls: ClassPointer) -> ClassInfo? {
+        // A missing class's placeholder has no isa: its "instances" are nil.
+        guard Int(bitPattern: cls) != 0 else { return nil }
         if let header = perry_load_acquire(cacheSlot(cls)), header != emptyCache,
            let info = header.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self) {
             return Unmanaged<ClassInfo>.fromOpaque(info).takeUnretainedValue()
