@@ -43,6 +43,9 @@ final class LayerState: ObjectState {
     /// What -display drew, and the size it drew at.
     var backing: CGRef?
     var backingSize = CGSize.zero
+    /// Whether the delegate has displayed the layer itself, through
+    /// -displayLayer:.
+    var displayedByDelegate = false
     var values: [String: NSObject] = [:]
 
     deinit {
@@ -349,6 +352,8 @@ open class CALayer: NSObject {
         let delegate = state.delegate.map { NSObject($0) }
         if let delegate, delegate.responds(to: "displayLayer:") {
             delegate.sendDisplay(self)
+            state.displayedByDelegate = true
+            state.backingSize = state.bounds.size
             return
         }
         guard draws, state.bounds.width > 0, state.bounds.height > 0,
@@ -374,6 +379,7 @@ open class CALayer: NSObject {
     var draws: Bool {
         if Methods.overrides(objcObject, "drawInContext:", of: CALayer.objCClass.pointer) { return true }
         guard let delegate = state.delegate else { return false }
+        if NSObject(delegate).responds(to: "displayLayer:") { return true }
         if ObjCRuntime.isKind(delegate, of: UIView.objCClass.pointer) {
             return Methods.overrides(delegate, "drawRect:", of: UIView.objCClass.pointer)
         }
@@ -476,7 +482,8 @@ extension CALayer {
             ObjCRuntime.isKind($0, of: UINavigationBar.objCClass.pointer)
                 && UINavigationBar(objcObject: $0, ownership: .retain).contentChanged()
         } ?? false
-        if layer.draws, redraws || state.needsDisplay || state.backing == nil || state.backingSize != state.bounds.size {
+        let undrawn = state.backing == nil && !state.displayedByDelegate
+        if layer.draws, redraws || state.needsDisplay || undrawn || state.backingSize != state.bounds.size {
             layer.sendDisplay()
         }
     }
