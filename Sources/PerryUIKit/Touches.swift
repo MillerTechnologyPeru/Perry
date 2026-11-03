@@ -327,6 +327,10 @@ enum Touches {
                 view.unsafeCast(to: UINavigationBar.self).tap(at: touch.location(in: view))
                 return
             }
+            if view.is(UIToolbar.self) {
+                view.unsafeCast(to: UIToolbar.self).tap(at: touch.location(in: view))
+                return
+            }
             if view.is(UITableViewCell.self), let tableObject = view.state.superview, ObjCRuntime.isKind(tableObject, of: UITableView.objCClass.pointer) {
                 let table = UITableView(objcObject: tableObject, ownership: .retain)
                 if let path = table.table.visibleCells.first(where: { $0.value.objcObject == view.objcObject })?.key {
