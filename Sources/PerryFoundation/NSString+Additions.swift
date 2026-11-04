@@ -577,6 +577,26 @@ extension NSString {
         return result
     }
 
+    // Case mapping for a locale: Swift's mapping is the root locale's, which
+    // differs only for a few languages (Turkish dotted i among them).
+    @ObjCMethod("uppercaseStringWithLocale:")
+    func uppercased(locale: ObjCObject?) -> String { value.uppercased() }
+
+    @ObjCMethod("lowercaseStringWithLocale:")
+    func lowercased(locale: ObjCObject?) -> String { value.lowercased() }
+
+    @ObjCMethod("capitalizedStringWithLocale:")
+    func capitalized(locale: ObjCObject?) -> String { capitalized() }
+
+    @ObjCMethod("localizedUppercaseString")
+    func localizedUppercase() -> String { value.uppercased() }
+
+    @ObjCMethod("localizedLowercaseString")
+    func localizedLowercase() -> String { value.lowercased() }
+
+    @ObjCMethod("localizedCapitalizedString")
+    func localizedCapitalized() -> String { capitalized() }
+
     @ObjCMethod("boolValue")
     func boolValue() -> Bool {
         let trimmed = value.drop { $0.isWhitespace }
