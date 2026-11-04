@@ -70,6 +70,7 @@ public import class Foundation.UserDefaults
 /// see <doc:Migrating-from-the-observable-object-protocol-to-the-observable-macro>.
 ///
 @available(OpenSwiftUI_v1_0, *)
+@frozen
 @propertyWrapper
 @dynamicMemberLookup
 public struct Binding<Value> {
@@ -80,8 +81,10 @@ public struct Binding<Value> {
     /// the binding value changes.
     public var transaction: Transaction
 
+    @usableFromInline
     package var location: AnyLocation<Value>
 
+    @usableFromInline
     package var _value: Value
 
     package init(value: Value, location: AnyLocation<Value>, transaction: Transaction) {
