@@ -46,6 +46,8 @@ let package = Package(
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
+        // CoreBluetooth, a central over BlueZ.
+        .library(name: "PerryCoreBluetooth", type: .dynamic, targets: ["PerryCoreBluetooth"]),
         .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
         .library(name: "PerryCloudKit", type: .dynamic, targets: ["PerryCloudKit"]),
         // Core Data.
@@ -68,6 +70,9 @@ let package = Package(
         // Cairo and FontConfig, which Silica renders CoreGraphics with.
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
+        // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
+        .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -216,6 +221,16 @@ let package = Package(
         .target(
             name: "PerryCoreLocation",
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CoreBluetooth: a central over BlueZ's D-Bus API.
+        .target(
+            name: "PerryCoreBluetooth",
+            dependencies: [
+                "PerryInterface", "PerryObjCInterop",
+                .product(name: "DBUS", package: "dbus"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // MapKit, with no map tiles; its views are UIKit's.
