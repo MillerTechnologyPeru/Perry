@@ -160,8 +160,14 @@ final class Compositor {
                                    y: CGFloat(raw.load(fromByteOffset: 36, as: Float.self)) * size.height)
                 }
                 switch type {
-                case 0x100: // quit
+                case 0x100, 0x210: // quit, window close requested
                     closed = true
+                case 0x20E, 0x20F: // window focus gained, lost
+                    Lifecycle.window(focused: type == 0x20E)
+                case 0x203, 0x209: // window hidden, minimized
+                    Lifecycle.window(visible: false)
+                case 0x202, 0x20B: // window shown, restored
+                    Lifecycle.window(visible: true)
                 case 0x700: // finger down: SDL_FingerID at 24
                     let id = raw.load(fromByteOffset: 24, as: UInt64.self)
                     if finger == nil {

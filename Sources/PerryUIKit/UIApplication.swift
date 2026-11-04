@@ -41,6 +41,10 @@ open class UIApplication: UIResponder {
     @ObjCClassMethod("sharedApplication")
     static func sharedApplication() -> UIApplication? { Application.shared }
 
+    /// Perry's: ends the app as closing its window does, through the
+    /// background and termination, for a controller's quit buttons.
+    @ObjCMethod("_perryTerminate") func perryTerminate() { Lifecycle.terminate() }
+
     @ObjCMethod("delegate")
     func delegate() -> NSObject? { Application.delegate }
 
