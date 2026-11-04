@@ -16,6 +16,9 @@ import PerryObjCInterop
 // whether what it draws has changed without its saying so.
 
 final class LayerState {
+    /// kCAContentsFormatRGBA8Uint; the contents are drawn as RGBA whatever
+    /// the format asked for.
+    var contentsFormat = "RGBA8"
     var bounds = CGRect.zero
     var position = CGPoint.zero
     var anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -281,6 +284,8 @@ open class CALayer: NSObject {
     @ObjCMethod("setShouldRasterize:") func setShouldRasterize(_ rasterize: Bool) {}
     @ObjCMethod("rasterizationScale") func rasterizationScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setRasterizationScale:") func setRasterizationScale(_ scale: CGFloat) {}
+    @ObjCMethod("contentsFormat") func contentsFormat() -> String { state.contentsFormat }
+    @ObjCMethod("setContentsFormat:") func setContentsFormat(_ format: String) { state.contentsFormat = format }
     @ObjCMethod("drawsAsynchronously") func drawsAsynchronously() -> Bool { false }
     @ObjCMethod("setDrawsAsynchronously:") func setDrawsAsynchronously(_ asynchronously: Bool) {}
 
