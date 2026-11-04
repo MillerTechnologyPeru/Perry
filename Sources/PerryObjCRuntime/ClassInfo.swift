@@ -25,6 +25,9 @@ public final class ClassInfo {
 
     /// Methods defined by this class itself, including its categories'.
     var methods: [SEL: UnsafeMutablePointer<perry_method>] = [:]
+
+    /// The class's own methods, its categories' included.
+    public var ownMethods: [UnsafeMutablePointer<perry_method>] { Runtime.lock.withLock { Array(methods.values) } }
     /// Protocol lists adopted by the class and its categories.
     var protocolLists: [UnsafeRawPointer] = []
     /// Declared property lists of the class and its categories.
