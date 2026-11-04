@@ -8,6 +8,14 @@
 //   br   x16
 //   .quad block
 //
+// and on armv7, in ARM state:
+//
+//   mov  r1, r0
+//   ldr  r0, [pc, #4]        the block
+//   ldr  pc, [r0, #12]       its invoke function (ldr to pc switches state)
+//   nop
+//   .long block
+//
 // Trampolines are made in pages of their own, writable and executable, or
 // switched between the two where the host refuses both at once, and never
 // freed: a removed one is kept for reuse.
@@ -20,6 +28,24 @@
 #include <sys/mman.h>
 
 enum { TRAMPOLINE_SIZE = 32, PAGE_SIZE_BYTES = 0x4000 };
+
+#if defined(__aarch64__)
+enum {
+    TRAMPOLINE_WORD0 = 0xaa0003e1,  // mov x1, x0
+    TRAMPOLINE_WORD1 = 0x58000060,  // ldr x0, #12 (the block, at code + 16)
+    TRAMPOLINE_WORD2 = 0xf9400810,  // ldr x16, [x0, #16]
+    TRAMPOLINE_WORD3 = 0xd61f0200,  // br x16
+};
+#elif defined(__arm__)
+enum {
+    TRAMPOLINE_WORD0 = 0xe1a01000,  // mov r1, r0
+    TRAMPOLINE_WORD1 = 0xe59f0004,  // ldr r0, [pc, #4] (the block, at code + 16)
+    TRAMPOLINE_WORD2 = 0xe590f00c,  // ldr pc, [r0, #12]
+    TRAMPOLINE_WORD3 = 0xe320f000,  // nop
+};
+#else
+#error "no block trampolines for this architecture"
+#endif
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static uint8_t *page;
@@ -59,10 +85,10 @@ void *perry_objc_trampoline_create(void *block) {
         used += TRAMPOLINE_SIZE;
     }
     make_writable((uint8_t *)code);
-    code[0] = 0xaa0003e1;       // mov x1, x0
-    code[1] = 0x58000060;       // ldr x0, #12 (the block, at code + 16)
-    code[2] = 0xf9400810;       // ldr x16, [x0, #16]
-    code[3] = 0xd61f0200;       // br x16
+    code[0] = TRAMPOLINE_WORD0;
+    code[1] = TRAMPOLINE_WORD1;
+    code[2] = TRAMPOLINE_WORD2;
+    code[3] = TRAMPOLINE_WORD3;
     memcpy(&code[4], &block, sizeof(block));
     __builtin___clear_cache((char *)code, (char *)code + TRAMPOLINE_SIZE);
     make_executable((uint8_t *)code);
@@ -72,7 +98,7 @@ void *perry_objc_trampoline_create(void *block) {
 
 void *perry_objc_trampoline_block(const void *imp) {
     const uint32_t *code = imp;
-    if (!code || code[0] != 0xaa0003e1 || code[1] != 0x58000060)
+    if (!code || code[0] != TRAMPOLINE_WORD0 || code[1] != TRAMPOLINE_WORD1)
         return NULL;
     void *block;
     memcpy(&block, &code[4], sizeof(block));
