@@ -120,7 +120,7 @@ static void report_conformances(const perry_image *image, const uint8_t *cls, co
 
 static const void *const *section_pointers(const perry_image *image, const char *sectname, size_t *count) {
     // Objective-C sections live in __DATA, __DATA_CONST or __DATA_DIRTY.
-    const struct section_64 *sect = perry_image_section(image, NULL, sectname);
+    const section_t *sect = perry_image_section(image, NULL, sectname);
     if (!sect) {
         *count = 0;
         return NULL;
