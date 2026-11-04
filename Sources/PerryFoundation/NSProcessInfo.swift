@@ -109,3 +109,11 @@ public final class NSProcessInfo: NSObject {
     @ObjCMethod("release", types: "Vv16@0:8") func release() {}
     @ObjCMethod("autorelease") func autorelease() -> UnsafeMutableRawPointer { objcObject }
 }
+
+/// Posted when Low Power Mode or the thermal state changes, which they
+/// never do here.
+@ObjCConstants
+enum ProcessInfoConstants {
+    static let NSProcessInfoPowerStateDidChangeNotification = "NSProcessInfoPowerStateDidChangeNotification"
+    static let NSProcessInfoThermalStateDidChangeNotification = "NSProcessInfoThermalStateDidChangeNotification"
+}
