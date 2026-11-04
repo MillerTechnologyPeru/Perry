@@ -13,6 +13,8 @@ final class ActivityIndicatorState: ObjectState {
     var color: UIColor?
     var animating = false
     var hidesWhenStopped = true
+    /// The side set with -_setCustomWidth:, or 0 for the style's.
+    var customWidth: CGFloat = 0
 }
 
 @ObjCClass("UIActivityIndicatorView")
@@ -109,9 +111,19 @@ open class UIActivityIndicatorView: UIView {
         if indicator.hidesWhenStopped { setHidden(true) }
     }
 
+    @ObjCMethod("_customWidth") func customWidth() -> CGFloat { indicator.customWidth }
+    @ObjCMethod("_setCustomWidth:")
+    func setCustomWidth(_ width: CGFloat) {
+        guard indicator.customWidth != width else { return }
+        indicator.customWidth = width
+        setNeedsDisplay()
+        invalidateIntrinsicContentSize()
+    }
+
     @ObjCMethod("intrinsicContentSize")
     func intrinsicContentSize() -> CGSize {
-        let side = UIActivityIndicatorView.side(indicator.style)
+        let custom = indicator.customWidth
+        let side = custom > 0 ? custom : UIActivityIndicatorView.side(indicator.style)
         return CGSize(width: side, height: side)
     }
 
