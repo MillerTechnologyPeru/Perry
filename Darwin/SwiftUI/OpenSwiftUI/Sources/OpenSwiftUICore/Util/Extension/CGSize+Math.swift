@@ -1,0 +1,98 @@
+//
+//  CGSize+Math.swift
+//  OpenSwiftUICore
+//
+//  Audited for 6.0.87
+//  Status: Complete
+
+public import Foundation
+
+extension CGSize {
+    @inlinable
+    prefix package static func - (operand: CGSize) -> CGSize {
+        var result = operand
+        result.width = -result.width
+        result.height = -result.height
+        return result
+    }
+    
+    @inlinable
+    package static func += (lhs: inout CGSize, rhs: CGSize) {
+        lhs.width += rhs.width
+        lhs.height += rhs.height
+    }
+    
+    @inlinable
+    package static func + (lhs: CGSize, rhs: CGSize) -> CGSize {
+        var result = lhs
+        result += rhs
+        return result
+    }
+    
+    @inlinable
+    package static func -= (lhs: inout CGSize, rhs: CGSize) {
+        lhs.width -= rhs.width
+        lhs.height -= rhs.height
+    }
+    
+    @inlinable
+    package static func - (lhs: CGSize, rhs: CGSize) -> CGSize {
+        var result = lhs
+        result -= rhs
+        return result
+    }
+    
+    @inlinable
+    package static func *= (lhs: inout CGSize, rhs: Double) {
+        lhs.width *= CGFloat(rhs)
+        lhs.height *= CGFloat(rhs)
+    }
+    
+    @inlinable
+    package static func * (lhs: CGSize, rhs: Double) -> CGSize {
+        var result = lhs
+        result *= rhs
+        return result
+    }
+    
+    @inlinable
+    package static func /= (lhs: inout CGSize, rhs: Double) {
+        lhs *= 1 / rhs
+    }
+    
+    @inlinable
+    package static func / (lhs: CGSize, rhs: Double) -> CGSize {
+        var result = lhs
+        result /= rhs
+        return result
+    }
+}
+
+package func mix(_ lhs: CGSize, _ rhs: CGSize, by t: Double) -> CGSize {
+    CGSize(
+        width: (rhs.width - lhs.width) * t + lhs.width,
+        height: (rhs.height - lhs.height) * t + lhs.height
+    )
+}
+
+extension CGSize {
+    package var magnitude: Double {
+        (width * width + height * height).squareRoot()
+    }
+
+    package mutating func normalize() {
+        let magnitudeSquared = width * width + height * height
+        guard magnitudeSquared != 0 else {
+            return
+        }
+        let scale = 1 / magnitudeSquared.squareRoot()
+        width *= scale
+        height *= scale
+    }
+
+    package func normalized() -> CGSize {
+        var result = self
+        result.normalize()
+        return result
+    }
+}

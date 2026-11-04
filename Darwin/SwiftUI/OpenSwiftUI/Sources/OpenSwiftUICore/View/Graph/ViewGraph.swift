@@ -1,0 +1,960 @@
+//
+//  ViewGraph.swift
+//  OpenSwiftUICore
+//
+//  Audited for 6.5.4
+//  Status: Complete
+//  ID: D63C4EB7F2B205694B6515509E76E98B (SwiftUI)
+//  ID: 7D9EDEF832940A362646A6E979F296C8 (SwiftUICore)
+
+package import OpenAttributeGraphShims
+#if canImport(Darwin)
+import Foundation
+#else
+package import Foundation
+#endif
+import OpenSwiftUI_SPI
+
+// MARK: - ViewGraph
+
+package final class ViewGraph: GraphHost {
+    package struct Outputs: OptionSet {
+        package let rawValue: UInt8
+
+        package init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        package static let displayList: ViewGraph.Outputs = .init(rawValue: 1 << 0)
+
+        package static let platformItemList: ViewGraph.Outputs = .init(rawValue: 1 << 1)
+
+        package static let viewResponders: ViewGraph.Outputs = .init(rawValue: 1 << 2)
+
+        package static let layout: ViewGraph.Outputs = .init(rawValue: 1 << 4)
+
+        package static let focus: ViewGraph.Outputs = .init(rawValue: 1 << 5)
+
+        package static let all: ViewGraph.Outputs = .init(rawValue: .max)
+
+        package static let defaults: ViewGraph.Outputs = [.displayList, .viewResponders, .layout, .focus]
+
+        @inline(__always)
+        fileprivate func addRequestedPreferences(to inputs: inout _ViewInputs) {
+            inputs.preferences.add(HostPreferencesKey.self)
+            if contains(.displayList) {
+                inputs.preferences.requiresDisplayList = true
+            }
+            if contains(.viewResponders) {
+                inputs.preferences.requiresViewResponders = true
+            }
+        }
+    }
+
+    let rootViewType: Any.Type
+
+    let makeRootView: (AnyAttribute, _ViewInputs) -> _ViewOutputs
+
+    package weak var delegate: (any ViewGraphDelegate)? = nil
+
+    private var features: ViewGraphFeatureBuffer = .init()
+
+    package var centersRootView: Bool = true
+
+    package let rootView: AnyAttribute
+
+    @Attribute var rootTransform: ViewTransform
+
+    @Attribute package var transform: ViewTransform
+
+    @Attribute package var zeroPoint: ViewOrigin
+
+    @Attribute package var proposedSize: ViewSize
+
+    @Attribute package var safeAreaInsets: _SafeAreaInsetsModifier
+
+    @Attribute var rootGeometry: ViewGeometry
+
+    @Attribute var position: ViewOrigin
+
+    @Attribute var dimensions: ViewSize
+
+    @OptionalAttribute var containerSize: ViewSize?
+
+    @Attribute var gestureTime: Time
+
+    @Attribute var gestureEvents: [EventID : EventType]
+
+    @Attribute var inheritedPhase: _GestureInputs.InheritedPhase
+
+    @Attribute var gestureResetSeed: UInt32
+
+    @OptionalAttribute var rootPhase: GesturePhase<Void>?
+
+    @OptionalAttribute package var gestureDebug: GestureDebug.Data?
+
+    @OptionalAttribute package var gestureCategory: GestureCategory?
+
+    @Attribute package var gesturePreferenceKeys: PreferenceKeys
+
+    private var eventSubgraph: Subgraph?
+
+    @Attribute package var defaultLayoutComputer: LayoutComputer
+
+    @WeakAttribute var rootResponders: [ViewResponder]?
+
+    @WeakAttribute var rootLayoutComputer: LayoutComputer?
+
+    @WeakAttribute var rootDisplayList: (DisplayList, DisplayList.Version)?
+
+    package var sizeThatFitsObservers: ViewGraphGeometryObservers<SizeThatFitsMeasurer> = .init()
+
+    package var accessibilityEnabled: Bool = false
+
+    package var requestedOutputs: Outputs {
+        didSet {
+            if oldValue != requestedOutputs {
+                uninstantiate()
+            }
+        }
+    }
+
+    var disabledOutputs: Outputs = []
+
+    private var mainUpdates: Int = 0
+
+    // MARK: - ViewGraph + NextUpdate
+
+    package struct NextUpdate {
+        package private(set) var time: Time = .infinity
+
+        private var _interval: Double = .infinity
+
+        package var interval: Double {
+            _interval.isFinite ? _interval : .zero
+        }
+
+        private var _defaultIntervalWasRequested: Bool = false
+
+        package private(set) var reasons: Set<UInt32> = []
+
+        package mutating func at(_ next: Time) {
+            time.formMin(next)
+        }
+
+        package mutating func maxVelocity(_ velocity: CGFloat) {
+            guard velocity >= 160 else {
+                return
+            }
+            let interval = velocity < 320 ? 1 / 80.0 : 1 / 120.0
+            let highFrameRateReason: UInt32 = _HighFrameRateReasonMake(0)
+            var newInterval = min(_interval, interval)
+            if _defaultIntervalWasRequested && newInterval > 1 / 60.0 {
+                newInterval = .infinity
+            }
+            _interval = newInterval
+            reasons.insert(highFrameRateReason)
+        }
+
+        package mutating func interval(_ interval: Double, reason: UInt32? = nil) {
+            if interval == .zero {
+                _defaultIntervalWasRequested = true
+            } else {
+                _interval.formMin(interval)
+            }
+            if _defaultIntervalWasRequested && _interval > 1 / 60 {
+                _interval = .infinity
+            }
+            if let reason {
+                reasons.insert(reason)
+            }
+        }
+    }
+
+    package var nextUpdate: (views: NextUpdate, gestures: NextUpdate) = (NextUpdate(), NextUpdate())
+
+    private weak var _preferenceBridge: PreferenceBridge?
+
+    package var preferenceBridge: PreferenceBridge? {
+        get { _preferenceBridge }
+        set { setPreferenceBridge(to: newValue) }
+    }
+
+    private var bridgedPreferences: [(any PreferenceKey.Type, AnyAttribute)] = []
+
+    package static var current: ViewGraph { GraphHost.currentHost as! ViewGraph }
+
+    package init<Root>(
+        rootViewType: Root.Type = Root.self,
+        requestedOutputs: ViewGraph.Outputs = Outputs.defaults
+    ) where Root: View {
+        self.rootViewType = rootViewType
+        self.requestedOutputs = requestedOutputs
+        let data = GraphHost.Data()
+        let oldCurrent = Subgraph.current
+        Subgraph.current = data.globalSubgraph
+        rootView = Attribute(type: Root.self).identifier
+        _rootTransform = Attribute(RootTransform())
+        _transform = _rootTransform
+        _zeroPoint = Attribute(value: ViewOrigin())
+        _proposedSize = Attribute(value: .zero)
+        _containerSize = requestedOutputs.contains(.layout) ? OptionalAttribute(Attribute(value: .zero)) : OptionalAttribute()
+        _safeAreaInsets = Attribute(value: _SafeAreaInsetsModifier(elements: [.init(regions: .container, insets: .zero)]))
+        _defaultLayoutComputer = Attribute(value: .defaultValue)
+        _gestureTime = Attribute(value: .zero)
+        _gestureEvents = Attribute(value: [:])
+        _inheritedPhase = Attribute(value: .defaultValue)
+        _gestureResetSeed = Attribute(value: .zero)
+        _gesturePreferenceKeys = Attribute(value: .init())
+        _rootGeometry = Attribute(RootGeometry(
+            proposedSize: _proposedSize,
+            safeAreaInsets: OptionalAttribute(_safeAreaInsets)
+        ))
+        _position = _rootGeometry.origin()
+        _dimensions = _rootGeometry.size()
+        makeRootView = { [_zeroPoint, _proposedSize, _safeAreaInsets] view, inputs in
+            var zeroInputs = inputs
+            zeroInputs.position = _zeroPoint
+            zeroInputs.containerPosition = _zeroPoint
+            zeroInputs.size = _proposedSize
+            return _SafeAreaInsetsModifier.makeDebuggableView(
+                modifier: _GraphValue(_safeAreaInsets),
+                inputs: zeroInputs
+            ) { _, insetsInputs in
+                var modifiedInputs = insetsInputs
+                modifiedInputs.position = inputs.position
+                modifiedInputs.containerPosition = inputs.containerPosition
+                modifiedInputs.size = inputs.size
+                return Root.makeDebuggableView(
+                    view: _GraphValue(Attribute(identifier: view)),
+                    inputs: modifiedInputs
+                )
+            }
+        }
+        super.init(data: data)
+        Subgraph.current = oldCurrent
+    }
+
+    convenience init<Root: View>(rootView: Root, environment: EnvironmentValues) {
+        self.init(rootViewType: Root.self)
+        setRootView(rootView)
+        setEnvironment(environment)
+    }
+
+    deinit {
+        removePreferenceOutlets(isInvalidating: true)
+        features.contents.destroy()
+    }
+
+    override public var graphDelegate: GraphDelegate? { delegate }
+
+    override public var parentHost: GraphHost? { preferenceBridge?.viewGraph }
+
+    package func append<T>(feature: T) where T: ViewGraphFeature {
+        features.append(feature)
+    }
+
+    package subscript<T>(feature: T.Type) -> UnsafeMutablePointer<T>? where T: ViewGraphFeature {
+        features[feature]
+    }
+
+    override package func instantiateOutputs() {
+        let outputs = rootSubgraph.apply {
+            var inputs = _ViewInputs(
+                graphInputs,
+                position: $position,
+                size: $dimensions,
+                transform: $transform,
+                containerPosition: $zeroPoint,
+                hostPreferenceKeys: data.$hostPreferenceKeys
+            )
+            if requestedOutputs.contains(.layout) {
+                inputs.base.options.formUnion([.viewRequestsLayoutComputer, .viewNeedsGeometry])
+                inputs.containerSize = _containerSize
+            }
+            requestedOutputs.addRequestedPreferences(to: &inputs)
+            if let preferenceBridge {
+                preferenceBridge.wrapInputs(&inputs)
+            }
+            _ViewDebug.initialize(inputs: &inputs)
+            if inputs.needsGeometry {
+                inputs.makeRootMatchedGeometryScope()
+            }
+            inputs.base.pushStableType(rootViewType)
+            $rootGeometry.mutateBody(
+                as: RootGeometry.self,
+                invalidating: true
+            ) { rootGeometry in
+                rootGeometry.$layoutDirection = inputs.layoutDirection
+            }
+            for feature in features {
+                feature.modifyViewInputs(inputs: &inputs, graph: self)
+            }
+            var outputs = makeRootView(rootView, inputs)
+            for feature in features {
+                feature.modifyViewOutputs(outputs: &outputs, inputs: inputs, graph: self)
+            }
+            return outputs
+        }
+        $rootGeometry.mutateBody(
+            as: RootGeometry.self,
+            invalidating: true
+        ) { rootGeometry in
+            rootGeometry.$childLayoutComputer = outputs.layoutComputer
+        }
+        if requestedOutputs.contains(.displayList) {
+            if let displayList = outputs.preferences.displayList {
+                _rootDisplayList = WeakAttribute(rootSubgraph.apply {
+                    Attribute(RootDisplayList(content: displayList, time: data.$time))
+                })
+            }
+        }
+        if requestedOutputs.contains(.viewResponders) {
+            _rootResponders = WeakAttribute(outputs.preferences.viewResponders)
+        }
+        if requestedOutputs.contains(.layout) {
+            _rootLayoutComputer = WeakAttribute(outputs.layoutComputer)
+        }
+        hostPreferenceValues = WeakAttribute(outputs.preferences.hostPreferenceValues)
+        makePreferenceOutlets(outputs: outputs)
+    }
+
+    override package func uninstantiateOutputs() {
+        removePreferenceOutlets(isInvalidating: false)
+        for feature in features {
+            feature.uninstantiate(graph: self)
+        }
+        $rootGeometry.mutateBody(
+            as: RootGeometry.self,
+            invalidating: true
+        ) { rootGeometry in
+            rootGeometry.$childLayoutComputer = nil
+            rootGeometry.$layoutDirection = nil
+        }
+        $rootLayoutComputer = nil
+        $rootResponders = nil
+        $rootDisplayList = nil
+        hostPreferenceValues = WeakAttribute()
+    }
+
+    override package func timeDidChange() {
+        nextUpdate.views = NextUpdate()
+    }
+
+    override package func isHiddenForReuseDidChange() {
+        if let preferenceBridge {
+            if data.isHiddenForReuse {
+                for (key, value) in bridgedPreferences {
+                    preferenceBridge.removeValue(value, for: key)
+                }
+                preferenceBridge.removeHostValues(for: data.$hostPreferenceKeys)
+            } else {
+                for (key, value) in bridgedPreferences {
+                    preferenceBridge.addValue(value, for: key)
+                }
+                if hostPreferenceValues != WeakAttribute() {
+                    preferenceBridge.addHostValues(hostPreferenceValues, for: data.$hostPreferenceKeys)
+                }
+            }
+        }
+        for feature in features {
+            feature.isHiddenForReuseDidChange(graph: self)
+        }
+        if isInstantiated || !data.isHiddenForReuse {
+            delegate?.graphDidChange()
+        }
+    }
+
+    package func requestImmediateUpdate() {
+        delegate?.requestUpdate(after: .zero)
+    }
+
+    private func makePreferenceOutlets(outputs: _ViewOutputs) {
+        guard let preferenceBridge else {
+            return
+        }
+        for key in preferenceBridge.requestedPreferences {
+            guard let value = outputs.preferences[anyKey: key] else {
+                continue
+            }
+            if !data.isHiddenForReuse {
+                preferenceBridge.addValue(value, for: key)
+            }
+            bridgedPreferences.append((key, value))
+        }
+        if !data.isHiddenForReuse, let hostValues = outputs.preferences.hostPreferenceValues {
+            preferenceBridge.addHostValues(WeakAttribute(hostValues), for: data.$hostPreferenceKeys)
+        }
+    }
+
+    private func removePreferenceOutlets(isInvalidating: Bool) {
+        guard let preferenceBridge else {
+            return
+        }
+        for (key, value) in bridgedPreferences {
+            preferenceBridge.removeValue(value, for: key, isInvalidating: isInvalidating)
+        }
+        bridgedPreferences = []
+        preferenceBridge.removeHostValues(for: data.$hostPreferenceKeys, isInvalidating: isInvalidating)
+        preferenceBridge.removeChild(self)
+    }
+}
+
+// MARK: - ViewGraph + Root Inputs
+
+extension ViewGraph {
+    package func setRootView<Root>(_ view: Root) where Root: View {
+        rootView.unsafeCast(to: Root.self).value = view
+    }
+
+    package func setSize(_ size: ViewSize) {
+        let hasChange = $proposedSize.setValue(size)
+        if hasChange {
+            delegate?.graphDidChange()
+        }
+    }
+
+    package func setProposedSize(_ size: CGSize) {
+        let hasChange = $proposedSize.setValue(ViewSize.fixed(size))
+        if hasChange {
+            delegate?.graphDidChange()
+        }
+    }
+
+    package var size: ViewSize {
+        proposedSize
+    }
+
+    @discardableResult
+    package func setSafeAreaInsets(_ insets: EdgeInsets) -> Bool {
+        setSafeAreaInsets([.init(regions: .container, insets: insets)])
+    }
+
+    @discardableResult
+    package func setSafeAreaInsets(_ elts: [SafeAreaInsets.Element]) -> Bool {
+        let hasChange = $safeAreaInsets.setValue(.init(elements: elts))
+        if hasChange {
+            delegate?.graphDidChange()
+        }
+        return hasChange
+    }
+
+    package func setContainerSize(_ size: ViewSize) {
+        guard let $containerSize else {
+            return
+        }
+        let hasChange = $containerSize.setValue(size)
+        if hasChange {
+            delegate?.graphDidChange()
+        }
+    }
+
+    @discardableResult
+    package func invalidateTransform() -> Bool {
+        let rootTransform = $rootTransform
+        guard !rootTransform.valueState.contains(.dirty) else {
+            return false
+        }
+        rootTransform.invalidateValue()
+        delegate?.graphDidChange()
+        return true
+    }
+}
+
+// MARK: - ViewGraph + Update
+
+extension ViewGraph {
+    package var updateRequiredMainThread: Bool {
+        graph.mainUpdates != mainUpdates
+    }
+
+    package func updateOutputs(at time: Time) {
+        beginNextUpdate(at: time)
+        updateOutputs(async: false)
+    }
+
+    package func updateOutputsAsync(at time: Time) -> (list: DisplayList, version: DisplayList.Version)? {
+        beginNextUpdate(at: time)
+        guard _rootDisplayList.allowsAsyncUpdate(),
+              hostPreferenceValues.allowsAsyncUpdate(),
+              sizeThatFitsObservers.isEmpty || _rootLayoutComputer.allowsAsyncUpdate()
+        else {
+            return nil
+        }
+        for feature in features {
+            guard let allowsAsyncUpdate = feature.allowsAsyncUpdate(graph: self) else {
+                feature.skipsAsyncUpdate = true
+                continue
+            }
+            feature.skipsAsyncUpdate = false
+            guard allowsAsyncUpdate else {
+                return nil
+            }
+        }
+        var result: (DisplayList, DisplayList.Version)?
+        graph.withMainThreadHandler(Update.syncMain) {
+            updateOutputs(async: true)
+            result = displayList()
+        }
+        return result
+    }
+
+    package func displayList() -> (DisplayList, DisplayList.Version) {
+        $rootDisplayList?.value ?? (.init(), .init())
+    }
+
+    private func beginNextUpdate(at time: Time) {
+        setTime(time)
+        data.updateSeed.unsafeIncrement()
+        mainUpdates = graph.mainUpdates
+    }
+
+    private func updateOutputs(async: Bool) {
+        var preferencesChanged = false
+        var featuresChanged = false
+        var sizeThatFitsChanged = false
+        var counter = 0
+        repeat {
+            counter &+= 1
+            instantiateIfNeeded()
+            startTransactionUpdate()
+            finishTransactionUpdate(in: globalSubgraph)
+            if updatePreferences() {
+                preferencesChanged = true
+            }
+            if sizeThatFitsObservers.needsUpdate(graph: self) {
+                sizeThatFitsChanged = true
+            }
+            for feature in features {
+                guard !async || !feature.skipsAsyncUpdate else {
+                    continue
+                }
+                if feature.needsUpdate {
+                    featuresChanged = true
+                } else if feature.needsUpdate(graph: self) {
+                    feature.needsUpdate = true
+                    featuresChanged = true
+                }
+            }
+        } while (needsTransaction && counter != 8)
+        guard preferencesChanged || featuresChanged || sizeThatFitsChanged else {
+            return
+        }
+        Update.syncMain {
+            if preferencesChanged {
+                delegate?.preferencesDidChange()
+                preferenceBridge?.updateHostValues(data.$hostPreferenceKeys)
+            }
+            if featuresChanged {
+                for feature in features {
+                    guard !async || !feature.skipsAsyncUpdate else {
+                        continue
+                    }
+                    if feature.needsUpdate {
+                        feature.update(graph: self)
+                        feature.needsUpdate = false
+                    }
+                }
+            }
+            if sizeThatFitsChanged {
+                sizeThatFitsObservers.notify()
+            }
+        }
+        mainUpdates &-= 1
+    }
+}
+
+package struct SizeThatFitsMeasurer: ViewGraphGeometryMeasurer {
+    package typealias Proposal = _ProposedSize
+
+    package typealias Size = CGSize
+
+    package static func measure(
+        given proposal: _ProposedSize,
+        in graph: ViewGraph
+    ) -> CGSize {
+        ViewGraph.sizeThatFits(
+            proposal,
+            layoutComputer: graph.layoutComputer,
+            insets: graph.rootViewInsets
+        )
+    }
+
+    package static func measure(
+        proposal: _ProposedSize,
+        layoutComputer: LayoutComputer,
+        insets: EdgeInsets
+    ) -> CGSize {
+        ViewGraph.sizeThatFits(
+            proposal,
+            layoutComputer: layoutComputer,
+            insets: insets
+        )
+    }
+
+    package static let invalidValue: CGSize = CGSize.invalidValue
+}
+
+package typealias SizeThatFitsObservers = ViewGraphGeometryObservers<SizeThatFitsMeasurer>
+
+extension ViewGraph {
+    fileprivate var layoutComputer: LayoutComputer? {
+        precondition(
+            requestedOutputs.contains(.layout),
+            "Cannot fetch layout computer without layout output"
+        )
+        instantiateIfNeeded()
+        return rootLayoutComputer
+    }
+
+    fileprivate var rootViewInsets: EdgeInsets {
+        var insets = safeAreaInsets.elements.reduce(.zero) { $0 + $1.insets }
+        insets.xFlipIfRightToLeft { data.environment.layoutDirection }
+        return insets
+    }
+
+    static func sizeThatFits(
+        _ proposal: _ProposedSize,
+        layoutComputer: LayoutComputer?,
+        insets: EdgeInsets
+    ) -> CGSize {
+        var proposal = proposal
+        proposal.width = proposal.width.map { max(.zero, $0 - insets.horizontal) }
+        proposal.height = proposal.height.map { max(.zero, $0 - insets.vertical) }
+        let fittingSize = if let layoutComputer {
+            layoutComputer.sizeThatFits(proposal)
+        } else {
+            proposal.fixingUnspecifiedDimensions()
+        }
+        return fittingSize.outset(by: insets)
+    }
+
+    package func sizeThatFits(_ proposal: _ProposedSize) -> CGSize {
+        Self.sizeThatFits(proposal, layoutComputer: layoutComputer, insets: rootViewInsets)
+    }
+
+    package func explicitAlignment(of guide: VerticalAlignment, at size: CGSize) -> CGFloat? {
+        guard let layoutComputer else {
+            return nil
+        }
+        let insets = rootViewInsets
+        let size = ViewSize.fixed(size.inset(by: insets))
+        return layoutComputer.explicitAlignment(guide.key, at: size).map { $0 + insets.top }
+    }
+
+    package func explicitAlignment(of guide: HorizontalAlignment, at size: CGSize) -> CGFloat? {
+        guard let layoutComputer else {
+            return nil
+        }
+        let insets = rootViewInsets
+        let size = ViewSize.fixed(size.inset(by: insets))
+        return layoutComputer.explicitAlignment(guide.key, at: size).map { $0 + insets.leading }
+    }
+
+    package func alignment(of guide: VerticalAlignment, at size: CGSize) -> CGFloat {
+        let layoutComputer = layoutComputer ?? .defaultValue
+        let insets = rootViewInsets
+        let dimensions = ViewDimensions(
+            guideComputer: layoutComputer,
+            size: .fixed(size.inset(by: insets))
+        )
+        return dimensions[explicit: guide] ?? (insets.top + guide.key.id.defaultValue(in: dimensions))
+    }
+
+    package func alignment(of guide: HorizontalAlignment, at size: CGSize) -> CGFloat {
+        let layoutComputer = layoutComputer ?? .defaultValue
+        let insets = rootViewInsets
+        let dimensions = ViewDimensions(
+            guideComputer: layoutComputer,
+            size: .fixed(size.inset(by: insets))
+        )
+        return dimensions[explicit: guide] ?? (insets.leading + guide.key.id.defaultValue(in: dimensions))
+    }
+
+    package func viewDebugData() -> [_ViewDebug.Data] {
+        _ViewDebug.makeDebugData(subgraph: rootSubgraph)
+    }
+}
+
+// MARK: - ViewGraph + PreferenceBridge
+
+extension ViewGraph {
+    package func updatePreferenceBridge(
+        environment: EnvironmentValues,
+        deferredUpdate: @escaping () -> Void
+    ) {
+        guard let preferenceBridge = environment.preferenceBridge,
+              preferenceBridge !== _preferenceBridge
+        else {
+            return
+        }
+        if GraphHost.isUpdating {
+            Update.enqueueAction(reason: nil) {
+                deferredUpdate()
+            }
+        } else {
+            self.preferenceBridge = preferenceBridge
+        }
+    }
+
+    package func invalidatePreferenceBridge() {
+        setPreferenceBridge(to: nil, isInvalidating: true)
+    }
+
+    private func setPreferenceBridge(to preferenceBridge: PreferenceBridge?, isInvalidating: Bool = false) {
+        guard _preferenceBridge !== preferenceBridge else { return }
+        removePreferenceOutlets(isInvalidating: isInvalidating)
+        _preferenceBridge = nil
+        if isInstantiated {
+            uninstantiate(immediately: isInvalidating)
+        }
+        _preferenceBridge = preferenceBridge
+        if let preferenceBridge = _preferenceBridge {
+            preferenceBridge.addChild(self)
+        }
+        updateRemovedState()
+    }
+}
+
+// MARK: - ViewGraph event lifecycle
+
+extension ViewGraph {
+    package var responderNode: ResponderNode? {
+        rootResponders?.first
+    }
+
+    package func setInheritedPhase(_ phase: _GestureInputs.InheritedPhase) {
+        inheritedPhase = phase
+    }
+
+    package func sendEvents(
+        _ events: [EventID: any EventType],
+        rootNode: ResponderNode,
+        at time: Time
+    ) -> GesturePhase<Void> {
+        startTransactionUpdate()
+        if gestureTime != time {
+            gestureTime = time
+            data.updateSeed.unsafeIncrement()
+            nextUpdate.gestures = .init()
+        }
+        gestureEvents = events
+        if $rootPhase == nil {
+            eventSubgraph = Subgraph(graph: graph)
+            var viewInputs = _ViewInputs(
+                graphInputs,
+                position: $position,
+                size: $dimensions,
+                transform: $transform,
+                containerPosition: $zeroPoint,
+                hostPreferenceKeys: data.$hostPreferenceKeys
+            )
+            viewInputs.copyCaches()
+            var gestureInputs = _GestureInputs(
+                viewInputs,
+                viewSubgraph: rootSubgraph,
+                events: $gestureEvents,
+                time: $gestureTime,
+                resetSeed: $gestureResetSeed,
+                inheritedPhase: $inheritedPhase,
+                gesturePreferenceKeys: $gesturePreferenceKeys
+            )
+            let gestureOutputs = eventSubgraph!.apply {
+                if _eventDebugTriggers.contains(.gestures) {
+                    gestureInputs.options = [.includeDebugOutput]
+                }
+                return rootNode.makeGesture(inputs: gestureInputs)
+            }
+            $rootPhase = gestureOutputs.phase
+            $gestureDebug = gestureOutputs.debugData
+            $gestureCategory = gestureOutputs.preferences.gestureCategory
+        }
+        var pendingEvents = events
+        var phase: GesturePhase<Void> = .failed
+        finishTransactionUpdate(in: eventSubgraph!) { again in
+            if again {
+                if !pendingEvents.isEmpty {
+                    gestureEvents = [:]
+                    pendingEvents = [:]
+                }
+            } else {
+                phase = rootPhase!
+            }
+        }
+        printGestures(data: gestureDebug, host: delegate)
+        return phase
+    }
+
+    package func resetEvents() {
+        guard let subgraph = eventSubgraph else {
+            return
+        }
+        eventSubgraph = nil
+        $rootPhase = nil
+        inheritedPhase = .failed
+        subgraph.willInvalidate(isInserted: true)
+        subgraph.invalidate()
+        responderNode?.resetGesture()
+    }
+}
+
+// MARK: - RootGeometry
+
+/// Calculates the geometry of the root view within the proposed size.
+///
+/// `RootGeometry` is responsible for:
+/// - Computing the size that fits the content based on layout preferences
+/// - Determining the origin of the content, applying centering if needed
+/// - Handling right-to-left layout direction adjustments
+/// - Applying safe area insets to the available space
+///
+/// The diagram below illustrates how the geometry is calculated:
+///
+/// ```
+/// |←--------------------------proposedSize.value.width--------------------------→|  (0, 0)
+/// ┌──────────────────────────────────────────────────────────────────────────────┐  ┌─────────> x
+/// │     (x: insets.leading, y: insets.top)                                       |  │
+/// │     ↓                                                                        |  |
+/// |     |←--------------------------proposal.width--------------------------→|   |  |
+/// │     ┌────────────┬───────────────────────────────────────────────────────┐   |  |
+/// │     |████████████|                                                       |   │  ↓ y
+/// │     |████████████|                                                       |   │  
+/// │     ├────────────┘                                                       │   |  
+/// |     |←----------→|                                                       |   |  
+/// │     |fittingSize.width                                                   |   |  
+/// │     |                                                                    |   │  
+/// |     |                                                                    |   |  
+/// |     |                                                                    |   |  
+/// |     |                                                                    |   |  
+/// │     |        centersRootView == true:                                    │   |  
+/// │     |        origin = insets + (proposal - fittingSize) * 0.5            │   |  
+/// │     |                                                                    |   │  
+/// │     |        centersRootView == false:                                   |   │  
+/// │     |        origin = (insets.leading, insets.top)                       |   │  
+/// │     |                                                                    |   │  
+/// │     |        If layoutDirection == .rightToLeft:                         |   │  
+/// │     |        origin.x is flipped to keep visual order consistent         |   │  
+/// │     |                                                                    |   │  
+/// │     └────────────────────────────────────────────────────────────────────┘   |  
+/// |                                                                              |  
+/// └──────────────────────────────────────────────────────────────────────────────┘  
+/// ```
+package struct RootGeometry: Rule, AsyncAttribute {
+    /// The layout direction to apply to the root view.
+    ///
+    /// When set to `.rightToLeft`, the x-coordinate will be adjusted to maintain
+    /// proper visual alignment from the right edge.
+    @OptionalAttribute
+    package var layoutDirection: LayoutDirection?
+
+    /// The proposed size for the entire view, including any insets.
+    @Attribute
+    package var proposedSize: ViewSize
+
+    /// Safe area insets to apply to the view.
+    ///
+    /// These insets define padding from the edges of the proposed size.
+    @OptionalAttribute
+    package var safeAreaInsets: _SafeAreaInsetsModifier?
+
+    /// The layout computer used to determine the size of the child view.
+    @OptionalAttribute
+    package var childLayoutComputer: LayoutComputer?
+
+    /// Creates a new root geometry with the specified attributes.
+    ///
+    /// - Parameters:
+    ///   - layoutDirection: The layout direction to apply.
+    ///   - proposedSize: The proposed size for the entire view.
+    ///   - safeAreaInsets: Safe area insets to apply to the view.
+    ///   - childLayoutComputer: The layout computer for determining the child view size.
+    package init(
+        layoutDirection: OptionalAttribute<LayoutDirection> = .init(),
+        proposedSize: Attribute<ViewSize>,
+        safeAreaInsets: OptionalAttribute<_SafeAreaInsetsModifier> = .init(),
+        childLayoutComputer: OptionalAttribute<LayoutComputer> = .init()
+    ) {
+        _layoutDirection = layoutDirection
+        _proposedSize = proposedSize
+        _safeAreaInsets = safeAreaInsets
+        _childLayoutComputer = childLayoutComputer
+    }
+
+    package var value: ViewGeometry {
+        let layoutComputer = childLayoutComputer ?? .defaultValue
+        let insets: EdgeInsets
+        if let safeAreaInsets {
+            var safeAreaInsets = safeAreaInsets.elements.reduce(.zero, { $0 + $1.insets })
+            // Apply flipping if needed to convert left/right insets to leading/trailing
+            if let layoutDirection {
+                safeAreaInsets.xFlipIfRightToLeft { layoutDirection }
+            }
+            insets = safeAreaInsets
+        } else {
+            insets = .zero
+        }
+        let proposal = proposedSize.value.inset(by: insets)
+        let fittingSize = layoutComputer.sizeThatFits(.init(proposal))
+        // Start with origin at the safe area offset
+        var origin = CGPoint(x: insets.leading, y: insets.top)
+
+        // Apply centering if needed
+        if ViewGraph.current.centersRootView {
+            origin += (proposal-fittingSize) * 0.5
+        }
+
+        var geometry = ViewGeometry(
+            origin: ViewOrigin(origin),
+            dimensions: ViewDimensions(
+                guideComputer: layoutComputer,
+                size: fittingSize,
+                proposal: .init(proposal)
+            )
+        )
+        if let layoutDirection {
+            geometry.finalizeLayoutDirection(layoutDirection, parentSize: proposedSize.value)
+        }
+        return geometry
+    }
+}
+
+// MARK: - Graph + ViewGraph
+
+extension Graph {
+    package func viewGraph() -> ViewGraph {
+        unsafeBitCast(context!, to: ViewGraph.self)
+    }
+}
+
+// MARK: - RootTransformProvider
+
+package protocol RootTransformProvider {
+    func rootTransform() -> ViewTransform
+}
+
+// MARK: - RootDisplayList
+
+private struct RootDisplayList: Rule, AsyncAttribute {
+    @Attribute var content: DisplayList
+    @Attribute var time: Time
+
+    var value: (DisplayList, DisplayList.Version) {
+        var displayList = content
+        let version = DisplayList.Version(forUpdate: ())
+        displayList.applyViewGraphTransform(time: $time, version: version)
+        return (displayList, version)
+    }
+}
+
+// MARK: - RootTransform
+
+private struct RootTransform: Rule {
+    var value: ViewTransform {
+        guard let delegate = ViewGraph.current.delegate,
+              let provider = delegate.as(RootTransformProvider.self)
+        else {
+            return ViewTransform()
+        }
+        return provider.rootTransform()
+    }
+}

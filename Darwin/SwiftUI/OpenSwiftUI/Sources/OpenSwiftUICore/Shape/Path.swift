@@ -1,0 +1,1156 @@
+//
+//  Path.swift
+//  OpenSwiftUICore
+//
+//  Audited for 6.5.4
+//  Status: WIP
+//  ID: 31FD92B70C320DDD253E93C7417D779A (SwiftUI)
+//  ID: 3591905F51357E95FA93E39751507471 (SwiftUICore)
+
+public import Foundation
+package import OpenRenderBoxShims
+import OpenSwiftUI_SPI
+public import OpenCoreGraphicsShims
+
+// MARK: - Path [WIP]
+
+/// The outline of a 2D shape.
+@available(OpenSwiftUI_v1_0, *)
+@frozen
+public struct Path: Equatable, LosslessStringConvertible, @unchecked Sendable {
+
+    // MARK: - Path.PathBox
+
+    @usableFromInline
+    final package class PathBox: Equatable {
+        private enum Kind: UInt8 {
+            #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+            case cgPath
+            #endif
+            case rbPath
+            case buffer
+        }
+
+        private var kind: Kind
+        private var data: PathData
+
+        #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+        @inline(__always)
+        init(_ path: CGPath) {
+            var data = PathData()
+            kind = .cgPath
+            data.cgPath = .passRetained(path)
+            self.data = data
+        }
+        #endif
+
+        package init(takingPath path: ORBPath) {
+            var data = PathData()
+            kind = .rbPath
+            data.rbPath = path
+            self.data = data
+        }
+
+        deinit {
+            switch kind {
+            #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+            case .cgPath:
+                data.cgPath.release()
+            #endif
+            case .rbPath:
+                data.rbPath.release()
+            case .buffer:
+                withUnsafeMutablePointer(to: &data) { pointer in
+                    let storage = unsafeBitCast(pointer, to: ORBPath.Storage.self)
+                    storage.destroy()
+                }
+            }
+        }
+
+        private func prepareBuffer() {
+            let path: ORBPath
+            switch kind {
+            #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+            case .cgPath:
+                path = ORBPath(cgPath: data.cgPath.takeRetainedValue())
+            #endif
+            case .rbPath:
+                path = data.rbPath
+            case .buffer:
+                return
+            }
+            withUnsafeMutablePointer(to: &data) { pointer in
+                let storage = unsafeBitCast(pointer, to: ORBPath.Storage.self)
+                storage.initialize(capacity: 96, source: nil)
+                storage.append(path: path)
+                kind = .buffer
+                path.release()
+            }
+        }
+
+        private static let bufferCallbacks: UnsafePointer<ORBPath.Callbacks> = {
+            let pointer = UnsafeMutablePointer<ORBPath.Callbacks>.allocate(capacity: 1)
+            var callbacks = ORBPath.empty.callbacks.pointee
+            callbacks.retain = { object in
+                UnsafeRawPointer(
+                    Unmanaged<PathBox>.fromOpaque(object)
+                    .retain()
+                    .toOpaque()
+                )
+            }
+            callbacks.release = { object in
+                Unmanaged<PathBox>.fromOpaque(object)
+                    .release()
+            }
+            callbacks.apply = { object, info, callback in
+                let box = object.assumingMemoryBound(to: PathBox.self).pointee
+                let storage = withUnsafeMutablePointer(to: &box.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return storage.apply(info: info, callback: callback)
+            }
+            callbacks.isEqual = { lhs, rhs in
+                let lhsBox = lhs.assumingMemoryBound(to: PathBox.self).pointee
+                let rhsBox = rhs.assumingMemoryBound(to: PathBox.self).pointee
+                let lhsStorage = withUnsafeMutablePointer(to: &lhsBox.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                let rhsStorage = withUnsafeMutablePointer(to: &rhsBox.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return lhsStorage.isEqual(to: rhsStorage)
+            }
+            callbacks.isEmpty = { object in
+                let box = object.assumingMemoryBound(to: PathBox.self).pointee
+                let storage = withUnsafeMutablePointer(to: &box.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return storage.isEmpty
+            }
+            callbacks.isSingleElement = { object in
+                let box = object.assumingMemoryBound(to: PathBox.self).pointee
+                let storage = withUnsafeMutablePointer(to: &box.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return storage.isEmpty
+            }
+            callbacks.bezierOrder = { object in
+                let box = object.assumingMemoryBound(to: PathBox.self).pointee
+                let storage = withUnsafeMutablePointer(to: &box.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return storage.bezierOrder
+            }
+            callbacks.boundingRect = { object in
+                let box = object.assumingMemoryBound(to: PathBox.self).pointee
+                let storage = withUnsafeMutablePointer(to: &box.data) {
+                    unsafeBitCast($0, to: ORBPath.Storage.self)
+                }
+                return storage.boundingRect
+            }
+            pointer.initialize(to: callbacks)
+            return UnsafePointer(pointer)
+        }()
+
+        #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+        @inline(__always)
+        fileprivate var cgPath: CGPath {
+            let rbPath: ORBPath
+            switch kind {
+            case .cgPath:
+                return data.cgPath.takeUnretainedValue()
+            case .rbPath:
+                rbPath = data.rbPath
+            case .buffer:
+                let storage = unsafeBitCast(self, to: ORBPath.Storage.self)
+                rbPath = ORBPath(storage: storage, callbacks: Self.bufferCallbacks)
+            }
+            return rbPath.cgPath
+        }
+        #endif
+
+        @inline(__always)
+        fileprivate var rbPath: ORBPath {
+            switch kind {
+            case .cgPath:
+                return ORBPath(cgPath: data.cgPath.takeUnretainedValue())
+            case .rbPath:
+                return data.rbPath
+            case .buffer:
+                let storage = unsafeBitCast(self, to: ORBPath.Storage.self)
+                return ORBPath(storage: storage, callbacks: Self.bufferCallbacks)
+            }
+        }
+        
+        @inline(__always)
+        fileprivate var boundingRect: CGRect {
+            switch kind {
+            case .cgPath:
+                #if canImport(CoreGraphics)
+                return data.cgPath.takeUnretainedValue().boundingBoxOfPath
+                #else
+                _openSwiftUIPlatformUnimplementedWarning()
+                return .zero
+                #endif
+            case .rbPath:
+                _openSwiftUIUnimplementedWarning()
+                // return data.rbPath.boundingBox // FIXME: RB API
+                return .zero
+            case .buffer:
+                let storage = unsafeBitCast(self, to: ORBPath.Storage.self)
+                return storage.boundingRect
+            }
+        }
+
+        @inline(__always)
+        fileprivate func retainRBPath() -> ORBPath {
+            let rbPath = rbPath
+            rbPath.retain()
+            return rbPath
+        }
+
+        @usableFromInline
+        package static func == (lhs: PathBox, rhs: PathBox) -> Bool {
+            return lhs.rbPath.isEqual(to: rhs.rbPath)
+        }
+    }
+
+    @usableFromInline
+    @frozen
+    package enum Storage: Equatable {
+        case empty
+        case rect(CGRect)
+        case ellipse(CGRect)
+        indirect case roundedRect(FixedRoundedRect)
+        @available(*, deprecated, message: "obsolete")
+        indirect case stroked(StrokedPath)
+        @available(*, deprecated, message: "obsolete")
+        indirect case trimmed(TrimmedPath)
+        case path(PathBox)
+    }
+
+    package var storage: Path.Storage
+
+    package init(storage: Path.Storage) {
+        self.storage = storage
+    }
+
+    package init(box: Path.PathBox) {
+        self.storage = .path(box)
+    }
+
+    /// Creates an empty path.
+    public init() {
+        storage = .empty
+    }
+
+    #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+    /// Creates a path from an immutable shape path.
+    ///
+    /// - Parameter path: The immutable CoreGraphics path to initialize
+    ///   the new path from.
+    ///
+    public init(_ path: CGPath) {
+        guard !path.isEmpty else {
+            storage = .empty
+            return
+        }
+        storage = .path(PathBox(path))
+    }
+
+    /// Creates a path from a copy of a mutable shape path.
+    ///
+    /// - Parameter path: The CoreGraphics path to initialize the new
+    ///   path from.
+    ///
+    public init(_ path: CGMutablePath) {
+        guard !path.isEmpty else {
+            storage = .empty
+            return
+        }
+        storage = .path(PathBox(path.mutableCopy()!))
+    }
+    #endif
+
+    /// Creates a path containing a rectangle.
+    ///
+    /// This is a convenience function that creates a path of a
+    /// rectangle. Using this convenience function is more efficient
+    /// than creating a path and adding a rectangle to it.
+    ///
+    /// Calling this function is equivalent to using `minX` and related
+    /// properties to find the corners of the rectangle, then using the
+    /// `move(to:)`, `addLine(to:)`, and `closeSubpath()` functions to
+    /// add the rectangle.
+    ///
+    /// - Parameter rect: The rectangle to add.
+    ///
+    public init(_ rect: CGRect) {
+        guard !rect.isNull else {
+            storage = .empty
+            return
+        }
+        storage = .rect(rect)
+    }
+
+    /// Creates a path containing a rounded rectangle.
+    ///
+    /// This is a convenience function that creates a path of a rounded
+    /// rectangle. Using this convenience function is more efficient
+    /// than creating a path and adding a rounded rectangle to it.
+    ///
+    /// - Parameters:
+    ///   - rect: A rectangle, specified in user space coordinates.
+    ///   - cornerSize: The size of the corners, specified in user space
+    ///     coordinates.
+    ///   - style: The corner style. Defaults to the `continous` style
+    ///     if not specified.
+    ///
+    public init(roundedRect rect: CGRect, cornerSize: CGSize, style: RoundedCornerStyle = .continuous) {
+        guard !rect.isNull else {
+            storage = .empty
+            return
+        }
+        guard cornerSize != .zero && !rect.isInfinite else {
+            storage = .rect(rect)
+            return
+        }
+        storage = .roundedRect(FixedRoundedRect(rect, cornerSize: cornerSize, style: style))
+    }
+
+    /// Creates a path containing a rounded rectangle.
+    ///
+    /// This is a convenience function that creates a path of a rounded
+    /// rectangle. Using this convenience function is more efficient
+    /// than creating a path and adding a rounded rectangle to it.
+    ///
+    /// - Parameters:
+    ///   - rect: A rectangle, specified in user space coordinates.
+    ///   - cornerRadius: The radius of all corners of the rectangle,
+    ///     specified in user space coordinates.
+    ///   - style: The corner style. Defaults to the `continous` style
+    ///     if not specified.
+    ///
+    public init(roundedRect rect: CGRect, cornerRadius: CGFloat, style: RoundedCornerStyle = .continuous) {
+        guard !rect.isNull else {
+            storage = .empty
+            return
+        }
+        guard cornerRadius != .zero && !rect.isInfinite else {
+            storage = .rect(rect)
+            return
+        }
+        storage = .roundedRect(FixedRoundedRect(rect, cornerRadius: cornerRadius, style: style))
+    }
+
+    /// Creates a path as the given rounded rectangle, which may have
+    /// uneven corner radii.
+    ///
+    /// This is a convenience function that creates a path of a rounded
+    /// rectangle. Using this function is more efficient than creating
+    /// a path and adding a rounded rectangle to it.
+    ///
+    /// - Parameters:
+    ///   - rect: A rectangle, specified in user space coordinates.
+    ///   - cornerRadii: The radius of each corner of the rectangle,
+    ///     specified in user space coordinates.
+    ///   - style: The corner style. Defaults to the `continous` style
+    ///     if not specified.
+    ///
+    public init(roundedRect rect: CGRect, cornerRadii: RectangleCornerRadii, style: RoundedCornerStyle = .continuous) {
+        guard !rect.isNull else {
+            storage = .empty
+            return
+        }
+        // TODO: addRoundedRect
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    /// Creates a path as an ellipse within the given rectangle.
+    ///
+    /// This is a convenience function that creates a path of an
+    /// ellipse. Using this convenience function is more efficient than
+    /// creating a path and adding an ellipse to it.
+    ///
+    /// The ellipse is approximated by a sequence of Bézier
+    /// curves. Its center is the midpoint of the rectangle defined by
+    /// the rect parameter. If the rectangle is square, then the
+    /// ellipse is circular with a radius equal to one-half the width
+    /// (or height) of the rectangle. If the rect parameter specifies a
+    /// rectangular shape, then the major and minor axes of the ellipse
+    /// are defined by the width and height of the rectangle.
+    ///
+    /// The ellipse forms a complete subpath of the path—that
+    /// is, the ellipse drawing starts with a move-to operation and
+    /// ends with a close-subpath operation, with all moves oriented in
+    /// the clockwise direction. If you supply an affine transform,
+    /// then the constructed Bézier curves that define the
+    /// ellipse are transformed before they are added to the path.
+    ///
+    /// - Parameter rect: The rectangle that bounds the ellipse.
+    ///
+    public init(ellipseIn rect: CGRect) {
+        guard !rect.isNull else {
+            storage = .empty
+            return
+        }
+        storage = rect.isInfinite ? .rect(rect) : .ellipse(rect)
+    }
+
+    /// Creates an empty path, then executes a closure to add its
+    /// initial elements.
+    ///
+    /// - Parameter callback: The Swift function that will be called to
+    ///   initialize the new path.
+    ///
+    public init(_ callback: (inout Path) -> ()) {
+        storage = .empty
+        callback(&self)
+    }
+
+    /// Initializes from the result of a previous call to
+    /// `Path.stringRepresentation`. Fails if the `string` does not
+    /// describe a valid path.
+    public init?(_ string: String) {
+        #if canImport(CoreGraphics)
+        let mutablePath = CGMutablePath()
+        let nsString = string as NSString
+        guard let str = nsString.utf8String else {
+            return nil
+        }
+        guard _CGPathParseString(mutablePath, str) else {
+            return nil
+        }
+        storage = .path(PathBox(mutablePath))
+        #else
+        _openSwiftUIPlatformUnimplementedWarning()
+        return nil
+        #endif
+    }
+
+    /// A description of the path that may be used to recreate the path
+    /// via `init?(_:)`.
+    public var description: String {
+        #if canImport(Darwin)
+        _CGPathCopyDescription(cgPath, 0.0)
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
+    }
+
+    #if canImport(CoreGraphics) || !OPENSWIFTUI_CF_CGTYPES
+    /// An immutable path representing the elements in the path.
+    public var cgPath: CGPath {
+        #if canImport(Darwin)
+        switch storage {
+        case .empty:
+            CGPath(rect: .null, transform: nil)
+        case let .rect(rect):
+            CGPath(rect: rect, transform: nil)
+        case let .ellipse(rect):
+            CGPath(ellipseIn: rect, transform: nil)
+        case let .roundedRect(fixedRoundedRect):
+            fixedRoundedRect.cgPath
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case let .path(pathBox):
+            pathBox.cgPath
+        }
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
+    }
+    #endif
+
+    package func retainRBPath() -> ORBPath {
+        switch storage {
+        case .empty:
+            ORBPath.empty
+        case let .rect(rect):
+            ORBPath(rect: rect, transform: nil)
+        case let .ellipse(rect):
+            ORBPath(ellipseIn: rect, transform: nil)
+        case let .roundedRect(fixedRoundedRect):
+            ORBPath(
+                roundedRect: fixedRoundedRect.rect,
+                cornerWidth: fixedRoundedRect.cornerSize.width,
+                cornerHeight: fixedRoundedRect.cornerSize.height,
+                style: fixedRoundedRect.style == .circular ? .circular : .continuous,
+                transform: nil
+            )
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case let .path(pathBox):
+            pathBox.retainRBPath()
+        }
+    }
+
+    package mutating func withMutableBuffer(do body: (UnsafeMutableRawPointer) -> Void) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    /// A Boolean value indicating whether the path contains zero elements.
+    public var isEmpty: Bool {
+        switch storage {
+        case .empty:
+            true
+        case let .rect(rect):
+            rect.isNull
+        case let .ellipse(rect):
+            rect.isNull
+        case let .roundedRect(fixedRoundedRect):
+            fixedRoundedRect.rect.isNull
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case let .path(pathBox):
+            pathBox.rbPath.isEmpty
+        }
+    }
+
+    /// A rectangle containing all path segments.
+    ///
+    /// This is the smallest rectangle completely enclosing all points
+    /// in the path but not including control points for Bézier
+    /// curves.
+    public var boundingRect: CGRect {
+        switch storage {
+        case .empty:
+            .null
+        case let .rect(rect):
+            rect
+        case let .ellipse(rect):
+            rect
+        case let .roundedRect(fixedRoundedRect):
+            fixedRoundedRect.rect
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case let .path(pathBox):
+            pathBox.boundingRect
+        }
+    }
+
+    /// Returns true if the path contains a specified point.
+    ///
+    /// If `eoFill` is true, this method uses the even-odd rule to define which
+    /// points are inside the path. Otherwise, it uses the non-zero rule.
+    public func contains(_ p: CGPoint, eoFill: Bool = false) -> Bool {
+        switch storage {
+        case .empty:
+            return false
+        case let .rect(rect):
+            return rect.contains(p)
+        case let .ellipse(rect):
+            return ellipseContains(in: rect, contains: p)
+        case let .roundedRect(rect):
+            #if canImport(Darwin)
+            return rect.contains(p)
+            #else
+            // FIXME
+            let path = retainRBPath()
+            defer { path.release() }
+            return path.contains(point: p, eoFill: false)
+            #endif
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case let .path(box):
+            let path = box.retainRBPath()
+            // TBA
+            defer { path.release() }
+            return path.contains(point: p, eoFill: eoFill)
+        }
+    }
+
+    package func contains(
+        points: [PlatformPoint],
+        eoFill: Bool = false,
+        origin: CGPoint = .zero
+    ) -> BitVector64 {
+        points.withUnsafeBufferPointer {
+            contains(points: $0, eoFill: eoFill, origin: origin)
+        }
+    }
+
+    package func contains(
+        points: UnsafeBufferPointer<PlatformPoint>,
+        eoFill: Bool = false,
+        origin: CGPoint = .zero
+    ) -> BitVector64 {
+        // FIXME:
+        // The RenderBox shim currently declares the batched mask result as Bool.
+        // Use scalar containment to preserve every bit until that ABI is corrected.
+        points.mapBool {
+            contains(CGPoint(x: $0.x - origin.x, y: $0.y - origin.y), eoFill: eoFill)
+        }
+    }
+
+    /// An element of a path.
+    @frozen
+    public enum Element: Equatable {
+        /// A path element that terminates the current subpath (without closing
+        /// it) and defines a new current point.
+        case move(to: CGPoint)
+
+        /// A line from the previous current point to the given point, which
+        /// becomes the new current point.
+        case line(to: CGPoint)
+
+        /// A quadratic Bézier curve from the previous current point to the
+        /// given end-point, using the single control point to define the curve.
+        ///
+        /// The end-point of the curve becomes the new current point.
+        case quadCurve(to: CGPoint, control: CGPoint)
+
+        /// A cubic Bézier curve from the previous current point to the given
+        /// end-point, using the two control points to define the curve.
+        ///
+        /// The end-point of the curve becomes the new current point.
+        case curve(to: CGPoint, control1: CGPoint, control2: CGPoint)
+
+        /// A line from the start point of the current subpath (if any) to the
+        /// current point, which terminates the subpath.
+        ///
+        /// After closing the subpath, the current point becomes undefined.
+        case closeSubpath
+    }
+
+    /// Calls `body` with each element in the path.
+    public func forEach(_ body: (Path.Element) -> Void) {
+        #if canImport(CoreGraphics)
+        // FIXME: Use RB API instead of CG API
+        cgPath.applyWithBlock { element in
+            let element = element.pointee
+            switch element.type {
+            case .moveToPoint:
+                body(.move(to: element.points[0]))
+            case .addLineToPoint:
+                body(.line(to: element.points[0]))
+            case .addQuadCurveToPoint:
+                body(.quadCurve(to: element.points[1], control: element.points[0]))
+            case .addCurveToPoint:
+                body(.curve(to: element.points[2], control1: element.points[0], control2: element.points[1]))
+            case .closeSubpath:
+                body(.closeSubpath)
+            @unknown default:
+                break
+            }
+        }
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
+    }
+
+    /// Returns a stroked copy of the path using `style` to define how the
+    /// stroked outline is created.
+    public func strokedPath(_ style: StrokeStyle) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    /// Returns a partial copy of the path.
+    ///
+    /// The returned path contains the region between `from` and `to`, both of
+    /// which must be fractions between zero and one defining points
+    /// linearly-interpolated along the path.
+    public func trimmedPath(from: CGFloat, to: CGFloat) -> Path {
+        guard !isEmpty else {
+            return Path()
+        }
+        guard from > 0 || to < 1 else {
+            return self
+        }
+        guard to > from else {
+            return Path()
+        }
+        // let retainedPath = retainRBPath()
+        _openSwiftUIUnimplementedWarning()
+        return self
+    }
+
+    package func rect() -> CGRect? {
+        switch storage {
+        case let .rect(rect):
+            rect
+        default:
+            nil
+        }
+    }
+
+    package func roundedRect() -> FixedRoundedRect? {
+        switch storage {
+        case let .rect(rect):
+            FixedRoundedRect(rect)
+        case let .ellipse(rect):
+            if rect.width == rect.height {
+                FixedRoundedRect(
+                    rect,
+                    cornerRadius: rect.width / 2,
+                    style: .circular
+                )
+            } else {
+                nil
+            }
+        case let .roundedRect(fixedRoundedRect):
+            fixedRoundedRect
+        default:
+            nil
+        }
+    }
+}
+
+@available(*, unavailable)
+extension Path.Storage: Sendable {}
+
+@available(*, unavailable)
+extension Path.PathBox: Sendable {}
+
+// MARK: - Path + Shape
+
+extension Path: Shape {
+    nonisolated public func path(in _: CGRect) -> Path { self }
+
+    public typealias AnimatableData = EmptyAnimatableData
+
+    public typealias Body = _ShapeView<Path, ForegroundStyle>
+}
+
+// MARK: - Path + ProtobufMessage
+
+extension Path: ProtobufMessage {
+    package func encode(to encoder: inout ProtobufEncoder) throws {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    package init(from decoder: inout ProtobufDecoder) throws {
+        _openSwiftUIUnimplementedFailure()
+    }
+}
+
+// MARK: - StrokedPath
+
+@available(*, deprecated, message: "obsolete")
+@usableFromInline
+package struct StrokedPath: Equatable {
+    public init(path: Path, style: StrokeStyle) {}
+
+    @usableFromInline
+    package static func == (a: StrokedPath, b: StrokedPath) -> Bool {
+        true
+    }
+}
+
+@available(*, unavailable)
+extension StrokedPath: Sendable {}
+
+// MARK: - TrimmedPath
+
+@available(*, deprecated, message: "obsolete")
+@usableFromInline
+package struct TrimmedPath: Equatable {
+    @usableFromInline
+    package static func == (a: TrimmedPath, b: TrimmedPath) -> Swift.Bool {
+        true
+    }
+}
+
+@available(*, unavailable)
+extension TrimmedPath: Sendable {}
+
+// MARK: - Path + Extension [WIP]
+
+@available(OpenSwiftUI_v1_0, *)
+extension Path {
+    public mutating func move(to end: CGPoint) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addLine(to end: CGPoint) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addQuadCurve(
+        to end: CGPoint,
+        control: CGPoint
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addCurve(
+        to end: CGPoint,
+        control1: CGPoint,
+        control2: CGPoint
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func closeSubpath() {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addRect(
+        _ rect: CGRect,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addRoundedRect(
+        in rect: CGRect,
+        cornerSize: CGSize,
+        style: RoundedCornerStyle = .continuous,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v4_0, *)
+    public mutating func addRoundedRect(
+        in rect: CGRect,
+        cornerRadii: RectangleCornerRadii,
+        style: RoundedCornerStyle = .continuous,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addEllipse(
+        in rect: CGRect,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addRects(
+        _ rects: [CGRect],
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addLines(_ lines: [CGPoint]) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addRelativeArc(
+        center: CGPoint,
+        radius: CGFloat,
+        startAngle: Angle,
+        delta: Angle,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addArc(
+        center: CGPoint,
+        radius: CGFloat,
+        startAngle: Angle,
+        endAngle: Angle,
+        clockwise: Bool,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addArc(
+        tangent1End: CGPoint,
+        tangent2End: CGPoint,
+        radius: CGFloat,
+        transform: CGAffineTransform = .identity
+    ) {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    public mutating func addPath(
+        _ path: Path,
+        transform: CGAffineTransform = .identity
+    ) {
+        // FIXME: Use RB instead of CG
+        if case .empty = storage {
+            self = path.applying(transform)
+        } else if !path.isEmpty {
+            #if canImport(CoreGraphics)
+            let result = cgPath.mutableCopy()!
+            result.addPath(path.cgPath, transform: transform)
+            self = Path(result)
+            #else
+            _openSwiftUIPlatformUnimplementedFailure()
+            #endif
+        }
+    }
+
+    public var currentPoint: CGPoint? {
+        get { _openSwiftUIUnimplementedFailure() }
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func normalized(eoFill: Bool = true) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func intersection(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func union(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func subtracting(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func symmetricDifference(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func lineIntersection(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    @available(OpenSwiftUI_v5_0, *)
+    public func lineSubtraction(
+        _ other: Path,
+        eoFill: Bool = false
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    package mutating func formTrivialUnion(_ path: Path) {
+        // TBA
+        guard !path.isEmpty else {
+            return
+        }
+        if let lhs = roundedRect(), let rhs = path.roundedRect() {
+            if lhs.contains(rhs) {
+                return
+            }
+            if rhs.contains(lhs) {
+                self = path
+                return
+            }
+        }
+        addPath(path)
+    }
+
+    public func applying(_ transform: CGAffineTransform) -> Path {
+        guard !transform.isIdentity else {
+            return self
+        }
+        switch storage {
+        case .empty:
+            return self
+        case let .rect(rect) where transform.isRectilinear:
+            return Path(rect.applying(transform))
+        case let .ellipse(rect) where transform.isRectilinear:
+            return Path(ellipseIn: rect.applying(transform))
+        case let .roundedRect(fixedRoundedRect) where transform.isRectilinear:
+            return Path(storage: .roundedRect(fixedRoundedRect.applying(transform)))
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        default:
+            // TBA
+            #if canImport(CoreGraphics)
+            var transform = transform
+            return Path(cgPath.copy(using: &transform)!)
+            #else
+            _openSwiftUIPlatformUnimplementedFailure()
+            #endif
+        }
+    }
+
+    public func offsetBy(
+        dx: CGFloat,
+        dy: CGFloat
+    ) -> Path {
+        _openSwiftUIUnimplementedFailure()
+    }
+
+    func mapPoints(_ body: (inout [CGPoint]) -> ()) -> Path {
+        // TBA
+        switch storage {
+        case .empty:
+            return self
+        case let .rect(rect):
+            var points = rect.cornerPoints
+            body(&points)
+            if let rect = CGRect(exactCornerPoints: points) {
+                return Path(rect)
+            }
+            #if canImport(CoreGraphics)
+            let result = CGMutablePath()
+            result.move(to: points[0])
+            for point in points[1..<4] {
+                result.addLine(to: point)
+            }
+            result.closeSubpath()
+            return Path(result)
+            #else
+            _openSwiftUIPlatformUnimplementedFailure()
+            #endif
+        case let .ellipse(rect):
+            var points = rect.cornerPoints
+            body(&points)
+            if let mapped = CGRect(exactCornerPoints: points),
+               mapped.width == rect.width,
+               mapped.height == rect.height {
+                return Path(ellipseIn: mapped)
+            }
+        case let .roundedRect(rect):
+            var points = rect.rect.cornerPoints
+            body(&points)
+            if let mapped = CGRect(exactCornerPoints: points),
+               mapped.width == rect.rect.width,
+               mapped.height == rect.rect.height {
+                return Path(storage: .roundedRect(FixedRoundedRect(
+                    mapped,
+                    cornerSize: rect.cornerSize,
+                    style: rect.style
+                )))
+            }
+        case .stroked, .trimmed:
+            _openSwiftUIUnreachableCode()
+        case .path:
+            break
+        }
+        #if canImport(CoreGraphics)
+        var points: [CGPoint] = []
+        forEach { element in
+            switch element {
+            case let .move(point), let .line(point):
+                points.append(point)
+            case let .quadCurve(point, control):
+                points.append(contentsOf: [point, control])
+            case let .curve(point, control1, control2):
+                points.append(contentsOf: [point, control1, control2])
+            case .closeSubpath:
+                break
+            }
+        }
+        body(&points)
+        let result = CGMutablePath()
+        var index = 0
+        forEach { element in
+            switch element {
+            case .move:
+                result.move(to: points[index])
+                index += 1
+            case .line:
+                result.addLine(to: points[index])
+                index += 1
+            case .quadCurve:
+                result.addQuadCurve(to: points[index], control: points[index + 1])
+                index += 2
+            case .curve:
+                result.addCurve(to: points[index], control1: points[index + 1], control2: points[index + 2])
+                index += 3
+            case .closeSubpath:
+                result.closeSubpath()
+            }
+        }
+        return Path(result)
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
+    }
+}
+
+private func ellipseContains(in rect: CGRect, contains point: CGPoint) -> Bool {
+    var rect = rect
+    var point = point
+    if rect.width != rect.height {
+        let scale = rect.height / rect.width
+        rect.origin.x *= scale
+        rect.size.width *= scale
+        point.x *= scale
+    }
+    let dx = point.x - (rect.origin.x + rect.width / 2)
+    let dy = point.y - (rect.origin.y + rect.height / 2)
+    let radius = rect.width / 2
+    return dx * dx + dy * dy < radius * radius
+}
+
+// MARK: - RenderBox
+
+private let temporaryPathCallbacks: UnsafePointer<ORBPath.Callbacks> = {
+    let pointer = UnsafeMutablePointer<ORBPath.Callbacks>.allocate(capacity: 1)
+    var callbacks = ORBPath.empty.callbacks.pointee
+    callbacks.retain = { _ in
+        _openSwiftUIUnreachableCode()
+    }
+    callbacks.release = { _ in
+        _openSwiftUIUnreachableCode()
+    }
+    callbacks.apply = { object, info, callback in
+        let storage = unsafeBitCast(object, to: ORBPath.Storage.self)
+        return storage.apply(info: info, callback: callback)
+    }
+    callbacks.isEqual = { lhs, rhs in
+        let lhs = unsafeBitCast(lhs, to: ORBPath.Storage.self)
+        let rhs = unsafeBitCast(rhs, to: ORBPath.Storage.self)
+        return lhs.isEqual(to: rhs)
+    }
+    callbacks.isEmpty = { object in
+        let storage = unsafeBitCast(object, to: ORBPath.Storage.self)
+        return storage.isEmpty
+    }
+    callbacks.isSingleElement = { object in
+        let storage = unsafeBitCast(object, to: ORBPath.Storage.self)
+        return storage.isSingleElement
+    }
+    callbacks.boundingRect = { object in
+        let storage = unsafeBitCast(object, to: ORBPath.Storage.self)
+        return storage.boundingRect
+    }
+    callbacks.cgPath = { object in
+        let storage = unsafeBitCast(object, to: ORBPath.Storage.self)
+        let cgPath = storage.cgPath
+        return cgPath.map { .passUnretained($0) }
+    }
+    pointer.initialize(to: callbacks)
+    return UnsafePointer(pointer)
+}()
+
+extension ORBPath {
+    static func withTemporaryPath<R>(
+        do body: (ORBPath) -> R,
+        builder: (UnsafeMutableRawPointer) -> ()
+    ) -> R {
+        return withUnsafeTemporaryAllocation(
+            of: UInt8.self,
+            capacity: 128
+        ) { bufferPointer in
+            let pointer = UnsafeMutableRawBufferPointer(
+                mutating: UnsafeRawBufferPointer(bufferPointer)
+            ).baseAddress!
+            let storage: ORBPath.Storage = unsafeBitCast(pointer, to: ORBPath.Storage.self)
+            storage.initialize(capacity: 128, source: nil)
+            builder(pointer)
+            let path = ORBPath(
+                storage: storage,
+                callbacks: temporaryPathCallbacks
+            )
+            let result = body(path)
+            storage.destroy()
+            return result
+        }
+    }
+}

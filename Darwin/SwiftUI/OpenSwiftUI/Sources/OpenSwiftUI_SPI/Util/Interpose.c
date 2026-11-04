@@ -1,0 +1,251 @@
+//
+//  Interpose.c
+//  OpenSwiftUI_SPI
+
+#include "OpenSwiftUIBase.h"
+
+#if OPENSWIFTUI_TARGET_OS_DARWIN
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// MARK: - kdebug_is_enabled
+
+extern bool kdebug_is_enabled(uint32_t debugid);
+
+static bool my_kdebug_is_enabled(uint32_t debugid) {
+    return true;
+}
+
+#if OPENSWIFTUI_SWIFTUI_RENDERER
+
+#include <dispatch/dispatch.h>
+#include <os/log.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+// Swift symbols of the module's ABI name: SwiftUI when built to stand in for it.
+#ifdef OPENSWIFTUI_AS_SWIFTUI
+#define OPENSWIFTUI_MANGLED(name) $s7SwiftUI##name
+#else
+#define OPENSWIFTUI_MANGLED(name) $s11OpenSwiftUI##name
+#endif
+
+// OpenSwiftUI_SPI is linked as a static framework by generated projects. Keep
+// an explicit reference to this translation unit so the linker extracts the
+// interpose registrations from the archive.
+void _OpenSwiftUI_LinkSwiftUIRendererInterposers(void) {}
+
+static os_log_t interpose_log(void) {
+    static dispatch_once_t onceToken;
+    static os_log_t log = NULL;
+    dispatch_once(&onceToken, ^{
+        log = os_log_create("org.OpenSwiftUIProject.OpenSwiftUI", "Interpose");
+    });
+    return log;
+}
+
+// MARK: - Type Description Shim
+
+// swift_getTypeName returns the module-qualified name (e.g. "OpenSwiftUI.CGDrawingView")
+// unlike AGTypeDescription which only returns the short name (e.g. "CGDrawingView").
+struct _interpose_type_name_pair {
+    const char *data;
+    uintptr_t length;
+};
+extern __attribute__((swiftcall))
+struct _interpose_type_name_pair swift_getTypeName(const void *type, bool qualified);
+
+static inline CFStringRef _interpose_type_description(const void *type) {
+    struct _interpose_type_name_pair name = swift_getTypeName(type, true);
+    if (name.data == NULL || name.length == 0) {
+        return NULL;
+    }
+    CFStringRef result = CFStringCreateWithBytes(
+        kCFAllocatorDefault, (const UInt8 *)name.data, (CFIndex)name.length,
+        kCFStringEncodingUTF8, false);
+    CFAutorelease(result);
+    return result;
+}
+
+// MARK: - Protocol Description Shim
+
+// ProtocolDescriptor is a ContextDescriptor, not type metadata,
+// so AGTypeDescription/OAGTypeDescription cannot be used on it.
+// Read the name directly from the ContextDescriptor binary layout:
+//   offset 0: uint32_t Flags
+//   offset 4: int32_t  Parent (relative indirectable pointer)
+//   offset 8: int32_t  Name   (relative direct pointer to const char*)
+static inline CFStringRef _interpose_protocol_description(const void *protocol) {
+    const uint8_t *base = (const uint8_t *)protocol;
+
+    // Resolve Name (relative direct pointer at offset 8)
+    int32_t name_offset = *(const int32_t *)(base + 8);
+    const char *name = (const char *)(base + 8 + (intptr_t)name_offset);
+
+    // Resolve Parent (relative indirectable pointer at offset 4)
+    int32_t parent_raw = *(const int32_t *)(base + 4);
+    if (parent_raw != 0) {
+        const void *parent;
+        if (parent_raw & 1) {
+            // Indirect: low bit set, mask it out and dereference
+            const void **indirect = (const void **)(base + 4 + (intptr_t)(parent_raw & ~1));
+            parent = *indirect;
+        } else {
+            // Direct: offset as-is
+            parent = (const void *)(base + 4 + (intptr_t)parent_raw);
+        }
+        if (parent != NULL) {
+            // ModuleContextDescriptor.Name is also at offset 8
+            const uint8_t *parent_base = (const uint8_t *)parent;
+            int32_t module_name_offset = *(const int32_t *)(parent_base + 8);
+            const char *module_name = (const char *)(parent_base + 8 + (intptr_t)module_name_offset);
+            CFStringRef result = CFStringCreateWithFormat(kCFAllocatorDefault, NULL, CFSTR("%s.%s"), module_name, name);
+            CFAutorelease(result);
+            return result;
+        }
+    }
+    CFStringRef result = CFStringCreateWithCString(kCFAllocatorDefault, name, kCFStringEncodingUTF8);
+    CFAutorelease(result);
+    return result;
+}
+
+// MARK: - Color.Resolved Nominal Type Descriptor
+
+extern const void $s7SwiftUI5ColorV8ResolvedVN;
+extern const void *OPENSWIFTUI_MANGLED(5ColorV8ResolvedVN);
+
+const void *_OpenSwiftUI_ColorResolvedNTD(void) {
+    return &OPENSWIFTUI_MANGLED(5ColorV8ResolvedVN);
+}
+
+// MARK: - Resolved Paint Metadata
+
+extern const void $s7SwiftUI14LinearGradientV6_PaintVN;
+extern const void OPENSWIFTUI_MANGLED(14LinearGradientV6_PaintVN);
+extern const void $s7SwiftUI14RadialGradientV6_PaintVN;
+extern const void OPENSWIFTUI_MANGLED(14RadialGradientV6_PaintVN);
+extern const void $s7SwiftUI18EllipticalGradientV6_PaintVN;
+extern const void OPENSWIFTUI_MANGLED(18EllipticalGradientV6_PaintVN);
+extern const void $s7SwiftUI15AngularGradientV6_PaintVN;
+extern const void OPENSWIFTUI_MANGLED(15AngularGradientV6_PaintVN);
+
+static const void *_interpose_resolved_paint_type(const void *targetType) {
+    // These payloads, including gradient stops, must match the system layout.
+    if (targetType == &$s7SwiftUI5ColorV8ResolvedVN) {
+        return _OpenSwiftUI_ColorResolvedNTD();
+    } else if (targetType == &$s7SwiftUI14LinearGradientV6_PaintVN) {
+        return &OPENSWIFTUI_MANGLED(14LinearGradientV6_PaintVN);
+    } else if (targetType == &$s7SwiftUI14RadialGradientV6_PaintVN) {
+        return &OPENSWIFTUI_MANGLED(14RadialGradientV6_PaintVN);
+    } else if (targetType == &$s7SwiftUI18EllipticalGradientV6_PaintVN) {
+        return &OPENSWIFTUI_MANGLED(18EllipticalGradientV6_PaintVN);
+    } else if (targetType == &$s7SwiftUI15AngularGradientV6_PaintVN) {
+        return &OPENSWIFTUI_MANGLED(15AngularGradientV6_PaintVN);
+    }
+    return NULL;
+}
+
+// MARK: - swift_dynamicCast
+
+extern bool swift_dynamicCast(void *dest, void *src,
+                  const void *srcType,
+                  const void *targetType,
+                  uint64_t flags);
+
+enum {
+    DynamicCastUnconditional = 0x1,
+    DynamicCastDestroyOnFailure = 0x4,
+};
+
+static bool my_swift_dynamicCast(void *dest, void *src, const void *srcType, const void *targetType, uint64_t flags) {
+    const void *fallbackType = _interpose_resolved_paint_type(targetType);
+    // A failed first attempt must not destroy the source or trap before the
+    // fallback. The final attempt applies the caller's original flags.
+    uint64_t firstFlags = fallbackType != NULL
+        ? flags & ~(uint64_t)(DynamicCastUnconditional | DynamicCastDestroyOnFailure)
+        : flags;
+    bool result = swift_dynamicCast(dest, src, srcType, targetType, firstFlags);
+    if (result) {
+        return result;
+    }
+    CFStringRef targetDescription = _interpose_type_description(targetType);
+    CFStringRef srcDescription = _interpose_type_description(srcType);
+    if (targetDescription != NULL && srcDescription != NULL &&
+        (CFStringHasPrefix(targetDescription, CFSTR("SwiftUI.")) ||
+         CFStringHasPrefix(targetDescription, CFSTR("SwiftUICore."))) &&
+        (CFStringHasPrefix(srcDescription, CFSTR("OpenSwiftUI.")) ||
+         CFStringHasPrefix(srcDescription, CFSTR("OpenSwiftUICore.")))) {
+        os_log_info(interpose_log(), "swift_dynamicCast failed for target: %{public}@ src: %{public}@", targetDescription, srcDescription);
+    }
+    // Retry supported resolved paints with the matching OpenSwiftUI metadata.
+    if (fallbackType != NULL) {
+        result = swift_dynamicCast(dest, src, srcType, fallbackType, flags);
+        if (result) {
+            CFStringRef description = _interpose_type_description(srcType);
+            os_log_info(interpose_log(), "swift_dynamicCast succeeded for %{public}@", description);
+        }
+    }
+    return result;
+}
+
+// MARK: - PlatformDrawable Protocol Descriptor
+
+extern const void $s7SwiftUI16PlatformDrawableMp;
+extern const void OPENSWIFTUI_MANGLED(16PlatformDrawableMp);
+
+const void *_OpenSwiftUI_PlatformDrawablePD(void) {
+    return &OPENSWIFTUI_MANGLED(16PlatformDrawableMp);
+}
+
+// MARK: - swift_conformsToProtocol2
+
+extern const void *swift_conformsToProtocol2(const void *type, const void *protocol);
+
+static const void *my_swift_conformsToProtocol2(const void *type, const void *protocol) {
+    const void *result = swift_conformsToProtocol2(type, protocol);
+    if (result != NULL) {
+        return result;
+    }
+    CFStringRef protocolDescription = _interpose_protocol_description(protocol);
+    CFStringRef typeDescription = _interpose_type_description(type);
+    if (protocolDescription != NULL && typeDescription != NULL &&
+        (CFStringHasPrefix(protocolDescription, CFSTR("SwiftUI.")) ||
+         CFStringHasPrefix(protocolDescription, CFSTR("SwiftUICore."))) &&
+        (CFStringHasPrefix(typeDescription, CFSTR("OpenSwiftUI.")) ||
+         CFStringHasPrefix(typeDescription, CFSTR("OpenSwiftUICore.")))) {
+        os_log_info(interpose_log(), "swift_conformsToProtocol2 failed for protocol: %{public}@ type: %{public}@", protocolDescription, typeDescription);
+    }
+    // If conformance check failed and the protocol is SwiftUI's PlatformDrawable,
+    // retry with OpenSwiftUI's PlatformDrawable
+    if (protocol == &$s7SwiftUI16PlatformDrawableMp) {
+        result = swift_conformsToProtocol2(type, _OpenSwiftUI_PlatformDrawablePD());
+        if (result != NULL) {
+            CFStringRef description = _interpose_type_description(type);
+            os_log_info(interpose_log(), "swift_conformsToProtocol2 succeeded via OpenSwiftUI fallback for %{public}@", description);
+        }
+    }
+    return result;
+}
+
+#endif /* OPENSWIFTUI_SWIFTUI_RENDERER */
+
+// MARK: - Interpose Registration
+
+typedef struct interpose_s {
+    const void *replacement;
+    const void *original;
+} interpose_t;
+
+__attribute__((used)) static const interpose_t interposers[]
+    __attribute__((section("__DATA, __interpose"))) = {
+    // Interpose kdebug_is_enabled to always return true to perform Signpost testing with Instruments
+    { (const void *)my_kdebug_is_enabled, (const void *)kdebug_is_enabled },
+#if OPENSWIFTUI_SWIFTUI_RENDERER
+    // Bridge resolved color and gradient paints used by SwiftUI's renderer.
+    { (const void *)my_swift_dynamicCast, (const void *)swift_dynamicCast },
+    // Interpose swift_conformsToProtocol2 to redirect SwiftUI.PlatformDrawable conformance checks to OpenSwiftUI.PlatformDrawable for Text's CGDrawingView
+    { (const void *)my_swift_conformsToProtocol2, (const void *)swift_conformsToProtocol2 },
+#endif
+};
+
+#endif /* OPENSWIFTUI_TARGET_OS_DARWIN */

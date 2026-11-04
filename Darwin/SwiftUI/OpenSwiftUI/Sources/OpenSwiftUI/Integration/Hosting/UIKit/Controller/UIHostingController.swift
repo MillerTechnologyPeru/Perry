@@ -1,0 +1,132 @@
+#if os(iOS) || os(visionOS)
+
+@available(macOS, unavailable)
+@available(watchOS, unavailable)
+@MainActor
+@preconcurrency
+open class UIHostingController<Content>: UIViewController where Content : View {
+    var host: _UIHostingView<Content>
+
+    #if OPENSWIFTUI_LINK_BACKLIGHTSERVICES
+    var alwaysOnBridge: AlwaysOnBridge<Content>?
+    #endif
+
+    var navigationBridge: NavigationBridge_PhoneTV<Content>?
+
+    override open dynamic var keyCommands: [UIKeyCommand]? {
+        // TODO
+        nil
+    }
+    
+    public init(rootView: Content) {
+        // TODO
+        host = _UIHostingView(rootView: rootView)
+        super.init(nibName: nil, bundle: nil)
+        _commonInit()
+    }
+    
+    public init?(coder: NSCoder, rootView: Content) {
+        // TODO
+        host = _UIHostingView(rootView: rootView)
+        super.init(coder: coder)
+        _commonInit()
+    }
+    
+    public required init?(coder: NSCoder) {
+        preconditionFailure("init(coder:) must be implemented in a subclass and call super.init(coder:, rootView:)")
+    }
+    
+    func _commonInit() {
+        host.viewController = self
+        // toolbar
+        // toolbar.addPreferences(to: ViewGraph)
+        // ...
+        // IsAppleInternalBuild
+    }
+    
+    open override func loadView() {
+        view = host
+    }
+
+    open override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        host.viewControllerDidAppear(transitionCoordinator: transitionCoordinator, animated: animated)
+        // TODO: Notify the remaining controller bridges.
+    }
+
+    open override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        host.viewControllerWillDisappear(transitionCoordinator: transitionCoordinator, animated: animated)
+        // TODO: Notify the remaining controller bridges.
+    }
+    
+    public var rootView: Content {
+        get { host.rootView }
+        set { host.rootView = newValue }
+    }
+    
+    public var sizingOptions: UIHostingControllerSizingOptions = [] {
+        didSet {
+            sizingOptionsDidChange(from: oldValue)
+        }
+    }
+    
+    @_spi(Private)
+    public func setRootView(_ newRootView: Content, transaction: Transaction) {
+        // TODO
+    }
+    
+    public func sizeThatFits(in size: CGSize) -> CGSize {
+        host.sizeThatFits(size)
+    }
+    
+    public func _render(seconds: Double) {
+        host.render(interval: seconds, targetTimestamp: nil)
+    }
+    
+    public func _forEachIdentifiedView(body: (_IdentifiedViewProxy) -> Void) {
+        host.forEachIdentifiedView(body: body)
+    }
+    
+    @available(iOS, deprecated: 16.4, message: "Use UIHostingController/safeAreaRegions or _UIHostingView/safeAreaRegions")
+    @available(tvOS, deprecated: 16.4, message: "Use UIHostingController/safeAreaRegions or _UIHostingView/safeAreaRegions")
+    @available(watchOS, deprecated: 9.4, message: "Use UIHostingController/safeAreaRegions or _UIHostingView/safeAreaRegions")
+    public var _disableSafeArea: Swift.Bool {
+        get {
+            host.explicitSafeAreaInsets == .zero
+        }
+        set {
+            host.explicitSafeAreaInsets = newValue ? .zero : nil
+        }
+    }
+    
+    final public var _rendererConfiguration: _RendererConfiguration {
+        get { host._rendererConfiguration }
+        set { host._rendererConfiguration = newValue }
+    }
+    
+    final public var _rendererObject: AnyObject? {
+        host._rendererObject
+    }
+    
+    func sizingOptionsDidChange(from oldSizingOptions: UIHostingControllerSizingOptions) {
+        _openSwiftUIUnimplementedWarning()
+    }
+
+    func _viewSafeAreaDidChange() {
+        _openSwiftUIUnimplementedWarning()
+    }
+
+    func didRender() {
+        _openSwiftUIUnimplementedWarning()
+    }
+}
+
+@available(macOS, unavailable)
+extension UIHostingController {
+    public var safeAreaRegions: SafeAreaRegions {
+        get { host.safeAreaRegions }
+        set { host.safeAreaRegions = newValue }
+    }
+}
+#endif
