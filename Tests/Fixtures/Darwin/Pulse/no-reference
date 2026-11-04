@@ -1,0 +1,1 @@
+Pulse needs a Bluetooth device, which only the fake BlueZ in Perry's tests provides.
