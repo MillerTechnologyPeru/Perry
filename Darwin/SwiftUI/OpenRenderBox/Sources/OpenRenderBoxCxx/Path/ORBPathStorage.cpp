@@ -68,7 +68,9 @@ uint32_t ORBPathStorageGetBezierOrder(ORBPathStorageRef storage) {
 #if ORB_TARGET_OS_DARWIN
 
 CGRect ORBPathStorageGetBoundingRect(ORBPathStorageRef storage) {
-    precondition_failure("TODO");
+    // FIXME: Use RB API instead of CG API
+    CGPathRef cgPath = storage->storage.cgpath();
+    return cgPath == nullptr ? CGRectNull : CGPathGetPathBoundingBox(cgPath);
 }
 
 CGPathRef ORBPathStorageGetCGPath(ORBPathStorageRef storage) {
