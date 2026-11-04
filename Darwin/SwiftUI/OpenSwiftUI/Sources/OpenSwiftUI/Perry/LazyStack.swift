@@ -135,8 +135,23 @@ struct LazyStackRoot: _VariadicView.UnaryViewRoot {
 /// The lengths children were last laid out at, by identity. Written by the
 /// layout as it places them; a change asks the stack to place again with
 /// it, as an estimate it replaces may have put others in the wrong place.
-final class LazyStackMeasurements {
+final class LazyStackMeasurements: ScrollTargetSource {
     private(set) var lengths: [AnyHashable: CGFloat] = [:]
+    /// The children, and where the last plan put each along the stack;
+    /// with the stack's origin in its scroll view's content, and its axis.
+    var children: [_VariadicView.Children.Element] = []
+    var starts: [CGFloat] = []
+    var origin: CGPoint = .zero
+    var axis: Axis = .vertical
+    var crossLength: CGFloat = 0
+
+    func frame<ID: Hashable>(of id: ID) -> CGRect? {
+        guard let index = children.firstIndex(where: { $0.id(as: ID.self) == id }), index < starts.count else { return nil }
+        let length = self.length(of: children[index].id)
+        return axis == .vertical
+            ? CGRect(x: origin.x, y: origin.y + starts[index], width: crossLength, height: length)
+            : CGRect(x: origin.x + starts[index], y: origin.y, width: length, height: crossLength)
+    }
     var onChange: (() -> Void)?
     private var changePending = false
 
@@ -172,6 +187,7 @@ struct LazyStackBody: View {
     var children: _VariadicView.Children
 
     @Environment(\.scrollViewport) private var viewport
+    @Environment(\.scrollTargetScroller) private var scroller
     @State private var measurements = LazyStackMeasurements()
     @State private var remeasured = 0
     @State private var origin: CGPoint = .zero
@@ -183,6 +199,7 @@ struct LazyStackBody: View {
         let _ = remeasured
         let plan = LazyStackPlan(root: root, children: children, measurements: measurements,
                                  window: window, edge: edge)
+        let _ = remember(plan)
         LazyStackLayout(axis: root.axis, crossAlignment: root.crossAlignment, positions: plan.positions,
                         ids: plan.shown.map(\.id), length: plan.length, measurements: measurements) {
             ForEach(plan.shown) { $0 }
@@ -199,6 +216,16 @@ struct LazyStackBody: View {
             let remeasured = $remeasured
             measurements.onChange = { remeasured.wrappedValue &+= 1 }
         }
+    }
+
+    /// Keeps where the plan puts children, for scrolling to one.
+    func remember(_ plan: LazyStackPlan) {
+        measurements.children = plan.all
+        measurements.starts = plan.starts
+        measurements.origin = origin
+        measurements.axis = root.axis
+        measurements.crossLength = root.axis == .vertical ? (viewport?.size.width ?? 0) : (viewport?.size.height ?? 0)
+        scroller?.add(measurements)
     }
 
     /// What shows or may soon, along the stack, in its own coordinates; nil
@@ -227,6 +254,9 @@ struct LazyStackPlan {
     var shown: [_VariadicView.Children.Element] = []
     var positions: [CGFloat] = []
     var length: CGFloat = 0
+    /// Every child, and where each starts along the stack.
+    var all: [_VariadicView.Children.Element] = []
+    var starts: [CGFloat] = []
 
     init(root: LazyStackRoot, children: _VariadicView.Children, measurements: LazyStackMeasurements,
          window: ClosedRange<CGFloat>?, edge: ClosedRange<CGFloat>?) {
@@ -245,6 +275,8 @@ struct LazyStackPlan {
             position += length + (index + 1 < count ? root.spacing : 0)
         }
         length = position
+        all = elements
+        self.starts = starts
 
         var visible: [Int] = []
         for index in 0..<count where window.map({ starts[index] + lengths[index] >= $0.lowerBound && starts[index] <= $0.upperBound }) ?? true {
