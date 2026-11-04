@@ -1,8 +1,8 @@
 #ifndef CPERRY_OBJC_H
 #define CPERRY_OBJC_H
 
-// The parts of libPerryobjc that must be C or assembly: Apple's arm64
-// Objective-C metadata layouts, the exported class storage and data symbols,
+// The parts of libPerryobjc that must be C or assembly: Apple's arm64 and
+// armv7 Objective-C metadata layouts, the exported class storage and data symbols,
 // and objc_msgSend. Layouts follow what clang and ld64 emit into Mach-O
 // images; they are written here from the format, not from Apple's headers.
 
@@ -23,8 +23,15 @@ typedef struct perry_objc_class {
 } perry_objc_class;
 
 // `bits` holds the class_ro_t pointer, with Swift flags in the low bits.
-// Apple masks it to 47 bits; the runtime clears only the low three, since
-// classes it builds have their class_ro_t on the Linux heap above 2^47.
+// Apple masks it to 47 bits; the runtime clears only the flag bits, since
+// classes it builds have their class_ro_t on the Linux heap above 2^47. On
+// arm64 the flags are the low three bits, on armv7 the low two (FAST_DATA_MASK
+// is 0xfffffffc).
+#if defined(__LP64__)
+#define PERRY_CLASS_BITS_FLAGS 7u
+#else
+#define PERRY_CLASS_BITS_FLAGS 3u
+#endif
 
 enum {
     PERRY_RO_META = 1 << 0,
@@ -37,7 +44,9 @@ typedef struct perry_class_ro {
     uint32_t flags;
     uint32_t instance_start;
     uint32_t instance_size;
-    uint32_t reserved;
+#if defined(__LP64__)
+    uint32_t reserved;              // padding to the pointer that follows; armv7 has none
+#endif
     const uint8_t *ivar_layout;
     const char *name;
     const void *base_methods;       // method list
@@ -88,7 +97,7 @@ typedef struct perry_category {
 typedef struct perry_protocol {
     void *isa;
     const char *name;
-    const void *protocols;          // protocol list: uint64_t count, then pointers
+    const void *protocols;          // protocol list: a pointer-sized count, then pointers
     const void *instance_methods;
     const void *class_methods;
     const void *optional_instance_methods;
@@ -98,7 +107,7 @@ typedef struct perry_protocol {
     uint32_t flags;
 } perry_protocol;
 
-// ivar_t. arm64 ivar offset variables are 32 bits.
+// ivar_t. Ivar offset variables are 32 bits on arm64 and armv7.
 typedef struct perry_ivar {
     int32_t *offset;
     const char *name;
@@ -122,8 +131,8 @@ typedef struct perry_property_attribute {
 // MARK: - Runtime state read by objc_msgSend
 
 // What a realized class's `cache` points to. objc_msgSend loads `cache`
-// and probes it: `mask`, then `mask + 1` buckets of {sel, imp}. A bucket
-// with a selector but no IMP yet is a miss.
+// and probes it: `mask` (one pointer), then `mask + 1` buckets of {sel, imp}.
+// A bucket with a selector but no IMP yet is a miss.
 typedef struct perry_class_header {
     void *cache;
     void *info;                     // the Swift ClassInfo, unretained
@@ -133,6 +142,15 @@ typedef struct perry_cache_bucket {
     const void *sel;
     void *imp;
 } perry_cache_bucket;
+
+// Where the table's buckets start, from the table's address: after the mask,
+// padded to the bucket's alignment. The assembly and ClassInfo.swift agree.
+enum {
+    PERRY_CACHE_BUCKETS_OFFSET = sizeof(void *),
+    PERRY_CACHE_BUCKET_SIZE = 2 * sizeof(void *),
+    PERRY_CLASS_CACHE_OFFSET = 2 * sizeof(void *),      // perry_objc_class.cache
+    PERRY_CLASS_INFO_OFFSET = sizeof(void *),           // perry_class_header.info
+};
 
 // The cache every unrealized class starts with: one empty bucket.
 void *perry_objc_empty_cache_table(void);
