@@ -46,8 +46,11 @@ extension ViewAlias {
 
     nonisolated public static func _viewListCount(inputs: _ViewListCountInputs) -> Int? {
         var inputs = inputs
+        // Source writers add their sources to graph inputs, which counting
+        // doesn't see; without one the count is unknown, not none (which
+        // would leave a ForEach of sections empty).
         guard let source = inputs.popLast(SourceInput<Self>.self) else {
-            return 0
+            return nil
         }
         return source.formula.viewListCount(source: source, inputs: inputs)
     }
