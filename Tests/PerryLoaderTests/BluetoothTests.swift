@@ -94,7 +94,12 @@ enum Bluetooth {
             bluez.standardOutput = try FileHandle(forWritingTo: log)
             bluez.standardError = bluez.standardOutput
             try bluez.run()
-            try Self.waitFor { (try? String(contentsOf: log, encoding: .utf8))?.contains("ready") == true }
+            do {
+                try Self.waitFor { (try? String(contentsOf: log, encoding: .utf8))?.contains("ready") == true }
+            } catch {
+                let output = (try? String(contentsOf: log, encoding: .utf8)) ?? ""
+                throw TestError.missingTool("a fake BlueZ that starts (\(output.isEmpty ? "no output" : output))")
+            }
         }
 
         /// SIGKILL, as the children inherit the test thread's blocked
@@ -106,8 +111,9 @@ enum Bluetooth {
             }
         }
 
+        /// Up to 20 seconds: Python starts slowly while the other suites run.
         private static func waitFor(_ condition: () -> Bool) throws {
-            for _ in 0..<100 {
+            for _ in 0..<400 {
                 if condition() { return }
                 usleep(50_000)
             }
