@@ -24,6 +24,7 @@ __attribute__((constructor)) static void init_streams(void) {
 
 // MARK: - Darwin va_list
 
+#if defined(__aarch64__)
 // A Darwin arm64 va_list is a pointer to 8-byte stack slots. An AAPCS64
 // va_list with empty register save areas reads the same slots.
 typedef struct aapcs64_va_list {
@@ -42,6 +43,19 @@ _Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list l
         aapcs64_va_list tmp_ = { (darwin_ap), NULL, NULL, 0, 0 }; \
         memcpy(&name, &tmp_, sizeof(name)); \
     } while (0)
+#else
+// A Darwin armv7 va_list is a pointer to the 4-byte slots after the fixed
+// arguments, and glibc armhf's is a struct holding such a pointer. Slots read
+// the same for integers, pointers and strings.
+_Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
+
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name; \
+    do { \
+        void *tmp_ = (darwin_ap); \
+        memcpy(&name, &tmp_, sizeof(name)); \
+    } while (0)
+#endif
 
 typedef void *darwin_va_list;
 
