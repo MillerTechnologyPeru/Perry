@@ -53,6 +53,10 @@ final class LayerState {
     var mask: CALayer?
     var actions: NSObject?
     var style: NSObject?
+    /// Filters, kept but not applied in drawing.
+    var compositingFilter: NSObject?
+    var filters: NSObject?
+    var backgroundFilters: NSObject?
     var needsDisplay = false
     var needsLayout = true
     /// What -display drew, and the size it drew at.
@@ -293,6 +297,12 @@ open class CALayer: NSObject {
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { state.delegate = delegate?.objcObject }
     @ObjCMethod("actions") func actions() -> NSObject? { state.actions }
     @ObjCMethod("setActions:") func setActions(_ actions: NSObject?) { state.actions = actions }
+    @ObjCMethod("compositingFilter") func compositingFilter() -> NSObject? { state.compositingFilter }
+    @ObjCMethod("setCompositingFilter:") func setCompositingFilter(_ filter: NSObject?) { state.compositingFilter = filter }
+    @ObjCMethod("filters") func filters() -> NSObject? { state.filters }
+    @ObjCMethod("setFilters:") func setFilters(_ filters: NSObject?) { state.filters = filters }
+    @ObjCMethod("backgroundFilters") func backgroundFilters() -> NSObject? { state.backgroundFilters }
+    @ObjCMethod("setBackgroundFilters:") func setBackgroundFilters(_ filters: NSObject?) { state.backgroundFilters = filters }
     @ObjCMethod("style") func style() -> NSObject? { state.style }
     @ObjCMethod("setStyle:") func setStyle(_ style: NSObject?) { state.style = style }
 
