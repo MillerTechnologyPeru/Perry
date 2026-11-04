@@ -45,8 +45,31 @@ std::unique_ptr<void, table::malloc_zone_deleter> table::alloc_persistent(size_t
     return std::unique_ptr<void, table::malloc_zone_deleter>(buffer);
 }
 
+// The address space reserved for the region, which then grows in place:
+// pointers into it stay valid, without remapping old pages to new
+// addresses (which some systems can only copy).
+static constexpr uint64_t reserved_region_size = 1ull << 30;
+
 table::table() {
     constexpr vm_size_t initial_size = static_cast<const vm_size_t>(32 * pages_per_map * page_size);
+
+    void *reserved = mmap(nullptr, reserved_region_size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+    if (reserved != MAP_FAILED) {
+        if (mprotect(reserved, initial_size, PROT_READ | PROT_WRITE) == 0) {
+            _vm_region_reserved_size = reserved_region_size;
+            _vm_region_base_address = reinterpret_cast<vm_address_t>(reserved);
+            _vm_region_size = initial_size;
+            IAGGraphVMRegionBaseAddress = reserved;
+            _ptr_base = reinterpret_cast<vm_address_t>(reserved) - page_size;
+            _ptr_max_offset = initial_size + page_size;
+            if (!_malloc_zone) {
+                _malloc_zone = malloc_create_zone(0, 0);
+                malloc_set_zone_name(_malloc_zone, "Compute graph data");
+            }
+            return;
+        }
+        munmap(reserved, reserved_region_size);
+    }
 
 #if TARGET_OS_MAC
     void *region = mmap(nullptr, initial_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -85,7 +108,9 @@ table::table() {
 
 table::~table() {
 #if !TARGET_OS_MAC
-    close(_vm_region_fd);
+    if (_vm_region_fd >= 0) {
+        close(_vm_region_fd);
+    }
 #endif
     if (_malloc_zone) {
         malloc_destroy_zone(_malloc_zone);
@@ -100,6 +125,17 @@ void table::unlock() { platform_lock_unlock(&_lock); }
 
 void table::grow_region() {
     uint64_t new_size = static_cast<uint64_t>(4 * _vm_region_size);
+
+    if (new_size <= _vm_region_reserved_size) {
+        // Make more of the reserved space usable, in place.
+        void *start = reinterpret_cast<void *>(_vm_region_base_address + _vm_region_size);
+        if (mprotect(start, new_size - _vm_region_size, PROT_READ | PROT_WRITE) != 0) {
+            precondition_failure("memory allocation failure (%u bytes, %u)", new_size, errno);
+        }
+        _vm_region_size = static_cast<uint32_t>(new_size);
+        _ptr_max_offset = _vm_region_size + page_size;
+        return;
+    }
 
     // Check size does not exceed 32 bits
     if ((uint32_t)new_size <= _vm_region_size) {
