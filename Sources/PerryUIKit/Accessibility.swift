@@ -18,7 +18,7 @@ enum Accessibility {
 
     /// One key per property: the address of its byte.
     enum Key: Int, CaseIterable {
-        case label, hint, value, language, traits, isElement, elementsHidden, viewIsModal, elements
+        case label, hint, value, language, traits, isElement, elementsHidden, viewIsModal, elements, identifier
     }
     nonisolated(unsafe) private static let keys = UnsafeMutablePointer<UInt8>.allocate(capacity: Key.allCases.count)
 
@@ -37,6 +37,11 @@ extension NSObject {
     @ObjCMethod("accessibilityLabel") func accessibilityLabel() -> NSObject? { Accessibility.get(self, .label) }
     @ObjCMethod("setAccessibilityLabel:")
     func setAccessibilityLabel(_ label: NSObject?) { Accessibility.set(self, .label, label, copy: true) }
+
+    /// UIAccessibilityIdentification's identifier; UIView keeps its own.
+    @ObjCMethod("accessibilityIdentifier") func objectAccessibilityIdentifier() -> NSObject? { Accessibility.get(self, .identifier) }
+    @ObjCMethod("setAccessibilityIdentifier:")
+    func setObjectAccessibilityIdentifier(_ identifier: NSObject?) { Accessibility.set(self, .identifier, identifier, copy: true) }
 
     @ObjCMethod("accessibilityHint") func accessibilityHint() -> NSObject? { Accessibility.get(self, .hint) }
     @ObjCMethod("setAccessibilityHint:")
