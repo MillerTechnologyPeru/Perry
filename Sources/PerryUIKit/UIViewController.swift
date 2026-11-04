@@ -315,6 +315,9 @@ open class UIViewController: UIResponder {
     @ObjCMethod("isMovingToParentViewController") func isMovingToParentViewController() -> Bool { state.movingToParent }
     @ObjCMethod("isMovingFromParentViewController") func isMovingFromParentViewController() -> Bool { state.movingFromParent }
     @ObjCMethod("isBeingPresented") func isBeingPresented() -> Bool { state.beingPresented }
+    /// The coordinator of a transition in progress; transitions here run
+    /// without one.
+    @ObjCMethod("transitionCoordinator") func transitionCoordinator() -> NSObject? { nil }
     @ObjCMethod("isBeingDismissed") func isBeingDismissed() -> Bool { state.beingDismissed }
 
     /// The nearest navigation controller at or above the parent.

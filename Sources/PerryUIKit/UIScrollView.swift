@@ -299,6 +299,9 @@ final class GestureRecognizerState: ObjectState {
     var delaysTouchesBegan = false
     var delaysTouchesEnded = true
     var name: String?
+    var allowedTouchTypes: NSObject?
+    var allowedPressTypes: NSObject?
+    var requiresExclusiveTouchType = true
 }
 
 /// The recognizer's targets and its view; touches drive recognizers in the
@@ -347,6 +350,46 @@ open class UIGestureRecognizer: NSObject {
 
     @ObjCMethod("locationInView:")
     func location(in view: UIView?) -> CGPoint { .zero }
+
+    @ObjCMethod("allowedTouchTypes") func allowedTouchTypes() -> NSObject? { state.allowedTouchTypes }
+    @ObjCMethod("setAllowedTouchTypes:") func setAllowedTouchTypes(_ types: NSObject?) { state.allowedTouchTypes = types }
+    @ObjCMethod("allowedPressTypes") func allowedPressTypes() -> NSObject? { state.allowedPressTypes }
+    @ObjCMethod("setAllowedPressTypes:") func setAllowedPressTypes(_ types: NSObject?) { state.allowedPressTypes = types }
+    @ObjCMethod("requiresExclusiveTouchType") func requiresExclusiveTouchType() -> Bool { state.requiresExclusiveTouchType }
+    @ObjCMethod("setRequiresExclusiveTouchType:")
+    func setRequiresExclusiveTouchType(_ requires: Bool) { state.requiresExclusiveTouchType = requires }
+
+    // MARK: UIGestureRecognizerSubclass
+
+    /// Subclasses set the state as they recognize; the targets hear of each
+    /// state from began to ended (recognized) or cancelled.
+    @ObjCMethod("setState:")
+    func setRecognizerState(_ newState: Int) {
+        state.state = newState
+        guard (1...4).contains(newState) else { return }
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+        for (target, action) in state.targets {
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(target, action, objcObject)
+        }
+    }
+
+    @ObjCMethod("reset") func reset() {}
+    @ObjCMethod("ignoreTouch:forEvent:") func ignoreTouch(_ touch: NSObject?, for event: NSObject?) {}
+    @ObjCMethod("ignorePress:forEvent:") func ignorePress(_ press: NSObject?, for event: NSObject?) {}
+    @ObjCMethod("shouldReceiveEvent:") func shouldReceiveEvent(_ event: NSObject?) -> Bool { state.enabled }
+    @ObjCMethod("canPreventGestureRecognizer:") func canPrevent(_ other: NSObject?) -> Bool { true }
+    @ObjCMethod("canBePreventedByGestureRecognizer:") func canBePrevented(by other: NSObject?) -> Bool { true }
+    @ObjCMethod("shouldRequireFailureOfGestureRecognizer:") func shouldRequireFailure(of other: NSObject?) -> Bool { false }
+    @ObjCMethod("shouldBeRequiredToFailByGestureRecognizer:")
+    func shouldBeRequiredToFail(by other: NSObject?) -> Bool { false }
+    @ObjCMethod("touchesBegan:withEvent:") func touchesBegan(_ touches: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("touchesMoved:withEvent:") func touchesMoved(_ touches: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("touchesEnded:withEvent:") func touchesEnded(_ touches: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("touchesCancelled:withEvent:") func touchesCancelled(_ touches: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("pressesBegan:withEvent:") func pressesBegan(_ presses: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("pressesChanged:withEvent:") func pressesChanged(_ presses: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("pressesEnded:withEvent:") func pressesEnded(_ presses: NSObject?, with event: NSObject?) {}
+    @ObjCMethod("pressesCancelled:withEvent:") func pressesCancelled(_ presses: NSObject?, with event: NSObject?) {}
 }
 
 @ObjCClass("UIPanGestureRecognizer")
@@ -360,6 +403,11 @@ open class UIPanGestureRecognizer: UIGestureRecognizer {
 
 @ObjCClass("UIScrollViewPanGestureRecognizer")
 open class UIScrollViewPanGestureRecognizer: UIPanGestureRecognizer {}
+
+/// A pointer hovering over the view, which has no pointer here: it never
+/// begins.
+@ObjCClass("UIHoverGestureRecognizer")
+open class UIHoverGestureRecognizer: UIGestureRecognizer {}
 
 @ObjCClass("UITapGestureRecognizer")
 open class UITapGestureRecognizer: UIGestureRecognizer {

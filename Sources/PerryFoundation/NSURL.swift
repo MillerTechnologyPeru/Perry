@@ -285,6 +285,7 @@ enum URLResourceKeys {
     static let NSURLFileSizeKey = "NSURLFileSizeKey"
     static let NSURLCreationDateKey = "NSURLCreationDateKey"
     static let NSURLContentModificationDateKey = "NSURLContentModificationDateKey"
+    static let NSURLContentTypeKey = "NSURLContentTypeKey"
     static let NSURLIsExcludedFromBackupKey = "NSURLIsExcludedFromBackupKey"
     static let NSURLLocalizedNameKey = "NSURLLocalizedNameKey"
     static let NSURLPathKey = "NSURLPathKey"

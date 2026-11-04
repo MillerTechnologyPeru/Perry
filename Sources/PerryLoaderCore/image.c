@@ -433,7 +433,11 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     return image;
 }
 
-// Applies each segment's final protection once fixups are done.
+// Applies each segment's protection once fixups are done. Segments made
+// read-only after fixups (SG_READ_ONLY: __DATA_CONST) stay writable until the
+// image's Objective-C metadata is registered, which rewrites selector and
+// protocol references there, as dyld leaves them for libobjc; seal_image then
+// drops write.
 static void protect_image(perry_image *image) {
     for (uint32_t i = 0; i < image->segment_count; i++) {
         perry_segment *seg = &image->segments[i];
@@ -442,10 +446,21 @@ static void protect_image(perry_image *image) {
         uint8_t *addr = perry_image_vmaddr(image, seg->vmaddr);
         size_t size = round_up(seg->vmsize, host_page_size);
         int prot = seg->initprot & (PROT_READ | PROT_WRITE | PROT_EXEC);
-        if (seg->flags & SG_READ_ONLY)
-            prot &= ~PROT_WRITE;
         if (prot & PROT_EXEC)
             __builtin___clear_cache((char *)addr, (char *)addr + seg->vmsize);
+        if (mprotect(addr, size, prot) != 0)
+            perry_fatal("%s: mprotect of %s failed: %s", image->path, seg->name, strerror(errno));
+    }
+}
+
+static void seal_image(perry_image *image) {
+    for (uint32_t i = 0; i < image->segment_count; i++) {
+        perry_segment *seg = &image->segments[i];
+        if (!seg->mapped || !(seg->flags & SG_READ_ONLY))
+            continue;
+        uint8_t *addr = perry_image_vmaddr(image, seg->vmaddr);
+        size_t size = round_up(seg->vmsize, host_page_size);
+        int prot = seg->initprot & (PROT_READ | PROT_EXEC);
         if (mprotect(addr, size, prot) != 0)
             perry_fatal("%s: mprotect of %s failed: %s", image->path, seg->name, strerror(errno));
     }
@@ -684,6 +699,7 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
+        perry_setup_thread_locals(img);
         protect_image(img);
     }
     return loaded;
@@ -727,6 +743,7 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
             run_image_initializers(loader, image->deps[i].image, argc, argv, envp, apple);
 
     notify_image_init(image);
+    seal_image(image);
 
     struct program_vars vars = {
         image->header, &program_argc, &program_argv, &program_envp, &program_name,

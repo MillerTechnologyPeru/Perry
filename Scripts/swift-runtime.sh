@@ -19,10 +19,24 @@ cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
 
 out=${1:-.build/perry-swift-runtime}
-runtime=$(ls -d /Library/Developer/CoreSimulator/Volumes/*/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS*.simruntime \
+# The newest iOS runtime simctl knows, wherever it is mounted: iOS 27's are
+# cryptexes, mounted under /private/var/run/com.apple.security.cryptexd.
+runtime=$(xcrun simctl runtime list -j 2>/dev/null | /usr/bin/python3 -c '
+import json, sys
+runtimes = [r for r in json.load(sys.stdin).values()
+            if r.get("platformIdentifier", "").endswith("iphonesimulator") and r.get("runtimeBundlePath")]
+runtimes.sort(key=lambda r: [int(p) for p in r.get("version", "0").split(".")])
+print(runtimes[-1]["runtimeBundlePath"] if runtimes else "")' || true)
+[ -n "$runtime" ] || runtime=$(ls -d /Library/Developer/CoreSimulator/Volumes/*/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS*.simruntime \
               /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS*.simruntime 2>/dev/null | sort -V | tail -1)
 [ -n "$runtime" ] || { echo "no iOS Simulator runtime installed (Xcode > Settings > Components)" >&2; exit 1; }
 swift_dir="$runtime/Contents/Resources/RuntimeRoot/usr/lib/swift"
+# From iOS 27 the runtime's core libraries are only in the simulator's dyld
+# shared cache, not files.
+[ -f "$swift_dir/libswiftCore.dylib" ] || {
+    echo "$(basename "$runtime") keeps libswiftCore only in its shared cache; use a runtime before iOS 27" >&2
+    exit 1
+}
 overlays="$(dirname "$(xcrun --find swift)")/../lib/swift-5.0/iphoneos"
 [ -d "$overlays" ] || { echo "no Swift 5.0 overlays at $overlays" >&2; exit 1; }
 

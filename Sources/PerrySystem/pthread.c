@@ -234,6 +234,83 @@ void darwin_os_unfair_lock_assert_owner(_Atomic uint32_t *lock) { (void)lock; }
 void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_assert_not_owner);
 void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) { (void)lock; }
 
+// os_unfair_recursive_lock: an unfair lock and a count of how many times
+// its owner holds it. The unfair lock records no owner, so the owning
+// thread's ID is kept beside it here, in the count's word's upper half;
+// Darwin keeps it in the lock word, which nothing else reads.
+typedef struct {
+    _Atomic uint32_t lock;
+    _Atomic uint32_t count;
+} darwin_unfair_recursive_lock;
+
+static _Thread_local uint32_t recursive_owner_id;
+static _Atomic uint32_t recursive_owner_ids;
+
+static uint32_t recursive_self(void) {
+    if (!recursive_owner_id)
+        recursive_owner_id = atomic_fetch_add(&recursive_owner_ids, 1) + 1;
+    return recursive_owner_id;
+}
+
+// Owner in the upper 16 bits, depth in the lower 16.
+static bool recursive_owned(darwin_unfair_recursive_lock *lock) {
+    uint32_t value = atomic_load_explicit(&lock->count, memory_order_relaxed);
+    return value && (value >> 16) == (recursive_self() & 0xffff);
+}
+
+void darwin_os_unfair_recursive_lock_lock_with_options(darwin_unfair_recursive_lock *lock, uint32_t options)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_lock_with_options);
+void darwin_os_unfair_recursive_lock_lock_with_options(darwin_unfair_recursive_lock *lock, uint32_t options) {
+    (void)options;
+    if (recursive_owned(lock)) {
+        atomic_fetch_add_explicit(&lock->count, 1, memory_order_relaxed);
+        return;
+    }
+    darwin_os_unfair_lock_lock(&lock->lock);
+    atomic_store_explicit(&lock->count, ((recursive_self() & 0xffff) << 16) | 1, memory_order_relaxed);
+}
+
+bool darwin_os_unfair_recursive_lock_trylock(darwin_unfair_recursive_lock *lock) DARWIN_SYMBOL(os_unfair_recursive_lock_trylock);
+bool darwin_os_unfair_recursive_lock_trylock(darwin_unfair_recursive_lock *lock) {
+    if (recursive_owned(lock)) {
+        atomic_fetch_add_explicit(&lock->count, 1, memory_order_relaxed);
+        return true;
+    }
+    if (!darwin_os_unfair_lock_trylock(&lock->lock))
+        return false;
+    atomic_store_explicit(&lock->count, ((recursive_self() & 0xffff) << 16) | 1, memory_order_relaxed);
+    return true;
+}
+
+void darwin_os_unfair_recursive_lock_unlock(darwin_unfair_recursive_lock *lock) DARWIN_SYMBOL(os_unfair_recursive_lock_unlock);
+void darwin_os_unfair_recursive_lock_unlock(darwin_unfair_recursive_lock *lock) {
+    uint32_t value = atomic_load_explicit(&lock->count, memory_order_relaxed);
+    if ((value & 0xffff) > 1) {
+        atomic_store_explicit(&lock->count, value - 1, memory_order_relaxed);
+        return;
+    }
+    atomic_store_explicit(&lock->count, 0, memory_order_relaxed);
+    darwin_os_unfair_lock_unlock(&lock->lock);
+}
+
+// Whether the calling thread holds the lock, as libobjc's fork handling asks.
+bool darwin_os_unfair_recursive_lock_tryunlock4objc(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_tryunlock4objc);
+bool darwin_os_unfair_recursive_lock_tryunlock4objc(darwin_unfair_recursive_lock *lock) {
+    if (!recursive_owned(lock))
+        return false;
+    darwin_os_unfair_recursive_lock_unlock(lock);
+    return true;
+}
+
+void darwin_os_unfair_recursive_lock_assert_owner(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_assert_owner);
+void darwin_os_unfair_recursive_lock_assert_owner(darwin_unfair_recursive_lock *lock) { (void)lock; }
+
+void darwin_os_unfair_recursive_lock_assert_not_owner(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_assert_not_owner);
+void darwin_os_unfair_recursive_lock_assert_not_owner(darwin_unfair_recursive_lock *lock) { (void)lock; }
+
 // MARK: - Conditions
 
 static void setup_static_cond(void *object, long sig) {
@@ -317,6 +394,14 @@ int darwin_pthread_cond_broadcast(darwin_cond *cond) DARWIN_SYMBOL(pthread_cond_
 int darwin_pthread_cond_broadcast(darwin_cond *cond) {
     pthread_cond_t *value = cond_value(cond);
     return value ? result(pthread_cond_broadcast(value)) : 22;
+}
+
+// Wakes the thread given, if it waits: waking every waiter instead is one
+// of the spurious wakeups condition variables allow.
+int darwin_pthread_cond_signal_thread_np(darwin_cond *cond, pthread_t thread)
+    DARWIN_SYMBOL(pthread_cond_signal_thread_np);
+int darwin_pthread_cond_signal_thread_np(darwin_cond *cond, pthread_t thread) {
+    return thread ? darwin_pthread_cond_broadcast(cond) : darwin_pthread_cond_signal(cond);
 }
 
 int darwin_pthread_condattr_init(darwin_condattr *attributes) DARWIN_SYMBOL(pthread_condattr_init);
@@ -639,6 +724,19 @@ int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) {
 int darwin_pthread_main_np(void) DARWIN_SYMBOL(pthread_main_np);
 int darwin_pthread_main_np(void) {
     return gettid() == getpid();
+}
+
+// The main thread, recorded as the library loads, which the loader does on it.
+static pthread_t main_thread;
+
+__attribute__((constructor))
+static void record_main_thread(void) {
+    main_thread = pthread_self();
+}
+
+pthread_t darwin_pthread_main_thread_np(void) DARWIN_SYMBOL(pthread_main_thread_np);
+pthread_t darwin_pthread_main_thread_np(void) {
+    return main_thread;
 }
 
 int darwin_pthread_threadid_np(pthread_t thread, uint64_t *id) DARWIN_SYMBOL(pthread_threadid_np);

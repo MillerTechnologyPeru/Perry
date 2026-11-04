@@ -188,6 +188,7 @@ PASSTHROUGH _memmove, memmove
 PASSTHROUGH _memset, memset
 PASSTHROUGH _memcmp, memcmp
 PASSTHROUGH _memchr, memchr
+PASSTHROUGH _wmemchr, wmemchr
 PASSTHROUGH _bzero, bzero
 PASSTHROUGH ___bzero, bzero
 PASSTHROUGH ___memcpy_chk, __memcpy_chk
@@ -344,6 +345,7 @@ PASSTHROUGH _coshf, coshf
 PASSTHROUGH _sinhf, sinhf
 PASSTHROUGH _tanhf, tanhf
 PASSTHROUGH _cbrtf, cbrtf
+PASSTHROUGH _copysign, copysign
 PASSTHROUGH _copysignf, copysignf
 PASSTHROUGH _erff, erff
 PASSTHROUGH _erfcf, erfcf

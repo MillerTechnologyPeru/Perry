@@ -179,3 +179,9 @@ public final class NSTimeZone: NSObject {
         return "\(zone.identifier) (\(TimeZones.abbreviation(zone, Date()) ?? "")) offset \(zone.secondsFromGMT())\(daylight)"
     }
 }
+
+/// Posted when the system time zone changes, which it never does here.
+@ObjCConstants
+enum TimeZoneConstants {
+    static let NSSystemTimeZoneDidChangeNotification = "NSSystemTimeZoneDidChangeNotification"
+}

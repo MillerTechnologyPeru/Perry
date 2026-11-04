@@ -19,7 +19,7 @@ public enum Runtime {
 
     // MARK: - Realization
 
-    private static func cacheSlot(_ cls: ClassPointer) -> UnsafeMutablePointer<UnsafeMutableRawPointer?> {
+    static func cacheSlot(_ cls: ClassPointer) -> UnsafeMutablePointer<UnsafeMutableRawPointer?> {
         UnsafeMutableRawPointer(cls).advanced(by: 16).assumingMemoryBound(to: UnsafeMutableRawPointer?.self)
     }
 
@@ -63,18 +63,7 @@ public enum Runtime {
                 return nil
             }
             let info = ClassInfo(cls: cls, ro: ro, superInfo: superInfo)
-
-            // Non-fragile ivars: when the superclass grew, move this
-            // class's ivars past it.
-            if !info.isMeta, let superInfo, Int(ro.pointee.instance_start) < superInfo.instanceSize {
-                let delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
-                if let ivars = ro.pointee.ivars {
-                    IvarList.forEach(ivars) { ivar in
-                        ivar.pointee.offset?.pointee += Int32(delta)
-                    }
-                }
-                info.instanceSize += delta
-            }
+            slideIvars(info, ro: ro)
             if let methods = info.baseMethods {
                 info.addMethods(methods, replacing: false)
             }
@@ -93,6 +82,21 @@ public enum Runtime {
             }
             return info
         }
+    }
+
+    /// Non-fragile ivars: when the superclass grew, moves the class's ivars
+    /// past it.
+    static func slideIvars(_ info: ClassInfo, ro: UnsafePointer<perry_class_ro>) {
+        guard !info.isMeta, let superInfo = info.superInfo, Int(ro.pointee.instance_start) < superInfo.instanceSize else {
+            return
+        }
+        let delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
+        if let ivars = ro.pointee.ivars {
+            IvarList.forEach(ivars) { ivar in
+                ivar.pointee.offset?.pointee += Int32(delta)
+            }
+        }
+        info.instanceSize += delta
     }
 
     static func register(_ cls: ClassPointer, name: UnsafePointer<CChar>) {

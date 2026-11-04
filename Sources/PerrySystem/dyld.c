@@ -221,12 +221,37 @@ static uint32_t program_sdk(void) {
 // less 2006.
 typedef struct { uint32_t platform; uint32_t version; } build_version;
 
+// The executable's minimum OS version, from the same load commands.
+static uint32_t program_minos(void) {
+    const uint32_t *mach = darwin_NSGetMachExecuteHeader();
+    if (!mach)
+        return 0;
+    const uint8_t *command = (const uint8_t *)mach + 32;
+    for (uint32_t i = 0; i < mach[4]; i++) {
+        const uint32_t *words = (const uint32_t *)command;
+        if (words[0] == 0x32 /* LC_BUILD_VERSION */)
+            return words[3];
+        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */)
+            return words[2];
+        command += words[1];
+    }
+    return 0;
+}
+
 bool darwin_dyld_program_sdk_at_least(build_version version) DARWIN_SYMBOL(dyld_program_sdk_at_least);
 bool darwin_dyld_program_sdk_at_least(build_version version) {
     uint32_t wanted = version.version;
     if (version.platform == 0xffffffff)
         wanted = ((version.version >> 16) - 2006) << 16;
     return program_sdk() >= wanted;
+}
+
+bool darwin_dyld_program_minos_at_least(build_version version) DARWIN_SYMBOL(dyld_program_minos_at_least);
+bool darwin_dyld_program_minos_at_least(build_version version) {
+    uint32_t wanted = version.version;
+    if (version.platform == 0xffffffff)
+        wanted = ((version.version >> 16) - 2006) << 16;
+    return program_minos() >= wanted;
 }
 
 // The OS is as new as anything a program checks for with @available.

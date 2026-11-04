@@ -82,6 +82,10 @@ open class UIWindow: UIView {
     @ObjCMethod("windowScene")
     func windowScene() -> UIWindowScene? { windowState.scene.map { UIWindowScene(objcObject: $0, ownership: .retain) } }
 
+    /// UIKit's private name for the scene the window shows in.
+    @ObjCMethod("_windowHostingScene")
+    func windowHostingScene() -> UIWindowScene? { windowScene() }
+
     @ObjCMethod("setWindowScene:")
     func setWindowScene(_ scene: UIWindowScene?) {
         if let old = windowState.scene { UIWindowScene.remove(window: objcObject, from: old) }

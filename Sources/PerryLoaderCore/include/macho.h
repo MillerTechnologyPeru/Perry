@@ -114,7 +114,10 @@ struct segment_command_64 {
 #define SECTION_TYPE                0x000000ffu
 #define S_ZEROFILL                  0x1
 #define S_MOD_INIT_FUNC_POINTERS    0x9
+#define S_THREAD_LOCAL_REGULAR      0x11
 #define S_THREAD_LOCAL_ZEROFILL     0x12
+#define S_THREAD_LOCAL_VARIABLES    0x13
+#define S_THREAD_LOCAL_INIT_FUNCTION_POINTERS 0x15
 #define S_INIT_FUNC_OFFSETS         0x16
 
 struct section_64 {

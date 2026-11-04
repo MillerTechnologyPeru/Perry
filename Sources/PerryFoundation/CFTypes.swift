@@ -45,6 +45,9 @@ public func CFCopyTypeIDDescription(_ type: UInt) -> id? {
         CFTypeIDs.uuid: "CFUUID", CFTypeIDs.date: "CFDate", CFTypeIDs.runLoop: "CFRunLoop", CFTypeIDs.timeZone: "CFTimeZone",
         CFTypeIDs.locale: "CFLocale",
     ]
+    if let name = CFRuntimeClasses.runtimeClass(type)?.pointee.className {
+        return Strings.make(String(cString: name))
+    }
     return names[type].map(Strings.make)
 }
 
