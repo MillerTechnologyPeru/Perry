@@ -97,6 +97,31 @@ struct RowSection {
     }
 }
 
+/// Records a row's frame in its scroll view's content, for scrolling to it.
+struct RowFrameRecorder: View {
+    var frames: RowFrames
+    var index: Int
+
+    var body: some View {
+        GeometryReader { proxy in
+            let _ = { frames.frames[index] = proxy.frame(in: .named(ScrollViewportInfo.contentSpace)) }()
+            Color.clear
+        }
+    }
+}
+
+/// The rows' frames, kept for the scroll view they're in.
+struct GroupedRowsBody: View {
+    var children: _VariadicView.Children
+    @Environment(\.scrollTargetScroller) private var scroller
+    @State private var frames = RowFrames()
+
+    var body: some View {
+        let _ = { frames.children = children.map { $0 }; scroller?.add(frames) }()
+        GroupedRowsLayout(children: children, frames: frames)
+    }
+}
+
 struct GroupedRowsRoot: _VariadicView.UnaryViewRoot {
     static var inset: CGFloat { 16 }
 
@@ -106,6 +131,17 @@ struct GroupedRowsRoot: _VariadicView.UnaryViewRoot {
     }
 
     func body(children: _VariadicView.Children) -> some View {
+        GroupedRowsBody(children: children)
+    }
+}
+
+/// The sections and their rows.
+struct GroupedRowsLayout: View {
+    var children: _VariadicView.Children
+    var frames: RowFrames
+    static var inset: CGFloat { GroupedRowsRoot.inset }
+
+    var body: some View {
         let sections = RowSection.sections(of: children)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(sections.indices, id: \.self) { index in
@@ -124,6 +160,7 @@ struct GroupedRowsRoot: _VariadicView.UnaryViewRoot {
                                 children[row]
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                     .padding(.horizontal, Self.inset)
+                                    .background(RowFrameRecorder(frames: frames, index: row))
                                 if row != section.rows.last {
                                     Divider().padding(.leading, Self.inset)
                                 }
