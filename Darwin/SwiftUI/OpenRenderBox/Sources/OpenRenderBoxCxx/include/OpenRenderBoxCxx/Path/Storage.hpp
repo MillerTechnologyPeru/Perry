@@ -155,6 +155,9 @@ public:
     void clear();
 
     bool append_element(ORBPathElement element, const CGFloat *points, const void * _Nullable userInfo);
+
+    /// The number of coordinates an element has; -1 for elements not kept.
+    static int32_t point_count(ORBPathElement element) ORB_NOEXCEPT;
 //    push_values(unsigned char, double const*, unsigned long)
     // update_single_element()
 
@@ -162,6 +165,18 @@ public:
     bool apply_elements(void *info, ORBPathApplyCallback callback) const ORB_NOEXCEPT;
 
 private:
+    /// Makes room for `size` bytes of elements.
+    void reserve(uint64_t size);
+
+    /// The elements' bytes.
+    ORB_INLINE
+    const void * _Nullable buffer() const ORB_NOEXCEPT { return _external_storage; }
+    ORB_INLINE
+    void * _Nullable buffer() ORB_NOEXCEPT { return _external_storage; }
+
+    ORB_INLINE
+    uintptr_t &_element_count() ORB_NOEXCEPT { return reinterpret_cast<uintptr_t &>(_reserved2); }
+
     /// Core element iteration (no fast-path checks)
     bool apply_elements_(void *info, ORBPathApplyCallback callback) const ORB_NOEXCEPT;
 
