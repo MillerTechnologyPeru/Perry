@@ -180,6 +180,26 @@ public class NSAttributedString: NSObject {
         return self
     }
 
+    /// The format's text with the arguments formatted into it, taking the
+    /// attributes of the format's first run.
+    @ObjCMethod("initWithFormat:options:locale:arguments:", types: "@48@0:8@16Q24@32*40")
+    func initialize(format: ObjCObject?, options: UInt, locale: ObjCObject?, arguments: UnsafeRawPointer?) -> Self {
+        let source = AttributedStrings.storage(format?.objcObject)
+        let text = String(decoding: source?.units ?? [], as: UTF16.self)
+        var formatted = text
+        if let arguments {
+            var darwin = DarwinArguments(arguments)
+            formatted = Format.string(text, &darwin)
+        }
+        let storage = AttributedStorage(units: Array(formatted.utf16), attributes: nil)
+        if let first = source?.runs.first, !storage.runs.isEmpty {
+            storage.runs.forEach { ObjC.release($0.attributes) }
+            storage.runs = [AttributeRun(length: storage.units.count, attributes: ObjC.retain(first.attributes)!)]
+        }
+        Storage.set(objcObject, storage)
+        return self
+    }
+
     /// From a keyed archive or nib: the string and its attributes.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: ObjCObject) -> Self {
@@ -433,4 +453,25 @@ public final class NSMutableAttributedString: NSAttributedString {
 
     @ObjCMethod("beginEditing") func beginEditing() {}
     @ObjCMethod("endEditing") func endEditing() {}
+}
+
+/// Foundation's attributed string keys (iOS 15 and later), which Swift's
+/// AttributedString attributes convert through, with Darwin's values.
+@ObjCConstants
+enum AttributedStringKeys {
+    static let NSAlternateDescriptionAttributeName = "NSAlternateDescription"
+    static let NSImageURLAttributeName = "NSImageURL"
+    static let NSInflectionAgreementArgumentAttributeName = "NSInflectionAgreementArgument"
+    static let NSInflectionAgreementConceptAttributeName = "NSInflectionAgreementConcept"
+    static let NSInflectionAlternativeAttributeName = "NSInflectionAlternative"
+    static let NSInflectionReferentConceptAttributeName = "NSInflectionReferentConcept"
+    static let NSInflectionRuleAttributeName = "NSInflect"
+    static let NSInlinePresentationIntentAttributeName = "NSInlinePresentationIntent"
+    static let NSLanguageIdentifierAttributeName = "NSLanguage"
+    static let NSListItemDelimiterAttributeName = "NSListItemDelimiter"
+    static let NSLocalizedNumberFormatAttributeName = "NSLocalizedNumberFormat"
+    static let NSMarkdownSourcePositionAttributeName = "NSMarkdownSourcePosition"
+    static let NSMorphologyAttributeName = "NSMorphology"
+    static let NSPresentationIntentAttributeName = "NSPresentationIntent"
+    static let NSReplacementIndexAttributeName = "NSReplacementIndex"
 }
