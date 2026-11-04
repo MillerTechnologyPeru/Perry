@@ -45,3 +45,13 @@ enum MediaConstants {
     static let AVPlayerItemDidPlayToEndTimeNotification = "AVPlayerItemDidPlayToEndTimeNotification"
     static let AVPlayerItemFailedToPlayToEndTimeNotification = "AVPlayerItemFailedToPlayToEndTimeNotification"
 }
+
+/// Metadata object types, which a capture output would recognize.
+@ObjCConstants
+enum MetadataObjectTypes {
+    static let AVMetadataObjectTypeQRCode = "org.iso.QRCode"
+    static let AVMetadataObjectTypeEAN13Code = "org.gs1.EAN-13"
+    static let AVMetadataObjectTypeEAN8Code = "org.gs1.EAN-8"
+    static let AVMetadataObjectTypeCode128Code = "com.intermec.Code128"
+    static let AVMetadataObjectTypeFace = "face"
+}
