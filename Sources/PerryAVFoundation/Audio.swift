@@ -1,8 +1,10 @@
+import Glibc
 import PerryObjCInterop
 
-// AVAudioPlayer and AVAudioSession, without sound: a player keeps the state
-// an app sets and reads back (playing, volume, loops, position), but
-// nothing is heard and it never finishes; the session accepts every
+// AVAudioPlayer and AVAudioSession. A player plays its file through
+// GStreamer when it's installed, looping as many times as asked and telling
+// its delegate when it's done; without GStreamer, or for data, it keeps the
+// state an app sets and reads back but is silent. The session accepts every
 // category, mode and activation.
 
 final class PlayerState {
@@ -17,6 +19,9 @@ final class PlayerState {
     var currentTime: Double = 0
     var meteringEnabled = false
     var enableRate = false
+    /// The file's pipeline, made when it's first wanted.
+    var pipeline: Pipeline?
+    var prepared = false
 }
 
 @ObjCClass("AVAudioPlayer")
@@ -55,15 +60,78 @@ open class AVAudioPlayer: NSObject {
 
     @ObjCMethod("dealloc")
     func dealloc() {
+        // Its pipeline goes with its state.
+        let start = AudioTiming.now()
         AVAudioPlayer.states.remove(objcObject)
+        Players.trace("audio player freed in \(AudioTiming.since(start)) ms at \(AudioTiming.stamp())")
         ObjCRuntime.superDealloc(objcObject, definedOn: AVAudioPlayer.objCClass.pointer)
     }
 
-    @ObjCMethod("prepareToPlay") func prepareToPlay() -> Bool { true }
-    @ObjCMethod("play") func play() -> Bool { player.playing = true; return true }
+    /// The file's pipeline, made the first time it's wanted, paused at
+    /// the start; nil without GStreamer, for data, or when it can't play.
+    var pipeline: Pipeline? {
+        let state = player
+        if !state.prepared {
+            state.prepared = true
+            let start = AudioTiming.now()
+            if let gst = GStreamer.shared, let uri = state.url?.unsafeCast(to: NSURL.self).absoluteString(),
+               let pipeline = Pipeline(uri: uri, gst: gst, video: false) {
+                defer { Players.trace("audio player for \(uri.split(separator: "/").last ?? "") made in \(AudioTiming.since(start)) ms at \(AudioTiming.stamp())") }
+                pipeline.set(volume: Double(state.volume), muted: false)
+                pipeline.pause()
+                if state.currentTime > 0 { pipeline.seek(to: state.currentTime) }
+                state.pipeline = pipeline
+            }
+        }
+        return state.pipeline
+    }
+
+    @ObjCMethod("prepareToPlay") func prepareToPlay() -> Bool { _ = pipeline; return true }
+
+    @ObjCMethod("play")
+    func play() -> Bool {
+        player.playing = true
+        if let pipeline {
+            let start = AudioTiming.now()
+            pipeline.play()
+            Players.trace("audio play in \(AudioTiming.since(start)) ms at \(AudioTiming.stamp())")
+            Players.startAudio(objcObject)
+        }
+        return true
+    }
+
     @ObjCMethod("playAtTime:") func play(atTime time: Double) -> Bool { play() }
-    @ObjCMethod("pause") func pause() { player.playing = false }
-    @ObjCMethod("stop") func stop() { player.playing = false }
+
+    @ObjCMethod("pause")
+    func pause() {
+        player.playing = false
+        player.pipeline?.pause()
+        Players.stopAudio(objcObject)
+    }
+
+    /// Stops, keeping the position, as Darwin's does.
+    @ObjCMethod("stop") func stop() { pause() }
+
+    /// Ends or loops a finished pass; false once the player has stopped.
+    func tick() -> Bool {
+        let state = player
+        guard state.playing, let pipeline = state.pipeline else { return false }
+        guard pipeline.finished() else { return true }
+        if state.numberOfLoops != 0 {
+            if state.numberOfLoops > 0 { state.numberOfLoops -= 1 }
+            pipeline.seek(to: 0)
+            pipeline.play()
+            return true
+        }
+        state.playing = false
+        pipeline.pause()
+        pipeline.seek(to: 0)
+        state.currentTime = 0
+        if let delegate = state.delegate.map({ NSObject($0) }), delegate.responds(to: "audioPlayerDidFinishPlaying:successfully:") {
+            delegate.sendAudioPlayerDidFinishPlaying(self, successfully: true)
+        }
+        return false
+    }
     @ObjCMethod("isPlaying") func isPlaying() -> Bool { player.playing }
 
     @ObjCMethod("url") func url() -> NSObject? { player.url }
@@ -71,8 +139,12 @@ open class AVAudioPlayer: NSObject {
     @ObjCMethod("delegate") func delegate() -> NSObject? { player.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { player.delegate = delegate?.objcObject }
     @ObjCMethod("volume") func volume() -> Float { player.volume }
-    @ObjCMethod("setVolume:") func setVolume(_ volume: Float) { player.volume = volume }
-    @ObjCMethod("setVolume:fadeDuration:") func setVolume(_ volume: Float, fadeDuration: Double) { player.volume = volume }
+    @ObjCMethod("setVolume:")
+    func setVolume(_ volume: Float) {
+        player.volume = volume
+        player.pipeline?.set(volume: Double(max(volume, 0)), muted: false)
+    }
+    @ObjCMethod("setVolume:fadeDuration:") func setVolume(_ volume: Float, fadeDuration: Double) { setVolume(volume) }
     @ObjCMethod("pan") func pan() -> Float { player.pan }
     @ObjCMethod("setPan:") func setPan(_ pan: Float) { player.pan = pan }
     @ObjCMethod("rate") func rate() -> Float { player.rate }
@@ -81,10 +153,14 @@ open class AVAudioPlayer: NSObject {
     @ObjCMethod("setEnableRate:") func setEnableRate(_ enable: Bool) { player.enableRate = enable }
     @ObjCMethod("numberOfLoops") func numberOfLoops() -> Int { player.numberOfLoops }
     @ObjCMethod("setNumberOfLoops:") func setNumberOfLoops(_ loops: Int) { player.numberOfLoops = loops }
-    @ObjCMethod("currentTime") func currentTime() -> Double { player.currentTime }
-    @ObjCMethod("setCurrentTime:") func setCurrentTime(_ time: Double) { player.currentTime = time }
+    @ObjCMethod("currentTime") func currentTime() -> Double { player.pipeline?.position ?? player.currentTime }
+    @ObjCMethod("setCurrentTime:")
+    func setCurrentTime(_ time: Double) {
+        player.currentTime = time
+        player.pipeline?.seek(to: time)
+    }
     @ObjCMethod("deviceCurrentTime") func deviceCurrentTime() -> Double { 0 }
-    @ObjCMethod("duration") func duration() -> Double { 0 }
+    @ObjCMethod("duration") func duration() -> Double { pipeline?.duration ?? 0 }
     @ObjCMethod("numberOfChannels") func numberOfChannels() -> UInt { 2 }
     @ObjCMethod("isMeteringEnabled") func isMeteringEnabled() -> Bool { player.meteringEnabled }
     @ObjCMethod("setMeteringEnabled:") func setMeteringEnabled(_ enabled: Bool) { player.meteringEnabled = enabled }
@@ -254,4 +330,22 @@ enum SessionConstants {
     static let AVAudioSessionPortHDMI = "HDMIOutput"
     static let AVAudioSessionPortHeadphones = "Headphones"
     static let AVAudioSessionPortLineOut = "LineOut"
+}
+
+/// AVAudioPlayerDelegate's message.
+extension NSObject {
+    @ObjCMethod("audioPlayerDidFinishPlaying:successfully:")
+    func sendAudioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully: Bool)
+}
+
+/// Timing for PERRY_AVFOUNDATION_TRACE.
+enum AudioTiming {
+    static func now() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+    }
+    static func since(_ start: Double) -> Int { Int((now() - start) * 1000) }
+    /// Milliseconds on the same clock as the frame hitch log.
+    static func stamp() -> Int { Int(now() * 1000) % 1_000_000 }
 }
