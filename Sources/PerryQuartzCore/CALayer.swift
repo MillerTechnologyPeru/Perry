@@ -316,6 +316,19 @@ open class CALayer: NSObject {
         state.values[key] = value
     }
 
+    // MARK: Presentation modifiers (private), which SwiftUI sets values through
+
+    @ObjCMethod("addPresentationModifier:")
+    func addPresentationModifier(_ modifier: CAPresentationModifier) {
+        modifier.modifier.layer = objcObject
+        modifier.apply()
+    }
+
+    @ObjCMethod("removePresentationModifier:")
+    func removePresentationModifier(_ modifier: CAPresentationModifier) {
+        if modifier.modifier.layer == objcObject { modifier.modifier.layer = nil }
+    }
+
     @ObjCMethod("setValue:forKeyPath:")
     func setValue(_ value: NSObject?, forKeyPath keyPath: String) { setValue(value, forKey: keyPath) }
 
