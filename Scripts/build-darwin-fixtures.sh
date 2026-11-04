@@ -15,6 +15,9 @@
 # Sources that include <libxml/…>, <zlib.h> and the like are linked with
 # those libraries, and .xcdatamodeld models are compiled with momc.
 #
+# A fixture with a `no-reference` file records no output: one whose output
+# depends on things only Perry's tests provide, such as a Bluetooth device.
+#
 # A fixture with an Entitlements.plist (the keychain needs some) records its
 # output from the iOS Simulator instead of macOS: it is built for the
 # simulator with the entitlements in __TEXT,__entitlements, as Xcode puts
@@ -71,6 +74,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<iconv.h>' $sources && libraries="$libraries -liconv"
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
+    grep -q '<CoreBluetooth/' $sources && frameworks="$frameworks -framework CoreBluetooth"
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
@@ -88,10 +92,15 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist) ;;
+            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$app/" ;;
         esac
     done
+
+    if [ -f "$src/no-reference" ]; then
+        echo "$app"
+        continue
+    fi
 
     if [ -f "$src/Entitlements.plist" ]; then
         simulator="${PERRY_SIMULATOR:-$(xcrun simctl list devices available | awk -F '[()]' '/iPhone/ { print $2; exit }')}"
@@ -157,7 +166,7 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist) ;;
+            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$macos/Resources/" ;;
         esac
     done
