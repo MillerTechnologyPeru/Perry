@@ -39,7 +39,7 @@ fetch() { # directory url commit
 }
 packages=$work/packages
 fetch "$packages/swift-foundation" \
-    https://github.com/MillerTechnologyPeru/swift-foundation.git e3c795d47774fa8dec02d03ccec48d1134746085
+    https://github.com/MillerTechnologyPeru/swift-foundation.git 83a9a7a7f6ce5aa3e253c9fa720df0f12f95b871
 fetch "$packages/swift-collections" \
     https://github.com/apple/swift-collections.git c11818f3cae0780656baa430b49e7f163f08dffd
 fetch "$packages/swift-foundation-icu" \
@@ -63,6 +63,8 @@ macros=$(cd "$foundation" && swift build --scratch-path "$work/spm" --show-bin-p
 merged=$work/merged
 rm -rf "$merged"; mkdir -p "$merged"
 cp -R "$foundation/Sources/FoundationEssentials" "$foundation/Sources/FoundationInternationalization" "$merged/"
+# Stand-ins for Objective-C classes the SDK's headers bring in for real.
+rm "$merged/FoundationEssentials/Bundle+Stub.swift"
 grep -rlE 'import (FoundationEssentials|FoundationInternationalization)$|(FoundationEssentials|FoundationInternationalization)\.' "$merged" \
     | while IFS= read -r file; do
         perl -i -pe 's/^\s*(?:(?:internal|package|public|\@_exported|\@preconcurrency|\@_implementationOnly)\s+)*import (?:FoundationEssentials|FoundationInternationalization)\s*$/\n/; s/\b(FoundationEssentials|FoundationInternationalization)\./Foundation./g' "$file"
@@ -85,7 +87,7 @@ shims=$foundation/Sources/_FoundationCShims/include
 icu=$packages/swift-foundation-icu/icuSources/include
 xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" \
     -module-name Foundation -package-name swift_foundation -parse-as-library \
-    -enable-library-evolution -swift-version 5 -O -wmo -import-underlying-module \
+    -enable-library-evolution -swift-version 5 -O -wmo -import-underlying-module -D FOUNDATION_OBJC_TYPES \
     -emit-library -emit-module -emit-module-path "$out/Foundation.swiftmodule" \
     -I "$products" \
     -Xcc -fmodule-map-file="$shims/module.modulemap" -Xcc -I"$shims" \
