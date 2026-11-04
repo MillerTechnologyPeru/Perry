@@ -6,26 +6,35 @@ import PerryObjCInterop
 // path). They are made as a peripheral discovers them, and the registry
 // finds them again by path when BlueZ reports a new value.
 
-/// The Objective-C objects standing for BlueZ's, by path.
+/// The Objective-C objects standing for BlueZ's, by central manager and
+/// path: as on Darwin, each manager has peripherals (and their attributes)
+/// of its own, so one manager's connection is never another's.
 enum Registry {
     static let lock = Lock()
     nonisolated(unsafe) static var peripherals: [String: CBPeripheral] = [:]
     nonisolated(unsafe) static var characteristics: [String: CBCharacteristic] = [:]
     nonisolated(unsafe) static var descriptors: [String: CBDescriptor] = [:]
 
-    /// The peripheral for a device, made the first time it is seen.
-    static func peripheral(path: String) -> CBPeripheral {
+    static func key(_ manager: UnsafeMutableRawPointer?, _ path: String) -> String {
+        "\(UInt(bitPattern: manager))|\(path)"
+    }
+
+    /// A manager's peripheral for a device, made the first time it sees it.
+    static func peripheral(path: String, manager: UnsafeMutableRawPointer) -> CBPeripheral {
         lock.withLock {
-            if let peripheral = peripherals[path] { return peripheral }
+            let key = key(manager, path)
+            if let peripheral = peripherals[key] { return peripheral }
             let peripheral = CBPeripheral.objCClass.object.newInstance().unsafeCast(to: CBPeripheral.self)
             peripheral.peripheral.path = path
-            peripherals[path] = peripheral
+            peripheral.peripheral.manager = manager
+            peripherals[key] = peripheral
             return peripheral
         }
     }
 
-    static func peripheral(identifier: String) -> CBPeripheral? {
-        lock.withLock { peripherals.values.first { $0.identifierString == identifier } }
+    /// The manager of the peripheral an attribute belongs to.
+    static func manager(of peripheral: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        peripheral.flatMap { CBPeer.peerStates[$0].manager }
     }
 }
 
@@ -118,7 +127,8 @@ open class CBCharacteristic: CBAttribute {
         state.isNotifying = properties["Notifying"]?.boolValue ?? false
         state.value = properties["Value"]?.bytes.map(NSData.of)
         state.service = service.objcObject
-        Registry.lock.withLock { Registry.characteristics[path] = characteristic }
+        let manager = Registry.manager(of: service.attribute.peripheral)
+        Registry.lock.withLock { Registry.characteristics[Registry.key(manager, path)] = characteristic }
         return characteristic
     }
 
@@ -145,7 +155,8 @@ open class CBDescriptor: CBAttribute {
         state.uuid = properties["UUID"]?.stringValue.flatMap(BluetoothUUID.init(string:)) ?? state.uuid
         state.value = properties["Value"]?.bytes.map(NSData.of)
         state.characteristic = characteristic.objcObject
-        Registry.lock.withLock { Registry.descriptors[path] = descriptor }
+        let manager = characteristic.service().flatMap { Registry.manager(of: $0.attribute.peripheral) }
+        Registry.lock.withLock { Registry.descriptors[Registry.key(manager, path)] = descriptor }
         return descriptor
     }
 
