@@ -18,6 +18,12 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         line.withCString { _ = write(2, $0, strlen($0)) }
         abort()
     }
+    Controllers.load(symbol)
+    // As on iOS, controllers already connected are announced soon after
+    // launch, for apps that only listen for the notifications.
+    if let after = Controllers.dispatchAfter, let time = Controllers.dispatchTime, let main = Controllers.mainQueue {
+        after(time(0, 500_000_000), main, nil) { _ in Controllers.start() }
+    }
     return true
 }
 
