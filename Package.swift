@@ -239,7 +239,7 @@ let package = Package(
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // GameController, with no controllers connected.
+        // GameController, over SDL3's gamepads.
         .target(
             name: "PerryGameController",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
