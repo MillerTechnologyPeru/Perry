@@ -128,7 +128,7 @@ enum SessionRoles {
 /// Font text styles.
 @ObjCConstants
 enum TextStyles {
-    static let UIFontTextStyleLargeTitle = "UICTFontTextStyleLargeTitle"
+    static let UIFontTextStyleLargeTitle = "UICTFontTextStyleTitle0"
     static let UIFontTextStyleTitle1 = "UICTFontTextStyleTitle1"
     static let UIFontTextStyleTitle2 = "UICTFontTextStyleTitle2"
     static let UIFontTextStyleTitle3 = "UICTFontTextStyleTitle3"
@@ -202,4 +202,67 @@ enum ActivityConstants {
     static let SLServiceTypeTencentWeibo = "com.apple.social.tencentweibo"
     static let kCTForegroundColorAttributeName = "CTForegroundColor"
     static let kCTFontAttributeName = "NSFont"
+}
+
+/// CoreText's font attributes, traits, text styles and size categories,
+/// with Darwin's values; the text styles and size categories are UIKit's.
+@ObjCConstants
+enum CoreTextFontKeys {
+    static let kCTFontNameAttribute = "NSFontNameAttribute"
+    static let kCTFontFamilyNameAttribute = "NSFontFamilyAttribute"
+    static let kCTFontSizeAttribute = "NSFontSizeAttribute"
+    static let kCTFontTraitsAttribute = "NSCTFontTraitsAttribute"
+    static let kCTFontFeatureSettingsAttribute = "NSCTFontFeatureSettingsAttribute"
+    static let kCTFontDescriptorLanguageAttribute = "NSCTFontDescriptorLanguageAttribute"
+    static let kCTFontLegibilityWeightAttribute = "NSCTFontLegibilityWeightAttribute"
+    static let kCTFontLanguageAwareLineHeightRatioAttribute = "NSCTFontLanguageAwareLineHeightRatioAttribute"
+    static let kCTFontWeightTrait = "NSCTFontWeightTrait"
+    static let kCTFontWidthTrait = "NSCTFontProportionTrait"
+    static let kCTFontGradeTrait = "NSCTFontGradeTrait"
+    static let kCTFontUIFontDesignTrait = "NSCTFontUIFontDesignTrait"
+    static let kCTFontUIFontDesignDefault = "NSCTFontUIFontDesignDefault"
+    static let kCTFontUIFontDesignRounded = "NSCTFontUIFontDesignRounded"
+    static let kCTFontUIFontDesignSerif = "NSCTFontUIFontDesignSerif"
+    static let kCTFontUIFontDesignMonospaced = "NSCTFontUIFontDesignMonospaced"
+    static let kCTFontUIFontDesignSoft = "NSCTFontUIFontDesignSoft"
+    static let kCTFontUIFontDesignCompact = "NSCTFontUIFontDesignCompact"
+    static let kCTFontUIFontDesignCompactRounded = "NSCTFontUIFontDesignCompactRounded"
+    static let kCTFontUIFontDesignCompactSoft = "NSCTFontUIFontDesignCompactSoft"
+    static let kCTTextScaleRatioAttributeName = "CTTextScaleRatio"
+
+    static let kCTFontWeightRegular: CGFloat = 0.0
+    static let kCTFontWeightHeavy: CGFloat = 0.56
+    static let kCTFontWidthStandard: CGFloat = 0.0
+    static let kCTFontWidthCondensed: CGFloat = -0.2
+    static let kCTFontWidthCompressed: CGFloat = -0.4
+    static let kCTFontWidthExpanded: CGFloat = 0.2
+
+    static let kCTUIFontTextStyleTitle0 = "UICTFontTextStyleTitle0"
+    static let kCTUIFontTextStyleTitle1 = "UICTFontTextStyleTitle1"
+    static let kCTUIFontTextStyleTitle2 = "UICTFontTextStyleTitle2"
+    static let kCTUIFontTextStyleTitle3 = "UICTFontTextStyleTitle3"
+    static let kCTUIFontTextStyleExtraLargeTitle = "UICTFontTextStyleExtraLargeTitle"
+    static let kCTUIFontTextStyleExtraLargeTitle2 = "UICTFontTextStyleExtraLargeTitle2"
+    static let kCTUIFontTextStyleHeadline = "UICTFontTextStyleHeadline"
+    static let kCTUIFontTextStyleSubhead = "UICTFontTextStyleSubhead"
+    static let kCTUIFontTextStyleBody = "UICTFontTextStyleBody"
+    static let kCTUIFontTextStyleCallout = "UICTFontTextStyleCallout"
+    static let kCTUIFontTextStyleFootnote = "UICTFontTextStyleFootnote"
+    static let kCTUIFontTextStyleFootnote2 = "UICTFontTextStyleFootnote2"
+    static let kCTUIFontTextStyleCaption1 = "UICTFontTextStyleCaption1"
+    static let kCTUIFontTextStyleCaption2 = "UICTFontTextStyleCaption2"
+    static let kCTUIFontTextStyleCaption3 = "UICTFontTextStyleCaption3"
+
+    static let kCTFontContentSizeCategoryXS = "UICTContentSizeCategoryXS"
+    static let kCTFontContentSizeCategoryS = "UICTContentSizeCategoryS"
+    static let kCTFontContentSizeCategoryM = "UICTContentSizeCategoryM"
+    static let kCTFontContentSizeCategoryL = "UICTContentSizeCategoryL"
+    static let kCTFontContentSizeCategoryXL = "UICTContentSizeCategoryXL"
+    static let kCTFontContentSizeCategoryXXL = "UICTContentSizeCategoryXXL"
+    static let kCTFontContentSizeCategoryXXXL = "UICTContentSizeCategoryXXXL"
+    static let kCTFontContentSizeCategoryAccessibilityM = "UICTContentSizeCategoryAccessibilityM"
+    static let kCTFontContentSizeCategoryAccessibilityL = "UICTContentSizeCategoryAccessibilityL"
+    static let kCTFontContentSizeCategoryAccessibilityXL = "UICTContentSizeCategoryAccessibilityXL"
+    static let kCTFontContentSizeCategoryAccessibilityXXL = "UICTContentSizeCategoryAccessibilityXXL"
+    static let kCTFontContentSizeCategoryAccessibilityXXXL = "UICTContentSizeCategoryAccessibilityXXXL"
 }
