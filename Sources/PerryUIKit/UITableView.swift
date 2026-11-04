@@ -557,7 +557,7 @@ open class UITableView: UIScrollView {
 
     @ObjCMethod("setDelegate:")
     override func setDelegate(_ delegate: NSObject?) {
-        scroll.delegate = delegate?.objcObject
+        scroll.delegate.object = delegate?.objcObject
         invalidate()
     }
 
