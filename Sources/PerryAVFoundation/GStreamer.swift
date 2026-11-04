@@ -13,6 +13,10 @@ final class GStreamer: @unchecked Sendable {
     let setState: @convention(c) (Pointer, Int32) -> Int32
     let getBus: @convention(c) (Pointer) -> Pointer?
     let busPopFiltered: @convention(c) (Pointer, UInt32) -> Pointer?
+    /// gst_message_parse_error: the message's GError (domain, code, then
+    /// the text) and debug text, for tracing.
+    var parseError: (@convention(c) (Pointer, UnsafeMutablePointer<UnsafeMutableRawPointer?>,
+                                     UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Void)?
     let objectUnref: @convention(c) (Pointer) -> Void
     let miniObjectUnref: @convention(c) (Pointer) -> Void
     let pullSample: @convention(c) (Pointer, UInt64) -> Pointer?
@@ -86,6 +90,8 @@ final class GStreamer: @unchecked Sendable {
         }
         (self.parseLaunch, self.binGetByName, self.setState, self.getBus, self.busPopFiltered) =
             (parseLaunch, binGetByName, setState, getBus, busPopFiltered)
+        parseError = bind(core, "gst_message_parse_error", (@convention(c) (Pointer, UnsafeMutablePointer<UnsafeMutableRawPointer?>,
+                                                                             UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Void).self)
         (self.objectUnref, self.miniObjectUnref, self.pullSample, self.sampleGetBuffer, self.sampleGetCaps) =
             (objectUnref, miniObjectUnref, pullSample, sampleGetBuffer, sampleGetCaps)
         (self.capsGetStructure, self.structureGetInt, self.bufferMap, self.bufferUnmap) =
@@ -111,15 +117,18 @@ final class Pipeline {
     private var ticksAtEnd = 0
     private let mapInfo = UnsafeMutableRawPointer.allocate(byteCount: GStreamer.mapInfoSize, alignment: 8)
 
-    init?(uri: String, gst: GStreamer) {
+    init?(uri: String, gst: GStreamer, video: Bool = true) {
         // In quotes, as the pipeline description reads them.
         var quoted = ""
         for character in uri {
             if character == "\\" || character == "\"" { quoted.append("\\") }
             quoted.append(character)
         }
-        let description = "playbin uri=\"\(quoted)\" video-sink=\"videoconvert ! videoscale ! video/x-raw,format=RGBA "
-            + "! appsink name=perryvideo max-buffers=1 drop=true\""
+        // Sound alone, as for AVAudioPlayer, sends any video nowhere.
+        let description = video
+            ? "playbin uri=\"\(quoted)\" video-sink=\"videoconvert ! videoscale ! video/x-raw,format=RGBA "
+                + "! appsink name=perryvideo max-buffers=1 drop=true\""
+            : "playbin uri=\"\(quoted)\" video-sink=fakesink"
         var error: GStreamer.Pointer?
         guard let element = description.withCString({ gst.parseLaunch($0, &error) }) else {
             GStreamer.log("can't make a pipeline for \(uri)")
@@ -152,7 +161,19 @@ final class Pipeline {
     /// report the end.
     func finished() -> Bool {
         guard let bus else { return true }
-        if let message = gst.busPopFiltered(bus, GStreamer.messageEOS | GStreamer.messageError) {
+        if let message = gst.busPopFiltered(bus, GStreamer.messageError) {
+            if Players.tracing, let parse = gst.parseError {
+                var error: UnsafeMutableRawPointer?
+                var debug: UnsafeMutablePointer<CChar>?
+                parse(message, &error, &debug)
+                // GError: a quark and an int, then the message.
+                let text = error.flatMap { $0.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self) }.map { String(cString: $0) }
+                Players.trace("error: \(text ?? "?") (\(debug.map { String(cString: $0) } ?? ""))")
+            }
+            gst.miniObjectUnref(message)
+            return true
+        }
+        if let message = gst.busPopFiltered(bus, GStreamer.messageEOS) {
             gst.miniObjectUnref(message)
             return true
         }
