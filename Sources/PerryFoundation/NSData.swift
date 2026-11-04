@@ -210,6 +210,33 @@ public class NSData: NSObject {
         url.flatMap(contents).map { DataObjects.owned(DataStorage($0), cls: cls) }
     }
 
+    /// NSDataReadingOptions only tune how the file is read (mapped,
+    /// uncached), so they are ignored; a failure is NSFileReadNoSuchFileError
+    /// (260) or NSFileReadUnknownError (256).
+    @ObjCClassMethod("dataWithContentsOfFile:options:error:")
+    static func data(_ cls: ObjCClass, contentsOfFile path: String?, options: UInt,
+                     error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSData? {
+        guard let path, let bytes = try? Data(contentsOf: URL(filePath: path)) else {
+            error?.pointee = readError(path.map { access($0, F_OK) == 0 } ?? false)
+            return nil
+        }
+        return DataObjects.owned(DataStorage(bytes), cls: cls)
+    }
+
+    @ObjCClassMethod("dataWithContentsOfURL:options:error:")
+    static func data(_ cls: ObjCClass, contentsOfURL url: NSURL?, options: UInt,
+                     error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSData? {
+        guard let url, let bytes = contents(of: url) else {
+            error?.pointee = readError(url.map { $0.url.isFileURL && access($0.url.path, F_OK) == 0 } ?? false)
+            return nil
+        }
+        return DataObjects.owned(DataStorage(bytes), cls: cls)
+    }
+
+    static func readError(_ exists: Bool) -> UnsafeMutableRawPointer? {
+        Errors.autoreleased(domain: Errors.cocoaDomain, code: exists ? 256 : 260, description: "The file couldn’t be opened.")
+    }
+
     /// A file's bytes, or what NSURLConnection loads for other schemes,
     /// waiting for it as Darwin does; nil when CFNetwork is not loaded.
     static func contents(of url: NSURL) -> Data? {
@@ -251,6 +278,24 @@ public class NSData: NSObject {
 
     @ObjCMethod("initWithContentsOfURL:")
     func initialize(contentsOfURL url: NSURL?) -> Self? { url.flatMap(NSData.contents).map { setStorage(DataStorage($0)) } }
+
+    @ObjCMethod("initWithContentsOfFile:options:error:")
+    func initialize(contentsOfFile path: String?, options: UInt, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Self? {
+        guard let path, let bytes = try? Data(contentsOf: URL(filePath: path)) else {
+            error?.pointee = NSData.readError(path.map { access($0, F_OK) == 0 } ?? false)
+            return nil
+        }
+        return setStorage(DataStorage(bytes))
+    }
+
+    @ObjCMethod("initWithContentsOfURL:options:error:")
+    func initialize(contentsOfURL url: NSURL?, options: UInt, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Self? {
+        guard let url, let bytes = NSData.contents(of: url) else {
+            error?.pointee = NSData.readError(url.map { $0.url.isFileURL && access($0.url.path, F_OK) == 0 } ?? false)
+            return nil
+        }
+        return setStorage(DataStorage(bytes))
+    }
 
     /// NSDataBase64DecodingOptions: 1 ignores unknown characters.
     @ObjCMethod("initWithBase64EncodedString:options:")
@@ -345,6 +390,38 @@ public class NSData: NSObject {
     @ObjCMethod("writeToFile:atomically:")
     func write(toFile path: String, atomically: Bool) -> Bool {
         (try? data.write(to: URL(filePath: path), options: atomically ? .atomic : [])) != nil
+    }
+
+    /// NSDataWritingOptions: atomic 1, without overwriting 2; the file
+    /// protection classes are only recorded by the system, so ignored.
+    @ObjCMethod("writeToFile:options:error:")
+    func write(toFile path: String, options: UInt, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        write(to: URL(filePath: path), options: options, error: error)
+    }
+
+    @ObjCMethod("writeToURL:options:error:")
+    func write(toURL url: NSURL, options: UInt, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        guard url.url.isFileURL else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 518, description: "The file couldn’t be saved.")
+            return false
+        }
+        return write(to: url.url, options: options, error: error)
+    }
+
+    private func write(to url: URL, options: UInt, error out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        var writing: Data.WritingOptions = []
+        if options & 1 != 0 { writing.insert(.atomic) }
+        if options & 2 != 0 { writing.insert(.withoutOverwriting) }
+        do {
+            try data.write(to: url, options: writing)
+            return true
+        } catch {
+            // NSFileWriteFileExistsError 516, NSFileWriteUnknownError 512.
+            let exists = options & 2 != 0 && access(url.path, F_OK) == 0
+            out?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: exists ? 516 : 512,
+                                                 description: "The file couldn’t be saved.")
+            return false
+        }
     }
 
     @ObjCMethod("writeToURL:atomically:")
