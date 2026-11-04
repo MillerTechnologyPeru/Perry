@@ -223,6 +223,9 @@ public final class NSURL: NSObject {
 
     @ObjCMethod("query") func query() -> String? { url.query(percentEncoded: true) }
     @ObjCMethod("fragment") func fragment() -> String? { url.fragment(percentEncoded: true) }
+    /// The ";parameters" of the last path segment (RFC 1808), which
+    /// URLs no longer have: they are part of the path.
+    @ObjCMethod("parameterString") func parameterString() -> String? { nil }
     @ObjCMethod("lastPathComponent") func lastPathComponent() -> String { url.lastPathComponent }
     @ObjCMethod("pathExtension") func pathExtension() -> String { url.pathExtension }
     @ObjCMethod("pathComponents") func pathComponents() -> NSArray { Arrays.owned(url.pathComponents.map { Strings.autoreleased($0) }) }
