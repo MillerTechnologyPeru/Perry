@@ -1052,8 +1052,3 @@ extension Blocks {
     }
 }
 
-/// UIFontDescriptor, as nibs keep fonts' attributes.
-@ObjCClass("UIFontDescriptor")
-open class UIFontDescriptor: NSObject {
-    @ObjCMethod("initWithCoder:") func initialize(coder: NSObject) -> Self { self }
-}
