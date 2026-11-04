@@ -140,4 +140,7 @@ void perry_imp_initSetWithObjects(void);    // - (id)initWithObjects:(id)first, 
 void perry_imp_initWithObjectsAndKeys(void); // - (id)initWithObjectsAndKeys:(id)first, ... nil
 void perry_imp_raiseFormat(void);          // + (void)raise:(NSString *)name format:(NSString *)format, ...
 
+/// A file's birth time, where its file system keeps one.
+bool perry_foundation_birth_time(const char *path, int64_t *seconds, uint32_t *nanoseconds);
+
 #endif
