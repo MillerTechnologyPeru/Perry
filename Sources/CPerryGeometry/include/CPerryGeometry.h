@@ -38,6 +38,12 @@ typedef struct CATransform3D {
     double m41, m42, m43, m44;
 } CATransform3D;
 
+// A display link's frame rates: lowest, highest, and preferred; zero for
+// the display's own.
+typedef struct CAFrameRateRange {
+    float minimum, maximum, preferred;
+} CAFrameRateRange;
+
 // GLKit's vectors, quaternions and matrices: floats, the matrices in
 // column-major order, as unions of these layouts are on Darwin.
 typedef struct GLKVector2 { float v[2]; } GLKVector2;
