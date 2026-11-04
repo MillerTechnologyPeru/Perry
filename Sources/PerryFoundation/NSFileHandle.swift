@@ -173,3 +173,23 @@ public class NSPort: NSObject {
 public final class NSMachPort: NSPort {
     @ObjCMethod("machPort") func machPort() -> UInt32 { 0 }
 }
+
+/// NSStream's property keys and network service types, and CFStream's
+/// SSL settings, with Darwin's values.
+@ObjCConstants
+enum StreamConstants {
+    static let NSStreamDataWrittenToMemoryStreamKey = "kCFStreamPropertyDataWritten"
+    static let NSStreamNetworkServiceType = "kCFStreamNetworkServiceType"
+    static let NSStreamNetworkServiceTypeVoIP = "kCFStreamNetworkServiceTypeVoIP"
+    static let NSStreamNetworkServiceTypeVideo = "kCFStreamNetworkServiceTypeVideo"
+    static let NSStreamNetworkServiceTypeBackground = "kCFStreamNetworkServiceTypeBackground"
+    static let NSStreamNetworkServiceTypeVoice = "kCFStreamNetworkServiceTypeVoice"
+    static let kCFStreamPropertySSLPeerTrust = "kCFStreamPropertySSLPeerTrust"
+    static let kCFStreamPropertySSLSettings = "kCFStreamPropertySSLSettings"
+    static let kCFStreamPropertySocketSecurityLevel = "kCFStreamPropertySocketSecurityLevel"
+    static let kCFStreamSSLCertificates = "kCFStreamSSLCertificates"
+    static let kCFStreamSSLLevel = "kCFStreamSSLLevel"
+    static let kCFStreamSSLPeerName = "kCFStreamSSLPeerName"
+    static let kCFStreamSSLValidatesCertificateChain = "kCFStreamSSLValidatesCertificateChain"
+    static let kCFStreamSocketSecurityLevelNegotiatedSSL = "kCFStreamSocketSecurityLevelNegotiatedSSL"
+}
