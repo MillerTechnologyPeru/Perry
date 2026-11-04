@@ -211,6 +211,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
+//   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -243,11 +244,13 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         return true;
     }
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
-    // and answers libAccessibility's and Accessibility's questions about
-    // accessibility settings.
+    // answers libAccessibility's and Accessibility's questions about
+    // accessibility settings, and stands in for Social's and Safari's view
+    // controllers and CoreText's text attributes.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
-        strstr(install_name, "/Accessibility.framework/")) {
+        strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
+        strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/CoreText.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
