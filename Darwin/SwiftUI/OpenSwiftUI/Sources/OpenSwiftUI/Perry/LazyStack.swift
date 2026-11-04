@@ -19,7 +19,6 @@ import Foundation
 
 /// Kinds of views that can be pinned to the bounds of a scroll view.
 @available(OpenSwiftUI_v2_0, *)
-@frozen
 public struct PinnedScrollableViews: OptionSet, Sendable {
     public let rawValue: UInt32
 
@@ -262,7 +261,7 @@ struct LazyStackPlan {
                 let members = [section.header].compactMap { $0 } + section.rows + [section.footer].compactMap { $0 }
                 guard let first = members.min(), let last = members.max() else { continue }
                 let sectionStart = starts[first], sectionEnd = starts[last] + lengths[last]
-                guard sectionEnd > edge.lowerBound, sectionStart < edge.upperBound else { continue }
+                        guard sectionEnd > edge.lowerBound, sectionStart < edge.upperBound else { continue }
                 if root.pinnedViews.contains(.sectionHeaders), let header = section.header {
                     let limit = sectionEnd - lengths[header]
                     pinnedIndices.append(header)
