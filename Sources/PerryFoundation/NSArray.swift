@@ -308,7 +308,7 @@ public class NSArray: NSObject {
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
-        Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state) ?? 0
+        Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state, buffer: objects, count: count) ?? 0
     }
 }
 
