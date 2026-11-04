@@ -75,6 +75,9 @@ typedef struct perry_image {
     // Entry point (LC_MAIN), as an offset from the mach header.
     bool has_entry;
     uint64_t entryoff;
+    bool unixthread;            // started by LC_UNIXTHREAD rather than LC_MAIN
+    const struct symtab_command *symtab;
+    void *legacy_main;          // _main, for LC_UNIXTHREAD executables, which have no LC_MAIN
 
     // Linkedit data. Pointers are into the mapped __LINKEDIT segment.
     const struct linkedit_data_command *chained_fixups;
@@ -113,6 +116,12 @@ void perry_loader_init(perry_loader *loader);
 perry_image *perry_load_executable(perry_loader *loader, const char *path);
 void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
 _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
+
+// The architectures a Mach-O file holds, as PERRY_ARCH_* bits: a thin file's
+// one, or each slice of a universal file. Zero when the file is not Mach-O.
+#define PERRY_ARCH_ARM64    1u
+#define PERRY_ARCH_ARMV7    2u
+unsigned perry_macho_architectures(const char *path);
 
 // Address helpers
 void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
