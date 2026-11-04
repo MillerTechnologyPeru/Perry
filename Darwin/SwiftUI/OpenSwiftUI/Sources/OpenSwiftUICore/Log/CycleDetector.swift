@@ -16,7 +16,7 @@ package struct UpdateCycleDetector {
     var hasLogged: Bool
 
     package init() {
-        updateSeed = ViewGraph.current.data.$updateSeed
+        updateSeed = GraphHost.currentHost.data.$updateSeed
         lastSeed = .max
         ttl = .zero
         hasLogged = false
@@ -63,7 +63,7 @@ package struct ValueCycleDetector<Value> where Value: Equatable {
     var values: Stack3<Value>
 
     package init() {
-        updateSeed = ViewGraph.current.data.$updateSeed
+        updateSeed = GraphHost.currentHost.data.$updateSeed
         lastSeed = .max
         hasLogged = false
         values = .init()
