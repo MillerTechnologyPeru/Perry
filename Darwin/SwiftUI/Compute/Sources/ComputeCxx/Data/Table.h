@@ -33,12 +33,15 @@ class table {
 
   private:
 #if !TARGET_OS_MAC
-    int _vm_region_fd;
+    int _vm_region_fd = -1;
 #endif
     vm_address_t _ptr_base;
     vm_address_t _vm_region_base_address;
     platform_lock _lock = PLATFORM_LOCK_INIT;
     uint32_t _vm_region_size;
+    // Address space reserved for the region to grow into in place, or 0
+    // when it moves to grow.
+    uint64_t _vm_region_reserved_size = 0;
     uint32_t _ptr_max_offset;
 
     uint32_t _num_used_pages = 0;
