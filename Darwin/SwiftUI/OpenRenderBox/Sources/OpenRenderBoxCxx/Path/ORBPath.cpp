@@ -42,14 +42,14 @@ const ORBPath ORBPathNull = {
 void ORBPathRetain(ORBPath path) {
     auto retain = path.callbacks->retain;
     if (retain != nullptr) {
-        retain(&path);
+        retain(path.storage);
     }
 }
 
 void ORBPathRelease(ORBPath path) {
     auto release = path.callbacks->release;
     if (release != nullptr) {
-        release(&path);
+        release(path.storage);
     }
 }
 
@@ -74,13 +74,12 @@ ORBPath make_rect(CGRect rect, const CGAffineTransform *transform, ORBPathElemen
     if (CGRectIsNull(rect)) {
         return ORBPathNull;
     }
-    if (transform == nullptr || CGAffineTransformIsIdentity(*transform)) {
-        // TODO
-        return ORBPathNull;
-    } else {
-        // TODO
-        return ORBPathNull;
-    }
+    // TODO: Keep the rect natively, as its element
+    CGPathRef cgPath = CGPathCreateWithRect(rect, transform);
+    return ORBPath {
+        reinterpret_cast<ORBPathStorage *>(const_cast<CGPath *>(cgPath)),
+        &ORBPathCGPathCallbacks,
+    };
 }
 } /* anonymous namespace */
 
@@ -256,8 +255,38 @@ bool ORBPathEqualToPath(ORBPath lhs, ORBPath rhs) {
 
 #if ORB_TARGET_OS_DARWIN
 CGPathRef ORBPathCopyCGPath(ORBPath path) {
-    // TODO: Return a retained copy of the CGPath
-    return nullptr;
+    if (path.callbacks == &ORBPathCGPathCallbacks) {
+        return CGPathRetain(reinterpret_cast<CGPathRef>(path.storage));
+    }
+    // Any other path, element by element.
+    CGMutablePathRef result = CGPathCreateMutable();
+    ORBPathApplyElements(path, result, +[](void *info, ORBPathElement element, const CGFloat *points, const void * _Nullable userInfo) -> bool {
+        auto cgPath = reinterpret_cast<CGMutablePathRef>(info);
+        switch (element) {
+            case ORBPathElementMoveToPoint:
+                CGPathMoveToPoint(cgPath, nullptr, points[0], points[1]);
+                break;
+            case ORBPathElementAddLineToPoint:
+                CGPathAddLineToPoint(cgPath, nullptr, points[0], points[1]);
+                break;
+            case ORBPathElementAddQuadCurveToPoint:
+                CGPathAddQuadCurveToPoint(cgPath, nullptr, points[0], points[1], points[2], points[3]);
+                break;
+            case ORBPathElementAddCurveToPoint:
+                CGPathAddCurveToPoint(cgPath, nullptr, points[0], points[1], points[2], points[3], points[4], points[5]);
+                break;
+            case ORBPathElementCloseSubpath:
+                CGPathCloseSubpath(cgPath);
+                break;
+            case ORBPathElementRect:
+                CGPathAddRect(cgPath, nullptr, CGRectMake(points[0], points[1], points[2], points[3]));
+                break;
+            default:
+                break;
+        }
+        return true;
+    });
+    return result;
 }
 
 bool ORBPathContainsPoint(ORBPath path, CGPoint point, bool eoFill) {
