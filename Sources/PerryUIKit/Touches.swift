@@ -54,7 +54,19 @@ open class UITouch: NSObject {
     @ObjCMethod("force") func force() -> CGFloat { 0 }
     @ObjCMethod("maximumPossibleForce") func maximumPossibleForce() -> CGFloat { 0 }
     @ObjCMethod("majorRadius") func majorRadius() -> CGFloat { 20 }
+    @ObjCMethod("majorRadiusTolerance") func majorRadiusTolerance() -> CGFloat { 5 }
     @ObjCMethod("gestureRecognizers") func gestureRecognizers() -> NSObject? { nil }
+
+    // A finger's: upright, with no pencil angles or estimates.
+    @ObjCMethod("altitudeAngle") func altitudeAngle() -> CGFloat { .pi / 2 }
+    @ObjCMethod("azimuthAngleInView:") func azimuthAngle(in view: UIView?) -> CGFloat { 0 }
+    @ObjCMethod("azimuthUnitVectorInView:") func azimuthUnitVector(in view: UIView?) -> CGSize { CGSize(width: 1, height: 0) }
+    @ObjCMethod("rollAngle") func rollAngle() -> CGFloat { 0 }
+    @ObjCMethod("estimatedProperties") func estimatedProperties() -> Int { 0 }
+    @ObjCMethod("estimatedPropertiesExpectingUpdates") func estimatedPropertiesExpectingUpdates() -> Int { 0 }
+    @ObjCMethod("estimationUpdateIndex") func estimationUpdateIndex() -> NSObject? { nil }
+    @ObjCMethod("preciseLocationInView:") func preciseLocation(in view: UIView?) -> CGPoint { location(in: view) }
+    @ObjCMethod("precisePreviousLocationInView:") func precisePreviousLocation(in view: UIView?) -> CGPoint { previousLocation(in: view) }
 }
 
 final class EventState: ObjectState {
@@ -87,9 +99,24 @@ open class UIEvent: NSObject {
     @ObjCMethod("touchesForWindow:")
     func touches(for window: UIWindow) -> NSObject? { set(state.touches.filter { $0.state.window?.objcObject == window.objcObject }) }
 
+    /// The touches a recognizer hears of: every one, as it hears of all
+    /// the touches in its view and the view's subviews.
+    @ObjCMethod("touchesForGestureRecognizer:")
+    func touches(for recognizer: NSObject) -> NSObject? { set(state.touches) }
+
+    @ObjCMethod("coalescedTouchesForTouch:")
+    func coalescedTouches(for touch: UITouch) -> NSObject? { NSMutableArray.of([touch]) }
+
+    @ObjCMethod("predictedTouchesForTouch:")
+    func predictedTouches(for touch: UITouch) -> NSObject? { NSMutableArray.of([]) }
+
     @ObjCMethod("type") func type() -> Int { 0 }
     @ObjCMethod("subtype") func subtype() -> Int { 0 }
     @ObjCMethod("timestamp") func timestamp() -> Double { state.timestamp }
+    /// No modifier keys are held, and the touch is a finger's, not a
+    /// button's.
+    @ObjCMethod("modifierFlags") func modifierFlags() -> Int { 0 }
+    @ObjCMethod("buttonMask") func buttonMask() -> Int { 0 }
 }
 
 /// UIResponder's touch messages, sent so overrides run.
@@ -99,6 +126,8 @@ extension NSObject {
     @ObjCMethod("touchesEnded:withEvent:") func sendTouchesEnded(_ touches: NSObject, with event: NSObject?)
     @ObjCMethod("touchesCancelled:withEvent:") func sendTouchesCancelled(_ touches: NSObject, with event: NSObject?)
     @ObjCMethod("nextResponder") func sendNextResponder() -> NSObject?
+    @ObjCMethod("reset") func sendReset()
+    @ObjCMethod("setState:") func sendSetState(_ state: Int)
     @ObjCMethod("scrollViewWillBeginDragging:") func sendScrollViewWillBeginDragging(_ scrollView: UIScrollView)
     @ObjCMethod("scrollViewDidEndDragging:willDecelerate:") func sendScrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool)
     @ObjCMethod("scrollViewDidEndDecelerating:") func sendScrollViewDidEndDecelerating(_ scrollView: UIScrollView)
@@ -114,6 +143,12 @@ enum Touches {
     nonisolated(unsafe) private static var panning = false
     /// Whether the touched view has been sent -touchesBegan:withEvent:.
     nonisolated(unsafe) private static var delivered = false
+    /// The gesture recognizers of the touched view and its ancestors, which
+    /// hear of the touch as the view does.
+    nonisolated(unsafe) private static var recognizers: [UIGestureRecognizer] = []
+
+    /// The touch in progress, for recognizers' locationInView:.
+    static var current: UITouch? { touch }
     nonisolated(unsafe) private static var samples: [(point: CGPoint, time: Double)] = []
     /// Momentum after a pan: the scroll view and its velocity in points
     /// per second.
@@ -135,6 +170,18 @@ enum Touches {
         event.state.timestamp = touch.state.timestamp
         (Touches.touch, Touches.event) = (touch, event)
         (start, panning, samples) = (point, false, [(point, Clock.now)])
+        recognizers = []
+        var ancestor = hit
+        while let view = ancestor {
+            recognizers += view.state.gestureRecognizers.filter { $0.state.enabled }
+            ancestor = view.state.superview.map(UIView.wrap)
+        }
+        // A recognizer that finished (ended, cancelled, failed) after the
+        // last touch lifted is possible again for this one.
+        for recognizer in recognizers where recognizer.state.state >= 3 {
+            recognizer.state.state = 0
+            recognizer.sendReset()
+        }
         scrollView = hit.flatMap(scrollingAncestor)
         // In a scroll view a cell lights up only once the touch has stayed a
         // moment without moving, as iOS waits to see whether it pans.
@@ -192,6 +239,7 @@ enum Touches {
         touch.state.location = point
         touch.state.timestamp = Clock.now
         defer {
+            resetRecognizers()
             (Touches.touch, event, scrollView) = (nil, nil, nil)
             Display.markDirty()
         }
@@ -330,10 +378,44 @@ enum Touches {
 
     private enum Phase { case began, moved, ended, cancelled }
 
+    /// Recognizers first, as UIKit sends them touches: each still possible,
+    /// or recognizing a continuous gesture, hears of the phase.
+    /// With PERRY_UIKIT_TOUCH_TRACE set, each phase and the recognizers it
+    /// goes to, with their states, are written to standard error.
+    nonisolated(unsafe) private static let tracing = getenv("PERRY_UIKIT_TOUCH_TRACE") != nil
+
+    private static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: UIKit: touch: \(message())\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+
+    private static func sendRecognizers(_ phase: Phase, _ set: NSMutableSet, _ event: UIEvent) {
+        trace("\(phase) to \(recognizers.map { "\($0.objcObject):\($0.state.state)" })")
+        for recognizer in recognizers where recognizer.state.state <= 2 {
+            switch phase {
+            case .began: recognizer.sendTouchesBegan(set, with: event)
+            case .moved: recognizer.sendTouchesMoved(set, with: event)
+            case .ended: recognizer.sendTouchesEnded(set, with: event)
+            case .cancelled: recognizer.sendTouchesCancelled(set, with: event)
+            }
+        }
+    }
+
+    /// Once the touch is over, each recognizer is possible again.
+    private static func resetRecognizers() {
+        for recognizer in recognizers {
+            recognizer.state.state = 0
+            recognizer.sendReset()
+        }
+        recognizers = []
+    }
+
     private static func send(_ phase: Phase) {
         guard let touch, let event, let view = touch.state.view else { return }
         let set = NSMutableSet.empty()
         set.add(touch)
+        sendRecognizers(phase, set, event)
         switch phase {
         case .began: view.sendTouchesBegan(set, with: event)
         case .moved: view.sendTouchesMoved(set, with: event)
