@@ -140,15 +140,42 @@ enum Snapshot {
     }
 
     /// The view tree beside the image: each view's class, frame, bounds
-    /// origin when scrolled, and whether it is hidden.
+    /// origin when scrolled, how its layer clips, and whether it is hidden.
     private static func describe(_ view: UIView, depth: Int, into tree: inout String) {
         let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
         let frame = view.state.frame
         tree += String(repeating: "  ", count: depth) + "\(name) (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))"
         let origin = view.state.bounds.origin
         if origin != .zero { tree += " bounds origin (\(origin.x), \(origin.y))" }
+        if let geometry = view.state.geometry {
+            if geometry.masksToBounds { tree += " clips" }
+            if geometry.cornerRadius > 0 { tree += " radius \(geometry.cornerRadius)" }
+            if geometry.layer.mask() != nil { tree += " masked" }
+            if let presented = geometry.layer.presentationLayer() {
+                let model = geometry.layer
+                if presented.frame() != model.frame() { tree += " presented \(presented.frame())" }
+                if presented.bounds() != model.bounds() { tree += " presented bounds \(presented.bounds())" }
+                if presented.masksToBounds() != model.masksToBounds() { tree += " presented clips \(presented.masksToBounds())" }
+            }
+        }
         tree += view.state.hidden ? " hidden\n" : "\n"
         for subview in view.state.subviews { describe(subview, depth: depth + 1, into: &tree) }
+        // Sublayers of no subview, which SwiftUI draws some content in.
+        if let layer = view.state.layer {
+            let viewLayers = Set(view.state.subviews.compactMap { $0.state.layer?.objcObject })
+            describe(layer: layer, skipping: viewLayers, depth: depth + 1, into: &tree)
+        }
+    }
+
+    private static func describe(layer: CALayer, skipping: Set<UnsafeMutableRawPointer>, depth: Int, into tree: inout String) {
+        for sublayer in (layer.sublayers()?.elements ?? []).map({ $0.unsafeCast(to: CALayer.self) }) where !skipping.contains(sublayer.objcObject) {
+            let name = ObjCRuntime.objectClass(sublayer.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+            let frame = sublayer.frame()
+            tree += String(repeating: "  ", count: depth) + "layer \(name) (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))"
+            if sublayer.masksToBounds() { tree += " clips" }
+            tree += sublayer.isHidden() ? " hidden\n" : "\n"
+            describe(layer: sublayer, skipping: [], depth: depth + 1, into: &tree)
+        }
     }
 }
 
