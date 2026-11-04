@@ -371,7 +371,10 @@ open class UIGestureRecognizer: NSObject {
             let line = "perry: UIKit: touch: recognizer \(objcObject) state \(state.state) -> \(newState)\n"
             line.withCString { _ = write(2, $0, strlen($0)) }
         }
+        let old = state.state
         state.state = newState
+        // Beginning, or recognizing at once, prevents the touch's others.
+        if old == 0, newState == 1 || newState == 3 { Touches.recognizerBegan(self) }
         guard (1...4).contains(newState) else { return }
         typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
         for (target, action) in state.targets {
@@ -398,13 +401,116 @@ open class UIGestureRecognizer: NSObject {
     @ObjCMethod("pressesCancelled:withEvent:") func pressesCancelled(_ presses: NSObject?, with event: NSObject?) {}
 }
 
+final class PanState {
+    /// Where translation is measured from, in the window.
+    var origin = CGPoint.zero
+    /// Recent touch locations, for velocity.
+    var samples: [(point: CGPoint, time: Double)] = []
+}
+
+/// A pan: begins once the touch has moved ten points, if its delegate
+/// agrees, then changes with each move and ends as the touch lifts.
+/// Translation and velocity are the touch's, which views here don't rotate
+/// or scale.
 @ObjCClass("UIPanGestureRecognizer")
 open class UIPanGestureRecognizer: UIGestureRecognizer {
-    @ObjCMethod("translationInView:") func translation(in view: UIView?) -> CGPoint { .zero }
-    @ObjCMethod("setTranslation:inView:") func setTranslation(_ translation: CGPoint, in view: UIView?) {}
-    @ObjCMethod("velocityInView:") func velocity(in view: UIView?) -> CGPoint { .zero }
+    nonisolated(unsafe) static var pans: [UnsafeMutableRawPointer: PanState] = [:]
+    var pan: PanState {
+        if let pan = UIPanGestureRecognizer.pans[objcObject] { return pan }
+        let pan = PanState()
+        UIPanGestureRecognizer.pans[objcObject] = pan
+        return pan
+    }
+
+    /// Points the touch moves before the pan begins.
+    static var hysteresis: CGFloat { 10 }
+
+    @ObjCMethod("dealloc")
+    override func dealloc() {
+        UIPanGestureRecognizer.pans[objcObject] = nil
+        super.dealloc()
+    }
+
+    private var location: CGPoint? { Touches.current?.location(in: nil) }
+
+    private func sample() {
+        guard let point = location else { return }
+        let now = Clock.now
+        pan.samples.append((point, now))
+        // The last tenth of a second, and at least the last two.
+        while pan.samples.count > 2, let first = pan.samples.first, now - first.time > 0.1 { pan.samples.removeFirst() }
+    }
+
+    @ObjCMethod("touchesBegan:withEvent:")
+    override func touchesBegan(_ touches: NSObject?, with event: NSObject?) {
+        guard let point = location else { return }
+        pan.origin = point
+        pan.samples = [(point, Clock.now)]
+    }
+
+    @ObjCMethod("touchesMoved:withEvent:")
+    override func touchesMoved(_ touches: NSObject?, with event: NSObject?) {
+        guard let point = location else { return }
+        sample()
+        switch state.state {
+        case 0:
+            let start = pan.origin
+            guard hypot(point.x - start.x, point.y - start.y) >= UIPanGestureRecognizer.hysteresis else { return }
+            if let delegate = delegate(), delegate.responds(to: "gestureRecognizerShouldBegin:"),
+               !delegate.sendGestureRecognizerShouldBegin(self) {
+                sendSetState(5)
+                return
+            }
+            // Translation counts from where the pan begins.
+            pan.origin = point
+            sendSetState(1)
+        case 1, 2:
+            sendSetState(2)
+        default:
+            break
+        }
+    }
+
+    @ObjCMethod("touchesEnded:withEvent:")
+    override func touchesEnded(_ touches: NSObject?, with event: NSObject?) {
+        sample()
+        switch state.state {
+        case 1, 2: sendSetState(3)
+        case 0: sendSetState(5)
+        default: break
+        }
+    }
+
+    @ObjCMethod("touchesCancelled:withEvent:")
+    override func touchesCancelled(_ touches: NSObject?, with event: NSObject?) {
+        if state.state == 1 || state.state == 2 { sendSetState(4) } else if state.state == 0 { sendSetState(5) }
+    }
+
+    @ObjCMethod("translationInView:")
+    func translation(in view: UIView?) -> CGPoint {
+        guard let point = location else { return .zero }
+        return CGPoint(x: point.x - pan.origin.x, y: point.y - pan.origin.y)
+    }
+
+    @ObjCMethod("setTranslation:inView:")
+    func setTranslation(_ translation: CGPoint, in view: UIView?) {
+        guard let point = location else { return }
+        pan.origin = CGPoint(x: point.x - translation.x, y: point.y - translation.y)
+    }
+
+    /// Points per second, over the last tenth of a second (or the last two
+    /// moves, if slower).
+    @ObjCMethod("velocityInView:")
+    func velocity(in view: UIView?) -> CGPoint {
+        guard let first = pan.samples.first, let last = pan.samples.last, last.time > first.time else { return .zero }
+        let elapsed = last.time - first.time
+        return CGPoint(x: (last.point.x - first.point.x) / elapsed, y: (last.point.y - first.point.y) / elapsed)
+    }
+
     @ObjCMethod("minimumNumberOfTouches") func minimumNumberOfTouches() -> UInt { 1 }
+    @ObjCMethod("setMinimumNumberOfTouches:") func setMinimumNumberOfTouches(_ count: UInt) {}
     @ObjCMethod("maximumNumberOfTouches") func maximumNumberOfTouches() -> UInt { UInt.max }
+    @ObjCMethod("setMaximumNumberOfTouches:") func setMaximumNumberOfTouches(_ count: UInt) {}
 }
 
 @ObjCClass("UIScrollViewPanGestureRecognizer")

@@ -5,8 +5,8 @@
 //  Status: Perry's implementation, interim
 //
 //  Picker, as a row that steps through its options when tapped; sheets,
-//  drawn over the presenting view; and the modifiers that have no effect
-//  yet (refresh, file import).
+//  drawn over the presenting view; the refresh action scroll views run;
+//  and file import, which shows nothing yet.
 
 #if os(iOS) || os(visionOS)
 public import Foundation
@@ -113,11 +113,43 @@ struct SheetModifier<Sheet: View>: ViewModifier {
 
 // MARK: - Modifiers without an effect yet
 
+// MARK: - refreshable
+
+/// An action that initiates a refresh operation: the action a view's
+/// `refreshable` modifier gives the views in it. A scroll view pulled down
+/// past its top runs it.
+@available(OpenSwiftUI_v3_0, *)
+public struct RefreshAction: Sendable {
+    let action: @Sendable () async -> Void
+
+    public func callAsFunction() async {
+        await action()
+    }
+}
+
+struct RefreshActionKey: EnvironmentKey {
+    static let defaultValue: RefreshAction? = nil
+}
+
+@available(OpenSwiftUI_v3_0, *)
+extension EnvironmentValues {
+    /// A refresh action stored in a view's environment.
+    public var refresh: RefreshAction? {
+        get { self[RefreshActionKey.self] }
+    }
+
+    var refreshAction: RefreshAction? {
+        get { self[RefreshActionKey.self] }
+        set { self[RefreshActionKey.self] = newValue }
+    }
+}
+
 @available(OpenSwiftUI_v3_0, *)
 extension View {
-    /// Marks this view as refreshable. Nothing pulls to refresh yet.
-    nonisolated public func refreshable(action: @escaping @Sendable () async -> Void) -> some View {
-        self
+    /// Marks this view as refreshable: scroll views in it run the action
+    /// when pulled down past their top.
+    nonisolated public func refreshable(@_inheritActorContext action: @escaping @Sendable () async -> Void) -> some View {
+        environment(\.refreshAction, RefreshAction(action: action))
     }
 }
 

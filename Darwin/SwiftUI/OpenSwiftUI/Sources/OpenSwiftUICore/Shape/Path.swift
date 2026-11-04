@@ -362,8 +362,8 @@ public struct Path: Equatable, LosslessStringConvertible, @unchecked Sendable {
             storage = .empty
             return
         }
-        // TODO: addRoundedRect
-        _openSwiftUIUnimplementedFailure()
+        storage = .empty
+        addRoundedRect(in: rect, cornerRadii: cornerRadii, style: style)
     }
 
     /// Creates a path as an ellipse within the given rectangle.
@@ -642,7 +642,22 @@ public struct Path: Equatable, LosslessStringConvertible, @unchecked Sendable {
     /// Returns a stroked copy of the path using `style` to define how the
     /// stroked outline is created.
     public func strokedPath(_ style: StrokeStyle) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        #if canImport(CoreGraphics)
+        // FIXME: Use RB API instead of CG API
+        guard !isEmpty else { return Path() }
+        var path = cgPath
+        if !style.dash.isEmpty {
+            path = path.copy(dashingWithPhase: style.dashPhase, lengths: style.dash)
+        }
+        return Path(path.copy(
+            strokingWithWidth: style.lineWidth,
+            lineCap: style.lineCap,
+            lineJoin: style.lineJoin,
+            miterLimit: style.miterLimit
+        ))
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
     }
 
     /// Returns a partial copy of the path.
@@ -758,19 +773,37 @@ extension TrimmedPath: Sendable {}
 
 @available(OpenSwiftUI_v1_0, *)
 extension Path {
+    // FIXME: Use RB instead of CG
+    /// Changes a mutable copy of the path's CoreGraphics path, which then
+    /// becomes the path.
+    private mutating func mutate(_ body: (CGMutablePath) -> Void) {
+        #if canImport(CoreGraphics)
+        let path: CGMutablePath
+        if case .empty = storage {
+            path = CGMutablePath()
+        } else {
+            path = cgPath.mutableCopy()!
+        }
+        body(path)
+        storage = path.isEmpty ? .empty : .path(PathBox(path))
+        #else
+        _openSwiftUIPlatformUnimplementedFailure()
+        #endif
+    }
+
     public mutating func move(to end: CGPoint) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.move(to: end) }
     }
 
     public mutating func addLine(to end: CGPoint) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addLine(to: end) }
     }
 
     public mutating func addQuadCurve(
         to end: CGPoint,
         control: CGPoint
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addQuadCurve(to: end, control: control) }
     }
 
     public mutating func addCurve(
@@ -778,18 +811,18 @@ extension Path {
         control1: CGPoint,
         control2: CGPoint
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addCurve(to: end, control1: control1, control2: control2) }
     }
 
     public mutating func closeSubpath() {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.closeSubpath() }
     }
 
     public mutating func addRect(
         _ rect: CGRect,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addRect(rect, transform: transform) }
     }
 
     public mutating func addRoundedRect(
@@ -798,7 +831,9 @@ extension Path {
         style: RoundedCornerStyle = .continuous,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        let width = min(max(cornerSize.width, 0), rect.width / 2)
+        let height = min(max(cornerSize.height, 0), rect.height / 2)
+        mutate { $0.addRoundedRect(in: rect, cornerWidth: width, cornerHeight: height, transform: transform) }
     }
 
     @available(OpenSwiftUI_v4_0, *)
@@ -808,25 +843,54 @@ extension Path {
         style: RoundedCornerStyle = .continuous,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        let rect = rect.standardized
+        let limit = min(rect.width, rect.height) / 2
+        func clamp(_ radius: CGFloat) -> CGFloat { min(max(radius, 0), limit) }
+        let topLeading = clamp(cornerRadii.topLeading), topTrailing = clamp(cornerRadii.topTrailing)
+        let bottomTrailing = clamp(cornerRadii.bottomTrailing), bottomLeading = clamp(cornerRadii.bottomLeading)
+        let quarter = CGFloat.pi / 2
+        mutate { path in
+            path.move(to: CGPoint(x: rect.minX + topLeading, y: rect.minY), transform: transform)
+            path.addLine(to: CGPoint(x: rect.maxX - topTrailing, y: rect.minY), transform: transform)
+            if topTrailing > 0 {
+                path.addArc(center: CGPoint(x: rect.maxX - topTrailing, y: rect.minY + topTrailing), radius: topTrailing,
+                            startAngle: -quarter, endAngle: 0, clockwise: false, transform: transform)
+            }
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomTrailing), transform: transform)
+            if bottomTrailing > 0 {
+                path.addArc(center: CGPoint(x: rect.maxX - bottomTrailing, y: rect.maxY - bottomTrailing), radius: bottomTrailing,
+                            startAngle: 0, endAngle: quarter, clockwise: false, transform: transform)
+            }
+            path.addLine(to: CGPoint(x: rect.minX + bottomLeading, y: rect.maxY), transform: transform)
+            if bottomLeading > 0 {
+                path.addArc(center: CGPoint(x: rect.minX + bottomLeading, y: rect.maxY - bottomLeading), radius: bottomLeading,
+                            startAngle: quarter, endAngle: 2 * quarter, clockwise: false, transform: transform)
+            }
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeading), transform: transform)
+            if topLeading > 0 {
+                path.addArc(center: CGPoint(x: rect.minX + topLeading, y: rect.minY + topLeading), radius: topLeading,
+                            startAngle: 2 * quarter, endAngle: 3 * quarter, clockwise: false, transform: transform)
+            }
+            path.closeSubpath()
+        }
     }
 
     public mutating func addEllipse(
         in rect: CGRect,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addEllipse(in: rect, transform: transform) }
     }
 
     public mutating func addRects(
         _ rects: [CGRect],
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addRects(rects, transform: transform) }
     }
 
     public mutating func addLines(_ lines: [CGPoint]) {
-        _openSwiftUIUnimplementedFailure()
+        mutate { $0.addLines(between: lines) }
     }
 
     public mutating func addRelativeArc(
@@ -836,7 +900,10 @@ extension Path {
         delta: Angle,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate {
+            $0.addRelativeArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians),
+                              delta: CGFloat(delta.radians), transform: transform)
+        }
     }
 
     public mutating func addArc(
@@ -847,16 +914,52 @@ extension Path {
         clockwise: Bool,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        mutate {
+            $0.addArc(center: center, radius: radius, startAngle: CGFloat(startAngle.radians),
+                      endAngle: CGFloat(endAngle.radians), clockwise: clockwise, transform: transform)
+        }
     }
 
+    /// An arc tangent to the line from the current point to `tangent1End`
+    /// and to the line from there to `tangent2End`, after a line to where
+    /// it starts.
     public mutating func addArc(
         tangent1End: CGPoint,
         tangent2End: CGPoint,
         radius: CGFloat,
         transform: CGAffineTransform = .identity
     ) {
-        _openSwiftUIUnimplementedFailure()
+        guard let current = currentPoint else {
+            move(to: tangent1End.applying(transform))
+            return
+        }
+        // The current point is already transformed; the tangents are not.
+        let inverse = transform.inverted()
+        let p0 = current.applying(inverse), p1 = tangent1End, p2 = tangent2End
+        let v1 = CGVector(dx: p0.x - p1.x, dy: p0.y - p1.y), v2 = CGVector(dx: p2.x - p1.x, dy: p2.y - p1.y)
+        let l1 = (v1.dx * v1.dx + v1.dy * v1.dy).squareRoot(), l2 = (v2.dx * v2.dx + v2.dy * v2.dy).squareRoot()
+        let cross = v1.dx * v2.dy - v1.dy * v2.dx
+        guard radius > 0, l1 > 0, l2 > 0, abs(cross) > 1e-9 * l1 * l2 else {
+            mutate { $0.addLine(to: p1, transform: transform) }
+            return
+        }
+        let u1 = CGVector(dx: v1.dx / l1, dy: v1.dy / l1), u2 = CGVector(dx: v2.dx / l2, dy: v2.dy / l2)
+        let angle = acos(max(-1, min(1, u1.dx * u2.dx + u1.dy * u2.dy)))
+        let distance = radius / tan(angle / 2)
+        let start = CGPoint(x: p1.x + u1.dx * distance, y: p1.y + u1.dy * distance)
+        let end = CGPoint(x: p1.x + u2.dx * distance, y: p1.y + u2.dy * distance)
+        // The center is along the bisector, radius away from both lines.
+        let bisector = CGVector(dx: u1.dx + u2.dx, dy: u1.dy + u2.dy)
+        let bisectorLength = (bisector.dx * bisector.dx + bisector.dy * bisector.dy).squareRoot()
+        let reach = radius / sin(angle / 2)
+        let center = CGPoint(x: p1.x + bisector.dx / bisectorLength * reach, y: p1.y + bisector.dy / bisectorLength * reach)
+        let startAngle = atan2(start.y - center.y, start.x - center.x)
+        let endAngle = atan2(end.y - center.y, end.x - center.x)
+        mutate {
+            $0.addLine(to: start, transform: transform)
+            $0.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle,
+                      clockwise: cross > 0, transform: transform)
+        }
     }
 
     public mutating func addPath(
@@ -878,7 +981,14 @@ extension Path {
     }
 
     public var currentPoint: CGPoint? {
-        get { _openSwiftUIUnimplementedFailure() }
+        get {
+            #if canImport(CoreGraphics)
+            if case .empty = storage { return nil }
+            return cgPath.currentPoint
+            #else
+            _openSwiftUIPlatformUnimplementedFailure()
+            #endif
+        }
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -981,7 +1091,7 @@ extension Path {
         dx: CGFloat,
         dy: CGFloat
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        applying(CGAffineTransform(translationX: dx, y: dy))
     }
 
     func mapPoints(_ body: (inout [CGPoint]) -> ()) -> Path {

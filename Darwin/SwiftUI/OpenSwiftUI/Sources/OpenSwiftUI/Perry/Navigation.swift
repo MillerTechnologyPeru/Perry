@@ -111,6 +111,8 @@ public struct NavigationStack<Data, Root>: View where Root: View {
         }
         .environment(\.navigationPush, { (page: AnyView) in pages.append(page) })
         .environment(\.navigationBarHeight, Self.barHeight)
+        // An edit button in the bar and the page's list share an edit mode.
+        .modifier(EditModeScopeModifier(isActive: true))
     }
 }
 
@@ -219,13 +221,13 @@ struct NavigationBarRepresentable: UIViewRepresentable {
     var onBack: () -> Void
     @Environment(\.self) private var environment
 
-    func makeUIView(context: Context) -> UINavigationBar {
-        let bar = UINavigationBar()
+    func makeUIView(context: Context) -> PassthroughNavigationBar {
+        let bar = PassthroughNavigationBar()
         bar.delegate = context.coordinator
         return bar
     }
 
-    func updateUIView(_ bar: UINavigationBar, context: Context) {
+    func updateUIView(_ bar: PassthroughNavigationBar, context: Context) {
         context.coordinator.onBack = onBack
         let strings = titles.map { $0?._resolveText(in: environment) ?? "" }
         guard strings != context.coordinator.shown else { return }
@@ -244,6 +246,16 @@ struct NavigationBarRepresentable: UIViewRepresentable {
             onBack()
             return true
         }
+    }
+}
+/// A navigation bar that takes touches only on its back button, leaving
+/// the rest to the bar items drawn over it.
+final class PassthroughNavigationBar: UINavigationBar {
+    static var backButtonWidth: CGFloat { 100 }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard (items?.count ?? 0) > 1, point.x < Self.backButtonWidth else { return nil }
+        return super.hitTest(point, with: event)
     }
 }
 #endif

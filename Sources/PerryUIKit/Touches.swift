@@ -127,6 +127,11 @@ extension NSObject {
     @ObjCMethod("touchesCancelled:withEvent:") func sendTouchesCancelled(_ touches: NSObject, with event: NSObject?)
     @ObjCMethod("nextResponder") func sendNextResponder() -> NSObject?
     @ObjCMethod("reset") func sendReset()
+    @ObjCMethod("canPreventGestureRecognizer:") func sendCanPrevent(_ other: UIGestureRecognizer) -> Bool
+    @ObjCMethod("canBePreventedByGestureRecognizer:") func sendCanBePrevented(by other: UIGestureRecognizer) -> Bool
+    @ObjCMethod("gestureRecognizerShouldBegin:") func sendGestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool
+    @ObjCMethod("gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:")
+    func sendGestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool
     @ObjCMethod("setState:") func sendSetState(_ state: Int)
     @ObjCMethod("scrollViewWillBeginDragging:") func sendScrollViewWillBeginDragging(_ scrollView: UIScrollView)
     @ObjCMethod("scrollViewDidEndDragging:willDecelerate:") func sendScrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool)
@@ -146,6 +151,44 @@ enum Touches {
     /// The gesture recognizers of the touched view and its ancestors, which
     /// hear of the touch as the view does.
     nonisolated(unsafe) private static var recognizers: [UIGestureRecognizer] = []
+
+    /// Whether the touched view's touches were cancelled by a recognizer
+    /// that began, after which it hears of no more.
+    nonisolated(unsafe) private static var viewCancelled = false
+
+    /// A recognizer of the touch began (or recognized): the touch's other
+    /// recognizers fail, or are cancelled if they had begun, unless either
+    /// delegate lets the two recognize together, or one can't prevent the
+    /// other. One that cancels touches in view cancels the touched view's.
+    static func recognizerBegan(_ recognizer: UIGestureRecognizer) {
+        guard touch != nil, recognizers.contains(where: { $0.objcObject == recognizer.objcObject }) else { return }
+        let set = NSMutableSet.empty()
+        if let touch { set.add(touch) }
+        for other in recognizers where other.objcObject != recognizer.objcObject && other.state.state <= 2 {
+            if simultaneous(recognizer, other) { continue }
+            guard recognizer.sendCanPrevent(other), other.sendCanBePrevented(by: recognizer) else { continue }
+            trace("\(recognizer.objcObject) prevents \(other.objcObject) (state \(other.state.state))")
+            if let event { other.sendTouchesCancelled(set, with: event) }
+            other.sendSetState(other.state.state == 0 ? 5 : 4)
+            other.sendReset()
+        }
+        if recognizer.state.cancelsTouchesInView, delivered, !viewCancelled, let view = touch?.state.view, let event {
+            viewCancelled = true
+            touch?.state.phase = 4
+            view.sendTouchesCancelled(set, with: event)
+        }
+    }
+
+    private static func simultaneous(_ first: UIGestureRecognizer, _ second: UIGestureRecognizer) -> Bool {
+        for (recognizer, other) in [(first, second), (second, first)] {
+            if let delegate = recognizer.delegate(),
+               delegate.responds(to: "gestureRecognizer:shouldRecognizeSimultaneouslyWithGestureRecognizer:"),
+               delegate.sendGestureRecognizer(recognizer, shouldRecognizeSimultaneouslyWith: other) {
+                return true
+            }
+        }
+        return false
+    }
 
     /// The touch in progress, for recognizers' locationInView:.
     static var current: UITouch? { touch }
@@ -171,6 +214,7 @@ enum Touches {
         (Touches.touch, Touches.event) = (touch, event)
         (start, panning, samples) = (point, false, [(point, Clock.now)])
         recognizers = []
+        viewCancelled = false
         var ancestor = hit
         while let view = ancestor {
             recognizers += view.state.gestureRecognizers.filter { $0.state.enabled }
@@ -416,6 +460,7 @@ enum Touches {
         let set = NSMutableSet.empty()
         set.add(touch)
         sendRecognizers(phase, set, event)
+        if viewCancelled { return }
         switch phase {
         case .began: view.sendTouchesBegan(set, with: event)
         case .moved: view.sendTouchesMoved(set, with: event)
