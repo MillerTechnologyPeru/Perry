@@ -722,6 +722,12 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Gesture recognizers
 
+    /// UIKit's private notice of ancestors' geometry changes, which
+    /// SwiftUI's hosting view asks for: views here are laid out anew each
+    /// pass, so there is nothing to register.
+    @ObjCMethod("_registerForGeometryChanges") func registerForGeometryChanges() {}
+    @ObjCMethod("_unregisterForGeometryChanges") func unregisterForGeometryChanges() {}
+
     @ObjCMethod("gestureRecognizers")
     func gestureRecognizers() -> NSObject? { state.gestureRecognizers.isEmpty ? nil : NSMutableArray.of(state.gestureRecognizers) }
 
