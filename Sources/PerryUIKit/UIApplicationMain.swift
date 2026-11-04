@@ -13,6 +13,7 @@ public func UIApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
         Launch.run(principalClassName: principalClassName.map { String(objCArgument: $0) },
                    delegateClassName: delegateClassName.map { String(objCArgument: $0) })
     }
+    Lifecycle.installSignalHandlers()
     NSRunLoop.main().run()
     return 0
 }
@@ -57,6 +58,7 @@ enum Launch {
             Application.state = .active
             delegate?.applicationDidBecomeActive(application)
             Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
+            Lifecycle.launched = true
         }
     }
 }
@@ -162,6 +164,7 @@ enum Scenes {
             scene.state.delegate = delegateClass.object.newInstance()
         }
         Application.connectedScenes?.add(scene)
+        Lifecycle.scenes.append(scene)
 
         let sceneDelegate = scene.state.delegate?.unsafeCast(to: AnyUISceneDelegate.self)
         Application.post(Notifications.UISceneWillConnectNotification, object: scene)
@@ -180,6 +183,7 @@ enum Scenes {
 
             Application.state = .active
             Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
+            Lifecycle.launched = true
         }
     }
 }
