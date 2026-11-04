@@ -147,7 +147,7 @@ enum Display {
     /// redraws when something changed; then again in a sixtieth of a second.
     private static func tick() {
         if let compositor {
-            if compositor.handleEvents() { exit(0) }
+            if compositor.handleEvents() { Lifecycle.terminate() }
             ObjCRuntime.autoreleasepool {
                 Touches.step()
                 Animations.step()
@@ -211,7 +211,7 @@ enum Display {
             case 12: // Expose
                 dirty = true
             case 33: // ClientMessage: the window was closed.
-                if raw.load(fromByteOffset: 56, as: UInt.self) == deleteAtom { exit(0) }
+                if raw.load(fromByteOffset: 56, as: UInt.self) == deleteAtom { Lifecycle.terminate() }
             default:
                 break
             }
