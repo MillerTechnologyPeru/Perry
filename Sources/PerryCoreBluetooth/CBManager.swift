@@ -177,12 +177,11 @@ open class CBCentralManager: CBManager {
         guard state.scanServices.isEmpty || services.contains(where: state.scanServices.contains) else { return }
         state.reported.insert(path)
 
-        let peripheral = Registry.peripheral(path: path)
+        let peripheral = Registry.peripheral(path: path, manager: objcObject)
         let peer = peripheral.peripheral
         peer.address = device["Address"]?.stringValue
         peer.name = device["Name"]?.stringValue ?? peer.name
         peer.rssi = rssi
-        peer.manager = objcObject
         guard let delegate = delegate(), delegate.responds(to: "centralManager:didDiscoverPeripheral:advertisementData:RSSI:") else { return }
         delegate.sendCentralManager(self, didDiscover: peripheral, advertisementData: Advertisement.data(device, services: services),
                                     rssi: NSNumber.make(integer: rssi))
@@ -196,18 +195,21 @@ open class CBCentralManager: CBManager {
         let peer = peripheral.peripheral
         guard peer.state == PeripheralState.disconnected else { return }
         peer.state = PeripheralState.connecting
-        peer.manager = objcObject
         peer.cancelling = false
+        bluetoothTrace("connect \(peer.path)")
         let owner = Unchecked(self), target = Unchecked(peripheral), path = peer.path
         central.command {
             let result = await Self.connect(path, cancelled: { owner.value.isCancelled(target.value) })
-            let resolved = await BlueZ.shared.properties(path, BlueZInterface.device)?["ServicesResolved"]?.boolValue ?? false
             Dispatch.on(owner.value.central.queue) {
                 let manager = owner.value, peripheral = target.value
                 guard peripheral.peripheral.state == PeripheralState.connecting else { return }
                 switch result {
-                case .success: if resolved { manager.connected(peripheral) }
+                case .success:
+                    // As on Darwin, the link being up is the connection;
+                    // discovering services waits for BlueZ to resolve them.
+                    manager.connected(peripheral)
                 case .failure(let failure):
+                    bluetoothTrace("connect \(path) failed: \(failure)")
                     peripheral.disconnected()
                     guard !peripheral.peripheral.cancelling else { return manager.disconnected(peripheral) }
                     let timedOut = (failure as? BlueZError)?.message.contains("timed out") == true
@@ -252,6 +254,7 @@ open class CBCentralManager: CBManager {
         guard peer.state != PeripheralState.disconnected else { return }
         peer.cancelling = true
         peer.state = PeripheralState.disconnecting
+        bluetoothTrace("disconnect \(peer.path)")
         let owner = Unchecked(self), target = Unchecked(peripheral), path = peer.path
         central.command {
             _ = try? await BlueZ.shared.call(path, BlueZInterface.device, "Disconnect")
@@ -264,6 +267,7 @@ open class CBCentralManager: CBManager {
 
     private func connected(_ peripheral: CBPeripheral) {
         guard peripheral.peripheral.state == PeripheralState.connecting else { return }
+        bluetoothTrace("didConnect \(peripheral.peripheral.path)")
         peripheral.peripheral.state = PeripheralState.connected
         guard let delegate = delegate(), delegate.responds(to: "centralManager:didConnectPeripheral:") else { return }
         delegate.sendCentralManager(self, didConnect: peripheral)
@@ -274,6 +278,7 @@ open class CBCentralManager: CBManager {
         guard peer.state != PeripheralState.disconnected || peer.cancelling else { return }
         let error = peer.cancelling ? nil : BluetoothErrors.cb(BluetoothErrors.peripheralDisconnected)
         let wasConnecting = peer.state == PeripheralState.connecting
+        bluetoothTrace("disconnected \(peer.path), \(error == nil ? "asked for" : "lost")")
         peer.cancelling = false
         peripheral.disconnected()
         guard let delegate = delegate() else { return }
@@ -315,11 +320,10 @@ open class CBCentralManager: CBManager {
     }
 
     private func peripheral(_ path: String, _ device: [String: DBusValue]) -> CBPeripheral {
-        let peripheral = Registry.peripheral(path: path)
+        let peripheral = Registry.peripheral(path: path, manager: objcObject)
         let peer = peripheral.peripheral
         peer.address = device["Address"]?.stringValue
         peer.name = device["Name"]?.stringValue ?? peer.name
-        if peer.manager == nil { peer.manager = objcObject }
         return peripheral
     }
 
@@ -351,8 +355,8 @@ open class CBCentralManager: CBManager {
                 if ["RSSI", "ManufacturerData", "ServiceData", "TxPower"].contains(where: { changed[$0] != nil }) {
                     discovered(path, device)
                 }
-                let peripheral = Registry.lock.withLock { Registry.peripherals[path] }
-                guard let peripheral, peripheral.peripheral.manager == objcObject else { return }
+                let peripheral = Registry.lock.withLock { Registry.peripherals[Registry.key(objcObject, path)] }
+                guard let peripheral else { return }
                 if let name = changed["Name"]?.stringValue { peripheral.nameChanged(name) }
                 if changed["ServicesResolved"]?.boolValue == true { connected(peripheral) }
                 // While connecting, Connect's answer decides: BlueZ may drop
@@ -362,8 +366,8 @@ open class CBCentralManager: CBManager {
                 }
             case BlueZInterface.characteristic:
                 guard let bytes = changed["Value"]?.bytes,
-                      let characteristic = Registry.lock.withLock({ Registry.characteristics[path] }),
-                      let peripheral = characteristic.owner, peripheral.peripheral.manager == objcObject else { return }
+                      let characteristic = Registry.lock.withLock({ Registry.characteristics[Registry.key(objcObject, path)] }),
+                      let peripheral = characteristic.owner else { return }
                 if let mtu = changed["MTU"]?.intValue { peripheral.peripheral.mtu = mtu }
                 peripheral.valueChanged(characteristic, bytes: bytes)
             default:
