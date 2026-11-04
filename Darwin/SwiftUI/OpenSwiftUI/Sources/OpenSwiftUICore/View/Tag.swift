@@ -6,6 +6,8 @@
 //  Status: Complete
 //  ID: 0F8CE0FEFF8003CACFB16F1C88624A9F (SwiftUICore)
 
+import OpenAttributeGraphShims
+
 // MARK: - View + Tag
 
 @available(OpenSwiftUI_v1_0, *)
@@ -268,3 +270,63 @@ private class TagIndexProjection<Value>: Projection where Value: Hashable {
         lhs === rhs
     }
 }
+
+// MARK: - _TagTraitWritingModifier
+
+/// Tags its content, as `tag(_:includeOptional:)` does from iOS 26: the
+/// tag's trait, and the optional tag's when `includeOptional` is set.
+@available(OpenSwiftUI_v1_0, *)
+@frozen
+public struct _TagTraitWritingModifier<TagValue>: PrimitiveViewModifier where TagValue: Hashable {
+    public let tag: TagValue
+    public let includeOptional: Bool
+
+    @inlinable
+    nonisolated public init(tag: TagValue, includeOptional: Bool) {
+        self.tag = tag
+        self.includeOptional = includeOptional
+    }
+
+    nonisolated public static func _makeView(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewInputs,
+        body: @escaping (_Graph, _ViewInputs) -> _ViewOutputs
+    ) -> _ViewOutputs {
+        body(_Graph(), inputs)
+    }
+
+    nonisolated public static func _makeViewList(
+        modifier: _GraphValue<Self>,
+        inputs: _ViewListInputs,
+        body: @escaping (_Graph, _ViewListInputs) -> _ViewListOutputs
+    ) -> _ViewListOutputs {
+        var inputs = inputs
+        let attribute = Attribute(AddTags(modifier: modifier.value, traits: OptionalAttribute(inputs.traits)))
+        inputs.addTraitKey(TagValueTraitKey<TagValue>.self)
+        inputs.addTraitKey(TagValueTraitKey<TagValue?>.self)
+        inputs.traits = attribute
+        return body(_Graph(), inputs)
+    }
+
+    nonisolated public static func _viewListCount(
+        inputs: _ViewListCountInputs,
+        body: (_ViewListCountInputs) -> Int?
+    ) -> Int? {
+        body(inputs)
+    }
+
+    private struct AddTags: Rule {
+        @Attribute var modifier: _TagTraitWritingModifier
+        @OptionalAttribute var traits: ViewTraitCollection?
+
+        var value: ViewTraitCollection {
+            var traits = traits ?? ViewTraitCollection()
+            traits[TagValueTraitKey<TagValue>.self] = .tagged(modifier.tag)
+            traits[TagValueTraitKey<TagValue?>.self] = modifier.includeOptional ? .tagged(Optional(modifier.tag)) : .untagged
+            return traits
+        }
+    }
+}
+
+@available(*, unavailable)
+extension _TagTraitWritingModifier: Sendable {}
