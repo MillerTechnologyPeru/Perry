@@ -171,6 +171,12 @@ class UIKitGestureRecognizer: UIGestureRecognizer {
         updateInheritedPhase(inheritedPhase)
     }
 
+    /// SwiftUI's gestures don't keep the hosting view's other recognizers
+    /// (scroll views' pans, say) from recognizing; those cancel them.
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
     override func reset() {
         eventBridge?.reset(
             eventSource: self,
