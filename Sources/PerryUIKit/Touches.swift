@@ -479,7 +479,8 @@ extension UIResponder {
 
 /// With PERRY_UIKIT_TAPS set to steps separated by semicolons, each is
 /// done in turn, two seconds apart, beginning two seconds after a window
-/// first shows: "195,120" taps a point; "type:Hello" types text, and
+/// first shows: "195,120" taps a point; "drag:195,600,195,200" swipes
+/// from the first point to the second over a quarter second; "type:Hello" types text, and
 /// "key:return", "key:backspace" and "key:escape" press those keys, for
 /// the first responder. To reach an app's later screens without a display,
 /// along with PERRY_UIKIT_SNAPSHOT, which then also keeps what shows a
@@ -487,6 +488,7 @@ extension UIResponder {
 enum TapScript {
     enum Step {
         case tap(CGPoint)
+        case drag(CGPoint, CGPoint)
         case type(String)
         case key(String)
     }
@@ -502,6 +504,11 @@ enum TapScript {
         steps = String(cString: setting).split(separator: ";").compactMap { item in
             if item.hasPrefix("type:") { return .type(String(item.dropFirst(5))) }
             if item.hasPrefix("key:") { return .key(String(item.dropFirst(4))) }
+            if item.hasPrefix("drag:") {
+                let values = item.dropFirst(5).split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+                guard values.count == 4 else { return nil }
+                return .drag(CGPoint(x: values[0], y: values[1]), CGPoint(x: values[2], y: values[3]))
+            }
             let values = item.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
             return values.count == 2 ? .tap(CGPoint(x: values[0], y: values[1])) : nil
         }
@@ -519,6 +526,8 @@ enum TapScript {
                 TapScript.lastTap = point
                 Touches.down(at: point)
                 Display.dispatchAfter?(Display.dispatchTime!(0, 150_000_000), Updates.mainQueue, nil) { _ in Touches.up(at: TapScript.lastTap) }
+            case .drag(let start, let end):
+                TapScript.drag(from: start, to: end)
             case .type(let text):
                 Keyboard.insert(text)
             case .key(let name):
@@ -533,6 +542,28 @@ enum TapScript {
             let number = TapScript.stepsDone
             Deferred.run(after: 1) { Snapshot.writeNumbered(number) }
             TapScript.next()
+        }
+    }
+
+    /// The points a drag under way has still to move through.
+    nonisolated(unsafe) private static var dragPath: [CGPoint] = []
+
+    /// Down at `start`, through ten moves 25 ms apart to `end`, and up.
+    private static func drag(from start: CGPoint, to end: CGPoint) {
+        dragPath = (1...10).map { step in
+            let fraction = CGFloat(step) / 10
+            return CGPoint(x: start.x + (end.x - start.x) * fraction, y: start.y + (end.y - start.y) * fraction)
+        }
+        Touches.down(at: start)
+        moveAlongDrag()
+    }
+
+    private static func moveAlongDrag() {
+        Display.dispatchAfter?(Display.dispatchTime!(0, 25_000_000), Updates.mainQueue, nil) { _ in
+            guard !TapScript.dragPath.isEmpty else { return }
+            let point = TapScript.dragPath.removeFirst()
+            Touches.move(to: point)
+            if TapScript.dragPath.isEmpty { Touches.up(at: point) } else { TapScript.moveAlongDrag() }
         }
     }
 }
