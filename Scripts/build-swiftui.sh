@@ -123,10 +123,39 @@ rm -f "$products"/*.o
 
 # Every package's objects in one image; libswiftDemangle, which the iOS SDK
 # does not ship, links through a stub of the exports Compute uses.
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -emit-library "$products"/*.o \
-    -framework UIKit -framework CoreServices -framework QuartzCore -framework CoreText \
-    -lMobileGestalt -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
-    -Xlinker -install_name -Xlinker /System/Library/Frameworks/SwiftUI.framework/SwiftUI \
-    -Xlinker -not_for_dyld_shared_cache -Xlinker -ObjC \
-    -o "$out/SwiftUI.framework/SwiftUI"
-echo "$out/SwiftUI.framework/SwiftUI"
+link() { # extra linker arguments...
+    xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -emit-library "$products"/*.o \
+        -framework UIKit -framework CoreServices -framework QuartzCore -framework CoreText \
+        -lMobileGestalt -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
+        -Xlinker -install_name -Xlinker /System/Library/Frameworks/SwiftUI.framework/SwiftUI \
+        -Xlinker -not_for_dyld_shared_cache -Xlinker -ObjC "$@" \
+        -o "$out/SwiftUI.framework/SwiftUI"
+}
+link
+
+# OpenSwiftUI's extensions on OpenSwiftUICore's types (EnvironmentValues,
+# Text...) are another module's to the compiler, so their members mangle as
+# extension members ("…ValuesVAAE10scenePhase…"). SwiftUICore's types are
+# originally SwiftUI's, so SwiftUI's own extensions mangle as the type's
+# members ("…ValuesV10scenePhase…"), and apps bind those names. Each such
+# member gets that name too, where it demangles to the same declaration.
+aliases=$work/aliases.txt
+nm -gU "$out/SwiftUI.framework/SwiftUI" | awk '{print $3}' | python3 -I -c '
+import re, subprocess, sys
+pairs = []
+for symbol in sys.stdin.read().split():
+    match = re.match(r"^(_\$s7SwiftUI\d+[A-Za-z_0-9]*?[VCO])AAE(\d.*)$", symbol)
+    if match:
+        pairs.append((symbol, match.group(1) + match.group(2)))
+def demangled(names):
+    output = subprocess.run(["xcrun", "swift-demangle", "--compact"], input="\n".join(names),
+                            capture_output=True, text=True).stdout
+    return output.split("\n")[:len(names)]
+original = demangled([a for a, _ in pairs])
+alias = demangled([b for _, b in pairs])
+for (a, b), x, y in zip(pairs, original, alias):
+    if x.replace("(extension in SwiftUI):", "") == y:
+        print(a, b)
+' > "$aliases"
+link -Xlinker -alias_list -Xlinker "$aliases"
+echo "$out/SwiftUI.framework/SwiftUI ($(wc -l < "$aliases" | tr -d ' ') same-module aliases)"
