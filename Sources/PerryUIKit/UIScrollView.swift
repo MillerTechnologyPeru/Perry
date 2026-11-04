@@ -16,7 +16,8 @@ final class ScrollViewState: ObjectState {
     var adjustmentBehavior = 0
     /// The adjusted insets last applied to the offset.
     var appliedAdjustedInset = UIEdgeInsets.zero
-    var delegate: UnsafeMutableRawPointer?
+    /// Weak, as Darwin's.
+    let delegate = WeakObject()
     var scrollEnabled = true
     var pagingEnabled = false
     var bounces = true
@@ -84,8 +85,8 @@ open class UIScrollView: UIView {
         super.dealloc()
     }
 
-    @ObjCMethod("delegate") func delegate() -> NSObject? { scroll.delegate.map { NSObject($0) } }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { scroll.delegate = delegate?.objcObject }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { scroll.delegate.object.map { NSObject($0) } }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { scroll.delegate.object = delegate?.objcObject }
 
     // MARK: Content
 
@@ -291,7 +292,8 @@ extension NSObject {
 final class GestureRecognizerState: ObjectState {
     /// The view the recognizer is attached to; not retained.
     var view: UnsafeMutableRawPointer?
-    var delegate: UnsafeMutableRawPointer?
+    /// Weak, as Darwin's.
+    let delegate = WeakObject()
     var targets: [(target: UnsafeMutableRawPointer, action: UnsafeRawPointer)] = []
     /// UIGestureRecognizerState: possible 0.
     var state = 0
@@ -333,8 +335,8 @@ open class UIGestureRecognizer: NSObject {
     }
 
     @ObjCMethod("view") func view() -> UIView? { state.view.map(UIView.wrap) }
-    @ObjCMethod("delegate") func delegate() -> NSObject? { state.delegate.map { NSObject($0) } }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { state.delegate = delegate?.objcObject }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { state.delegate.object.map { NSObject($0) } }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { state.delegate.object = delegate?.objcObject }
     @ObjCMethod("state") func recognizerState() -> Int { state.state }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { state.enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { state.enabled = enabled }
