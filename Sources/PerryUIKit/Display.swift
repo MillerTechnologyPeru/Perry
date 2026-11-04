@@ -12,7 +12,7 @@ import PerryObjCInterop
 // PERRY_UIKIT_RENDERER=software, the window is an X11 window drawn in
 // software. The libraries are loaded when the first window appears, so
 // nothing needs them without a display. PERRY_UIKIT_DISPLAY_SCALE sets the
-// window's pixels per point (1).
+// window's pixels per point, which is otherwise chosen from the display.
 
 enum Display {
     typealias Pointer = UnsafeMutableRawPointer
@@ -25,13 +25,24 @@ enum Display {
     nonisolated(unsafe) private static var deleteAtom: UInt = 0
     nonisolated(unsafe) private static var dirty = true
     nonisolated(unsafe) private static var lastDraw = 0.0
-    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else the
-    /// desktop's scaling of its display as SDL finds it, else 1.
+    /// The most points a screen's short side has: a landscape iPhone's
+    /// height, the tallest the iPhone apps Perry runs lay out for.
+    static let iPhoneShortSide: CGFloat = 430
+
+    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else chosen from
+    /// the display as iOS pairs a screen with a scale: the desktop's
+    /// scaling of it, or more, the least whole scale that gives its usable
+    /// area's short side an iPhone's points at most, so a handheld's 1080p
+    /// screen is 640 by 360 points at @3x rather than 1920 by 1080 at @1x;
+    /// else 1.
     nonisolated(unsafe) static let scale: CGFloat = {
         if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { return value }
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
-        guard wanted, !software, let native = SDL.nativeScale() else { return 1 }
-        return native
+        guard wanted, !software else { return 1 }
+        let native = SDL.nativeScale() ?? 1
+        guard let pixels = SDL.usableDisplaySize() else { return native }
+        let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
+        return max(native, fitting, 1)
     }()
 
     private struct X {
