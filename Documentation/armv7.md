@@ -61,10 +61,29 @@ Checked with clang for `armv7-apple-ios` against `armv7-linux-gnueabihf`.
 
 ## Status
 
+An armv7 C program built with ld64 runs: `hello` (iOS 6, `LC_MAIN`, and iOS 5,
+`LC_UNIXTHREAD`) prints through libSystem's `printf` and exits with its code,
+under `perry32` or through `perry`, which hands it over.
+
 - Loader: 32-bit headers, segments, fat slice choice, `LC_UNIXTHREAD`, dyld
   info rebase and bind, unresolved-import stubs and `tlv_get_addr` for armv7.
   Chained fixups stay 64-bit.
-- `perry32` builds and links.
-- Not yet: libSystem (`PerrySystem`) for Darwin's armv7 layouts and calling
-  convention, the Objective-C runtime and `objc_msgSend`, Foundation, UIKit,
-  and the other providers, classic relocations, and Mach-O test programs.
+- libSystem (`libPerrySystem.so` for armv7): the streams, process startup and
+  errno, and `thunks_arm.S` with the functions whose arguments and results are
+  each one 32-bit word. Variadic printf and scanf read integers, pointers and
+  strings; `long long` and `double` conversions need the format-driven repack
+  described above.
+- Not yet: the rest of libSystem for Darwin's armv7 layouts and calling
+  convention (files, sockets, pthreads, mach, 64-bit arguments), the
+  Objective-C runtime and `objc_msgSend`, Foundation, UIKit, the other
+  providers, and classic relocations (iOS before 3.1).
+
+## Building and running
+
+    Scripts/build-armv7-loader.sh              # .build/armv7/bin/perry32
+    Scripts/build-armv7-system.sh              # .build/armv7/bin/libPerrySystem.so
+    Scripts/build-armv7-fixtures.sh 6.0 hello  # .build/perry-fixtures/armv7/hello
+    .build/armv7/bin/perry32 .build/perry-fixtures/armv7/hello
+
+`Scripts/build-armv7-fixtures.sh` links with `arm-apple-darwin11-ld` from
+cctools-port, installed under `.toolchains/cctools`.
