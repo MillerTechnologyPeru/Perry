@@ -248,6 +248,8 @@ final class ControllerState {
     /// GCControllerPlayerIndex: unset -1.
     var playerIndex = -1
     var pausedHandler: ObjCBlock?
+    /// SDL's buttons held at the last read, for tracing.
+    var held: [Int] = []
 
     init(gamepad: SDL.Pointer, id: UInt32, name: String) {
         (self.gamepad, self.id, self.name) = (gamepad, id, name)
@@ -448,7 +450,14 @@ enum Controllers {
         let profile = state.profile
         let gamepad = state.gamepad
         func button(_ button: Button) -> Float { SDL.getGamepadButton(gamepad, button.rawValue) ? 1 : 0 }
-        if let quit = quitButtons, !quit.isEmpty, quit.allSatisfy({ SDL.getGamepadButton(gamepad, $0.rawValue) }) {
+        if tracing {
+            let held = (0..<26).filter { SDL.getGamepadButton(gamepad, Int32($0)) }
+            if held != state.held {
+                state.held = held
+                trace("SDL buttons held: \(held)")
+            }
+        }
+        for combination in quitButtons where !combination.isEmpty && combination.allSatisfy({ SDL.getGamepadButton(gamepad, $0.rawValue) }) {
             Quit.now()
         }
         func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
@@ -482,16 +491,19 @@ enum Controllers {
 
     /// With PERRY_GAMECONTROLLER_QUIT set to buttons joined by "+" (home,
     /// select, start, a, b, x, y, l1, r1, l3, r3), holding them all quits
-    /// the app, as handhelds' ports quit with home and select.
-    nonisolated(unsafe) private static let quitButtons: [Button]? = {
-        guard let setting = getenv("PERRY_GAMECONTROLLER_QUIT") else { return nil }
+    /// the app, as handhelds' ports quit with home and select; several
+    /// combinations, separated by commas, each quit.
+    nonisolated(unsafe) private static let quitButtons: [[Button]] = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_QUIT") else { return [] }
         let names: [String: Button] = [
             "home": .guide, "guide": .guide, "select": .back, "back": .back, "start": .start, "a": .south, "b": .east,
             "x": .west, "y": .north, "l1": .leftShoulder, "r1": .rightShoulder, "l3": .leftStick, "r3": .rightStick,
         ]
-        let buttons = String(cString: setting).lowercased().split(separator: "+").compactMap { names[String($0)] }
-        trace("quit with \(buttons)")
-        return buttons
+        let combinations = String(cString: setting).lowercased().split(separator: ",").map { combination in
+            combination.split(separator: "+").compactMap { names[String($0.filter { $0 != " " })] }
+        }
+        trace("quit with \(combinations)")
+        return combinations
     }()
 
     /// How far a stick may lean, from 0 to 1, and still be at rest: as
