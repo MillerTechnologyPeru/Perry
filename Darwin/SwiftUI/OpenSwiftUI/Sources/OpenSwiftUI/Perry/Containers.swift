@@ -4,54 +4,10 @@
 //
 //  Status: Perry's implementation
 //
-//  LazyVStack, List and Form: stacks of rows in a ScrollView. LazyVStack
-//  makes all its rows up front.
+//  List and Form: sections of rows in a ScrollView.
 
 #if os(iOS) || os(visionOS)
 public import OpenSwiftUICore
-
-// MARK: - LazyVStack
-
-/// Kinds of views that can be pinned to the bounds of a scroll view.
-@available(OpenSwiftUI_v2_0, *)
-@frozen
-public struct PinnedScrollableViews: OptionSet, Sendable {
-    public let rawValue: UInt32
-
-    public init(rawValue: UInt32) { self.rawValue = rawValue }
-
-    /// The header view of each `Section` will be pinned.
-    public static let sectionHeaders = PinnedScrollableViews(rawValue: 1 << 0)
-
-    /// The footer view of each `Section` will be pinned.
-    public static let sectionFooters = PinnedScrollableViews(rawValue: 1 << 1)
-}
-
-/// A view that arranges its children in a line that grows vertically,
-/// creating items only as needed.
-@available(OpenSwiftUI_v2_0, *)
-public struct LazyVStack<Content>: View where Content: View {
-    var alignment: HorizontalAlignment
-    var spacing: CGFloat?
-    var pinnedViews: PinnedScrollableViews
-    var content: Content
-
-    public init(
-        alignment: HorizontalAlignment = .center,
-        spacing: CGFloat? = nil,
-        pinnedViews: PinnedScrollableViews = .init(),
-        @ViewBuilder content: () -> Content
-    ) {
-        self.alignment = alignment
-        self.spacing = spacing
-        self.pinnedViews = pinnedViews
-        self.content = content()
-    }
-
-    public var body: some View {
-        VStack(alignment: alignment, spacing: spacing) { content }
-    }
-}
 
 // MARK: - List and Form
 
