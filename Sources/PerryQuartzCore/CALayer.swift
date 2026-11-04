@@ -15,6 +15,37 @@ import PerryObjCInterop
 // (a view whose class has -drawRect:), and -_perryLayerContentChanged:
 // whether what it draws has changed without its saying so.
 
+/// Pixels a layer shows in place of contents, as an OpenGL ES drawable's
+/// are read back: RGBA rows, bottom row first. A new frame replaces the
+/// pixels and counts up the generation, so the compositor updates its
+/// texture in place rather than making an image each frame.
+final class LivePixels {
+    private(set) var data: UnsafeMutableRawPointer
+    private(set) var width: Int
+    private(set) var height: Int
+    private(set) var generation = 0
+    var opaque = false
+
+    init(width: Int, height: Int) {
+        (self.width, self.height) = (width, height)
+        data = .allocate(byteCount: max(width * height * 4, 4), alignment: 16)
+    }
+
+    deinit { data.deallocate() }
+
+    /// Takes a frame of `width` by `height` from `pixels`.
+    func update(from pixels: UnsafeRawPointer, width: Int, height: Int, opaque: Bool) {
+        if width != self.width || height != self.height {
+            data.deallocate()
+            (self.width, self.height) = (width, height)
+            data = .allocate(byteCount: max(width * height * 4, 4), alignment: 16)
+        }
+        data.copyMemory(from: pixels, byteCount: width * height * 4)
+        self.opaque = opaque
+        generation &+= 1
+    }
+}
+
 final class LayerState {
     /// kCAContentsFormatRGBA8Uint; the contents are drawn as RGBA whatever
     /// the format asked for.
@@ -39,6 +70,8 @@ final class LayerState {
     var shadowOffset = CGSize(width: 0, height: -3)
     var shadowRadius: CGFloat = 3
     var contents: NSObject?
+    /// A GL drawable's frames, shown in place of contents.
+    var livePixels: LivePixels?
     var contentsScale: CGFloat = 1
     var contentsGravity = "resize"
     var name: String?
@@ -145,6 +178,7 @@ final class LayerState {
         LayerState.setColor(&copy.backing, backing)
         (copy.shadowOpacity, copy.shadowOffset, copy.shadowRadius) = (shadowOpacity, shadowOffset, shadowRadius)
         (copy.contents, copy.contentsScale, copy.contentsGravity) = (contents, contentsScale, contentsGravity)
+        copy.livePixels = livePixels
         (copy.isOpaque, copy.sublayers, copy.superlayer, copy.delegate, copy.mask) = (isOpaque, sublayers, superlayer, delegate, mask)
         (copy.backingSize, copy.displayedByDelegate, copy.allowsGroupOpacity) = (backingSize, displayedByDelegate, allowsGroupOpacity)
         return copy
@@ -277,6 +311,19 @@ open class CALayer: NSObject {
     @ObjCMethod("setShadowPath:") func setShadowPath(_ path: UnsafeMutableRawPointer?) {}
     @ObjCMethod("contents") func contents() -> NSObject? { state.contents }
     @ObjCMethod("setContents:") func setContents(_ contents: NSObject?) { change("contents") { state.contents = contents } }
+
+    /// Perry's: shows a GL frame, RGBA rows bottom first, without making an
+    /// image; nil pixels go back to the contents.
+    @ObjCMethod("_perrySetPixels:width:height:opaque:")
+    func setPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool) {
+        guard let pixels, width > 0, height > 0 else {
+            changed { state.livePixels = nil }
+            return
+        }
+        let live = state.livePixels ?? LivePixels(width: width, height: height)
+        live.update(from: pixels, width: width, height: height, opaque: opaque)
+        changed { state.livePixels = live }
+    }
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat) { changed { state.contentsScale = scale } }
     @ObjCMethod("contentsGravity") func contentsGravity() -> String { state.contentsGravity }
@@ -749,7 +796,9 @@ extension CALayer {
         if let backing = model.backing {
             CG.drawFlipped(backing, in: CGRect(origin: state.bounds.origin, size: model.backingSize), context: context)
         }
-        if let contents = state.contents {
+        if let live = state.livePixels {
+            drawLivePixels(live, of: state, in: context)
+        } else if let contents = state.contents {
             drawContents(contents, of: state, in: context)
         }
         if let shape, let shapeLayer = layer.as(CAShapeLayer.self) { shapeLayer.drawShape(shape, in: context) }
@@ -824,6 +873,25 @@ extension CALayer {
 
     /// A CGImage, or an object with one (a UIImage), placed by the contents
     /// gravity.
+    /// A GL frame drawn in software, as for snapshots: its rows are bottom
+    /// first, so drawn flipped back.
+    static func drawLivePixels(_ live: LivePixels, of state: LayerState, in context: CGRef) {
+        guard let space = CG.colorSpaceCreateDeviceRGB() else { return }
+        defer { CG.release(space) }
+        // Premultiplied RGBA, first byte red.
+        guard let bitmap = CG.bitmapContextCreate(live.data, live.width, live.height, 8, live.width * 4, space, 1 | 0x4000) else { return }
+        defer { CG.release(bitmap) }
+        guard let image = CG.bitmapContextCreateImage(bitmap) else { return }
+        defer { CG.release(image) }
+        let rect = place(CGSize(width: CGFloat(live.width) / state.contentsScale, height: CGFloat(live.height) / state.contentsScale),
+                         in: state.bounds, gravity: state.contentsGravity)
+        CG.saveGState(context)
+        CG.translateCTM(context, 0, rect.minY + rect.maxY)
+        CG.scaleCTM(context, 1, -1)
+        CG.drawFlipped(image, in: rect, context: context)
+        CG.restoreGState(context)
+    }
+
     static func drawContents(_ contents: NSObject, of state: LayerState, in context: CGRef) {
         let image = contents.responds(to: "CGImage") ? contents.sendCGImage() : contents.objcObject
         guard let image else { return }
