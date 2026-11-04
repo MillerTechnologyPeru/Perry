@@ -240,9 +240,26 @@ public class NSData: NSObject {
         Errors.autoreleased(domain: Errors.cocoaDomain, code: exists ? 256 : 260, description: "The file couldn’t be opened.")
     }
 
+    /// URLs read from local files instead, as an old app's servers are
+    /// gone: PERRY_URL_MAP's URL=path pairs, separated by "|", each split
+    /// at its last "=" (a URL's query can have them; a path seldom does).
+    nonisolated(unsafe) static let urlMap: [String: String] = {
+        guard let setting = getenv("PERRY_URL_MAP") else { return [:] }
+        var map: [String: String] = [:]
+        for entry in String(cString: setting).split(separator: "|") {
+            guard let equals = entry.lastIndex(of: "=") else { continue }
+            map[String(entry[..<equals])] = String(entry[entry.index(after: equals)...])
+        }
+        return map
+    }()
+
     /// A file's bytes, or what NSURLConnection loads for other schemes,
-    /// waiting for it as Darwin does; nil when CFNetwork is not loaded.
+    /// waiting for it as Darwin does; nil when CFNetwork is not loaded. A
+    /// URL PERRY_URL_MAP maps is its file's bytes.
     static func contents(of url: NSURL) -> Data? {
+        if let path = urlMap[url.url.absoluteString] {
+            return try? Data(contentsOf: path.hasPrefix("file:") ? URL(string: path) ?? URL(filePath: path) : URL(filePath: path))
+        }
         if url.url.isFileURL { return try? Data(contentsOf: url.url) }
         let requestClass = ObjC.getClass("NSURLRequest").map(UnsafeMutableRawPointer.init)
         let connectionClass = ObjC.getClass("NSURLConnection").map(UnsafeMutableRawPointer.init)
