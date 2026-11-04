@@ -412,12 +412,23 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     uint32_t *code = (uint32_t *)(current_page.base + current_page.used);
     current_page.used += STUB_SIZE;
 
+#if defined(__LP64__)
     code[0] = 0x58000080;   // ldr x0, #16    (description)
     code[1] = 0x580000b0;   // ldr x16, #20   (handler)
     code[2] = 0xd61f0200;   // br x16
     code[3] = 0xd503201f;   // nop
     *(uint64_t *)&code[4] = (uint64_t)(uintptr_t)strdup(description);
     *(uint64_t *)&code[6] = (uint64_t)(uintptr_t)&perry_unimplemented;
+#else
+    // ARM state, so the stub's address has no Thumb bit; callers reach it by
+    // blx or bx, which switch to ARM state by that bit.
+    code[0] = 0xe59f0008;   // ldr r0, [pc, #8]   (description, at +16)
+    code[1] = 0xe59ff008;   // ldr pc, [pc, #8]   (handler, at +20)
+    code[2] = 0xe320f000;   // nop
+    code[3] = 0xe320f000;   // nop
+    code[4] = (uint32_t)(uintptr_t)strdup(description);
+    code[5] = (uint32_t)(uintptr_t)&perry_unimplemented;
+#endif
     __builtin___clear_cache((char *)code, (char *)code + STUB_SIZE);
     if (!current_page.writable_exec)
         mprotect(current_page.base, current_page.size, PROT_READ | PROT_EXEC);
