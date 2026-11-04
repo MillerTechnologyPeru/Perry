@@ -36,8 +36,15 @@ enum SDL {
     nonisolated(unsafe) static var clear: (@convention(c) (Pointer?) -> Bool)!
     nonisolated(unsafe) static var present: (@convention(c) (Pointer?) -> Bool)!
     nonisolated(unsafe) static var setClipRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
+    /// SDL 3.2's, for the frame rate overlay; nil before it.
+    nonisolated(unsafe) static var renderDebugText: (@convention(c) (Pointer?, Float, Float, UnsafePointer<CChar>) -> Bool)?
+    nonisolated(unsafe) static var setRenderScale: (@convention(c) (Pointer?, Float, Float) -> Bool)?
 
     static let pixelFormatARGB8888: UInt32 = 0x1636_2004
+    /// R, G, B, A bytes, as OpenGL reads pixels back.
+    static let pixelFormatABGR8888: UInt32 = 0x1676_2004
+    static let blendNone: UInt32 = 0
+    static let textureAccessStreaming: Int32 = 1
     static let blendBlend: UInt32 = 0x1
     static let blendPremultiplied: UInt32 = 0x10
 
@@ -61,6 +68,8 @@ enum SDL {
             return unsafeBitCast(symbol, to: T.self)
         }
         createTexture = bind("SDL_CreateTexture")
+        renderDebugText = dlsym(library, "SDL_RenderDebugText").map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Float, Float, UnsafePointer<CChar>) -> Bool).self) }
+        setRenderScale = dlsym(library, "SDL_SetRenderScale").map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Float, Float) -> Bool).self) }
         updateTexture = bind("SDL_UpdateTexture")
         setTextureBlendMode = bind("SDL_SetTextureBlendMode")
         setTextureAlphaMod = bind("SDL_SetTextureAlphaModFloat")
@@ -144,6 +153,7 @@ final class Compositor {
     /// Composites the roots, each placed in the screen by its own transform.
     func draw(_ roots: [CALayer]) {
         for key in textures.keys { textures[key]?.used = false }
+        for key in liveTextures.keys { liveTextures[key]?.used = false }
         _ = SDL.setDrawColor(renderer, 0, 0, 0, 1)
         _ = SDL.setClipRect(renderer, nil)
         _ = SDL.clear(renderer)
@@ -155,6 +165,11 @@ final class Compositor {
             SDL.destroyTexture(entry.texture)
             textures[key] = nil
         }
+        for (key, entry) in liveTextures where !entry.used {
+            SDL.destroyTexture(entry.texture)
+            liveTextures[key] = nil
+        }
+        if FrameRate.on { FrameRate.frame(renderer: renderer) }
         _ = SDL.present(renderer)
     }
 
@@ -177,7 +192,10 @@ final class Compositor {
         let rounded = state.cornerRadius > 0 && state.backgroundColor != nil
         let textured = layer.state.backing != nil || state.contents != nil || rounded || shape != nil
             || (!aligned && state.backgroundColor != nil)
-        if textured {
+        if let live = state.livePixels {
+            if let background = state.backgroundColor, !live.opaque { fill(frame, with: background, alpha: alpha) }
+            drawLive(live, of: layer, state: state, toScreen: toScreen, alpha: alpha)
+        } else if textured {
             drawTexture(of: layer, state: state, shape: shape, border: false, toScreen: toScreen, alpha: alpha)
         } else if let background = state.backgroundColor {
             fill(frame, with: background, alpha: alpha)
@@ -269,6 +287,42 @@ final class Compositor {
         _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
     }
 
+    /// The persistent streaming textures of layers showing GL frames, and
+    /// the generation each last took.
+    private var liveTextures: [UnsafeMutableRawPointer: (texture: SDL.Pointer, width: Int, height: Int, generation: Int, used: Bool)] = [:]
+
+    /// A GL frame: its texture updated in place when the frame is new, and
+    /// drawn flipped upright, as the rows are bottom first.
+    private func drawLive(_ live: LivePixels, of layer: CALayer, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
+        let key = layer.objcObject
+        var entry = liveTextures[key]
+        if let current = entry, current.width != live.width || current.height != live.height {
+            SDL.destroyTexture(current.texture)
+            entry = nil
+        }
+        if entry == nil {
+            guard let texture = SDL.createTexture(renderer, SDL.pixelFormatABGR8888, SDL.textureAccessStreaming,
+                                                  Int32(live.width), Int32(live.height)) else { return }
+            _ = SDL.setTextureScaleMode(texture, 1)
+            entry = (texture, live.width, live.height, live.generation &- 1, true)
+        }
+        guard var current = entry else { return }
+        if current.generation != live.generation {
+            _ = SDL.updateTexture(current.texture, nil, live.data, Int32(live.width * 4))
+            FrameRate.glFrames += max(live.generation &- current.generation, 1)
+            current.generation = live.generation
+        }
+        current.used = true
+        liveTextures[key] = current
+        _ = SDL.setTextureBlendMode(current.texture, live.opaque && alpha >= 1 ? SDL.blendNone : SDL.blendPremultiplied)
+        let level = Float(alpha)
+        _ = SDL.setTextureAlphaMod(current.texture, level)
+        _ = SDL.setTextureColorMod(current.texture, level, level, level)
+        var target = pixels(toScreen.apply(state.bounds))
+        // SDL_FLIP_VERTICAL.
+        _ = SDL.renderTextureRotated(renderer, current.texture, nil, &target, 0, nil, 2)
+    }
+
     /// The layer's texture, drawn again when what it shows has changed.
     private func texture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool) -> SDL.Pointer? {
         let key = Key(layer: layer.objcObject, border: border)
@@ -309,5 +363,51 @@ final class Compositor {
         _ = SDL.setTextureScaleMode(texture, 1)
         textures[key] = Entry(texture: texture, signature: signature, used: true)
         return texture
+    }
+}
+
+/// With PERRY_UIKIT_FPS set, the frames composited each second, and the new
+/// OpenGL ES frames among them (the app's own rate), drawn in the corner
+/// and written to standard error.
+enum FrameRate {
+    nonisolated(unsafe) static let on = getenv("PERRY_UIKIT_FPS") != nil
+    nonisolated(unsafe) static var glFrames = 0
+    nonisolated(unsafe) private static var frames = 0
+    nonisolated(unsafe) private static var since = now()
+    nonisolated(unsafe) private static var text = "fps -"
+
+    private static func now() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+    }
+
+    nonisolated(unsafe) private static var lastFrame = 0.0
+
+    static func frame(renderer: SDL.Pointer?) {
+        frames += 1
+        let time = now()
+        if lastFrame > 0, time - lastFrame > 0.15 {
+            let line = "perry: UIKit: hitch \(Int((time - lastFrame) * 1000)) ms between frames at \(Int(time * 1000) % 1_000_000)\n"
+            _ = line.withCString { write(2, $0, strlen($0)) }
+        }
+        lastFrame = time
+        if time - since >= 1 {
+            let elapsed = time - since
+            text = "screen \(Int((Double(frames) / elapsed).rounded())) fps  GL \(Int((Double(glFrames) / elapsed).rounded())) fps"
+            let line = "perry: UIKit: \(text)\n"
+            _ = line.withCString { write(2, $0, strlen($0)) }
+            (frames, glFrames, since) = (0, 0, time)
+        }
+        guard let draw = SDL.renderDebugText else { return }
+        _ = SDL.setClipRect(renderer, nil)
+        _ = SDL.setRenderScale?(renderer, 2, 2)
+        _ = SDL.setDrawBlendMode(renderer, SDL.blendBlend)
+        _ = SDL.setDrawColor(renderer, 0, 0, 0, 0.6)
+        var back = SDL.FRect(x: 4, y: 4, w: Float(text.utf8.count * 8 + 8), h: 16)
+        _ = SDL.fillRect(renderer, &back)
+        _ = SDL.setDrawColor(renderer, 1, 1, 0.3, 1)
+        _ = text.withCString { draw(renderer, 8, 8, $0) }
+        _ = SDL.setRenderScale?(renderer, 1, 1)
     }
 }
