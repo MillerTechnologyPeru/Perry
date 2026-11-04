@@ -193,7 +193,8 @@ final class NSFileManager: NSObject {
         }
     }
 
-    /// NSFileType, NSFileSize, NSFileModificationDate and NSFilePosixPermissions.
+    /// NSFileType, NSFileSize, NSFileModificationDate, NSFileCreationDate
+    /// and NSFilePosixPermissions.
     @ObjCMethod("attributesOfItemAtPath:error:")
     func attributes(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
         var info = stat()
@@ -215,6 +216,7 @@ final class NSFileManager: NSObject {
         add("NSFileType", ObjCConstantExports.shared.object(type))
         add("NSFileSize", Numbers.make(nil, .unsigned(UInt64(info.st_size))))
         add("NSFileModificationDate", Dates.autoreleased(modified))
+        add("NSFileCreationDate", Dates.autoreleased(FileManagers.creationDate(path) ?? modified))
         add("NSFilePosixPermissions", Numbers.make(nil, .unsigned(UInt64(info.st_mode & 0o7777))))
         return Dictionaries.owned(entries)
     }
@@ -295,4 +297,26 @@ extension FileManagers {
 public func NSSearchPathForDirectoriesInDomains(_ directory: UInt, _ domains: UInt, _ expandTilde: Bool) -> UnsafeMutableRawPointer? {
     let path = FileManagers.directory(directory)
     return Arrays.autoreleased(path.map { [Strings.autoreleased($0)] } ?? [])
+}
+
+/// File attributes and protection classes; files here are not encrypted
+/// by class, so protection is only recorded.
+@ObjCConstants
+enum FileProtectionConstants {
+    static let NSFileCreationDate = "NSFileCreationDate"
+    static let NSFileProtectionKey = "NSFileProtectionKey"
+    static let NSFileProtectionNone = "NSFileProtectionNone"
+    static let NSFileProtectionComplete = "NSFileProtectionComplete"
+    static let NSFileProtectionCompleteUnlessOpen = "NSFileProtectionCompleteUnlessOpen"
+    static let NSFileProtectionCompleteUntilFirstUserAuthentication = "NSFileProtectionCompleteUntilFirstUserAuthentication"
+}
+
+extension FileManagers {
+    /// When the file was made: its birth time, which statx gives where the
+    /// file system keeps it.
+    static func creationDate(_ path: String) -> Date? {
+        var seconds: Int64 = 0, nanoseconds: UInt32 = 0
+        guard perry_foundation_birth_time(path, &seconds, &nanoseconds) else { return nil }
+        return Date(timeIntervalSince1970: Double(seconds) + Double(nanoseconds) / 1e9)
+    }
 }
