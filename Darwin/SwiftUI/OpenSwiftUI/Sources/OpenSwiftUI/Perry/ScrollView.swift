@@ -73,6 +73,13 @@ struct ScrollViewport<Content: View>: View {
     /// Whether the refresh action a pull started is running.
     @State private var refreshing = false
     @Environment(\.refreshAction) private var refresh
+    /// The reader the scroll view is in, and its way to scroll for it.
+    @Environment(\.scrollRegistry) private var registry
+    @State private var scroller = ScrollTargetScroller()
+    /// The indicators' opacity: shown while scrolling, then faded out.
+    @State private var indicatorOpacity: Double = 0
+    /// Counts scrolls, so an indicator fade only follows the last one.
+    @State private var scrollCount = 0
     /// Where the content was before it last moved to `offset`, which an
     /// animation may still be carrying it from.
     @State private var previousOffset: CGSize = .zero
@@ -93,6 +100,7 @@ struct ScrollViewport<Content: View>: View {
             .coordinateSpace(name: ScrollViewportInfo.contentSpace)
         }
         .environment(\.scrollViewport, viewportInfo)
+        .environment(\.scrollTargetScroller, prepareScroller())
         .overlay(alignment: .top) { refreshIndicator }
         .overlay(alignment: .topLeading) { indicators }
         .clipped()
@@ -126,9 +134,38 @@ struct ScrollViewport<Content: View>: View {
 
     // MARK: Scrolling
 
+    /// The scroller targets are found through, kept up to date with the
+    /// viewport, and in the reader the scroll view is in.
+    func prepareScroller() -> ScrollTargetScroller {
+        let scroller = scroller
+        let offset = $offset, previous = $previousOffset, metrics = metrics
+        scroller.axes = axes
+        scroller.current = { (metrics.viewport, offset.wrappedValue) }
+        scroller.move = { target in
+            previous.wrappedValue = offset.wrappedValue
+            offset.wrappedValue = clamp(target)
+            showIndicators()
+        }
+        registry?.register(scroller)
+        return scroller
+    }
+
+    /// Shows the indicators, and fades them out once scrolling stops.
+    func showIndicators() {
+        indicatorOpacity = 1
+        scrollCount &+= 1
+        let count = scrollCount, current = $scrollCount, opacity = $indicatorOpacity
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard current.wrappedValue == count else { return }
+            withAnimation(.easeOut(duration: 0.3)) { opacity.wrappedValue = 0 }
+        }
+    }
+
     /// The pan's translation moves the content from where it was as the
     /// pan began, stretching past the ends.
     func panChanged(_ translation: CGSize) {
+        if indicatorOpacity != 1 { indicatorOpacity = 1 }
         let origin = dragOrigin ?? offset
         if dragOrigin == nil { dragOrigin = offset }
         previousOffset = offset
@@ -162,6 +199,7 @@ struct ScrollViewport<Content: View>: View {
             offset = target
             dragOrigin = nil
         }
+        showIndicators()
     }
 
     /// Seconds of release velocity the content glides on for.
@@ -205,11 +243,11 @@ struct ScrollViewport<Content: View>: View {
 
     // MARK: Indicators
 
-    /// While dragging, a bar along each scrolling axis whose length and
-    /// place show the viewport's in the content.
+    /// While scrolling, a bar along each scrolling axis whose length and
+    /// place show the viewport's in the content; they fade once it stops.
     @ViewBuilder
     var indicators: some View {
-        if showsIndicators, dragOrigin != nil {
+        if showsIndicators {
             let size = metrics.viewport, content = metrics.content, limit = metrics.limit(axes)
             ZStack(alignment: .topLeading) {
                 if axes.contains(.vertical), content.height > size.height {
@@ -230,6 +268,7 @@ struct ScrollViewport<Content: View>: View {
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .opacity(indicatorOpacity)
             .allowsHitTesting(false)
         }
     }
