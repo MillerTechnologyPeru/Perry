@@ -16,8 +16,12 @@ static uint64_t bind_target(perry_loader *loader, perry_image *image, int ordina
     return (uint64_t)(uintptr_t)sym.address;
 }
 
-static void write_bind(perry_loader *loader, uint64_t *loc, uint64_t value, const char *name) {
-    *loc = value;
+// A pointer-sized slot in the image, which Darwin's ARM ABIs size as the
+// loader's own pointers: 8 bytes for arm64, 4 for armv7.
+typedef uintptr_t slot_t;
+
+static void write_bind(perry_loader *loader, slot_t *loc, uint64_t value, const char *name) {
+    *loc = (slot_t)value;
     if (loader->report)
         perry_record_bind_location(loc, name);
     perry_trace(PERRY_TRACE_BIND, "bind %p = 0x%llx %s", (void *)loc, (unsigned long long)value, name);
@@ -25,6 +29,10 @@ static void write_bind(perry_loader *loader, uint64_t *loc, uint64_t value, cons
 
 // MARK: - Chained fixups
 
+// Chained fixups are 64-bit: DYLD_CHAINED_PTR_64 and its offset form. Images
+// for iOS 2 through 10 carry dyld info opcodes instead, which every pointer
+// width uses.
+#if defined(__LP64__)
 typedef struct chained_import {
     uint64_t target;    // resolved address including the import's addend
     const char *name;
@@ -39,7 +47,7 @@ static void walk_chain(perry_loader *loader, perry_image *image, uint16_t format
             uint32_t ordinal = (uint32_t)CHAINED_PTR64_ORDINAL(raw);
             if (ordinal >= import_count)
                 perry_fatal("%s: chained bind ordinal %u out of range", image->path, ordinal);
-            write_bind(loader, (uint64_t *)loc, imports[ordinal].target + CHAINED_PTR64_ADDEND(raw),
+            write_bind(loader, (slot_t *)loc, imports[ordinal].target + CHAINED_PTR64_ADDEND(raw),
                        imports[ordinal].name);
         } else {
             uint64_t target = CHAINED_PTR64_TARGET(raw);
@@ -144,6 +152,12 @@ static void apply_chained_fixups(perry_loader *loader, perry_image *image) {
     }
     free(imports);
 }
+#else
+static void apply_chained_fixups(perry_loader *loader, perry_image *image) {
+    (void)loader;
+    perry_fatal("%s: chained fixups are not supported in a 32-bit image", image->path);
+}
+#endif
 
 // MARK: - Dyld info opcodes
 
@@ -177,27 +191,27 @@ static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8
             offset += perry_read_uleb(&p, end);
             break;
         case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
-            offset += (uint64_t)imm * 8;
+            offset += (uint64_t)imm * sizeof(slot_t);
             break;
         case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
-            for (unsigned i = 0; i < imm; i++, offset += 8)
-                *(uint64_t *)segment_address(image, seg, offset) += (uint64_t)image->slide;
+            for (unsigned i = 0; i < imm; i++, offset += sizeof(slot_t))
+                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES: {
             uint64_t count = perry_read_uleb(&p, end);
-            for (uint64_t i = 0; i < count; i++, offset += 8)
-                *(uint64_t *)segment_address(image, seg, offset) += (uint64_t)image->slide;
+            for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t))
+                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
             break;
         }
         case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
-            *(uint64_t *)segment_address(image, seg, offset) += (uint64_t)image->slide;
-            offset += 8 + perry_read_uleb(&p, end);
+            *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+            offset += sizeof(slot_t) + perry_read_uleb(&p, end);
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB: {
             uint64_t count = perry_read_uleb(&p, end);
             uint64_t skip = perry_read_uleb(&p, end);
-            for (uint64_t i = 0; i < count; i++, offset += 8 + skip)
-                *(uint64_t *)segment_address(image, seg, offset) += (uint64_t)image->slide;
+            for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t) + skip)
+                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
             break;
         }
         default:
@@ -226,7 +240,7 @@ static void run_bind_opcodes(perry_loader *loader, perry_image *image, const uin
             cache_valid = true; \
         } \
         if (kind != BIND_WEAK || cached) \
-            write_bind(loader, (uint64_t *)segment_address(image, seg, offset), cached + (uint64_t)addend, name); \
+            write_bind(loader, (slot_t *)segment_address(image, seg, offset), cached + (uint64_t)addend, name); \
     } while (0)
 
     while (p < end) {
@@ -272,22 +286,22 @@ static void run_bind_opcodes(perry_loader *loader, perry_image *image, const uin
             break;
         case BIND_OPCODE_DO_BIND:
             DO_BIND();
-            offset += 8;
+            offset += sizeof(slot_t);
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
             DO_BIND();
-            offset += 8 + perry_read_uleb(&p, end);
+            offset += sizeof(slot_t) + perry_read_uleb(&p, end);
             break;
         case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
             DO_BIND();
-            offset += 8 + (uint64_t)imm * 8;
+            offset += sizeof(slot_t) + (uint64_t)imm * sizeof(slot_t);
             break;
         case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB: {
             uint64_t count = perry_read_uleb(&p, end);
             uint64_t skip = perry_read_uleb(&p, end);
             for (uint64_t i = 0; i < count; i++) {
                 DO_BIND();
-                offset += 8 + skip;
+                offset += sizeof(slot_t) + skip;
             }
             break;
         }
