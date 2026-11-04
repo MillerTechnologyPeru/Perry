@@ -181,3 +181,25 @@ enum AttributeNames {
     static let NSUnderlineStyleAttributeName = "NSUnderline"
     static let NSStrikethroughStyleAttributeName = "NSStrikethrough"
 }
+
+/// Activity types, and the services and text attributes of frameworks
+/// UIKit stands in for: Social's, and CoreText's.
+@ObjCConstants
+enum ActivityConstants {
+    static let UIActivityTypeAirDrop = "com.apple.UIKit.activity.AirDrop"
+    static let UIActivityTypeAssignToContact = "com.apple.UIKit.activity.AssignToContact"
+    static let UIActivityTypePostToFacebook = "com.apple.UIKit.activity.PostToFacebook"
+    static let UIActivityTypePostToTwitter = "com.apple.UIKit.activity.PostToTwitter"
+    static let UIActivityTypePostToWeibo = "com.apple.UIKit.activity.PostToWeibo"
+    static let UIActivityTypePostToTencentWeibo = "com.apple.UIKit.activity.TencentWeibo"
+    static let UIActivityTypeMail = "com.apple.UIKit.activity.Mail"
+    static let UIActivityTypeMessage = "com.apple.UIKit.activity.Message"
+    static let UIActivityTypeCopyToPasteboard = "com.apple.UIKit.activity.CopyToPasteboard"
+    static let UIActivityTypePrint = "com.apple.UIKit.activity.Print"
+    static let SLServiceTypeFacebook = "com.apple.social.facebook"
+    static let SLServiceTypeTwitter = "com.apple.social.twitter"
+    static let SLServiceTypeSinaWeibo = "com.apple.social.sinaweibo"
+    static let SLServiceTypeTencentWeibo = "com.apple.social.tencentweibo"
+    static let kCTForegroundColorAttributeName = "CTForegroundColor"
+    static let kCTFontAttributeName = "NSFont"
+}
