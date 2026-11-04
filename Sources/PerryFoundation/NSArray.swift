@@ -206,6 +206,24 @@ public class NSArray: NSObject {
         return elements.firstIndex { ObjectKey(object: $0) == ObjectKey(object: target.id) }.map(UInt.init) ?? notFound
     }
 
+    /// The first element that is `target` itself, not only equal to it.
+    @ObjCMethod("indexOfObjectIdenticalTo:")
+    func index(ofIdentical target: ObjCObject?) -> UInt {
+        guard let target else { return notFound }
+        return elements.firstIndex { $0 == target.id }.map(UInt.init) ?? notFound
+    }
+
+    @ObjCMethod("indexOfObjectIdenticalTo:inRange:")
+    func index(ofIdentical target: ObjCObject?, in range: NSRange) -> UInt {
+        guard let target else { return notFound }
+        let all = elements
+        let start = Int(range.location)
+        let end = min(all.count, start + Int(range.length))
+        guard start < end else { return notFound }
+        let found: Int? = (start..<end).first { all[$0] == target.id }
+        return found.map { UInt($0) } ?? notFound
+    }
+
     @ObjCMethod("containsObject:")
     func contains(_ target: ObjCObject?) -> Bool { index(of: target) != notFound }
 
@@ -366,6 +384,16 @@ public class NSMutableArray: NSArray {
         let matches = { (object: id) in ObjectKey(object: object) == ObjectKey(object: element.id) }
         let removed = storage.objects.filter(matches)
         storage.objects.removeAll(where: matches)
+        storage.enumeration.mutated()
+        for item in removed { ObjC.release(item) }
+    }
+
+    /// Removes the elements that are `element` itself.
+    @ObjCMethod("removeObjectIdenticalTo:")
+    func remove(identical element: ObjCObject?) {
+        guard let element else { return }
+        let removed = storage.objects.filter { $0 == element.id }
+        storage.objects.removeAll { $0 == element.id }
         storage.enumeration.mutated()
         for item in removed { ObjC.release(item) }
     }
