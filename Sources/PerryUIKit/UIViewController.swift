@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UIViewController: owns a view, which it loads the first time it is asked
@@ -467,6 +468,17 @@ open class UIViewController: UIResponder {
     /// disappears.
     static func coversPresenter(_ style: Int) -> Bool { style == 0 || style == 3 }
 
+    /// The style a presentation takes: automatic (-2) is full screen for
+    /// player view controllers, and for every controller in apps built
+    /// before the iOS 13 SDK, which had no sheets by default; else a page
+    /// sheet.
+    var presentationStyle: Int {
+        let style = state.modalPresentationStyle
+        guard style == -2 else { return style }
+        if !ProgramSDK.iOS13 || ObjCRuntime.isKind(objcObject, of: AVPlayerViewController.objCClass.pointer) { return 0 }
+        return 1
+    }
+
     /// Presents `controller` from the root of this controller's
     /// containment, loading its view now; the transition runs in the next
     /// update pass.
@@ -540,20 +552,33 @@ open class UIViewController: UIResponder {
     }
 }
 
+/// Whether the app was built with an SDK at least iOS 13's, which brought
+/// sheets as the default presentation; true when that can't be told.
+enum ProgramSDK {
+    nonisolated(unsafe) static let iOS13: Bool = {
+        // dyld_program_sdk_at_least takes a dyld_build_version_t, a platform
+        // (iOS 2) and a version (13.0.0), in one register.
+        typealias AtLeast = @convention(c) (UInt64) -> Bool
+        let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD)
+        guard let atLeast = dlsym(system, "_dyld_program_sdk_at_least") else { return true }
+        return unsafeBitCast(atLeast, to: AtLeast.self)(UInt64(2) | UInt64(0x000D_0000) << 32)
+    }()
+}
+
 /// Modal presentation, run in update passes.
 enum Presentations {
     static func present(_ controller: UIViewController, from presenter: UIViewController, animated: Bool) {
-        guard let presenterView = presenter.state.view, let window = presenterView.window()?.unsafeCast(to: UIWindow.self) else { return }
-        let covers = UIViewController.coversPresenter(controller.state.modalPresentationStyle)
+        guard let presenterView = presenter.state.view, let window = window(for: presenter) else { return }
+        let covers = UIViewController.coversPresenter(controller.presentationStyle)
         if covers { _ = presenter.beginAppearance(false, animated: animated) }
         _ = controller.beginAppearance(true, animated: animated)
 
         let bounds = window.state.bounds
         let container = UITransitionView.objCClass.object.allocated().initializeView(frame: bounds).unsafeCast(to: UIView.self)
         let view = controller.loadedView
-        view.sendSetFrame(covers || controller.state.modalPresentationStyle == 5 ? bounds : sheetFrame(in: window))
+        view.sendSetFrame(covers || controller.presentationStyle == 5 ? bounds : sheetFrame(in: window))
         container.setAutoresizingMask(18)
-        if covers || controller.state.modalPresentationStyle == 5 { view.setAutoresizingMask(18) }
+        if covers || controller.presentationStyle == 5 { view.setAutoresizingMask(18) }
         container.addSubview(view)
         window.addSubview(container)
         if covers, let superview = presenterView.superview() {
@@ -565,11 +590,30 @@ enum Presentations {
         if covers { presenter.finishAppearance() }
     }
 
+    /// The window to present in: the presenter's view's, or, when an app
+    /// has taken that view out of its window before the presentation's
+    /// update pass, the window whose root view controller the presenter or
+    /// one of its parents is, else the key window. UIKit presents at once,
+    /// while the presenter's view is still in the window.
+    static func window(for presenter: UIViewController) -> UIWindow? {
+        if let window = presenter.state.view?.window() { return window.unsafeCast(to: UIWindow.self) }
+        var controller: UIViewController? = presenter
+        while let current = controller {
+            if let window = Windows.visible.first(where: { $0.windowState.rootViewController?.objcObject == current.objcObject }) {
+                return window
+            }
+            controller = current.state.parent.map(UIViewController.wrap)
+        }
+        return Windows.key.map { UIWindow(objcObject: $0, ownership: .retain) }
+    }
+
     static func dismiss(_ controller: UIViewController, animated: Bool) {
         guard let presenterObject = controller.state.presenting else { return }
         let presenter = UIViewController.wrap(presenterObject)
         if let presented = controller.state.presented { dismiss(presented, animated: false) }
-        let covers = presenter.state.coveredSuperview != nil
+        // Whether the presenter was covered, and so reappears: by the style,
+        // as its view may have left its superview before it was presented.
+        let covers = UIViewController.coversPresenter(controller.presentationStyle)
         _ = controller.beginAppearance(false, animated: animated)
         if covers { _ = presenter.beginAppearance(true, animated: animated) }
         if let superview = presenter.state.coveredSuperview, let view = presenter.state.view {
@@ -579,10 +623,11 @@ enum Presentations {
         let container = controller.state.view?.superview()
         controller.state.view?.removeFromSuperview()
         container?.removeFromSuperview()
-        if covers { presenter.finishAppearance() }
-        controller.finishAppearance()
+        // Unlinked first: the presenter's -viewDidAppear: may present again.
         presenter.state.presented = nil
         controller.state.presenting = nil
+        controller.finishAppearance()
+        if covers { presenter.finishAppearance() }
     }
 
     /// A page sheet: below the top safe area, inset a little.
