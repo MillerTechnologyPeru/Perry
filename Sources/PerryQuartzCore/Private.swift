@@ -110,7 +110,10 @@ final class ObjectStates<State: AnyObject>: @unchecked Sendable {
 
 final class PresentationModifierState {
     var keyPath = ""
+    /// The value last set.
     var value: NSObject?
+    /// The value shown: the value last set, once its group is flushed.
+    var presented: NSObject?
     var enabled = true
     var additive = false
     var group: NSObject?
@@ -119,9 +122,11 @@ final class PresentationModifierState {
 }
 
 /// CAPresentationModifier (private): a value for a layer's key path that
-/// shows without a transaction. Here the value becomes the layer's, with
-/// actions off, when its group is flushed, on the main queue, which owns the
-/// layer tree.
+/// shows in place of the layer's own, or added to it, while the modifier is
+/// on the layer: in how the layer presents, not its model. A value set
+/// shows at once, or in a group when the group is flushed. SwiftUI shows
+/// geometry it lays out off the main thread through these, until the main
+/// thread sets the layers' own values and removes them.
 @ObjCClass("CAPresentationModifier")
 open class CAPresentationModifier: NSObject {
     static let states = ObjectStates { PresentationModifierState() }
@@ -154,7 +159,10 @@ open class CAPresentationModifier: NSObject {
 
     @ObjCMethod("keyPath") func keyPath() -> String { modifier.keyPath }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { modifier.enabled }
-    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { modifier.enabled = enabled }
+    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) {
+        PresentationModifiers.withLock { modifier.enabled = enabled }
+        Compositing.changed()
+    }
     @ObjCMethod("additive") func additive() -> Bool { modifier.additive }
     @ObjCMethod("group") func group() -> NSObject? { modifier.group }
     @ObjCMethod("value") func value() -> NSObject? { modifier.value }
@@ -162,29 +170,72 @@ open class CAPresentationModifier: NSObject {
     /// Without a group the value shows at once; in one, when it is flushed.
     @ObjCMethod("setValue:")
     func setValue(_ value: NSObject?) {
-        modifier.value = value
-        if modifier.group == nil { apply() }
+        let state = modifier
+        PresentationModifiers.withLock {
+            state.value = value
+            if state.group == nil { state.presented = value }
+        }
+        if state.group == nil { Compositing.changed() }
     }
 
     @ObjCMethod("setValue:velocity:")
     func setValue(_ value: NSObject?, velocity: NSObject?) { setValue(value) }
 
-    /// The value, set on the layer with actions off, from the main queue.
-    func apply() {
+    /// Shows the value last set.
+    func show() {
         let state = modifier
-        guard state.enabled, let layer = state.layer, let value = state.value else { return }
-        let retainedLayer = ObjCRuntime.retain(layer)
-        let keyPath = state.keyPath
-        Dispatch.onMain {
-            typealias Set = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
-            let disabled = CATransaction.disableActions()
-            CATransaction.setDisableActions(true)
-            unsafeBitCast(ObjCRuntime.msgSend, to: Set.self)(retainedLayer, ObjCRuntime.selector("setValue:forKeyPath:"),
-                                                              value.objcObject, keyPath.objCArgument())
-            CATransaction.setDisableActions(disabled)
-            ObjCRuntime.release(retainedLayer)
+        PresentationModifiers.withLock { state.presented = state.value }
+    }
+}
+
+/// The presentation modifiers on each layer, guarded by one lock, as
+/// SwiftUI changes them from its render thread while the main thread draws.
+enum PresentationModifiers {
+    nonisolated(unsafe) private static let mutex: UnsafeMutablePointer<pthread_mutex_t> = {
+        let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(mutex, nil)
+        return mutex
+    }()
+    nonisolated(unsafe) private static var byLayer: [UnsafeMutableRawPointer: [PresentationModifierState]] = [:]
+
+    static func withLock<T>(_ body: () -> T) -> T {
+        pthread_mutex_lock(mutex)
+        defer { pthread_mutex_unlock(mutex) }
+        return body()
+    }
+
+    static func add(_ modifier: PresentationModifierState, to layer: UnsafeMutableRawPointer) {
+        withLock {
+            modifier.layer = layer
+            if modifier.group == nil || modifier.presented == nil { modifier.presented = modifier.value }
+            byLayer[layer, default: []].append(modifier)
+        }
+        Compositing.changed()
+    }
+
+    static func remove(_ modifier: PresentationModifierState, from layer: UnsafeMutableRawPointer) {
+        withLock {
+            byLayer[layer]?.removeAll { $0 === modifier }
+            if byLayer[layer]?.isEmpty == true { byLayer[layer] = nil }
+            if modifier.layer == layer { modifier.layer = nil }
+        }
+        Compositing.changed()
+    }
+
+    static func forget(_ layer: UnsafeMutableRawPointer) { withLock { byLayer[layer] = nil } }
+
+    /// The enabled modifiers' shown values on the layer, in the order they
+    /// were added.
+    static func values(on layer: UnsafeMutableRawPointer) -> [(keyPath: String, value: NSObject, additive: Bool)] {
+        withLock {
+            (byLayer[layer] ?? []).compactMap { modifier in
+                guard modifier.enabled, let value = modifier.presented else { return nil }
+                return (modifier.keyPath, value, modifier.additive)
+            }
         }
     }
+
+    static var any: Bool { withLock { !byLayer.isEmpty } }
 }
 
 final class PresentationModifierGroupState {
@@ -220,7 +271,11 @@ open class CAPresentationModifierGroup: NSObject {
     @ObjCMethod("updatesAsynchronously") func updatesAsynchronously() -> Bool { group.updatesAsynchronously }
     @ObjCMethod("setUpdatesAsynchronously:") func setUpdatesAsynchronously(_ value: Bool) { group.updatesAsynchronously = value }
 
-    @ObjCMethod("flush") func flush() { group.modifiers.forEach { $0.apply() } }
+    @ObjCMethod("flush")
+    func flush() {
+        group.modifiers.forEach { $0.show() }
+        Compositing.changed()
+    }
     @ObjCMethod("flushWithTargetTime:") func flush(targetTime: Double) { flush() }
     @ObjCMethod("flushLocally") func flushLocally() { flush() }
     @ObjCMethod("flushLocallyWithTargetTime:") func flushLocally(targetTime: Double) { flush() }
