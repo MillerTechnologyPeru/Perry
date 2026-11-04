@@ -282,6 +282,26 @@ final class NSFileManager: NSObject {
         }
         return Arrays.owned(found.map { [$0] } ?? [])
     }
+
+    /// The directory, made if asked; the item replacement directory is a
+    /// new temporary one.
+    @ObjCMethod("URLForDirectory:inDomain:appropriateForURL:create:error:")
+    func url(for directory: UInt, in domain: UInt, appropriateFor url: ObjCObject?, create: Bool,
+             error errorPointer: UnsafeMutablePointer<id?>?) -> NSURL? {
+        let path: String
+        if directory == 99 {    // NSItemReplacementDirectory
+            path = (getenv("TMPDIR").map { String(cString: $0) } ?? "/tmp") + "/(A Document Being Saved By Perry \(UInt32.random(in: 0...UInt32.max)))"
+        } else if let found = FileManagers.directory(directory) {
+            path = found
+        } else {
+            FileManagers.report(errorPointer, "directory \(directory)")
+            return nil
+        }
+        if create || directory == 99 {
+            guard createDirectory(atPath: path, intermediates: true, attributes: nil, error: errorPointer) else { return nil }
+        }
+        return URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory))
+    }
 }
 
 extension FileManagers {
