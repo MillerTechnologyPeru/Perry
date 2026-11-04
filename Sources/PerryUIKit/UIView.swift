@@ -18,6 +18,8 @@ final class ViewState: ObjectState {
     var tintColor: UIColor?
     /// UIViewContentMode: scale to fill 0.
     var contentMode = 0
+    /// UISemanticContentAttribute: unspecified 0.
+    var semanticContentAttribute = 0
     var autoresizingMask: UInt = 0
     var autoresizesSubviews = true
     var multipleTouchEnabled = false
@@ -273,6 +275,11 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("updateConstraintsIfNeeded") func updateConstraintsIfNeeded() {}
     @ObjCMethod("updateConstraints") func updateConstraints() {}
     @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
+    @ObjCMethod("_wantsConstraintBasedLayout") func wantsConstraintBasedLayout() -> Bool { !state.constraints.isEmpty }
+    /// Alignment rects are frames: views have no alignment insets.
+    @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+    @ObjCMethod("frameForAlignmentRect:") func frame(forAlignmentRect rect: CGRect) -> CGRect { rect }
+    @ObjCMethod("alignmentRectForFrame:") func alignmentRect(forFrame frame: CGRect) -> CGRect { frame }
     @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { setNeedsLayout(); superviewNeedsLayout() }
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSizeOfView() -> CGSize { CGSize(width: -1, height: -1) }
 
@@ -418,6 +425,9 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setOpaque:") func setOpaque(_ opaque: Bool) { state.geometry.isOpaque = opaque }
     @ObjCMethod("contentMode") func contentMode() -> Int { state.contentMode }
     @ObjCMethod("setContentMode:") func setContentMode(_ mode: Int) { state.contentMode = mode }
+    @ObjCMethod("semanticContentAttribute") func semanticContentAttribute() -> Int { state.semanticContentAttribute }
+    @ObjCMethod("setSemanticContentAttribute:") func setSemanticContentAttribute(_ attribute: Int) { state.semanticContentAttribute = attribute }
+    @ObjCMethod("effectiveUserInterfaceLayoutDirection") func effectiveUserInterfaceLayoutDirection() -> Int { state.semanticContentAttribute == 4 ? 1 : 0 }
     @ObjCMethod("autoresizingMask") func autoresizingMask() -> UInt { state.autoresizingMask }
     @ObjCMethod("setAutoresizingMask:") func setAutoresizingMask(_ mask: UInt) { state.autoresizingMask = mask }
     @ObjCMethod("autoresizesSubviews") func autoresizesSubviews() -> Bool { state.autoresizesSubviews }
