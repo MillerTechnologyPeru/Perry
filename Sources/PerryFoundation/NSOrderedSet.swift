@@ -90,6 +90,9 @@ enum OrderedSets {
 /// NSOrderedSet.
 @ObjCClass("NSOrderedSet")
 public class NSOrderedSet: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSOrderedSet__") func isNSOrderedSet__() -> Bool { true }
+
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         OrderedSets.setClass = cls.storage
