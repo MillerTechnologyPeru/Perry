@@ -234,6 +234,83 @@ void darwin_os_unfair_lock_assert_owner(_Atomic uint32_t *lock) { (void)lock; }
 void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) DARWIN_SYMBOL(os_unfair_lock_assert_not_owner);
 void darwin_os_unfair_lock_assert_not_owner(_Atomic uint32_t *lock) { (void)lock; }
 
+// os_unfair_recursive_lock: an unfair lock and a count of how many times
+// its owner holds it. The unfair lock records no owner, so the owning
+// thread's ID is kept beside it here, in the count's word's upper half;
+// Darwin keeps it in the lock word, which nothing else reads.
+typedef struct {
+    _Atomic uint32_t lock;
+    _Atomic uint32_t count;
+} darwin_unfair_recursive_lock;
+
+static _Thread_local uint32_t recursive_owner_id;
+static _Atomic uint32_t recursive_owner_ids;
+
+static uint32_t recursive_self(void) {
+    if (!recursive_owner_id)
+        recursive_owner_id = atomic_fetch_add(&recursive_owner_ids, 1) + 1;
+    return recursive_owner_id;
+}
+
+// Owner in the upper 16 bits, depth in the lower 16.
+static bool recursive_owned(darwin_unfair_recursive_lock *lock) {
+    uint32_t value = atomic_load_explicit(&lock->count, memory_order_relaxed);
+    return value && (value >> 16) == (recursive_self() & 0xffff);
+}
+
+void darwin_os_unfair_recursive_lock_lock_with_options(darwin_unfair_recursive_lock *lock, uint32_t options)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_lock_with_options);
+void darwin_os_unfair_recursive_lock_lock_with_options(darwin_unfair_recursive_lock *lock, uint32_t options) {
+    (void)options;
+    if (recursive_owned(lock)) {
+        atomic_fetch_add_explicit(&lock->count, 1, memory_order_relaxed);
+        return;
+    }
+    darwin_os_unfair_lock_lock(&lock->lock);
+    atomic_store_explicit(&lock->count, ((recursive_self() & 0xffff) << 16) | 1, memory_order_relaxed);
+}
+
+bool darwin_os_unfair_recursive_lock_trylock(darwin_unfair_recursive_lock *lock) DARWIN_SYMBOL(os_unfair_recursive_lock_trylock);
+bool darwin_os_unfair_recursive_lock_trylock(darwin_unfair_recursive_lock *lock) {
+    if (recursive_owned(lock)) {
+        atomic_fetch_add_explicit(&lock->count, 1, memory_order_relaxed);
+        return true;
+    }
+    if (!darwin_os_unfair_lock_trylock(&lock->lock))
+        return false;
+    atomic_store_explicit(&lock->count, ((recursive_self() & 0xffff) << 16) | 1, memory_order_relaxed);
+    return true;
+}
+
+void darwin_os_unfair_recursive_lock_unlock(darwin_unfair_recursive_lock *lock) DARWIN_SYMBOL(os_unfair_recursive_lock_unlock);
+void darwin_os_unfair_recursive_lock_unlock(darwin_unfair_recursive_lock *lock) {
+    uint32_t value = atomic_load_explicit(&lock->count, memory_order_relaxed);
+    if ((value & 0xffff) > 1) {
+        atomic_store_explicit(&lock->count, value - 1, memory_order_relaxed);
+        return;
+    }
+    atomic_store_explicit(&lock->count, 0, memory_order_relaxed);
+    darwin_os_unfair_lock_unlock(&lock->lock);
+}
+
+// Whether the calling thread holds the lock, as libobjc's fork handling asks.
+bool darwin_os_unfair_recursive_lock_tryunlock4objc(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_tryunlock4objc);
+bool darwin_os_unfair_recursive_lock_tryunlock4objc(darwin_unfair_recursive_lock *lock) {
+    if (!recursive_owned(lock))
+        return false;
+    darwin_os_unfair_recursive_lock_unlock(lock);
+    return true;
+}
+
+void darwin_os_unfair_recursive_lock_assert_owner(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_assert_owner);
+void darwin_os_unfair_recursive_lock_assert_owner(darwin_unfair_recursive_lock *lock) { (void)lock; }
+
+void darwin_os_unfair_recursive_lock_assert_not_owner(darwin_unfair_recursive_lock *lock)
+    DARWIN_SYMBOL(os_unfair_recursive_lock_assert_not_owner);
+void darwin_os_unfair_recursive_lock_assert_not_owner(darwin_unfair_recursive_lock *lock) { (void)lock; }
+
 // MARK: - Conditions
 
 static void setup_static_cond(void *object, long sig) {
