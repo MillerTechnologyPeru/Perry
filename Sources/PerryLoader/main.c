@@ -1,4 +1,6 @@
-// perry: runs arm64 iOS and macOS Mach-O binaries on arm64 Linux.
+// perry: runs arm64 iOS and macOS Mach-O binaries on arm64 Linux, and, built
+// as a 32-bit program (perry32), armv7 iOS binaries on a kernel that runs
+// 32-bit ARM programs.
 
 #define _GNU_SOURCE
 #include "bundle.h"
@@ -115,6 +117,7 @@ static void usage(FILE *out) {
           out);
 }
 
+#if defined(__LP64__)
 // Darwin's runtimes keep pointers in 47 bits: libobjc's class_rw/ro data
 // pointers, which Swift's runtime masks with 0x7ffffffffff8, for one. Its
 // heap is there, but arm64 Linux maps memory from the top of its 48-bit
@@ -164,6 +167,42 @@ static void use_low_addresses(char **argv) {
         mmap((void *)top, page, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
 }
 
+#else
+// A 32-bit process has no address space above 4 GB to avoid.
+static void use_low_addresses(char **argv) { (void)argv; }
+#endif
+
+#if defined(__LP64__)
+// A program with no arm64 code but armv7 code is run by perry32, the same
+// loader built as a 32-bit program, which maps armv7 Mach-O beside 32-bit
+// providers: one process cannot hold both. It is found beside this program,
+// or at PERRY32.
+static void run_in_32_bit_loader(const char *executable, char **argv) {
+    unsigned archs = perry_macho_architectures(executable);
+    if (!(archs & PERRY_ARCH_ARMV7) || (archs & PERRY_ARCH_ARM64))
+        return;
+    const char *named = getenv("PERRY32");
+    char self[PATH_MAX], sibling[PATH_MAX + 16];
+    const char *path = named;
+    if (!path) {
+        ssize_t length = readlink("/proc/self/exe", self, sizeof(self) - 1);
+        if (length > 0) {
+            self[length] = 0;
+            char *slash = strrchr(self, '/');
+            if (slash)
+                *slash = 0;
+            snprintf(sibling, sizeof(sibling), "%s/perry32", self);
+            path = sibling;
+        }
+    }
+    if (!path || access(path, X_OK) != 0)
+        perry_fatal("%s is an armv7 program, which perry32 runs, and it was not found%s", executable,
+                    path ? "" : " (set PERRY32)");
+    execv(path, argv);
+    perry_fatal("cannot run %s: %s", path, strerror(errno));
+}
+#endif
+
 int main(int argc, char **argv) {
     use_low_addresses(argv);
     perry_log_init();
@@ -198,6 +237,10 @@ int main(int argc, char **argv) {
     char resolved[PATH_MAX];
     const char *executable = has_bundle ? bundle.executable_path
                            : (realpath(target, resolved) ? resolved : target);
+
+#if defined(__LP64__)
+    run_in_32_bit_loader(executable, argv);
+#endif
 
     perry_loader loader;
     perry_loader_init(&loader);
