@@ -295,8 +295,11 @@ open class EAGLContext: NSObject {
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard let layerObject = state.drawables[UInt32(name)] else { return false }
         let layer = CALayer(objcObject: layerObject, ownership: .retain)
-        guard let image = Renderbuffers.image(UInt32(name), opaque: layer.isOpaque()) else { return false }
-        layer.setContents(NSObject(image.object))
+        // The pixels go to the layer as they are read, for the compositor
+        // to stream to its texture: no image, and no flip on the CPU.
+        guard Renderbuffers.read(UInt32(name), into: { pixels, width, height in
+            layer.setPerryPixels(pixels, width: width, height: height, opaque: layer.isOpaque())
+        }) else { return false }
         Display.markDirty()
         Updates.schedule()
         return true
@@ -310,6 +313,38 @@ open class EAGLContext: NSObject {
 }
 
 enum Renderbuffers {
+    /// Where frames are read back, kept from one to the next.
+    nonisolated(unsafe) private static var buffer: (pointer: UnsafeMutableRawPointer, bytes: Int)?
+
+    /// A renderbuffer's pixels, RGBA rows bottom first as OpenGL reads
+    /// them, passed to `body`; read through a framebuffer of its own so the
+    /// app's bindings are untouched.
+    static func read(_ renderbuffer: UInt32, into body: (UnsafeRawPointer, Int, Int) -> Void) -> Bool {
+        var width: Int32 = 0, height: Int32 = 0, previousFramebuffer: Int32 = 0, previousRenderbuffer: Int32 = 0
+        GLES.getIntegerv(GLES.framebufferBinding, &previousFramebuffer)
+        GLES.getIntegerv(GLES.renderbufferBinding, &previousRenderbuffer)
+        GLES.bindRenderbuffer(GLES.renderbuffer, renderbuffer)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D42, &width)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D43, &height)
+        guard width > 0, height > 0 else { return false }
+        var framebuffer: UInt32 = 0
+        GLES.genFramebuffers(1, &framebuffer)
+        GLES.bindFramebuffer(GLES.framebuffer, framebuffer)
+        GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.colorAttachment0, GLES.renderbuffer, renderbuffer)
+        let bytes = Int(width) * Int(height) * 4
+        if buffer.map({ $0.bytes < bytes }) ?? true {
+            buffer?.pointer.deallocate()
+            buffer = (.allocate(byteCount: bytes, alignment: 16), bytes)
+        }
+        let pointer = buffer!.pointer
+        GLES.readPixels(0, 0, width, height, 0x1908, 0x1401, pointer)
+        GLES.bindFramebuffer(GLES.framebuffer, UInt32(previousFramebuffer))
+        GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(previousRenderbuffer))
+        GLES.deleteFramebuffers(1, &framebuffer)
+        body(pointer, Int(width), Int(height))
+        return true
+    }
+
     /// A renderbuffer's pixels as an image, top row first, read through a
     /// framebuffer of its own so the app's bindings are untouched.
     static func image(_ renderbuffer: UInt32, opaque: Bool) -> Owned? {
