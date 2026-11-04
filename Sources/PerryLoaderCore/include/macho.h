@@ -113,6 +113,18 @@ struct load_command {
     uint32_t cmdsize;
 };
 
+// LC_UNIXTHREAD: the initial register state, laid out by flavor.
+struct thread_command {
+    uint32_t cmd;
+    uint32_t cmdsize;
+    uint32_t flavor;
+    uint32_t count;     // in 32-bit words
+    uint32_t state[];
+};
+
+#define ARM_THREAD_STATE        1
+#define ARM_THREAD_STATE_PC     15      // r15, in the 17 words of r0-r12, sp, lr, pc, cpsr
+
 #define SG_READ_ONLY 0x10
 
 struct segment_command {
@@ -264,6 +276,20 @@ struct dyld_info_command {
     uint32_t export_off;
     uint32_t export_size;
 };
+
+struct nlist {
+    uint32_t n_strx;
+    uint8_t n_type;
+    uint8_t n_sect;
+    int16_t n_desc;
+    uint32_t n_value;
+};
+
+#define N_STAB                  0xe0
+#define N_TYPE                  0x0e
+#define N_EXT                   0x01
+#define N_SECT                  0xe
+#define N_ARM_THUMB_DEF         0x0008  // n_desc: the symbol is Thumb code
 
 struct symtab_command {
     uint32_t cmd;
