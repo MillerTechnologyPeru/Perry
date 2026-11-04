@@ -57,7 +57,7 @@ void perry_setup_thread_locals(perry_image *image) {
     for (uint32_t s = 0; s < image->segment_count; s++) {
         const perry_segment *seg = &image->segments[s];
         for (uint32_t j = 0; j < seg->nsects; j++) {
-            const struct section_64 *sect = &seg->sections[j];
+            const section_t *sect = &seg->sections[j];
             uint32_t type = sect->flags & SECTION_TYPE;
             if (type != S_THREAD_LOCAL_REGULAR && type != S_THREAD_LOCAL_ZEROFILL)
                 continue;
@@ -75,7 +75,7 @@ void perry_setup_thread_locals(perry_image *image) {
     for (uint32_t s = 0; s < image->segment_count; s++) {
         const perry_segment *seg = &image->segments[s];
         for (uint32_t j = 0; j < seg->nsects; j++) {
-            const struct section_64 *sect = &seg->sections[j];
+            const section_t *sect = &seg->sections[j];
             uint32_t type = sect->flags & SECTION_TYPE;
             if (type == S_THREAD_LOCAL_INIT_FUNCTION_POINTERS && sect->size)
                 perry_warn("%s: thread-local initializers are not run", image->path);
