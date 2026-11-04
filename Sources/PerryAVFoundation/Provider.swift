@@ -18,6 +18,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         line.withCString { _ = write(2, $0, strlen($0)) }
         abort()
     }
+    Players.load(symbol)
     return true
 }
 

@@ -61,6 +61,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libopenal1 \
  && rm -rf /var/lib/apt/lists/*
 
+# GStreamer, for AVPlayer's video and audio, which AVFoundation's provider
+# opens at run time: playbin and its decoders (libav's for H.264 and AAC).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav \
+ && rm -rf /var/lib/apt/lists/*
+
 # LLVM's libc++ and libc++abi as Apple builds them for arm64, which C++ in
 # iOS apps and Swift's runtime were built against: std::string in the
 # alternate layout (its data pointer first), and type_info compared as
