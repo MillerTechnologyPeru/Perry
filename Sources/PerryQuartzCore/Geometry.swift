@@ -96,6 +96,12 @@ extension CGRect: Equatable {
     public static func == (a: CGRect, b: CGRect) -> Bool { a.origin == b.origin && a.size == b.size }
 }
 
+// MARK: - CAFrameRateRange
+
+extension CAFrameRateRange: ObjCScalar {
+    public static var objCTypeEncoding: String { "{CAFrameRateRange=fff}" }
+}
+
 // MARK: - CATransform3D
 
 extension CATransform3D: ObjCScalar {
