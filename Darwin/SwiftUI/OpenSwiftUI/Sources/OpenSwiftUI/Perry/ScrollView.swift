@@ -67,6 +67,9 @@ struct ScrollViewport<Content: View>: View {
     /// The offset when the drag under way began.
     @State private var dragOrigin: CGSize?
     @State private var metrics = ScrollMetrics()
+    /// Where the content was before it last moved to `offset`, which an
+    /// animation may still be carrying it from.
+    @State private var previousOffset: CGSize = .zero
 
     /// How much of a drag past the content's end moves it.
     static var stretch: CGFloat { 0.4 }
@@ -74,16 +77,39 @@ struct ScrollViewport<Content: View>: View {
 
     var body: some View {
         ScrollLayout(axes: axes, offset: offset, clamps: dragOrigin == nil, metrics: metrics) {
-            if axes == .horizontal {
-                HStack { content }
-            } else {
-                VStack { content }
+            Group {
+                if axes == .horizontal {
+                    HStack { content }
+                } else {
+                    VStack { content }
+                }
             }
+            .coordinateSpace(name: ScrollViewportInfo.contentSpace)
         }
+        .environment(\.scrollViewport, viewportInfo)
         .overlay(alignment: .topLeading) { indicators }
         .clipped()
         .contentShape(Rectangle())
         .simultaneousGesture(drag)
+    }
+
+    /// The part of the content that shows, or may while an animation moves
+    /// it: from where it was to where it is going, and while a drag is under
+    /// way, where it was as the drag began.
+    var viewportInfo: ScrollViewportInfo {
+        var size = metrics.viewport
+        if size == .zero { size = ScrollViewportInfo.fallbackSize }
+        // While a drag is under way, also what showed as it began: a lazy
+        // stack keeps the views the touch began on.
+        let offsets = [previousOffset, offset] + (dragOrigin.map { [$0] } ?? [])
+        let low = CGSize(width: offsets.map(\.width).min()!, height: offsets.map(\.height).min()!)
+        let high = CGSize(width: offsets.map(\.width).max()!, height: offsets.map(\.height).max()!)
+        return ScrollViewportInfo(
+            visible: CGRect(x: low.width, y: low.height,
+                            width: high.width - low.width + size.width, height: high.height - low.height + size.height),
+            offset: offset,
+            size: size
+        )
     }
 
     // MARK: Scrolling
@@ -93,6 +119,7 @@ struct ScrollViewport<Content: View>: View {
             .onChanged { value in
                 let origin = dragOrigin ?? offset
                 if dragOrigin == nil { dragOrigin = offset }
+                previousOffset = offset
                 offset = stretched(CGSize(width: origin.width - value.translation.width,
                                           height: origin.height - value.translation.height))
             }
@@ -100,6 +127,7 @@ struct ScrollViewport<Content: View>: View {
                 let origin = dragOrigin ?? offset
                 let target = clamp(CGSize(width: origin.width - value.predictedEndTranslation.width,
                                           height: origin.height - value.predictedEndTranslation.height))
+                previousOffset = offset
                 withAnimation(.easeOut(duration: 0.4)) {
                     offset = target
                     dragOrigin = nil
@@ -156,6 +184,35 @@ struct ScrollViewport<Content: View>: View {
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .allowsHitTesting(false)
         }
+    }
+}
+
+// MARK: - Viewport
+
+/// What of a scroll view's content shows, in the content's coordinate space,
+/// for lazy stacks to make only what is near it.
+struct ScrollViewportInfo: Equatable {
+    /// The content's coordinate space's name.
+    static let contentSpace = "org.perry.ScrollView.content"
+    /// An iPhone's screen, until the viewport is first laid out.
+    static let fallbackSize = CGSize(width: 390, height: 844)
+
+    /// The region that shows, or will while the content moves.
+    var visible: CGRect
+    /// How far the content is scrolled.
+    var offset: CGSize
+    /// The viewport's size.
+    var size: CGSize
+}
+
+struct ScrollViewportKey: EnvironmentKey {
+    static let defaultValue: ScrollViewportInfo? = nil
+}
+
+extension EnvironmentValues {
+    var scrollViewport: ScrollViewportInfo? {
+        get { self[ScrollViewportKey.self] }
+        set { self[ScrollViewportKey.self] = newValue }
     }
 }
 
