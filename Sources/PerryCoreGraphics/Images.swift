@@ -210,6 +210,9 @@ enum ColorSpaces {
 @ObjCConstants
 enum ColorSpaceNames {
     static let kCGColorSpaceSRGB = "kCGColorSpaceSRGB"
+    static let kCGColorSpaceLinearDisplayP3 = "kCGColorSpaceLinearDisplayP3"
+    static let kCGColorSpaceExtendedLinearDisplayP3 = "kCGColorSpaceExtendedLinearDisplayP3"
+    static let kCGColorSpaceITUR_2100_PQ = "kCGColorSpaceITUR_2100_PQ"
     static let kCGColorSpaceGenericRGB = "kCGColorSpaceGenericRGB"
     static let kCGColorSpaceGenericRGBLinear = "kCGColorSpaceGenericRGBLinear"
     static let kCGColorSpaceGenericGray = "kCGColorSpaceGenericGray"
