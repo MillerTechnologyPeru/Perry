@@ -89,18 +89,22 @@ public final class NSURL: NSObject {
     }
 
     // MARK: Creating
+    //
+    // A nil string makes no URL.
 
     @ObjCClassMethod("URLWithString:")
-    static func url(_ cls: ObjCClass, string: String) -> NSURL? { URLs.wrapped(URL(string: string), cls: cls) }
+    static func url(_ cls: ObjCClass, string: String?) -> NSURL? { string.flatMap { URLs.wrapped(URL(string: $0), cls: cls) } }
 
     @ObjCClassMethod("URLWithString:relativeToURL:")
-    static func url(_ cls: ObjCClass, string: String, relativeTo base: NSURL?) -> NSURL? {
-        URLs.wrapped(URL(string: string, relativeTo: base?.url), cls: cls)
+    static func url(_ cls: ObjCClass, string: String?, relativeTo base: NSURL?) -> NSURL? {
+        guard let string else { return nil }
+        return URLs.wrapped(URL(string: string, relativeTo: base?.url), cls: cls)
     }
 
     @ObjCClassMethod("fileURLWithPath:")
-    static func fileURL(_ cls: ObjCClass, path: String) -> NSURL? {
-        URLs.wrapped(URLs.fileURL(path, isDirectory: nil), cls: cls)
+    static func fileURL(_ cls: ObjCClass, path: String?) -> NSURL? {
+        guard let path else { return nil }
+        return URLs.wrapped(URLs.fileURL(path, isDirectory: nil), cls: cls)
     }
 
     /// The file URL of the path the components make (+[NSString pathWithComponents:]).
@@ -110,22 +114,23 @@ public final class NSURL: NSObject {
     }
 
     @ObjCClassMethod("fileURLWithPath:isDirectory:")
-    static func fileURL(_ cls: ObjCClass, path: String, isDirectory: Bool) -> NSURL? {
-        URLs.wrapped(URLs.fileURL(path, isDirectory: isDirectory), cls: cls)
+    static func fileURL(_ cls: ObjCClass, path: String?, isDirectory: Bool) -> NSURL? {
+        guard let path else { return nil }
+        return URLs.wrapped(URLs.fileURL(path, isDirectory: isDirectory), cls: cls)
     }
 
     @ObjCMethod("initWithString:")
-    func initialize(string: String) -> Self? { setURL(URL(string: string)) }
+    func initialize(string: String?) -> Self? { setURL(string.flatMap { URL(string: $0) }) }
 
     @ObjCMethod("initWithString:relativeToURL:")
-    func initialize(string: String, relativeTo base: NSURL?) -> Self? { setURL(URL(string: string, relativeTo: base?.url)) }
+    func initialize(string: String?, relativeTo base: NSURL?) -> Self? { setURL(string.flatMap { URL(string: $0, relativeTo: base?.url) }) }
 
     @ObjCMethod("initFileURLWithPath:")
-    func initialize(filePath path: String) -> Self? { setURL(URLs.fileURL(path, isDirectory: nil)) }
+    func initialize(filePath path: String?) -> Self? { setURL(path.map { URLs.fileURL($0, isDirectory: nil) }) }
 
     @ObjCMethod("initFileURLWithPath:isDirectory:")
-    func initialize(filePath path: String, isDirectory: Bool) -> Self? {
-        setURL(URLs.fileURL(path, isDirectory: isDirectory))
+    func initialize(filePath path: String?, isDirectory: Bool) -> Self? {
+        setURL(path.map { URLs.fileURL($0, isDirectory: isDirectory) })
     }
 
     @ObjCMethod("dealloc")
