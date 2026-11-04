@@ -1,0 +1,91 @@
+import ComputeCxx
+
+@frozen
+public struct RuleContext<Value> {
+
+    public var attribute: Attribute<Value>
+
+    public init(attribute: Attribute<Value>) {
+        self.attribute = attribute
+    }
+
+    public func update(body: () -> Void) {
+        AnyRuleContext(attribute: attribute.identifier).update(body: body)
+    }
+
+    public var value: Value {
+        unsafeAddress {
+            return UnsafePointer(__IAGGraphGetOutputValue(Metadata(Value.self))!.assumingMemoryBound(to: Value.self))
+        }
+        nonmutating set {
+            withUnsafePointer(to: newValue) { newValuePointer in
+                Graph.setOutputValue(newValuePointer)
+            }
+        }
+    }
+
+    public var hasValue: Bool {
+        let valuePointer = __IAGGraphGetOutputValue(Metadata(Value.self))
+        return valuePointer != nil
+    }
+
+    public func changedValue<T>(of input: Attribute<T>, options: IAGValueOptions) -> (value: T, changed: Bool) {
+        let value = __IAGGraphGetInputValue(
+            attribute.identifier,
+            input.identifier,
+            options,
+            Metadata(T.self)
+        )
+        return (
+            value.value.assumingMemoryBound(to: T.self).pointee,
+            value.flags.contains(.changed)
+        )
+    }
+
+    public func valueAndFlags<InputValue>(
+        of input: Attribute<InputValue>,
+        options: IAGValueOptions
+    ) -> (
+        value: InputValue, flags: IAGChangedValueFlags
+    ) {
+        let value = __IAGGraphGetInputValue(
+            attribute.identifier,
+            input.identifier,
+            options,
+            Metadata(InputValue.self)
+        )
+        return (
+            value.value.assumingMemoryBound(to: InputValue.self).pointee,
+            value.flags.contains(.changed) ? .changed : []
+        )
+    }
+
+    public subscript<InputValue>(_ input: Attribute<InputValue>) -> InputValue {
+        unsafeAddress {
+            return __IAGGraphGetInputValue(attribute.identifier, input.identifier, [], Metadata(InputValue.self))
+                .value
+                .assumingMemoryBound(to: InputValue.self)
+        }
+    }
+
+    public subscript<T>(_ weakInput: WeakAttribute<T>) -> T? {
+        return weakInput.attribute.map { input in
+            return self[input]
+        }
+    }
+
+    public subscript<T>(_ optionalInput: OptionalAttribute<T>) -> T? {
+        return optionalInput.attribute.map { input in
+            return self[input]
+        }
+    }
+
+}
+
+extension RuleContext: Equatable {
+
+    public static func == (_ lhs: RuleContext, _ rhs: RuleContext) -> Bool {
+        return lhs.attribute == rhs.attribute
+    }
+
+}

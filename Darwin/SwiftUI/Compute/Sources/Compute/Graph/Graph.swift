@@ -1,0 +1,237 @@
+import ComputeCxx
+import Foundation
+
+@_silgen_name("IAGGraphInternAttributeType")
+public func internAttributeType(
+    ctx: UnownedGraphContext,
+    body: Metadata,
+    makeAttributeType: () -> UnsafePointer<_AttributeType>
+) -> UInt32
+
+extension Graph {
+    static func typeIndex(
+        ctx: UnownedGraphContext,
+        body: any _AttributeBody.Type,
+        valueType: Metadata,
+        flags: _AttributeType.Flags,
+        update: () -> (UnsafeMutableRawPointer, AnyAttribute) -> Void
+    ) -> AttributeTypeIndex {
+        let makeAttributeType: () -> UnsafePointer<_AttributeType> = {
+            let bodyType: any _AttributeBody.Type
+            #if CompatibilityModeAttributeGraphV6
+            bodyType = Body.self
+            #else
+            bodyType = flags.contains(.external) ? _External.self : body
+            #endif
+            let attributeType =
+                _AttributeType(
+                    selfType: bodyType,
+                    valueType: valueType,
+                    flags: flags,
+                    update: update()
+                )
+            let pointer = UnsafeMutablePointer<_AttributeType>.allocate(capacity: 1)
+            pointer.initialize(to: attributeType)
+            return UnsafePointer(pointer)
+        }
+        return withoutActuallyEscaping(makeAttributeType) { escapingMakeAttributeType in
+            return internAttributeType(
+                ctx: ctx,
+                body: Metadata(body),
+                makeAttributeType: escapingMakeAttributeType
+            )
+        }
+    }
+}
+
+@_silgen_name("IAGGraphSetOutputValue")
+@inline(__always)
+@inlinable
+func IAGGraphSetOutputValue(_ value: UnsafeRawPointer, of type: Metadata)
+
+extension Graph {
+    @inline(__always)
+    @inlinable
+    public static func setOutputValue<Value>(_ value: UnsafePointer<Value>) {
+        IAGGraphSetOutputValue(UnsafeRawPointer(value), of: Metadata(Value.self))
+    }
+
+    @_transparent
+    @inline(__always)
+    public var mainUpdates: Int { numericCast(counter(for: .mainThreadUpdates)) }
+}
+
+extension Graph {
+    @_transparent
+    public static func anyInputsChanged(excluding excludedAttributes: [AnyAttribute]) -> Bool {
+        return __IAGGraphAnyInputsChanged(excludedAttributes, excludedAttributes.count)
+    }
+}
+
+@_silgen_name("IAGGraphSetUpdateCallback")
+func IAGGraphSetUpdateCallback(
+    _ graph: UnsafeRawPointer,
+    callback: (() -> Void)?
+)
+
+@_silgen_name("IAGGraphSetInvalidationCallback")
+func IAGGraphSetInvalidationCallback(
+    _ graph: UnsafeRawPointer,
+    callback: ((AnyAttribute) -> Void)?
+)
+
+@_silgen_name("IAGGraphWithMainThreadHandler")
+func IAGGraphWithMainThreadHandler(
+    _ graph: UnsafeRawPointer,
+    body: @escaping () -> Void,
+    mainThreadHandler: (() -> Void) -> Void
+)
+
+extension Graph {
+    public func onUpdate(_ handler: @escaping () -> Void) {
+        IAGGraphSetUpdateCallback(unsafeBitCast(self, to: UnsafeRawPointer.self), callback: handler)
+    }
+
+    public func onInvalidation(_ handler: @escaping (AnyAttribute) -> Void) {
+        IAGGraphSetInvalidationCallback(unsafeBitCast(self, to: UnsafeRawPointer.self), callback: handler)
+    }
+
+    public func withDeadline<T>(_ deadline: UInt64, _ body: () -> T) -> T {
+        let oldDeadline = self.deadline
+        self.deadline = deadline
+        let result = body()
+        self.deadline = oldDeadline
+        return result
+    }
+
+    // check is static
+    public static func withoutUpdate<T>(_ body: () -> T) -> T {
+        let previousUpdate = Graph.clearUpdate()
+        let result = body()
+        Graph.setUpdate(previousUpdate)
+        return result
+    }
+
+    public func withoutSubgraphInvalidation<T>(_ body: () -> T) -> T {
+        let wasDeferring = self.beginDeferringSubgraphInvalidation()
+        let result = body()
+        self.endDeferringSubgraphInvalidation(wasDeferring: wasDeferring)
+        return result
+    }
+
+    public func withMainThreadHandler(_ mainThreadHandler: (() -> Void) -> Void, do body: () -> Void) {
+        withoutActuallyEscaping(body) { escapingBody in
+            IAGGraphWithMainThreadHandler(
+                unsafeBitCast(self, to: UnsafeRawPointer.self),
+                body: escapingBody,
+                mainThreadHandler: mainThreadHandler
+            )
+        }
+    }
+}
+
+extension Graph {
+    public func addTraceEvent<Value>(_ event: UnsafePointer<Int8>, value: Value) {
+        withUnsafePointer(to: value) { valuePointer in
+            self.addTraceEvent(name: event, value: valuePointer, type: Metadata(Value.self))
+        }
+    }
+
+    public func addTraceEvent<Value>(_ event: UnsafePointer<Int8>, context: UnsafePointer<Value>) {
+        self.addTraceEvent(name: event, value: context, type: Metadata(Value.self))
+    }
+
+    @_transparent
+    public static func registerNamedTraceEvent(name: String, subsystem: String) -> Graph.NamedTraceEventID {
+        name.withCString { namePointer in
+            subsystem.withCString { subsystemPointer in
+                Graph.registerNamedTraceEvent(
+                    name: namePointer,
+                    subsystem: subsystemPointer
+                )
+            }
+        }
+    }
+
+    @_transparent
+    public func addNamedTraceEvent(
+        _ eventID: Graph.NamedTraceEventID,
+        eventArgs: [UInt32] = [],
+        data: Data? = nil,
+        flags: Graph.NamedTraceEventFlags = []
+    ) {
+        #if canImport(Darwin)
+        addNamedTraceEvent(
+            eventID: eventID,
+            eventArgCount: eventArgs.count,
+            eventArgs: eventArgs,
+            data: data as CFData?,
+            flags: flags
+        )
+        #else
+        addNamedTraceEvent(
+            eventID: eventID,
+            eventArgCount: eventArgs.count,
+            eventArgs: eventArgs,
+            data: data?.cfData,
+            flags: flags
+        )
+        #endif
+    }
+}
+
+extension Graph {
+    public static func startProfiling() {
+        Graph.startProfiling(nil)
+    }
+
+    public static func stopProfiling() {
+        Graph.stopProfiling(nil)
+    }
+    
+    public static func resetProfile() {
+        Graph.resetProfile(nil)
+    }
+    
+    public static func markProfile(name: UnsafePointer<Int8>) {
+        Graph.markProfile(nil, name: name)
+    }
+}
+
+#if canImport(Darwin)
+extension Graph {
+    public func print(includeValues: Bool) {
+        Swift.print(graphvizDescription(includeValues: includeValues))
+    }
+
+    public func archiveJSON(name: String?) {
+        Graph.archiveJSON(name: name?.cString(using: .utf8))
+    }
+
+    public func graphvizDescription(includeValues: Bool) -> String {
+        let options: NSDictionary = [
+            DescriptionOption.format: "graph/dot",
+            DescriptionOption.includeValues: includeValues,
+        ]
+        guard let description = Graph.description(self, options: options) as? String else {
+            preconditionFailure()
+        }
+        return description
+    }
+
+    public static func printStack(maxFrames: Int) {
+        Swift.print(stackDescription(maxFrames: maxFrames))
+    }
+
+    public static func stackDescription(maxFrames: Int) -> String {
+        let options: NSDictionary = [
+            DescriptionOption.format: "stack/text",
+            DescriptionOption.maxFrames: maxFrames,
+        ]
+        guard let description = Graph.description(nil, options: options) as? String else {
+            return ""
+        }
+        return description
+    }
+}
+#endif

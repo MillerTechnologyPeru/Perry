@@ -1,0 +1,126 @@
+// swift-tools-version: 6.3
+
+import PackageDescription
+
+let swiftRuntimeHeadersPath = "\(Context.packageDirectory)/Submodules/swift-runtime-headers"
+
+var dependencies: [Package.Dependency] = [
+    .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.0"),
+    .package(url: "https://github.com/groue/Semaphore", from: "0.1.0"),
+    .package(url: "https://github.com/jcmosc/swift-sexp", branch: "main"),
+]
+
+let package = Package(
+    name: "Compute",
+    platforms: [.macOS(.v15)],
+    products: [
+        .library(name: "Compute", targets: ["Compute"]),
+        .library(name: "_ComputeTestSupport", targets: ["_ComputeTestSupport"]),
+    ],
+    traits: [
+        .trait(name: "CompatibilityModeAttributeGraphV6")
+    ],
+    dependencies: dependencies,
+    targets: [
+        .target(
+            name: "Platform",
+            cSettings: [
+                .define("_GNU_SOURCE", .when(platforms: [.linux]))
+            ]
+        ),
+        .target(
+            name: "SwiftCorelibsCoreFoundation"
+        ),
+        .target(
+            name: "Utilities",
+            dependencies: [
+                "Platform",
+                .target(name: "SwiftCorelibsCoreFoundation", condition: .when(platforms: [.linux])),
+            ]
+        ),
+        .testTarget(
+            name: "UtilitiesTests",
+            dependencies: ["Utilities"],
+            cxxSettings: [.define("SWIFT_TESTING")],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
+        .target(
+            name: "Compute",
+            dependencies: ["ComputeCxx"],
+            swiftSettings: [
+                .enableExperimentalFeature("Extern"),
+                .unsafeFlags(
+                    [
+                        "-enable-library-evolution",
+                        // When -enable-library-evolution is specified verify-emitted-module-interface command fails
+                        "-no-verify-emitted-module-interface",
+                    ],
+                    .when(platforms: [.macOS, .macCatalyst, .iOS, .tvOS, .watchOS, .visionOS])
+                ),
+            ],
+            linkerSettings: [
+                .linkedLibrary("crypto", .when(platforms: [.linux]))
+            ]
+        ),
+        .testTarget(
+            name: "ComputeTests",
+            dependencies: [
+                "Compute",
+                "_ComputeTestSupport",
+                .product(name: "SExp", package: "swift-sexp"),
+                .product(name: "Semaphore", package: "Semaphore"),
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("Extern")
+            ]
+        ),
+        .testTarget(
+            name: "ComputeLayoutDescriptorTests",
+            dependencies: [
+                "Compute",
+                "_ComputeTestSupport",
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("Extern")
+            ]
+        ),
+        .testTarget(
+            name: "ComputeSwiftTests",
+            dependencies: [
+                "Compute",
+                .product(name: "Algorithms", package: "swift-algorithms"),
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("Extern")
+            ]
+        ),
+        .target(
+            name: "ComputeCxx",
+            dependencies: [
+                "Platform",
+                "Utilities",
+                "ComputeCxxSwiftSupport",
+                .target(name: "SwiftCorelibsCoreFoundation", condition: .when(platforms: [.linux])),
+            ],
+            cxxSettings: [
+                .headerSearchPath(""),
+                .headerSearchPath("internalInclude"),
+                .define("_GNU_SOURCE", .when(platforms: [.linux])),
+                .unsafeFlags([
+                    "-static",
+                    "-DCOMPILED_WITH_SWIFT",
+                    "-DPURE_BRIDGING_MODE",
+                    "-isystem", "\(swiftRuntimeHeadersPath)/include",
+                    "-isystem", "\(swiftRuntimeHeadersPath)/stdlib/include",
+                    "-isystem", "\(swiftRuntimeHeadersPath)/stdlib/public/SwiftShims",
+                ]),
+            ],
+            linkerSettings: [
+                .linkedLibrary("swiftDemangle")
+            ]
+        ),
+        .target(name: "ComputeCxxSwiftSupport"),
+        .target(name: "_ComputeTestSupport"),
+    ],
+    cxxLanguageStandard: .cxx20,
+)

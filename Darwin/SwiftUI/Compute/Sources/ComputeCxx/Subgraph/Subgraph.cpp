@@ -1,0 +1,1110 @@
+#include "Subgraph.h"
+
+#include <cstddef>
+#include <cstring>
+#include <ranges>
+#include <stack>
+
+#include <Utilities/CFPointer.h>
+
+#include "Attribute/AttributeData/Node/IndirectNode.h"
+#include "Attribute/AttributeData/Node/Node.h"
+#include "Attribute/AttributeID/OffsetAttributeID.h"
+#include "Attribute/AttributeView/AttributeView.h"
+#include "Graph/Context.h"
+#include "Graph/Tree/TreeElement.h"
+#include "Graph/UpdateStack.h"
+#include "IAGSubgraph-Private.h"
+#include "NodeCache.h"
+#include "Protobuf/Encoder.h"
+#include "Trace/Trace.h"
+
+namespace IAG {
+
+Subgraph::Subgraph(SubgraphObject *object, Graph::Context &context, AttributeID attribute) {
+    _object = object;
+
+    Graph *graph = &context.graph();
+    _graph = graph;
+    _context_id = context.id();
+
+    graph->add_subgraph(*this);
+
+    if (IAGSubgraphShouldRecordTree()) {
+        if (!attribute || attribute.is_nil()) {
+            auto update = Graph::current_update();
+            if (update.tag() == 0 && update.get() != nullptr) {
+                if (update.get()->graph() == graph) {
+                    if (auto *frame = update.get()->global_top()) {
+                        attribute = AttributeID(frame->attribute);
+                    }
+                }
+            }
+        }
+        begin_tree(attribute, nullptr, 0);
+    }
+
+    context.graph().foreach_trace([this](Trace &trace) { trace.created(*this); });
+}
+
+Subgraph::~Subgraph() {
+    if (auto *observers_ptr = _observers.get()) {
+        auto *observers = *observers_ptr;
+
+        notify_observers();
+        delete observers;
+    }
+    if (_cache) {
+        _cache->~NodeCache();
+    }
+}
+
+#pragma mark - CFType
+
+Subgraph *Subgraph::from_cf(IAGSubgraphStorage *storage) { return storage->subgraph; }
+
+IAGSubgraphStorage *Subgraph::to_cf() const { return reinterpret_cast<IAGSubgraphStorage *>(_object); }
+
+void Subgraph::clear_object() {
+    auto *object = _object;
+    if (object) {
+        object->clear_subgraph();
+        _object = nullptr;
+
+        if (current_subgraph() == this) {
+            set_current_subgraph(nullptr);
+            CFRelease(object);
+        }
+    }
+}
+
+#pragma mark - Current subgraph
+
+pthread_key_t Subgraph::_current_subgraph_key;
+
+void Subgraph::make_current_subgraph_key() { pthread_key_create(&_current_subgraph_key, nullptr); }
+
+Subgraph *Subgraph::current_subgraph() { return (Subgraph *)pthread_getspecific(_current_subgraph_key); }
+
+void Subgraph::set_current_subgraph(Subgraph *subgraph) { pthread_setspecific(_current_subgraph_key, subgraph); }
+
+#pragma mark - Observers
+
+IAGUniqueID Subgraph::add_observer(ClosureFunctionVV<void> callback) {
+    if (!_observers) {
+        _observers = alloc(sizeof(vector<Observer, 0, uint64_t> *), 7).unsafe_cast<vector<Observer, 0, uint64_t> *>();
+        *_observers = new vector<Observer, 0, uint64_t>();
+    }
+
+    auto observer_id = IAGMakeUniqueID();
+    (*_observers)->push_back(Observer(callback, observer_id));
+    return observer_id;
+}
+
+void Subgraph::remove_observer(IAGUniqueID observer_id) {
+    if (auto *observers_ptr = _observers.get()) {
+        auto *observers = *observers_ptr;
+        auto *iter = std::remove_if(observers->begin(), observers->end(), [&observer_id](auto observer) -> bool {
+            return observer.observer_id == observer_id;
+        });
+        observers->erase(iter, observers->end());
+    }
+}
+
+void Subgraph::notify_observers() {
+    if (auto *observers_ptr = _observers.get()) {
+        auto *observers = *observers_ptr;
+        while (!observers->empty()) {
+            observers->back().callback();
+            observers->pop_back();
+        }
+    }
+}
+
+#pragma mark - Graph
+
+void Subgraph::invalidate_and_delete_(bool delete_zone_data) {
+    if (delete_zone_data) {
+        mark_deleted();
+    }
+
+    if (is_invalidating()) {
+        return;
+    }
+
+    for (auto *parent : _parents) {
+        parent->remove_child(*this, true);
+    }
+    _parents.clear();
+
+    // Store the graph locally since the `this` pointer may be deleted
+    Graph &graph = *_graph;
+    if (!graph.is_deferring_subgraph_invalidation() && !graph.has_main_handler()) {
+        invalidate_now(graph);
+        graph.invalidate_subgraphs();
+    } else {
+        invalidate_deferred(graph);
+    }
+}
+
+void Subgraph::invalidate_deferred(Graph &graph) {
+    auto old_invalidation_state = _invalidation_state;
+    if (old_invalidation_state != InvalidationState::Deferred) {
+        graph.defer_subgraph_invalidation(*this);
+        _invalidation_state = InvalidationState::Deferred;
+        if (old_invalidation_state == InvalidationState::None) {
+            graph.foreach_trace([this](Trace &trace) { trace.invalidate(*this); });
+        }
+    }
+}
+
+void Subgraph::invalidate_now(Graph &graph) {
+    graph.will_invalidate_subgraph();
+
+    auto removed_subgraphs = vector<Subgraph *, 16, uint64_t>();
+    auto invalidating_subgraphs = std::stack<Subgraph *, vector<Subgraph *, 16, uint64_t>>();
+
+    auto old_invalidation_state = _invalidation_state;
+    if (_invalidation_state != InvalidationState::Completed) {
+        _invalidation_state = InvalidationState::Completed;
+        if (old_invalidation_state == InvalidationState::None) {
+            graph.foreach_trace([this](Trace &trace) { trace.invalidate(*this); });
+        }
+        clear_object();
+        invalidating_subgraphs.push(this);
+
+        while (!invalidating_subgraphs.empty()) {
+            Subgraph *subgraph = invalidating_subgraphs.top();
+            invalidating_subgraphs.pop();
+
+            graph.foreach_trace([subgraph](Trace &trace) { trace.destroy(*subgraph); });
+
+            notify_observers();
+            graph.remove_subgraph(*subgraph);
+
+            subgraph->mark_deleted();
+            removed_subgraphs.push_back(subgraph);
+
+            // Invalidate all children that belong to the same context
+            // Update parent and child vectors of subgraphs that aren't being
+            // invalidated
+            for (auto child : subgraph->_children) {
+                if (child.subgraph()->context_id() == _context_id) {
+                    // for each other parent of the child, remove the child from
+                    // that parent
+                    for (auto *other_parent : child.subgraph()->_parents) {
+                        if (other_parent == subgraph) {
+                            continue;
+                        }
+
+                        auto *iter = std::remove_if(other_parent->_children.begin(), other_parent->_children.end(),
+                                                   [&child](auto other_parent_child) -> bool {
+                                                       return other_parent_child.subgraph() == child.subgraph();
+                                                   });
+                        other_parent->_children.erase(iter, other_parent->_children.end());
+                    }
+
+                    child.subgraph()->_parents.clear();
+
+                    // Invalidate this child
+                    auto old_invalidation_state = child.subgraph()->_invalidation_state;
+                    if (child.subgraph()->_invalidation_state != InvalidationState::Completed) { // TODO: check
+                        child.subgraph()->_invalidation_state = InvalidationState::Completed;
+                        if (old_invalidation_state == InvalidationState::None) {
+                            graph.foreach_trace([&child](Trace &trace) { trace.invalidate(*child.subgraph()); });
+                        }
+                        child.subgraph()->clear_object();
+                        invalidating_subgraphs.push(child.subgraph());
+                    }
+                } else {
+                    // don't invalidate this child but remove this subgraph from
+                    // its parents vector
+                    auto *iter =
+                        std::remove(child.subgraph()->_parents.begin(), child.subgraph()->_parents.end(), subgraph);
+                    child.subgraph()->_parents.erase(iter, child.subgraph()->_parents.end());
+                }
+            }
+        }
+    }
+
+    for (auto *removed_subgraph : removed_subgraphs) {
+        for (auto page : removed_subgraph->pages()) {
+            bool found_nil_attribute = false;
+            for (auto attribute : attribute_view(page)) {
+                if (auto node = attribute.get_node()) {
+                    graph.remove_node(node);
+                } else if (auto indirect_node = attribute.get_indirect_node()) {
+                    graph.remove_indirect_node(indirect_node);
+                } else if (attribute.is_nil()) {
+                    found_nil_attribute = true;
+                    break;
+                }
+            }
+            if (found_nil_attribute) {
+                break;
+            }
+        }
+    }
+
+    for (auto *removed_subgraph : removed_subgraphs) {
+        for (auto page : removed_subgraph->pages()) {
+            // store previous node so we can iterate past it before destroying
+            // it
+            data::ptr<Node> previous_node = nullptr;
+            bool found_nil_attribute = false;
+            for (auto attribute : attribute_view(page)) {
+                if (previous_node) {
+                    previous_node->destroy(*_graph);
+                    _graph->did_destroy_node();
+                    previous_node = nullptr;
+                }
+                if (auto node = attribute.get_node()) {
+                    previous_node = node;
+                } else if (attribute.is_nil()) {
+                    found_nil_attribute = true;
+                    break;
+                }
+            }
+            if (previous_node) {
+                previous_node->destroy(*_graph);
+                _graph->did_destroy_node();
+                previous_node = nullptr;
+            }
+            if (found_nil_attribute) {
+                break;
+            }
+        }
+    }
+
+    for (Subgraph *removed_subgraph : removed_subgraphs) {
+        delete removed_subgraph;
+    }
+
+    graph.did_invalidate_subgraph();
+}
+
+void Subgraph::graph_destroyed() {
+    auto old_invalidation_state = _invalidation_state;
+    _invalidation_state = InvalidationState::GraphDestroyed;
+
+    if (old_invalidation_state == InvalidationState::None) {
+        graph()->foreach_trace([this](Trace &trace) { trace.invalidate(*this); });
+    }
+
+    notify_observers();
+
+    for (auto page : pages()) {
+        // store previous node so we can iterate past it before destroying it
+        data::ptr<Node> previous_node = nullptr;
+        bool found_nil_attribute = false;
+        for (auto attribute : attribute_view(page)) {
+            if (previous_node) {
+                previous_node->destroy(*_graph);
+                _graph->did_destroy_node();
+                previous_node = nullptr;
+            }
+            if (auto node = attribute.get_node()) {
+                previous_node = node;
+            } else if (attribute.is_nil()) {
+                found_nil_attribute = true;
+            }
+        }
+        if (previous_node) {
+            previous_node->destroy(*_graph);
+            _graph->did_destroy_node();
+            previous_node = nullptr;
+        }
+        if (found_nil_attribute) {
+            break;
+        }
+    }
+
+    _parents.clear();
+    _children.clear();
+
+    clear();
+}
+
+#pragma mark - Children
+
+void Subgraph::add_child(Subgraph &child, uint8_t tag) {
+    if (child.graph() != graph()) {
+        precondition_failure("child subgraph must have same graph");
+    }
+    for (auto *parent : child._parents) {
+        if (parent == this) {
+            precondition_failure("child already attached to new parent");
+        }
+    }
+    graph()->foreach_trace([this, &child](Trace &trace) { trace.add_child(*this, child); });
+    _children.push_back(SubgraphChild(&child, tag));
+
+    IAGAttributeFlags descendent_flags = child._flags | child._descendent_flags;
+    if (descendent_flags & ~_descendent_flags) {
+        _descendent_flags |= descendent_flags;
+        propagate_flags();
+    }
+
+    IAGAttributeFlags descendent_dirty_flags = child._dirty_flags | child._descendent_dirty_flags;
+    if (descendent_dirty_flags & ~_descendent_dirty_flags) {
+        _descendent_dirty_flags |= descendent_dirty_flags;
+        propagate_dirty_flags();
+    }
+
+    child._parents.push_back(this);
+}
+
+void Subgraph::remove_child(Subgraph &child, bool suppress_trace) {
+    auto *parent_iter = std::remove(child._parents.begin(), child._parents.end(), this);
+    child._parents.erase(parent_iter, child._parents.end());
+
+    if (!suppress_trace) {
+        graph()->foreach_trace([this, &child](Trace &trace) { trace.remove_child(*this, child); });
+    }
+
+    auto *child_iter = std::remove_if(_children.begin(), _children.end(), [&child](auto subgraph_child) -> bool {
+        return subgraph_child.subgraph() == &child;
+    });
+    _children.erase(child_iter, _children.end());
+}
+
+bool Subgraph::ancestor_of(const Subgraph &other) {
+    auto candidates = std::stack<const Subgraph *, vector<const Subgraph *, 32, uint64_t>>();
+    candidates.push(&other);
+    while (!candidates.empty()) {
+        const auto *candidate = candidates.top();
+        candidates.pop();
+        
+        if (candidate == this) {
+            return true;
+        }
+
+        for (Subgraph *parent : candidate->_parents) {
+            candidates.push(parent);
+        }
+    }
+    return false;
+}
+
+#pragma mark - Flags
+
+void Subgraph::set_flags(data::ptr<Node> node, IAGAttributeFlags flags) {
+    if (node->subgraph_flags() == flags) {
+        return;
+    }
+    if (node->subgraph_flags() == IAGAttributeFlagsNone || flags == IAGAttributeFlagsNone) {
+        // unlink and reinsert to trigger a reorder
+        unlink_attribute(AttributeID(node));
+        node->set_subgraph_flags(flags);
+        insert_attribute(AttributeID(node), true);
+    } else {
+        node->set_subgraph_flags(flags);
+    }
+
+    add_flags(flags);
+    if (node->is_dirty()) {
+        add_dirty_flags(flags);
+    }
+}
+
+void Subgraph::add_flags(IAGAttributeFlags flags) {
+    if (!(flags & ~_flags)) {
+        return;
+    }
+
+    _flags |= flags;
+    propagate_flags();
+}
+
+void Subgraph::propagate_flags() {
+    uint8_t flags = _flags | _descendent_flags;
+    foreach_ancestor([&flags](Subgraph &ancestor) -> bool {
+        if (!(flags & ~ancestor._descendent_flags)) {
+            return false;
+        }
+
+        ancestor._descendent_flags |= flags;
+        return true;
+    });
+}
+
+void Subgraph::add_dirty_flags(IAGAttributeFlags dirty_flags) {
+    if (!(dirty_flags & ~_dirty_flags)) {
+        return;
+    }
+
+    _dirty_flags |= dirty_flags;
+    propagate_dirty_flags();
+}
+
+void Subgraph::propagate_dirty_flags() {
+    uint8_t dirty_flags = _dirty_flags | _descendent_dirty_flags;
+    foreach_ancestor([&dirty_flags](Subgraph &ancestor) -> bool {
+        if (!(dirty_flags & ~ancestor._descendent_dirty_flags)) {
+            return false;
+        }
+
+        ancestor._descendent_dirty_flags |= dirty_flags;
+        return true;
+    });
+}
+
+// MARK: Attributes
+
+void Subgraph::insert_attribute(AttributeID attribute, bool updatable) {
+    AttributeID previous_attribute = AttributeID(IAGAttributeNil);
+
+    // sort attributes with flags before indirect attributes or attributes
+    // without flags the attribute will only be non-updatable if it is a
+    // non-mutable indirect node that does not traverse subgraphs
+    if (updatable && !attribute.has_subgraph_flags()) {
+        for (auto other : attribute_view(attribute.page_ptr())) {
+            if (!other.has_subgraph_flags()) {
+                break;
+            }
+            previous_attribute = other;
+        }
+    }
+
+    RelativeAttributeID next_attribute;
+    if (auto previous_node = previous_attribute.get_node()) {
+        next_attribute = previous_node->next_attribute();
+        previous_node->set_next_attribute(RelativeAttributeID(attribute));
+    } else if (auto previous_indirect_node = previous_attribute.get_indirect_node()) {
+        next_attribute = previous_indirect_node->next_attribute();
+        previous_indirect_node->set_next_attribute(RelativeAttributeID(attribute));
+    } else {
+        if (updatable) {
+            next_attribute = RelativeAttributeID(attribute.page_ptr()->bytes_list);
+            attribute.page_ptr()->bytes_list = RelativeAttributeID(attribute);
+        } else {
+            next_attribute = RelativeAttributeID(attribute.page_ptr()->const_bytes_list);
+            attribute.page_ptr()->const_bytes_list = RelativeAttributeID(attribute);
+        }
+    }
+
+    if (auto node = attribute.get_node()) {
+        node->set_next_attribute(next_attribute);
+    } else if (auto indirect_node = attribute.get_indirect_node()) {
+        indirect_node->set_next_attribute(next_attribute);
+    }
+}
+
+void Subgraph::unlink_attribute(AttributeID attribute) {
+    AttributeID previous_attribute = AttributeID(nullptr);
+    for (auto other : attribute_view(attribute.page_ptr())) {
+        if (!other || other.is_nil()) {
+            break;
+        }
+        if (other == attribute) {
+            break;
+        }
+        previous_attribute = other;
+    }
+
+    RelativeAttributeID next_attribute = RelativeAttributeID(nullptr);
+    if (auto node = attribute.get_node()) {
+        next_attribute = node->next_attribute();
+        node->set_next_attribute(RelativeAttributeID(nullptr));
+    } else if (auto indirect_node = attribute.get_indirect_node()) {
+        next_attribute = indirect_node->next_attribute();
+        indirect_node->set_next_attribute(RelativeAttributeID(nullptr));
+    }
+
+    if (auto previous_node = previous_attribute.get_node()) {
+        previous_node->set_next_attribute(next_attribute);
+    } else if (auto previous_indirect_node = previous_attribute.get_indirect_node()) {
+        previous_indirect_node->set_next_attribute(next_attribute);
+    } else {
+        attribute.page_ptr()->bytes_list = next_attribute;
+    }
+}
+
+void Subgraph::add_node(data::ptr<Node> node) {
+    node->set_subgraph_flags(IAGAttributeFlagsNone);
+    insert_attribute(AttributeID(node), true);
+
+    if (_tree_root) {
+        graph()->add_tree_data_for_subgraph(this, _tree_root, node);
+    }
+
+    graph()->foreach_trace([&node](Trace &trace) { trace.added(node); });
+}
+
+void Subgraph::add_indirect(data::ptr<IndirectNode> node, bool updatable) {
+    insert_attribute(AttributeID(node),
+                     updatable); // make sure adds Indirect kind to node
+
+    graph()->foreach_trace([&node](Trace &trace) { trace.added(node); });
+}
+
+std::atomic<uint32_t> Subgraph::_last_traversal_seed = {};
+
+void Subgraph::apply(uint32_t options, ClosureFunctionAV<void, IAGAttribute> body) {
+    if (!is_valid()) {
+        return;
+    }
+
+    IAGAttributeFlags flags = options & IAGAttributeFlagsAll;
+    if (!intersects(flags)) {
+        return;
+    }
+
+    // Defer subgraph invalidation until the end of this method's scope
+    auto without_invalidating = Graph::without_invalidating(graph());
+    _last_traversal_seed += 1;
+
+    auto subgraphs = std::stack<Subgraph *, vector<Subgraph *, 32, uint64_t>>();
+    subgraphs.push(this);
+    _traversal_seed = _last_traversal_seed;
+
+    while (!subgraphs.empty()) {
+        auto *subgraph = subgraphs.top();
+        subgraphs.pop();
+
+        if (!subgraph->is_valid()) {
+            continue;
+        }
+
+        if ((options >> 0x18) & 0x1 || subgraph->context_id() == _context_id) {
+            if (!options || (subgraph->_flags & flags)) {
+                for (auto page : subgraph->pages()) {
+                    for (auto attribute : attribute_view(page)) {
+                        if (!attribute) { // TODO: nil or null
+                            break;
+                        }
+                        if (auto node = attribute.get_node()) {
+                            if (options) { // TODO: options or mask?
+                                if (node->subgraph_flags() == IAGAttributeFlagsNone) {
+                                    // we know this attribute is sorted after
+                                    // all nodes with flags so we aren't going
+                                    // to match any more attributes after this
+                                    break;
+                                }
+                                if (!(node->subgraph_flags() & flags)) {
+                                    continue;
+                                }
+                            }
+
+                            body(attribute);
+                        } else if (attribute.is_indirect_node()) {
+                            if (options) { // TODO: options or mask?
+                                // we know this attribute is sorted after all
+                                // nodes with flags so we aren't going to match
+                                // any more attributes after this
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (auto child : subgraph->children()) {
+                if (child.subgraph()->intersects(flags) && child.subgraph()->_traversal_seed != _last_traversal_seed) {
+
+                    subgraphs.push(child.subgraph());
+                    child.subgraph()->_traversal_seed = _last_traversal_seed;
+                }
+            }
+        }
+    }
+}
+
+void Subgraph::update(IAGAttributeFlags mask) {
+    if (_graph->needs_update() && _graph->thread_is_updating()) {
+        _graph->call_update();
+    }
+
+    if (!is_valid() || !is_dirty(mask)) {
+        _graph->invalidate_subgraphs();
+        return;
+    }
+
+    _graph->foreach_trace([this, &mask](Trace &trace) { trace.begin_update(*this, mask); });
+    _last_traversal_seed += 1;
+
+    auto subgraph_objects =
+        std::stack<util::cf_ptr<IAGSubgraphRef>, vector<util::cf_ptr<IAGSubgraphRef>, 32, uint64_t>>();
+    auto dirty_nodes = vector<data::ptr<Node>, 256, uint64_t>();
+
+    subgraph_objects.push(util::cf_ptr(to_cf()));
+    _traversal_seed = _last_traversal_seed;
+
+    while (!subgraph_objects.empty()) {
+        bool created_transaction = false;
+
+        util::cf_ptr<IAGSubgraphRef> subgraph_object = subgraph_objects.top();
+        subgraph_objects.pop();
+
+        Subgraph *subgraph = Subgraph::from_cf(subgraph_object.get());
+        if (!subgraph) {
+            continue;
+        }
+
+        while (subgraph->is_valid() && subgraph->_dirty_flags & mask) {
+            subgraph->_dirty_flags &= ~mask;
+
+            if (mask == 0 || intersects(mask)) {
+                for (auto page : subgraph->pages()) {
+                    for (auto attribute : attribute_view(page)) {
+                        if (!attribute || attribute.is_nil()) {
+                            break;
+                        }
+                        if (auto node = attribute.get_node()) {
+                            if (mask) {
+                                if (node->subgraph_flags() == IAGAttributeFlagsNone) {
+                                    // we know this attribute is sorted after
+                                    // all nodes with flags so we aren't going
+                                    // to match any more attributes after this
+                                    break;
+                                }
+                                if (!(node->subgraph_flags() & mask)) {
+                                    continue;
+                                }
+                            }
+
+                            if (node->is_dirty()) {
+                                dirty_nodes.push_back(node);
+                            }
+                        } else if (attribute.is_indirect_node()) {
+                            if (mask) {
+                                // we know this attribute is sorted after all
+                                // nodes with flags so we aren't going to match
+                                // any more attributes after this
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (auto node : dirty_nodes) {
+                if (!created_transaction) {
+                    _graph->increment_transaction_count_if_needed();
+                }
+                _graph->update_attribute(node, IAGGraphUpdateOptionsInTransaction);
+                created_transaction = true;
+                if (!subgraph->is_valid()) {
+                    break;
+                }
+            }
+            dirty_nodes.clear();
+        }
+
+        if (subgraph->is_valid() && subgraph->_descendent_dirty_flags & mask) {
+            subgraph->_descendent_dirty_flags &= ~mask;
+
+            for (auto child : subgraph->children()) {
+                Subgraph *child_subgraph = child.subgraph();
+                if (child_subgraph->is_dirty(mask) && child_subgraph->_traversal_seed != _traversal_seed) {
+                    subgraph_objects.push(util::cf_ptr(child_subgraph->to_cf()));
+                    child_subgraph->_traversal_seed = _traversal_seed;
+                }
+            }
+        }
+
+        _graph->invalidate_subgraphs();
+    }
+
+    _graph->invalidate_subgraphs();
+    _graph->foreach_trace([this](Trace &trace) { trace.end_update(*this); });
+}
+
+#pragma mark - Cache
+
+// age = 0x00: recently fetched, in items(), removed from recycle list
+// age = 0x01: recently inserted, in items(), inserted in recycle list as mru
+// age = 0xff: collected, removed from items(), in recycle list
+
+data::ptr<Node> Subgraph::cache_fetch(size_t hash, const swift::metadata &metadata, const void *body,
+                                      ClosureFunctionCI<uint32_t, IAGUnownedGraphContextRef> get_attribute_type_id) {
+    if (_cache == nullptr) {
+        _cache = alloc(sizeof(NodeCache), 7).unsafe_cast<NodeCache>();
+        new (_cache.get()) NodeCache();
+    }
+
+    data::ptr<NodeCache::Type> type = _cache->types().lookup(&metadata, nullptr);
+    if (type == nullptr) {
+        const auto *equatable = metadata.equatable();
+        if (equatable == nullptr) {
+            precondition_failure("cache key must be equatable: %s", metadata.name(false));
+        }
+
+        type = alloc(sizeof(NodeCache::Type), 7).unsafe_cast<NodeCache::Type>();
+        type->type = &metadata;
+        type->equatable = equatable;
+        type->mru = nullptr;
+        type->lru = nullptr;
+        type->type_id = get_attribute_type_id(_graph);
+        _cache->types().insert(&metadata, type);
+    }
+
+    NodeCache::ItemKey item_key = {hash << 8, type, nullptr, body};
+    NodeCache::Item *item = _cache->items().lookup(&item_key, nullptr);
+    if (item) {
+        // cache hit: remove from lru (now active)
+        if (item->age() > 0) {
+            // remove item from list
+            if (item->next != nullptr) {
+                item->next->prev = item->prev;
+            } else {
+                type->lru = item->prev;
+            }
+            if (item->prev != nullptr) {
+                item->prev->next = item->next;
+            } else {
+                type->mru = item->next;
+            }
+
+            item->reset_age();
+        }
+    } else {
+        // cache miss
+        if (!get_attribute_type_id) {
+            return nullptr;
+        }
+
+        // try reusing a lru item, only if it has been collected at least once
+        // to prevent thrashing
+        if (type->lru && type->lru->age() >= 2) {
+            item = type->lru;
+
+            // remove item from list
+            if (item->next != nullptr) {
+                item->next->prev = item->prev;
+            } else {
+                type->lru = item->prev;
+            }
+            if (item->prev != nullptr) {
+                item->prev->next = item->next;
+            } else {
+                type->mru = item->next;
+            }
+
+            // remove item
+            if (item->age() != 0xff) {
+                _cache->items().remove_ptr((const NodeCache::ItemKey *)item);
+            }
+
+            // reset node data
+            _graph->remove_all_inputs(item->node);
+            item->node->set_dirty(true);
+            item->node->set_pending(true);
+            item->node->update_self(*_graph, body);
+            item->hash_and_age = hash << 8;
+        } else {
+            data::ptr<Node> node = graph()->add_attribute(*this, type->type_id, body, nullptr);
+            item = new NodeCache::Item(item_key.hash_and_age, item_key.type, node, nullptr, nullptr);
+            node->set_cached(true);
+            _cache->items_by_node().insert(node, item);
+        }
+
+        // reinsert in lookup map
+        _cache->items().insert((const NodeCache::ItemKey *)item, item);
+    }
+
+    return item->node;
+}
+
+void Subgraph::cache_insert(data::ptr<Node> node) {
+    if (!is_valid()) {
+        return;
+    }
+
+    if (!node->output_edges().empty()) {
+        return;
+    }
+    if (node->is_updating()) {
+        return;
+    }
+
+    if (!node->is_cached()) {
+        return;
+    }
+
+    auto attribute_type = graph()->attribute_type(node->type_id());
+    data::ptr<NodeCache::Type> type = _cache->types().lookup(&attribute_type.body_metadata(), nullptr);
+    NodeCache::Item *item = _cache->items_by_node().lookup(node, nullptr);
+    if (!item) {
+        return; // shouldn't happen
+    }
+
+    if (item->age() < 0xff) {
+        item->increment_age();
+    }
+
+    // insert as mru
+    item->next = type->mru;
+    item->prev = nullptr;
+    type->mru = item;
+    if (item->next) {
+        item->next->prev = item;
+    } else {
+        type->lru = item;
+    }
+
+    if (!has_cached_nodes()) {
+        if (!is_graph_invalidating_subgraphs()) {
+            _graph->add_subgraphs_with_cached_nodes(*this);
+        }
+        set_has_cached_nodes(true);
+    }
+}
+
+void Subgraph::cache_collect() {
+    set_has_cached_nodes(false);
+
+    if (_cache == nullptr || !is_valid()) {
+        return;
+    }
+
+    std::pair<Subgraph *, NodeCache *> context = {this, _cache.get()};
+    _cache->types().for_each(
+        [](const swift::metadata *metadata, const data::ptr<NodeCache::Type> type, void *context) {
+            auto *inner_context = reinterpret_cast<std::pair<Subgraph *, NodeCache *> *>(context);
+            Subgraph *subgraph = inner_context->first;
+            NodeCache *cache = inner_context->second;
+
+            for (NodeCache::Item *item = type->mru; item != nullptr; item = item->next) {
+                if (item->age() == 0xff) {
+                    // stop processing, all subsequent items will have age ==
+                    // 0xff too
+                    break;
+                }
+
+                item->increment_age();
+
+                if (item->age() == 0xff) {
+                    cache->items().remove_ptr((const NodeCache::ItemKey *)item);
+                    item->node->destroy_self(*subgraph->graph());
+                    item->node->destroy_value(*subgraph->graph());
+                    subgraph->graph()->remove_all_inputs(item->node);
+                } else {
+                    subgraph->set_has_cached_nodes(true);
+                }
+            }
+        },
+        &context);
+}
+
+#pragma mark - Tree
+
+void Subgraph::begin_tree(AttributeID value, const swift::metadata *type, uint32_t flags) {
+    data::ptr<Graph::TreeElement> tree = alloc(sizeof(Graph::TreeElement), 7).unsafe_cast<Graph::TreeElement>();
+    tree->type = type;
+    tree->value = value;
+    tree->flags = flags;
+    tree->parent = _tree_root;
+    tree->first_child = Graph::TreeElementID();
+    tree->next_sibling = Graph::TreeElementID();
+    tree->first_value = Graph::TreeValueID();
+
+    auto old_root = _tree_root;
+    _tree_root = Graph::TreeElementID(tree);
+
+    if (old_root) {
+        _tree_root->next_sibling = old_root->first_child;
+        old_root->first_child = _tree_root;
+    }
+}
+
+void Subgraph::end_tree() {
+    if (_tree_root && _tree_root->parent) {
+        _tree_root = _tree_root->parent;
+    }
+}
+
+void Subgraph::set_tree_owner(AttributeID owner) {
+    if (!_tree_root) {
+        return;
+    }
+    if (_tree_root->parent) {
+        precondition_failure("setting owner of non-root tree");
+    }
+    _tree_root->value = owner;
+}
+
+void Subgraph::add_tree_value(AttributeID value, const swift::metadata *type, const char *key, uint32_t flags) {
+    if (!_tree_root) {
+        return;
+    }
+
+    auto key_id = graph()->intern_key(key);
+
+    data::ptr<Graph::TreeValue> tree_value = alloc(sizeof(Graph::TreeValue), 7).unsafe_cast<Graph::TreeValue>();
+    tree_value->type = type;
+    tree_value->value = value;
+    tree_value->key_id = key_id;
+    tree_value->flags = flags;
+    tree_value->next = _tree_root->first_value;
+
+    _tree_root->first_value = Graph::TreeValueID(tree_value);
+}
+
+AttributeID Subgraph::tree_node_at_index(Graph::TreeElementID tree_element, uint64_t index) {
+    if (auto *tree_data_element = graph()->tree_data_element_for_subgraph(this)) {
+        auto &nodes = tree_data_element->nodes();
+
+        auto *found = std::lower_bound(nodes.begin(), nodes.end(), tree_element,
+                                      [](auto iter, auto value) { return iter.first < (uint32_t)value; });
+
+        // Find the element that is `index` places after the first given tree
+        // element, stopping if we reach the next tree element before `index`
+        // places.
+        uint64_t i = index;
+        for (auto *iter = found; iter != nodes.end(); ++iter) {
+            if (iter->first != tree_element) {
+                break;
+            }
+            if (i == 0) {
+                return AttributeID(iter->second);
+            }
+            --i;
+        }
+    }
+    return AttributeID(IAGAttributeNil);
+}
+
+Graph::TreeElementID Subgraph::tree_subgraph_child(Graph::TreeElementID tree_element) {
+    auto *tree_data_element = graph()->tree_data_element_for_subgraph(this);
+    if (!tree_data_element) {
+        return Graph::TreeElementID(nullptr);
+    }
+
+    auto &nodes = tree_data_element->nodes();
+    if (nodes.empty()) {
+        return Graph::TreeElementID(nullptr);
+    }
+
+    auto *found = std::lower_bound(nodes.begin(), nodes.end(), tree_element,
+                                  [](auto iter, auto value) -> bool { return iter.first < (uint32_t)value; });
+    if (found == nodes.end()) {
+        return Graph::TreeElementID(nullptr);
+    }
+
+    auto subgraph_children = vector<Subgraph *, 32, uint64_t>();
+
+    // Check if any node created for _this_ tree element, is the tree owner for
+    // any child subgraph
+    for (auto *subgraph : _graph->subgraphs()) {
+        if (!subgraph->is_valid()) {
+            continue;
+        }
+        if (subgraph->_tree_root == nullptr) {
+            continue;
+        }
+        AttributeID attribute = subgraph->_tree_root->value;
+        if (!attribute || attribute.is_nil()) {
+            continue;
+        }
+
+        attribute = attribute.resolve(TraversalOptions::None).attribute();
+        if (auto node = attribute.get_node()) {
+            for (auto *iter = found; iter != nodes.end(); ++iter) {
+                if (iter->first != tree_element) {
+                    break;
+                }
+                if (iter->second == node) {
+                    subgraph_children.push_back(subgraph);
+                    break;
+                }
+            }
+        }
+    }
+
+    std::sort(subgraph_children.begin(), subgraph_children.end());
+
+    auto first_tree_child = Graph::TreeElementID();
+
+    // Link all tree roots of child subgraphs together as siblings
+    auto old_first_tree_child = Graph::TreeElementID();
+    for (auto *subgraph : subgraph_children) {
+        first_tree_child = subgraph->_tree_root;
+        first_tree_child->next_sibling = old_first_tree_child;
+        old_first_tree_child = first_tree_child;
+    }
+
+    return first_tree_child;
+}
+
+#pragma mark - Encoding
+
+void Subgraph::encode(Encoder &encoder) const {
+    encoder.encode_field_varint(1, subgraph_id());
+    encoder.encode_field_varint(2, context_id());
+    for (auto *parent : _parents) {
+        encoder.encode_field_varint(3, parent->subgraph_id());
+    }
+    for (auto child : _children) {
+        encoder.encode_field_varint(4, child.subgraph()->subgraph_id());
+    }
+    encoder.encode_field_varint(5, is_valid() ? 0 : 1);
+
+    for (uint32_t iteration = 0; iteration < 2; ++iteration) {
+        for (auto page : pages()) {
+            bool found_nil_attribute = false;
+            auto view = iteration == 0 ? const_attribute_view(page) : attribute_view(page);
+            for (auto attribute : view) {
+                if (auto node = attribute.get_node()) {
+                    encoder.encode_field_begin(6);
+                    encoder.encode_field_varint(1, attribute);
+                    encoder.encode_field_begin(2);
+                    graph()->encode_node(encoder, *node.get(), false);
+                    encoder.encode_field_end();
+                    encoder.encode_field_end();
+                } else if (auto indirect_node = attribute.get_indirect_node()) {
+                    encoder.encode_field_begin(6);
+                    encoder.encode_field_varint(1, attribute);
+                    encoder.encode_field_begin(3);
+                    graph()->encode_indirect_node(encoder, *indirect_node.get());
+                    encoder.encode_field_end();
+                    encoder.encode_field_end();
+                } else if (attribute.is_nil()) {
+                    found_nil_attribute = true;
+                    break;
+                }
+            }
+            if (found_nil_attribute) {
+                break;
+            }
+        }
+    }
+
+    if (_tree_root) {
+        encoder.encode_field_begin(7);
+        _graph->encode_tree(encoder, _tree_root);
+        encoder.encode_field_end();
+    }
+}
+
+#pragma mark - Printing
+
+void Subgraph::print(uint32_t indent_level) {
+    uint64_t indent_length = static_cast<uint64_t>(2 * indent_level);
+    char *indent_string = (char *)alloca(indent_length + 1);
+    memset(indent_string, ' ', indent_length);
+    indent_string[indent_length] = '\0';
+
+    fprintf(stdout, "%s+ %p: %u in %lu [", indent_string, this, (uint32_t)subgraph_id(), (unsigned long)_context_id);
+
+    bool first = true;
+    for (auto page : pages()) {
+        for (auto attribute : attribute_view(page)) {
+            if (auto node = attribute.get_node()) {
+                fprintf(stdout, "%s%u", first ? "" : " ", IAGAttribute(attribute));
+                if (auto subgraph_flags = node->subgraph_flags()) {
+                    fprintf(stdout, "(%u)", subgraph_flags);
+                }
+                first = false;
+            }
+        }
+    }
+
+    fwrite("]\n", 2, 1, stdout);
+
+    for (auto child : _children) {
+        child.subgraph()->print(indent_level + 1);
+    }
+}
+
+} // namespace IAG

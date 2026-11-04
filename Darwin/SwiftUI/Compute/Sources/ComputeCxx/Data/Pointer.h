@@ -1,0 +1,115 @@
+#pragma once
+
+#include <cassert>
+#include <type_traits>
+
+#include "ComputeCxx/IAGBase.h"
+
+#include "Constants.h"
+#include "Table.h"
+
+IAG_ASSUME_NONNULL_BEGIN
+
+namespace IAG {
+namespace data {
+
+struct page;
+
+template <typename T>
+class ptr {
+  public:
+    using element_type = T;
+    using offset_type = uint32_t;
+    using difference_type = int32_t;
+
+  private:
+    offset_type _offset;
+
+    template <typename U>
+    friend class ptr;
+
+  public:
+    constexpr ptr(offset_type offset = 0) : _offset(offset) {};
+    constexpr ptr(std::nullptr_t) : _offset(0) {};
+
+    void assert_valid() const {
+        if (_offset >= table::shared().ptr_max_offset()) {
+            precondition_failure("invalid data offset: %u", _offset);
+        }
+    }
+
+    [[nodiscard]] element_type *_Nullable get() const noexcept {
+        if (_offset == 0) {
+            return nullptr;
+        }
+        return reinterpret_cast<element_type *>(table::shared().ptr_base() + _offset);
+    }
+
+    // MARK: Page
+
+    ptr<page> page_ptr() const noexcept { return ptr<page>(_offset & ~page_alignment_mask); }
+
+    offset_type offset() const noexcept { return _offset; }
+
+    template <typename U>
+    ptr<U> aligned(offset_type alignment_mask = sizeof(offset_type) - 1) const {
+        return ptr<U>((_offset + alignment_mask) & ~alignment_mask);
+    };
+
+    explicit operator bool() const noexcept { return _offset != 0; };
+    std::add_lvalue_reference_t<T> operator*() const noexcept { return *get(); };
+    T *_Nonnull operator->() const noexcept {
+        assert(_offset != 0);
+        return get();
+    };
+
+    bool operator==(const ptr<T> &other) const noexcept { return _offset == other._offset; };
+    bool operator!=(const ptr<T> &other) const noexcept { return _offset != other._offset; };
+    bool operator==(std::nullptr_t) const noexcept { return _offset == 0; };
+    bool operator!=(std::nullptr_t) const noexcept { return _offset != 0; };
+
+    bool operator<(offset_type offset) const noexcept { return _offset < offset; };
+    bool operator<=(offset_type offset) const noexcept { return _offset <= offset; };
+    bool operator>(offset_type offset) const noexcept { return _offset > offset; };
+    bool operator>=(offset_type offset) const noexcept { return _offset >= offset; };
+
+    template <typename U>
+    ptr<U> operator+(difference_type shift) const noexcept {
+        return ptr<U>(_offset + shift);
+    };
+
+    template <typename U>
+    ptr<U> operator-(difference_type shift) const noexcept {
+        return ptr<U>(_offset - shift);
+    };
+
+    template <typename U>
+    difference_type operator-(const ptr<U> &other) const noexcept {
+        return _offset - other._offset;
+    };
+
+    template <typename U>
+    ptr<U> advanced(difference_type shift) const noexcept {
+        return ptr<U>(_offset + shift);
+    };
+
+    template <typename U>
+    ptr<U> unsafe_cast() const {
+        return ptr<U>(_offset);
+    }
+};
+
+} // namespace data
+} // namespace IAG
+
+namespace std {
+
+template <typename T>
+class hash<IAG::data::ptr<T>> {
+  public:
+    std::uint64_t operator()(const IAG::data::ptr<T> &pointer) const { return pointer.offset(); }
+};
+
+} // namespace std
+
+IAG_ASSUME_NONNULL_END
