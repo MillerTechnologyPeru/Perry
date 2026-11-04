@@ -76,6 +76,23 @@ final class BundleStorage {
 }
 
 enum Bundles {
+    /// The first localization in `available` that one of `preferences` (the
+    /// user's languages by default) names, matching "en-US" to "en" and
+    /// "English" to "en".
+    static func preferred(from available: [String], preferences: [String]?) -> String? {
+        let languages = preferences ?? Locale.preferredLanguages
+        func base(_ name: String) -> String {
+            let lowered = name.lowercased()
+            if lowered == "english" { return "en" }
+            return String(lowered.split(whereSeparator: { $0 == "-" || $0 == "_" }).first ?? Substring(lowered))
+        }
+        for language in languages {
+            if let exact = available.first(where: { $0.lowercased() == language.lowercased() }) { return exact }
+            if let close = available.first(where: { base($0) == base(language) }) { return close }
+        }
+        return nil
+    }
+
     nonisolated(unsafe) static var bundleClass: Class!
     nonisolated(unsafe) static var main: id!
     nonisolated(unsafe) private static var byPath: [String: id] = [:]
@@ -162,6 +179,39 @@ public final class NSBundle: NSObject {
         return "en"
     }
 
+    /// The localizations the bundle has: its .lproj directories' names,
+    /// without Base, which holds resources for every localization.
+    @ObjCMethod("localizations")
+    func localizations() -> NSArray {
+        let names = storage.resources(type: "lproj", directory: nil)
+            .map { Paths.deletingPathExtension(Paths.lastComponent($0)) }
+            .filter { $0 != "Base" }
+        return Arrays.owned(names.map { Strings.autoreleased($0) })
+    }
+
+    /// The localizations used: the first of the user's languages the bundle
+    /// has, else its development localization.
+    @ObjCMethod("preferredLocalizations")
+    func preferredLocalizations() -> NSArray {
+        let available = Arrays.elements(localizations().objcObject).compactMap(Strings.value(of:))
+        let chosen = Bundles.preferred(from: available, preferences: nil) ?? developmentLocalization() ?? "en"
+        return Arrays.owned([Strings.autoreleased(chosen)])
+    }
+
+    @ObjCClassMethod("preferredLocalizationsFromArray:")
+    static func preferredLocalizations(from localizations: NSArray?) -> NSArray {
+        preferredLocalizations(from: localizations, forPreferences: nil)
+    }
+
+    @ObjCClassMethod("preferredLocalizationsFromArray:forPreferences:")
+    static func preferredLocalizations(from localizations: NSArray?, forPreferences preferences: NSArray?) -> NSArray {
+        let available = Arrays.elements(localizations?.objcObject).compactMap(Strings.value(of:))
+        let chosen = Bundles.preferred(from: available, preferences: preferences.map {
+            Arrays.elements($0.objcObject).compactMap(Strings.value(of:))
+        }) ?? available.first
+        return Arrays.owned(chosen.map { [Strings.autoreleased($0)] } ?? [])
+    }
+
     // MARK: Resources
 
     @ObjCMethod("pathForResource:ofType:")
@@ -204,5 +254,12 @@ public final class NSBundle: NSObject {
     func localizedString(forKey key: String, value: String?, table: String?) -> String {
         guard let value, !value.isEmpty else { return key }
         return value
+    }
+
+    /// The localized string, as an attributed string without attributes.
+    @ObjCMethod("localizedAttributedStringForKey:value:table:")
+    func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
+        let text = localizedString(forKey: key, value: value, table: table)
+        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: nil), mutable: false))
     }
 }
