@@ -222,6 +222,10 @@ public final class NSURL: NSObject {
     @ObjCMethod("pathExtension") func pathExtension() -> String { url.pathExtension }
     @ObjCMethod("pathComponents") func pathComponents() -> NSArray { Arrays.owned(url.pathComponents.map { Strings.autoreleased($0) }) }
     @ObjCMethod("isFileURL") func isFileURL() -> Bool { url.isFileURL }
+    /// File URLs are path URLs here: there are no file references.
+    @ObjCMethod("isFileReferenceURL") func isFileReferenceURL() -> Bool { false }
+    @ObjCMethod("filePathURL") func filePathURL() -> NSURL? { url.isFileURL ? URLs.wrapped(url.absoluteURL) : nil }
+    @ObjCMethod("fileReferenceURL") func fileReferenceURL() -> NSURL? { filePathURL() }
 
     /// Whether a file URL's file exists; any other URL cannot be checked.
     @ObjCMethod("checkResourceIsReachableAndReturnError:")
