@@ -1,0 +1,16 @@
+# Sources under licenses other than MIT, which Scripts/build-swiftui.sh
+# fetches from upstream at the pinned commits.
+/Compute/Submodules/
+/Compute/Sources/SwiftCorelibsCoreFoundation/
+/Compute/Sources/Utilities/include/Utilities/SwiftBridging.h
+/Compute/Sources/ComputeCxx/internalInclude/CoreFoundationPrivate/CFRuntime.h
+/Compute/Sources/ComputeCxx/include/ComputeCxx/IAGTargetConditionals.h
+/OpenAttributeGraph/Checkouts/
+/OpenAttributeGraph/Sources/SwiftCorelibs/
+/OpenAttributeGraph/Sources/SwiftBridging/SwiftBridging.h
+/OpenAttributeGraph/Sources/OpenAttributeGraphCxx/include/OpenAttributeGraph/OAGTargetConditionals.h
+/OpenAttributeGraph/Sources/OpenAttributeGraphCxx/include/OpenAttributeGraph/Private/CFRuntime.h
+/OpenRenderBox/Sources/OpenRenderBoxCxx/include/OpenRenderBox/ORBTargetConditionals.h
+/OpenRenderBox/Sources/OpenRenderBoxCxx/include/OpenRenderBox/CFCGTypes.h
+/OpenSwiftUI/Sources/SwiftCorelibs/
+/OpenSwiftUI/Sources/OpenSwiftUI_SPI/OpenSwiftUITargetConditionals.h
