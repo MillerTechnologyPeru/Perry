@@ -102,6 +102,10 @@ public enum ObjCRuntime {
             addMethod: addMethod, replaceMethod: replaceMethod, initializeClassPair: initializeClassPair,
             allocateClassPair: allocateClassPair, registerClassPair: registerClassPair))
         poolFunctions = (push: poolPush, pop: poolPop)
+        if let store = bind("_objc_storeWeak", as: (@convention(c) (UnsafeMutablePointer<Object>?, Object) -> Object).self),
+           let load = bind("_objc_loadWeakRetained", as: (@convention(c) (UnsafeMutablePointer<Object>?) -> Object).self) {
+            weakFunctions = (store: store, loadRetained: load)
+        }
         guard let getProtocol = bind("_objc_getProtocol", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
               let allocateProtocol = bind("_objc_allocateProtocol",
                                           as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
@@ -232,6 +236,47 @@ public enum ObjCRuntime {
     nonisolated(unsafe) public static var poolFunctions: (push: @convention(c) () -> UnsafeMutableRawPointer?,
                                                          pop: @convention(c) (UnsafeMutableRawPointer?) -> Void) =
         ({ nil }, { _ in })
+
+    /// objc_storeWeak and objc_loadWeakRetained; nil until bound, when
+    /// weak references hold their objects unretained.
+    nonisolated(unsafe) public static var weakFunctions: (
+        store: @convention(c) (UnsafeMutablePointer<UnsafeMutableRawPointer?>?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
+        loadRetained: @convention(c) (UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UnsafeMutableRawPointer?
+    )?
+}
+
+/// A weak reference to an Objective-C object, which reads nil once the
+/// object is deallocated, as Darwin's delegate properties do.
+public final class WeakObject {
+    private let slot: UnsafeMutablePointer<UnsafeMutableRawPointer?>
+
+    public init(_ object: UnsafeMutableRawPointer? = nil) {
+        slot = .allocate(capacity: 1)
+        slot.initialize(to: nil)
+        self.object = object
+    }
+
+    deinit {
+        if let weak = ObjCRuntime.weakFunctions { _ = weak.store(slot, nil) }
+        slot.deallocate()
+    }
+
+    /// The object, or nil once it is gone; unretained.
+    public var object: UnsafeMutableRawPointer? {
+        get {
+            guard let weak = ObjCRuntime.weakFunctions else { return slot.pointee }
+            guard let object = weak.loadRetained(slot) else { return nil }
+            ObjCRuntime.autorelease(object)
+            return object
+        }
+        set {
+            if let weak = ObjCRuntime.weakFunctions {
+                _ = weak.store(slot, newValue)
+            } else {
+                slot.pointee = newValue
+            }
+        }
+    }
 }
 
 /// Reports a misuse of the interop layer and aborts.
