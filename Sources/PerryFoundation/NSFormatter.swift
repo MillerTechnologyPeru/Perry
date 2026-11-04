@@ -26,6 +26,14 @@ public class NSFormatter: NSObject {
     }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjC.retain(objcObject)! }
+
+    /// Date and number formatters behave as since Mac OS X 10.4
+    /// (NSDateFormatterBehavior10_4, NSNumberFormatterBehavior10_4: 1040),
+    /// the only behavior iOS has.
+    @ObjCMethod("formatterBehavior") func formatterBehavior() -> UInt { 1040 }
+    @ObjCMethod("setFormatterBehavior:") func setFormatterBehavior(_ behavior: UInt) {}
+    @ObjCClassMethod("defaultFormatterBehavior") static func defaultFormatterBehavior() -> UInt { 1040 }
+    @ObjCClassMethod("setDefaultFormatterBehavior:") static func setDefaultFormatterBehavior(_ behavior: UInt) {}
 }
 
 // MARK: - Dates
@@ -181,7 +189,8 @@ public final class NSDateFormatter: NSFormatter {
         ObjC.superDealloc(objcObject, from: DateFormatters.formatterClass)
     }
 
-    @ObjCMethod("stringFromDate:") func string(from date: NSDate) -> String { storage.string(from: date.date) }
+    /// Nil for no date, as on Darwin.
+    @ObjCMethod("stringFromDate:") func string(from date: NSDate?) -> String? { date.map { storage.string(from: $0.date) } }
 
     @ObjCMethod("stringForObjectValue:")
     func dateString(forObjectValue value: ObjCObject?) -> String? {
@@ -190,7 +199,7 @@ public final class NSDateFormatter: NSFormatter {
     }
 
     @ObjCMethod("dateFromString:")
-    func date(from string: String) -> UnsafeMutableRawPointer? { storage.date(from: string).flatMap { Dates.autoreleased($0) } }
+    func date(from string: String?) -> UnsafeMutableRawPointer? { string.flatMap { storage.date(from: $0) }.flatMap { Dates.autoreleased($0) } }
 
     @ObjCMethod("getObjectValue:forString:errorDescription:")
     func getObjectValue(_ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, for string: String,

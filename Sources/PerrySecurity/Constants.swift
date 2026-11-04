@@ -258,3 +258,11 @@ enum KeyAlgorithms {
     static let kSecKeyAlgorithmECIESEncryptionStandardVariableIVX963SHA512AESGCM = "algid:encrypt:ECIES:ECDH:KDFX963:SHA512:AESGCM-KDFIV"
     static let kSecKeyAlgorithmECIESEncryptionCofactorVariableIVX963SHA512AESGCM = "algid:encrypt:ECIES:ECDHC:KDFX963:SHA512:AESGCM-KDFIV"
 }
+
+@ObjCConstants
+enum MoreItemKeys {
+    static let kSecAttrProtocolNNTPS = "ntps"
+    static let kSecAttrProtocolTelnetS = "tels"
+    static let kSecSharedPassword = "spwd"
+    static let kSecUseNoAuthenticationUI = "u_NoAuthUI"
+}

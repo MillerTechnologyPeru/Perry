@@ -22,10 +22,11 @@ enum Blocks {
     }
 }
 
-/// for (id x in collection): Foundation hands out every element in one
-/// batch from a buffer the collection keeps until the next enumeration.
+/// for (id x in collection): elements go out in batches through the
+/// caller's own buffer, with the position in the caller's state, so
+/// enumerations of a collection, nested or on other threads, share nothing.
+/// The mutations counter lets the loop notice the collection changing.
 final class EnumerationBuffer {
-    private var items: UnsafeMutablePointer<id?>?
     let mutations: UnsafeMutablePointer<UInt>
 
     init() {
@@ -34,24 +35,25 @@ final class EnumerationBuffer {
     }
 
     deinit {
-        items?.deallocate()
         mutations.deallocate()
     }
 
     /// countByEnumeratingWithState:objects:count: for `objects`.
-    /// NSFastEnumerationState is { state, itemsPtr, mutationsPtr, extra[5] }.
-    func enumerate(_ objects: [id], state: UnsafeMutableRawPointer?) -> UInt {
-        guard let state, state.load(as: UInt.self) == 0 else { return 0 }
-        items?.deallocate()
-        let buffer = UnsafeMutablePointer<id?>.allocate(capacity: max(objects.count, 1))
-        for (index, object) in objects.enumerated() {
-            (buffer + index).initialize(to: object)
+    /// NSFastEnumerationState is { state, itemsPtr, mutationsPtr, extra[5] }:
+    /// state is the index of the next batch, plus one once started.
+    func enumerate(_ objects: [id], state: UnsafeMutableRawPointer?, buffer: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        guard let state, let buffer, count > 0 else { return 0 }
+        let started = state.load(as: UInt.self)
+        let next = started == 0 ? 0 : Int(started - 1)
+        guard next < objects.count else { return 0 }
+        let batch = min(Int(count), objects.count - next)
+        for index in 0..<batch {
+            buffer[index] = objects[next + index]
         }
-        items = buffer
-        state.storeBytes(of: 1, as: UInt.self)
+        state.storeBytes(of: UInt(next + batch + 1), as: UInt.self)
         state.storeBytes(of: UnsafeMutableRawPointer(buffer), toByteOffset: 8, as: UnsafeMutableRawPointer.self)
         state.storeBytes(of: UnsafeMutableRawPointer(mutations), toByteOffset: 16, as: UnsafeMutableRawPointer.self)
-        return UInt(objects.count)
+        return UInt(batch)
     }
 
     func mutated() {

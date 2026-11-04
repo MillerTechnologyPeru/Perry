@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/uio.h>
 #include <sys/syscall.h>
 #include <time.h>
 #include <ucontext.h>
@@ -713,4 +714,147 @@ void *darwin_dlsym(void *handle, const char *symbol) {
         dl_error = message;
     }
     return address;
+}
+
+// MARK: - Hosts, exceptions and memory
+
+// The host's basic information (HOST_BASIC_INFO, 1): its processors and
+// memory, as an arm64 device reports them.
+typedef struct {
+    int32_t max_cpus, avail_cpus;
+    uint32_t memory_size;
+    int32_t cpu_type, cpu_subtype, cpu_threadtype, physical_cpu, physical_cpu_max, logical_cpu, logical_cpu_max;
+    uint64_t max_mem;
+} darwin_host_basic_info;
+
+kern_return_t darwin_host_info(mach_port_t host, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(host_info);
+kern_return_t darwin_host_info(mach_port_t host, int flavor, int32_t *info, uint32_t *count) {
+    (void)host;
+    uint32_t words = sizeof(darwin_host_basic_info) / sizeof(int32_t);
+    if (flavor != 1 || !info || !count || *count < words)
+        return KERN_INVALID_ARGUMENT;
+    long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+    uint64_t memory = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+    darwin_host_basic_info basic = {
+        (int32_t)cpus, (int32_t)cpus, memory > UINT32_MAX ? UINT32_MAX : (uint32_t)memory,
+        0x0100000c /* CPU_TYPE_ARM64 */, 0, 0, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, memory,
+    };
+    memcpy(info, &basic, sizeof(basic));
+    *count = words;
+    return KERN_SUCCESS;
+}
+
+// Exception ports: there are none, and none can be set. Crash reporters
+// that find so fall back to signal handlers.
+kern_return_t darwin_task_get_exception_ports(mach_port_t task, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                              mach_port_t *ports, int *behaviors, int *flavors)
+    DARWIN_SYMBOL(task_get_exception_ports);
+kern_return_t darwin_task_get_exception_ports(mach_port_t task, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                              mach_port_t *ports, int *behaviors, int *flavors) {
+    (void)task, (void)mask, (void)masks, (void)ports, (void)behaviors, (void)flavors;
+    if (count)
+        *count = 0;
+    return KERN_SUCCESS;
+}
+
+kern_return_t darwin_thread_get_exception_ports(mach_port_t thread, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                                mach_port_t *ports, int *behaviors, int *flavors)
+    DARWIN_SYMBOL(thread_get_exception_ports);
+kern_return_t darwin_thread_get_exception_ports(mach_port_t thread, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                                mach_port_t *ports, int *behaviors, int *flavors) {
+    return darwin_task_get_exception_ports(thread, mask, masks, count, ports, behaviors, flavors);
+}
+
+#define MACH_FAILS(name, ...) \
+    kern_return_t darwin_##name(__VA_ARGS__) DARWIN_SYMBOL(name); \
+    kern_return_t darwin_##name(__VA_ARGS__) { return KERN_FAILURE; }
+
+MACH_FAILS(task_set_exception_ports, mach_port_t task, uint32_t mask, mach_port_t port, int behavior, int flavor)
+MACH_FAILS(task_swap_exception_ports, mach_port_t task, uint32_t mask, mach_port_t port, int behavior, int flavor,
+           uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors)
+MACH_FAILS(thread_swap_exception_ports, mach_port_t thread, uint32_t mask, mach_port_t port, int behavior, int flavor,
+           uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors)
+MACH_FAILS(exception_raise, mach_port_t port, mach_port_t thread, mach_port_t task, int exception, void *code, uint32_t count)
+MACH_FAILS(exception_raise_state, mach_port_t port, int exception, void *code, uint32_t count, int *flavor,
+           void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
+MACH_FAILS(exception_raise_state_identity, mach_port_t port, mach_port_t thread, mach_port_t task, int exception,
+           void *code, uint32_t count, int *flavor, void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
+MACH_FAILS(mach_port_insert_right, mach_port_t task, mach_port_t name, mach_port_t port, int disposition)
+MACH_FAILS(mach_port_mod_refs, mach_port_t task, mach_port_t name, int right, int delta)
+MACH_FAILS(mach_port_move_member, mach_port_t task, mach_port_t member, mach_port_t after)
+MACH_FAILS(mach_port_request_notification, mach_port_t task, mach_port_t name, int message_id, uint32_t sync,
+           mach_port_t notify, int disposition, mach_port_t *previous)
+MACH_FAILS(mach_make_memory_entry_64, mach_port_t task, uint64_t *size, uint64_t offset, int permission,
+           mach_port_t *entry, mach_port_t parent)
+MACH_FAILS(vm_map, mach_port_t task, uintptr_t *address, uintptr_t size, uintptr_t mask, int flags, mach_port_t object,
+           uintptr_t offset, int copy, int current, int maximum, int inheritance)
+
+// No ports can be made: there is no Mach IPC.
+kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) DARWIN_SYMBOL(mach_port_allocate);
+kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) {
+    (void)task, (void)right;
+    if (name)
+        *name = 0;
+    return KERN_RESOURCE_SHORTAGE;
+}
+
+// MACH_SEND_INVALID_DEST, MACH_RCV_INVALID_NAME: no port names anything.
+int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t receive_size, mach_port_t receive_name,
+                    uint32_t timeout, mach_port_t notify) DARWIN_SYMBOL(mach_msg);
+int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t receive_size, mach_port_t receive_name,
+                    uint32_t timeout, mach_port_t notify) {
+    (void)message, (void)send_size, (void)receive_size, (void)receive_name, (void)timeout, (void)notify;
+    return (option & 1) ? 0x10000003 : 0x10004002;
+}
+
+// MIG's NDR record, which marshalled messages begin with: little-endian,
+// ASCII, IEEE floats.
+const uint8_t darwin_NDR_record[8] DARWIN_SYMBOL(NDR_record) = { 0, 0, 0, 0, 1, 0, 0, 0 };
+
+// iOS's 16 KB pages.
+uintptr_t darwin_vm_page_size DARWIN_SYMBOL(vm_page_size) = 16384;
+uintptr_t darwin_vm_page_mask DARWIN_SYMBOL(vm_page_mask) = 16383;
+
+// Copies another address's memory, failing rather than faulting where none
+// is mapped.
+kern_return_t darwin_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                       uintptr_t *out_size) DARWIN_SYMBOL(vm_read_overwrite);
+kern_return_t darwin_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                       uintptr_t *out_size) {
+    (void)task;
+    struct iovec local = { (void *)data, size }, remote = { (void *)address, size };
+    ssize_t copied = syscall(SYS_process_vm_readv, getpid(), &local, 1UL, &remote, 1UL, 0UL);
+    if (copied < 0 || (uintptr_t)copied != size)
+        return KERN_INVALID_ADDRESS;
+    if (out_size)
+        *out_size = size;
+    return KERN_SUCCESS;
+}
+
+// The pthread for a thread port; only the calling thread's is known.
+pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) DARWIN_SYMBOL(pthread_from_mach_thread_np);
+pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
+    return port == (mach_port_t)thread_id() ? pthread_self() : 0;
+}
+
+// The architecture, as NXGetLocalArchInfo describes it.
+typedef struct { const char *name; int cputype; int cpusubtype; int byteorder; const char *description; } darwin_arch_info;
+static const darwin_arch_info arm64_info = { "arm64", 0x0100000c, 0, 1, "ARM64" };
+
+const darwin_arch_info *darwin_NXGetLocalArchInfo(void) DARWIN_SYMBOL(NXGetLocalArchInfo);
+const darwin_arch_info *darwin_NXGetLocalArchInfo(void) { return &arm64_info; }
+
+const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) DARWIN_SYMBOL(NXGetArchInfoFromCpuType);
+const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) {
+    (void)subtype;
+    return type == arm64_info.cputype ? &arm64_info : NULL;
+}
+
+// The 32-bit header's lookup: a 64-bit image has no 32-bit segments, so
+// nothing is found, as on 64-bit Darwin.
+const void *darwin_getsectbynamefromheader(const void *header, const char *segment, const char *section)
+    DARWIN_SYMBOL(getsectbynamefromheader);
+const void *darwin_getsectbynamefromheader(const void *header, const char *segment, const char *section) {
+    (void)header, (void)segment, (void)section;
+    return NULL;
 }

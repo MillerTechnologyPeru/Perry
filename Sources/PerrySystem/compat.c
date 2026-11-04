@@ -23,7 +23,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <stdatomic.h>
 #include <sys/resource.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 // MARK: - Signals
@@ -712,3 +714,202 @@ void darwin_tlv_bootstrap(void) {
     fprintf(stderr, "perry: thread-local variable used before its image was set up\n");
     abort();
 }
+
+// MARK: - More atomics
+
+int32_t darwin_OSAtomicIncrement32(volatile int32_t *value) DARWIN_SYMBOL(OSAtomicIncrement32);
+int32_t darwin_OSAtomicIncrement32(volatile int32_t *value) { return __atomic_add_fetch(value, 1, __ATOMIC_RELAXED); }
+
+int32_t darwin_OSAtomicIncrement32Barrier(volatile int32_t *value) DARWIN_SYMBOL(OSAtomicIncrement32Barrier);
+int32_t darwin_OSAtomicIncrement32Barrier(volatile int32_t *value) { return __atomic_add_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicDecrement32(volatile int32_t *value) DARWIN_SYMBOL(OSAtomicDecrement32);
+int32_t darwin_OSAtomicDecrement32(volatile int32_t *value) { return __atomic_sub_fetch(value, 1, __ATOMIC_RELAXED); }
+
+int32_t darwin_OSAtomicDecrement32Barrier(volatile int32_t *value) DARWIN_SYMBOL(OSAtomicDecrement32Barrier);
+int32_t darwin_OSAtomicDecrement32Barrier(volatile int32_t *value) { return __atomic_sub_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+void darwin_OSMemoryBarrier(void) DARWIN_SYMBOL(OSMemoryBarrier);
+void darwin_OSMemoryBarrier(void) { __atomic_thread_fence(__ATOMIC_SEQ_CST); }
+
+// OSSpinLock: an int, 0 when unlocked.
+bool darwin_OSSpinLockTry(volatile int32_t *lock) DARWIN_SYMBOL(OSSpinLockTry);
+bool darwin_OSSpinLockTry(volatile int32_t *lock) {
+    int32_t expected = 0;
+    return __atomic_compare_exchange_n(lock, &expected, 1, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED);
+}
+
+void darwin_OSSpinLockLock(volatile int32_t *lock) DARWIN_SYMBOL(OSSpinLockLock);
+void darwin_OSSpinLockLock(volatile int32_t *lock) {
+    while (!darwin_OSSpinLockTry(lock))
+        sched_yield();
+}
+
+void darwin_OSSpinLockUnlock(volatile int32_t *lock) DARWIN_SYMBOL(OSSpinLockUnlock);
+void darwin_OSSpinLockUnlock(volatile int32_t *lock) { __atomic_store_n(lock, 0, __ATOMIC_RELEASE); }
+
+// MARK: - More of the Apple System Log
+
+// A message: its keys and values. Searching the log finds nothing, as it
+// keeps nothing; sending a message writes its text to stderr.
+typedef struct { char **keys, **values; size_t count; } darwin_asl_message;
+
+void *darwin_asl_new(uint32_t type) DARWIN_SYMBOL(asl_new);
+void *darwin_asl_new(uint32_t type) { (void)type; return calloc(1, sizeof(darwin_asl_message)); }
+
+void darwin_asl_free(darwin_asl_message *message) DARWIN_SYMBOL(asl_free);
+void darwin_asl_free(darwin_asl_message *message) {
+    if (!message)
+        return;
+    for (size_t i = 0; i < message->count; i++) {
+        free(message->keys[i]);
+        free(message->values[i]);
+    }
+    free(message->keys);
+    free(message->values);
+    free(message);
+}
+
+int darwin_asl_set(darwin_asl_message *message, const char *key, const char *value) DARWIN_SYMBOL(asl_set);
+int darwin_asl_set(darwin_asl_message *message, const char *key, const char *value) {
+    if (!message || !key)
+        return -1;
+    for (size_t i = 0; i < message->count; i++) {
+        if (strcmp(message->keys[i], key) == 0) {
+            free(message->values[i]);
+            message->values[i] = value ? strdup(value) : NULL;
+            return 0;
+        }
+    }
+    message->keys = realloc(message->keys, (message->count + 1) * sizeof(char *));
+    message->values = realloc(message->values, (message->count + 1) * sizeof(char *));
+    message->keys[message->count] = strdup(key);
+    message->values[message->count] = value ? strdup(value) : NULL;
+    message->count++;
+    return 0;
+}
+
+int darwin_asl_set_query(darwin_asl_message *message, const char *key, const char *value, uint32_t op) DARWIN_SYMBOL(asl_set_query);
+int darwin_asl_set_query(darwin_asl_message *message, const char *key, const char *value, uint32_t op) {
+    (void)op;
+    return darwin_asl_set(message, key, value);
+}
+
+const char *darwin_asl_get(darwin_asl_message *message, const char *key) DARWIN_SYMBOL(asl_get);
+const char *darwin_asl_get(darwin_asl_message *message, const char *key) {
+    if (!message || !key)
+        return NULL;
+    for (size_t i = 0; i < message->count; i++)
+        if (strcmp(message->keys[i], key) == 0)
+            return message->values[i];
+    return NULL;
+}
+
+int darwin_asl_send(void *client, darwin_asl_message *message) DARWIN_SYMBOL(asl_send);
+int darwin_asl_send(void *client, darwin_asl_message *message) {
+    (void)client;
+    const char *text = darwin_asl_get(message, "Message");
+    if (text)
+        fprintf(stderr, "%s\n", text);
+    return 0;
+}
+
+// A search's response, which has no messages.
+void *darwin_asl_search(void *client, void *query) DARWIN_SYMBOL(asl_search);
+void *darwin_asl_search(void *client, void *query) { (void)client; (void)query; return calloc(1, 1); }
+
+void *darwin_aslresponse_next(void *response) DARWIN_SYMBOL(aslresponse_next);
+void *darwin_aslresponse_next(void *response) { (void)response; return NULL; }
+
+void darwin_aslresponse_free(void *response) DARWIN_SYMBOL(aslresponse_free);
+void darwin_aslresponse_free(void *response) { free(response); }
+
+// asl_next and asl_release: aslresponse_next and the freeing of any ASL
+// object, as macOS 10.10 renamed them.
+void *darwin_asl_next(void *response) DARWIN_SYMBOL(asl_next);
+void *darwin_asl_next(void *response) { (void)response; return NULL; }
+
+void darwin_asl_release(void *object) DARWIN_SYMBOL(asl_release);
+void darwin_asl_release(void *object) { free(object); }
+
+// MARK: - Notifications
+
+// notify(3): a registration gets a token, and no notification comes.
+static _Atomic int notify_tokens;
+
+uint32_t darwin_notify_register_dispatch(const char *name, int *token, void *queue, void *handler)
+    DARWIN_SYMBOL(notify_register_dispatch);
+uint32_t darwin_notify_register_dispatch(const char *name, int *token, void *queue, void *handler) {
+    (void)name, (void)queue, (void)handler;
+    if (token)
+        *token = atomic_fetch_add(&notify_tokens, 1) + 1;
+    return 0;
+}
+
+uint32_t darwin_notify_cancel(int token) DARWIN_SYMBOL(notify_cancel);
+uint32_t darwin_notify_cancel(int token) { (void)token; return 0; }
+
+// MARK: - Extended attributes
+
+// Darwin's take a position and options (XATTR_NOFOLLOW 1); Linux keeps an
+// app's attributes in its user namespace.
+static void xattr_name(const char *name, char *out, size_t size) { snprintf(out, size, "user.%s", name); }
+
+ssize_t darwin_getxattr(const char *path, const char *name, void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(getxattr);
+ssize_t darwin_getxattr(const char *path, const char *name, void *value, size_t size, uint32_t position, int options) {
+    (void)position;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    ssize_t length = (options & 1) ? lgetxattr(path, linux_name, value, size) : getxattr(path, linux_name, value, size);
+    if (length < 0 && errno == ENODATA)
+        errno = 93;    // ENOATTR
+    return length;
+}
+
+int darwin_setxattr(const char *path, const char *name, const void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(setxattr);
+int darwin_setxattr(const char *path, const char *name, const void *value, size_t size, uint32_t position, int options) {
+    (void)position;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    // XATTR_CREATE 2 and XATTR_REPLACE 4 are Linux's 1 and 2.
+    int flags = ((options & 2) ? XATTR_CREATE : 0) | ((options & 4) ? XATTR_REPLACE : 0);
+    return (options & 1) ? lsetxattr(path, linux_name, value, size, flags) : setxattr(path, linux_name, value, size, flags);
+}
+
+int darwin_removexattr(const char *path, const char *name, int options) DARWIN_SYMBOL(removexattr);
+int darwin_removexattr(const char *path, const char *name, int options) {
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    int result = (options & 1) ? lremovexattr(path, linux_name) : removexattr(path, linux_name);
+    if (result < 0 && errno == ENODATA)
+        errno = 93;
+    return result;
+}
+
+// MARK: - Signal stacks and the rest
+
+// Darwin's stack_t is { ss_sp, ss_size, ss_flags }; Linux's { ss_sp,
+// ss_flags, ss_size }. SS_ONSTACK and SS_DISABLE are 1 and 4 on both.
+struct darwin_stack { void *sp; size_t size; int flags; };
+
+int darwin_sigaltstack(const struct darwin_stack *stack, struct darwin_stack *previous) DARWIN_SYMBOL(sigaltstack);
+int darwin_sigaltstack(const struct darwin_stack *stack, struct darwin_stack *previous) {
+    stack_t linux_stack, linux_previous;
+    if (stack) {
+        linux_stack.ss_sp = stack->sp;
+        linux_stack.ss_size = stack->size;
+        linux_stack.ss_flags = stack->flags & SS_DISABLE;
+    }
+    int result = sigaltstack(stack ? &linux_stack : NULL, previous ? &linux_previous : NULL);
+    if (result == 0 && previous) {
+        previous->sp = linux_previous.ss_sp;
+        previous->size = linux_previous.ss_size;
+        previous->flags = linux_previous.ss_flags;
+    }
+    return result;
+}
+
+const char *darwin_getprogname(void) DARWIN_SYMBOL(getprogname);
+const char *darwin_getprogname(void) { return program_invocation_short_name; }

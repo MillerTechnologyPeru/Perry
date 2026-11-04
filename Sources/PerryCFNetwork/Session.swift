@@ -163,6 +163,17 @@ open class NSURLCache: NSObject {
     @ObjCMethod("cachedResponseForRequest:") func cachedResponse(for request: NSObject) -> NSObject? { nil }
     @ObjCMethod("removeAllCachedResponses") func removeAllCachedResponses() {}
     @ObjCMethod("removeCachedResponseForRequest:") func removeCachedResponse(for request: NSObject) {}
+    /// The cache keeps nothing: responses stored are let go.
+    @ObjCMethod("storeCachedResponse:forRequest:") func store(_ response: NSObject?, for request: NSObject?) {}
+    @ObjCMethod("storeCachedResponse:forDataTask:") func store(_ response: NSObject?, forDataTask task: NSObject?) {}
+    @ObjCMethod("getCachedResponseForDataTask:completionHandler:")
+    func cachedResponse(forDataTask task: NSObject?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        completionHandler.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+            completionHandler.object, nil)
+    }
+    @ObjCMethod("removeCachedResponseForDataTask:") func removeCachedResponse(forDataTask task: NSObject?) {}
+    @ObjCMethod("removeCachedResponsesSinceDate:") func removeCachedResponses(since date: NSObject?) {}
 }
 
 // MARK: - Tasks
@@ -573,4 +584,10 @@ final class TaskBox: @unchecked Sendable {
 struct BoxedCompletion {
     let body: Session.DataCompletion
     let box: TaskBox
+}
+
+@ObjCConstants
+enum HTTPVersionConstants {
+    static let kCFHTTPVersion1_0 = "HTTP/1.0"
+    static let kCFHTTPVersion1_1 = "HTTP/1.1"
 }

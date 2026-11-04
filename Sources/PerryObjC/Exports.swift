@@ -615,6 +615,29 @@ public func class_copyPropertyList(_ cls: Class?, _ count: UnsafeMutablePointer<
     return array
 }
 
+/// The class's own methods, in a malloc'd array the caller frees.
+@c(_class_copyMethodList)
+public func class_copyMethodList(_ cls: Class?, _ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafeMutableRawPointer?>? {
+    let methods = cls.flatMap { Runtime.info($0) }?.ownMethods ?? []
+    count?.pointee = UInt32(methods.count)
+    guard !methods.isEmpty else { return nil }
+    let array = malloc(MemoryLayout<UnsafeMutableRawPointer?>.stride * (methods.count + 1))!
+        .bindMemory(to: UnsafeMutableRawPointer?.self, capacity: methods.count + 1)
+    for (index, method) in methods.enumerated() { array[index] = UnsafeMutableRawPointer(method) }
+    array[methods.count] = nil
+    return array
+}
+
+/// How many classes there are, writing up to `count` of them to `buffer`.
+@c(_objc_getClassList)
+public func objc_getClassList(_ buffer: UnsafeMutablePointer<Class?>?, _ count: Int32) -> Int32 {
+    let classes = Runtime.classes
+    if let buffer {
+        for (index, cls) in classes.prefix(Int(max(count, 0))).enumerated() { buffer[index] = cls }
+    }
+    return Int32(classes.count)
+}
+
 @c(_property_getName)
 public func property_getName(_ property: UnsafeRawPointer?) -> UnsafePointer<CChar>? {
     property.flatMap(Properties.name)

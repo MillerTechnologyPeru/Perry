@@ -222,3 +222,8 @@ final class NSUserDefaults: NSObject {
     @ObjCMethod("synchronize")
     func synchronize() -> Bool { storage.save() }
 }
+
+@ObjCConstants
+enum UserDefaultsConstants {
+    static let NSUserDefaultsDidChangeNotification = "NSUserDefaultsDidChangeNotification"
+}

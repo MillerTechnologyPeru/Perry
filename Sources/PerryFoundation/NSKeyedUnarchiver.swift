@@ -294,6 +294,14 @@ public class NSKeyedUnarchiver: NSObject {
         return Unarchivers.storage(unarchiver)?.root().map(ObjCObject.init)
     }
 
+    /// The root object of the archive in a file, or nil if the file cannot
+    /// be read.
+    @ObjCClassMethod("unarchiveObjectWithFile:")
+    static func unarchive(file path: String?) -> ObjCObject? {
+        guard let path, let data = try? Data(contentsOf: URL(filePath: path)) else { return nil }
+        return unarchive(DataObjects.owned(DataStorage(data)))
+    }
+
     @ObjCClassMethod("unarchiveTopLevelObjectWithData:error:")
     static func unarchiveTopLevel(_ data: ObjCObject?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
         guard let object = unarchive(data) else {
