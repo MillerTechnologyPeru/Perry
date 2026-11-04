@@ -97,4 +97,10 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libsdl3-0 libgl1-mesa-dri libegl1 libgles2 libgles1 libgl1 libglx-mesa0 libegl-mesa0 libgbm1 \
  && rm -rf /var/lib/apt/lists/*
 
+# D-Bus and Python's bindings for it, for CoreBluetooth's tests, which run a
+# fake BlueZ (Tests/Fixtures/bluez) on a bus of their own.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends dbus-daemon python3-dbus python3-gi \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /perry
