@@ -293,6 +293,9 @@ public class NSArray: NSObject {
         return Arrays.owned(elements.sorted { compare(comparator.object, $0, $1) < 0 })
     }
 
+    @ObjCMethod("sortedArrayWithOptions:usingComparator:")
+    func sorted(options: UInt, comparator: ObjCBlock) -> NSArray { sorted(comparator: comparator) }
+
     @ObjCMethod("enumerateObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)
@@ -439,6 +442,36 @@ public class NSMutableArray: NSArray {
         } else {
             replace(at: index, with: element)
         }
+    }
+
+    /// NSComparisonResult from the block: ascending -1 first. Swift's sort
+    /// is stable, as NSSortStable asks.
+    @ObjCMethod("sortUsingComparator:")
+    func sort(comparator: ObjCBlock) {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        storage.objects.sort { compare(comparator.object, $0, $1) < 0 }
+        storage.enumeration.mutated()
+    }
+
+    /// NSSortOptions (concurrent, stable) only tune the sort.
+    @ObjCMethod("sortWithOptions:usingComparator:")
+    func sort(options: UInt, comparator: ObjCBlock) { sort(comparator: comparator) }
+
+    /// A stable sort by each NSSortDescriptor in turn.
+    @ObjCMethod("sortUsingDescriptors:")
+    func sort(usingDescriptors descriptors: ObjCObject?) {
+        let keys = descriptors.map { Arrays.elements($0.objcObject) } ?? []
+        guard !keys.isEmpty else { return }
+        let compare = ObjC.selector("compareObject:toObject:")
+        let send = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id, SEL, id, id) -> Int).self)
+        storage.objects = storage.objects.enumerated().sorted { a, b in
+            for descriptor in keys {
+                let order = send(descriptor, compare, a.element, b.element)
+                if order != 0 { return order < 0 }
+            }
+            return a.offset < b.offset
+        }.map(\.element)
+        storage.enumeration.mutated()
     }
 
     @ObjCMethod("sortUsingSelector:")
