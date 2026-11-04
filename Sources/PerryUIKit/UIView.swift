@@ -218,6 +218,17 @@ open class UIView: UIResponder, UICoordinateSpace {
         return self
     }
 
+    /// A view backed by `layer`, which it becomes the delegate of, in place
+    /// of one of its +layerClass; its frame is the layer's.
+    @ObjCMethod("_initWithLayer:")
+    func initialize(layer: CALayer) -> Self {
+        let state = UIView.states[objcObject]
+        state.layer = layer
+        state.geometry = LayerGeometry(layer)
+        layer.setDelegate(self)
+        return self
+    }
+
     /// From a nib: the geometry, appearance and behavior Interface Builder
     /// set, the constraints, then the subviews.
     @ObjCMethod("initWithCoder:")
@@ -275,6 +286,23 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("updateConstraintsIfNeeded") func updateConstraintsIfNeeded() {}
     @ObjCMethod("updateConstraints") func updateConstraints() {}
     @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
+    /// Every property animates inside an animation block.
+    @ObjCMethod("_shouldAnimatePropertyWithKey:") func shouldAnimateProperty(withKey key: String?) -> Bool { true }
+    /// The subviews put in their layers' order, after the sublayers were
+    /// reordered directly (as SwiftUI does, then calls this): UIKit's
+    /// subviews follow the layer tree.
+    @ObjCMethod("_invalidateSubviewCache")
+    func invalidateSubviewCache() {
+        let state = state
+        guard state.subviews.count > 1, let sublayers = state.layer.sublayers()?.elements else { return }
+        var order: [UnsafeMutableRawPointer: Int] = [:]
+        for (index, sublayer) in sublayers.enumerated() { order[sublayer.objcObject] = index }
+        state.subviews = state.subviews.enumerated().sorted { lhs, rhs in
+            let left = lhs.element.state.layer.map { order[$0.objcObject] ?? Int.max } ?? Int.max
+            let right = rhs.element.state.layer.map { order[$0.objcObject] ?? Int.max } ?? Int.max
+            return (left, lhs.offset) < (right, rhs.offset)
+        }.map(\.element)
+    }
     @ObjCMethod("_wantsConstraintBasedLayout") func wantsConstraintBasedLayout() -> Bool { !state.constraints.isEmpty }
     /// Alignment rects are frames: views have no alignment insets.
     @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
