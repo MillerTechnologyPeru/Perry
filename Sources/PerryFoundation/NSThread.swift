@@ -17,6 +17,8 @@ final class ThreadStorage {
     var isFinished = false
     var isCancelled = false
     var stackSize: UInt = 512 * 1024
+    /// NSQualityOfServiceDefault; threads here are all scheduled alike.
+    var qualityOfService = -1
     /// The thread's run loop, once it or a perform onto the thread made one.
     var runLoop: RunLoopState?
 
@@ -276,6 +278,8 @@ public final class NSThread: NSObject {
     @ObjCMethod("setStackSize:") func setStackSize(_ size: UInt) { storage?.stackSize = size }
     @ObjCMethod("threadPriority") func threadPriority() -> Double { 0.5 }
     @ObjCMethod("setThreadPriority:") func setThreadPriority(_ priority: Double) {}
+    @ObjCMethod("qualityOfService") func qualityOfService() -> Int { storage?.qualityOfService ?? -1 }
+    @ObjCMethod("setQualityOfService:") func setQualityOfService(_ quality: Int) { storage?.qualityOfService = quality }
 
     @ObjCMethod("threadDictionary")
     func threadDictionary() -> UnsafeMutableRawPointer? { storage?.threadDictionary }
