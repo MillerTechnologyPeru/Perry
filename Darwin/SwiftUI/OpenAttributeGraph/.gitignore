@@ -1,0 +1,24 @@
+.DS_Store
+/.build*
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+coverage.txt
+TODO.md
+Checkouts/*
+!Checkouts/swift
+.ag_template/
+build/
+.ag_repo/
+.oag_repo/
+.claude
+
+# Tuist
+Derived/
+Tuist/.build/
+*.xcodeproj
+*.xcworkspace
+*.xcframework
