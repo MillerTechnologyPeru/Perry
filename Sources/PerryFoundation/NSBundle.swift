@@ -65,6 +65,62 @@ final class BundleStorage {
         return nil
     }
 
+    /// The localizations: the .lproj directories' names, without Base,
+    /// which holds resources for every localization. Read once.
+    private(set) lazy var localizations: [String] = resources(type: "lproj", directory: nil)
+        .map { Paths.deletingPathExtension(Paths.lastComponent($0)) }
+        .filter { $0 != "Base" }
+
+    // MARK: Strings tables
+
+    private let tablesLock: UnsafeMutablePointer<pthread_mutex_t> = {
+        let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(lock, nil)
+        return lock
+    }()
+    private var tables: [String: [String: String]] = [:]
+
+    /// The table in `<table>.strings` in a directory of the resources,
+    /// read once.
+    private func table(_ name: String, in directory: String) -> [String: String] {
+        let path = Paths.appending(Paths.appending(resourcePath, directory), name + ".strings")
+        pthread_mutex_lock(tablesLock)
+        defer { pthread_mutex_unlock(tablesLock) }
+        if let table = tables[path] { return table }
+        let table = (try? Data(contentsOf: URL(filePath: path))).flatMap { PropertyLists.stringsTable(Array($0)) } ?? [:]
+        tables[path] = table
+        return table
+    }
+
+    /// The directories a table is looked up in, most preferred first: the
+    /// localization asked for, else the user's preferred one the bundle
+    /// has, then the development localization, Base, and the unlocalized
+    /// resources.
+    func localizationDirectories(_ localization: String?, available: [String], development: String) -> [String] {
+        var names: [String] = []
+        if let localization, !localization.isEmpty {
+            names.append(localization)
+        } else if let preferred = Bundles.preferred(from: available, preferences: nil) {
+            names.append(preferred)
+        }
+        names += [development, "Base", "en", "English"]
+        var directories: [String] = []
+        for name in names where !directories.contains(name + ".lproj") {
+            directories.append(name + ".lproj")
+        }
+        return directories + [""]
+    }
+
+    /// The string for `key` in `table` (Localizable by default): from the
+    /// first of the directories whose table has it.
+    func localizedString(_ key: String, table name: String?, directories: [String]) -> String? {
+        let name = name.flatMap { $0.isEmpty ? nil : $0 } ?? "Localizable"
+        for directory in directories {
+            if let value = table(name, in: directory)[key] { return value }
+        }
+        return nil
+    }
+
     func resources(type: String?, directory: String?) -> [String] {
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
@@ -91,6 +147,14 @@ enum Bundles {
             if let close = available.first(where: { base($0) == base(language) }) { return close }
         }
         return nil
+    }
+
+    /// When no preference matches: the main bundle's development
+    /// localization, if `available` has it.
+    static func developmentFallback(in available: [String]) -> String? {
+        var region = "en"
+        if case .string(let value)? = storage(main)?.info["CFBundleDevelopmentRegion"] { region = value }
+        return preferred(from: available, preferences: [region])
     }
 
     nonisolated(unsafe) static var bundleClass: Class!
@@ -145,6 +209,14 @@ public final class NSBundle: NSObject {
     @ObjCClassMethod("bundleWithURL:")
     static func bundle(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
 
+    /// The bundle at the path, made once: the receiver, newly allocated,
+    /// is set aside for it.
+    @ObjCMethod("initWithPath:")
+    func initialize(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
+
+    @ObjCMethod("initWithURL:")
+    func initialize(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
+
     @ObjCClassMethod("bundleWithIdentifier:")
     static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
         Bundles.storage(Bundles.main)?.identifier == identifier ? Bundles.main : nil
@@ -183,18 +255,14 @@ public final class NSBundle: NSObject {
     /// without Base, which holds resources for every localization.
     @ObjCMethod("localizations")
     func localizations() -> NSArray {
-        let names = storage.resources(type: "lproj", directory: nil)
-            .map { Paths.deletingPathExtension(Paths.lastComponent($0)) }
-            .filter { $0 != "Base" }
-        return Arrays.owned(names.map { Strings.autoreleased($0) })
+        Arrays.owned(storage.localizations.map { Strings.autoreleased($0) })
     }
 
     /// The localizations used: the first of the user's languages the bundle
     /// has, else its development localization.
     @ObjCMethod("preferredLocalizations")
     func preferredLocalizations() -> NSArray {
-        let available = Arrays.elements(localizations().objcObject).compactMap(Strings.value(of:))
-        let chosen = Bundles.preferred(from: available, preferences: nil) ?? developmentLocalization() ?? "en"
+        let chosen = Bundles.preferred(from: storage.localizations, preferences: nil) ?? developmentLocalization() ?? "en"
         return Arrays.owned([Strings.autoreleased(chosen)])
     }
 
@@ -208,7 +276,7 @@ public final class NSBundle: NSObject {
         let available = Arrays.elements(localizations?.objcObject).compactMap(Strings.value(of:))
         let chosen = Bundles.preferred(from: available, preferences: preferences.map {
             Arrays.elements($0.objcObject).compactMap(Strings.value(of:))
-        }) ?? available.first
+        }) ?? Bundles.developmentFallback(in: available)
         return Arrays.owned(chosen.map { [Strings.autoreleased($0)] } ?? [])
     }
 
@@ -244,22 +312,42 @@ public final class NSBundle: NSObject {
         URLs.wrapped(storage.resource(name, type: type, directory: subdirectory).map { URL(filePath: $0) })
     }
 
+    @ObjCMethod("URLsForResourcesWithExtension:subdirectory:")
+    func urls(forResourcesWithExtension type: String?, subdirectory: String?) -> NSArray {
+        Arrays.owned(storage.resources(type: type, directory: subdirectory).compactMap { URLs.autoreleased(URL(filePath: $0)) })
+    }
+
     @ObjCMethod("pathsForResourcesOfType:inDirectory:")
     func paths(forResourcesOfType type: String?, inDirectory directory: String?) -> NSArray {
         Arrays.owned(storage.resources(type: type, directory: directory).map { Strings.autoreleased($0) })
     }
 
-    /// Strings files are not read yet: returns `value`, or the key.
+    /// The string for the key in the table's strings file, in the user's
+    /// language where the bundle has it; else `value`, or the key when
+    /// there is no value.
     @ObjCMethod("localizedStringForKey:value:table:")
     func localizedString(forKey key: String, value: String?, table: String?) -> String {
+        localizedString(forKey: key, value: value, table: table, localization: nil)
+    }
+
+    @ObjCMethod("localizedStringForKey:value:table:localization:")
+    func localizedString(forKey key: String, value: String?, table: String?, localization: String?) -> String {
+        let directories = storage.localizationDirectories(localization, available: storage.localizations,
+                                                          development: developmentLocalization() ?? "en")
+        if let found = storage.localizedString(key, table: table, directories: directories) { return found }
         guard let value, !value.isEmpty else { return key }
         return value
+    }
+
+    @ObjCMethod("localizedAttributedStringForKey:value:table:localization:")
+    func localizedAttributedString(forKey key: String, value: String?, table: String?, localization: String?) -> id? {
+        let text = localizedString(forKey: key, value: value, table: table, localization: localization)
+        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: nil), mutable: false))
     }
 
     /// The localized string, as an attributed string without attributes.
     @ObjCMethod("localizedAttributedStringForKey:value:table:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
-        let text = localizedString(forKey: key, value: value, table: table)
-        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: nil), mutable: false))
+        localizedAttributedString(forKey: key, value: value, table: table, localization: nil)
     }
 }
