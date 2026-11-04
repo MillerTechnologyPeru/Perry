@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // Core Animation's private functions that SwiftUI calls, and the gradient
@@ -74,4 +75,155 @@ open class CAGradientLayer: CALayer {
     @ObjCMethod("setEndPoint:") func setEndPoint(_ point: CGPoint) { changed { gradient.endPoint = point } }
     @ObjCMethod("type") func type() -> String { gradient.type }
     @ObjCMethod("setType:") func setType(_ type: String) { changed { gradient.type = type } }
+}
+
+// MARK: - Presentation modifiers
+
+/// Swift state per Objective-C object, made on first use and removed at
+/// -dealloc: NSObject subclasses here have no stored Swift state.
+final class ObjectStates<State: AnyObject>: @unchecked Sendable {
+    private var mutex = pthread_mutex_t()
+    private var states: [UnsafeMutableRawPointer: State] = [:]
+    private let make: () -> State
+
+    init(_ make: @escaping () -> State) {
+        self.make = make
+        pthread_mutex_init(&mutex, nil)
+    }
+
+    subscript(object: UnsafeMutableRawPointer) -> State {
+        pthread_mutex_lock(&mutex)
+        defer { pthread_mutex_unlock(&mutex) }
+        if let state = states[object] { return state }
+        let state = make()
+        states[object] = state
+        return state
+    }
+
+    func remove(_ object: UnsafeMutableRawPointer) {
+        pthread_mutex_lock(&mutex)
+        let state = states.removeValue(forKey: object)
+        pthread_mutex_unlock(&mutex)
+        _ = state
+    }
+}
+
+final class PresentationModifierState {
+    var keyPath = ""
+    var value: NSObject?
+    var enabled = true
+    var additive = false
+    var group: NSObject?
+    /// The layer it was added to; not retained.
+    var layer: UnsafeMutableRawPointer?
+}
+
+/// CAPresentationModifier (private): a value for a layer's key path that
+/// shows without a transaction. Here the value becomes the layer's, with
+/// actions off, when its group is flushed, on the main queue, which owns the
+/// layer tree.
+@ObjCClass("CAPresentationModifier")
+open class CAPresentationModifier: NSObject {
+    static let states = ObjectStates { PresentationModifierState() }
+    var modifier: PresentationModifierState { CAPresentationModifier.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        CAPresentationModifier.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: CAPresentationModifier.objCClass.pointer)
+    }
+
+    @ObjCMethod("initWithKeyPath:initialValue:additive:")
+    func initialize(keyPath: String, initialValue: NSObject?, additive: Bool) -> Self {
+        initialize(keyPath: keyPath, initialValue: initialValue, additive: additive, group: nil)
+    }
+
+    @ObjCMethod("initWithKeyPath:initialValue:additive:group:")
+    func initialize(keyPath: String, initialValue: NSObject?, additive: Bool, group: NSObject?) -> Self {
+        let state = modifier
+        (state.keyPath, state.value, state.additive, state.group) = (keyPath, initialValue, additive, group)
+        group?.as(CAPresentationModifierGroup.self)?.add(self)
+        return self
+    }
+
+    @ObjCMethod("initWithKeyPath:initialValue:initialVelocity:additive:preferredFrameRateRangeMaximum:group:")
+    func initialize(keyPath: String, initialValue: NSObject?, initialVelocity: NSObject?, additive: Bool,
+                    preferredFrameRateRangeMaximum: Int, group: NSObject?) -> Self {
+        initialize(keyPath: keyPath, initialValue: initialValue, additive: additive, group: group)
+    }
+
+    @ObjCMethod("keyPath") func keyPath() -> String { modifier.keyPath }
+    @ObjCMethod("isEnabled") func isEnabled() -> Bool { modifier.enabled }
+    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { modifier.enabled = enabled }
+    @ObjCMethod("additive") func additive() -> Bool { modifier.additive }
+    @ObjCMethod("group") func group() -> NSObject? { modifier.group }
+    @ObjCMethod("value") func value() -> NSObject? { modifier.value }
+
+    /// Without a group the value shows at once; in one, when it is flushed.
+    @ObjCMethod("setValue:")
+    func setValue(_ value: NSObject?) {
+        modifier.value = value
+        if modifier.group == nil { apply() }
+    }
+
+    @ObjCMethod("setValue:velocity:")
+    func setValue(_ value: NSObject?, velocity: NSObject?) { setValue(value) }
+
+    /// The value, set on the layer with actions off, from the main queue.
+    func apply() {
+        let state = modifier
+        guard state.enabled, let layer = state.layer, let value = state.value else { return }
+        let retainedLayer = ObjCRuntime.retain(layer)
+        let keyPath = state.keyPath
+        Dispatch.onMain {
+            typealias Set = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+            let disabled = CATransaction.disableActions()
+            CATransaction.setDisableActions(true)
+            unsafeBitCast(ObjCRuntime.msgSend, to: Set.self)(retainedLayer, ObjCRuntime.selector("setValue:forKeyPath:"),
+                                                              value.objcObject, keyPath.objCArgument())
+            CATransaction.setDisableActions(disabled)
+            ObjCRuntime.release(retainedLayer)
+        }
+    }
+}
+
+final class PresentationModifierGroupState {
+    var capacity = 0
+    var updatesAsynchronously = true
+    var modifiers: [CAPresentationModifier] = []
+}
+
+/// CAPresentationModifierGroup (private): modifiers whose values show
+/// together when it is flushed.
+@ObjCClass("CAPresentationModifierGroup")
+open class CAPresentationModifierGroup: NSObject {
+    static let states = ObjectStates { PresentationModifierGroupState() }
+    var group: PresentationModifierGroupState { CAPresentationModifierGroup.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        CAPresentationModifierGroup.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: CAPresentationModifierGroup.objCClass.pointer)
+    }
+
+    @ObjCClassMethod("groupWithCapacity:")
+    static func make(_ cls: ObjCClass, capacity: UInt) -> CAPresentationModifierGroup {
+        let group = cls.object.allocated().initialized().unsafeCast(to: CAPresentationModifierGroup.self)
+        group.group.capacity = Int(capacity)
+        return group
+    }
+
+    func add(_ modifier: CAPresentationModifier) { group.modifiers.append(modifier) }
+
+    @ObjCMethod("count") func count() -> UInt { UInt(group.modifiers.count) }
+    @ObjCMethod("capacity") func capacity() -> UInt { UInt(group.capacity) }
+    @ObjCMethod("updatesAsynchronously") func updatesAsynchronously() -> Bool { group.updatesAsynchronously }
+    @ObjCMethod("setUpdatesAsynchronously:") func setUpdatesAsynchronously(_ value: Bool) { group.updatesAsynchronously = value }
+
+    @ObjCMethod("flush") func flush() { group.modifiers.forEach { $0.apply() } }
+    @ObjCMethod("flushWithTargetTime:") func flush(targetTime: Double) { flush() }
+    @ObjCMethod("flushLocally") func flushLocally() { flush() }
+    @ObjCMethod("flushLocallyWithTargetTime:") func flushLocally(targetTime: Double) { flush() }
+    @ObjCMethod("flushWithTransaction") func flushWithTransaction() { flush() }
+    @ObjCMethod("flushWithTransactionAndTargetTime:") func flushWithTransaction(targetTime: Double) { flush() }
 }
