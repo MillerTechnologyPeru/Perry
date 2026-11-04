@@ -135,6 +135,9 @@ enum TypeEncoding {
 /// NSValue.
 @ObjCClass("NSValue")
 public class NSValue: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSValue__") func isNSValue__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
