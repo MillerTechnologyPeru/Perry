@@ -136,8 +136,16 @@ enum Touches {
         (Touches.touch, Touches.event) = (touch, event)
         (start, panning, samples) = (point, false, [(point, Clock.now)])
         scrollView = hit.flatMap(scrollingAncestor)
-        highlighted = hit.flatMap(tableCell)
-        highlighted?.sendSetHighlighted(true, animated: false)
+        // In a scroll view a cell lights up only once the touch has stayed a
+        // moment without moving, as iOS waits to see whether it pans.
+        if let cell = hit.flatMap(tableCell) {
+            if scrollView == nil {
+                highlighted = cell
+                cell.sendSetHighlighted(true, animated: false)
+            } else {
+                pendingHighlight = (cell, Clock.now)
+            }
+        }
         startOffset = scrollView?.state.bounds.origin ?? .zero
         scrollView?.scroll.tracking = true
         // Inside a scroll view, the content hears of the touch only once
@@ -217,8 +225,15 @@ enum Touches {
         pan(scrollView, to: clamped(scrollView, CGPoint(x: offset.x, y: offset.y + distance * axis(scrollView).y)))
     }
 
-    /// Moves momentum scrolling on, from the live view's tick.
+    /// Lights up a cell held long enough, and moves momentum scrolling on,
+    /// from the live view's tick.
     static func step() {
+        if let (cell, since) = pendingHighlight, touch != nil, !panning, Clock.now - since >= highlightDelay {
+            pendingHighlight = nil
+            highlighted = cell
+            cell.sendSetHighlighted(true, animated: false)
+            Display.markDirty()
+        }
         guard let (view, velocity, time) = coasting else { return }
         let now = Clock.now, elapsed = now - time
         let rate = pow(view.scroll.decelerationRate, elapsed * 1000)
@@ -273,8 +288,13 @@ enum Touches {
 
     /// The cell a touch began in, highlighted until it lifts or pans.
     nonisolated(unsafe) private static var highlighted: UITableViewCell?
+    /// A cell in a scroll view, to light up if the touch stays.
+    nonisolated(unsafe) private static var pendingHighlight: (cell: UITableViewCell, since: Double)?
+    /// UIScrollView's delay before content hears of a touch.
+    private static let highlightDelay = 0.15
 
     private static func unhighlight() {
+        pendingHighlight = nil
         highlighted?.sendSetHighlighted(false, animated: false)
         highlighted = nil
     }

@@ -21,6 +21,16 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     return true
 }
 
+/// With PERRY_BLUETOOTH_TRACE set, what the central managers ask of BlueZ
+/// and hear back, on stderr.
+nonisolated(unsafe) private let tracing = getenv("PERRY_BLUETOOTH_TRACE") != nil
+
+func bluetoothTrace(_ message: @autoclosure () -> String) {
+    guard tracing else { return }
+    let line = "perry: CoreBluetooth: \(message())\n"
+    line.withCString { _ = write(2, $0, strlen($0)) }
+}
+
 /// Reports a fatal error, and aborts.
 func bluetoothFatal(_ message: String) -> Never {
     let line = "perry: CoreBluetooth: *** \(message)\n"

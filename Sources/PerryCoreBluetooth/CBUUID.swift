@@ -32,9 +32,12 @@ struct BluetoothUUID: Hashable, Sendable {
     }
 
     /// "180D", "0000180D", or "0000180D-0000-1000-8000-00805F9B34FB",
-    /// in either case, with or without hyphens.
+    /// in either case, with or without hyphens; a short form may also be
+    /// written "0x180D", as Darwin takes it.
     init?(string: String) {
-        let hex = string.filter { $0 != "-" }
+        var text = Substring(string)
+        if text.hasPrefix("0x") || text.hasPrefix("0X") { text = text.dropFirst(2) }
+        let hex = text.filter { $0 != "-" }
         guard [4, 8, 32].contains(hex.count), hex.allSatisfy(\.isHexDigit) else { return nil }
         var bytes: [UInt8] = []
         var index = hex.startIndex

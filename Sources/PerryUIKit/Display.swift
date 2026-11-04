@@ -66,7 +66,9 @@ enum Display {
     static func startIfWanted() {
         guard !started, wanted else { return }
         started = true
-        let title = "Perry: " + (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app")
+        // The app's name, as its home screen shows it.
+        let title = NSBundle.main().infoObject(forKey: "CFBundleDisplayName")?.stringValue
+            ?? NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app"
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         SDL.prepareEnvironment()
         if !software, SDL.loadOnce(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {

@@ -299,9 +299,9 @@ public class NSDictionary: NSObject {
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         let keys = entries.map(\.key)
         if let storage = Dictionaries.storage(objcObject) {
-            return storage.enumeration.enumerate(keys, state: state)
+            return storage.enumeration.enumerate(keys, state: state, buffer: objects, count: count)
         }
-        return Dictionaries.constantEnumeration.enumerate(keys, state: state)
+        return Dictionaries.constantEnumeration.enumerate(keys, state: state, buffer: objects, count: count)
     }
 
     // MARK: Copying

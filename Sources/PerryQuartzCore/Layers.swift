@@ -203,3 +203,13 @@ enum LayerConstants {
     static let kCAContentsFormatGray8Uint = "Gray8"
     static let kCAEmitterLayerPoint = "point"
 }
+
+/// CATextLayer's alignment modes.
+@ObjCConstants
+enum TextAlignmentModes {
+    static let kCAAlignmentNatural = "natural"
+    static let kCAAlignmentLeft = "left"
+    static let kCAAlignmentRight = "right"
+    static let kCAAlignmentCenter = "center"
+    static let kCAAlignmentJustified = "justified"
+}

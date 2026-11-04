@@ -316,6 +316,40 @@ extension NSArray {
         return IndexSets.make(UnsafeMutableRawPointer(IndexSets.setClass), passed)
     }
 
+    /// The first index whose element passes, or NSNotFound.
+    @ObjCMethod("indexOfObjectPassingTest:")
+    func index(ofObjectPassingTest block: ObjCObject) -> UInt {
+        typealias Invoke = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        for (index, element) in Arrays.elements(objcObject).enumerated() {
+            var stop = false
+            if invoke(block.id, element, UInt(index), &stop) { return UInt(index) }
+            if stop { break }
+        }
+        return UInt(Int.max)
+    }
+
+    /// NSEnumerationOptions: reverse 2 searches from the end; concurrent
+    /// searching is done in order.
+    @ObjCMethod("indexOfObjectWithOptions:passingTest:")
+    func index(options: UInt, ofObjectPassingTest block: ObjCObject) -> UInt {
+        typealias Invoke = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let elements = Arrays.elements(objcObject)
+        let order = options & 2 != 0 ? Array(elements.indices.reversed()) : Array(elements.indices)
+        for index in order {
+            var stop = false
+            if invoke(block.id, elements[index], UInt(index), &stop) { return UInt(index) }
+            if stop { break }
+        }
+        return UInt(Int.max)
+    }
+
+    @ObjCMethod("indexesOfObjectsWithOptions:passingTest:")
+    func indexes(options: UInt, ofObjectsPassingTest block: ObjCObject) -> UnsafeMutableRawPointer? {
+        indexes(ofObjectsPassingTest: block)
+    }
+
     /// For NSMutableArray.
     @ObjCMethod("removeObjectsAtIndexes:")
     func removeObjects(atIndexes indexes: ObjCObject) {

@@ -206,6 +206,24 @@ public class NSArray: NSObject {
         return elements.firstIndex { ObjectKey(object: $0) == ObjectKey(object: target.id) }.map(UInt.init) ?? notFound
     }
 
+    /// The first element that is `target` itself, not only equal to it.
+    @ObjCMethod("indexOfObjectIdenticalTo:")
+    func index(ofIdentical target: ObjCObject?) -> UInt {
+        guard let target else { return notFound }
+        return elements.firstIndex { $0 == target.id }.map(UInt.init) ?? notFound
+    }
+
+    @ObjCMethod("indexOfObjectIdenticalTo:inRange:")
+    func index(ofIdentical target: ObjCObject?, in range: NSRange) -> UInt {
+        guard let target else { return notFound }
+        let all = elements
+        let start = Int(range.location)
+        let end = min(all.count, start + Int(range.length))
+        guard start < end else { return notFound }
+        let found: Int? = (start..<end).first { all[$0] == target.id }
+        return found.map { UInt($0) } ?? notFound
+    }
+
     @ObjCMethod("containsObject:")
     func contains(_ target: ObjCObject?) -> Bool { index(of: target) != notFound }
 
@@ -275,6 +293,9 @@ public class NSArray: NSObject {
         return Arrays.owned(elements.sorted { compare(comparator.object, $0, $1) < 0 })
     }
 
+    @ObjCMethod("sortedArrayWithOptions:usingComparator:")
+    func sorted(options: UInt, comparator: ObjCBlock) -> NSArray { sorted(comparator: comparator) }
+
     @ObjCMethod("enumerateObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)
@@ -287,7 +308,7 @@ public class NSArray: NSObject {
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
-        Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state) ?? 0
+        Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state, buffer: objects, count: count) ?? 0
     }
 }
 
@@ -370,6 +391,16 @@ public class NSMutableArray: NSArray {
         for item in removed { ObjC.release(item) }
     }
 
+    /// Removes the elements that are `element` itself.
+    @ObjCMethod("removeObjectIdenticalTo:")
+    func remove(identical element: ObjCObject?) {
+        guard let element else { return }
+        let removed = storage.objects.filter { $0 == element.id }
+        storage.objects.removeAll { $0 == element.id }
+        storage.enumeration.mutated()
+        for item in removed { ObjC.release(item) }
+    }
+
     @ObjCMethod("removeLastObject")
     func removeLast() {
         guard let last = storage.objects.popLast() else { return }
@@ -411,6 +442,36 @@ public class NSMutableArray: NSArray {
         } else {
             replace(at: index, with: element)
         }
+    }
+
+    /// NSComparisonResult from the block: ascending -1 first. Swift's sort
+    /// is stable, as NSSortStable asks.
+    @ObjCMethod("sortUsingComparator:")
+    func sort(comparator: ObjCBlock) {
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        storage.objects.sort { compare(comparator.object, $0, $1) < 0 }
+        storage.enumeration.mutated()
+    }
+
+    /// NSSortOptions (concurrent, stable) only tune the sort.
+    @ObjCMethod("sortWithOptions:usingComparator:")
+    func sort(options: UInt, comparator: ObjCBlock) { sort(comparator: comparator) }
+
+    /// A stable sort by each NSSortDescriptor in turn.
+    @ObjCMethod("sortUsingDescriptors:")
+    func sort(usingDescriptors descriptors: ObjCObject?) {
+        let keys = descriptors.map { Arrays.elements($0.objcObject) } ?? []
+        guard !keys.isEmpty else { return }
+        let compare = ObjC.selector("compareObject:toObject:")
+        let send = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id, SEL, id, id) -> Int).self)
+        storage.objects = storage.objects.enumerated().sorted { a, b in
+            for descriptor in keys {
+                let order = send(descriptor, compare, a.element, b.element)
+                if order != 0 { return order < 0 }
+            }
+            return a.offset < b.offset
+        }.map(\.element)
+        storage.enumeration.mutated()
     }
 
     @ObjCMethod("sortUsingSelector:")

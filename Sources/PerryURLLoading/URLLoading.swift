@@ -266,6 +266,9 @@ public struct Failure: Sendable {
     public let description: String
     public let failingURL: URL?
 
+    /// NSURLErrorTimedOut, for a load given up on.
+    public static func timedOut(url: URL?) -> Failure { Failure(URLError(.timedOut), url: url) }
+
     init(_ error: any Error, url: URL?) {
         if let error = error as? URLError {
             domain = "NSURLErrorDomain"
@@ -675,6 +678,23 @@ public final class Session: @unchecked Sendable {
             forwarder = nil
             value = URLSession(configuration: self.configuration.value)
         }
+    }
+
+    /// Sessions let go with tasks still running. corelibs' URLSession
+    /// cannot be freed while its tasks run, which Darwin's outlives: such a
+    /// session finishes them, invalidated, and is kept for good.
+    nonisolated(unsafe) private static var orphans: [URLSession] = []
+    private static let orphansLock = NSLock()
+
+    deinit {
+        lock.lock()
+        let running = tasks.values.contains { $0.value.state != .completed }
+        lock.unlock()
+        guard running else { return }
+        value.finishTasksAndInvalidate()
+        Self.orphansLock.lock()
+        Self.orphans.append(value)
+        Self.orphansLock.unlock()
     }
 
     fileprivate func task(for task: URLSessionTask) -> Task? {

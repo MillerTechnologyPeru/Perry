@@ -207,7 +207,7 @@ public class NSSet: NSObject {
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
-        Sets.storage(objcObject)?.enumeration.enumerate(members, state: state) ?? 0
+        Sets.storage(objcObject)?.enumeration.enumerate(members, state: state, buffer: objects, count: count) ?? 0
     }
 
     @ObjCMethod("copyWithZone:")

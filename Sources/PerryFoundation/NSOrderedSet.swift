@@ -198,7 +198,7 @@ public class NSOrderedSet: NSObject {
 
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
-        storage.enumeration.enumerate(storage.members, state: state)
+        storage.enumeration.enumerate(storage.members, state: state, buffer: objects, count: count)
     }
 
     @ObjCMethod("enumerateObjectsUsingBlock:")

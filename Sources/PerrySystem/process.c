@@ -235,6 +235,17 @@ int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin
         *previous = handlers[linux_signal];
     if (!action)
         return 0;
+    // PERRY_KEEP_CRASH_HANDLERS keeps the crash signals' handlers Perry
+    // started with, so a crash reporter in the app does not hide where a
+    // crash happened: the app's handler is recorded but not installed.
+    static int keep = -1;
+    if (keep < 0)
+        keep = getenv("PERRY_KEEP_CRASH_HANDLERS") != NULL;
+    if (keep && (linux_signal == SIGSEGV || linux_signal == SIGBUS || linux_signal == SIGILL ||
+                 linux_signal == SIGABRT || linux_signal == SIGTRAP || linux_signal == SIGFPE)) {
+        handlers[linux_signal] = *action;
+        return 0;
+    }
     struct sigaction linux_action;
     memset(&linux_action, 0, sizeof(linux_action));
     for (int darwin = 1; darwin <= 31; darwin++)

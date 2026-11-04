@@ -13,6 +13,9 @@ public enum Runtime {
     nonisolated(unsafe) static var classesByName: [CStringKey: ClassPointer] = [:]
     nonisolated(unsafe) static var allClasses: [ClassInfo] = []
 
+    /// The classes realized so far, not their metaclasses.
+    public static var classes: [ClassPointer] { lock.withLock { allClasses.filter { !$0.isMeta }.map(\.cls) } }
+
     nonisolated(unsafe) static let emptyCache = perry_objc_empty_cache()!
     nonisolated(unsafe) static let emptyTable = perry_objc_empty_cache_table()!
     nonisolated(unsafe) public static let msgForward = IMP(mutating: perry_objc_msgForward_address()!)
