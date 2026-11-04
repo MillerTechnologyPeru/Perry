@@ -38,7 +38,7 @@ typedef struct perry_segment {
     uint64_t filesize;
     int initprot;
     uint32_t flags;
-    const struct section_64 *sections;
+    const section_t *sections;
     uint32_t nsects;
     bool mapped;                // false for __PAGEZERO and empty segments
 } perry_segment;
@@ -52,7 +52,7 @@ typedef struct perry_image {
     intptr_t slide;             // added to unslid vmaddrs
     uint64_t vm_start;          // lowest unslid vmaddr (ignoring __PAGEZERO)
     size_t vm_size;
-    const struct mach_header_64 *header;
+    const mach_header_t *header;
 
     perry_segment *segments;
     uint32_t segment_count;
@@ -120,7 +120,7 @@ void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
 // Points the image's thread-local variable descriptors at Perry's tlv_get_addr.
 void perry_setup_thread_locals(perry_image *image);
 void *perry_image_fileoff(const perry_image *image, uint64_t fileoff);
-const struct section_64 *perry_image_section(const perry_image *image, const char *segname, const char *sectname);
+const section_t *perry_image_section(const perry_image *image, const char *segname, const char *sectname);
 const char *perry_platform_name(uint32_t platform);
 
 // Fixups (fixups.c)
