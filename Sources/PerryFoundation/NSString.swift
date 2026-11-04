@@ -194,6 +194,15 @@ public class NSString: NSObject {
 
     // MARK: Creating
 
+    /// Swift's standard library bridges a short ASCII string through this,
+    /// for a tagged-pointer string; strings here are objects, which it takes
+    /// as well. Returned retained, as its name says.
+    @ObjCClassMethod("newTaggedNSStringWithASCIIBytes_:length_:")
+    static func newTaggedString(_ cls: ObjCClass, bytes: UnsafePointer<UInt8>?, length: Int) -> UnsafeMutableRawPointer? {
+        guard let bytes else { return nil }
+        return Strings.make(String(decoding: UnsafeBufferPointer(start: bytes, count: length), as: UTF8.self))
+    }
+
     @ObjCClassMethod("string")
     static func empty(_ cls: ObjCClass) -> ObjCObject { ObjCObject(Strings.autoreleased("", of: cls.pointer)) }
 
