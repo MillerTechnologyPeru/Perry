@@ -188,6 +188,9 @@ PASSTHROUGH _memmove, memmove
 PASSTHROUGH _memset, memset
 PASSTHROUGH _memcmp, memcmp
 PASSTHROUGH _memchr, memchr
+PASSTHROUGH _strcasestr, strcasestr
+PASSTHROUGH _writev, writev
+PASSTHROUGH _drand48, drand48
 PASSTHROUGH _wmemchr, wmemchr
 PASSTHROUGH _bzero, bzero
 PASSTHROUGH ___bzero, bzero
