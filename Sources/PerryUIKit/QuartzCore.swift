@@ -29,6 +29,8 @@ class CALayer: NSObject {
     @ObjCMethod("masksToBounds") func masksToBounds() -> Bool
     @ObjCMethod("setMasksToBounds:") func setMasksToBounds(_ masks: Bool)
     @ObjCMethod("cornerRadius") func cornerRadius() -> CGFloat
+    @ObjCMethod("mask") func mask() -> NSObject?
+    @ObjCMethod("presentationLayer") func presentationLayer() -> CALayer?
     @ObjCMethod("setCornerRadius:") func setCornerRadius(_ radius: CGFloat)
     @ObjCMethod("backgroundColor") func backgroundColor() -> UnsafeMutableRawPointer?
     @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: UnsafeMutableRawPointer?)
