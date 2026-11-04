@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UIScrollView: the content offset is the bounds' origin, so subviews
@@ -345,11 +346,12 @@ open class UIGestureRecognizer: NSObject {
     @ObjCMethod("setDelaysTouchesEnded:") func setDelaysTouchesEnded(_ delays: Bool) { state.delaysTouchesEnded = delays }
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
-    @ObjCMethod("numberOfTouches") func numberOfTouches() -> UInt { 0 }
+    @ObjCMethod("numberOfTouches") func numberOfTouches() -> UInt { Touches.current == nil ? 0 : 1 }
     @ObjCMethod("requireGestureRecognizerToFail:") func requireToFail(_ other: UIGestureRecognizer) {}
 
+    /// Where the touch is, in `view` (the window if nil).
     @ObjCMethod("locationInView:")
-    func location(in view: UIView?) -> CGPoint { .zero }
+    func location(in view: UIView?) -> CGPoint { Touches.current?.location(in: view) ?? .zero }
 
     @ObjCMethod("allowedTouchTypes") func allowedTouchTypes() -> NSObject? { state.allowedTouchTypes }
     @ObjCMethod("setAllowedTouchTypes:") func setAllowedTouchTypes(_ types: NSObject?) { state.allowedTouchTypes = types }
@@ -365,6 +367,10 @@ open class UIGestureRecognizer: NSObject {
     /// state from began to ended (recognized) or cancelled.
     @ObjCMethod("setState:")
     func setRecognizerState(_ newState: Int) {
+        if getenv("PERRY_UIKIT_TOUCH_TRACE") != nil {
+            let line = "perry: UIKit: touch: recognizer \(objcObject) state \(state.state) -> \(newState)\n"
+            line.withCString { _ = write(2, $0, strlen($0)) }
+        }
         state.state = newState
         guard (1...4).contains(newState) else { return }
         typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
@@ -409,8 +415,32 @@ open class UIScrollViewPanGestureRecognizer: UIPanGestureRecognizer {}
 @ObjCClass("UIHoverGestureRecognizer")
 open class UIHoverGestureRecognizer: UIGestureRecognizer {}
 
+/// A tap: recognized when the touch lifts, unless it moved ten points.
 @ObjCClass("UITapGestureRecognizer")
 open class UITapGestureRecognizer: UIGestureRecognizer {
+    @ObjCMethod("touchesBegan:withEvent:")
+    override func touchesBegan(_ touches: NSObject?, with event: NSObject?) {
+        tapStart = Touches.current?.location(in: nil)
+    }
+
+    @ObjCMethod("touchesMoved:withEvent:")
+    override func touchesMoved(_ touches: NSObject?, with event: NSObject?) {
+        guard let start = tapStart, let point = Touches.current?.location(in: nil) else { return }
+        if hypot(point.x - start.x, point.y - start.y) >= 10 { state.state = 5 }
+    }
+
+    @ObjCMethod("touchesEnded:withEvent:")
+    override func touchesEnded(_ touches: NSObject?, with event: NSObject?) {
+        if state.state == 0 { sendSetState(3) }
+    }
+
+    /// Where the touch began, by recognizer object.
+    var tapStart: CGPoint? {
+        get { UITapGestureRecognizer.starts[objcObject] }
+        set { UITapGestureRecognizer.starts[objcObject] = newValue }
+    }
+    nonisolated(unsafe) static var starts: [UnsafeMutableRawPointer: CGPoint] = [:]
+
     @ObjCMethod("numberOfTapsRequired") func numberOfTapsRequired() -> UInt { 1 }
     @ObjCMethod("setNumberOfTapsRequired:") func setNumberOfTapsRequired(_ count: UInt) {}
     @ObjCMethod("numberOfTouchesRequired") func numberOfTouchesRequired() -> UInt { 1 }
