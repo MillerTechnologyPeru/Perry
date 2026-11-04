@@ -70,6 +70,9 @@ struct ScrollViewport<Content: View>: View {
     /// The offset when the drag under way began.
     @State private var dragOrigin: CGSize?
     @State private var metrics = ScrollMetrics()
+    /// Whether the refresh action a pull started is running.
+    @State private var refreshing = false
+    @Environment(\.refreshAction) private var refresh
     /// Where the content was before it last moved to `offset`, which an
     /// animation may still be carrying it from.
     @State private var previousOffset: CGSize = .zero
@@ -79,7 +82,7 @@ struct ScrollViewport<Content: View>: View {
     static var indicatorThickness: CGFloat { 3 }
 
     var body: some View {
-        ScrollLayout(axes: axes, offset: offset, clamps: dragOrigin == nil, metrics: metrics) {
+        ScrollLayout(axes: axes, offset: offset, clamps: dragOrigin == nil && !refreshing, metrics: metrics) {
             Group {
                 if axes == .horizontal {
                     HStack { content }
@@ -90,6 +93,7 @@ struct ScrollViewport<Content: View>: View {
             .coordinateSpace(name: ScrollViewportInfo.contentSpace)
         }
         .environment(\.scrollViewport, viewportInfo)
+        .overlay(alignment: .top) { refreshIndicator }
         .overlay(alignment: .topLeading) { indicators }
         .clipped()
         .background(
@@ -132,9 +136,24 @@ struct ScrollViewport<Content: View>: View {
     }
 
     /// On release the content glides as far as the pan's velocity carries
-    /// it, within the content.
+    /// it, within the content; pulled down far enough, in a scroll view
+    /// with a refresh action, it holds below its top while the action runs.
     func panEnded(_ translation: CGSize, velocity: CGSize) {
         let origin = dragOrigin ?? offset
+        if let refresh, axes.contains(.vertical), !refreshing, offset.height <= -Self.refreshPull {
+            refreshing = true
+            previousOffset = offset
+            withAnimation(.easeOut(duration: 0.25)) {
+                offset = CGSize(width: 0, height: -Self.refreshHold)
+                dragOrigin = nil
+            }
+            Task { @MainActor in
+                await refresh()
+                refreshing = false
+                withAnimation(.easeOut(duration: 0.3)) { offset = .zero }
+            }
+            return
+        }
         let carry = Self.carry
         let target = clamp(CGSize(width: origin.width - translation.width - velocity.width * carry,
                                   height: origin.height - translation.height - velocity.height * carry))
@@ -147,6 +166,22 @@ struct ScrollViewport<Content: View>: View {
 
     /// Seconds of release velocity the content glides on for.
     static var carry: CGFloat { 0.3 }
+
+    /// How far past its top the content is pulled to refresh, and where it
+    /// holds while refreshing.
+    static var refreshPull: CGFloat { 50 }
+    static var refreshHold: CGFloat { 56 }
+
+    /// A spinner above the content while it's pulled down or refreshing.
+    @ViewBuilder
+    var refreshIndicator: some View {
+        if refresh != nil, axes.contains(.vertical), refreshing || offset.height < 0 {
+            ProgressView()
+                .frame(height: max(-offset.height, 0))
+                .opacity(refreshing ? 1 : min(Double(-offset.height / Self.refreshPull), 1))
+                .allowsHitTesting(false)
+        }
+    }
 
     /// The offset along the scrolling axes, within the content.
     func clamp(_ proposed: CGSize) -> CGSize {
