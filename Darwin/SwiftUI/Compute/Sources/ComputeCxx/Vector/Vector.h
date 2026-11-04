@@ -211,8 +211,19 @@ template <typename T, unsigned int _inline_capacity, typename size_type>
     requires std::unsigned_integral<size_type>
 void vector<T, _inline_capacity, size_type>::reserve_slow(size_type new_cap) {
     size_type effective_new_cap = std::max(capacity() * 1.5, new_cap * 1.0);
+    bool was_inline = _buffer == nullptr;
     _buffer = reinterpret_cast<T *>(details::realloc_vector<size_type, sizeof(T)>(
         (void *)_buffer, (void *)_inline_buffer, _inline_capacity, &_capacity, effective_new_cap));
+    if (was_inline && _buffer != nullptr) {
+        // The elements moved to the heap byte for byte, leaving copies in the
+        // inline slots that the inline array's own destruction would destroy
+        // a second time (releasing a cf_ptr's object twice, say). Their
+        // ownership went with the bytes, so empty the slots without
+        // destroying them.
+        for (size_type i = 0; i < _size; ++i) {
+            new (&_inline_buffer[i]) T();
+        }
+    }
 }
 
 template <typename T, unsigned int _inline_capacity, typename size_type>
