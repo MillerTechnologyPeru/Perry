@@ -1506,8 +1506,14 @@ void *Graph::input_value_ref(data::ptr<IAG::Node> node, AttributeID input, uint3
     uint32_t index = index_of_input(*node, comparator);
 
     if (index < UINT32_MAX) {
-        IAG::OffsetAttributeID resolved_input =
-            input.resolve(IAG::TraversalOptions::UpdateDependencies | IAG::TraversalOptions::AssertNotNil);
+        // A weak input (subgraph_id != 0) whose source is gone reads as
+        // nil, as on the slow path, rather than failing.
+        IAG::OffsetAttributeID resolved_input = input.resolve(
+            IAG::TraversalOptions::UpdateDependencies |
+            (subgraph_id != 0 ? IAG::TraversalOptions::EvaluateWeakReferences : IAG::TraversalOptions::AssertNotNil));
+        if (subgraph_id != 0 && (!resolved_input.attribute() || !resolved_input.attribute().is_node())) {
+            return nullptr;
+        }
         assert(resolved_input.attribute().is_node());
         auto input_node = resolved_input.attribute().get_node();
 
