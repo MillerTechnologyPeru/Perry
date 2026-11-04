@@ -275,6 +275,12 @@ final class NSFileManager: NSObject {
     // MARK: Standard directories
 
     /// NSSearchPathDirectory in NSUserDomainMask: one URL, in the home directory.
+    /// No iCloud: as when the user isn't signed in to it.
+    @ObjCMethod("URLForUbiquityContainerIdentifier:")
+    func urlForUbiquityContainer(identifier: ObjCObject?) -> NSURL? { nil }
+
+    @ObjCMethod("ubiquityIdentityToken") func ubiquityIdentityToken() -> ObjCObject? { nil }
+
     @ObjCMethod("URLsForDirectory:inDomains:")
     func urls(for directory: UInt, inDomains domains: UInt) -> NSArray {
         let found = FileManagers.directory(directory).flatMap {
