@@ -261,6 +261,8 @@ enum Players {
     nonisolated(unsafe) static var dispatchTime: DispatchTime?
     nonisolated(unsafe) static var mainQueue: UnsafeMutableRawPointer?
     nonisolated(unsafe) private static var playing: [UnsafeMutableRawPointer] = []
+    /// AVAudioPlayers playing, retained while they are.
+    nonisolated(unsafe) private static var audioPlaying: [UnsafeMutableRawPointer] = []
     nonisolated(unsafe) private static var scheduled = false
     nonisolated(unsafe) static var ticks = 0
 
@@ -291,6 +293,20 @@ enum Players {
         playing.removeAll { $0 == player }
     }
 
+    static func startAudio(_ player: UnsafeMutableRawPointer) {
+        if !audioPlaying.contains(player) {
+            audioPlaying.append(player)
+            _ = ObjCRuntime.retain(player)
+        }
+        schedule()
+    }
+
+    static func stopAudio(_ player: UnsafeMutableRawPointer) {
+        guard audioPlaying.contains(player) else { return }
+        audioPlaying.removeAll { $0 == player }
+        ObjCRuntime.release(player)
+    }
+
     private static func schedule() {
         guard !scheduled, let dispatchAfter, let dispatchTime, let mainQueue else {
             if dispatchAfter == nil || dispatchTime == nil || mainQueue == nil { trace("no main queue to tick players on") }
@@ -306,7 +322,11 @@ enum Players {
                     ObjCRuntime.release(object)
                 }
             }
-            if !Players.playing.isEmpty { Players.schedule() }
+            for object in Players.audioPlaying {
+                let player = AVAudioPlayer(objcObject: object, ownership: .retain)
+                if !player.tick() { Players.stopAudio(object) }
+            }
+            if !Players.playing.isEmpty || !Players.audioPlaying.isEmpty { Players.schedule() }
         }
     }
 }

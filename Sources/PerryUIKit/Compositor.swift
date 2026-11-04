@@ -137,8 +137,10 @@ final class Compositor {
 
     /// Touchscreen fingers, mouse buttons, motion and the wheel as touches,
     /// and the keyboard's text and editing keys; true when the window was
-    /// closed. One finger at a time is a touch; the mouse events SDL makes
-    /// from fingers are left out, as the fingers come themselves.
+    /// closed. The first finger down is the touch that works scroll views
+    /// and controls; others down with it are touches of their own. The
+    /// mouse events SDL makes from fingers are left out, as the fingers
+    /// come themselves.
     func handleEvents() -> Bool {
         var event = [UInt64](repeating: 0, count: 16)
         var closed = false
@@ -161,17 +163,25 @@ final class Compositor {
                 case 0x100: // quit
                     closed = true
                 case 0x700: // finger down: SDL_FingerID at 24
-                    guard finger == nil else { break }
-                    finger = raw.load(fromByteOffset: 24, as: UInt64.self)
-                    Touches.down(at: fingerPoint())
+                    let id = raw.load(fromByteOffset: 24, as: UInt64.self)
+                    if finger == nil {
+                        finger = id
+                        Touches.down(at: fingerPoint())
+                    } else {
+                        Touches.down(at: fingerPoint(), finger: id)
+                    }
                     Display.markDirty()
                 case 0x702: // finger motion
-                    guard finger == raw.load(fromByteOffset: 24, as: UInt64.self) else { break }
-                    Touches.move(to: fingerPoint())
+                    let id = raw.load(fromByteOffset: 24, as: UInt64.self)
+                    if finger == id { Touches.move(to: fingerPoint()) } else { Touches.move(to: fingerPoint(), finger: id) }
                 case 0x701, 0x703: // finger up, finger cancelled
-                    guard finger == raw.load(fromByteOffset: 24, as: UInt64.self) else { break }
-                    finger = nil
-                    Touches.up(at: fingerPoint())
+                    let id = raw.load(fromByteOffset: 24, as: UInt64.self)
+                    if finger == id {
+                        finger = nil
+                        Touches.up(at: fingerPoint())
+                    } else {
+                        Touches.up(at: fingerPoint(), finger: id, cancelled: type == 0x703)
+                    }
                     Display.markDirty()
                 case 0x400: // mouse motion
                     guard !fromFinger() else { break }

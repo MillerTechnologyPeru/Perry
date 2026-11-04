@@ -208,10 +208,13 @@ enum Touches {
         let touch = UITouch.objCClass.object.allocated().unsafeCast(to: UITouch.self)
         (touch.state.location, touch.state.previous, touch.state.window, touch.state.view) = (point, point, window, hit)
         touch.state.timestamp = Clock.now
-        let event = UIEvent.objCClass.object.allocated().unsafeCast(to: UIEvent.self)
-        event.state.touches = [touch]
+        // One event for every finger down, as UIKit's: this one joins it
+        // when other fingers are already down.
+        let event = Touches.event ?? UIEvent.objCClass.object.allocated().unsafeCast(to: UIEvent.self)
+        event.state.touches.append(touch)
         event.state.timestamp = touch.state.timestamp
         (Touches.touch, Touches.event) = (touch, event)
+        markStationary(except: touch)
         (start, panning, samples) = (point, false, [(point, Clock.now)])
         recognizers = []
         viewCancelled = false
@@ -250,6 +253,7 @@ enum Touches {
         touch.state.previous = touch.state.location
         touch.state.location = point
         touch.state.timestamp = Clock.now
+        markStationary(except: touch)
         samples.append((point, Clock.now))
         samples.removeAll { Clock.now - $0.time > 0.1 }
         if let scrollView {
@@ -282,9 +286,12 @@ enum Touches {
         guard let touch else { return }
         touch.state.location = point
         touch.state.timestamp = Clock.now
+        markStationary(except: touch)
         defer {
             resetRecognizers()
-            (Touches.touch, event, scrollView) = (nil, nil, nil)
+            event?.state.touches.removeAll { $0.objcObject == touch.objcObject }
+            if others.isEmpty { event = nil }
+            (Touches.touch, scrollView) = (nil, nil)
             Display.markDirty()
         }
         if let scrollView, panning {
@@ -307,6 +314,74 @@ enum Touches {
         touch.state.phase = 3
         send(.ended)
         tapped(touch)
+    }
+
+    // MARK: More fingers
+
+    /// Fingers down besides the first, by the platform's number for them:
+    /// each a touch sent to the view it went down on, in the first's event.
+    /// The first alone works scroll views, recognizers and controls.
+    nonisolated(unsafe) private static var others: [UInt64: UITouch] = [:]
+
+    /// Every finger down but `touch` is stationary in the event it's in.
+    private static func markStationary(except touch: UITouch) {
+        for other in event?.state.touches ?? [] where other.objcObject != touch.objcObject && other.state.phase < 2 {
+            other.state.phase = 2
+        }
+    }
+
+    /// Another finger down at `point`. As UIKit, a view hears of a second
+    /// touch only when it's multiple-touch enabled.
+    static func down(at point: CGPoint, finger: UInt64) {
+        guard others[finger] == nil, let window = keyWindow, let hit = window.sendHitTest(point, with: nil) else { return }
+        let down = ([touch].compactMap { $0 } + others.values).contains { $0.state.view?.objcObject == hit.objcObject }
+        guard !down || hit.state.multipleTouchEnabled else { return }
+        let added = UITouch.objCClass.object.allocated().unsafeCast(to: UITouch.self)
+        (added.state.location, added.state.previous, added.state.window, added.state.view) = (point, point, window, hit)
+        added.state.timestamp = Clock.now
+        let event = Touches.event ?? UIEvent.objCClass.object.allocated().unsafeCast(to: UIEvent.self)
+        event.state.touches.append(added)
+        event.state.timestamp = added.state.timestamp
+        Touches.event = event
+        others[finger] = added
+        markStationary(except: added)
+        deliver(added, .began, in: event)
+        Display.markDirty()
+    }
+
+    static func move(to point: CGPoint, finger: UInt64) {
+        guard let moved = others[finger], let event else { return }
+        moved.state.previous = moved.state.location
+        (moved.state.location, moved.state.timestamp, moved.state.phase) = (point, Clock.now, 1)
+        event.state.timestamp = moved.state.timestamp
+        markStationary(except: moved)
+        deliver(moved, .moved, in: event)
+        Display.markDirty()
+    }
+
+    static func up(at point: CGPoint, finger: UInt64, cancelled: Bool = false) {
+        guard let lifted = others.removeValue(forKey: finger), let event else { return }
+        (lifted.state.location, lifted.state.timestamp, lifted.state.phase) = (point, Clock.now, cancelled ? 4 : 3)
+        event.state.timestamp = lifted.state.timestamp
+        markStationary(except: lifted)
+        deliver(lifted, cancelled ? .cancelled : .ended, in: event)
+        event.state.touches.removeAll { $0.objcObject == lifted.objcObject }
+        if touch == nil, others.isEmpty { Touches.event = nil }
+        Display.markDirty()
+    }
+
+    /// A phase of one of the other fingers, to its view alone.
+    private static func deliver(_ finger: UITouch, _ phase: Phase, in event: UIEvent) {
+        guard let view = finger.state.view else { return }
+        let set = NSMutableSet.empty()
+        set.add(finger)
+        trace("finger \(finger.objcObject) \(phase) at \(finger.state.location) to \(view.objcObject)")
+        switch phase {
+        case .began: view.sendTouchesBegan(set, with: event)
+        case .moved: view.sendTouchesMoved(set, with: event)
+        case .ended: view.sendTouchesEnded(set, with: event)
+        case .cancelled: view.sendTouchesCancelled(set, with: event)
+        }
     }
 
     /// The mouse wheel scrolls the scroll view under the pointer.

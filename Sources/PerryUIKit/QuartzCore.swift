@@ -36,6 +36,9 @@ class CALayer: NSObject {
     @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: UnsafeMutableRawPointer?)
     @ObjCMethod("contents") func contents() -> NSObject?
     @ObjCMethod("setContents:") func setContents(_ contents: NSObject?)
+    /// QuartzCore's: shows RGBA rows, bottom first, without an image.
+    @ObjCMethod("_perrySetPixels:width:height:opaque:")
+    func setPerryPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool)
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat)
     @ObjCMethod("contentsGravity") func contentsGravity() -> String
