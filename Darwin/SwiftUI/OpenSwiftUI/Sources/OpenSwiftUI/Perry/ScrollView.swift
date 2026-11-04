@@ -7,13 +7,16 @@
 //  A scroll view in the view graph. A layout proposes the content its
 //  viewport's length across the scrolling axes and leaves it its ideal
 //  length along them, then places it moved back by the scroll offset; the
-//  viewport clips it. A drag moves it, stretching past the ends, and on
-//  release it glides to where the drag's velocity carries it, within the
-//  content. Being SwiftUI throughout, the content's buttons and gestures are
-//  hit where they are drawn.
+//  viewport clips it. A pan moves it, stretching past the ends, and on
+//  release it glides to where the pan's velocity carries it, within the
+//  content. The pan is UIKit's, on the hosting view, as a scroll view's is:
+//  once it begins, the content's SwiftUI gestures (a button's press, say)
+//  are cancelled. The content stays in the view graph, so its buttons and
+//  gestures are hit where they are drawn.
 
 #if os(iOS) || os(visionOS)
 public import OpenSwiftUICore
+import UIKit
 
 // MARK: - ScrollView
 
@@ -89,8 +92,13 @@ struct ScrollViewport<Content: View>: View {
         .environment(\.scrollViewport, viewportInfo)
         .overlay(alignment: .topLeading) { indicators }
         .clipped()
-        .contentShape(Rectangle())
-        .simultaneousGesture(drag)
+        .background(
+            ScrollPanRecognizer(
+                axes: axes,
+                changed: { panChanged($0) },
+                ended: { panEnded($0, velocity: $1) }
+            )
+        )
     }
 
     /// The part of the content that shows, or may while an animation moves
@@ -114,26 +122,31 @@ struct ScrollViewport<Content: View>: View {
 
     // MARK: Scrolling
 
-    var drag: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { value in
-                let origin = dragOrigin ?? offset
-                if dragOrigin == nil { dragOrigin = offset }
-                previousOffset = offset
-                offset = stretched(CGSize(width: origin.width - value.translation.width,
-                                          height: origin.height - value.translation.height))
-            }
-            .onEnded { value in
-                let origin = dragOrigin ?? offset
-                let target = clamp(CGSize(width: origin.width - value.predictedEndTranslation.width,
-                                          height: origin.height - value.predictedEndTranslation.height))
-                previousOffset = offset
-                withAnimation(.easeOut(duration: 0.4)) {
-                    offset = target
-                    dragOrigin = nil
-                }
-            }
+    /// The pan's translation moves the content from where it was as the
+    /// pan began, stretching past the ends.
+    func panChanged(_ translation: CGSize) {
+        let origin = dragOrigin ?? offset
+        if dragOrigin == nil { dragOrigin = offset }
+        previousOffset = offset
+        offset = stretched(CGSize(width: origin.width - translation.width, height: origin.height - translation.height))
     }
+
+    /// On release the content glides as far as the pan's velocity carries
+    /// it, within the content.
+    func panEnded(_ translation: CGSize, velocity: CGSize) {
+        let origin = dragOrigin ?? offset
+        let carry = Self.carry
+        let target = clamp(CGSize(width: origin.width - translation.width - velocity.width * carry,
+                                  height: origin.height - translation.height - velocity.height * carry))
+        previousOffset = offset
+        withAnimation(.easeOut(duration: 0.5)) {
+            offset = target
+            dragOrigin = nil
+        }
+    }
+
+    /// Seconds of release velocity the content glides on for.
+    static var carry: CGFloat { 0.3 }
 
     /// The offset along the scrolling axes, within the content.
     func clamp(_ proposed: CGSize) -> CGSize {
@@ -262,6 +275,116 @@ struct ScrollLayout: Layout {
             origin.x += (bounds.width - size.width) / 2
         }
         content.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(size))
+    }
+}
+// MARK: - Pan
+
+/// Installs a pan recognizer on the hosting view for the viewport it's the
+/// background of. The pan begins for a touch in the viewport moving along
+/// its axes, unless a smaller scroll viewport holds the touch too.
+struct ScrollPanRecognizer: UIViewRepresentable {
+    var axes: Axis.Set
+    var changed: (CGSize) -> Void
+    var ended: (CGSize, CGSize) -> Void
+
+    func makeUIView(context: Context) -> ScrollPanAnchor {
+        let anchor = ScrollPanAnchor()
+        anchor.isUserInteractionEnabled = false
+        anchor.coordinator = context.coordinator
+        context.coordinator.anchor = anchor
+        return anchor
+    }
+
+    func updateUIView(_ anchor: ScrollPanAnchor, context: Context) {
+        let coordinator = context.coordinator
+        (coordinator.axes, coordinator.changed, coordinator.ended) = (axes, changed, ended)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        weak var anchor: UIView?
+        var axes: Axis.Set = .vertical
+        var changed: (CGSize) -> Void = { _ in }
+        var ended: (CGSize, CGSize) -> Void = { _, _ in }
+        private(set) lazy var recognizer: UIPanGestureRecognizer = {
+            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
+            recognizer.delegate = self
+            return recognizer
+        }()
+
+        /// The coordinators whose viewports are in a window.
+        nonisolated(unsafe) static var installed: [ObjectIdentifier: Weak] = [:]
+
+        struct Weak { weak var coordinator: Coordinator? }
+
+        func install(on host: UIView?) {
+            recognizer.view?.removeGestureRecognizer(recognizer)
+            Coordinator.installed[ObjectIdentifier(self)] = nil
+            guard let host else { return }
+            host.addGestureRecognizer(recognizer)
+            Coordinator.installed[ObjectIdentifier(self)] = Weak(coordinator: self)
+        }
+
+        /// Whether this viewport holds the window point and scrolls the way
+        /// the pan moves.
+        func accepts(_ point: CGPoint, horizontal: Bool) -> Bool {
+            guard let anchor, anchor.window != nil else { return false }
+            guard anchor.bounds.contains(anchor.convert(point, from: nil)) else { return false }
+            return axes.contains(horizontal ? .horizontal : .vertical)
+        }
+
+        var area: CGFloat { (anchor?.bounds.width ?? 0) * (anchor?.bounds.height ?? 0) }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let point = pan.location(in: nil)
+            let moved = pan.translation(in: nil)
+            let horizontal = abs(moved.x) > abs(moved.y)
+            guard accepts(point, horizontal: horizontal) else { return false }
+            // The innermost scroll view that scrolls this way takes the pan.
+            let area = self.area
+            for entry in Coordinator.installed.values {
+                guard let other = entry.coordinator, other !== self, other.accepts(point, horizontal: horizontal) else { continue }
+                if other.area < area { return false }
+            }
+            return true
+        }
+
+        @objc func pan(_ recognizer: UIPanGestureRecognizer) {
+            let translation = recognizer.translation(in: nil)
+            let moved = CGSize(width: axes.contains(.horizontal) ? translation.x : 0,
+                               height: axes.contains(.vertical) ? translation.y : 0)
+            switch recognizer.state {
+            case .began, .changed:
+                changed(moved)
+            case .ended:
+                let velocity = recognizer.velocity(in: nil)
+                ended(moved, CGSize(width: axes.contains(.horizontal) ? velocity.x : 0,
+                                    height: axes.contains(.vertical) ? velocity.y : 0))
+            case .cancelled, .failed:
+                ended(moved, .zero)
+            default:
+                break
+            }
+        }
+    }
+}
+
+/// The viewport's stand-in in UIKit, which puts its coordinator's pan on
+/// the hosting view while it's in a window.
+final class ScrollPanAnchor: UIView {
+    weak var coordinator: ScrollPanRecognizer.Coordinator?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil else {
+            coordinator?.install(on: nil)
+            return
+        }
+        var host: UIView? = superview
+        while let view = host, !(view is AnyUIHostingView) { host = view.superview }
+        coordinator?.install(on: host)
     }
 }
 #endif
