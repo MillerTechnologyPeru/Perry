@@ -153,6 +153,21 @@ extension NSObject {
 
     // MARK: Introspection
 
+    // What the Swift runtime asks to tell Foundation's classes apart: each
+    // Foundation class answers YES for itself.
+    @ObjCMethod("isNSObject__") func isNSObject__() -> Bool { true }
+    @ObjCMethod("isNSArray__") func isNSArray__() -> Bool { false }
+    @ObjCMethod("isNSCFConstantString__") func isNSCFConstantString__() -> Bool { false }
+    @ObjCMethod("isNSData__") func isNSData__() -> Bool { false }
+    @ObjCMethod("isNSDate__") func isNSDate__() -> Bool { false }
+    @ObjCMethod("isNSDictionary__") func isNSDictionary__() -> Bool { false }
+    @ObjCMethod("isNSNumber__") func isNSNumber__() -> Bool { false }
+    @ObjCMethod("isNSOrderedSet__") func isNSOrderedSet__() -> Bool { false }
+    @ObjCMethod("isNSSet__") func isNSSet__() -> Bool { false }
+    @ObjCMethod("isNSString__") func isNSString__() -> Bool { false }
+    @ObjCMethod("isNSTimeZone__") func isNSTimeZone__() -> Bool { false }
+    @ObjCMethod("isNSValue__") func isNSValue__() -> Bool { false }
+
     @ObjCMethod("isKindOfClass:")
     func isKind(of target: ObjCClass?) -> Bool {
         var current: ObjCClass? = objCClass
