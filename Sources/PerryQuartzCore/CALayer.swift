@@ -55,6 +55,12 @@ final class LayerState {
     var style: NSObject?
     /// Filters, kept but not applied in drawing.
     var compositingFilter: NSObject?
+    var allowsEdgeAntialiasing = false
+    /// CAEdgeAntialiasingMask: all four edges.
+    var edgeAntialiasingMask: UInt32 = 0xf
+    var allowsGroupBlending = true
+    var minificationFilter = "linear"
+    var magnificationFilter = "linear"
     var filters: NSObject?
     var backgroundFilters: NSObject?
     var needsDisplay = false
@@ -178,6 +184,7 @@ open class CALayer: NSObject {
     deinit {
         for sublayer in state.sublayers { sublayer.state.superlayer = nil }
         Presentation.forget(objcObject)
+        PresentationModifiers.forget(objcObject)
     }
 
     /// The layer as it presents now: a copy with its animations applied.
@@ -284,6 +291,18 @@ open class CALayer: NSObject {
     @ObjCMethod("setNeedsDisplayOnBoundsChange:") func setNeedsDisplayOnBoundsChange(_ needs: Bool) { state.needsDisplayOnBoundsChange = needs }
     @ObjCMethod("allowsGroupOpacity") func allowsGroupOpacity() -> Bool { state.allowsGroupOpacity }
     @ObjCMethod("setAllowsGroupOpacity:") func setAllowsGroupOpacity(_ allows: Bool) { state.allowsGroupOpacity = allows }
+    @ObjCMethod("allowsGroupBlending") func allowsGroupBlending() -> Bool { state.allowsGroupBlending }
+    @ObjCMethod("setAllowsGroupBlending:") func setAllowsGroupBlending(_ allows: Bool) { state.allowsGroupBlending = allows }
+    @ObjCMethod("allowsEdgeAntialiasing") func allowsEdgeAntialiasing() -> Bool { state.allowsEdgeAntialiasing }
+    @ObjCMethod("setAllowsEdgeAntialiasing:") func setAllowsEdgeAntialiasing(_ allows: Bool) { state.allowsEdgeAntialiasing = allows }
+    @ObjCMethod("edgeAntialiasingMask") func edgeAntialiasingMask() -> UInt32 { state.edgeAntialiasingMask }
+    @ObjCMethod("setEdgeAntialiasingMask:") func setEdgeAntialiasingMask(_ mask: UInt32) { state.edgeAntialiasingMask = mask }
+    @ObjCMethod("minificationFilter") func minificationFilter() -> String { state.minificationFilter }
+    @ObjCMethod("setMinificationFilter:") func setMinificationFilter(_ filter: String) { state.minificationFilter = filter }
+    @ObjCMethod("magnificationFilter") func magnificationFilter() -> String { state.magnificationFilter }
+    @ObjCMethod("setMagnificationFilter:") func setMagnificationFilter(_ filter: String) { state.magnificationFilter = filter }
+    /// Whether the layer has been drawn.
+    @ObjCMethod("hasBeenCommitted") func hasBeenCommitted() -> Bool { state.rendered }
     @ObjCMethod("shouldRasterize") func shouldRasterize() -> Bool { false }
     @ObjCMethod("setShouldRasterize:") func setShouldRasterize(_ rasterize: Bool) {}
     @ObjCMethod("rasterizationScale") func rasterizationScale() -> CGFloat { state.contentsScale }
@@ -330,13 +349,12 @@ open class CALayer: NSObject {
 
     @ObjCMethod("addPresentationModifier:")
     func addPresentationModifier(_ modifier: CAPresentationModifier) {
-        modifier.modifier.layer = objcObject
-        modifier.apply()
+        PresentationModifiers.add(modifier.modifier, to: objcObject)
     }
 
     @ObjCMethod("removePresentationModifier:")
     func removePresentationModifier(_ modifier: CAPresentationModifier) {
-        if modifier.modifier.layer == objcObject { modifier.modifier.layer = nil }
+        PresentationModifiers.remove(modifier.modifier, from: objcObject)
     }
 
     @ObjCMethod("setValue:forKeyPath:")
