@@ -281,6 +281,20 @@ CGPathRef ORBPathCopyCGPath(ORBPath path) {
             case ORBPathElementRect:
                 CGPathAddRect(cgPath, nullptr, CGRectMake(points[0], points[1], points[2], points[3]));
                 break;
+            case ORBPathElementRoundedRect:
+            case ORBPathElementFixedRoundedRectCircular:
+            case ORBPathElementFixedRoundedRectContinuous: {
+                // FIXME: Continuous corners are drawn circular.
+                CGRect rect = CGRectStandardize(CGRectMake(points[0], points[1], points[2], points[3]));
+                CGFloat width = fmin(fmax(points[4], 0), rect.size.width / 2);
+                CGFloat height = fmin(fmax(points[5], 0), rect.size.height / 2);
+                if (width > 0 && height > 0) {
+                    CGPathAddRoundedRect(cgPath, nullptr, rect, width, height);
+                } else {
+                    CGPathAddRect(cgPath, nullptr, rect);
+                }
+                break;
+            }
             default:
                 break;
         }
@@ -294,8 +308,18 @@ bool ORBPathContainsPoint(ORBPath path, CGPoint point, bool eoFill) {
 }
 
 bool ORBPathContainsPoints(ORBPath path, uint64_t count, const CGPoint *points, bool eoFill, const CGAffineTransform *transform) {
-    // TODO: Implement point containment testing with winding rule
-    return false;
+    // FIXME: Use RB API instead of CG API
+    // Whether any of the points is inside.
+    CGPathRef cgPath = ORBPathCopyCGPath(path);
+    if (cgPath == nullptr) {
+        return false;
+    }
+    bool contains = false;
+    for (uint64_t index = 0; index < count && !contains; index++) {
+        contains = CGPathContainsPoint(cgPath, transform, points[index], eoFill);
+    }
+    CGPathRelease(cgPath);
+    return contains;
 }
 #endif /* ORB_TARGET_OS_DARWIN */
 
