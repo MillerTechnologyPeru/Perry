@@ -68,7 +68,7 @@ open class UIFont: NSObject {
 
     /// Text styles' sizes at the default content size.
     static let textStyleSizes: [String: CGFloat] = [
-        "UICTFontTextStyleLargeTitle": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
+        "UICTFontTextStyleTitle0": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
         "UICTFontTextStyleTitle3": 20, "UICTFontTextStyleHeadline": 17, "UICTFontTextStyleSubhead": 15,
         "UICTFontTextStyleBody": 17, "UICTFontTextStyleCallout": 16, "UICTFontTextStyleFootnote": 13,
         "UICTFontTextStyleCaption1": 12, "UICTFontTextStyleCaption2": 11,
@@ -103,6 +103,9 @@ open class UIFont: NSObject {
     }
 
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: state.name.hashValue) ^ UInt(state.pointSize) }
+
+    /// A UIFont is a CTFont, as on Darwin.
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.font }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
     /// The font CoreGraphics draws with: a bold or regular sans serif for

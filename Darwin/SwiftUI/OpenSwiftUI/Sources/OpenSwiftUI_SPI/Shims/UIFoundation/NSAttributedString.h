@@ -1,0 +1,73 @@
+//
+//  NSAttributedString.h
+//  OpenSwiftUI_SPI
+
+#pragma once
+
+#include "OpenSwiftUIBase.h"
+
+typedef long NSInteger;
+
+// This defines currently supported values for NSUnderlineStyleAttributeName and NSStrikethroughStyleAttributeName. These values are or'ed together to produce an underline style.
+// Underlines will be drawn with a solid pattern by default, so NSUnderlineStylePatternSolid does not need to be specified.
+typedef OPENSWIFTUI_OPTIONS(NSInteger, NSUnderlineStyle) {
+    NSUnderlineStyleNone                                    = 0x00,
+    NSUnderlineStyleSingle                                  = 0x01,
+    NSUnderlineStyleThick API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))      = 0x02,
+    NSUnderlineStyleDouble API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))     = 0x09,
+
+    NSUnderlineStylePatternSolid API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))      = 0x0000,
+    NSUnderlineStylePatternDot API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))        = 0x0100,
+    NSUnderlineStylePatternDash API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))       = 0x0200,
+    NSUnderlineStylePatternDashDot API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))    = 0x0300,
+    NSUnderlineStylePatternDashDotDot API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0)) = 0x0400,
+
+    NSUnderlineStyleByWord API_AVAILABLE(macos(10.0), ios(7.0), tvos(9.0), watchos(2.0), visionos(1.0))            = 0x8000
+} API_AVAILABLE(macos(10.0), ios(6.0), tvos(9.0), watchos(2.0), visionos(1.0));
+
+#if !OPENSWIFTUI_TARGET_OS_DARWIN
+
+typedef unsigned long NSUInteger;
+
+// Support for Markdown:
+
+// Presentation intents correspond to the Markdown constructs applied to a certain range.
+// The system may supply a default presentation for these intents in certain contexts.
+
+// Inline presentation intents.
+// For use with NSInlinePresentationAttributeName.
+typedef OPENSWIFTUI_OPTIONS(NSUInteger, NSInlinePresentationIntent) {
+    NSInlinePresentationIntentEmphasized                   = 1 << 0,
+    NSInlinePresentationIntentStronglyEmphasized           = 1 << 1,
+    NSInlinePresentationIntentCode                         = 1 << 2,
+    NSInlinePresentationIntentStrikethrough                = 1 << 5,
+    NSInlinePresentationIntentSoftBreak                    = 1 << 6,
+    NSInlinePresentationIntentLineBreak                    = 1 << 7,
+    NSInlinePresentationIntentInlineHTML                   = 1 << 8,
+    NSInlinePresentationIntentBlockHTML                    = 1 << 9
+} API_AVAILABLE(macos(12.0), ios(15.0), watchos(8.0), tvos(15.0)) OPENSWIFTUI_SWIFT_NAME(InlinePresentationIntent);
+
+#endif
+
+#if OPENSWIFTUI_TARGET_OS_DARWIN
+
+#import <Foundation/Foundation.h>
+
+OPENSWIFTUI_ASSUME_NONNULL_BEGIN
+
+@interface NSAttributedString (OpenSwiftUI_SPI)
+- (instancetype)initOpenSwiftUIAttributedStringWithFormat:(NSAttributedString *)format options:(NSAttributedStringFormattingOptions)options locale:(NSLocale * _Nullable)locale arguments:(va_list)arguments;
+- (NSAttributedString *)_ui_attributedSubstringFromRange_openswiftui_safe_wrapper:(NSRange)range scaledByScaleFactor:(CGFloat)factor OPENSWIFTUI_SWIFT_NAME(_ui_attributedSubstring(from:scaledBy:));
+@end
+
+@interface NSMutableAttributedString (OpenSwiftUI_SPI)
+@property(readonly, assign, nonatomic) BOOL isEmptyOrTerminatedByParagraphSeparator_openswiftui_safe_wrapper OPENSWIFTUI_SWIFT_NAME(isEmptyOrTerminatedByParagraphSeparator);
+@end
+
+@interface NSCharacterSet (OpenSwiftUI_SPI)
+@property(class, readonly, nonatomic) NSCharacterSet *ic_emojiCharacterSet;
+@end
+
+OPENSWIFTUI_ASSUME_NONNULL_END
+
+#endif

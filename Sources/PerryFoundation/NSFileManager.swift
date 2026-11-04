@@ -275,12 +275,38 @@ final class NSFileManager: NSObject {
     // MARK: Standard directories
 
     /// NSSearchPathDirectory in NSUserDomainMask: one URL, in the home directory.
+    /// No iCloud: as when the user isn't signed in to it.
+    @ObjCMethod("URLForUbiquityContainerIdentifier:")
+    func urlForUbiquityContainer(identifier: ObjCObject?) -> NSURL? { nil }
+
+    @ObjCMethod("ubiquityIdentityToken") func ubiquityIdentityToken() -> ObjCObject? { nil }
+
     @ObjCMethod("URLsForDirectory:inDomains:")
     func urls(for directory: UInt, inDomains domains: UInt) -> NSArray {
         let found = FileManagers.directory(directory).flatMap {
             URLs.autoreleased(URL(filePath: $0, directoryHint: .isDirectory))
         }
         return Arrays.owned(found.map { [$0] } ?? [])
+    }
+
+    /// The directory, made if asked; the item replacement directory is a
+    /// new temporary one.
+    @ObjCMethod("URLForDirectory:inDomain:appropriateForURL:create:error:")
+    func url(for directory: UInt, in domain: UInt, appropriateFor url: ObjCObject?, create: Bool,
+             error errorPointer: UnsafeMutablePointer<id?>?) -> NSURL? {
+        let path: String
+        if directory == 99 {    // NSItemReplacementDirectory
+            path = (getenv("TMPDIR").map { String(cString: $0) } ?? "/tmp") + "/(A Document Being Saved By Perry \(UInt32.random(in: 0...UInt32.max)))"
+        } else if let found = FileManagers.directory(directory) {
+            path = found
+        } else {
+            FileManagers.report(errorPointer, "directory \(directory)")
+            return nil
+        }
+        if create || directory == 99 {
+            guard createDirectory(atPath: path, intermediates: true, attributes: nil, error: errorPointer) else { return nil }
+        }
+        return URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory))
     }
 }
 

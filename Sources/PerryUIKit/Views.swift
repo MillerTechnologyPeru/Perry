@@ -212,6 +212,25 @@ final class ParagraphStyleState: ObjectState {
     var minimumLineHeight: CGFloat = 0
     var maximumLineHeight: CGFloat = 0
     var lineHeightMultiple: CGFloat = 0
+    var paragraphSpacingBefore: CGFloat = 0
+    var lineBreakStrategy: UInt = 0
+    var hyphenationFactor: Float = 0
+    /// NSWritingDirectionNatural.
+    var baseWritingDirection = -1
+    var allowsDefaultTighteningForTruncation = false
+    // Private to UIKit, which SwiftUI sets.
+    var secondaryLineBreakMode = 0
+    var fullyJustified = false
+    var spansAllLines = false
+
+    func copy(from other: ParagraphStyleState) {
+        (alignment, lineBreakMode, lineSpacing, paragraphSpacing) = (other.alignment, other.lineBreakMode, other.lineSpacing, other.paragraphSpacing)
+        (firstLineHeadIndent, headIndent, tailIndent) = (other.firstLineHeadIndent, other.headIndent, other.tailIndent)
+        (minimumLineHeight, maximumLineHeight, lineHeightMultiple) = (other.minimumLineHeight, other.maximumLineHeight, other.lineHeightMultiple)
+        (paragraphSpacingBefore, lineBreakStrategy, hyphenationFactor) = (other.paragraphSpacingBefore, other.lineBreakStrategy, other.hyphenationFactor)
+        (baseWritingDirection, allowsDefaultTighteningForTruncation) = (other.baseWritingDirection, other.allowsDefaultTighteningForTruncation)
+        (secondaryLineBreakMode, fullyJustified, spansAllLines) = (other.secondaryLineBreakMode, other.fullyJustified, other.spansAllLines)
+    }
 }
 
 @ObjCClass("NSParagraphStyle")
@@ -241,18 +260,14 @@ open class NSParagraphStyle: NSObject {
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
         let copy = NSParagraphStyle.objCClass.object.allocated().unsafeCast(to: NSParagraphStyle.self)
-        let (from, to) = (state, copy.state)
-        (to.alignment, to.lineBreakMode, to.lineSpacing, to.paragraphSpacing) = (from.alignment, from.lineBreakMode, from.lineSpacing, from.paragraphSpacing)
-        (to.firstLineHeadIndent, to.headIndent, to.tailIndent) = (from.firstLineHeadIndent, from.headIndent, from.tailIndent)
-        (to.minimumLineHeight, to.maximumLineHeight, to.lineHeightMultiple) = (from.minimumLineHeight, from.maximumLineHeight, from.lineHeightMultiple)
+        copy.state.copy(from: state)
         return ObjCRuntime.retain(copy.objcObject)!
     }
 
     @ObjCMethod("mutableCopyWithZone:")
     func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
         let copy = NSMutableParagraphStyle.objCClass.object.allocated().unsafeCast(to: NSParagraphStyle.self)
-        let (from, to) = (state, copy.state)
-        (to.alignment, to.lineBreakMode, to.lineSpacing, to.paragraphSpacing) = (from.alignment, from.lineBreakMode, from.lineSpacing, from.paragraphSpacing)
+        copy.state.copy(from: state)
         return ObjCRuntime.retain(copy.objcObject)!
     }
 
@@ -266,6 +281,14 @@ open class NSParagraphStyle: NSObject {
     @ObjCMethod("minimumLineHeight") func minimumLineHeight() -> CGFloat { state.minimumLineHeight }
     @ObjCMethod("maximumLineHeight") func maximumLineHeight() -> CGFloat { state.maximumLineHeight }
     @ObjCMethod("lineHeightMultiple") func lineHeightMultiple() -> CGFloat { state.lineHeightMultiple }
+    @ObjCMethod("paragraphSpacingBefore") func paragraphSpacingBefore() -> CGFloat { state.paragraphSpacingBefore }
+    @ObjCMethod("lineBreakStrategy") func lineBreakStrategy() -> UInt { state.lineBreakStrategy }
+    @ObjCMethod("hyphenationFactor") func hyphenationFactor() -> Float { state.hyphenationFactor }
+    @ObjCMethod("baseWritingDirection") func baseWritingDirection() -> Int { state.baseWritingDirection }
+    @ObjCMethod("allowsDefaultTighteningForTruncation") func allowsDefaultTighteningForTruncation() -> Bool { state.allowsDefaultTighteningForTruncation }
+    @ObjCMethod("secondaryLineBreakMode") func secondaryLineBreakMode() -> Int { state.secondaryLineBreakMode }
+    @ObjCMethod("fullyJustified") func fullyJustified() -> Bool { state.fullyJustified }
+    @ObjCMethod("spansAllLines") func spansAllLines() -> Bool { state.spansAllLines }
 }
 
 @ObjCClass("NSMutableParagraphStyle")
@@ -280,6 +303,15 @@ open class NSMutableParagraphStyle: NSParagraphStyle {
     @ObjCMethod("setMinimumLineHeight:") func setMinimumLineHeight(_ height: CGFloat) { state.minimumLineHeight = height }
     @ObjCMethod("setMaximumLineHeight:") func setMaximumLineHeight(_ height: CGFloat) { state.maximumLineHeight = height }
     @ObjCMethod("setLineHeightMultiple:") func setLineHeightMultiple(_ multiple: CGFloat) { state.lineHeightMultiple = multiple }
+    @ObjCMethod("setParagraphSpacingBefore:") func setParagraphSpacingBefore(_ spacing: CGFloat) { state.paragraphSpacingBefore = spacing }
+    @ObjCMethod("setLineBreakStrategy:") func setLineBreakStrategy(_ strategy: UInt) { state.lineBreakStrategy = strategy }
+    @ObjCMethod("setHyphenationFactor:") func setHyphenationFactor(_ factor: Float) { state.hyphenationFactor = factor }
+    @ObjCMethod("setBaseWritingDirection:") func setBaseWritingDirection(_ direction: Int) { state.baseWritingDirection = direction }
+    @ObjCMethod("setAllowsDefaultTighteningForTruncation:")
+    func setAllowsDefaultTighteningForTruncation(_ allows: Bool) { state.allowsDefaultTighteningForTruncation = allows }
+    @ObjCMethod("setSecondaryLineBreakMode:") func setSecondaryLineBreakMode(_ mode: Int) { state.secondaryLineBreakMode = mode }
+    @ObjCMethod("setFullyJustified:") func setFullyJustified(_ justified: Bool) { state.fullyJustified = justified }
+    @ObjCMethod("setSpansAllLines:") func setSpansAllLines(_ spans: Bool) { state.spansAllLines = spans }
 }
 
 // MARK: - Web views, which show nothing

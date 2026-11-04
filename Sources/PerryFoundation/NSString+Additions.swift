@@ -184,6 +184,20 @@ extension NSString {
         StringEncoding.encode(value, encoding, lossy: lossy).map { DataObjects.owned(DataStorage(Data($0))) }
     }
 
+    /// The string as a property list in the old-style text format, or the
+    /// strings file format; nil when it is neither.
+    @ObjCMethod("propertyList")
+    func propertyList() -> UnsafeMutableRawPointer? {
+        PropertyLists.parse(Array(value.utf8)).flatMap { PropertyLists.object($0.0, mutability: 0) }
+    }
+
+    /// The string as a strings file: a dictionary of strings.
+    @ObjCMethod("propertyListFromStringsFileFormat")
+    func propertyListFromStringsFileFormat() -> UnsafeMutableRawPointer? {
+        var parser = OpenStepParser(Array(value.unicodeScalars))
+        return parser.stringsDocument().flatMap { PropertyLists.object($0, mutability: 0) }
+    }
+
     @ObjCMethod("canBeConvertedToEncoding:")
     func canConvert(to encoding: UInt) -> Bool { StringEncoding.encode(value, encoding) != nil }
 

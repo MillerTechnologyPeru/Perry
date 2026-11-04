@@ -127,6 +127,9 @@ enum Numbers {
 /// NSNumber.
 @ObjCClass("NSNumber")
 public class NSNumber: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSNumber__") func isNSNumber__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)

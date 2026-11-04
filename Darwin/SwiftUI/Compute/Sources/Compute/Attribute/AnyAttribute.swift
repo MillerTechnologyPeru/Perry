@@ -1,0 +1,109 @@
+import ComputeCxx
+
+@_silgen_name("IAGGraphMutateAttribute")
+func IAGGraphMutateAttribute(
+    _ attribute: AnyAttribute,
+    type: Metadata,
+    invalidating: Bool,
+    modify: @escaping (UnsafeMutableRawPointer) -> Void
+)
+
+@_silgen_name("IAGGraphSearch")
+func IAGGraphSearch(
+    attribute: AnyAttribute,
+    options: SearchOptions,
+    predicate: @escaping (AnyAttribute) -> Bool
+) -> Bool
+
+extension AnyAttribute {
+    public static var current: AnyAttribute? {
+        let attribute = __IAGGraphGetCurrentAttribute()
+        return attribute == .nil ? nil : attribute
+    }
+
+    public init<Value>(_ attribute: Attribute<Value>) {
+        self = attribute.identifier
+    }
+
+    public func unsafeCast<Value>(to type: Value.Type) -> Attribute<Value> {
+        return Attribute<Value>(identifier: self)
+    }
+
+    public func visitBody<Visitor: AttributeBodyVisitor>(_ visitor: inout Visitor) {
+        info.type.pointee.attributeBody._visitSelf(info.body, visitor: &visitor)
+    }
+
+    public func mutateBody<Body>(as type: Body.Type, invalidating: Bool, _ mutator: (inout Body) -> Void) {
+        withoutActuallyEscaping(mutator) { escapingMutator in
+            let modify: (UnsafeMutableRawPointer) -> Void = { pointer in
+                escapingMutator(&pointer.assumingMemoryBound(to: Body.self).pointee)
+            }
+            IAGGraphMutateAttribute(
+                self,
+                type: Metadata(type),
+                invalidating: invalidating,
+                modify: modify
+            )
+        }
+    }
+
+    // Node
+
+    public func setFlags(_ newFlags: Subgraph.Flags, mask: Subgraph.Flags) {
+        flags = flags.subtracting(mask).union(newFlags.intersection(mask))
+    }
+
+    public func addInput(_ input: AnyAttribute, options: InputOptions, token: Int) {
+        addInput(input, options: options)
+    }
+
+    public func addInput<T>(_ input: Attribute<T>, options: InputOptions, token: Int) {
+        addInput(input.identifier, options: options, token: token)
+    }
+
+    // Indirect Node
+
+    public func unsafeOffset(at offset: Int) -> AnyAttribute {
+        return __IAGGraphCreateOffsetAttribute(self, UInt32(offset))
+    }
+
+    public var indirectDependency: AnyAttribute? {
+        get {
+            let indirectDependency = __IAGGraphGetIndirectDependency(self)
+            return indirectDependency == .nil ? nil : indirectDependency
+        }
+        nonmutating set {
+            __IAGGraphSetIndirectDependency(self, newValue ?? .nil)
+        }
+    }
+
+    public func breadthFirstSearch(options: SearchOptions, _ predicate: (AnyAttribute) -> Bool) -> Bool {
+        return withoutActuallyEscaping(predicate) { escapingPredicate in
+            return IAGGraphSearch(attribute: self, options: options, predicate: escapingPredicate)
+        }
+    }
+
+    public var _bodyType: Any.Type {
+        return info.type.pointee.self_id.type
+    }
+
+    public var _bodyPointer: UnsafeRawPointer {
+        return info.body
+    }
+
+    public var valueType: Any.Type {
+        return info.type.pointee.value_id.type
+    }
+}
+
+extension AnyAttribute: @retroactive Hashable {}
+
+extension AnyAttribute: @retroactive CustomStringConvertible {
+    public var description: String {
+        return "#\(rawValue)"
+    }
+}
+
+extension AnyAttribute {
+    public typealias _ObjectiveCType = Self.RawValue  // Fixes compiler crash
+}

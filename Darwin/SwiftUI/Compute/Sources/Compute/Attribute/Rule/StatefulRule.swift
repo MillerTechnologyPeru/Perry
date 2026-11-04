@@ -1,0 +1,60 @@
+import ComputeCxx
+
+public protocol StatefulRule: _AttributeBody {
+    associatedtype Value
+
+    static var initialValue: Value? { get }
+    mutating func updateValue()
+}
+
+extension StatefulRule {
+    public static var initialValue: Value? {
+        nil
+    }
+
+    public static func _updateDefault(_ default: UnsafeMutableRawPointer) {
+        guard let initialValue = initialValue else {
+            return
+        }
+        withUnsafePointer(to: initialValue) { initialValuePointer in
+            Graph.setOutputValue(initialValuePointer)
+        }
+    }
+}
+
+extension StatefulRule {
+    public static func _update(_ self: UnsafeMutableRawPointer, attribute: AnyAttribute) {
+        let rule = self.assumingMemoryBound(to: Self.self)
+        rule.pointee.updateValue()
+    }
+
+    @_alwaysEmitIntoClient
+    public var bodyChanged: Bool {
+        AnyAttribute.currentWasModified
+    }
+
+    public var value: Value {
+        unsafeAddress {
+            guard let result = __IAGGraphGetOutputValue(Metadata(Value.self)) else {
+                preconditionFailure()
+            }
+            let pointer = result.assumingMemoryBound(to: Value.self)
+            return UnsafePointer(pointer)
+        }
+        nonmutating set {
+            context.value = newValue
+        }
+    }
+
+    public var hasValue: Bool {
+        context.hasValue
+    }
+
+    public var attribute: Attribute<Value> {
+        Attribute<Value>(identifier: AnyAttribute.current!)
+    }
+
+    public var context: RuleContext<Value> {
+        RuleContext<Value>(attribute: attribute)
+    }
+}

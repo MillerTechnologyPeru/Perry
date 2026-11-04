@@ -1,0 +1,2321 @@
+import Foundation
+import Testing
+import _ComputeTestSupport
+
+// This suite relies heavily on process isolation, which does not complete on Linux.
+#if !os(Linux)
+
+public struct ValueLayout: CustomStringConvertible, Equatable {
+    let storage: UnsafePointer<CUnsignedChar>
+
+    static var trivial: ValueLayout {
+        return unsafeBitCast(UnsafePointer<CUnsignedChar>(bitPattern: 1), to: ValueLayout.self)
+    }
+
+    public var description: String {
+        return "\(storage)".replacing(/^0x0+/, with: "0x")
+    }
+}
+
+extension Optional: @retroactive CustomStringConvertible where Wrapped == ValueLayout {
+
+    public var description: String {
+        switch self {
+        case .none:
+            return "0x00000000"
+        case .some(let wrapped):
+            return wrapped.description
+        }
+    }
+
+}
+
+extension ValueLayout {
+    static func prefetch<Value>(
+        of type: Value.Type,
+        options: ComparisonOptions,
+        priority: Int
+    ) -> ValueLayout? {
+        guard
+            let layout = prefetchCompareValues(
+                type: Metadata(type),
+                options: options,
+                priority: UInt32(priority)
+            )
+        else {
+            return nil
+        }
+        return ValueLayout(storage: layout)
+    }
+}
+
+let allOptions: [ComparisonOptions] = [
+    ComparisonOptions(mode: .bitwise),
+    ComparisonOptions(mode: .equatableUnlessPOD),
+    ComparisonOptions(mode: .equatableAlways),
+]
+
+@Suite(.serialized)
+struct PrefetchCompareValuesTests {
+
+    @Suite
+    struct FundamentalTypeTests {
+
+        @Test
+        func layoutForNever() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            let layout0 = ValueLayout.prefetch(
+                of: Never.self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            let layout1 = ValueLayout.prefetch(
+                of: Never.self,
+                options: ComparisonOptions(mode: .indirect),
+                priority: 0
+            )
+            #expect(layout1 == nil, "expected `layout1` to be nil, but was \(layout1) instead")
+
+            let layout2 = ValueLayout.prefetch(
+                of: Never.self,
+                options: ComparisonOptions(mode: .equatableUnlessPOD),
+                priority: 0
+            )
+            #expect(layout2 == nil, "expected `layout2` to be nil, but was \(layout2) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Never.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Never, 0 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 0 #:type Never))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForVoid() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                for options in allOptions {
+                    let layout = ValueLayout.prefetch(of: Void.self, options: options, priority: 0)
+                    #expect(layout == .trivial, "expected `layout` to be the trivial value, but was \(layout) instead")
+                }
+            }
+        }
+
+        @Test
+        func layoutForBool() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: Bool.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: Bool.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                let layout2 = ValueLayout.prefetch(
+                    of: Bool.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+                #expect(layout2 == .trivial, "expected `layout2` to be the trivial value, but was \(layout2) instead")
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Bool.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Bool, 1 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type Bool))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForNumericNonEquatable() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let types: [Any.Type] = [Int.self, Double.self, Float.self]
+                for type in types {
+                    let layout0 = ValueLayout.prefetch(
+                        of: type,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                    #expect(
+                        layout0 == .trivial,
+                        "expected `layout0` to be the trivial value, but was \(layout0) instead"
+                    )
+
+                    let layout1 = ValueLayout.prefetch(
+                        of: type,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                    #expect(
+                        layout1 == .trivial,
+                        "expected `layout1` to be the trivial value, but was \(layout1) instead"
+                    )
+
+                    let layout2 = ValueLayout.prefetch(
+                        of: type,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                    #expect(
+                        layout2 == .trivial,
+                        "expected `layout2` to be the trivial value, but was \(layout2) instead"
+                    )
+                }
+            }
+        }
+
+        @Test
+        func layoutForIntEquatable() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                var output = ""
+                let layout = await reprintingStandardError(to: &output) {
+                    ValueLayout.prefetch(of: Int.self, options: ComparisonOptions(mode: .equatableAlways), priority: 0)
+                }
+                #expect(layout != nil, "expected `layout` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output,
+                    """
+                    == Int, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout))
+                       (== #:size 8 #:type Int))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForDoubleEquatable() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                var output = ""
+                let layout = await reprintingStandardError(to: &output) {
+                    ValueLayout.prefetch(
+                        of: Double.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout != nil, "expected `layout` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output,
+                    """
+                    == Double, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout))
+                       (== #:size 8 #:type Double))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForFloatEquatable() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                var output = ""
+                let layout = await reprintingStandardError(to: &output) {
+                    ValueLayout.prefetch(
+                        of: Float.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout != nil, "expected `layout` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output,
+                    """
+                    == Float, 4 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout))
+                       (== #:size 4 #:type Float))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForString() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: String.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == String, 16 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout2))
+                       (== #:size 16 #:type String))
+
+                    """
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: String.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == String, 16 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 16 #:type String))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForStaticString() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                for options in allOptions {
+                    let layout = ValueLayout.prefetch(of: StaticString.self, options: options, priority: 0)
+                    #expect(layout == .trivial, "expected `layout` to be the trivial value, but was \(layout) instead")
+                }
+            }
+        }
+
+    }
+
+    @Suite
+    struct StructTests {
+
+        @Test(arguments: allOptions)
+        func layoutForEmptyStruct(with options: ComparisonOptions) {
+            struct EmptyStruct {}
+
+            let layout = ValueLayout.prefetch(of: EmptyStruct.self, options: options, priority: 0)
+            #expect(layout == nil, "expected `layout` to be nil, but was \(layout) instead")
+        }
+
+        @Test("Layout for struct enclosing single element equals the layout of the enclosed element")
+        func layoutForStructEnclosingSingleElement() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                struct StructEnclosingSingleElement {
+                    var property: Int
+                }
+
+                let layout0 = ValueLayout.prefetch(
+                    of: StructEnclosingSingleElement.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: StructEnclosingSingleElement.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                let layout2 = ValueLayout.prefetch(
+                    of: StructEnclosingSingleElement.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+                #expect(layout2 == .trivial, "expected `layout2` to be the trivial value, but was \(layout2) instead")
+
+                let innerLayout = ValueLayout.prefetch(
+                    of: Int.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: StructEnclosingSingleElement.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(
+                    layout3 == innerLayout,
+                    "expected `layout3` to equal \(innerLayout), but was \(layout3) instead"
+                )
+            }
+        }
+
+        @Test
+        func layoutForTrivialStruct() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                struct TrivialStruct {
+                    var first: Int
+                    var second: Int
+                }
+
+                let layout0 = ValueLayout.prefetch(
+                    of: TrivialStruct.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: TrivialStruct.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                let layout2 = ValueLayout.prefetch(
+                    of: TrivialStruct.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+                #expect(layout2 == .trivial, "expected `layout2` to be the trivial value, but was \(layout2) instead")
+
+                let _ = ValueLayout.prefetch(
+                    of: Int.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: TrivialStruct.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == TrivialStruct, 16 bytes ==
+                    (layout #:length 35 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type Int)
+                       (== #:size 8 #:type Int))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForStructWithAlignedElement() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            struct StructWithAlignedElement {
+                var int8: Int8
+                var int64: Int64
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: StructWithAlignedElement.self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output0,
+                    """
+                    == StructWithAlignedElement, 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout0))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: StructWithAlignedElement.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == StructWithAlignedElement, 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout1))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: StructWithAlignedElement.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == StructWithAlignedElement, 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout2))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: Int8.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: Int64.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: StructWithAlignedElement.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == StructWithAlignedElement, 16 bytes ==
+                    (layout #:length 36 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type Int8)
+                       (skip 7)
+                       (== #:size 8 #:type Int64))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForStructWithComplexProperty() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            typealias ComplexType = Int64???
+            struct StructWithComplexProperty {
+                var int8: Int8  // force layout to be non-nil
+                var complexProperty: ComplexType
+            }
+
+            await #expect(processExitsWith: .success) {
+                let nestedLayout0 = ValueLayout.prefetch(
+                    of: ComplexType.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: StructWithComplexProperty.self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringEqualToAnyStringWithDiff(
+                    output0,
+                    [
+                        // Relative layout encoded as relative pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 10 #:address \(String(describing: layout0))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout0))))
+
+                        """,
+                        // Relative layout encoded as absolute pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 13 #:address \(String(describing: layout0))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout0))))
+
+                        """,
+                    ]
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let nestedLayout1 = ValueLayout.prefetch(
+                    of: ComplexType.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: StructWithComplexProperty.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringEqualToAnyStringWithDiff(
+                    output1,
+                    [
+                        // Relative layout encoded as relative pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 10 #:address \(String(describing: layout1))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout1))))
+
+                        """,
+                        // Relative layout encoded as absolute pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 13 #:address \(String(describing: layout1))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout1))))
+
+                        """,
+                    ]
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let nestedLayout2 = ValueLayout.prefetch(
+                    of: ComplexType.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: StructWithComplexProperty.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringEqualToAnyStringWithDiff(
+                    output2,
+                    [
+                        // Relative layout encoded as relative pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 10 #:address \(String(describing: layout2))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout2))))
+
+                        """,
+                        // Relative layout encoded as absolute pointer
+                        """
+                        == StructWithComplexProperty, 19 bytes ==
+                        (layout #:length 13 #:address \(String(describing: layout2))
+                           (read 1)
+                           (skip 7)
+                           (nested #:size 11 #:layout \(String(describing: nestedLayout2))))
+
+                        """,
+                    ]
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: Int8.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: ComplexType.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: StructWithComplexProperty.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == StructWithComplexProperty, 19 bytes ==
+                    (layout #:length 36 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type Int8)
+                       (skip 7)
+                       (== #:size 11 #:type Optional<Optional<Optional<Int64>>>))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct ClassTests {
+
+        @Test(arguments: allOptions)
+        func layoutForEmptyClass(with options: ComparisonOptions) {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+            class EmptyClass {}
+
+            let layout = ValueLayout.prefetch(of: EmptyClass.self, options: options, priority: 0)
+            #expect(layout == nil, "expected `layout` to be nil, but was \(layout) instead")
+        }
+
+        @Test(arguments: allOptions)
+        func layoutForTrivialClass(with options: ComparisonOptions) {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+            class TrivialClass {
+                var property: Int = 0
+            }
+
+            let layout = ValueLayout.prefetch(of: TrivialClass.self, options: options, priority: 0)
+            #expect(layout == nil, "expected `layout` to be nil, but was \(layout) instead")
+        }
+
+        @Test
+        func layoutForStructWithWeakVar() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                class EmptyClass {}
+                struct StructWithWeakVar {
+                    weak var property: EmptyClass?
+                }
+
+                for options in allOptions {
+                    let layout = ValueLayout.prefetch(of: StructWithWeakVar.self, options: options, priority: 0)
+                    #expect(layout == .trivial, "expected `layout` to be the trivial value, but was \(layout) instead")
+                }
+            }
+        }
+
+    }
+
+    @Suite
+    struct EnumTests {
+
+        @Test(arguments: allOptions)
+        func layoutForEmptyEnum(with options: ComparisonOptions) {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+            enum EmptyEnum {}
+
+            let layout = ValueLayout.prefetch(of: EmptyEnum.self, options: options, priority: 0)
+            #expect(layout == nil, "expected `layout` to be nil, but was \(layout) instead")
+        }
+
+        @Test
+        func layoutForBasicEnum() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            enum BasicEnum {
+                case first
+                case second
+            }
+
+            let layout0 = ValueLayout.prefetch(
+                of: BasicEnum.self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            let layout1 = ValueLayout.prefetch(
+                of: BasicEnum.self,
+                options: ComparisonOptions(mode: .indirect),
+                priority: 0
+            )
+            #expect(layout1 == nil, "expected `layout1` to be nil, but was \(layout1) instead")
+
+            let layout2 = ValueLayout.prefetch(
+                of: BasicEnum.self,
+                options: ComparisonOptions(mode: .equatableUnlessPOD),
+                priority: 0
+            )
+            #expect(layout2 == nil, "expected `layout2` to be nil, but was \(layout2) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: BasicEnum.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == BasicEnum, 1 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type BasicEnum))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForIntEnum() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            enum IntEnum: Int {
+                case first = 1
+                case second = 2
+            }
+
+            let layout0 = ValueLayout.prefetch(
+                of: IntEnum.self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            let layout1 = ValueLayout.prefetch(
+                of: IntEnum.self,
+                options: ComparisonOptions(mode: .indirect),
+                priority: 0
+            )
+            #expect(layout1 == nil, "expected `layout1` to be nil, but was \(layout1) instead")
+
+            let layout2 = ValueLayout.prefetch(
+                of: IntEnum.self,
+                options: ComparisonOptions(mode: .equatableUnlessPOD),
+                priority: 0
+            )
+            #expect(layout2 == nil, "expected `layout2` to be nil, but was \(layout2) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: IntEnum.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == IntEnum, 1 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type IntEnum))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForTaggedUnionEnum() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            enum TaggedUnionEnum {
+                case first
+                case second(Int)
+                case third(String)
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: TaggedUnionEnum.self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output0,
+                    """
+                    == TaggedUnionEnum, 17 bytes ==
+                    (layout #:length 14 #:address \(String(describing: layout0))
+                       (enum #:size 17 #:type TaggedUnionEnum
+                         (case 0
+                           (read 8))
+                         (case 1
+                           (read 16))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: TaggedUnionEnum.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == TaggedUnionEnum, 17 bytes ==
+                    (layout #:length 14 #:address \(String(describing: layout1))
+                       (enum #:size 17 #:type TaggedUnionEnum
+                         (case 0
+                           (read 8))
+                         (case 1
+                           (read 16))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: TaggedUnionEnum.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == TaggedUnionEnum, 17 bytes ==
+                    (layout #:length 30 #:address \(String(describing: layout2))
+                       (enum #:size 17 #:type TaggedUnionEnum
+                         (case 0
+                           (read 8))
+                         (case 1
+                           (== #:size 16 #:type String))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: Int.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: TaggedUnionEnum.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == TaggedUnionEnum, 17 bytes ==
+                    (layout #:length 46 #:address \(String(describing: layout3))
+                       (enum #:size 17 #:type TaggedUnionEnum
+                         (case 0
+                           (== #:size 8 #:type Int))
+                         (case 1
+                           (== #:size 16 #:type String))))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForIndirectEnum() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            indirect enum IndirectEnum {
+                case string(String)
+                case indirectEnum(child: IndirectEnum)
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: IndirectEnum.self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output0,
+                    """
+                    == IndirectEnum, 8 bytes ==
+                    (layout #:length 14 #:address \(String(describing: layout0))
+                       (enum #:size 8 #:type IndirectEnum
+                         (case 0
+                           (read 8))
+                         (case 1
+                           (read 8))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: IndirectEnum.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == IndirectEnum, 8 bytes ==
+                    (layout #:length 46 #:address \(String(describing: layout1))
+                       (enum #:size 8 #:type IndirectEnum
+                         (case 0
+                           (indirect #:size 16 #:type String))
+                         (case 1
+                           (indirect #:size 8 #:type (child: IndirectEnum)))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: IndirectEnum.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == IndirectEnum, 8 bytes ==
+                    (layout #:length 46 #:address \(String(describing: layout2))
+                       (enum #:size 8 #:type IndirectEnum
+                         (case 0
+                           (indirect #:size 16 #:type String))
+                         (case 1
+                           (indirect #:size 8 #:type (child: IndirectEnum)))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: IndirectEnum.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == IndirectEnum, 8 bytes ==
+                    (layout #:length 46 #:address \(String(describing: layout3))
+                       (enum #:size 8 #:type IndirectEnum
+                         (case 0
+                           (indirect #:size 16 #:type String))
+                         (case 1
+                           (indirect #:size 8 #:type (child: IndirectEnum)))))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForIndirectEnumCase() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            protocol NodeProtocol {
+
+            }
+            struct Node {
+                let field0: NodeProtocol.Type
+                var field1: UInt32
+                var field2: UInt32?
+            }
+            enum Stack<Value> {
+                case empty
+                indirect case node(value: Value, next: Stack<Value>)
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: Stack<Node>.self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output0,
+                    """
+                    == Stack<Node>, 8 bytes ==
+                    (layout #:length 12 #:address \(String(describing: layout0))
+                       (enum #:size 8 #:type Stack<Node>
+                         (case 0
+                           (read 8))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: Stack<Node>.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == Stack<Node>, 8 bytes ==
+                    (layout #:length 28 #:address \(String(describing: layout1))
+                       (enum #:size 8 #:type Stack<Node>
+                         (case 0
+                           (indirect #:size 40 #:type (value: Node, next: Stack<Node>)))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Stack<Node>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Stack<Node>, 8 bytes ==
+                    (layout #:length 28 #:address \(String(describing: layout2))
+                       (enum #:size 8 #:type Stack<Node>
+                         (case 0
+                           (indirect #:size 40 #:type (value: Node, next: Stack<Node>)))))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Stack<Node>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Stack<Node>, 8 bytes ==
+                    (layout #:length 28 #:address \(String(describing: layout3))
+                       (enum #:size 8 #:type Stack<Node>
+                         (case 0
+                           (indirect #:size 40 #:type (value: Node, next: Stack<Node>)))))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct TupleTests {
+
+        @Test
+        func layoutForTuple() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: (Int, String).self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: (Int, String).self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                let _ = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: (Int, String).self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == (Int, String), 24 bytes ==
+                    (layout #:length 19 #:address \(String(describing: layout2))
+                       (read 8)
+                       (== #:size 16 #:type String))
+
+                    """
+                )
+
+                let _ = ValueLayout.prefetch(
+                    of: Int.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: String.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: (Int, String).self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == (Int, String), 24 bytes ==
+                    (layout #:length 35 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type Int)
+                       (== #:size 16 #:type String))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForTupleWithAlignedElement() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                var output0 = ""
+                let layout0 = await reprintingStandardError(to: &output0) {
+                    ValueLayout.prefetch(
+                        of: (Int8, Int64).self,
+                        options: ComparisonOptions(mode: .bitwise),
+                        priority: 0
+                    )
+                }
+                #expect(layout0 != nil, "expected `layout0` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output0,
+                    """
+                    == (Int8, Int64), 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout0))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: (Int8, Int64).self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == (Int8, Int64), 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout1))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: (Int8, Int64).self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == (Int8, Int64), 16 bytes ==
+                    (layout #:length 4 #:address \(String(describing: layout2))
+                       (read 1)
+                       (skip 7)
+                       (read 8))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: Int8.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: Int64.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: (Int8, Int64).self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == (Int8, Int64), 16 bytes ==
+                    (layout #:length 36 #:address \(String(describing: layout3))
+                       (== #:size 1 #:type Int8)
+                       (skip 7)
+                       (== #:size 8 #:type Int64))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct CollectionTests {
+
+        @Test
+        func layoutForArray() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: Array<Int>.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: Array<Int>.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Array<Int>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Array<Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout2))
+                       (== #:size 8 #:type Array<Int>))
+
+                    """
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Array<Int>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Array<Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type Array<Int>))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForArrayOfNotEquatable() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                class NotEquatable {}
+
+                for options in allOptions {
+                    let layout = ValueLayout.prefetch(of: Array<NotEquatable>.self, options: options, priority: 0)
+                    #expect(layout == .trivial, "expected `layout` to be the trivial value, but was \(layout) instead")
+                }
+            }
+        }
+
+        @Test
+        func layoutForDictionary() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: Dictionary<Int, Int>.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: Dictionary<Int, Int>.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Dictionary<Int, Int>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Dictionary<Int, Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout2))
+                       (== #:size 8 #:type Dictionary<Int, Int>))
+
+                    """
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Dictionary<Int, Int>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Dictionary<Int, Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type Dictionary<Int, Int>))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForDictionaryOfNotEquatable() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+
+                class NotEquatable {}
+
+                for options in allOptions {
+                    let layout = ValueLayout.prefetch(
+                        of: Dictionary<Int, NotEquatable>.self,
+                        options: options,
+                        priority: 0
+                    )
+                    #expect(layout == .trivial, "expected `layout` to be the trivial value, but was \(layout) instead")
+                }
+            }
+        }
+
+        @Test
+        func layoutForSet() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                let layout0 = ValueLayout.prefetch(
+                    of: Set<Int>.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: Set<Int>.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Set<Int>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Set<Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout2))
+                       (== #:size 8 #:type Set<Int>))
+
+                    """
+                )
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Set<Int>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Set<Int>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type Set<Int>))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct EquatableTests {
+
+        @Test
+        func layoutForEquatableStruct() async {
+            await #expect(processExitsWith: .success) {
+                setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+                setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+                struct EquatableStruct: Equatable {
+                    var property: Int = 0
+                    static func == (lhs: EquatableStruct, rhs: EquatableStruct) -> Bool {
+                        return false
+                    }
+                }
+
+                let layout0 = ValueLayout.prefetch(
+                    of: EquatableStruct.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+
+                let layout1 = ValueLayout.prefetch(
+                    of: EquatableStruct.self,
+                    options: ComparisonOptions(mode: .indirect),
+                    priority: 0
+                )
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+
+                let layout2 = ValueLayout.prefetch(
+                    of: EquatableStruct.self,
+                    options: ComparisonOptions(mode: .equatableUnlessPOD),
+                    priority: 0
+                )
+                #expect(layout2 == .trivial, "expected `layout2` to be the trivial value, but was \(layout2) instead")
+
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: EquatableStruct.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == EquatableStruct, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type EquatableStruct))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForEquatableClass() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            class EquatableClass: Equatable {
+                var property: Int = 0
+                static func == (lhs: EquatableClass, rhs: EquatableClass) -> Bool {
+                    return false
+                }
+            }
+
+            let layout0 = ValueLayout.prefetch(
+                of: EquatableClass.self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            let layout1 = ValueLayout.prefetch(
+                of: EquatableClass.self,
+                options: ComparisonOptions(mode: .indirect),
+                priority: 0
+            )
+            #expect(layout1 == nil, "expected `layout1` to be nil, but was \(layout1) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: EquatableClass.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == EquatableClass, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout2))
+                       (== #:size 8 #:type EquatableClass))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: EquatableClass.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == EquatableClass, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type EquatableClass))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct ExistentialTests {
+
+        @Test
+        func layoutForAny() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            let layout0 = ValueLayout.prefetch(of: Any.self, options: ComparisonOptions(mode: .bitwise), priority: 0)
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(of: Any.self, options: ComparisonOptions(mode: .indirect), priority: 0)
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == Any, 32 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout1))
+                       (existential #:size 32 #:type Any))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Any.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Any, 32 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout2))
+                       (existential #:size 32 #:type Any))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(of: Any.self, options: ComparisonOptions(mode: .equatableAlways), priority: 0)
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Any, 32 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout3))
+                       (existential #:size 32 #:type Any))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForAnyError() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            let layout0 = ValueLayout.prefetch(
+                of: (any Error).self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: (any Error).self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == Error, 8 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout1))
+                       (existential #:size 8 #:type Error))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: (any Error).self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == Error, 8 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout2))
+                       (existential #:size 8 #:type Error))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: (any Error).self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Error, 8 bytes ==
+                    (layout #:length 10 #:address \(String(describing: layout3))
+                       (existential #:size 8 #:type Error))
+
+                    """
+                )
+            }
+        }
+
+    }
+
+    @Suite
+    struct FunctionTests {
+        @Test
+        func layoutForFunction() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            typealias Function = () -> Void
+
+            let layout0 = ValueLayout.prefetch(
+                of: Function.self,
+                options: ComparisonOptions(mode: .bitwise),
+                priority: 0
+            )
+            #expect(layout0 == nil, "expected `layout0` to be nil, but was \(layout0) instead")
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(of: Function.self, options: ComparisonOptions(mode: .indirect), priority: 0)
+                }
+                #expect(layout1 != nil, "expected `layout1` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output1,
+                    """
+                    == () -> (), 16 bytes ==
+                    (layout #:length 3 #:address \(String(describing: layout1))
+                       (read 8)
+                       (capture-ref))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Function.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 != nil, "expected `layout2` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output2,
+                    """
+                    == () -> (), 16 bytes ==
+                    (layout #:length 3 #:address \(String(describing: layout2))
+                       (read 8)
+                       (capture-ref))
+
+                    """
+                )
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Function.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == () -> (), 16 bytes ==
+                    (layout #:length 3 #:address \(String(describing: layout3))
+                       (read 8)
+                       (capture-ref))
+
+                    """
+                )
+            }
+        }
+    }
+
+    @Suite
+    struct AttributeTests {
+        @Test
+        func layoutForAnyAttribute() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                let layout0 = ValueLayout.prefetch(
+                    of: AnyAttribute.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: AnyAttribute.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: AnyAttribute.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 == .trivial, "expected `layout1` to be the trivial value, but was \(layout2) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: AnyAttribute.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                #if COMPATIBILITY_TESTS
+                let typeName = "AGAttribute"
+                #else
+                let typeName = "IAGAttribute"
+                #endif
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == \(typeName), 4 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 4 #:type \(typeName)))
+
+                    """
+                )
+            }
+        }
+        
+        @Test
+        func layoutForAttributeOfBool() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                let layout0 = ValueLayout.prefetch(
+                    of: Attribute<Bool>.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: Attribute<Bool>.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: Attribute<Bool>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 == .trivial, "expected `layout1` to be the trivial value, but was \(layout2) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: Attribute<Bool>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == Attribute<Bool>, 4 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 4 #:type Attribute<Bool>))
+
+                    """
+                )
+            }
+        }
+
+        @Test
+        func layoutForAnyWeakAttribute() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                let layout0 = ValueLayout.prefetch(
+                    of: AnyWeakAttribute.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: AnyWeakAttribute.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: AnyWeakAttribute.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 == .trivial, "expected `layout1` to be the trivial value, but was \(layout2) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                let _ = ValueLayout.prefetch(
+                    of: AnyAttribute.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                let _ = ValueLayout.prefetch(
+                    of: UInt32.self,
+                    options: ComparisonOptions(mode: .equatableAlways),
+                    priority: 0
+                )
+                
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: AnyWeakAttribute.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                #if COMPATIBILITY_TESTS
+                let typeName = "AGWeakAttribute"
+                #else
+                let typeName = "IAGWeakAttribute"
+                #endif
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == \(typeName), 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type \(typeName)))
+                    
+                    """
+                )
+            }
+        }
+        
+        @Test
+        func layoutForWeakAttributeOfBool() async {
+            setenv(asyncLayoutsEnvironmentVariable, "0", 1)
+            setenv(printLayoutsEnvironmentVariable, "1", 1)
+
+            await #expect(processExitsWith: .success) {
+                let layout0 = ValueLayout.prefetch(
+                    of: WeakAttribute<Bool>.self,
+                    options: ComparisonOptions(mode: .bitwise),
+                    priority: 0
+                )
+                #expect(layout0 == .trivial, "expected `layout0` to be the trivial value, but was \(layout0) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output1 = ""
+                let layout1 = await reprintingStandardError(to: &output1) {
+                    ValueLayout.prefetch(
+                        of: WeakAttribute<Bool>.self,
+                        options: ComparisonOptions(mode: .indirect),
+                        priority: 0
+                    )
+                }
+                #expect(layout1 == .trivial, "expected `layout1` to be the trivial value, but was \(layout1) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output2 = ""
+                let layout2 = await reprintingStandardError(to: &output2) {
+                    ValueLayout.prefetch(
+                        of: WeakAttribute<Bool>.self,
+                        options: ComparisonOptions(mode: .equatableUnlessPOD),
+                        priority: 0
+                    )
+                }
+                #expect(layout2 == .trivial, "expected `layout1` to be the trivial value, but was \(layout2) instead")
+            }
+
+            await #expect(processExitsWith: .success) {
+                var output3 = ""
+                let layout3 = await reprintingStandardError(to: &output3) {
+                    ValueLayout.prefetch(
+                        of: WeakAttribute<Bool>.self,
+                        options: ComparisonOptions(mode: .equatableAlways),
+                        priority: 0
+                    )
+                }
+                #expect(layout3 != nil, "expected `layout3` to have a value, but was nil instead")
+                #if COMPATIBILITY_TESTS
+                let typeName = "AGAttribute"
+                #else
+                let typeName = "IAGAttribute"
+                #endif
+                assertStringsEqualWithDiff(
+                    output3,
+                    """
+                    == WeakAttribute<Bool>, 8 bytes ==
+                    (layout #:length 18 #:address \(String(describing: layout3))
+                       (== #:size 8 #:type WeakAttribute<Bool>))
+
+                    """
+                )
+            }
+        }
+    }
+}
+
+#endif

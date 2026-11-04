@@ -16,6 +16,9 @@ import PerryObjCInterop
 // whether what it draws has changed without its saying so.
 
 final class LayerState {
+    /// kCAContentsFormatRGBA8Uint; the contents are drawn as RGBA whatever
+    /// the format asked for.
+    var contentsFormat = "RGBA8"
     var bounds = CGRect.zero
     var position = CGPoint.zero
     var anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -50,6 +53,16 @@ final class LayerState {
     var mask: CALayer?
     var actions: NSObject?
     var style: NSObject?
+    /// Filters, kept but not applied in drawing.
+    var compositingFilter: NSObject?
+    var allowsEdgeAntialiasing = false
+    /// CAEdgeAntialiasingMask: all four edges.
+    var edgeAntialiasingMask: UInt32 = 0xf
+    var allowsGroupBlending = true
+    var minificationFilter = "linear"
+    var magnificationFilter = "linear"
+    var filters: NSObject?
+    var backgroundFilters: NSObject?
     var needsDisplay = false
     var needsLayout = true
     /// What -display drew, and the size it drew at.
@@ -171,6 +184,7 @@ open class CALayer: NSObject {
     deinit {
         for sublayer in state.sublayers { sublayer.state.superlayer = nil }
         Presentation.forget(objcObject)
+        PresentationModifiers.forget(objcObject)
     }
 
     /// The layer as it presents now: a copy with its animations applied.
@@ -277,10 +291,24 @@ open class CALayer: NSObject {
     @ObjCMethod("setNeedsDisplayOnBoundsChange:") func setNeedsDisplayOnBoundsChange(_ needs: Bool) { state.needsDisplayOnBoundsChange = needs }
     @ObjCMethod("allowsGroupOpacity") func allowsGroupOpacity() -> Bool { state.allowsGroupOpacity }
     @ObjCMethod("setAllowsGroupOpacity:") func setAllowsGroupOpacity(_ allows: Bool) { state.allowsGroupOpacity = allows }
+    @ObjCMethod("allowsGroupBlending") func allowsGroupBlending() -> Bool { state.allowsGroupBlending }
+    @ObjCMethod("setAllowsGroupBlending:") func setAllowsGroupBlending(_ allows: Bool) { state.allowsGroupBlending = allows }
+    @ObjCMethod("allowsEdgeAntialiasing") func allowsEdgeAntialiasing() -> Bool { state.allowsEdgeAntialiasing }
+    @ObjCMethod("setAllowsEdgeAntialiasing:") func setAllowsEdgeAntialiasing(_ allows: Bool) { state.allowsEdgeAntialiasing = allows }
+    @ObjCMethod("edgeAntialiasingMask") func edgeAntialiasingMask() -> UInt32 { state.edgeAntialiasingMask }
+    @ObjCMethod("setEdgeAntialiasingMask:") func setEdgeAntialiasingMask(_ mask: UInt32) { state.edgeAntialiasingMask = mask }
+    @ObjCMethod("minificationFilter") func minificationFilter() -> String { state.minificationFilter }
+    @ObjCMethod("setMinificationFilter:") func setMinificationFilter(_ filter: String) { state.minificationFilter = filter }
+    @ObjCMethod("magnificationFilter") func magnificationFilter() -> String { state.magnificationFilter }
+    @ObjCMethod("setMagnificationFilter:") func setMagnificationFilter(_ filter: String) { state.magnificationFilter = filter }
+    /// Whether the layer has been drawn.
+    @ObjCMethod("hasBeenCommitted") func hasBeenCommitted() -> Bool { state.rendered }
     @ObjCMethod("shouldRasterize") func shouldRasterize() -> Bool { false }
     @ObjCMethod("setShouldRasterize:") func setShouldRasterize(_ rasterize: Bool) {}
     @ObjCMethod("rasterizationScale") func rasterizationScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setRasterizationScale:") func setRasterizationScale(_ scale: CGFloat) {}
+    @ObjCMethod("contentsFormat") func contentsFormat() -> String { state.contentsFormat }
+    @ObjCMethod("setContentsFormat:") func setContentsFormat(_ format: String) { state.contentsFormat = format }
     @ObjCMethod("drawsAsynchronously") func drawsAsynchronously() -> Bool { false }
     @ObjCMethod("setDrawsAsynchronously:") func setDrawsAsynchronously(_ asynchronously: Bool) {}
 
@@ -288,6 +316,12 @@ open class CALayer: NSObject {
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { state.delegate = delegate?.objcObject }
     @ObjCMethod("actions") func actions() -> NSObject? { state.actions }
     @ObjCMethod("setActions:") func setActions(_ actions: NSObject?) { state.actions = actions }
+    @ObjCMethod("compositingFilter") func compositingFilter() -> NSObject? { state.compositingFilter }
+    @ObjCMethod("setCompositingFilter:") func setCompositingFilter(_ filter: NSObject?) { state.compositingFilter = filter }
+    @ObjCMethod("filters") func filters() -> NSObject? { state.filters }
+    @ObjCMethod("setFilters:") func setFilters(_ filters: NSObject?) { state.filters = filters }
+    @ObjCMethod("backgroundFilters") func backgroundFilters() -> NSObject? { state.backgroundFilters }
+    @ObjCMethod("setBackgroundFilters:") func setBackgroundFilters(_ filters: NSObject?) { state.backgroundFilters = filters }
     @ObjCMethod("style") func style() -> NSObject? { state.style }
     @ObjCMethod("setStyle:") func setStyle(_ style: NSObject?) { state.style = style }
 
@@ -309,6 +343,18 @@ open class CALayer: NSObject {
             return
         }
         state.values[key] = value
+    }
+
+    // MARK: Presentation modifiers (private), which SwiftUI sets values through
+
+    @ObjCMethod("addPresentationModifier:")
+    func addPresentationModifier(_ modifier: CAPresentationModifier) {
+        PresentationModifiers.add(modifier.modifier, to: objcObject)
+    }
+
+    @ObjCMethod("removePresentationModifier:")
+    func removePresentationModifier(_ modifier: CAPresentationModifier) {
+        PresentationModifiers.remove(modifier.modifier, from: objcObject)
     }
 
     @ObjCMethod("setValue:forKeyPath:")

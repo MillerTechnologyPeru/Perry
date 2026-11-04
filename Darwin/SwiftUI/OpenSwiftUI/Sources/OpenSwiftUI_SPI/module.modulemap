@@ -1,0 +1,71 @@
+module OpenSwiftUI_SPI {
+    umbrella "Overlay"
+    export *
+
+    module Util {
+        umbrella "Util"
+        export *
+    }
+}
+
+module QuartzCore_Private {
+    umbrella "Shims/QuartzCore"
+    export *
+}
+
+module CoreFoundation_Private {
+    umbrella "Shims/CoreFoundation"
+    export *
+}
+
+module CoreGraphics_Private {
+    umbrella "Shims/CoreGraphics"
+    export *
+}
+
+module CoreText_Private {
+    umbrella "Shims/CoreText"
+    export *
+}
+
+module CoreUI_Private {
+    umbrella "Shims/CoreUI"
+    export *
+}
+
+module OpenSwiftUICSymbols {
+    umbrella "Shims/CSymbols"
+    export *
+}
+
+module dyldPrivate {
+    umbrella "Shims/dyld"
+    export *
+}
+
+module kdebug_Private {
+    umbrella "Shims/kdebug"
+    export *
+}
+
+module GraphicsServices_Private {
+    umbrella "Shims/GraphicsServices"
+    export *
+}
+
+module MobileGestaltPrivate {
+    umbrella "Shims/MobileGestalt"
+    export *
+}
+
+module libAccessibilityPrivate {
+    umbrella "Shims/Accessibility"
+    export *
+}
+
+module UIFoundation_Private {
+    umbrella "Shims/UIFoundation"
+    export *
+}
+
+extern module OpenSwiftUICore "Public/module.modulemap"

@@ -272,13 +272,39 @@ enum PropertyLists {
     /// The value and its format.
     static func parse(_ bytes: [UInt8]) -> (ArchiveValue, UInt)? {
         if let list = BinaryPropertyList(bytes) { return (list.value(list.top), binary) }
-        let text = String(decoding: bytes, as: UTF8.self)
+        let text = PropertyLists.text(bytes)
         let trimmed = text.drop { $0.isWhitespace || $0 == "\u{FEFF}" }
         if trimmed.hasPrefix("<?xml") || trimmed.hasPrefix("<!DOCTYPE") || trimmed.hasPrefix("<plist") {
             return parseXML(bytes).map { ($0, xml) }
         }
         var parser = OpenStepParser(Array(text.unicodeScalars))
-        return parser.document().map { ($0, openStep) }
+        if let value = parser.document() { return (value, openStep) }
+        var strings = OpenStepParser(Array(text.unicodeScalars))
+        return strings.stringsDocument().map { ($0, openStep) }
+    }
+
+    /// Text in a property list's encoding: UTF-16 after its byte order
+    /// mark, else UTF-8 (after any mark).
+    static func text(_ bytes: [UInt8]) -> String {
+        if bytes.count >= 2, (bytes[0], bytes[1]) == (0xFF, 0xFE) || (bytes[0], bytes[1]) == (0xFE, 0xFF) {
+            let little = bytes[0] == 0xFF
+            let units = stride(from: 2, to: bytes.count - 1, by: 2).map {
+                little ? UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 : UInt16(bytes[$0]) << 8 | UInt16(bytes[$0 + 1])
+            }
+            return String(decoding: units, as: UTF16.self)
+        }
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { return String(decoding: bytes.dropFirst(3), as: UTF8.self) }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// A strings file's table, in any format: binary or XML property lists
+    /// as Xcode compiles them, or the text format, `"key" = "value";`.
+    static func stringsTable(_ bytes: [UInt8]) -> [String: String]? {
+        guard let (value, _) = parse(bytes), case .dictionary(let entries) = value else { return nil }
+        return entries.compactMapValues {
+            if case .string(let text) = $0 { return text }
+            return nil
+        }
     }
 }
 
@@ -483,6 +509,56 @@ struct OpenStepParser {
         return index == scalars.count ? value : nil
     }
 
+    /// The strings file format: a dictionary's entries without its braces,
+    /// where `key;` maps the key to itself.
+    mutating func stringsDocument() -> ArchiveValue? {
+        var entries: [String: ArchiveValue] = [:]
+        while true {
+            skipSpace()
+            if index == scalars.count { return .dictionary(entries) }
+            guard case .string(let key)? = value() else { return nil }
+            if expect(";") {
+                entries[key] = .string(key)
+                continue
+            }
+            guard expect("="), let value = value(), expect(";") else { return nil }
+            entries[key] = value
+        }
+    }
+
+    /// The scalar for a backslash escape's character, the backslash just
+    /// read: C's escapes, \Uxxxx (and \uxxxx) in hex, and \ooo in octal.
+    private mutating func escape() -> Unicode.Scalar? {
+        let scalar = scalars[index]
+        func digits(_ limit: Int, radix: UInt32) -> UInt32? {
+            var value: UInt32 = 0, count = 0
+            while count < limit, index + 1 < scalars.count,
+                  let digit = Character(scalars[index + 1]).hexDigitValue, UInt32(digit) < radix {
+                value = value * radix + UInt32(digit)
+                index += 1
+                count += 1
+            }
+            return count > 0 ? value : nil
+        }
+        switch scalar {
+        case "n": return "\n"
+        case "t": return "\t"
+        case "r": return "\r"
+        case "a": return "\u{07}"
+        case "b": return "\u{08}"
+        case "f": return "\u{0C}"
+        case "v": return "\u{0B}"
+        case "U", "u":
+            guard let value = digits(4, radix: 16) else { return scalar }
+            return Unicode.Scalar(value) ?? "\u{FFFD}"
+        case "0"..."7":
+            index -= 1
+            guard let value = digits(3, radix: 8) else { return scalar }
+            return Unicode.Scalar(value) ?? "\u{FFFD}"
+        default: return scalar
+        }
+    }
+
     private static func isUnquoted(_ scalar: Unicode.Scalar) -> Bool {
         scalar.properties.isAlphabetic || ("0"..."9").contains(scalar) || "_$+/:.-".unicodeScalars.contains(scalar)
     }
@@ -534,12 +610,7 @@ struct OpenStepParser {
             while index < scalars.count, scalars[index] != "\"" {
                 if scalars[index] == "\\", index + 1 < scalars.count {
                     index += 1
-                    switch scalars[index] {
-                    case "n": text += "\n"
-                    case "t": text += "\t"
-                    case "r": text += "\r"
-                    default: text.unicodeScalars.append(scalars[index])
-                    }
+                    if let scalar = escape() { text.unicodeScalars.append(scalar) }
                 } else {
                     text.unicodeScalars.append(scalars[index])
                 }

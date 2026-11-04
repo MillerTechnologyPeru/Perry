@@ -172,6 +172,9 @@ enum Strings {
 /// NSString.
 @ObjCClass("NSString")
 public class NSString: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSString__") func isNSString__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
@@ -246,6 +249,12 @@ public class NSString: NSObject {
         guard let arguments else { return setValue(format) }
         var darwin = DarwinArguments(arguments)
         return setValue(Format.string(format, &darwin))
+    }
+
+    /// Formats as initWithFormat:arguments: does; the locale is not applied.
+    @ObjCMethod("initWithFormat:locale:arguments:", types: "@40@0:8@16@24*32")
+    func initialize(format: String, locale: ObjCObject?, arguments: UnsafeRawPointer?) -> Self {
+        initialize(format: format, arguments: arguments)
     }
 
     @ObjCMethod("dealloc")

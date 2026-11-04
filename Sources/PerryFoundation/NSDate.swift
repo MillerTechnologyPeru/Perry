@@ -74,6 +74,9 @@ enum Dates {
 /// NSDate.
 @ObjCClass("NSDate")
 public final class NSDate: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSDate__") func isNSDate__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)

@@ -1,0 +1,375 @@
+#include "Table.h"
+
+#include <algorithm>
+#include <cerrno>
+#include <cstddef>
+#include <sys/mman.h>
+#if TARGET_OS_MAC
+#include <mach/mach.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+#include <platform/lock.h>
+#include <platform/malloc.h>
+#include <platform/once.h>
+
+#include "Errors/Errors.h"
+#include "Page.h"
+#include "Zone.h"
+
+static void *IAGGraphVMRegionBaseAddress;
+
+namespace IAG {
+namespace data {
+
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization) -- storage only, constructed later via placement new
+table _shared_table_bytes;
+
+table &table::ensure_shared() {
+    static platform_once_t onceToken;
+    platform_once(&onceToken, []() { new (&_shared_table_bytes) table(); });
+    return _shared_table_bytes;
+}
+
+table &table::shared() { return _shared_table_bytes; }
+
+malloc_zone_t *table::_malloc_zone = nullptr;
+
+std::unique_ptr<void, table::malloc_zone_deleter> table::alloc_persistent(size_t size) {
+    void *buffer = malloc_zone_malloc(table::_malloc_zone, size);
+    if (!buffer) {
+        precondition_failure("memory allocation failure (%lu bytes)", size);
+    }
+    return std::unique_ptr<void, table::malloc_zone_deleter>(buffer);
+}
+
+// The address space reserved for the region, which then grows in place:
+// pointers into it stay valid, without remapping old pages to new
+// addresses (which some systems can only copy).
+static constexpr uint64_t reserved_region_size = 1ull << 30;
+
+table::table() {
+    constexpr vm_size_t initial_size = static_cast<const vm_size_t>(32 * pages_per_map * page_size);
+
+    void *reserved = mmap(nullptr, reserved_region_size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
+    if (reserved != MAP_FAILED) {
+        if (mprotect(reserved, initial_size, PROT_READ | PROT_WRITE) == 0) {
+            _vm_region_reserved_size = reserved_region_size;
+            _vm_region_base_address = reinterpret_cast<vm_address_t>(reserved);
+            _vm_region_size = initial_size;
+            IAGGraphVMRegionBaseAddress = reserved;
+            _ptr_base = reinterpret_cast<vm_address_t>(reserved) - page_size;
+            _ptr_max_offset = initial_size + page_size;
+            if (!_malloc_zone) {
+                _malloc_zone = malloc_create_zone(0, 0);
+                malloc_set_zone_name(_malloc_zone, "Compute graph data");
+            }
+            return;
+        }
+        munmap(reserved, reserved_region_size);
+    }
+
+#if TARGET_OS_MAC
+    void *region = mmap(nullptr, initial_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (region == MAP_FAILED) {
+        precondition_failure("memory allocation failure (%u bytes, %u)", initial_size, errno);
+    }
+#else
+    _vm_region_fd = memfd_create("IAGGraphVMRegion", MFD_CLOEXEC);
+    if (_vm_region_fd < 0) {
+        precondition_failure("memfd_create failure (%u)", errno);
+    }
+
+    if (ftruncate(_vm_region_fd, initial_size) != 0) {
+        precondition_failure("ftruncate failure (%u bytes, %u)", initial_size, errno);
+    }
+
+    void *region = mmap(nullptr, initial_size, PROT_READ | PROT_WRITE, MAP_SHARED, _vm_region_fd, 0);
+    if (region == MAP_FAILED) {
+        precondition_failure("memory allocation failure (%u bytes, %u)", initial_size, errno);
+    }
+#endif
+
+    _vm_region_base_address = reinterpret_cast<vm_address_t>(region);
+    _vm_region_size = initial_size;
+
+    IAGGraphVMRegionBaseAddress = region;
+
+    _ptr_base = reinterpret_cast<vm_address_t>(region) - page_size;
+    _ptr_max_offset = initial_size + page_size;
+
+    if (!_malloc_zone) {
+        _malloc_zone = malloc_create_zone(0, 0);
+        malloc_set_zone_name(_malloc_zone, "Compute graph data");
+    }
+}
+
+table::~table() {
+#if !TARGET_OS_MAC
+    if (_vm_region_fd >= 0) {
+        close(_vm_region_fd);
+    }
+#endif
+    if (_malloc_zone) {
+        malloc_destroy_zone(_malloc_zone);
+    }
+}
+
+void table::lock() { platform_lock_lock(&_lock); }
+
+void table::unlock() { platform_lock_unlock(&_lock); }
+
+#pragma mark - Region
+
+void table::grow_region() {
+    uint64_t new_size = static_cast<uint64_t>(4 * _vm_region_size);
+
+    if (new_size <= _vm_region_reserved_size) {
+        // Make more of the reserved space usable, in place.
+        void *start = reinterpret_cast<void *>(_vm_region_base_address + _vm_region_size);
+        if (mprotect(start, new_size - _vm_region_size, PROT_READ | PROT_WRITE) != 0) {
+            precondition_failure("memory allocation failure (%u bytes, %u)", new_size, errno);
+        }
+        _vm_region_size = static_cast<uint32_t>(new_size);
+        _ptr_max_offset = _vm_region_size + page_size;
+        return;
+    }
+
+    // Check size does not exceed 32 bits
+    if ((uint32_t)new_size <= _vm_region_size) {
+        precondition_failure("exhausted data space");
+    }
+
+#if TARGET_OS_MAC
+    void *new_region = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (new_region == MAP_FAILED) {
+        precondition_failure("memory allocation failure (%u bytes, %u)", new_size, errno);
+    }
+
+    vm_prot_t cur_protection = VM_PROT_NONE;
+    vm_prot_t max_protection = VM_PROT_NONE;
+    kern_return_t kr = vm_remap(mach_task_self(), reinterpret_cast<vm_address_t *>(&new_region), _vm_region_size, 0,
+                                VM_FLAGS_OVERWRITE, mach_task_self(), _vm_region_base_address, false, &cur_protection,
+                                &max_protection, VM_INHERIT_NONE);
+    if (kr != KERN_SUCCESS) {
+        precondition_failure("vm_remap failure: 0x%x", kr);
+    }
+#else
+    if (ftruncate(_vm_region_fd, new_size) != 0) {
+        precondition_failure("ftruncate failure (%u bytes, %u)", new_size, errno);
+    }
+
+    void *new_region = mmap(nullptr, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, _vm_region_fd, 0);
+    if (new_region == MAP_FAILED) {
+        precondition_failure("memory allocation failure (%u bytes, %u)", new_size, errno);
+    }
+#endif
+
+    _remapped_regions.push_back({this->_vm_region_base_address, this->_vm_region_size});
+
+    _vm_region_base_address = reinterpret_cast<vm_address_t>(new_region);
+    IAGGraphVMRegionBaseAddress = new_region;
+
+    _vm_region_size = static_cast<uint32_t>(new_size);
+    _ptr_base = reinterpret_cast<vm_address_t>(new_region) - page_size;
+    _ptr_max_offset = _vm_region_size + page_size;
+}
+
+#pragma mark - Zones
+
+uint32_t table::make_zone_id() {
+    _num_zones += 1;
+    return _num_zones;
+}
+
+#pragma mark - Pages
+
+ptr<page> table::alloc_page(zone *zone, uint32_t needed_size) {
+    lock();
+
+    uint32_t needed_pages = (needed_size + page_alignment_mask) / page_size;
+
+    // assume we'll have to append a new page
+    uint32_t new_page_index = _page_maps.size() * pages_per_map;
+
+    // scan for consecutive free pages
+    if (!_page_maps.empty() && _num_used_pages <= _page_maps.size() * pages_per_map) {
+
+        uint32_t start_map_index = _map_search_start;
+        for (int i = 0; i < _page_maps.size(); i++) {
+            int map_index = start_map_index + i;
+            if (map_index >= _page_maps.size()) {
+                map_index -= _page_maps.size(); // wrap around
+            }
+
+            auto map_copy = std::bitset(_page_maps[map_index]);
+            page_map_type candidate_pages_map = map_copy.flip();
+
+            bool found = false;
+            while (candidate_pages_map.any()) {
+                int candidate_bit = std::countr_zero(static_cast<uint64_t>(candidate_pages_map.to_ullong()));
+
+                if (needed_pages > 1) {
+                    // scan ahead to find enough consecutive free pages
+                    bool sufficient_consecutive_pages = true;
+                    for (int j = 1; j < needed_pages; j++) {
+                        int next_page_index = (map_index * pages_per_map) + candidate_bit + j;
+                        int next_map_index = next_page_index / pages_per_map;
+                        if (next_map_index == _page_maps.size()) {
+                            // There are not enough maps, but the trailing pages
+                            // are contiguous so this page is usable
+                            found = true;
+                            break;
+                        }
+                        if (_page_maps[next_map_index].test(next_page_index % pages_per_map)) {
+                            // next page is used, remove this page from
+                            // candidate_pages_map
+                            candidate_pages_map.reset(candidate_bit);
+                            sufficient_consecutive_pages = false;
+                            break;
+                        }
+                    }
+                    found = sufficient_consecutive_pages;
+                } else {
+                    // only need one page
+                    found = true;
+                }
+
+                if (found) {
+                    new_page_index = (map_index * pages_per_map) + candidate_bit;
+                    _map_search_start = map_index;
+                    break;
+                }
+            }
+            if (found) {
+                break;
+            }
+        }
+    }
+
+    // update maps
+    for (int i = 0; i < needed_pages; i++) {
+        uint32_t page_index = new_page_index + i;
+        uint32_t map_index = page_index / pages_per_map;
+
+        if (map_index == _page_maps.size()) {
+            _page_maps.push_back(0);
+            _page_metadata_maps.push_back(0);
+        } else if (_page_maps[map_index] == 0) {
+            make_pages_reusable(page_index, false);
+        }
+
+        _page_maps[map_index].set(page_index % pages_per_map);
+        if (i == 0) {
+            _page_metadata_maps[map_index].set(page_index % pages_per_map);
+        }
+    }
+
+    _num_used_pages += needed_pages;
+
+    uint32_t new_region_size = (new_page_index + needed_pages) * page_size;
+    while (_vm_region_size < new_region_size) {
+        grow_region();
+    }
+
+    // ptr offsets are "one"-based, so that we can treat 0 as null.
+    ptr<page> new_page = ptr<page>((new_page_index + 1) * page_size);
+    new_page->zone = zone;
+    new_page->next = nullptr;
+    new_page->total = (needed_size + page_alignment_mask) & ~page_alignment_mask;
+    new_page->in_use = sizeof(page);
+
+    new_page->bytes_list = 0;
+    new_page->const_bytes_list = 0;
+
+    unlock();
+
+    return new_page;
+}
+
+void table::dealloc_page_locked(ptr<page> page) {
+    int32_t total_bytes = page->total;
+    int32_t num_pages = total_bytes / page_size;
+
+    _num_used_pages -= num_pages;
+
+    // convert the page address (starts at 512) to an index (starts at 0)
+    int32_t page_index = (page.offset() / page_size) - 1;
+    for (int32_t i = 0; i != num_pages; i += 1) {
+
+        int32_t next_page_index = page_index + i;
+        int32_t next_map_index = next_page_index / pages_per_map;
+
+        _page_maps[next_map_index].reset(next_page_index % pages_per_map);
+        if (i == 0) {
+            _page_metadata_maps[next_map_index].reset(next_page_index % pages_per_map);
+        }
+
+        if (_page_maps[next_map_index].none()) {
+            make_pages_reusable(next_page_index, true);
+        }
+    }
+}
+
+void table::make_pages_reusable(uint32_t page_index, bool reusable) {
+    static constexpr uint32_t mapped_pages_size = page_size * pages_per_map; // 64 * 512 = 0x8000
+
+    void *mapped_pages_address =
+        reinterpret_cast<void *>(_vm_region_base_address + ((page_index * page_size) & ~(mapped_pages_size - 1)));
+
+#if TARGET_OS_MAC
+    int advice = reusable ? MADV_FREE_REUSABLE : MADV_FREE_REUSE;
+#else
+    int advice = reusable ? MADV_FREE : MADV_NORMAL;
+#endif
+    madvise(mapped_pages_address, mapped_pages_size, advice);
+
+    static bool unmap_reusable = []() -> bool {
+        char *result = getenv("IAG_UNMAP_REUSABLE");
+        if (result) {
+            return atoi(result) != 0;
+        }
+        return false;
+    }();
+
+    if (unmap_reusable) {
+        int protection = reusable ? PROT_NONE : (PROT_READ | PROT_WRITE);
+        mprotect(mapped_pages_address, mapped_pages_size, protection);
+    }
+
+    _num_reusable_bytes += reusable ? mapped_pages_size : -mapped_pages_size;
+}
+
+uint64_t table::raw_page_seed(ptr<page> page) {
+    page.assert_valid();
+
+    lock();
+
+    uint32_t page_index = (page.offset() / page_size) - 1;
+    uint32_t map_index = page_index / pages_per_map;
+
+    uint64_t result = 0;
+    if (map_index < _page_metadata_maps.size() && _page_metadata_maps[map_index].test(page_index % pages_per_map)) {
+        auto raw_zone_info = page->zone->page_seed();
+        result = (uint64_t)raw_zone_info | ((uint64_t)0x01 << 32);
+    }
+
+    unlock();
+
+    return result;
+}
+
+#pragma mark - Printing
+
+void table::print() {
+    lock();
+    fprintf(stdout, "data::table %p:\n  %.2fKB allocated, %.2fKB used, %.2fKB reusable.\n", this,
+            (_ptr_max_offset - page_size) / 1024.0, (_num_used_pages * page_size) / 1024.0,
+            _num_reusable_bytes / 1024.0);
+    unlock();
+}
+
+} // namespace data
+} // namespace IAG

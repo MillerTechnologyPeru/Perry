@@ -1,0 +1,1217 @@
+//
+//  DisplayList.swift
+//  OpenSwiftUICore
+//
+//  Audited for 6.5.4
+//  Status: WIP
+//  ID: F37E3733E490AA5E3BDC045E3D34D9F8 (SwiftUICore)
+
+package import Foundation
+package import OpenAttributeGraphShims
+package import OpenCoreGraphicsShims
+package import OpenRenderBoxShims
+
+// MARK: - _DisplayList_Identity
+
+private var lastIdentity: UInt32 = 0
+
+package struct _DisplayList_Identity: Hashable, Codable, CustomStringConvertible {
+    package private(set) var value: UInt32
+    
+    init(value: UInt32) {
+        self.value = value
+    }
+    
+    package init() {
+        lastIdentity += 1
+        self.init(value: lastIdentity)
+    }
+    
+    package init(decodedValue value: UInt32) {
+        self.init(value: value)
+    }
+    
+    package static let none = _DisplayList_Identity(value: 0)
+
+    package var description: String { "#\(value)" }
+}
+
+// MARK: - DisplayList [6.4.41] [WIP]
+
+package struct DisplayList: Equatable {
+    package private(set) var items: [Item]
+    
+    package struct Features: OptionSet {
+        package let rawValue: UInt16
+        package init(rawValue: UInt16) {
+            self.rawValue = rawValue
+        }
+        package static let required = Features(rawValue: 1 << 0)
+        package static let views = Features(rawValue: 1 << 1)
+        package static let animations = Features(rawValue: 1 << 2)
+        package static let dynamicContent = Features(rawValue: 1 << 3)
+        package static let interpolatorLayers = Features(rawValue: 1 << 4)
+        package static let interpolatorRoots = Features(rawValue: 1 << 5)
+        package static let stateEffects = Features(rawValue: 1 << 6)
+        package static let states = Features(rawValue: 1 << 7)
+        package static let flattened = Features(rawValue: 1 << 9)
+    }
+    
+    package private(set) var features: Features
+
+    package private(set) var properties: Properties
+
+    package init() {
+        items = []
+        features = []
+        properties = []
+    }
+    
+    package init(_ item: Item) {
+        if case .empty = item.value {
+            items = []
+            features = []
+            properties = []
+        } else {
+            items = [item]
+            features = item.features
+            properties = item.properties
+        }
+    }
+    
+    package init(_ items: [Item]) {
+        var features: Features = []
+        var properties: Properties = []
+        for item in items {
+            features.formUnion(item.features)
+            properties.formUnion(item.properties)
+        }
+        self.items = items
+        self.features = features
+        self.properties = properties
+    }
+
+    package mutating func append(_ item: Item) {
+        if case .empty = item.value {
+            return
+        }
+        items.append(item)
+        features.formUnion(item.features)
+        properties.formUnion(item.properties)
+    }
+    
+    package mutating func append(contentsOf other: DisplayList) {
+        for item in other.items {
+            append(item)
+        }
+    }
+
+    package mutating func reserveCapacity(_ count: Int) {
+        items.reserveCapacity(count)
+    }
+
+    package mutating func transform(_ body: (inout Item) -> Void) {
+        features = []
+        properties = []
+        guard !items.isEmpty else {
+            return
+        }
+        var transformedFeatures: Features = []
+        var transformedProperties: Properties = []
+        for index in items.indices {
+            body(&items[index])
+            transformedFeatures.formUnion(items[index].features)
+            transformedProperties.formUnion(items[index].properties)
+        }
+        features = transformedFeatures
+        properties = transformedProperties
+    }
+
+    package mutating func translate(by offset: CGSize, version: Version) {
+        guard !items.isEmpty else {
+            return
+        }
+        for index in items.indices {
+            items[index].frame.origin += offset
+            items[index].version.combine(with: version)
+        }
+    }
+
+    package var isEmpty: Bool {
+        items.isEmpty
+    }
+
+    package var version: Version {
+        var version = Version()
+        for item in items {
+            version.combine(with: item.version)
+        }
+        return version
+    }
+    
+    package func nextUpdate(after time: Time) -> Time {
+        guard !features.contains(.animations) else {
+            return time
+        }
+        var nextUpdate = Time.infinity
+        if features.contains(.dynamicContent) {
+            for item in items {
+                nextUpdate.formMin(item.nextUpdate(after: time))
+                if nextUpdate == time {
+                    break
+                }
+            }
+        }
+        return nextUpdate
+    }
+
+    @discardableResult
+    package func forEachIdentity(_ body: (Identity, inout Bool) -> Void) -> Bool {
+        for item in items {
+            if item.identity != .none {
+                var stop = false
+                body(item.identity, &stop)
+                guard !stop else {
+                    return false
+                }
+            }
+            switch item.value {
+            case let .content(content):
+                if case let .flattened(list, _, _) = content.value {
+                    guard list.forEachIdentity(body) else {
+                        return false
+                    }
+                }
+            case let .effect(effect, list):
+                if case let .mask(mask, _) = effect {
+                    guard mask.forEachIdentity(body) else {
+                        return false
+                    }
+                }
+                guard list.forEachIdentity(body) else {
+                    return false
+                }
+            case let .states(states):
+                for (_, list) in states {
+                    guard list.forEachIdentity(body) else {
+                        return false
+                    }
+                }
+            case .empty:
+                break
+            }
+        }
+        return true
+    }
+
+    package func forEachRBDisplayList(_ body: (any ORBDisplayListContents) -> Void) {
+        for item in items {
+            switch item.value {
+            case let .content(content):
+                switch content.value {
+                case let .flattened(list, _, _):
+                    list.forEachRBDisplayList(body)
+                case let .drawing(rbList, _, _):
+                    body(rbList)
+                default:
+                    break
+                }
+            case let .effect(effect, list):
+                if case let .mask(mask, _) = effect {
+                    mask.forEachRBDisplayList(body)
+                }
+                list.forEachRBDisplayList(body)
+            case let .states(states):
+                for (_, list) in states {
+                    list.forEachRBDisplayList(body)
+                }
+            case .empty:
+                break
+            }
+        }
+    }
+
+    package static func == (a: DisplayList, b: DisplayList) -> Bool {
+        a.items == b.items && a.features == b.features && a.properties == b.properties
+    }
+}
+
+@available(*, unavailable)
+extension DisplayList: Sendable {}
+
+@available(*, unavailable)
+extension DisplayList.Version: Sendable {}
+
+extension DisplayList {
+    package typealias Identity = _DisplayList_Identity
+
+    package typealias StableIdentity = _DisplayList_StableIdentity
+
+    package typealias StableIdentityMap = _DisplayList_StableIdentityMap
+
+    package typealias StableIdentityRoot = _DisplayList_StableIdentityRoot
+
+    package typealias StableIdentityScope = _DisplayList_StableIdentityScope
+
+    package struct Item: Equatable {
+        package var frame: CGRect
+
+        package var version: Version
+
+        package var value: Item.Value
+
+        package var identity: Identity
+
+        package enum Value {
+            case empty
+            case content(Content)
+            case effect(Effect, DisplayList)
+            case states([(StrongHash, DisplayList)])
+        }
+
+        package init(_ value: Item.Value, frame: CGRect, identity: Identity, version: Version) {
+            self.frame = frame
+            self.version = version
+            self.value = value
+            self.identity = identity
+        }
+        
+        package static func == (lhs: Item, rhs: Item) -> Bool {
+            lhs.identity == rhs.identity && lhs.version == rhs.version
+        }
+        
+        package var position: CGPoint { frame.origin }
+
+        package var size: CGSize { frame.size }
+    }
+    
+    package struct Content {
+        package var value: Content.Value
+
+        package var seed: Seed
+
+        package enum Value {
+            indirect case backdrop(BackdropEffect)
+            indirect case color(Color.Resolved)
+            indirect case chameleonColor(fallback: Color.Resolved, filters: [GraphicsFilter])
+            indirect case image(GraphicsImage)
+            indirect case shape(Path, AnyResolvedPaint, FillStyle)
+            indirect case shadow(Path, ResolvedShadowStyle)
+            indirect case platformView(any PlatformViewFactory)
+            indirect case platformLayer(any PlatformLayerFactory)
+            indirect case text(StyledTextContentView, CGSize)
+            indirect case flattened(DisplayList, CGPoint, RasterizationOptions)
+            indirect case drawing(any ORBDisplayListContents, CGPoint, RasterizationOptions)
+            indirect case view(any _DisplayList_ViewFactory)
+            case placeholder(id: Identity)
+            
+            @inline(__always)
+            var caseName: String {
+                switch self {
+                case .backdrop:
+                    return "backdrop"
+                case .color:
+                    return "color"
+                case .chameleonColor:
+                    return "chameleonColor"
+                case .image:
+                    return "image"
+                case .shape:
+                    return "shape"
+                case .shadow:
+                    return "shadow"
+                case .platformView:
+                    return "platformView"
+                case .platformLayer:
+                    return "platformLayer"
+                case .text:
+                    return "text"
+                case .flattened:
+                    return "flattened"
+                case .drawing:
+                    return "drawing"
+                case .view:
+                    return "view"
+                case .placeholder:
+                    return "placeholder"
+                }
+            }
+        }
+        
+        package init(_ value: Content.Value, seed: Seed) {
+            self.value = value
+            self.seed = seed
+        }
+        
+        @inline(__always)
+        var features: DisplayList.Features {
+            switch value {
+            case let .platformView(factory):
+                return factory.features
+            case let .text(view, _):
+                let resolved = view.text
+                return resolved.isDynamic && resolved.archiveOptions.isArchived ? .dynamicContent : []
+            case let .flattened(list, _, _):
+                return list.features.union(.flattened)
+            case .view, .placeholder:
+                return .views
+            default:
+                return []
+            }
+        }
+    }
+
+    package typealias ViewFactory = _DisplayList_ViewFactory
+
+    package enum Effect {
+        case identity
+        case geometryGroup
+        case compositingGroup
+        case backdropGroup(Bool)
+        indirect case archive(ArchiveIDs?)
+        case properties(Properties)
+        indirect case platformGroup(any PlatformGroupFactory)
+        case opacity(Float)
+        case blendMode(GraphicsBlendMode)
+        indirect case clip(Path, FillStyle, _: GraphicsContext.ClipOptions = .init())
+        indirect case mask(DisplayList, _: GraphicsContext.ClipOptions = .init())
+        indirect case transform(Transform)
+        indirect case filter(GraphicsFilter)
+        indirect case animation(any _DisplayList_AnyEffectAnimation)
+        indirect case contentTransition(ContentTransition.State)
+        indirect case view(any _DisplayList_ViewFactory)
+        indirect case accessibility([AccessibilityNodeAttachment])
+        indirect case platform(PlatformEffect)
+        indirect case state(StrongHash)
+        indirect case interpolatorRoot(InterpolatorGroup, contentOrigin: CGPoint, contentOffset: CGSize)
+        case interpolatorLayer(InterpolatorGroup, serial: UInt32)
+        indirect case interpolatorAnimation(InterpolatorAnimation)
+        
+        @inline(__always)
+        var features: DisplayList.Features {
+            switch self {
+            case let .properties(properties):
+                return properties.features
+            case let .platformGroup(factory):
+                return factory.features
+            case .mask(let list, _):
+                return list.features
+            case .animation:
+                return .animations
+            case .view:
+                return .views
+            case let .platform(platformEffect):
+                return platformEffect.features
+            case .state:
+                return .stateEffects
+            case .interpolatorRoot:
+                return .interpolatorRoots
+            case let .interpolatorLayer(group, _):
+                return group.features.union([.interpolatorLayers, .required])
+            default:
+                return []
+            }
+        }
+    }
+
+    package enum Transform {
+        case affine(CGAffineTransform)
+        case projection(ProjectionTransform)
+        case rotation(_RotationEffect.Data)
+        case rotation3D(_Rotation3DEffect.Data)
+    }
+    
+    package typealias AnyEffectAnimation = _DisplayList_AnyEffectAnimation
+
+    package typealias AnyEffectAnimator = _DisplayList_AnyEffectAnimator
+
+    package struct ArchiveIDs {
+        package var uuid: UUID
+        package var stableIDs: StableIdentityMap
+        package init(uuid: UUID, stableIDs: StableIdentityMap) {
+            self.uuid = uuid
+            self.stableIDs = stableIDs
+        }
+    }
+    
+    package struct InterpolatorAnimation {
+        package var value: StrongHash?
+        package var animation: Animation?
+    }
+    
+    package struct Version: Comparable, Hashable {
+        private static var lastValue: Int = .zero
+        
+        package private(set) var value: Int
+        
+        package init() { value = .zero }
+        
+        package init(decodedValue value: Int) {
+            Version.lastValue.formMax(value)
+            self.value = value
+        }
+        
+        package init(forUpdate: Void) {
+            Version.lastValue &+= 1
+            value = Version.lastValue
+        }
+        
+        package mutating func combine(with other: Version) {
+            value.formMax(other.value)
+        }
+
+        package static func < (lhs: Version, rhs: Version) -> Bool {
+            lhs.value < rhs.value
+        }
+        
+        @inline(__always)
+        var seed: Seed { .init(self) }
+    }
+
+    package struct Seed: Hashable {
+        package private(set) var value: UInt16
+        
+        init(value: UInt16) {
+            self.value = value
+        }
+        
+        package init() {
+            self.init(value: .zero)
+        }
+
+        package init(decodedValue value: UInt16) {
+            self.init(value: value)
+        }
+
+        package init(_ version: Version) {
+            if version.value == .zero {
+                self.init(value: .zero)
+            } else {
+                var rawValue = UInt32(bitPattern: Int32(truncatingIfNeeded: version.value >> 16))
+                rawValue += (rawValue << 5)
+                rawValue ^= UInt32(bitPattern: Int32(truncatingIfNeeded: version.value))
+                rawValue = 1 | (rawValue << 1)
+                self.init(value: UInt16(truncatingIfNeeded: rawValue))
+            }
+        }
+        
+        package mutating func invalidate() {
+            guard value != .zero else { return }
+            value = (~value | 1)
+        }
+        
+        package static let undefined: Seed = Seed(value: 2)
+    }
+    
+    package struct Properties: OptionSet {
+        package let rawValue: UInt8
+
+        package init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        package static let foregroundLayer = Properties(rawValue: 1 << 0)
+        package static let ignoresEvents = Properties(rawValue: 1 << 1)
+        package static let privacySensitive = Properties(rawValue: 1 << 2)
+        package static let archivesInteractiveControls = Properties(rawValue: 1 << 3)
+        package static let secondaryForegroundLayer = Properties(rawValue: 1 << 4)
+        package static let tertiaryForegroundLayer = Properties(rawValue: 1 << 5)
+        package static let quaternaryForegroundLayer = Properties(rawValue: 1 << 6)
+        package static let screencaptureProhibited = Properties(rawValue: 1 << 7)
+        
+        @inline(__always)
+        var features: DisplayList.Features {
+            contains(.privacySensitive) ? .required : []
+        }
+    }
+    
+    package struct Key: PreferenceKey {
+        package static let _includesRemovedValues: Bool = true
+        package static let defaultValue = DisplayList()
+        package static func reduce(value: inout DisplayList, nextValue: () -> DisplayList) {
+            value.append(contentsOf: nextValue())
+        }
+    }
+    
+    package struct Options: OptionSet, ViewInput {
+        package let rawValue: UInt8
+        package init(rawValue: UInt8) {
+            self.rawValue = rawValue
+        }
+
+        package static let disableCanonicalization = Options(rawValue: 1 << 0)
+        package static let defaultValue: Options = []
+    }
+    
+    package struct Index {
+        package private(set) var identity: _DisplayList_Identity = .none
+        package private(set) var serial: UInt32 = .zero
+        package private(set) var archiveIdentity: _DisplayList_Identity = .none
+        package private(set) var archiveSerial: UInt32 = .zero
+        private var restored: RestoreOptions = []
+        
+        package init() {}
+        package mutating func enter(identity: Identity) -> Index {
+            if identity == .none {
+                self.serial.unsafeIncrement()
+                let copy = self
+                self.restored = []
+                return copy
+            } else {
+                let copy = self
+                self.identity = identity
+                self.serial = 0
+                self.restored = ._1
+                return copy
+            }
+        }
+        
+        package mutating func leave(index saved: Index) {
+            if restored.contains(._4) || saved.restored.contains(._8) {
+                let oldIdentity = identity
+                let oldSerial = serial
+                if restored.contains(._4) {
+                    identity = archiveIdentity
+                    serial = archiveSerial
+                }
+                if restored.contains(._8) {
+                    archiveIdentity = oldIdentity
+                    archiveSerial = oldSerial
+                }
+            }
+            if restored.contains(._1) {
+                identity = saved.identity
+                serial = saved.serial
+            }
+            if restored.contains(._2) {
+                archiveIdentity = saved.archiveIdentity
+                archiveSerial = saved.archiveSerial
+            }
+            restored = saved.restored
+        }
+        
+        package mutating func updateArchive(entering: Bool) {
+            if entering {
+                archiveIdentity = identity
+                archiveSerial = serial
+                identity = .none
+                serial = .zero
+                if !restored.contains([._2, ._4]) {
+                    restored = restored.union([._2, ._4])
+                }
+            } else {
+                // false
+                identity = archiveIdentity
+                serial = archiveSerial
+                archiveIdentity = .none
+                archiveSerial = .zero
+                if !restored.contains([._1, ._8]) {
+                    restored = restored.union([._1, ._8])
+                }
+            }
+        }
+        
+        package mutating func skip(list: DisplayList) {
+            for item in list.items {
+                skip(item: item)
+            }
+        }
+        
+        package mutating func skip(item: Item) {
+            guard item.identity == .none else { return }
+            let saved = enter(identity: item.identity)
+            defer { leave(index: saved) }
+            switch item.value {
+            case let .content(content):
+                if case let .flattened(list, _, _) = content.value {
+                    skip(list: list)
+                }
+            case let .effect(effect, list):
+                skip(list: list)
+                skip(effect: effect)
+            default:
+                break
+            }
+        }
+        
+        package mutating func skip(effect: Effect) {
+            switch effect {
+            case let .archive(archiveIDs):
+                updateArchive(entering: archiveIDs != nil)
+            case let .mask(list, _):
+                skip(list: list)
+            default:
+                break
+            }
+        }
+        
+        package func assertItem(_ item: Item) {}
+        
+        package var id: ID {
+            ID(identity: identity, serial: serial, archiveIdentity: archiveIdentity, archiveSerial: archiveSerial)
+        }
+        
+        package struct ID: Hashable {
+            var identity: _DisplayList_Identity
+            var serial: UInt32
+            var archiveIdentity: _DisplayList_Identity
+            var archiveSerial: UInt32
+        }
+        
+        private struct RestoreOptions: OptionSet {
+            let rawValue: UInt8
+            
+            static let _1 = RestoreOptions(rawValue: 1 << 0)
+            static let _2 = RestoreOptions(rawValue: 1 << 1)
+            static let _4 = RestoreOptions(rawValue: 1 << 2)
+            static let _8 = RestoreOptions(rawValue: 1 << 3)
+        }
+    }
+}
+
+extension _ViewInputs {
+    @inline(__always)
+    var displayListOptions: DisplayList.Options {
+        get { self[DisplayList.Options.self] }
+        set { self[DisplayList.Options.self] = newValue }
+    }
+}
+
+extension PreferencesInputs {
+    @inline(__always)
+    package var requiresDisplayList: Bool {
+        get {
+            contains(DisplayList.Key.self)
+        }
+        set {
+            if newValue {
+                add(DisplayList.Key.self)
+            } else {
+                remove(DisplayList.Key.self)
+            }
+        }
+    }
+}
+
+extension _ViewOutputs {
+    @inline(__always)
+    package var displayList: Attribute<DisplayList>? {
+        get { preferences.displayList }
+        set { preferences.displayList = newValue }
+    }
+}
+
+extension PreferencesOutputs {
+    @inline(__always)
+    package var displayList: Attribute<DisplayList>? {
+        get { self[DisplayList.Key.self] }
+        set { self[DisplayList.Key.self] = newValue }
+    }
+}
+
+// MARK: - DisplayList + AnyEffectAnimator
+
+package protocol _DisplayList_AnyEffectAnimation: ProtobufMessage {
+    static var leafProtobufTag: CodableEffectAnimation.Tag? { get }
+    func makeAnimator() -> any _DisplayList_AnyEffectAnimator
+}
+
+package protocol _DisplayList_AnyEffectAnimator {
+    /// Evaluates the effect animation at the given time and viewport size.
+    ///
+    /// - Parameters:
+    ///   - animation: The existential effect animation. Must be castable to
+    ///     `Animation`; otherwise the method returns
+    ///     ``DisplayList/Effect/identity`` with `finished: true`.
+    ///   - time: The current render time.
+    ///   - size: The viewport size passed to
+    ///     ``EffectAnimation/effect(value:size:)``.
+    /// - Returns: A tuple of the resolved display list effect and a Boolean
+    ///   indicating whether the animation has completed.
+    mutating func evaluate(
+        _ animation: any DisplayList.AnyEffectAnimation,
+        at time: Time,
+        size: CGSize
+    ) -> (DisplayList.Effect, finished: Bool)
+}
+
+// MARK: - DisplayList.Item + Extension
+
+extension DisplayList.Item {
+    package mutating func canonicalize(options: DisplayList.Options = .init()) {
+        guard !options.contains(.disableCanonicalization) else {
+            return
+        }
+        switch value {
+        case .empty, .states:
+            return
+        case let .content(content):
+            if frame.isEmpty && !features.contains(.required) {
+                value = .empty
+                return
+            }
+            switch content.value {
+            case let .color(color):
+                if color == .clear {
+                    value = .empty
+                }
+            case let .shape(path, _, _):
+                if path.isEmpty {
+                    value = .empty
+                }
+            case let .shadow(path, shadow):
+                if path.isEmpty || shadow.color.opacity == 0 {
+                    value = .empty
+                }
+            case let .text(text, _):
+                if text.text.isEmpty {
+                    value = .empty
+                }
+            case let .flattened(list, _, _):
+                if list.isEmpty {
+                    value = .empty
+                }
+            default:
+                break
+            }
+        case let .effect(effect, list):
+            guard !list.isEmpty || effect.features.contains(.required) else {
+                value = .empty
+                return
+            }
+            switch effect {
+            case let .opacity(opacity) where opacity >= 1:
+                value = .effect(.identity, list)
+                canonicalizeIdentityEffect(list: list)
+            case let .clip(path, fillStyle, clipOptions):
+                if clipOptions.isEmpty,
+                   list.items.count == 1,
+                   let paint = list.items[0].paint(in: CGRect(origin: .zero, size: frame.size)) {
+                    value = .content(DisplayList.Content(
+                        .shape(path, paint, fillStyle),
+                        seed: DisplayList.Seed(version)
+                    ))
+                }
+            case let .mask(mask, maskOptions):
+                if maskOptions.isEmpty,
+                   list.items.count == 1,
+                   let filter = list.items[0].backdropFilter(size: frame.size) {
+                    value = .effect(.filter(filter), mask)
+                } else if mask.items.count == 1,
+                    let (path, fillStyle) = mask.items[0].opaqueContentPath() {
+                    value = .effect(.clip(path, fillStyle, maskOptions), list)
+                    canonicalize(options: options)
+                }
+            case let .transform(transform):
+                if case let .affine(t) = transform, t == .identity {
+                    value = .effect(.identity, list)
+                    canonicalizeIdentityEffect(list: list)
+                }
+            case let .filter(filter):
+                if filter.isIdentity {
+                    value = .effect(.identity, list)
+                    canonicalizeIdentityEffect(list: list)
+                } else if let outerMatrix = _ColorMatrix(filter, premultiplied: false),
+                       list.items.count == 1,
+                       let (innerMatrix, innerList) = list.items[0].colorMatrix(size: frame.size) {
+                    value = .effect(
+                        .filter(.colorMatrix(outerMatrix * innerMatrix, premultiplied: false)),
+                        innerList
+                    )
+                }
+            case .identity:
+                canonicalizeIdentityEffect(list: list)
+            default:
+                break
+            }
+            guard !list.features.contains(.required) else {
+                return
+            }
+            switch effect {
+            case let .opacity(opacity):
+                if opacity <= 0 {
+                    value = .empty
+                }
+            case let .clip(path, _, _):
+                if path.isEmpty {
+                    value = .empty
+                }
+            case let .mask(mask, _):
+                if mask.isEmpty {
+                    value = .empty
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    private mutating func canonicalizeIdentityEffect(list: DisplayList) {
+        guard list.items.count == 1 else {
+            return
+        }
+        let item = list.items[0]
+        frame = item.frame.offset(by: CGSize(frame.origin))
+        version.combine(with: item.version)
+        value = item.value
+        if item.identity != .none {
+            identity = item.identity
+        }
+    }
+
+    fileprivate func opaqueContentPath() -> (Path, FillStyle)? {
+        guard case let .content(content) = value else {
+            return nil
+        }
+        switch content.value {
+        case let .color(color):
+            guard color.opacity == 1 else {
+                return nil
+            }
+            return (Path(frame), FillStyle())
+        case let .shape(path, paint, fillStyle):
+            guard paint.isOpaque else {
+                return nil
+            }
+            return (
+                frame.origin != .zero ? path.applying(.init(translationX: frame.x, y: frame.y)) : path,
+                fillStyle
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func paint(in rect: CGRect) -> AnyResolvedPaint? {
+        guard case let .content(content) = value else {
+            return nil
+        }
+        switch content.value {
+        case let .color(color):
+            guard rect == frame else {
+                return nil
+            }
+            return _AnyResolvedPaint(color)
+        case let .shape(path, paint, _):
+            guard rect == frame,
+                path == Path(CGRect(origin: .zero, size: rect.size)) else {
+                return nil
+            }
+            return paint
+        default:
+            return nil
+        }
+    }
+
+    private func colorMatrix(size: CGSize) -> (_ColorMatrix, DisplayList)? {
+        guard frame == CGRect(origin: .zero, size: size),
+              case let .effect(.filter(filter), list) = value,
+              let matrix = _ColorMatrix(filter, premultiplied: false) else {
+            return nil
+        }
+        return (matrix, list)
+    }
+
+    private func backdropFilter(size: CGSize) -> GraphicsFilter? {
+        guard let (matrix, list) = colorMatrix(size: size),
+              list.items.count == 1 else {
+            return nil
+        }
+        let item = list.items[0]
+        guard item.frame == CGRect(origin: .zero, size: size),
+              case let .content(content) = item.value,
+              case let .backdrop(backdrop) = content.value,
+              backdrop.color.opacity == 0
+        else {
+            return nil
+        }
+        return .vibrantColorMatrix(matrix)
+    }
+
+    package func matchesTopLevelStructure(of other: DisplayList.Item) -> Bool {
+        switch (value, other.value) {
+        case (.empty, .empty):
+            return true
+        case let (.content(lhs), .content(rhs)):
+            return compareEnumTags(lhs.value, rhs.value)
+        case let (.effect(lhs, _), .effect(rhs, _)):
+            return compareEnumTags(lhs, rhs)
+        case let (.states(lhs), .states(rhs)):
+            guard lhs.count == rhs.count else { return false }
+            return zip(lhs, rhs).allSatisfy { $0.0 == $1.0 }
+        default:
+            return false
+        }
+    }
+    
+    package var features: DisplayList.Features {
+        switch value {
+        case .empty:
+            return []
+        case let .content(content):
+            return content.features
+        case let .effect(effect, list):
+            return effect.features.union(list.features)
+        case let .states(states):
+            return states.reduce(into: [.states]) { features, state in
+                features.formUnion(state.1.features)
+            }
+        }
+    }
+
+    package var properties: DisplayList.Properties {
+        switch value {
+        case .empty:
+            return []
+        case let .content(content):
+            if case let .flattened(list, _, _) = content.value {
+                return list.properties
+            } else {
+                return []
+            }
+        case let .effect(effect, list):
+            var properties = list.properties
+            switch effect {
+            case let .properties(effectProperties):
+                properties.formUnion(effectProperties)
+            case let .mask(mask, _):
+                properties.formUnion(mask.properties)
+            case let .interpolatorLayer(group, _):
+                properties.formUnion(group.properties)
+            default:
+                break
+            }
+            return properties
+        case let .states(states):
+            return states.reduce(into: []) { properties, state in
+                properties.formUnion(state.1.properties)
+            }
+        }
+    }
+}
+
+// MARK: - DisplayList + Extension
+
+extension DisplayList {
+    package func opaqueContentPath() -> (Path, FillStyle)? {
+        guard items.count == 1 else {
+            return nil
+        }
+        return items[0].opaqueContentPath()
+    }
+}
+
+// MARK: - DisplayList.Transform + Extension
+
+extension DisplayList.Transform {
+    package var affineTransform: CGAffineTransform? {
+        switch self {
+        case let .affine(transform):
+            return transform
+        case let .rotation(data):
+            return data.transform
+        case .projection, .rotation3D:
+            return nil
+        }
+    }
+
+    package var projectionTransform: ProjectionTransform? {
+        switch self {
+        case let .projection(transform):
+            return transform
+        case let .rotation3D(data):
+            return data.transform
+        case .affine, .rotation:
+            return nil
+        }
+    }
+}
+
+// TODO
+
+extension DisplayList {
+    // FIXME
+    package class InterpolatorGroup {
+        package var maxDuration: Double = .zero
+
+        private struct Contents {
+            var list: DisplayList
+            var origin: CGPoint
+            var rbList: ORBDisplayListContents
+            var nextTime: Time
+            var numericValue: Float?
+        }
+
+        private struct Removed {
+            var contents: Contents
+            var interpolator: ORBDisplayListInterpolator?
+            var transition: ORBTransition?
+            var animation: ORBAnimation
+            var listener: AnimationListener?
+            var begin: Time
+            var duration: Double
+            var phase: Phase
+        }
+
+        private enum Phase {
+            case pending
+            case first
+            case second
+            case running
+        }
+
+//        private var contents: Contents
+//        private var removed: [Removed]
+//        var time: Time
+//        var renderer: DisplayList.GraphicsRenderer?
+//        var contentSeed: DisplayList.Seed
+//        var supportsVFD: Bool
+//        var needsUpdate: Bool
+
+        package init() {
+//            _openSwiftUIUnimplementedFailure()
+        }
+
+        func reset() {
+            _openSwiftUIEmptyStub()
+        }
+
+        var features: Features {
+            []
+        }
+
+        var properties: Properties {
+            []
+        }
+
+        func nextUpdate(after _: Time) -> Time {
+            .infinity
+        }
+
+        func rewriteDisplayList(
+            _ list: inout DisplayList,
+            time: Attribute<Time>,
+            contentOrigin: CGPoint,
+            contentOffset: CGSize,
+            version: DisplayList.Version
+        ) -> Bool {
+            _openSwiftUIUnimplementedWarning()
+            return false
+        }
+    }
+
+    package class UnaryInterpolatorGroup: InterpolatorGroup {
+        var layer: InterpolatorLayer = .init()
+
+        var contentsScale: Float = .zero
+
+        var rasterizationOptions: RasterizationOptions = .init()
+
+        override func nextUpdate(after time: Time) -> Time {
+            layer.nextUpdate(after: time)
+        }
+
+        override var properties: Properties {
+            layer.properties
+        }
+    }
+
+    struct InterpolatorLayer {
+        struct Contents {
+            var list: DisplayList = .init()
+            var origin: CGPoint = .zero
+            var rbList: (any ORBDisplayListContents)?
+            var nextTime: Time = .infinity
+            var numericValue: Float?
+        }
+
+        struct Removed {
+            var contents: Contents = .init()
+            var interpolator: ORBDisplayListInterpolator?
+            var transition: ORBTransition?
+            var animation: ORBAnimation = .init()
+            var listener: AnimationListener?
+            var begin: Time = .zero
+            var duration: Double = .zero
+            var phase: Phase = .pending
+        }
+
+        enum Phase {
+            case pending
+            case first
+            case second
+            case running
+        }
+
+        var contents: Contents = .init()
+        var removed: [Removed] = []
+        var time: Time = .zero
+        var renderer: DisplayList.GraphicsRenderer?
+        var contentSeed: DisplayList.Seed = .init()
+        var supportsVFD: Bool = false
+        var needsUpdate: Bool = false
+
+        @inline(__always)
+        func nextUpdate(after _: Time) -> Time {
+            removed.isEmpty ? contents.nextTime : time
+        }
+
+        var properties: Properties {
+            removed.reduce(into: contents.list.properties) { properties, removed in
+                properties.formUnion(removed.contents.list.properties)
+            }
+        }
+    }
+}
+
+extension DisplayList.Item {
+    package func nextUpdate(after time: Time) -> Time {
+        var nextUpdate = Time.infinity
+        switch value {
+        case let .content(content):
+            switch content.value {
+            case let .text(text, _):
+                nextUpdate.formMin(
+                    text.text.nextUpdate(after: time, equivalentDate: .now, reduceFrequency: false)
+                )
+            case let .flattened(list, _, _):
+                nextUpdate.formMin(list.nextUpdate(after: time))
+            default:
+                break
+            }
+        case let .effect(effect, list):
+            nextUpdate.formMin(list.nextUpdate(after: time))
+            switch effect {
+            case let .mask(mask, _):
+                nextUpdate.formMin(mask.nextUpdate(after: time))
+            case .animation:
+                nextUpdate = time
+            case let .interpolatorLayer(group, _):
+                nextUpdate.formMin(group.nextUpdate(after: time))
+            default:
+                break
+            }
+        case let .states(states):
+            for (_, list) in states {
+                let nestedUpdate: Time
+                if list.features.contains(.animations) {
+                    nestedUpdate = time
+                } else if list.features.contains(.dynamicContent) {
+                    nestedUpdate = list.nextUpdate(after: time)
+                } else {
+                    nestedUpdate = .infinity
+                }
+                nextUpdate.formMin(nestedUpdate)
+            }
+        case .empty:
+            break
+        }
+        return nextUpdate
+    }
+}
+
+extension DisplayList.Item {
+    func addDrawingGroup(contentSeed: DisplayList.Seed) {
+        _openSwiftUIUnimplementedWarning()
+    }
+}

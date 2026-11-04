@@ -566,8 +566,17 @@ open class UINavigationBar: UIView {
         func hit(_ frame: CGRect) -> Bool {
             point.x >= frame.minX - slop && point.x <= frame.maxX + slop && point.y >= frame.minY && point.y <= frame.maxY
         }
-        if let back = buttons.back, hit(back.frame), let navigation = barState.navigationController {
-            _ = UINavigationController(objcObject: navigation, ownership: .retain).pop(animated: true)
+        if let back = buttons.back, hit(back.frame) {
+            if let navigation = barState.navigationController {
+                _ = UINavigationController(objcObject: navigation, ownership: .retain).pop(animated: true)
+            } else if let item = topItem() {
+                // A bar on its own pops its top item, as its delegate allows.
+                let delegate = delegate()
+                if let delegate, delegate.responds(to: "navigationBar:shouldPopItem:"),
+                   !delegate.sendNavigationBar(self, shouldPop: item) { return }
+                _ = popItem(animated: true)
+                if let delegate, delegate.responds(to: "navigationBar:didPopItem:") { delegate.sendNavigationBar(self, didPop: item) }
+            }
             return
         }
         for (item, frame) in buttons.left + buttons.right where hit(frame) && item.state.enabled {
@@ -871,4 +880,11 @@ open class UIBarButtonItem: UIBarItem {
         typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(receiver.objcObject, action, objcObject)
     }
+}
+
+/// UINavigationBarDelegate's messages, for a bar without a navigation
+/// controller.
+extension NSObject {
+    @ObjCMethod("navigationBar:shouldPopItem:") func sendNavigationBar(_ bar: UINavigationBar, shouldPop item: UINavigationItem) -> Bool
+    @ObjCMethod("navigationBar:didPopItem:") func sendNavigationBar(_ bar: UINavigationBar, didPop item: UINavigationItem)
 }

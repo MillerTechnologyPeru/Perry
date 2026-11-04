@@ -30,7 +30,8 @@ enum Presentation {
     static func presented(_ layer: CALayer) -> (state: LayerState, shape: ShapeLayerState?) {
         let model = layer.state
         let shapeModel = layer.as(CAShapeLayer.self)?.shape
-        guard !model.animations.isEmpty else { return (model, shapeModel) }
+        let modifiers = PresentationModifiers.values(on: layer.objcObject)
+        guard !model.animations.isEmpty || !modifiers.isEmpty else { return (model, shapeModel) }
         let state = model.copy()
         let shape = shapeModel?.copy()
         let now = Clock.now
@@ -38,6 +39,14 @@ enum Presentation {
             evaluate(entry.animation, at: now, keyPath: nil, model: { AnimatedValue.value(of: model, shape: shapeModel, $0) }) { key, value in
                 value.write(to: state, shape: shape, key)
             }
+        }
+        // Presentation modifiers' values, over the animations'.
+        for modifier in modifiers {
+            guard var value = AnimatedValue(boxed: modifier.value, key: modifier.keyPath) else { continue }
+            if modifier.additive, let base = AnimatedValue.value(of: state, shape: shape, modifier.keyPath) {
+                value = AnimatedValue.add(base, value)
+            }
+            value.write(to: state, shape: shape, modifier.keyPath)
         }
         return (state, shape)
     }

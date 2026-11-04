@@ -218,6 +218,13 @@ public final class NSLocale: NSObject {
 
     @ObjCMethod("localeIdentifier") func localeIdentifier() -> String { locale.identifier }
     @ObjCMethod("languageCode") func languageCode() -> String { locale.language.languageCode?.identifier ?? "" }
+    /// The locale's language as a BCP 47 identifier: language, script
+    /// and region ("zh-Hant-TW" for zh_Hant_TW), without other keywords.
+    @ObjCMethod("languageIdentifier") func languageIdentifier() -> String {
+        let language = locale.language
+        return [language.languageCode?.identifier, language.script?.identifier, language.region?.identifier]
+            .compactMap { $0 }.joined(separator: "-")
+    }
     @ObjCMethod("countryCode") func countryCode() -> String? { locale.region?.identifier }
     @ObjCMethod("regionCode") func regionCode() -> String? { locale.region?.identifier }
     @ObjCMethod("scriptCode") func scriptCode() -> String? { locale.language.script?.identifier }

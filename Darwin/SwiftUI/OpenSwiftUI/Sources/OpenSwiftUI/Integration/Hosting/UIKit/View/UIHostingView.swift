@@ -1,0 +1,868 @@
+//
+//  UIHostingView.swift
+//  OpenSwiftUI
+//
+//  Audited for 6.0.87
+//  Status: WIP
+//  ID: FAF0B683EB49BE9BABC9009857940A1E (SwiftUI)
+
+#if os(iOS) || os(visionOS)
+import OpenAttributeGraphShims
+@_spi(ForOpenSwiftUIOnly)
+@_spi(Private)
+public import OpenSwiftUICore
+#if OPENSWIFTUI_SWIFTUI_RENDERER
+import OpenSwiftUISymbolDualTestsSupport
+#endif
+@_spiOnly public import COpenSwiftUI
+
+/// A UIView which hosts an OpenSwiftUI View hierarchy.
+@available(macOS, unavailable)
+open class _UIHostingView<Content>: UIView, XcodeViewDebugDataProvider where Content: View {
+    override dynamic open class var layerClass: AnyClass {
+        UIHostingViewDebugLayer.self
+    }
+    
+    var _rootView: Content
+
+    let _base: UIHostingViewBase
+
+    var base: UIHostingViewBase {
+        let base = _base
+        if base.uiView == nil {
+            base.uiView = self
+        }
+        if base.host == nil {
+            base.host = self
+        }
+        if base.delegate == nil {
+            base.delegate = self
+        }
+        if base.renderer.host == nil {
+            base.renderer.host = self
+        }
+        return base
+    }
+
+    final package var viewGraph: ViewGraph { _base.viewGraph }
+
+    final package let renderer = DisplayList.ViewRenderer(platform: .init(definition: UIViewPlatformViewDefinition.self))
+
+    var allowUIKitAnimations: Int32 = .zero
+
+    var disabledBackgroundColor: Bool = false
+    
+    var allowFrameChanges: Bool = true
+    
+    private var transparentBackgroundReasons: HostingViewTransparentBackgroundReason = [] {
+        didSet {
+            let oldHadReasons = oldValue != []
+            let newHasReasons = transparentBackgroundReasons != []
+            if oldHadReasons == newHasReasons {
+                updateBackgroundColor()
+            }
+        }
+    }
+    
+    var explicitSafeAreaInsets: EdgeInsets? = nil {
+        didSet {
+            safeAreaInsetsDidChange()
+        }
+    }
+    
+    var keyboardFrame: CGRect? = nil
+    
+    var keyboardSeed: UInt32 = .zero
+    
+    // var keyboardTrackingElement: UIHostingKeyboardTrackingElement? = nil
+    
+    package var isHiddenForReuse: Bool {
+        get { _base.isHiddenForReuse }
+        set { _base.isHiddenForReuse = true }
+    }
+    
+    var registeredForGeometryChanges: Bool = false
+    
+    @_spi(Private)
+    public var safeAreaRegions: SafeAreaRegions = .all {
+        didSet {
+            safeAreaRegionsDidChange(from: oldValue)
+        }
+    }
+    
+    var initialInheritedEnvironment: EnvironmentValues? = nil
+
+    var inheritedEnvironment: EnvironmentValues? = nil {
+        didSet {
+            invalidateProperties(.environment)
+        }
+    }
+    
+    package var environmentOverride: EnvironmentValues? = nil {
+        didSet {
+            invalidateProperties(.environment)
+        }
+    }
+    
+    weak var viewController: UIHostingController<Content>? = nil {
+        didSet {
+            updateBackgroundColor()
+        }
+    }
+    
+    var currentEvent: UIEvent? = nil
+    
+    var eventBridge: UIKitEventBindingBridge
+
+    let focusBridge = FocusBridge()
+
+    var colorScheme: ColorScheme? = nil {
+        didSet {
+            didChangeColorScheme(from: oldValue)
+        }
+    }
+
+    // TODO
+
+    #if os(iOS)
+    let feedbackCache: UIKitSensoryFeedbackCache<Content> = .init()
+    #endif
+
+    // TODO
+
+    weak var delegate: UIHostingViewDelegate?
+
+    // TODO: Forward changes to the pending store when AccessibilityViewGraph is available.
+    var currentAccessibilityFocusStore: AccessibilityFocusStore = .init()
+
+    var appliesContainerBackgroundFallbackColor: Bool = false {
+        didSet {
+            updateBackgroundColor()
+        }
+    }
+
+    var containerBackgroundFallbackColor: UIColor? {
+        didSet {
+            updateBackgroundColor()
+        }
+    }
+
+    package var accessibilityEnabled: Bool {
+        get {
+            viewGraph.accessibilityEnabled
+        }
+        set {
+            let oldValue = viewGraph.accessibilityEnabled
+            viewGraph.accessibilityEnabled = newValue
+            guard oldValue != newValue else {
+                return
+            }
+            invalidateProperties(.environment)
+            // AccessibilityFocus.changed(from: nil, to: nil, within: self)
+        }
+    }
+
+    // MARK: - UIHostingView initialization [WIP]
+
+    required public init(rootView: Content) {
+        _rootView = rootView
+        Update.begin()
+        var options = Self.defaultViewGraphOutputs().options
+        if Self.requiresExplicitGeometryChangedRegistration {
+            options.formUnion(.registeredForGeometryChanges)
+        }
+        _base = UIHostingViewBase(
+            rootViewType: ModifiedContent<
+                ModifiedContent<
+                    Content,
+                    EditModeScopeModifier
+                >,
+                HitTestBindingModifier
+            >.self,
+            options: options
+        )
+        _base.viewGraph.append(feature: FocusViewGraph(graph: _base.viewGraph))
+        _base.eventBindingManager.addForwardedEventDispatcher(KeyEventDispatcher())
+        eventBridge = UIKitEventBindingBridge(eventBindingManager: _base.eventBindingManager)
+        // TODO
+        if _UIUpdateAdaptiveRateNeeded() {
+            _base.viewGraph.append(feature: EnableVFDFeature())
+        }
+        // TODO
+        super.init(frame: .zero)
+        _base.viewGraph.append(feature: HostViewGraph(host: self))
+        appendViewGraphFeatures()
+        let base = base
+        if let host = base.host {
+            host.initializeViewGraph()
+            base.setupNotifications()
+        }
+        if let current = RepresentableContextValues.current {
+            if let bridge = current.preferenceBridge {
+                setPreferenceBridge(bridge)
+            }
+            initialInheritedEnvironment = current.environment
+        }
+        #if os(iOS)
+        feedbackCache.host = self
+        #endif
+        focusBridge._host = self
+        viewGraph.addPreference(FocusedValueList.Key.self)
+        viewGraph.addPreference(FocusStoreList.Key.self)
+        viewGraph.addPreference(AccessibilityFocusStoreList.Key.self)
+        // TODO
+        eventBindingManager.host = self
+        eventBindingManager.delegate = eventBridge
+        if let gestureRecognizer = eventBridge.gestureRecognizer {
+            addGestureRecognizer(gestureRecognizer)
+        }
+        addGestureRecognizer(eventBridge.hoverGestureRecognizer)
+        // TODO
+        HostingViewRegistry.shared.add(self)
+        Update.end()
+        // TODO
+    }
+
+    func setPreferenceBridge(_ bridge: PreferenceBridge) {
+        guard viewGraph.preferenceBridge !== bridge else { return }
+        viewGraph.preferenceBridge = bridge
+    }
+
+    func appendViewGraphFeatures() {
+        _openSwiftUIEmptyStub()
+    }
+    
+    @available(*, unavailable)
+    required dynamic public init?(coder _: NSCoder) {
+        preconditionFailure("init(coder:) has not been implemented")
+    }
+    
+    // MARK: - UIHostingView teardown
+
+    deinit {
+        let base = _base
+        base.tearDown(uiView: self, host: self)
+        NotificationCenter.default.removeObserver(self)
+        base.cancelAsyncRendering()
+        base.displayLink?.invalidate()
+        base.displayLink = nil
+        _base.clearUpdateTimer()
+        HostingViewRegistry.shared.remove(self)
+    }
+    
+    /// The renderer configuration of the hosting view.
+    final public var _rendererConfiguration: _RendererConfiguration {
+        get {
+            Update.locked { renderer.configuration }
+        }
+        set {
+            Update.locked { renderer.configuration = newValue }
+        }
+    }
+    
+    /// An optional object representing the current renderer.
+    final public var _rendererObject: AnyObject? {
+        Update.locked {
+            renderer.exportedObject(rootView: self)
+        }
+    }
+    
+    override dynamic open func didMoveToWindow() {
+        Update.begin()
+        // TODO:
+        // updateKeyboardAvoidance()
+        eventBridge.hostingView(self, didMoveToWindow: window)
+        if let viewController {
+            // viewController._didMoveToWindow()
+        }
+        // TODO
+        base.didMoveToWindow()
+        Update.end()
+    }
+
+    override dynamic open func layoutSubviews() {
+        super.layoutSubviews()
+        base.layoutSubviews()
+    }
+
+    @_implementationOnly
+    override dynamic open func _geometryChanged(
+        _ geometry: UnsafeRawPointer,
+        forAncestor ancestor: UIView?
+    ) {
+        base._geometryChanged(geometry, forAncestor: ancestor)
+    }
+
+    override dynamic open var frame: CGRect {
+        get {
+            super.frame
+        }
+        set {
+            guard allowFrameChanges else {
+                return
+            }
+            let oldValue = super.frame
+            super.frame = newValue
+            base.frameDidChange(oldValue: oldValue)
+        }
+    }
+
+    open override var bounds: CGRect {
+        get {
+            super.bounds
+        }
+        set {
+            guard allowFrameChanges else {
+                return
+            }
+            let oldValue = super.bounds
+            super.bounds = newValue
+            base.frameDidChange(oldValue: oldValue)
+        }
+    }
+
+    open override var clipsToBounds: Bool {
+        didSet {
+            base.clipsToBoundsDidChange(oldValue: oldValue)
+        }
+    }
+
+    open override func tintColorDidChange() {
+        base.tintColorDidChange()
+    }
+
+    open override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        updateBackgroundColor()
+        if shouldDisableUIKitAnimations,
+           Semantics.TraitCollectionAnimations.isEnabled,
+           var transaction = Transaction.currentUIViewTransaction(canDisableAnimations: true) {
+            #if OPENSWIFTUI_LINK_BACKLIGHTSERVICES
+            if let viewController, let alwaysOnBridge = viewController.alwaysOnBridge {
+                alwaysOnBridge.configureTransaction(&transaction)
+            }
+            #endif
+            viewGraph.emptyTransaction(transaction)
+        }
+        if traitCollection.userInterfaceIdiom != previousTraitCollection?.userInterfaceIdiom {
+            updateEventBridge()
+        }
+        invalidateProperties(.environment)
+    }
+
+    open override func safeAreaInsetsDidChange() {
+        _safeAreaInsetsDidChange()
+    }
+
+    func _safeAreaInsetsDidChange() {
+        guard safeAreaRegions != [] || !isLinkedOnOrAfter(.v7) else {
+            return
+        }
+        viewController?._viewSafeAreaDidChange()
+        invalidateProperties([.safeArea, .containerSize], mayDeferUpdate: false)
+    }
+
+    open override var backgroundColor: UIColor? {
+        get { super.backgroundColor }
+        set {
+            disabledBackgroundColor = true
+            super.backgroundColor = newValue
+        }
+    }
+
+    package func updateBackgroundColor() {
+        func setBackground(_ color: UIColor?) {
+            guard !disabledBackgroundColor else {
+                return
+            }
+            super.backgroundColor = color
+        }
+        if appliesContainerBackgroundFallbackColor, let containerBackgroundFallbackColor {
+            backgroundColor = containerBackgroundFallbackColor
+            return
+        }
+        guard viewController != nil else {
+            return
+        }
+        if wantsTransparentBackground {
+            super.backgroundColor = nil
+        } else {
+            setBackground(.systemBackground)
+        }
+    }
+
+    // TODO
+
+    func updateEventBridge() {
+        let bridge = eventBridge
+        guard traitCollection.userInterfaceIdiom == .carPlay,
+              let gestureRecognizer = bridge.gestureRecognizer
+        else {
+            return
+        }
+        gestureRecognizer.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+    }
+
+    func setRootView(_ view: Content, transaction: Transaction) {
+        _rootView = view
+        viewGraph.asyncTransaction(transaction) { [weak self] in
+            guard let self else { return }
+            updateRootView()
+        }
+    }
+
+    /// The root View of the view hierarchy to display.
+    var rootView: Content {
+        get { _rootView }
+        set {
+            _rootView = newValue
+            invalidateProperties(.rootView)
+        }
+    }
+    
+    var invalidatesIntrinsicContentSizeOnIdealSizeChange: Bool = false {
+        didSet {
+            // TODO
+        }
+    }
+    
+    private lazy var foreignSubviews: NSHashTable<UIView> = NSHashTable.weakObjects()
+
+    private var isInsertingRenderedSubview: Bool = false
+
+    // Audited for 6.5.4
+    override dynamic open func didAddSubview(_ subview: UIView) {
+        super.didAddSubview(subview)
+        guard !isInsertingRenderedSubview else { return }
+        foreignSubviews.add(subview)
+        if isLinkedOnOrAfter(.v7) {
+            let hostName = if _OpenSwiftUIIsAppleInternalBuild(), viewController == nil {
+                "_UIHostingView"
+            } else {
+                "UIHostingController.view"
+            }
+            Log.runtimeIssues(
+                "Adding '%s' as a subview of %s is not supported and may result in a broken view hierarchy. Add your view above %s in a common superview or insert it into your OpenSwiftUI content in a UIViewRepresentable instead.",
+                [
+                    "\(type(of: subview))",
+                    hostName,
+                    hostName,
+                ]
+            )
+        }
+    }
+
+    // Audited for 6.5.4
+    override dynamic open func willRemoveSubview(_ subview: UIView) {
+        super.willRemoveSubview(subview)
+        foreignSubviews.remove(subview)
+    }
+
+    // Audited for 6.5.4
+    override dynamic open func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        printHitTestIfNeeded(at: point, with: event)
+        let result = super.hitTest(point, with: event)
+        guard GestureContainerFeature.isEnabled,
+              _UIHitTestContext.current != nil || CoreTesting.isRunning
+        else {
+            return result
+        }
+        if let result, foreignSubviews.allObjects.contains(where: { result.isDescendant(of: $0) }) {
+            return result
+        }
+        currentEvent = event
+        guard !UIViewIgnoresTouchEvents(self), self.point(inside: point, with: event) else {
+            return nil
+        }
+        return self
+    }
+
+    // Audited for 6.5.4
+    @_implementationOnly
+    override dynamic open func _hitTest(with context: _UIHitTestContext?) -> (UIResponder & _UIGestureRecognizerContainer)? {
+        defer { currentEvent = nil }
+        guard GestureContainerFeature.isEnabled else { return nil }
+        return Update.perform {
+            updateTransformWithoutGeometryObservation()
+            let context = context!
+            let point = context.point
+            guard let hit = (responderNode as? ViewResponder)?.hitTest(
+                globalPoint: point,
+                radius: context.radius
+            ) else {
+                return self
+            }
+            let cacheKey = ViewResponder.hitTestKey
+            if let responder = hit as? UIViewResponder, let hostView = responder.hostView {
+                let hitView: UIView? = {
+                    if let result = responder.lastResult, result.key == cacheKey {
+                        return result.hitView
+                    }
+                    return hostView.hitTest(hostView.convert(point, from: nil), with: currentEvent)
+                }()
+                guard let hitView else { return self }
+                let container = hitView._hitTest(with: context) ?? hitView
+                if _eventDebugTriggers.contains(.gestures) {
+                    printGestureContainerAncestors(container)
+                }
+                return container
+            }
+            if hit is any AnyGestureContainingResponder, let container = hit.gestureContainer {
+                let container = container as! (UIResponder & _UIGestureRecognizerContainer)
+                if _eventDebugTriggers.contains(.gestures) {
+                    printGestureContainerAncestors(container)
+                }
+                return container
+            }
+            var parent = hit.parent
+            var container: (UIResponder & _UIGestureRecognizerContainer)?
+            while let responder = parent {
+                if let gestureContainer = responder.gestureContainer {
+                    container = (gestureContainer as! (UIResponder & _UIGestureRecognizerContainer))
+                    break
+                } else if let representedView = (responder as? UIViewResponder)?.representedView {
+                    container = representedView
+                    break
+                }
+                parent = responder.parent
+            }
+            if container == nil {
+                container = hit.host?.as(UIView.self)
+            }
+            guard let container, container !== self else { return self }
+            if _eventDebugTriggers.contains(.gestures) {
+                printGestureContainerAncestors(container)
+            }
+            return container
+        }
+    }
+
+    // Audited for 6.5.4
+    @_implementationOnly
+    override dynamic open var _childContainers: [any _UIGestureRecognizerContainer] {
+        guard GestureContainerFeature.isEnabled else { return super._childContainers }
+        return (responderNode as? ViewResponder)?.childGestureContainers ?? []
+    }
+
+    // Audited for 6.5.4
+    private func printHitTestIfNeeded(at point: CGPoint, with event: UIEvent?) {
+        guard _eventDebugTriggers.contains(.hitTest), let event, event.type == .touches else {
+            return
+        }
+        guard sequence(first: self as UIView, next: { $0.superview })
+            .dropFirst().first(ofType: HostingViewProtocol.self) == nil
+        else {
+            return
+        }
+        let usesGestureContainer = GestureContainerFeature.isEnabled
+        let context = _UIHitTestContext.current
+        if usesGestureContainer {
+            guard let context else { return }
+            printHitTest(point, radius: context.radius)
+        } else {
+            guard context == nil else { return }
+            printHitTest(point)
+        }
+    }
+    
+    /// The UIKit notion of the safe area insets.
+    open override var safeAreaInsets: UIEdgeInsets {
+        guard let explicitSafeAreaInsets else {
+            return super.safeAreaInsets
+        }
+        let layoutDirection = Update.ensure { viewGraph.environment.layoutDirection }
+        return if layoutDirection == .rightToLeft {
+            UIEdgeInsets(top: explicitSafeAreaInsets.top, left: explicitSafeAreaInsets.trailing, bottom: explicitSafeAreaInsets.bottom, right: explicitSafeAreaInsets.leading)
+        } else {
+            UIEdgeInsets(top: explicitSafeAreaInsets.top, left: explicitSafeAreaInsets.leading, bottom: explicitSafeAreaInsets.bottom, right: explicitSafeAreaInsets.trailing)
+        }
+    }
+
+    override dynamic open func sizeThatFits(_ size: CGSize) -> CGSize {
+        base._layoutSizeThatFits(size)
+    }
+
+    // FIXME
+    final public func _viewDebugData() -> [_ViewDebug.Data] {
+        // TODO
+        []
+    }
+    
+    @_spi(Private)
+    @available(iOS, deprecated: 16.4, message: "Use UIHostingController/safeAreaRegions or _UIHostingView/safeAreaRegions")
+    final public var addsKeyboardToSafeAreaInsets: Bool {
+        get { safeAreaRegions.contains(.keyboard) }
+        set { safeAreaRegions.setValue(newValue, for: .keyboard) }
+    }
+
+    open override var next: UIResponder? {
+        eventBridge.keyPressResponder ?? defaultNextResponder
+    }
+
+    override dynamic open var canBecomeFirstResponder: Bool {
+        focusBridge.acceptsFirstResponder
+    }
+
+    override dynamic open var preferredFocusEnvironments: [any UIFocusEnvironment] {
+        _preferredFocusEnvironments
+    }
+
+    @_implementationOnly
+    override dynamic open func _didChange(toFirstResponder responder: UIResponder?) {
+        super._didChange(toFirstResponder: responder)
+        focusBridge.firstResponderDidChange(to: responder, rootResponder: responderNode)
+    }
+
+    override dynamic open func focusItems(in rect: CGRect) -> [any UIFocusItem] {
+        let items = super.focusItems(in: rect).filter { !($0 is UIView) }
+        guard viewController?._shouldIgnoreChildFocusRegions != true else { return items }
+        return childFocusItems(in: rect) + items
+    }
+
+    override dynamic open func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        focusBridge.didUpdateFocus(in: context, with: coordinator)
+    }
+
+    package func makeViewDebugData() -> Data? {
+        Update.ensure {
+            _ViewDebug.serializedData(viewGraph.viewDebugData())
+        }
+    }
+    
+    package class func defaultViewGraphOutputs() -> ViewGraph.Outputs {
+        .defaults
+    }
+
+    package class var ignoresPresentations: Bool {
+        false
+    }
+
+    package class var createsUIInteractions: Bool {
+        true
+    }
+
+    package class var requiresExplicitGeometryChangedRegistration: Bool {
+        true
+    }
+
+    package var focusedValues: FocusedValues = .init() {
+        didSet {
+            invalidateProperties(.focusedValues)
+        }
+    }
+
+    // Audited for 6.5.4
+    private struct EnableVFDFeature: ViewGraphFeature {
+        func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+            inputs.base.options.insert(.supportsVariableFrameDuration)
+        }
+    }
+
+    #if OPENSWIFTUI_SWIFTUI_RENDERER
+    @_implementationOnly
+    override public func swiftui_insertRenderedSubview(_ subview: Any, at index: Int) {
+        openswiftui_insertRenderedSubview(subview, at: index)
+    }
+    #endif
+
+    @_implementationOnly
+    override public func openswiftui_insertRenderedSubview(_ subview: Any, at index: Int) {
+        let view = subview as! UIView
+        isInsertingRenderedSubview = true
+        insertSubview(view, at: index)
+        isInsertingRenderedSubview = false
+    }
+}
+
+extension _UIHostingView {
+    var hostSafeAreaElements: [SafeAreaInsets.Element] {
+        _hostSafeAreaElements
+    }
+
+    var _hostSafeAreaElements: [SafeAreaInsets.Element] {
+        let pixelLength = viewGraph.environment.pixelLength
+        let uiSafeAreaInsets = safeAreaInsets
+        var safeAreaEdgeInsets = EdgeInsets(
+            top: uiSafeAreaInsets.top,
+            leading: uiSafeAreaInsets.left,
+            bottom: uiSafeAreaInsets.bottom,
+            trailing: uiSafeAreaInsets.right
+        )
+        safeAreaEdgeInsets.xFlipIfRightToLeft { .leftToRight }
+        safeAreaEdgeInsets.round(toMultipleOf: pixelLength)
+        var containerElement = SafeAreaInsets.Element(regions: .container, insets: .zero)
+        if safeAreaRegions.contains(.container) {
+            containerElement.insets = safeAreaEdgeInsets
+        }
+        let bottomInset: Double
+        if safeAreaRegions.contains(.keyboard),
+           let keyboardFrame,
+           let window,
+           keyboardFrame.size.isNonEmpty {
+            let convertedKeyboardFrame = convert(keyboardFrame, from: window.screen.coordinateSpace)
+            bottomInset = convertedKeyboardFrame.minY - bounds.maxY
+        } else {
+            bottomInset = 0.0
+        }
+        var keyboardElement = SafeAreaInsets.Element(regions: .keyboard, insets: .zero)
+        if safeAreaRegions.contains(.keyboard) {
+            var value = bottomInset - safeAreaEdgeInsets.bottom
+            value.round(toMultipleOf: pixelLength)
+            keyboardElement.insets = EdgeInsets(value, edges: .bottom)
+        }
+
+        if keyboardElement.insets.bottom < 0 {
+            containerElement.insets.bottom = -keyboardElement.insets.bottom
+            keyboardElement.insets.bottom = bottomInset
+            keyboardElement.regions.formUnion(containerElement.regions)
+        }
+
+        var elements: [SafeAreaInsets.Element] = []
+        if !containerElement.insets.isEmpty {
+            elements.append(containerElement)
+        }
+        if !keyboardElement.insets.isEmpty {
+            elements.append(keyboardElement)
+        }
+        return elements
+    }
+
+    func makeRootView() -> ModifiedContent<ModifiedContent<Content, EditModeScopeModifier>, HitTestBindingModifier> {
+        _UIHostingView.makeRootView(
+            rootView.modifier(EditModeScopeModifier(isActive: viewController != nil))
+        )
+    }
+    
+    var wantsTransparentBackground: Bool {
+        transparentBackgroundReasons != []
+    }
+    
+    func setWantsTransparentBackground(for reason: HostingViewTransparentBackgroundReason, _ isEnabled: Bool) {
+        transparentBackgroundReasons.setValue(isEnabled, for: reason)
+    }
+    
+    func safeAreaRegionsDidChange(from oldSafeAreaRegions: SafeAreaRegions) {
+        guard safeAreaRegions != oldSafeAreaRegions else {
+            return
+        }
+        invalidateProperties([.safeArea, .containerSize])
+    }
+    
+    func didChangeColorScheme(from oldColorScheme: ColorScheme?) {
+        // TODO
+    }
+
+    package var isInSizeTransition: Bool {
+        _base.isInSizeTransition
+    }
+
+    package var isRotatingWindow: Bool {
+        _base.isRotatingWindow
+    }
+
+    package var sceneActivationState: UIScene.ActivationState? {
+        _base.sceneActivationState
+    }
+
+    package var isResizingSheet: Bool {
+        // TODO
+        return false
+    }
+
+    package var isTabSidebarMorphing: Bool {
+        // TODO
+        return false
+    }
+
+    package func focusDidChange() {
+        let rootResponder = responderNode
+        focusBridge.host?.setNeedsFocusUpdate()
+        focusBridge.focusDidChange_PhoneWatch(rootResponder: rootResponder)
+    }
+
+    func viewControllerWillDisappear(
+        transitionCoordinator: (any UIViewControllerTransitionCoordinator)?,
+        animated: Bool
+    ) {
+        guard focusBridge.canAcceptFocus, let host = focusBridge.host else { return }
+        focusBridge.canAcceptFocus = false
+        if let item = focusBridge.focusedItem {
+            (item.platformResponder ?? host).resignFirstResponder()
+        }
+    }
+
+    func viewControllerDidAppear(
+        transitionCoordinator: (any UIViewControllerTransitionCoordinator)?,
+        animated: Bool
+    ) {
+        guard !focusBridge.canAcceptFocus else { return }
+        focusBridge.canAcceptFocus = true
+        if focusBridge.focusedItem == nil {
+            focusBridge.flags.insert(.resettingFocus)
+        }
+        focusBridge.hostDidBecomeFirstResponder(in: nil)
+        focusBridge.flags.remove(.resettingFocus)
+    }
+}
+
+// MARK: - _UIHostingView.HostViewGraph [6.5.4]
+
+extension _UIHostingView {
+    private struct HostViewGraph: ViewGraphFeature {
+        weak var host: _UIHostingView?
+
+        func modifyViewInputs(inputs: inout _ViewInputs, graph: ViewGraph) {
+            guard let host else {
+                return
+            }
+            inputs.eventBindingBridgeFactory = UIKitResponderEventBindingBridge.Factory.self
+            inputs.gestureContainerFactory = UIKitGestureContainerFactory.self
+            host.delegate?.hostingView(host, willModifyViewInputs: &inputs)
+            if inputs[InterfaceIdiomInput.self] == nil {
+                var idiom: AnyInterfaceIdiom?
+                Update.syncMain {
+                    idiom = host.traitCollection.userInterfaceIdiom.idiom
+                        ?? UIDevice.current.userInterfaceIdiom.idiom
+                }
+                idiom.map { inputs[InterfaceIdiomInput.self] = $0 }
+            }
+            let box = WeakBox<UIView>(host)
+            inputs[UIKitHostContainerFocusItemInput.self] = OptionalAttribute(Attribute(value: box))
+            #if OPENSWIFTUI_LINK_BACKLIGHTSERVICES
+            inputs.textAlwaysOnProvider = OpenSwiftUITextAlwaysOnProvider.self
+            #endif
+            host.navigationBridge?.updateViewInputs(&inputs)
+        }
+    }
+}
+
+extension _UIHostingView: HitTestingLeafPlatformView {
+    var usesResponderForHitTesting: Bool {
+        _openSwiftUIUnreachableCode()
+    }
+
+    var foreignSubviewsForHitTesting: [PlatformView] {
+        _openSwiftUIUnreachableCode()
+    }
+
+    var isTransparentForHitTesting: Bool {
+        _openSwiftUIUnreachableCode()
+    }
+}
+
+extension _UIHostingView: CurrentEventProvider {}
+
+// MARK: - UIHostingViewDelegate
+
+package protocol UIHostingViewDelegate: AnyObject {
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, didMoveTo window: UIWindow?) where V: View
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, willUpdate environment: inout EnvironmentValues) where V: View
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, didUpdate environment: EnvironmentValues) where V: View
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, didChangePreferences preferences: PreferenceValues) where V: View
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, didChangePlatformItemList itemList: PlatformItemList) where V: View
+    func hostingView<V>(_ hostingView: _UIHostingView<V>, willModifyViewInputs inputs: inout _ViewInputs) where V: View
+}
+
+#endif

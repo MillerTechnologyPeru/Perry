@@ -1,0 +1,503 @@
+//
+//  UIHostingView+Render.swift
+//  OpenSwiftUI
+//
+//  Audited for 6.5.4
+//  Status: WIP
+
+#if os(iOS) || os(visionOS)
+@_spi(ForOpenSwiftUIOnly)
+@_spi(Private)
+public import OpenSwiftUICore
+import COpenSwiftUI
+
+// MARK: - _UIHostingView + UIViewControllerProvider
+
+extension _UIHostingView: UIViewControllerProvider {
+    package var uiViewController: UIViewController? {
+        viewController
+    }
+}
+
+// MARK: - _UIHostingView + UIHostingViewBaseDelegate
+
+extension _UIHostingView: UIHostingViewBaseDelegate {
+    package var shouldDisableUIKitAnimations: Bool {
+        guard allowUIKitAnimations == 0,
+              !base.allowUIKitAnimationsForNextUpdate,
+              !isInSizeTransition,
+              !isResizingSheet,
+              !isRotatingWindow,
+              !isTabSidebarMorphing
+        else {
+            return false
+        }
+        return true
+    }
+
+    package func sceneActivationStateDidChange() {
+        _openSwiftUIUnimplementedWarning()
+    }
+}
+
+// MARK: - _UIHostingView + HostingViewProtocol
+
+@_spi(Private)
+extension _UIHostingView: HostingViewProtocol {
+    public func convertAnchor<Value>(_ anchor: Anchor<Value>) -> Value {
+        anchor.convert(to: viewGraph.transform)
+    }
+}
+
+// MARK: - _UIHostingView + TestHost [6.4.41]
+
+extension _UIHostingView: TestHost {
+    package func setTestSize(_ size: CGSize) {
+        let newSize: CGSize
+        if size == CGSize.deviceSize {
+            let screenSize = UIDevice.current.screenSize
+            let idiom = UIDevice.current.userInterfaceIdiom
+            if idiom == .pad, screenSize.width < screenSize.height {
+                newSize = CGSize(width: screenSize.height, height: screenSize.width)
+            } else {
+                if idiom == .phone, screenSize.height < screenSize.width {
+                    newSize = CGSize(width: screenSize.height, height: screenSize.width)
+                } else {
+                    newSize = screenSize
+                }
+            }
+        } else {
+            newSize = size
+        }
+        if bounds.size != newSize {
+            allowFrameChanges = true
+            bounds.size = newSize
+            allowFrameChanges = false
+        }
+    }
+
+    package func setTestSafeAreaInsets(_ insets: EdgeInsets) {
+        explicitSafeAreaInsets = insets
+
+    }
+
+    package var testSize: CGSize { bounds.size }
+
+    package var viewCacheIsEmpty: Bool {
+        Update.locked {
+            renderer.viewCacheIsEmpty
+        }
+    }
+
+    package func forEachIdentifiedView(body: (_IdentifiedViewProxy) -> Void) {
+        let tree = preferenceValue(_IdentifiedViewsKey.self)
+        tree.forEach { proxy in
+            var proxy = proxy
+            proxy.adjustment = { [weak self] rect in
+                guard let self else { return }
+                rect = convert(rect, from: nil)
+            }
+            body(proxy)
+        }
+    }
+
+    package func forEachDescendantHost(body: (any TestHost) -> Void) {
+        forEachDescendantHost { (view: UIView) in
+            if let testHost = view as? any TestHost {
+                body(testHost)
+            }
+        }
+    }
+
+    package func renderForTest(interval: Double) {
+        _renderForTest(interval: interval)
+    }
+
+    package var attributeCountInfo: AttributeCountTestInfo {
+        preferenceValue(AttributeCountInfoKey.self)
+    }
+
+    public func _renderForTest(interval: Double) {
+        func shouldContinue() -> Bool {
+            if propertiesNeedingUpdate == [], !CoreTesting.needsRender {
+                false
+            } else {
+                times >= 0
+            }
+        }
+        advanceTimeForTest(interval: interval)
+        _base.canAdvanceTimeAutomatically = false
+        var times = 16
+        repeat {
+            times -= 1
+            CoreTesting.needsRender = false
+            updateGraph { host in
+                host.flushTransactions()
+            }
+            RunLoop.flushObservers()
+            render(targetTimestamp: nil)
+            CATransaction.flush()
+        } while shouldContinue()
+        CoreTesting.needsRender = false
+        _base.canAdvanceTimeAutomatically = true
+    }
+}
+
+extension UIDevice {
+    package var screenSize: CGSize {
+        let screenBounds = UIScreen.main.bounds
+        let screenWidth = screenBounds.width
+        let screenHeight = screenBounds.height
+        let orientation = UIDevice.current.orientation
+        let finalWidth: CGFloat
+        let finalHeight: CGFloat
+        switch orientation {
+        case .landscapeLeft, .landscapeRight:
+            // In landscape, swap dimensions to ensure width > height
+            finalWidth = max(screenWidth, screenHeight)
+            finalHeight = min(screenWidth, screenHeight)
+        case .portrait, .portraitUpsideDown:
+            // In portrait, keep original dimensions (height > width)
+            finalWidth = screenWidth
+            finalHeight = screenHeight
+        default:
+            // For other orientations, keep original dimensions
+            finalWidth = screenWidth
+            finalHeight = screenHeight
+        }
+        return CGSize(width: finalWidth, height: finalHeight)
+    }
+}
+
+extension UIView {
+    func forEachDescendantHost(body: (UIView) -> Void) {
+        body(self)
+        for view in subviews {
+            view.forEachDescendantHost(body: body)
+        }
+    }
+}
+
+// MARK: - _UIHostingView + ViewRendererHost [WIP]
+
+extension _UIHostingView: ViewRendererHost {
+    // MARK: - GraphDelegate conformance
+
+    @_spi(ForOpenSwiftUIOnly)
+    public func preferencesDidChange() {
+        let preferences = viewGraph.preferenceValues()
+        focusBridge.preferencesDidChange(preferences)
+        delegate?.hostingView(self, didChangePreferences: preferences)
+        // TODO: Notify the remaining UIKit bridges.
+        _openSwiftUIUnimplementedWarning()
+    }
+
+    @_spi(ForOpenSwiftUIOnly)
+    @available(OpenSwiftUI_v6_0, *)
+    public func beginTransaction() {
+        onMainThread { [weak self] in
+            guard UIKitUpdateCycle.defaultUseSetNeedsLayout else {
+                let updateAction = {
+                    Update.ensure {
+                        _ = self?.updateGraph {
+                            $0.flushTransactions()
+                        }
+                    }
+                }
+                if _UIUpdateCycleEnabled() {
+                    UIKitUpdateCycle.addPreCommitObserver(updateAction)
+                }
+                RunLoop.addObserver(updateAction)
+                return
+            }
+            self?.base.requestImmediateUpdate()
+        }
+    }
+
+    // MARK: - ViewGraphDelegate conforamnce
+
+    package func `as`<T>(_ type: T.Type) -> T? {
+        guard let value = base.as(type) else {
+            if FocusHost.self == type {
+                return unsafeBitCast(self as any FocusHost, to: T.self)
+            // TODO: PlatformItemListHost
+            } else if UIViewControllerProvider.self == type {
+                return unsafeBitCast(self as any UIViewControllerProvider, to: T.self)
+            // TODO: PointerHost, WindowLayoutHost,
+            } else if UIView.self == type {
+                return unsafeBitCast(self as UIView, to: T.self)
+            } else if EventGraphHost.self == type {
+                return unsafeBitCast(self as any EventGraphHost, to: T.self)
+            } else if RootTransformProvider.self == type {
+                return unsafeBitCast(self as any RootTransformProvider, to: T.self)
+            } else if CurrentEventProvider.self == type {
+                return unsafeBitCast(self as any CurrentEventProvider, to: T.self)
+            // TODO: ContainerBackgroundHost, RootTransformUpdater
+            } else if FallbackResponderProvider.self == type {
+                return unsafeBitCast(self as any FallbackResponderProvider, to: T.self)
+            } else if ViewRendererHost.self == type {
+                return unsafeBitCast(self as any ViewRendererHost, to: T.self)
+            // TODO: ViewGraphRenderObserver, ToolbarInputFeatureDelegate
+            } else {
+                return nil
+            }
+        }
+        return value
+    }
+
+    package func requestUpdate(after delay: Double) {
+        base.requestUpdate(after: delay)
+    }
+
+    // MARK: - ViewRendererHost conformance
+
+    package var currentTimestamp: Time {
+        get { base.currentTimestamp }
+        set { base.currentTimestamp = newValue }
+    }
+
+    package var propertiesNeedingUpdate: ViewRendererHostProperties {
+        get { base.propertiesNeedingUpdate }
+        set { base.propertiesNeedingUpdate = newValue }
+    }
+
+    package var renderingPhase: ViewRenderingPhase {
+        get { base.renderingPhase }
+        set { base.renderingPhase = newValue }
+    }
+
+    package var externalUpdateCount: Int {
+        get { base.externalUpdateCount }
+        set { base.externalUpdateCount = newValue }
+    }
+
+    package func updateRootView() {
+        let rootView = makeRootView()
+        viewGraph.setRootView(rootView)
+    }
+
+    package func updateEnvironment() {
+        var environment = base.startUpdateEnvironment()
+        delegate?.hostingView(self, willUpdate: &environment)
+        // WIP
+        _openSwiftUIUnimplementedWarning()
+        environment.displayScale = traitCollection.displayScale
+        if let displayGamut = DisplayGamut(rawValue: traitCollection.displayGamut.rawValue) {
+            environment.displayGamut = displayGamut
+        }
+        #if os(iOS)
+        environment.feedbackCache = feedbackCache
+        #endif
+        focusBridge.updateEnvironment(&environment)
+        delegate?.hostingView(self, didUpdate: environment)
+        base.endUpdateEnvironment(environment)
+    }
+
+    package func updateTransform() {
+        base.updateTransform()
+
+        // TODO: Notify UIKit related bridges
+        _openSwiftUIUnimplementedWarning()
+
+        if !safeAreaRegions.contains(.container) {
+            invalidateProperties(.safeArea, mayDeferUpdate: false)
+        }
+    }
+
+    package func updateTransformWithoutGeometryObservation() {
+        base.updateTransformWithoutGeometryObservation()
+    }
+
+    package func updateSize() {
+        base.updateSize()
+    }
+    
+    package func updateSafeArea() {
+        let changed = viewGraph.setSafeAreaInsets(hostSafeAreaElements)
+        if changed {
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    package func updateContainerSize() {
+        base.updateContainerSize()
+    }
+
+    package func updateFocusStore() {
+        guard viewGraph.requestedOutputs.contains(.focus) else { return }
+        viewGraph.setFocusStore(focusBridge.focusStore)
+    }
+
+    package func updateFocusedItem() {
+        guard viewGraph.requestedOutputs.contains(.focus) else { return }
+        viewGraph.setFocusedItem(focusedItem)
+    }
+
+    package func updateFocusedValues() {
+        guard viewGraph.requestedOutputs.contains(.focus) else { return }
+        viewGraph.setFocusedValues(focusedValues)
+    }
+
+    package func updateAccessibilityEnvironment() {
+        _openSwiftUIUnimplementedWarning()
+    }
+}
+
+// MARK: - _UIHostingView + EventGraphHost
+
+extension _UIHostingView: EventGraphHost {
+    package var eventBindingManager: EventBindingManager {
+        base.eventBindingManager
+    }
+
+    package var focusedResponder: ResponderNode? {
+        focusBridge.focusedItem?.responder
+    }
+}
+
+// MARK: - _UIHostingView + FocusHost
+
+extension _UIHostingView: FocusHost, FocusBridgeProvider {
+    var focusedItem: FocusItem? {
+        focusBridge.focusedItem
+    }
+
+    func focus(item: FocusItem) {
+        focusBridge.moveFocus(to: item, designatedPlatformResponder: nil)
+    }
+
+    var _preferredFocusEnvironments: [any UIFocusEnvironment] {
+        var environments = focusBridge.requestedFocusEnvironments
+        if let container = defaultFocusItemsContainer() {
+            environments.append(container)
+        } else {
+            environments.append(contentsOf: focusBridge.preferredFocusEnvironments)
+        }
+        return environments
+    }
+}
+
+// MARK: - _UIHostingView + ViewGraphRenderObserver
+
+extension _UIHostingView: ViewGraphRenderObserver {
+    package func didRender() {
+        viewController?.didRender()
+    }
+}
+
+// MARK: - _UIHostingView + UIKitAnimationCooperating
+
+package protocol UIKitAnimationCooperating {
+    func beginAllowUIKitAnimations()
+    func endAllowUIKitAnimations()
+}
+
+extension _UIHostingView {
+    package func beginAllowUIKitAnimations() {
+        allowUIKitAnimations &+= 1
+    }
+
+    package func endAllowUIKitAnimations() {
+        allowUIKitAnimations = max(allowUIKitAnimations - 1, 0)
+    }
+}
+
+// MARK: - _UIHostingView + FallbackResponderProvider
+
+extension _UIHostingView: FallbackResponderProvider {
+    package var defaultNextResponder: UIResponder? {
+        super.next
+    }
+}
+
+// MARK: - _UIHostingView + RootTransformProvider [6.5.4]
+
+extension _UIHostingView: RootTransformProvider {
+    package func rootTransform() -> ViewTransform {
+        if !_base.registeredForGeometryChanges {
+            _base.registeredForGeometryChanges = true
+            _registerForGeometryChanges()
+        }
+        var buffer = ViewTransform.UnsafeBuffer()
+        withUnsafeMutablePointer(to: &buffer) { buffer in
+            CALayerMapGeometry(
+                window?.layer,
+                layer,
+                { context, transform in
+                    context.assumingMemoryBound(to: ViewTransform.UnsafeBuffer.self).pointee
+                        .appendProjectionTransform(ProjectionTransform(transform.pointee), inverse: true)
+                },
+                { context, transform in
+                    context.assumingMemoryBound(to: ViewTransform.UnsafeBuffer.self).pointee
+                        .appendProjectionTransform(ProjectionTransform(transform.pointee), inverse: false)
+                },
+                buffer
+            )
+        }
+        let bounds = bounds
+        if _SemanticFeature_v6.isEnabled {
+            if let window {
+                buffer.appendScrollGeometry(
+                    .rootViewTransform(
+                        contentOffset: bounds.origin,
+                        containerSize: convert(bounds, to: window as any UICoordinateSpace).size
+                    ),
+                    isClipped: true
+                )
+            }
+            buffer.appendScrollGeometry(
+                .rootViewTransform(contentOffset: bounds.origin, containerSize: bounds.size),
+                isClipped: clipsToBounds
+            )
+        } else {
+            _ = clipsToBounds
+        }
+        buffer.appendCoordinateSpace(id: hostingViewCoordinateSpace)
+        buffer.appendCoordinateSpace(id: UIKitHostContainerCoordinateSpace)
+        var transform = ViewTransform()
+        transform.append(movingContentsOf: &buffer)
+        return transform
+    }
+}
+
+// MARK: - _UIHostingView + Alignment
+
+extension _UIHostingView {
+
+    @_spi(Private)
+    @available(OpenSwiftUI_v6_0, *)
+    @available(macOS, unavailable)
+    public func horizontalAlignment(_ guide: HorizontalAlignment) -> CGFloat {
+        alignment(of: guide, at: bounds.size)
+    }
+
+    @_spi(Private)
+    @available(OpenSwiftUI_v6_0, *)
+    @available(macOS, unavailable)
+    public func verticalAlignment(_ guide: VerticalAlignment) -> CGFloat {
+        alignment(of: guide, at: bounds.size)
+    }
+}
+
+// MARK: - _makeUIHostingView
+
+@available(OpenSwiftUI_v2_0, *)
+@available(iOS, unavailable)
+@available(macOS, unavailable)
+@available(tvOS, unavailable)
+@available(visionOS, unavailable)
+public func _makeUIHostingView<Content>(_ view: Content) -> NSObject where Content: View {
+    _UIHostingView(rootView: view)
+}
+
+// MARK: - _UIHostingView + AnyUIHostingView
+
+extension _UIHostingView: AnyUIHostingView {
+    package var debugName: String? {
+        // TODO: UIHostingViewDebugOptions
+        _openSwiftUIUnimplementedWarning()
+        return nil
+    }
+}
+
+#endif

@@ -1,0 +1,10 @@
+PRODUCT_BUNDLE_IDENTIFIER = org.OpenSwiftUIProject.$(OPENSWIFTUI_TARGET_BUNDLE_ID).OpenSwiftUIUITests
+
+CODE_SIGN_ENTITLEMENTS = TestingHost/TestingHost.entitlements
+
+// Remove -module_alias Testing=_Testing_Unavailable
+OTHER_SWIFT_FLAGS = $(OPENSWIFTUI_AVAILABILITY_MACRO)
+
+CLANG_ENABLE_MODULES = YES;
+
+SWIFT_OBJC_BRIDGING_HEADER = Tests/OpenSwiftUIUITests/OpenSwiftUIUITests-Bridging-Header.h

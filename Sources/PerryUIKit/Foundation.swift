@@ -134,6 +134,15 @@ class NSMutableDictionary: NSDictionary {
 class NSNumber: NSObject {
     @ObjCClassMethod("numberWithDouble:")
     static func make(double: Double) -> NSNumber
+
+    @ObjCClassMethod("numberWithUnsignedInt:")
+    static func make(unsignedInt: UInt32) -> NSNumber
+
+    @ObjCMethod("doubleValue")
+    func doubleValue() -> Double
+
+    @ObjCMethod("unsignedIntValue")
+    func unsignedIntValue() -> UInt32
 }
 
 extension NSBundle {

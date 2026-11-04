@@ -138,6 +138,9 @@ enum Dictionaries {
 /// NSDictionary.
 @ObjCClass("NSDictionary")
 public class NSDictionary: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSDictionary__") func isNSDictionary__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)

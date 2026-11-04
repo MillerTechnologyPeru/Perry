@@ -134,3 +134,175 @@ extension NSString {
         return laidOut.size
     }
 }
+
+// MARK: - Attributed strings
+
+@ObjCWrapper("NSAttributedString")
+class NSAttributedString: NSObject {
+    @ObjCMethod("string")
+    func string() -> String
+
+    @ObjCMethod("length")
+    func length() -> UInt
+
+    @ObjCMethod("attributesAtIndex:effectiveRange:")
+    func attributes(at index: UInt, effectiveRange: UnsafeMutableRawPointer?) -> NSDictionary?
+}
+
+final class StringDrawingContextState: ObjectState {
+    var minimumScaleFactor: CGFloat = 0
+    var actualScaleFactor: CGFloat = 1
+    var totalBounds = CGRect.zero
+    var baselineOffset: CGFloat = 0
+    var firstBaselineOffset: CGFloat = 0
+    var scaledLineHeight: CGFloat = 0
+    var scaledBaselineOffset: CGFloat = 0
+    var wrapsForTruncationMode = false
+    var wantsBaselineOffset = false
+    var wantsScaledLineHeight = false
+    var wantsScaledBaselineOffset = false
+    var cachesLayout = false
+    var maximumNumberOfLines = 0
+    var wantsNumberOfLineFragments = false
+    var activeRenderers: UInt = 0
+    var layout: NSObject?
+    var numberOfLineFragments = 0
+    var hasTruncatedRanges = false
+    var linkTextAttributesProvider: ObjCBlock?
+}
+
+/// NSStringDrawingContext: what measuring and drawing a string may do
+/// (scale it down, how many lines), and, after, what it did.
+@ObjCClass("NSStringDrawingContext")
+open class NSStringDrawingContext: NSObject {
+    static let states = StateTable<StringDrawingContextState>()
+    var state: StringDrawingContextState { NSStringDrawingContext.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        NSStringDrawingContext.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSStringDrawingContext.objCClass.pointer)
+    }
+
+    @ObjCMethod("minimumScaleFactor") func minimumScaleFactor() -> CGFloat { state.minimumScaleFactor }
+    @ObjCMethod("setMinimumScaleFactor:") func setMinimumScaleFactor(_ factor: CGFloat) { state.minimumScaleFactor = factor }
+    @ObjCMethod("actualScaleFactor") func actualScaleFactor() -> CGFloat { state.actualScaleFactor }
+    @ObjCMethod("totalBounds") func totalBounds() -> CGRect { state.totalBounds }
+
+    // Private to UIKit, which SwiftUI uses.
+    @ObjCMethod("baselineOffset") func baselineOffset() -> CGFloat { state.baselineOffset }
+    @ObjCMethod("setBaselineOffset:") func setBaselineOffset(_ offset: CGFloat) { state.baselineOffset = offset }
+    @ObjCMethod("firstBaselineOffset") func firstBaselineOffset() -> CGFloat { state.firstBaselineOffset }
+    @ObjCMethod("setFirstBaselineOffset:") func setFirstBaselineOffset(_ offset: CGFloat) { state.firstBaselineOffset = offset }
+    @ObjCMethod("scaledLineHeight") func scaledLineHeight() -> CGFloat { state.scaledLineHeight }
+    @ObjCMethod("setScaledLineHeight:") func setScaledLineHeight(_ height: CGFloat) { state.scaledLineHeight = height }
+    @ObjCMethod("scaledBaselineOffset") func scaledBaselineOffset() -> CGFloat { state.scaledBaselineOffset }
+    @ObjCMethod("setScaledBaselineOffset:") func setScaledBaselineOffset(_ offset: CGFloat) { state.scaledBaselineOffset = offset }
+    @ObjCMethod("wrapsForTruncationMode") func wrapsForTruncationMode() -> Bool { state.wrapsForTruncationMode }
+    @ObjCMethod("setWrapsForTruncationMode:") func setWrapsForTruncationMode(_ value: Bool) { state.wrapsForTruncationMode = value }
+    @ObjCMethod("wantsBaselineOffset") func wantsBaselineOffset() -> Bool { state.wantsBaselineOffset }
+    @ObjCMethod("setWantsBaselineOffset:") func setWantsBaselineOffset(_ value: Bool) { state.wantsBaselineOffset = value }
+    @ObjCMethod("wantsScaledLineHeight") func wantsScaledLineHeight() -> Bool { state.wantsScaledLineHeight }
+    @ObjCMethod("setWantsScaledLineHeight:") func setWantsScaledLineHeight(_ value: Bool) { state.wantsScaledLineHeight = value }
+    @ObjCMethod("wantsScaledBaselineOffset") func wantsScaledBaselineOffset() -> Bool { state.wantsScaledBaselineOffset }
+    @ObjCMethod("setWantsScaledBaselineOffset:") func setWantsScaledBaselineOffset(_ value: Bool) { state.wantsScaledBaselineOffset = value }
+    @ObjCMethod("cachesLayout") func cachesLayout() -> Bool { state.cachesLayout }
+    @ObjCMethod("setCachesLayout:") func setCachesLayout(_ value: Bool) { state.cachesLayout = value }
+    @ObjCMethod("maximumNumberOfLines") func maximumNumberOfLines() -> Int { state.maximumNumberOfLines }
+    @ObjCMethod("setMaximumNumberOfLines:") func setMaximumNumberOfLines(_ lines: Int) { state.maximumNumberOfLines = lines }
+    @ObjCMethod("wantsNumberOfLineFragments") func wantsNumberOfLineFragments() -> Bool { state.wantsNumberOfLineFragments }
+    @ObjCMethod("setWantsNumberOfLineFragments:") func setWantsNumberOfLineFragments(_ value: Bool) { state.wantsNumberOfLineFragments = value }
+    @ObjCMethod("activeRenderers") func activeRenderers() -> UInt { state.activeRenderers }
+    @ObjCMethod("setActiveRenderers:") func setActiveRenderers(_ renderers: UInt) { state.activeRenderers = renderers }
+    @ObjCMethod("layout") func layout() -> NSObject? { state.layout }
+    @ObjCMethod("setLayout:") func setLayout(_ layout: NSObject?) { state.layout = layout }
+    @ObjCMethod("numberOfLineFragments") func numberOfLineFragments() -> Int { state.numberOfLineFragments }
+    @ObjCMethod("hasTruncatedRanges") func hasTruncatedRanges() -> Bool { state.hasTruncatedRanges }
+    @ObjCMethod("linkTextAttributesProvider") func linkTextAttributesProvider() -> ObjCBlock? { state.linkTextAttributesProvider }
+    @ObjCMethod("setLinkTextAttributesProvider:")
+    func setLinkTextAttributesProvider(_ provider: ObjCBlock?) { state.linkTextAttributesProvider = provider }
+}
+
+/// The text's layout, in its first run's font, color and paragraph style:
+/// lines between words, as many as the height and line limit allow, the
+/// last truncated when text is left out.
+private struct AttributedLayout {
+    var lines: [String]
+    var size: CGSize
+    var font: UIFont
+    var color: UIColor
+    var alignment: Int
+    var truncated: Bool
+
+    init(_ string: NSAttributedString, size: CGSize, lineLimit: Int) {
+        let text = string.string()
+        let attributes = string.length() > 0 ? string.attributes(at: 0, effectiveRange: nil) : nil
+        let (font, color) = style(attributes)
+        let paragraph = attributes?.object(forKey: "NSParagraphStyle")?.as(NSParagraphStyle.self)
+        let lineHeight = Text.lineHeight(font)
+        var limit = size.height > 0 && size.height < .greatestFiniteMagnitude ? max(1, Int((size.height / lineHeight).rounded(.down))) : 0
+        if lineLimit > 0 { limit = limit > 0 ? min(limit, lineLimit) : lineLimit }
+        let width = size.width > 0 && size.width < .greatestFiniteMagnitude ? size.width : .greatestFiniteMagnitude
+        let all = Text.lines(text, font: font, width: width, limit: 0)
+        var lines = limit > 0 ? Array(all.prefix(limit)) : all
+        let truncated = lines.count < all.count
+        if truncated, let last = lines.indices.last, width < .greatestFiniteMagnitude {
+            lines[last] = Text.truncated(lines[last] + " " + all[lines.count...].joined(separator: " "), font: font, width: width)
+        }
+        let measured = lines.map { Text.size($0, font: font).width }.max() ?? 0
+        self.lines = lines
+        self.font = font
+        self.color = color
+        // NSTextAlignment: natural 4 is left.
+        self.alignment = paragraph.map { $0.state.alignment == 4 ? 0 : $0.state.alignment } ?? 0
+        self.truncated = truncated
+        self.size = CGSize(width: min(measured, width), height: CGFloat(max(lines.count, 1)) * lineHeight)
+    }
+
+    /// What drawing reports to its context.
+    func report(to context: NSStringDrawingContext?) {
+        guard let state = context?.state else { return }
+        let lineHeight = Text.lineHeight(font)
+        state.numberOfLineFragments = lines.count
+        state.hasTruncatedRanges = truncated
+        state.actualScaleFactor = 1
+        state.totalBounds = CGRect(origin: .zero, size: size)
+        state.firstBaselineOffset = font.ascender()
+        state.baselineOffset = CGFloat(max(lines.count - 1, 0)) * lineHeight + font.ascender()
+    }
+}
+
+@ObjCCategory("NSExtendedStringDrawing")
+extension NSAttributedString {
+    @ObjCMethod("size")
+    func size() -> CGSize { AttributedLayout(self, size: .zero, lineLimit: 1).size }
+
+    /// NSStringDrawingOptions: uses line fragment origin 1 lays the text out
+    /// in lines; otherwise it is one line.
+    @ObjCMethod("boundingRectWithSize:options:context:")
+    func boundingRect(with size: CGSize, options: Int, context: NSStringDrawingContext?) -> CGRect {
+        let lineLimit = options & 1 == 0 ? 1 : context?.state.maximumNumberOfLines ?? 0
+        let layout = AttributedLayout(self, size: size, lineLimit: lineLimit)
+        layout.report(to: context)
+        return CGRect(origin: .zero, size: layout.size)
+    }
+
+    @ObjCMethod("drawWithRect:options:context:")
+    func draw(with rect: CGRect, options: Int, context: NSStringDrawingContext?) {
+        let lineLimit = options & 1 == 0 ? 1 : context?.state.maximumNumberOfLines ?? 0
+        let layout = AttributedLayout(self, size: rect.size, lineLimit: lineLimit)
+        layout.report(to: context)
+        drawLines(layout.lines, in: rect, font: layout.font, color: layout.color, alignment: layout.alignment)
+    }
+
+    @ObjCMethod("drawAtPoint:")
+    func draw(at point: CGPoint) {
+        let layout = AttributedLayout(self, size: .zero, lineLimit: 1)
+        drawLines(layout.lines, in: CGRect(origin: point, size: layout.size), font: layout.font, color: layout.color, alignment: 0)
+    }
+
+    @ObjCMethod("drawInRect:")
+    func draw(in rect: CGRect) {
+        draw(with: rect, options: 1, context: nil)
+    }
+}

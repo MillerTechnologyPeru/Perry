@@ -55,4 +55,5 @@ enum AppearanceProxies {
 func providerDidStart(_ info: perry_startup_info) {
     AppearanceProxies.install(on: UIView.objCClass)
     AppearanceProxies.install(on: UIBarItem.objCClass)
+    RendererContexts.install()
 }

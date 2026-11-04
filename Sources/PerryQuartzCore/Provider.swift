@@ -40,7 +40,12 @@ enum StructureConstants {
             storage.initialize(to: value)
             return UnsafeMutableRawPointer(storage)
         }
-        return ["_CATransform3DIdentity": value(CATransform3D.identity)]
+        return [
+            "_CATransform3DIdentity": value(CATransform3D.identity),
+            // CAFrameRateRange: minimum, maximum, preferred; all zero for the
+            // display's own rate.
+            "_CAFrameRateRangeDefault": value((Float(0), Float(0), Float(0))),
+        ]
     }()
 }
 

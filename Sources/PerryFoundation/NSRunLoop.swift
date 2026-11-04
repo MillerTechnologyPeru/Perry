@@ -157,6 +157,13 @@ final class RunLoopState {
                     stopRequested = false
                     return nil
                 }
+                // A timer invalidated without the run loop hearing of it
+                // would otherwise come due forever.
+                let invalid = timers.filter { !Timers.isValid($0) }
+                if !invalid.isEmpty {
+                    timers.removeAll { !Timers.isValid($0) }
+                    invalid.forEach { ObjC.release($0) }
+                }
                 let due = timers.min { Timers.fireDate($0) < Timers.fireDate($1) }
                 return (due, due.map(Timers.fireDate) ?? .infinity)
             }
@@ -300,9 +307,10 @@ public final class NSRunLoop: NSObject {
     @ObjCMethod("currentMode")
     func currentMode() -> UnsafeMutableRawPointer? { RunLoopModes.NSDefaultRunLoopModeObject }
 
+    /// The timer records the run loop, so invalidating it takes it out.
     @ObjCMethod("addTimer:forMode:")
     func add(_ timer: ObjCObject, forMode mode: ObjCObject?) {
-        if Timers.isValid(timer.id) { state?.add(timer.id) }
+        if let state, Timers.isValid(timer.id) { Timers.add(timer.id, to: state) }
     }
 
     /// Runs a block on the loop's next pass; the loop runs one mode here.
@@ -377,6 +385,13 @@ public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Doub
                                _ returnAfterSourceHandled: Bool) -> Int32 {
     RunLoops.current.run(until: absoluteTimeNow() + seconds,
                          returnAfterSourceHandled: returnAfterSourceHandled).rawValue
+}
+
+/// The mode the run loop is running in, +1: the default mode, the only
+/// one run loops here run in.
+@c(_CFRunLoopCopyCurrentMode)
+public func CFRunLoopCopyCurrentMode(_ loop: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    ObjC.retain(RunLoopModes.NSDefaultRunLoopModeObject)
 }
 
 @c(_CFRunLoopStop)

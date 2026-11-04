@@ -78,6 +78,11 @@ open class CATransaction: NSObject {
 
     @ObjCClassMethod("disableActions")
     static func disableActions() -> Bool { (stack.last ?? implicit).values["disableActions"].map { $0.sendBoolValue() } ?? false }
+    /// Core Animation's private switch to a background thread's context:
+    /// transactions here are one tree's, whatever the thread.
+    @ObjCClassMethod("activateBackground:")
+    static func activateBackground(_ activate: Bool) {}
+
     @ObjCClassMethod("setDisableActions:")
     static func setDisableActions(_ disable: Bool) { current.values["disableActions"] = NSNumber.make(bool: disable) }
 

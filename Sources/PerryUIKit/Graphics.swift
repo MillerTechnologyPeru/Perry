@@ -307,3 +307,30 @@ open class UIGraphicsImageRenderer: UIGraphicsRenderer {
         return UIImage.encode(rendered.image.object, type: "public.jpeg", properties: properties)
     }
 }
+
+/// UIGraphicsRenderer's private -pushContext: and -popContext:, which make
+/// a graphics context object's CGContext current and restore the one
+/// before. Callers take the implementations and call them with no
+/// receiver, so they are C functions that do not use one.
+enum RendererContexts {
+    typealias Function = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Bool
+
+    nonisolated(unsafe) static let push: Function = { _, _, context in
+        guard let context else { return false }
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let cgContext = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)(context, ObjCRuntime.selector("CGContext"))
+        UIGraphicsPushContext(cgContext)
+        return cgContext != nil
+    }
+
+    nonisolated(unsafe) static let pop: Function = { _, _, _ in
+        UIGraphicsPopContext()
+        return true
+    }
+
+    static func install() {
+        let renderer = UIGraphicsRenderer.objCClass
+        renderer.addMethod("pushContext:", types: "B24@0:8@16", implementation: unsafeBitCast(push, to: UnsafeRawPointer.self), isClassMethod: false)
+        renderer.addMethod("popContext:", types: "B24@0:8@16", implementation: unsafeBitCast(pop, to: UnsafeRawPointer.self), isClassMethod: false)
+    }
+}

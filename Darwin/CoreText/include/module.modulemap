@@ -1,0 +1,4 @@
+module _CoreTextPrivate {
+    header "CTAdaptiveImageGlyph.h"
+    export *
+}

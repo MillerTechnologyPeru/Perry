@@ -1,0 +1,450 @@
+import Foundation
+import Testing
+import _ComputeTestSupport
+
+@Suite
+struct SubgraphTests {
+    @Suite
+    struct CFTypeTests {
+        @Test
+        func typeID() {
+            #if os(Linux)
+            let description = String(cfString: CFCopyTypeIDDescription(Subgraph.typeID))
+            #else
+            let description = CFCopyTypeIDDescription(Subgraph.typeID) as String?
+            #endif
+            #if COMPATIBILITY_TESTS
+            #expect(description == "AGSubgraph")
+            #else
+            #expect(description == "IAGSubgraph")
+            #endif
+        }
+
+        @Test
+        func createSubgraph() async throws {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+            #expect(CFGetTypeID(subgraph) == Subgraph.typeID)
+        }
+    }
+
+    @Suite
+    struct ObserverTests {
+        @Test
+        func observerNotifiedOnSubgraphDestroyed() {
+            var notifiedCount = 0
+            autoreleasepool {
+                let graph = Graph()
+
+                autoreleasepool {
+                    let subgraph = Subgraph(graph: graph)
+                    let _ = subgraph.addObserver {
+                        notifiedCount += 1
+                    }
+                }
+
+                #expect(notifiedCount == 1)
+            }
+
+            // Observers aren't notified more than once
+            #expect(notifiedCount == 1)
+        }
+
+        @Test
+        func observerNotifiedOnGraphDestroyed() {
+            var notifiedCount = 0
+            autoreleasepool {
+                let graph = Graph()
+                let subgraph = Subgraph(graph: graph)
+                let _ = subgraph.addObserver {
+                    notifiedCount += 1
+                }
+
+                #expect(notifiedCount == 0)
+            }
+
+            #expect(notifiedCount == 1)
+        }
+
+        @Test
+        func removedObserverNotNotified() {
+            var notifiedCount = 0
+            autoreleasepool {
+                let graph = Graph()
+                let subgraph = Subgraph(graph: graph)
+                let observerID = subgraph.addObserver {
+                    notifiedCount += 1
+                }
+                subgraph.removeObserver(observerID)
+            }
+
+            #expect(notifiedCount == 0)
+        }
+
+        @Test
+        func removeObserverAfterInvalidation() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+            var notifiedCount = 0
+            let observerID = subgraph.addObserver {
+                notifiedCount += 1
+            }
+
+            subgraph.invalidate()
+            subgraph.removeObserver(observerID)
+
+            #expect(subgraph.isValid == false)
+            #expect(notifiedCount == 1)
+        }
+
+        @Test
+        func removeObserverDuringInvalidation() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+            var notifiedCount = 0
+            var observerID = 0
+            observerID = subgraph.addObserver {
+                notifiedCount += 1
+                subgraph.removeObserver(observerID)
+            }
+
+            subgraph.invalidate()
+
+            #expect(subgraph.isValid == false)
+            #expect(notifiedCount == 1)
+        }
+    }
+
+    @Suite
+    struct InvalidationTests {
+        @Test
+        func invalidateSubgraph() throws {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            var notifiedCount = 0
+            let _ = subgraph.addObserver {
+                notifiedCount += 1
+            }
+
+            #expect(subgraph.isValid == true)
+            #expect(graph.counter(for: .subgraphs) == 1)
+            #expect(notifiedCount == 0)
+
+            subgraph.invalidate()
+
+            #expect(subgraph.isValid == false)
+            #expect(graph.counter(for: .subgraphs) == 0)
+            #expect(notifiedCount == 1)
+        }
+
+        @Test
+        func deferredInvalidateSubgraph() throws {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            var notifiedCount = 0
+            let _ = subgraph.addObserver {
+                notifiedCount += 1
+            }
+
+            #expect(subgraph.isValid == true)
+            #expect(graph.counter(for: .subgraphs) == 1)
+            #expect(notifiedCount == 0)
+
+            let wasDeferring = graph.beginDeferringSubgraphInvalidation()
+
+            subgraph.invalidate()
+
+            #expect(subgraph.isValid == false)
+            #expect(graph.counter(for: .subgraphs) == 1)  // Subgraph not removed until batch end
+            #expect(notifiedCount == 0)
+
+            graph.endDeferringSubgraphInvalidation(wasDeferring: wasDeferring)
+
+            #expect(subgraph.isValid == false)
+            #expect(graph.counter(for: .subgraphs) == 0)
+            #expect(notifiedCount == 1)
+        }
+
+        @Test
+        func subgraphInvalidatedOnGraphDestroyed() throws {
+            var subgraphOrNil: Subgraph? = nil
+            try autoreleasepool {
+                let graph = Graph()
+                subgraphOrNil = Subgraph(graph: graph)
+
+                let subgraph = try #require(subgraphOrNil)
+                #expect(subgraph.isValid == true)
+            }
+
+            let subgraph = try #require(subgraphOrNil)
+            #expect(subgraph.isValid == false)
+        }
+    }
+
+    @Suite
+    struct CurrentSubgraph {
+        @Test
+        func currentSubgraph() {
+            #expect(Subgraph.current == nil)
+
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+            Subgraph.current = subgraph
+            #expect(Subgraph.current == subgraph)
+
+            Subgraph.current = nil
+            #expect(Subgraph.current == nil)
+        }
+
+        @Test
+        func invalidateCurrentSubgraph() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+            Subgraph.current = subgraph
+
+            subgraph.invalidate()
+            #expect(Subgraph.current == nil)
+        }
+    }
+
+    @Suite
+    struct ChildrenTests {
+        @Test
+        func child() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            #expect(subgraph.childCount == 0)
+
+            let child = Subgraph(graph: graph)
+            subgraph.addChild(child)
+
+            #expect(subgraph.childCount == 1)
+            #expect(subgraph.child(at: 0, tag: nil) == child)
+            #expect(subgraph.isAncestor(of: child) == true)
+            #expect(child.parentCount == 1)
+            #expect(child.parent(at: 0) == subgraph)
+
+            subgraph.removeChild(child)
+
+            #expect(subgraph.childCount == 0)
+            #expect(subgraph.isAncestor(of: child) == false)
+            #expect(child.parentCount == 0)
+        }
+
+        @Test
+        func multipleChildren() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            #expect(subgraph.childCount == 0)
+
+            let child1 = Subgraph(graph: graph)
+            subgraph.addChild(child1)
+
+            let child2 = Subgraph(graph: graph)
+            subgraph.addChild(child2)
+
+            #expect(subgraph.childCount == 2)
+            #expect(subgraph.child(at: 0, tag: nil) == child1)
+            #expect(subgraph.child(at: 1, tag: nil) == child2)
+            #expect(subgraph.isAncestor(of: child1) == true)
+            #expect(subgraph.isAncestor(of: child2) == true)
+            #expect(child1.parentCount == 1)
+            #expect(child1.parent(at: 0) == subgraph)
+            #expect(child2.parentCount == 1)
+            #expect(child2.parent(at: 0) == subgraph)
+
+            subgraph.removeChild(child1)
+
+            #expect(subgraph.childCount == 1)
+            #expect(subgraph.child(at: 0, tag: nil) == child2)
+            #expect(subgraph.isAncestor(of: child1) == false)
+            #expect(subgraph.isAncestor(of: child2) == true)
+            #expect(child1.parentCount == 0)
+            #expect(child2.parentCount == 1)
+            #expect(child2.parent(at: 0) == subgraph)
+
+            subgraph.removeChild(child2)
+
+            #expect(subgraph.childCount == 0)
+            #expect(subgraph.isAncestor(of: child1) == false)
+            #expect(subgraph.isAncestor(of: child2) == false)
+            #expect(child1.parentCount == 0)
+            #expect(child2.parentCount == 0)
+        }
+
+        @Test
+        func multipleParents() {
+            let graph = Graph()
+            let parent1 = Subgraph(graph: graph)
+            let parent2 = Subgraph(graph: graph)
+
+            let child = Subgraph(graph: graph)
+            parent1.addChild(child)
+            parent2.addChild(child)
+
+            #expect(parent1.childCount == 1)
+            #expect(parent1.child(at: 0, tag: nil) == child)
+            #expect(parent1.isAncestor(of: child) == true)
+            #expect(parent2.childCount == 1)
+            #expect(parent2.child(at: 0, tag: nil) == child)
+            #expect(parent2.isAncestor(of: child) == true)
+            #expect(child.parentCount == 2)
+            #expect(child.parent(at: 0) == parent1)
+            #expect(child.parent(at: 1) == parent2)
+
+            parent1.removeChild(child)
+
+            #expect(parent1.childCount == 0)
+            #expect(parent1.isAncestor(of: child) == false)
+            #expect(parent2.childCount == 1)
+            #expect(parent2.child(at: 0, tag: nil) == child)
+            #expect(parent2.isAncestor(of: child) == true)
+            #expect(child.parentCount == 1)
+            #expect(child.parent(at: 0) == parent2)
+
+            parent2.removeChild(child)
+
+            #expect(parent1.childCount == 0)
+            #expect(parent1.isAncestor(of: child) == false)
+            #expect(parent2.childCount == 0)
+            #expect(parent2.isAncestor(of: child) == false)
+            #expect(child.parentCount == 0)
+
+        }
+
+        @Test(arguments: [0, 1, 2, 3])
+        func childWithTag(_ tag: Int) {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            let child = Subgraph(graph: graph)
+            subgraph.addChild(child, tag: UInt8(tag))
+
+            var storedTag: Int = 0
+            subgraph.child(at: 0, tag: &storedTag)
+            #expect(storedTag == tag)
+        }
+
+        @Test
+        func childWithInvalidTag() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            let child = Subgraph(graph: graph)
+            subgraph.addChild(child, tag: UInt8.max)
+
+            var storedTag: Int = 0
+            subgraph.child(at: 0, tag: &storedTag)
+            #expect(storedTag == 3)  // Only lowest 2 bits stored
+        }
+
+        @Test
+        func invalidatingSubgraphInvalidatesChildren() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            let child = Subgraph(graph: graph)
+            subgraph.addChild(child)
+
+            #expect(subgraph.isValid == true)
+            #expect(child.isValid == true)
+
+            subgraph.invalidate()
+
+            #expect(subgraph.isValid == false)
+            #expect(child.isValid == false)
+        }
+        
+        @Test
+        func ancestorOfTraversesParentsOfAllIntermediateSubgraphs() {
+            let graph = Graph()
+            let root1 = Subgraph(graph: graph)
+            let root2 = Subgraph(graph: graph)
+            let intermediate = Subgraph(graph: graph)
+            let child = Subgraph(graph: graph)
+
+            root1.addChild(intermediate)
+            root2.addChild(intermediate)
+            intermediate.addChild(child)
+
+            #expect(intermediate.parentCount == 2)
+            #expect(child.parentCount == 1)
+
+            #expect(root1.isAncestor(of: child) == true)
+            #expect(root2.isAncestor(of: child) == true)
+        }
+    }
+
+    @Suite
+    struct FlagsTests {
+        @Test
+        func intersects() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            let child = Subgraph(graph: graph)
+            subgraph.addChild(child)
+
+            Subgraph.current = child
+
+            let attribute = Attribute(value: 1)
+            #expect(subgraph.intersects(flags: Subgraph.Flags(rawValue: 1)) == false)
+            #expect(child.intersects(flags: Subgraph.Flags(rawValue: 1)) == false)
+
+            attribute.flags = Subgraph.Flags(rawValue: 1)
+            #expect(subgraph.intersects(flags: Subgraph.Flags(rawValue: 1)) == true)
+            #expect(child.intersects(flags: Subgraph.Flags(rawValue: 1)) == true)
+        }
+    }
+
+    @Suite
+    struct ForEachTests {
+        @Test
+        func forEachDoesNotRetainNonEscapingClosureContext() {
+            let graph = Graph()
+            let subgraph = Subgraph(graph: graph)
+
+            Subgraph.current = subgraph
+            defer { Subgraph.current = nil }
+
+            let attribute = Attribute(value: 1)
+            attribute.flags = Subgraph.Flags(rawValue: 1)
+
+            // Retaining a non-escaping closure context reads its uninitialized header. Fill the stack
+            // with garbage from a sibling frame so the header that forEach's closure context later
+            // occupies is non-zero, which makes the retain crash.
+            fillStackWithGarbage()
+            let (visitedCount, unexpectedCount) = countAttributes(in: subgraph, matching: attribute.identifier)
+
+            #expect(visitedCount == 1)
+            #expect(unexpectedCount == 0)
+        }
+
+        @inline(never)
+        func fillStackWithGarbage() {
+            var garbage = (UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0))
+            withUnsafeMutableBytes(of: &garbage) { bytes in
+                bytes.initializeMemory(as: UInt8.self, repeating: 0xAF)
+            }
+        }
+
+        @inline(never)
+        func countAttributes(in subgraph: Subgraph, matching expected: AnyAttribute) -> (Int, Int) {
+            // Capturing several values makes the closure context a stack-allocated struct.
+            var visitedCount = 0
+            var unexpectedCount = 0
+            subgraph.forEach(Subgraph.Flags(rawValue: 1)) { attribute in
+                if attribute == expected {
+                    visitedCount += 1
+                } else {
+                    unexpectedCount += 1
+                }
+            }
+            return (visitedCount, unexpectedCount)
+        }
+    }
+}

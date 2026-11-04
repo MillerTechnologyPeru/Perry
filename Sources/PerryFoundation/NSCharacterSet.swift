@@ -439,6 +439,35 @@ extension NSString {
         return NSRange(location: UInt(Int.max), length: 0)
     }
 
+    @ObjCMethod("rangeOfCharacterFromSet:options:")
+    func rangeOfCharacter(from set: NSCharacterSet, options: UInt) -> NSRange {
+        rangeOfCharacter(from: set, options: options, range: NSRange(location: 0, length: UInt(value.utf16.count)))
+    }
+
+    /// The first (or with the backwards option 4, the last) character of
+    /// the set in the range; with the anchored option 8, only at the
+    /// range's start (or end).
+    @ObjCMethod("rangeOfCharacterFromSet:options:range:")
+    func rangeOfCharacter(from set: NSCharacterSet, options: UInt, range: NSRange) -> NSRange {
+        let contains = set.contains
+        let lower = Int(range.location), upper = lower + Int(range.length)
+        var found: [(offset: Int, width: Int)] = []
+        var offset = 0
+        for scalar in value.unicodeScalars {
+            let width = scalar.utf16.count
+            if offset >= upper { break }
+            if offset >= lower { found.append((offset, contains(scalar) ? width : 0)) }
+            offset += width
+        }
+        let backwards = options & 4 != 0, anchored = options & 8 != 0
+        let candidates = backwards ? Array(found.reversed()) : found
+        for (index, candidate) in candidates.enumerated() {
+            if candidate.width > 0 { return NSRange(location: UInt(candidate.offset), length: UInt(candidate.width)) }
+            if anchored && index == 0 { break }
+        }
+        return NSRange(location: UInt(Int.max), length: 0)
+    }
+
     /// The path as the file system takes it: UTF-8.
     @ObjCMethod("fileSystemRepresentation")
     func fileSystemRepresentation() -> UnsafePointer<CChar>? { Strings.utf8(objcObject) }

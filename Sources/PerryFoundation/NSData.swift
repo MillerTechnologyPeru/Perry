@@ -161,6 +161,9 @@ private func base64(_ data: Data, options: UInt) -> String {
 /// NSData.
 @ObjCClass("NSData")
 public class NSData: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSData__") func isNSData__() -> Bool { true }
+
     /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)

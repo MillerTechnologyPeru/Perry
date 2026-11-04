@@ -1,0 +1,38 @@
+module OpenRenderBoxCxx {
+    export *
+}
+
+module OpenRenderBoxCxx.C {
+    umbrella header "OpenRenderBox/OpenRenderBox.h"
+    export *
+}
+
+module OpenRenderBoxCxx.Color {
+    requires cplusplus
+    umbrella "OpenRenderBoxCxx/Color"
+    export *
+}
+
+module OpenRenderBoxCxx.Animation {
+    requires cplusplus
+    umbrella "OpenRenderBoxCxx/Animation"
+    export *
+}
+
+module OpenRenderBoxCxx.Path {
+    requires cplusplus
+    umbrella "OpenRenderBoxCxx/Path"
+    export *
+}
+
+module OpenRenderBoxCxx.Util {
+    requires cplusplus
+    umbrella "OpenRenderBoxCxx/Util"
+    export *
+}
+
+module OpenRenderBoxCxx.ObjC {
+    requires objc
+    umbrella "OpenRenderBoxObjC"
+    export *
+}

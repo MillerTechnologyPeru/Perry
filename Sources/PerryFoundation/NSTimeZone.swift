@@ -61,6 +61,9 @@ enum TimeZones {
 /// NSTimeZone.
 @ObjCClass("NSTimeZone")
 public final class NSTimeZone: NSObject {
+    /// What the Swift runtime asks to tell Foundation's classes apart.
+    @ObjCMethod("isNSTimeZone__") func isNSTimeZone__() -> Bool { true }
+
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         TimeZones.zoneClass = cls.storage

@@ -1,0 +1,855 @@
+#include "Metadata.h"
+
+#if TARGET_OS_MAC
+#include <CoreFoundation/CFString.h>
+#else
+#include <SwiftCorelibsCoreFoundation/CFString.h>
+#endif
+#include <ranges>
+#include <swift/Runtime/Casting.h>
+#include <swift/Runtime/ExistentialContainer.h>
+#include <swift/Runtime/HeapObject.h>
+
+#include <Utilities/HashTable.h>
+#include <Utilities/Heap.h>
+#include <platform/image.h>
+#include <platform/lock.h>
+#include <platform/sha.h>
+
+#include "ContextDescriptor.h"
+#include "Errors/Errors.h"
+#include "MetadataVisitor.h"
+#include "_SwiftStdlibCxxOverlay.h"
+
+namespace IAG {
+namespace swift {
+
+#pragma mark - Metadata
+
+const char *metadata::name(bool qualified) const {
+    auto result = swift_getTypeName(this, qualified);
+    return result.data;
+};
+
+const context_descriptor *_Nullable metadata::descriptor() const {
+    switch (getKind()) {
+    case ::swift::MetadataKind::Class: {
+        if (is_type_metadata()) {
+            const auto *const class_type = static_cast<const ::swift::ClassMetadata *>(base());
+            return reinterpret_cast<const context_descriptor *>(class_type->getDescription());
+        }
+        return nullptr;
+    }
+    case ::swift::MetadataKind::Struct:
+    case ::swift::MetadataKind::Enum:
+    case ::swift::MetadataKind::Optional: {
+        const auto *descriptor = static_cast<const ::swift::TargetValueMetadata<::swift::InProcess> *>(base())->Description;
+        return reinterpret_cast<const context_descriptor *>(descriptor);
+    }
+    default:
+        return nullptr;
+    }
+}
+
+const type_context_descriptor *_Nullable metadata::nominal_descriptor() const {
+    const auto *result = descriptor();
+    if (!result) {
+        return nullptr;
+    }
+    switch (result->getKind()) {
+    case ::swift::ContextDescriptorKind::Struct:
+    case ::swift::ContextDescriptorKind::Enum:
+        return reinterpret_cast<const type_context_descriptor *>(result);
+    default:
+        return nullptr;
+    }
+};
+
+struct parent_info {
+    const char *name;
+    uint64_t generic_args_end;
+};
+
+void metadata::append_description(CFMutableStringRef description) const {
+    // Append function signature
+    if (const auto *functiom_metadata = llvm::dyn_cast<::swift::FunctionTypeMetadata>(base())) {
+        CFStringAppendCString(description, "(", kCFStringEncodingUTF8);
+        size_t num_parameters = functiom_metadata->getNumParameters();
+        for (int i = 0; i < num_parameters; i++) {
+            if (i > 0) {
+                CFStringAppendCString(description, ", ", kCFStringEncodingUTF8);
+            }
+            const auto *parameter = functiom_metadata->getParameter(i);
+            if (parameter) {
+                metadata::from_base(parameter)->append_description(description);
+            } else {
+                CFStringAppendCString(description, "nil", kCFStringEncodingUTF8);
+            }
+        }
+        CFStringAppendCString(description, ")", kCFStringEncodingUTF8);
+
+        CFStringAppendCString(description, " -> ", kCFStringEncodingUTF8);
+
+        if (!functiom_metadata->ResultType) {
+            CFStringAppendCString(description, "nil", kCFStringEncodingUTF8);
+            return;
+        }
+
+        metadata::from_base(functiom_metadata->ResultType)->append_description(description);
+        return;
+    }
+
+    // Append tuple signature
+    if (const auto *tuple_metadata = llvm::dyn_cast<::swift::TupleTypeMetadata>(base())) {
+        if (tuple_metadata->NumElements) {
+            CFStringAppendCString(description, "(", kCFStringEncodingUTF8);
+            for (int i = 0; i < tuple_metadata->NumElements; i++) {
+                if (i > 0) {
+                    CFStringAppendCString(description, ", ", kCFStringEncodingUTF8);
+                }
+                auto element = tuple_metadata->getElement(i);
+                if (element.Type) {
+                    metadata::from_base(element.Type)->append_description(description);
+                } else {
+                    CFStringAppendCString(description, "nil", kCFStringEncodingUTF8);
+                }
+            }
+            CFStringAppendCString(description, ")", kCFStringEncodingUTF8);
+        } else {
+            CFStringAppendCString(description, "Void", kCFStringEncodingUTF8);
+        }
+        return;
+    }
+
+    // Collect all parent types
+    vector<parent_info, 8, uint64_t> all_parents = {};
+    for (const auto *parent = descriptor(); parent != nullptr; parent = parent->parent()) {
+        if (const auto *nominal_parent = llvm::dyn_cast<::swift::TypeContextDescriptor>(parent->base())) {
+            const char *name = nominal_parent->Name.get();
+            uint64_t total_generic_args = parent->count_generic_args();
+            all_parents.push_back({name, total_generic_args});
+        }
+    }
+    if (all_parents.empty()) {
+        all_parents.push_back({
+            name(false),
+            0,
+        });
+    }
+
+    // Append the type name, starting from the outermost parent type
+    vector<context_descriptor::generic_arg, 8, uint64_t> generic_args = {};
+    if (const auto *metadata_descriptor = descriptor()) {
+        metadata_descriptor->push_generic_args(*this, generic_args);
+    }
+    if (all_parents.size()) {
+        uint64_t generic_args_start = 0;
+        uint64_t index = all_parents.size();
+        for (auto &parent : std::ranges::reverse_view(all_parents)) {
+            --index;
+            CFStringAppendCString(description, parent.name, kCFStringEncodingUTF8);
+            if (parent.generic_args_end != generic_args_start) {
+                CFStringAppendCString(description, "<", kCFStringEncodingUTF8);
+                for (uint64_t i = generic_args_start; i < parent.generic_args_end; i++) {
+                    if (i > generic_args_start) {
+                        CFStringAppendCString(description, ", ", kCFStringEncodingUTF8);
+                    }
+                    context_descriptor::generic_arg arg = generic_args[i];
+                    if (arg.is_pack) {
+                        CFStringAppendCString(description, "Pack{", kCFStringEncodingUTF8);
+                    }
+                    for (int j = 0; j < arg.num_types; j++) {
+                        if (j > 0) {
+                            CFStringAppendCString(description, ", ", kCFStringEncodingUTF8);
+                        }
+                        if (arg.is_pack) {
+                            // types points to an array of metadata pointers
+                            const auto *pack_types = reinterpret_cast<const metadata *const *>(arg.types);
+                            pack_types[j]->append_description(description);
+                        } else {
+                            arg.types[j].append_description(description);
+                        }
+                    }
+                    if (arg.is_pack) {
+                        CFStringAppendCString(description, "}", kCFStringEncodingUTF8);
+                    }
+                }
+                CFStringAppendCString(description, ">", kCFStringEncodingUTF8);
+            }
+            if (index > 0) {
+                CFStringAppendCString(description, ".", kCFStringEncodingUTF8);
+            }
+            generic_args_start = parent.generic_args_end;
+        }
+    }
+}
+
+namespace {
+
+class TypeSignatureCache {
+  private:
+    platform_lock _lock;
+    util::Table<const metadata *, const unsigned char *> _table;
+
+  public:
+    TypeSignatureCache() : _lock(PLATFORM_LOCK_INIT), _table() {};
+
+    void lock() { platform_lock_lock(&_lock); };
+    void unlock() { platform_lock_unlock(&_lock); };
+
+    const unsigned char *lookup(const metadata *type, const metadata **_Nullable found) {
+        return _table.lookup(type, found);
+    }
+
+    bool insert(const metadata *type, const unsigned char *signature) { return _table.insert(type, signature); }
+};
+
+} // namespace
+
+const void *metadata::signature() const {
+    static TypeSignatureCache *cache = new TypeSignatureCache();
+
+    const metadata *found = nullptr;
+    cache->lock();
+    const unsigned char *signature = cache->lookup(this, &found);
+    cache->unlock();
+    if (found) {
+        return signature;
+    }
+
+    auto metadata_queue = vector<const metadata *, 8, uint64_t>();
+    auto generic_args = vector<context_descriptor::generic_arg, 8, uint64_t>();
+    auto descriptors = vector<const context_descriptor *, 8, uint64_t>();
+
+    metadata_queue.push_back(this);
+
+    while (metadata_queue.size() > 0) {
+        const auto *metadata = metadata_queue.back();
+        metadata_queue.pop_back();
+
+        generic_args.clear();
+
+        const auto *descriptor = metadata->descriptor();
+        if (descriptor) {
+            descriptors.push_back(descriptor);
+            descriptor->push_generic_args(*metadata, generic_args);
+        }
+        for (auto generic_arg : generic_args) {
+            for (int i = 0; i < generic_arg.num_types; i++) {
+                if (generic_arg.is_pack) {
+                    // types points to an array of metadata pointers
+                    const auto *pack_types = reinterpret_cast<const IAG::swift::metadata *const *>(generic_arg.types);
+                    for (int j = 0; j < generic_arg.num_types; j++) {
+                        metadata_queue.push_back(pack_types[j]);
+                    }
+                } else {
+                    metadata_queue.push_back(&generic_arg.types[i]);
+                }
+            }
+        }
+    }
+
+    if (descriptors.size()) {
+        auto context = PLATFORM_SHA1_CTX();
+        PLATFORM_SHA1_Init(&context);
+
+        const char prefix[] = "IAGTypeSignature";
+        PLATFORM_SHA1_Update(&context, prefix, sizeof(prefix));
+
+        auto infos = vector<platform_image_info_t, 8, uint64_t>();
+        infos.reserve(descriptors.size());
+
+        platform_image_infos_for_addresses((unsigned)descriptors.size(),
+                                           static_cast<const void *[]>(descriptors.data()), infos.data());
+
+        for (auto info : infos) {
+            PLATFORM_SHA1_Update(&context, info.identifier, sizeof(((platform_image_info_t *)nullptr)->identifier));
+            PLATFORM_SHA1_Update(&context, &info.offset, sizeof(((platform_image_info_t *)nullptr)->offset));
+        }
+
+        auto *digest = new unsigned char[PLATFORM_SHA1_DIGEST_LENGTH];
+        PLATFORM_SHA1_Final(digest, &context);
+
+        signature = digest;
+    } else {
+        signature = nullptr;
+    }
+
+    cache->lock();
+    cache->insert(this, signature);
+    cache->unlock();
+
+    return signature;
+}
+
+const equatable_witness_table *metadata::equatable() const {
+    switch (getKind()) {
+    case ::swift::MetadataKind::Class: {
+#if TARGET_OS_MAC
+        static const equatable_witness_table *nsobject_conformance = []() -> const equatable_witness_table * {
+            Class nsobject = objc_getClass("NSObject");
+            if (!nsobject) {
+                return nullptr;
+            }
+            const auto *nsobject_metadata = swift_getObjCClassMetadata(reinterpret_cast<::swift::ClassMetadata *>(nsobject));
+            if (!nsobject_metadata) {
+                return nullptr;
+            }
+            const auto *witness_table = swift_conformsToProtocol(nsobject_metadata, &EquatableProtocolDescriptor);
+            return reinterpret_cast<const equatable_witness_table *>(witness_table);
+        }();
+#endif
+        const auto *conformance = reinterpret_cast<const equatable_witness_table *>(
+            swift_conformsToProtocol(this, &EquatableProtocolDescriptor));
+#if TARGET_OS_MAC
+        if (conformance == nsobject_conformance) {
+            return nullptr;
+        }
+#endif
+        return conformance;
+    }
+    case ::swift::MetadataKind::Struct:
+    case ::swift::MetadataKind::Enum:
+    case ::swift::MetadataKind::Optional:
+    case ::swift::MetadataKind::Tuple: {
+        const auto *witness_table = swift_conformsToProtocol(this, &EquatableProtocolDescriptor);
+        return reinterpret_cast<const equatable_witness_table *>(witness_table);
+    }
+    default:
+        return nullptr;
+    }
+}
+
+#pragma mark Mutating objects
+
+void metadata::copy_on_write_heap_object(void **object_ref) const {
+    if (::swift::swift_isUniquelyReferencedNonObjC(*object_ref)) {
+        return;
+    }
+
+    assert(::swift::isHeapMetadataKind(getKind()));
+    const auto *heap_metadata = reinterpret_cast<const ::swift::HeapMetadata *>(this);
+
+    ::swift::HeapObject *copy =
+        ::swift::swift_allocObject(heap_metadata, vw_size(), getValueWitnesses()->getAlignmentMask());
+    vw_initializeWithCopy(reinterpret_cast<opaque_value *>(copy), reinterpret_cast<opaque_value *>(*object_ref));
+    ::swift::swift_release(reinterpret_cast<::swift::HeapObject *>(*object_ref));
+    *object_ref = copy;
+}
+
+#pragma mark Looking up types by name
+
+const metadata *metadata::mangled_type_name_ref(const char *type_name, bool fault_if_null, ref_kind *kind_out) const {
+    if (!type_name) {
+        return nullptr;
+    }
+
+    const auto *context = descriptor();
+
+    const void *const *generic_args = nullptr;
+    if (context && context->isGeneric()) {
+        switch (context->getKind()) {
+        case ::swift::ContextDescriptorKind::Class: {
+            if (const auto *base = llvm::dyn_cast<::swift::ClassDescriptor>(context)) {
+                const auto *class_descriptor = class_type_descriptor::from_base(base);
+
+                const auto *asWords = reinterpret_cast<const void *const *>(this);
+                generic_args = asWords + class_descriptor->immediate_members_offset();
+            }
+            break;
+        }
+        case ::swift::ContextDescriptorKind::Struct: {
+            if (const auto *struct_descriptor = llvm::dyn_cast<::swift::StructDescriptor>(context)) {
+                const auto *asWords = reinterpret_cast<const void *const *>(this);
+                generic_args = asWords + struct_descriptor->getGenericArgumentOffset();
+            }
+            break;
+        }
+        case ::swift::ContextDescriptorKind::Enum: {
+            if (const auto *enum_descriptor = llvm::dyn_cast<::swift::EnumDescriptor>(context)) {
+                const auto *asWords = reinterpret_cast<const void *const *>(this);
+                generic_args = asWords + enum_descriptor->getGenericArgumentOffset();
+            }
+        }
+        default:
+            break;
+        }
+    }
+
+    // See
+    // https://github.com/swiftlang/swift/blob/main/docs/ABI/Mangling.rst#symbolic-references
+    auto string = ::swift::Demangle::makeSymbolicMangledNameStringRef(type_name);
+    const auto *type = swift_getTypeByMangledNameInContext(string.data(), string.size(), context, generic_args);
+    if (!type) {
+        if (fault_if_null) {
+            std::string ascii_type_name = "";
+            for (auto c = string.begin(), end = string.end(); c != end; c++) {
+                if (*c == '\\') {
+                    ascii_type_name.append("\\\\", 2);
+                } else {
+                    if (*c > 126) {
+                        // char is outside of ASCII range, encode as "\ABC"
+                        // where ABC are digits between 0 and 7.
+                        ascii_type_name.push_back('\\');
+                        ascii_type_name.push_back((*c >> 6) | 0x30);
+                        ascii_type_name.push_back(((*c >> 3) & 7) | 0x30);
+                        ascii_type_name.push_back((uint8_t)((*c & 7) | 0x30));
+                    } else {
+                        ascii_type_name.push_back(*c);
+                    }
+                }
+            }
+
+            non_fatal_precondition_failure("Swift metadata failure: \"%s\", context %s (%p), args %p",
+                                           ascii_type_name.c_str(), name(false), context, generic_args);
+        }
+        return nullptr;
+    }
+
+    if (kind_out) {
+        *kind_out = ref_kind::strong;
+        if (string.size() >= 3 && string[string.size() - 2] == 'X') {
+            switch (string[string.size() - 1]) {
+            case 'o':
+                *kind_out = ref_kind::unowned;
+                break;
+            case 'w':
+                *kind_out = ref_kind::weak;
+                break;
+            case 'u':
+                *kind_out = ref_kind::unmanaged;
+                break;
+            default:
+                break;
+            }
+        }
+    }
+
+    return metadata::from_base(type);
+}
+
+namespace {
+
+class TypeCache {
+  public:
+    using key_info = std::pair<const metadata *, const char *>;
+    using value_info = std::pair<const metadata *, metadata::ref_kind>;
+
+  private:
+    platform_lock _lock;
+    util::Heap _heap;
+    char _heap_buffer[4096];
+    util::Table<const key_info *, const value_info *> _table;
+
+  public:
+    TypeCache()
+        : _lock(PLATFORM_LOCK_INIT), _heap(_heap_buffer, 4096, 0),
+          _table([](const key_info *key) -> uint64_t { return uintptr_t(key->first) * 0x21 ^ uintptr_t(key->second); },
+                 [](const key_info *a, const key_info *b) -> bool {
+                     if (a->first != b->first) {
+                         return false;
+                     }
+                     return a->second == b->second;
+                 },
+                 nullptr, nullptr, &_heap) {};
+
+    void lock() { platform_lock_lock(&_lock); };
+    void unlock() { platform_lock_unlock(&_lock); };
+
+    const value_info *lookup(const key_info *type, const key_info **_Nullable found) {
+        return _table.lookup(type, found);
+    }
+
+    bool insert(const key_info *key, const value_info *value) { return _table.insert(key, value); };
+
+    key_info *create_key(const metadata *type, const char *type_name) {
+        auto *key = _heap.alloc<key_info>();
+        key->first = type;
+        key->second = type_name;
+        return key;
+    };
+
+    value_info *create_value(const metadata *type, metadata::ref_kind ref_kind) {
+        auto *value = _heap.alloc<value_info>();
+        value->first = type;
+        value->second = ref_kind;
+        return value;
+    };
+};
+
+} // namespace
+
+const metadata *metadata::mangled_type_name_ref_cached(const char *type_name, ref_kind *kind_out) const {
+    if (!type_name) {
+        return nullptr;
+    }
+
+    static TypeCache *cache = new TypeCache();
+
+    cache->lock();
+    TypeCache::key_info lookup_key = {this, type_name};
+    const auto *result = cache->lookup(&lookup_key, nullptr);
+    cache->unlock();
+
+    if (!result) {
+        ref_kind kind;
+        const metadata *type = mangled_type_name_ref(type_name, true, &kind);
+
+        cache->lock();
+        auto *key = cache->create_key(this, type_name);
+        auto *value = cache->create_value(type, kind);
+        cache->insert(key, value);
+        cache->unlock();
+
+        result = value;
+    }
+
+    if (kind_out) {
+        *kind_out = result->second;
+    }
+    return result->first;
+}
+
+#pragma mark Visiting
+
+bool metadata::visit(metadata_visitor &visitor) const {
+    switch (getKind()) {
+    case ::swift::MetadataKind::Class: {
+        return visitor.visit_class(reinterpret_cast<const any_class_type_metadata &>(*this));
+    }
+    case ::swift::MetadataKind::Struct: {
+        const auto *struct_type = reinterpret_cast<const ::swift::StructMetadata *>(this);
+        const auto *context = descriptor();
+        if (context && ::swift::StructDescriptor::classof(context)) {
+            const auto *struct_context = reinterpret_cast<const ::swift::StructDescriptor *>(context);
+            if (struct_context->Fields && struct_context->hasFieldOffsetVector()) {
+                const auto *field_offsets = struct_type->getFieldOffsets();
+                unsigned index = 0;
+                for (const auto &field : struct_context->Fields->getFields()) {
+                    size_t field_offset = field_offsets[index];
+                    size_t end_offset = index + 1 < struct_context->NumFields ? field_offsets[index + 1] : vw_size();
+                    size_t field_size = field_offset <= end_offset ? end_offset - field_offset : -1;
+                    if (!visitor.visit_field(*this, field, field_offset, field_size)) {
+                        return false;
+                    }
+                    index += 1;
+                }
+                return struct_context->NumFields > 0;
+            }
+        }
+        return visitor.unknown_result();
+    }
+    case ::swift::MetadataKind::Enum:
+    case ::swift::MetadataKind::Optional: {
+        const auto *context = descriptor();
+        if (context && ::swift::EnumDescriptor::classof(context)) {
+            const auto *enum_context = reinterpret_cast<const ::swift::EnumDescriptor *>(context);
+            if (enum_context->Fields) {
+                if (enum_context->getNumPayloadCases() != 0) {
+                    unsigned index = 0;
+                    for (const auto &field : enum_context->Fields->getFields()) {
+                        if (!field.hasMangledTypeName()) {
+                            continue;
+                        }
+                        if (!visitor.visit_case(*this, field, index)) {
+                            return false;
+                        }
+                        index += 1;
+                    }
+                    return true;
+                }
+            }
+        }
+        return visitor.unknown_result();
+    }
+    case ::swift::MetadataKind::Opaque: {
+        // Builtin.NativeObject, see
+        // https://github.com/swiftlang/swift/blob/main/docs/ABI/Mangling.rst
+        static const metadata *native_object = mangled_type_name_ref("Bo", true, nullptr);
+        if (this == native_object) {
+            return visitor.visit_native_object(*this);
+        }
+        return visitor.unknown_result();
+    }
+    case ::swift::MetadataKind::Tuple: {
+        const auto *tuple_type = reinterpret_cast<const ::swift::TupleTypeMetadata *>(this);
+        for (unsigned index = 0; index < tuple_type->NumElements; ++index) {
+            const auto &element = tuple_type->getElement(index);
+            if (element.Type) {
+                size_t element_offset = element.Offset;
+                size_t element_size = element.Type->vw_size();
+
+                if (element.Type->getKind() == ::swift::MetadataKind::Metatype) {
+                    size_t end_offset =
+                        index + 1 < tuple_type->NumElements ? tuple_type->getElement(index + 1).Offset : vw_size();
+                    size_t calculated_size = element_offset <= end_offset ? end_offset - element_offset : -1;
+                    element_size = std::min(element_size, calculated_size);
+                }
+                if (!visitor.visit_element(*metadata::from_base(element.Type), metadata::ref_kind::strong,
+                                           element.Offset, element_size)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    case ::swift::MetadataKind::Function: {
+        return visitor.visit_function(reinterpret_cast<const function_type_metadata &>(*this));
+    }
+    case ::swift::MetadataKind::Existential: {
+        return visitor.visit_existential(reinterpret_cast<const existential_type_metadata &>(*this));
+    }
+    default:
+        return visitor.unknown_result();
+    }
+}
+
+bool metadata::visit_heap(metadata_visitor &visitor, LayoutDescriptor::HeapMode heap_mode) const {
+    switch (getKind()) {
+    case ::swift::MetadataKind::Class: {
+        if (heap_mode & LayoutDescriptor::HeapMode::Class) {
+            return visit_heap_class(visitor);
+        }
+        return visitor.unknown_result();
+    }
+    case ::swift::MetadataKind::HeapLocalVariable: {
+        if (heap_mode & LayoutDescriptor::HeapMode::Locals) {
+            return visit_heap_locals(visitor);
+        }
+        return visitor.unknown_result();
+    }
+    case ::swift::MetadataKind::HeapGenericLocalVariable: {
+        const auto *generic_heap_type = reinterpret_cast<const ::swift::GenericBoxHeapMetadata *>(this);
+        if (heap_mode & LayoutDescriptor::HeapMode::GenericLocals && generic_heap_type->BoxedType) {
+            const auto *element_type = generic_heap_type->BoxedType;
+            auto alignment_mask = element_type->getValueWitnesses()->getAlignmentMask();
+            size_t offset = (generic_heap_type->Offset + alignment_mask) & ~alignment_mask;
+            return visitor.visit_element(reinterpret_cast<const metadata &>(*element_type), metadata::ref_kind::strong,
+                                         offset, element_type->vw_size());
+        }
+        return visitor.unknown_result();
+    }
+    default:
+        return visitor.unknown_result();
+    }
+}
+
+bool metadata::visit_heap_class(metadata_visitor &visitor) const {
+    const auto *const class_type = static_cast<const ::swift::ClassMetadata *>(base());
+
+#if SWIFT_OBJC_INTEROP
+    if ((class_type->Data & 3) == 0) {
+        // Pure Objective-C class unsupported
+        return visitor.unknown_result();
+    }
+#endif
+
+    const auto *context = descriptor();
+    if (!context) {
+        return visitor.unknown_result();
+    }
+
+    const auto *class_context = reinterpret_cast<const ::swift::ClassDescriptor *>(context);
+    if (class_context->SuperclassType && class_type->Superclass) {
+        if (!class_type->Superclass->isClassObject()) {
+            return visitor.unknown_result();
+        }
+        if (!reinterpret_cast<const metadata &>(*class_type->Superclass).visit_heap_class(visitor)) {
+            return false;
+        }
+    }
+
+    if (!class_context->Fields) {
+        return true;
+    }
+
+    const auto *fields = class_context->Fields.get();
+    if (!fields) {
+        return true;
+    }
+
+    if (!fields->NumFields) {
+        return true;
+    }
+
+    if (fields->NumFields != class_context->NumFields) {
+        return visitor.unknown_result();
+    }
+
+    if ((class_type->Flags & ::swift::ClassFlags::UsesSwiftRefcounting) == 0) {
+        ptrdiff_t *ivar_offsets = nullptr;
+
+#if SWIFT_OBJC_INTEROP
+        unsigned int ivar_count;
+        // NOLINTNEXTLINE(bugprone-casting-through-void) -- required for ObjC interop
+        Ivar *ivar_list = class_copyIvarList(reinterpret_cast<const Class>((void *)this), &ivar_count);
+        if (ivar_list) {
+            if (ivar_count == fields->NumFields) {
+                ivar_offsets = (ptrdiff_t *)alloca(sizeof(ptrdiff_t) * ivar_count);
+                memset(ivar_offsets, 0, sizeof(ptrdiff_t) * ivar_count);
+                for (unsigned int ivar_index = 0; ivar_index < ivar_count; ++ivar_index) {
+                    ivar_offsets[ivar_index] = ivar_getOffset(ivar_list[ivar_index]);
+                }
+            }
+            free(ivar_list);
+        }
+#endif
+
+        if (ivar_offsets && *ivar_offsets != 0) {
+            unsigned index = 0;
+            for (const auto &field : fields->getFields()) {
+                ptrdiff_t offset = ivar_offsets[index];
+                ptrdiff_t end_offset = index + 1 < fields->NumFields ? ivar_offsets[index + 1] : vw_size();
+                size_t field_size = offset <= end_offset ? end_offset - offset : -1;
+                if (!visitor.visit_field(*this, field, offset, field_size)) {
+                    return false;
+                }
+                index += 1;
+            }
+            return true;
+        }
+        return visitor.unknown_result();
+    } else {
+        if (class_context->hasFieldOffsetVector()) {
+            auto offset = reinterpret_cast<const class_type_descriptor *>(class_context)->field_offset_vector_offset();
+            const auto *asWords = reinterpret_cast<const void *const *>(this);
+            const ptrdiff_t *field_offsets = reinterpret_cast<const ptrdiff_t *>(asWords + offset);
+
+            unsigned index = 0;
+            for (const auto &field : class_context->Fields->getFields()) {
+                ptrdiff_t field_offset = field_offsets[index];
+                ptrdiff_t end_offset = index + 1 < class_context->NumFields ? field_offsets[index + 1] : vw_size();
+                size_t field_size = field_offset <= end_offset ? end_offset - field_offset : -1;
+                if (!visitor.visit_field(*this, field, field_offset, field_size)) {
+                    return false;
+                }
+                index += 1;
+            }
+            return true;
+        }
+        return visitor.unknown_result();
+    }
+
+    return visitor.unknown_result();
+}
+
+bool metadata::visit_heap_locals(metadata_visitor &visitor) const {
+    const auto *local_type = reinterpret_cast<const ::swift::HeapLocalVariableMetadata *>(this);
+    if (!local_type->CaptureDescription) {
+        return visitor.unknown_result();
+    }
+
+    const auto *descriptor = reinterpret_cast<const ::swift::reflection::CaptureDescriptor *>(local_type->CaptureDescription);
+    if (descriptor->NumMetadataSources != 0) {
+        return visitor.unknown_result();
+    }
+
+    size_t offset = local_type->OffsetToFirstCapture;
+    if (offset == 0) {
+        return visitor.unknown_result();
+    }
+
+    if (descriptor->NumBindings) {
+        // Builtin.RawPointer, see
+        // https://github.com/swiftlang/swift/blob/main/docs/ABI/Mangling.rst
+        static const metadata *pointer_type = mangled_type_name_ref("Bp", true, nullptr);
+        if (pointer_type == nullptr) {
+            return visitor.unknown_result();
+        }
+        for (unsigned i = 0; i < descriptor->NumBindings; ++i) {
+            if (!visitor.visit_element(*pointer_type, metadata::ref_kind::unmanaged, offset, vw_size())) {
+                return false;
+            }
+            offset += sizeof(void *);
+        }
+    }
+
+    for (auto capture_type_record = descriptor->capture_begin(), end = descriptor->capture_end();
+         capture_type_record != end; ++capture_type_record) {
+        const char *mangled_name = nullptr;
+        if (capture_type_record->hasMangledTypeName()) {
+            mangled_name = capture_type_record->getMangledTypeName().data();
+        }
+        metadata::ref_kind kind = metadata::ref_kind::strong;
+        const metadata *element_type = mangled_type_name_ref(mangled_name, true, &kind);
+        if (!element_type) {
+            return visitor.unknown_result();
+        }
+
+        size_t size = element_type->vw_size();
+        size_t alignment_mask = element_type->getValueWitnesses()->getAlignmentMask();
+        size_t aligned_offset = (offset + alignment_mask) & ~alignment_mask;
+
+        if (!visitor.visit_element(*element_type, kind, aligned_offset, size)) {
+            return false;
+        }
+
+        offset = aligned_offset + size;
+    }
+
+    return true;
+}
+
+#pragma mark - Existential type metadata
+
+::swift::ExistentialTypeRepresentation existential_type_metadata::representation() const {
+    // Some existentials use special containers.
+    switch (Flags.getSpecialProtocol()) {
+    case ::swift::SpecialProtocol::Error:
+        return ::swift::ExistentialTypeRepresentation::Error;
+    case ::swift::SpecialProtocol::None:
+        break;
+    }
+    // The layout of standard containers depends on whether the existential is
+    // class-constrained.
+    if (isClassBounded())
+        return ::swift::ExistentialTypeRepresentation::Class;
+    return ::swift::ExistentialTypeRepresentation::Opaque;
+}
+
+const void *existential_type_metadata::project_value(void *container) const {
+    switch (representation()) {
+    case ::swift::ExistentialTypeRepresentation::Class: {
+        const auto *class_container = reinterpret_cast<const ::swift::ClassExistentialContainer *>(container);
+        return reinterpret_cast<const void *>(&class_container->Value);
+    }
+    case ::swift::ExistentialTypeRepresentation::Opaque: {
+        const auto *opaque_container = reinterpret_cast<const ::swift::OpaqueExistentialContainer *>(container);
+
+        const auto *vwt = opaque_container->Type->getValueWitnesses();
+
+        if (vwt->isValueInline()) {
+            return reinterpret_cast<const void *>(&opaque_container->Buffer);
+        }
+
+        // Compute the byte offset of the object in the box.
+        size_t alignment_mask = vwt->getAlignmentMask();
+        size_t byte_offset = (sizeof(::swift::HeapObject) + alignment_mask) & ~alignment_mask;
+        const auto *byte_pointer = reinterpret_cast<const char *>(
+            *reinterpret_cast<::swift::HeapObject *const *const>(&opaque_container->Buffer));
+        return reinterpret_cast<const void *>(byte_pointer + byte_offset);
+    }
+    case ::swift::ExistentialTypeRepresentation::Error:
+        return nullptr;
+    }
+}
+
+const metadata *existential_type_metadata::dynamic_type(void *container) const {
+    switch (representation()) {
+    case ::swift::ExistentialTypeRepresentation::Class: {
+        const auto *class_container = reinterpret_cast<const ::swift::ClassExistentialContainer *>(container);
+        void *obj = class_container->Value;
+        return static_cast<const metadata *>(swift_getObjectType(reinterpret_cast<::swift::HeapObject *>(obj)));
+    }
+    case ::swift::ExistentialTypeRepresentation::Opaque: {
+        const auto *opaque_container = reinterpret_cast<const ::swift::OpaqueExistentialContainer *>(container);
+        return static_cast<const metadata *>(opaque_container->Type);
+    }
+    case ::swift::ExistentialTypeRepresentation::Error: {
+        return nullptr;
+    }
+    }
+}
+
+} // namespace swift
+} // namespace IAG

@@ -1,0 +1,72 @@
+#pragma once
+
+#include "LayoutDescriptor.h"
+
+#include "ComputeCxx/IAGBase.h"
+#include "ComputeCxx/IAGComparison.h"
+#include "Vector/Vector.h"
+
+IAG_ASSUME_NONNULL_BEGIN
+
+namespace IAG {
+namespace LayoutDescriptor {
+
+class Compare {
+  public:
+    struct Enum {
+        enum Mode : uint32_t {
+            Unmanaged = 0,
+            Managed = 1,
+        };
+
+        const swift::metadata *type;
+        unsigned int enum_tag;
+        const unsigned char *lhs;
+        const unsigned char *rhs;
+        const unsigned char *lhs_copy;
+        const unsigned char *rhs_copy;
+        size_t offset;
+        Mode mode;
+        bool owns_copies;
+
+        Enum()
+            : type(nullptr), enum_tag(0), lhs(nullptr), rhs(nullptr), lhs_copy(nullptr), rhs_copy(nullptr), offset(0),
+              mode(Mode::Unmanaged), owns_copies(false) {};
+        Enum(const swift::metadata *type, Mode mode, unsigned int enum_tag, size_t offset, const unsigned char *lhs,
+             const unsigned char *lhs_copy, const unsigned char *rhs, const unsigned char *rhs_copy, bool owns_copies);
+        ~Enum();
+
+        // Non-copyable
+        Enum(const Enum &) = delete;
+        Enum &operator=(const Enum &) = delete;
+
+        // Non-moveable
+        Enum(Enum &&) = delete;
+        Enum &operator=(Enum &&) = delete;
+    };
+
+    class Frame {
+      private:
+        vector<Enum, 8, uint64_t> *_enums;
+        uint64_t _start;
+
+      public:
+        Frame(vector<Enum, 8, uint64_t> *enums);
+        ~Frame();
+    };
+
+  private:
+    vector<Enum, 8, uint64_t> _enums;
+
+  public:
+    bool operator()(ValueLayout layout, const unsigned char *lhs, const unsigned char *rhs, size_t offset, size_t size,
+                    IAGComparisonOptions options);
+
+    void failed(IAGComparisonOptions options, const unsigned char *lhs, const unsigned char *rhs, size_t offset,
+                size_t size, const swift::metadata *_Nullable type);
+};
+
+} // namespace LayoutDescriptor
+} // namespace IAG
+
+IAG_ASSUME_NONNULL_END

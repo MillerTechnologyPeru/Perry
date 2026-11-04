@@ -1,0 +1,82 @@
+//
+//  Compute.swift
+//  OpenAttributeGraphShims
+
+#if OPENATTRIBUTEGRAPH_COMPUTE
+
+@_exported public import Compute
+
+public typealias OAGAttributeInfo = IAGAttributeInfo
+public typealias OAGCachedValueOptions = CachedValueOptions
+public typealias OAGChangedValueFlags = IAGChangedValueFlags
+public typealias OAGInputOptions = InputOptions
+public typealias OAGValue = IAGChangedValue
+public typealias OAGValueOptions = IAGValueOptions
+
+extension AnyAttribute {
+    public typealias Flags = Subgraph.Flags
+}
+
+extension Subgraph {
+    public typealias ChildFlags = AnyAttribute.Flags
+}
+
+extension Graph {
+    public typealias TraceOptions = TraceFlags
+
+    public static func startTracing(_ graph: Graph?, options: TraceOptions) {
+        startTracing(graph, flags: options)
+    }
+
+    public static func startProfiling() {
+        startProfiling(nil)
+    }
+
+    public static func stopProfiling() {
+        stopProfiling(nil)
+    }
+
+    public func startProfiling() {
+        Self.startProfiling(self)
+    }
+
+    public func stopProfiling() {
+        Self.stopProfiling(self)
+    }
+
+    public func resetProfile() {
+        // TODO: placeholder
+    }
+}
+
+#if !canImport(Darwin)
+extension Graph {
+    public func print(includeValues: Bool) {}
+
+    public func archiveJSON(name: String?) {}
+
+    public static func archiveJSON(name: UnsafePointer<CChar>?) {}
+
+    public func graphvizDescription(includeValues: Bool) -> String {
+        ""
+    }
+
+    public static func printStack(maxFrames: Int) {}
+
+    public static func stackDescription(maxFrames: Int) -> String {
+        ""
+    }
+}
+#endif
+
+extension _AttributeBody {
+    public typealias Flags = _AttributeType.Flags
+}
+
+extension CachedValueOptions {
+    public static var _1: CachedValueOptions = .unprefetched
+}
+
+public let attributeGraphVendor = AttributeGraphVendor.compute
+
+#endif
