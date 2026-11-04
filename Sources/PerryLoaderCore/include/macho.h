@@ -10,6 +10,7 @@
 
 // MARK: - Headers
 
+#define MH_MAGIC                0xfeedfaceu
 #define MH_MAGIC_64             0xfeedfacfu
 #define FAT_MAGIC               0xcafebabeu
 #define FAT_MAGIC_64            0xcafebabfu
@@ -21,6 +22,12 @@
 #define CPU_SUBTYPE_ARM64_ALL   0
 #define CPU_SUBTYPE_ARM64_V8    1
 #define CPU_SUBTYPE_ARM64E      2
+#define CPU_SUBTYPE_ARM_ALL     0
+#define CPU_SUBTYPE_ARM_V6      6
+#define CPU_SUBTYPE_ARM_V7      9
+#define CPU_SUBTYPE_ARM_V7F     10
+#define CPU_SUBTYPE_ARM_V7S     11
+#define CPU_SUBTYPE_ARM_V7K     12
 
 #define MH_EXECUTE              0x2
 #define MH_DYLIB                0x6
@@ -38,6 +45,16 @@ struct mach_header_64 {
     uint32_t sizeofcmds;
     uint32_t flags;
     uint32_t reserved;
+};
+
+struct mach_header {
+    uint32_t magic;
+    int32_t cputype;
+    int32_t cpusubtype;
+    uint32_t filetype;
+    uint32_t ncmds;
+    uint32_t sizeofcmds;
+    uint32_t flags;
 };
 
 // Fat headers are always big-endian.
@@ -67,6 +84,7 @@ struct fat_arch_64 {
 
 #define LC_REQ_DYLD                 0x80000000u
 #define LC_SYMTAB                   0x2
+#define LC_SEGMENT                  0x1
 #define LC_UNIXTHREAD               0x5
 #define LC_DYSYMTAB                 0xb
 #define LC_LOAD_DYLIB               0xc
@@ -96,6 +114,20 @@ struct load_command {
 };
 
 #define SG_READ_ONLY 0x10
+
+struct segment_command {
+    uint32_t cmd;
+    uint32_t cmdsize;
+    char segname[16];
+    uint32_t vmaddr;
+    uint32_t vmsize;
+    uint32_t fileoff;
+    uint32_t filesize;
+    int32_t maxprot;
+    int32_t initprot;
+    uint32_t nsects;
+    uint32_t flags;
+};
 
 struct segment_command_64 {
     uint32_t cmd;
@@ -135,6 +167,20 @@ struct section_64 {
     uint32_t reserved3;
 };
 
+struct section {
+    char sectname[16];
+    char segname[16];
+    uint32_t addr;
+    uint32_t size;
+    uint32_t offset;
+    uint32_t align;
+    uint32_t reloff;
+    uint32_t nreloc;
+    uint32_t flags;
+    uint32_t reserved1;
+    uint32_t reserved2;
+};
+
 struct dylib_command {
     uint32_t cmd;
     uint32_t cmdsize;
@@ -155,6 +201,14 @@ struct entry_point_command {
     uint32_t cmdsize;
     uint64_t entryoff;
     uint64_t stacksize;
+};
+
+struct encryption_info_command {
+    uint32_t cmd;
+    uint32_t cmdsize;
+    uint32_t cryptoff;
+    uint32_t cryptsize;
+    uint32_t cryptid;
 };
 
 struct encryption_info_command_64 {
@@ -219,6 +273,30 @@ struct symtab_command {
     uint32_t stroff;
     uint32_t strsize;
 };
+
+// MARK: - The image's own pointer width
+
+// The loader maps images of its own pointer width: a 64-bit loader loads
+// arm64 Mach-O, a 32-bit one loads armv7 Mach-O. These name the structures
+// of whichever it is, so the code that walks them is written once.
+
+#if defined(__LP64__)
+#define MH_MAGIC_NATIVE         MH_MAGIC_64
+#define LC_SEGMENT_NATIVE       LC_SEGMENT_64
+#define LC_ENCRYPTION_INFO_NATIVE LC_ENCRYPTION_INFO_64
+typedef struct mach_header_64 mach_header_t;
+typedef struct segment_command_64 segment_command_t;
+typedef struct section_64 section_t;
+typedef struct encryption_info_command_64 encryption_info_command_t;
+#else
+#define MH_MAGIC_NATIVE         MH_MAGIC
+#define LC_SEGMENT_NATIVE       LC_SEGMENT
+#define LC_ENCRYPTION_INFO_NATIVE LC_ENCRYPTION_INFO
+typedef struct mach_header mach_header_t;
+typedef struct segment_command segment_command_t;
+typedef struct section section_t;
+typedef struct encryption_info_command encryption_info_command_t;
+#endif
 
 // MARK: - Library ordinals
 
