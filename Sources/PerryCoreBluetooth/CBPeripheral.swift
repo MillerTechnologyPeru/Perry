@@ -97,6 +97,7 @@ open class CBPeripheral: CBPeer {
         let wanted = uuids?.uuids
         let owner = Unchecked(self), path = peripheral.path
         Task {
+            await Self.servicesResolved(path)
             let objects = await BlueZ.shared.objects(under: path)
             Dispatch.on(owner.value.queue) {
                 let peripheral = owner.value
@@ -112,6 +113,17 @@ open class CBPeripheral: CBPeer {
                 guard let delegate = peripheral.delegateObject(), delegate.responds(to: "peripheral:didDiscoverServices:") else { return }
                 delegate.sendPeripheral(peripheral, didDiscoverServices: nil)
             }
+        }
+    }
+
+    /// Waits until BlueZ has resolved the device's services, which it does
+    /// after connecting (at once when it has them cached), for up to 30
+    /// seconds or until the device disconnects.
+    static func servicesResolved(_ path: String) async {
+        for _ in 0..<300 {
+            let device = await BlueZ.shared.properties(path, BlueZInterface.device)
+            if device?["ServicesResolved"]?.boolValue == true || device?["Connected"]?.boolValue != true { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }
 
@@ -324,9 +336,10 @@ open class CBPeripheral: CBPeer {
         state.state = PeripheralState.disconnected
         state.services = nil
         state.reading = []
+        let prefix = Registry.key(state.manager, state.path) + "/"
         Registry.lock.withLock {
-            Registry.characteristics = Registry.characteristics.filter { !$0.key.hasPrefix(state.path + "/") }
-            Registry.descriptors = Registry.descriptors.filter { !$0.key.hasPrefix(state.path + "/") }
+            Registry.characteristics = Registry.characteristics.filter { !$0.key.hasPrefix(prefix) }
+            Registry.descriptors = Registry.descriptors.filter { !$0.key.hasPrefix(prefix) }
         }
     }
 }
