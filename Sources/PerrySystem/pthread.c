@@ -527,6 +527,11 @@ int darwin_pthread_attr_setdetachstate(pthread_attr_t *attributes, int state) {
         state == DARWIN_DETACHED ? PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE));
 }
 
+int darwin_pthread_attr_setstack(pthread_attr_t *attributes, void *stack, size_t size) DARWIN_SYMBOL(pthread_attr_setstack);
+int darwin_pthread_attr_setstack(pthread_attr_t *attributes, void *stack, size_t size) {
+    return result(pthread_attr_setstack(attributes, stack, size));
+}
+
 int darwin_pthread_attr_getdetachstate(const pthread_attr_t *attributes, int *state) DARWIN_SYMBOL(pthread_attr_getdetachstate);
 int darwin_pthread_attr_getdetachstate(const pthread_attr_t *attributes, int *state) {
     int linux_state = 0;
