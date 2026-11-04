@@ -132,8 +132,13 @@ final class Compositor {
         _ = on ? SDL.startTextInput?(window) : SDL.stopTextInput?(window)
     }
 
-    /// Mouse buttons, motion and the wheel as touches, and the keyboard's
-    /// text and editing keys; true when the window was closed.
+    /// The touchscreen finger being followed, as SDL numbers it.
+    private var finger: UInt64?
+
+    /// Touchscreen fingers, mouse buttons, motion and the wheel as touches,
+    /// and the keyboard's text and editing keys; true when the window was
+    /// closed. One finger at a time is a touch; the mouse events SDL makes
+    /// from fingers are left out, as the fingers come themselves.
     func handleEvents() -> Bool {
         var event = [UInt64](repeating: 0, count: 16)
         var closed = false
@@ -144,13 +149,35 @@ final class Compositor {
                     CGPoint(x: CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) / scale,
                             y: CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) / scale)
                 }
+                /// A mouse event SDL made from a finger: SDL_TOUCH_MOUSEID.
+                func fromFinger() -> Bool { raw.load(fromByteOffset: 20, as: UInt32.self) == UInt32.max }
+                /// A finger's place: x and y from 0 to 1 across the window.
+                func fingerPoint() -> CGPoint {
+                    let size = Screen.bounds.size
+                    return CGPoint(x: CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) * size.width,
+                                   y: CGFloat(raw.load(fromByteOffset: 36, as: Float.self)) * size.height)
+                }
                 switch type {
                 case 0x100: // quit
                     closed = true
+                case 0x700: // finger down: SDL_FingerID at 24
+                    guard finger == nil else { break }
+                    finger = raw.load(fromByteOffset: 24, as: UInt64.self)
+                    Touches.down(at: fingerPoint())
+                    Display.markDirty()
+                case 0x702: // finger motion
+                    guard finger == raw.load(fromByteOffset: 24, as: UInt64.self) else { break }
+                    Touches.move(to: fingerPoint())
+                case 0x701, 0x703: // finger up, finger cancelled
+                    guard finger == raw.load(fromByteOffset: 24, as: UInt64.self) else { break }
+                    finger = nil
+                    Touches.up(at: fingerPoint())
+                    Display.markDirty()
                 case 0x400: // mouse motion
+                    guard !fromFinger() else { break }
                     Touches.move(to: point())
                 case 0x401, 0x402: // mouse button down and up
-                    guard raw.load(fromByteOffset: 24, as: UInt8.self) == 1 else { break }
+                    guard !fromFinger(), raw.load(fromByteOffset: 24, as: UInt8.self) == 1 else { break }
                     if type == 0x401 { Touches.down(at: point()) } else { Touches.up(at: point()) }
                     Display.markDirty()
                 case 0x206: // window resized: its size at 20 and 24
