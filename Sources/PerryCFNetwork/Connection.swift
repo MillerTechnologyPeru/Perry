@@ -358,33 +358,57 @@ open class NSURLConnection: NSObject {
     /// transfer engine each time.
     private static let oneShotSession = Session(configuration: .makeDefault(), events: nil)
 
-    /// Loads at once on the calling thread, which waits.
+    /// Loads at once on the calling thread, which waits, no longer than the
+    /// request's timeout (and a moment more for the engine's own): then the
+    /// load is cancelled and fails with NSURLErrorTimedOut, as on Darwin.
     @ObjCClassMethod("sendSynchronousRequest:returningResponse:error:")
     static func sendSynchronous(_ request: NSObject, returningResponse response: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                                 error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSData? {
-        let done = UnsafeMutablePointer<sem_t>.allocate(capacity: 1)
-        sem_init(done, 0, 0)
-        defer {
-            sem_destroy(done)
-            done.deallocate()
-        }
-        nonisolated(unsafe) let signal = done
-        final class Result: @unchecked Sendable {
+        /// The load's outcome, and a semaphore it posts; the completion
+        /// keeps both, as it may come after the caller stopped waiting.
+        final class Outcome: @unchecked Sendable {
+            let done = UnsafeMutablePointer<sem_t>.allocate(capacity: 1)
             var data: Data?
             var response: Response?
             var failure: Failure?
+            init() { sem_init(done, 0, 0) }
+            deinit {
+                sem_destroy(done)
+                done.deallocate()
+            }
         }
-        let result = Result()
-        oneShotSession.dataTask(Requests.request(request.objcObject).copy()) { data, response, failure in
-            result.data = data
-            result.response = response
-            result.failure = failure
-            sem_post(signal)
-        }.resume()
-        while sem_wait(done) != 0 {}
-        response?.pointee = result.response.map(Responses.object)?.objcObject
-        error?.pointee = Errors.object(result.failure)?.objcObject
-        return result.failure == nil ? NSMutableData.mutable(result.data ?? Data()) : nil
+        let outcome = Outcome()
+        let load = Requests.request(request.objcObject).copy()
+        let task = oneShotSession.dataTask(load) { data, response, failure in
+            outcome.data = data
+            outcome.response = response
+            outcome.failure = failure
+            sem_post(outcome.done)
+        }
+        task.resume()
+
+        let timeout = load.timeout > 0 ? load.timeout : 60
+        var deadline = timespec()
+        clock_gettime(CLOCK_REALTIME, &deadline)
+        let end = Double(deadline.tv_sec) + Double(deadline.tv_nsec) / 1e9 + timeout + 5
+        deadline.tv_sec = Int(end)
+        deadline.tv_nsec = Int((end - end.rounded(.down)) * 1e9)
+        var finished = true
+        while sem_timedwait(outcome.done, &deadline) != 0 {
+            guard errno == EINTR else {
+                finished = false
+                break
+            }
+        }
+        if !finished {
+            task.cancel()
+            response?.pointee = nil
+            error?.pointee = Errors.object(Failure.timedOut(url: load.url))?.objcObject
+            return nil
+        }
+        response?.pointee = outcome.response.map(Responses.object)?.objcObject
+        error?.pointee = Errors.object(outcome.failure)?.objcObject
+        return outcome.failure == nil ? NSMutableData.mutable(outcome.data ?? Data()) : nil
     }
 
     /// Loads, then runs the handler on `queue`: (response, data, error).
