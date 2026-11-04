@@ -170,6 +170,31 @@ public final class NSTimer: NSObject {
                                             block: block)))
     }
 
+    // MARK: Initializers, for timers allocated and then added to a run loop
+
+    @ObjCMethod("initWithFireDate:interval:repeats:block:")
+    func initialize(fireDate: NSDate, interval: Double, repeats: Bool, block: ObjCBlock) -> Self {
+        let storage = NSTimer.make(interval, repeats: repeats, target: nil, selector: nil, userInfo: nil, block: block)
+        storage.fireDate = fireDate.date.timeIntervalSinceReferenceDate
+        Storage.set(objcObject, storage)
+        return self
+    }
+
+    @ObjCMethod("initWithFireDate:interval:target:selector:userInfo:repeats:")
+    func initialize(fireDate: NSDate, interval: Double, target: ObjCObject, selector: ObjCSelector, userInfo: ObjCObject?,
+                    repeats: Bool) -> Self {
+        let storage = NSTimer.make(interval, repeats: repeats, target: target, selector: selector, userInfo: userInfo, block: nil)
+        storage.fireDate = fireDate.date.timeIntervalSinceReferenceDate
+        Storage.set(objcObject, storage)
+        return self
+    }
+
+    @ObjCMethod("initWithTimeInterval:repeats:block:")
+    func initialize(interval: Double, repeats: Bool, block: ObjCBlock) -> Self {
+        Storage.set(objcObject, NSTimer.make(interval, repeats: repeats, target: nil, selector: nil, userInfo: nil, block: block))
+        return self
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
