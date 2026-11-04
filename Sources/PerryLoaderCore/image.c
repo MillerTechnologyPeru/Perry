@@ -184,6 +184,42 @@ static void check_cpu(const char *path, int32_t cputype, int32_t cpusubtype) {
 #endif
 }
 
+unsigned perry_macho_architectures(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    union {
+        struct mach_header mh;
+        struct fat_header fat;
+        uint8_t bytes[4096];
+    } head;
+    ssize_t got = pread(fd, &head, sizeof(head), 0);
+    unsigned archs = 0;
+    if (got >= (ssize_t)sizeof(struct mach_header)) {
+        uint32_t magic = head.fat.magic;
+        if (magic == MH_MAGIC || magic == MH_MAGIC_64) {
+            if (head.mh.cputype == CPU_TYPE_ARM)
+                archs |= PERRY_ARCH_ARMV7;
+            else if (head.mh.cputype == CPU_TYPE_ARM64)
+                archs |= PERRY_ARCH_ARM64;
+        } else if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
+            bool is64 = magic == be32(FAT_MAGIC_64);
+            size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
+            uint32_t count = be32(head.fat.nfat_arch);
+            for (uint32_t i = 0; i < count && sizeof(struct fat_header) + (i + 1) * entry <= (size_t)got; i++) {
+                const struct fat_arch *arch = (const struct fat_arch *)(head.bytes + sizeof(struct fat_header) + i * entry);
+                int32_t cputype = (int32_t)be32((uint32_t)arch->cputype);
+                if (cputype == CPU_TYPE_ARM)
+                    archs |= PERRY_ARCH_ARMV7;
+                else if (cputype == CPU_TYPE_ARM64)
+                    archs |= PERRY_ARCH_ARM64;
+            }
+        }
+    }
+    close(fd);
+    return archs;
+}
+
 static bool open_macho(const char *path, macho_file *out) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0)
@@ -303,8 +339,16 @@ static void parse_load_commands(perry_image *image) {
             break;
         }
         case LC_UNIXTHREAD:
+#if defined(__LP64__)
             if (mh->filetype == MH_EXECUTE)
                 perry_fatal("%s: LC_UNIXTHREAD executables are not supported", image->path);
+#else
+            // iOS before 6 starts an executable at crt1's `start`, with the
+            // kernel's stack. It calls _main, so find that and call it as
+            // LC_MAIN's entry is.
+            if (mh->filetype == MH_EXECUTE)
+                image->unixthread = true;
+#endif
             break;
         case LC_ENCRYPTION_INFO_NATIVE: {
             const encryption_info_command_t *ec = (const void *)lc;
@@ -329,6 +373,9 @@ static void parse_load_commands(perry_image *image) {
             }
             break;
         }
+        case LC_SYMTAB:
+            image->symtab = (const void *)lc;
+            break;
         case LC_DYLD_CHAINED_FIXUPS:
             image->chained_fixups = (const void *)lc;
             break;
@@ -932,12 +979,44 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     run_image_initializers(loader, image, argc, argv, envp, apple);
 }
 
+#if !defined(__LP64__)
+// Finds _main in an executable's symbol table, with the Thumb bit its
+// definition carries, for executables that LC_UNIXTHREAD starts.
+static void *find_main(perry_image *image) {
+    const struct symtab_command *st = image->symtab;
+    if (!st)
+        return NULL;
+    const struct nlist *syms = perry_image_fileoff(image, st->symoff);
+    const char *strings = perry_image_fileoff(image, st->stroff);
+    if (!syms || !strings)
+        return NULL;
+    for (uint32_t i = 0; i < st->nsyms; i++) {
+        const struct nlist *sym = &syms[i];
+        if ((sym->n_type & N_STAB) || (sym->n_type & N_TYPE) != N_SECT || sym->n_strx >= st->strsize)
+            continue;
+        if (strcmp(strings + sym->n_strx, "_main") != 0)
+            continue;
+        uintptr_t address = (uintptr_t)perry_image_vmaddr(image, sym->n_value & ~1u);
+        return (void *)(address | ((sym->n_desc & N_ARM_THUMB_DEF) || (sym->n_value & 1) ? 1 : 0));
+    }
+    return NULL;
+}
+#endif
+
 void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple) {
     (void)loader;
+#if !defined(__LP64__)
+    if (!image->has_entry && image->unixthread)
+        image->legacy_main = find_main(image);
+    if (!image->has_entry && !image->legacy_main)
+        perry_fatal("%s: no LC_MAIN entry point and no _main", image->path);
+#else
     if (!image->has_entry)
         perry_fatal("%s: no LC_MAIN entry point", image->path);
+#endif
     typedef int (*main_fn)(int, char **, char **, char **);
-    main_fn entry = (main_fn)(void *)(image->base + image->entryoff);
+    main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
+                                     : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
     exit(entry(argc, argv, envp, apple));
 }
