@@ -162,6 +162,9 @@ public enum Runtime {
     /// starting at `cls`. Runs +initialize first, tries +resolve…Method:,
     /// and falls back to _objc_msgForward.
     public static func lookUpIMP(receiver: ObjectPointer?, selector: SEL, cls: ClassPointer) -> IMP {
+        if Zombies.enabled, let receiver, Zombies.report(receiver, String(cString: selector)) {
+            objcFatal("message \(String(cString: selector)) sent to a deallocated object")
+        }
         guard let info = Runtime.info(cls) else {
             objcFatal("message \(String(cString: selector)) sent to an object whose class is unknown")
         }
