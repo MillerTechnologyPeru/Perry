@@ -23,7 +23,7 @@ public enum Runtime {
     // MARK: - Realization
 
     static func cacheSlot(_ cls: ClassPointer) -> UnsafeMutablePointer<UnsafeMutableRawPointer?> {
-        UnsafeMutableRawPointer(cls).advanced(by: 16).assumingMemoryBound(to: UnsafeMutableRawPointer?.self)
+        UnsafeMutableRawPointer(cls).advanced(by: Layout.classCache).assumingMemoryBound(to: UnsafeMutableRawPointer?.self)
     }
 
     /// The runtime state of `cls`, realizing it on first use. Nil for
@@ -33,7 +33,7 @@ public enum Runtime {
         // A missing class's placeholder has no isa: its "instances" are nil.
         guard Int(bitPattern: cls) != 0 else { return nil }
         if let header = perry_load_acquire(cacheSlot(cls)), header != emptyCache,
-           let info = header.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self) {
+           let info = header.load(fromByteOffset: Layout.headerInfo, as: UnsafeMutableRawPointer?.self) {
             return Unmanaged<ClassInfo>.fromOpaque(info).takeUnretainedValue()
         }
         return realize(cls, registerName: true)
@@ -44,10 +44,10 @@ public enum Runtime {
     static func realize(_ cls: ClassPointer, registerName: Bool) -> ClassInfo? {
         lock.withLock {
             if let header = perry_load_acquire(cacheSlot(cls)), header != emptyCache,
-               let info = header.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self) {
+               let info = header.load(fromByteOffset: Layout.headerInfo, as: UnsafeMutableRawPointer?.self) {
                 return Unmanaged<ClassInfo>.fromOpaque(info).takeUnretainedValue()
             }
-            let bits = UInt(cls.pointee.bits) & ~7
+            let bits = UInt(cls.pointee.bits) & Layout.classBitsMask
             guard let ro = UnsafePointer<perry_class_ro>(bitPattern: bits) else {
                 return nil
             }
@@ -59,7 +59,7 @@ public enum Runtime {
             // and its name where the vtable goes.
             if let superclass = cls.pointee.superclass, superInfo == nil {
                 if superclass.pointee.bits == 0,
-                   let name = UnsafeRawPointer(superclass).load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
+                   let name = UnsafeRawPointer(superclass).load(fromByteOffset: Layout.classVtable, as: UnsafePointer<CChar>?.self) {
                     let own = ro.pointee.name.map { String(cString: $0) } ?? "?"
                     objcWarning("class \(own) inherits from \(String(cString: name)), which is not available")
                 }
@@ -291,10 +291,18 @@ public enum Runtime {
 
     private static func makeRO(flags: UInt32, start: Int, size: Int, name: UnsafePointer<CChar>) -> UnsafeMutablePointer<perry_class_ro> {
         let ro = UnsafeMutablePointer<perry_class_ro>.allocate(capacity: 1)
+        // arm64's class_ro_t pads after instance_size; armv7's does not.
+#if arch(arm64)
         ro.initialize(to: perry_class_ro(
             flags: flags, instance_start: UInt32(start), instance_size: UInt32(size), reserved: 0,
             ivar_layout: nil, name: name, base_methods: nil, base_protocols: nil, ivars: nil,
             weak_ivar_layout: nil, base_properties: nil))
+#else
+        ro.initialize(to: perry_class_ro(
+            flags: flags, instance_start: UInt32(start), instance_size: UInt32(size),
+            ivar_layout: nil, name: name, base_methods: nil, base_protocols: nil, ivars: nil,
+            weak_ivar_layout: nil, base_properties: nil))
+#endif
         return ro
     }
 
