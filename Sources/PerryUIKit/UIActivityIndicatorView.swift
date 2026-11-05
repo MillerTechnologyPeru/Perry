@@ -41,6 +41,9 @@ open class UIActivityIndicatorView: UIView {
         _ = super.initialize(frame: frame)
         state.userInteractionEnabled = false
         state.hidden = true
+        // It keeps its size, as Darwin's does: SwiftUI's progress views
+        // don't stretch it to the space offered.
+        state.contentHuggingPriority = (750, 750)
         return self
     }
 
