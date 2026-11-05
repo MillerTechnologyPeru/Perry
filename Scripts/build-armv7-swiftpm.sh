@@ -6,12 +6,14 @@
 # .build/armv7-pm/armv7-unknown-linux-gnueabihf/release, optimized like the
 # Swift runtime they run with, which has no SwiftOnoneSupport on armv7
 # machines; PERRY_CONFIGURATION=debug builds them unoptimized.
-# Usage: Scripts/build-armv7-swiftpm.sh [product...]   (default: Perryobjc PerryFoundation)
+# Usage: Scripts/build-armv7-swiftpm.sh [product...]
+#   (default: Perryobjc Perrydispatch PerryFoundation; Foundation's provider loads
+#   libdispatch's)
 # swift-syntax needs several GB of memory to build; a 4 GB machine is not enough.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
-[ $# -gt 0 ] || set -- Perryobjc PerryFoundation
+[ $# -gt 0 ] || set -- Perryobjc Perrydispatch PerryFoundation
 
 # Paths as the container sees the checkout, at /perry.
 swift=$(cd .toolchains && ls -d swift-6.4.0-RELEASE-*/usr/bin | head -1)
