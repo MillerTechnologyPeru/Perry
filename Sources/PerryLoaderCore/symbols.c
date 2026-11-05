@@ -553,6 +553,13 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     if (weak_import) {
         perry_record_import(image, library, name, PERRY_IMPORT_WEAK_MISSING);
         perry_trace(PERRY_TRACE_BIND, "weak import %s from %s missing", name, library);
+        // A weak string constant is there on any system the app runs on,
+        // and read without a check: it gets the constant string of its
+        // name, as a missing one that is not weak does. Other weak
+        // imports stay NULL, for the app's own checks.
+        void *constant = string_constant(loader, name);
+        if (constant)
+            sym.address = constant;
         return sym;
     }
     perry_record_import(image, library, name, PERRY_IMPORT_UNRESOLVED);
