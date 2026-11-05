@@ -999,11 +999,26 @@ open class UIView: UIResponder, UICoordinateSpace {
 }
 
 /// Views UIKit puts between a window and its root view controller's view.
+/// They take no touches themselves: one that nothing in the controller's
+/// views takes goes on to what is behind them in the window, such as a
+/// game's GL view under the views of its interface.
 @ObjCClass("UITransitionView")
-open class UITransitionView: UIView {}
+open class UITransitionView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 @ObjCClass("UIDropShadowView")
-open class UIDropShadowView: UIView {}
+open class UIDropShadowView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 /// UIView's messages, sent so subclasses' overrides run.
 extension NSObject {
