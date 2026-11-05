@@ -2,8 +2,10 @@ import CPerryFoundation
 import PerryObjCInterop
 
 // Key-value coding: -valueForKey: and -setValue:forKey: through the
-// accessor methods a class has, with scalars wrapped in NSNumber as the
-// methods' type encodings say; dictionaries by key, arrays element-wise.
+// accessor methods a class has, else, as Foundation does unless the class's
+// +accessInstanceVariablesDirectly says no, its instance variable _key,
+// _isKey, key or isKey; with scalars wrapped in NSNumber as the methods' or
+// variables' type encodings say; dictionaries by key, arrays element-wise.
 
 enum KeyValueCoding {
     /// A method's type encoding with the offsets removed: "q@:" for a getter
@@ -91,6 +93,9 @@ enum KeyValueCoding {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
+        if let ivar = instanceVariable(object, key) {
+            return InstanceVariables.get(object, ivar)
+        }
         // As Foundation does: the object's -valueForUndefinedKey:, which
         // raises unless a class overrides it.
         return ObjC.send(object, ObjC.selector("valueForUndefinedKey:"), Strings.autoreleased(key))
@@ -105,10 +110,79 @@ enum KeyValueCoding {
         }
         let selector = ObjC.selector("set" + key.prefix(1).uppercased() + key.dropFirst() + ":")
         guard responds(object, selector) else {
+            if let ivar = instanceVariable(object, key) {
+                InstanceVariables.set(object, ivar, value)
+                return
+            }
             _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
             return
         }
         set(object, selector, value)
+    }
+
+    /// The instance variable a key names, in Foundation's order, if the
+    /// class allows reaching them.
+    static func instanceVariable(_ object: id, _ key: String) -> UnsafeMutableRawPointer? {
+        guard let cls = ObjC.objectGetClass(object), !key.isEmpty else { return nil }
+        let allows = ObjC.selector("accessInstanceVariablesDirectly")
+        if ObjC.instanceMethod(ObjC.objectGetClass(UnsafeMutableRawPointer(cls)), allows) != nil {
+            typealias Send = @convention(c) (UnsafeMutableRawPointer, SEL) -> Bool
+            guard unsafeBitCast(ObjC.msgSend!, to: Send.self)(UnsafeMutableRawPointer(cls), allows) else { return nil }
+        }
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        for name in ["_" + key, "_is" + capitalized, key, "is" + capitalized] {
+            if let ivar = name.withCString({ ObjC.instanceVariable(cls, $0) }) { return ivar }
+        }
+        return nil
+    }
+}
+
+/// Instance variables read and written by their type encodings.
+enum InstanceVariables {
+    static func get(_ object: id, _ ivar: UnsafeMutableRawPointer) -> id? {
+        let address = object + ObjC.ivarOffset(ivar)
+        let type = ObjC.ivarTypes(ivar).map { String(cString: $0) } ?? "@"
+        switch type.first ?? "@" {
+        case "@", "#": return address.load(as: id?.self)
+        case "q", "l": return Numbers.make(nil, .signed(address.load(as: Int64.self)))
+        case "Q", "L": return Numbers.make(nil, .unsigned(address.load(as: UInt64.self)))
+        case "i": return Numbers.make(nil, .signed(Int64(address.load(as: Int32.self))))
+        case "I": return Numbers.make(nil, .unsigned(UInt64(address.load(as: UInt32.self))))
+        case "s": return Numbers.make(nil, .signed(Int64(address.load(as: Int16.self))))
+        case "S": return Numbers.make(nil, .unsigned(UInt64(address.load(as: UInt16.self))))
+        case "c": return Numbers.make(nil, .signed(Int64(address.load(as: Int8.self))))
+        case "C": return Numbers.make(nil, .unsigned(UInt64(address.load(as: UInt8.self))))
+        case "B": return perry_foundation_boolean(address.load(as: UInt8.self) != 0 ? 1 : 0)
+        case "d": return Numbers.make(nil, .double(address.load(as: Double.self)))
+        case "f": return Numbers.make(nil, .double(Double(address.load(as: Float.self))))
+        case "{":
+            return ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: UnsafeRawPointer(address), type: type))
+        default: return nil
+        }
+    }
+
+    /// Objects are held strongly, as an ivar Foundation sets is.
+    static func set(_ object: id, _ ivar: UnsafeMutableRawPointer, _ value: id?) {
+        let address = object + ObjC.ivarOffset(ivar)
+        let type = ObjC.ivarTypes(ivar).map { String(cString: $0) } ?? "@"
+        let number = Numbers.storage(value)
+        switch type.first ?? "@" {
+        case "@":
+            let old = address.load(as: id?.self)
+            address.storeBytes(of: ObjC.retain(value), as: id?.self)
+            ObjC.release(old)
+        case "q", "l", "Q", "L": address.storeBytes(of: number.int64, as: Int64.self)
+        case "i", "I": address.storeBytes(of: Int32(truncatingIfNeeded: number.int64), as: Int32.self)
+        case "s", "S": address.storeBytes(of: Int16(truncatingIfNeeded: number.int64), as: Int16.self)
+        case "c", "C", "B": address.storeBytes(of: Int8(truncatingIfNeeded: number.int64), as: Int8.self)
+        case "d": address.storeBytes(of: number.double, as: Double.self)
+        case "f": address.storeBytes(of: Float(number.double), as: Float.self)
+        case "{":
+            if let storage = Values.storage(value), let size = TypeEncoding.size(of: type) {
+                storage.bytes.prefix(size).withUnsafeBytes { address.copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+            }
+        default: break
+        }
     }
 }
 
