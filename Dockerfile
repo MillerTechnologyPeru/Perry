@@ -110,6 +110,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends dbus-daemon python3-dbus python3-gi \
  && rm -rf /var/lib/apt/lists/*
 
+# DejaVu's oblique faces, for italic text in the system font.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fonts-dejavu-extra \
+ && rm -rf /var/lib/apt/lists/*
+
 # swift-cmark, Swift's fork of cmark-gfm, which Foundation parses Markdown
 # with: GitHub's tables, strikethrough and autolinks, the ^[text](attributes)
 # syntax, and the inline-only and whitespace-preserving modes Foundation's

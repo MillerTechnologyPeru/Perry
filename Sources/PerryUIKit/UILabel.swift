@@ -10,6 +10,10 @@ final class FontState: ObjectState {
     var name = "Helvetica"
     var pointSize: CGFloat = 17
     var weight: CGFloat = 0
+    /// CTFontSymbolicTraits: italic, bold, monospace…
+    var traits: UInt32 = 0
+    /// A system font's design: "NSCTFontUIFontDesignMonospaced" and the like.
+    var design: String?
 }
 
 @ObjCClass("UIFont")
@@ -17,9 +21,10 @@ open class UIFont: NSObject {
     static let states = StateTable<FontState>()
     var state: FontState { UIFont.states[objcObject] }
 
-    static func make(name: String, size: CGFloat, weight: CGFloat = 0) -> UIFont {
+    static func make(name: String, size: CGFloat, weight: CGFloat = 0, traits: UInt32 = 0, design: String? = nil) -> UIFont {
         let font = objCClass.object.allocated().unsafeCast(to: UIFont.self)
         (font.state.name, font.state.pointSize, font.state.weight) = (name, size, weight)
+        (font.state.traits, font.state.design) = (traits, design)
         return font
     }
 
@@ -52,13 +57,17 @@ open class UIFont: NSObject {
 
     @ObjCClassMethod("systemFontOfSize:") static func systemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size) }
     @ObjCClassMethod("boldSystemFontOfSize:") static func boldSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Semibold", size: size, weight: 0.4) }
-    @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-RegularItalic", size: size) }
+    @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont {
+        make(name: ".SFUI-RegularItalic", size: size, traits: italicTrait)
+    }
 
     @ObjCClassMethod("systemFontOfSize:weight:")
     static func systemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
 
     @ObjCClassMethod("monospacedSystemFontOfSize:weight:")
-    static func monospacedSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: "Courier", size: size, weight: weight) }
+    static func monospacedSystemFont(size: CGFloat, weight: CGFloat) -> UIFont {
+        make(name: "Courier", size: size, weight: weight, traits: monoSpaceTrait)
+    }
 
     @ObjCClassMethod("monospacedDigitSystemFontOfSize:weight:")
     static func monospacedDigitSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
@@ -94,12 +103,27 @@ open class UIFont: NSObject {
     @ObjCMethod("leading") func leading() -> CGFloat { 0 }
 
     @ObjCMethod("fontWithSize:")
-    func withSize(_ size: CGFloat) -> UIFont { UIFont.make(name: state.name, size: size, weight: state.weight) }
+    func withSize(_ size: CGFloat) -> UIFont {
+        UIFont.make(name: state.name, size: size, weight: state.weight, traits: state.traits, design: state.design)
+    }
 
+    /// The font's descriptor: its name, size, weight, traits and design.
+    @ObjCMethod("fontDescriptor")
+    func fontDescriptor() -> UnsafeMutableRawPointer? { ObjCRuntime.autorelease(CTFontCopyFontDescriptor(objcObject)) }
+
+    /// The font a descriptor names, at `size`, or the descriptor's size when 0.
+    @ObjCClassMethod("fontWithDescriptor:size:")
+    static func font(descriptor: UnsafeMutableRawPointer?, size: CGFloat) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(CTFontCreateWithFontDescriptor(descriptor, size, nil))
+    }
+
+    /// Equal fonts draw the same: the same name, size, weight, traits and
+    /// design. (Attributed strings merge runs whose fonts are equal.)
     @ObjCMethod("isEqual:")
     func isEqual(_ other: NSObject?) -> Bool {
         guard let other = other?.as(UIFont.self) else { return false }
         return other.state.name == state.name && other.state.pointSize == state.pointSize
+            && other.state.weight == state.weight && other.state.traits == state.traits && other.state.design == state.design
     }
 
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: state.name.hashValue) ^ UInt(state.pointSize) }
@@ -108,11 +132,26 @@ open class UIFont: NSObject {
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.font }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
-    /// The font CoreGraphics draws with: a bold or regular sans serif for
-    /// the system font.
+    var isBold: Bool {
+        state.weight >= 0.3 || state.traits & boldTrait != 0 || state.name.contains("Bold") || state.name.contains("Semibold")
+    }
+
+    var isItalic: Bool { state.traits & italicTrait != 0 || state.name.contains("Italic") || state.name.contains("Oblique") }
+
+    var isMonospaced: Bool {
+        state.design == "NSCTFontUIFontDesignMonospaced" || state.traits & monoSpaceTrait != 0
+            || ["Courier", "Menlo", "SFMono", "Monaco"].contains { state.name.contains($0) }
+    }
+
+    /// The font CoreGraphics draws with, as FontConfig names it
+    /// ("Family-Style"): for the system font and monospaced fonts, DejaVu
+    /// Sans or Sans Mono, bold and oblique as the font is; other fonts by
+    /// their names.
     var drawingName: String {
-        if state.name.hasPrefix(".SFUI") { return state.weight >= 0.3 ? "DejaVu Sans Bold" : "DejaVu Sans" }
-        return state.name
+        guard state.name.hasPrefix(".") || isMonospaced else { return state.name }
+        let family = isMonospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
+        let style = (isBold ? "Bold" : "") + (isItalic ? "Oblique" : "")
+        return style.isEmpty ? family : family + "-" + style
     }
 }
 
