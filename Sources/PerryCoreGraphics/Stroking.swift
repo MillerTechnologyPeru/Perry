@@ -234,7 +234,7 @@ enum Stroking {
     }
 }
 
-@c(_CGPathCreateCopyByStrokingPath)
+@DarwinC("_CGPathCreateCopyByStrokingPath")
 public func CGPathCreateCopyByStrokingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ lineWidth: CGFloat,
                                            _ lineCap: Int32, _ lineJoin: Int32, _ miterLimit: CGFloat) -> Ref? {
     guard let state = Paths.state(path) else { return nil }
@@ -243,7 +243,7 @@ public func CGPathCreateCopyByStrokingPath(_ path: Ref?, _ t: UnsafePointer<CGAf
     return outline
 }
 
-@c(_CGPathCreateCopyByDashingPath)
+@DarwinC("_CGPathCreateCopyByDashingPath")
 public func CGPathCreateCopyByDashingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ phase: CGFloat,
                                           _ lengths: UnsafePointer<CGFloat>?, _ count: Int) -> Ref? {
     guard let state = Paths.state(path) else { return nil }
