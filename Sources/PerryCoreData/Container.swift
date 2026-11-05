@@ -232,11 +232,15 @@ enum Notifications {
     static let NSDeletedObjectsKey = "deleted"
     static let NSRefreshedObjectsKey = "refreshed"
     static let NSInvalidatedObjectsKey = "invalidated"
+    static let NSInvalidatedAllObjectsKey = "invalidatedAll"
 }
 
 /// Store options and error keys.
 @ObjCConstants
 enum Keys {
+    static let NSAffectedStoresErrorKey = "NSAffectedStoresErrorKey"
+    static let NSPersistentStoreSaveConflictsErrorKey = "NSPersistentStoreSaveConflictsErrorKey"
+    static let NSValidationPredicateErrorKey = "NSValidationErrorPredicate"
     static let NSMigratePersistentStoresAutomaticallyOption = "NSMigratePersistentStoresAutomaticallyOption"
     static let NSInferMappingModelAutomaticallyOption = "NSInferMappingModelAutomaticallyOption"
     static let NSReadOnlyPersistentStoreOption = "NSReadOnlyPersistentStoreOption"
