@@ -24,6 +24,12 @@ void perry_foundation_set_empty_dictionary_class(void *cls) { ns_dictionary0[0] 
 
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 
+// What @catch (NSException *) names: objc_typeinfo { vtable, name, class }.
+// NSException's class is made at startup, so the record has none, and
+// libobjc's personality routine matches it by name.
+struct perry_objc_typeinfo { const void *vtable; const char *name; void *cls; };
+const struct perry_objc_typeinfo ns_exception_ehtype DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { NULL, "NSException", NULL };
+
 perry_class_storage ns_string DARWIN_SYMBOL("_OBJC_CLASS_$_NSString");
 perry_class_storage ns_string_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSString");
 // String literals' isa. CoreFoundation exports it as an array; it is the
