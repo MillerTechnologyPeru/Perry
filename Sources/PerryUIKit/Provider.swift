@@ -16,6 +16,8 @@ private let libobjc = "/usr/lib/libobjc.A.dylib"
 /// API and checks Foundation is running.
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    // Before the app's code runs.
+    SDL.prepareEnvironment()
     func symbol(_ library: String, _ name: String) -> UnsafeMutableRawPointer? {
         library.withCString { library in name.withCString { lookup(library, $0) } }
     }
