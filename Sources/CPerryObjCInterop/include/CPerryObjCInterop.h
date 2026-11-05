@@ -17,4 +17,15 @@ typedef struct perry_word_pair {
     uint32_t high;
 } perry_word_pair;
 
+// A structure as 32-bit Darwin passes it: its words, in core registers and on
+// the stack, and through memory when returned, where Linux's armhf passes a
+// structure of floats or doubles in VFP registers. Structures of words pass
+// the same way on both.
+typedef struct perry_words2 { uint32_t words[2]; } perry_words2;
+typedef struct perry_words3 { uint32_t words[3]; } perry_words3;
+typedef struct perry_words4 { uint32_t words[4]; } perry_words4;
+typedef struct perry_words6 { uint32_t words[6]; } perry_words6;
+typedef struct perry_words8 { uint32_t words[8]; } perry_words8;
+typedef struct perry_words16 { uint32_t words[16]; } perry_words16;
+
 #endif
