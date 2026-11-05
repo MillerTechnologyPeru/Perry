@@ -272,16 +272,52 @@ private struct AttributedLayout {
     }
 }
 
+extension NSAttributedString {
+    /// NSTextAlignment from the first run's paragraph style: natural 4 is left.
+    var drawingAlignment: Int {
+        let attributes = length() > 0 ? attributes(at: 0, effectiveRange: nil) : nil
+        let paragraph = attributes?.object(forKey: "NSParagraphStyle")?.as(NSParagraphStyle.self)
+        return paragraph.map { $0.state.alignment == 4 ? 0 : $0.state.alignment } ?? 0
+    }
+
+    /// The layout in more than one style, when the text has more than one.
+    func styledLayout(size: CGSize, lineLimit: Int) -> StyledLayout? {
+        let runs = styledRuns
+        guard StyledLayout.needed(runs) else { return nil }
+        return StyledLayout(runs, width: size.width, height: size.height, lineLimit: lineLimit)
+    }
+}
+
+extension StyledLayout {
+    /// What drawing reports to its context.
+    func report(to context: NSStringDrawingContext?) {
+        guard let state = context?.state else { return }
+        state.numberOfLineFragments = lines.count
+        state.hasTruncatedRanges = truncated
+        state.actualScaleFactor = 1
+        state.totalBounds = CGRect(origin: .zero, size: size)
+        state.firstBaselineOffset = firstBaseline
+        state.baselineOffset = lastBaseline
+    }
+}
+
 @ObjCCategory("NSExtendedStringDrawing")
 extension NSAttributedString {
     @ObjCMethod("size")
-    func size() -> CGSize { AttributedLayout(self, size: .zero, lineLimit: 1).size }
+    func size() -> CGSize {
+        if let styled = styledLayout(size: .zero, lineLimit: 1) { return styled.size }
+        return AttributedLayout(self, size: .zero, lineLimit: 1).size
+    }
 
     /// NSStringDrawingOptions: uses line fragment origin 1 lays the text out
     /// in lines; otherwise it is one line.
     @ObjCMethod("boundingRectWithSize:options:context:")
     func boundingRect(with size: CGSize, options: Int, context: NSStringDrawingContext?) -> CGRect {
         let lineLimit = options & 1 == 0 ? 1 : context?.state.maximumNumberOfLines ?? 0
+        if let styled = styledLayout(size: size, lineLimit: lineLimit) {
+            styled.report(to: context)
+            return CGRect(origin: .zero, size: styled.size)
+        }
         let layout = AttributedLayout(self, size: size, lineLimit: lineLimit)
         layout.report(to: context)
         return CGRect(origin: .zero, size: layout.size)
@@ -290,6 +326,11 @@ extension NSAttributedString {
     @ObjCMethod("drawWithRect:options:context:")
     func draw(with rect: CGRect, options: Int, context: NSStringDrawingContext?) {
         let lineLimit = options & 1 == 0 ? 1 : context?.state.maximumNumberOfLines ?? 0
+        if let styled = styledLayout(size: rect.size, lineLimit: lineLimit) {
+            styled.report(to: context)
+            styled.draw(in: rect, alignment: drawingAlignment)
+            return
+        }
         let layout = AttributedLayout(self, size: rect.size, lineLimit: lineLimit)
         layout.report(to: context)
         drawLines(layout.lines, in: rect, font: layout.font, color: layout.color, alignment: layout.alignment)
@@ -297,6 +338,10 @@ extension NSAttributedString {
 
     @ObjCMethod("drawAtPoint:")
     func draw(at point: CGPoint) {
+        if let styled = styledLayout(size: .zero, lineLimit: 1) {
+            styled.draw(in: CGRect(origin: point, size: styled.size), alignment: 0)
+            return
+        }
         let layout = AttributedLayout(self, size: .zero, lineLimit: 1)
         drawLines(layout.lines, in: CGRect(origin: point, size: layout.size), font: layout.font, color: layout.color, alignment: 0)
     }
