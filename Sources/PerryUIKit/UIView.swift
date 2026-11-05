@@ -399,6 +399,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         for subview in state.subviews { subview.state.superview = nil }
         state.layer.setDelegate(nil)
         UIView.states.remove(objcObject)
+        UIView.guides.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
 
