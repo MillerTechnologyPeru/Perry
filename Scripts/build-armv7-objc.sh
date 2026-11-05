@@ -16,7 +16,7 @@ macros=${PERRY_OBJC_MACROS:-$root/.build/macros/PerryObjCMacros}
 [ -x "$macros" ] || { echo "build the macro plugin first: Scripts/build-host-macros.sh" >&2; exit 1; }
 
 clang_flags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE"
-for name in msgsend_arm.S trampolines.c data.c; do
+for name in msgsend_arm.S trampolines.c data.c exceptions_arm.c; do
     "$llvm/clang" $clang_flags -I"$root/Sources/CPerryObjC/include" -c "$root/Sources/CPerryObjC/$name" \
         -o "$out/obj/cobjc-$name.o"
 done
