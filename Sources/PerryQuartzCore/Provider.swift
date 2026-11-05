@@ -184,13 +184,13 @@ class NSValue: NSObject {
     @ObjCMethod("objCType") func objCType() -> UnsafePointer<CChar>?
     @ObjCMethod("getValue:size:") func getValue(_ buffer: UnsafeMutableRawPointer, size: UInt)
 
-    static func boxing<T: ObjCScalar>(_ value: T) -> NSValue {
+    static func boxing<T: ObjCValue>(_ value: T) -> NSValue {
         var value = value
         return T.objCTypeEncoding.withCString { type in withUnsafeBytes(of: &value) { make(bytes: $0.baseAddress!, objCType: type) } }
     }
 
     /// The value, when it holds a `T`.
-    func unboxed<T: ObjCScalar>(_ type: T.Type) -> T? {
+    func unboxed<T: ObjCValue>(_ type: T.Type) -> T? {
         guard let encoding = objCType().map({ String(cString: $0) }), encoding == T.objCTypeEncoding else { return nil }
         let buffer = UnsafeMutablePointer<T>.allocate(capacity: 1)
         defer { buffer.deallocate() }
