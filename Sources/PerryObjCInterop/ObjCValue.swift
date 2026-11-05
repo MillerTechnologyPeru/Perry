@@ -95,6 +95,32 @@ extension UInt16: ObjCScalar { public static var objCTypeEncoding: String { "S" 
 extension Int8: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
 extension UInt8: ObjCScalar { public static var objCTypeEncoding: String { "C" } }
 
+// MARK: - Structures
+
+/// A C structure that crosses as Darwin passes it. Its ObjCType is the
+/// structure itself on 64-bit, where Darwin and Linux pass structures the same
+/// way, and on 32-bit Darwin the words it is made of (ObjCWords2 and so on),
+/// since Darwin passes a structure of floats or doubles in core registers and
+/// on the stack where Linux's armhf uses VFP registers. The two are the same
+/// size; values convert by their bits.
+public protocol ObjCStructure: ObjCValue {}
+
+extension ObjCStructure {
+    @inline(__always) public init(objCArgument value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
+    @inline(__always) public init(objCReturnValue value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
+    @inline(__always) public init(objCOwned value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
+    @inline(__always) public func objCArgument() -> ObjCType { unsafeBitCast(self, to: ObjCType.self) }
+    @inline(__always) public func objCReturnValue() -> ObjCType { unsafeBitCast(self, to: ObjCType.self) }
+    @inline(__always) public func objCOwnedReturnValue() -> ObjCType { unsafeBitCast(self, to: ObjCType.self) }
+}
+
+public typealias ObjCWords2 = perry_words2
+public typealias ObjCWords3 = perry_words3
+public typealias ObjCWords4 = perry_words4
+public typealias ObjCWords6 = perry_words6
+public typealias ObjCWords8 = perry_words8
+public typealias ObjCWords16 = perry_words16
+
 // MARK: - 32-bit Darwin's floating point and 64-bit integers
 
 /// Two words, the low one first: how 32-bit Darwin passes a double or a
