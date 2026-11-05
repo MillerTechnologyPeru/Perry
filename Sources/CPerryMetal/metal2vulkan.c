@@ -12,7 +12,7 @@
 // kept for the life of the process.
 
 /// The ABI these declarations are of.
-#define ABI_VERSION 7
+#define ABI_VERSION 8
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static perry_m2v table;
@@ -164,6 +164,7 @@ static void load(void) {
     BIND(reflection_free)
     BIND(compute_encoder_set_texture)
     BIND(compute_encoder_memory_barrier)
+    BIND(compute_encoder_dispatch_threadgroups_indirect)
     BIND(compute_encoder_set_sampler_state)
 #undef BIND
     loaded = &table;
