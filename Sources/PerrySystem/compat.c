@@ -460,6 +460,24 @@ int darwin_asl_remove_log_file(void *client, int fd) {
     return 0;
 }
 
+int32_t darwin_OSAtomicOr32Barrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32Barrier);
+int32_t darwin_OSAtomicOr32Barrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_or_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+// Bit n counts from the most significant bit of the first byte, as Darwin's.
+bool darwin_OSAtomicTestAndClearBarrier(uint32_t n, volatile void *address) DARWIN_SYMBOL(OSAtomicTestAndClearBarrier);
+bool darwin_OSAtomicTestAndClearBarrier(uint32_t n, volatile void *address) {
+    volatile uint8_t *byte = (volatile uint8_t *)address + (n >> 3);
+    uint8_t mask = (uint8_t)(0x80u >> (n & 7));
+    return (__atomic_fetch_and(byte, (uint8_t)~mask, __ATOMIC_SEQ_CST) & mask) != 0;
+}
+
+// No library has a link-time version here: -1, as for one not linked.
+int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) DARWIN_SYMBOL(NSVersionOfLinkTimeLibrary);
+int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) { (void)name; return -1; }
+
+const char *darwin_mach_error_string(int error) DARWIN_SYMBOL(mach_error_string);
+const char *darwin_mach_error_string(int error) { return error == 0 ? "(os/kern) successful" : "(os/kern) failure"; }
+
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) DARWIN_SYMBOL(OSAtomicAdd32);
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) { return __atomic_add_fetch(value, amount, __ATOMIC_RELAXED); }
 
