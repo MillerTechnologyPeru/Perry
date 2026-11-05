@@ -418,3 +418,39 @@ enum HTTPStreamProperties {
     static let kCFStreamErrorDomainNetServices: Int32 = 10
     static let kCFStreamErrorDomainNetDB: Int32 = 12
 }
+
+// MARK: - Proxies
+
+/// No proxies are configured: requests go direct.
+@c(_CFNetworkCopySystemProxySettings)
+public func CFNetworkCopySystemProxySettings() -> UnsafeMutableRawPointer? {
+    let off = NSNumber.make(int64: 0)
+    let settings = NSMutableDictionary.of([
+        ("HTTPEnable", off), ("HTTPSEnable", off), ("ProxyAutoConfigEnable", off),
+        ("__SCOPED__", NSMutableDictionary.empty()),
+    ])
+    return ObjCRuntime.retain(settings.objcObject)
+}
+
+/// Direct, for every URL.
+@c(_CFNetworkCopyProxiesForURL)
+public func CFNetworkCopyProxiesForURL(_ url: UnsafeMutableRawPointer?, _ settings: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    let direct = NSMutableDictionary.of([(ProxyConstants.kCFProxyTypeKey, NSObject.string(ProxyConstants.kCFProxyTypeNone))])
+    return ObjCRuntime.retain(NSMutableArray.of([direct]).objcObject)
+}
+
+@ObjCConstants
+enum ProxyConstants {
+    static let kCFProxyTypeKey = "kCFProxyTypeKey"
+    static let kCFProxyHostNameKey = "kCFProxyHostNameKey"
+    static let kCFProxyPortNumberKey = "kCFProxyPortNumberKey"
+    static let kCFProxyTypeNone = "kCFProxyTypeNone"
+    static let kCFProxyTypeHTTP = "kCFProxyTypeHTTP"
+    static let kCFProxyTypeHTTPS = "kCFProxyTypeHTTPS"
+    static let kCFProxyTypeSOCKS = "kCFProxyTypeSOCKS"
+    static let kCFProxyTypeAutoConfigurationURL = "kCFProxyTypeAutoConfigurationURL"
+    static let kCFNetworkProxiesHTTPEnable = "HTTPEnable"
+    static let kCFNetworkProxiesHTTPProxy = "HTTPProxy"
+    static let kCFNetworkProxiesHTTPPort = "HTTPPort"
+    static let kCFNetworkProxiesProxyAutoConfigEnable = "ProxyAutoConfigEnable"
+}
