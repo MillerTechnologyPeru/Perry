@@ -8,7 +8,10 @@ import PerryObjCInterop
 // -_perryReadRGBA:width:height:, RGBA rows bottom first) and shows them on
 // the layer as a GL frame is shown. At most maximumDrawableCount drawables
 // are out at once; -nextDrawable waits a second for one, as Core
-// Animation's does. Their textures are reused once presented, as Core
+// Animation's does. With displaySyncEnabled, as by default, it also hands
+// out at most one a display refresh (60 a second, as UIScreen's
+// maximumFramesPerSecond, or PERRY_METAL_FPS), as a drawable comes free
+// only at a refresh on iOS: an app drawing in a loop is paced by it. Their textures are reused once presented, as Core
 // Animation's are, so a drawable an app keeps holds no new memory.
 
 @ObjCWrapper("MTLTextureDescriptor")
@@ -21,8 +24,8 @@ class MTLTextureDescriptor: NSObject {
 
 extension NSObject {
     @ObjCMethod("newTextureWithDescriptor:") func newTexture(descriptor: MTLTextureDescriptor) -> NSObject?
-    @ObjCMethod("_perryReadRGBA:width:height:")
-    func readRGBA(_ pixels: UnsafeMutableRawPointer?, width: UInt, height: UInt) -> Bool
+    @ObjCMethod("_perryReadPixels:width:height:")
+    func readPixels(_ pixels: UnsafeMutableRawPointer?, width: UInt, height: UInt) -> Int
 }
 
 /// The drawables a layer has out, and the textures of those it has back.
@@ -91,17 +94,26 @@ enum MetalTrace {
     /// draws without a display.
     nonisolated(unsafe) static let dumpFrame: Int = getenv("PERRY_METAL_DUMP_FRAME").flatMap { Int(String(cString: $0)) } ?? 300
 
-    static func dump(_ pixels: [UInt8], width: Int, height: Int, to path: String) {
+    /// Time spent reading drawables back and handing them to the layer, in
+    /// nanoseconds, logged every 300 frames.
+    nonisolated(unsafe) static var readTime: UInt64 = 0
+    nonisolated(unsafe) static let framesPerSecond: Double = getenv("PERRY_METAL_FPS").flatMap { Double(String(cString: $0)) }.map { max($0, 1) } ?? 60
+    nonisolated(unsafe) static var showTime: UInt64 = 0
+
+    static func dump(_ pixels: UnsafeRawPointer, layout: Int, width: Int, height: Int, to path: String) {
         guard let file = fopen(path, "wb") else { return }
         defer { fclose(file) }
         let header = "P6\n\(width) \(height)\n255\n"
         _ = header.withCString { fwrite($0, 1, strlen($0), file) }
         var row = [UInt8](repeating: 0, count: width * 3)
-        // RGBA rows bottom first; a PPM's are RGB, top first.
-        for y in (0..<height).reversed() {
+        let bytes = pixels.assumingMemoryBound(to: UInt8.self)
+        let (red, blue) = layout & 1 != 0 ? (2, 0) : (0, 2)
+        // A PPM's rows are RGB, top first.
+        for y in 0..<height {
+            let line = layout & 2 != 0 ? y : height - 1 - y
             for x in 0..<width {
-                let i = (y * width + x) * 4
-                (row[x * 3], row[x * 3 + 1], row[x * 3 + 2]) = (pixels[i], pixels[i + 1], pixels[i + 2])
+                let i = (line * width + x) * 4
+                (row[x * 3], row[x * 3 + 1], row[x * 3 + 2]) = (bytes[i + red], bytes[i + 1], bytes[i + blue])
             }
             _ = row.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) }
         }
@@ -129,6 +141,22 @@ final class MetalLayerState {
     var colorspace: UnsafeMutableRawPointer?
     var nextID = 0
     let pool = DrawablePool()
+    /// When -nextDrawable last handed one out, on the monotonic clock.
+    var lastDrawable: UInt64 = 0
+
+    /// The buffer drawables are read back into, reused frame to frame.
+    var readback: UnsafeMutableRawPointer?
+    var readbackSize = 0
+
+    deinit { readback?.deallocate() }
+
+    func readbackBuffer(_ size: Int) -> UnsafeMutableRawPointer {
+        if let readback, readbackSize == size { return readback }
+        readback?.deallocate()
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: max(size, 4), alignment: 64)
+        (readback, readbackSize) = (buffer, size)
+        return buffer
+    }
 }
 
 @ObjCClass("CAMetalLayer")
@@ -185,6 +213,7 @@ open class CAMetalLayer: CALayer {
             MetalTrace.log("nextDrawable #\(MetalTrace.drawables) of \(objcObject): \(size.width)×\(size.height), format \(metal.pixelFormat), device \(metal.device == nil ? "none" : "set"), \(metal.pool.out) out")
         }
         guard let device = metal.device, size.width >= 1, size.height >= 1 else { return nil }
+        if metal.displaySyncEnabled { waitForRefresh() }
         guard metal.pool.take(limit: metal.maximumDrawableCount, timeout: metal.allowsNextDrawableTimeout ? 1 : nil) else {
             return nil
         }
@@ -208,11 +237,26 @@ open class CAMetalLayer: CALayer {
         return CAMetalDrawable(texture: texture, key: key, layer: self, id: metal.nextID)
     }
 
-    /// Shows pixels read from a presented drawable, as a GL frame is shown
-    /// from the thread that presents it: not through the main queue, which
-    /// an app may be waiting in.
-    func show(_ pixels: [UInt8], width: Int, height: Int) {
-        pixels.withUnsafeBytes { setPixels($0.baseAddress, width: width, height: height, opaque: state.isOpaque) }
+    /// Waits, if need be, until a refresh after the last drawable handed out.
+    private func waitForRefresh() {
+        let interval = UInt64(1e9 / MetalTrace.framesPerSecond)
+        let now = clock_gettime_nsec_np()
+        let next = metal.lastDrawable + interval
+        if metal.lastDrawable != 0, now < next {
+            var until = timespec(tv_sec: Int(next / 1_000_000_000), tv_nsec: Int(next % 1_000_000_000))
+            while clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, nil) == EINTR {}
+            // A late frame does not make the next one early.
+            metal.lastDrawable = next
+        } else {
+            metal.lastDrawable = now
+        }
+    }
+
+    /// Shows pixels read from a presented drawable, as they are, as a GL
+    /// frame is shown from the thread that presents it: not through the
+    /// main queue, which an app may be waiting in.
+    func show(_ pixels: UnsafeRawPointer, layout: Int, width: Int, height: Int) {
+        setPixels(pixels, width: width, height: height, opaque: state.isOpaque, layout: layout)
     }
 }
 
@@ -270,15 +314,23 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
         drawable.presented = true
         let size = layer.drawableSize()
         let width = Int(size.width), height = Int(size.height)
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let read = pixels.withUnsafeMutableBytes { texture.readRGBA($0.baseAddress, width: UInt(width), height: UInt(height)) }
-        if read { layer.show(pixels, width: width, height: height) }
+        // Presents come from one thread, metal2vulkan's, in order.
+        let pixels = layer.metal.readbackBuffer(width * height * 4)
+        let start = clock_gettime_nsec_np()
+        let layout = texture.readPixels(pixels, width: UInt(width), height: UInt(height))
+        let read = layout >= 0
+        let readEnd = clock_gettime_nsec_np()
+        if read { layer.show(pixels, layout: layout, width: width, height: height) }
+        MetalTrace.readTime += readEnd - start
+        MetalTrace.showTime += clock_gettime_nsec_np() - readEnd
         MetalTrace.presents += 1
         if read, MetalTrace.presents == MetalTrace.dumpFrame, let path = getenv("PERRY_METAL_DUMP") {
-            MetalTrace.dump(pixels, width: width, height: height, to: String(cString: path))
+            MetalTrace.dump(pixels, layout: layout, width: width, height: height, to: String(cString: path))
         }
         if MetalTrace.presents <= 3 || MetalTrace.presents % 300 == 0 {
-            MetalTrace.log("present #\(MetalTrace.presents): \(width)×\(height), read \(read)")
+            let frames = Double(min(MetalTrace.presents, 300))
+            MetalTrace.log("present #\(MetalTrace.presents): \(width)×\(height), read \(read); per frame, read back \(Double(MetalTrace.readTime) / frames / 1e6) ms, shown \(Double(MetalTrace.showTime) / frames / 1e6) ms")
+            (MetalTrace.readTime, MetalTrace.showTime) = (0, 0)
         }
         drawable.presentedTime = Double(clock_gettime_nsec_np()) / 1e9
         giveBack()
