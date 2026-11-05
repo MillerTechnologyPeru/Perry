@@ -824,11 +824,15 @@ static int provider_layer(const perry_provider *provider) {
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
         return 3;
     // UIKit's views are QuartzCore's layers' delegates, and MapKit's views
-    // are UIKit's.
-    if (strstr(name, "/UIKit.framework/") || strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") ||
-        strstr(name, "/WebKit.framework/"))
+    // are UIKit's: by the provider's library, as UIKit's stands in for
+    // several frameworks (AdSupport, OpenGLES, WebKit…), any of which an
+    // app may name first.
+    const char *library = provider->path ? strrchr(provider->path, '/') : NULL;
+    library = library ? library + 1 : provider->path;
+    if ((library && strcmp(library, "libPerryUIKit.so") == 0) || strstr(name, "/UIKit.framework/") ||
+        strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") || strstr(name, "/WebKit.framework/"))
         return 5;
-    if (strstr(name, "/MapKit.framework/"))
+    if ((library && strcmp(library, "libPerryMapKit.so") == 0) || strstr(name, "/MapKit.framework/"))
         return 6;
     return 4;
 }
