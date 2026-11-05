@@ -1,0 +1,419 @@
+import Glibc
+
+// WPE WebKit, WebKit's port for embedding, loaded when a web view first
+// needs it. Each web view has a WebKitWebView of its own over a view backend
+// from WPEBackend-fdo, which hands every frame the web process draws to the
+// view in shared memory; the view shows it as its layer's contents. The
+// pages run in WPE's web and network processes, which are Linux programs;
+// their replies come through GLib's main context, which runs on the main
+// queue while there are pages. Without WPE web views load nothing.
+
+final class WPE: @unchecked Sendable {
+    typealias Pointer = UnsafeMutableRawPointer
+
+    // libwpe and WPEBackend-fdo.
+    let viewBackendAddActivityState: @convention(c) (Pointer, UInt32) -> Void
+    let viewBackendDispatchSetSize: @convention(c) (Pointer, UInt32, UInt32) -> Void
+    let viewBackendDispatchSetDeviceScaleFactor: @convention(c) (Pointer, Float) -> Void
+    let exportableCreate: @convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?
+    let exportableDestroy: @convention(c) (Pointer) -> Void
+    let exportableGetViewBackend: @convention(c) (Pointer) -> Pointer?
+    let exportableFrameComplete: @convention(c) (Pointer) -> Void
+    let exportableReleaseShmBuffer: @convention(c) (Pointer, Pointer) -> Void
+    let shmExportedBufferGetShmBuffer: @convention(c) (Pointer) -> Pointer?
+    // libwayland-server's shared-memory buffers.
+    let shmBufferGetData: @convention(c) (Pointer) -> Pointer?
+    let shmBufferGetWidth: @convention(c) (Pointer) -> Int32
+    let shmBufferGetHeight: @convention(c) (Pointer) -> Int32
+    let shmBufferGetStride: @convention(c) (Pointer) -> Int32
+    let shmBufferBeginAccess: @convention(c) (Pointer) -> Void
+    let shmBufferEndAccess: @convention(c) (Pointer) -> Void
+    // WPE WebKit's API, and its JavaScriptCore's values.
+    let webViewBackendNew: @convention(c) (Pointer, Pointer?, Pointer?) -> Pointer?
+    let webViewNew: @convention(c) (Pointer) -> Pointer?
+    let webViewLoadHTML: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void
+    let webViewLoadURI: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let webViewGetTitle: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let webViewGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let webViewIsLoading: @convention(c) (Pointer) -> Int32
+    let webViewGetEstimatedLoadProgress: @convention(c) (Pointer) -> Double
+    let webViewCanGoBack: @convention(c) (Pointer) -> Int32
+    let webViewCanGoForward: @convention(c) (Pointer) -> Int32
+    let webViewGoBack: @convention(c) (Pointer) -> Void
+    let webViewGoForward: @convention(c) (Pointer) -> Void
+    let webViewReload: @convention(c) (Pointer) -> Void
+    let webViewStopLoading: @convention(c) (Pointer) -> Void
+    let webViewGetSettings: @convention(c) (Pointer) -> Pointer?
+    let settingsSetUserAgent: @convention(c) (Pointer, UnsafePointer<CChar>?) -> Void
+    let webViewEvaluateJavaScript: @convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
+                                                   UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void
+    let webViewCallAsyncJavaScriptFunction: @convention(c) (Pointer, UnsafePointer<CChar>, Int, Pointer?, UnsafePointer<CChar>?,
+                                                            UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void
+    let webViewEvaluateJavaScriptFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
+    let webViewCallAsyncJavaScriptFunctionFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
+    let valueIsUndefined: @convention(c) (Pointer) -> Int32
+    let valueToJSON: @convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?
+    // GLib and GObject.
+    let mainContextIteration: @convention(c) (Pointer?, Int32) -> Int32
+    let signalConnectData: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt
+    let signalHandlerDisconnect: @convention(c) (Pointer, UInt) -> Void
+    let objectUnref: @convention(c) (Pointer) -> Void
+    let free: @convention(c) (Pointer?) -> Void
+    let errorFree: @convention(c) (Pointer) -> Void
+    let quarkToString: @convention(c) (UInt32) -> UnsafePointer<CChar>?
+
+    // WebKitLoadEvent.
+    static let loadStarted: Int32 = 0, loadCommitted: Int32 = 2, loadFinished: Int32 = 3
+    /// wpe_view_activity_state: visible, focused, in a window.
+    static let activityShown: UInt32 = 1 | 2 | 4
+
+    /// WPE, initialized; nil when it isn't installed.
+    static let shared: WPE? = WPE()
+
+    private init?() {
+        let names = ["libwpe-1.0.so.1", "libWPEBackend-fdo-1.0.so.1", "libwayland-server.so.0", "libWPEWebKit-2.0.so.1",
+                     "libglib-2.0.so.0", "libgobject-2.0.so.0"]
+        // Local, so WPE's JavaScriptCore never stands in for the one
+        // JavaScriptCore.framework is over.
+        let libraries = names.map { dlopen($0, RTLD_NOW | RTLD_LOCAL) }
+        guard let wpe = libraries[0], let fdo = libraries[1], let wayland = libraries[2], let webkit = libraries[3],
+              let glib = libraries[4], let gobject = libraries[5] else {
+            WPE.log("WPE WebKit is not installed; web views load nothing")
+            return nil
+        }
+        var missing: [String] = []
+        func bind<T>(_ library: Pointer, _ name: String, _: T.Type) -> T {
+            guard let symbol = dlsym(library, name) else {
+                missing.append(name)
+                return unsafeBitCast(WPE.missingFunction, to: T.self)
+            }
+            return unsafeBitCast(symbol, to: T.self)
+        }
+        let loaderInit = bind(wpe, "wpe_loader_init", (@convention(c) (UnsafePointer<CChar>) -> Int32).self)
+        let initializeShm = bind(fdo, "wpe_fdo_initialize_shm", (@convention(c) () -> Int32).self)
+        viewBackendAddActivityState = bind(wpe, "wpe_view_backend_add_activity_state", (@convention(c) (Pointer, UInt32) -> Void).self)
+        viewBackendDispatchSetSize = bind(wpe, "wpe_view_backend_dispatch_set_size", (@convention(c) (Pointer, UInt32, UInt32) -> Void).self)
+        viewBackendDispatchSetDeviceScaleFactor = bind(wpe, "wpe_view_backend_dispatch_set_device_scale_factor",
+                                                       (@convention(c) (Pointer, Float) -> Void).self)
+        exportableCreate = bind(fdo, "wpe_view_backend_exportable_fdo_create",
+                                (@convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?).self)
+        exportableDestroy = bind(fdo, "wpe_view_backend_exportable_fdo_destroy", (@convention(c) (Pointer) -> Void).self)
+        exportableGetViewBackend = bind(fdo, "wpe_view_backend_exportable_fdo_get_view_backend", (@convention(c) (Pointer) -> Pointer?).self)
+        exportableFrameComplete = bind(fdo, "wpe_view_backend_exportable_fdo_dispatch_frame_complete", (@convention(c) (Pointer) -> Void).self)
+        exportableReleaseShmBuffer = bind(fdo, "wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer",
+                                          (@convention(c) (Pointer, Pointer) -> Void).self)
+        shmExportedBufferGetShmBuffer = bind(fdo, "wpe_fdo_shm_exported_buffer_get_shm_buffer", (@convention(c) (Pointer) -> Pointer?).self)
+        shmBufferGetData = bind(wayland, "wl_shm_buffer_get_data", (@convention(c) (Pointer) -> Pointer?).self)
+        shmBufferGetWidth = bind(wayland, "wl_shm_buffer_get_width", (@convention(c) (Pointer) -> Int32).self)
+        shmBufferGetHeight = bind(wayland, "wl_shm_buffer_get_height", (@convention(c) (Pointer) -> Int32).self)
+        shmBufferGetStride = bind(wayland, "wl_shm_buffer_get_stride", (@convention(c) (Pointer) -> Int32).self)
+        shmBufferBeginAccess = bind(wayland, "wl_shm_buffer_begin_access", (@convention(c) (Pointer) -> Void).self)
+        shmBufferEndAccess = bind(wayland, "wl_shm_buffer_end_access", (@convention(c) (Pointer) -> Void).self)
+        webViewBackendNew = bind(webkit, "webkit_web_view_backend_new", (@convention(c) (Pointer, Pointer?, Pointer?) -> Pointer?).self)
+        webViewNew = bind(webkit, "webkit_web_view_new", (@convention(c) (Pointer) -> Pointer?).self)
+        webViewLoadHTML = bind(webkit, "webkit_web_view_load_html",
+                               (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void).self)
+        webViewLoadURI = bind(webkit, "webkit_web_view_load_uri", (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        webViewGetTitle = bind(webkit, "webkit_web_view_get_title", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        webViewGetURI = bind(webkit, "webkit_web_view_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        webViewIsLoading = bind(webkit, "webkit_web_view_is_loading", (@convention(c) (Pointer) -> Int32).self)
+        webViewGetEstimatedLoadProgress = bind(webkit, "webkit_web_view_get_estimated_load_progress", (@convention(c) (Pointer) -> Double).self)
+        webViewCanGoBack = bind(webkit, "webkit_web_view_can_go_back", (@convention(c) (Pointer) -> Int32).self)
+        webViewCanGoForward = bind(webkit, "webkit_web_view_can_go_forward", (@convention(c) (Pointer) -> Int32).self)
+        webViewGoBack = bind(webkit, "webkit_web_view_go_back", (@convention(c) (Pointer) -> Void).self)
+        webViewGoForward = bind(webkit, "webkit_web_view_go_forward", (@convention(c) (Pointer) -> Void).self)
+        webViewReload = bind(webkit, "webkit_web_view_reload", (@convention(c) (Pointer) -> Void).self)
+        webViewStopLoading = bind(webkit, "webkit_web_view_stop_loading", (@convention(c) (Pointer) -> Void).self)
+        webViewGetSettings = bind(webkit, "webkit_web_view_get_settings", (@convention(c) (Pointer) -> Pointer?).self)
+        settingsSetUserAgent = bind(webkit, "webkit_settings_set_user_agent", (@convention(c) (Pointer, UnsafePointer<CChar>?) -> Void).self)
+        webViewEvaluateJavaScript = bind(webkit, "webkit_web_view_evaluate_javascript",
+                                         (@convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
+                                                          UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void).self)
+        webViewCallAsyncJavaScriptFunction = bind(webkit, "webkit_web_view_call_async_javascript_function",
+                                                  (@convention(c) (Pointer, UnsafePointer<CChar>, Int, Pointer?, UnsafePointer<CChar>?,
+                                                                   UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void).self)
+        webViewEvaluateJavaScriptFinish = bind(webkit, "webkit_web_view_evaluate_javascript_finish",
+                                               (@convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?).self)
+        webViewCallAsyncJavaScriptFunctionFinish = bind(webkit, "webkit_web_view_call_async_javascript_function_finish",
+                                                        (@convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?).self)
+        valueIsUndefined = bind(webkit, "jsc_value_is_undefined", (@convention(c) (Pointer) -> Int32).self)
+        valueToJSON = bind(webkit, "jsc_value_to_json", (@convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?).self)
+        mainContextIteration = bind(glib, "g_main_context_iteration", (@convention(c) (Pointer?, Int32) -> Int32).self)
+        signalConnectData = bind(gobject, "g_signal_connect_data",
+                                 (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt).self)
+        signalHandlerDisconnect = bind(gobject, "g_signal_handler_disconnect", (@convention(c) (Pointer, UInt) -> Void).self)
+        objectUnref = bind(gobject, "g_object_unref", (@convention(c) (Pointer) -> Void).self)
+        free = bind(glib, "g_free", (@convention(c) (Pointer?) -> Void).self)
+        errorFree = bind(glib, "g_error_free", (@convention(c) (Pointer) -> Void).self)
+        quarkToString = bind(glib, "g_quark_to_string", (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
+        guard missing.isEmpty else {
+            WPE.log("WPE WebKit is incomplete (no \(missing.joined(separator: ", "))); web views load nothing")
+            return nil
+        }
+        guard loaderInit("libWPEBackend-fdo-1.0.so.1") != 0, initializeShm() != 0 else {
+            WPE.log("WPEBackend-fdo did not initialize; web views load nothing")
+            return nil
+        }
+    }
+
+    private static let missingFunction: @convention(c) () -> Void = {}
+
+    /// Runs what GLib's main context has ready: WPE's replies, signals and
+    /// frames.
+    func dispatch() {
+        var budget = 1000
+        while budget > 0, mainContextIteration(nil, 0) != 0 { budget -= 1 }
+    }
+
+    /// A GError's domain, code and message.
+    func error(_ error: Pointer) -> (domain: String, code: Int, message: String) {
+        let domain = quarkToString(error.load(as: UInt32.self)).map { String(cString: $0) } ?? ""
+        let code = Int(error.load(fromByteOffset: 4, as: Int32.self))
+        let message = error.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self).map { String(cString: $0) } ?? ""
+        return (domain, code, message)
+    }
+
+    static func log(_ message: String) {
+        let line = "perry: WebKit: \(message)\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+}
+
+/// One web view's page: a WebKitWebView drawing into frames of the view's
+/// size, which `frame` shows.
+final class WebPage {
+    typealias Pointer = UnsafeMutableRawPointer
+
+    let wpe: WPE
+    private let exportable: Pointer
+    private let backend: Pointer
+    /// The exportable's client data: this page, until it goes.
+    private let slot: UnsafeMutablePointer<Pointer?>
+    let view: Pointer
+    private var handlers: [UInt] = []
+    private(set) var size: (width: UInt32, height: UInt32)
+    private(set) var scale: Float
+
+    /// A frame: BGRA pixels, premultiplied, top row first, with the width,
+    /// height and bytes per row. They are good only during the call.
+    var frame: ((UnsafeRawPointer, Int, Int, Int) -> Void)?
+    /// WebKitLoadEvent: started, committed, finished.
+    var loadChanged: ((Int32) -> Void)?
+    /// A load failed: whether it had committed, then GError's domain, code
+    /// and message.
+    var loadFailed: ((Bool, String, Int, String) -> Void)?
+    /// The page's title changed.
+    var titleChanged: (() -> Void)?
+
+    /// The pages there are, which the main queue runs GLib's context for.
+    nonisolated(unsafe) static var count = 0
+    nonisolated(unsafe) private static var scheduled = false
+
+    init?(width: UInt32, height: UInt32, scale: Float) {
+        guard let wpe = WPE.shared else { return nil }
+        let size = (max(width, 1), max(height, 1))
+        let slot = UnsafeMutablePointer<Pointer?>.allocate(capacity: 1)
+        slot.initialize(to: nil)
+        // WebKit destroys the exportable when it is done with the backend.
+        guard let exportable = wpe.exportableCreate(WebPage.client, slot, size.0, size.1),
+              let backend = wpe.exportableGetViewBackend(exportable),
+              let webBackend = wpe.webViewBackendNew(backend, unsafeBitCast(WebPage.onBackendDestroyed, to: Pointer.self), exportable),
+              let view = wpe.webViewNew(webBackend) else {
+            WPE.log("can't make a web view")
+            return nil
+        }
+        (self.wpe, self.exportable, self.backend, self.view, self.slot) = (wpe, exportable, backend, view, slot)
+        (self.size, self.scale) = (size, scale)
+        slot.pointee = Unmanaged.passUnretained(self).toOpaque()
+        wpe.viewBackendDispatchSetDeviceScaleFactor(backend, scale)
+        wpe.viewBackendAddActivityState(backend, WPE.activityShown)
+        let data = Unmanaged.passUnretained(self).toOpaque()
+        handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
+        handlers.append(wpe.signalConnectData(view, "load-failed", unsafeBitCast(WebPage.onLoadFailed, to: UnsafeRawPointer.self), data, nil, 0))
+        handlers.append(wpe.signalConnectData(view, "notify::title", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self), data, nil, 0))
+        WebPage.count += 1
+        WebPage.schedule()
+    }
+
+    deinit {
+        for handler in handlers { wpe.signalHandlerDisconnect(view, handler) }
+        // The slot stays, empty, for any frame still on its way.
+        slot.pointee = nil
+        wpe.objectUnref(view)
+        WebPage.count -= 1
+    }
+
+    func loadHTML(_ html: String, baseURI: String?) {
+        if let baseURI { wpe.webViewLoadHTML(view, html, baseURI) } else { wpe.webViewLoadHTML(view, html, nil) }
+    }
+
+    func loadURI(_ uri: String) { wpe.webViewLoadURI(view, uri) }
+
+    var title: String? { wpe.webViewGetTitle(view).map { String(cString: $0) } }
+    var uri: String? { wpe.webViewGetURI(view).map { String(cString: $0) } }
+    var isLoading: Bool { wpe.webViewIsLoading(view) != 0 }
+    var progress: Double { wpe.webViewGetEstimatedLoadProgress(view) }
+    var canGoBack: Bool { wpe.webViewCanGoBack(view) != 0 }
+    var canGoForward: Bool { wpe.webViewCanGoForward(view) != 0 }
+    func goBack() { wpe.webViewGoBack(view) }
+    func goForward() { wpe.webViewGoForward(view) }
+    func reload() { wpe.webViewReload(view) }
+    func stopLoading() { wpe.webViewStopLoading(view) }
+
+    func setUserAgent(_ agent: String?) {
+        guard let settings = wpe.webViewGetSettings(view) else { return }
+        if let agent { wpe.settingsSetUserAgent(settings, agent) } else { wpe.settingsSetUserAgent(settings, nil) }
+    }
+
+    /// The view's size in points and its scale, which the next frames have.
+    func resize(width: UInt32, height: UInt32, scale: Float) {
+        let size = (max(width, 1), max(height, 1))
+        if scale != self.scale {
+            self.scale = scale
+            wpe.viewBackendDispatchSetDeviceScaleFactor(backend, scale)
+        }
+        guard size != self.size else { return }
+        self.size = size
+        wpe.viewBackendDispatchSetSize(backend, size.0, size.1)
+    }
+
+    /// Runs `script` in the page; `completion` hears its value as JSON (nil
+    /// for undefined) or a GError's domain, code and message.
+    func evaluate(_ script: String, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
+        let box = Unmanaged.passRetained(Evaluation(page: self, completion: completion)).toOpaque()
+        wpe.webViewEvaluateJavaScript(view, script, -1, nil, nil, nil, unsafeBitCast(WebPage.onEvaluated, to: Pointer.self), box)
+    }
+
+    /// Calls `body` once the page has drawn what it has now: after two of
+    /// its animation frames, and a frame's time for that frame to arrive.
+    func afterRendering(_ body: @escaping () -> Void) {
+        let box = Unmanaged.passRetained(Rendering(body)).toOpaque()
+        wpe.webViewCallAsyncJavaScriptFunction(view, "await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))",
+                                               -1, nil, nil, nil, nil, unsafeBitCast(WebPage.onRendered, to: Pointer.self), box)
+    }
+
+    private final class Rendering {
+        let body: () -> Void
+        init(_ body: @escaping () -> Void) { self.body = body }
+    }
+
+    /// The function's result is not needed; the frame drawn after it is.
+    private static let onRendered: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
+        guard let data else { return }
+        let rendering = Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue()
+        if let wpe = WPE.shared, let source, let result {
+            var error: Pointer?
+            if let value = wpe.webViewCallAsyncJavaScriptFunctionFinish(source, result, &error) { wpe.objectUnref(value) }
+            if let error { wpe.errorFree(error) }
+        }
+        guard let after = Display.dispatchAfter, let time = Display.dispatchTime else { return rendering.body() }
+        after(time(0, 50_000_000), Updates.mainQueue, Unmanaged.passRetained(rendering).toOpaque()) { data in
+            guard let data else { return }
+            Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue().body()
+        }
+    }
+
+    struct EvaluationError: Error {
+        let domain: String, code: Int, message: String
+    }
+
+    private final class Evaluation {
+        let page: WebPage
+        let completion: (Result<String?, EvaluationError>) -> Void
+        init(page: WebPage, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
+            (self.page, self.completion) = (page, completion)
+        }
+    }
+
+    // MARK: Callbacks from C
+
+    /// wpe_view_backend_exportable_fdo_client: frames in shared memory only.
+    nonisolated(unsafe) private static let client: UnsafeRawPointer = {
+        let client = UnsafeMutablePointer<UnsafeRawPointer?>.allocate(capacity: 5)
+        client.initialize(repeating: nil, count: 5)
+        client[2] = unsafeBitCast(WebPage.onShmBuffer, to: UnsafeRawPointer.self)
+        return UnsafeRawPointer(client)
+    }()
+
+    /// A frame, to the page in the exportable's slot.
+    private static let onShmBuffer: @convention(c) (Pointer?, Pointer?) -> Void = { data, buffer in
+        guard let buffer, let page = data?.assumingMemoryBound(to: Pointer?.self).pointee else { return }
+        Unmanaged<WebPage>.fromOpaque(page).takeUnretainedValue().receive(buffer)
+    }
+
+    private static let onBackendDestroyed: @convention(c) (Pointer?) -> Void = { exportable in
+        if let exportable { WPE.shared?.exportableDestroy(exportable) }
+    }
+
+    private func receive(_ buffer: Pointer) {
+        defer {
+            wpe.exportableReleaseShmBuffer(exportable, buffer)
+            wpe.exportableFrameComplete(exportable)
+        }
+        guard let shm = wpe.shmExportedBufferGetShmBuffer(buffer) else { return }
+        wpe.shmBufferBeginAccess(shm)
+        defer { wpe.shmBufferEndAccess(shm) }
+        let width = Int(wpe.shmBufferGetWidth(shm)), height = Int(wpe.shmBufferGetHeight(shm))
+        let stride = Int(wpe.shmBufferGetStride(shm))
+        guard width > 0, height > 0, let data = wpe.shmBufferGetData(shm) else { return }
+        frame?(data, width, height, stride)
+    }
+
+    private static let onLoadChanged: @convention(c) (Pointer?, Int32, Pointer?) -> Void = { _, event, data in
+        guard let data else { return }
+        Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue().loadChanged?(event)
+    }
+
+    /// load-failed: the view, the WebKitLoadEvent it failed at, the URI and
+    /// the GError; true, as handled.
+    private static let onLoadFailed: @convention(c) (Pointer?, Int32, UnsafePointer<CChar>?, Pointer?, Pointer?) -> Int32 = {
+        _, event, _, error, data in
+        guard let data else { return 1 }
+        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
+        let described = error.map(page.wpe.error) ?? (domain: "", code: 0, message: "")
+        page.loadFailed?(event >= WPE.loadCommitted, described.domain, described.code, described.message)
+        return 1
+    }
+
+    private static let onNotify: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, _, data in
+        guard let data else { return }
+        Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue().titleChanged?()
+    }
+
+    private static let onEvaluated: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
+        guard let data else { return }
+        let evaluation = Unmanaged<Evaluation>.fromOpaque(data).takeRetainedValue()
+        let wpe = evaluation.page.wpe
+        var error: Pointer?
+        guard let source, let result, let value = wpe.webViewEvaluateJavaScriptFinish(source, result, &error) else {
+            let described = error.map(wpe.error) ?? (domain: "", code: 0, message: "")
+            if let error { wpe.errorFree(error) }
+            evaluation.completion(.failure(EvaluationError(domain: described.domain, code: described.code, message: described.message)))
+            return
+        }
+        defer { wpe.objectUnref(value) }
+        if wpe.valueIsUndefined(value) != 0 {
+            evaluation.completion(.success(nil))
+            return
+        }
+        let json = wpe.valueToJSON(value, 0)
+        defer { wpe.free(json) }
+        evaluation.completion(.success(json.map { String(cString: $0) }))
+    }
+
+    /// Runs GLib's context on the main queue, a frame's time apart, while
+    /// there are pages.
+    private static func schedule() {
+        guard !scheduled, let after = Display.dispatchAfter, let time = Display.dispatchTime else { return }
+        scheduled = true
+        after(time(0, 8_000_000), Updates.mainQueue, nil) { _ in
+            WebPage.scheduled = false
+            WPE.shared?.dispatch()
+            WebPage.tick?()
+            if WebPage.count > 0 { WebPage.schedule() }
+        }
+    }
+
+    /// Run after each pass of GLib's context: web views follow their sizes.
+    nonisolated(unsafe) static var tick: (() -> Void)?
+}
