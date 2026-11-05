@@ -95,6 +95,11 @@ public final class NSDate: NSObject {
     @ObjCClassMethod("date")
     static func now(_ cls: ObjCClass) -> NSDate { Dates.wrapped(.now, cls: cls) }
 
+    @ObjCClassMethod("dateWithTimeInterval:sinceDate:")
+    static func date(_ cls: ObjCClass, interval: Double, since date: NSDate) -> NSDate {
+        Dates.wrapped(date.date.addingTimeInterval(interval), cls: cls)
+    }
+
     @ObjCClassMethod("dateWithTimeIntervalSinceNow:")
     static func date(_ cls: ObjCClass, sinceNow seconds: Double) -> NSDate {
         Dates.wrapped(Date(timeIntervalSinceNow: seconds), cls: cls)
