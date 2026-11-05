@@ -358,6 +358,8 @@ typedef struct perry_m2v {
     bool (* _Nonnull compute_encoder_set_texture)(perry_m2v_handle, perry_m2v_handle, uint32_t, perry_m2v_error);
     /// MTLBarrierScope.
     bool (* _Nonnull compute_encoder_memory_barrier)(perry_m2v_handle, uint64_t, perry_m2v_error);
+    bool (* _Nonnull compute_encoder_dispatch_threadgroups_indirect)(perry_m2v_handle, perry_m2v_handle, uint64_t, MTLSize,
+                                                                       perry_m2v_error);
     bool (* _Nonnull compute_encoder_set_sampler_state)(perry_m2v_handle, perry_m2v_handle, uint32_t, perry_m2v_error);
 } perry_m2v;
 
