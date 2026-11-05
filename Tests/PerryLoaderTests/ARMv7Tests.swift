@@ -47,6 +47,34 @@ struct ARMv7Tests {
         ])
     }
 
+    @Test("Files: open's flags, struct stat, struct dirent, symlinks and errno")
+    func files() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("files").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "mkdir 0",
+            "mkdir again -1 errno 17",
+            "write 12",
+            "fstat 0 size 12",
+            "exclusive -1 errno 17",
+            "missing -1 errno 2",
+            "stat 0",
+            "mode 640 type 100000 nlink 1 size 12 uid-set 1",
+            "mtime-set 1 blocks-set 1",
+            "rename 0",
+            "stat old -1 errno 2",
+            "symlink 0",
+            "readlink 1 b",
+            "lstat link 120000 size 1",
+            "stat link 100000 size 12",
+            "read 12 hello, files",
+            "entry b type 8 namlen 1",
+            "entry link type 10",
+            "entries 4 found 1 1",
+            "rmdir 0",
+        ])
+    }
+
     @Test("fseeko and ftello take 64-bit offsets")
     func seeko() throws {
         let result = try run(ARMv7.perry32, [ARMv7.fixture("seeko").path])
@@ -98,5 +126,6 @@ enum ARMv7 {
             && fm.fileExists(atPath: fixture("runtime").path)
             && fm.fileExists(atPath: fixture("abi").path)
             && fm.fileExists(atPath: fixture("seeko").path)
+            && fm.fileExists(atPath: fixture("files").path)
     }
 }
