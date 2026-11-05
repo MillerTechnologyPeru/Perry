@@ -26,13 +26,13 @@ final class ManagedObjectState: ObjectState {
 
     var modelData: ModelData {
         ModelData(entity: EntityName(rawValue: entityName), id: id,
-                  attributes: Dictionary(uniqueKeysWithValues: attributes.map { (PropertyKey(rawValue: $0.key), $0.value) }),
-                  relationships: Dictionary(uniqueKeysWithValues: relationships.map { (PropertyKey(rawValue: $0.key), $0.value) }))
+                  attributes: Dictionary(uniqueKeysWithValues: attributes.map { (PropertyKey(stored: $0.key), $0.value) }),
+                  relationships: Dictionary(uniqueKeysWithValues: relationships.map { (PropertyKey(stored: $0.key), $0.value) }))
     }
 
     func load(_ data: ModelData) {
-        attributes = Dictionary(uniqueKeysWithValues: data.attributes.map { ($0.key.rawValue, $0.value) })
-        relationships = Dictionary(uniqueKeysWithValues: data.relationships.map { ($0.key.rawValue, $0.value) })
+        attributes = Dictionary(uniqueKeysWithValues: data.attributes.map { ($0.key.propertyName, $0.value) })
+        relationships = Dictionary(uniqueKeysWithValues: data.relationships.map { ($0.key.propertyName, $0.value) })
         committed = data
     }
 }
@@ -451,11 +451,11 @@ open class NSManagedObject: NSObject {
         let committed = state.committed
         var entries: [(String, NSObject)] = []
         for (key, value) in state.attributes.sorted(by: { $0.key < $1.key })
-        where committed?.attributes[PropertyKey(rawValue: key)] != value {
+        where committed?.attributes[PropertyKey(stored: key)] != value {
             entries.append((key, ManagedObjects.object(value) ?? NSObject(ObjCClass(named: "NSNull").object.newInstance().objcObject)))
         }
         for (key, value) in state.relationships.sorted(by: { $0.key < $1.key })
-        where committed?.relationships[PropertyKey(rawValue: key)] != value {
+        where committed?.relationships[PropertyKey(stored: key)] != value {
             if let object = ManagedObjects.value(self, key) { entries.append((key, object)) }
         }
         return NSMutableDictionary.of(entries)

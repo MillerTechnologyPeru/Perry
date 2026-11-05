@@ -68,6 +68,12 @@ enum ImagePropertyKeys {
     static let kCGImagePropertyGIFDelayTime = "DelayTime"
     static let kCGImagePropertyGIFUnclampedDelayTime = "UnclampedDelayTime"
     static let kCGImagePropertyGIFImageColorMap = "ImageColorMap"
+    static let kCGImagePropertyHEICSLoopCount = "LoopCount"
+    static let kCGImagePropertyHEICSDelayTime = "DelayTime"
+    static let kCGImagePropertyHEICSUnclampedDelayTime = "UnclampedDelayTime"
+    static let kCGImagePropertyWebPLoopCount = "LoopCount"
+    static let kCGImagePropertyWebPDelayTime = "DelayTime"
+    static let kCGImagePropertyWebPUnclampedDelayTime = "UnclampedDelayTime"
     static let kCGImagePropertyGIFHasGlobalColorMap = "HasGlobalColorMap"
     static let kCGImagePropertyGIFCanvasPixelWidth = "CanvasPixelWidth"
     static let kCGImagePropertyGIFCanvasPixelHeight = "CanvasPixelHeight"
@@ -114,6 +120,11 @@ enum ImagePropertyKeys {
     static let kCGImageSourceThumbnailMaxPixelSize = "kCGImageSourceThumbnailMaxPixelSize"
     static let kCGImageSourceCreateThumbnailWithTransform = "kCGImageSourceCreateThumbnailWithTransform"
     static let kCGImageSourceSubsampleFactor = "kCGImageSourceSubsampleFactor"
+    /// Decode requests (iOS 17): images here are decoded at standard
+    /// dynamic range whatever is asked.
+    static let kCGImageSourceDecodeRequest = "kCGImageSourceDecodeRequest"
+    static let kCGImageSourceDecodeToHDR = "kCGImageSourceDecodeToHDR"
+    static let kCGImageSourceDecodeToSDR = "kCGImageSourceDecodeToSDR"
     static let kCGImageDestinationLossyCompressionQuality = "kCGImageDestinationLossyCompressionQuality"
     static let kCGImageDestinationBackgroundColor = "kCGImageDestinationBackgroundColor"
     static let kCGImageDestinationImageMaxPixelSize = "kCGImageDestinationImageMaxPixelSize"
@@ -121,6 +132,12 @@ enum ImagePropertyKeys {
     static let kCGImageDestinationOptimizeColorForSharing = "kCGImageDestinationOptimizeColorForSharing"
     static let kCGImageDestinationMergeMetadata = "kCGImageDestinationMergeMetadata"
     static let kCGImageDestinationMetadata = "kCGImageDestinationMetadata"
+    /// Encode requests (iOS 17): images here are encoded at standard
+    /// dynamic range whatever is asked.
+    static let kCGImageDestinationEncodeRequest = "kCGImageDestinationEncodeRequest"
+    static let kCGImageDestinationEncodeToSDR = "kCGImageDestinationEncodeToSDR"
+    static let kCGImageDestinationEncodeToISOHDR = "kCGImageDestinationEncodeToISOHDR"
+    static let kCGImageDestinationEncodeToISOGainmap = "kCGImageDestinationEncodeToISOGainmap"
     static let kCGImageDestinationDateTime = "kCGImageDestinationDateTime"
     static let kCGImageDestinationOrientation = "kCGImageDestinationOrientation"
 }
@@ -291,6 +308,9 @@ public func CGImageSourceGetType(_ source: Ref?) -> Ref? {
 public func CGImageSourceGetCount(_ source: Ref?) -> Int { Sources.state(source)?.contents?.images.count ?? 0 }
 
 @c(_CGImageSourceGetStatus) public func CGImageSourceGetStatus(_ source: Ref?) -> Int32 { Sources.state(source)?.status ?? -4 }
+
+/// Sources here keep their decoded images for good; nothing to drop.
+@c(_CGImageSourceRemoveCacheAtIndex) public func CGImageSourceRemoveCacheAtIndex(_ source: Ref?, _ index: Int) {}
 
 @c(_CGImageSourceGetStatusAtIndex)
 public func CGImageSourceGetStatusAtIndex(_ source: Ref?, _ index: Int) -> Int32 {

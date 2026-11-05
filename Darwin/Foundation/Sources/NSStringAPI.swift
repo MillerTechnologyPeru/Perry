@@ -51,6 +51,11 @@ extension String {
         }
         self = String._unconditionallyBridgeFromObjectiveC(string)
     }
+
+    /// A string made from a format and arguments, in the current locale.
+    public static func localizedStringWithFormat(_ format: String, _ arguments: any CVarArg...) -> String {
+        String(format: format, locale: Locale.current, arguments: arguments)
+    }
 }
 
 @available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)

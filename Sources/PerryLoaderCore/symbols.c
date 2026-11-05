@@ -305,6 +305,39 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     return true;
 }
 
+/// Loads the Swift corelibs' Foundation before any provider, so that its
+/// own calls bind to its own functions. Its CoreFoundation has SPI named
+/// like Darwin's functions as exported, with an underscore
+/// (_CFCharacterSetCreateMutableCopy, _CFArrayReplaceValues…), which
+/// providers define as Darwin's; loaded first as a provider's dependency,
+/// it would bind those to the provider's, which return Objective-C objects.
+/// The Swift runtime's directory is the one libswiftCore is in, which the
+/// Objective-C runtime's provider loads without Foundation.
+static void load_corelibs_foundation(perry_loader *loader) {
+    static bool loaded;
+    if (loaded)
+        return;
+    loaded = true;
+    if (dlopen("libFoundation.so", RTLD_NOW | RTLD_GLOBAL))
+        return;
+    for (uint32_t i = 0; i < loader->library_dir_count; i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/libPerryobjc.so", loader->library_dirs[i]);
+        void *objc = access(path, R_OK) == 0 ? dlopen(path, RTLD_NOW | RTLD_LOCAL) : NULL;
+        void *retain = objc ? dlsym(objc, "swift_retain") : NULL;
+        Dl_info info;
+        if (!retain || !dladdr(retain, &info) || !info.dli_fname)
+            continue;
+        const char *slash = strrchr(info.dli_fname, '/');
+        if (!slash)
+            continue;
+        snprintf(path, sizeof(path), "%.*s/libFoundation.so", (int)(slash - info.dli_fname), info.dli_fname);
+        if (dlopen(path, RTLD_NOW | RTLD_GLOBAL))
+            return;
+    }
+    perry_trace(PERRY_TRACE_BIND, "corelibs Foundation not loaded first: %s", dlerror());
+}
+
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name) {
     for (uint32_t i = 0; i < loader->provider_count; i++)
         if (strcmp(loader->providers[i]->install_name, install_name) == 0)
@@ -343,6 +376,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         snprintf(path, sizeof(path), "%s/libPerry%s.so", loader->library_dirs[i], short_name);
         if (access(path, R_OK) != 0)
             continue;
+        load_corelibs_foundation(loader);
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (!handle)
             perry_fatal("cannot load provider %s: %s", path, dlerror());

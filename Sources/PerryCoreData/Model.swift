@@ -174,7 +174,13 @@ enum ModelFiles {
         guard path.hasSuffix(".momd") else { return path.hasSuffix(".mom") ? path : nil }
         let manager = NSFileManager.defaultManager()
         let files = manager.contents(atPath: path, error: nil)?.elements.map(\.stringValue).filter { $0.hasSuffix(".mom") } ?? []
-        // VersionInfo.plist names the current version; a single model needs none.
+        // VersionInfo.plist names the current version; a single model needs
+        // none, and is named as the directory is.
+        if let current = NSDictionary.make(contentsOfFile: path + "/VersionInfo.plist")?
+            .object(forKey: "NSManagedObjectModel_CurrentVersionName")?.stringValue,
+           files.contains(current + ".mom") {
+            return path + "/" + current + ".mom"
+        }
         let name = String(path.split(separator: "/").last ?? "").replacingSuffix(".momd", with: ".mom")
         if files.contains(name) { return path + "/" + name }
         return files.sorted().last.map { path + "/" + $0 }
@@ -294,15 +300,15 @@ open class NSEntityDescription: NSObject {
         EntityDescription(
             id: EntityName(rawValue: state.name),
             attributes: attributes.filter { !$0.state.transient }.map {
-                Attribute(id: PropertyKey(rawValue: $0.state.name), type: AttributeKind.coreModelType($0.state.attributeType))
+                Attribute(id: PropertyKey(stored: $0.state.name), type: AttributeKind.coreModelType($0.state.attributeType))
             },
             relationships: relationships.filter { !$0.state.transient }.map { relationship in
                 let destination = relationship.state.destination.map { Descriptions.entities[$0].name } ?? ""
                 let inverse = relationship.state.inverse.map { Descriptions.properties[$0].name } ?? ""
-                return Relationship(id: PropertyKey(rawValue: relationship.state.name),
+                return Relationship(id: PropertyKey(stored: relationship.state.name),
                                     type: relationship.state.maxCount == 1 ? .toOne : .toMany,
                                     destinationEntity: EntityName(rawValue: destination),
-                                    inverseRelationship: PropertyKey(rawValue: inverse))
+                                    inverseRelationship: PropertyKey(stored: inverse))
             })
     }
 }
@@ -393,4 +399,27 @@ open class NSRelationshipDescription: NSPropertyDescription {
     @ObjCMethod("deleteRule") func deleteRule() -> UInt { state.deleteRule }
     @ObjCMethod("setDeleteRule:") func setDeleteRule(_ rule: UInt) { state.deleteRule = rule }
     @ObjCMethod("isToMany") func toMany() -> Bool { isToMany }
+}
+
+// MARK: - Stored names
+
+/// A property's key in CoreModel's stores. CoreModel-SQLite names each
+/// table's primary key column "id", so a property of that name is stored as
+/// another, and named back when read.
+extension PropertyKey {
+    static let reservedName = "id"
+    static let renamed = "_perry_id"
+
+    init(stored name: String) {
+        self.init(rawValue: name == PropertyKey.reservedName ? PropertyKey.renamed : name)
+    }
+
+    /// The property this key stores.
+    var propertyName: String { rawValue == PropertyKey.renamed ? PropertyKey.reservedName : rawValue }
+
+    /// A predicate's key path in stored names, component by component.
+    static func storedKeyPath(_ keyPath: String) -> String {
+        keyPath.split(separator: ".", omittingEmptySubsequences: false)
+            .map { $0 == reservedName ? renamed : String($0) }.joined(separator: ".")
+    }
 }
