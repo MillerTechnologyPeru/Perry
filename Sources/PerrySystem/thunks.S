@@ -211,18 +211,7 @@ PASSTHROUGH ___strncpy_chk, __strncpy_chk
 PASSTHROUGH ___strncat_chk, __strncat_chk
 
 // MARK: - stdlib
-PASSTHROUGH _malloc, malloc
-PASSTHROUGH _calloc, calloc
-PASSTHROUGH _realloc, realloc
 PASSTHROUGH _free, free
-PASSTHROUGH _posix_memalign, posix_memalign
-// Typed allocation takes the type's descriptor last, which glibc's
-// allocator has no use for.
-PASSTHROUGH _malloc_type_malloc, malloc
-PASSTHROUGH _malloc_type_calloc, calloc
-PASSTHROUGH _malloc_type_realloc, realloc
-PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
-PASSTHROUGH _aligned_alloc, aligned_alloc
 PASSTHROUGH _getenv, getenv
 PASSTHROUGH _setenv, setenv
 PASSTHROUGH _unsetenv, unsetenv
