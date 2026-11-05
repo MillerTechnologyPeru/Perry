@@ -285,4 +285,12 @@ extension NSObject {
     func sendMapViewDidChangeVisibleRegion(_ mapView: MKMapView)
 }
 
-extension UIEdgeInsets: ObjCScalar { public static var objCTypeEncoding: String { "{UIEdgeInsets=dddd}" } }
+extension UIEdgeInsets: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{UIEdgeInsets=ffff}" }
+    #else
+    public typealias ObjCType = UIEdgeInsets
+    public static var objCTypeEncoding: String { "{UIEdgeInsets=dddd}" }
+    #endif
+}
