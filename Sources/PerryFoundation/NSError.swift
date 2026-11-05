@@ -155,6 +155,11 @@ public final class NSError: NSObject {
 
     @ObjCMethod("localizedDescription") func localizedDescription() -> String { Errors.localizedDescription(objcObject) }
 
+    @ObjCMethod("localizedRecoverySuggestion")
+    func localizedRecoverySuggestion() -> ObjCObject? {
+        Dictionaries.value(storage?.userInfo, for: Strings.autoreleased("NSLocalizedRecoverySuggestion")).map(ObjCObject.init)
+    }
+
     @ObjCMethod("localizedFailureReason")
     func localizedFailureReason() -> ObjCObject? {
         Dictionaries.value(storage?.userInfo, for: Strings.autoreleased("NSLocalizedFailureReason")).map(ObjCObject.init)
