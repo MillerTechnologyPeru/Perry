@@ -409,6 +409,21 @@ _mmap:
     pop {r4, pc}
     .size _mmap, . - _mmap
 
+// void perry_sjlj_longjmp(void **jbuf): __builtin_longjmp's return to a
+// Darwin function's exception dispatch (runtime.c). Its setjmp saved r7, the
+// dispatch address (with the Thumb bit) and sp; the dispatch code reloads
+// everything else from the frame.
+    .globl perry_sjlj_longjmp
+    .hidden perry_sjlj_longjmp
+    .type perry_sjlj_longjmp, %function
+    .p2align 2
+perry_sjlj_longjmp:
+    ldr r7, [r0]
+    ldr r1, [r0, #4]
+    ldr sp, [r0, #8]
+    bx r1
+    .size perry_sjlj_longjmp, . - perry_sjlj_longjmp
+
 #endif
 
     .section .note.GNU-stack,"",%progbits
