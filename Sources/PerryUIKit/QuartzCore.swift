@@ -39,6 +39,8 @@ class CALayer: NSObject {
     /// QuartzCore's: shows RGBA rows, bottom first, without an image.
     @ObjCMethod("_perrySetPixels:width:height:opaque:")
     func setPerryPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool)
+    /// QuartzCore's: whether the last of those has been on the screen.
+    @ObjCMethod("_perryPixelsShown") func pixelsShown() -> Bool
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat)
     @ObjCMethod("contentsGravity") func contentsGravity() -> String
