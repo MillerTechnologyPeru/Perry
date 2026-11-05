@@ -123,11 +123,18 @@ enum Strings {
         return ObjC.autorelease(object)!
     }
 
-    /// FNV-1a over UTF-16, so equal strings hash equally in every process.
+    /// FNV-1a over UTF-16, so equal strings hash equally in every process:
+    /// the 64-bit or the 32-bit variant, as wide as NSUInteger.
     static func hash(_ value: String) -> UInt {
+        #if _pointerBitWidth(_64)
         var hash: UInt = 0xcbf2_9ce4_8422_2325
+        let prime: UInt = 0x100_0000_01b3
+        #else
+        var hash: UInt = 0x811c_9dc5
+        let prime: UInt = 0x0100_0193
+        #endif
         for unit in value.utf16 {
-            hash = (hash ^ UInt(unit)) &* 0x100_0000_01b3
+            hash = (hash ^ UInt(unit)) &* prime
         }
         return hash
     }
