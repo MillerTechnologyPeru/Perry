@@ -33,6 +33,9 @@ extension UIImage {
         NamedImage.platformImage = { name, bundle in
             UIImage(named: name, in: bundle, compatibleWith: nil)
         }
+        NamedImage.platformSymbol = { name in
+            UIImage(systemName: name)
+        }
     }()
 }
 #endif
