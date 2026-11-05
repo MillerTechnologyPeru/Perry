@@ -171,20 +171,20 @@ public func CGBitmapContextCreateImage(_ context: Ref?) -> Ref? {
 @c(_CGContextSaveGState) public func CGContextSaveGState(_ context: Ref?) { Contexts.canvas(context)?.save() }
 @c(_CGContextRestoreGState) public func CGContextRestoreGState(_ context: Ref?) { Contexts.canvas(context)?.restore() }
 
-@c(_CGContextSetRGBFillColor)
+@DarwinC("_CGContextSetRGBFillColor")
 public func CGContextSetRGBFillColor(_ context: Ref?, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) {
     Contexts.canvas(context)?.setFill(Double(r), Double(g), Double(b), Double(a))
 }
 
-@c(_CGContextSetRGBStrokeColor)
+@DarwinC("_CGContextSetRGBStrokeColor")
 public func CGContextSetRGBStrokeColor(_ context: Ref?, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) {
     Contexts.canvas(context)?.setStroke(Double(r), Double(g), Double(b), Double(a))
 }
 
-@c(_CGContextSetGrayFillColor)
+@DarwinC("_CGContextSetGrayFillColor")
 public func CGContextSetGrayFillColor(_ context: Ref?, _ gray: CGFloat, _ a: CGFloat) { Contexts.canvas(context)?.setFill(Double(gray), Double(gray), Double(gray), Double(a)) }
 
-@c(_CGContextSetGrayStrokeColor)
+@DarwinC("_CGContextSetGrayStrokeColor")
 public func CGContextSetGrayStrokeColor(_ context: Ref?, _ gray: CGFloat, _ a: CGFloat) { Contexts.canvas(context)?.setStroke(Double(gray), Double(gray), Double(gray), Double(a)) }
 
 @c(_CGContextSetFillColorWithColor)
@@ -217,14 +217,14 @@ public func CGContextSetStrokeColor(_ context: Ref?, _ components: UnsafePointer
 @c(_CGContextSetFillColorSpace) public func CGContextSetFillColorSpace(_ context: Ref?, _ space: Ref?) {}
 @c(_CGContextSetStrokeColorSpace) public func CGContextSetStrokeColorSpace(_ context: Ref?, _ space: Ref?) {}
 
-@c(_CGContextSetAlpha) public func CGContextSetAlpha(_ context: Ref?, _ alpha: CGFloat) { Contexts.canvas(context)?.alpha = Double(alpha) }
-@c(_CGContextSetLineWidth) public func CGContextSetLineWidth(_ context: Ref?, _ width: CGFloat) { Contexts.canvas(context)?.lineWidth = Double(width) }
+@DarwinC("_CGContextSetAlpha") public func CGContextSetAlpha(_ context: Ref?, _ alpha: CGFloat) { Contexts.canvas(context)?.alpha = Double(alpha) }
+@DarwinC("_CGContextSetLineWidth") public func CGContextSetLineWidth(_ context: Ref?, _ width: CGFloat) { Contexts.canvas(context)?.lineWidth = Double(width) }
 @c(_CGContextSetLineCap) public func CGContextSetLineCap(_ context: Ref?, _ cap: Int32) { Contexts.canvas(context)?.setLineCap(cap) }
 @c(_CGContextSetLineJoin) public func CGContextSetLineJoin(_ context: Ref?, _ join: Int32) { Contexts.canvas(context)?.setLineJoin(join) }
-@c(_CGContextSetMiterLimit) public func CGContextSetMiterLimit(_ context: Ref?, _ limit: CGFloat) { Contexts.canvas(context)?.setMiterLimit(Double(limit)) }
-@c(_CGContextSetFlatness) public func CGContextSetFlatness(_ context: Ref?, _ flatness: CGFloat) { Contexts.canvas(context)?.setFlatness(Double(flatness)) }
+@DarwinC("_CGContextSetMiterLimit") public func CGContextSetMiterLimit(_ context: Ref?, _ limit: CGFloat) { Contexts.canvas(context)?.setMiterLimit(Double(limit)) }
+@DarwinC("_CGContextSetFlatness") public func CGContextSetFlatness(_ context: Ref?, _ flatness: CGFloat) { Contexts.canvas(context)?.setFlatness(Double(flatness)) }
 
-@c(_CGContextSetLineDash)
+@DarwinC("_CGContextSetLineDash")
 public func CGContextSetLineDash(_ context: Ref?, _ phase: CGFloat, _ lengths: UnsafePointer<CGFloat>?, _ count: Int) {
     let pattern = lengths.map { UnsafeBufferPointer(start: $0, count: count).map { Double($0) } } ?? []
     Contexts.canvas(context)?.setLineDash(phase: Double(phase), lengths: pattern)
@@ -237,27 +237,27 @@ public func CGContextSetLineDash(_ context: Ref?, _ phase: CGFloat, _ lengths: U
 @c(_CGContextSetInterpolationQuality) public func CGContextSetInterpolationQuality(_ context: Ref?, _ quality: Int32) {}
 @c(_CGContextGetInterpolationQuality) public func CGContextGetInterpolationQuality(_ context: Ref?) -> Int32 { 0 }
 
-@c(_CGContextSetShadowWithColor)
+@DarwinC("_CGContextSetShadowWithColor")
 public func CGContextSetShadowWithColor(_ context: Ref?, _ offset: CGSize, _ blur: CGFloat, _ color: Ref?) {
     let c = Colors.state(color)?.rgba ?? (0, 0, 0, 0)
     Contexts.canvas(context)?.setShadow(dx: Double(offset.width), dy: Double(offset.height), blur: Double(blur), color: c)
 }
 
-@c(_CGContextSetShadow)
+@DarwinC("_CGContextSetShadow")
 public func CGContextSetShadow(_ context: Ref?, _ offset: CGSize, _ blur: CGFloat) {
     Contexts.canvas(context)?.setShadow(dx: Double(offset.width), dy: Double(offset.height), blur: Double(blur), color: (0, 0, 0, 1.0 / 3))
 }
 
 // MARK: Transforms
 
-@c(_CGContextConcatCTM)
+@DarwinC("_CGContextConcatCTM")
 public func CGContextConcatCTM(_ context: Ref?, _ t: CGAffineTransform) { Contexts.canvas(context)?.concat(Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)) }
 
-@c(_CGContextTranslateCTM) public func CGContextTranslateCTM(_ context: Ref?, _ tx: CGFloat, _ ty: CGFloat) { Contexts.canvas(context)?.translate(Double(tx), Double(ty)) }
-@c(_CGContextScaleCTM) public func CGContextScaleCTM(_ context: Ref?, _ sx: CGFloat, _ sy: CGFloat) { Contexts.canvas(context)?.scale(Double(sx), Double(sy)) }
-@c(_CGContextRotateCTM) public func CGContextRotateCTM(_ context: Ref?, _ angle: CGFloat) { Contexts.canvas(context)?.rotate(Double(angle)) }
+@DarwinC("_CGContextTranslateCTM") public func CGContextTranslateCTM(_ context: Ref?, _ tx: CGFloat, _ ty: CGFloat) { Contexts.canvas(context)?.translate(Double(tx), Double(ty)) }
+@DarwinC("_CGContextScaleCTM") public func CGContextScaleCTM(_ context: Ref?, _ sx: CGFloat, _ sy: CGFloat) { Contexts.canvas(context)?.scale(Double(sx), Double(sy)) }
+@DarwinC("_CGContextRotateCTM") public func CGContextRotateCTM(_ context: Ref?, _ angle: CGFloat) { Contexts.canvas(context)?.rotate(Double(angle)) }
 
-@c(_CGContextGetCTM)
+@DarwinC("_CGContextGetCTM")
 public func CGContextGetCTM(_ context: Ref?) -> CGAffineTransform {
     guard let m = Contexts.canvas(context)?.ctm else { return CGAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0) }
     return CGAffineTransform(a: CGFloat(m.a), b: CGFloat(m.b), c: CGFloat(m.c), d: CGFloat(m.d), tx: CGFloat(m.tx), ty: CGFloat(m.ty))
@@ -267,30 +267,30 @@ public func CGContextGetCTM(_ context: Ref?) -> CGAffineTransform {
 
 @c(_CGContextBeginPath) public func CGContextBeginPath(_ context: Ref?) { Contexts.canvas(context)?.beginPath() }
 @c(_CGContextClosePath) public func CGContextClosePath(_ context: Ref?) { Contexts.canvas(context)?.closePath() }
-@c(_CGContextMoveToPoint) public func CGContextMoveToPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.move(Double(x), Double(y)) }
-@c(_CGContextAddLineToPoint) public func CGContextAddLineToPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.line(Double(x), Double(y)) }
+@DarwinC("_CGContextMoveToPoint") public func CGContextMoveToPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.move(Double(x), Double(y)) }
+@DarwinC("_CGContextAddLineToPoint") public func CGContextAddLineToPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.line(Double(x), Double(y)) }
 
-@c(_CGContextAddCurveToPoint)
+@DarwinC("_CGContextAddCurveToPoint")
 public func CGContextAddCurveToPoint(_ context: Ref?, _ c1x: CGFloat, _ c1y: CGFloat, _ c2x: CGFloat, _ c2y: CGFloat, _ x: CGFloat, _ y: CGFloat) {
     Contexts.canvas(context)?.curve(Double(c1x), Double(c1y), Double(c2x), Double(c2y), Double(x), Double(y))
 }
 
-@c(_CGContextAddQuadCurveToPoint)
+@DarwinC("_CGContextAddQuadCurveToPoint")
 public func CGContextAddQuadCurveToPoint(_ context: Ref?, _ cx: CGFloat, _ cy: CGFloat, _ x: CGFloat, _ y: CGFloat) {
     Contexts.canvas(context)?.quad(Double(cx), Double(cy), Double(x), Double(y))
 }
 
-@c(_CGContextAddArc)
+@DarwinC("_CGContextAddArc")
 public func CGContextAddArc(_ context: Ref?, _ x: CGFloat, _ y: CGFloat, _ radius: CGFloat, _ start: CGFloat, _ end: CGFloat, _ clockwise: Int32) {
     Contexts.canvas(context)?.arc(Double(x), Double(y), radius: Double(radius), start: Double(start), end: Double(end), clockwise: clockwise != 0)
 }
 
-@c(_CGContextAddArcToPoint)
+@DarwinC("_CGContextAddArcToPoint")
 public func CGContextAddArcToPoint(_ context: Ref?, _ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat, _ radius: CGFloat) {
     Contexts.canvas(context)?.arc(tangent1: Double(x1), Double(y1), tangent2: Double(x2), Double(y2), radius: Double(radius))
 }
 
-@c(_CGContextAddRect)
+@DarwinC("_CGContextAddRect")
 public func CGContextAddRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.canvas(context)?.rect(Double(r.origin.x), Double(r.origin.y), Double(r.size.width), Double(r.size.height))
@@ -301,7 +301,7 @@ public func CGContextAddRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>?, 
     for index in 0..<count { CGContextAddRect(context, rects![index]) }
 }
 
-@c(_CGContextAddEllipseInRect)
+@DarwinC("_CGContextAddEllipseInRect")
 public func CGContextAddEllipseInRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.canvas(context)?.ellipse(Double(r.origin.x), Double(r.origin.y), Double(r.size.width), Double(r.size.height))
@@ -322,13 +322,13 @@ public func CGContextAddPath(_ context: Ref?, _ path: Ref?) {
 
 @c(_CGContextIsPathEmpty) public func CGContextIsPathEmpty(_ context: Ref?) -> Bool { Contexts.canvas(context)?.isPathEmpty ?? true }
 
-@c(_CGContextGetPathCurrentPoint)
+@DarwinC("_CGContextGetPathCurrentPoint")
 public func CGContextGetPathCurrentPoint(_ context: Ref?) -> CGPoint {
     let point = Contexts.canvas(context)?.currentPoint ?? (0, 0)
     return CGPoint(x: CGFloat(point.0), y: CGFloat(point.1))
 }
 
-@c(_CGContextGetPathBoundingBox)
+@DarwinC("_CGContextGetPathBoundingBox")
 public func CGContextGetPathBoundingBox(_ context: Ref?) -> CGRect {
     guard let canvas = Contexts.canvas(context), !canvas.isPathEmpty else {
         return CGRect(origin: CGPoint(x: .infinity, y: .infinity), size: CGSize(width: 0, height: 0))
@@ -337,7 +337,7 @@ public func CGContextGetPathBoundingBox(_ context: Ref?) -> CGRect {
     return CGRect(origin: CGPoint(x: CGFloat(b.0), y: CGFloat(b.1)), size: CGSize(width: CGFloat(b.2), height: CGFloat(b.3)))
 }
 
-@c(_CGContextPathContainsPoint)
+@DarwinC("_CGContextPathContainsPoint")
 public func CGContextPathContainsPoint(_ context: Ref?, _ point: CGPoint, _ mode: Int32) -> Bool {
     Contexts.canvas(context)?.pathContains(Double(point.x), Double(point.y), evenOdd: mode == 1 || mode == 4) ?? false
 }
@@ -349,7 +349,7 @@ public func CGContextPathContainsPoint(_ context: Ref?, _ point: CGPoint, _ mode
 @c(_CGContextStrokePath) public func CGContextStrokePath(_ context: Ref?) { Contexts.paint(context) { $0.strokePath() } }
 @c(_CGContextDrawPath) public func CGContextDrawPath(_ context: Ref?, _ mode: Int32) { Contexts.paint(context) { $0.drawPath(mode) } }
 
-@c(_CGContextFillRect)
+@DarwinC("_CGContextFillRect")
 public func CGContextFillRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.paint(context) { canvas in
@@ -364,7 +364,7 @@ public func CGContextFillRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>?,
     for index in 0..<count { CGContextFillRect(context, rects![index]) }
 }
 
-@c(_CGContextStrokeRect)
+@DarwinC("_CGContextStrokeRect")
 public func CGContextStrokeRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.paint(context) { canvas in
@@ -374,7 +374,7 @@ public func CGContextStrokeRect(_ context: Ref?, _ rect: CGRect) {
     }
 }
 
-@c(_CGContextStrokeRectWithWidth)
+@DarwinC("_CGContextStrokeRectWithWidth")
 public func CGContextStrokeRectWithWidth(_ context: Ref?, _ rect: CGRect, _ width: CGFloat) {
     guard let canvas = Contexts.canvas(context) else { return }
     canvas.save()
@@ -383,7 +383,7 @@ public func CGContextStrokeRectWithWidth(_ context: Ref?, _ rect: CGRect, _ widt
     canvas.restore()
 }
 
-@c(_CGContextFillEllipseInRect)
+@DarwinC("_CGContextFillEllipseInRect")
 public func CGContextFillEllipseInRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.paint(context) { canvas in
@@ -393,7 +393,7 @@ public func CGContextFillEllipseInRect(_ context: Ref?, _ rect: CGRect) {
     }
 }
 
-@c(_CGContextStrokeEllipseInRect)
+@DarwinC("_CGContextStrokeEllipseInRect")
 public func CGContextStrokeEllipseInRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.paint(context) { canvas in
@@ -416,7 +416,7 @@ public func CGContextStrokeLineSegments(_ context: Ref?, _ points: UnsafePointer
     }
 }
 
-@c(_CGContextClearRect)
+@DarwinC("_CGContextClearRect")
 public func CGContextClearRect(_ context: Ref?, _ rect: CGRect) {
     let r = CGRectStandardize(rect)
     Contexts.paint(context) { $0.clear(Double(r.origin.x), Double(r.origin.y), Double(r.size.width), Double(r.size.height)) }
@@ -425,7 +425,7 @@ public func CGContextClearRect(_ context: Ref?, _ rect: CGRect) {
 @c(_CGContextClip) public func CGContextClip(_ context: Ref?) { Contexts.canvas(context)?.clip(evenOdd: false) }
 @c(_CGContextEOClip) public func CGContextEOClip(_ context: Ref?) { Contexts.canvas(context)?.clip(evenOdd: true) }
 
-@c(_CGContextClipToRect)
+@DarwinC("_CGContextClipToRect")
 public func CGContextClipToRect(_ context: Ref?, _ rect: CGRect) {
     guard let canvas = Contexts.canvas(context) else { return }
     let r = CGRectStandardize(rect)
@@ -445,7 +445,7 @@ public func CGContextClipToRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>
     canvas.clip(evenOdd: false)
 }
 
-@c(_CGContextDrawImage)
+@DarwinC("_CGContextDrawImage")
 public func CGContextDrawImage(_ context: Ref?, _ rect: CGRect, _ image: Ref?) {
     guard let image = Images.state(image) else { return }
     let r = CGRectStandardize(rect)
@@ -455,7 +455,7 @@ public func CGContextDrawImage(_ context: Ref?, _ rect: CGRect, _ image: Ref?) {
 @c(_CGContextBeginTransparencyLayer)
 public func CGContextBeginTransparencyLayer(_ context: Ref?, _ info: Ref?) { Contexts.canvas(context)?.beginLayer() }
 
-@c(_CGContextBeginTransparencyLayerWithRect)
+@DarwinC("_CGContextBeginTransparencyLayerWithRect")
 public func CGContextBeginTransparencyLayerWithRect(_ context: Ref?, _ rect: CGRect, _ info: Ref?) { Contexts.canvas(context)?.beginLayer() }
 
 @c(_CGContextEndTransparencyLayer)
@@ -464,25 +464,25 @@ public func CGContextEndTransparencyLayer(_ context: Ref?) { Contexts.paint(cont
 // MARK: Text
 
 /// The deprecated toy text calls, which UIKit-era code still makes.
-@c(_CGContextSelectFont)
+@DarwinC("_CGContextSelectFont")
 public func CGContextSelectFont(_ context: Ref?, _ name: UnsafePointer<CChar>?, _ size: CGFloat, _ encoding: Int32) {
     _ = Contexts.canvas(context)?.selectFont(name.map { String(cString: $0) } ?? "Helvetica", size: Double(size))
 }
 
-@c(_CGContextSetFontSize) public func CGContextSetFontSize(_ context: Ref?, _ size: CGFloat) { Contexts.canvas(context)?.setFontSize(Double(size)) }
-@c(_CGContextSetCharacterSpacing) public func CGContextSetCharacterSpacing(_ context: Ref?, _ spacing: CGFloat) { Contexts.canvas(context)?.setCharacterSpacing(Double(spacing)) }
+@DarwinC("_CGContextSetFontSize") public func CGContextSetFontSize(_ context: Ref?, _ size: CGFloat) { Contexts.canvas(context)?.setFontSize(Double(size)) }
+@DarwinC("_CGContextSetCharacterSpacing") public func CGContextSetCharacterSpacing(_ context: Ref?, _ spacing: CGFloat) { Contexts.canvas(context)?.setCharacterSpacing(Double(spacing)) }
 @c(_CGContextSetTextDrawingMode) public func CGContextSetTextDrawingMode(_ context: Ref?, _ mode: Int32) {}
 
-@c(_CGContextSetTextPosition)
+@DarwinC("_CGContextSetTextPosition")
 public func CGContextSetTextPosition(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.textPosition = (Double(x), Double(y)) }
 
-@c(_CGContextGetTextPosition)
+@DarwinC("_CGContextGetTextPosition")
 public func CGContextGetTextPosition(_ context: Ref?) -> CGPoint {
     let p = Contexts.canvas(context)?.textPosition ?? (0, 0)
     return CGPoint(x: CGFloat(p.0), y: CGFloat(p.1))
 }
 
-@c(_CGContextSetTextMatrix)
+@DarwinC("_CGContextSetTextMatrix")
 public func CGContextSetTextMatrix(_ context: Ref?, _ t: CGAffineTransform) { Contexts.canvas(context)?.setTextMatrix(Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)) }
 
 @c(_CGContextShowText)
@@ -492,7 +492,7 @@ public func CGContextShowText(_ context: Ref?, _ text: UnsafePointer<CChar>?, _ 
     Contexts.paint(context) { $0.showText(string) }
 }
 
-@c(_CGContextShowTextAtPoint)
+@DarwinC("_CGContextShowTextAtPoint")
 public func CGContextShowTextAtPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat, _ text: UnsafePointer<CChar>?, _ length: Int) {
     CGContextSetTextPosition(context, x, y)
     CGContextShowText(context, text, length)
@@ -646,39 +646,39 @@ public func CGPathCreateCopyByTransformingPath(_ path: Ref?, _ t: UnsafePointer<
     return copy
 }
 
-@c(_CGPathCreateWithRect)
+@DarwinC("_CGPathCreateWithRect")
 public func CGPathCreateWithRect(_ rect: CGRect, _ t: UnsafePointer<CGAffineTransform>?) -> Ref {
     let path = Paths.make()
     Paths.append(path, t, Paths.rect(CGRectStandardize(rect)))
     return path
 }
 
-@c(_CGPathCreateWithEllipseInRect)
+@DarwinC("_CGPathCreateWithEllipseInRect")
 public func CGPathCreateWithEllipseInRect(_ rect: CGRect, _ t: UnsafePointer<CGAffineTransform>?) -> Ref {
     let path = Paths.make()
     Paths.append(path, t, Paths.ellipse(CGRectStandardize(rect)))
     return path
 }
 
-@c(_CGPathCreateWithRoundedRect)
+@DarwinC("_CGPathCreateWithRoundedRect")
 public func CGPathCreateWithRoundedRect(_ rect: CGRect, _ rx: CGFloat, _ ry: CGFloat, _ t: UnsafePointer<CGAffineTransform>?) -> Ref {
     let path = Paths.make()
     Paths.append(path, t, Paths.roundedRect(CGRectStandardize(rect), Double(rx), Double(ry)))
     return path
 }
 
-@c(_CGPathMoveToPoint)
+@DarwinC("_CGPathMoveToPoint")
 public func CGPathMoveToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x: CGFloat, _ y: CGFloat) { Paths.append(path, t, [.move(Double(x), Double(y))]) }
 
-@c(_CGPathAddLineToPoint)
+@DarwinC("_CGPathAddLineToPoint")
 public func CGPathAddLineToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x: CGFloat, _ y: CGFloat) { Paths.append(path, t, [.line(Double(x), Double(y))]) }
 
-@c(_CGPathAddQuadCurveToPoint)
+@DarwinC("_CGPathAddQuadCurveToPoint")
 public func CGPathAddQuadCurveToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ cx: CGFloat, _ cy: CGFloat, _ x: CGFloat, _ y: CGFloat) {
     Paths.append(path, t, [.quad(Double(cx), Double(cy), Double(x), Double(y))])
 }
 
-@c(_CGPathAddCurveToPoint)
+@DarwinC("_CGPathAddCurveToPoint")
 public func CGPathAddCurveToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ c1x: CGFloat, _ c1y: CGFloat, _ c2x: CGFloat,
                                   _ c2y: CGFloat, _ x: CGFloat, _ y: CGFloat) {
     Paths.append(path, t, [.curve(Double(c1x), Double(c1y), Double(c2x), Double(c2y), Double(x), Double(y))])
@@ -686,7 +686,7 @@ public func CGPathAddCurveToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTrans
 
 @c(_CGPathCloseSubpath) public func CGPathCloseSubpath(_ path: Ref?) { Paths.append(path, nil, [.close]) }
 
-@c(_CGPathAddRect)
+@DarwinC("_CGPathAddRect")
 public func CGPathAddRect(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ rect: CGRect) {
     Paths.append(path, t, Paths.rect(CGRectStandardize(rect)))
 }
@@ -703,24 +703,24 @@ public func CGPathAddLines(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?,
                  + (1..<count).map { .line(Double(points[$0].x), Double(points[$0].y)) })
 }
 
-@c(_CGPathAddEllipseInRect)
+@DarwinC("_CGPathAddEllipseInRect")
 public func CGPathAddEllipseInRect(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ rect: CGRect) {
     Paths.append(path, t, Paths.ellipse(CGRectStandardize(rect)))
 }
 
-@c(_CGPathAddRoundedRect)
+@DarwinC("_CGPathAddRoundedRect")
 public func CGPathAddRoundedRect(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ rect: CGRect, _ rx: CGFloat, _ ry: CGFloat) {
     Paths.append(path, t, Paths.roundedRect(CGRectStandardize(rect), Double(rx), Double(ry)))
 }
 
-@c(_CGPathAddArc)
+@DarwinC("_CGPathAddArc")
 public func CGPathAddArc(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x: CGFloat, _ y: CGFloat, _ radius: CGFloat,
                          _ start: CGFloat, _ end: CGFloat, _ clockwise: Bool) {
     let hasCurrent = Paths.state(path)?.current != nil
     Paths.append(path, t, Paths.arc(Double(x), Double(y), Double(radius), Double(start), Double(end), clockwise: clockwise, hasCurrentPoint: hasCurrent))
 }
 
-@c(_CGPathAddRelativeArc)
+@DarwinC("_CGPathAddRelativeArc")
 public func CGPathAddRelativeArc(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x: CGFloat, _ y: CGFloat, _ radius: CGFloat,
                                  _ start: CGFloat, _ delta: CGFloat) {
     CGPathAddArc(path, t, x, y, radius, start, start + delta, delta < 0)
@@ -746,14 +746,14 @@ public func CGPathIsRect(_ path: Ref?, _ rect: UnsafeMutablePointer<CGRect>?) ->
 @c(_CGPathEqualToPath)
 public func CGPathEqualToPath(_ a: Ref?, _ b: Ref?) -> Bool { Paths.state(a)?.commands == Paths.state(b)?.commands }
 
-@c(_CGPathGetCurrentPoint)
+@DarwinC("_CGPathGetCurrentPoint")
 public func CGPathGetCurrentPoint(_ path: Ref?) -> CGPoint {
     let point = Paths.state(path)?.current ?? (0, 0)
     return CGPoint(x: CGFloat(point.0), y: CGFloat(point.1))
 }
 
 /// The smallest rect holding every point, control points included.
-@c(_CGPathGetBoundingBox)
+@DarwinC("_CGPathGetBoundingBox")
 public func CGPathGetBoundingBox(_ path: Ref?) -> CGRect {
     guard let points = Paths.state(path)?.points, !points.isEmpty else {
         return CGRect(origin: CGPoint(x: .infinity, y: .infinity), size: CGSize(width: 0, height: 0))
@@ -762,10 +762,10 @@ public func CGPathGetBoundingBox(_ path: Ref?) -> CGRect {
     return CGRect(origin: CGPoint(x: xs.min()!, y: ys.min()!), size: CGSize(width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!))
 }
 
-@c(_CGPathGetPathBoundingBox) public func CGPathGetPathBoundingBox(_ path: Ref?) -> CGRect { CGPathGetBoundingBox(path) }
+@DarwinC("_CGPathGetPathBoundingBox") public func CGPathGetPathBoundingBox(_ path: Ref?) -> CGRect { CGPathGetBoundingBox(path) }
 
 /// Fill containment, through a scratch canvas.
-@c(_CGPathContainsPoint)
+@DarwinC("_CGPathContainsPoint")
 public func CGPathContainsPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ point: CGPoint, _ evenOdd: Bool) -> Bool {
     guard let commands = Paths.state(path)?.commands, let canvas = Canvas(width: 1, height: 1) else { return false }
     canvas.add(commands)
@@ -870,7 +870,7 @@ public func CGGradientCreateWithColors(_ space: Ref?, _ colors: Ref?, _ location
 @c(_CGGradientRelease) public func CGGradientRelease(_ gradient: Ref?) { ObjCRuntime.release(gradient) }
 
 /// CGGradientDrawingOptions: draws before start 1, after end 2.
-@c(_CGContextDrawLinearGradient)
+@DarwinC("_CGContextDrawLinearGradient")
 public func CGContextDrawLinearGradient(_ context: Ref?, _ gradient: Ref?, _ start: CGPoint, _ end: CGPoint, _ options: UInt32) {
     guard let stops = CGGradientObject.states[gradient]?.stops else { return }
     Contexts.paint(context) {
@@ -878,7 +878,7 @@ public func CGContextDrawLinearGradient(_ context: Ref?, _ gradient: Ref?, _ sta
     }
 }
 
-@c(_CGContextDrawRadialGradient)
+@DarwinC("_CGContextDrawRadialGradient")
 public func CGContextDrawRadialGradient(_ context: Ref?, _ gradient: Ref?, _ startCenter: CGPoint, _ startRadius: CGFloat, _ endCenter: CGPoint,
                                         _ endRadius: CGFloat, _ options: UInt32) {
     guard let stops = CGGradientObject.states[gradient]?.stops else { return }
