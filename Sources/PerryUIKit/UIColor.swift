@@ -133,7 +133,7 @@ open class UIColor: NSObject {
                 return self
             }
         }
-        let alpha = decoded.has("UIAlpha") ? decoded.double("UIAlpha") : 1
+        let alpha: CGFloat = decoded.has("UIAlpha") ? decoded.double("UIAlpha") : 1
         if decoded.integer("UIColorComponentCount") == 2 || (decoded.has("UIWhite") && !decoded.has("UIRed")) {
             state.set(white: decoded.double("UIWhite"), alpha: alpha)
         } else {
