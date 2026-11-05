@@ -335,9 +335,14 @@ final class Compositor {
         let width = state.bounds.width * (toScreen.a * toScreen.a + toScreen.b * toScreen.b).squareRoot()
         let height = state.bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
         var target = pixels(CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height))
-        let degrees = atan2(toScreen.b, toScreen.a) * 180 / .pi
-        // A negative determinant mirrors: SDL_FLIP_HORIZONTAL.
-        let flip: Int32 = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0 ? 1 : 0
+        // A negative determinant mirrors: SDL_FLIP_HORIZONTAL, which SDL
+        // does before it turns the texture. So the turn is the one that
+        // takes the mirrored x axis, pointing left, to where the transform
+        // takes the x axis: none for a scale of (-1, 1), half a turn for a
+        // scale of (1, -1).
+        let mirrored = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0
+        let degrees = (mirrored ? atan2(-toScreen.b, -toScreen.a) : atan2(toScreen.b, toScreen.a)) * 180 / .pi
+        let flip: Int32 = mirrored ? 1 : 0
         _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
     }
 
