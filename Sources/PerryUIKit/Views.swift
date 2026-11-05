@@ -853,6 +853,7 @@ enum WebViews {
 @ObjCWrapper("NSURL")
 class NSURLObject: NSObject {
     @ObjCClassMethod("URLWithString:") static func make(string: String) -> NSObject?
+    @ObjCClassMethod("fileURLWithPath:") static func make(fileURLWithPath path: String) -> NSObject?
 }
 
 @ObjCWrapper("NSData")
