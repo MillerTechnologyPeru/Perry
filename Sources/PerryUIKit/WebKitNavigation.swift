@@ -167,3 +167,24 @@ open class WKHTTPCookieStore: NSObject {
     @ObjCMethod("addObserver:") func addObserver(_ observer: NSObject?) {}
     @ObjCMethod("removeObserver:") func removeObserver(_ observer: NSObject?) {}
 }
+
+/// Where scripts run. Pages have one world here, so every world is the
+/// page's; worlds keep their names.
+@ObjCClass("WKContentWorld")
+open class WKContentWorld: NSObject {
+    var worldName: String?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    nonisolated(unsafe) static let page = WKContentWorld()
+    nonisolated(unsafe) static let defaultClient = WKContentWorld()
+
+    @ObjCClassMethod("pageWorld") static func pageWorld() -> NSObject { page }
+    @ObjCClassMethod("defaultClientWorld") static func defaultClientWorld() -> NSObject { defaultClient }
+    @ObjCClassMethod("worldWithName:") static func world(name: String?) -> NSObject {
+        let world = WKContentWorld()
+        world.worldName = name
+        return world
+    }
+    @ObjCMethod("name") func name() -> String? { worldName }
+}
