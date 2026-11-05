@@ -55,43 +55,57 @@ _Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
         void *tmp_ = (darwin_ap); \
         memcpy(&name, &tmp_, sizeof(name)); \
     } while (0)
+
+// For a format's arguments: copied to where glibc reads 64-bit values.
+#define DARWIN_VA_FORMAT(name, format, darwin_ap) \
+    size_t size_##name = perry_repack_arguments((format), (darwin_ap), NULL); \
+    uintptr_t raw_##name = (uintptr_t)__builtin_alloca(size_##name + 8); \
+    void *repacked_##name = (void *)((raw_##name + 7) & ~(uintptr_t)7); \
+    perry_repack_arguments((format), (darwin_ap), repacked_##name); \
+    va_list name; \
+    memcpy(&name, &repacked_##name, sizeof(name))
+#endif
+
+#if defined(__aarch64__)
+// Arguments need no repacking on arm64.
+#define DARWIN_VA_FORMAT(name, format, darwin_ap) DARWIN_VA(name, darwin_ap)
 #endif
 
 typedef void *darwin_va_list;
 
 int darwin_vprintf(const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vprintf);
 int darwin_vprintf(const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vprintf(fmt, va);
 }
 
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfprintf);
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vfprintf(f, fmt, va);
 }
 
 int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vdprintf);
 int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vdprintf(fd, fmt, va);
 }
 
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsprintf);
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vsprintf(buf, fmt, va);
 }
 
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsnprintf);
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vsnprintf(buf, size, fmt, va);
 }
 
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vasprintf);
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vasprintf(out, fmt, va);
 }
 
@@ -115,7 +129,7 @@ int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) {
 
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsyslog);
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     vsyslog(priority, fmt, va);
 }
 
@@ -124,14 +138,14 @@ int __vsnprintf_chk(char *, size_t, int, size_t, const char *, va_list);
 
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(__vsprintf_chk);
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return __vsprintf_chk(buf, flag, slen, fmt, va);
 }
 
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap)
     DARWIN_SYMBOL(__vsnprintf_chk);
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return __vsnprintf_chk(buf, maxlen, flag, slen, fmt, va);
 }
 
