@@ -143,4 +143,25 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0 \
  && rm -rf /var/lib/apt/lists/*
 
+# Vulkan's loader and Mesa's Vulkan drivers (lavapipe on the CPU when a
+# container has no GPU), which metal2vulkan opens at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers \
+ && rm -rf /var/lib/apt/lists/*
+
+# metal2vulkan (GPL-2.0-or-later OR LGPL-3.0-or-later, taken as LGPL), the
+# Metal API on Vulkan, through the C ABI crate on MillerTechnologyPeru's
+# fork: libmetal2vulkan.so, a separate library Metal's provider opens at run
+# time. Built with the Rust its toolchain file pins, which is removed after.
+RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vulkan/archive/75cbc84889a978390f6cb7eae0cb9539be744fee.tar.gz \
+ && echo "fbdf067784cfd7c5ec4741c228588df52db18683c36061c3c33c56b4abf57404  /tmp/m2v.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/m2v && tar -xzf /tmp/m2v.tar.gz -C /tmp/m2v --strip-components=1 \
+        --wildcards '*/capi' '*/crates/metal2vulkan' '*/crates/metal2vulkan-air' '*/crates/metal2vulkan-runtime' \
+        '*/Cargo.toml' '*/rust-toolchain.toml' '*/LICENSE*' \
+ && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.1 \
+ && cd /tmp/m2v/capi && /root/.cargo/bin/cargo build --release \
+ && strip -o /usr/lib/aarch64-linux-gnu/libmetal2vulkan.so target/release/libmetal2vulkan_capi.so \
+ && mkdir -p /usr/share/doc/metal2vulkan && cp /tmp/m2v/LICENSE* /usr/share/doc/metal2vulkan/ \
+ && cd / && rm -rf /tmp/m2v /tmp/m2v.tar.gz /root/.cargo /root/.rustup
+
 WORKDIR /perry

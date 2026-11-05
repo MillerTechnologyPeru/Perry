@@ -986,6 +986,8 @@ open class UIAlertController: UIViewController {
         alert.alert.message = message
         alert.alert.style = style
         alert.state.modalPresentationStyle = 5
+        // An alert is often an app's report of what went wrong.
+        uikitWarning("alert: \(title ?? ""): \(message ?? "")")
         return alert
     }
 

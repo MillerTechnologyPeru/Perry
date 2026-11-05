@@ -142,6 +142,14 @@ open class CADisplayLink: NSObject {
         if let runLoop, runLoop.objcObject != main {
             state.runLoop = ObjCRuntime.retain(runLoop.objcObject)
             state.mode = mode.flatMap { ObjCRuntime.retain($0.objcObject) }
+        } else {
+            // The main run loop's link is a timer on it in its common modes,
+            // as on Darwin it is a source of the run loop, not of the main
+            // queue: it fires in a run loop the app runs inside a block on
+            // the main queue (World of Goo 2 waits for frames so), where the
+            // main queue cannot run again.
+            state.runLoop = ObjCRuntime.retain(main)
+            state.mode = ObjCRuntime.retain("kCFRunLoopCommonModes".objCArgument())
         }
         schedule()
     }

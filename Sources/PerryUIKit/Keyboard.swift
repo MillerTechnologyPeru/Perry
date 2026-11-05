@@ -66,3 +66,88 @@ extension NSObject {
     @ObjCMethod("becomeFirstResponder") func sendBecomeFirstResponder() -> Bool
     @ObjCMethod("resignFirstResponder") func sendResignFirstResponder() -> Bool
 }
+
+// MARK: - UIKeyCommand
+
+final class KeyCommandState {
+    var input: String?
+    var modifierFlags = 0
+    var action: ObjCSelector?
+    var title: String?
+    var discoverabilityTitle: String?
+    var wantsPriorityOverSystemBehavior = false
+}
+
+/// A key command, kept for the responders that list it; with no hardware
+/// keyboard, none is ever performed.
+@ObjCClass("UIKeyCommand")
+open class UIKeyCommand: NSObject {
+    var command = KeyCommandState()
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCClassMethod("keyCommandWithInput:modifierFlags:action:")
+    static func make(input: String?, modifierFlags: Int, action: ObjCSelector?) -> UIKeyCommand {
+        let command = UIKeyCommand()
+        command.command.input = input
+        command.command.modifierFlags = modifierFlags
+        command.command.action = action
+        return command
+    }
+
+    @ObjCClassMethod("keyCommandWithInput:modifierFlags:action:discoverabilityTitle:")
+    static func make(input: String?, modifierFlags: Int, action: ObjCSelector?, discoverabilityTitle: String?) -> UIKeyCommand {
+        let command = make(input: input, modifierFlags: modifierFlags, action: action)
+        command.command.discoverabilityTitle = discoverabilityTitle
+        return command
+    }
+
+    @ObjCClassMethod("commandWithTitle:image:action:input:modifierFlags:propertyList:")
+    static func make(title: String?, image: NSObject?, action: ObjCSelector?, input: String?, modifierFlags: Int,
+                     propertyList: NSObject?) -> UIKeyCommand {
+        let command = make(input: input, modifierFlags: modifierFlags, action: action)
+        command.command.title = title
+        return command
+    }
+
+    @ObjCMethod("input") func input() -> String? { command.input }
+    @ObjCMethod("modifierFlags") func modifierFlags() -> Int { command.modifierFlags }
+    @ObjCMethod("action") func action() -> ObjCSelector? { command.action }
+    @ObjCMethod("title") func title() -> String? { command.title }
+    @ObjCMethod("setTitle:") func setTitle(_ title: String?) { command.title = title }
+    @ObjCMethod("discoverabilityTitle") func discoverabilityTitle() -> String? { command.discoverabilityTitle }
+    @ObjCMethod("setDiscoverabilityTitle:") func setDiscoverabilityTitle(_ title: String?) { command.discoverabilityTitle = title }
+    @ObjCMethod("wantsPriorityOverSystemBehavior") func wantsPriorityOverSystemBehavior() -> Bool { command.wantsPriorityOverSystemBehavior }
+    @ObjCMethod("setWantsPriorityOverSystemBehavior:") func setWantsPriorityOverSystemBehavior(_ wants: Bool) {
+        command.wantsPriorityOverSystemBehavior = wants
+    }
+}
+
+// MARK: - UIPointerInteraction
+
+final class PointerInteractionState {
+    var delegate: UnsafeMutableRawPointer?
+    var view: UnsafeMutableRawPointer?
+    var enabled = true
+}
+
+/// A pointer interaction; there is no pointer, so it never asks its
+/// delegate for regions or styles.
+@ObjCClass("UIPointerInteraction")
+open class UIPointerInteraction: NSObject {
+    var pointer = PointerInteractionState()
+
+    @ObjCMethod("initWithDelegate:")
+    public required init(delegate: UnsafeMutableRawPointer?) {
+        super.init()
+        pointer.delegate = delegate
+    }
+
+    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { pointer.delegate }
+    @ObjCMethod("view") func view() -> UnsafeMutableRawPointer? { pointer.view }
+    @ObjCMethod("willMoveToView:") func willMove(toView view: UnsafeMutableRawPointer?) {}
+    @ObjCMethod("didMoveToView:") func didMove(toView view: UnsafeMutableRawPointer?) { pointer.view = view }
+    @ObjCMethod("isEnabled") func isEnabled() -> Bool { pointer.enabled }
+    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { pointer.enabled = enabled }
+    @ObjCMethod("invalidate") func invalidate() {}
+}

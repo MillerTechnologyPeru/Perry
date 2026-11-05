@@ -41,6 +41,11 @@ final class RunLoopState {
         self.object = object
     }
 
+    /// An input source added or removed: one of another library's, such as
+    /// an audio queue's on the run loop its app names.
+    func addSource() { locked { ports += 1 } }
+    func removeSource() { locked { ports = max(0, ports - 1) } }
+
     private func locked<T>(_ body: () -> T) -> T {
         pthread_mutex_lock(mutex)
         defer { pthread_mutex_unlock(mutex) }
@@ -383,8 +388,23 @@ public func CFRunLoopRun() {
 @c(_CFRunLoopRunInMode)
 public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double,
                                _ returnAfterSourceHandled: Bool) -> Int32 {
-    RunLoops.current.run(until: absoluteTimeNow() + seconds,
-                         returnAfterSourceHandled: returnAfterSourceHandled).rawValue
+    // A loop with an input source waits for it, as on Darwin.
+    let state = RunLoops.current
+    return state.run(until: absoluteTimeNow() + seconds, returnAfterSourceHandled: returnAfterSourceHandled,
+                     waitWhenEmpty: state.ports > 0 ? true : nil).rawValue
+}
+
+/// Perry's own: another library's input source on a run loop, which keeps
+/// it waiting rather than finished when it has nothing else. Audio queues
+/// add one to the run loop their app names for callbacks.
+@c(_perry_CFRunLoopAddInputSource)
+public func perry_CFRunLoopAddInputSource(_ runLoop: UnsafeMutableRawPointer?) {
+    RunLoops.state(runLoop)?.addSource()
+}
+
+@c(_perry_CFRunLoopRemoveInputSource)
+public func perry_CFRunLoopRemoveInputSource(_ runLoop: UnsafeMutableRawPointer?) {
+    RunLoops.state(runLoop)?.removeSource()
 }
 
 /// The mode the run loop is running in, +1: the default mode, the only

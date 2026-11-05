@@ -527,6 +527,41 @@ int darwin_pthread_attr_setdetachstate(pthread_attr_t *attributes, int state) {
         state == DARWIN_DETACHED ? PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE));
 }
 
+// Cancellation states and types, which Darwin numbers differently:
+// PTHREAD_CANCEL_ENABLE 1, DISABLE 0; DEFERRED 2, ASYNCHRONOUS 0.
+enum { DARWIN_CANCEL_ENABLE = 0x01, DARWIN_CANCEL_DISABLE = 0x00, DARWIN_CANCEL_DEFERRED = 0x02,
+       DARWIN_CANCEL_ASYNCHRONOUS = 0x00 };
+
+int darwin_pthread_setcancelstate(int state, int *old_state) DARWIN_SYMBOL(pthread_setcancelstate);
+int darwin_pthread_setcancelstate(int state, int *old_state) {
+    if (state != DARWIN_CANCEL_ENABLE && state != DARWIN_CANCEL_DISABLE)
+        return 22;
+    int linux_old = 0;
+    int error = pthread_setcancelstate(state == DARWIN_CANCEL_ENABLE ? PTHREAD_CANCEL_ENABLE : PTHREAD_CANCEL_DISABLE,
+                                       &linux_old);
+    if (!error && old_state)
+        *old_state = linux_old == PTHREAD_CANCEL_ENABLE ? DARWIN_CANCEL_ENABLE : DARWIN_CANCEL_DISABLE;
+    return result(error);
+}
+
+int darwin_pthread_setcanceltype(int type, int *old_type) DARWIN_SYMBOL(pthread_setcanceltype);
+int darwin_pthread_setcanceltype(int type, int *old_type) {
+    if (type != DARWIN_CANCEL_DEFERRED && type != DARWIN_CANCEL_ASYNCHRONOUS)
+        return 22;
+    int linux_old = 0;
+    int error = pthread_setcanceltype(type == DARWIN_CANCEL_DEFERRED ? PTHREAD_CANCEL_DEFERRED
+                                                                      : PTHREAD_CANCEL_ASYNCHRONOUS,
+                                      &linux_old);
+    if (!error && old_type)
+        *old_type = linux_old == PTHREAD_CANCEL_DEFERRED ? DARWIN_CANCEL_DEFERRED : DARWIN_CANCEL_ASYNCHRONOUS;
+    return result(error);
+}
+
+void darwin_pthread_testcancel(void) DARWIN_SYMBOL(pthread_testcancel);
+void darwin_pthread_testcancel(void) {
+    pthread_testcancel();
+}
+
 // Darwin's smallest stack is 16 KB; the host's is larger (128 KB on arm64),
 // and its threads keep their thread-local storage on the stack too. A size
 // Darwin accepts is raised to one the host does.
@@ -783,4 +818,20 @@ int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *pa
 int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *parameters) {
     (void)attributes;
     return parameters ? 0 : 22;
+}
+
+// Quality-of-service classes, which Linux has no counterpart for: accepted
+// and ignored, as a thread's priority already is.
+int darwin_pthread_set_qos_class_self_np(unsigned int qos, int relative_priority) DARWIN_SYMBOL(pthread_set_qos_class_self_np);
+int darwin_pthread_set_qos_class_self_np(unsigned int qos, int relative_priority) {
+    (void)qos;
+    return relative_priority > 0 || relative_priority < -15 ? 22 : 0;
+}
+
+int darwin_pthread_attr_set_qos_class_np(pthread_attr_t *attributes, unsigned int qos, int relative_priority)
+    DARWIN_SYMBOL(pthread_attr_set_qos_class_np);
+int darwin_pthread_attr_set_qos_class_np(pthread_attr_t *attributes, unsigned int qos, int relative_priority) {
+    (void)attributes;
+    (void)qos;
+    return relative_priority > 0 || relative_priority < -15 ? 22 : 0;
 }
