@@ -25,6 +25,8 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
               weakVariable: symbol("__NSConcreteWeakBlockVariable")),
         copy: symbol("__Block_copy"), release: symbol("__Block_release"))
 
+    ThrowTrace.install(lookup)
+
     // Objects captured by blocks are retained through this runtime.
     if let useRR2 = symbol("__Block_use_RR2") {
         typealias UseRR2 = @convention(c) (UnsafePointer<perry_block_callbacks>) -> Void
