@@ -30,8 +30,9 @@ extension UIImage {
     /// Has bundle images resolve as UIImage(named:in:compatibleWith:)
     /// finds them, once.
     static let installNamedImages: Void = {
-        NamedImage.platformImage = { name, bundle in
-            UIImage(named: name, in: bundle, compatibleWith: nil)
+        NamedImage.platformImage = { name, bundle, colorScheme in
+            let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+            return UIImage(named: name, in: bundle, compatibleWith: traits)
         }
         NamedImage.platformSymbol = { name in
             UIImage(systemName: name)
