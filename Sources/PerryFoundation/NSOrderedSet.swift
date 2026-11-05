@@ -96,6 +96,10 @@ public class NSOrderedSet: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         OrderedSets.setClass = cls.storage
+        cls.addMethod("orderedSetWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_orderedSetWithObjects), isClassMethod: true)
+        cls.addMethod("initWithObjects:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_initOrderedSetWithObjects), isClassMethod: false)
     }
 
     var storage: OrderedSetStorage {
@@ -132,6 +136,12 @@ public class NSOrderedSet: NSObject {
     @ObjCMethod("init")
     func initialize() -> Self {
         Storage.set(objcObject, OrderedSetStorage())
+        return self
+    }
+
+    @ObjCMethod("initWithOrderedSet:")
+    func initialize(orderedSet other: ObjCObject?) -> Self {
+        Storage.set(objcObject, OrderedSetStorage(OrderedSets.storage(other?.id).members))
         return self
     }
 
@@ -574,4 +584,19 @@ public final class NSCache: NSObject {
 
     @ObjCMethod("evictsObjectsWithDiscardedContent") func evictsDiscarded() -> Bool { storage.evictsDiscarded }
     @ObjCMethod("setEvictsObjectsWithDiscardedContent:") func setEvictsDiscarded(_ value: Bool) { storage.evictsDiscarded = value }
+}
+
+/// + (id)orderedSetWithObjects:(id)first, ... nil
+@c
+public func perry_foundation_orderedSetWithObjects(_ cls: id?, _ cmd: SEL?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    guard let cls else { return nil }
+    return OrderedSets.make(cls, nilTerminated(first, arguments))
+}
+
+/// - (id)initWithObjects:(id)first, ... nil
+@c
+public func perry_foundation_initOrderedSetWithObjects(_ object: id?, _ cmd: SEL?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    guard let object else { return nil }
+    Storage.set(object, OrderedSetStorage(nilTerminated(first, arguments)))
+    return object
 }
