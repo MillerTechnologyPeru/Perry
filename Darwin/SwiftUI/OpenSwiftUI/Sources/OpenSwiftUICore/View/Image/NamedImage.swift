@@ -28,6 +28,9 @@ package enum NamedImage {
     /// The platform's image named `name` in a bundle, which OpenSwiftUI
     /// sets: how bundle images resolve without CoreUI.
     nonisolated(unsafe) package static var platformImage: ((String, Bundle) -> (any ImageProvider)?)?
+    /// The platform's system symbol named `name`: how Image(systemName:)
+    /// resolves without CoreUI.
+    nonisolated(unsafe) package static var platformSymbol: ((String) -> (any ImageProvider)?)?
     #endif
 
     // MARK: - NamedImage.VectorKey
@@ -910,6 +913,9 @@ extension Image {
             // Without CoreUI, the platform's images: UIImage(named:in:)
             // where OpenSwiftUI installs it.
             if let bundle = location.bundle, let provider = NamedImage.platformImage?(name, bundle) {
+                return provider.resolve(in: context)
+            }
+            if case .system = location, let provider = NamedImage.platformSymbol?(name) {
                 return provider.resolve(in: context)
             }
             #endif
