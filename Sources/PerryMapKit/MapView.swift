@@ -111,7 +111,7 @@ class MKMapView: UIView {
         let span = region.span
         let x = span.longitudeDelta > 0 ? (coordinate.longitude - (region.center.longitude - span.longitudeDelta / 2)) / span.longitudeDelta : 0.5
         let y = span.latitudeDelta > 0 ? ((region.center.latitude + span.latitudeDelta / 2) - coordinate.latitude) / span.latitudeDelta : 0.5
-        let point = CGPoint(x: bounds.origin.x + x * bounds.size.width, y: bounds.origin.y + y * bounds.size.height)
+        let point = CGPoint(x: bounds.origin.x + CGFloat(x) * bounds.size.width, y: bounds.origin.y + CGFloat(y) * bounds.size.height)
         return view.map { convert(point, to: $0) } ?? point
     }
 
@@ -119,8 +119,8 @@ class MKMapView: UIView {
     func convert(_ point: CGPoint, toCoordinateFrom view: UIView?) -> CLLocationCoordinate2D {
         let local = view.map { convert(point, from: $0) } ?? point
         let bounds = self.bounds(), region = map.region
-        let x = bounds.size.width > 0 ? (local.x - bounds.origin.x) / bounds.size.width : 0.5
-        let y = bounds.size.height > 0 ? (local.y - bounds.origin.y) / bounds.size.height : 0.5
+        let x = Double(bounds.size.width > 0 ? (local.x - bounds.origin.x) / bounds.size.width : 0.5)
+        let y = Double(bounds.size.height > 0 ? (local.y - bounds.origin.y) / bounds.size.height : 0.5)
         return CLLocationCoordinate2D(latitude: region.center.latitude + region.span.latitudeDelta * (0.5 - y),
                                       longitude: region.center.longitude + region.span.longitudeDelta * (x - 0.5))
     }
