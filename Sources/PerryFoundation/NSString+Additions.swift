@@ -63,8 +63,64 @@ enum StringEncoding {
                 return [UInt8(v >> 24), UInt8(v >> 16 & 0xff), UInt8(v >> 8 & 0xff), UInt8(v & 0xff)]
             }
         default:
-            return nil
+            guard let name = iconvName(encoding) else { return nil }
+            return convert(Array(string.utf8), from: "UTF-8", to: lossy ? name + "//TRANSLIT" : name)
         }
+    }
+
+    /// glibc's iconv name for the other encodings Darwin has: its legacy
+    /// NSStringEncodings, and CFStringEncodings with the high bit set.
+    static func iconvName(_ encoding: UInt) -> String? {
+        let low = encoding & 0xFFFF_FFFF
+        switch low {
+        case 2: return "NEXTSTEP"
+        case 3: return "EUC-JP"
+        case 8: return "CP932"                      // Shift JIS, as Darwin's
+        case 9: return "ISO-8859-2"
+        case 11: return "CP1251"
+        case 12: return "CP1252"
+        case 13: return "CP1253"
+        case 14: return "CP1254"
+        case 15: return "CP1250"
+        case 21: return "ISO-2022-JP"
+        case 30: return "MACINTOSH"
+        default: break
+        }
+        guard low & 0x8000_0000 != 0 else { return nil }
+        switch low & 0x7FFF_FFFF {
+        case 0x0001, 0x0A01, 0x0628: return "CP932"      // Mac Japanese, Shift JIS, DOS Japanese
+        case 0x0002, 0x0A03: return "BIG5"               // Mac Chinese (Traditional), Big5
+        case 0x0003, 0x0422, 0x0940: return "CP949"      // Mac Korean, DOS Korean, EUC-KR
+        case 0x0019, 0x0421, 0x0930: return "GBK"        // Mac Chinese (Simplified), DOS Chinese, GB 2312
+        case 0x0632: return "GB18030"
+        case 0x0920: return "EUC-JP"
+        case 0x0201...0x0210: return "ISO-8859-\((low & 0x7FFF_FFFF) - 0x0200)"
+        case 0x0500: return "CP1252"
+        case 0x0501: return "CP1250"
+        case 0x0502: return "CP1251"
+        case 0x0503: return "CP1253"
+        case 0x0504: return "CP1254"
+        default: return nil
+        }
+    }
+
+    /// Bytes converted by glibc's iconv; nil if a byte or character can't be.
+    static func convert(_ input: [UInt8], from: String, to: String) -> [UInt8]? {
+        let descriptor = iconv_open(to, from)
+        guard let descriptor, Int(bitPattern: descriptor) != -1 else { return nil }
+        defer { iconv_close(descriptor) }
+        var source = input.map { CChar(bitPattern: $0) }
+        var output = [CChar](repeating: 0, count: input.count * 4 + 16)
+        let written: Int? = source.withUnsafeMutableBufferPointer { inBuffer in
+            output.withUnsafeMutableBufferPointer { outBuffer in
+                var inPointer = inBuffer.baseAddress, outPointer = outBuffer.baseAddress
+                var inLeft = inBuffer.count, outLeft = outBuffer.count
+                guard iconv(descriptor, &inPointer, &inLeft, &outPointer, &outLeft) != -1 || inLeft == 0 else { return nil }
+                return outBuffer.count - outLeft
+            }
+        }
+        guard let written else { return nil }
+        return output[..<written].map { UInt8(bitPattern: $0) }
     }
 
     static func decode(_ bytes: UnsafeRawBufferPointer, _ encoding: UInt) -> String? {
@@ -110,7 +166,8 @@ enum StringEncoding {
             }
             return String(scalars)
         default:
-            return nil
+            guard let name = iconvName(encoding), let utf8 = convert(Array(bytes), from: name, to: "UTF-8") else { return nil }
+            return String(decoding: utf8, as: UTF8.self)
         }
     }
 }
