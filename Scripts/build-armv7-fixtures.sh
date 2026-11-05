@@ -60,7 +60,7 @@ for file in $fixtures; do
     *) flags=""; libs="$out/libSystem/libSystem.dylib" ;;
     esac
     # shellcheck disable=SC2086
-    "$llvm/clang" -target "armv7-apple-ios$min" -mfloat-abi=soft $flags -c "$root/Tests/Fixtures/$file" \
+    "$llvm/clang" -target "armv7-apple-ios$min" -mfloat-abi=soft -fno-stack-protector $flags -c "$root/Tests/Fixtures/$file" \
         -o "$out/$name.o" -isystem "$root/Tests/Fixtures/include"
     # Before iOS 6 an executable starts at crt1's start; Perry calls _main.
     entry=""
