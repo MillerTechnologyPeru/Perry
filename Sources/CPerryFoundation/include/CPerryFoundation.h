@@ -83,17 +83,17 @@ typedef struct {
     uint8_t byte8, byte9, byte10, byte11, byte12, byte13, byte14, byte15;
 } CFUUIDBytes;
 
-// Key-value observing's setter for any argument type (kvo.S): it calls
+// Key-value observing's setter for any argument type (kvo.S, kvo_arm.S): it calls
 // perry_foundation_kvo_will, which returns the setter it replaces, then
 // perry_foundation_kvo_did.
 void perry_kvo_setter(void);
 
-// Calls a getter that may return a structure: x8 is `indirect`; x0, x1
-// and d0 to d3 are saved in `registers` afterwards.
+// arm64 only. Calls a getter that may return a structure: x8 is `indirect`;
+// x0, x1 and d0 to d3 are saved in `registers` afterwards.
 void perry_foundation_call_getter(void *object, const char *selector, const void *imp, void *indirect,
                                   uint64_t registers[6]);
 
-// Calls a setter with x2, x3 and d0 to d3 from `registers`.
+// arm64 only. Calls a setter with x2, x3 and d0 to d3 from `registers`.
 void perry_foundation_call_setter(void *object, const char *selector, const void *imp, const uint64_t registers[6]);
 
 // -[NSProcessInfo operatingSystemVersion]. Larger than 16 bytes, so it is
@@ -123,9 +123,10 @@ void perry_foundation_set_empty_array_class(void *cls);
 const void *perry_foundation_cf_allocator(int which);
 void perry_foundation_set_empty_dictionary_class(void *cls);
 
-// Variadic entry points (variadic.S). Apple's arm64 ABI passes variadic
-// arguments in 8-byte stack slots; each entry point passes a pointer to
-// them (a Darwin va_list) after the fixed arguments and branches to Swift.
+// Variadic entry points (variadic.S, variadic_arm.S). Apple's arm64 ABI
+// passes variadic arguments in 8-byte stack slots, its armv7 ABI in
+// contiguous words from the first free register on; each entry point passes
+// a pointer to them (a Darwin va_list) after the fixed arguments to Swift.
 // Declared without parameters: only their addresses are used.
 void perry_imp_stringWithFormat(void);      // + (id)stringWithFormat:(NSString *)format, ...
 void perry_imp_initWithFormat(void);        // - (id)initWithFormat:(NSString *)format, ...
