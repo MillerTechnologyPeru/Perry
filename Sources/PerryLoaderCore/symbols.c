@@ -165,17 +165,20 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define LIBOBJC "/usr/lib/libobjc.A.dylib"
 #define CFNETWORK "/System/Library/Frameworks/CFNetwork.framework/CFNetwork"
 #define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
+#define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
-// queue, and UIKit's views are backed by QuartzCore's layers. Loading them
-// while binding gives them their startup too.
+// queue, CoreGraphics' objects are CoreFoundation's (Foundation's provider),
+// and UIKit's views are backed by QuartzCore's layers. Loading them while
+// binding gives them their startup too.
 static const struct {
     const char *short_name;
     const char *install_name;
 } provider_links[] = {
     {"dispatch", LIBOBJC},
     {"Foundation", LIBDISPATCH},
+    {"CoreGraphics", COREFOUNDATION},
     {"UIKit", QUARTZCORE},
 };
 
