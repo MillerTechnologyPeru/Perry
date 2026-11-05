@@ -28,6 +28,11 @@ typedef struct audio_file {
     uint32_t max_packet;
     int64_t valid_frames;               // from a CAF packet table; -1 if none
     int32_t priming, remainder;
+    /// Opened with callbacks: audio is read through them, at its place in
+    /// the file, as Darwin's reads do (apps watch where the reads go).
+    read_proc read;
+    void *client;
+    bool decoded;                       // bytes are GStreamer's PCM, not the file's
 } audio_file;
 
 #define FILE_MAGIC FOURCC('p', 'a', 'f', 'l')
@@ -245,6 +250,7 @@ static OSStatus decode_other(audio_file *file, uint32_t hint) {
         return kAudioFileUnsupportedFileTypeError;
     }
     free(file->bytes);
+    file->decoded = true;
     file->bytes = (uint8_t *)samples;
     file->size = frames * channels * 2;
     file->data_offset = 0;
@@ -333,7 +339,13 @@ OSStatus darwin_AudioFileOpenWithCallbacks(void *data, read_proc read, void *wri
         if (!got) break;
         done += got;
     }
-    return open_bytes(bytes, (size_t)done, hint, (audio_file **)out);
+    OSStatus status = open_bytes(bytes, (size_t)done, hint, (audio_file **)out);
+    if (!status) {
+        audio_file *file = *out;
+        file->read = read;
+        file->client = data;
+    }
+    return status;
 }
 
 OSStatus darwin_AudioFileClose(void *handle) DARWIN_SYMBOL(AudioFileClose);
@@ -465,6 +477,19 @@ static void packet(audio_file *file, uint64_t index, uint64_t *offset, uint32_t 
     }
 }
 
+/// `size` bytes of audio data from `offset` within it: through the app's
+/// callback for files opened with them, else from the bytes read at open.
+static bool copy_data(audio_file *file, uint64_t offset, uint32_t size, void *buffer) {
+    if (file->read && !file->decoded) {
+        uint32_t actual = 0;
+        OSStatus status = file->read(file->client, (int64_t)(file->data_offset + offset), size, buffer, &actual);
+        if (!status && actual == size) return true;
+    }
+    if (offset + size > file->data_size) return false;
+    memcpy(buffer, file->bytes + file->data_offset + offset, size);
+    return true;
+}
+
 /// Reads up to `*packets` packets from `start`, stopping before `capacity`
 /// bytes (when given) would be exceeded.
 static OSStatus read_packets(audio_file *file, uint32_t *bytes, AudioStreamPacketDescription *descriptions, int64_t start,
@@ -478,7 +503,7 @@ static OSStatus read_packets(audio_file *file, uint32_t *bytes, AudioStreamPacke
         uint32_t size, frames;
         packet(file, (uint64_t)start + count, &offset, &size, &frames);
         if (written + size > capacity) break;
-        memcpy((uint8_t *)buffer + written, file->bytes + file->data_offset + offset, size);
+        if (!copy_data(file, offset, size, (uint8_t *)buffer + written)) break;
         if (descriptions) descriptions[count] = (AudioStreamPacketDescription){ (int64_t)written, frames, size };
         written += size;
         count++;
@@ -518,6 +543,5 @@ OSStatus darwin_AudioFileReadBytes(void *handle, uint8_t cache, int64_t start, u
     if ((uint64_t)start >= file->data_size) { *bytes = 0; return kAudioFileEndOfFileError; }
     uint64_t available = file->data_size - (uint64_t)start;
     if (*bytes > available) *bytes = (uint32_t)available;
-    memcpy(buffer, file->bytes + file->data_offset + start, *bytes);
-    return 0;
+    return copy_data(file, (uint64_t)start, *bytes, buffer) ? 0 : kAudioFileUnspecifiedError;
 }
