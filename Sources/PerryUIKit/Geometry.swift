@@ -2,8 +2,12 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-/// CoreGraphics' scalar: double on 64-bit Darwin.
+/// CoreGraphics' scalar: double on 64-bit Darwin, float on 32-bit.
+#if _pointerBitWidth(_32)
+public typealias CGFloat = Float
+#else
 public typealias CGFloat = Double
+#endif
 
 // CoreGraphics' geometry as Objective-C values, and UIKit's string forms.
 
