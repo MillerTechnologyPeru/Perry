@@ -29,8 +29,8 @@
 // a pointer into it. Spilling the unused argument registers just below the
 // stack arguments makes that run, so the va_list is the spill's address. glibc
 // reads 64-bit values from 8-byte aligned slots, which this does not give it:
-// the format's integers, pointers and strings read right, and its long long
-// and double conversions do not yet.
+// the targets are the repacking wrappers in stdio.c (_vprintf and the like),
+// which copy 64-bit arguments to where glibc reads them.
 .macro VARIADIC name, target, nfixed
     .globl \name
     .type \name, %function
@@ -67,16 +67,17 @@
     .text
 
 // MARK: - stdio
-VARIADIC _printf, vprintf, 1
-VARIADIC _fprintf, vfprintf, 2
-VARIADIC _dprintf, vdprintf, 2
-VARIADIC _sprintf, vsprintf, 2
-VARIADIC _snprintf, vsnprintf, 3
-VARIADIC _asprintf, vasprintf, 2
+// Darwin's files are always large files, so fopen is glibc's fopen64.
+VARIADIC _printf, _vprintf, 1
+VARIADIC _fprintf, _vfprintf, 2
+VARIADIC _dprintf, _vdprintf, 2
+VARIADIC _sprintf, _vsprintf, 2
+VARIADIC _snprintf, _vsnprintf, 3
+VARIADIC _asprintf, _vasprintf, 2
 VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
-VARIADIC _syslog, vsyslog, 2
+VARIADIC _syslog, _vsyslog, 2
 
 PASSTHROUGH _puts, puts
 PASSTHROUGH _putchar, putchar
@@ -92,7 +93,7 @@ PASSTHROUGH _fwrite, fwrite
 PASSTHROUGH _fread, fread
 PASSTHROUGH _fflush, fflush
 PASSTHROUGH _fclose, fclose
-PASSTHROUGH _fopen, fopen
+PASSTHROUGH _fopen, fopen64
 PASSTHROUGH _fdopen, fdopen
 PASSTHROUGH _fileno, fileno
 PASSTHROUGH _feof, feof
@@ -167,10 +168,101 @@ PASSTHROUGH _access, access
 PASSTHROUGH _chdir, chdir
 PASSTHROUGH _getcwd, getcwd
 PASSTHROUGH _getpagesize, getpagesize
+PASSTHROUGH _munmap, munmap
 PASSTHROUGH _sched_yield, sched_yield
 PASSTHROUGH _arc4random, arc4random
 PASSTHROUGH _arc4random_buf, arc4random_buf
 PASSTHROUGH _arc4random_uniform, arc4random_uniform
+
+
+// MARK: - 64-bit arguments
+//
+// Darwin passes a 64-bit argument in the next two registers or stack slots,
+// whichever are free; glibc starts it at an even register or an 8-byte aligned
+// slot. off_t is 64 bits on Darwin always, so these call glibc's *64 forms.
+// Each adapter builds an 8-byte aligned frame, since Darwin does not keep one.
+
+// f(a, off_t, int): the offset takes r1:r2 here and r2:r3 there, which moves
+// the last argument to the stack.
+.macro OFFSET_THEN_INT name, target
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    push {r4, lr}
+    mov r4, sp
+    sub sp, sp, #8
+    bic sp, sp, #7
+    str r3, [sp]
+    mov r3, r2
+    mov r2, r1
+    bl \target
+    mov sp, r4
+    pop {r4, pc}
+    .size \name, . - \name
+.endm
+
+// f(a, off_t): r1:r2 becomes r2:r3.
+.macro OFFSET_LAST name, target
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    mov r3, r2
+    mov r2, r1
+    b \target
+    .size \name, . - \name
+.endm
+
+// f(a, b, c, off_t): the offset starts in r3 and continues on the stack here,
+// and wholly on the stack there, after the padding r3 becomes.
+.macro THREE_THEN_OFFSET name, target
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    push {r4, lr}
+    mov r4, sp
+    sub sp, sp, #8
+    bic sp, sp, #7
+    ldr r12, [r4, #8]
+    str r3, [sp]
+    str r12, [sp, #4]
+    bl \target
+    mov sp, r4
+    pop {r4, pc}
+    .size \name, . - \name
+.endm
+
+OFFSET_THEN_INT _lseek, lseek64
+OFFSET_THEN_INT _fseeko, fseeko64
+OFFSET_LAST _ftruncate, ftruncate64
+OFFSET_LAST _truncate, truncate64
+THREE_THEN_OFFSET _pread, pread64
+THREE_THEN_OFFSET _pwrite, pwrite64
+PASSTHROUGH _ftello, ftello64
+
+// mmap(addr, length, protection, flags, fd, off_t): fd, then the offset, on
+// the stack here; fd, padding, then the offset at an even slot there. The
+// Darwin flags convert in perry_mmap (system.c).
+    .globl _mmap
+    .type _mmap, %function
+    .p2align 2
+_mmap:
+    push {r4, lr}
+    mov r4, sp
+    sub sp, sp, #16
+    bic sp, sp, #7
+    ldr r12, [r4, #8]
+    str r12, [sp]
+    ldr r12, [r4, #12]
+    str r12, [sp, #8]
+    ldr r12, [r4, #16]
+    str r12, [sp, #12]
+    bl perry_mmap
+    mov sp, r4
+    pop {r4, pc}
+    .size _mmap, . - _mmap
 
 #endif
 
