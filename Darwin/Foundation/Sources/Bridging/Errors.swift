@@ -23,7 +23,9 @@ public func _convertNSErrorToError(_ error: NSError?) -> any Error {
 
 @available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
 public func _convertErrorToNSError(_ error: any Error) -> NSError {
-    // An NSError thrown as itself; any other error by its domain and code.
+    // An NSError thrown as itself (and an error stored as one, such as
+    // URLError); any other error by its domain, code and user info.
     if let embedded = error._getEmbeddedNSError(), let error = embedded as? NSError { return error }
-    return NSError(domain: error._domain, code: error._code, userInfo: nil)
+    return NSError(domain: error._domain, code: error._code,
+                   userInfo: _getErrorDefaultUserInfo(error) as? [String: Any])
 }
