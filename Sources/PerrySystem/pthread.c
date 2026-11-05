@@ -752,3 +752,24 @@ int darwin_pthread_threadid_np(pthread_t thread, uint64_t *id) {
         *id = (uint64_t)gettid();
     return 0;
 }
+
+// Scheduling is the host's: a thread's policy, priority and inheritance
+// are hints, taken and kept for the getters.
+
+int darwin_pthread_attr_setschedpolicy(pthread_attr_t *attributes, int policy) DARWIN_SYMBOL(pthread_attr_setschedpolicy);
+int darwin_pthread_attr_setschedpolicy(pthread_attr_t *attributes, int policy) {
+    (void)attributes;
+    return policy >= 1 && policy <= 4 ? 0 : 22;
+}
+
+int darwin_pthread_attr_setinheritsched(pthread_attr_t *attributes, int inherit) DARWIN_SYMBOL(pthread_attr_setinheritsched);
+int darwin_pthread_attr_setinheritsched(pthread_attr_t *attributes, int inherit) {
+    (void)attributes;
+    return inherit == 1 || inherit == 2 ? 0 : 22;
+}
+
+int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *parameters) DARWIN_SYMBOL(pthread_attr_setschedparam);
+int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *parameters) {
+    (void)attributes;
+    return parameters ? 0 : 22;
+}

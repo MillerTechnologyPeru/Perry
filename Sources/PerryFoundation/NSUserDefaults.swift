@@ -24,10 +24,26 @@ final class UserDefaultsStorage {
         return URL(filePath: home + "/Library/Preferences/" + suite + ".plist")
     }
 
-    func value(_ key: String) -> PropertyValue? { values[key] ?? registered[key] }
+    func value(_ key: String) -> PropertyValue? { values[key] ?? registered[key] ?? Self.global[key] }
+
+    /// NSGlobalDomain's values that apps read as iOS always has them: the
+    /// languages, most preferred first, and the locale.
+    static let global: [String: PropertyValue] = {
+        let languages = Locale.preferredLanguages.isEmpty ? ["en"] : Locale.preferredLanguages
+        return [
+            "AppleLanguages": .array(languages.map { .string($0) }),
+            "AppleLocale": .string(Locale.current.identifier.isEmpty ? "en_US" : Locale.current.identifier),
+        ]
+    }()
 
     func set(_ value: PropertyValue?, for key: String) {
         values[key] = value
+        save()
+    }
+
+    /// Forgets every value set, as removing the domain does.
+    func removeAll() {
+        values = [:]
         save()
     }
 
@@ -35,7 +51,7 @@ final class UserDefaultsStorage {
         registered.merge(defaults) { _, new in new }
     }
 
-    var all: [String: PropertyValue] { registered.merging(values) { _, set in set } }
+    var all: [String: PropertyValue] { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
 
     @discardableResult
     func save() -> Bool {
@@ -112,6 +128,10 @@ final class NSUserDefaults: NSObject {
         storage.value(key)?.object().map { ObjCObject($0) }
     }
 
+    /// Key-value coding reads and writes defaults, as Foundation's does.
+    @ObjCMethod("valueForKey:")
+    func value(forKey key: String) -> ObjCObject? { object(forKey: key) }
+
     @ObjCMethod("stringForKey:")
     func string(forKey key: String) -> String? {
         switch storage.value(key) {
@@ -165,6 +185,28 @@ final class NSUserDefaults: NSObject {
         return object(forKey: key)
     }
 
+    /// The array, when every element is a string.
+    @ObjCMethod("stringArrayForKey:")
+    func stringArray(forKey key: String) -> ObjCObject? {
+        guard case .array(let values)? = storage.value(key),
+              values.allSatisfy({ if case .string = $0 { return true } else { return false } }) else { return nil }
+        return object(forKey: key)
+    }
+
+    /// A URL stored as its string (an absolute URL, or a path for a file).
+    @ObjCMethod("URLForKey:")
+    func url(forKey key: String) -> ObjCObject? {
+        guard case .string(let text)? = storage.value(key) else { return nil }
+        let url = text.hasPrefix("/") ? URL(filePath: text) : URL(string: text)
+        return URLs.wrapped(url).map { ObjCObject($0.objcObject) }
+    }
+
+    @ObjCMethod("setURL:forKey:")
+    func set(url: NSURL?, forKey key: String) {
+        guard let url else { storage.set(nil, for: key); return }
+        storage.set(.string(url.url.absoluteString), for: key)
+    }
+
     @ObjCMethod("dictionaryForKey:")
     func dictionary(forKey key: String) -> ObjCObject? {
         guard case .dictionary? = storage.value(key) else { return nil }
@@ -197,6 +239,9 @@ final class NSUserDefaults: NSObject {
         storage.set(converted, for: key)
     }
 
+    @ObjCMethod("setValue:forKey:")
+    func setValue(_ value: ObjCObject?, forKey key: String) { set(value, forKey: key) }
+
     @ObjCMethod("setInteger:forKey:")
     func set(integer: Int, forKey key: String) { storage.set(.integer(Int64(integer)), for: key) }
 
@@ -211,6 +256,12 @@ final class NSUserDefaults: NSObject {
 
     @ObjCMethod("removeObjectForKey:")
     func remove(forKey key: String) { storage.set(nil, for: key) }
+
+    /// The app's own domain only: other apps' domains aren't kept here.
+    @ObjCMethod("removePersistentDomainForName:")
+    func removePersistentDomain(forName name: String) {
+        if name == storage.suite { storage.removeAll() }
+    }
 
     @ObjCMethod("registerDefaults:")
     func register(_ defaults: ObjCObject) {

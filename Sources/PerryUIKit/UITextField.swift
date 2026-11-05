@@ -17,6 +17,9 @@ final class TextFieldState: ObjectState {
     var textAlignment = 4
     /// UITextBorderStyle: none 0, line 1, bezel 2, rounded rect 3.
     var borderStyle = 0
+    /// Images drawn stretched over the bounds, in place of the border.
+    var background: UIImage?
+    var disabledBackground: UIImage?
     var clearButtonMode = 0
     var delegate: UnsafeMutableRawPointer?
     var leftView: UIView?
@@ -53,6 +56,8 @@ open class UITextField: UIControl {
         field.placeholder = decoded.string("UIPlaceholder")
         field.font = decoded.object("UIFont")?.as(UIFont.self)
         field.textColor = decoded.object("UITextColor")?.as(UIColor.self)
+        field.background = decoded.object("UIBackground")?.as(UIImage.self)
+        field.disabledBackground = decoded.object("UIDisabledBackground")?.as(UIImage.self)
         if decoded.has("UITextAlignment") { field.textAlignment = decoded.integer("UITextAlignment") }
         field.borderStyle = decoded.integer("UIBorderStyle")
         field.clearButtonMode = decoded.integer("UIClearButtonMode")
@@ -93,6 +98,11 @@ open class UITextField: UIControl {
     @ObjCMethod("textAlignment") func textAlignment() -> Int { field.textAlignment }
     @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { field.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("borderStyle") func borderStyle() -> Int { field.borderStyle }
+    @ObjCMethod("background") func background() -> UIImage? { field.background }
+    @ObjCMethod("setBackground:") func setBackground(_ image: UIImage?) { field.background = image; setNeedsDisplay() }
+    @ObjCMethod("disabledBackground") func disabledBackground() -> UIImage? { field.disabledBackground }
+    @ObjCMethod("setDisabledBackground:") func setDisabledBackground(_ image: UIImage?) { field.disabledBackground = image; setNeedsDisplay() }
+
     @ObjCMethod("setBorderStyle:") func setBorderStyle(_ style: Int) { field.borderStyle = style; setNeedsDisplay() }
     @ObjCMethod("clearButtonMode") func clearButtonMode() -> Int { field.clearButtonMode }
     @ObjCMethod("setClearButtonMode:") func setClearButtonMode(_ mode: Int) { field.clearButtonMode = mode }
@@ -316,7 +326,11 @@ open class UITextField: UIControl {
     override func draw(_ rect: CGRect) {
         guard let context = Graphics.current else { return }
         let bounds = state.bounds
-        if field.borderStyle == 3 {
+        let enabled = UIControl.controlStates[objcObject].enabled
+        if let image = (!enabled ? field.disabledBackground : nil) ?? field.background {
+            // A background image replaces the border, as on iOS.
+            image.draw(in: bounds)
+        } else if field.borderStyle == 3 {
             let fill = UIColor.systemGray6()
             withExtendedLifetime(fill) {
                 let path = CG.pathCreateMutable()

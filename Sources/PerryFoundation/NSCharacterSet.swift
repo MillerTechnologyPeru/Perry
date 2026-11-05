@@ -134,6 +134,36 @@ public class NSCharacterSet: NSObject {
     @ObjCClassMethod("illegalCharacterSet")
     static func illegal(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.unassigned])) }
 
+    // The characters each part of a URL allows unescaped, as RFC 3986 and
+    // Foundation's sets have them: ASCII letters and digits, the unreserved
+    // "-._~", the sub-delimiters "!$&'()*+,;=", and what the part adds.
+
+    private static func urlSet(_ cls: ObjCClass, adding extra: String) -> NSCharacterSet? {
+        let members = Set(("-._~!$&'()*+,;=" + extra).unicodeScalars.map(\.value))
+        return set(cls) { scalar in
+            let v = scalar.value
+            return (0x30...0x39).contains(v) || (0x41...0x5a).contains(v) || (0x61...0x7a).contains(v) || members.contains(v)
+        }
+    }
+
+    @ObjCClassMethod("URLUserAllowedCharacterSet")
+    static func urlUserAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: "") }
+
+    @ObjCClassMethod("URLPasswordAllowedCharacterSet")
+    static func urlPasswordAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: "") }
+
+    @ObjCClassMethod("URLHostAllowedCharacterSet")
+    static func urlHostAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: ":[]") }
+
+    @ObjCClassMethod("URLPathAllowedCharacterSet")
+    static func urlPathAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: ":@/") }
+
+    @ObjCClassMethod("URLQueryAllowedCharacterSet")
+    static func urlQueryAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: ":@/?") }
+
+    @ObjCClassMethod("URLFragmentAllowedCharacterSet")
+    static func urlFragmentAllowed(_ cls: ObjCClass) -> NSCharacterSet? { urlSet(cls, adding: ":@/?") }
+
     @ObjCClassMethod("characterSetWithCharactersInString:")
     static func characters(_ cls: ObjCClass, in string: String) -> NSCharacterSet? {
         let members = Set(string.unicodeScalars.map(\.value))

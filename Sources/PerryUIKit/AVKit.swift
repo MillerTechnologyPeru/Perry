@@ -132,6 +132,16 @@ enum PlayerViews {
 
     static func stop(_ controller: UnsafeMutableRawPointer) { showing.removeAll { $0 == controller } }
 
+    /// Player layers with a player, which show its frames wherever they are.
+    nonisolated(unsafe) static var layers: [UnsafeMutableRawPointer] = []
+
+    static func start(layer: UnsafeMutableRawPointer) {
+        if !layers.contains(layer) { layers.append(layer) }
+        schedule()
+    }
+
+    static func stop(layer: UnsafeMutableRawPointer) { layers.removeAll { $0 == layer } }
+
     private static func schedule() {
         guard !scheduled, let after = Display.dispatchAfter, let time = Display.dispatchTime else { return }
         scheduled = true
@@ -140,7 +150,10 @@ enum PlayerViews {
             for object in PlayerViews.showing {
                 AVPlayerViewController(objcObject: object, ownership: .retain).showFrame()
             }
-            if !PlayerViews.showing.isEmpty { PlayerViews.schedule() }
+            for object in PlayerViews.layers {
+                AVPlayerLayer(objcObject: object, ownership: .retain).showFrame()
+            }
+            if !PlayerViews.showing.isEmpty || !PlayerViews.layers.isEmpty { PlayerViews.schedule() }
         }
     }
 }
@@ -151,4 +164,84 @@ extension NSObject {
     @ObjCMethod("_perryVideoFrameWidth") func sendVideoFrameWidth() -> Int
     @ObjCMethod("_perryVideoFrameHeight") func sendVideoFrameHeight() -> Int
     @ObjCMethod("_perryVideoFrameBytes") func sendVideoFrameBytes() -> UnsafeRawPointer?
+}
+
+// AVFoundation's AVPlayerLayer: a layer showing its player's frames as its
+// contents, fitted by its video gravity. It is here with the player view,
+// as a layer of UIKit's; Objective-C classes bind from any provider.
+
+final class PlayerLayerState: ObjectState {
+    var player: NSObject?
+    var videoGravity = "AVLayerVideoGravityResizeAspect"
+    var frameNumber: UInt = 0
+    var size = CGSize.zero
+}
+
+@ObjCClass("AVPlayerLayer")
+class AVPlayerLayer: CALayer {
+    static let states = StateTable<PlayerLayerState>()
+    var layerState: PlayerLayerState { AVPlayerLayer.states[objcObject] }
+
+    @ObjCClassMethod("playerLayerWithPlayer:")
+    static func layer(_ cls: ObjCClass, player: NSObject?) -> NSObject {
+        let layer = cls.object.allocated().initializeLayer().unsafeCast(to: AVPlayerLayer.self)
+        layer.setPlayer(player)
+        return layer
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        PlayerViews.stop(layer: objcObject)
+        AVPlayerLayer.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: AVPlayerLayer.objCClass.pointer)
+    }
+
+    @ObjCMethod("player") func player() -> NSObject? { layerState.player }
+    @ObjCMethod("setPlayer:")
+    func setPlayer(_ player: NSObject?) {
+        let state = layerState
+        state.player = player
+        state.frameNumber = 0
+        if player != nil { PlayerViews.start(layer: objcObject) } else { PlayerViews.stop(layer: objcObject) }
+    }
+
+    @ObjCMethod("videoGravity") func videoGravity() -> String { layerState.videoGravity }
+    @ObjCMethod("setVideoGravity:")
+    func setVideoGravity(_ gravity: String) {
+        layerState.videoGravity = gravity
+        setContentsGravity(AVPlayerViewController.contentsGravity(gravity))
+    }
+
+    @ObjCMethod("isReadyForDisplay") func isReadyForDisplay() -> Bool { layerState.frameNumber > 0 }
+
+    /// The rectangle the video fills, by its gravity.
+    @ObjCMethod("videoRect")
+    func videoRect() -> CGRect {
+        let bounds = self.bounds(), size = layerState.size
+        guard size.width > 0, size.height > 0, layerState.videoGravity != "AVLayerVideoGravityResize" else { return bounds }
+        let sx = bounds.size.width / size.width, sy = bounds.size.height / size.height
+        let scale = layerState.videoGravity == "AVLayerVideoGravityResizeAspectFill" ? max(sx, sy) : min(sx, sy)
+        let width = size.width * scale, height = size.height * scale
+        return CGRect(origin: CGPoint(x: bounds.origin.x + (bounds.size.width - width) / 2,
+                                      y: bounds.origin.y + (bounds.size.height - height) / 2),
+                      size: CGSize(width: width, height: height))
+    }
+
+    @ObjCMethod("pixelBufferAttributes") func pixelBufferAttributes() -> NSObject? { nil }
+    @ObjCMethod("setPixelBufferAttributes:") func setPixelBufferAttributes(_ attributes: NSObject?) {}
+
+    /// Shows the player's frame, if it has a new one.
+    func showFrame() {
+        let state = layerState
+        guard let player = state.player else { return }
+        let number = player.sendVideoFrameNumber()
+        guard number != state.frameNumber else { return }
+        let width = player.sendVideoFrameWidth(), height = player.sendVideoFrameHeight()
+        guard width > 0, height > 0, let bytes = player.sendVideoFrameBytes(),
+              let image = AVPlayerViewController.image(bytes, width: width, height: height) else { return }
+        state.frameNumber = number
+        state.size = CGSize(width: CGFloat(width), height: CGFloat(height))
+        setContents(NSObject(image.object))
+        Display.markDirty()
+    }
 }

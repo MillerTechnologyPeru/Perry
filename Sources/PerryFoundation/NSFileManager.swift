@@ -38,6 +38,7 @@ enum FileAttributes {
     static let NSFileSize = "NSFileSize"
     static let NSFileModificationDate = "NSFileModificationDate"
     static let NSFilePosixPermissions = "NSFilePosixPermissions"
+    static let NSFileImmutable = "NSFileImmutable"
     static let NSFileSystemSize = "NSFileSystemSize"
     static let NSFileSystemFreeSize = "NSFileSystemFreeSize"
     static let NSFileSystemNodes = "NSFileSystemNodes"
@@ -153,6 +154,29 @@ final class NSFileManager: NSObject {
     @ObjCMethod("subpathsAtPath:")
     func subpaths(atPath path: String) -> NSArray? { subpaths(atPath: path, error: nil) }
 
+    /// The directory's subpaths, as they are when it is made; none if it is
+    /// missing. -skipDescendants and the attributes aren't supported.
+    @ObjCMethod("enumeratorAtPath:")
+    func enumerator(atPath path: String) -> ObjCObject {
+        Enumerators.make(((try? files.subpathsOfDirectory(atPath: path)) ?? []).sorted().map { Strings.autoreleased($0) })
+    }
+
+    /// The directory's contents as URLs, as they are when it is made, by
+    /// NSDirectoryEnumerationOptions: 1 skips subdirectories' contents, 4
+    /// hidden files. Missing directories give none; the keys and the error
+    /// handler aren't used.
+    @ObjCMethod("enumeratorAtURL:includingPropertiesForKeys:options:errorHandler:")
+    func enumerator(at url: NSURL?, keys: ObjCObject?, options: UInt, errorHandler: ObjCObject?) -> ObjCObject? {
+        guard let url else { return nil }
+        let root = url.url.path(percentEncoded: false)
+        let paths = options & 1 != 0
+            ? (try? files.contentsOfDirectory(atPath: root)) ?? []
+            : (try? files.subpathsOfDirectory(atPath: root)) ?? []
+        let visible = options & 4 != 0 ? paths.filter { !$0.split(separator: "/").contains { $0.hasPrefix(".") } } : paths
+        let base = root.hasSuffix("/") ? root : root + "/"
+        return Enumerators.make(visible.sorted().compactMap { URLs.wrapped(URL(filePath: base + $0))?.objcObject })
+    }
+
     // MARK: Changing
 
     @ObjCMethod("removeItemAtPath:error:")
@@ -179,6 +203,21 @@ final class NSFileManager: NSObject {
         } catch {
             FileManagers.report(errorPointer, source)
             return false
+        }
+    }
+
+    @ObjCMethod("moveItemAtURL:toURL:error:")
+    func moveItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        moveItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+    }
+
+    @ObjCMethod("destinationOfSymbolicLinkAtPath:error:")
+    func destinationOfSymbolicLink(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> String? {
+        do {
+            return try files.destinationOfSymbolicLink(atPath: path)
+        } catch {
+            FileManagers.report(errorPointer, path)
+            return nil
         }
     }
 

@@ -70,8 +70,10 @@ RUN apt-get update \
 
 # LLVM's libc++ and libc++abi as Apple builds them for arm64, which C++ in
 # iOS apps and Swift's runtime were built against: std::string in the
-# alternate layout (its data pointer first), and type_info compared as
-# Apple's arm64 compares it, by name for types marked not unique. Named
+# alternate layout (its data pointer first), type_info compared as Apple's
+# arm64 compares it, by name for types marked not unique, and the ARM C++
+# ABI's constructors and destructors that return this, which apps' inlined
+# code uses (and its two-word new[] cookies, as Apple's arm64 has). Named
 # libperry-c++ so they never stand in for the system's; the CXX provider
 # opens them at run time.
 RUN apt-get update \
@@ -85,7 +87,7 @@ RUN apt-get update \
         llvm-project-19.1.7.src/llvm/utils \
  && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm-build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-        -DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 \
+        "-DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
         -DLIBCXX_ABI_DEFINES=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT \
         -DLIBCXX_SHARED_OUTPUT_NAME=perry-c++ -DLIBCXXABI_SHARED_OUTPUT_NAME=perry-c++abi \

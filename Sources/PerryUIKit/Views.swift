@@ -322,6 +322,7 @@ final class WebViewState: ObjectState {
     var uiDelegate: UnsafeMutableRawPointer?
     var html: String?
     var request: NSObject?
+    var customUserAgent: String?
     var scalesPageToFit = false
     var configuration: NSObject?
     var allowsInlineMediaPlayback = false
@@ -392,10 +393,12 @@ open class UIWebView: UIView {
 
     @ObjCMethod("stringByEvaluatingJavaScriptFromString:") func evaluate(_ script: String?) -> String? { "" }
 
-    /// The delegate hears the load start and finish, on the next pass.
+    /// The delegate hears the load start and finish, on the next pass. The
+    /// view is kept until then, as its controller may let it go first.
     private func finishLoad() {
-        let object = objcObject
+        let object = ObjCRuntime.retain(objcObject)!
         Updates.afterPass {
+            defer { ObjCRuntime.release(object) }
             let view = UIWebView(objcObject: object, ownership: .retain)
             guard let delegate = view.delegate() else { return }
             if delegate.responds(to: "webViewDidStartLoad:") { delegate.sendWebViewDidStartLoad(view) }
@@ -435,12 +438,29 @@ open class WKWebView: UIView {
     @ObjCMethod("setUIDelegate:") func setUIDelegate(_ delegate: NSObject?) { web.uiDelegate = delegate?.objcObject }
     @ObjCMethod("loadHTMLString:baseURL:") func loadHTMLString(_ html: String?, baseURL: NSObject?) -> NSObject? {
         web.html = html
-        return nil
+        return WebNavigations.start(self, failing: nil)
     }
     @ObjCMethod("loadRequest:") func loadRequest(_ request: NSObject?) -> NSObject? {
         web.request = request
-        return nil
+        let url = request?.unsafeCast(to: NSURLRequestObject.self).url()
+        return WebNavigations.start(self, failing: WebNavigations.isNetwork(url) ? WebErrors.offline() : nil)
     }
+    @ObjCMethod("loadFileURL:allowingReadAccessToURL:")
+    func loadFileURL(_ url: NSObject?, allowingReadAccessTo directory: NSObject?) -> NSObject? {
+        WebNavigations.start(self, failing: nil)
+    }
+    @ObjCMethod("loadData:MIMEType:characterEncodingName:baseURL:")
+    func loadData(_ data: NSObject?, mimeType: String?, encoding: String?, baseURL: NSObject?) -> NSObject? {
+        WebNavigations.start(self, failing: nil)
+    }
+    @ObjCMethod("customUserAgent") func customUserAgent() -> String? { web.customUserAgent }
+    @ObjCMethod("setCustomUserAgent:") func setCustomUserAgent(_ agent: String?) { web.customUserAgent = agent }
+    @ObjCMethod("allowsBackForwardNavigationGestures") func allowsBackForwardNavigationGestures() -> Bool { false }
+    @ObjCMethod("setAllowsBackForwardNavigationGestures:") func setAllowsBackForwardNavigationGestures(_ allows: Bool) {}
+    @ObjCMethod("allowsLinkPreview") func allowsLinkPreview() -> Bool { false }
+    @ObjCMethod("setAllowsLinkPreview:") func setAllowsLinkPreview(_ allows: Bool) {}
+    @ObjCMethod("isInspectable") func isInspectable() -> Bool { false }
+    @ObjCMethod("setInspectable:") func setInspectable(_ inspectable: Bool) {}
     @ObjCMethod("URL") func url() -> NSObject? { nil }
     @ObjCMethod("title") func title() -> String? { nil }
     @ObjCMethod("isLoading") func isLoading() -> Bool { false }
@@ -452,5 +472,12 @@ open class WKWebView: UIView {
     @ObjCMethod("reload") func reload() -> NSObject? { nil }
     @ObjCMethod("stopLoading") func stopLoading() {}
     @ObjCMethod("scrollView") func scrollView() -> NSObject? { nil }
-    @ObjCMethod("evaluateJavaScript:completionHandler:") func evaluateJavaScript(_ script: String?, completionHandler: ObjCBlock?) {}
+    /// No script runs: the handler hears an error after the pass.
+    @ObjCMethod("evaluateJavaScript:completionHandler:") func evaluateJavaScript(_ script: String?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        Updates.afterPass {
+            typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+            completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.noScript().objcObject)
+        }
+    }
 }

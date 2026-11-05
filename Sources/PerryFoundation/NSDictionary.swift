@@ -217,6 +217,17 @@ public class NSDictionary: NSObject {
     @ObjCMethod("initWithDictionary:")
     func initialize(dictionary other: NSDictionary?) -> Self { setEntries(other?.entries ?? []) }
 
+    /// With copyItems, each value is the value's -copy, as Foundation's.
+    @ObjCMethod("initWithDictionary:copyItems:")
+    func initialize(dictionary other: NSDictionary?, copyItems: Bool) -> Self {
+        guard copyItems else { return initialize(dictionary: other) }
+        let copies = (other?.entries ?? []).map { entry -> (key: id, value: id) in
+            (entry.key, ObjC.send(entry.value, Selectors.copyWithZone, nil) ?? ObjC.retain(entry.value)!)
+        }
+        defer { for copy in copies { ObjC.release(copy.value) } }
+        return setEntries(copies)
+    }
+
     /// A property list file's dictionary; nil when the file holds none.
     @ObjCMethod("initWithContentsOfFile:")
     func initialize(contentsOfFile path: String) -> Self? { initialize(contentsOf: URL(filePath: path)) }
@@ -286,6 +297,31 @@ public class NSDictionary: NSObject {
 
     @ObjCMethod("description")
     func description() -> String { Describe.object(objcObject, indent: 0) }
+
+    /// The keys whose values are equal to `object`.
+    @ObjCMethod("allKeysForObject:")
+    func allKeys(for object: ObjCObject?) -> NSArray {
+        guard let object else { return NSArray(objcObject: Arrays.autoreleased([]), ownership: .retain) }
+        let keys = entries.filter { $0.value == object.id || ObjC.sendBool($0.value, Selectors.isEqual, object.id) }.map(\.key)
+        return NSArray(objcObject: Arrays.autoreleased(keys), ownership: .retain)
+    }
+
+    /// The keys whose entries the block passes, as a set.
+    @ObjCMethod("keysOfEntriesPassingTest:")
+    func keysOfEntries(passingTest block: ObjCBlock) -> ObjCObject {
+        let test = block.function(as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Bool).self)
+        var keys: [id] = []
+        var stop = false
+        for entry in entries {
+            if test(block.object, entry.key, entry.value, &stop) { keys.append(entry.key) }
+            if stop { break }
+        }
+        return ObjCObject(Sets.autoreleased(keys))
+    }
+
+    /// Concurrent enumeration runs in order here.
+    @ObjCMethod("keysOfEntriesWithOptions:passingTest:")
+    func keysOfEntries(options: UInt, passingTest block: ObjCBlock) -> ObjCObject { keysOfEntries(passingTest: block) }
 
     @ObjCMethod("enumerateKeysAndObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
@@ -385,6 +421,11 @@ public class NSMutableDictionary: NSDictionary {
     @ObjCMethod("removeObjectForKey:")
     func remove(forKey key: ObjCObject?) {
         if let key { storage.remove(key.id) }
+    }
+
+    @ObjCMethod("removeObjectsForKeys:")
+    func remove(forKeys keys: ObjCObject?) {
+        for key in Arrays.elements(keys?.id) { storage.remove(key) }
     }
 
     @ObjCMethod("removeAllObjects")

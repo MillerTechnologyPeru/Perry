@@ -250,6 +250,10 @@ open class UIViewController: UIResponder {
     @ObjCMethod("hidesBottomBarWhenPushed") func hidesBottomBarWhenPushed() -> Bool { state.hidesBottomBarWhenPushed }
     @ObjCMethod("edgesForExtendedLayout") func edgesForExtendedLayout() -> Int { state.edgesForExtendedLayout }
     @ObjCMethod("setEdgesForExtendedLayout:") func setEdgesForExtendedLayout(_ edges: Int) { state.edgesForExtendedLayout = edges }
+    /// iOS 3's: whether the view lays out under the status bar. Views always
+    /// do here, as there is no status bar.
+    @ObjCMethod("wantsFullScreenLayout") func wantsFullScreenLayout() -> Bool { true }
+    @ObjCMethod("setWantsFullScreenLayout:") func setWantsFullScreenLayout(_ wants: Bool) {}
     @ObjCMethod("extendedLayoutIncludesOpaqueBars") func extendedLayoutIncludesOpaqueBars() -> Bool { state.extendedLayoutIncludesOpaqueBars }
     @ObjCMethod("setExtendedLayoutIncludesOpaqueBars:") func setExtendedLayoutIncludesOpaqueBars(_ includes: Bool) {
         state.extendedLayoutIncludesOpaqueBars = includes

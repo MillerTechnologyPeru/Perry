@@ -226,7 +226,7 @@ open class NSStringDrawingContext: NSObject {
 /// The text's layout, in its first run's font, color and paragraph style:
 /// lines between words, as many as the height and line limit allow, the
 /// last truncated when text is left out.
-private struct AttributedLayout {
+struct AttributedLayout {
     var lines: [String]
     var size: CGSize
     var font: UIFont

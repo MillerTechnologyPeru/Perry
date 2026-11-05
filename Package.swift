@@ -19,6 +19,9 @@ let package = Package(
         .library(name: "Perryxml2", type: .dynamic, targets: ["PerryXML2"]),
         .library(name: "Perryz", type: .dynamic, targets: ["PerryZ"]),
         .library(name: "PerryCXX", type: .dynamic, targets: ["PerryCXX"]),
+        // malloc from a window above 4 GB, as iOS's heap is, for games that
+        // keep pointers in 32 bits; loaded with LD_PRELOAD.
+        .library(name: "PerryLowHeap", type: .dynamic, targets: ["PerryLowHeap"]),
         .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
@@ -36,7 +39,7 @@ let package = Package(
         .library(name: "PerryAccelerate", type: .dynamic, targets: ["PerryAccelerate"]),
         // JavaScriptCore over WebKitGTK's.
         .library(name: "PerryJavaScriptCore", type: .dynamic, targets: ["PerryJavaScriptCore"]),
-        // AudioToolbox's system sounds, without audio output.
+        // AudioToolbox, played through GStreamer.
         .library(name: "PerryAudioToolbox", type: .dynamic, targets: ["PerryAudioToolbox"]),
         // UserNotifications.
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
@@ -73,6 +76,7 @@ let package = Package(
         // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
     targets: [
         .target(name: "PerryInterface"),
@@ -152,6 +156,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("xml2")]
         ),
         .target(name: "PerryZ", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("z")]),
+        .target(name: "PerryLowHeap"),
         // libc++ and libc++abi, and OpenAL: LLVM's and OpenAL Soft, opened at run time.
         .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
@@ -161,7 +166,9 @@ let package = Package(
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
         .target(name: "PerryIconv"),
         .target(name: "PerryAccelerate", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("openblas")]),
-        .target(name: "PerryAudioToolbox"),
+        // AudioToolbox: files, converters, queues and audio units, played
+        // through GStreamer.
+        .target(name: "PerryAudioToolbox", dependencies: ["PerryInterface"], linkerSettings: [.linkedLibrary("m")]),
         .target(
             name: "PerryCompression",
             linkerSettings: [
@@ -174,7 +181,10 @@ let package = Package(
         // CFNetwork's Objective-C classes over PerryURLLoading.
         .target(
             name: "PerryCFNetwork",
-            dependencies: ["PerryInterface", "PerryObjCInterop", "PerryURLLoading"],
+            dependencies: [
+                "PerryInterface", "PerryObjCInterop", "PerryURLLoading",
+                .product(name: "HTTPTypes", package: "swift-http-types"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // Security's exported data that Swift cannot define.

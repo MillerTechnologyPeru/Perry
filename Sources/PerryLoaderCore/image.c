@@ -512,6 +512,15 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@rpath/", 7) == 0) {
+        // As dyld does from iOS 12.2: the system's Swift runtime libraries
+        // over the copies apps built for earlier versions embed (which stop
+        // the app on a later one), when the runtime given has the library.
+        if (strncmp(name + 7, "libswift", 8) == 0) {
+            snprintf(buf, sizeof(buf), "%s%s", SWIFT_LIBRARY_DIR, name + 7);
+            char mapped[PATH_MAX];
+            if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                return strdup(mapped);
+        }
         // As dyld does, search the rpaths of the loading image, then of each
         // image that led to loading it, out to the main executable: Swift's
         // embedded overlays have none of their own.

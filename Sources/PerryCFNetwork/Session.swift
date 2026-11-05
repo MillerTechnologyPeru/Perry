@@ -133,6 +133,46 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCMethod("setAllowsCellularAccess:") func setAllowsCellularAccess(_ value: Bool) { configuration.allowsCellularAccess = value }
     @ObjCMethod("waitsForConnectivity") func waitsForConnectivity() -> Bool { configuration.waitsForConnectivity }
     @ObjCMethod("setWaitsForConnectivity:") func setWaitsForConnectivity(_ value: Bool) { configuration.waitsForConnectivity = value }
+    // Kept and read back; they don't change how requests go here.
+    @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(configuration.settings["networkServiceType"] ?? 0) }
+    @ObjCMethod("setNetworkServiceType:") func setNetworkServiceType(_ value: UInt) { configuration.settings["networkServiceType"] = Int(value) }
+    @ObjCMethod("allowsConstrainedNetworkAccess")
+    func allowsConstrainedNetworkAccess() -> Bool { configuration.settings["allowsConstrainedNetworkAccess", default: 1] != 0 }
+    @ObjCMethod("setAllowsConstrainedNetworkAccess:")
+    func setAllowsConstrainedNetworkAccess(_ value: Bool) { configuration.settings["allowsConstrainedNetworkAccess"] = value ? 1 : 0 }
+    @ObjCMethod("allowsExpensiveNetworkAccess")
+    func allowsExpensiveNetworkAccess() -> Bool { configuration.settings["allowsExpensiveNetworkAccess", default: 1] != 0 }
+    @ObjCMethod("setAllowsExpensiveNetworkAccess:")
+    func setAllowsExpensiveNetworkAccess(_ value: Bool) { configuration.settings["allowsExpensiveNetworkAccess"] = value ? 1 : 0 }
+    @ObjCMethod("isDiscretionary") func isDiscretionary() -> Bool { configuration.settings["discretionary"] ?? 0 != 0 }
+    @ObjCMethod("setDiscretionary:") func setDiscretionary(_ value: Bool) { configuration.settings["discretionary"] = value ? 1 : 0 }
+    @ObjCMethod("sessionSendsLaunchEvents") func sessionSendsLaunchEvents() -> Bool { configuration.settings["sendsLaunchEvents", default: 1] != 0 }
+    @ObjCMethod("setSessionSendsLaunchEvents:") func setSessionSendsLaunchEvents(_ value: Bool) { configuration.settings["sendsLaunchEvents"] = value ? 1 : 0 }
+    @ObjCMethod("shouldUseExtendedBackgroundIdleMode")
+    func shouldUseExtendedBackgroundIdleMode() -> Bool { configuration.settings["extendedIdle"] ?? 0 != 0 }
+    @ObjCMethod("setShouldUseExtendedBackgroundIdleMode:")
+    func setShouldUseExtendedBackgroundIdleMode(_ value: Bool) { configuration.settings["extendedIdle"] = value ? 1 : 0 }
+    @ObjCMethod("multipathServiceType") func multipathServiceType() -> Int { configuration.settings["multipath"] ?? 0 }
+    @ObjCMethod("setMultipathServiceType:") func setMultipathServiceType(_ value: Int) { configuration.settings["multipath"] = value }
+    /// SSLProtocol and tls_protocol_version_t values, as set.
+    @ObjCMethod("TLSMinimumSupportedProtocol") func tlsMinimumProtocol() -> Int32 { Int32(configuration.settings["tlsMinimum"] ?? 0) }
+    @ObjCMethod("setTLSMinimumSupportedProtocol:") func setTLSMinimumProtocol(_ value: Int32) { configuration.settings["tlsMinimum"] = Int(value) }
+    @ObjCMethod("TLSMaximumSupportedProtocol") func tlsMaximumProtocol() -> Int32 { Int32(configuration.settings["tlsMaximum"] ?? 0) }
+    @ObjCMethod("setTLSMaximumSupportedProtocol:") func setTLSMaximumProtocol(_ value: Int32) { configuration.settings["tlsMaximum"] = Int(value) }
+    @ObjCMethod("TLSMinimumSupportedProtocolVersion")
+    func tlsMinimumVersion() -> UInt16 { UInt16(configuration.settings["tlsMinimumVersion"] ?? 0x0301) }
+    @ObjCMethod("setTLSMinimumSupportedProtocolVersion:")
+    func setTLSMinimumVersion(_ value: UInt16) { configuration.settings["tlsMinimumVersion"] = Int(value) }
+    @ObjCMethod("TLSMaximumSupportedProtocolVersion")
+    func tlsMaximumVersion() -> UInt16 { UInt16(configuration.settings["tlsMaximumVersion"] ?? 0x0304) }
+    @ObjCMethod("setTLSMaximumSupportedProtocolVersion:")
+    func setTLSMaximumVersion(_ value: UInt16) { configuration.settings["tlsMaximumVersion"] = Int(value) }
+    @ObjCMethod("sharedContainerIdentifier") func sharedContainerIdentifier() -> String? { configuration.sharedContainerIdentifier }
+    @ObjCMethod("setSharedContainerIdentifier:") func setSharedContainerIdentifier(_ value: String?) { configuration.sharedContainerIdentifier = value }
+    /// No proxies: requests go direct.
+    @ObjCMethod("connectionProxyDictionary") func connectionProxyDictionary() -> NSObject? { nil }
+    @ObjCMethod("setConnectionProxyDictionary:") func setConnectionProxyDictionary(_ value: NSObject?) {}
+
     @ObjCMethod("HTTPShouldUsePipelining") func usesPipelining() -> Bool { configuration.usesPipelining }
     @ObjCMethod("setHTTPShouldUsePipelining:") func setUsesPipelining(_ value: Bool) { configuration.usesPipelining = value }
 }

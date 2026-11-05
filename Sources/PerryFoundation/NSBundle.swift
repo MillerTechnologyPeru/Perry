@@ -200,8 +200,21 @@ public final class NSBundle: NSObject {
 
     /// The app's classes are all in its executable, and Perry's framework
     /// classes have no bundle of their own: the main bundle.
+    /// The bundle of the image defining the class: a framework's, for a
+    /// class in one, otherwise the main bundle.
     @ObjCClassMethod("bundleForClass:")
-    static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Bundles.main }
+    static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        var info: (UnsafePointer<CChar>?, UnsafeRawPointer?, UnsafePointer<CChar>?, UnsafeRawPointer?) = (nil, nil, nil, nil)
+        guard let cls, let addressInfo = ObjC.addressInfo,
+              withUnsafeMutableBytes(of: &info, { addressInfo(cls, $0.baseAddress) }) != 0, let name = info.0 else { return Bundles.main }
+        let path = String(cString: name)
+        // …/Name.framework/Name: the framework's directory.
+        let bytes = Array(path.utf8), marker = Array(".framework/".utf8)
+        guard bytes.count > marker.count,
+              let start = (0...(bytes.count - marker.count)).last(where: { bytes[$0..<$0 + marker.count].elementsEqual(marker) })
+        else { return Bundles.main }
+        return Bundles.bundle(path: String(decoding: bytes[..<(start + marker.count - 1)], as: UTF8.self)) ?? Bundles.main
+    }
 
     @ObjCClassMethod("bundleWithPath:")
     static func bundle(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
@@ -217,9 +230,34 @@ public final class NSBundle: NSObject {
     @ObjCMethod("initWithURL:")
     func initialize(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
 
+    /// The app's own frameworks, which Darwin has loaded with it.
+    static func frameworkBundles() -> [UnsafeMutableRawPointer] {
+        guard let main = Bundles.storage(Bundles.main) else { return [] }
+        let frameworks = main.path + "/Frameworks"
+        return ((try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? []).sorted()
+            .filter { $0.hasSuffix(".framework") }
+            .compactMap { Bundles.bundle(path: frameworks + "/" + $0) }
+    }
+
+    /// The main bundle: no other non-framework bundles are loaded.
+    @ObjCClassMethod("allBundles")
+    static func allBundles() -> UnsafeMutableRawPointer? { Arrays.autoreleased([Bundles.main].compactMap { $0 }) }
+
+    @ObjCClassMethod("allFrameworks")
+    static func allFrameworks() -> UnsafeMutableRawPointer? { Arrays.autoreleased(frameworkBundles()) }
+
     @ObjCClassMethod("bundleWithIdentifier:")
     static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
-        Bundles.storage(Bundles.main)?.identifier == identifier ? Bundles.main : nil
+        guard let main = Bundles.storage(Bundles.main) else { return nil }
+        if main.identifier == identifier { return Bundles.main }
+        // The app's own frameworks, which Darwin has loaded with it.
+        let frameworks = main.path + "/Frameworks"
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? [] where name.hasSuffix(".framework") {
+            if let bundle = Bundles.bundle(path: frameworks + "/" + name), Bundles.storage(bundle)?.identifier == identifier {
+                return bundle
+            }
+        }
+        return nil
     }
 
     // Bundles live for the whole process.
@@ -232,6 +270,9 @@ public final class NSBundle: NSObject {
     @ObjCMethod("resourcePath") func resourcePath() -> String { storage.resourcePath }
     @ObjCMethod("resourceURL") func resourceURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.resourcePath, directoryHint: .isDirectory)) }
     @ObjCMethod("executablePath") func executablePath() -> String? { storage.executablePath }
+    /// Where the App Store's receipt would be. There is none.
+    @ObjCMethod("appStoreReceiptURL")
+    func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String? { storage.identifier }
     @ObjCMethod("isLoaded") func isLoaded() -> Bool { true }
@@ -239,6 +280,10 @@ public final class NSBundle: NSObject {
 
     @ObjCMethod("infoDictionary")
     func infoDictionary() -> NSDictionary { NSDictionary(objCArgument: storage.infoDictionary) }
+
+    /// The info dictionary; its localized InfoPlist.strings aren't merged.
+    @ObjCMethod("localizedInfoDictionary")
+    func localizedInfoDictionary() -> NSDictionary { infoDictionary() }
 
     @ObjCMethod("objectForInfoDictionaryKey:")
     func object(forInfoDictionaryKey key: ObjCObject) -> ObjCObject? {

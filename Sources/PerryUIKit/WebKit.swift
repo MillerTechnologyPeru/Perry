@@ -20,8 +20,28 @@ open class WKWebViewConfiguration: NSObject {
     var dataDetectorTypes: UInt = 0
     var ignoresViewportScaleLimits = false
     var selectionGranularity = 0
+    var defaultWebpagePreferences: NSObject?
+    var schemeHandlers: [String: NSObject] = [:]
+    /// Other settings apps set by key, kept.
+    var others: [String: NSObject] = [:]
 
     @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("defaultWebpagePreferences")
+    func defaultWebpagePreferencesObject() -> NSObject {
+        if let defaultWebpagePreferences { return defaultWebpagePreferences }
+        let made = WKWebpagePreferences()
+        defaultWebpagePreferences = made
+        return made
+    }
+    @ObjCMethod("setDefaultWebpagePreferences:") func setDefaultWebpagePreferences(_ value: NSObject?) { defaultWebpagePreferences = value }
+
+    @ObjCMethod("setURLSchemeHandler:forURLScheme:")
+    func setURLSchemeHandler(_ handler: NSObject?, forURLScheme scheme: String) { schemeHandlers[scheme] = handler }
+    @ObjCMethod("urlSchemeHandlerForURLScheme:") func urlSchemeHandler(forURLScheme scheme: String) -> NSObject? { schemeHandlers[scheme] }
+
+    @ObjCMethod("setValue:forUndefinedKey:") func setValue(_ value: NSObject?, forUndefinedKey key: String) { others[key] = value }
+    @ObjCMethod("valueForUndefinedKey:") func value(forUndefinedKey key: String) -> NSObject? { others[key] }
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
@@ -123,6 +143,24 @@ open class WKWebsiteDataStore: NSObject {
     @ObjCClassMethod("allWebsiteDataTypes")
     static func allWebsiteDataTypes() -> NSObject { NSMutableSet.empty() }
 
+    @ObjCMethod("httpCookieStore") func httpCookieStore() -> NSObject { WKHTTPCookieStore.shared }
+
+    /// There are no records; the handler hears none after the pass.
+    @ObjCMethod("fetchDataRecordsOfTypes:completionHandler:")
+    func fetchDataRecords(ofTypes types: NSObject?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        Updates.afterPass {
+            typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void
+            completionHandler.function(as: Invoke.self)(completionHandler.object, NSMutableArray.empty().objcObject)
+        }
+    }
+
+    @ObjCMethod("removeDataOfTypes:forDataRecords:completionHandler:")
+    func removeData(ofTypes types: NSObject?, forDataRecords records: NSObject?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        Updates.afterPass { Blocks.call(completionHandler) }
+    }
+
     @ObjCMethod("isPersistent") func isPersistent() -> Bool { persistent }
 
     /// There is no data to remove; the handler runs at once.
@@ -137,8 +175,16 @@ open class WKPreferences: NSObject {
     var javaScriptEnabled = true
     var javaScriptCanOpenWindowsAutomatically = false
     var minimumFontSize: CGFloat = 0
+    /// WebKit's private preferences, which apps set by key, kept.
+    var others: [String: NSObject] = [:]
 
     @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("setValue:forUndefinedKey:")
+    func setValue(_ value: NSObject?, forUndefinedKey key: String) { others[key] = value }
+
+    @ObjCMethod("valueForUndefinedKey:")
+    func value(forUndefinedKey key: String) -> NSObject? { others[key] }
 
     @ObjCMethod("javaScriptEnabled") func javaScriptEnabledValue() -> Bool { javaScriptEnabled }
     @ObjCMethod("setJavaScriptEnabled:") func setJavaScriptEnabled(_ value: Bool) { javaScriptEnabled = value }

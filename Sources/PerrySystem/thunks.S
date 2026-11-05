@@ -55,6 +55,7 @@ VARIADIC _asprintf, vasprintf, 2
 VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
+VARIADIC _swscanf, vswscanf, 2
 VARIADIC ___sprintf_chk, __vsprintf_chk, 4
 VARIADIC ___snprintf_chk, __vsnprintf_chk, 5
 VARIADIC _syslog, vsyslog, 2
@@ -192,6 +193,14 @@ PASSTHROUGH _strcasestr, strcasestr
 PASSTHROUGH _writev, writev
 PASSTHROUGH _drand48, drand48
 PASSTHROUGH _wmemchr, wmemchr
+PASSTHROUGH _wmemcpy, wmemcpy
+PASSTHROUGH _wmemcmp, wmemcmp
+PASSTHROUGH _wcslen, wcslen
+PASSTHROUGH _wcscpy, wcscpy
+PASSTHROUGH _wcsncpy, wcsncpy
+PASSTHROUGH _wcscmp, wcscmp
+PASSTHROUGH _wcsncmp, wcsncmp
+PASSTHROUGH _wcschr, wcschr
 PASSTHROUGH _bzero, bzero
 PASSTHROUGH ___bzero, bzero
 PASSTHROUGH ___memcpy_chk, __memcpy_chk
@@ -265,6 +274,18 @@ PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork
 PASSTHROUGH _execv, execv
 PASSTHROUGH _execve, execve
+PASSTHROUGH _div, div
+PASSTHROUGH _ldiv, ldiv
+PASSTHROUGH _ldexpf, ldexpf
+PASSTHROUGH _wcscat, wcscat
+PASSTHROUGH _gmtime_r, gmtime_r
+PASSTHROUGH _basename, __xpg_basename
+PASSTHROUGH _dirname, dirname
+PASSTHROUGH _alarm, alarm
+PASSTHROUGH _getdtablesize, getdtablesize
+PASSTHROUGH _setbuf, setbuf
+PASSTHROUGH _setuid, setuid
+PASSTHROUGH _setgid, setgid
 PASSTHROUGH _waitpid, waitpid
 PASSTHROUGH _setpgid, setpgid
 PASSTHROUGH _getloadavg, getloadavg
@@ -291,6 +312,23 @@ PASSTHROUGH _difftime, difftime
 PASSTHROUGH _fseek, fseek
 PASSTHROUGH _ftell, ftell
 PASSTHROUGH _localtime, localtime
+PASSTHROUGH _gmtime, gmtime
+PASSTHROUGH _mktime, mktime
+PASSTHROUGH _fseeko, fseeko
+PASSTHROUGH _ftello, ftello
+PASSTHROUGH _remove, remove
+PASSTHROUGH _system, system
+PASSTHROUGH _isdigit, isdigit
+PASSTHROUGH _isspace, isspace
+PASSTHROUGH _fnmatch, fnmatch
+PASSTHROUGH _inet_aton, inet_aton
+PASSTHROUGH _gethostbyname, gethostbyname
+PASSTHROUGH _wcstol, wcstol
+PASSTHROUGH _wcstof, wcstof
+PASSTHROUGH _wcstombs, wcstombs
+PASSTHROUGH _mbstowcs, mbstowcs
+PASSTHROUGH _ecvt, ecvt
+PASSTHROUGH _fcvt, fcvt
 PASSTHROUGH _pthread_cancel, pthread_cancel
 
 // MARK: - unistd
@@ -369,6 +407,7 @@ PASSTHROUGH _nextafter, nextafter
 // long double is double on Darwin arm64.
 PASSTHROUGH _fmodl, fmod
 PASSTHROUGH _lgammal_r, lgamma_r
+PASSTHROUGH _llroundl, llround
 
 // MARK: - compiler runtime
 // 128-bit division, which Darwin's libSystem exports (compiler-rt's).
@@ -376,6 +415,66 @@ PASSTHROUGH ___divti3, __divti3
 PASSTHROUGH ___modti3, __modti3
 PASSTHROUGH ___udivti3, __udivti3
 PASSTHROUGH ___umodti3, __umodti3
+
+// MARK: - setjmp
+
+// Darwin's arm64 jmp_buf is 192 bytes, glibc's 312, so glibc's setjmp
+// would write past the app's buffer: the callee-saved registers, the frame
+// and link registers, sp and d8-d15 are saved here in 168 of Darwin's 192.
+// The signal mask is not saved or restored.
+.macro SETJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    stp x19, x20, [x0, #0]
+    stp x21, x22, [x0, #16]
+    stp x23, x24, [x0, #32]
+    stp x25, x26, [x0, #48]
+    stp x27, x28, [x0, #64]
+    stp x29, x30, [x0, #80]
+    mov x9, sp
+    str x9, [x0, #96]
+    stp d8, d9, [x0, #104]
+    stp d10, d11, [x0, #120]
+    stp d12, d13, [x0, #136]
+    stp d14, d15, [x0, #152]
+    mov w0, #0
+    ret
+    .size \name, . - \name
+.endm
+
+// Returns from the matching setjmp with the value, or 1 for 0.
+.macro LONGJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    ldp x19, x20, [x0, #0]
+    ldp x21, x22, [x0, #16]
+    ldp x23, x24, [x0, #32]
+    ldp x25, x26, [x0, #48]
+    ldp x27, x28, [x0, #64]
+    ldp x29, x30, [x0, #80]
+    ldr x9, [x0, #96]
+    mov sp, x9
+    ldp d8, d9, [x0, #104]
+    ldp d10, d11, [x0, #120]
+    ldp d12, d13, [x0, #136]
+    ldp d14, d15, [x0, #152]
+    cmp w1, #0
+    csinc w0, w1, wzr, ne
+    ret
+    .size \name, . - \name
+.endm
+
+SETJMP _setjmp
+SETJMP __setjmp
+LONGJMP _longjmp
+LONGJMP __longjmp
+// sigsetjmp's buffer is setjmp's and one more int; the mask isn't kept.
+SETJMP _sigsetjmp
+LONGJMP _siglongjmp
 
 #endif
 

@@ -35,6 +35,8 @@ enum SDL {
     nonisolated(unsafe) static var fillRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
     nonisolated(unsafe) static var clear: (@convention(c) (Pointer?) -> Bool)!
     nonisolated(unsafe) static var present: (@convention(c) (Pointer?) -> Bool)!
+    nonisolated(unsafe) static var getError: (@convention(c) () -> UnsafePointer<CChar>?)?
+    static var lastError: String { getError?().map { String(cString: $0) } ?? "" }
     nonisolated(unsafe) static var setClipRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
     /// SDL 3.2's, for the frame rate overlay; nil before it.
     nonisolated(unsafe) static var renderDebugText: (@convention(c) (Pointer?, Float, Float, UnsafePointer<CChar>) -> Bool)?
@@ -83,6 +85,7 @@ enum SDL {
         fillRect = bind("SDL_RenderFillRect")
         clear = bind("SDL_RenderClear")
         present = bind("SDL_RenderPresent")
+        getError = bind("SDL_GetError")
         setClipRect = bind("SDL_SetRenderClipRect")
         return complete
     }
@@ -150,13 +153,41 @@ final class Compositor {
         for sublayer in state.sublayers { display(sublayer) }
     }
 
+    /// With PERRY_UIKIT_COMPOSITE_TRACE set, the layers composited, about
+    /// every three seconds: each one's frame on the screen, opacity, whether
+    /// it is hidden, its animations and what it is drawn with.
+    nonisolated(unsafe) static let tracing = getenv("PERRY_UIKIT_COMPOSITE_TRACE") != nil
+    nonisolated(unsafe) private static var lastTrace: Double = 0
+    private var tracingFrame = false
+
+    private func trace(_ layer: CALayer, state: LayerState, frame: CGRect, depth: Int, how: String) {
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let send = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)
+        func className(_ object: UnsafeMutableRawPointer?) -> String {
+            guard let object, let cls = send(object, ObjCRuntime.selector("class")),
+                  let text = send(cls, ObjCRuntime.selector("description")) else { return "nil" }
+            return String(objCArgument: text)
+        }
+        let name = className(layer.objcObject) + "/" + className(send(layer.objcObject, ObjCRuntime.selector("delegate")))
+        let line = String(repeating: "  ", count: depth)
+            + "\(name) \(frame) opacity \(state.opacity) hidden \(state.hidden) animations \(layer.state.animations.count) \(how)\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+
     /// Composites the roots, each placed in the screen by its own transform.
     func draw(_ roots: [CALayer]) {
+        tracingFrame = false
+        if Compositor.tracing, Clock.now - Compositor.lastTrace > 3 {
+            Compositor.lastTrace = Clock.now
+            tracingFrame = true
+            "perry: QuartzCore: composite\n".withCString { _ = write(2, $0, strlen($0)) }
+        }
         for key in textures.keys { textures[key]?.used = false }
         for key in liveTextures.keys { liveTextures[key]?.used = false }
         _ = SDL.setDrawColor(renderer, 0, 0, 0, 1)
         _ = SDL.setClipRect(renderer, nil)
-        _ = SDL.clear(renderer)
+        let cleared = SDL.clear(renderer)
+        if tracingFrame, !cleared { "perry: QuartzCore: clearing failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
         for root in roots {
             let (state, _) = Presentation.presented(root)
             composite(root, toScreen: state.toSuperlayer(within: nil), alpha: 1, clip: nil)
@@ -170,14 +201,20 @@ final class Compositor {
             liveTextures[key] = nil
         }
         if FrameRate.on { FrameRate.frame(renderer: renderer) }
-        _ = SDL.present(renderer)
+        let presented = SDL.present(renderer)
+        if tracingFrame, !presented { "perry: QuartzCore: presenting failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
     }
 
     /// A layer, then its sublayers, then its border; `toScreen` takes the
     /// layer's coordinates to the screen's, in points.
-    private func composite(_ layer: CALayer, toScreen: CGAffineTransform, alpha: CGFloat, clip: CGRect?) {
+    private func composite(_ layer: CALayer, toScreen: CGAffineTransform, alpha: CGFloat, clip: CGRect?, depth: Int = 0) {
         let (state, shape) = Presentation.presented(layer)
         layer.state.rendered = true
+        if tracingFrame {
+            trace(layer, state: state, frame: toScreen.apply(state.bounds), depth: depth,
+                  how: state.livePixels != nil ? "live" : (layer.state.backing != nil || state.contents != nil) ? "textured"
+                      : state.backgroundColor != nil ? "filled" : "")
+        }
         guard !state.hidden, state.opacity > 0 else { return }
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
@@ -204,7 +241,8 @@ final class Compositor {
         if inner.map({ $0.width > 0 && $0.height > 0 }) ?? true {
             for sublayer in CALayer.orderedSublayers(of: state) {
                 let presented = Presentation.state(of: sublayer)
-                composite(sublayer, toScreen: presented.toSuperlayer(within: state).concatenating(toScreen), alpha: alpha, clip: inner)
+                composite(sublayer, toScreen: presented.toSuperlayer(within: state).concatenating(toScreen), alpha: alpha, clip: inner,
+                          depth: depth + 1)
             }
         }
         if state.borderWidth > 0, state.borderColor != nil {

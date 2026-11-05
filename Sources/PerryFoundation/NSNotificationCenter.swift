@@ -30,7 +30,12 @@ final class NotificationCenterStorage {
         let token: id?
         let name: String?
         let object: id?
+        /// CFNotificationCenterAddObserver's callback, called with the
+        /// center, observer, name, object and user info.
+        var callback: CFNotificationCallback? = nil
     }
+
+    typealias CFNotificationCallback = @convention(c) (id?, id?, id?, id?, id?) -> Void
 
     var observers: [Observer] = []
 
@@ -73,6 +78,7 @@ enum Notifications {
     /// Delivers to every matching observer, in the order they were added.
     /// Observers added or removed while posting take effect next time.
     static func post(_ notification: id, from center: id?) {
+        let centerObject = center
         guard let center = Notifications.center(center), let storage = storage(notification) else { return }
         let name = Strings.value(of: storage.name)
         let matching = center.observers.filter { observer in
@@ -80,7 +86,9 @@ enum Notifications {
                 && (observer.object == nil || observer.object == storage.object)
         }
         for observer in matching {
-            if let block = observer.block {
+            if let callback = observer.callback {
+                callback(centerObject, observer.observer, storage.name, storage.object, storage.userInfo)
+            } else if let block = observer.block {
                 Blocks.invoke(block, as: (@convention(c) (id, id?) -> Void).self)(block, notification)
             } else if let selector = observer.selector {
                 _ = ObjC.send(observer.observer, selector, notification)
@@ -207,4 +215,56 @@ public final class NSNotificationCenter: NSObject {
         Notifications.post(notification, from: objcObject)
         ObjC.release(notification)
     }
+}
+
+// MARK: - CFNotificationCenter
+
+/// The default center, which NSNotificationCenter's is.
+@c(_CFNotificationCenterGetLocalCenter)
+public func CFNotificationCenterGetLocalCenter() -> id? { Notifications.defaultCenter }
+
+/// Notifications between processes: there are no others to hear them, so
+/// they reach this process's own observers.
+nonisolated(unsafe) private var darwinCenter: id?
+
+@c(_CFNotificationCenterGetDarwinNotifyCenter)
+public func CFNotificationCenterGetDarwinNotifyCenter() -> id? {
+    if let darwinCenter { return darwinCenter }
+    guard let center = Storage.allocate(UnsafeMutableRawPointer(Notifications.centerClass)) else { return nil }
+    Storage.set(center, NotificationCenterStorage())
+    darwinCenter = center
+    return center
+}
+
+@c(_CFNotificationCenterAddObserver)
+public func CFNotificationCenterAddObserver(_ center: id?, _ observer: id?, _ callback: (@convention(c) (id?, id?, id?, id?, id?) -> Void)?,
+                                            _ name: id?, _ object: id?, _ suspension: Int) {
+    guard let storage = Notifications.center(center), let callback else { return }
+    storage.observers.append(.init(observer: observer, selector: nil, block: nil, token: nil,
+                                   name: Strings.value(of: name), object: object, callback: callback))
+}
+
+@c(_CFNotificationCenterRemoveObserver)
+public func CFNotificationCenterRemoveObserver(_ center: id?, _ observer: id?, _ name: id?, _ object: id?) {
+    let text = Strings.value(of: name)
+    Notifications.center(center)?.remove {
+        $0.callback != nil && $0.observer == observer && (text == nil || $0.name == text) && (object == nil || $0.object == object)
+    }
+}
+
+@c(_CFNotificationCenterRemoveEveryObserver)
+public func CFNotificationCenterRemoveEveryObserver(_ center: id?, _ observer: id?) {
+    Notifications.center(center)?.remove { $0.callback != nil && $0.observer == observer }
+}
+
+@c(_CFNotificationCenterPostNotification)
+public func CFNotificationCenterPostNotification(_ center: id?, _ name: id?, _ object: id?, _ userInfo: id?, _ immediately: UInt8) {
+    guard let center, let notification = Notifications.make(name: name, object: object, userInfo: userInfo) else { return }
+    Notifications.post(notification, from: center)
+    ObjC.release(notification)
+}
+
+@c(_CFNotificationCenterPostNotificationWithOptions)
+public func CFNotificationCenterPostNotificationWithOptions(_ center: id?, _ name: id?, _ object: id?, _ userInfo: id?, _ options: UInt) {
+    CFNotificationCenterPostNotification(center, name, object, userInfo, 0)
 }

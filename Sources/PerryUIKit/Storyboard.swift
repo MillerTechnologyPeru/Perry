@@ -331,8 +331,19 @@ extension UIViewController {
     func loadViewFromNib() -> Bool {
         guard let name = state.nibName else { return false }
         let directory = state.storyboard?.state.path ?? state.nibBundlePath ?? NSBundle.main().bundlePath()
+        // The bundle's own directory, its preferred localizations' and then
+        // Base.lproj, as Darwin looks for a nib.
         var archive = Nibs.load(named: name, in: directory)
         var path = directory
+        if archive == nil, state.storyboard == nil, let bundle = NSBundle.bundle(path: directory) {
+            for localization in bundle.preferredLocalizations().elements {
+                let candidate = directory + "/" + String(objCArgument: localization.objcObject) + ".lproj"
+                if let found = Nibs.load(named: name, in: candidate) {
+                    (archive, path) = (found, candidate)
+                    break
+                }
+            }
+        }
         if archive == nil {
             path = directory + "/Base.lproj"
             archive = Nibs.load(named: name, in: path)

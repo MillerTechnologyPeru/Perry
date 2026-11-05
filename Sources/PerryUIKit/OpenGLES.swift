@@ -102,7 +102,17 @@ enum GLES {
         guard name.hasPrefix("_gl") else { return nil }
         if name == "_glGetString" { return unsafeBitCast(getStringFunction, to: UnsafeMutableRawPointer.self) }
         load()
-        let cName = String(name.dropFirst())
+        // PVRTC textures are decoded for the host, which can't sample them.
+        if name == "_glCompressedTexImage2D" || name == "_glCompressedTexSubImage2D" {
+            PVRTC.bind(host)
+            return name == "_glCompressedTexImage2D" ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
+                : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self)
+        }
+        return host(String(name.dropFirst()))
+    }
+
+    /// The host's function by its C name.
+    static func host(_ cName: String) -> UnsafeMutableRawPointer? {
         for library in libraries {
             if let symbol = dlsym(library, cName) { return symbol }
         }

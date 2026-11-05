@@ -89,6 +89,7 @@ enum ErrorConstants {
     static let NSLocalizedFailureReasonErrorKey = "NSLocalizedFailureReason"
     static let NSFilePathErrorKey = "NSFilePath"
     static let NSUnderlyingErrorKey = "NSUnderlyingError"
+    static let NSDebugDescriptionErrorKey = "NSDebugDescription"
     static let NSOSStatusErrorDomain = "NSOSStatusErrorDomain"
     static let NSMachErrorDomain = "NSMachErrorDomain"
     static let NSLocalizedRecoverySuggestionErrorKey = "NSLocalizedRecoverySuggestion"
@@ -153,6 +154,11 @@ public final class NSError: NSObject {
     func userInfo() -> ObjCObject { ObjCObject(storage?.userInfo ?? Dictionaries.autoreleased([])) }
 
     @ObjCMethod("localizedDescription") func localizedDescription() -> String { Errors.localizedDescription(objcObject) }
+
+    @ObjCMethod("localizedRecoverySuggestion")
+    func localizedRecoverySuggestion() -> ObjCObject? {
+        Dictionaries.value(storage?.userInfo, for: Strings.autoreleased("NSLocalizedRecoverySuggestion")).map(ObjCObject.init)
+    }
 
     @ObjCMethod("localizedFailureReason")
     func localizedFailureReason() -> ObjCObject? {

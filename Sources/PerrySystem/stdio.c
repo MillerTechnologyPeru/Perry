@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
+#include <wchar.h>
 
 // MARK: - Standard streams
 
@@ -73,6 +74,12 @@ int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap)
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) {
     DARWIN_VA(va, ap);
     return vsnprintf(buf, size, fmt, va);
+}
+
+int darwin_vswprintf(wchar_t *buf, size_t size, const wchar_t *fmt, darwin_va_list ap) DARWIN_SYMBOL(vswprintf);
+int darwin_vswprintf(wchar_t *buf, size_t size, const wchar_t *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vswprintf(buf, size, fmt, va);
 }
 
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vasprintf);

@@ -256,6 +256,10 @@ open class UIButton: UIControl {
         return label
     }
 
+    /// iOS 2's: the title label's font.
+    @ObjCMethod("font") func font() -> UIFont { titleLabel().fontObject() }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { titleLabel().setFont(font) }
+
     @ObjCMethod("imageView")
     func imageView() -> UIImageView {
         if let view = button.imageView { return view }
@@ -767,6 +771,21 @@ open class UIDevice: NSObject {
     @ObjCMethod("playInputClick") func playInputClick() {}
 }
 
+/// A screen's resolution, in pixels, with square pixels.
+@ObjCClass("UIScreenMode")
+open class UIScreenMode: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    nonisolated(unsafe) static let native = UIScreenMode()
+
+    @ObjCMethod("size")
+    func size() -> CGSize {
+        let size = Screen.bounds.size
+        return CGSize(width: min(size.width, size.height) * Screen.scale, height: max(size.width, size.height) * Screen.scale)
+    }
+    @ObjCMethod("pixelAspectRatio") func pixelAspectRatio() -> CGFloat { 1 }
+}
+
 /// The screen: the size and scale the views are laid out for.
 @ObjCClass("UIScreen")
 open class UIScreen: NSObject {
@@ -788,6 +807,15 @@ open class UIScreen: NSObject {
         let size = Screen.bounds.size
         return CGRect(x: 0, y: 0, width: min(size.width, size.height) * Screen.scale, height: max(size.width, size.height) * Screen.scale)
     }
+    /// The one mode: the panel's pixels, as nativeBounds gives them.
+    @ObjCMethod("currentMode") func currentMode() -> UIScreenMode { UIScreenMode.native }
+    @ObjCMethod("preferredMode") func preferredMode() -> UIScreenMode { UIScreenMode.native }
+    @ObjCMethod("availableModes") func availableModes() -> NSObject { NSMutableArray.of([UIScreenMode.native]) }
+    @ObjCMethod("setCurrentMode:") func setCurrentMode(_ mode: NSObject?) {}
+    @ObjCMethod("mirroredScreen") func mirroredScreen() -> NSObject? { nil }
+    @ObjCMethod("isCaptured") func isCaptured() -> Bool { false }
+    @ObjCMethod("overscanCompensation") func overscanCompensation() -> Int { 0 }
+    @ObjCMethod("setOverscanCompensation:") func setOverscanCompensation(_ value: Int) {}
     @ObjCMethod("applicationFrame") func applicationFrame() -> CGRect { Screen.bounds }
     @ObjCMethod("scale") func scale() -> CGFloat { Screen.scale }
     @ObjCMethod("nativeScale") func nativeScale() -> CGFloat { Screen.scale }

@@ -1032,3 +1032,15 @@ public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: Unsafe
     -> UnsafeMutablePointer<UnsafeRawPointer>? {
     copyList(proto.map { Protocols.properties(UnsafePointer($0)) } ?? [], count)
 }
+
+// MARK: - Catching
+
+/// Entering and leaving a @catch. Exceptions are never unwound to one (see
+/// objc_exception_throw), so these are bound but not reached.
+@c(_objc_begin_catch)
+public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    objcFatal("an exception reached a @catch, which Perry cannot unwind to")
+}
+
+@c(_objc_end_catch)
+public func objc_end_catch() {}

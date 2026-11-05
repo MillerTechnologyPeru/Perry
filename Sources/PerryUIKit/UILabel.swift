@@ -238,14 +238,15 @@ enum Text {
     }
 
     /// Draws one line of `text` in the current context with its top left
-    /// at `point`, in `color`, or the context's fill color.
-    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor?) {
+    /// at `point`, in `color`, or the context's fill color; filled, unless
+    /// `keepingMode` leaves the context's text drawing mode (as stroking).
+    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor?, keepingMode: Bool = false) {
         guard let context = Graphics.current else { return }
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         font.drawingName.withCString { CG.selectFont(context, $0, font.state.pointSize, 1) }
         if let color { CG.setFillColorWithColor(context, color.state.makeCGColor()) }
-        CG.setTextDrawingMode(context, 0)
+        if !keepingMode { CG.setTextDrawingMode(context, 0) }
         // Glyphs are drawn upright in UIKit's flipped coordinates.
         CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0))
         CG.setTextPosition(context, point.x, point.y + font.state.pointSize * 0.95)

@@ -91,7 +91,9 @@ enum KeyValueCoding {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
-        foundationFatal("[<\(ObjC.className(object)) \(object)> valueForUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+        // As Foundation does: the object's -valueForUndefinedKey:, which
+        // raises unless a class overrides it.
+        return ObjC.send(object, ObjC.selector("valueForUndefinedKey:"), Strings.autoreleased(key))
     }
 
     static func setValue(_ object: id, _ key: String, _ value: id?) {
@@ -103,7 +105,8 @@ enum KeyValueCoding {
         }
         let selector = ObjC.selector("set" + key.prefix(1).uppercased() + key.dropFirst() + ":")
         guard responds(object, selector) else {
-            foundationFatal("[<\(ObjC.className(object)) \(object)> setValue:forUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+            _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
+            return
         }
         set(object, selector, value)
     }
@@ -249,6 +252,18 @@ extension NSObject {
     @ObjCMethod("setValue:forKey:")
     func setKeyValue(_ value: ObjCObject?, forKey key: String) { KeyValueCoding.setValue(objcObject, key, value?.objcObject) }
 
+    /// What a key without accessors does: raise, as Foundation's, unless a
+    /// class overrides these.
+    @ObjCMethod("valueForUndefinedKey:")
+    func value(forUndefinedKey key: String) -> ObjCObject? {
+        foundationFatal("[<\(ObjC.className(objcObject)) \(objcObject)> valueForUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+    }
+
+    @ObjCMethod("setValue:forUndefinedKey:")
+    func setValue(_ value: ObjCObject?, forUndefinedKey key: String) {
+        foundationFatal("[<\(ObjC.className(objcObject)) \(objcObject)> setValue:forUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+    }
+
     /// Each key in turn, by -valueForKey:, so classes' own versions apply.
     /// A key starting with @ is a collection operator, applied to the
     /// collection so far with the rest of the path.
@@ -264,6 +279,38 @@ extension NSObject {
             current = ObjC.send(object, ObjC.selector("valueForKey:"), Strings.autoreleased(key))
         }
         return current.map(ObjCObject.init)
+    }
+
+    /// Each entry set by -setValue:forKey:, NSNull as nil.
+    @ObjCMethod("setValuesForKeysWithDictionary:")
+    func setKeyValues(_ dictionary: ObjCObject?) {
+        for (key, value) in Dictionaries.entries(dictionary?.id) {
+            _ = ObjC.send(objcObject, ObjC.selector("setValue:forKey:"), value == Nulls.null ? nil : value, key)
+        }
+    }
+
+    /// Each key's -valueForKey:, nil as NSNull.
+    @ObjCMethod("dictionaryWithValuesForKeys:")
+    func keyValues(forKeys keys: ObjCObject?) -> ObjCObject {
+        let entries = Arrays.elements(keys?.id).map { key -> (key: id, value: id) in
+            (key, ObjC.send(objcObject, ObjC.selector("valueForKey:"), key) ?? Nulls.null)
+        }
+        return ObjCObject(Dictionaries.autoreleased(entries))
+    }
+
+    /// The path's last key set, by -setValue:forKey:, on the object the
+    /// keys before it reach, by -valueForKey:; nothing if one is nil.
+    @ObjCMethod("setValue:forKeyPath:")
+    func setKeyValue(_ value: ObjCObject?, forKeyPath path: String) {
+        var keys = path.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let last = keys.removeLast()
+        var current: id? = objcObject
+        for key in keys {
+            guard let object = current else { return }
+            current = ObjC.send(object, ObjC.selector("valueForKey:"), Strings.autoreleased(key))
+        }
+        guard let target = current else { return }
+        _ = ObjC.send(target, ObjC.selector("setValue:forKey:"), value?.objcObject, Strings.autoreleased(last))
     }
 }
 

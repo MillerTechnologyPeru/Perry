@@ -12,6 +12,11 @@ class NSURL: NSObject {
     @ObjCMethod("absoluteString") func absoluteString() -> String?
 }
 
+@ObjCWrapper("NSArray")
+class NSArray: NSObject {
+    @ObjCClassMethod("array") static func empty() -> NSArray
+}
+
 @ObjCWrapper("NSNotificationCenter")
 class NSNotificationCenter: NSObject {
     @ObjCClassMethod("defaultCenter") static func defaultCenter() -> NSNotificationCenter
@@ -24,6 +29,9 @@ enum PlayerConstants {
     static let AVPlayerItemFailedToPlayToEndTimeNotification = "AVPlayerItemFailedToPlayToEndTimeNotification"
     static let AVPlayerItemTimeJumpedNotification = "AVPlayerItemTimeJumpedNotification"
     static let AVPlayerItemPlaybackStalledNotification = "AVPlayerItemPlaybackStalledNotification"
+    static let AVPlayerItemNewAccessLogEntryNotification = "AVPlayerItemNewAccessLogEntryNotification"
+    static let AVPlayerItemNewErrorLogEntryNotification = "AVPlayerItemNewErrorLogEntryNotification"
+    static let AVPlayerItemFailedToPlayToEndTimeErrorKey = "AVPlayerItemFailedToPlayToEndTimeErrorKey"
     static let AVLayerVideoGravityResizeAspect = "AVLayerVideoGravityResizeAspect"
     static let AVLayerVideoGravityResizeAspectFill = "AVLayerVideoGravityResizeAspectFill"
     static let AVLayerVideoGravityResize = "AVLayerVideoGravityResize"
@@ -95,6 +103,12 @@ open class AVPlayerItem: NSObject {
     @ObjCMethod("error") func error() -> NSObject? { nil }
     @ObjCMethod("isPlaybackLikelyToKeepUp") func isPlaybackLikelyToKeepUp() -> Bool { true }
     @ObjCMethod("isPlaybackBufferEmpty") func isPlaybackBufferEmpty() -> Bool { false }
+    @ObjCMethod("isPlaybackBufferFull") func isPlaybackBufferFull() -> Bool { true }
+
+    /// The ranges buffered and seekable, as NSValues of CMTimeRanges: none
+    /// reported, as a local file needs no buffering.
+    @ObjCMethod("loadedTimeRanges") func loadedTimeRanges() -> NSArray { NSArray.empty() }
+    @ObjCMethod("seekableTimeRanges") func seekableTimeRanges() -> NSArray { NSArray.empty() }
 }
 
 // MARK: - AVPlayer
