@@ -633,7 +633,45 @@ open class WKWebView: UIView {
         page.loadFailed = { committed, domain, code, message in
             WebViews.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
         }
+        // Key-value observers hear the properties WebKit's change.
+        page.propertyChanged = { property in
+            let keys: [String] = switch property {
+            case "title": ["title"]
+            case "uri": ["URL"]
+            case "is-loading": ["loading", "canGoBack", "canGoForward"]
+            case "estimated-load-progress": ["estimatedProgress"]
+            default: []
+            }
+            let view = NSObject(object)
+            for key in keys { view.sendWillChangeValue(forKey: key) }
+            for key in keys.reversed() { view.sendDidChangeValue(forKey: key) }
+        }
         return page
+    }
+
+    /// `functionBody` as an async function's body, its arguments as its
+    /// variables; the handler hears what it returns, awaited, as
+    /// evaluateJavaScript's does. Frames and content worlds are the page's.
+    @ObjCMethod("callAsyncJavaScript:arguments:inFrame:inContentWorld:completionHandler:")
+    func callAsyncJavaScript(_ body: String?, arguments: NSObject?, frame: NSObject?, world: NSObject?, completionHandler: ObjCBlock?) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+        guard let page = page() else {
+            guard let completionHandler else { return }
+            Updates.afterPass {
+                completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.noScript().objcObject)
+            }
+            return
+        }
+        page.callAsync(WebViews.declaring(arguments) + (body ?? "")) { result in
+            guard let completionHandler else { return }
+            switch result {
+            case .success(let json):
+                let value = json.flatMap(WebViews.object(json:))
+                completionHandler.function(as: Invoke.self)(completionHandler.object, value?.objcObject, nil)
+            case .failure:
+                completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.exception().objcObject)
+            }
+        }
     }
 }
 
@@ -737,6 +775,70 @@ enum WebViews {
         }
     }
 
+    /// Declarations of a dictionary's entries as constants, for a function
+    /// body: each value as a JavaScript literal.
+    static func declaring(_ arguments: NSObject?) -> String {
+        guard let arguments, arguments.sendCount() > 0 else { return "" }
+        let keys = arguments.sendAllKeys()
+        var declarations: [String] = []
+        for index in 0..<keys.sendCount() {
+            let key = keys.sendObject(at: index)
+            let name = String(objCArgument: key.objcObject)
+            declarations.append("\(name) = \(literal(arguments.sendObject(forKey: key)))")
+        }
+        return "const \(declarations.joined(separator: ", "));\n"
+    }
+
+    /// Foundation's strings, numbers, Booleans, arrays, dictionaries and
+    /// NSNull as JavaScript; other objects as their descriptions' strings.
+    static func literal(_ object: NSObject?) -> String {
+        guard let object else { return "undefined" }
+        func kind(_ name: String) -> Bool { ObjCRuntime.isKind(object.objcObject, of: ObjCRuntime.classObject(name)) }
+        if kind("NSNull") { return "null" }
+        if kind("NSString") { return quoted(String(objCArgument: object.objcObject)) }
+        if kind("NSNumber") {
+            // NSNumber's Booleans are 'c' (BOOL) numbers of CFBoolean's.
+            if kind("__NSCFBoolean") || object.sendObjCType().map({ String(cString: $0) }) == "c" {
+                return object.sendBoolValue() ? "true" : "false"
+            }
+            return object.sendStringValue()
+        }
+        if kind("NSArray") {
+            return "[" + (0..<object.sendCount()).map { literal(object.sendObject(at: $0)) }.joined(separator: ", ") + "]"
+        }
+        if kind("NSDictionary") {
+            let keys = object.sendAllKeys()
+            return "{" + (0..<keys.sendCount()).map { index -> String in
+                let key = keys.sendObject(at: index)
+                return quoted(String(objCArgument: key.sendDescription().objcObject)) + ": " + literal(object.sendObject(forKey: key))
+            }.joined(separator: ", ") + "}"
+        }
+        return quoted(String(objCArgument: object.sendDescription().objcObject))
+    }
+
+    /// A JavaScript string literal.
+    static func quoted(_ string: String) -> String {
+        var out = "\""
+        for scalar in string.unicodeScalars {
+            switch scalar {
+            case "\"": out += "\\\""
+            case "\\": out += "\\\\"
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\u{2028}": out += "\\u2028"
+            case "\u{2029}": out += "\\u2029"
+            default:
+                if scalar.value < 0x20 {
+                    let hex = String(scalar.value, radix: 16)
+                    out += "\\u" + String(repeating: "0", count: 4 - hex.count) + hex
+                } else {
+                    out.unicodeScalars.append(scalar)
+                }
+            }
+        }
+        return out + "\""
+    }
+
     /// A script's value from its JSON, fragments allowed.
     static func object(json: String) -> NSObject? {
         var text = json
@@ -762,6 +864,8 @@ class NSDataFactory: NSObject {
 class JSONSerializationObject: NSObject {
     @ObjCClassMethod("JSONObjectWithData:options:error:")
     static func object(data: NSObject, options: UInt, error: UnsafeMutableRawPointer?) -> NSObject?
+    @ObjCClassMethod("dataWithJSONObject:options:error:")
+    static func data(object: NSObject, options: UInt, error: UnsafeMutableRawPointer?) -> NSObject?
 }
 
 @ObjCWrapper("UIImage")
@@ -772,6 +876,17 @@ class UIImageFactory: NSObject {
 
 extension NSObject {
     @ObjCMethod("absoluteString") func sendAbsoluteString() -> String?
+    @ObjCMethod("willChangeValueForKey:") func sendWillChangeValue(forKey key: String)
+    @ObjCMethod("didChangeValueForKey:") func sendDidChangeValue(forKey key: String)
+    @ObjCMethod("count") func sendCount() -> UInt
+    @ObjCMethod("allKeys") func sendAllKeys() -> NSObject
+    @ObjCMethod("objectAtIndex:") func sendObject(at index: UInt) -> NSObject
+    @ObjCMethod("objectForKey:") func sendObject(forKey key: NSObject) -> NSObject?
+    @ObjCMethod("objCType") func sendObjCType() -> UnsafePointer<CChar>?
+    @ObjCMethod("boolValue") func sendBoolValue() -> Bool
+    @ObjCMethod("stringValue") func sendStringValue() -> String
+    @ObjCMethod("description") func sendDescription() -> NSObject
+    @ObjCMethod("length") func sendLength() -> UInt
     @ObjCMethod("webView:didFailNavigation:withError:")
     func sendDidFailNavigation(_ view: NSObject, _ navigation: NSObject, _ error: NSObject)
 }
