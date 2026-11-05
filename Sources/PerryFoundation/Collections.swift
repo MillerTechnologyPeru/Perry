@@ -18,7 +18,7 @@ struct ObjectKey: Hashable {
 /// Blocks: the invoke function is the word after isa, flags and reserved.
 enum Blocks {
     static func invoke<Function>(_ block: id, as type: Function.Type) -> Function {
-        unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: type)
+        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: type)
     }
 }
 
@@ -51,8 +51,10 @@ final class EnumerationBuffer {
             buffer[index] = objects[next + index]
         }
         state.storeBytes(of: UInt(next + batch + 1), as: UInt.self)
-        state.storeBytes(of: UnsafeMutableRawPointer(buffer), toByteOffset: 8, as: UnsafeMutableRawPointer.self)
-        state.storeBytes(of: UnsafeMutableRawPointer(mutations), toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(buffer), toByteOffset: DarwinLayout.enumerationItems,
+                         as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(mutations), toByteOffset: DarwinLayout.enumerationMutations,
+                         as: UnsafeMutableRawPointer.self)
         return UInt(batch)
     }
 
