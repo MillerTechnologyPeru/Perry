@@ -62,6 +62,7 @@ final class BundleStorage {
                 if FileManager.default.fileExists(atPath: candidate) { return candidate }
             }
         }
+        BundleTrace.log("\(Paths.lastComponent(path)): no resource \(name)\(suffix) in \(directory ?? "/")")
         return nil
     }
 
@@ -287,7 +288,12 @@ public final class NSBundle: NSObject {
 
     @ObjCMethod("objectForInfoDictionaryKey:")
     func object(forInfoDictionaryKey key: ObjCObject) -> ObjCObject? {
-        Dictionaries.value(storage.infoDictionary, for: key.id).map(ObjCObject.init)
+        let value = Dictionaries.value(storage.infoDictionary, for: key.id)
+        if BundleTrace.on {
+            let described = value.flatMap { Strings.value(of: ObjC.send($0, ObjC.selector("description"))) } ?? "nil"
+            BundleTrace.log("\(Paths.lastComponent(storage.path)): info \(Strings.value(of: key.id) ?? "?") = \(described.prefix(200))")
+        }
+        return value.map(ObjCObject.init)
     }
 
     @ObjCMethod("developmentLocalization")
@@ -414,5 +420,17 @@ public final class NSBundle: NSObject {
     @ObjCMethod("localizedAttributedStringForKey:value:table:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
         localizedAttributedString(forKey: key, value: value, table: table, localization: nil)
+    }
+}
+
+/// With PERRY_BUNDLE_TRACE set, the info dictionary keys asked for, with
+/// their values, and the resources looked for but not found.
+enum BundleTrace {
+    nonisolated(unsafe) static let on = getenv("PERRY_BUNDLE_TRACE") != nil
+
+    static func log(_ line: @autoclosure () -> String) {
+        guard on else { return }
+        let text = "perry: bundle: " + line() + "\n"
+        text.withCString { _ = write(2, $0, strlen($0)) }
     }
 }
