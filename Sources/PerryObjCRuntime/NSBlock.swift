@@ -77,7 +77,7 @@ class NSBlock: NSObject {
     @ObjCMethod("invoke")
     func invokeBlock() {
         typealias Invoke = @convention(c) (ObjectPointer) -> Void
-        unsafeBitCast(objcObject.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
+        unsafeBitCast(objcObject.load(fromByteOffset: Layout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
     }
 }
 
