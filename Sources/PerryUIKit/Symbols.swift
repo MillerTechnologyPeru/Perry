@@ -92,7 +92,7 @@ enum Symbols {
         let points = stride(from: 0.0, to: 2 * Double.pi, by: Double.pi / 40).map { t -> (CGFloat, CGFloat) in
             let x = 16 * pow(sin(t), 3)
             let y = 13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t)
-            return (12 + x * 0.6, 11.5 - y * 0.6)
+            return (CGFloat(12 + x * 0.6), CGFloat(11.5 - y * 0.6))
         }
         if filled { pen.fill(points) } else { pen.stroke(points, closed: true) }
     }
