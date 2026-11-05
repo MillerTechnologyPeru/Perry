@@ -92,6 +92,15 @@ public macro ObjCCategory(_ categoryName: String, addedAtStartup: Bool = true) =
 public macro ObjCConstants() =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCConstantsMacro")
 
+/// Exports the function as a C function named `name` ("_CGRectMake"), as
+/// @c(name) would, with Darwin's calling convention for floating point,
+/// 64-bit integers and structures of them (their ObjCType and
+/// ObjCResultType), and as perry_native_<name without its underscore>
+/// unchanged, for other providers.
+@attached(peer, names: prefixed(__darwin_), prefixed(__native_))
+public macro DarwinC(_ name: String) =
+    #externalMacro(module: "PerryObjCMacros", type: "DarwinCMacro")
+
 /// An instance method. With a body, the function implements the selector;
 /// without one, calling it sends the message. The function's arguments are
 /// the selector's.
