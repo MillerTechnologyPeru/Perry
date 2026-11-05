@@ -92,4 +92,11 @@ typedef struct PerryRange {
     unsigned long length;
 } PerryRange;
 
+// CFRange, for frameworks that take one without importing Foundation's
+// declaration of it (CoreText's, in UIKit).
+typedef struct PerryCFRange {
+    long location;
+    long length;
+} PerryCFRange;
+
 #endif
