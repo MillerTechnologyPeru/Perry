@@ -511,6 +511,37 @@ extension NSString {
         return String(cString: home) + value.dropFirst()
     }
 
+    /// The tilde expanded, and "." components, empty components and a
+    /// trailing slash removed; ".." resolved where a component precedes it
+    /// (never above the root of an absolute path).
+    @ObjCMethod("stringByStandardizingPath")
+    func standardizingPath() -> String {
+        let path = expandingTilde()
+        guard !path.isEmpty else { return path }
+        let absolute = path.hasPrefix("/")
+        var components: [Substring] = []
+        for component in path.split(separator: "/", omittingEmptySubsequences: true) where component != "." {
+            if component == "..", let last = components.last, last != ".." {
+                components.removeLast()
+            } else if component == "..", absolute {
+                continue
+            } else {
+                components.append(component)
+            }
+        }
+        let joined = components.joined(separator: "/")
+        return absolute ? "/" + joined : (joined.isEmpty ? "." : joined)
+    }
+
+    /// Symbolic links resolved when the path exists; standardized otherwise.
+    @ObjCMethod("stringByResolvingSymlinksInPath")
+    func resolvingSymlinks() -> String {
+        let standardized = standardizingPath()
+        guard let resolved = realpath(standardized, nil) else { return standardized }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
     // MARK: Searching
 
     @ObjCMethod("rangeOfString:")
@@ -651,6 +682,13 @@ extension NSString {
     func compare(_ other: String, options: UInt, range: NSRange, locale: ObjCObject?) -> Int {
         compare(other, options: options, range: range)
     }
+
+    /// Not localized, as the other comparisons here.
+    @ObjCMethod("localizedCompare:")
+    func localizedCompare(_ other: String) -> Int { Strings.compare(value, other) }
+
+    @ObjCMethod("localizedCaseInsensitiveCompare:")
+    func localizedCaseInsensitiveCompare(_ other: String) -> Int { Strings.compare(value.lowercased(), other.lowercased()) }
 
     @ObjCMethod("localizedStandardCompare:")
     func localizedStandardCompare(_ other: String) -> Int { Strings.numericCompare(value.lowercased(), other.lowercased()) }
