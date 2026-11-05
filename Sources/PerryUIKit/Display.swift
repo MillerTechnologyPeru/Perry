@@ -48,7 +48,14 @@ enum Display {
         let native = SDL.nativeScale() ?? 1
         guard let pixels = SDL.usableDisplaySize() else { return native }
         let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
-        return max(native, fitting, 1)
+        let chosen = max(native, fitting, 1)
+        // An iPhone's screen (PERRY_UIKIT_SCREEN=iphone) is a window that
+        // fits the usable area, in quarter steps, however small that makes
+        // it: 390 by 844 points is taller than a laptop's display at @3x.
+        guard let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" else { return chosen }
+        let screen = Screen.bounds.size
+        let fits = min(pixels.width / screen.width, pixels.height / screen.height)
+        return min(chosen, max((fits * 4).rounded(.down) / 4, 0.5))
     }()
 
     private struct X {
@@ -72,6 +79,9 @@ enum Display {
     }
 
     nonisolated(unsafe) private static var compositor: Compositor?
+    /// SDL's renderer compositing the live view ("opengles2", "vulkan"…);
+    /// nil without one.
+    nonisolated(unsafe) static var gpuRenderer: String?
 
     static var wanted: Bool {
         guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil else { return false }

@@ -161,7 +161,14 @@ public class NSDictionary: NSObject {
     // MARK: Creating
 
     @ObjCClassMethod("dictionary")
-    static func dictionary(_ cls: ObjCClass) -> NSDictionary { Dictionaries.owned([], cls: cls.pointer) }
+    static func dictionary(_ cls: ObjCClass) -> NSDictionary {
+        // NSDictionary's own is the immortal @{}, as Apple's is: Swift's
+        // runtime keeps it for every error without user info, unretained.
+        guard cls.pointer != UnsafeMutableRawPointer(Dictionaries.dictionaryClass) else {
+            return NSDictionary(objCOwned: ObjC.retain(perry_foundation_empty_dictionary())!)
+        }
+        return Dictionaries.owned([], cls: cls.pointer)
+    }
 
     @ObjCClassMethod("dictionaryWithObject:forKey:")
     static func dictionary(_ cls: ObjCClass, object: ObjCObject, forKey key: ObjCObject) -> NSDictionary {
@@ -249,6 +256,14 @@ public class NSDictionary: NSObject {
     @ObjCMethod("writeToURL:atomically:")
     func write(toURL url: NSURL, atomically: Bool) -> Bool { PropertyLists.write(objcObject, to: url.url, atomically: atomically) }
 
+    /// iOS 11's: written atomically, with an error when it can't be.
+    @ObjCMethod("writeToURL:error:")
+    func write(toURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> Bool {
+        if PropertyLists.write(objcObject, to: url.url, atomically: true) { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 512, description: "The file couldn’t be saved.")
+        return false
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -264,6 +279,21 @@ public class NSDictionary: NSObject {
     func object(forKey key: ObjCObject?) -> ObjCObject? {
         Dictionaries.value(objcObject, for: key?.id).map(ObjCObject.init)
     }
+
+    // MARK: File attributes (NSFileManager's NSDictionary category)
+
+    private func attribute(_ key: String) -> id? { Dictionaries.value(objcObject, for: Strings.autoreleased(key)) }
+    private func attributeNumber(_ key: String) -> NumberStorage? { attribute(key).map { Numbers.storage($0) } }
+
+    @ObjCMethod("fileSize") func fileSize() -> UInt64 { attributeNumber("NSFileSize").map { UInt64(bitPattern: $0.int64) } ?? 0 }
+    @ObjCMethod("fileModificationDate") func fileModificationDate() -> ObjCObject? { attribute("NSFileModificationDate").map(ObjCObject.init) }
+    @ObjCMethod("fileCreationDate") func fileCreationDate() -> ObjCObject? { attribute("NSFileCreationDate").map(ObjCObject.init) }
+    @ObjCMethod("fileType") func fileType() -> ObjCObject? { attribute("NSFileType").map(ObjCObject.init) }
+    @ObjCMethod("filePosixPermissions") func filePosixPermissions() -> UInt { attributeNumber("NSFilePosixPermissions").map { UInt(truncatingIfNeeded: $0.int64) } ?? 0 }
+    @ObjCMethod("fileOwnerAccountName") func fileOwnerAccountName() -> ObjCObject? { attribute("NSFileOwnerAccountName").map(ObjCObject.init) }
+    @ObjCMethod("fileSystemNumber") func fileSystemNumber() -> Int { attributeNumber("NSFileSystemNumber").map { Int($0.int64) } ?? 0 }
+    @ObjCMethod("fileSystemFileNumber") func fileSystemFileNumber() -> UInt { attributeNumber("NSFileSystemFileNumber").map { UInt(truncatingIfNeeded: $0.int64) } ?? 0 }
+    @ObjCMethod("fileIsImmutable") func fileIsImmutable() -> Bool { (attributeNumber("NSFileImmutable")?.int64 ?? 0) != 0 }
 
     @ObjCMethod("objectForKeyedSubscript:")
     func object(subscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
@@ -304,6 +334,13 @@ public class NSDictionary: NSObject {
         guard let object else { return NSArray(objcObject: Arrays.autoreleased([]), ownership: .retain) }
         let keys = entries.filter { $0.value == object.id || ObjC.sendBool($0.value, Selectors.isEqual, object.id) }.map(\.key)
         return NSArray(objcObject: Arrays.autoreleased(keys), ownership: .retain)
+    }
+
+    /// The keys' values, in order, with the marker for keys not present.
+    @ObjCMethod("objectsForKeys:notFoundMarker:")
+    func objects(forKeys keys: ObjCObject?, notFoundMarker marker: ObjCObject) -> NSArray {
+        let values = Arrays.elements(keys?.id).map { Dictionaries.value(objcObject, for: $0) ?? marker.id }
+        return NSArray(objcObject: Arrays.autoreleased(values), ownership: .retain)
     }
 
     /// The keys whose entries the block passes, as a set.

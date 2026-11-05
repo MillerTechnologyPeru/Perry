@@ -356,28 +356,51 @@ enum AutoLayout {
             }
         }
 
+        /// An attribute of a guide, whose edges are `insets` inside its
+        /// owning view's; of the view itself without insets.
+        func expression(_ view: UIView, _ attribute: Attribute, insets: UIEdgeInsets?) -> LayoutExpression? {
+            guard let insets else { return expression(view, attribute) }
+            let item = item(view)
+            let x = LayoutExpression(item.x), y = LayoutExpression(item.y)
+            let width = LayoutExpression(item.width), height = LayoutExpression(item.height)
+            switch attribute {
+            case .notAnAttribute: return nil
+            case .left, .leading, .leftMargin, .leadingMargin: return x + insets.left
+            case .right, .trailing, .rightMargin, .trailingMargin: return x + width + -insets.right
+            case .top, .topMargin: return y + insets.top
+            case .bottom, .bottomMargin, .firstBaseline, .lastBaseline: return y + height + -insets.bottom
+            case .width: return width + -(insets.left + insets.right)
+            case .height: return height + -(insets.top + insets.bottom)
+            case .centerX, .centerXWithinMargins: return x + width * 0.5 + (insets.left - insets.right) / 2
+            case .centerY, .centerYWithinMargins: return y + height * 0.5 + (insets.top - insets.bottom) / 2
+            }
+        }
+
         /// Adds a constraint, unless it names a view outside the window
         /// or an attribute it cannot express.
         func add(_ constraint: NSLayoutConstraint) {
             let state = constraint.state
-            guard let firstObject = state.firstItem, let first = layoutView(firstObject),
+            guard let firstObject = state.firstItem, let first = layoutItem(firstObject),
                   let firstAttribute = Attribute(rawValue: state.firstAttribute),
-                  let lhs = expression(first, firstAttribute) else { return }
+                  let lhs = expression(first.view, firstAttribute, insets: first.insets) else { return }
             var rhs = LayoutExpression(constant: state.constant)
             if let secondObject = state.secondItem, let secondAttribute = Attribute(rawValue: state.secondAttribute),
                secondAttribute != .notAnAttribute {
-                guard let second = layoutView(secondObject), let other = expression(second, secondAttribute) else { return }
+                guard let second = layoutItem(secondObject),
+                      let other = expression(second.view, secondAttribute, insets: second.insets) else { return }
                 rhs = other * state.multiplier + state.constant
             }
             let relation: LayoutSolver.Relation = state.relation < 0 ? .lessOrEqual : state.relation > 0 ? .greaterOrEqual : .equal
             solver.add(lhs - rhs, relation, strength: AutoLayout.strength(state.priority))
         }
 
-        private func layoutView(_ object: UnsafeMutableRawPointer) -> UIView? {
-            let view = UIView.wrap(object)
-            guard view.is(UIView.self) else { return nil }
+        /// A constraint's item: its view, or the view that owns the guide
+        /// it is with the guide's insets there.
+        private func layoutItem(_ object: UnsafeMutableRawPointer) -> (view: UIView, insets: UIEdgeInsets?)? {
+            guard let resolved = LayoutItems.resolve(object) else { return nil }
+            let view = resolved.view
             guard view.objcObject == root.objcObject || view.isDescendant(of: root) || view.windowObject != nil else { return nil }
-            return view
+            return resolved
         }
 
         /// Solves, measuring multi-line labels again at their new widths

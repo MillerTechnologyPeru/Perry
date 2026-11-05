@@ -600,13 +600,22 @@ enum Controllers {
         return max(0, min(0.9, value))
     }()
 
+    /// How much a stick's lean counts for: PERRY_GAMECONTROLLER_SENSITIVITY
+    /// multiplies it, so that at 2 half the way out is all the way; 1 by
+    /// default. For sticks that don't reach their edge, and games that
+    /// steer little for a full lean.
+    nonisolated(unsafe) static let sensitivity: Float = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_SENSITIVITY"), let value = Float(String(cString: setting)) else { return 1 }
+        return max(0.1, min(10, value))
+    }()
+
     /// A stick's position past the dead zone, measured from the center so
     /// diagonals keep their direction, rescaled to start from zero at its
-    /// edge.
+    /// edge, and multiplied by the sensitivity.
     static func stick(_ x: Float, _ y: Float) -> (x: Float, y: Float) {
         let length = (x * x + y * y).squareRoot()
         guard length > deadZone else { return (0, 0) }
-        let scale = min(1, (length - deadZone) / (1 - deadZone)) / length
+        let scale = min(1, sensitivity * (length - deadZone) / (1 - deadZone)) / length
         return (max(-1, min(1, x * scale)), max(-1, min(1, y * scale)))
     }
 

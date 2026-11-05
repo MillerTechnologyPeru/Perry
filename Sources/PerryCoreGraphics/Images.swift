@@ -9,6 +9,7 @@ import PerryObjCInterop
 enum TypeIDs {
     static let colorSpace: UInt = 73, color: UInt = 74, image: UInt = 75, dataProvider: UInt = 76, context: UInt = 77
     static let imageSource: UInt = 78, imageDestination: UInt = 79
+    static let font: UInt = 80
 }
 
 // MARK: - Pixel formats
@@ -340,6 +341,36 @@ public func CGColorCreateGenericGray(_ gray: Double, _ a: Double) -> Ref {
 public func CGColorCreateCopyWithAlpha(_ color: Ref?, _ alpha: Double) -> Ref? {
     guard let state = Colors.state(color) else { return nil }
     return Colors.make(state.space, Array(state.components.dropLast()) + [alpha])
+}
+
+/// The color in another color space, its alpha kept: gray, RGB and CMYK
+/// convert by their usual formulas, with no color management, so sRGB and
+/// device RGB match; nil for a space of another model. SwiftUI resolves
+/// every color that isn't already sRGB this way: a nil here is black.
+@c(_CGColorCreateCopyByMatchingToColorSpace)
+public func CGColorCreateCopyByMatchingToColorSpace(_ space: Ref?, _ intent: Int32, _ color: Ref?, _ options: Ref?) -> Ref? {
+    guard let space, let target = ColorSpaces.state(space), let state = Colors.state(color),
+          let source = ColorSpaces.state(state.space) else { return nil }
+    let values = Array(state.components.dropLast()), alpha = state.components.last ?? 1
+    // The color as RGB, then as the target's model.
+    let rgb: [Double]
+    switch source.model {
+    case 0 where values.count == 1: rgb = [values[0], values[0], values[0]]
+    case 1 where values.count == 3: rgb = values
+    case 2 where values.count == 4:
+        rgb = values.prefix(3).map { (1 - $0) * (1 - values[3]) }
+    default: return nil
+    }
+    let converted: [Double]
+    switch target.model {
+    case 0: converted = [0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]]
+    case 1: converted = rgb
+    case 2:
+        let black = 1 - (rgb.max() ?? 0)
+        converted = black >= 1 ? [0, 0, 0, 1] : rgb.map { (1 - $0 - black) / (1 - black) } + [black]
+    default: return nil
+    }
+    return Colors.make(space, converted + [alpha])
 }
 
 @c(_CGColorGetNumberOfComponents) public func CGColorGetNumberOfComponents(_ color: Ref?) -> Int { Colors.state(color)?.components.count ?? 0 }

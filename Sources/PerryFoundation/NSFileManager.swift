@@ -327,6 +327,18 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("ubiquityIdentityToken") func ubiquityIdentityToken() -> ObjCObject? { nil }
 
+    /// An app group's shared container: a directory of the group's in the
+    /// app's container, made the first time it's asked for, as the app
+    /// were the group's only member.
+    @ObjCMethod("containerURLForSecurityApplicationGroupIdentifier:")
+    func containerURL(forSecurityApplicationGroupIdentifier identifier: String?) -> NSURL? {
+        guard let identifier, !identifier.isEmpty, !identifier.contains("/") else { return nil }
+        let home = getenv("HOME").map { String(cString: $0) } ?? "/tmp"
+        let path = home + "/Shared/AppGroup/" + identifier
+        guard createDirectory(atPath: path, intermediates: true, attributes: nil, error: nil) else { return nil }
+        return URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory))
+    }
+
     @ObjCMethod("URLsForDirectory:inDomains:")
     func urls(for directory: UInt, inDomains domains: UInt) -> NSArray {
         let found = FileManagers.directory(directory).flatMap {

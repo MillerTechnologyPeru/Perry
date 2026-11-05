@@ -112,12 +112,17 @@ enum PropertyValue: Codable, Equatable {
                 values[key] = value
             }
             self = .dictionary(values)
-        } else if object == Nulls.null {
+        } else if Nulls.isNull(object) {
             self = .null
         } else {
+            PropertyValue.rejected = ObjC.className(object)
             return nil
         }
     }
+
+    /// The class of the last object that is not a property list or JSON
+    /// value, to name in the error.
+    nonisolated(unsafe) static var rejected: String?
 
     /// A new autoreleased Objective-C object for this value. Collections
     /// are mutable when `mutableContainers` is set, as JSON reading allows.

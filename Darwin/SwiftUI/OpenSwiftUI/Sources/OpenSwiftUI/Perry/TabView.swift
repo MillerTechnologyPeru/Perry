@@ -8,7 +8,8 @@
 //  one is the child whose tag is the selection (or whose index is, for an
 //  Int selection without tags), and each child's `tabItem` label becomes a
 //  button along the bottom. The bar's backdrop is a UITabBar; the labels
-//  over it are SwiftUI views, so they render like the rest of the app.
+//  over it are SwiftUI views, so they render like the rest of the app. In
+//  the page style, the tabs are pages swiped between, with dots for them.
 
 #if os(iOS) || os(visionOS)
 public import OpenSwiftUICore
@@ -24,6 +25,10 @@ public struct TabView<SelectionValue, Content>: View where SelectionValue: Hasha
     var content: Content
     /// The selection while no binding is given.
     @State private var internalSelection: AnyHashable?
+    /// How the tabs are paged, when the style pages them.
+    @Environment(\.tabViewPaging) private var paging
+    /// Whether the shown tab hides the bar, with toolbar(.hidden, for: .tabBar).
+    @State private var isBarHidden = false
 
     public init(selection: Binding<SelectionValue>?, @ViewBuilder content: () -> Content) {
         self.selection = selection
@@ -39,8 +44,17 @@ public struct TabView<SelectionValue, Content>: View where SelectionValue: Hasha
         } else {
             $internalSelection
         }
-        _VariadicView.Tree(TabViewRoot<SelectionValue>(selection: selected)) {
-            content
+        if let paging {
+            _VariadicView.Tree(PagedTabViewRoot<SelectionValue>(selection: selected, showsIndex: paging.showsIndex)) {
+                content
+            }
+        } else {
+            _VariadicView.Tree(TabViewRoot<SelectionValue>(selection: selected, isBarHidden: isBarHidden)) {
+                content
+            }
+            .onPreferenceChange(TabBarHiddenKey.self) { hidden in
+                isBarHidden = hidden ?? false
+            }
         }
     }
 }
@@ -55,6 +69,7 @@ extension TabView where SelectionValue == Int {
 /// Lays out the selected tab above the tab bar.
 struct TabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
     var selection: Binding<AnyHashable?>
+    var isBarHidden = false
 
     static var barHeight: CGFloat { 49 }
 
@@ -78,26 +93,32 @@ struct TabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            HStack(spacing: 0) {
-                ForEach(children.indices, id: \.self) { index in
-                    let isSelected = values[index] == current
-                    Button {
-                        selection.wrappedValue = values[index]
-                    } label: {
-                        VStack(spacing: 2) {
-                            children[index][TabItemTraitKey.self] ?? AnyView(EmptyView())
-                        }
-                        .font(.caption)
-                        .foregroundColor(isSelected ? Color.accentColor : Color.gray)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+            if !isBarHidden {
+                tabBar(children: children, values: values, current: current)
             }
-            .frame(height: Self.barHeight)
-            .background(TabBarBackdrop())
         }
+    }
+
+    private func tabBar(children: _VariadicView.Children, values: [AnyHashable], current: AnyHashable?) -> some View {
+        HStack(spacing: 0) {
+            ForEach(children.indices, id: \.self) { index in
+                let isSelected = values[index] == current
+                Button {
+                    selection.wrappedValue = values[index]
+                } label: {
+                    VStack(spacing: 2) {
+                        children[index][TabItemTraitKey.self] ?? AnyView(EmptyView())
+                    }
+                    .font(.caption)
+                    .foregroundColor(isSelected ? Color.accentColor : Color.gray)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(height: Self.barHeight)
+        .background(TabBarBackdrop())
     }
 }
 

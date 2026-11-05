@@ -71,14 +71,16 @@ open class UIImage: NSObject {
         return self
     }
 
-    /// From a nib: the named image in the main bundle.
+    /// From a nib: the named image in the bundle the nib came from, else in
+    /// the main bundle.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
-        if let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName"),
-           let image = UIImage.image(UIImage.objCClass, named: name) {
-            state.set(image.state.cgImage, scale: image.state.scale, orientation: 0)
-        }
+        guard let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName") else { return self }
+        let nibBundle = coder.as(UINibDecoder.self)?.nib?.bundlePath.flatMap { NSBundle.bundle(path: $0) }
+        let image = nibBundle.flatMap { UIImage.image(UIImage.objCClass, named: name, in: $0, catalog: false) }
+            ?? UIImage.image(UIImage.objCClass, named: name)
+        if let image { state.set(image.state.cgImage, scale: image.state.scale, orientation: 0) }
         return self
     }
 
@@ -118,8 +120,8 @@ open class UIImage: NSObject {
     @ObjCClassMethod("imageNamed:")
     static func image(_ cls: ObjCClass, named name: String) -> UIImage? { image(cls, named: name, in: NSBundle.main(), catalog: true) }
 
-    /// The named image's file in `bundle`, else, for the main bundle, the
-    /// asset catalog's.
+    /// The named image's file in `bundle`, else the bundle's asset
+    /// catalog's.
     static func image(_ cls: ObjCClass, named name: String, in bundle: NSBundle, catalog: Bool) -> UIImage? {
         let base = name.hasSuffix(".png") || name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name
         let type = name.hasSuffix(".jpg") ? "jpg" : "png"
@@ -130,14 +132,21 @@ open class UIImage: NSObject {
             }
         }
         guard catalog else { return nil }
-        return AssetCatalog.image(named: name).map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
+        let found = bundle.objcObject == NSBundle.main().objcObject
+            ? AssetCatalog.image(named: name) : AssetCatalog.catalog(in: bundle)?.image(named: name)
+        return found.map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
     }
 
     /// In the bundle given, the main bundle when none is.
     @ObjCClassMethod("imageNamed:inBundle:compatibleWithTraitCollection:")
     static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIImage? {
         guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else { return image(cls, named: name) }
-        return image(cls, named: name, in: bundle, catalog: false)
+        return image(cls, named: name, in: bundle, catalog: true)
+    }
+
+    @ObjCClassMethod("imageNamed:inBundle:withConfiguration:")
+    static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, configuration: NSObject?) -> UIImage? {
+        image(cls, named: name, in: bundle, compatibleWith: nil)
     }
 
     /// The common SF Symbols, drawn as templates (Symbols).

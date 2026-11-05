@@ -153,6 +153,14 @@ open class UIColor: NSObject {
         return self
     }
 
+    /// Asset catalogs' colors aren't read yet: there is no color by any
+    /// name.
+    @ObjCClassMethod("colorNamed:")
+    static func color(_ cls: ObjCClass, named name: String) -> UIColor? { nil }
+
+    @ObjCClassMethod("colorNamed:inBundle:compatibleWithTraitCollection:")
+    static func color(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIColor? { nil }
+
     /// Display P3 is taken as sRGB.
     @ObjCClassMethod("colorWithDisplayP3Red:green:blue:alpha:")
     static func color(_ cls: ObjCClass, displayP3Red red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> UIColor {

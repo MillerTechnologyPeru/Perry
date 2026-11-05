@@ -21,6 +21,7 @@ size_t perry_foundation_usable_size(void *block) { return malloc_usable_size(blo
 
 void perry_foundation_set_empty_array_class(void *cls) { ns_array0[0] = cls; }
 void perry_foundation_set_empty_dictionary_class(void *cls) { ns_dictionary0[0] = cls; }
+void *perry_foundation_empty_dictionary(void) { return ns_dictionary0; }
 
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 

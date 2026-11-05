@@ -8,6 +8,7 @@
 
 #include <dlfcn.h>
 #include <limits.h>
+#include <pthread.h>
 #include <link.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -209,6 +210,8 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
+//   …/Metal.framework/Metal                               -> QuartzCore
+//   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
@@ -264,6 +267,19 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "AVFoundation");
         return true;
     }
+    // Network's path monitor reads the routes SystemConfiguration's
+    // reachability does. Its C API is libnetwork's, which Network's Swift
+    // overlay binds to directly.
+    if (strstr(install_name, "/Network.framework/") || strcmp(install_name, "/usr/lib/libnetwork.dylib") == 0) {
+        snprintf(out, out_size, "SystemConfiguration");
+        return true;
+    }
+    // Metal, without a device: QuartzCore, which has its layers, answers
+    // that there is none.
+    if (strstr(install_name, "/Metal.framework/")) {
+        snprintf(out, out_size, "QuartzCore");
+        return true;
+    }
     // ImageIO's images are CoreGraphics' own.
     if (strstr(install_name, "/ImageIO.framework/")) {
         snprintf(out, out_size, "CoreGraphics");
@@ -298,6 +314,10 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
     char short_name[256];
     if (!provider_short_name(install_name, short_name, sizeof(short_name)))
         return NULL;
+    // WebKit's web views make URL requests of their own, as CFNetwork's
+    // classes, which must start with the program.
+    if (strstr(install_name, "/WebKit.framework/"))
+        perry_find_provider(loader, CFNETWORK);
 
     // Several install names may map to one provider (libSystem's sublibraries).
     for (uint32_t i = 0; i + 1 < loader->provider_count; i++) {
@@ -371,11 +391,30 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
 // MARK: - Unresolved stubs
 
 // Calling an unresolved import lands in a stub that reports which symbol was
-// missing instead of jumping to address zero.
-_Noreturn static void perry_unimplemented(const char *description) {
+// missing instead of jumping to address zero. With
+// PERRY_UNIMPLEMENTED=continue, for finding what a program needs, each is
+// reported the first time and returns zero.
+static uintptr_t perry_unimplemented(const char *description) {
+    static int continues = -1;
+    if (continues < 0) {
+        const char *mode = getenv("PERRY_UNIMPLEMENTED");
+        continues = mode && strcmp(mode, "continue") == 0;
+    }
     fflush(stdout);
-    fprintf(stderr, "perry: unimplemented: %s\n", description);
-    abort();
+    if (!continues) {
+        fprintf(stderr, "perry: unimplemented: %s\n", description);
+        abort();
+    }
+    static hash_table reported;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&lock);
+    void **slot = hash_lookup_string(&reported, description, true);
+    bool first = !*slot;
+    *slot = (void *)1;
+    pthread_mutex_unlock(&lock);
+    if (first)
+        fprintf(stderr, "perry: unimplemented: %s, returning 0\n", description);
+    return 0;
 }
 
 typedef struct stub_page {
@@ -472,11 +511,21 @@ static bool ends_with(const char *name, const char *suffix) {
 
 /// For an unresolved string constant's import, a pointer to a constant
 /// CFString of its name ("_UIFooNotification" is @"UIFooNotification"),
-/// made once; NULL for other symbols, or before Foundation is loaded.
+/// made once; NULL for other symbols, or before Foundation is loaded. A
+/// constant is known by its name's ending (notification names, keys, error
+/// domains) or by the families of string constants Apple names alike: user
+/// activity types, capture device types and session presets, and
+/// authorization scopes and options.
 static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
-    if (!ends_with(name, "Notification") && !ends_with(name, "NotificationName") && !ends_with(name, "Key") &&
-        !ends_with(name, "Attribute") && !ends_with(name, "AttributeName") && !ends_with(name, "Identifier"))
+    static const char *const families[] = { "_NSUserActivityType", "_AVCaptureDeviceType", "_AVCaptureSessionPreset",
+                                            "_ASAuthorizationScope", "_ASAuthorizationPublicKeyCredential" };
+    bool family = false;
+    for (size_t i = 0; i < sizeof(families) / sizeof(families[0]) && !family; i++)
+        family = strncmp(name, families[i], strlen(families[i])) == 0;
+    if (!family && !ends_with(name, "Notification") && !ends_with(name, "NotificationName") && !ends_with(name, "Key") &&
+        !ends_with(name, "Attribute") && !ends_with(name, "AttributeName") && !ends_with(name, "Identifier") &&
+        !ends_with(name, "ErrorDomain"))
         return NULL;
     perry_symbol isa = { 0 };
     for (uint32_t i = 0; i < loader->provider_count && !isa.found; i++)
@@ -539,6 +588,13 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     if (weak_import) {
         perry_record_import(image, library, name, PERRY_IMPORT_WEAK_MISSING);
         perry_trace(PERRY_TRACE_BIND, "weak import %s from %s missing", name, library);
+        // A weak string constant is there on any system the app runs on,
+        // and read without a check: it gets the constant string of its
+        // name, as a missing one that is not weak does. Other weak
+        // imports stay NULL, for the app's own checks.
+        void *constant = string_constant(loader, name);
+        if (constant)
+            sym.address = constant;
         return sym;
     }
     perry_record_import(image, library, name, PERRY_IMPORT_UNRESOLVED);

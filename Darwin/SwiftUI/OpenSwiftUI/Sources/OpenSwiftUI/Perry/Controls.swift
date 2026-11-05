@@ -4,9 +4,9 @@
 //
 //  Status: Perry's implementation, interim
 //
-//  Picker, as a row that steps through its options when tapped; sheets,
-//  drawn over the presenting view; the refresh action scroll views run;
-//  and file import, which shows nothing yet.
+//  Picker, as a row that steps through its options when tapped; the
+//  refresh action scroll views run; and file import, which shows nothing
+//  yet.
 
 #if os(iOS) || os(visionOS)
 public import Foundation
@@ -21,9 +21,28 @@ public struct Picker<Label, SelectionValue, Content>: View where Label: View, Se
     var selection: Binding<SelectionValue>
     var label: Label
     var content: Content
+    @Environment(\.pickerKind) private var kind
+
+    @available(*, deprecated, renamed: "Picker(selection:content:label:)")
+    public init(selection: Binding<SelectionValue>, label: Label, @ViewBuilder content: () -> Content) {
+        self.selection = selection
+        self.label = label
+        self.content = content()
+    }
+
+    public init(selection: Binding<SelectionValue>, @ViewBuilder content: () -> Content, @ViewBuilder label: () -> Label) {
+        self.selection = selection
+        self.label = label()
+        self.content = content()
+    }
 
     public var body: some View {
-        _VariadicView.Tree(PickerRoot(selection: selection, label: label)) { content }
+        switch kind {
+        case .segmented:
+            _VariadicView.Tree(SegmentedPickerRoot(selection: selection)) { content }
+        case .automatic:
+            _VariadicView.Tree(PickerRoot(selection: selection, label: label)) { content }
+        }
     }
 }
 
@@ -69,45 +88,6 @@ struct PickerRoot<SelectionValue: Hashable, Label: View>: _VariadicView.UnaryVie
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - sheet
-
-@available(OpenSwiftUI_v1_0, *)
-extension View {
-    /// Presents a sheet when a binding to a Boolean value that you provide
-    /// is true; here, drawn over this view.
-    public func sheet<Content>(
-        isPresented: Binding<Bool>,
-        onDismiss: (() -> Void)? = nil,
-        @ViewBuilder content: @escaping () -> Content
-    ) -> some View where Content: View {
-        modifier(SheetModifier(isPresented: isPresented, onDismiss: onDismiss, sheet: content))
-    }
-}
-
-struct SheetModifier<Sheet: View>: ViewModifier {
-    var isPresented: Binding<Bool>
-    var onDismiss: (() -> Void)?
-    var sheet: () -> Sheet
-
-    func body(content: Content) -> some View {
-        content.overlay {
-            if isPresented.wrappedValue {
-                VStack(spacing: 0) {
-                    HStack {
-                        Spacer()
-                        Button("Done") { isPresented.wrappedValue = false }
-                            .padding(16)
-                    }
-                    sheet()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
-                .background(Color.white)
-                .onDisappear { onDismiss?() }
-            }
-        }
     }
 }
 
@@ -193,5 +173,47 @@ public struct _TaskModifier2: ViewModifier {
         nonisolated(unsafe) let action = action
         return content.modifier(_TaskModifier(priority: priority) { await action() })
     }
+}
+// MARK: - _TaskValueModifier2
+
+/// The modifier `task(id:)` uses from iOS 26.4, which names its task and
+/// may give it an executor; it runs the action as `_TaskValueModifier`
+/// does, again whenever the identity changes.
+@available(OpenSwiftUI_v3_0, *)
+public struct _TaskValueModifier2<ID>: ViewModifier where ID: Equatable {
+    var id: ID
+    var priority: TaskPriority
+    nonisolated(unsafe) var action: @isolated(any) () async -> Void
+
+    @usableFromInline
+    nonisolated init(
+        id: ID,
+        name: String,
+        executorPreference taskExecutor: (any TaskExecutor)?,
+        priority: TaskPriority,
+        action: sending @escaping @isolated(any) () async -> Void
+    ) {
+        self.id = id
+        self.priority = priority
+        self.action = action
+    }
+
+    public func body(content: Content) -> some View {
+        nonisolated(unsafe) let action = action
+        return content.modifier(_TaskValueModifier(value: id, priority: priority) { await action() })
+    }
+}
+
+/// `_TaskValueModifier.init(value:priority:action:)` under the name apps
+/// built against Apple's SDK call, whose action is `@Sendable` in the
+/// mangling; this module's own initializer mangles without it.
+@available(OpenSwiftUI_v3_0, *)
+@_silgen_name("$s7SwiftUI18_TaskValueModifierV5value8priority6actionACyxGx_ScPyyYaYbctcfC")
+public func _perryTaskValueModifierInit<Value>(
+    value: Value,
+    priority: TaskPriority,
+    action: @escaping @Sendable () async -> Void
+) -> _TaskValueModifier<Value> where Value: Equatable {
+    _TaskValueModifier(value: value, priority: priority, action: action)
 }
 #endif

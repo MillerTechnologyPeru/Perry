@@ -1,4 +1,6 @@
 import FoundationEssentials
+import Glibc
+import PerryInterface
 import PerryObjCInterop
 import PerryURLLoading
 
@@ -198,6 +200,9 @@ open class NSURLCache: NSObject {
 
     @ObjCMethod("memoryCapacity") func memoryCapacity() -> UInt { 512_000 }
     @ObjCMethod("diskCapacity") func diskCapacity() -> UInt { 10_000_000 }
+    /// The cache keeps nothing, whatever room it is given.
+    @ObjCMethod("setMemoryCapacity:") func setMemoryCapacity(_ capacity: UInt) {}
+    @ObjCMethod("setDiskCapacity:") func setDiskCapacity(_ capacity: UInt) {}
     @ObjCMethod("currentMemoryUsage") func currentMemoryUsage() -> UInt { 0 }
     @ObjCMethod("currentDiskUsage") func currentDiskUsage() -> UInt { 0 }
     @ObjCMethod("cachedResponseForRequest:") func cachedResponse(for request: NSObject) -> NSObject? { nil }
@@ -283,7 +288,13 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { task?.priority = priority }
     @ObjCMethod("resume") func resume() { task?.resume() }
     @ObjCMethod("suspend") func suspend() { task?.suspend() }
-    @ObjCMethod("cancel") func cancel() { task?.cancel() }
+    @ObjCMethod("cancel") func cancel() {
+        // PERRY_URL_TRACE: who cancels a task, and which.
+        if getenv("PERRY_URL_TRACE") != nil {
+            perry_print_frames("perry: URL: cancel \(task?.originalRequest?.url?.absoluteString ?? "?")")
+        }
+        task?.cancel()
+    }
 }
 
 @ObjCClass("NSURLSessionDataTask") open class NSURLSessionDataTask: NSURLSessionTask {}
@@ -579,6 +590,13 @@ open class NSURLSession: NSObject {
     @ObjCMethod("uploadTaskWithRequest:fromFile:completionHandler:")
     func uploadTask(with request: NSObject, fromFile file: NSURL, completionHandler: ObjCBlock?) -> NSObject {
         dataTask({ state!.session.uploadTask(self.request(request), file: file.url!, completion: $0) }, completionHandler)
+    }
+
+    /// The body is the request's own, its data or stream, rather than one
+    /// the delegate gives with URLSession:task:needNewBodyStream:.
+    @ObjCMethod("uploadTaskWithStreamedRequest:")
+    func uploadTask(withStreamedRequest request: NSObject) -> NSObject {
+        dataTask({ state!.session.dataTask(self.request(request), completion: $0) }, nil)
     }
 
     /// A download's handler runs before the file is removed.

@@ -91,7 +91,6 @@ PASSTHROUGH _pthread_self, pthread_self
 PASSTHROUGH _pthread_equal, pthread_equal
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_setstacksize, pthread_attr_setstacksize
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _access, access
 PASSTHROUGH _mkdir, mkdir
@@ -269,6 +268,9 @@ PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes
 PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _mktemp, mktemp
+PASSTHROUGH _memccpy, memccpy
+PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork

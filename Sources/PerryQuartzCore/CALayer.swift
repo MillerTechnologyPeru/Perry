@@ -80,6 +80,9 @@ final class LayerState {
     var contents: NSObject?
     /// A GL drawable's frames, shown in place of contents.
     var livePixels: LivePixels?
+    /// GL frames shared as GPU buffers, which the compositor shows in
+    /// place of live pixels.
+    var sharedFrames: SharedFrames?
     var contentsScale: CGFloat = 1
     var contentsGravity = "resize"
     var name: String?
@@ -187,6 +190,7 @@ final class LayerState {
         (copy.shadowOpacity, copy.shadowOffset, copy.shadowRadius) = (shadowOpacity, shadowOffset, shadowRadius)
         (copy.contents, copy.contentsScale, copy.contentsGravity) = (contents, contentsScale, contentsGravity)
         copy.livePixels = livePixels
+        copy.sharedFrames = sharedFrames
         (copy.isOpaque, copy.sublayers, copy.superlayer, copy.delegate, copy.mask) = (isOpaque, sublayers, superlayer, delegate, mask)
         (copy.backingSize, copy.displayedByDelegate, copy.allowsGroupOpacity) = (backingSize, displayedByDelegate, allowsGroupOpacity)
         return copy
@@ -340,6 +344,38 @@ open class CALayer: NSObject {
         live.update(from: pixels, width: width, height: height, opaque: opaque, bgra: layout & 1 != 0, topFirst: layout & 2 != 0)
         changed { state.livePixels = live }
     }
+    /// Perry's: the dma-bufs GL frames will be shared in, as `count`
+    /// records of seven 64-bit values (fd, width, height, stride, offset,
+    /// fourcc, modifier), whose fds are duplicated; nil goes back to live
+    /// pixels and contents.
+    @ObjCMethod("_perrySetSharedBuffers:count:")
+    func setSharedBuffers(_ records: UnsafeRawPointer?, count: Int) {
+        let frames = records.flatMap { count > 0 ? SharedFrames(records: $0, count: count) : nil }
+        changed {
+            state.sharedFrames = frames
+            if frames != nil { state.livePixels = nil }
+        }
+    }
+
+    /// Perry's: the shared buffer at `slot` is getting a new frame, to
+    /// show once `fence` signals (a sync file descriptor, taken over; -1
+    /// when the frame is already finished).
+    @ObjCMethod("_perryPublishSharedSlot:opaque:fence:")
+    func publishSharedSlot(_ slot: Int, opaque: Bool, fence: Int) {
+        guard let frames = state.sharedFrames else {
+            if fence >= 0 { close(Int32(fence)) }
+            return
+        }
+        frames.publish(slot, opaque: opaque, fence: Int32(fence))
+        changed {}
+    }
+
+    /// Perry's: the shared buffers in use, which are not to be drawn
+    /// into, as a mask of their indexes; -1 when the compositor can't
+    /// import them (or there are none).
+    @ObjCMethod("_perrySharedSlotsInUse")
+    func sharedSlotsInUse() -> Int { state.sharedFrames?.slotsInUse ?? -1 }
+
     /// Perry's: whether the compositor has shown the last GL frame, so a
     /// newer one would be seen; true without one.
     @ObjCMethod("_perryPixelsShown")

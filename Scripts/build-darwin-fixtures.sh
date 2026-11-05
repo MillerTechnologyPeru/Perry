@@ -40,6 +40,24 @@ for src in Tests/Fixtures/Darwin/*/; do
     app="$out/$name.app"
     rm -rf "$app"
     mkdir -p "$app"
+    # A Swift fixture, main.swift, built with swiftc for its MinimumOSVersion,
+    # and for macOS for its reference. Perry runs it on Apple's Swift
+    # runtime, .build/perry-swift-runtime (Scripts/swift-runtime.sh).
+    if [ -f "$src/main.swift" ]; then
+        swift_min=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$src/Info.plist")
+        xcrun --sdk iphoneos swiftc -target "arm64-apple-ios$swift_min" -sdk "$sdk" \
+            -swift-version 5 -O -o "$app/$name" "$src"/*.swift
+        plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
+        macos="$out/macos/$name.app/Contents"
+        rm -rf "$out/macos/$name.app"
+        mkdir -p "$macos/MacOS"
+        xcrun --sdk macosx swiftc -target arm64-apple-macos14 -sdk "$macsdk" \
+            -swift-version 5 -O -o "$macos/MacOS/$name" "$src"/*.swift
+        cp "$src/Info.plist" "$macos/Info.plist"
+        perl -e 'alarm 60; exec @ARGV' "$macos/MacOS/$name" > "$out/$name.expected" 2>/dev/null
+        echo "$app"
+        continue
+    fi
     sources=$(ls "$src"/*.m)
     includes=""
     if [ -f "$src/dependencies" ]; then
@@ -79,6 +97,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
+    grep -q '<WebKit/' $sources && frameworks="$frameworks -framework WebKit"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \

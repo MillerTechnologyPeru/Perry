@@ -466,7 +466,8 @@ public func class_conformsToProtocol(_ cls: Class?, _ proto: ProtocolPointer?) -
 @c(_class_addIvar)
 public func class_addIvar(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ size: Int, _ alignment: UInt8,
                           _ types: UnsafePointer<CChar>?) -> Bool {
-    false
+    guard let cls, let name else { return false }
+    return Runtime.addIvar(cls, name: name, size: size, alignment: alignment, types: types)
 }
 
 @c(_objc_allocateClassPair)

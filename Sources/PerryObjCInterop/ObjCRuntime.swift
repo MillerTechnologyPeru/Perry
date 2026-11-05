@@ -106,6 +106,7 @@ public enum ObjCRuntime {
            let load = bind("_objc_loadWeakRetained", as: (@convention(c) (UnsafeMutablePointer<Object>?) -> Object).self) {
             weakFunctions = (store: store, loadRetained: load)
         }
+        addIvarFunction = bind("_class_addIvar", as: AddIvar.self)
         guard let getProtocol = bind("_objc_getProtocol", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
               let allocateProtocol = bind("_objc_allocateProtocol",
                                           as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
@@ -236,6 +237,18 @@ public enum ObjCRuntime {
     nonisolated(unsafe) public static var poolFunctions: (push: @convention(c) () -> UnsafeMutableRawPointer?,
                                                          pop: @convention(c) (UnsafeMutableRawPointer?) -> Void) =
         ({ nil }, { _ in })
+
+    typealias AddIvar = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, Int, UInt8, UnsafePointer<CChar>?) -> Bool
+    nonisolated(unsafe) static var addIvarFunction: AddIvar?
+
+    /// class_addIvar, for a class not yet registered.
+    @discardableResult
+    public static func addIvar(_ cls: ObjCClass, _ ivar: ObjCInstanceVariable) -> Bool {
+        guard let addIvarFunction else { return false }
+        return ivar.name.withCString { name in
+            ivar.types.withCString { addIvarFunction(cls.pointer, name, ivar.size, ivar.alignment, $0) }
+        }
+    }
 
     /// objc_storeWeak and objc_loadWeakRetained; nil until bound, when
     /// weak references hold their objects unretained.

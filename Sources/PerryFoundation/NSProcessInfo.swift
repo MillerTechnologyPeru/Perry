@@ -12,7 +12,7 @@ enum Process {
     nonisolated(unsafe) static var executablePath = ""
     nonisolated(unsafe) static var bundlePath: String?
     /// The SDK the main executable was built with, from LC_BUILD_VERSION.
-    nonisolated(unsafe) static var sdkVersion = NSOperatingSystemVersion(majorVersion: 17, minorVersion: 0, patchVersion: 0)
+    nonisolated(unsafe) static var sdkVersion = NSOperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0)
 
     static func start(_ info: perry_startup_info) {
         arguments = (0..<Int(info.argc)).compactMap { info.argv?[$0].map { String(cString: $0) } }

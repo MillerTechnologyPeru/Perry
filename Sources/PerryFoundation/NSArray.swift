@@ -181,6 +181,14 @@ public class NSArray: NSObject {
     @ObjCMethod("writeToURL:atomically:")
     func write(toURL url: NSURL, atomically: Bool) -> Bool { PropertyLists.write(objcObject, to: url.url, atomically: atomically) }
 
+    /// iOS 11's: written atomically, with an error when it can't be.
+    @ObjCMethod("writeToURL:error:")
+    func write(toURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> Bool {
+        if PropertyLists.write(objcObject, to: url.url, atomically: true) { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 512, description: "The file couldn’t be saved.")
+        return false
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -479,6 +487,16 @@ public class NSMutableArray: NSArray {
     func sort(comparator: ObjCBlock) {
         let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
         storage.objects.sort { compare(comparator.object, $0, $1) < 0 }
+        storage.enumeration.mutated()
+    }
+
+    /// NSInteger (*)(id, id, void *): NSComparisonResult, ascending -1
+    /// first.
+    @ObjCMethod("sortUsingFunction:context:")
+    func sort(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) {
+        guard let function else { return }
+        let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
+        storage.objects.sort { compare($0, $1, context) < 0 }
         storage.enumeration.mutated()
     }
 

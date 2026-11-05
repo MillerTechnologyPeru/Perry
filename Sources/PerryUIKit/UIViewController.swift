@@ -282,6 +282,16 @@ open class UIViewController: UIResponder {
     @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
     @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { Screen.orientation }
     @ObjCMethod("shouldAutorotate") func shouldAutorotate() -> Bool { true }
+    // The rotation callbacks from before iOS 8, which subclasses still call
+    // on super. The screen never rotates, so nothing sends them.
+    @ObjCMethod("shouldAutorotateToInterfaceOrientation:")
+    func shouldAutorotate(toInterfaceOrientation orientation: Int) -> Bool { orientation == Screen.orientation }
+    @ObjCMethod("willRotateToInterfaceOrientation:duration:")
+    func willRotate(toInterfaceOrientation orientation: Int, duration: Double) {}
+    @ObjCMethod("willAnimateRotationToInterfaceOrientation:duration:")
+    func willAnimateRotation(toInterfaceOrientation orientation: Int, duration: Double) {}
+    @ObjCMethod("didRotateFromInterfaceOrientation:")
+    func didRotate(fromInterfaceOrientation orientation: Int) {}
     @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
 
     // MARK: Containment

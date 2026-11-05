@@ -65,7 +65,7 @@ struct DarwinFixtureTests {
     /// on macOS, recorded by Scripts/build-darwin-fixtures.sh.
     @Test("Apps print exactly what they print on Darwin", arguments: DarwinFixtures.withReference)
     func matchesDarwin(_ name: String) throws {
-        let result = try runPerry([DarwinFixtures.app(name).path])
+        let result = try runPerry([DarwinFixtures.app(name).path], environment: DarwinFixtures.environment(name))
         #expect(result.status == 0, "\(result.stderr)")
         let expected = try String(contentsOf: DarwinFixtures.reference(name), encoding: .utf8)
         #expect(result.stdout == expected)
@@ -86,11 +86,28 @@ enum DarwinFixtures {
     /// Fixtures with a recorded Darwin output.
     static var withReference: [String] {
         [
-            "Abacus", "Almanac", "Anvil", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cornerstone", "Courier", "Darkroom", "Easel", "Foreman", "Forge", "Foundry", "Gatekeeper", "Herald", "Itinerary", "Keyring", "Lantern", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Panorama", "Parsley",
+            "Abacus", "Almanac", "Anvil", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cobweb", "Cornerstone", "Courier", "Darkroom", "Easel", "Foreman", "Forge", "Foundry", "Gatekeeper", "Gossamer", "Herald", "Itinerary", "Keyring", "Lantern", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Panorama", "Parsley",
             "Quill", "Relay", "Roster", "Satchel", "Scribe", "Scriptorium", "Sentinel", "Shelf", "Sketchbook", "Telegraph", "Typecast", "Vault", "Viewport",
         ].filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path)
+        } + swift.filter {
+            built($0) && FileManager.default.fileExists(atPath: reference($0).path) && swiftRuntime != nil
         }
+    }
+
+    /// Fixtures written in Swift, which run on Apple's Swift runtime.
+    static let swift = ["Tempo"]
+
+    /// Apple's Swift runtime as Scripts/swift-runtime.sh assembles it, with
+    /// Perry's Swift frameworks; nil when it isn't there.
+    static var swiftRuntime: URL? {
+        let directory = TestEnvironment.packageRoot.appending(path: ".build/perry-swift-runtime")
+        return FileManager.default.fileExists(atPath: directory.appending(path: "libswiftCore.dylib").path) ? directory : nil
+    }
+
+    static func environment(_ name: String) -> [String: String] {
+        guard swift.contains(name), let swiftRuntime else { return [:] }
+        return ["PERRY_SWIFT_RUNTIME": swiftRuntime.path]
     }
 
     static func built(_ name: String) -> Bool {

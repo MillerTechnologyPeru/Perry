@@ -185,3 +185,75 @@ public func NSTextAlignmentToCTTextAlignment(_ alignment: Int) -> UInt8 { [0, 2,
 
 @c(_NSTextAlignmentFromCTTextAlignment)
 public func NSTextAlignmentFromCTTextAlignment(_ alignment: UInt8) -> Int { [0, 2, 1, 3, 4][min(Int(alignment), 4)] }
+
+// MARK: Lines
+
+/// A line of the whole string, in its first run's font and color.
+@ObjCClass("__NSCFLine")
+final class CTLine: NSObject {
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Typesetting.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: CTLine.objCClass.pointer)
+    }
+}
+
+@c(_CTLineGetTypeID) public func CTLineGetTypeID() -> UInt { 0x50_06 }
+
+@c(_CTLineCreateWithAttributedString)
+public func CTLineCreateWithAttributedString(_ string: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let string else { return nil }
+    let copy = NSObject(objCArgument: string).unsafeCast(to: NSAttributedString.self)
+    return Typesetting.make(CTLine.objCClass, copy)
+}
+
+/// The line's text on one line, with no width limit.
+private func lineLayout(_ line: UnsafeMutableRawPointer?) -> AttributedLayout? {
+    guard let (_, string) = Typesetting.state(line) else { return nil }
+    return AttributedLayout(string, size: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude), lineLimit: 1)
+}
+
+/// The width, and the font's ascent, descent and leading.
+@c(_CTLineGetTypographicBounds)
+public func CTLineGetTypographicBounds(_ line: UnsafeMutableRawPointer?, _ ascent: UnsafeMutablePointer<CGFloat>?,
+                                       _ descent: UnsafeMutablePointer<CGFloat>?, _ leading: UnsafeMutablePointer<CGFloat>?) -> Double {
+    guard let layout = lineLayout(line) else { return 0 }
+    ascent?.pointee = layout.font.ascender()
+    descent?.pointee = -layout.font.descender()
+    leading?.pointee = layout.font.leading()
+    return Double(layout.lines.first.map { Text.size($0, font: layout.font).width } ?? 0)
+}
+
+/// The box from the baseline down by the descent to up by the ascent.
+@c(_CTLineGetImageBounds)
+public func CTLineGetImageBounds(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) -> CGRect {
+    guard lineLayout(line) != nil else { return .zero }
+    var ascent: CGFloat = 0, descent: CGFloat = 0
+    let width = CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+    return CGRect(x: 0, y: -descent, width: CGFloat(width), height: ascent + descent)
+}
+
+@c(_CTLineGetStringRange)
+public func CTLineGetStringRange(_ line: UnsafeMutableRawPointer?) -> PerryCFRange {
+    PerryCFRange(location: 0, length: Int(Typesetting.state(line)?.string.length() ?? 0))
+}
+
+@c(_CTLineGetGlyphCount)
+public func CTLineGetGlyphCount(_ line: UnsafeMutableRawPointer?) -> Int {
+    Int(Typesetting.state(line)?.string.length() ?? 0)
+}
+
+/// Draws the line with its baseline at the context's text position, in
+/// CoreText's coordinates, y up: flipped there to draw it upright.
+@c(_CTLineDraw)
+public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) {
+    guard let layout = lineLayout(line), let text = layout.lines.first, let context else { return }
+    let position = CG.getTextPosition(context)
+    Graphics.push(context)
+    defer { Graphics.pop() }
+    CG.saveGState(context)
+    defer { CG.restoreGState(context) }
+    CG.translateCTM(context, position.x, position.y)
+    CG.scaleCTM(context, 1, -1)
+    Text.draw(text, at: CGPoint(x: 0, y: -layout.font.ascender()), font: layout.font, color: layout.color, keepingMode: false)
+}

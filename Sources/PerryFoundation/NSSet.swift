@@ -126,10 +126,18 @@ public class NSSet: NSObject {
     @ObjCMethod("init")
     func initialize() -> Self { setMembers([]) }
 
+    @ObjCMethod("setByAddingObject:")
+    func adding(object: ObjCObject) -> NSSet { adding(contentsOf: [object.id]) }
+
+    @ObjCMethod("setByAddingObjectsFromArray:")
+    func adding(objectsFromArray array: ObjCObject?) -> NSSet { adding(contentsOf: Arrays.elements(array?.id)) }
+
     @ObjCMethod("setByAddingObjectsFromSet:")
-    func adding(objectsFrom other: NSSet?) -> NSSet {
+    func adding(objectsFrom other: NSSet?) -> NSSet { adding(contentsOf: other?.members ?? []) }
+
+    private func adding(contentsOf others: [id]) -> NSSet {
         var members = self.members
-        for member in other?.members ?? [] where !members.contains(where: { $0 == member || ObjC.sendBool($0, Selectors.isEqual, member) }) {
+        for member in others where !members.contains(where: { $0 == member || ObjC.sendBool($0, Selectors.isEqual, member) }) {
             members.append(member)
         }
         return Sets.owned(members)
