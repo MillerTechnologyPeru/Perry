@@ -131,7 +131,11 @@ enum Blocks {
 
 // MARK: - Foundation, as this provider calls it
 
+#if _pointerBitWidth(_32)
+public typealias CGFloat = Float
+#else
 public typealias CGFloat = Double
+#endif
 
 extension NSObject {
     @ObjCMethod("new") func newInstance() -> NSObject
