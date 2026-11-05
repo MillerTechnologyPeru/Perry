@@ -18,6 +18,7 @@
 #include <semaphore.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -975,6 +976,39 @@ int darwin_removexattr(const char *path, const char *name, int options) {
     return result;
 }
 
+ssize_t darwin_fgetxattr(int fd, const char *name, void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(fgetxattr);
+ssize_t darwin_fgetxattr(int fd, const char *name, void *value, size_t size, uint32_t position, int options) {
+    (void)position, (void)options;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    ssize_t length = fgetxattr(fd, linux_name, value, size);
+    if (length < 0 && errno == ENODATA)
+        errno = 93;
+    return length;
+}
+
+int darwin_fsetxattr(int fd, const char *name, const void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(fsetxattr);
+int darwin_fsetxattr(int fd, const char *name, const void *value, size_t size, uint32_t position, int options) {
+    (void)position;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    int flags = ((options & 2) ? XATTR_CREATE : 0) | ((options & 4) ? XATTR_REPLACE : 0);
+    return fsetxattr(fd, linux_name, value, size, flags);
+}
+
+int darwin_fremovexattr(int fd, const char *name, int options) DARWIN_SYMBOL(fremovexattr);
+int darwin_fremovexattr(int fd, const char *name, int options) {
+    (void)options;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    int result = fremovexattr(fd, linux_name);
+    if (result < 0 && errno == ENODATA)
+        errno = 93;
+    return result;
+}
+
 // MARK: - Signal stacks and the rest
 
 // Darwin's stack_t is { ss_sp, ss_size, ss_flags }; Linux's { ss_sp,
@@ -1076,3 +1110,29 @@ int darwin_sem_wait(void *semaphore) { return sem_wait(semaphore_for(semaphore))
 
 int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
 int darwin_sem_trywait(void *semaphore) { return sem_trywait(semaphore_for(semaphore)); }
+
+// Compares in time that depends only on the length: 0 when equal.
+int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) DARWIN_SYMBOL(timingsafe_bcmp);
+int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) {
+    const unsigned char *x = a, *y = b;
+    unsigned char difference = 0;
+    for (size_t i = 0; i < length; i++)
+        difference |= x[i] ^ y[i];
+    return difference != 0;
+}
+
+// MARK: - Time zones
+
+// time.h's zone globals, Darwin's own: tzset fills them from Linux's.
+char *darwin_tzname[2] DARWIN_SYMBOL(tzname) = { "GMT", "GMT" };
+long darwin_timezone DARWIN_SYMBOL(timezone) = 0;
+int darwin_daylight DARWIN_SYMBOL(daylight) = 0;
+
+void darwin_tzset(void) DARWIN_SYMBOL(tzset);
+void darwin_tzset(void) {
+    tzset();
+    darwin_tzname[0] = tzname[0];
+    darwin_tzname[1] = tzname[1];
+    darwin_timezone = timezone;
+    darwin_daylight = daylight;
+}
