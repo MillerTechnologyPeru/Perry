@@ -36,13 +36,17 @@ enum Display {
     /// screen is 640 by 360 points at @3x rather than 1920 by 1080 at @1x;
     /// else 1.
     nonisolated(unsafe) static let scale: CGFloat = {
+        let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE").flatMap { Double(String(cString: $0)) }.flatMap { $0 > 0 ? CGFloat($0) : nil }
         // A fixed screen is drawn as large as fits the display, whatever
-        // scale the app is told.
+        // scale the app is told, unless the setting gives its points their
+        // pixels: at 1, a @1x screen is drawn pixel for pixel, with nothing
+        // scaled.
         if let fixed = Screen.fixed {
+            if let setting { return setting }
             guard wanted, let pixels = SDL.usableDisplaySize() else { return fixed.scale }
             return min(pixels.width / fixed.size.width, pixels.height / fixed.size.height)
         }
-        if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { return value }
+        if let setting { return setting }
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         guard wanted, !software else { return 1 }
         let native = SDL.nativeScale() ?? 1
