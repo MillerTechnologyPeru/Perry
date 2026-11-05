@@ -428,7 +428,21 @@ kern_return_t darwin_thread_suspend(mach_port_t port) {
         return KERN_INVALID_ARGUMENT;
     }
     pthread_mutex_unlock(&suspension_lock);
-    while (sem_wait(&entry->stopped) != 0 && errno == EINTR) {}
+    // A thread that blocks the signal never stops: give up on it after a
+    // second, resumed already, so a signal it takes later doesn't stop it.
+    struct timespec deadline;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += 1;
+    int waited;
+    while ((waited = sem_timedwait(&entry->stopped, &deadline)) != 0 && errno == EINTR) {}
+    if (waited != 0) {
+        pthread_mutex_lock(&suspension_lock);
+        entry->count = 0;
+        atomic_store(&entry->resume, 1);
+        syscall(SYS_futex, &entry->resume, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+        pthread_mutex_unlock(&suspension_lock);
+        return KERN_FAILURE;
+    }
     return KERN_SUCCESS;
 }
 
