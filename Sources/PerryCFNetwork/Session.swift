@@ -1,4 +1,6 @@
 import FoundationEssentials
+import Glibc
+import PerryInterface
 import PerryObjCInterop
 import PerryURLLoading
 
@@ -286,7 +288,13 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { task?.priority = priority }
     @ObjCMethod("resume") func resume() { task?.resume() }
     @ObjCMethod("suspend") func suspend() { task?.suspend() }
-    @ObjCMethod("cancel") func cancel() { task?.cancel() }
+    @ObjCMethod("cancel") func cancel() {
+        // PERRY_URL_TRACE: who cancels a task, and which.
+        if getenv("PERRY_URL_TRACE") != nil {
+            perry_print_frames("perry: URL: cancel \(task?.originalRequest?.url?.absoluteString ?? "?")")
+        }
+        task?.cancel()
+    }
 }
 
 @ObjCClass("NSURLSessionDataTask") open class NSURLSessionDataTask: NSURLSessionTask {}
