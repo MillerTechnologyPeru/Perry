@@ -298,6 +298,31 @@ public class NSDictionary: NSObject {
     @ObjCMethod("description")
     func description() -> String { Describe.object(objcObject, indent: 0) }
 
+    /// The keys whose values are equal to `object`.
+    @ObjCMethod("allKeysForObject:")
+    func allKeys(for object: ObjCObject?) -> NSArray {
+        guard let object else { return NSArray(objcObject: Arrays.autoreleased([]), ownership: .retain) }
+        let keys = entries.filter { $0.value == object.id || ObjC.sendBool($0.value, Selectors.isEqual, object.id) }.map(\.key)
+        return NSArray(objcObject: Arrays.autoreleased(keys), ownership: .retain)
+    }
+
+    /// The keys whose entries the block passes, as a set.
+    @ObjCMethod("keysOfEntriesPassingTest:")
+    func keysOfEntries(passingTest block: ObjCBlock) -> ObjCObject {
+        let test = block.function(as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Bool).self)
+        var keys: [id] = []
+        var stop = false
+        for entry in entries {
+            if test(block.object, entry.key, entry.value, &stop) { keys.append(entry.key) }
+            if stop { break }
+        }
+        return ObjCObject(Sets.autoreleased(keys))
+    }
+
+    /// Concurrent enumeration runs in order here.
+    @ObjCMethod("keysOfEntriesWithOptions:passingTest:")
+    func keysOfEntries(options: UInt, passingTest block: ObjCBlock) -> ObjCObject { keysOfEntries(passingTest: block) }
+
     @ObjCMethod("enumerateKeysAndObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, id?, UnsafeMutablePointer<Bool>) -> Void).self)
