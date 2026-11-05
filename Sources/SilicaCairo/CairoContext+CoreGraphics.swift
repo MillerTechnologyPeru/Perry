@@ -40,6 +40,35 @@ public extension CairoContext {
         internalContext.restore()
     }
 
+    /// Clips later drawing to an alpha-only surface of `width` by `height`
+    /// pixels in `rect`, as CGContextClipToMask does: what is drawn until
+    /// the graphics state is restored goes to a group, painted through the
+    /// mask then. Outside the rect nothing is drawn. The mask is drawn into
+    /// a device-sized surface now, as the transform may change before then.
+    func beginMask(_ mask: Cairo.Surface.Image, width: Int, height: Int, in rect: CGRect) {
+        guard let device = try? Cairo.Surface.Image(format: .a8, width: max(Int(size.width), 1), height: max(Int(size.height), 1))
+        else { return }
+        let painter = Cairo.Context(surface: device)
+        painter.matrix = internalContext.matrix
+        let pattern = Pattern(surface: mask)
+        var matrix = Matrix.identity
+        matrix.translate(x: Double(rect.origin.x), y: Double(rect.origin.y))
+        matrix.scale(x: Double(rect.size.width) / Double(width), y: Double(rect.size.height) / Double(height))
+        matrix.scale(x: 1, y: -1)
+        matrix.translate(x: 0, y: -Double(height))
+        matrix.invert()
+        pattern.matrix = matrix
+        pattern.extend = .none
+        painter.source = pattern
+        painter.addRectangle(x: Double(rect.origin.x), y: Double(rect.origin.y),
+                             width: Double(rect.size.width), height: Double(rect.size.height))
+        painter.clip()
+        painter.paint()
+        device.flush()
+        internalContext.pushGroup()
+        internalState.masks.append(device)
+    }
+
     // MARK: Painting
 
     /// The fill color with the global alpha applied.
