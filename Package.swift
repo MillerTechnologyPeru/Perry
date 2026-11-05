@@ -61,6 +61,8 @@ let package = Package(
         .library(name: "PerryQuartzCore", type: .dynamic, targets: ["PerryQuartzCore"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
+        // Metal, on Vulkan.
+        .library(name: "PerryMetal", type: .dynamic, targets: ["PerryMetal"]),
     ],
     dependencies: [
         // CoreModel's macros need swift-syntax 603; Perry's work with 603 and 604.
@@ -326,6 +328,15 @@ let package = Package(
         .target(
             name: "PerryUIKit",
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Metal's declarations of metal2vulkan's C ABI, and its loader:
+        // metal2vulkan (LGPL) is a separate library opened at run time.
+        .target(name: "CPerryMetal"),
+        // Metal over metal2vulkan's Metal API on Vulkan.
+        .target(
+            name: "PerryMetal",
+            dependencies: ["CPerryGeometry", "CPerryMetal", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Generates a provider's perry_provider_startup and perry_provider_symbol
