@@ -101,15 +101,15 @@ public func dispatch_io_create_with_io(_ type: UInt, _ io: Object?, _ queue: Obj
 }
 
 @c(_dispatch_io_read)
-public func dispatch_io_read(_ channel: Object?, _ offset: Int64, _ length: Int, _ queue: Object?,
+public func dispatch_io_read(_ channel: Object?, _ offset: Int64.ObjCType, _ length: Int, _ queue: Object?,
                              _ handler: UnsafeMutableRawPointer?) {
-    linux_dispatch_io_read_f(Objects.linux(channel), offset, length, Objects.linux(queue), IO.context(handler), IO.handler)
+    linux_dispatch_io_read_f(Objects.linux(channel), Int64(objCArgument: offset), length, Objects.linux(queue), IO.context(handler), IO.handler)
 }
 
 @c(_dispatch_io_write)
-public func dispatch_io_write(_ channel: Object?, _ offset: Int64, _ data: Object?, _ queue: Object?,
+public func dispatch_io_write(_ channel: Object?, _ offset: Int64.ObjCType, _ data: Object?, _ queue: Object?,
                               _ handler: UnsafeMutableRawPointer?) {
-    linux_dispatch_io_write_f(Objects.linux(channel), offset, Objects.linux(data), Objects.linux(queue),
+    linux_dispatch_io_write_f(Objects.linux(channel), Int64(objCArgument: offset), Objects.linux(data), Objects.linux(queue),
                               IO.context(handler), IO.handler)
 }
 
@@ -144,8 +144,8 @@ public func dispatch_io_set_low_water(_ channel: Object?, _ lowWater: Int) {
 }
 
 @c(_dispatch_io_set_interval)
-public func dispatch_io_set_interval(_ channel: Object?, _ interval: UInt64, _ flags: UInt) {
-    linux_dispatch_io_set_interval(Objects.linux(channel), interval, flags)
+public func dispatch_io_set_interval(_ channel: Object?, _ interval: UInt64.ObjCType, _ flags: UInt) {
+    linux_dispatch_io_set_interval(Objects.linux(channel), UInt64(objCArgument: interval), flags)
 }
 
 // MARK: - Whole reads and writes
