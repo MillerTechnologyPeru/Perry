@@ -767,9 +767,28 @@ open class UIDevice: NSObject {
     @ObjCMethod("batteryState") func batteryState() -> Int { 0 }
     @ObjCMethod("isProximityMonitoringEnabled") func isProximityMonitoringEnabled() -> Bool { false }
     @ObjCMethod("setProximityMonitoringEnabled:") func setProximityMonitoringEnabled(_ enabled: Bool) {}
-    @ObjCMethod("isGeneratingDeviceOrientationNotifications") func isGeneratingDeviceOrientationNotifications() -> Bool { false }
-    @ObjCMethod("beginGeneratingDeviceOrientationNotifications") func beginGeneratingDeviceOrientationNotifications() {}
-    @ObjCMethod("endGeneratingDeviceOrientationNotifications") func endGeneratingDeviceOrientationNotifications() {}
+    /// How many more times the notifications were begun than ended.
+    nonisolated(unsafe) static var orientationObservers = 0
+
+    @ObjCMethod("isGeneratingDeviceOrientationNotifications")
+    func isGeneratingDeviceOrientationNotifications() -> Bool { UIDevice.orientationObservers > 0 }
+
+    /// The device never turns, but the first notification comes all the
+    /// same, a moment after they are first begun, as it does on a device
+    /// once its accelerometer has answered: apps wait for it to learn which
+    /// way they are held.
+    @ObjCMethod("beginGeneratingDeviceOrientationNotifications")
+    func beginGeneratingDeviceOrientationNotifications() {
+        UIDevice.orientationObservers += 1
+        guard UIDevice.orientationObservers == 1, let after = Display.dispatchAfter, let time = Display.dispatchTime else { return }
+        after(time(0, 100_000_000), Updates.mainQueue, nil) { _ in
+            guard UIDevice.orientationObservers > 0 else { return }
+            Application.post(MoreNotifications.UIDeviceOrientationDidChangeNotification, object: UIDevice.currentDevice())
+        }
+    }
+
+    @ObjCMethod("endGeneratingDeviceOrientationNotifications")
+    func endGeneratingDeviceOrientationNotifications() { UIDevice.orientationObservers = max(UIDevice.orientationObservers - 1, 0) }
     @ObjCMethod("playInputClick") func playInputClick() {}
 }
 

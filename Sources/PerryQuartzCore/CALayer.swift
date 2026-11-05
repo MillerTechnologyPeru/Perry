@@ -142,10 +142,15 @@ final class LayerState {
             if transform.isIdentity {
                 bounds.size = newValue.size
             } else {
-                // The size before the transform whose transformed box is the frame.
-                let unit = transform.apply(CGRect(x: 0, y: 0, width: 1, height: 1))
-                if unit.width > 0, unit.height > 0 {
-                    bounds.size = CGSize(width: newValue.width / unit.width, height: newValue.height / unit.height)
+                // The frame's box through the transform's inverse, as Core
+                // Animation takes it: a frame of 526 by 13 under a quarter
+                // turn makes bounds of 13 by 526.
+                let t = transform
+                let determinant = t.a * t.d - t.b * t.c
+                if abs(determinant) > 1e-9 {
+                    let width = (abs(t.d * newValue.width) + abs(t.c * newValue.height)) / abs(determinant)
+                    let height = (abs(t.b * newValue.width) + abs(t.a * newValue.height)) / abs(determinant)
+                    bounds.size = CGSize(width: width, height: height)
                 }
             }
             position = CGPoint(x: newValue.minX + anchorPoint.x * newValue.width, y: newValue.minY + anchorPoint.y * newValue.height)

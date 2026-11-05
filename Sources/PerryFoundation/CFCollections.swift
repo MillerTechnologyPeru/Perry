@@ -136,22 +136,69 @@ enum CFCollections {
     static func object(_ value: CFValue) -> id? { value.map { UnsafeMutableRawPointer(mutating: $0) } }
 }
 
-/// A CFArray of the program's pointers.
+/// A CFArray of the program's pointers. It is an NSArray all the same, as
+/// every CFArray is on Darwin: one made without callbacks, so as not to
+/// retain its objects, is still sent -objectAtIndex: and -addObject:. The
+/// methods here are the ones NSArray's others are built on, and those that
+/// change it; what it holds is retained, released and compared by its
+/// callbacks.
 @ObjCClass("__NSCFArray")
-public class NSCFArray: NSObject {
+public class NSCFArray: NSArray {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         CFCollections.arrayClass = cls.storage
     }
 
     @ObjCMethod("dealloc")
-    func dealloc() {
+    func cfDealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: CFCollections.arrayClass)
     }
 
-    @ObjCMethod("count") func count() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
-    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFTypeIDs.array }
+    @ObjCMethod("count") func cfCount() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
+    @ObjCMethod("_cfTypeID") func cfArrayTypeID() -> UInt { CFTypeIDs.array }
+
+    @ObjCMethod("objectAtIndex:")
+    func cfObject(at index: UInt) -> UnsafeMutableRawPointer? {
+        guard let keys = CFCollections.storage(objcObject)?.keys, index < UInt(keys.count) else {
+            foundationFatal("-[__NSCFArray objectAtIndex:]: index (\(index)) beyond bounds")
+        }
+        return CFCollections.object(keys[Int(index)])
+    }
+
+    @ObjCMethod("addObject:")
+    func cfAdd(_ value: UnsafeMutableRawPointer?) { CFArrayAppendValue(objcObject, UnsafeRawPointer(value)) }
+
+    @ObjCMethod("insertObject:atIndex:")
+    func cfInsert(_ value: UnsafeMutableRawPointer?, at index: UInt) {
+        CFArrayInsertValueAtIndex(objcObject, Int(index), UnsafeRawPointer(value))
+    }
+
+    @ObjCMethod("replaceObjectAtIndex:withObject:")
+    func cfReplace(at index: UInt, with value: UnsafeMutableRawPointer?) {
+        CFArraySetValueAtIndex(objcObject, Int(index), UnsafeRawPointer(value))
+    }
+
+    @ObjCMethod("removeObjectAtIndex:")
+    func cfRemove(at index: UInt) { CFArrayRemoveValueAtIndex(objcObject, Int(index)) }
+
+    @ObjCMethod("removeLastObject")
+    func cfRemoveLast() {
+        guard let count = CFCollections.storage(objcObject)?.keys.count, count > 0 else { return }
+        CFArrayRemoveValueAtIndex(objcObject, count - 1)
+    }
+
+    @ObjCMethod("removeAllObjects") func cfRemoveAll() { CFArrayRemoveAllValues(objcObject) }
+
+    /// Every value its callbacks find equal to `value`.
+    @ObjCMethod("removeObject:")
+    func cfRemove(_ value: UnsafeMutableRawPointer?) {
+        guard let storage = CFCollections.storage(objcObject) else { return }
+        let target = UnsafeRawPointer(value)
+        let removed = storage.keys.filter { storage.keyCallbacks.isEqual($0, target) }
+        storage.keys.removeAll { storage.keyCallbacks.isEqual($0, target) }
+        removed.forEach(storage.keyCallbacks.released)
+    }
 }
 
 /// A CFDictionary of the program's pointers.

@@ -46,8 +46,8 @@
 VARIADIC _printf, vprintf, 1
 VARIADIC _fprintf, vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
-VARIADIC _sprintf, vsprintf, 2
-VARIADIC _snprintf, vsnprintf, 3
+VARIADIC _sprintf, perry_vsprintf, 2
+VARIADIC _snprintf, perry_vsnprintf, 3
 VARIADIC _snprintf_l, perry_vsnprintf_l, 4
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
@@ -56,8 +56,8 @@ VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
 VARIADIC _swscanf, vswscanf, 2
-VARIADIC ___sprintf_chk, __vsprintf_chk, 4
-VARIADIC ___snprintf_chk, __vsnprintf_chk, 5
+VARIADIC ___sprintf_chk, perry_vsprintf_chk, 4
+VARIADIC ___snprintf_chk, perry_vsnprintf_chk, 5
 VARIADIC _syslog, vsyslog, 2
 
 // The v* variants take a Darwin va_list (a plain pointer to stack slots)
@@ -211,18 +211,7 @@ PASSTHROUGH ___strncpy_chk, __strncpy_chk
 PASSTHROUGH ___strncat_chk, __strncat_chk
 
 // MARK: - stdlib
-PASSTHROUGH _malloc, malloc
-PASSTHROUGH _calloc, calloc
-PASSTHROUGH _realloc, realloc
 PASSTHROUGH _free, free
-PASSTHROUGH _posix_memalign, posix_memalign
-// Typed allocation takes the type's descriptor last, which glibc's
-// allocator has no use for.
-PASSTHROUGH _malloc_type_malloc, malloc
-PASSTHROUGH _malloc_type_calloc, calloc
-PASSTHROUGH _malloc_type_realloc, realloc
-PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
-PASSTHROUGH _aligned_alloc, aligned_alloc
 PASSTHROUGH _getenv, getenv
 PASSTHROUGH _setenv, setenv
 PASSTHROUGH _unsetenv, unsetenv

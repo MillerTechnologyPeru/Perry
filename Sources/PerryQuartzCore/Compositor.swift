@@ -277,8 +277,13 @@ final class Compositor {
         _ = SDL.setClipRect(renderer, &rect)
     }
 
+    /// The rectangle on the display, its edges on whole pixels: layers that
+    /// meet at an edge meet at the same pixel, whatever the scale, with no
+    /// pixel between them that each covers in part.
     func pixels(_ rect: CGRect) -> SDL.FRect {
-        SDL.FRect(x: Float(rect.minX * scale), y: Float(rect.minY * scale), w: Float(rect.width * scale), h: Float(rect.height * scale))
+        let left = (rect.minX * scale).rounded(), top = (rect.minY * scale).rounded()
+        let right = (rect.maxX * scale).rounded(), bottom = (rect.maxY * scale).rounded()
+        return SDL.FRect(x: Float(left), y: Float(top), w: Float(right - left), h: Float(bottom - top))
     }
 
     private func fill(_ rect: CGRect, with color: CGRef, alpha: CGFloat) {
@@ -326,18 +331,41 @@ final class Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
-        if toScreen.isAxisAligned, toScreen.a >= 0, toScreen.d >= 0 {
+        let small = 1e-9
+        // Scaled only, perhaps mirrored: into the layer's box on the
+        // display, flipped where a scale is negative (SDL_FLIP_HORIZONTAL
+        // 1, SDL_FLIP_VERTICAL 2).
+        if abs(toScreen.b) < small, abs(toScreen.c) < small {
             var target = pixels(toScreen.apply(state.bounds))
-            _ = SDL.renderTexture(renderer, texture, nil, &target)
+            let flip: Int32 = (toScreen.a < 0 ? 1 : 0) | (toScreen.d < 0 ? 2 : 0)
+            if flip == 0 {
+                _ = SDL.renderTexture(renderer, texture, nil, &target)
+            } else {
+                _ = SDL.renderTextureRotated(renderer, texture, nil, &target, 0, nil, flip)
+            }
             return
         }
+        // A negative determinant mirrors: SDL_FLIP_HORIZONTAL, which SDL
+        // does before it turns the texture. So the turn is the one that
+        // takes the mirrored x axis, pointing left, to where the transform
+        // takes the x axis.
+        let mirrored = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0
+        let degrees = (mirrored ? atan2(-toScreen.b, -toScreen.a) : atan2(toScreen.b, toScreen.a)) * 180 / .pi
+        let flip: Int32 = mirrored ? 1 : 0
+        // A quarter turn: the layer's box on the display, with its sides
+        // exchanged, turned about its center into that box.
+        if abs(toScreen.a) < small, abs(toScreen.d) < small {
+            let box = pixels(toScreen.apply(state.bounds))
+            var target = SDL.FRect(x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w)
+            _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
+            return
+        }
+        // Any other turn is placed as it falls, not on whole pixels.
         let center = toScreen.apply(CGPoint(x: state.bounds.midX, y: state.bounds.midY))
         let width = state.bounds.width * (toScreen.a * toScreen.a + toScreen.b * toScreen.b).squareRoot()
         let height = state.bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
-        var target = pixels(CGRect(x: center.x - width / 2, y: center.y - height / 2, width: width, height: height))
-        let degrees = atan2(toScreen.b, toScreen.a) * 180 / .pi
-        // A negative determinant mirrors: SDL_FLIP_HORIZONTAL.
-        let flip: Int32 = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0 ? 1 : 0
+        var target = SDL.FRect(x: Float((center.x - width / 2) * scale), y: Float((center.y - height / 2) * scale),
+                               w: Float(width * scale), h: Float(height * scale))
         _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
     }
 
@@ -406,6 +434,10 @@ final class Compositor {
             return nil
         }
         defer { CG.release(context) }
+        // The texture is whole pixels and the layer may not be: what is
+        // drawn is stretched to fill it, so that its last row and column
+        // are covered, not left partly clear at the layer's edge.
+        CG.scaleCTM(context, CGFloat(width) / (state.bounds.width * scale), CGFloat(height) / (state.bounds.height * scale))
         CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
         if border {
             CALayer.drawBorder(of: state, in: context)
