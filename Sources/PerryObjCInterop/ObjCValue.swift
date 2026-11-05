@@ -215,7 +215,7 @@ public struct ObjCClass: ObjCNullable, Hashable, ObjCMethodRegistrar {
     public init(named name: String) { pointer = ObjCRuntime.classObject(name) }
 
     public var superclass: ObjCClass? {
-        pointer.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self).map(ObjCClass.init)
+        pointer.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeMutableRawPointer?.self).map(ObjCClass.init)
     }
 
     /// The metaclass, where class methods live.
