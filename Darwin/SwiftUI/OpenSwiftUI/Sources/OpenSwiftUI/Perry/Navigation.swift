@@ -524,6 +524,11 @@ struct NavigationBarRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> PassthroughNavigationBar {
         let bar = PassthroughNavigationBar()
         bar.delegate = context.coordinator
+        // Transparent, without its hairline, as iOS draws a bar over
+        // content that isn't scrolled under it: its scroll edge appearance.
+        bar.barTintColor = .clear
+        bar.backgroundColor = .clear
+        bar.shadowImage = UIImage()
         return bar
     }
 
