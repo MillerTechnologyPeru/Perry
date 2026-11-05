@@ -75,6 +75,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
     grep -q '<CoreBluetooth/' $sources && frameworks="$frameworks -framework CoreBluetooth"
+    grep -q '<Metal/' $sources && frameworks="$frameworks -framework Metal"
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
@@ -83,6 +84,10 @@ for src in Tests/Fixtures/Darwin/*/; do
         $frameworks $libraries \
         -o "$app/$name" $sources
     plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
+    # Metal shaders, built into default.metallib as Xcode builds them.
+    if ls "$src"/*.metal >/dev/null 2>&1; then
+        xcrun -sdk iphoneos metal -std=metal3.0 -mios-version-min=$min -o "$app/default.metallib" "$src"/*.metal
+    fi
     # Core Data models, compiled as Xcode does.
     for data_model in "$src"/*.xcdatamodeld; do
         [ -d "$data_model" ] || continue
@@ -92,7 +97,7 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
+            *.m|*.metal|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$app/" ;;
         esac
     done
@@ -158,6 +163,9 @@ for src in Tests/Fixtures/Darwin/*/; do
                 -o "$macos/MacOS/$name" $sources ;;
     esac
     cp "$src/Info.plist" "$macos/Info.plist"
+    if ls "$src"/*.metal >/dev/null 2>&1; then
+        xcrun -sdk macosx metal -std=metal3.0 -mmacosx-version-min=13.0 -o "$macos/Resources/default.metallib" "$src"/*.metal
+    fi
     for data_model in "$src"/*.xcdatamodeld; do
         [ -d "$data_model" ] || continue
         model_name=$(basename "$data_model" .xcdatamodeld)
@@ -166,7 +174,7 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
+            *.m|*.metal|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$macos/Resources/" ;;
         esac
     done
