@@ -122,8 +122,22 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   (Foundation's CF time and date functions, libdispatch's times and
   offsets); the same types are the native ones on arm64. The type encodings
   are 32-bit Darwin's: `NSInteger` is `i`, `BOOL` `c`, offsets in words.
-- Not yet: exceptions (`@throw`, unwinding through registered contexts), the
-  remaining files.c entry points, the rest of Foundation's coverage, UIKit and the other providers (their `@c` entry
+- Exceptions: Darwin's armv7 code registers a setjmp context in each
+  function with handlers or cleanups, and libSystem unwinds through them in
+  two phases, as libunwind's Unwind-sjlj.c does (`runtime.c`), longjmping to
+  the handler's dispatch code (`perry_sjlj_longjmp`). libobjc's personality
+  routine reads LLVM's SjLj exception tables and matches catch clauses by
+  class, `id` or catch-all (`exceptions_arm.c`), with `objc_exception_throw`,
+  `objc_exception_rethrow`, `objc_begin_catch` and `objc_end_catch`.
+  Foundation's `OBJC_EHTYPE_$_NSException` has no class, since NSException's
+  is made at startup, and is matched by name. An exception Foundation raises
+  unwinds through its Swift frames to the program's handler; one none
+  catches goes to the uncaught exception handler. Without
+  `-fobjc-arc-exceptions`, ARC does not release objects an exception leaves,
+  as on Darwin. `exceptions.m` checks this against macOS. arm64 still cannot
+  unwind Mach-O frames.
+- Not yet: C++ exceptions (`__gxx_personality_sj0`), the remaining files.c
+  entry points, the rest of Foundation's coverage, UIKit and the other providers (their `@c` entry
   points with floating point, such as CoreGraphics', and `CGFloat`, which is
   a float on armv7), `objc_msgForward_stret`, and classic relocations (iOS
   before 3.1).
