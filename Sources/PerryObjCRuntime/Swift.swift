@@ -40,6 +40,30 @@ extension Runtime {
         return cls
     }
 
+    /// Runs the Swift metadata initializers of `info`'s class and its
+    /// superclasses that have not run, superclass first, as Darwin's
+    /// libobjc does as it realizes such a class: an instance made from
+    /// Objective-C (WMF's [[WMFEventPlatformClient alloc] init]) before any
+    /// Swift code touched the class would otherwise be laid out by the
+    /// compiler's placeholder ivar offsets, a resilient one at 0, over the
+    /// isa. Each initializer calls _objc_realizeClassFromSwift with the
+    /// class laid out; it runs outside the lock, as Swift's runtime may
+    /// wait on another thread's metadata, and Swift runs it once.
+    public static func runSwiftInitializers(_ info: ClassInfo) {
+        var pending: [(ClassInfo, ClassInfo.SwiftInitializer)] = []
+        lock.withLock {
+            var current: ClassInfo? = info
+            while let each = current {
+                if let initializer = each.swiftInitializer { pending.insert((each, initializer), at: 0) }
+                current = each.superInfo
+            }
+        }
+        for (each, initializer) in pending {
+            _ = initializer(each.cls, nil)
+            lock.withLock { each.swiftInitializer = nil }
+        }
+    }
+
     /// class_setSuperclass: moves `cls`, and its metaclass, under
     /// `superclass`. Swift's runtime does so for its classes that subclass
     /// Foundation's, such as its NSError.

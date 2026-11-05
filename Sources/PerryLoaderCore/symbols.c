@@ -112,8 +112,12 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
     if (dep->provider && provider_lookup(loader, dep->provider, name, out))
         return true;
     // Swift symbols of a framework whose Swift code the provider lacks.
-    if (dep->swift_overlay && strncmp(name, "_$s", 3) == 0)
-        return perry_exports_lookup(loader, dep->swift_overlay, name, out, depth + 1);
+    if (strncmp(name, "_$s", 3) == 0) {
+        if (dep->swift_overlay && perry_exports_lookup(loader, dep->swift_overlay, name, out, depth + 1))
+            return true;
+        if (dep->swift_additions && perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1))
+            return true;
+    }
     return false;
 }
 
@@ -544,6 +548,103 @@ static void *string_constant(perry_loader *loader, const char *name) {
     return variable;
 }
 
+/// Witness tables apps take directly whose conformances the libraries have
+/// only as resilient ones: each a table of this many words, filled in
+/// once every image is bound.
+#define WITNESS_TABLE_WORDS 256
+typedef struct pending_witness_table {
+    void **table;
+    const int32_t *conformance;
+    const char *name;
+    struct pending_witness_table *next;
+} pending_witness_table;
+static pending_witness_table *pending_tables;
+
+/// For an unresolved protocol witness table ("…WP"), room for the table of
+/// the conformance the library has ("…Mc"), which the Swift runtime makes
+/// before initializers run (perry_make_witness_tables). Apple's SwiftUI
+/// declares its types and their protocols in one module, so apps take its
+/// witness tables directly; Perry's declares some types in another module
+/// than the protocol, which makes the conformance resilient, with no static
+/// table. Only a conformance with no conditional requirements is made: its
+/// table is the same for every use.
+static void *resilient_witness_table(perry_loader *loader, perry_dependency *dep, const char *name) {
+    if (!dep || strncmp(name, "_$s", 3) != 0 || !ends_with(name, "WP")) return NULL;
+    static hash_table made;
+    void **slot = hash_lookup_string(&made, name, false);
+    if (slot) return *slot;
+    size_t length = strlen(name);
+    char *descriptor_name = strdup(name);
+    if (!descriptor_name) return NULL;
+    descriptor_name[length - 2] = 'M';
+    descriptor_name[length - 1] = 'c';
+    perry_symbol descriptor = { 0 };
+    lookup_in_dependency(loader, dep, descriptor_name, &descriptor, 0);
+    free(descriptor_name);
+    if (!descriptor.found) return NULL;
+    // A protocol conformance descriptor: protocol, type reference, witness
+    // table pattern (relative), then flags, with the count of conditional
+    // requirements in bits 8-15.
+    const int32_t *conformance = descriptor.address;
+    if (((uint32_t)conformance[3] >> 8) & 0xff) return NULL;
+    pending_witness_table *pending = calloc(1, sizeof *pending);
+    void **table = calloc(WITNESS_TABLE_WORDS, sizeof(void *));
+    if (!pending || !table) return NULL;
+    *pending = (pending_witness_table){ table, conformance, strdup(name), pending_tables };
+    pending_tables = pending;
+    *hash_lookup_string(&made, name, true) = table;
+    return table;
+}
+
+static const void *relative_target(const int32_t *field) {
+    return (const char *)field + *field;
+}
+
+/// A relative pointer whose low bit says it points at a pointer to the
+/// target.
+static const void *relative_indirectable_target(const int32_t *field) {
+    const char *target = (const char *)field + (*field & ~1);
+    return (*field & 1) ? *(const void *const *)target : target;
+}
+
+void perry_make_witness_tables(perry_loader *loader) {
+    typedef const void *(*access_function)(size_t request);
+    typedef const void *const *(*get_witness_table)(const void *conformance, const void *type, const void *const *arguments);
+    get_witness_table get = NULL;
+    for (pending_witness_table *pending = pending_tables; pending; pending = pending->next) {
+        if (!get) {
+            perry_symbol sym = { 0 };
+            for (perry_image *img = loader->images; img && !sym.found; img = img->next)
+                perry_exports_lookup(loader, img, "_swift_getWitnessTable", &sym, 0);
+            if (!sym.found) return;
+            get = (get_witness_table)sym.address;
+        }
+        const int32_t *conformance = pending->conformance;
+        // The type reference's kind (bits 3-5 of the flags): a type
+        // descriptor, directly or through a pointer.
+        uint32_t flags = (uint32_t)conformance[3];
+        const int32_t *type;
+        switch ((flags >> 3) & 7) {
+        case 0: type = relative_target(&conformance[1]); break;
+        case 1: type = *(const int32_t *const *)relative_target(&conformance[1]); break;
+        default: continue;
+        }
+        // A type context descriptor: flags (generic: bit 7), parent, name,
+        // then its metadata access function, relative.
+        if (!type || ((uint32_t)type[0] & 0x80)) continue;
+        // A protocol descriptor: flags, parent, name, the counts of its
+        // requirements in its signature and of its requirements.
+        const int32_t *protocol = relative_indirectable_target(&conformance[0]);
+        uint32_t words = 1 + (uint32_t)protocol[4];
+        if (words > WITNESS_TABLE_WORDS) continue;
+        const void *metadata = ((access_function)relative_target(&type[3]))(0);
+        const void *const *table = metadata ? get(conformance, metadata, NULL) : NULL;
+        if (!table) continue;
+        memcpy(pending->table, table, words * sizeof(void *));
+        perry_trace(PERRY_TRACE_BIND, "witness table %s made from its conformance", pending->name);
+    }
+}
+
 perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal, const char *name, bool weak_import) {
     perry_symbol sym = { 0 };
     const char *library;
@@ -580,6 +681,14 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     for (uint32_t i = 0; is_class && !sym.found && i < loader->provider_count; i++)
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], name, &sym);
+
+    if (!sym.found && ordinal > 0) {
+        void *table = resilient_witness_table(loader, &image->deps[ordinal - 1], name);
+        if (table) {
+            sym.found = true;
+            sym.address = table;
+        }
+    }
 
     if (sym.found) {
         perry_record_import(image, library, name, PERRY_IMPORT_RESOLVED);

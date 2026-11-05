@@ -30,6 +30,8 @@ open class UISwitch: UIControl {
     @ObjCMethod("initWithFrame:")
     override func initialize(frame: CGRect) -> Self {
         _ = super.initialize(frame: CGRect(origin: frame.origin, size: UISwitch.size))
+        // It keeps its size, as Darwin's does, in Auto Layout and SwiftUI.
+        state.contentHuggingPriority = (750, 750)
         return self
     }
 

@@ -226,6 +226,11 @@ open class NSURLCache: NSObject {
 /// A task's Swift side and its completion handler.
 final class TaskState {
     let task: Task
+    /// When the task was made, where its metrics begin.
+    let created = Date()
+    /// Its own delegate, which hears of it before the session's.
+    var delegate: NSObject?
+    var metricsDelivered = false
 
     init(_ task: Task) {
         self.task = task
@@ -282,6 +287,8 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("countOfBytesSent") func countOfBytesSent() -> Int64 { task?.bytesSent ?? 0 }
     @ObjCMethod("countOfBytesExpectedToReceive") func countOfBytesExpectedToReceive() -> Int64 { task?.bytesExpectedToReceive ?? 0 }
     @ObjCMethod("countOfBytesExpectedToSend") func countOfBytesExpectedToSend() -> Int64 { task?.bytesExpectedToSend ?? 0 }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { Tasks.states.get(objcObject)?.delegate }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { Tasks.states.get(objcObject)?.delegate = delegate }
     @ObjCMethod("taskDescription") func taskDescription() -> String? { task?.taskDescription }
     @ObjCMethod("setTaskDescription:") func setTaskDescription(_ text: String?) { task?.taskDescription = text }
     @ObjCMethod("priority") func priority() -> Float { task?.priority ?? 0.5 }
@@ -386,6 +393,7 @@ final class DelegateEvents: SessionEvents, @unchecked Sendable {
 
     func task(_ task: Task, didCompleteWith error: Failure?) {
         let name = "URLSession:task:didCompleteWithError:"
+        run { [self] in Metrics.deliver(session: session, task: task, sessionDelegate: delegate) }
         if responds(name) {
             run { [self] in
                 send((@convention(c) (Object, UnsafeRawPointer, Object, Object, Object) -> Void).self)(
@@ -557,10 +565,13 @@ open class NSURLSession: NSObject {
         nonisolated(unsafe) let queue = state.queue
         let box = TaskBox()
         nonisolated(unsafe) let block = handler
+        nonisolated(unsafe) let session = objcObject
+        nonisolated(unsafe) let sessionDelegate = state.delegate
         let body: Session.DataCompletion = { data, response, error in
             box.task?.markCompleted()
             Hops.run(on: queue) {
                 ObjCRuntime.autoreleasepool {
+                    if let task = box.task { Metrics.deliver(session: session, task: task, sessionDelegate: sessionDelegate) }
                     Blocks.call(block, data.map(NSData.of)?.objcObject, response.map(Responses.object)?.objcObject,
                                 Errors.object(error)?.objcObject)
                 }

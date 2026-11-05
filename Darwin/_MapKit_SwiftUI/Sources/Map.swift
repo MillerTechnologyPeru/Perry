@@ -1,8 +1,10 @@
-// Map: an MKMapView, with the map content's annotations drawn over it as
-// SwiftUI views where their coordinates fall in the visible region, and
-// the controls mapControls gives along its trailing edge. The camera
-// position binding moves the map, and the map's moves are written back to
-// it, and reported to onMapCameraChange's actions.
+// Map: for now a stub, an empty area where the map would be. The map
+// itself, kept in mapKitBody, is an MKMapView with the map content's
+// annotations drawn over it as SwiftUI views where their coordinates fall
+// in the visible region, and the controls mapControls gives along its
+// trailing edge. The camera position binding moves the map, and the map's
+// moves are written back to it, and reported to onMapCameraChange's
+// actions.
 
 public import CoreLocation
 public import MapKit
@@ -188,9 +190,17 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
     @State private var visibleRegion: MKCoordinateRegion?
     @Environment(\.mapEnvironment) private var environment
 
+    /// For now a stub: an empty area in the map's land color, with neither
+    /// the map, its content nor its controls. The MKMapView-backed map is
+    /// `mapKitBody`, unused until it is ready.
     @preconcurrency
     @MainActor
     public var body: some View {
+        Color(red: 0.96, green: 0.95, blue: 0.92)
+    }
+
+    @MainActor @ViewBuilder
+    var mapKitBody: some View {
         let items = content.mapItems
         let target = (position?.wrappedValue ?? initialPosition)
         ZStack(alignment: .topTrailing) {

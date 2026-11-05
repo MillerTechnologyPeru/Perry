@@ -28,6 +28,7 @@ typedef struct perry_dependency {
     struct perry_image *image;  // set when the dependency is a Mach-O image
     perry_provider *provider;   // set when a Linux provider stands in for it
     struct perry_image *swift_overlay; // a framework's Swift code, for a Swift image
+    struct perry_image *swift_additions; // Swift API of the framework's that Perry adds, after the overlay's
 } perry_dependency;
 
 typedef struct perry_segment {
@@ -136,6 +137,9 @@ typedef struct perry_symbol {
 } perry_symbol;
 
 perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal, const char *name, bool weak_import);
+/// Fills in the witness tables made for apps from libraries' resilient
+/// conformances, once every image is bound.
+void perry_make_witness_tables(perry_loader *loader);
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth);
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name);
 void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name);

@@ -8,8 +8,10 @@
 @available(macOS 12.0, iOS 15.0, watchOS 8.0, tvOS 15.0, *)
 extension URLSession {
     /// Runs a task the session makes with a completion handler, cancelling
-    /// it if the calling task is cancelled.
+    /// it if the calling task is cancelled. The delegate is the task's own,
+    /// told of it before the session's delegate, metrics included.
     private func load<T: Sendable>(
+        delegate: (any URLSessionTaskDelegate)? = nil,
         _ make: (@escaping @Sendable (T?, URLResponse?, (any Error)?) -> Void) -> URLSessionTask
     ) async throws -> (T, URLResponse) {
         let box = _TaskBox()
@@ -25,6 +27,7 @@ extension URLSession {
                     }
                 }
                 box.task = task
+                if let delegate { task.delegate = delegate }
                 task.resume()
             }
         } onCancel: {
@@ -35,7 +38,7 @@ extension URLSession {
     /// Downloads the contents of a URL based on the specified URL request
     /// and delivers the data asynchronously.
     public func data(for request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (Data, URLResponse) {
-        try await load { handler in
+        try await load(delegate: delegate) { handler in
             dataTask(with: request) { data, response, error in handler(data ?? Data(), response, error) }
         }
     }
@@ -48,7 +51,7 @@ extension URLSession {
     /// Uploads data to a URL based on the specified URL request and delivers
     /// the result asynchronously.
     public func upload(for request: URLRequest, fromFile fileURL: URL, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (Data, URLResponse) {
-        try await load { handler in
+        try await load(delegate: delegate) { handler in
             uploadTask(with: request, fromFile: fileURL) { data, response, error in handler(data ?? Data(), response, error) }
         }
     }
@@ -56,7 +59,7 @@ extension URLSession {
     /// Uploads data to a URL based on the specified URL request and delivers
     /// the result asynchronously.
     public func upload(for request: URLRequest, from bodyData: Data, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (Data, URLResponse) {
-        try await load { handler in
+        try await load(delegate: delegate) { handler in
             uploadTask(with: request, from: bodyData) { data, response, error in handler(data ?? Data(), response, error) }
         }
     }
@@ -65,7 +68,7 @@ extension URLSession {
     /// to a file, delivering its location asynchronously. The file is moved
     /// out of the way of the task's own clean-up first.
     public func download(for request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (URL, URLResponse) {
-        try await load { handler in
+        try await load(delegate: delegate) { handler in
             downloadTask(with: request) { location, response, error in
                 handler(location.flatMap(URLSession.keep), response, error)
             }
@@ -80,7 +83,7 @@ extension URLSession {
 
     /// Resumes a previously paused download.
     public func download(resumeFrom resumeData: Data, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (URL, URLResponse) {
-        try await load { handler in
+        try await load(delegate: delegate) { handler in
             downloadTask(withResumeData: resumeData) { location, response, error in
                 handler(location.flatMap(URLSession.keep), response, error)
             }
@@ -127,7 +130,7 @@ extension URLSession {
     /// they have loaded, with the response.
     public func bytes(for request: URLRequest, delegate: (any URLSessionTaskDelegate)? = nil) async throws -> (AsyncBytes, URLResponse) {
         let box = _TaskBox()
-        let (data, response): (Data, URLResponse) = try await load { handler in
+        let (data, response): (Data, URLResponse) = try await load(delegate: delegate) { handler in
             let task = dataTask(with: request) { data, response, error in handler(data ?? Data(), response, error) }
             box.task = task
             return task

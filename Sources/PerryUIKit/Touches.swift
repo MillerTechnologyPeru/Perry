@@ -149,8 +149,15 @@ enum Touches {
     /// Whether the touched view has been sent -touchesBegan:withEvent:.
     nonisolated(unsafe) private static var delivered = false
     /// The gesture recognizers of the touched view and its ancestors, which
-    /// hear of the touch as the view does.
-    nonisolated(unsafe) private static var recognizers: [UIGestureRecognizer] = []
+    /// hear of the touch as the view does. Held until the touch is over, as
+    /// Darwin holds them: a view the touch began in may go away during it,
+    /// and its recognizers with it.
+    nonisolated(unsafe) private static var recognizers: [UIGestureRecognizer] = [] {
+        didSet {
+            for recognizer in recognizers { _ = ObjCRuntime.retain(recognizer.objcObject) }
+            for recognizer in oldValue { ObjCRuntime.release(recognizer.objcObject) }
+        }
+    }
 
     /// Whether the touched view's touches were cancelled by a recognizer
     /// that began, after which it hears of no more.

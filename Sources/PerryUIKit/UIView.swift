@@ -42,6 +42,8 @@ final class ViewState: ObjectState {
     var interactions: [NSObject] = []
     /// The view controller whose view this is; not retained.
     var viewController: UnsafeMutableRawPointer?
+    /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
+    var userInterfaceStyle = 0
 
     var center: CGPoint {
         get { geometry.position }
@@ -457,8 +459,48 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Appearance
 
-    /// The device's, for every view.
-    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+    /// The device's, in the appearance the view, its controller or the
+    /// nearest superview or controller above it overrides it with.
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device(style: interfaceStyle) }
+
+    /// Nothing to do here; subclasses override it.
+    @ObjCMethod("traitCollectionDidChange:") func traitCollectionDidChange(_ previous: UITraitCollection?) {}
+
+    @ObjCMethod("overrideUserInterfaceStyle") func overrideUserInterfaceStyle() -> Int { state.userInterfaceStyle }
+    @ObjCMethod("setOverrideUserInterfaceStyle:")
+    func setOverrideUserInterfaceStyle(_ style: Int) {
+        let previous = traitCollection()
+        state.userInterfaceStyle = style
+        announceTraitChange(from: previous)
+    }
+
+    /// The appearance this view is drawn in: the first override from it up.
+    var interfaceStyle: Int {
+        var current: UIView? = self
+        while let view = current {
+            if view.state.userInterfaceStyle != 0 { return view.state.userInterfaceStyle }
+            if let controller = view.state.viewController.map({ UIViewController.wrap($0) }),
+               controller.state.userInterfaceStyle != 0 {
+                return controller.state.userInterfaceStyle
+            }
+            current = view.state.superview.map { UIView.wrap($0) }
+        }
+        return 1
+    }
+
+    /// Sends -traitCollectionDidChange: to this view, its subviews and their
+    /// controllers when their appearance changed.
+    func announceTraitChange(from previous: UITraitCollection) {
+        guard previous.traits.style != interfaceStyle else { return }
+        var pending = [self]
+        while let view = pending.popLast() {
+            view.sendTraitCollectionDidChange(previous)
+            if let controller = view.state.viewController {
+                NSObject(controller).sendTraitCollectionDidChange(previous)
+            }
+            pending.append(contentsOf: view.state.subviews)
+        }
+    }
 
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
     /// A stack view closes up around an arranged subview that hides. As

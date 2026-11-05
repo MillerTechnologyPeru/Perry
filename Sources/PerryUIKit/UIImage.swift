@@ -122,7 +122,7 @@ open class UIImage: NSObject {
 
     /// The named image's file in `bundle`, else the bundle's asset
     /// catalog's.
-    static func image(_ cls: ObjCClass, named name: String, in bundle: NSBundle, catalog: Bool) -> UIImage? {
+    static func image(_ cls: ObjCClass, named name: String, in bundle: NSBundle, catalog: Bool, dark: Bool = false) -> UIImage? {
         let base = name.hasSuffix(".png") || name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name
         let type = name.hasSuffix(".jpg") ? "jpg" : "png"
         let suffixes = Screen.scale >= 3 ? ["@3x", "@2x", ""] : Screen.scale >= 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
@@ -133,15 +133,16 @@ open class UIImage: NSObject {
         }
         guard catalog else { return nil }
         let found = bundle.objcObject == NSBundle.main().objcObject
-            ? AssetCatalog.image(named: name) : AssetCatalog.catalog(in: bundle)?.image(named: name)
+            ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
         return found.map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
     }
 
-    /// In the bundle given, the main bundle when none is.
+    /// In the bundle given, the main bundle when none is; the catalog's
+    /// image for the dark appearance when the traits are dark.
     @ObjCClassMethod("imageNamed:inBundle:compatibleWithTraitCollection:")
     static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIImage? {
-        guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else { return image(cls, named: name) }
-        return image(cls, named: name, in: bundle, catalog: true)
+        let dark = traits?.as(UITraitCollection.self)?.traits.style == 2
+        return image(cls, named: name, in: bundle?.as(NSBundle.self) ?? NSBundle.main(), catalog: true, dark: dark)
     }
 
     @ObjCClassMethod("imageNamed:inBundle:withConfiguration:")

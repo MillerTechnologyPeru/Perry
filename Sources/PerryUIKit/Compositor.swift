@@ -21,6 +21,12 @@ enum SDL {
     nonisolated(unsafe) static var primaryDisplay: (@convention(c) () -> UInt32)?
     nonisolated(unsafe) static var displayContentScale: (@convention(c) (UInt32) -> Float)?
     nonisolated(unsafe) static var displayUsableBounds: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool)?
+    /// SDL_GetDesktopDisplayMode: its SDL_DisplayMode, whose pixel_density
+    /// (at 16) is the desktop's scaling of the display, fractional on a
+    /// desktop scaled by 125%.
+    nonisolated(unsafe) static var desktopDisplayMode: (@convention(c) (UInt32) -> UnsafeRawPointer?)?
+    nonisolated(unsafe) static var windowPixelDensity: (@convention(c) (Pointer?) -> Float)?
+    nonisolated(unsafe) static var setWindowSize: (@convention(c) (Pointer?, Int32, Int32) -> Bool)?
     nonisolated(unsafe) static var startTextInput: (@convention(c) (Pointer?) -> Bool)?
     nonisolated(unsafe) static var setViewport: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)?
     nonisolated(unsafe) static var outputSize: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> Bool)?
@@ -69,26 +75,43 @@ enum SDL {
         return result
     }
 
-    /// The desktop's scaling of the primary display (2 on a HiDPI desktop),
-    /// starting SDL's video for the question; nil without SDL or a display.
+    /// The desktop's scaling of the primary display, as the native display
+    /// gives it: its pixels per window coordinate (1.25 on a desktop scaled
+    /// by 125%, 2 on a HiDPI one) times its content scale. Starts SDL's
+    /// video for the question; nil without SDL or a display.
     static func nativeScale() -> CGFloat? {
+        guard let display = primaryDisplayStarted() else { return nil }
+        let content = displayContentScale.map { CGFloat($0(display)) } ?? 1
+        let scale = displayDensity(display) * (content > 0 ? content : 1)
+        return scale > 0 ? scale : nil
+    }
+
+    /// The primary display's pixels per window coordinate: its desktop
+    /// mode's pixel density, else 1.
+    static func displayDensity() -> CGFloat { primaryDisplayStarted().map(displayDensity) ?? 1 }
+
+    private static func displayDensity(_ display: UInt32) -> CGFloat {
+        guard let mode = desktopDisplayMode?(display) else { return 1 }
+        let density = CGFloat(mode.load(fromByteOffset: 16, as: Float.self))
+        return density > 0 ? density : 1
+    }
+
+    private static func primaryDisplayStarted() -> UInt32? {
         prepareEnvironment()
-        guard loadOnce(), initialize(0x20), let primaryDisplay, let displayContentScale else { return nil }
+        guard loadOnce(), initialize(0x20), let primaryDisplay else { return nil }
         let display = primaryDisplay()
-        guard display != 0 else { return nil }
-        let scale = displayContentScale(display)
-        return scale > 0 ? CGFloat(scale) : nil
+        return display != 0 ? display : nil
     }
 
     /// The primary display's usable area, without the desktop's panels, in
-    /// pixels; nil without SDL or a display.
+    /// pixels: SDL gives it in window coordinates, which a scaled desktop's
+    /// pixel density turns to pixels. Nil without SDL or a display.
     static func usableDisplaySize() -> CGSize? {
-        prepareEnvironment()
-        guard loadOnce(), initialize(0x20), let primaryDisplay, let displayUsableBounds else { return nil }
-        let display = primaryDisplay()
+        guard let display = primaryDisplayStarted(), let displayUsableBounds else { return nil }
         var rect = [Int32](repeating: 0, count: 4)     // SDL_Rect: x, y, w, h
-        guard display != 0, displayUsableBounds(display, &rect), rect[2] > 0, rect[3] > 0 else { return nil }
-        return CGSize(width: CGFloat(rect[2]), height: CGFloat(rect[3]))
+        guard displayUsableBounds(display, &rect), rect[2] > 0, rect[3] > 0 else { return nil }
+        let density = displayDensity(display)
+        return CGSize(width: (CGFloat(rect[2]) * density).rounded(.down), height: (CGFloat(rect[3]) * density).rounded(.down))
     }
 
     /// Binds SDL3's functions; false without libSDL3.
@@ -118,6 +141,12 @@ enum SDL {
         displayContentScale = dlsym(library, "SDL_GetDisplayContentScale").map { unsafeBitCast($0, to: (@convention(c) (UInt32) -> Float).self) }
         displayUsableBounds = dlsym(library, "SDL_GetDisplayUsableBounds")
             .map { unsafeBitCast($0, to: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool).self) }
+        desktopDisplayMode = dlsym(library, "SDL_GetDesktopDisplayMode")
+            .map { unsafeBitCast($0, to: (@convention(c) (UInt32) -> UnsafeRawPointer?).self) }
+        windowPixelDensity = dlsym(library, "SDL_GetWindowPixelDensity")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Float).self) }
+        setWindowSize = dlsym(library, "SDL_SetWindowSize")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Int32, Int32) -> Bool).self) }
         startTextInput = dlsym(library, "SDL_StartTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
         setViewport = dlsym(library, "SDL_SetRenderViewport")
             .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool).self) }
@@ -132,6 +161,9 @@ final class Compositor {
     let window: SDL.Pointer
     let renderer: SDL.Pointer
     let scale: CGFloat
+    /// The window's pixels per window coordinate, which SDL gives events
+    /// and sizes in: the desktop's scaling, fractional or whole.
+    private(set) var density: CGFloat = 1
 
     /// SDL's renderer's EGL context, which an app's EAGLContext displaces
     /// when it draws on the same thread.
@@ -145,21 +177,36 @@ final class Compositor {
             uikitWarning("SDL could not start its video: \(SDL.lastError)")
             return nil
         }
-        let width = Int32((size.width * scale).rounded()), height = Int32((size.height * scale).rounded())
-        // SDL_WINDOW_RESIZABLE.
-        guard let window = title.withCString({ SDL.createWindow($0, width, height, Screen.isResizable ? 0x20 : 0) }),
+        // The window is made in window coordinates, the display's pixels
+        // over its density, and drawn at its pixel density, so a desktop
+        // scaled by a fraction shows it pixel for pixel rather than scaled.
+        let estimate = SDL.displayDensity()
+        let width = Int32((size.width * scale / estimate).rounded()), height = Int32((size.height * scale / estimate).rounded())
+        // SDL_WINDOW_RESIZABLE, SDL_WINDOW_HIGH_PIXEL_DENSITY.
+        let flags: UInt64 = (Screen.isResizable ? 0x20 : 0) | 0x2000
+        guard let window = title.withCString({ SDL.createWindow($0, width, height, flags) }),
               let renderer = "opengles2".withCString({ SDL.createRenderer(window, $0) }) else {
             uikitWarning("SDL could not make a window: \(SDL.lastError)")
             return nil
         }
+        let density = SDL.windowPixelDensity.map { CGFloat($0(window)) } ?? estimate
+        // A compositor that draws the window at another density than the
+        // display's has it resized, for the pixels the screen needs.
+        if density > 0, abs(density - estimate) > 0.01 {
+            _ = SDL.setWindowSize?(window, Int32((size.width * scale / density).rounded()), Int32((size.height * scale / density).rounded()))
+        }
         // The smallest an iPad app's window gets.
-        if Screen.isResizable { _ = SDL.setWindowMinimumSize?(window, Int32(320 * scale), Int32(320 * scale)) }
+        if Screen.isResizable {
+            let side = Int32((320 * scale / max(density, 1)).rounded())
+            _ = SDL.setWindowMinimumSize?(window, side, side)
+        }
         (self.window, self.renderer, self.scale) = (window, renderer, scale)
+        self.density = density > 0 ? density : 1
         fitted = Screen.fixed != nil && SDL.setViewport != nil && SDL.outputSize != nil
         rendererContext = EAGLContexts.save()
         let name = SDL.rendererName(renderer).map { String(cString: $0) } ?? "unknown"
         Display.gpuRenderer = name
-        uikitWarning("live view composited by SDL's \(name) renderer")
+        uikitWarning("live view composited by SDL's \(name) renderer, at \(scale) pixels a point, \(self.density) a window coordinate")
     }
 
     /// Typed text arrives while text input is on, as for a keyboard on screen.
@@ -201,9 +248,10 @@ final class Compositor {
         while event.withUnsafeMutableBytes({ SDL.pollEvent($0.baseAddress) }) {
             event.withUnsafeBytes { raw in
                 let type = raw.load(fromByteOffset: 0, as: UInt32.self)
+                /// A mouse event's place, which SDL gives in window coordinates.
                 func point() -> CGPoint {
-                    CGPoint(x: (CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) - origin.x) / scale,
-                            y: (CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) - origin.y) / scale)
+                    CGPoint(x: (CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) * density - origin.x) / scale,
+                            y: (CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) * density - origin.y) / scale)
                 }
                 /// A mouse event SDL made from a finger: SDL_TOUCH_MOUSEID.
                 func fromFinger() -> Bool { raw.load(fromByteOffset: 20, as: UInt32.self) == UInt32.max }
@@ -253,7 +301,7 @@ final class Compositor {
                     guard !fromFinger(), raw.load(fromByteOffset: 24, as: UInt8.self) == 1 else { break }
                     if type == 0x401 { Touches.down(at: point()) } else { Touches.up(at: point()) }
                     Display.markDirty()
-                case 0x206 where !fitted: // window resized: its size at 20 and 24
+                case 0x207 where !fitted: // window's pixel size changed: its pixels at 20 and 24
                     let size = CGSize(width: CGFloat(raw.load(fromByteOffset: 20, as: Int32.self)) / scale,
                                       height: CGFloat(raw.load(fromByteOffset: 24, as: Int32.self)) / scale)
                     Screen.resize(to: size)
