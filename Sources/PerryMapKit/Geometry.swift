@@ -5,14 +5,60 @@ import PerryObjCInterop
 // MapKit's geometry: regions in degrees, and map points on the Web Mercator
 // projection of the world onto a square 2^28 points across, as MapKit's.
 
-extension CLLocationCoordinate2D: ObjCScalar { public static var objCTypeEncoding: String { "{CLLocationCoordinate2D=dd}" } }
-extension MKCoordinateSpan: ObjCScalar { public static var objCTypeEncoding: String { "{MKCoordinateSpan=dd}" } }
-extension MKCoordinateRegion: ObjCScalar {
-    public static var objCTypeEncoding: String { "{MKCoordinateRegion={CLLocationCoordinate2D=dd}{MKCoordinateSpan=dd}}" }
+extension CLLocationCoordinate2D: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{CLLocationCoordinate2D=dd}" }
+    #else
+    public typealias ObjCType = CLLocationCoordinate2D
+    public static var objCTypeEncoding: String { "{CLLocationCoordinate2D=dd}" }
+    #endif
 }
-extension MKMapPoint: ObjCScalar { public static var objCTypeEncoding: String { "{MKMapPoint=dd}" } }
-extension MKMapSize: ObjCScalar { public static var objCTypeEncoding: String { "{MKMapSize=dd}" } }
-extension MKMapRect: ObjCScalar { public static var objCTypeEncoding: String { "{MKMapRect={MKMapPoint=dd}{MKMapSize=dd}}" } }
+extension MKCoordinateSpan: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{MKCoordinateSpan=dd}" }
+    #else
+    public typealias ObjCType = MKCoordinateSpan
+    public static var objCTypeEncoding: String { "{MKCoordinateSpan=dd}" }
+    #endif
+}
+extension MKCoordinateRegion: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords8
+    public static var objCTypeEncoding: String { "{MKCoordinateRegion={CLLocationCoordinate2D=dd}{MKCoordinateSpan=dd}}" }
+    #else
+    public typealias ObjCType = MKCoordinateRegion
+    public static var objCTypeEncoding: String { "{MKCoordinateRegion={CLLocationCoordinate2D=dd}{MKCoordinateSpan=dd}}" }
+    #endif
+}
+extension MKMapPoint: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{MKMapPoint=dd}" }
+    #else
+    public typealias ObjCType = MKMapPoint
+    public static var objCTypeEncoding: String { "{MKMapPoint=dd}" }
+    #endif
+}
+extension MKMapSize: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{MKMapSize=dd}" }
+    #else
+    public typealias ObjCType = MKMapSize
+    public static var objCTypeEncoding: String { "{MKMapSize=dd}" }
+    #endif
+}
+extension MKMapRect: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords8
+    public static var objCTypeEncoding: String { "{MKMapRect={MKMapPoint=dd}{MKMapSize=dd}}" }
+    #else
+    public typealias ObjCType = MKMapRect
+    public static var objCTypeEncoding: String { "{MKMapRect={MKMapPoint=dd}{MKMapSize=dd}}" }
+    #endif
+}
 
 enum MapGeometry {
     static let worldSize = MKMapSize(width: 268_435_456, height: 268_435_456)
@@ -92,18 +138,18 @@ enum DeviceLocation {
     }()
 }
 
-@c(_MKCoordinateSpanMake)
+@DarwinC("_MKCoordinateSpanMake")
 public func MKCoordinateSpanMake(_ latitudeDelta: Double, _ longitudeDelta: Double) -> MKCoordinateSpan {
     MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
 }
 
-@c(_MKCoordinateRegionMake)
+@DarwinC("_MKCoordinateRegionMake")
 public func MKCoordinateRegionMake(_ center: CLLocationCoordinate2D, _ span: MKCoordinateSpan) -> MKCoordinateRegion {
     MKCoordinateRegion(center: center, span: span)
 }
 
 /// A region `latitudinalMeters` tall and `longitudinalMeters` wide.
-@c(_MKCoordinateRegionMakeWithDistance)
+@DarwinC("_MKCoordinateRegionMakeWithDistance")
 public func MKCoordinateRegionMakeWithDistance(_ center: CLLocationCoordinate2D, _ latitudinalMeters: Double,
                                                _ longitudinalMeters: Double) -> MKCoordinateRegion {
     let longitudeScale = max(cos(center.latitude * .pi / 180), 0.000001)
@@ -112,22 +158,22 @@ public func MKCoordinateRegionMakeWithDistance(_ center: CLLocationCoordinate2D,
         longitudeDelta: longitudinalMeters / (MapGeometry.metersPerDegree * longitudeScale)))
 }
 
-@c(_MKCoordinateRegionForMapRect)
+@DarwinC("_MKCoordinateRegionForMapRect")
 public func MKCoordinateRegionForMapRect(_ rect: MKMapRect) -> MKCoordinateRegion { MapGeometry.region(rect) }
 
-@c(_MKMapPointForCoordinate)
+@DarwinC("_MKMapPointForCoordinate")
 public func MKMapPointForCoordinate(_ coordinate: CLLocationCoordinate2D) -> MKMapPoint { MapGeometry.point(coordinate) }
 
-@c(_MKCoordinateForMapPoint)
+@DarwinC("_MKCoordinateForMapPoint")
 public func MKCoordinateForMapPoint(_ point: MKMapPoint) -> CLLocationCoordinate2D { MapGeometry.coordinate(point) }
 
-@c(_MKMetersPerMapPointAtLatitude)
+@DarwinC("_MKMetersPerMapPointAtLatitude")
 public func MKMetersPerMapPointAtLatitude(_ latitude: Double) -> Double { MapGeometry.metersPerMapPoint(latitude) }
 
-@c(_MKMapPointsPerMeterAtLatitude)
+@DarwinC("_MKMapPointsPerMeterAtLatitude")
 public func MKMapPointsPerMeterAtLatitude(_ latitude: Double) -> Double { 1 / MapGeometry.metersPerMapPoint(latitude) }
 
-@c(_MKMetersBetweenMapPoints)
+@DarwinC("_MKMetersBetweenMapPoints")
 public func MKMetersBetweenMapPoints(_ a: MKMapPoint, _ b: MKMapPoint) -> Double {
     let from = MapGeometry.coordinate(a), to = MapGeometry.coordinate(b)
     let radians = Double.pi / 180
@@ -136,31 +182,31 @@ public func MKMetersBetweenMapPoints(_ a: MKMapPoint, _ b: MKMapPoint) -> Double
     return 6_371_008.8 * 2 * atan2(h.squareRoot(), (1 - h).squareRoot())
 }
 
-@c(_MKMapRectUnion) public func MKMapRectUnion(_ a: MKMapRect, _ b: MKMapRect) -> MKMapRect { MapGeometry.union(a, b) }
-@c(_MKMapRectIntersection) public func MKMapRectIntersection(_ a: MKMapRect, _ b: MKMapRect) -> MKMapRect { MapGeometry.intersection(a, b) }
-@c(_MKMapRectIntersectsRect)
+@DarwinC("_MKMapRectUnion") public func MKMapRectUnion(_ a: MKMapRect, _ b: MKMapRect) -> MKMapRect { MapGeometry.union(a, b) }
+@DarwinC("_MKMapRectIntersection") public func MKMapRectIntersection(_ a: MKMapRect, _ b: MKMapRect) -> MKMapRect { MapGeometry.intersection(a, b) }
+@DarwinC("_MKMapRectIntersectsRect")
 public func MKMapRectIntersectsRect(_ a: MKMapRect, _ b: MKMapRect) -> Bool { !MapGeometry.isNull(MapGeometry.intersection(a, b)) }
-@c(_MKMapRectContainsPoint) public func MKMapRectContainsPoint(_ rect: MKMapRect, _ point: MKMapPoint) -> Bool { MapGeometry.contains(rect, point) }
+@DarwinC("_MKMapRectContainsPoint") public func MKMapRectContainsPoint(_ rect: MKMapRect, _ point: MKMapPoint) -> Bool { MapGeometry.contains(rect, point) }
 
-@c(_MKMapRectContainsRect)
+@DarwinC("_MKMapRectContainsRect")
 public func MKMapRectContainsRect(_ a: MKMapRect, _ b: MKMapRect) -> Bool {
     let both = MapGeometry.intersection(a, b)
     return !MapGeometry.isNull(both) && both.origin.x == b.origin.x && both.origin.y == b.origin.y
         && both.size.width == b.size.width && both.size.height == b.size.height
 }
 
-@c(_MKMapRectInset)
+@DarwinC("_MKMapRectInset")
 public func MKMapRectInset(_ rect: MKMapRect, _ dx: Double, _ dy: Double) -> MKMapRect {
     MKMapRect(origin: MKMapPoint(x: rect.origin.x + dx, y: rect.origin.y + dy),
               size: MKMapSize(width: rect.size.width - 2 * dx, height: rect.size.height - 2 * dy))
 }
 
-@c(_MKMapRectOffset)
+@DarwinC("_MKMapRectOffset")
 public func MKMapRectOffset(_ rect: MKMapRect, _ dx: Double, _ dy: Double) -> MKMapRect {
     MKMapRect(origin: MKMapPoint(x: rect.origin.x + dx, y: rect.origin.y + dy), size: rect.size)
 }
 
-@c(_MKMapRectSpans180thMeridian)
+@DarwinC("_MKMapRectSpans180thMeridian")
 public func MKMapRectSpans180thMeridian(_ rect: MKMapRect) -> Bool { rect.origin.x + rect.size.width > MapGeometry.worldSize.width }
 
 @ObjCConstants
