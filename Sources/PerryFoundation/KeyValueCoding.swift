@@ -109,9 +109,12 @@ enum KeyValueCoding {
     }
 }
 
-/// Structures passed to and returned from accessors as arm64 passes them:
-/// up to four floats or doubles in d0 to d3, others up to 16 bytes in two
-/// general registers, larger ones through memory. KVC wraps them in NSValue.
+/// Structures passed to and returned from accessors as Darwin passes them,
+/// which KVC wraps in NSValue. On arm64: up to four floats or doubles in d0
+/// to d3, others up to 16 bytes in two general registers, larger ones
+/// through memory. On armv7: arguments as words in r2, r3 and then on the
+/// stack; results of up to 4 bytes in r0, larger ones through a pointer
+/// passed in r0, before self.
 enum Structures {
     /// A method's types, whole: "{_NSRange=QQ}", "@", ":".
     static func encodedTypes(_ object: id, _ selector: SEL) -> [String] {
@@ -157,6 +160,40 @@ enum Structures {
         return (first, members.count)
     }
 
+    #if _pointerBitWidth(_32)
+    /// The most words a structure argument may take.
+    static let argumentWords = 16
+
+    static func get(_ object: id, _ selector: SEL, type: String) -> id? {
+        guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return nil }
+        var bytes = [UInt8](repeating: 0, count: max(size, 4))
+        if size <= 4 {
+            var word = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> UInt32).self)(object, selector)
+            withUnsafeBytes(of: &word) { word in bytes.withUnsafeMutableBytes { $0.copyMemory(from: word) } }
+        } else {
+            let getter = unsafeBitCast(imp, to: (@convention(c) (UnsafeMutableRawPointer, id, SEL) -> Void).self)
+            bytes.withUnsafeMutableBytes { getter($0.baseAddress!, object, selector) }
+        }
+        return bytes.prefix(size).withUnsafeBytes {
+            ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: $0.baseAddress, type: type))
+        }
+    }
+
+    static func set(_ object: id, _ selector: SEL, _ value: id?) {
+        guard let storage = Values.storage(value), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return }
+        guard storage.bytes.count <= argumentWords * 4 else {
+            foundationFatal("-[\(ObjC.className(object)) \(String(cString: selector))]: a \(storage.bytes.count)-byte structure is too large for key-value coding")
+        }
+        var w = [UInt32](repeating: 0, count: argumentWords)
+        storage.bytes.withUnsafeBytes { source in w.withUnsafeMutableBytes { $0.copyMemory(from: source) } }
+        typealias Setter = @convention(c) (id, SEL, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                                           UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32) -> Void
+        unsafeBitCast(imp, to: Setter.self)(object, selector, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+                                            w[8], w[9], w[10], w[11], w[12], w[13], w[14], w[15])
+    }
+    #else
     static func get(_ object: id, _ selector: SEL, type: String) -> id? {
         guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
         else { return nil }
@@ -200,7 +237,7 @@ enum Structures {
                 perry_foundation_call_setter(object, selector, imp, registers)
             }
         }
-    }
+    }    #endif
 }
 
 /// Key-value coding's collection operators: @count, @sum, @avg, @max,
