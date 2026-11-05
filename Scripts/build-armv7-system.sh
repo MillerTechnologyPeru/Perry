@@ -13,7 +13,7 @@ cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi
   -I$root/Sources/PerrySystem/include -I$root/Sources/PerryInterface/include"
 
 objects=""
-for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c; do
+for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c; do
     object=$out/obj/system-$name.o
     # shellcheck disable=SC2086
     "$llvm/clang" $cflags -c "$root/Sources/PerrySystem/$name" -o "$object"
