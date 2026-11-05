@@ -2,8 +2,9 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-// The main bundle's compiled asset catalog, Assets.car, from which
-// +imageNamed: takes the images that are not loose files. It is a BOM file
+// A bundle's compiled asset catalog, Assets.car, from which +imageNamed:
+// and its variant for other bundles take the images that are not loose
+// files. It is a BOM file
 // of named trees: FACETKEYS maps image names to their attributes,
 // KEYFORMAT lists the attributes a rendition's key holds, and RENDITIONS
 // holds each rendition: a CSI header, then its pixels, compressed in one
@@ -24,6 +25,22 @@ enum AssetCatalog {
 
     /// The named image at the scale nearest the screen's.
     static func image(named name: String) -> (image: Owned, scale: CGFloat)? { main?.image(named: name) }
+
+    /// Other bundles' catalogs (a Swift package's resource bundle, a
+    /// framework's), by the bundle's path, read the first time one of their
+    /// images is asked for.
+    nonisolated(unsafe) private static var catalogs: [String: Catalog?] = [:]
+    private static let lock = Lock()
+
+    static func catalog(in bundle: NSBundle) -> Catalog? {
+        guard let path = bundle.path(forResource: "Assets", ofType: "car") else { return nil }
+        return lock.withLock {
+            if let catalog = catalogs[path] { return catalog }
+            let catalog = Catalog(path: path)
+            catalogs[path] = catalog
+            return catalog
+        }
+    }
 }
 
 final class Catalog {
