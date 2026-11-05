@@ -1,5 +1,6 @@
 import CPerryGeometry
 import CPerryMetal
+import Glibc
 import PerryObjCInterop
 
 // Command queues, command buffers and compute command encoders. A command
@@ -83,6 +84,7 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
     var label: String?
     /// The encoders' pipelines and buffers, kept until it completes.
     var resources: [NSObject] = []
+    var committed = false
     private let lock = Lock()
 
     init(handle: perry_m2v_handle, queue: MTLCommandQueue) {
@@ -96,6 +98,7 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
     }
 
     func keep(_ object: NSObject) {
+        guard !committed else { return }
         lock.withLock { resources.append(object) }
     }
 
@@ -115,13 +118,51 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
     }
 
     @ObjCMethod("computeCommandEncoderWithDispatchType:")
-    func computeCommandEncoder(dispatchType: UInt) -> MTLComputeCommandEncoder? { computeCommandEncoder() }
+    func computeCommandEncoder(dispatchType: UInt) -> MTLComputeCommandEncoder? {
+        Trace.log("computeCommandEncoder", "dispatch type \(dispatchType)")
+        return computeCommandEncoder()
+    }
+
+    @ObjCMethod("renderCommandEncoderWithDescriptor:")
+    func renderCommandEncoder(descriptor: MTLRenderPassDescriptor?) -> MTLRenderCommandEncoder? {
+        guard let descriptor else { return nil }
+        var (pass, textures) = descriptor.value()
+        if Trace.enabled {
+            let color = descriptor.colors.slots.elements[0]
+            let target = color?.texture.map { "\($0.descriptor.width)×\($0.descriptor.height) format \($0.descriptor.pixel_format)" } ?? "none"
+            Trace.log("renderCommandEncoder", "colour \(target) level \(color?.value.level ?? 0) mips \(color?.texture?.descriptor.mipmap_level_count ?? 0), load \(color?.value.load_action ?? 0), clear \(color?.value.clear ?? (0, 0, 0, 0))")
+        }
+        if Trace.debugClear {
+            // Drawables (BGRA8) clear to magenta, other targets to green.
+            let drawable = descriptor.colors.slots.elements[0]?.texture?.descriptor.pixel_format == 80
+            pass.color_attachments.0.clear = drawable ? (1, 0, 1, 1) : (0, 1, 0, 1)
+        }
+        if let texture = descriptor.colors.slots.elements[0]?.texture { dumpPass(texture) }
+        for texture in textures { keep(texture) }
+        let (encoder, message) = M2V.call { M2V.api.command_buffer_render_command_encoder(handle, &pass, $0) }
+        guard let encoder else {
+            metalWarning("renderCommandEncoderWithDescriptor: \(message ?? "failed")")
+            return nil
+        }
+        return MTLRenderCommandEncoder(handle: encoder, commandBuffer: self)
+    }
+
+    @ObjCMethod("blitCommandEncoder") func blitCommandEncoder() -> MTLBlitCommandEncoder? {
+        let (encoder, message) = M2V.call { M2V.api.command_buffer_blit_command_encoder(handle, $0) }
+        guard let encoder else {
+            metalWarning("blitCommandEncoder: \(message ?? "failed")")
+            return nil
+        }
+        return MTLBlitCommandEncoder(handle: encoder, commandBuffer: self)
+    }
 
     @ObjCMethod("enqueue") func enqueue() {}
 
     @ObjCMethod("commit") func commit() {
+        Trace.log("commit")
         // The resources go once the work is done.
         keepResourcesUntilCompleted()
+        committed = true
         let (_, message) = M2V.call { M2V.api.command_buffer_commit(handle, $0) }
         if let message { metalWarning("commit: \(message)") }
     }
@@ -166,6 +207,72 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
         }
     }
 
+    /// PERRY_METAL_DUMP_PASSES=<directory>: the colour targets of render
+    /// passes PERRY_METAL_DUMP_PASS (1000 by default) to 20 after it, as
+    /// PPMs, once their command buffer completes.
+    nonisolated(unsafe) static var passes = 0
+    nonisolated(unsafe) static let dumpDirectory = getenv("PERRY_METAL_DUMP_PASSES").map { String(cString: $0) }
+    nonisolated(unsafe) static let dumpFrom = getenv("PERRY_METAL_DUMP_PASS").flatMap { Int(String(cString: $0)) } ?? 1000
+
+    private func dumpPass(_ texture: MTLTexture) {
+        guard let directory = Self.dumpDirectory else { return }
+        Self.passes += 1
+        let pass = Self.passes
+        guard pass >= Self.dumpFrom, pass < Self.dumpFrom + 20 else { return }
+        onCompletion {
+            let width = Int(texture.descriptor.width), height = Int(texture.descriptor.height)
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            let read = pixels.withUnsafeMutableBytes { texture.readRGBA($0.baseAddress, width: UInt(width), height: UInt(height)) }
+            guard read, let file = fopen("\(directory)/pass-\(pass)-\(width)x\(height)-f\(texture.descriptor.pixel_format).ppm", "wb") else {
+                metalWarning("pass \(pass): not read")
+                return
+            }
+            defer { fclose(file) }
+            let header = "P6\n\(width) \(height)\n255\n"
+            _ = header.withCString { fwrite($0, 1, strlen($0), file) }
+            var row = [UInt8](repeating: 0, count: width * 3)
+            for y in (0..<height).reversed() {
+                for x in 0..<width {
+                    let i = (y * width + x) * 4
+                    (row[x * 3], row[x * 3 + 1], row[x * 3 + 2]) = (pixels[i], pixels[i + 1], pixels[i + 2])
+                }
+                _ = row.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) }
+            }
+        }
+    }
+
+    /// A texture's pixels once the work completes, as a PPM of its colour
+    /// beside one of its alpha, rows as stored.
+    func dumpOnCompletion(_ texture: MTLTexture, to path: String) {
+        onCompletion {
+            let width = Int(texture.descriptor.width), height = Int(texture.descriptor.height)
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0), size: MTLSize(width: UInt(width), height: UInt(height), depth: 1))
+            let (read, message) = M2V.call { out in
+                pixels.withUnsafeMutableBytes {
+                    M2V.api.texture_get_bytes(texture.handle, $0.baseAddress, $0.count, UInt64(width * 4), 0, region, 0, 0, out)
+                }
+            }
+            guard read, let file = fopen(path, "wb") else {
+                metalWarning("dump \(path): \(message ?? "not read")")
+                return
+            }
+            defer { fclose(file) }
+            let header = "P6\n\(width * 2) \(height)\n255\n"
+            _ = header.withCString { fwrite($0, 1, strlen($0), file) }
+            var row = [UInt8](repeating: 0, count: width * 6)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let i = (y * width + x) * 4
+                    (row[x * 3], row[x * 3 + 1], row[x * 3 + 2]) = (pixels[i], pixels[i + 1], pixels[i + 2])
+                    let a = (width + x) * 3
+                    (row[a], row[a + 1], row[a + 2]) = (pixels[i + 3], pixels[i + 3], pixels[i + 3])
+                }
+                _ = row.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) }
+            }
+        }
+    }
+
     private func keepResourcesUntilCompleted() {
         let buffer = self
         onCompletion { buffer.releaseResources() }
@@ -192,8 +299,23 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
         }
     }
 
+    /// The drawable is shown once the work that drew it completes: -present,
+    /// which CAMetalLayer's drawables read their texture back for.
     @ObjCMethod("presentDrawable:") func presentDrawable(_ drawable: NSObject?) {
-        metalWarning("presentDrawable: is not supported yet")
+        Trace.log("presentDrawable", drawable == nil ? "nil" : "")
+        guard let drawable else { return }
+        onCompletion {
+            typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(drawable.objcObject, ObjCRuntime.selector("present"))
+        }
+    }
+
+    @ObjCMethod("presentDrawable:atTime:") func presentDrawable(_ drawable: NSObject?, atTime time: Double) {
+        presentDrawable(drawable)
+    }
+
+    @ObjCMethod("presentDrawable:afterMinimumDuration:") func presentDrawable(_ drawable: NSObject?, afterMinimumDuration: Double) {
+        presentDrawable(drawable)
     }
 
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
@@ -204,6 +326,7 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
 
 @ObjCClass("_MTLComputeCommandEncoder")
 open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol {
+    var bound: [UInt: MTLTexture?] = [:]
     var handle: perry_m2v_handle?
     var commandBuffer: MTLCommandBuffer?
     var label: String?
@@ -241,6 +364,7 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
     }
 
     @ObjCMethod("setBuffer:offset:atIndex:") func setBuffer(_ buffer: MTLBuffer?, offset: UInt, index: UInt) {
+        Trace.log("computeSetBuffer", "\(buffer.map { "\($0.objcObject) len \(M2V.api.buffer_length($0.handle))" } ?? "nil") +\(offset) at \(index): \((0..<8).map { i in "\(buffer.flatMap { M2V.api.buffer_contents($0.handle) }?.loadUnaligned(fromByteOffset: Int(offset) + i * 4, as: Int32.self) ?? 0)" }.joined(separator: " "))")
         if let buffer { commandBuffer?.keep(buffer) }
         encode("setBuffer:offset:atIndex:") {
             M2V.api.compute_encoder_set_buffer($0, buffer?.handle, UInt64(offset), UInt32(index), $1)
@@ -248,6 +372,7 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
     }
 
     @ObjCMethod("setBufferOffset:atIndex:") func setBufferOffset(_ offset: UInt, index: UInt) {
+        Trace.log("computeSetBufferOffset", "+\(offset) at \(index)")
         encode("setBufferOffset:atIndex:") { M2V.api.compute_encoder_set_buffer_offset($0, UInt64(offset), UInt32(index), $1) }
     }
 
@@ -260,7 +385,36 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
     }
 
     @ObjCMethod("setBytes:length:atIndex:") func setBytes(_ bytes: UnsafeRawPointer?, length: UInt, index: UInt) {
+        Trace.log("computeSetBytes", "\(length) at \(index): \((0..<min(Int(length) / 4, 8)).map { "\(bytes?.loadUnaligned(fromByteOffset: $0 * 4, as: Int32.self) ?? 0)" }.joined(separator: " "))")
         encode("setBytes:length:atIndex:") { M2V.api.compute_encoder_set_bytes($0, bytes, Int(length), UInt32(index), $1) }
+    }
+
+    @ObjCMethod("setTexture:atIndex:") func setTexture(_ texture: MTLTexture?, index: UInt) {
+        bound[index] = texture
+        Trace.log("computeSetTexture", "\(texture.map { "\($0.objcObject) \($0.descriptor.width)×\($0.descriptor.height) mips \($0.descriptor.mipmap_level_count) parent \($0.parent.map { "\($0.objcObject)" } ?? "none")" } ?? "nil") at \(index)")
+        if let texture { commandBuffer?.keep(texture) }
+        encode("setTexture:atIndex:") { M2V.api.compute_encoder_set_texture($0, texture?.handle, UInt32(index), $1) }
+    }
+
+    @ObjCMethod("setTextures:withRange:") func setTextures(_ textures: UnsafePointer<UnsafeMutableRawPointer?>?, range: PerryRange) {
+        for i in 0..<Int(range.length) {
+            setTexture(textures?[i].map { MTLTexture.objCInstance($0, ownership: .retain) }, index: range.location + UInt(i))
+        }
+    }
+
+    @ObjCMethod("setSamplerState:atIndex:") func setSamplerState(_ sampler: MTLSamplerState?, index: UInt) {
+        if let sampler { commandBuffer?.keep(sampler) }
+        encode("setSamplerState:atIndex:") {
+            M2V.api.compute_encoder_set_sampler_state($0, sampler?.handle, UInt32(index), $1)
+        }
+    }
+
+    @ObjCMethod("setSamplerStates:withRange:")
+    func setSamplerStates(_ samplers: UnsafePointer<UnsafeMutableRawPointer?>?, range: PerryRange) {
+        for i in 0..<Int(range.length) {
+            setSamplerState(samplers?[i].map { MTLSamplerState.objCInstance($0, ownership: .retain) },
+                            index: range.location + UInt(i))
+        }
     }
 
     @ObjCMethod("setThreadgroupMemoryLength:atIndex:") func setThreadgroupMemoryLength(_ length: UInt, index: UInt) {
@@ -270,6 +424,8 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
     }
 
     @ObjCMethod("dispatchThreads:threadsPerThreadgroup:") func dispatchThreads(_ threads: MTLSize, perThreadgroup: MTLSize) {
+        Trace.log("dispatch", "threads \(threads.width)×\(threads.height) by \(perThreadgroup.width)×\(perThreadgroup.height)")
+        debugBarrier()
         encode("dispatchThreads:threadsPerThreadgroup:") {
             M2V.api.compute_encoder_dispatch_threads($0, threads, perThreadgroup, $1)
         }
@@ -277,6 +433,8 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
 
     @ObjCMethod("dispatchThreadgroups:threadsPerThreadgroup:")
     func dispatchThreadgroups(_ groups: MTLSize, perThreadgroup: MTLSize) {
+        Trace.log("dispatch", "groups \(groups.width)×\(groups.height) by \(perThreadgroup.width)×\(perThreadgroup.height)")
+        debugBarrier()
         encode("dispatchThreadgroups:threadsPerThreadgroup:") {
             M2V.api.compute_encoder_dispatch_threadgroups($0, groups, perThreadgroup, $1)
         }
@@ -284,7 +442,32 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
 
     /// Resources are tracked by the runtime as Metal's are.
     @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {}
-    @ObjCMethod("memoryBarrierWithScope:") func memoryBarrier(scope: UInt) {}
+    @ObjCMethod("memoryBarrierWithScope:") func memoryBarrier(scope: UInt) {
+        encode("memoryBarrierWithScope:") { M2V.api.compute_encoder_memory_barrier($0, UInt64(scope), $1) }
+    }
+
+    /// PERRY_METAL_DEBUG_BARRIERS: a barrier on buffers and textures before
+    /// every dispatch.
+    /// PERRY_METAL_DUMP_DISPATCH=<n>: the textures bound for dispatch n,
+    /// into PERRY_METAL_DUMP_PASSES (or /tmp).
+    nonisolated(unsafe) static var dispatches = 0
+    nonisolated(unsafe) static let dumpDispatches = Set((getenv("PERRY_METAL_DUMP_DISPATCH").map { String(cString: $0) } ?? "").split(separator: ",").compactMap { Int($0) })
+
+    private func dumpDispatch() {
+        Self.dispatches += 1
+        guard Self.dumpDispatches.contains(Self.dispatches), let commandBuffer else { return }
+        let directory = MTLCommandBuffer.dumpDirectory ?? "/tmp"
+        for (index, texture) in bound {
+            guard let texture else { continue }
+            commandBuffer.dumpOnCompletion(texture, to: "\(directory)/dispatch-\(Self.dispatches)-t\(index)-\(texture.descriptor.width)x\(texture.descriptor.height).ppm")
+        }
+    }
+
+    private func debugBarrier() {
+        dumpDispatch()
+        guard Trace.debugBarriers else { return }
+        encode("memoryBarrierWithScope:") { M2V.api.compute_encoder_memory_barrier($0, 3, $1) }
+    }
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
     @ObjCMethod("popDebugGroup") func popDebugGroup() {}
     @ObjCMethod("insertDebugSignpost:") func insertDebugSignpost(_ name: String?) {}
