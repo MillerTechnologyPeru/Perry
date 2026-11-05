@@ -94,6 +94,24 @@ static void notify(queue *q, uint32_t property) {
 
 // MARK: - The pipeline
 
+static bool has_element(const char *name) {
+    const perry_gst *g = perry_gst_get();
+    void *factory = g && g->factory_find ? g->factory_find(name) : NULL;
+    if (factory) g->object_unref(factory);
+    return factory != NULL;
+}
+
+/// The decoder for compressed packets: one whose pads are always there,
+/// so the pipeline stays linked when a stop takes it back to its start
+/// (decodebin's pads come and go, and parse_launch links them once), or
+/// decodebin for formats without one.
+static const char *decoder(uint32_t format) {
+    if (format == kAudioFormatMPEG4AAC && has_element("avdec_aac")) return "avdec_aac !";
+    if (format == kAudioFormatMPEGLayer3 && has_element("mpegaudioparse") && has_element("mpg123audiodec"))
+        return "mpegaudioparse ! mpg123audiodec !";
+    return "decodebin !";
+}
+
 /// Builds the pipeline for the queue's format; false (and silent) if it
 /// can't be.
 static bool build(queue *q) {
@@ -118,7 +136,7 @@ static bool build(queue *q) {
     }
     snprintf(description, sizeof description,
              "appsrc name=src format=time block=true max-bytes=%zu caps=\"%s\" ! %s audioconvert ! audioresample ! "
-             "volume name=volume ! autoaudiosink", room, caps, decoded ? "" : "decodebin !");
+             "volume name=volume ! autoaudiosink", room, caps, decoded ? "" : decoder(f->mFormatID));
     perry_audio_trace("audio queue %p: %s", (void *)q, description);
     q->pipeline = g->parse_launch(description, NULL);
     if (q->pipeline) {
