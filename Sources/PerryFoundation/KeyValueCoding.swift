@@ -266,6 +266,23 @@ extension NSObject {
         return current.map(ObjCObject.init)
     }
 
+    /// Each entry set by -setValue:forKey:, NSNull as nil.
+    @ObjCMethod("setValuesForKeysWithDictionary:")
+    func setKeyValues(_ dictionary: ObjCObject?) {
+        for (key, value) in Dictionaries.entries(dictionary?.id) {
+            _ = ObjC.send(objcObject, ObjC.selector("setValue:forKey:"), value == Nulls.null ? nil : value, key)
+        }
+    }
+
+    /// Each key's -valueForKey:, nil as NSNull.
+    @ObjCMethod("dictionaryWithValuesForKeys:")
+    func keyValues(forKeys keys: ObjCObject?) -> ObjCObject {
+        let entries = Arrays.elements(keys?.id).map { key -> (key: id, value: id) in
+            (key, ObjC.send(objcObject, ObjC.selector("valueForKey:"), key) ?? Nulls.null)
+        }
+        return ObjCObject(Dictionaries.autoreleased(entries))
+    }
+
     /// The path's last key set, by -setValue:forKey:, on the object the
     /// keys before it reach, by -valueForKey:; nothing if one is nil.
     @ObjCMethod("setValue:forKeyPath:")
