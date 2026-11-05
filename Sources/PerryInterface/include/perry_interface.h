@@ -53,4 +53,10 @@ typedef void (*perry_provider_image_fn)(const perry_image_info *image);
 typedef void *(*perry_provider_symbol_fn)(const char *name);
 #define PERRY_PROVIDER_SYMBOL_SYMBOL "perry_provider_symbol"
 
+// Prints `title`, then the calling thread's frames by their frame
+// pointers, each as the file it is mapped from and the offset in it (for
+// atos -l 0 on a Mach-O dylib, -l 0x100000000 on an app), on standard
+// error. For tracing who calls a function.
+void perry_print_frames(const char *title);
+
 #endif
