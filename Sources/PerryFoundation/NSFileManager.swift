@@ -38,6 +38,7 @@ enum FileAttributes {
     static let NSFileSize = "NSFileSize"
     static let NSFileModificationDate = "NSFileModificationDate"
     static let NSFilePosixPermissions = "NSFilePosixPermissions"
+    static let NSFileImmutable = "NSFileImmutable"
     static let NSFileSystemSize = "NSFileSystemSize"
     static let NSFileSystemFreeSize = "NSFileSystemFreeSize"
     static let NSFileSystemNodes = "NSFileSystemNodes"
