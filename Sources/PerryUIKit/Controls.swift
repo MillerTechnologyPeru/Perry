@@ -751,7 +751,10 @@ open class UIDevice: NSObject {
     @ObjCMethod("model") func model() -> String { "iPhone" }
     @ObjCMethod("localizedModel") func localizedModel() -> String { "iPhone" }
     @ObjCMethod("systemName") func systemName() -> String { "iOS" }
-    @ObjCMethod("systemVersion") func systemVersion() -> String { "15.0" }
+    /// The iOS version the app was built for, as NSProcessInfo gives it:
+    /// the platform version in its Info.plist, or iOS 18 without one.
+    @ObjCMethod("systemVersion")
+    func systemVersion() -> String { NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0" }
     /// UIUserInterfaceIdiom: phone 0.
     @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { 0 }
     /// UIDeviceOrientation: portrait 1.

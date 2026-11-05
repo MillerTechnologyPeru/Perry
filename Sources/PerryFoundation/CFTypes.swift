@@ -752,6 +752,21 @@ public func CFPreferencesAppSynchronize(_ application: id?) -> Bool { ObjC.sendB
 @c(_CFPreferencesSynchronize)
 public func CFPreferencesSynchronize(_ application: id?, _ user: id?, _ host: id?) -> Bool { CFPreferencesAppSynchronize(application) }
 
+/// Sets and removes several values at once.
+@c(_CFPreferencesSetMultiple)
+public func CFPreferencesSetMultiple(_ set: id?, _ remove: id?, _ application: id?, _ user: id?, _ host: id?) {
+    for (key, value) in Dictionaries.entries(set) { CFPreferencesSetAppValue(key, value, application) }
+    for key in Arrays.elements(remove) { CFPreferencesSetAppValue(key, nil, application) }
+}
+
+/// An app's preferences are one domain here, searched alone: there are no
+/// suites to add to its search or take from it.
+@c(_CFPreferencesAddSuitePreferencesToApp)
+public func CFPreferencesAddSuitePreferencesToApp(_ application: id?, _ suite: id?) {}
+
+@c(_CFPreferencesRemoveSuitePreferencesFromApp)
+public func CFPreferencesRemoveSuitePreferencesFromApp(_ application: id?, _ suite: id?) {}
+
 @c(_CFPreferencesCopyKeyList)
 public func CFPreferencesCopyKeyList(_ application: id?, _ user: id?, _ host: id?) -> id? {
     ObjC.retain(ObjC.send(ObjC.send(Preferences.defaults, ObjC.selector("dictionaryRepresentation")), ObjC.selector("allKeys")))

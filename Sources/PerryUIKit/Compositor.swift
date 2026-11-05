@@ -131,6 +131,7 @@ final class Compositor {
         fitted = Screen.fixed != nil && SDL.setViewport != nil && SDL.outputSize != nil
         rendererContext = EAGLContexts.save()
         let name = SDL.rendererName(renderer).map { String(cString: $0) } ?? "unknown"
+        Display.gpuRenderer = name
         uikitWarning("live view composited by SDL's \(name) renderer")
     }
 

@@ -562,6 +562,16 @@ public class NSMutableData: NSData {
 /// NSNull: one immortal instance, also exported as kCFNull.
 enum Nulls {
     nonisolated(unsafe) static var null: id!
+    nonisolated(unsafe) static var nullClass: Class?
+
+    /// Whether the object is NSNull: the one instance, or another made
+    /// past +alloc (by the runtime's allocation functions, as Swift's
+    /// NSNull() is).
+    static func isNull(_ object: id?) -> Bool {
+        guard let object else { return false }
+        if object == null { return true }
+        return nullClass.map { ObjC.isKind(object, of: $0) } ?? false
+    }
 }
 
 /// CoreFoundation's name for the NSNull instance.
@@ -577,10 +587,12 @@ public final class NSNull: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryImmortal(cls)
         Nulls.null = ObjC.createInstance(cls.markingStatic().storage, 0)
+        Nulls.nullClass = cls.storage
     }
 
     @ObjCClassMethod("null") static func null() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCClassMethod("alloc") static func alloc() -> UnsafeMutableRawPointer? { Nulls.null }
+    @ObjCClassMethod("allocWithZone:") static func alloc(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCMethod("init") func initialize() -> Self { self }
     @ObjCMethod("description") func description() -> String { "<null>" }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSNull { self }
