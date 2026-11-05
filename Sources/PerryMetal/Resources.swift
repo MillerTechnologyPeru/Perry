@@ -123,6 +123,55 @@ open class MTLFunction: NSObject, MTLFunctionProtocol {
     @ObjCMethod("name") func name() -> String { M2V.api.function_name(handle).map { String(cString: $0) } ?? "" }
     /// MTLFunctionType.
     @ObjCMethod("functionType") func functionType() -> UInt { UInt(M2V.api.function_type(handle)) }
+    @ObjCMethod("options") func options() -> UInt { 0 }
+    /// MTLPatchTypeNone, and no control points.
+    @ObjCMethod("patchType") func patchType() -> UInt { 0 }
+    @ObjCMethod("patchControlPointCount") func patchControlPointCount() -> Int { -1 }
+
+    /// A vertex function's inputs, or nil.
+    @ObjCMethod("vertexAttributes") func vertexAttributes() -> NSObject? {
+        var list: UnsafeMutablePointer<perry_m2v_attribute>?
+        let count = M2V.api.function_vertex_attributes(handle, &list)
+        guard count >= 0 else { return nil }
+        defer { M2V.api.attributes_free(list, Int(count)) }
+        let attributes = (0..<Int(count)).compactMap { list?[$0] }.map { MTLVertexAttribute(attribute: $0) }
+        return NSObject.array(attributes)
+    }
+
+    @ObjCMethod("stageInputAttributes") func stageInputAttributes() -> NSObject? { vertexAttributes() }
+}
+
+final class AttributeState {
+    var name = ""
+    var index = 0
+    var type: UInt = 0
+    var active = false
+    var patchData = false
+    var patchControlPointData = false
+}
+
+@ObjCClass("MTLVertexAttribute")
+open class MTLVertexAttribute: NSObject {
+    var attribute = AttributeState()
+
+    init(attribute a: perry_m2v_attribute) {
+        super.init()
+        attribute.name = a.name.map { String(cString: $0) } ?? ""
+        attribute.index = Int(a.attribute_index)
+        attribute.type = UInt(a.attribute_type)
+        attribute.active = a.active
+        attribute.patchData = a.patch_data
+        attribute.patchControlPointData = a.patch_control_point_data
+    }
+
+    @ObjCMethod("name") func name() -> String { attribute.name }
+    @ObjCMethod("attributeIndex") func attributeIndex() -> UInt { UInt(attribute.index) }
+    /// MTLDataType.
+    @ObjCMethod("attributeType") func attributeType() -> UInt { attribute.type }
+    @ObjCMethod("isActive") func isActive() -> Bool { attribute.active }
+    @ObjCMethod("active") func active() -> Bool { attribute.active }
+    @ObjCMethod("isPatchData") func isPatchData() -> Bool { attribute.patchData }
+    @ObjCMethod("isPatchControlPointData") func isPatchControlPointData() -> Bool { attribute.patchControlPointData }
 }
 
 @ObjCClass("_MTLComputePipelineState")
