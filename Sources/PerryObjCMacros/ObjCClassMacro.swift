@@ -30,6 +30,7 @@ struct PerryObjCMacrosPlugin: CompilerPlugin {
         ObjCPropertyMacro.self,
         ObjCProtocolMacro.self,
         ObjCRequirementMacro.self,
+        DarwinCMacro.self,
     ]
 }
 
