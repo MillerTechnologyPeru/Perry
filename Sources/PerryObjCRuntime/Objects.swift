@@ -68,6 +68,13 @@ public enum Objects {
     public static func peerWillDeinitialize(_ object: ObjectPointer) -> Bool { RetainCounts.peerWillDeinitialize(object) }
 
     public static func dispose(_ object: ObjectPointer) {
+        if Zombies.tracing { Zombies.trace(object, "dealloc") }
+        if Zombies.enabled {
+            Zombies.bury(object)
+            destructInstance(object)
+            Zombies.mark(object)
+            return
+        }
         destructInstance(object)
         free(object)
     }
@@ -95,6 +102,7 @@ public enum Objects {
     }
 
     public static func retain(_ object: ObjectPointer) -> ObjectPointer {
+        if Zombies.enabled, Zombies.report(object, "retain") { return object }
         // Objects of classes the runtime cannot read are treated as immortal.
         guard let info = Runtime.info(classOf(object)) else { return object }
         if usesDefaultRetainRelease(info) {
@@ -105,6 +113,7 @@ public enum Objects {
     }
 
     public static func release(_ object: ObjectPointer) {
+        if Zombies.enabled, Zombies.report(object, "release") { return }
         guard let info = Runtime.info(classOf(object)) else { return }
         if usesDefaultRetainRelease(info) {
             if RetainCounts.release(object) {
@@ -116,6 +125,7 @@ public enum Objects {
     }
 
     public static func autorelease(_ object: ObjectPointer) -> ObjectPointer {
+        if Zombies.enabled, Zombies.report(object, "autorelease") { return object }
         guard let info = Runtime.info(classOf(object)) else { return object }
         if usesDefaultRetainRelease(info) {
             AutoreleasePool.add(object)
@@ -134,6 +144,67 @@ public enum Objects {
 /// retains and releases from either side count there, the last release
 /// from Objective-C deallocates the object, and the Swift object's deinit
 /// runs as the object is destroyed.
+/// Debugging switches for reference counting.
+///
+/// PERRY_OBJC_ZOMBIES=1 keeps deallocated objects' memory instead of freeing
+/// it, as NSZombieEnabled does, and reports a retain, release or autorelease
+/// of one with its class, in place of the crash a reused address gives.
+///
+/// PERRY_OBJC_TRACE set to a class's name reports each retain, release,
+/// autorelease and deallocation of its instances, with the count after.
+///
+/// PERRY_OBJC_TRAP=1 raises SIGTRAP at each report, for a debugger to show
+/// where it came from.
+enum Zombies {
+    static let enabled: Bool = getenv("PERRY_OBJC_ZOMBIES").map { String(cString: $0) != "0" } ?? false
+    static let traps: Bool = getenv("PERRY_OBJC_TRAP").map { String(cString: $0) != "0" } ?? false
+    /// The traced class's name, as a C string's address.
+    static let tracedName: UInt = getenv("PERRY_OBJC_TRACE").map { UInt(bitPattern: strdup($0)) } ?? 0
+    static let tracing: Bool = tracedName != 0
+    /// Each buried object's class name, by address (addresses, as the
+    /// table must be Sendable).
+    static let graves = Mutex<[UInt: UInt]>([:])
+
+    /// A stand-in class with an empty method cache, so that a message to a
+    /// buried object reaches Runtime.lookUpIMP, which reports it.
+    static let zombieClass: UInt = {
+        let cls = calloc(1, 64)!
+        cls.storeBytes(of: Runtime.emptyCache, toByteOffset: 16, as: UnsafeMutableRawPointer?.self)
+        return UInt(bitPattern: cls)
+    }()
+
+    /// Makes a buried object an instance of the stand-in class.
+    static func mark(_ object: ObjectPointer) {
+        object.storeBytes(of: zombieClass, as: UInt.self)
+    }
+
+    static func bury(_ object: ObjectPointer) {
+        guard let info = Runtime.info(classOf(object)) else { return }
+        let key = UInt(bitPattern: object), name = UInt(bitPattern: info.name)
+        graves.withLock { $0[key] = name }
+    }
+
+    /// Whether `object` was deallocated; reports the message if so.
+    static func report(_ object: ObjectPointer, _ message: String) -> Bool {
+        let key = UInt(bitPattern: object)
+        guard let name = UnsafePointer<CChar>(bitPattern: graves.withLock({ $0[key] ?? 0 })) else { return false }
+        say("perry: objc: -[\(String(cString: name)) \(message)] sent to deallocated instance 0x\(String(key, radix: 16))\n")
+        return true
+    }
+
+    /// Reports `event` if `object` is of the traced class.
+    static func trace(_ object: ObjectPointer, _ event: String) {
+        guard let traced = UnsafePointer<CChar>(bitPattern: tracedName), let info = Runtime.info(classOf(object)),
+              strcmp(info.name, traced) == 0 else { return }
+        say("perry: objc: \(String(cString: traced)) 0x\(String(UInt(bitPattern: object), radix: 16)) \(event), count \(RetainCounts.count(object))\n")
+    }
+
+    static func say(_ text: String) {
+        text.withCString { _ = write(2, $0, strlen($0)) }
+        if traps { raise(SIGTRAP) }
+    }
+}
+
 enum RetainCounts {
     struct Entry {
         var extra: UInt = 0
@@ -160,6 +231,7 @@ enum RetainCounts {
     }
 
     static func retain(_ object: ObjectPointer) {
+        defer { if Zombies.tracing { Zombies.trace(object, "retain") } }
         let peerAddress = shard(object).table.withLock { table -> UInt in
             let key = UInt(bitPattern: object)
             if let address = table[key]?.peerAddress, address != 0 { return address }
@@ -174,6 +246,7 @@ enum RetainCounts {
     /// ignored. A peer's count drops outside the lock, as its deinit may
     /// run if Swift let go at the same moment.
     static func release(_ object: ObjectPointer) -> Bool {
+        if Zombies.tracing { Zombies.trace(object, "release") }
         enum Outcome { case keep, deallocate, releasePeer(UInt) }
         let outcome = shard(object).table.withLock { table -> Outcome in
             let key = UInt(bitPattern: object)
@@ -446,7 +519,13 @@ public enum AutoreleasePool {
         }
     }
 
+    /// An object already being deallocated is left out: its memory is gone
+    /// by the time the pool drains. (A getter's result, retained and
+    /// autoreleased, can be one: a subview's -superview, sent from its
+    /// superview's -dealloc.)
     public static func add(_ object: ObjectPointer) {
+        if Zombies.tracing { Zombies.trace(object, "autorelease") }
+        if RetainCounts.isDeallocating(object) { return }
         current.objects.append(object)
     }
 }
