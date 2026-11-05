@@ -188,6 +188,67 @@ open class GCPhysicalInputProfile: NSObject {
     @ObjCMethod("valueChangedHandler") func valueChangedHandler() -> ObjCBlock? { profile.handlers[objcObject] }
     @ObjCMethod("setValueChangedHandler:")
     func setValueChangedHandler(_ handler: ObjCBlock?) { profile.handlers[objcObject] = handler }
+
+    // The elements by GameController's input names, as iOS 14 lists them.
+
+    var namedButtons: [(String, GCControllerElement)] {
+        let p = profile
+        return [("Button A", p.buttonA), ("Button B", p.buttonB), ("Button X", p.buttonX), ("Button Y", p.buttonY),
+                ("Left Shoulder", p.leftShoulder), ("Right Shoulder", p.rightShoulder),
+                ("Left Trigger", p.leftTrigger), ("Right Trigger", p.rightTrigger),
+                ("Left Thumbstick Button", p.leftThumbstickButton), ("Right Thumbstick Button", p.rightThumbstickButton),
+                ("Button Menu", p.buttonMenu), ("Button Options", p.buttonOptions), ("Button Home", p.buttonHome)]
+    }
+
+    var namedDpads: [(String, GCControllerElement)] {
+        [("Direction Pad", profile.dpad), ("Left Thumbstick", profile.leftThumbstick),
+         ("Right Thumbstick", profile.rightThumbstick)]
+    }
+
+    @ObjCMethod("buttons") func buttons() -> NSObject { Collections.dictionary(namedButtons) }
+    @ObjCMethod("dpads") func dpads() -> NSObject { Collections.dictionary(namedDpads) }
+    @ObjCMethod("axes") func axes() -> NSObject { Collections.dictionary([]) }
+    @ObjCMethod("touchpads") func touchpads() -> NSObject { Collections.dictionary([]) }
+    @ObjCMethod("elements") func elements() -> NSObject { Collections.dictionary(namedButtons + namedDpads) }
+    @ObjCMethod("allButtons") func allButtons() -> NSObject { Collections.set(namedButtons.map(\.1)) }
+    @ObjCMethod("allDpads") func allDpads() -> NSObject { Collections.set(namedDpads.map(\.1)) }
+    @ObjCMethod("allAxes") func allAxes() -> NSObject { Collections.set([]) }
+    @ObjCMethod("allTouchpads") func allTouchpads() -> NSObject { Collections.set([]) }
+    @ObjCMethod("allElements") func allElements() -> NSObject { Collections.set((namedButtons + namedDpads).map(\.1)) }
+    @ObjCMethod("objectForKeyedSubscript:") func object(forKeyedSubscript key: String?) -> GCControllerElement? {
+        (namedButtons + namedDpads).first { $0.0 == key }?.1
+    }
+}
+
+/// Foundation collections of elements, autoreleased.
+enum Collections {
+    typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafePointer<UnsafeMutableRawPointer?>?,
+                                     UnsafePointer<UnsafeMutableRawPointer?>?, UInt) -> UnsafeMutableRawPointer?
+    typealias MakeSet = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafePointer<UnsafeMutableRawPointer?>?,
+                                        UInt) -> UnsafeMutableRawPointer?
+
+    static func dictionary(_ entries: [(String, GCControllerElement)]) -> NSObject {
+        let keys: [UnsafeMutableRawPointer?] = entries.map { $0.0.objCArgument() }
+        let values: [UnsafeMutableRawPointer?] = entries.map { $0.1.objcObject }
+        let dictionary = values.withUnsafeBufferPointer { values in
+            keys.withUnsafeBufferPointer { keys in
+                unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(ObjCRuntime.classObject("NSDictionary"),
+                                                                ObjCRuntime.selector("dictionaryWithObjects:forKeys:count:"),
+                                                                values.baseAddress, keys.baseAddress, UInt(values.count))
+            }
+        }
+        return NSObject(objCReturnValue: dictionary)
+    }
+
+    static func set(_ elements: [GCControllerElement]) -> NSObject {
+        let objects: [UnsafeMutableRawPointer?] = elements.map { $0.objcObject }
+        let set = objects.withUnsafeBufferPointer {
+            unsafeBitCast(ObjCRuntime.msgSend, to: MakeSet.self)(ObjCRuntime.classObject("NSSet"),
+                                                               ObjCRuntime.selector("setWithObjects:count:"),
+                                                               $0.baseAddress, UInt($0.count))
+        }
+        return NSObject(objCReturnValue: set)
+    }
 }
 
 @ObjCClass("GCMicroGamepad")
@@ -346,6 +407,30 @@ enum ControllerConstants {
     static let GCInputButtonMenu = "Button Menu"
     static let GCInputButtonOptions = "Button Options"
     static let GCInputButtonHome = "Button Home"
+    static let GCInputLeftThumbstickButton = "Left Thumbstick Button"
+    static let GCInputRightThumbstickButton = "Right Thumbstick Button"
+    static let GCInputXboxPaddleOne = "Paddle 1"
+    static let GCInputXboxPaddleTwo = "Paddle 2"
+    static let GCInputXboxPaddleThree = "Paddle 3"
+    static let GCInputXboxPaddleFour = "Paddle 4"
+    static let GCInputDualShockTouchpadOne = "Touchpad 1"
+    static let GCInputDualShockTouchpadTwo = "Touchpad 2"
+    static let GCInputDualShockTouchpadButton = "Touchpad Button"
+    static let GCKeyboardDidConnectNotification = "GCKeyboardDidConnectNotification"
+    static let GCKeyboardDidDisconnectNotification = "GCKeyboardDidDisconnectNotification"
+    static let GCMouseDidConnectNotification = "GCMouseDidConnectNotification"
+    static let GCMouseDidDisconnectNotification = "GCMouseDidDisconnectNotification"
+    static let GCMouseDidBecomeCurrentNotification = "GCMouseDidBecomeCurrentNotification"
+    static let GCMouseDidStopBeingCurrentNotification = "GCMouseDidStopBeingCurrentNotification"
+    static let GCHapticsLocalityDefault = "Default"
+    static let GCHapticsLocalityAll = "All"
+    static let GCHapticsLocalityHandles = "Handles"
+    static let GCHapticsLocalityLeftHandle = "Left Handle"
+    static let GCHapticsLocalityRightHandle = "Right Handle"
+    static let GCHapticsLocalityTriggers = "Triggers"
+    static let GCHapticsLocalityLeftTrigger = "Left Trigger"
+    static let GCHapticsLocalityRightTrigger = "Right Trigger"
+    static let GCHapticDurationInfinite: Float = .greatestFiniteMagnitude
 }
 
 // MARK: - Reading the gamepads
