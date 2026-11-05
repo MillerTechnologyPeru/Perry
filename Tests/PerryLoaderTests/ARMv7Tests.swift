@@ -119,6 +119,32 @@ struct ARMv7Tests {
         #expect(result.stderr.contains("-[Derived missingMethod]: unrecognized selector sent to instance 0x"))
     }
 
+    /// What system.c prints on macOS. qemu-arm returns nothing for a 32-bit
+    /// program's SO_RCVTIMEO, so under qemu the timeout line is not compared.
+    @Test("Threads, libm, signal handlers and socket options pass as on Darwin",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("system").path)))
+    func system() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("system").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        var expected = [
+            "threads counter 4000 once 1 results 64 timedwait 60",
+            "math 0.479426 0.877583 1.414214 -3.000000 2.718282 2.302585",
+            "math2 1.414214 2.356194 1.500000 5.000000 12.000000",
+            "math3 0.750 6 -3.000 -0.750 0.232088 -3",
+            "float 0.24740 3.37500 3.16228 6.50000",
+            "convert 6.2500 -1000.0000 0.1250",
+            "sorted -1.25 0.00 2.75 3.50 10.00",
+            "signal handled 1 context 1",
+        ]
+        var lines = result.stdout.lines
+        if ProcessInfo.processInfo.environment["QEMU_LD_PREFIX"] == nil {
+            expected.append("timeout 2 500000 size 1")
+        } else {
+            lines.removeAll { $0.hasPrefix("timeout ") }
+        }
+        #expect(lines == expected)
+    }
+
     /// What foundation_abi.m prints with Apple's Foundation on macOS.
     @Test("Foundation's variadic methods, KVC, KVO and floating point pass as on Darwin",
           .enabled(if: ARMv7.foundationAvailable))
