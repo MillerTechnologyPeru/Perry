@@ -265,6 +265,21 @@ extension NSObject {
         }
         return current.map(ObjCObject.init)
     }
+
+    /// The path's last key set, by -setValue:forKey:, on the object the
+    /// keys before it reach, by -valueForKey:; nothing if one is nil.
+    @ObjCMethod("setValue:forKeyPath:")
+    func setKeyValue(_ value: ObjCObject?, forKeyPath path: String) {
+        var keys = path.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        let last = keys.removeLast()
+        var current: id? = objcObject
+        for key in keys {
+            guard let object = current else { return }
+            current = ObjC.send(object, ObjC.selector("valueForKey:"), Strings.autoreleased(key))
+        }
+        guard let target = current else { return }
+        _ = ObjC.send(target, ObjC.selector("setValue:forKey:"), value?.objcObject, Strings.autoreleased(last))
+    }
 }
 
 /// Sorting by descriptors.
