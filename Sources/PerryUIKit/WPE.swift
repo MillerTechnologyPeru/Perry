@@ -52,6 +52,17 @@ final class WPE: @unchecked Sendable {
     let webViewEvaluateJavaScriptFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
     let webViewCallAsyncJavaScriptFunctionFinish: @convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?
     let valueIsUndefined: @convention(c) (Pointer) -> Int32
+    let valueIsString: @convention(c) (Pointer) -> Int32
+    let valueIsNumber: @convention(c) (Pointer) -> Int32
+    let valueIsBoolean: @convention(c) (Pointer) -> Int32
+    let valueToString: @convention(c) (Pointer) -> UnsafeMutablePointer<CChar>?
+    // Policy decisions on navigations.
+    let navigationPolicyDecisionGetNavigationAction: @convention(c) (Pointer) -> Pointer?
+    let navigationActionGetRequest: @convention(c) (Pointer) -> Pointer?
+    let navigationActionGetNavigationType: @convention(c) (Pointer) -> Int32
+    let uriRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let policyDecisionUse: @convention(c) (Pointer) -> Void
+    let policyDecisionIgnore: @convention(c) (Pointer) -> Void
     let valueToJSON: @convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?
     // GLib and GObject.
     let mainContextIteration: @convention(c) (Pointer?, Int32) -> Int32
@@ -137,6 +148,18 @@ final class WPE: @unchecked Sendable {
         webViewCallAsyncJavaScriptFunctionFinish = bind(webkit, "webkit_web_view_call_async_javascript_function_finish",
                                                         (@convention(c) (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?).self)
         valueIsUndefined = bind(webkit, "jsc_value_is_undefined", (@convention(c) (Pointer) -> Int32).self)
+        valueIsString = bind(webkit, "jsc_value_is_string", (@convention(c) (Pointer) -> Int32).self)
+        valueIsNumber = bind(webkit, "jsc_value_is_number", (@convention(c) (Pointer) -> Int32).self)
+        valueIsBoolean = bind(webkit, "jsc_value_is_boolean", (@convention(c) (Pointer) -> Int32).self)
+        valueToString = bind(webkit, "jsc_value_to_string", (@convention(c) (Pointer) -> UnsafeMutablePointer<CChar>?).self)
+        navigationPolicyDecisionGetNavigationAction = bind(webkit, "webkit_navigation_policy_decision_get_navigation_action",
+                                                           (@convention(c) (Pointer) -> Pointer?).self)
+        navigationActionGetRequest = bind(webkit, "webkit_navigation_action_get_request", (@convention(c) (Pointer) -> Pointer?).self)
+        navigationActionGetNavigationType = bind(webkit, "webkit_navigation_action_get_navigation_type",
+                                                 (@convention(c) (Pointer) -> Int32).self)
+        uriRequestGetURI = bind(webkit, "webkit_uri_request_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        policyDecisionUse = bind(webkit, "webkit_policy_decision_use", (@convention(c) (Pointer) -> Void).self)
+        policyDecisionIgnore = bind(webkit, "webkit_policy_decision_ignore", (@convention(c) (Pointer) -> Void).self)
         valueToJSON = bind(webkit, "jsc_value_to_json", (@convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?).self)
         mainContextIteration = bind(glib, "g_main_context_iteration", (@convention(c) (Pointer?, Int32) -> Int32).self)
         signalConnectData = bind(gobject, "g_signal_connect_data",
@@ -204,6 +227,10 @@ final class WebPage {
     var loadFailed: ((Bool, String, Int, String) -> Void)?
     /// The page's title changed.
     var titleChanged: (() -> Void)?
+    /// Whether a navigation to a URI goes ahead, with its
+    /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
+    /// every navigation go ahead.
+    var decideNavigation: ((String, Int32) -> Bool)?
 
     /// The pages there are, which the main queue runs GLib's context for.
     nonisolated(unsafe) static var count = 0
@@ -230,6 +257,7 @@ final class WebPage {
         let data = Unmanaged.passUnretained(self).toOpaque()
         handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "load-failed", unsafeBitCast(WebPage.onLoadFailed, to: UnsafeRawPointer.self), data, nil, 0))
+        handlers.append(wpe.signalConnectData(view, "decide-policy", unsafeBitCast(WebPage.onDecidePolicy, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "notify::title", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self), data, nil, 0))
         WebPage.count += 1
         WebPage.schedule()
@@ -311,6 +339,57 @@ final class WebPage {
             guard let data else { return }
             Unmanaged<Rendering>.fromOpaque(data).takeRetainedValue().body()
         }
+    }
+
+    /// Runs `script` in the page and waits for it, running GLib's context
+    /// meanwhile: a string, number or Boolean value as a string, as
+    /// JavaScript's String() makes it; nil for other values and exceptions.
+    func evaluateString(_ script: String) -> String? {
+        var outcome: String??
+        let box = Unmanaged.passRetained(StringEvaluation(page: self) { outcome = $0 }).toOpaque()
+        wpe.webViewEvaluateJavaScript(view, script, -1, nil, nil, nil, unsafeBitCast(WebPage.onEvaluatedString, to: Pointer.self), box)
+        while outcome == nil { _ = wpe.mainContextIteration(nil, 1) }
+        return outcome ?? nil
+    }
+
+    private final class StringEvaluation {
+        let page: WebPage
+        let completion: (String?) -> Void
+        init(page: WebPage, completion: @escaping (String?) -> Void) { (self.page, self.completion) = (page, completion) }
+    }
+
+    private static let onEvaluatedString: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
+        guard let data else { return }
+        let evaluation = Unmanaged<StringEvaluation>.fromOpaque(data).takeRetainedValue()
+        let wpe = evaluation.page.wpe
+        var error: Pointer?
+        guard let source, let result, let value = wpe.webViewEvaluateJavaScriptFinish(source, result, &error) else {
+            if let error { wpe.errorFree(error) }
+            return evaluation.completion(nil)
+        }
+        defer { wpe.objectUnref(value) }
+        guard wpe.valueIsString(value) != 0 || wpe.valueIsNumber(value) != 0 || wpe.valueIsBoolean(value) != 0 else {
+            return evaluation.completion(nil)
+        }
+        let string = wpe.valueToString(value)
+        defer { wpe.free(string) }
+        evaluation.completion(string.map { String(cString: $0) } ?? "")
+    }
+
+    /// decide-policy: navigations ask `decideNavigation`; the rest, and
+    /// navigations without it, take WebKit's default.
+    private static let onDecidePolicy: @convention(c) (Pointer?, Pointer?, Int32, Pointer?) -> Int32 = { _, decision, type, data in
+        guard let data, let decision, type == 0 else { return 0 }    // WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION
+        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
+        let wpe = page.wpe
+        guard let decide = page.decideNavigation, let action = wpe.navigationPolicyDecisionGetNavigationAction(decision) else { return 0 }
+        let uri = wpe.navigationActionGetRequest(action).flatMap(wpe.uriRequestGetURI).map { String(cString: $0) } ?? ""
+        if decide(uri, wpe.navigationActionGetNavigationType(action)) {
+            wpe.policyDecisionUse(decision)
+        } else {
+            wpe.policyDecisionIgnore(decision)
+        }
+        return 1
     }
 
     struct EvaluationError: Error {
