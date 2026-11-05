@@ -136,11 +136,24 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   `-fobjc-arc-exceptions`, ARC does not release objects an exception leaves,
   as on Darwin. `exceptions.m` checks this against macOS. arm64 still cannot
   unwind Mach-O frames.
+- Graphics: `CGFloat` is a float on armv7, as on 32-bit Darwin, in the C
+  geometry (`PERRY_CGFLOAT`) and in CoreGraphics, QuartzCore, UIKit and
+  MapKit; their code converts where CGFloats meet the doubles Cairo, SDL
+  and Core Animation's arithmetic use. Geometry crosses Objective-C methods
+  as its words (`ObjCStructure`, `ObjCWords4` for a CGRect), since Darwin
+  passes structures of floats in core registers. C functions with floating
+  point or geometry are `@DarwinC("_Name")`: the macro exports a wrapper
+  under the Darwin name that takes those as their ObjCType, and the function
+  unchanged as `perry_native_Name`, which QuartzCore's and UIKit's bindings
+  for CoreGraphics prefer, so providers call each other as Swift does. The
+  loader loads Foundation's provider with CoreGraphics', as CoreGraphics
+  links CoreFoundation. `graphics.c` checks geometry, transforms, colors,
+  paths and drawing against macOS.
 - Not yet: C++ exceptions (`__gxx_personality_sj0`), the remaining files.c
-  entry points, the rest of Foundation's coverage, UIKit and the other providers (their `@c` entry
-  points with floating point, such as CoreGraphics', and `CGFloat`, which is
-  a float on armv7), `objc_msgForward_stret`, and classic relocations (iOS
-  before 3.1).
+  entry points, the rest of Foundation's coverage, UIKit's live view and
+  apps on armv7, the variadic formats and `double` functions of the wrapped
+  libraries (SQLite, libxml2, zlib), `objc_msgForward_stret`, and classic
+  relocations (iOS before 3.1).
 
 ## Building and running
 
