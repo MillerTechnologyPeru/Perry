@@ -99,20 +99,26 @@ int main(void) {
     printf("read %ld %s\n", read(fd, buffer, sizeof(buffer) - 1), buffer);
     close(fd);
 
+    // Printed after the listing: its order is the file system's.
     DIR *directory = opendir(dir);
-    int found_b = 0, found_link = 0, entries = 0;
+    int found_b = 0, found_link = 0, entries = 0, b_type = 0, b_namlen = 0, link_type = 0;
     for (struct dirent *entry; (entry = readdir(directory)); ) {
         entries++;
         if (entry->d_name[0] == 'b' && entry->d_name[1] == 0) {
             found_b = 1;
-            printf("entry b type %d namlen %d\n", entry->d_type, entry->d_namlen);
+            b_type = entry->d_type;
+            b_namlen = entry->d_namlen;
         }
         if (entry->d_name[0] == 'l' && entry->d_namlen == 4) {
             found_link = 1;
-            printf("entry link type %d\n", entry->d_type);
+            link_type = entry->d_type;
         }
     }
     closedir(directory);
+    if (found_b)
+        printf("entry b type %d namlen %d\n", b_type, b_namlen);
+    if (found_link)
+        printf("entry link type %d\n", link_type);
     printf("entries %d found %d %d\n", entries, found_b, found_link);
 
     unlink("/tmp/perry-files-fixture/b");
