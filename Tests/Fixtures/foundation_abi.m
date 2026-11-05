@@ -2,8 +2,10 @@
 // observing with structures: format strings mixing word-sized and 64-bit
 // arguments, nil-terminated collection methods, predicates, CF formats, KVC
 // through accessors that pass and return structures, and KVO's setter for
-// scalar and structure properties. Its numbers are integers, and doubles
-// only travel as variadic arguments and inside structures.
+// scalar and structure properties. And floating point both ways across the
+// boundary, which 32-bit Darwin passes in core registers: numbers, dates and
+// CF functions Foundation implements, and accessors of this program's
+// double, float and BOOL properties that Foundation calls.
 //
 // Built against the real Foundation where an SDK has it (to record the
 // expected output on a Mac), and otherwise against the declarations below.
@@ -25,6 +27,11 @@ typedef const struct __CFString *CFStringRef;
 typedef const struct __CFAllocator *CFAllocatorRef;
 typedef const struct __CFDictionary *CFDictionaryRef;
 typedef const void *CFTypeRef;
+typedef const struct __CFDate *CFDateRef;
+typedef double CFAbsoluteTime;
+CFDateRef CFDateCreate(CFAllocatorRef, CFAbsoluteTime);
+CFAbsoluteTime CFDateGetAbsoluteTime(CFDateRef);
+CFAbsoluteTime CFAbsoluteTimeGetCurrent(void);
 #define CFSTR(s) ((CFStringRef)__builtin___CFStringMakeConstantString(s))
 CFStringRef CFStringCreateWithFormat(CFAllocatorRef, CFDictionaryRef, CFStringRef, ...);
 void CFRelease(CFTypeRef);
@@ -87,7 +94,22 @@ __attribute__((objc_root_class))
 @interface NSNumber : NSValue
 + (NSNumber *)numberWithInt:(int)value;
 + (NSNumber *)numberWithLongLong:(long long)value;
++ (NSNumber *)numberWithDouble:(double)value;
++ (NSNumber *)numberWithFloat:(float)value;
++ (NSNumber *)numberWithBool:(BOOL)value;
 - (long long)longLongValue;
+- (double)doubleValue;
+- (float)floatValue;
+- (BOOL)boolValue;
+@end
+@interface NSDate : NSObject
++ (instancetype)dateWithTimeIntervalSinceReferenceDate:(double)interval;
+- (double)timeIntervalSinceReferenceDate;
+- (instancetype)dateByAddingTimeInterval:(double)interval;
+@end
+@interface NSString (Numbers)
+- (double)doubleValue;
+- (float)floatValue;
 @end
 void NSLog(NSString *format, ...);
 extern NSString *const NSKeyValueChangeNewKey;
@@ -99,6 +121,9 @@ typedef struct { double x, y; } Pair;
 
 @interface Item : NSObject
 @property (nonatomic) int count;
+@property (nonatomic) double weight;
+@property (nonatomic) float ratio;
+@property (nonatomic) BOOL flag;
 @property (nonatomic) long long big;
 @property (nonatomic) NSRange range;
 @property (nonatomic) Pair pair;
@@ -110,7 +135,10 @@ static void show(NSString *string) { printf("%s\n", [string UTF8String]); }
 
 // A KVC or KVO value: a number's integer, a structure's fields.
 static void describe(const char *label, id value) {
-    if ([value isKindOfClass:[NSNumber class]]) {
+    char type = [value isKindOfClass:[NSNumber class]] ? [(NSNumber *)value objCType][0] : 0;
+    if (type == 'd' || type == 'f') {
+        printf("%s %.3f\n", label, [(NSNumber *)value doubleValue]);
+    } else if ([value isKindOfClass:[NSNumber class]]) {
         printf("%s %lld\n", label, [(NSNumber *)value longLongValue]);
     } else if ([value isKindOfClass:[NSValue class]] && [(NSValue *)value objCType][1] == '_') {
         NSRange range = [(NSValue *)value rangeValue];
@@ -178,16 +206,37 @@ int main(void) {
         describe("range", [item valueForKey:@"range"]);
         describe("pair", [item valueForKey:@"pair"]);
 
+        NSNumber *d = [NSNumber numberWithDouble:-2.5];
+        NSNumber *f = [NSNumber numberWithFloat:0.75f];
+        printf("numbers %.3f %.3f %.3f %.3f %.3f %lld\n", [d doubleValue], [d floatValue], [f doubleValue], [f floatValue],
+               [@1.25 doubleValue], [@7.5 longLongValue]);
+        printf("strings %.3f %.3f\n", [@"3.25" doubleValue], [@"-0.5" floatValue]);
+        NSDate *date = [NSDate dateWithTimeIntervalSinceReferenceDate:1000.25];
+        printf("date %.3f %.3f\n", [date timeIntervalSinceReferenceDate],
+               [[date dateByAddingTimeInterval:-0.5] timeIntervalSinceReferenceDate]);
+        CFDateRef cfDate = CFDateCreate(NULL, 12345.5);
+        printf("cf date %.3f now %d\n", CFDateGetAbsoluteTime(cfDate), CFAbsoluteTimeGetCurrent() > 7e8);
+        CFRelease(cfDate);
+        [item setValue:@2.5 forKey:@"weight"];
+        [item setValue:[NSNumber numberWithFloat:0.125f] forKey:@"ratio"];
+        [item setValue:[NSNumber numberWithBool:1] forKey:@"flag"];
+        printf("floats %.3f %.3f %d\n", item.weight, item.ratio, item.flag);
+        describe("weight", [item valueForKey:@"weight"]);
+        describe("ratio", [item valueForKey:@"ratio"]);
+        printf("flag %d\n", [[item valueForKey:@"flag"] boolValue]);
+
         Watcher *watcher = [Watcher new];
-        NSString *keys[] = { @"count", @"big", @"range", @"pair" };
-        for (int i = 0; i < 4; i++)
+        NSString *keys[] = { @"count", @"big", @"range", @"pair", @"weight", @"ratio" };
+        for (int i = 0; i < 6; i++)
             [item addObserver:watcher forKeyPath:keys[i]
                       options:NSKeyValueObservingOptionNew | NSKeyValueObservingOptionOld context:NULL];
         item.count = 4;
         item.big = 1LL << 35;
         item.range = NSMakeRange(1, 2);
         item.pair = (Pair){3.5, 4.75};
-        for (int i = 0; i < 4; i++)
+        item.weight = -1.5;
+        item.ratio = 3.25f;
+        for (int i = 0; i < 6; i++)
             [item removeObserver:watcher forKeyPath:keys[i]];
         item.count = 5;
         printf("after %d %lld %lu %.2f\n", item.count, item.big, (unsigned long)item.range.length, item.pair.y);
