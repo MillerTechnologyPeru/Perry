@@ -946,33 +946,44 @@ public func objc_setUncaughtExceptionHandler(_ handler: (@convention(c) (UnsafeM
     return previous
 }
 
-/// Throws an exception. Perry cannot unwind Mach-O frames to a @catch, so
-/// every exception is uncaught: the handler reports it, and the process
+/// An exception no @catch handles: the handler reports it, and the process
 /// ends as Darwin's does after an uncaught exception.
-@c(_objc_exception_throw)
-public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
+@c
+public func perry_objc_uncaught_exception(_ exception: UnsafeMutableRawPointer?) -> Never {
     if let handler = uncaughtExceptionHandler { handler(exception) }
     objcFatal("terminating with uncaught exception of type NSException")
+}
+
+#if !arch(arm)
+/// Throws an exception. Perry cannot unwind arm64 Mach-O frames to a
+/// @catch, so every exception is uncaught. On armv7, exceptions_arm.c
+/// throws and catches them.
+@c(_objc_exception_throw)
+public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
+    perry_objc_uncaught_exception(exception)
 }
 
 @c(_objc_exception_rethrow)
 public func objc_exception_rethrow() -> Never {
     objcFatal("an exception was rethrown, which Perry cannot unwind")
 }
+#endif
 
 @c(_objc_terminate)
 public func objc_terminate() -> Never {
     objcFatal("terminating")
 }
 
+#if !arch(arm)
 /// The personality routine Objective-C code's unwind tables name. Code
 /// that only cleans up (ARC, @autoreleasepool) refers to it without
-/// throwing; Perry cannot unwind Mach-O frames, so reaching it stops.
+/// throwing; Perry cannot unwind arm64 Mach-O frames, so reaching it stops.
 @c(___objc_personality_v0)
 public func objc_personality_v0(_ version: Int32, _ actions: Int32, _ exceptionClass: UInt64, _ exception: UnsafeMutableRawPointer?,
                                 _ context: UnsafeMutableRawPointer?) -> Int32 {
     objcFatal("an exception is unwinding through Objective-C code, which Perry cannot do")
 }
+#endif
 
 // MARK: - Protocol introspection
 
