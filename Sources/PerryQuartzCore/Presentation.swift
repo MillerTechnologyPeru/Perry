@@ -170,7 +170,7 @@ enum Presentation {
     /// Values at key times, or a point along a path.
     private static func keyframe(_ animation: CAAnimation, key: String, at fraction: Double) -> AnimatedValue? {
         if let path = animation.path() {
-            return PathTrimming.point(at: fraction, along: path).map { .point($0) }
+            return PathTrimming.point(at: CGFloat(fraction), along: path).map { .point($0) }
         }
         let values = animation.values()?.as(NSArray.self)?.elements.compactMap { AnimatedValue(boxed: $0, key: key) } ?? []
         guard let first = values.first else { return nil }
