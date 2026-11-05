@@ -101,3 +101,42 @@ _Noreturn void darwin_unwind_resume(void *exception) {
     fputs("perry: _Unwind_Resume called; unwinding Mach-O frames is not supported\n", stderr);
     abort();
 }
+
+#if defined(__arm__)
+// MARK: - setjmp and longjmp unwinding
+
+// Darwin's armv7 code unwinds with setjmp and longjmp: a function with cleanups
+// registers a context when it starts and unregisters it when it ends, and
+// exceptions longjmp to the registered contexts' landing pads. The contexts
+// chain through their first member, most recent first.
+struct sjlj_function_context {
+    struct sjlj_function_context *prev;
+};
+
+static __thread struct sjlj_function_context *sjlj_top;
+
+void darwin_sjlj_register(struct sjlj_function_context *context) DARWIN_SYMBOL(_Unwind_SjLj_Register);
+void darwin_sjlj_register(struct sjlj_function_context *context) {
+    context->prev = sjlj_top;
+    sjlj_top = context;
+}
+
+void darwin_sjlj_unregister(struct sjlj_function_context *context) DARWIN_SYMBOL(_Unwind_SjLj_Unregister);
+void darwin_sjlj_unregister(struct sjlj_function_context *context) {
+    sjlj_top = context->prev;
+}
+
+// Raising an exception through registered frames is not implemented, so
+// neither is resuming one.
+_Noreturn void darwin_sjlj_resume(void *exception) DARWIN_SYMBOL(_Unwind_SjLj_Resume);
+_Noreturn void darwin_sjlj_resume(void *exception) {
+    fputs("perry: _Unwind_SjLj_Resume called; exceptions are not supported\n", stderr);
+    abort();
+}
+
+int darwin_sjlj_raise(void *exception) DARWIN_SYMBOL(_Unwind_SjLj_RaiseException);
+int darwin_sjlj_raise(void *exception) {
+    fputs("perry: _Unwind_SjLj_RaiseException called; exceptions are not supported\n", stderr);
+    abort();
+}
+#endif
