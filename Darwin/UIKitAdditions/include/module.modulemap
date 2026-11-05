@@ -1,0 +1,4 @@
+module _UIKitPrivate {
+    header "UIKitPrivate.h"
+    export *
+}
