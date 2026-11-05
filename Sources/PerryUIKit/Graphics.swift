@@ -303,7 +303,7 @@ open class UIGraphicsImageRenderer: UIGraphicsRenderer {
     func jpegData(compressionQuality quality: CGFloat, actions: ObjCBlock) -> NSObject? {
         guard let rendered = render(actions) else { return nil }
         let properties = NSMutableDictionary.empty()
-        properties.set(NSNumber.make(double: quality), forKey: "kCGImageDestinationLossyCompressionQuality")
+        properties.set(NSNumber.make(double: Double(quality)), forKey: "kCGImageDestinationLossyCompressionQuality")
         return UIImage.encode(rendered.image.object, type: "public.jpeg", properties: properties)
     }
 }
