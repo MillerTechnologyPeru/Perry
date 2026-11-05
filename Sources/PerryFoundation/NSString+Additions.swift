@@ -486,8 +486,12 @@ extension NSString {
     @ObjCMethod("stringByDeletingLastPathComponent") func deletingLastPathComponent() -> String { Paths.deletingLastComponent(value) }
     @ObjCMethod("stringByDeletingPathExtension") func deletingPathExtension() -> String { Paths.deletingPathExtension(value) }
 
+    /// A nil component appends nothing.
     @ObjCMethod("stringByAppendingPathComponent:")
-    func appending(pathComponent component: String) -> String { Paths.appending(value, component) }
+    func appending(pathComponent component: String?) -> String {
+        guard let component, !component.isEmpty else { return value }
+        return Paths.appending(value, component)
+    }
 
     @ObjCMethod("stringByAppendingPathExtension:")
     func appending(pathExtension: String) -> String { Paths.normalized(value) + "." + pathExtension }
