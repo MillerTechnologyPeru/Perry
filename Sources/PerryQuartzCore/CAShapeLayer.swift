@@ -89,7 +89,7 @@ open class CAShapeLayer: CALayer {
         // CGLineCap: butt 0, round 1, square 2; CGLineJoin: miter 0, round 1, bevel 2.
         CG.setLineCap(context, shape.lineCap == "round" ? 1 : shape.lineCap == "square" ? 2 : 0)
         CG.setLineJoin(context, shape.lineJoin == "round" ? 1 : shape.lineJoin == "bevel" ? 2 : 0)
-        let dashes = shape.lineDashPattern?.as(NSArray.self)?.elements.map { $0.sendDoubleValue() } ?? []
+        let dashes = shape.lineDashPattern?.as(NSArray.self)?.elements.map { CGFloat($0.sendDoubleValue()) } ?? []
         if !dashes.isEmpty { dashes.withUnsafeBufferPointer { CG.setLineDash(context, shape.lineDashPhase, $0.baseAddress, $0.count) } }
         CG.addPath(context, trimmed ?? path)
         CG.strokePath(context)
