@@ -1,0 +1,3 @@
+/* Markdown in a strings table, as SwiftUI's Text reads it. */
+"greeting" = "Hello, **bold** and *soft* `code` [home](https://example.com) ^[them](inflect: true)";
+"plain" = "Just  text\n";

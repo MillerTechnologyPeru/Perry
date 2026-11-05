@@ -134,10 +134,12 @@ let package = Package(
         .target(name: "CPerryFoundation"),
         // Linux's libxml2, for NSXMLParser.
         .systemLibrary(name: "CLibXML2", pkgConfig: "libxml-2.0", providers: [.apt(["libxml2-dev"])]),
+        // swift-cmark, Swift's cmark-gfm, for NSAttributedString's Markdown.
+        .systemLibrary(name: "CCmarkGFM"),
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CCmarkGFM", "CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Binding a Darwin library's imports to the Linux build of the same

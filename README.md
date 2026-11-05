@@ -43,7 +43,11 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   option, dependent keys, key paths through other objects, manual and
   to-many notifications), `NSRegularExpression` (over ICU, as Darwin's) and
   `NSTextCheckingResult`, `NSScanner`, `NSAttributedString` and
-  `NSMutableAttributedString`, `NSURLComponents` and `NSURLQueryItem`,
+  `NSMutableAttributedString`, Markdown as Foundation imports it (over
+  swift-cmark, Swift's cmark-gfm: presentation intents, inline presentation
+  intents, links, images, tables, list delimiters, source positions and
+  `^[…](…)` attributes, for `initWithMarkdownString:` and the localized
+  attributed strings SwiftUI's `Text` reads), `NSURLComponents` and `NSURLQueryItem`,
   `NSIndexSet`, `NSOrderedSet`, `NSCountedSet`, `NSCache`, `NSLock`,
   `NSRecursiveLock`, `NSCondition`, `NSOperation`,
   `NSBlockOperation` and `NSOperationQueue` (dependencies, priorities,

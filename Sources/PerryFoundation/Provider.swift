@@ -69,6 +69,9 @@ enum Conformances {
         ("NSError", ["NSCopying", "NSSecureCoding"]),
         ("NSNull", ["NSCopying", "NSSecureCoding"]),
         ("NSEnumerator", ["NSFastEnumeration"]),
+        ("NSPresentationIntent", ["NSCopying"]),
+        ("NSAttributedStringMarkdownSourcePosition", ["NSCopying"]),
+        ("NSAttributedStringMarkdownParsingOptions", ["NSCopying"]),
     ]
 
     /// Declares the protocols, unless an image already has, and adds them

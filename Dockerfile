@@ -110,4 +110,22 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends dbus-daemon python3-dbus python3-gi \
  && rm -rf /var/lib/apt/lists/*
 
+# swift-cmark, Swift's fork of cmark-gfm, which Foundation parses Markdown
+# with: GitHub's tables, strikethrough and autolinks, the ^[text](attributes)
+# syntax, and the inline-only and whitespace-preserving modes Foundation's
+# options choose. Static archives, built position-independent for
+# PerryFoundation and named libperry-cmark-gfm so they never stand in for a
+# system cmark; their functions stay hidden in the provider.
+RUN curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archive/437611671145d47e6d9679761b8a5987766f4ae5.tar.gz \
+ && echo "bcc825cecd1710cdca28f7cc0a74423a691966be2f3a4c6fa8739a2009ed5bf2  /tmp/cmark.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/cmark && tar -xzf /tmp/cmark.tar.gz -C /tmp/cmark --strip-components=1 \
+ && cmake -G Ninja -S /tmp/cmark -B /tmp/cmark-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-19 \
+        -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
+ && ninja -C /tmp/cmark-build libcmark-gfm libcmark-gfm-extensions \
+ && cp /tmp/cmark-build/src/libcmark-gfm.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm.a \
+ && cp /tmp/cmark-build/extensions/libcmark-gfm-extensions.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm-extensions.a \
+ && mkdir -p /usr/include/perry-cmark-gfm \
+ && cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h /usr/include/perry-cmark-gfm/ \
+ && rm -rf /tmp/cmark /tmp/cmark-build /tmp/cmark.tar.gz
+
 WORKDIR /perry

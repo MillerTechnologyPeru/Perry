@@ -339,13 +339,33 @@ public final class NSBundle: NSObject {
         return value
     }
 
+    /// The localized string's inline Markdown, as Foundation reads strings
+    /// tables: emphasis, code, links and ^[…](…) attributes, with its
+    /// whitespace kept and what cannot be parsed left as text, in the
+    /// localization's language (NSLanguage). Foundation inflects the text
+    /// that asks to be (NSInflect) and drops the request; with no grammar
+    /// engine here the text stays as written.
     @ObjCMethod("localizedAttributedStringForKey:value:table:localization:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?, localization: String?) -> id? {
         let text = localizedString(forKey: key, value: value, table: table, localization: localization)
-        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: nil), mutable: false))
+        let options = MarkdownOptionsStorage()
+        options.interpretedSyntax = Markdown.Syntax.inlineOnlyPreservingWhitespace.rawValue
+        options.allowsExtendedAttributes = true
+        options.failurePolicy = 1
+        let storage = MarkdownObjects.storage(text, options: options, baseURL: nil, error: nil)
+            ?? AttributedStorage(units: Array(text.utf16), attributes: nil)
+        let language = localization.flatMap { $0.isEmpty ? nil : $0 }
+            ?? Bundles.preferred(from: self.storage.localizations, preferences: nil) ?? developmentLocalization() ?? "en"
+        let languageKey = Strings.autoreleased("NSLanguage"), inflect = Strings.autoreleased("NSInflect")
+        let languageValue = Strings.autoreleased(language)
+        storage.update(NSRange(location: 0, length: storage.units.count)) { entries in
+            entries.filter { !AttributedStorage.equal($0.key, inflect) && !AttributedStorage.equal($0.key, languageKey) }
+                + [(key: languageKey, value: languageValue)]
+        }
+        return ObjC.autorelease(AttributedStrings.make(storage, mutable: false))
     }
 
-    /// The localized string, as an attributed string without attributes.
+    /// The localized string, as an attributed string of its Markdown.
     @ObjCMethod("localizedAttributedStringForKey:value:table:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
         localizedAttributedString(forKey: key, value: value, table: table, localization: nil)
