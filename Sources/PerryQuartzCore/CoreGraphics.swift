@@ -76,7 +76,9 @@ enum CG {
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) -> Bool {
         var complete = true
         func bind<T>(_ name: String) -> T? {
-            guard let symbol = lookup(coreGraphics, "_" + name) else {
+            // Its native export when it has one: @DarwinC's under the Darwin
+            // name takes Darwin's calling convention.
+            guard let symbol = lookup(coreGraphics, "perry_native_" + name) ?? lookup(coreGraphics, "_" + name) else {
                 complete = false
                 return nil
             }
