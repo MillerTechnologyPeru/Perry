@@ -211,7 +211,7 @@ public enum ObjCRuntime {
         var current = objectClass(object)
         while let c = current {
             if c == cls { return true }
-            current = c.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
+            current = c.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeMutableRawPointer?.self)
         }
         return false
     }
