@@ -3,7 +3,9 @@ import Glibc
 import PerryObjCInterop
 
 // UIColor: a color in sRGB, or a gray, with its CGColor made on first use.
-// Setting a color sets the current context's fill and stroke colors.
+// Setting a color sets the current context's fill and stroke colors. A
+// dynamic color is its provider's color for the device's traits, and for
+// other traits when resolved with them.
 
 final class ColorState: ObjectState {
     var red: CGFloat = 0
@@ -16,6 +18,9 @@ final class ColorState: ObjectState {
     var cgColor: CGRef?
     /// colorWithPatternImage:'s image, which is drawn as its average color.
     var patternImage: UIImage?
+    /// colorWithDynamicProvider:'s block, which gives the color for a trait
+    /// collection; the color's components are its color for the device's.
+    var provider: ObjCBlock?
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
@@ -191,8 +196,26 @@ open class UIColor: NSObject {
 
     @ObjCClassMethod("colorWithDynamicProvider:")
     static func color(_ cls: ObjCClass, dynamicProvider provider: ObjCBlock) -> NSObject? {
+        let resolved = resolve(provider, UITraitCollection.current())
+        return make(cls) { state in
+            if let resolved {
+                let other = resolved.state
+                (state.red, state.green, state.blue, state.alpha) = (other.red, other.green, other.blue, other.alpha)
+                state.white = other.white
+                state.patternImage = other.patternImage
+            }
+            state.provider = provider
+        }
+    }
+
+    /// A dynamic color's provider's color for `traits`: the block is given
+    /// a trait collection, which apps read without checking for nil, in the
+    /// light appearance when `traits` leaves the appearance unspecified.
+    private static func resolve(_ provider: ObjCBlock, _ traits: UITraitCollection) -> UIColor? {
         typealias Provider = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
-        return provider.function(as: Provider.self)(provider.object, nil).map { NSObject($0) }
+        let traits = traits.traits.style == 0 ? traits.with(style: 1) : traits
+        return provider.function(as: Provider.self)(provider.object, traits.objcObject)
+            .map { UIColor(objcObject: $0, ownership: .retain) }
     }
 
     private static func set(_ state: ColorState, from cgColor: UnsafeMutableRawPointer?) {
@@ -321,8 +344,14 @@ open class UIColor: NSObject {
     /// The color's CGColor, which the color owns.
     @ObjCMethod("CGColor") func cgColor() -> UnsafeMutableRawPointer? { state.makeCGColor() }
 
+    /// A dynamic color's provider's color for `traits`; any other color is
+    /// itself.
     @ObjCMethod("resolvedColorWithTraitCollection:")
-    func resolvedColor(with traits: NSObject?) -> UIColor { self }
+    func resolvedColor(with traits: NSObject?) -> UIColor {
+        guard let provider = state.provider else { return self }
+        let collection = traits?.as(UITraitCollection.self) ?? UITraitCollection.current()
+        return UIColor.resolve(provider, collection) ?? self
+    }
 
     // MARK: Setting
 
