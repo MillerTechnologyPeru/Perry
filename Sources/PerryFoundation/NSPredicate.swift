@@ -466,9 +466,9 @@ enum PredicateEvaluation {
     /// changes over a string.
     static func function(_ name: String, _ arguments: [id?]) -> id? {
         let items = arguments.first.flatMap { elements($0) } ?? []
-        typealias DoubleValue = @convention(c) (id?, SEL) -> Double
+        typealias DoubleValue = @convention(c) (id?, SEL) -> Double.ObjCResultType
         let doubleValue = unsafeBitCast(ObjC.msgSend, to: DoubleValue.self)
-        let numbers = items.map { doubleValue($0, ObjC.selector("doubleValue")) }
+        let numbers = items.map { darwinResult(doubleValue($0, ObjC.selector("doubleValue")), as: Double.self) }
         switch name {
         case "count:": return Numbers.make(nil, .signed(Int64(items.count)))
         case "sum:": return Numbers.make(nil, .double(numbers.reduce(0, +)))
