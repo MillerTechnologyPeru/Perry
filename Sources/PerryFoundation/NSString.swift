@@ -181,6 +181,9 @@ public class NSString: NSObject {
         Strings.stringClass = cls.storage
         cls.addMethod("stringWithFormat:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
+        // Formatting isn't localized here, so it is stringWithFormat:.
+        cls.addMethod("localizedStringWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
         cls.addMethod("initWithFormat:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
         cls.addMethod("stringByAppendingFormat:", types: "@24@0:8@16",
@@ -321,6 +324,22 @@ public class NSString: NSObject {
 
     @ObjCMethod("stringByAppendingString:")
     func appending(_ other: String) -> String { value + other }
+
+    /// Cut or padded to `length` UTF-16 units, the pad repeating from
+    /// `start`, as Foundation's.
+    @ObjCMethod("stringByPaddingToLength:withString:startingAtIndex:")
+    func padding(toLength length: UInt, with pad: String, startingAt start: UInt) -> String {
+        var units = Array(value.utf16)
+        if units.count >= Int(length) { return String(decoding: units.prefix(Int(length)), as: UTF16.self) }
+        let padUnits = Array(pad.utf16)
+        guard !padUnits.isEmpty else { return value }
+        var index = Int(start) % padUnits.count
+        while units.count < Int(length) {
+            units.append(padUnits[index])
+            index = (index + 1) % padUnits.count
+        }
+        return String(decoding: units, as: UTF16.self)
+    }
 
     @ObjCMethod("uppercaseString")
     func uppercased() -> String { value.uppercased() }
