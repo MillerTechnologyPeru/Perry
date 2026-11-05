@@ -174,8 +174,11 @@ public final class NSNotificationCenter: NSObject {
         ObjC.superDealloc(objcObject, from: Notifications.centerClass)
     }
 
+    /// A nil observer is not added, as Foundation adds none: a program may
+    /// pass an object it has not made yet.
     @ObjCMethod("addObserver:selector:name:object:")
-    func add(observer: ObjCObject, selector: ObjCSelector, name: String?, object: ObjCObject?) {
+    func add(observer: ObjCObject?, selector: ObjCSelector, name: String?, object: ObjCObject?) {
+        guard let observer else { return }
         observers.observers.append(.init(observer: observer.id, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
                                          block: nil, token: nil, name: name, object: object?.id))
     }
@@ -191,12 +194,14 @@ public final class NSNotificationCenter: NSObject {
     }
 
     @ObjCMethod("removeObserver:")
-    func remove(_ observer: ObjCObject) {
+    func remove(_ observer: ObjCObject?) {
+        guard let observer else { return }
         observers.remove { $0.observer == observer.id || $0.token == observer.id }
     }
 
     @ObjCMethod("removeObserver:name:object:")
-    func remove(_ observer: ObjCObject, name: String?, object: ObjCObject?) {
+    func remove(_ observer: ObjCObject?, name: String?, object: ObjCObject?) {
+        guard let observer else { return }
         observers.remove {
             ($0.observer == observer.id || $0.token == observer.id)
                 && (name == nil || $0.name == name) && (object == nil || $0.object == object?.id)
