@@ -24,6 +24,8 @@ final class LivePixels {
     private(set) var width: Int
     private(set) var height: Int
     private(set) var generation = 0
+    /// The generation the compositor last put on the screen.
+    var shown = -1
     var opaque = false
 
     init(width: Int, height: Int) {
@@ -324,6 +326,10 @@ open class CALayer: NSObject {
         live.update(from: pixels, width: width, height: height, opaque: opaque)
         changed { state.livePixels = live }
     }
+    /// Perry's: whether the compositor has shown the last GL frame, so a
+    /// newer one would be seen; true without one.
+    @ObjCMethod("_perryPixelsShown")
+    func pixelsShown() -> Bool { state.livePixels.map { $0.shown == $0.generation } ?? true }
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat) { changed { state.contentsScale = scale } }
     @ObjCMethod("contentsGravity") func contentsGravity() -> String { state.contentsGravity }
