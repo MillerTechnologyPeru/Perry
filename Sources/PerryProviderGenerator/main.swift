@@ -14,7 +14,8 @@
 //     func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? // other imports
 //
 // A class that declares `class func didDefineObjCClass(_:)` in its own body
-// has it called right after the class is defined.
+// has it called right after the class is defined; one that declares
+// `objCInstanceVariables` gets them before the class is registered.
 
 import Foundation
 import SwiftParser
@@ -27,6 +28,7 @@ struct ClassDeclaration {
     /// The other types it inherits: protocols, some of them Objective-C's.
     let adopted: [String]
     let hasSetUp: Bool
+    let hasInstanceVariables: Bool
 }
 
 struct ProtocolDeclaration {
@@ -68,13 +70,19 @@ final class Collector: SyntaxVisitor {
             let hasSetUp = node.memberBlock.members.contains {
                 $0.decl.as(FunctionDeclSyntax.self)?.name.text == "didDefineObjCClass"
             }
+            let hasInstanceVariables = node.memberBlock.members.contains {
+                $0.decl.as(VariableDeclSyntax.self)?.bindings.contains {
+                    $0.pattern.as(IdentifierPatternSyntax.self)?.identifier.text == "objCInstanceVariables"
+                } ?? false
+            }
             let inherited = (node.inheritanceClause?.inheritedTypes ?? []).map(\.type.trimmedDescription)
             classes.append(ClassDeclaration(
                 name: node.name.text,
                 objCName: objCName,
                 superclass: inherited.first,
                 adopted: Array(inherited.dropFirst()),
-                hasSetUp: hasSetUp))
+                hasSetUp: hasSetUp,
+                hasInstanceVariables: hasInstanceVariables))
         }
         if attribute("ObjCConstants", in: node.attributes) != nil { constantTables.append(node.name.text) }
         return .visitChildren
@@ -242,10 +250,11 @@ if !protocols.isEmpty {
 if !classes.isEmpty {
     lines += ["", "    // Classes, superclasses first."]
     for declaration in classes {
+        let ivars = declaration.hasInstanceVariables ? "\(declaration.name).addObjCInstanceVariables" : ""
         if declaration.hasSetUp {
-            lines.append("    \(declaration.name).didDefineObjCClass(\(declaration.name).defineObjCClass())")
+            lines.append("    \(declaration.name).didDefineObjCClass(\(declaration.name).defineObjCClass(\(ivars)))")
         } else {
-            lines.append("    \(declaration.name).defineObjCClass()")
+            lines.append("    \(declaration.name).defineObjCClass(\(ivars))")
         }
     }
 }
