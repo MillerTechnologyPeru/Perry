@@ -1,7 +1,6 @@
 #!/bin/sh
 # Builds libPerrySystem.so for armv7, the provider for libSystem, into
-# .build/armv7/bin beside perry32, which finds providers there. Only the
-# files that have been brought to Darwin's armv7 ABI are built.
+# .build/armv7/bin beside perry32, which finds providers there.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 llvm=$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)
@@ -13,7 +12,8 @@ cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi
   -I$root/Sources/PerrySystem/include -I$root/Sources/PerryInterface/include"
 
 objects=""
-for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c; do
+for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c \
+    pthread.c process.c mach.c sockets.c math.c dyld.c compat.c dispatch.c commoncryptor.c commondigest.c; do
     object=$out/obj/system-$name.o
     # shellcheck disable=SC2086
     "$llvm/clang" $cflags -c "$root/Sources/PerrySystem/$name" -o "$object"
