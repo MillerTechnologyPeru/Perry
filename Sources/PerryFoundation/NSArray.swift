@@ -181,6 +181,14 @@ public class NSArray: NSObject {
     @ObjCMethod("writeToURL:atomically:")
     func write(toURL url: NSURL, atomically: Bool) -> Bool { PropertyLists.write(objcObject, to: url.url, atomically: atomically) }
 
+    /// iOS 11's: written atomically, with an error when it can't be.
+    @ObjCMethod("writeToURL:error:")
+    func write(toURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> Bool {
+        if PropertyLists.write(objcObject, to: url.url, atomically: true) { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 512, description: "The file couldn’t be saved.")
+        return false
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
