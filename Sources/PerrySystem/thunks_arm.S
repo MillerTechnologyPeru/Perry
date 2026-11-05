@@ -154,6 +154,12 @@ PASSTHROUGH _setenv, setenv
 PASSTHROUGH _unsetenv, unsetenv
 
 // MARK: - files and processes
+// open, openat and fcntl are variadic on Darwin; files.c reads their optional
+// argument from the va_list.
+VARIADIC _open, perry_vopen, 2
+VARIADIC _openat, perry_vopenat, 3
+VARIADIC _fcntl, perry_vfcntl, 2
+
 PASSTHROUGH _read, read
 PASSTHROUGH _write, write
 PASSTHROUGH _close, close
@@ -166,6 +172,23 @@ PASSTHROUGH _rmdir, rmdir
 PASSTHROUGH _isatty, isatty
 PASSTHROUGH _access, access
 PASSTHROUGH _chdir, chdir
+PASSTHROUGH _mkdir, mkdir
+PASSTHROUGH _symlink, symlink
+PASSTHROUGH _link, link
+PASSTHROUGH _readlink, readlink
+PASSTHROUGH _rename, rename
+PASSTHROUGH _chmod, chmod
+PASSTHROUGH _fchmod, fchmod
+PASSTHROUGH _chown, chown
+PASSTHROUGH _fchown, fchown
+PASSTHROUGH _fchdir, fchdir
+PASSTHROUGH _umask, umask
+PASSTHROUGH _time, time
+PASSTHROUGH _nanosleep, nanosleep
+PASSTHROUGH _gettimeofday, gettimeofday
+PASSTHROUGH _mprotect, mprotect
+PASSTHROUGH _mlock, mlock
+PASSTHROUGH _munlock, munlock
 PASSTHROUGH _getcwd, getcwd
 PASSTHROUGH _getpagesize, getpagesize
 PASSTHROUGH _munmap, munmap
