@@ -327,22 +327,24 @@ final class Compositor {
 
     /// The persistent streaming textures of layers showing GL frames, and
     /// the generation each last took.
-    private var liveTextures: [UnsafeMutableRawPointer: (texture: SDL.Pointer, width: Int, height: Int, generation: Int, used: Bool)] = [:]
+    private var liveTextures: [UnsafeMutableRawPointer: (texture: SDL.Pointer, width: Int, height: Int, bgra: Bool, generation: Int, used: Bool)] = [:]
 
     /// A GL frame: its texture updated in place when the frame is new, and
-    /// drawn flipped upright, as the rows are bottom first.
+    /// drawn flipped upright, as the rows are bottom first. A Metal
+    /// drawable's, B, G, R, A rows top first, go up as they are.
     private func drawLive(_ live: LivePixels, of layer: CALayer, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
         let key = layer.objcObject
         var entry = liveTextures[key]
-        if let current = entry, current.width != live.width || current.height != live.height {
+        if let current = entry, current.width != live.width || current.height != live.height || current.bgra != live.bgra {
             SDL.destroyTexture(current.texture)
             entry = nil
         }
         if entry == nil {
-            guard let texture = SDL.createTexture(renderer, SDL.pixelFormatABGR8888, SDL.textureAccessStreaming,
+            let format = live.bgra ? SDL.pixelFormatARGB8888 : SDL.pixelFormatABGR8888
+            guard let texture = SDL.createTexture(renderer, format, SDL.textureAccessStreaming,
                                                   Int32(live.width), Int32(live.height)) else { return }
             _ = SDL.setTextureScaleMode(texture, 1)
-            entry = (texture, live.width, live.height, live.generation &- 1, true)
+            entry = (texture, live.width, live.height, live.bgra, live.generation &- 1, true)
         }
         guard var current = entry else { return }
         if current.generation != live.generation {
@@ -358,8 +360,8 @@ final class Compositor {
         _ = SDL.setTextureAlphaMod(current.texture, level)
         _ = SDL.setTextureColorMod(current.texture, level, level, level)
         var target = pixels(toScreen.apply(state.bounds))
-        // SDL_FLIP_VERTICAL.
-        _ = SDL.renderTextureRotated(renderer, current.texture, nil, &target, 0, nil, 2)
+        // SDL_FLIP_VERTICAL for rows bottom first.
+        _ = SDL.renderTextureRotated(renderer, current.texture, nil, &target, 0, nil, live.topFirst ? 0 : 2)
     }
 
     /// The layer's texture, drawn again when what it shows has changed.
