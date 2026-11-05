@@ -105,7 +105,7 @@ public func PerryCADisplayLayers(_ roots: UnsafePointer<UnsafeMutableRawPointer?
 public func PerryCAComposite(_ renderer: UnsafeMutableRawPointer?, _ scale: Double, _ roots: UnsafePointer<UnsafeMutableRawPointer?>?,
                              _ count: Int) -> Bool {
     guard let renderer, SDL.loadOnce() else { return false }
-    let compositor = Compositor.shared(renderer, scale: scale)
+    let compositor = Compositor.shared(renderer, scale: CGFloat(scale))
     let layers = (0..<count).compactMap { roots?[$0] }.map(CALayer.wrap)
     compositor.draw(layers)
     return true
@@ -284,7 +284,7 @@ final class Compositor {
         let degrees = atan2(toScreen.b, toScreen.a) * 180 / .pi
         // A negative determinant mirrors: SDL_FLIP_HORIZONTAL.
         let flip: Int32 = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0 ? 1 : 0
-        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
+        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
     }
 
     /// The persistent streaming textures of layers showing GL frames, and
