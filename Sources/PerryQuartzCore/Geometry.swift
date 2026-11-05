@@ -122,11 +122,12 @@ extension CATransform3D: ObjCScalar {
         m13 == 0 && m14 == 0 && m23 == 0 && m24 == 0 && m31 == 0 && m32 == 0 && m33 == 1 && m34 == 0 && m43 == 0 && m44 == 1
     }
 
-    var rows: [Double] { [m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44] }
+    var rows: [Double] { [Double(m11), Double(m12), Double(m13), Double(m14), Double(m21), Double(m22), Double(m23), Double(m24), Double(m31), Double(m32), Double(m33), Double(m34), Double(m41), Double(m42), Double(m43), Double(m44)] }
 
     init(rows: [Double]) {
-        self.init(m11: rows[0], m12: rows[1], m13: rows[2], m14: rows[3], m21: rows[4], m22: rows[5], m23: rows[6], m24: rows[7],
-                  m31: rows[8], m32: rows[9], m33: rows[10], m34: rows[11], m41: rows[12], m42: rows[13], m43: rows[14], m44: rows[15])
+        let m = rows.map { CGFloat($0) }
+        self.init(m11: m[0], m12: m[1], m13: m[2], m14: m[3], m21: m[4], m22: m[5], m23: m[6], m24: m[7],
+                  m31: m[8], m32: m[9], m33: m[10], m34: m[11], m41: m[12], m42: m[13], m43: m[14], m44: m[15])
     }
 
     /// `self` then `other`, as CATransform3DConcat(self, other).
@@ -143,13 +144,13 @@ extension CATransform3D: ObjCScalar {
 
     static func translation(_ x: Double, _ y: Double, _ z: Double) -> CATransform3D {
         var transform = identity
-        (transform.m41, transform.m42, transform.m43) = (x, y, z)
+        (transform.m41, transform.m42, transform.m43) = (CGFloat(x), CGFloat(y), CGFloat(z))
         return transform
     }
 
     static func scale(_ x: Double, _ y: Double, _ z: Double) -> CATransform3D {
         var transform = identity
-        (transform.m11, transform.m22, transform.m33) = (x, y, z)
+        (transform.m11, transform.m22, transform.m33) = (CGFloat(x), CGFloat(y), CGFloat(z))
         return transform
     }
 
@@ -159,10 +160,10 @@ extension CATransform3D: ObjCScalar {
         guard length > 0 else { return identity }
         let (x, y, z) = (x / length, y / length, z / length)
         let c = cos(angle), s = sin(angle), t = 1 - c
-        return CATransform3D(m11: t * x * x + c, m12: t * x * y + z * s, m13: t * x * z - y * s, m14: 0,
-                             m21: t * x * y - z * s, m22: t * y * y + c, m23: t * y * z + x * s, m24: 0,
-                             m31: t * x * z + y * s, m32: t * y * z - x * s, m33: t * z * z + c, m34: 0,
-                             m41: 0, m42: 0, m43: 0, m44: 1)
+        return CATransform3D(rows: [t * x * x + c, t * x * y + z * s, t * x * z - y * s, 0,
+                                    t * x * y - z * s, t * y * y + c, t * y * z + x * s, 0,
+                                    t * x * z + y * s, t * y * z - x * s, t * z * z + c, 0,
+                                    0, 0, 0, 1])
     }
 
     /// The inverse, by Gauss-Jordan elimination; the transform itself when
