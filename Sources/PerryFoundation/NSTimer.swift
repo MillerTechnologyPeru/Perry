@@ -21,6 +21,9 @@ final class TimerStorage {
     var onFired: (() -> Void)?
     private(set) var isValid = true
     var runLoops: [RunLoopState] = []
+    /// While its callout runs: a run loop run inside it (as apps pump
+    /// events from a timer) doesn't fire it again, as CFRunLoop doesn't.
+    var firing = false
 
     init(fireDate: Double, interval: Double, repeats: Bool, target: id?, selector: SEL?, userInfo: id?,
          block: id?, argument: id? = nil, isPerformRequest: Bool = false) {
@@ -61,8 +64,10 @@ enum Timers {
         Storage.get(timer, as: TimerStorage.self)
     }
 
+    /// When it fires next; never while it is firing.
     static func fireDate(_ timer: id) -> Double {
-        storage(timer)?.fireDate ?? .infinity
+        guard let storage = storage(timer), !storage.firing else { return .infinity }
+        return storage.fireDate
     }
 
     static func isValid(_ timer: id) -> Bool {
@@ -103,12 +108,14 @@ enum Timers {
     /// a repeating timer past now (missed fires are skipped) or invalidates
     /// a one-shot one.
     static func fire(_ timer: id, from runLoop: RunLoopState?) {
-        guard let storage = storage(timer), storage.isValid else { return }
+        guard let storage = storage(timer), storage.isValid, !storage.firing else { return }
+        storage.firing = true
         if let block = storage.block {
             Blocks.invoke(block, as: (@convention(c) (id, id?) -> Void).self)(block, timer)
         } else if let selector = storage.selector {
             _ = ObjC.send(storage.target, selector, storage.isPerformRequest ? storage.argument : timer)
         }
+        storage.firing = false
         storage.onFired?()
         guard storage.isValid else { return }
         if storage.repeats {
