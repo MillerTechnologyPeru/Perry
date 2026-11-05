@@ -47,6 +47,13 @@ struct ARMv7Tests {
         ])
     }
 
+    @Test("Objective-C classes, categories, +load and blocks run")
+    func objectiveCRuns() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("zoo").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout == "Dog +load\nwoof legs=4\nwag\n")
+    }
+
     @Test("Files: open's flags, struct stat, struct dirent, symlinks and errno")
     func files() throws {
         let result = try run(ARMv7.perry32, [ARMv7.fixture("files").path])
@@ -127,5 +134,6 @@ enum ARMv7 {
             && fm.fileExists(atPath: fixture("abi").path)
             && fm.fileExists(atPath: fixture("seeko").path)
             && fm.fileExists(atPath: fixture("files").path)
+            && fm.fileExists(atPath: fixture("zoo").path)
     }
 }
