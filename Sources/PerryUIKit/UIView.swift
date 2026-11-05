@@ -18,6 +18,8 @@ final class ViewState: ObjectState {
     var tintColor: UIColor?
     /// UIViewContentMode: scale to fill 0.
     var contentMode = 0
+    /// Whether -drawRect: starts from a cleared context; drawing always does here.
+    var clearsContextBeforeDrawing = true
     /// UISemanticContentAttribute: unspecified 0.
     var semanticContentAttribute = 0
     var autoresizingMask: UInt = 0
@@ -451,6 +453,9 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ clips: Bool) { state.geometry.masksToBounds = clips }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.geometry.isOpaque }
     @ObjCMethod("setOpaque:") func setOpaque(_ opaque: Bool) { state.geometry.isOpaque = opaque }
+    @ObjCMethod("clearsContextBeforeDrawing") func clearsContextBeforeDrawing() -> Bool { state.clearsContextBeforeDrawing }
+    @ObjCMethod("setClearsContextBeforeDrawing:")
+    func setClearsContextBeforeDrawing(_ clears: Bool) { state.clearsContextBeforeDrawing = clears }
     @ObjCMethod("contentMode") func contentMode() -> Int { state.contentMode }
     @ObjCMethod("setContentMode:") func setContentMode(_ mode: Int) { state.contentMode = mode }
     @ObjCMethod("semanticContentAttribute") func semanticContentAttribute() -> Int { state.semanticContentAttribute }
