@@ -187,6 +187,8 @@ public func dispatch_source_merge_data(_ source: Object?, _ value: UInt) {
 }
 
 @c(_dispatch_source_set_timer)
-public func dispatch_source_set_timer(_ source: Object?, _ start: UInt64, _ interval: UInt64, _ leeway: UInt64) {
-    linux_dispatch_source_set_timer(Objects.linux(source), start, interval, leeway)
+public func dispatch_source_set_timer(_ source: Object?, _ start: UInt64.ObjCType, _ interval: UInt64.ObjCType,
+                                      _ leeway: UInt64.ObjCType) {
+    linux_dispatch_source_set_timer(Objects.linux(source), UInt64(objCArgument: start), UInt64(objCArgument: interval),
+                                    UInt64(objCArgument: leeway))
 }
