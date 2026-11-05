@@ -117,8 +117,13 @@ typedef struct unit {
     size_t scratch_size;
 
     // Output units.
+    /// The thread pushing to the pipeline runs from the first start to
+    /// disposal; between a stop and the next start it pushes silence
+    /// instead of rendering, so the device stays open and the stream's
+    /// times keep up with the clock. `rendering` is held while it renders.
     pthread_t thread;
-    bool running, stop;
+    pthread_mutex_t rendering;
+    bool thread_started, running, stop;
     void *pipeline, *src;
     double sample_time;
 } unit;
@@ -155,9 +160,11 @@ static void bus_defaults(unit *u, bus *b) {
     }
 }
 
+/// A mixer may have no inputs, as games set before adding their voices;
+/// the buses' storage stays, for one.
 static bool set_input_count(unit *u, uint32_t count) {
-    if (count == 0 || count > 128) return false;
-    bus *inputs = realloc(u->inputs, count * sizeof *inputs);
+    if (count > 128) return false;
+    bus *inputs = realloc(u->inputs, (count ? count : 1) * sizeof *inputs);
     if (!inputs) return false;
     for (uint32_t i = u->input_count; i < count; i++) bus_defaults(u, &inputs[i]);
     u->inputs = inputs;
@@ -222,6 +229,7 @@ OSStatus darwin_AudioComponentInstanceNew(const void *c, void **out) {
     pthread_mutexattr_init(&attributes);
     pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
     pthread_mutex_init(&u->lock, &attributes);
+    pthread_mutex_init(&u->rendering, NULL);
     pthread_mutexattr_destroy(&attributes);
     u->output = canonical();
     u->max_frames = 4096;
@@ -237,13 +245,13 @@ OSStatus darwin_AudioComponentInstanceNew(const void *c, void **out) {
     return 0;
 }
 
-static OSStatus output_stop(unit *u);
+static void output_end(unit *u);
 
 OSStatus darwin_AudioComponentInstanceDispose(void *handle) DARWIN_SYMBOL(AudioComponentInstanceDispose);
 OSStatus darwin_AudioComponentInstanceDispose(void *handle) {
     unit *u = valid(handle);
     if (!u) return kAudio_ParamError;
-    output_stop(u);
+    output_end(u);
     const perry_gst *g = perry_gst_get();
     if (g && u->pipeline) {
         if (u->src) g->object_unref(u->src);
@@ -525,6 +533,7 @@ static void *output_run(void *argument) {
     const perry_gst *g = perry_gst_get();
     uint32_t frames = u->max_frames < 512 ? u->max_frames : 512;
     uint64_t pushed = 0;
+    AudioStreamBasicDescription built = canonical();
     for (;;) {
         pthread_mutex_lock(&u->lock);
         bool stop = u->stop;
@@ -532,22 +541,33 @@ static void *output_run(void *argument) {
         pthread_mutex_unlock(&u->lock);
         if (stop) break;
         if (!perry_pcm_supported(&format)) format = canonical();
-        buffers io;
-        if (!allocate(&format, frames, &io)) break;
-        AudioTimeStamp time = { 0 };
-        time.mSampleTime = u->sample_time;
-        time.mHostTime = monotonic();
-        time.mRateScalar = 1;
-        time.mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
-        uint32_t flags = 0;
-        render(u, &flags, &time, frames, io.list);
-        u->sample_time += frames;
+        // The pipeline's caps are its first format's.
+        if (pushed == 0) built = format;
+        else if (format.mSampleRate != built.mSampleRate || format.mChannelsPerFrame != built.mChannelsPerFrame) format = built;
         uint32_t channels = format.mChannelsPerFrame;
         size_t bytes = (size_t)frames * channels * sizeof(float);
-        float *samples = malloc(bytes);
-        if (samples) perry_pcm_read(&format, io.list, 0, frames, samples);
-        release(&io);
+        float *samples = calloc(1, bytes);
         if (!samples) break;
+        pthread_mutex_lock(&u->rendering);
+        pthread_mutex_lock(&u->lock);
+        bool running = u->running;
+        pthread_mutex_unlock(&u->lock);
+        if (running) {
+            buffers io;
+            if (allocate(&format, frames, &io)) {
+                AudioTimeStamp time = { 0 };
+                time.mSampleTime = u->sample_time;
+                time.mHostTime = monotonic();
+                time.mRateScalar = 1;
+                time.mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
+                uint32_t flags = 0;
+                render(u, &flags, &time, frames, io.list);
+                u->sample_time += frames;
+                perry_pcm_read(&format, io.list, 0, frames, samples);
+                release(&io);
+            }
+        }
+        pthread_mutex_unlock(&u->rendering);
         if (g && u->src) {
             void *buffer = g->buffer_new_allocate(NULL, bytes, NULL);
             if (buffer) {
@@ -602,26 +622,46 @@ OSStatus darwin_AudioOutputUnitStart(void *handle) {
     if (!u || u->component->kind != OUTPUT) return kAudio_ParamError;
     pthread_mutex_lock(&u->lock);
     if (u->running) { pthread_mutex_unlock(&u->lock); return 0; }
-    if (output_build(u)) perry_gst_get()->set_state(u->pipeline, PERRY_GST_STATE_PLAYING);
-    u->stop = false;
-    u->running = pthread_create(&u->thread, NULL, output_run, u) == 0;
+    if (!u->thread_started) {
+        if (output_build(u)) perry_gst_get()->set_state(u->pipeline, PERRY_GST_STATE_PLAYING);
+        u->stop = false;
+        u->thread_started = pthread_create(&u->thread, NULL, output_run, u) == 0;
+    }
+    u->running = u->thread_started;
     pthread_mutex_unlock(&u->lock);
     return u->running ? 0 : kAudio_MemFullError;
 }
 
+/// Stops rendering: once this returns, the unit's callbacks aren't called,
+/// as on Darwin. The thread goes on pushing silence.
 static OSStatus output_stop(unit *u) {
     pthread_mutex_lock(&u->lock);
-    if (!u->running) { pthread_mutex_unlock(&u->lock); return 0; }
-    u->stop = true;
+    bool was = u->running;
     u->running = false;
+    pthread_mutex_unlock(&u->lock);
+    // Waits out a render under way, unless this is that render's thread.
+    if (was && u->thread_started && !pthread_equal(pthread_self(), u->thread)) {
+        pthread_mutex_lock(&u->rendering);
+        pthread_mutex_unlock(&u->rendering);
+    }
+    return 0;
+}
+
+/// Ends the thread and closes the device, for disposal.
+static void output_end(unit *u) {
+    output_stop(u);
+    pthread_mutex_lock(&u->lock);
+    bool started = u->thread_started;
+    u->stop = true;
+    u->thread_started = false;
     pthread_t thread = u->thread;
     pthread_mutex_unlock(&u->lock);
     // Stopping the pipeline frees a push waiting for room.
     const perry_gst *g = perry_gst_get();
     if (g && u->pipeline) g->set_state(u->pipeline, PERRY_GST_STATE_NULL);
+    if (!started) return;
     if (!pthread_equal(pthread_self(), thread)) pthread_join(thread, NULL);
     else pthread_detach(thread);
-    return 0;
 }
 
 OSStatus darwin_AudioOutputUnitStop(void *handle) DARWIN_SYMBOL(AudioOutputUnitStop);
@@ -824,6 +864,7 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
         break;
     }
     pthread_mutex_unlock(&u->lock);
+    if (status) perry_audio_trace("%s: setting property %u (scope %u, element %u) failed: %d", u->component->name, id, scope, element, (int)status);
     return status;
 }
 
