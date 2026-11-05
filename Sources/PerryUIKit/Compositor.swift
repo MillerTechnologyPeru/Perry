@@ -233,7 +233,7 @@ final class Compositor {
         // makes its own context current; then the renderer's is again.
         QuartzCore.withRoots(windows) { QuartzCore.displayLayers?($0, $1) }
         rendererContext?.restore()
-        _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, scale, $0, $1) }
+        _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, Double(scale), $0, $1) }
         // The renderer's context was current while it drew; the app's is
         // again.
         EAGLContexts.restore()
