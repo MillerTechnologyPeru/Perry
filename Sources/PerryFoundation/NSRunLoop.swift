@@ -381,9 +381,9 @@ public func CFRunLoopRun() {
 }
 
 @c(_CFRunLoopRunInMode)
-public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double,
+public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double.ObjCType,
                                _ returnAfterSourceHandled: Bool) -> Int32 {
-    RunLoops.current.run(until: absoluteTimeNow() + seconds,
+    RunLoops.current.run(until: absoluteTimeNow() + Double(objCArgument: seconds),
                          returnAfterSourceHandled: returnAfterSourceHandled).rawValue
 }
 
