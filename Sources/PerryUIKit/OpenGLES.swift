@@ -45,6 +45,22 @@ enum GLES {
     nonisolated(unsafe) static var viewport: (@convention(c) (Int32, Int32, Int32, Int32) -> Void)!
     nonisolated(unsafe) static var finish: (@convention(c) () -> Void)!
 
+    // OpenGL ES 3's pixel buffers and fences, for reading frames back
+    // without waiting for the GPU; nil where the host has none.
+    nonisolated(unsafe) static var flush: (@convention(c) () -> Void)?
+    nonisolated(unsafe) static var genBuffers: (@convention(c) (Int32, UnsafeMutablePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var deleteBuffers: (@convention(c) (Int32, UnsafePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var bindBuffer: (@convention(c) (UInt32, UInt32) -> Void)?
+    nonisolated(unsafe) static var bufferData: (@convention(c) (UInt32, Int, UnsafeRawPointer?, UInt32) -> Void)?
+    /// GL_EXT_buffer_storage's: storage the CPU reads from cached memory.
+    nonisolated(unsafe) static var bufferStorage: (@convention(c) (UInt32, Int, UnsafeRawPointer?, UInt32) -> Void)?
+    nonisolated(unsafe) static var mapBufferRange: (@convention(c) (UInt32, Int, Int, UInt32) -> UnsafeMutableRawPointer?)?
+    nonisolated(unsafe) static var unmapBuffer: (@convention(c) (UInt32) -> UInt8)?
+    nonisolated(unsafe) static var fenceSync: (@convention(c) (UInt32, UInt32) -> Pointer?)?
+    nonisolated(unsafe) static var clientWaitSync: (@convention(c) (Pointer?, UInt32, UInt64) -> UInt32)?
+    nonisolated(unsafe) static var deleteSync: (@convention(c) (Pointer?) -> Void)?
+    static let pixelPackBuffer: UInt32 = 0x88EB, pixelPackBufferBinding: UInt32 = 0x88ED
+
     static let framebuffer: UInt32 = 0x8D40, renderbuffer: UInt32 = 0x8D41
     static let framebufferBinding: UInt32 = 0x8CA6, renderbufferBinding: UInt32 = 0x8CA7
     static let colorAttachment0: UInt32 = 0x8CE0, depthAttachment: UInt32 = 0x8D00, stencilAttachment: UInt32 = 0x8D20
@@ -87,6 +103,20 @@ enum GLES {
         readPixels = bind(gles, "glReadPixels")
         viewport = bind(gles, "glViewport")
         finish = bind(gles, "glFinish")
+        func host<T>(_ name: String) -> T? {
+            (dlsym(gles, name) ?? getProcAddress?(name)).map { unsafeBitCast($0, to: T.self) }
+        }
+        flush = host("glFlush")
+        genBuffers = host("glGenBuffers")
+        deleteBuffers = host("glDeleteBuffers")
+        bindBuffer = host("glBindBuffer")
+        bufferData = host("glBufferData")
+        bufferStorage = host("glBufferStorageEXT")
+        mapBufferRange = host("glMapBufferRange")
+        unmapBuffer = host("glUnmapBuffer")
+        fenceSync = host("glFenceSync")
+        clientWaitSync = host("glClientWaitSync")
+        deleteSync = host("glDeleteSync")
         // Mesa's surfaceless platform: contexts without a window system.
         guard let display = getPlatformDisplay(0x31DD, nil, nil), initialize(display, nil, nil) != 0,
               bindAPI(0x30A0) != 0 else { return false }
@@ -305,6 +335,13 @@ open class EAGLContext: NSObject {
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard let layerObject = state.drawables[UInt32(name)] else { return false }
         let layer = CALayer(objcObject: layerObject, ownership: .retain)
+        // Read back without waiting for the GPU when the host can, and only
+        // frames the screen will show.
+        if let context = state.context, Renderbuffers.present(UInt32(name), context: context, layer: layer) {
+            Display.markDirty()
+            Updates.schedule()
+            return true
+        }
         // The pixels go to the layer as they are read, for the compositor
         // to stream to its texture: no image, and no flip on the CPU.
         guard Renderbuffers.read(UInt32(name), into: { pixels, width, height in
@@ -325,6 +362,147 @@ open class EAGLContext: NSObject {
 enum Renderbuffers {
     /// Where frames are read back, kept from one to the next.
     nonisolated(unsafe) private static var buffer: (pointer: UnsafeMutableRawPointer, bytes: Int)?
+
+    // MARK: Reading back without waiting
+
+    /// A renderbuffer's frames, read back through a pixel buffer: the GPU
+    /// copies a frame into it when it is presented, behind the app's
+    /// drawing, and the layer takes it once a fence says the copy is done,
+    /// at a later present or when the compositor is about to draw. One copy
+    /// is under way at a time: frames presented meanwhile are skipped, and
+    /// the newest frame taken replaces one the screen has not shown.
+    final class Readback {
+        let context: UnsafeMutableRawPointer
+        let layer: CALayer
+        var framebuffer: UInt32 = 0
+        var buffer: UInt32 = 0
+        var bytes = 0, width = 0, height = 0
+        var fence: UnsafeMutableRawPointer?
+
+        init(context: UnsafeMutableRawPointer, layer: CALayer) { (self.context, self.layer) = (context, layer) }
+    }
+
+    private struct Key: Hashable {
+        let context: UnsafeMutableRawPointer
+        let renderbuffer: UInt32
+    }
+
+    nonisolated(unsafe) private static var readbacks: [Key: Readback] = [:]
+
+    /// Whether frames are read back through pixel buffers: with
+    /// PERRY_UIKIT_ASYNC_READBACK=1, on a host with OpenGL ES 3's, asked
+    /// once a context is current. Off by default: Mesa's freedreno copies
+    /// into a pixel buffer on the CPU, so it is slower there than reading
+    /// at once.
+    nonisolated(unsafe) private static var asynchronous: Bool?
+
+    private static func available() -> Bool {
+        if let asynchronous { return asynchronous }
+        let version = GLES.getString?(0x1F02).map { String(cString: $0) } ?? ""
+        let functions = GLES.genBuffers != nil && GLES.bindBuffer != nil && GLES.bufferData != nil && GLES.mapBufferRange != nil
+            && GLES.unmapBuffer != nil && GLES.fenceSync != nil && GLES.clientWaitSync != nil && GLES.deleteSync != nil && GLES.flush != nil
+        let wanted = getenv("PERRY_UIKIT_ASYNC_READBACK").map { String(cString: $0) == "1" } ?? false
+        let result = wanted && functions && (version.contains("OpenGL ES 3") || version.contains("OpenGL ES 4"))
+        asynchronous = result
+        return result
+    }
+
+    /// Presents the renderbuffer, its context current, without waiting for
+    /// the GPU; false when the host can't, to read it at once instead.
+    static func present(_ renderbuffer: UInt32, context: GLContext, layer: CALayer) -> Bool {
+        guard available() else { return false }
+        let key = Key(context: context.handle, renderbuffer: renderbuffer)
+        let readback = readbacks[key] ?? {
+            let made = Readback(context: context.handle, layer: layer)
+            readbacks[key] = made
+            return made
+        }()
+        take(readback)
+        // The GPU is still copying an earlier frame: this one is skipped,
+        // and a newer one is read when the copy is done.
+        guard readback.fence == nil else { return true }
+        return start(readback, renderbuffer: renderbuffer)
+    }
+
+    /// Has the GPU copy the renderbuffer into the readback's pixel buffer,
+    /// leaving the app's bindings as they were.
+    private static func start(_ readback: Readback, renderbuffer: UInt32) -> Bool {
+        guard let bindBuffer = GLES.bindBuffer, let fenceSync = GLES.fenceSync else { return false }
+        var previousFramebuffer: Int32 = 0, previousRenderbuffer: Int32 = 0, previousPack: Int32 = 0
+        GLES.getIntegerv(GLES.framebufferBinding, &previousFramebuffer)
+        GLES.getIntegerv(GLES.renderbufferBinding, &previousRenderbuffer)
+        GLES.getIntegerv(GLES.pixelPackBufferBinding, &previousPack)
+        defer {
+            bindBuffer(GLES.pixelPackBuffer, UInt32(previousPack))
+            GLES.bindFramebuffer(GLES.framebuffer, UInt32(previousFramebuffer))
+            GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(previousRenderbuffer))
+        }
+        var width: Int32 = 0, height: Int32 = 0
+        GLES.bindRenderbuffer(GLES.renderbuffer, renderbuffer)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D42, &width)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D43, &height)
+        guard width > 0, height > 0 else { return false }
+        if readback.framebuffer == 0 { GLES.genFramebuffers(1, &readback.framebuffer) }
+        GLES.bindFramebuffer(GLES.framebuffer, readback.framebuffer)
+        GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.colorAttachment0, GLES.renderbuffer, renderbuffer)
+        let bytes = Int(width) * Int(height) * 4
+        // Storage made for the CPU to read, in cached memory, where the host
+        // has it (and made again for a new size, as it can't change);
+        // otherwise a buffer for reading.
+        if bytes != readback.bytes, readback.buffer != 0, GLES.bufferStorage != nil {
+            GLES.deleteBuffers?(1, &readback.buffer)
+            readback.buffer = 0
+        }
+        if readback.buffer == 0 { GLES.genBuffers?(1, &readback.buffer) }
+        bindBuffer(GLES.pixelPackBuffer, readback.buffer)
+        if bytes != readback.bytes {
+            if let storage = GLES.bufferStorage {
+                storage(GLES.pixelPackBuffer, bytes, nil, 0x0001 | 0x0200)     // GL_MAP_READ_BIT, GL_CLIENT_STORAGE_BIT
+            } else {
+                GLES.bufferData?(GLES.pixelPackBuffer, bytes, nil, 0x88E1)    // GL_STREAM_READ
+            }
+            readback.bytes = bytes
+        }
+        // Into the bound pixel buffer, from its start.
+        GLES.readPixels(0, 0, width, height, 0x1908, 0x1401, nil)
+        (readback.width, readback.height) = (Int(width), Int(height))
+        readback.fence = fenceSync(0x9117, 0)      // GL_SYNC_GPU_COMMANDS_COMPLETE
+        GLES.flush?()
+        return readback.fence != nil
+    }
+
+    /// Gives the layer the readback's frame if the GPU has copied it, with
+    /// the readback's context current.
+    private static func take(_ readback: Readback) {
+        guard let fence = readback.fence, let wait = GLES.clientWaitSync, let bindBuffer = GLES.bindBuffer else { return }
+        let status = wait(fence, 0, 0)
+        // GL_TIMEOUT_EXPIRED: not yet.
+        guard status != 0x911B else { return }
+        GLES.deleteSync?(fence)
+        readback.fence = nil
+        // GL_ALREADY_SIGNALED, GL_CONDITION_SATISFIED; otherwise it failed.
+        guard status == 0x911A || status == 0x911C else { return }
+        var previousPack: Int32 = 0
+        GLES.getIntegerv(GLES.pixelPackBufferBinding, &previousPack)
+        bindBuffer(GLES.pixelPackBuffer, readback.buffer)
+        if let pixels = GLES.mapBufferRange?(GLES.pixelPackBuffer, 0, readback.bytes, 0x0001) {     // GL_MAP_READ_BIT
+            readback.layer.setPerryPixels(UnsafeRawPointer(pixels), width: readback.width, height: readback.height,
+                                          opaque: readback.layer.isOpaque())
+            _ = GLES.unmapBuffer?(GLES.pixelPackBuffer)
+            Display.markDirty()
+        }
+        bindBuffer(GLES.pixelPackBuffer, UInt32(previousPack))
+    }
+
+    /// Before the compositor draws: the frames the GPU has finished copying
+    /// go to their layers, each with its context current for the moment.
+    static func collect() {
+        let pending = readbacks.values.filter { $0.fence != nil }
+        guard !pending.isEmpty, let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return }
+        let saved = EAGLContexts.save()
+        for readback in pending where makeCurrent(display, nil, nil, readback.context) != 0 { take(readback) }
+        saved?.restore()
+    }
 
     /// A renderbuffer's pixels, RGBA rows bottom first as OpenGL reads
     /// them, passed to `body`; read through a framebuffer of its own so the

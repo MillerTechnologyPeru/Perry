@@ -350,6 +350,7 @@ final class Compositor {
             FrameRate.glFrames += max(live.generation &- current.generation, 1)
             current.generation = live.generation
         }
+        live.shown = live.generation
         current.used = true
         liveTextures[key] = current
         _ = SDL.setTextureBlendMode(current.texture, live.opaque && alpha >= 1 ? SDL.blendNone : SDL.blendPremultiplied)

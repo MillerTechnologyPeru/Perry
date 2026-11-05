@@ -22,6 +22,8 @@ enum SDL {
     nonisolated(unsafe) static var displayContentScale: (@convention(c) (UInt32) -> Float)?
     nonisolated(unsafe) static var displayUsableBounds: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool)?
     nonisolated(unsafe) static var startTextInput: (@convention(c) (Pointer?) -> Bool)?
+    nonisolated(unsafe) static var setViewport: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)?
+    nonisolated(unsafe) static var outputSize: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> Bool)?
     nonisolated(unsafe) static var stopTextInput: (@convention(c) (Pointer?) -> Bool)?
 
     static var lastError: String { error().map { String(cString: $0) } ?? "" }
@@ -90,6 +92,10 @@ enum SDL {
         displayUsableBounds = dlsym(library, "SDL_GetDisplayUsableBounds")
             .map { unsafeBitCast($0, to: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool).self) }
         startTextInput = dlsym(library, "SDL_StartTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
+        setViewport = dlsym(library, "SDL_SetRenderViewport")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool).self) }
+        outputSize = dlsym(library, "SDL_GetCurrentRenderOutputSize")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> Bool).self) }
         stopTextInput = dlsym(library, "SDL_StopTextInput").map { unsafeBitCast($0, to: (@convention(c) (Pointer?) -> Bool).self) }
         return complete
     }
@@ -122,6 +128,7 @@ final class Compositor {
         // The smallest an iPad app's window gets.
         if Screen.isResizable { _ = SDL.setWindowMinimumSize?(window, Int32(320 * scale), Int32(320 * scale)) }
         (self.window, self.renderer, self.scale) = (window, renderer, scale)
+        fitted = Screen.fixed != nil && SDL.setViewport != nil && SDL.outputSize != nil
         rendererContext = EAGLContexts.save()
         let name = SDL.rendererName(renderer).map { String(cString: $0) } ?? "unknown"
         uikitWarning("live view composited by SDL's \(name) renderer")
@@ -130,6 +137,25 @@ final class Compositor {
     /// Typed text arrives while text input is on, as for a keyboard on screen.
     func setTextInput(_ on: Bool) {
         _ = on ? SDL.startTextInput?(window) : SDL.stopTextInput?(window)
+    }
+
+    /// Whether a fixed screen is fitted to the window: drawn in a viewport
+    /// centered in it, at `scale`, with bars beside it.
+    private var fitted = false
+    /// The window's pixels, and where in them the viewport begins.
+    private var output = CGSize.zero
+    private var origin = CGPoint.zero
+
+    /// Centers the viewport for the window as it is now.
+    private func fit() {
+        var w: Int32 = 0, h: Int32 = 0
+        guard fitted, SDL.outputSize?(renderer, &w, &h) == true, w > 0, h > 0 else { return }
+        output = CGSize(width: CGFloat(w), height: CGFloat(h))
+        let size = Screen.bounds.size
+        let width = (size.width * scale).rounded(), height = (size.height * scale).rounded()
+        origin = CGPoint(x: ((output.width - width) / 2).rounded(.down), y: ((output.height - height) / 2).rounded(.down))
+        var rect = (Int32(origin.x), Int32(origin.y), Int32(width), Int32(height))
+        _ = withUnsafeBytes(of: &rect) { SDL.setViewport?(renderer, $0.baseAddress) }
     }
 
     /// The touchscreen finger being followed, as SDL numbers it.
@@ -148,16 +174,19 @@ final class Compositor {
             event.withUnsafeBytes { raw in
                 let type = raw.load(fromByteOffset: 0, as: UInt32.self)
                 func point() -> CGPoint {
-                    CGPoint(x: CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) / scale,
-                            y: CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) / scale)
+                    CGPoint(x: (CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) - origin.x) / scale,
+                            y: (CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) - origin.y) / scale)
                 }
                 /// A mouse event SDL made from a finger: SDL_TOUCH_MOUSEID.
                 func fromFinger() -> Bool { raw.load(fromByteOffset: 20, as: UInt32.self) == UInt32.max }
                 /// A finger's place: x and y from 0 to 1 across the window.
                 func fingerPoint() -> CGPoint {
+                    let x = CGFloat(raw.load(fromByteOffset: 32, as: Float.self)), y = CGFloat(raw.load(fromByteOffset: 36, as: Float.self))
+                    if fitted, output.width > 0 {
+                        return CGPoint(x: (x * output.width - origin.x) / scale, y: (y * output.height - origin.y) / scale)
+                    }
                     let size = Screen.bounds.size
-                    return CGPoint(x: CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) * size.width,
-                                   y: CGFloat(raw.load(fromByteOffset: 36, as: Float.self)) * size.height)
+                    return CGPoint(x: x * size.width, y: y * size.height)
                 }
                 switch type {
                 case 0x100, 0x210: // quit, window close requested
@@ -196,7 +225,7 @@ final class Compositor {
                     guard !fromFinger(), raw.load(fromByteOffset: 24, as: UInt8.self) == 1 else { break }
                     if type == 0x401 { Touches.down(at: point()) } else { Touches.up(at: point()) }
                     Display.markDirty()
-                case 0x206: // window resized: its size at 20 and 24
+                case 0x206 where !fitted: // window resized: its size at 20 and 24
                     let size = CGSize(width: CGFloat(raw.load(fromByteOffset: 20, as: Int32.self)) / scale,
                                       height: CGFloat(raw.load(fromByteOffset: 24, as: Int32.self)) / scale)
                     Screen.resize(to: size)
@@ -232,7 +261,10 @@ final class Compositor {
         // Layers display first, as an app's OpenGL ES drawing for a layer
         // makes its own context current; then the renderer's is again.
         QuartzCore.withRoots(windows) { QuartzCore.displayLayers?($0, $1) }
+        // GL frames the GPU has finished reading back, to show in this one.
+        Renderbuffers.collect()
         rendererContext?.restore()
+        fit()
         _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, scale, $0, $1) }
         // The renderer's context was current while it drew; the app's is
         // again.

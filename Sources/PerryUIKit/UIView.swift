@@ -75,8 +75,12 @@ enum Screen {
     /// UIInterfaceOrientation: portrait 1, landscape right 3, landscape left 4.
     nonisolated(unsafe) static let orientation: Int = {
         let bundle = NSBundle.main()
-        let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
-            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        // An iPad-only app lists them for the iPad alone; else the one it
+        // starts in.
+        var names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations~ipad"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        if names.isEmpty, let initial = bundle.infoObject(forKey: "UIInterfaceOrientation")?.stringValue { names = [initial] }
         if names.isEmpty || names.contains("UIInterfaceOrientationPortrait") { return 1 }
         for name in names {
             if name == "UIInterfaceOrientationLandscapeRight" { return 3 }
@@ -87,11 +91,33 @@ enum Screen {
 
     static var isLandscape: Bool { orientation == 3 || orientation == 4 }
 
+    /// PERRY_UIKIT_SCREEN set to "ipad" (1024 by 768 points at @2x) or to
+    /// points and a scale ("1024x768@2", or "1024x768" at @1x) gives the app
+    /// that screen whatever the display, held as the app is (landscape or
+    /// portrait; other sizes are as given), and drawn as large as fits the
+    /// display, with bars beside it.
+    nonisolated(unsafe) static let fixed: (size: CGSize, scale: CGFloat)? = {
+        guard let setting = getenv("PERRY_UIKIT_SCREEN").map({ String(cString: $0).lowercased() }) else { return nil }
+        var text = setting == "ipad" ? "1024x768@2" : setting
+        var scale: CGFloat = 1
+        if let at = text.firstIndex(of: "@") {
+            guard let value = Double(text[text.index(after: at)...]), value > 0 else { return nil }
+            scale = CGFloat(value)
+            text = String(text[..<at])
+        }
+        let sides = text.split(separator: "x").compactMap { Double($0) }
+        guard sides.count == 2, sides[0] > 0, sides[1] > 0 else { return nil }
+        // "ipad" is held as the app is; other sizes are as given.
+        guard setting == "ipad" else { return (CGSize(width: CGFloat(sides[0]), height: CGFloat(sides[1])), scale) }
+        return (isLandscape ? CGSize(width: 1024, height: 768) : CGSize(width: 768, height: 1024), scale)
+    }()
+
     /// With a live view, the screen is the display's own: its usable area,
     /// in points at the desktop's scale (one pixel a point unless it scales
     /// its display). PERRY_UIKIT_SCREEN=iphone keeps an iPhone's instead, as
     /// without a display.
     nonisolated(unsafe) static let nativeSize: CGSize? = {
+        if let fixed { return fixed.size }
         if let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" { return nil }
         guard Display.wanted, let pixels = SDL.usableDisplaySize() else { return nil }
         let scale = max(Display.scale, 1)
@@ -107,6 +133,7 @@ enum Screen {
     /// landscape, and does not require the full screen; or the screen is the
     /// display's. PERRY_UIKIT_RESIZABLE set to 1 or 0 decides it instead.
     nonisolated(unsafe) static let isResizable: Bool = {
+        if fixed != nil { return false }
         if let setting = getenv("PERRY_UIKIT_RESIZABLE") { return String(cString: setting) != "0" }
         // The display's screen is a desktop window's.
         if nativeSize != nil { return true }
@@ -142,7 +169,7 @@ enum Screen {
     /// else the iPhone's. Apps size what they draw from it (a game its
     /// renderbuffer and its interface), so an iPhone's screen keeps three
     /// whatever the live view's scale.
-    nonisolated(unsafe) static let scale: CGFloat = nativeSize != nil ? max(Display.scale, 1) : 3
+    nonisolated(unsafe) static let scale: CGFloat = fixed?.scale ?? (nativeSize != nil ? max(Display.scale, 1) : 3)
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
     /// pixels, so lines are not lost between them.

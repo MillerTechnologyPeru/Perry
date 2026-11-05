@@ -74,6 +74,7 @@ static void load_gst(void) {
 #define BIND(field, library, name) if (!(*(void **)&gst.field = dlsym(library, name))) { \
         perry_audio_warn("GStreamer lacks %s; audio plays silently", name); return; }
     BIND(parse_launch, core, "gst_parse_launch");
+    *(void **)&gst.factory_find = dlsym(core, "gst_element_factory_find");
     BIND(bin_get_by_name, core, "gst_bin_get_by_name");
     BIND(set_state, core, "gst_element_set_state");
     BIND(get_state, core, "gst_element_get_state");

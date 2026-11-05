@@ -148,6 +148,8 @@ void perry_ima4_decode(const uint8_t *packet, uint32_t channels, float *out);
 typedef struct perry_gst perry_gst;
 struct perry_gst {
     void *(*parse_launch)(const char *description, void **error);
+    /// gst_element_factory_find: whether an element can be made; optional.
+    void *(*factory_find)(const char *name);
     void *(*bin_get_by_name)(void *bin, const char *name);
     int (*set_state)(void *element, int state);
     int (*get_state)(void *element, int *state, int *pending, uint64_t timeout);
