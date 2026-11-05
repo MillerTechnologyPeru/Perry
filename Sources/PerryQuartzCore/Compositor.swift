@@ -389,7 +389,7 @@ final class Compositor {
             ? "\(state.bounds.size) \(state.borderWidth) \(String(describing: state.borderColor)) \(state.cornerRadius) \(state.maskedCorners)"
             : "\(state.bounds.size) \(String(describing: state.backgroundColor)) \(state.cornerRadius) \(state.maskedCorners) "
                 + "\(String(describing: model.backing)) \(model.backingSize) \(String(describing: state.contents?.objcObject)) "
-                + "\(state.contentsGravity) \(state.contentsScale)"
+                + "\(state.contentsGravity) \(state.contentsScale) \(String(describing: state.contentsMultiplyColor)) \(state.contentsSwizzle)"
         if let shape, !border {
             signature += " \(String(describing: shape.path)) \(String(describing: shape.fillColor)) \(String(describing: shape.strokeColor)) "
                 + "\(shape.lineWidth) \(shape.strokeStart) \(shape.strokeEnd) \(shape.lineCap) \(shape.lineJoin) \(shape.lineDashPhase)"
