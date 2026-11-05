@@ -465,6 +465,36 @@ const char *perry_bind_name_at(const void *location) {
 
 // MARK: - Resolution
 
+static bool ends_with(const char *name, const char *suffix) {
+    size_t n = strlen(name), m = strlen(suffix);
+    return n >= m && strcmp(name + n - m, suffix) == 0;
+}
+
+/// For an unresolved string constant's import, a pointer to a constant
+/// CFString of its name ("_UIFooNotification" is @"UIFooNotification"),
+/// made once; NULL for other symbols, or before Foundation is loaded.
+static void *string_constant(perry_loader *loader, const char *name) {
+    if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
+    if (!ends_with(name, "Notification") && !ends_with(name, "NotificationName") && !ends_with(name, "Key") &&
+        !ends_with(name, "Attribute") && !ends_with(name, "AttributeName") && !ends_with(name, "Identifier"))
+        return NULL;
+    perry_symbol isa = { 0 };
+    for (uint32_t i = 0; i < loader->provider_count && !isa.found; i++)
+        if (loader->providers[i]->handle)
+            provider_lookup(loader, loader->providers[i], "___CFConstantStringClassReference", &isa);
+    if (!isa.found) return NULL;
+    // { isa, flags, bytes, length }, as clang emits for @"…"; then the
+    // variable holding it, which the import names.
+    struct { void *isa; uint64_t flags; const char *bytes; uint64_t length; } *string = calloc(1, sizeof *string);
+    void **variable = calloc(1, sizeof *variable);
+    if (!string || !variable) return NULL;
+    char *bytes = strdup(name + 1);
+    *string = (typeof(*string)){ isa.address, 0x7C8, bytes, strlen(bytes) };
+    *variable = string;
+    perry_trace(PERRY_TRACE_BIND, "string constant %s for unresolved import", name);
+    return variable;
+}
+
 perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal, const char *name, bool weak_import) {
     perry_symbol sym = { 0 };
     const char *library;
@@ -526,6 +556,14 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
             fprintf(stderr, "perry: warning: %s: class %s (%s) is not available\n", image->path, class_name, library);
         }
         sym.address = placeholder;
+        return sym;
+    }
+    // A string constant (a notification's name, a dictionary key) is data
+    // the app reads, and Apple names each for its value: it gets a constant
+    // string of its name, as the framework's would be.
+    void *constant = string_constant(loader, name);
+    if (constant) {
+        sym.address = constant;
         return sym;
     }
     sym.address = perry_unresolved_stub(library, name);
