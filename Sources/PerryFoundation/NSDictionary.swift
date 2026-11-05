@@ -68,10 +68,10 @@ enum Dictionaries {
     static func entries(_ object: id?) -> [(key: id, value: id)] {
         guard let object else { return [] }
         if ObjC.objectGetClass(object) == constantClass {
-            let count = Int(object.load(fromByteOffset: 16, as: UInt64.self))
+            let count = Int(object.load(fromByteOffset: DarwinLayout.dictionaryCount, as: UInt.self))
             guard count > 0,
-                  let keys = object.load(fromByteOffset: 24, as: UnsafePointer<id>?.self),
-                  let values = object.load(fromByteOffset: 32, as: UnsafePointer<id>?.self) else { return [] }
+                  let keys = object.load(fromByteOffset: DarwinLayout.dictionaryKeys, as: UnsafePointer<id>?.self),
+                  let values = object.load(fromByteOffset: DarwinLayout.dictionaryObjects, as: UnsafePointer<id>?.self) else { return [] }
             return (0..<count).map { (keys[$0], values[$0]) }
         }
         if let storage = storage(object) {
