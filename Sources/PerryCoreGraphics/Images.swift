@@ -319,31 +319,31 @@ public func CGColorCreate(_ space: Ref?, _ components: UnsafePointer<CGFloat>?) 
     return Colors.make(space, UnsafeBufferPointer(start: components, count: state.components + 1).map { Double($0) })
 }
 
-@c(_CGColorCreateGenericRGB)
+@DarwinC("_CGColorCreateGenericRGB")
 public func CGColorCreateGenericRGB(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> Ref {
     let space = CGColorSpaceCreateWithName(NSObject.string("kCGColorSpaceSRGB").objcObject)!
     defer { ObjCRuntime.release(space) }
     return Colors.make(space, [Double(r), Double(g), Double(b), Double(a)])
 }
 
-@c(_CGColorCreateSRGB)
+@DarwinC("_CGColorCreateSRGB")
 public func CGColorCreateSRGB(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> Ref { CGColorCreateGenericRGB(r, g, b, a) }
 
-@c(_CGColorCreateGenericGray)
+@DarwinC("_CGColorCreateGenericGray")
 public func CGColorCreateGenericGray(_ gray: CGFloat, _ a: CGFloat) -> Ref {
     let space = CGColorSpaceCreateDeviceGray()
     defer { ObjCRuntime.release(space) }
     return Colors.make(space, [Double(gray), Double(a)])
 }
 
-@c(_CGColorCreateCopyWithAlpha)
+@DarwinC("_CGColorCreateCopyWithAlpha")
 public func CGColorCreateCopyWithAlpha(_ color: Ref?, _ alpha: CGFloat) -> Ref? {
     guard let state = Colors.state(color) else { return nil }
     return Colors.make(state.space, Array(state.components.dropLast()) + [Double(alpha)])
 }
 
 @c(_CGColorGetNumberOfComponents) public func CGColorGetNumberOfComponents(_ color: Ref?) -> Int { Colors.state(color)?.components.count ?? 0 }
-@c(_CGColorGetAlpha) public func CGColorGetAlpha(_ color: Ref?) -> CGFloat { CGFloat(Colors.state(color)?.components.last ?? 0) }
+@DarwinC("_CGColorGetAlpha") public func CGColorGetAlpha(_ color: Ref?) -> CGFloat { CGFloat(Colors.state(color)?.components.last ?? 0) }
 @c(_CGColorGetColorSpace) public func CGColorGetColorSpace(_ color: Ref?) -> Ref? { Colors.state(color)?.space }
 
 /// The components live as long as the color, as CGFloats.
@@ -567,7 +567,7 @@ public func CGImageMaskCreate(_ width: Int, _ height: Int, _ bitsPerComponent: I
 @c(_CGImageCreateCopy) public func CGImageCreateCopy(_ image: Ref?) -> Ref? { ObjCRuntime.retain(image) }
 
 /// The rect is in pixels from the top-left, clipped to the image.
-@c(_CGImageCreateWithImageInRect)
+@DarwinC("_CGImageCreateWithImageInRect")
 public func CGImageCreateWithImageInRect(_ image: Ref?, _ rect: CGRect) -> Ref? {
     guard let state = Images.state(image) else { return nil }
     let r = CGRectIntegral(CGRectIntersection(CGRectStandardize(rect), CGRect(origin: CGPoint(x: 0, y: 0),
