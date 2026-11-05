@@ -19,6 +19,9 @@ let package = Package(
         .library(name: "Perryxml2", type: .dynamic, targets: ["PerryXML2"]),
         .library(name: "Perryz", type: .dynamic, targets: ["PerryZ"]),
         .library(name: "PerryCXX", type: .dynamic, targets: ["PerryCXX"]),
+        // malloc from a window above 4 GB, as iOS's heap is, for games that
+        // keep pointers in 32 bits; loaded with LD_PRELOAD.
+        .library(name: "PerryLowHeap", type: .dynamic, targets: ["PerryLowHeap"]),
         .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
@@ -151,6 +154,7 @@ let package = Package(
             linkerSettings: [.linkedLibrary("xml2")]
         ),
         .target(name: "PerryZ", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("z")]),
+        .target(name: "PerryLowHeap"),
         // libc++ and libc++abi, and OpenAL: LLVM's and OpenAL Soft, opened at run time.
         .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
