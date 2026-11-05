@@ -142,3 +142,39 @@ public func NSStringFromCGSize(_ size: CGSize) -> UnsafeMutableRawPointer? { des
 /// "{{x, y}, {width, height}}"
 @c(_NSStringFromCGRect)
 public func NSStringFromCGRect(_ rect: CGRect) -> UnsafeMutableRawPointer? { describe(rect).objCReturnValue() }
+
+/// The numbers in a string, in order, as UIKit's *FromString functions read
+/// "{x, y}" and "{{x, y}, {w, h}}"; missing ones are 0.
+func numbers(_ string: UnsafeMutableRawPointer?, count: Int) -> [CGFloat] {
+    guard let string else { return Array(repeating: 0, count: count) }
+    let text = String(objCArgument: string)
+    var values: [CGFloat] = []
+    var current = ""
+    for character in text + "," {
+        if character.isNumber || "+-.eE".contains(character) {
+            current.append(character)
+        } else if !current.isEmpty {
+            values.append(CGFloat(strtod(current, nil)))
+            current = ""
+        }
+    }
+    return (values + Array(repeating: 0, count: count)).prefix(count).map { $0 }
+}
+
+@c(_CGPointFromString)
+public func CGPointFromString(_ string: UnsafeMutableRawPointer?) -> CGPoint {
+    let n = numbers(string, count: 2)
+    return CGPoint(x: n[0], y: n[1])
+}
+
+@c(_CGSizeFromString)
+public func CGSizeFromString(_ string: UnsafeMutableRawPointer?) -> CGSize {
+    let n = numbers(string, count: 2)
+    return CGSize(width: n[0], height: n[1])
+}
+
+@c(_CGRectFromString)
+public func CGRectFromString(_ string: UnsafeMutableRawPointer?) -> CGRect {
+    let n = numbers(string, count: 4)
+    return CGRect(origin: CGPoint(x: n[0], y: n[1]), size: CGSize(width: n[2], height: n[3]))
+}

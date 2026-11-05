@@ -11,6 +11,8 @@ enum Presentation {
     /// The layers with animations.
     nonisolated(unsafe) private static var layers: [UnsafeMutableRawPointer] = []
     nonisolated(unsafe) private static var settleAt: Double?
+    /// How many wake-ups settle() has asked for.
+    nonisolated(unsafe) private static var wakeUps = 0
 
     static func track(_ layer: CALayer) {
         if !layers.contains(layer.objcObject) { layers.append(layer.objcObject) }
@@ -223,9 +225,20 @@ enum Presentation {
         }
         layers.removeAll { CALayer.state(of: $0).animations.isEmpty }
         Compositing.changed()
-        guard next.isFinite, next != settleAt else { return }
+        guard next.isFinite else {
+            settleAt = nil
+            return
+        }
+        guard next != settleAt else { return }
+        // One wake-up counts, the last asked for: an earlier one, for a
+        // time that is no longer the next, does nothing when it comes.
+        // (Each used to settle and ask for another, so every animation
+        // added left one more coming round for good.)
         settleAt = next
+        wakeUps &+= 1
+        let wakeUp = wakeUps
         Dispatch.onMain(after: max(next - Clock.now, 0) + 0.001) {
+            guard wakeUp == wakeUps else { return }
             settleAt = nil
             settle()
         }

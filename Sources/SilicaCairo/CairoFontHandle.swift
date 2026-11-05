@@ -28,7 +28,7 @@ public final class CairoFontHandle: CGFontHandle {
 
     // MARK: - Initialization
 
-    public init?(name: String, configuration: FontConfiguration = .current) {
+    public init?(name: String, configuration: FontConfiguration = .process) {
 
         // create new font
         guard let pattern = FontConfig.Pattern(cgFont: name, configuration: configuration),
@@ -122,7 +122,7 @@ public final class CairoFontHandle: CGFontHandle {
 public extension CGFont {
 
     /// Creates a font with the specified name, resolved via FontConfig and loaded by Cairo.
-    init?(name: String, configuration: FontConfiguration = .current) {
+    init?(name: String, configuration: FontConfiguration = .process) {
 
         guard let handle = CairoFontHandle(name: name, configuration: configuration)
             else { return nil }
@@ -158,11 +158,24 @@ public extension CGFont {
     }
 }
 
+// MARK: - Font Config
+
+public extension FontConfiguration {
+
+    /// FontConfig's configuration for the process, kept for good. (Perry:
+    /// `current` makes a new object each time it is read, and each gives up
+    /// a reference to the configuration as it goes that it never took. The
+    /// configuration is destroyed, and the next font made loads another,
+    /// without the fonts an app has added and with every font file read
+    /// again.)
+    nonisolated(unsafe) static let process: FontConfiguration = .current
+}
+
 // MARK: - Font Config Pattern
 
 internal extension FontConfig.Pattern {
 
-    convenience init?(cgFont name: String, configuration: FontConfiguration = .current) {
+    convenience init?(cgFont name: String, configuration: FontConfiguration = .process) {
         self.init()
 
         let separator: Character = "-"

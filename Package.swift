@@ -61,6 +61,8 @@ let package = Package(
         .library(name: "PerryQuartzCore", type: .dynamic, targets: ["PerryQuartzCore"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
+        // Metal, on Vulkan.
+        .library(name: "PerryMetal", type: .dynamic, targets: ["PerryMetal"]),
     ],
     dependencies: [
         // CoreModel's macros need swift-syntax 603; Perry's work with 603 and 604.
@@ -75,6 +77,8 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
         // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
+        // Sockets and their addresses, typed, for CFSocket.
+        .package(url: "https://github.com/PureSwift/Socket.git", from: "0.5.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
@@ -143,7 +147,10 @@ let package = Package(
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CCmarkGFM", "CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            dependencies: [
+                "CCmarkGFM", "CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop",
+                .product(name: "Socket", package: "Socket"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // Binding a Darwin library's imports to the Linux build of the same
@@ -326,6 +333,15 @@ let package = Package(
         .target(
             name: "PerryUIKit",
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Metal's declarations of metal2vulkan's C ABI, and its loader:
+        // metal2vulkan (LGPL) is a separate library opened at run time.
+        .target(name: "CPerryMetal"),
+        // Metal over metal2vulkan's Metal API on Vulkan.
+        .target(
+            name: "PerryMetal",
+            dependencies: ["CPerryGeometry", "CPerryMetal", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Generates a provider's perry_provider_startup and perry_provider_symbol

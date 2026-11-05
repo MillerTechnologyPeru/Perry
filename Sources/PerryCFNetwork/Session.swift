@@ -529,6 +529,34 @@ open class NSURLSession: NSObject {
         state?.session.invalidateAndCancel()
     }
 
+    // MARK: Tasks
+
+    /// The session's tasks, given to the handler on the delegate queue
+    /// later: its data, upload and download tasks. Tasks under way are not
+    /// listed, so each list is empty.
+    @ObjCMethod("getTasksWithCompletionHandler:")
+    func getTasks(completionHandler: ObjCBlock?) {
+        guard let completionHandler, let state else { return }
+        nonisolated(unsafe) let block = completionHandler
+        state.queue.addOperation(block: Closures.block {
+            ObjCRuntime.autoreleasepool {
+                Blocks.call(block, NSMutableArray.of([]).objcObject, NSMutableArray.of([]).objcObject, NSMutableArray.of([]).objcObject)
+            }
+        })
+    }
+
+    @ObjCMethod("getAllTasksWithCompletionHandler:")
+    func getAllTasks(completionHandler: ObjCBlock?) {
+        guard let completionHandler, let state else { return }
+        nonisolated(unsafe) let block = completionHandler
+        state.queue.addOperation(block: Closures.block {
+            ObjCRuntime.autoreleasepool {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                    block.object, NSMutableArray.of([]).objcObject)
+            }
+        })
+    }
+
     // MARK: Completion handlers
 
     /// A data or upload completion handler, run on the delegate queue.

@@ -191,6 +191,7 @@ enum GLES {
     }
 
     nonisolated(unsafe) private static var strings: [String: UnsafePointer<UInt8>] = [:]
+    private static let pvrtcExtension = "GL_IMG_texture_compression_pvrtc"
 
     static func string(_ name: UInt32) -> UnsafePointer<UInt8>? {
         load()
@@ -202,6 +203,12 @@ enum GLES {
             text = "OpenGL ES \(api == 1 ? "1.1" : api == 3 ? "3.0" : "2.0") Perry (\(host ?? ""))"
         case 0x8B8C: // GL_SHADING_LANGUAGE_VERSION
             text = api == 1 ? nil : "OpenGL ES GLSL ES \(api == 3 ? "3.00" : "1.00")"
+        case 0x1F03: // GL_EXTENSIONS
+            // PVRTC textures, which every iOS GPU has, are decoded here
+            // (PVRTC): a program that finds them missing may fall back to
+            // a decoder of its own, never run on iOS.
+            guard let host else { return getString?(name) }
+            text = host.contains(pvrtcExtension) ? host : host + (host.hasSuffix(" ") || host.isEmpty ? "" : " ") + pvrtcExtension
         default:
             return getString?(name)
         }
@@ -225,7 +232,21 @@ final class GLContext {
         self.api = api
     }
 
-    deinit { _ = GLES.destroyContext?(GLES.display, handle) }
+    deinit {
+        if GLTrace.on { GLTrace.say("context \(handle) destroyed") }
+        _ = GLES.destroyContext?(GLES.display, handle)
+    }
+}
+
+/// PERRY_UIKIT_GL_TRACE=1 reports contexts made, destroyed and made
+/// current, renderbuffers given storage, and frame shares.
+enum GLTrace {
+    static let on = getenv("PERRY_UIKIT_GL_TRACE") != nil
+
+    static func say(_ text: String) {
+        let line = "perry: UIKit: GL: \(text) (thread \(String(UInt(pthread_self()), radix: 16)))\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
 }
 
 final class SharegroupState: ObjectState {
@@ -257,6 +278,8 @@ final class ContextState: ObjectState {
     /// Renderbuffers given storage from a layer, by name, and the layer
     /// (not retained).
     var drawables: [UInt32: UnsafeMutableRawPointer] = [:]
+    /// When the last frame was presented, for pacing.
+    var lastPresent = 0.0
 }
 
 /// The current context of each thread.
@@ -299,8 +322,16 @@ enum EAGLContexts {
         GLES.load()
         guard let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return context == nil }
         let handle = context?.state.context?.handle
-        guard makeCurrent(display, nil, nil, handle) != 0 else { return false }
-        lock.withLock { currents[UInt(pthread_self())] = context }
+        guard makeCurrent(display, nil, nil, handle) != 0 else {
+            if GLTrace.on { GLTrace.say("making context \(String(describing: handle)) current failed") }
+            return false
+        }
+        let previous = lock.withLock { () -> EAGLContext? in
+            let previous = currents[UInt(pthread_self())]
+            currents[UInt(pthread_self())] = context
+            return previous
+        }
+        if GLTrace.on, previous?.objcObject != context?.objcObject { GLTrace.say("context \(String(describing: handle)) current") }
         return true
     }
 }
@@ -328,6 +359,7 @@ open class EAGLContext: NSObject {
         let attributes: [Int32] = [0x3098, Int32(api), 0x3038]
         guard let handle = create(GLES.display, nil, group.state.root?.handle, attributes) else { return nil }
         let context = GLContext(handle: handle, api: Int(api))
+        if GLTrace.on { GLTrace.say("context \(handle) made, ES \(api), sharing with \(String(describing: group.state.root?.handle))") }
         if group.state.root == nil { group.state.root = context }
         state.context = context
         state.sharegroup = group
@@ -359,6 +391,9 @@ open class EAGLContext: NSObject {
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard name != 0, width > 0, height > 0 else { return false }
         GLES.renderbufferStorage(UInt32(target), layer.colorFormat, width, height)
+        if GLTrace.on {
+            GLTrace.say("renderbuffer \(name) of context \(String(describing: state.context?.handle)): \(width) by \(height) from layer \(layer.objcObject)")
+        }
         state.drawables[UInt32(name)] = layer.objcObject
         return true
     }
@@ -373,7 +408,28 @@ open class EAGLContext: NSObject {
         guard Renderbuffers.show(UInt32(name), context: state.context, layer: layer, opaque: layer.isOpaque()) else { return false }
         Display.markDirty()
         Updates.schedule()
+        pace()
         return true
+    }
+
+    /// Waits out what is left of the display's frame since the last
+    /// present, as presenting does on iOS, where a frame waits for the
+    /// display to take it. A program may count on it for its pace: one that
+    /// updates, presents and starts over at once (Monopoly) runs at the
+    /// display's rate there, and as fast as it can without this. The wait
+    /// is a little short of a frame, so that a program already paced by a
+    /// display link, whose presents come a frame apart give or take, is
+    /// not held back.
+    private func pace() {
+        let frame = 1.0 / 60 - 0.0005
+        let now = Clock.now
+        let due = state.lastPresent + frame
+        if due > now, due - now < frame {
+            usleep(UInt32((due - now) * 1_000_000))
+            state.lastPresent = due
+        } else {
+            state.lastPresent = now
+        }
     }
 
     @ObjCMethod("presentRenderbuffer:atTime:")
@@ -534,6 +590,10 @@ enum Renderbuffers {
         let key = Key(context: context.handle, renderbuffer: renderbuffer)
         let share = sharesLock.withLock { () -> Share in
             if let existing = shares[key], existing.layer.objcObject == layer.objcObject { return existing }
+            if GLTrace.on {
+                GLTrace.say("share for renderbuffer \(renderbuffer) of context \(context.handle), layer \(layer.objcObject)"
+                    + (shares[key] == nil ? "" : ", replacing one"))
+            }
             let made = Share(context: context.handle, layer: layer)
             shares[key] = made
             return made
@@ -554,6 +614,7 @@ enum Renderbuffers {
         GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D53, &alphaBits)      // GL_RENDERBUFFER_ALPHA_SIZE
         guard width > 0, height > 0 else { return false }
         if share.textures.isEmpty || share.width != Int(width) || share.height != Int(height) {
+            if GLTrace.on { GLTrace.say("share for renderbuffer \(renderbuffer) of context \(context.handle) built at \(width) by \(height)") }
             tearDown(share)
             guard build(share, width: width, height: height, alpha: alphaBits > 0) else {
                 tearDown(share)

@@ -38,11 +38,34 @@ enum SDL {
 
     /// Before SDL starts: its renderer makes its GL contexts through EGL,
     /// as EAGLContext does, so the two can take turns being current on one
-    /// thread, and renders with OpenGL ES 2.
+    /// thread. The renderer, OpenGL ES 2, is named where it is made, not
+    /// with SDL_RENDER_DRIVER: the environment is the app's too, and an app
+    /// with an SDL of its own (World of Goo 2's) would read it and choose
+    /// OpenGL ES over Metal.
     static func prepareEnvironment() {
         setenv("SDL_VIDEO_FORCE_EGL", "1", 0)
-        setenv("SDL_RENDER_DRIVER", "opengles2", 0)
+        _ = videoDriver
     }
+
+    /// The video driver the environment names for Perry's SDL (PortMaster
+    /// sets SDL_VIDEODRIVER=wayland), taken out of the environment when
+    /// UIKit starts, before the app runs: an app's own SDL reads it too, and
+    /// World of Goo 2's, built for iOS, finds no such driver and stops. It
+    /// reaches Perry's SDL as a hint instead. The audio driver (PortMaster's
+    /// SDL_AUDIODRIVER=pulseaudio) goes too, which Perry's SDL does not use
+    /// and an iOS SDL would find none of, opening no sound.
+    nonisolated(unsafe) static let videoDriver: String? = {
+        var driver: String?
+        for name in ["SDL_VIDEO_DRIVER", "SDL_VIDEODRIVER"] {
+            if let value = getenv(name) {
+                driver = driver ?? String(cString: value)
+                unsetenv(name)
+            }
+        }
+        unsetenv("SDL_AUDIO_DRIVER")
+        unsetenv("SDL_AUDIODRIVER")
+        return driver
+    }()
 
     /// Binds SDL3 once; false without it.
     static func loadOnce() -> Bool {
@@ -103,6 +126,10 @@ enum SDL {
             return unsafeBitCast(symbol, to: T.self)
         }
         initialize = bind("SDL_Init")
+        if let videoDriver, let setHint = dlsym(library, "SDL_SetHint") {
+            typealias SetHint = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Bool
+            _ = unsafeBitCast(setHint, to: SetHint.self)("SDL_VIDEO_DRIVER", videoDriver)
+        }
         createWindow = bind("SDL_CreateWindow")
         createRenderer = bind("SDL_CreateRenderer")
         rendererName = bind("SDL_GetRendererName")
@@ -158,7 +185,7 @@ final class Compositor {
         // SDL_WINDOW_RESIZABLE, SDL_WINDOW_HIGH_PIXEL_DENSITY.
         let flags: UInt64 = (Screen.isResizable ? 0x20 : 0) | 0x2000
         guard let window = title.withCString({ SDL.createWindow($0, width, height, flags) }),
-              let renderer = SDL.createRenderer(window, nil) else {
+              let renderer = "opengles2".withCString({ SDL.createRenderer(window, $0) }) else {
             uikitWarning("SDL could not make a window: \(SDL.lastError)")
             return nil
         }

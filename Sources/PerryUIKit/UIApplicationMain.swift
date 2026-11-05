@@ -19,7 +19,27 @@ public func UIApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
 }
 
 enum Launch {
+    /// The fonts Info.plist lists under UIAppFonts, added to those text is
+    /// drawn with and fonts are found by name among, as iOS adds them
+    /// before the app starts.
+    static func registerAppFonts() {
+        let bundle = NSBundle.main()
+        let names = bundle.infoObject(forKey: "UIAppFonts")?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        for name in names {
+            guard let url = NSURLObject.make(fileURLWithPath: bundle.bundlePath() + "/" + name),
+                  let provider = CG.dataProviderCreateWithURL(url.objcObject) else { continue }
+            defer { CG.dataProviderRelease(provider) }
+            guard let font = CG.fontCreateWithDataProvider(provider) else {
+                uikitWarning("UIAppFonts: \(name) could not be loaded")
+                continue
+            }
+            _ = CG.fontRegister?(font)
+            CG.fontRelease(font)
+        }
+    }
+
     static func run(principalClassName: String?, delegateClassName: String?) {
+        registerAppFonts()
         let info = NSBundle.main()
         let principal = principalClassName ?? info.infoObject(forKey: "NSPrincipalClass")?.stringValue
         guard let applicationClass = Classes.named(principal ?? "UIApplication") else {

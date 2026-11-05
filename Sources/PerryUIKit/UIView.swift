@@ -38,6 +38,8 @@ final class ViewState: ObjectState {
     /// The superview, which retains this view; not retained.
     var superview: UnsafeMutableRawPointer?
     var subviews: [UIView] = []
+    /// Its interactions (pointer, context menu…), which never act here.
+    var interactions: [NSObject] = []
     /// The view controller whose view this is; not retained.
     var viewController: UnsafeMutableRawPointer?
     /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
@@ -597,6 +599,23 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("superview") func superview() -> UIView? { state.superview.map(UIView.wrap) }
     @ObjCMethod("subviews") func subviews() -> NSObject { NSMutableArray.of(state.subviews) }
+    @ObjCMethod("interactions") func interactions() -> NSObject { NSMutableArray.of(state.interactions) }
+    @ObjCMethod("setInteractions:") func setInteractions(_ interactions: NSObject?) {
+        state.interactions = interactions.map { $0.unsafeCast(to: NSArray.self).elements } ?? []
+    }
+    @ObjCMethod("addInteraction:") func addInteraction(_ interaction: NSObject?) {
+        guard let interaction else { return }
+        state.interactions.append(interaction)
+        // UIInteraction's -willMoveToView: and -didMoveToView:, where it has them.
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+        for selector in ["willMoveToView:", "didMoveToView:"] where interaction.responds(to: selector) {
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(interaction.objcObject, ObjCRuntime.selector(selector), objcObject)
+        }
+    }
+    @ObjCMethod("removeInteraction:") func removeInteraction(_ interaction: NSObject?) {
+        guard let interaction else { return }
+        state.interactions.removeAll { $0.objcObject == interaction.objcObject }
+    }
 
     /// The window the view is in: the nearest UIWindow at or above it.
     @ObjCMethod("window")
@@ -611,8 +630,15 @@ open class UIView: UIResponder, UICoordinateSpace {
         return nil
     }
 
+    /// Nil adds nothing, as on iOS.
     @ObjCMethod("addSubview:")
-    func addSubview(_ view: UIView) { insert(view, at: state.subviews.count) }
+    func addSubview(_ view: UIView?) {
+        guard let view else {
+            uikitWarning("-[UIView addSubview:] with nil")
+            return
+        }
+        insert(view, at: state.subviews.count)
+    }
 
     @ObjCMethod("insertSubview:atIndex:")
     func insertSubview(_ view: UIView, at index: Int) { insert(view, at: index) }
@@ -1015,11 +1041,26 @@ open class UIView: UIResponder, UICoordinateSpace {
 }
 
 /// Views UIKit puts between a window and its root view controller's view.
+/// They take no touches themselves: one that nothing in the controller's
+/// views takes goes on to what is behind them in the window, such as a
+/// game's GL view under the views of its interface.
 @ObjCClass("UITransitionView")
-open class UITransitionView: UIView {}
+open class UITransitionView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 @ObjCClass("UIDropShadowView")
-open class UIDropShadowView: UIView {}
+open class UIDropShadowView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 /// UIView's messages, sent so subclasses' overrides run.
 extension NSObject {

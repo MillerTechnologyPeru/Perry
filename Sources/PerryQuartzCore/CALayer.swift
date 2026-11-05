@@ -27,6 +27,10 @@ final class LivePixels {
     /// The generation the compositor last put on the screen.
     var shown = -1
     var opaque = false
+    /// B, G, R, A bytes rather than R, G, B, A, as Metal's drawables have
+    /// them; and rows top first rather than bottom first, as GL's.
+    var bgra = false
+    var topFirst = false
 
     init(width: Int, height: Int) {
         (self.width, self.height) = (width, height)
@@ -36,7 +40,7 @@ final class LivePixels {
     deinit { data.deallocate() }
 
     /// Takes a frame of `width` by `height` from `pixels`.
-    func update(from pixels: UnsafeRawPointer, width: Int, height: Int, opaque: Bool) {
+    func update(from pixels: UnsafeRawPointer, width: Int, height: Int, opaque: Bool, bgra: Bool = false, topFirst: Bool = false) {
         if width != self.width || height != self.height {
             data.deallocate()
             (self.width, self.height) = (width, height)
@@ -44,6 +48,8 @@ final class LivePixels {
         }
         data.copyMemory(from: pixels, byteCount: width * height * 4)
         self.opaque = opaque
+        self.bgra = bgra
+        self.topFirst = topFirst
         generation &+= 1
     }
 }
@@ -141,10 +147,15 @@ final class LayerState {
             if transform.isIdentity {
                 bounds.size = newValue.size
             } else {
-                // The size before the transform whose transformed box is the frame.
-                let unit = transform.apply(CGRect(x: 0, y: 0, width: 1, height: 1))
-                if unit.width > 0, unit.height > 0 {
-                    bounds.size = CGSize(width: newValue.width / unit.width, height: newValue.height / unit.height)
+                // The frame's box through the transform's inverse, as Core
+                // Animation takes it: a frame of 526 by 13 under a quarter
+                // turn makes bounds of 13 by 526.
+                let t = transform
+                let determinant = t.a * t.d - t.b * t.c
+                if abs(determinant) > 1e-9 {
+                    let width = (abs(t.d * newValue.width) + abs(t.c * newValue.height)) / abs(determinant)
+                    let height = (abs(t.b * newValue.width) + abs(t.a * newValue.height)) / abs(determinant)
+                    bounds.size = CGSize(width: width, height: height)
                 }
             }
             position = CGPoint(x: newValue.minX + anchorPoint.x * newValue.width, y: newValue.minY + anchorPoint.y * newValue.height)
@@ -329,12 +340,20 @@ open class CALayer: NSObject {
     /// image; nil pixels go back to the contents.
     @ObjCMethod("_perrySetPixels:width:height:opaque:")
     func setPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool) {
+        setPixels(pixels, width: width, height: height, opaque: opaque, layout: 0)
+    }
+
+    /// Perry's: the same with their layout, the sum of 1 for B, G, R, A
+    /// bytes and 2 for rows top first; Metal's drawables are 3, and shown
+    /// without converting them.
+    @ObjCMethod("_perrySetPixels:width:height:opaque:layout:")
+    func setPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool, layout: Int) {
         guard let pixels, width > 0, height > 0 else {
             changed { state.livePixels = nil }
             return
         }
         let live = state.livePixels ?? LivePixels(width: width, height: height)
-        live.update(from: pixels, width: width, height: height, opaque: opaque)
+        live.update(from: pixels, width: width, height: height, opaque: opaque, bgra: layout & 1 != 0, topFirst: layout & 2 != 0)
         changed { state.livePixels = live }
     }
     /// Perry's: the dma-bufs GL frames will be shared in, as `count`
@@ -931,17 +950,23 @@ extension CALayer {
     /// A CGImage, or an object with one (a UIImage), placed by the contents
     /// gravity.
     /// A GL frame drawn in software, as for snapshots: its rows are bottom
-    /// first, so drawn flipped back.
+    /// first, so drawn flipped back; a Metal drawable's are top first.
     static func drawLivePixels(_ live: LivePixels, of state: LayerState, in context: CGRef) {
         guard let space = CG.colorSpaceCreateDeviceRGB() else { return }
         defer { CG.release(space) }
-        // Premultiplied RGBA, first byte red.
-        guard let bitmap = CG.bitmapContextCreate(live.data, live.width, live.height, 8, live.width * 4, space, 1 | 0x4000) else { return }
+        // Premultiplied RGBA, first byte red; or BGRA, first byte blue
+        // (premultiplied first, 32-bit little-endian).
+        let info: UInt32 = live.bgra ? 2 | 0x2000 : 1 | 0x4000
+        guard let bitmap = CG.bitmapContextCreate(live.data, live.width, live.height, 8, live.width * 4, space, info) else { return }
         defer { CG.release(bitmap) }
         guard let image = CG.bitmapContextCreateImage(bitmap) else { return }
         defer { CG.release(image) }
         let rect = place(CGSize(width: CGFloat(live.width) / state.contentsScale, height: CGFloat(live.height) / state.contentsScale),
                          in: state.bounds, gravity: state.contentsGravity)
+        guard !live.topFirst else {
+            CG.drawFlipped(image, in: rect, context: context)
+            return
+        }
         CG.saveGState(context)
         CG.translateCTM(context, 0, rect.minY + rect.maxY)
         CG.scaleCTM(context, 1, -1)

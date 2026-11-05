@@ -500,6 +500,36 @@ extension NSString {
         return self
     }
 
+    /// A file's text in the encoding it is found to be in, which is given
+    /// back: UTF-16 with a byte order mark, else UTF-8 if it is that, else
+    /// ISO Latin 1, which any bytes are.
+    static func string(contentsOfFile path: String, usedEncoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
+        guard let data = try? Data(contentsOf: URL(filePath: path)) else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+            return nil
+        }
+        let marked = data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff])
+        for encoding: UInt in marked ? [10, 4, 5] : [4, 5] {
+            guard let decoded = data.withUnsafeBytes({ StringEncoding.decode($0, encoding) }) else { continue }
+            usedEncoding?.pointee = encoding
+            return decoded
+        }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 264, description: "The file couldn’t be opened because its text encoding couldn’t be determined.")
+        return nil
+    }
+
+    @ObjCClassMethod("stringWithContentsOfFile:usedEncoding:error:")
+    static func string(contentsOfFile path: String?, used encoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
+        path.flatMap { string(contentsOfFile: $0, usedEncoding: encoding, error: error) }
+    }
+
+    @ObjCMethod("initWithContentsOfFile:usedEncoding:error:")
+    func initialize(contentsOfFile path: String?, usedEncoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let path, let decoded = Self.string(contentsOfFile: path, usedEncoding: usedEncoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
     @ObjCMethod("initWithContentsOfURL:encoding:error:")
     func initialize(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
         guard let decoded = Self.string(contentsOfURL: url, encoding: encoding, error: error) else { return nil }

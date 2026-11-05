@@ -22,6 +22,9 @@ final class RunLoopState {
     /// Observers added, retained, and blocks to perform, copied.
     private var observers: [id] = []
     private var blocks: [id] = []
+    /// Work from Foundation itself for the next pass, such as a socket's
+    /// callback.
+    private var work: [() -> Void] = []
     /// Ports added, which keep the loop running as input sources do.
     var ports = 0
     private var stopRequested = false
@@ -40,6 +43,11 @@ final class RunLoopState {
         Storage.set(object, self)
         self.object = object
     }
+
+    /// An input source added or removed: one of another library's, such as
+    /// an audio queue's on the run loop its app names.
+    func addSource() { locked { ports += 1 } }
+    func removeSource() { locked { ports = max(0, ports - 1) } }
 
     private func locked<T>(_ body: () -> T) -> T {
         pthread_mutex_lock(mutex)
@@ -96,6 +104,12 @@ final class RunLoopState {
         wakeUp()
     }
 
+    /// Runs Foundation's own work on the loop's next pass. Safe from any thread.
+    func perform(work body: @escaping () -> Void) {
+        locked { work.append(body) }
+        wakeUp()
+    }
+
     /// Calls the observers of `activity`, in their order; an observer that
     /// does not repeat is removed after its first call.
     private func notify(_ activity: UInt) {
@@ -111,15 +125,19 @@ final class RunLoopState {
 
     /// Runs the blocks performed so far; whether there were any.
     private func runBlocks() -> Bool {
-        let pending = locked { () -> [id] in
-            defer { blocks.removeAll() }
-            return blocks
+        let (pending, bodies) = locked { () -> ([id], [() -> Void]) in
+            defer {
+                blocks.removeAll()
+                work.removeAll()
+            }
+            return (blocks, work)
         }
         for block in pending {
             ObjC.autoreleasepool { Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block) }
             ObjC.release(block)
         }
-        return !pending.isEmpty
+        for body in bodies { ObjC.autoreleasepool { body() } }
+        return !pending.isEmpty || !bodies.isEmpty
     }
 
     func snapshotTimers() -> [id] { locked { timers } }
@@ -190,7 +208,7 @@ final class RunLoopState {
     /// Sleeps until `deadline`, a wake-up or, on the main thread, work for
     /// the main queue.
     private func wait(until deadline: Double) {
-        if locked({ stopRequested || !blocks.isEmpty }) { return }
+        if locked({ stopRequested || !blocks.isEmpty || !work.isEmpty }) { return }
         notify(RunLoopActivity.beforeWaiting)
         defer { notify(RunLoopActivity.afterWaiting) }
         let remaining = deadline - absoluteTimeNow()
@@ -383,8 +401,39 @@ public func CFRunLoopRun() {
 @c(_CFRunLoopRunInMode)
 public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double,
                                _ returnAfterSourceHandled: Bool) -> Int32 {
-    RunLoops.current.run(until: absoluteTimeNow() + seconds,
-                         returnAfterSourceHandled: returnAfterSourceHandled).rawValue
+    // A loop with an input source waits for it, as on Darwin.
+    let state = RunLoops.current
+    return state.run(until: absoluteTimeNow() + seconds, returnAfterSourceHandled: returnAfterSourceHandled,
+                     waitWhenEmpty: state.ports > 0 ? true : nil).rawValue
+}
+
+/// Perry's own: another library's input source on a run loop, which keeps
+/// it waiting rather than finished when it has nothing else. Audio queues
+/// add one to the run loop their app names for callbacks.
+@c(_perry_CFRunLoopAddInputSource)
+public func perry_CFRunLoopAddInputSource(_ runLoop: UnsafeMutableRawPointer?) {
+    RunLoops.state(runLoop)?.addSource()
+}
+
+@c(_perry_CFRunLoopRemoveInputSource)
+public func perry_CFRunLoopRemoveInputSource(_ runLoop: UnsafeMutableRawPointer?) {
+    RunLoops.state(runLoop)?.removeSource()
+}
+
+/// An NSTimer is a CFRunLoopTimer; every mode is the same run loop here.
+@c(_CFRunLoopAddTimer)
+public func CFRunLoopAddTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: UnsafeMutableRawPointer?,
+                              _ mode: UnsafeMutableRawPointer?) {
+    guard let state = RunLoops.state(runLoop), let timer else { return }
+    Timers.add(timer, to: state)
+}
+
+@c(_CFRunLoopRemoveTimer)
+public func CFRunLoopRemoveTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: UnsafeMutableRawPointer?,
+                                 _ mode: UnsafeMutableRawPointer?) {
+    guard let state = RunLoops.state(runLoop), let timer else { return }
+    Timers.storage(timer)?.runLoops.removeAll { $0 === state }
+    state.remove(timer)
 }
 
 /// The mode the run loop is running in, +1: the default mode, the only

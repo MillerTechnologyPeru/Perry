@@ -7,10 +7,21 @@ public enum Objects {
 
     // MARK: - Lifetime
 
+    /// The room an instance gets, as Darwin's allocator gives it (libPerrySystem's
+    /// malloc has the reasons): up to 1008 bytes in 16-byte steps, from there
+    /// up to 15 KB in 512-byte steps and 64 bytes more, beyond that in 16 KB
+    /// pages. A class may write a little past its instances' size and never
+    /// know on Darwin.
+    static func blockSize(_ size: Int) -> Int {
+        if size <= 1008 { return size <= 16 ? 16 : (size + 15) & ~15 }
+        if size <= 15 * 1024 { return ((size + 511) & ~511) + 64 }
+        return (size + 16383) & ~16383
+    }
+
     public static func createInstance(_ cls: ClassPointer, extraBytes: Int = 0) -> ObjectPointer? {
         guard let found = Runtime.info(cls) else { return nil }
         Runtime.runSwiftInitializers(found)
-        guard let info = Runtime.info(cls), let object = calloc(1, max(info.instanceSize + extraBytes, 16)) else {
+        guard let info = Runtime.info(cls), let object = calloc(1, blockSize(info.instanceSize + extraBytes)) else {
             return nil
         }
         object.storeBytes(of: cls, as: ClassPointer.self)
