@@ -580,7 +580,9 @@ public struct ObjCConstantsMacro: MemberMacro, ExtensionMacro {
             if let prefix = number?.as(PrefixOperatorExprSyntax.self) { number = prefix.expression }
             if constant.type == "Float" {
                 value = ".float(\(constant.name))"
-            } else if constant.type.map({ ["Double", "CGFloat", "TimeInterval"].contains($0) }) == true
+            } else if constant.type == "CGFloat" {
+                value = ".cgFloat(Double(\(constant.name)))"
+            } else if constant.type.map({ ["Double", "TimeInterval"].contains($0) }) == true
                         || (constant.type == nil && number?.is(FloatLiteralExprSyntax.self) == true) {
                 value = ".double(Double(\(constant.name)))"
             } else if constant.type.map(integers.contains) == true
