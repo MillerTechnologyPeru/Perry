@@ -91,7 +91,9 @@ enum KeyValueCoding {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
-        foundationFatal("[<\(ObjC.className(object)) \(object)> valueForUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+        // As Foundation does: the object's -valueForUndefinedKey:, which
+        // raises unless a class overrides it.
+        return ObjC.send(object, ObjC.selector("valueForUndefinedKey:"), Strings.autoreleased(key))
     }
 
     static func setValue(_ object: id, _ key: String, _ value: id?) {
@@ -103,7 +105,8 @@ enum KeyValueCoding {
         }
         let selector = ObjC.selector("set" + key.prefix(1).uppercased() + key.dropFirst() + ":")
         guard responds(object, selector) else {
-            foundationFatal("[<\(ObjC.className(object)) \(object)> setValue:forUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+            _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
+            return
         }
         set(object, selector, value)
     }
@@ -248,6 +251,18 @@ extension NSObject {
 
     @ObjCMethod("setValue:forKey:")
     func setKeyValue(_ value: ObjCObject?, forKey key: String) { KeyValueCoding.setValue(objcObject, key, value?.objcObject) }
+
+    /// What a key without accessors does: raise, as Foundation's, unless a
+    /// class overrides these.
+    @ObjCMethod("valueForUndefinedKey:")
+    func value(forUndefinedKey key: String) -> ObjCObject? {
+        foundationFatal("[<\(ObjC.className(objcObject)) \(objcObject)> valueForUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+    }
+
+    @ObjCMethod("setValue:forUndefinedKey:")
+    func setValue(_ value: ObjCObject?, forUndefinedKey key: String) {
+        foundationFatal("[<\(ObjC.className(objcObject)) \(objcObject)> setValue:forUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
+    }
 
     /// Each key in turn, by -valueForKey:, so classes' own versions apply.
     /// A key starting with @ is a collection operator, applied to the
