@@ -1,5 +1,3 @@
-@_spi(Reflection) import Swift
-
 // Markdown in Swift: AttributedString's parsing options and source
 // positions, presentation intents and their attributes, which
 // swift-foundation leaves to Apple's own build, and the Markdown
@@ -145,6 +143,8 @@ public struct PresentationIntent: Hashable, Codable, CustomDebugStringConvertibl
 @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
 extension PresentationIntent: _ObjectiveCBridgeable {
     public typealias _ObjectiveCType = __NSPresentationIntent
+
+    public static func _getObjectiveCType() -> Any.Type { __NSPresentationIntent.self }
 
     @_semantics("convertToObjectiveC")
     public func _bridgeToObjectiveC() -> __NSPresentationIntent {
@@ -544,17 +544,38 @@ enum _MarkdownImport {
             ]
             for key in declared { keys[key.markdownName] = key }
         }
-        _ = _forEachField(of: scope, options: [.ignoreUnknown]) { _, _, type, _ in
+        for index in 0..<_markdownFieldCount(scope) {
+            var field = _MarkdownFieldMetadata()
+            let type = _markdownFieldType(scope, index: index, fieldMetadata: &field)
+            field.freeName?(field.name)
             if let key = type as? any MarkdownDecodableAttributedStringKey.Type {
                 keys[key.markdownName] = key
             } else if let inner = type as? any AttributeScope.Type {
                 keys.merge(markdownKeys(inner)) { current, _ in current }
             }
-            return true
         }
         return keys
     }
 }
+
+// The Swift runtime's reflection of a type's stored properties, which the
+// standard library's _forEachField is built on; the SDK's interface leaves
+// that out.
+
+/// _FieldReflectionMetadata's layout.
+struct _MarkdownFieldMetadata {
+    var name: UnsafePointer<CChar>? = nil
+    var freeName: (@convention(c) (UnsafePointer<CChar>?) -> Void)? = nil
+    var isStrong = false
+    var isVar = false
+}
+
+@_silgen_name("swift_reflectionMirror_recursiveCount")
+func _markdownFieldCount(_ type: Any.Type) -> Int
+
+@_silgen_name("swift_reflectionMirror_recursiveChildMetadata")
+func _markdownFieldType(_ type: Any.Type, index: Int,
+                        fieldMetadata: UnsafeMutablePointer<_MarkdownFieldMetadata>) -> Any.Type
 
 @available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
 extension AttributedString {
