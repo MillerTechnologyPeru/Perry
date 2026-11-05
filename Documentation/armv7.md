@@ -61,29 +61,39 @@ Checked with clang for `armv7-apple-ios` against `armv7-linux-gnueabihf`.
 
 ## Status
 
-An armv7 C program built with ld64 runs: `hello` (iOS 6, `LC_MAIN`, and iOS 5,
-`LC_UNIXTHREAD`) prints through libSystem's `printf` and exits with its code,
-under `perry32` or through `perry`, which hands it over.
+armv7 C and Objective-C programs run, built with ld64 for iOS 5 (`LC_UNIXTHREAD`)
+and iOS 6 (`LC_MAIN`), under `perry32` or through `perry`, which hands them
+over. The Objective-C runtime fixture (`runtime.m`: `+initialize`, super sends,
+introspection, ARC deallocation, `__weak`, associated objects, autorelease
+pools, unrecognized selectors) prints what it does on arm64, byte for byte.
 
 - Loader: 32-bit headers, segments, fat slice choice, `LC_UNIXTHREAD`, dyld
-  info rebase and bind, unresolved-import stubs and `tlv_get_addr` for armv7.
-  Chained fixups stay 64-bit.
-- libSystem (`libPerrySystem.so` for armv7): the streams, process startup and
-  errno, and `thunks_arm.S` with the functions whose arguments and results are
-  each one 32-bit word. Variadic printf and scanf read integers, pointers and
-  strings; `long long` and `double` conversions need the format-driven repack
-  described above.
-- Not yet: the rest of libSystem for Darwin's armv7 layouts and calling
-  convention (files, sockets, pthreads, mach, 64-bit arguments), the
-  Objective-C runtime and `objc_msgSend`, Foundation, UIKit, the other
-  providers, and classic relocations (iOS before 3.1).
+  info rebase and bind, unresolved-import stubs, `tlv_get_addr` and the
+  Objective-C report for armv7. Chained fixups stay 64-bit.
+- libSystem (`libPerrySystem.so` for armv7): the streams, process startup,
+  errno, setjmp-and-longjmp unwinder registration, and `thunks_arm.S` with the
+  functions whose arguments and results are each one 32-bit word. Variadic
+  printf and scanf read integers, pointers and strings; `long long` and
+  `double` conversions need the format-driven repack described above.
+- libobjc (`libPerryobjc.so` for armv7): `objc_msgSend` and its stret and super
+  forms, message forwarding and block trampolines in ARM assembly; the Swift
+  runtime reads metadata at the pointer width's offsets (`Layout`).
+- Not yet: exceptions (`@throw`, unwinding through registered contexts), the
+  rest of libSystem for Darwin's armv7 layouts and calling convention (files,
+  sockets, pthreads, mach, 64-bit arguments), Foundation, UIKit, the other
+  providers, `objc_msgForward_stret`, and classic relocations (iOS before 3.1).
 
 ## Building and running
 
     Scripts/build-armv7-loader.sh              # .build/armv7/bin/perry32
     Scripts/build-armv7-system.sh              # .build/armv7/bin/libPerrySystem.so
-    Scripts/build-armv7-fixtures.sh 6.0 hello  # .build/perry-fixtures/armv7/hello
-    .build/armv7/bin/perry32 .build/perry-fixtures/armv7/hello
+    Scripts/build-host-macros.sh               # .build/macros/PerryObjCMacros
+    Scripts/build-armv7-objc.sh                # .build/armv7/bin/libPerryobjc.so
+    Scripts/build-armv7-fixtures.sh 6.0 hello.c runtime.m
+    .build/armv7/bin/perry32 .build/perry-fixtures/armv7/runtime
 
 `Scripts/build-armv7-fixtures.sh` links with `arm-apple-darwin11-ld` from
-cctools-port, installed under `.toolchains/cctools`.
+cctools-port, installed under `.toolchains/cctools`. The armv7 Swift modules
+are compiled with `swiftc` directly (`build-armv7-objc.sh`), and the macro
+plugin against the swift-syntax libraries the toolchain ships, because
+SwiftPM's build of swift-syntax needs more memory than a 4 GB machine has.
