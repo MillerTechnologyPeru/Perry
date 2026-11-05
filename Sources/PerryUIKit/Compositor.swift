@@ -261,6 +261,8 @@ final class Compositor {
         // Layers display first, as an app's OpenGL ES drawing for a layer
         // makes its own context current; then the renderer's is again.
         QuartzCore.withRoots(windows) { QuartzCore.displayLayers?($0, $1) }
+        // GL frames the GPU has finished reading back, to show in this one.
+        Renderbuffers.collect()
         rendererContext?.restore()
         fit()
         _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, scale, $0, $1) }
