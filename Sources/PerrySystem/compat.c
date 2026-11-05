@@ -357,12 +357,12 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         case KERN_OSRELEASE: name = "kern.osrelease"; break;
         case KERN_OSVERSION: name = "kern.osversion"; break;
         case KERN_PROC: {
-            // struct kinfo_proc is 648 bytes on arm64.
+            // struct kinfo_proc is 648 bytes on arm64, 492 on armv7.
             if (!old_length)
                 return -1;
             if (old)
-                memset(old, 0, *old_length < 648 ? *old_length : 648);
-            *old_length = 648;
+                memset(old, 0, *old_length < PERRY_KINFO_PROC_SIZE ? *old_length : PERRY_KINFO_PROC_SIZE);
+            *old_length = PERRY_KINFO_PROC_SIZE;
             return 0;
         }
         }
@@ -374,7 +374,7 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         case HW_PHYSMEM: name = "hw.physmem"; break;
         case HW_MEMSIZE: name = "hw.memsize"; break;
         case HW_PAGESIZE: {
-            int32_t size = 16384;
+            int32_t size = PERRY_PAGE_SIZE;
             if (!old_length)
                 return -1;
             if (old && *old_length >= sizeof(size))
