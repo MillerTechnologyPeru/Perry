@@ -344,8 +344,8 @@ public func os_signpost_enabled(_ log: Object?) -> Bool { !(Logging.state(log)?.
 
 /// Signposts mark intervals for Instruments, which Linux lacks.
 @c(__os_signpost_emit_with_name_impl)
-public func _os_signpost_emit_with_name_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type: UInt8, _ identifier: UInt64,
-                                             _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
+public func _os_signpost_emit_with_name_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type: UInt8,
+                                             _ identifier: UInt64.ObjCType, _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
                                              _ buffer: UnsafePointer<UInt8>?, _ size: UInt32) {}
 
 // MARK: - Activities
