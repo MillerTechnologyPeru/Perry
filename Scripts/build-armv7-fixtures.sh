@@ -6,7 +6,8 @@
 # .tbd in Tests/Fixtures/sdk lists.
 #
 # usage: build-armv7-fixtures.sh [minimum iOS version, default 6.0] [fixture ...]
-#   fixtures are file names in Tests/Fixtures: hello.c, runtime.m (default: hello.c)
+#   fixtures are file names in Tests/Fixtures: hello.c, runtime.m, foundation_abi.m
+#   (default: hello.c)
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 llvm=$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)
@@ -50,13 +51,18 @@ PY
 # a context with the unwinder, which libSystem provides.
 stub libSystem /usr/lib/libSystem.B.dylib __Unwind_SjLj_Register __Unwind_SjLj_Unregister \
     __Unwind_SjLj_Resume __Unwind_SjLj_RaiseException
-stub libobjc /usr/lib/libobjc.A.dylib
+# Structures too big for r0 come back through a pointer: the _stret sends,
+# which arm64 does not have.
+stub libobjc /usr/lib/libobjc.A.dylib _objc_msgSend_stret _objc_msgSendSuper2_stret
+stub Foundation /System/Library/Frameworks/Foundation.framework/Foundation
 
 fixtures=${*:-hello.c}
 for file in $fixtures; do
     name=${file%.*}
     case $file in
-    *.m) flags="-fobjc-arc -fblocks"; libs="$out/libSystem/libSystem.dylib $out/libobjc/libobjc.dylib" ;;
+    *.m) flags="-fobjc-arc -fblocks"
+        libs="$out/libSystem/libSystem.dylib $out/libobjc/libobjc.dylib"
+        grep -q NSString "$root/Tests/Fixtures/$file" && libs="$libs $out/Foundation/Foundation.dylib" ;;
     *) flags=""; libs="$out/libSystem/libSystem.dylib" ;;
     esac
     # shellcheck disable=SC2086
