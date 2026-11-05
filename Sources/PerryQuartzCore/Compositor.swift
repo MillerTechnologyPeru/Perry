@@ -174,6 +174,13 @@ final class Compositor {
         line.withCString { _ = write(2, $0, strlen($0)) }
     }
 
+    /// A color's components, for the trace.
+    static func describe(_ color: CGRef) -> String {
+        guard let components = CG.colorGetComponents(color) else { return "?" }
+        let count = CG.colorGetNumberOfComponents(color)
+        return (0..<count).map { "\((Double(components[$0]) * 100).rounded() / 100)" }.joined(separator: " ")
+    }
+
     /// Composites the roots, each placed in the screen by its own transform.
     func draw(_ roots: [CALayer]) {
         tracingFrame = false
@@ -217,8 +224,9 @@ final class Compositor {
         layer.state.rendered = true
         if tracingFrame {
             trace(layer, state: state, frame: toScreen.apply(state.bounds), depth: depth,
-                  how: state.sharedFrames != nil ? "shared" : state.livePixels != nil ? "live" : (layer.state.backing != nil || state.contents != nil) ? "textured"
+                  how: (state.sharedFrames != nil ? "shared" : state.livePixels != nil ? "live" : (layer.state.backing != nil || state.contents != nil) ? "textured"
                       : state.backgroundColor != nil ? "filled" : "")
+                      + (state.backgroundColor.map { " background " + Compositor.describe($0) } ?? ""))
         }
         guard !state.hidden, state.opacity > 0 else { return }
         let alpha = alpha * CGFloat(state.opacity)
