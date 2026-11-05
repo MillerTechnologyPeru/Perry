@@ -138,7 +138,11 @@ final class StateTable<State: ObjectState>: @unchecked Sendable {
 
 // MARK: - UIKit, CoreLocation and Foundation, as this provider calls them
 
+#if _pointerBitWidth(_32)
+public typealias CGFloat = Float
+#else
 public typealias CGFloat = Double
+#endif
 
 extension CGPoint: ObjCScalar { public static var objCTypeEncoding: String { "{CGPoint=dd}" } }
 extension CGSize: ObjCScalar { public static var objCTypeEncoding: String { "{CGSize=dd}" } }
