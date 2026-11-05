@@ -278,9 +278,10 @@ int darwin_getpeername(int socket, void *address, socklen_t *length) {
     return result;
 }
 
-// Darwin's struct timeval: a 32-bit tv_usec, then padding.
+// Darwin's struct timeval: a long tv_sec and a 32-bit tv_usec (then padding
+// on arm64).
 struct darwin_timeval {
-    int64_t tv_sec;
+    long tv_sec;
     int32_t tv_usec;
 };
 
@@ -314,7 +315,7 @@ int darwin_getsockopt(int socket, int level, int name, void *value, socklen_t *l
         return 0;
     }
     if (is_timeout(level, name) && value && length && *length >= sizeof(struct darwin_timeval)) {
-        struct timeval timeout;
+        struct timeval timeout = { 0, 0 };
         socklen_t size = sizeof(timeout);
         int result = getsockopt(socket, level, name, &timeout, &size);
         if (result == 0) {
