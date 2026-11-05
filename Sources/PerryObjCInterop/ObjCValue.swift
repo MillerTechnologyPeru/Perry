@@ -1,3 +1,4 @@
+@_exported import CPerryObjCInterop
 #if canImport(Glibc)
 import Glibc
 #elseif canImport(Darwin)
@@ -15,6 +16,11 @@ import Darwin
 public protocol ObjCValue {
     /// The C-representable type the value has in a message send.
     associatedtype ObjCType
+    /// The type it has as a method's result: ObjCType, except where 32-bit
+    /// Darwin returns a value in other registers than it passes it in (a
+    /// double or a 64-bit integer passes as two words, ObjCWordPair, and
+    /// returns in r0 and r1, a UInt64).
+    associatedtype ObjCResultType = ObjCType
 
     /// The Objective-C type encoding: "q", "d", "@" and so on.
     static var objCTypeEncoding: String { get }
@@ -38,6 +44,15 @@ public protocol ObjCValue {
     func objCReturnValue() -> ObjCType
     /// As a +1 result, for methods in the owned families.
     func objCOwnedReturnValue() -> ObjCType
+
+    /// A result's ABI form from its argument form, and back.
+    static func objCResult(_ value: ObjCType) -> ObjCResultType
+    static func objCArgumentForm(ofResult value: ObjCResultType) -> ObjCType
+}
+
+extension ObjCValue where ObjCResultType == ObjCType {
+    @inline(__always) public static func objCResult(_ value: ObjCType) -> ObjCType { value }
+    @inline(__always) public static func objCArgumentForm(ofResult value: ObjCType) -> ObjCType { value }
 }
 
 extension ObjCValue {
@@ -58,19 +73,93 @@ extension ObjCScalar {
     @inline(__always) public func objCOwnedReturnValue() -> Self { self }
 }
 
+#if _pointerBitWidth(_32)
+// 32-bit Darwin's NSInteger and NSUInteger are int and unsigned int, and its
+// BOOL is a signed char.
+extension Int: ObjCScalar { public static var objCTypeEncoding: String { "i" } }
+extension UInt: ObjCScalar { public static var objCTypeEncoding: String { "I" } }
+extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
+#else
 extension Int: ObjCScalar { public static var objCTypeEncoding: String { "q" } }
 extension UInt: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
 extension Int64: ObjCScalar { public static var objCTypeEncoding: String { "q" } }
 extension UInt64: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
+extension Double: ObjCScalar { public static var objCTypeEncoding: String { "d" } }
+extension Float: ObjCScalar { public static var objCTypeEncoding: String { "f" } }
+extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "B" } }
+#endif
 extension Int32: ObjCScalar { public static var objCTypeEncoding: String { "i" } }
 extension UInt32: ObjCScalar { public static var objCTypeEncoding: String { "I" } }
 extension Int16: ObjCScalar { public static var objCTypeEncoding: String { "s" } }
 extension UInt16: ObjCScalar { public static var objCTypeEncoding: String { "S" } }
 extension Int8: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
 extension UInt8: ObjCScalar { public static var objCTypeEncoding: String { "C" } }
-extension Double: ObjCScalar { public static var objCTypeEncoding: String { "d" } }
-extension Float: ObjCScalar { public static var objCTypeEncoding: String { "f" } }
-extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "B" } }
+
+// MARK: - 32-bit Darwin's floating point and 64-bit integers
+
+/// Two words, the low one first: how 32-bit Darwin passes a double or a
+/// 64-bit integer (perry_word_pair, a C structure so that @c functions can
+/// take it).
+public typealias ObjCWordPair = perry_word_pair
+
+extension perry_word_pair {
+    @inline(__always) public init(_ bits: UInt64) {
+        self.init(low: UInt32(truncatingIfNeeded: bits), high: UInt32(truncatingIfNeeded: bits >> 32))
+    }
+
+    @inline(__always) public var bits: UInt64 { UInt64(high) << 32 | UInt64(low) }
+}
+
+/// A 64-bit value that 32-bit Darwin passes as an ObjCWordPair and returns
+/// in r0 and r1.
+public protocol ObjCWordPairValue: ObjCValue where ObjCType == ObjCWordPair, ObjCResultType == UInt64 {
+    init(objCBits: UInt64)
+    var objCBits: UInt64 { get }
+}
+
+extension ObjCWordPairValue {
+    @inline(__always) public init(objCArgument value: ObjCWordPair) { self.init(objCBits: value.bits) }
+    @inline(__always) public init(objCReturnValue value: ObjCWordPair) { self.init(objCBits: value.bits) }
+    @inline(__always) public init(objCOwned value: ObjCWordPair) { self.init(objCBits: value.bits) }
+    @inline(__always) public func objCArgument() -> ObjCWordPair { ObjCWordPair(objCBits) }
+    @inline(__always) public func objCReturnValue() -> ObjCWordPair { ObjCWordPair(objCBits) }
+    @inline(__always) public func objCOwnedReturnValue() -> ObjCWordPair { ObjCWordPair(objCBits) }
+    @inline(__always) public static func objCResult(_ value: ObjCWordPair) -> UInt64 { value.bits }
+    @inline(__always) public static func objCArgumentForm(ofResult value: UInt64) -> ObjCWordPair { ObjCWordPair(value) }
+}
+
+#if _pointerBitWidth(_32)
+extension Double: ObjCWordPairValue {
+    public static var objCTypeEncoding: String { "d" }
+    @inline(__always) public init(objCBits: UInt64) { self.init(bitPattern: objCBits) }
+    @inline(__always) public var objCBits: UInt64 { bitPattern }
+}
+
+extension Int64: ObjCWordPairValue {
+    public static var objCTypeEncoding: String { "q" }
+    @inline(__always) public init(objCBits: UInt64) { self.init(bitPattern: objCBits) }
+    @inline(__always) public var objCBits: UInt64 { UInt64(bitPattern: self) }
+}
+
+extension UInt64: ObjCWordPairValue {
+    public static var objCTypeEncoding: String { "Q" }
+    @inline(__always) public init(objCBits: UInt64) { self = objCBits }
+    @inline(__always) public var objCBits: UInt64 { self }
+}
+
+/// A float, which 32-bit Darwin passes and returns in a core register: its
+/// bits as a word.
+extension Float: ObjCValue {
+    public typealias ObjCType = UInt32
+    public static var objCTypeEncoding: String { "f" }
+    @inline(__always) public init(objCArgument value: UInt32) { self.init(bitPattern: value) }
+    @inline(__always) public init(objCReturnValue value: UInt32) { self.init(bitPattern: value) }
+    @inline(__always) public init(objCOwned value: UInt32) { self.init(bitPattern: value) }
+    @inline(__always) public func objCArgument() -> UInt32 { bitPattern }
+    @inline(__always) public func objCReturnValue() -> UInt32 { bitPattern }
+    @inline(__always) public func objCOwnedReturnValue() -> UInt32 { bitPattern }
+}
+#endif
 
 // MARK: - Nullable values and Optional
 
