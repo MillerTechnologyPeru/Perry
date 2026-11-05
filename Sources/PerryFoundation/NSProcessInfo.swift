@@ -25,7 +25,7 @@ enum Process {
     /// LC_BUILD_VERSION's sdk field: xxxx.yy.zz in nibbles.
     private static func buildSDK(_ header: UnsafeRawPointer) -> NSOperatingSystemVersion? {
         let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
-        var command = header + 32
+        var command = header + DarwinLayout.machHeaderSize(header)
         for _ in 0..<count {
             let cmd = command.load(as: UInt32.self)
             if cmd == 0x32 {                        // LC_BUILD_VERSION
