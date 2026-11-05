@@ -146,6 +146,31 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
         if let message { metalWarning("getBytes: \(message)") }
     }
 
+    /// Perry's, for CAMetalLayer: the 2D texture's pixels as they are, rows
+    /// top first, into `pixels`; their layout as
+    /// -[CALayer _perrySetPixels:width:height:opaque:layout:] takes it (3 for
+    /// BGRA8, 2 for RGBA8), or -1 for another format or size.
+    @ObjCMethod("_perryReadPixels:width:height:")
+    func readPixels(_ pixels: UnsafeMutableRawPointer?, width: UInt, height: UInt) -> Int {
+        guard let pixels, UInt64(width) == descriptor.width, UInt64(height) == descriptor.height else { return -1 }
+        let layout: Int
+        switch descriptor.pixel_format {
+        case 70, 71: layout = 2
+        case 80, 81: layout = 3
+        default: return -1
+        }
+        let rowBytes = Int(width) * 4
+        let region = MTLRegion(origin: MTLOrigin(x: 0, y: 0, z: 0), size: MTLSize(width: width, height: height, depth: 1))
+        let (read, message) = M2V.call {
+            M2V.api.texture_get_bytes(handle, pixels, rowBytes * Int(height), UInt64(rowBytes), 0, region, 0, 0, $0)
+        }
+        guard read else {
+            metalWarning("reading a drawable: \(message ?? "failed")")
+            return -1
+        }
+        return layout
+    }
+
     /// Perry's, for CAMetalLayer: the 2D texture's pixels as RGBA rows,
     /// bottom first, as a GL frame's are; false for a format other than
     /// RGBA8 or BGRA8 or another size.
