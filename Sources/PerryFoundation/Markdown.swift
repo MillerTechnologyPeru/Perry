@@ -138,9 +138,10 @@ enum Markdown {
     }
 
     /// GitHub's extensions, registered once for every parser.
-    nonisolated(unsafe) private static let extensions: [OpaquePointer] = {
+    nonisolated(unsafe) private static let extensions: [UnsafeMutablePointer<cmark_syntax_extension>] = {
         cmark_gfm_core_extensions_ensure_registered()
-        return ["table", "strikethrough", "autolink"].compactMap { cmark_find_syntax_extension($0) }
+        let names: [String] = ["table", "strikethrough", "autolink"]
+        return names.compactMap { cmark_find_syntax_extension($0) }
     }()
 
     static func parse(_ source: String, _ options: Options) -> [Run] {
@@ -171,20 +172,62 @@ enum Markdown {
 
         init(options: Options) { self.options = options }
 
-        mutating func append(_ text: String, _ attributes: Attributes, _ node: OpaquePointer) {
+        mutating func append(_ text: String, _ attributes: Attributes, _ node: UnsafeMutablePointer<cmark_node>) {
+            append(text, attributes, at: position(of: node))
+        }
+
+        mutating func append(_ text: String, _ attributes: Attributes, at position: Position?) {
             guard !text.isEmpty else { return }
             var attributes = attributes
-            if options.sourcePositions {
-                attributes.position = Position(startLine: Int(cmark_node_get_start_line(node)),
-                                               startColumn: Int(cmark_node_get_start_column(node)),
-                                               endLine: Int(cmark_node_get_end_line(node)),
-                                               endColumn: Int(cmark_node_get_end_column(node)))
-            }
+            if options.sourcePositions { attributes.position = position }
             if let last = runs.last, last.attributes == attributes {
                 runs[runs.count - 1].text += text
             } else {
                 runs.append(Run(text: text, attributes: attributes))
             }
+        }
+
+        /// Where cmark found a node; nothing for the nodes it gives no place,
+        /// such as line breaks.
+        func position(of node: UnsafeMutablePointer<cmark_node>) -> Position? {
+            let position = Position(startLine: Int(cmark_node_get_start_line(node)),
+                                    startColumn: Int(cmark_node_get_start_column(node)),
+                                    endLine: Int(cmark_node_get_end_line(node)),
+                                    endColumn: Int(cmark_node_get_end_column(node)))
+            return position.startLine > 0 ? position : nil
+        }
+
+        /// A link's or image's description as Foundation keeps it: its
+        /// text without the inline syntax inside it, from where its first
+        /// child starts to where its last ends.
+        func flattened(_ node: UnsafeMutablePointer<cmark_node>) -> (text: String, position: Position?) {
+            var text = ""
+            var first: Position?, last: Position?
+            var child = cmark_node_first_child(node)
+            while let current = child {
+                if let place = position(of: current) {
+                    if first == nil { first = place }
+                    last = place
+                }
+                child = cmark_node_next(current)
+            }
+            func walk(_ node: UnsafeMutablePointer<cmark_node>) {
+                var child = cmark_node_first_child(node)
+                while let current = child {
+                    switch cmark_node_get_type(current) {
+                    case CMARK_NODE_TEXT, CMARK_NODE_CODE, CMARK_NODE_HTML_INLINE:
+                        text += literal(current)
+                    case CMARK_NODE_SOFTBREAK: text += " "
+                    case CMARK_NODE_LINEBREAK: text += "\n"
+                    default: walk(current)
+                    }
+                    child = cmark_node_next(current)
+                }
+            }
+            walk(node)
+            guard let first, let last else { return (text, nil) }
+            return (text, Position(startLine: first.startLine, startColumn: first.startColumn,
+                                   endLine: last.endLine, endColumn: last.endColumn))
         }
 
         /// A new block inside the current one; none when only inline syntax
@@ -197,7 +240,7 @@ enum Markdown {
             return inner
         }
 
-        mutating func children(of node: OpaquePointer, _ attributes: Attributes) {
+        mutating func children(of node: UnsafeMutablePointer<cmark_node>, _ attributes: Attributes) {
             var child = cmark_node_first_child(node)
             while let current = child {
                 visit(current, attributes)
@@ -205,7 +248,7 @@ enum Markdown {
             }
         }
 
-        mutating func visit(_ node: OpaquePointer, _ attributes: Attributes) {
+        mutating func visit(_ node: UnsafeMutablePointer<cmark_node>, _ attributes: Attributes) {
             let type = cmark_node_get_type(node)
             var attributes = attributes
             switch type {
@@ -219,13 +262,13 @@ enum Markdown {
                 list(node, attributes)
             case CMARK_NODE_CODE_BLOCK:
                 let info = string(cmark_node_get_fence_info(node)) ?? ""
-                let hint = info.split(whereSeparator: { $0 == " " || $0 == "\t" }).first.map(String.init)
-                append(literal(node), open(.codeBlock(languageHint: hint), attributes), node)
+                append(literal(node), open(.codeBlock(languageHint: info.isEmpty ? nil : info), attributes), node)
             case CMARK_NODE_HTML_BLOCK:
                 attributes.inline |= Inline.blockHTML
                 append(literal(node), attributes, node)
             case CMARK_NODE_THEMATIC_BREAK:
-                append("\u{2E3B}", open(.thematicBreak, attributes), node)
+                // Foundation gives the break no source position.
+                append("\u{2E3B}", open(.thematicBreak, attributes), at: nil)
             case CMARK_NODE_TEXT:
                 append(literal(node), attributes, node)
             case CMARK_NODE_SOFTBREAK:
@@ -249,15 +292,19 @@ enum Markdown {
             case CMARK_NODE_LINK:
                 attributes.link = string(cmark_node_get_url(node))
                 if let title = string(cmark_node_get_title(node)), !title.isEmpty { attributes.alternateDescription = title }
-                children(of: node, attributes)
+                let description = flattened(node)
+                append(description.text, attributes, at: description.position)
             case CMARK_NODE_IMAGE:
                 attributes.imageURL = string(cmark_node_get_url(node))
                 if let title = string(cmark_node_get_title(node)), !title.isEmpty { attributes.alternateDescription = title }
-                let before = runs.count, length = runs.last?.text.utf8.count
-                children(of: node, attributes)
                 // An image without a description stands as U+FFFC, the
                 // object replacement character.
-                if runs.count == before, runs.last?.text.utf8.count == length { append("\u{FFFC}", attributes, node) }
+                let description = flattened(node)
+                if description.text.isEmpty {
+                    append("\u{FFFC}", attributes, at: nil)
+                } else {
+                    append(description.text, attributes, at: description.position)
+                }
             case CMARK_NODE_ATTRIBUTE:
                 if options.extendedAttributes, let source = string(cmark_node_get_attributes(node)) {
                     attributes.extended.append(source)
@@ -278,7 +325,7 @@ enum Markdown {
 
         /// A list and its items, each with its ordinal (counted from the
         /// list's start when ordered) and its marker.
-        mutating func list(_ node: OpaquePointer, _ attributes: Attributes) {
+        mutating func list(_ node: UnsafeMutablePointer<cmark_node>, _ attributes: Attributes) {
             let ordered = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
             let list = open(ordered ? .orderedList : .unorderedList, attributes)
             var delimiter: String?
@@ -306,7 +353,7 @@ enum Markdown {
 
         /// A table, its header row, its rows counted from 1, and its cells
         /// by column.
-        mutating func table(_ node: OpaquePointer, _ attributes: Attributes) {
+        mutating func table(_ node: UnsafeMutablePointer<cmark_node>, _ attributes: Attributes) {
             let columns = Int(cmark_gfm_extensions_get_table_columns(node))
             let raw = cmark_gfm_extensions_get_table_alignments(node)
             let alignments = (0..<columns).map { column -> Int in
@@ -334,7 +381,7 @@ enum Markdown {
             }
         }
 
-        func literal(_ node: OpaquePointer) -> String {
+        func literal(_ node: UnsafeMutablePointer<cmark_node>) -> String {
             string(cmark_node_get_literal(node)) ?? ""
         }
 
