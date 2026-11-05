@@ -313,9 +313,17 @@ public final class Configuration: @unchecked Sendable {
 
     public var identifier: String?
 
+    /// Settings corelibs doesn't use (the network service type, constrained
+    /// and expensive access, discretionary transfers…), kept by name to be
+    /// read back.
+    public var settings: [String: Int] = [:]
+    public var sharedContainerIdentifier: String?
+
     public func copy() -> Configuration {
         let copy = Configuration(value.copy() as! URLSessionConfiguration)
         copy.identifier = identifier
+        copy.settings = settings
+        copy.sharedContainerIdentifier = sharedContainerIdentifier
         copy.waitsForConnectivity = waitsForConnectivity
         copy.protocolClasses = protocolClasses
         return copy
