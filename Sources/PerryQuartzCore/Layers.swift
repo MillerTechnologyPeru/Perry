@@ -36,27 +36,34 @@ open class CAEAGLLayer: CALayer {
 // MARK: - CADisplayLink
 
 /// The frame clock: subscribers are called at their rates from the main
-/// queue, checked 120 times a second.
+/// queue, each on a schedule of its own that advances by its interval, so
+/// a frame that runs late does not push the next ones back; the clock
+/// sleeps until the soonest one is due. One that falls a whole interval
+/// behind starts again from now.
 enum Frames {
     final class Subscriber {
         let interval: Double
-        var last = 0.0
+        var next: Double
         let tick: (Double) -> Void
 
-        init(interval: Double, tick: @escaping (Double) -> Void) {
+        init(interval: Double, next: Double, tick: @escaping (Double) -> Void) {
             self.interval = interval
+            self.next = next
             self.tick = tick
         }
     }
 
     nonisolated(unsafe) private static var subscribers: [ObjectIdentifier: Subscriber] = [:]
     nonisolated(unsafe) private static var running = false
+    /// Early by this much is on time: dispatch wakes a little late or
+    /// early, and a tick a hair early is better than one a frame late.
+    private static let slack = 0.001
 
     static func add(_ owner: AnyObject, framesPerSecond: Int, _ tick: @escaping (Double) -> Void) {
-        subscribers[ObjectIdentifier(owner)] = Subscriber(interval: 1 / Double(max(framesPerSecond, 1)), tick: tick)
+        subscribers[ObjectIdentifier(owner)] = Subscriber(interval: 1 / Double(max(framesPerSecond, 1)), next: Clock.now, tick: tick)
         guard !running else { return }
         running = true
-        Dispatch.onMain(after: 1.0 / 120) { step() }
+        Dispatch.onMain { step() }
     }
 
     static func remove(_ owner: AnyObject) { subscribers[ObjectIdentifier(owner)] = nil }
@@ -66,12 +73,18 @@ enum Frames {
             running = false
             return
         }
-        let now = Clock.now
-        for subscriber in Array(subscribers.values) where now - subscriber.last >= subscriber.interval * 0.98 {
-            subscriber.last = now
+        for subscriber in Array(subscribers.values) {
+            let now = Clock.now
+            guard now >= subscriber.next - slack else { continue }
+            subscriber.next += subscriber.interval
+            if now - subscriber.next > subscriber.interval { subscriber.next = now + subscriber.interval }
             ObjCRuntime.autoreleasepool { subscriber.tick(now) }
         }
-        Dispatch.onMain(after: 1.0 / 120) { step() }
+        guard let soonest = subscribers.values.map(\.next).min() else {
+            running = false
+            return
+        }
+        Dispatch.onMain(after: soonest - Clock.now) { step() }
     }
 }
 
