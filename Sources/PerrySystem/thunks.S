@@ -274,6 +274,18 @@ PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork
 PASSTHROUGH _execv, execv
 PASSTHROUGH _execve, execve
+PASSTHROUGH _div, div
+PASSTHROUGH _ldiv, ldiv
+PASSTHROUGH _ldexpf, ldexpf
+PASSTHROUGH _wcscat, wcscat
+PASSTHROUGH _gmtime_r, gmtime_r
+PASSTHROUGH _basename, __xpg_basename
+PASSTHROUGH _dirname, dirname
+PASSTHROUGH _alarm, alarm
+PASSTHROUGH _getdtablesize, getdtablesize
+PASSTHROUGH _setbuf, setbuf
+PASSTHROUGH _setuid, setuid
+PASSTHROUGH _setgid, setgid
 PASSTHROUGH _waitpid, waitpid
 PASSTHROUGH _setpgid, setpgid
 PASSTHROUGH _getloadavg, getloadavg
@@ -460,6 +472,9 @@ SETJMP _setjmp
 SETJMP __setjmp
 LONGJMP _longjmp
 LONGJMP __longjmp
+// sigsetjmp's buffer is setjmp's and one more int; the mask isn't kept.
+SETJMP _sigsetjmp
+LONGJMP _siglongjmp
 
 #endif
 
