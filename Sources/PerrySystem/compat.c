@@ -250,6 +250,74 @@ struct darwin_passwd *darwin_getpwuid(uid_t uid) { return passwd_to_darwin(getpw
 struct darwin_passwd *darwin_getpwnam(const char *name) DARWIN_SYMBOL(getpwnam);
 struct darwin_passwd *darwin_getpwnam(const char *name) { return passwd_to_darwin(getpwnam(name)); }
 
+/// The entry in the caller's storage: the host's strings in the buffer.
+static int passwd_r_to_darwin(int status, const struct passwd *entry, struct darwin_passwd *out, struct darwin_passwd **result) {
+    *result = NULL;
+    if (status || !entry) return status;
+    *out = (struct darwin_passwd){ entry->pw_name, entry->pw_passwd, entry->pw_uid, entry->pw_gid, 0, "",
+                                   entry->pw_gecos, entry->pw_dir, entry->pw_shell, 0 };
+    *result = out;
+    return 0;
+}
+
+int darwin_getpwuid_r(uid_t uid, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result)
+    DARWIN_SYMBOL(getpwuid_r);
+int darwin_getpwuid_r(uid_t uid, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result) {
+    struct passwd entry, *found = NULL;
+    return passwd_r_to_darwin(getpwuid_r(uid, &entry, buffer, size, &found), found, out, result);
+}
+
+int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result)
+    DARWIN_SYMBOL(getpwnam_r);
+int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result) {
+    struct passwd entry, *found = NULL;
+    return passwd_r_to_darwin(getpwnam_r(name, &entry, buffer, size, &found), found, out, result);
+}
+
+// MARK: - Locale conventions
+
+/// Darwin's lconv: glibc's, but with the international fields ordered
+/// p_cs_precedes, n_cs_precedes, p_sep_by_space, n_sep_by_space.
+struct darwin_lconv {
+    char *decimal_point, *thousands_sep, *grouping, *int_curr_symbol, *currency_symbol;
+    char *mon_decimal_point, *mon_thousands_sep, *mon_grouping, *positive_sign, *negative_sign;
+    char int_frac_digits, frac_digits, p_cs_precedes, p_sep_by_space, n_cs_precedes, n_sep_by_space, p_sign_posn, n_sign_posn;
+    char int_p_cs_precedes, int_n_cs_precedes, int_p_sep_by_space, int_n_sep_by_space, int_p_sign_posn, int_n_sign_posn;
+};
+
+struct darwin_lconv *darwin_localeconv(void) DARWIN_SYMBOL(localeconv);
+struct darwin_lconv *darwin_localeconv(void) {
+    static __thread struct darwin_lconv result;
+    const struct lconv *l = localeconv();
+    result = (struct darwin_lconv){
+        l->decimal_point, l->thousands_sep, l->grouping, l->int_curr_symbol, l->currency_symbol,
+        l->mon_decimal_point, l->mon_thousands_sep, l->mon_grouping, l->positive_sign, l->negative_sign,
+        l->int_frac_digits, l->frac_digits, l->p_cs_precedes, l->p_sep_by_space, l->n_cs_precedes, l->n_sep_by_space,
+        l->p_sign_posn, l->n_sign_posn,
+        l->int_p_cs_precedes, l->int_n_cs_precedes, l->int_p_sep_by_space, l->int_n_sep_by_space,
+        l->int_p_sign_posn, l->int_n_sign_posn,
+    };
+    return &result;
+}
+
+// MARK: - Terminals
+
+/// An app has no terminal: Darwin's termios differs from Linux's, and the
+/// standard streams are the launcher's log.
+int darwin_tcgetattr(int fd, void *attributes) DARWIN_SYMBOL(tcgetattr);
+int darwin_tcgetattr(int fd, void *attributes) {
+    (void)fd; (void)attributes;
+    errno = ENOTTY;
+    return -1;
+}
+
+int darwin_tcsetattr(int fd, int action, const void *attributes) DARWIN_SYMBOL(tcsetattr);
+int darwin_tcsetattr(int fd, int action, const void *attributes) {
+    (void)fd; (void)action; (void)attributes;
+    errno = ENOTTY;
+    return -1;
+}
+
 // MARK: - Strings
 
 // The XSI form, returning an error number.
