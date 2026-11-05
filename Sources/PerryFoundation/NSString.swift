@@ -1,6 +1,7 @@
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
+import Synchronization
 
 /// An NSString's contents.
 final class StringStorage {
@@ -85,8 +86,9 @@ enum Strings {
         return String(decoding: units, as: UTF16.self)
     }
 
-    /// UTF-16 literals have no C string; keep one per literal.
-    nonisolated(unsafe) private static var literalUTF8: [UInt: StringStorage] = [:]
+    /// UTF-16 literals have no C string; keep one per literal, made by
+    /// whichever thread asks first.
+    private static let literalUTF8 = Mutex<[UInt: StringStorage]>([:])
 
     static func utf8(_ object: id) -> UnsafePointer<CChar>? {
         if ObjC.objectGetClass(object) == constantClass {
@@ -95,10 +97,12 @@ enum Strings {
                 return object.load(fromByteOffset: 16, as: UnsafePointer<CChar>?.self)
             }
             let key = UInt(bitPattern: object)
-            if let cached = literalUTF8[key] { return cached.utf8 }
-            let storage = StringStorage(constantValue(object))
-            literalUTF8[key] = storage
-            return storage.utf8
+            return literalUTF8.withLock { literals in
+                if let cached = literals[key] { return cached.utf8 }
+                let storage = StringStorage(constantValue(object))
+                literals[key] = storage
+                return storage.utf8
+            }
         }
         return (Storage.get(object, as: StringStorage.self) ?? StringStorage("")).utf8
     }
