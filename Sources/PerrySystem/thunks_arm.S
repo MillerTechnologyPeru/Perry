@@ -64,6 +64,39 @@
     .size \name, . - \name
 .endm
 
+// VARIADIC_STACK darwin_name, va_function, fixed_count
+//
+// For four or five fixed arguments, whose variadic arguments are all on the
+// caller's stack: the va_list is their address. The target takes the fixed
+// arguments past r3 and then the va_list on its stack, in a frame aligned to
+// 8 bytes.
+.macro VARIADIC_STACK name, target, nfixed
+    .if \nfixed != 4 && \nfixed != 5
+    .error "VARIADIC_STACK takes four or five fixed arguments"
+    .endif
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    push {r4, r5, r6, lr}
+    mov r4, sp
+    add r5, sp, #16                 // the caller's stack arguments
+    add r12, r5, #(4 * (\nfixed - 4))  // the va_list
+    sub sp, sp, #8
+    bic sp, sp, #7
+    .if \nfixed == 5
+    ldr r6, [r5]
+    str r6, [sp]
+    str r12, [sp, #4]
+    .else
+    str r12, [sp]
+    .endif
+    bl \target
+    mov sp, r4
+    pop {r4, r5, r6, pc}
+    .size \name, . - \name
+.endm
+
     .text
 
 // MARK: - stdio
@@ -78,6 +111,11 @@ VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
 VARIADIC _syslog, _vsyslog, 2
+VARIADIC _ioctl, perry_ioctl, 2
+VARIADIC_STACK _snprintf_l, perry_darwin_vsnprintf_l, 4
+VARIADIC_STACK _asl_log, perry_darwin_asl_log, 4
+VARIADIC_STACK ___sprintf_chk, ___vsprintf_chk, 4
+VARIADIC_STACK ___snprintf_chk, ___vsnprintf_chk, 5
 
 PASSTHROUGH _puts, puts
 PASSTHROUGH _putchar, putchar
@@ -159,6 +197,90 @@ PASSTHROUGH _unsetenv, unsetenv
 VARIADIC _open, perry_vopen, 2
 VARIADIC _openat, perry_vopenat, 3
 VARIADIC _fcntl, perry_vfcntl, 2
+VARIADIC_STACK _open_dprotected_np, perry_vopen_dprotected, 4
+
+// MARK: - functions of words
+// Their arguments and results are 32-bit words, or 64-bit results in r0 and
+// r1, or a 64-bit argument that comes first, all of which pass the same.
+// Darwin's structures they take are laid out as glibc's armhf ones: rusage,
+// tm, timeval, utimbuf and iovec, with a 32-bit time_t on both.
+// malloc_type_* take a type identifier after the arguments malloc's do.
+PASSTHROUGH ___cxa_atexit, __cxa_atexit
+PASSTHROUGH __exit, _exit
+PASSTHROUGH _abort, abort
+PASSTHROUGH _abs, abs
+PASSTHROUGH _atexit, atexit
+PASSTHROUGH _atoi, atoi
+PASSTHROUGH _atol, atol
+PASSTHROUGH _atoll, atoll
+PASSTHROUGH _backtrace, backtrace
+PASSTHROUGH _backtrace_symbols, backtrace_symbols
+PASSTHROUGH _bcopy, bcopy
+PASSTHROUGH _bsearch, bsearch
+PASSTHROUGH _execv, execv
+PASSTHROUGH _execve, execve
+PASSTHROUGH _exit, exit
+PASSTHROUGH _flock, flock
+PASSTHROUGH _fork, fork
+PASSTHROUGH _fseek, fseek
+PASSTHROUGH _ftell, ftell
+PASSTHROUGH _getdomainname, getdomainname
+PASSTHROUGH _getegid, getegid
+PASSTHROUGH _geteuid, geteuid
+PASSTHROUGH _getgid, getgid
+PASSTHROUGH _gethostname, gethostname
+PASSTHROUGH _getloadavg, getloadavg
+PASSTHROUGH _getpid, getpid
+PASSTHROUGH _getppid, getppid
+PASSTHROUGH _getprotobyname, getprotobyname
+PASSTHROUGH _getrusage, getrusage
+PASSTHROUGH _getuid, getuid
+PASSTHROUGH _if_nametoindex, if_nametoindex
+PASSTHROUGH _inet_addr, inet_addr
+PASSTHROUGH _inet_ntoa, inet_ntoa
+PASSTHROUGH _labs, labs
+PASSTHROUGH _listen, listen
+PASSTHROUGH _llabs, llabs
+PASSTHROUGH _localtime, localtime
+PASSTHROUGH _localtime_r, localtime_r
+PASSTHROUGH _malloc_type_calloc, calloc
+PASSTHROUGH _malloc_type_malloc, malloc
+PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
+PASSTHROUGH _malloc_type_realloc, realloc
+PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
+PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
+PASSTHROUGH _pthread_attr_init, pthread_attr_init
+PASSTHROUGH _pthread_attr_setstacksize, pthread_attr_setstacksize
+PASSTHROUGH _pthread_cancel, pthread_cancel
+PASSTHROUGH _pthread_create, pthread_create
+PASSTHROUGH _pthread_detach, pthread_detach
+PASSTHROUGH _pthread_equal, pthread_equal
+PASSTHROUGH _pthread_exit, pthread_exit
+PASSTHROUGH _pthread_join, pthread_join
+PASSTHROUGH _pthread_self, pthread_self
+PASSTHROUGH _qsort, qsort
+PASSTHROUGH _rand, rand
+PASSTHROUGH _random, random
+PASSTHROUGH _setpgid, setpgid
+PASSTHROUGH _shutdown, shutdown
+PASSTHROUGH _sleep, sleep
+PASSTHROUGH _srand, srand
+PASSTHROUGH _srandom, srandom
+PASSTHROUGH _stpcpy, stpcpy
+PASSTHROUGH _strftime, strftime
+PASSTHROUGH _strlcat, strlcat
+PASSTHROUGH _strlcpy, strlcpy
+PASSTHROUGH _strtol, strtol
+PASSTHROUGH _strtoll, strtoll
+PASSTHROUGH _strtoul, strtoul
+PASSTHROUGH _strtoull, strtoull
+PASSTHROUGH _usleep, usleep
+PASSTHROUGH _utime, utime
+PASSTHROUGH _utimes, utimes
+PASSTHROUGH _waitpid, waitpid
+PASSTHROUGH _wmemchr, wmemchr
+PASSTHROUGH _writev, writev
 
 PASSTHROUGH _read, read
 PASSTHROUGH _write, write
