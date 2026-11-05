@@ -217,6 +217,22 @@ public final class NSBundle: NSObject {
     @ObjCMethod("initWithURL:")
     func initialize(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
 
+    /// The app's own frameworks, which Darwin has loaded with it.
+    static func frameworkBundles() -> [UnsafeMutableRawPointer] {
+        guard let main = Bundles.storage(Bundles.main) else { return [] }
+        let frameworks = main.path + "/Frameworks"
+        return ((try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? []).sorted()
+            .filter { $0.hasSuffix(".framework") }
+            .compactMap { Bundles.bundle(path: frameworks + "/" + $0) }
+    }
+
+    /// The main bundle: no other non-framework bundles are loaded.
+    @ObjCClassMethod("allBundles")
+    static func allBundles() -> UnsafeMutableRawPointer? { Arrays.autoreleased([Bundles.main].compactMap { $0 }) }
+
+    @ObjCClassMethod("allFrameworks")
+    static func allFrameworks() -> UnsafeMutableRawPointer? { Arrays.autoreleased(frameworkBundles()) }
+
     @ObjCClassMethod("bundleWithIdentifier:")
     static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
         guard let main = Bundles.storage(Bundles.main) else { return nil }
@@ -251,6 +267,10 @@ public final class NSBundle: NSObject {
 
     @ObjCMethod("infoDictionary")
     func infoDictionary() -> NSDictionary { NSDictionary(objCArgument: storage.infoDictionary) }
+
+    /// The info dictionary; its localized InfoPlist.strings aren't merged.
+    @ObjCMethod("localizedInfoDictionary")
+    func localizedInfoDictionary() -> NSDictionary { infoDictionary() }
 
     @ObjCMethod("objectForInfoDictionaryKey:")
     func object(forInfoDictionaryKey key: ObjCObject) -> ObjCObject? {
