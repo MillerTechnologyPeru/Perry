@@ -24,7 +24,17 @@ final class UserDefaultsStorage {
         return URL(filePath: home + "/Library/Preferences/" + suite + ".plist")
     }
 
-    func value(_ key: String) -> PropertyValue? { values[key] ?? registered[key] }
+    func value(_ key: String) -> PropertyValue? { values[key] ?? registered[key] ?? Self.global[key] }
+
+    /// NSGlobalDomain's values that apps read as iOS always has them: the
+    /// languages, most preferred first, and the locale.
+    static let global: [String: PropertyValue] = {
+        let languages = Locale.preferredLanguages.isEmpty ? ["en"] : Locale.preferredLanguages
+        return [
+            "AppleLanguages": .array(languages.map { .string($0) }),
+            "AppleLocale": .string(Locale.current.identifier.isEmpty ? "en_US" : Locale.current.identifier),
+        ]
+    }()
 
     func set(_ value: PropertyValue?, for key: String) {
         values[key] = value
@@ -35,7 +45,7 @@ final class UserDefaultsStorage {
         registered.merge(defaults) { _, new in new }
     }
 
-    var all: [String: PropertyValue] { registered.merging(values) { _, set in set } }
+    var all: [String: PropertyValue] { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
 
     @discardableResult
     func save() -> Bool {
@@ -111,6 +121,10 @@ final class NSUserDefaults: NSObject {
     func object(forKey key: String) -> ObjCObject? {
         storage.value(key)?.object().map { ObjCObject($0) }
     }
+
+    /// Key-value coding reads and writes defaults, as Foundation's does.
+    @ObjCMethod("valueForKey:")
+    func value(forKey key: String) -> ObjCObject? { object(forKey: key) }
 
     @ObjCMethod("stringForKey:")
     func string(forKey key: String) -> String? {
@@ -196,6 +210,9 @@ final class NSUserDefaults: NSObject {
         }
         storage.set(converted, for: key)
     }
+
+    @ObjCMethod("setValue:forKey:")
+    func setValue(_ value: ObjCObject?, forKey key: String) { set(value, forKey: key) }
 
     @ObjCMethod("setInteger:forKey:")
     func set(integer: Int, forKey key: String) { storage.set(.integer(Int64(integer)), for: key) }
