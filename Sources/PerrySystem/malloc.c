@@ -140,6 +140,30 @@ void *darwin_malloc_zone_memalign(darwin_malloc_zone *zone, size_t alignment, si
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) DARWIN_SYMBOL(malloc_zone_free);
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) { zone->free(zone, ptr); }
 
+/// malloc_zone_malloc_with_options(zone, alignment, size, options): in
+/// `zone` (the default one when NULL), aligned to `alignment` if more than
+/// a pointer's, and zeroed with MALLOC_ZONE_MALLOC_OPTION_CLEAR (1). Under
+/// memory tagging another option picks the tag, which Linux has no use for.
+void *darwin_malloc_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size, uint64_t options)
+    DARWIN_SYMBOL(malloc_zone_malloc_with_options);
+void *darwin_malloc_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size, uint64_t options) {
+    if (!zone) zone = &default_zone;
+    void *block = alignment > sizeof(void *) ? zone->memalign(zone, alignment, size) : zone->malloc(zone, size);
+    if (block && (options & 1)) memset(block, 0, size);
+    return block;
+}
+
+/// The typed form, which a type identifier is passed to for typed memory
+/// allocation; the identifier is not used here.
+void *darwin_malloc_type_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size,
+                                                   uint64_t type_id, uint64_t options)
+    DARWIN_SYMBOL(malloc_type_zone_malloc_with_options);
+void *darwin_malloc_type_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size,
+                                                   uint64_t type_id, uint64_t options) {
+    (void)type_id;
+    return darwin_malloc_zone_malloc_with_options(zone, alignment, size, options);
+}
+
 // MARK: - Introspection
 
 /// The usable size of a block, which may exceed what was asked for.

@@ -532,27 +532,11 @@ enum _MarkdownImport {
         }
     }
 
-    /// A scope's attributes by Markdown name, its own and its scopes', read
-    /// from its stored properties as Foundation's scope descriptions are;
-    /// Foundation's own scope adds those this library declares outside it.
+    /// A scope's attributes by Markdown name.
     static func markdownKeys(_ scope: any AttributeScope.Type) -> [String: any MarkdownDecodableAttributedStringKey.Type] {
         var keys: [String: any MarkdownDecodableAttributedStringKey.Type] = [:]
-        if scope == AttributeScopes.FoundationAttributes.self {
-            let declared: [any MarkdownDecodableAttributedStringKey.Type] = [
-                AttributeScopes.FoundationAttributes.MorphologyAttribute.self,
-                AttributeScopes.FoundationAttributes.InflectionRuleAttribute.self,
-            ]
-            for key in declared { keys[key.markdownName] = key }
-        }
-        for index in 0..<_markdownFieldCount(scope) {
-            var field = _MarkdownFieldMetadata()
-            let type = _markdownFieldType(scope, index: index, fieldMetadata: &field)
-            field.freeName?(field.name)
-            if let key = type as? any MarkdownDecodableAttributedStringKey.Type {
-                keys[key.markdownName] = key
-            } else if let inner = type as? any AttributeScope.Type {
-                keys.merge(markdownKeys(inner)) { current, _ in current }
-            }
+        for key in _AttributeScopeTable.keys(scope).values {
+            if let markdown = key as? any MarkdownDecodableAttributedStringKey.Type { keys[markdown.markdownName] = markdown }
         }
         return keys
     }
