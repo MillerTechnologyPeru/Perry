@@ -70,8 +70,10 @@ RUN apt-get update \
 
 # LLVM's libc++ and libc++abi as Apple builds them for arm64, which C++ in
 # iOS apps and Swift's runtime were built against: std::string in the
-# alternate layout (its data pointer first), and type_info compared as
-# Apple's arm64 compares it, by name for types marked not unique. Named
+# alternate layout (its data pointer first), type_info compared as Apple's
+# arm64 compares it, by name for types marked not unique, and the ARM C++
+# ABI's constructors and destructors that return this, which apps' inlined
+# code uses (and its two-word new[] cookies, as Apple's arm64 has). Named
 # libperry-c++ so they never stand in for the system's; the CXX provider
 # opens them at run time.
 RUN apt-get update \
@@ -85,7 +87,7 @@ RUN apt-get update \
         llvm-project-19.1.7.src/llvm/utils \
  && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm-build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-        -DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 \
+        "-DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
         -DLIBCXX_ABI_DEFINES=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT \
         -DLIBCXX_SHARED_OUTPUT_NAME=perry-c++ -DLIBCXXABI_SHARED_OUTPUT_NAME=perry-c++abi \
@@ -109,5 +111,57 @@ RUN apt-get update \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends dbus-daemon python3-dbus python3-gi \
  && rm -rf /var/lib/apt/lists/*
+
+# DejaVu's oblique faces, for italic text in the system font.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fonts-dejavu-extra \
+ && rm -rf /var/lib/apt/lists/*
+
+# swift-cmark, Swift's fork of cmark-gfm, which Foundation parses Markdown
+# with: GitHub's tables, strikethrough and autolinks, the ^[text](attributes)
+# syntax, and the inline-only and whitespace-preserving modes Foundation's
+# options choose. Static archives, built position-independent for
+# PerryFoundation and named libperry-cmark-gfm so they never stand in for a
+# system cmark; their functions stay hidden in the provider.
+RUN curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archive/437611671145d47e6d9679761b8a5987766f4ae5.tar.gz \
+ && echo "bcc825cecd1710cdca28f7cc0a74423a691966be2f3a4c6fa8739a2009ed5bf2  /tmp/cmark.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/cmark && tar -xzf /tmp/cmark.tar.gz -C /tmp/cmark --strip-components=1 \
+ && cmake -G Ninja -S /tmp/cmark -B /tmp/cmark-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-19 \
+        -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
+ && ninja -C /tmp/cmark-build libcmark-gfm libcmark-gfm-extensions \
+ && cp /tmp/cmark-build/src/libcmark-gfm.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm.a \
+ && cp /tmp/cmark-build/extensions/libcmark-gfm-extensions.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm-extensions.a \
+ && mkdir -p /usr/include/perry-cmark-gfm \
+ && cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h /usr/include/perry-cmark-gfm/ \
+ && rm -rf /tmp/cmark /tmp/cmark-build /tmp/cmark.tar.gz
+
+# WPE WebKit, WebKit's port for embedding, which WKWebView and UIWebView
+# load at run time: its web and network processes, and WPEBackend-fdo,
+# which hands each frame the web process draws to the view in shared
+# memory.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0 \
+ && rm -rf /var/lib/apt/lists/*
+
+# Vulkan's loader and Mesa's Vulkan drivers (lavapipe on the CPU when a
+# container has no GPU), which metal2vulkan opens at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers \
+ && rm -rf /var/lib/apt/lists/*
+
+# metal2vulkan (GPL-2.0-or-later OR LGPL-3.0-or-later, taken as LGPL), the
+# Metal API on Vulkan, through the C ABI crate on MillerTechnologyPeru's
+# fork: libmetal2vulkan.so, a separate library Metal's provider opens at run
+# time. Built with the Rust its toolchain file pins, which is removed after.
+RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vulkan/archive/75cbc84889a978390f6cb7eae0cb9539be744fee.tar.gz \
+ && echo "fbdf067784cfd7c5ec4741c228588df52db18683c36061c3c33c56b4abf57404  /tmp/m2v.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/m2v && tar -xzf /tmp/m2v.tar.gz -C /tmp/m2v --strip-components=1 \
+        --wildcards '*/capi' '*/crates/metal2vulkan' '*/crates/metal2vulkan-air' '*/crates/metal2vulkan-runtime' \
+        '*/Cargo.toml' '*/rust-toolchain.toml' '*/LICENSE*' \
+ && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.1 \
+ && cd /tmp/m2v/capi && /root/.cargo/bin/cargo build --release \
+ && strip -o /usr/lib/aarch64-linux-gnu/libmetal2vulkan.so target/release/libmetal2vulkan_capi.so \
+ && mkdir -p /usr/share/doc/metal2vulkan && cp /tmp/m2v/LICENSE* /usr/share/doc/metal2vulkan/ \
+ && cd / && rm -rf /tmp/m2v /tmp/m2v.tar.gz /root/.cargo /root/.rustup
 
 WORKDIR /perry

@@ -3,7 +3,9 @@ import Glibc
 import PerryObjCInterop
 
 // UIColor: a color in sRGB, or a gray, with its CGColor made on first use.
-// Setting a color sets the current context's fill and stroke colors.
+// Setting a color sets the current context's fill and stroke colors. A
+// dynamic color is its provider's color for the device's traits, and for
+// other traits when resolved with them.
 
 final class ColorState: ObjectState {
     var red: CGFloat = 0
@@ -14,6 +16,11 @@ final class ColorState: ObjectState {
     var white: CGFloat?
     /// The CGColor, made on first use and released with the color.
     var cgColor: CGRef?
+    /// colorWithPatternImage:'s image, which is drawn as its average color.
+    var patternImage: UIImage?
+    /// colorWithDynamicProvider:'s block, which gives the color for a trait
+    /// collection; the color's components are its color for the device's.
+    var provider: ObjCBlock?
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
@@ -68,6 +75,43 @@ open class UIColor: NSObject {
 
     // MARK: Making colors
 
+    /// Patterns aren't tiled here: the color is the image's average.
+    @ObjCClassMethod("colorWithPatternImage:")
+    static func color(_ cls: ObjCClass, patternImage image: UIImage?) -> UIColor {
+        let (r, g, b, a) = image.map(UIColor.averageColor) ?? (0, 0, 0, 0)
+        return make(cls) {
+            $0.set(red: r, green: g, blue: b, alpha: a)
+            $0.patternImage = image
+        }
+    }
+
+    @ObjCMethod("initWithPatternImage:")
+    func initialize(patternImage image: UIImage?) -> Self {
+        let (r, g, b, a) = image.map(UIColor.averageColor) ?? (0, 0, 0, 0)
+        state.set(red: r, green: g, blue: b, alpha: a)
+        state.patternImage = image
+        return self
+    }
+
+    /// An image's average color, from it drawn at 8 by 8 pixels.
+    static func averageColor(_ image: UIImage) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+        guard let cgImage = image.cgImage(), let context = CG.makeContext(size: CGSize(width: 8, height: 8), scale: 1, opaque: false) else {
+            return (0, 0, 0, 0)
+        }
+        defer { CG.release(context) }
+        CG.drawFlipped(cgImage, in: CGRect(x: 0, y: 0, width: 8, height: 8), context: context)
+        guard let data = CG.bitmapContextGetData(context) else { return (0, 0, 0, 0) }
+        // Premultiplied B, G, R, A per pixel.
+        var sums = (0.0, 0.0, 0.0, 0.0)
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        for pixel in 0..<64 {
+            sums.0 += Double(bytes[pixel * 4 + 2]); sums.1 += Double(bytes[pixel * 4 + 1])
+            sums.2 += Double(bytes[pixel * 4]); sums.3 += Double(bytes[pixel * 4 + 3])
+        }
+        guard sums.3 > 0 else { return (0, 0, 0, 0) }
+        return (CGFloat(sums.0 / sums.3), CGFloat(sums.1 / sums.3), CGFloat(sums.2 / sums.3), CGFloat(sums.3 / 64 / 255))
+    }
+
     @ObjCClassMethod("colorWithRed:green:blue:alpha:")
     static func color(_ cls: ObjCClass, red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> UIColor {
         make(cls) { $0.set(red: red, green: green, blue: blue, alpha: alpha) }
@@ -114,6 +158,14 @@ open class UIColor: NSObject {
         return self
     }
 
+    /// Asset catalogs' colors aren't read yet: there is no color by any
+    /// name.
+    @ObjCClassMethod("colorNamed:")
+    static func color(_ cls: ObjCClass, named name: String) -> UIColor? { nil }
+
+    @ObjCClassMethod("colorNamed:inBundle:compatibleWithTraitCollection:")
+    static func color(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIColor? { nil }
+
     /// Display P3 is taken as sRGB.
     @ObjCClassMethod("colorWithDisplayP3Red:green:blue:alpha:")
     static func color(_ cls: ObjCClass, displayP3Red red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> UIColor {
@@ -144,8 +196,26 @@ open class UIColor: NSObject {
 
     @ObjCClassMethod("colorWithDynamicProvider:")
     static func color(_ cls: ObjCClass, dynamicProvider provider: ObjCBlock) -> NSObject? {
+        let resolved = resolve(provider, UITraitCollection.current())
+        return make(cls) { state in
+            if let resolved {
+                let other = resolved.state
+                (state.red, state.green, state.blue, state.alpha) = (other.red, other.green, other.blue, other.alpha)
+                state.white = other.white
+                state.patternImage = other.patternImage
+            }
+            state.provider = provider
+        }
+    }
+
+    /// A dynamic color's provider's color for `traits`: the block is given
+    /// a trait collection, which apps read without checking for nil, in the
+    /// light appearance when `traits` leaves the appearance unspecified.
+    private static func resolve(_ provider: ObjCBlock, _ traits: UITraitCollection) -> UIColor? {
         typealias Provider = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
-        return provider.function(as: Provider.self)(provider.object, nil).map { NSObject($0) }
+        let traits = traits.traits.style == 0 ? traits.with(style: 1) : traits
+        return provider.function(as: Provider.self)(provider.object, traits.objcObject)
+            .map { UIColor(objcObject: $0, ownership: .retain) }
     }
 
     private static func set(_ state: ColorState, from cgColor: UnsafeMutableRawPointer?) {
@@ -274,8 +344,14 @@ open class UIColor: NSObject {
     /// The color's CGColor, which the color owns.
     @ObjCMethod("CGColor") func cgColor() -> UnsafeMutableRawPointer? { state.makeCGColor() }
 
+    /// A dynamic color's provider's color for `traits`; any other color is
+    /// itself.
     @ObjCMethod("resolvedColorWithTraitCollection:")
-    func resolvedColor(with traits: NSObject?) -> UIColor { self }
+    func resolvedColor(with traits: NSObject?) -> UIColor {
+        guard let provider = state.provider else { return self }
+        let collection = traits?.as(UITraitCollection.self) ?? UITraitCollection.current()
+        return UIColor.resolve(provider, collection) ?? self
+    }
 
     // MARK: Setting
 

@@ -652,3 +652,17 @@ const char *darwin_gai_strerror(int error) {
     };
     return error >= 0 && error < (int)(sizeof(messages) / sizeof(messages[0])) ? messages[error] : "Unknown error";
 }
+
+// MARK: - IPv6 addresses
+
+// netinet6/in6.h's well-known addresses, which Darwin exports as data.
+const struct in6_addr darwin_in6addr_any DARWIN_SYMBOL(in6addr_any) = IN6ADDR_ANY_INIT;
+const struct in6_addr darwin_in6addr_loopback DARWIN_SYMBOL(in6addr_loopback) = IN6ADDR_LOOPBACK_INIT;
+const struct in6_addr darwin_in6addr_nodelocal_allnodes DARWIN_SYMBOL(in6addr_nodelocal_allnodes) =
+    { { { 0xff, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 } } };
+const struct in6_addr darwin_in6addr_linklocal_allnodes DARWIN_SYMBOL(in6addr_linklocal_allnodes) =
+    { { { 0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 } } };
+const struct in6_addr darwin_in6addr_linklocal_allrouters DARWIN_SYMBOL(in6addr_linklocal_allrouters) =
+    { { { 0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x02 } } };
+const struct in6_addr darwin_in6addr_linklocal_allv2routers DARWIN_SYMBOL(in6addr_linklocal_allv2routers) =
+    { { { 0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x6a } } };

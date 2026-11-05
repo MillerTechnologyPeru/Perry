@@ -475,3 +475,23 @@ enum AttributedStringKeys {
     static let NSPresentationIntentAttributeName = "NSPresentationIntent"
     static let NSReplacementIndexAttributeName = "NSReplacementIndex"
 }
+
+// MARK: - CFAttributedString
+
+/// An attributed string with the attributes over all of it, +1.
+@c(_CFAttributedStringCreate)
+public func CFAttributedStringCreate(_ allocator: UnsafeRawPointer?, _ string: id?, _ attributes: id?) -> id? {
+    guard let text = Strings.value(of: string) else { return nil }
+    return AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: attributes), mutable: false)
+}
+
+@c(_CFAttributedStringGetLength)
+public func CFAttributedStringGetLength(_ string: id?) -> Int {
+    AttributedStrings.storage(string)?.units.count ?? 0
+}
+
+/// The string, +0, held by an autorelease pool as the attributed string's is.
+@c(_CFAttributedStringGetString)
+public func CFAttributedStringGetString(_ string: id?) -> id? {
+    ObjC.send(string, ObjC.selector("string"))
+}

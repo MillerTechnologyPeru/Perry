@@ -39,11 +39,11 @@ open class UITraitCollection: NSObject {
     }
 
     /// The device's traits, every one specified.
-    static func device() -> UITraitCollection {
+    static func device(style: Int = 1) -> UITraitCollection {
         make { traits in
             let size = Screen.bounds.size
             traits.idiom = 0
-            traits.style = 1
+            traits.style = style
             traits.horizontalSizeClass = size.width >= 700 ? 2 : 1
             traits.verticalSizeClass = size.height < 500 ? 1 : 2
             traits.displayScale = Screen.scale
@@ -91,6 +91,20 @@ open class UITraitCollection: NSObject {
         }
     }
 
+    /// These traits in the appearance `style`.
+    func with(style: Int) -> UITraitCollection {
+        let mine = traits
+        return UITraitCollection.make { traits in
+            traits.idiom = mine.idiom
+            traits.style = style
+            traits.horizontalSizeClass = mine.horizontalSizeClass
+            traits.verticalSizeClass = mine.verticalSizeClass
+            traits.displayScale = mine.displayScale
+            traits.layoutDirection = mine.layoutDirection
+            traits.contentSizeCategory = mine.contentSizeCategory
+        }
+    }
+
     @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { traits.idiom }
     @ObjCMethod("userInterfaceStyle") func userInterfaceStyle() -> Int { traits.style }
     @ObjCMethod("horizontalSizeClass") func horizontalSizeClass() -> Int { traits.horizontalSizeClass }
@@ -135,4 +149,9 @@ open class UITraitCollection: NSObject {
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+}
+
+/// UITraitEnvironment's message, sent so apps' overrides run.
+extension NSObject {
+    @ObjCMethod("traitCollectionDidChange:") func sendTraitCollectionDidChange(_ previous: UITraitCollection?)
 }

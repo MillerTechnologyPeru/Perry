@@ -89,6 +89,10 @@ class NSMutableSet: NSSet {
 class NSDictionary: NSObject {
     @ObjCMethod("objectForKey:") func object(forKey key: NSObject) -> NSObject?
     @ObjCMethod("allKeys") func allKeys() -> NSArray
+    @ObjCClassMethod("dictionaryWithContentsOfFile:") static func make(contentsOfFile path: String) -> NSDictionary?
+
+    /// The value for a string key.
+    func object(forKey key: String) -> NSObject? { object(forKey: NSObject(key.objCArgument()!)) }
 }
 
 @ObjCWrapper("NSMutableDictionary")

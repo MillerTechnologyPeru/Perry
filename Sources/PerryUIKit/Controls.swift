@@ -256,6 +256,10 @@ open class UIButton: UIControl {
         return label
     }
 
+    /// iOS 2's: the title label's font.
+    @ObjCMethod("font") func font() -> UIFont { titleLabel().fontObject() }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { titleLabel().setFont(font) }
+
     @ObjCMethod("imageView")
     func imageView() -> UIImageView {
         if let view = button.imageView { return view }
@@ -678,12 +682,12 @@ open class NSLayoutConstraint: NSObject {
         for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.setActive(false) }
     }
 
-    /// The closest view both items are in.
+    /// The closest view both items (or the views that own them, for
+    /// guides) are in.
     private var holder: UIView? {
-        guard let first = state.firstItem.map({ UIView.wrap($0) }), first.is(UIView.self) else { return nil }
+        guard let first = state.firstItem.flatMap({ LayoutItems.resolve($0)?.view }) else { return nil }
         guard let secondObject = state.secondItem else { return first }
-        let second = UIView.wrap(secondObject)
-        guard second.is(UIView.self) else { return first }
+        guard let second = LayoutItems.resolve(secondObject)?.view else { return first }
         var candidate: UIView? = first
         while let view = candidate {
             if view.objcObject == second.objcObject || second.isDescendant(of: view) { return view }
@@ -706,8 +710,7 @@ open class NSLayoutConstraint: NSObject {
 
     private func invalidate() {
         for item in [state.firstItem, state.secondItem].compactMap({ $0 }) {
-            let view = UIView.wrap(item)
-            guard view.is(UIView.self) else { continue }
+            guard let view = LayoutItems.resolve(item)?.view else { continue }
             view.setNeedsLayout()
             view.superviewNeedsLayout()
         }
@@ -747,7 +750,10 @@ open class UIDevice: NSObject {
     @ObjCMethod("model") func model() -> String { "iPhone" }
     @ObjCMethod("localizedModel") func localizedModel() -> String { "iPhone" }
     @ObjCMethod("systemName") func systemName() -> String { "iOS" }
-    @ObjCMethod("systemVersion") func systemVersion() -> String { "15.0" }
+    /// The iOS version the app was built for, as NSProcessInfo gives it:
+    /// the platform version in its Info.plist, or iOS 18 without one.
+    @ObjCMethod("systemVersion")
+    func systemVersion() -> String { NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0" }
     /// UIUserInterfaceIdiom: phone 0.
     @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { 0 }
     /// UIDeviceOrientation: portrait 1.
@@ -761,10 +767,44 @@ open class UIDevice: NSObject {
     @ObjCMethod("batteryState") func batteryState() -> Int { 0 }
     @ObjCMethod("isProximityMonitoringEnabled") func isProximityMonitoringEnabled() -> Bool { false }
     @ObjCMethod("setProximityMonitoringEnabled:") func setProximityMonitoringEnabled(_ enabled: Bool) {}
-    @ObjCMethod("isGeneratingDeviceOrientationNotifications") func isGeneratingDeviceOrientationNotifications() -> Bool { false }
-    @ObjCMethod("beginGeneratingDeviceOrientationNotifications") func beginGeneratingDeviceOrientationNotifications() {}
-    @ObjCMethod("endGeneratingDeviceOrientationNotifications") func endGeneratingDeviceOrientationNotifications() {}
+    /// How many more times the notifications were begun than ended.
+    nonisolated(unsafe) static var orientationObservers = 0
+
+    @ObjCMethod("isGeneratingDeviceOrientationNotifications")
+    func isGeneratingDeviceOrientationNotifications() -> Bool { UIDevice.orientationObservers > 0 }
+
+    /// The device never turns, but the first notification comes all the
+    /// same, a moment after they are first begun, as it does on a device
+    /// once its accelerometer has answered: apps wait for it to learn which
+    /// way they are held.
+    @ObjCMethod("beginGeneratingDeviceOrientationNotifications")
+    func beginGeneratingDeviceOrientationNotifications() {
+        UIDevice.orientationObservers += 1
+        guard UIDevice.orientationObservers == 1, let after = Display.dispatchAfter, let time = Display.dispatchTime else { return }
+        after(time(0, 100_000_000), Updates.mainQueue, nil) { _ in
+            guard UIDevice.orientationObservers > 0 else { return }
+            Application.post(MoreNotifications.UIDeviceOrientationDidChangeNotification, object: UIDevice.currentDevice())
+        }
+    }
+
+    @ObjCMethod("endGeneratingDeviceOrientationNotifications")
+    func endGeneratingDeviceOrientationNotifications() { UIDevice.orientationObservers = max(UIDevice.orientationObservers - 1, 0) }
     @ObjCMethod("playInputClick") func playInputClick() {}
+}
+
+/// A screen's resolution, in pixels, with square pixels.
+@ObjCClass("UIScreenMode")
+open class UIScreenMode: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    nonisolated(unsafe) static let native = UIScreenMode()
+
+    @ObjCMethod("size")
+    func size() -> CGSize {
+        let size = Screen.bounds.size
+        return CGSize(width: min(size.width, size.height) * Screen.scale, height: max(size.width, size.height) * Screen.scale)
+    }
+    @ObjCMethod("pixelAspectRatio") func pixelAspectRatio() -> CGFloat { 1 }
 }
 
 /// The screen: the size and scale the views are laid out for.
@@ -788,6 +828,15 @@ open class UIScreen: NSObject {
         let size = Screen.bounds.size
         return CGRect(x: 0, y: 0, width: min(size.width, size.height) * Screen.scale, height: max(size.width, size.height) * Screen.scale)
     }
+    /// The one mode: the panel's pixels, as nativeBounds gives them.
+    @ObjCMethod("currentMode") func currentMode() -> UIScreenMode { UIScreenMode.native }
+    @ObjCMethod("preferredMode") func preferredMode() -> UIScreenMode { UIScreenMode.native }
+    @ObjCMethod("availableModes") func availableModes() -> NSObject { NSMutableArray.of([UIScreenMode.native]) }
+    @ObjCMethod("setCurrentMode:") func setCurrentMode(_ mode: NSObject?) {}
+    @ObjCMethod("mirroredScreen") func mirroredScreen() -> NSObject? { nil }
+    @ObjCMethod("isCaptured") func isCaptured() -> Bool { false }
+    @ObjCMethod("overscanCompensation") func overscanCompensation() -> Int { 0 }
+    @ObjCMethod("setOverscanCompensation:") func setOverscanCompensation(_ value: Int) {}
     @ObjCMethod("applicationFrame") func applicationFrame() -> CGRect { Screen.bounds }
     @ObjCMethod("scale") func scale() -> CGFloat { Screen.scale }
     @ObjCMethod("nativeScale") func nativeScale() -> CGFloat { Screen.scale }
@@ -956,6 +1005,8 @@ open class UIAlertController: UIViewController {
         alert.alert.message = message
         alert.alert.style = style
         alert.state.modalPresentationStyle = 5
+        // An alert is often an app's report of what went wrong.
+        uikitWarning("alert: \(title ?? ""): \(message ?? "")")
         return alert
     }
 

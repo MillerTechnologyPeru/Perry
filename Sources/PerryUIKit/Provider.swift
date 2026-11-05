@@ -16,6 +16,8 @@ private let libobjc = "/usr/lib/libobjc.A.dylib"
 /// API and checks Foundation is running.
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    // Before the app's code runs.
+    SDL.prepareEnvironment()
     func symbol(_ library: String, _ name: String) -> UnsafeMutableRawPointer? {
         library.withCString { library in name.withCString { lookup(library, $0) } }
     }
@@ -125,6 +127,14 @@ enum Classes {
 @c(_UIAccessibilityIsInvertColorsEnabled) public func UIAccessibilityIsInvertColorsEnabled() -> Bool { false }
 @c(_UIAccessibilityButtonShapesEnabled) public func UIAccessibilityButtonShapesEnabled() -> Bool { false }
 @c(_UIAccessibilityPrefersCrossFadeTransitions) public func UIAccessibilityPrefersCrossFadeTransitions() -> Bool { false }
+@c(_UIAccessibilityIsAssistiveTouchRunning) public func UIAccessibilityIsAssistiveTouchRunning() -> Bool { false }
+@c(_UIAccessibilityIsClosedCaptioningEnabled) public func UIAccessibilityIsClosedCaptioningEnabled() -> Bool { false }
+@c(_UIAccessibilityIsGrayscaleEnabled) public func UIAccessibilityIsGrayscaleEnabled() -> Bool { false }
+@c(_UIAccessibilityIsMonoAudioEnabled) public func UIAccessibilityIsMonoAudioEnabled() -> Bool { false }
+@c(_UIAccessibilityIsShakeToUndoEnabled) public func UIAccessibilityIsShakeToUndoEnabled() -> Bool { false }
+@c(_UIAccessibilityIsSpeakScreenEnabled) public func UIAccessibilityIsSpeakScreenEnabled() -> Bool { false }
+@c(_UIAccessibilityIsSpeakSelectionEnabled) public func UIAccessibilityIsSpeakSelectionEnabled() -> Bool { false }
+@c(_UIAccessibilityDarkerSystemColorsEnabled) public func UIAccessibilityDarkerSystemColorsEnabled() -> Bool { false }
 @c(_UIAccessibilityShouldDifferentiateWithoutColor)
 public func UIAccessibilityShouldDifferentiateWithoutColor() -> Bool { false }
 

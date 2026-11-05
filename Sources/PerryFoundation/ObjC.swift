@@ -37,6 +37,13 @@ enum ObjC {
     nonisolated(unsafe) static var objectSetClass: (@convention(c) (id?, Class) -> Class?)!
     nonisolated(unsafe) static var methodImplementation: (@convention(c) (Class?, SEL) -> UnsafeRawPointer?)!
     nonisolated(unsafe) static var dispose: (@convention(c) (id?) -> id?)!
+    /// Instance variables, for key-value coding's direct access.
+    nonisolated(unsafe) static var instanceVariable: (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?)?
+    nonisolated(unsafe) static var ivarOffset: (@convention(c) (UnsafeMutableRawPointer?) -> Int)?
+    nonisolated(unsafe) static var ivarType: (@convention(c) (UnsafeMutableRawPointer?) -> SEL?)?
+    /// Darwin's dladdr, which knows the Mach-O images: the path of the
+    /// image holding an address is its first word.
+    nonisolated(unsafe) static var addressInfo: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32)?
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -67,6 +74,13 @@ enum ObjC {
         objectSetClass = bind("_object_setClass", (@convention(c) (id?, Class) -> Class?).self)
         methodImplementation = bind("_class_getMethodImplementation", (@convention(c) (Class?, SEL) -> UnsafeRawPointer?).self)
         dispose = bind("_object_dispose", (@convention(c) (id?) -> id?).self)
+        instanceVariable = bind("_class_getInstanceVariable", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
+        ivarOffset = bind("_ivar_getOffset", (@convention(c) (UnsafeMutableRawPointer?) -> Int).self)
+        ivarType = bind("_ivar_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)
+        // PerrySystem's, which the loader has open; its lookup is the app's.
+        if let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD), let symbol = dlsym(system, "_dladdr") {
+            addressInfo = unsafeBitCast(symbol, to: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32).self)
+        }
         // The interop layer's wrappers call the runtime through its own table.
         guard ObjCRuntime.load(lookup) else { return false }
         // Classes Foundation defines live in its exported storage.

@@ -143,6 +143,16 @@ public final class NSURL: NSObject {
 
     @ObjCMethod("absoluteString") func absoluteString() -> String { url.absoluteString }
     @ObjCMethod("relativeString") func relativeString() -> String { url.relativeString }
+    /// The path as given, not resolved against the base URL.
+    @ObjCMethod("relativePath")
+    func relativePath() -> String? { URL(string: url.relativeString).map { $0.path(percentEncoded: false) } ?? url.relativePath }
+    /// Everything after the scheme's colon.
+    @ObjCMethod("resourceSpecifier")
+    func resourceSpecifier() -> String? {
+        let text = url.absoluteString
+        guard let colon = text.firstIndex(of: ":"), url.scheme != nil else { return text }
+        return String(text[text.index(after: colon)...])
+    }
     @ObjCMethod("absoluteURL") func absoluteURL() -> NSURL? { URLs.wrapped(url.absoluteURL) }
     @ObjCMethod("baseURL") func baseURL() -> NSURL? { URLs.wrapped(url.baseURL) }
     @ObjCMethod("scheme") func scheme() -> String? { url.scheme }

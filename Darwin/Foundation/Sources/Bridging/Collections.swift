@@ -176,3 +176,34 @@ extension Set: _ObjectiveCBridgeable {
         return result!
     }
 }
+
+// MARK: AnyHashable
+
+// A hashable value bridges as its base value does, to an object; an object
+// comes back as the value it bridges to, or itself.
+@available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
+extension AnyHashable: _ObjectiveCBridgeable {
+    public typealias _ObjectiveCType = NSObject
+
+    public func _bridgeToObjectiveC() -> NSObject {
+        _bridgeAnythingToObjectiveC(base) as! NSObject
+    }
+
+    public static func _forceBridgeFromObjectiveC(_ x: NSObject, result: inout AnyHashable?) {
+        result = _unconditionallyBridgeFromObjectiveC(x)
+    }
+
+    public static func _conditionallyBridgeFromObjectiveC(_ x: NSObject, result: inout AnyHashable?) -> Bool {
+        result = _unconditionallyBridgeFromObjectiveC(x)
+        return true
+    }
+
+    @_effects(readonly)
+    public static func _unconditionallyBridgeFromObjectiveC(_ source: NSObject?) -> AnyHashable {
+        // An object that bridges to a hashable Swift value is that value.
+        if let value = (source as Any?).flatMap({ $0 as? AnyHashable }) {
+            return value
+        }
+        return AnyHashable(source!)
+    }
+}

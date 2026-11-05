@@ -30,6 +30,12 @@ struct NibArchive {
     let objects: [Object]
 
     init?(_ bytes: [UInt8]) {
+        // An older nib is a keyed archive, a binary property list.
+        if bytes.starts(with: Array("bplist00".utf8)) {
+            guard let objects = KeyedNib.objects(bytes) else { return nil }
+            self.objects = objects
+            return
+        }
         guard bytes.count >= 50, Array(bytes[0..<10]) == Array("NIBArchive".utf8) else { return nil }
         func u32(_ at: Int) -> Int {
             Int(bytes[at]) | Int(bytes[at + 1]) << 8 | Int(bytes[at + 2]) << 16 | Int(bytes[at + 3]) << 24
@@ -112,6 +118,176 @@ struct NibArchive {
                                   values: values[first..<first + count]))
         }
         self.objects = objects
+    }
+}
+
+/// Nibs as Xcode made them before NIBArchive, and as apps built for iOS 5
+/// and earlier still have them: an NSKeyedArchiver archive, a binary
+/// property list whose "$objects" are the objects, each a dictionary of its
+/// keys with its class under "$class", referring to one another by index,
+/// and whose "$top" has the nib's own keys. They are read into the same
+/// objects a NIBArchive gives: the first is the nib's root, in place of the
+/// archive's "$null"; strings, numbers and data are NSString, NSNumber and
+/// NSData with the keys those have in a NIBArchive; a collection's
+/// "NS.objects" (and "NS.keys") are its unkeyed elements.
+enum KeyedNib {
+    indirect enum Plist {
+        case null, bool(Bool), integer(Int64), real(Double), data([UInt8]), string(String), uid(Int)
+        case array([Plist]), dictionary([String: Plist])
+    }
+
+    /// A binary property list's top object.
+    static func parse(_ bytes: [UInt8]) -> Plist? {
+        guard bytes.count >= 40 else { return nil }
+        func big(_ at: Int, _ size: Int) -> Int? {
+            guard at >= 0, size > 0, at + size <= bytes.count else { return nil }
+            return bytes[at..<at + size].reduce(0) { $0 << 8 | Int($1) }
+        }
+        let trailer = bytes.count - 32
+        let offsetSize = Int(bytes[trailer + 6]), referenceSize = Int(bytes[trailer + 7])
+        guard let count = big(trailer + 8, 8), let top = big(trailer + 16, 8), let table = big(trailer + 24, 8),
+              offsetSize > 0, referenceSize > 0 else { return nil }
+        var parsed: [Int: Plist] = [:]
+        func object(_ index: Int, depth: Int) -> Plist? {
+            if let known = parsed[index] { return known }
+            guard depth < 64, index < count, let offset = big(table + index * offsetSize, offsetSize), offset < trailer else { return nil }
+            let marker = bytes[offset], kind = marker >> 4, low = Int(marker & 0xf)
+            var position = offset + 1
+            // A length of 15 is followed by the length as an integer.
+            func length() -> Int? {
+                guard low == 0xf else { return low }
+                guard position < trailer else { return nil }
+                let size = 1 << Int(bytes[position] & 0xf)
+                defer { position += 1 + size }
+                return big(position + 1, size)
+            }
+            func references(_ number: Int) -> [Plist]? {
+                var items: [Plist] = []
+                for _ in 0..<number {
+                    guard let reference = big(position, referenceSize), let item = object(reference, depth: depth + 1) else { return nil }
+                    items.append(item)
+                    position += referenceSize
+                }
+                return items
+            }
+            let value: Plist
+            switch kind {
+            case 0x0: value = marker == 0x08 ? .bool(false) : marker == 0x09 ? .bool(true) : .null
+            case 0x1:
+                guard let raw = big(position, 1 << low) else { return nil }
+                value = .integer(Int64(truncatingIfNeeded: raw))
+            case 0x2, 0x3:
+                guard let raw = big(position, 1 << low) else { return nil }
+                value = .real(low == 2 ? Double(Float(bitPattern: UInt32(truncatingIfNeeded: raw))) : Double(bitPattern: UInt64(bitPattern: Int64(raw))))
+            case 0x4:
+                guard let size = length(), position + size <= trailer else { return nil }
+                value = .data(Array(bytes[position..<position + size]))
+            case 0x5:
+                guard let size = length(), position + size <= trailer else { return nil }
+                value = .string(String(decoding: bytes[position..<position + size], as: UTF8.self))
+            case 0x6:
+                guard let size = length(), position + size * 2 <= trailer else { return nil }
+                let units = (0..<size).map { UInt16(bytes[position + $0 * 2]) << 8 | UInt16(bytes[position + $0 * 2 + 1]) }
+                value = .string(String(decoding: units, as: UTF16.self))
+            case 0x8:
+                guard let raw = big(position, low + 1) else { return nil }
+                value = .uid(raw)
+            case 0xa, 0xc:
+                guard let size = length(), let items = references(size) else { return nil }
+                value = .array(items)
+            case 0xd:
+                guard let size = length(), let keys = references(size), let values = references(size) else { return nil }
+                var dictionary: [String: Plist] = [:]
+                for (key, item) in zip(keys, values) {
+                    if case .string(let name) = key { dictionary[name] = item }
+                }
+                value = .dictionary(dictionary)
+            default: return nil
+            }
+            parsed[index] = value
+            return value
+        }
+        return object(top, depth: 0)
+    }
+
+    /// The archive's objects as a nib's; nil if it is not a keyed archive.
+    static func objects(_ bytes: [UInt8]) -> [NibArchive.Object]? {
+        guard case .dictionary(let root)? = parse(bytes), case .array(let archived)? = root["$objects"],
+              case .dictionary(let top)? = root["$top"] else { return nil }
+        typealias Entry = (key: String, value: NibArchive.Value)
+        var values: [Entry] = []
+        var described: [(className: String, fallbacks: [String], range: Range<Int>)] = []
+        func value(_ plist: Plist) -> NibArchive.Value? {
+            switch plist {
+            case .uid(let index): return index == 0 ? .null : .object(index)
+            case .integer(let number): return .integer(number)
+            case .real(let number): return .double(number)
+            case .bool(let flag): return .bool(flag)
+            case .data(let data): return .data(data)
+            case .string(let text): return .data(Array(text.utf8))
+            case .null: return .null
+            case .array, .dictionary: return nil
+            }
+        }
+        func add(_ className: String, _ fallbacks: [String] = [], _ entries: [Entry]) {
+            described.append((className, fallbacks, values.count..<values.count + entries.count))
+            values += entries
+        }
+        func text(_ plist: Plist?) -> String? {
+            switch plist {
+            case .string(let text)?: return text
+            case .uid(let index)? where archived.indices.contains(index): if case .string(let text) = archived[index] { return text }
+            default: break
+            }
+            return nil
+        }
+        // The root, where the archive has "$null".
+        add("NSObject", [], top.compactMap { key, item in value(item).map { (key, $0) } })
+        for object in archived.dropFirst() {
+            switch object {
+            case .string(let string): add("NSString", [], [("NS.bytes", .data(Array(string.utf8)))])
+            case .integer(let number): add("NSNumber", [], [("NS.intval", .integer(number))])
+            case .real(let number): add("NSNumber", [], [("NS.dblval", .double(number))])
+            case .bool(let flag): add("NSNumber", [], [("NS.boolval", .bool(flag))])
+            case .data(let data): add("NSData", [], [("NS.bytes", .data(data))])
+            case .dictionary(let fields):
+                // A class: its name and its superclasses' names.
+                guard case .uid(let classIndex)? = fields["$class"], archived.indices.contains(classIndex),
+                      case .dictionary(let cls) = archived[classIndex], case .string(let className)? = cls["$classname"] else {
+                    add("$class", [], [])
+                    continue
+                }
+                var fallbacks: [String] = []
+                if case .array(let names)? = cls["$classes"] {
+                    fallbacks = names.dropFirst().compactMap { if case .string(let name) = $0 { return name } else { return nil } }
+                }
+                var entries: [Entry] = []
+                var elements: [Plist] = [], keys: [Plist]?
+                for (key, item) in fields where key != "$class" {
+                    switch (key, item) {
+                    case ("NS.objects", .array(let items)): elements = items
+                    case ("NS.keys", .array(let items)): keys = items
+                    case ("NS.string", _):
+                        if let string = text(item) { entries.append(("NS.bytes", .data(Array(string.utf8)))) }
+                    default:
+                        if let converted = value(item) { entries.append((key, converted)) }
+                    }
+                }
+                // A dictionary's elements are each key and then its value.
+                if let keys {
+                    for (key, item) in zip(keys, elements) {
+                        guard let first = value(key), let second = value(item) else { continue }
+                        entries.append(("UINibEncoderEmptyKey", first))
+                        entries.append(("UINibEncoderEmptyKey", second))
+                    }
+                } else {
+                    entries += elements.compactMap { value($0).map { ("UINibEncoderEmptyKey", $0) } }
+                }
+                add(className, fallbacks, entries)
+            default: add("NSNull", [], [])
+            }
+        }
+        return described.map { NibArchive.Object(className: $0.className, fallbacks: $0.fallbacks, values: values[$0.range]) }
     }
 }
 
@@ -208,7 +384,9 @@ final class NibUnarchiving {
             let proxied = identifier == "IBFilesOwner" ? owner : external[identifier]
             if let proxied { decoded[index] = proxied }
             return proxied
-        case "UIClassSwapper":
+        case "UIClassSwapper", "UICustomObject":
+            // A view of a class the app names, or an object of one (an app
+            // delegate), which is initialized plainly.
             guard case .object(let nameIndex)? = value("UIClassName"), let name = object(at: nameIndex, decoder: decoder)?.stringValue else {
                 return nil
             }
@@ -387,6 +565,13 @@ open class UINibDecoder: NSObject {
     /// Geometry is data: a byte giving the element type (6: floats, 7:
     /// doubles), then the elements.
     func doubles(_ key: String) -> [Double] {
+        // In a keyed archive geometry is a string: "{{0, 0}, {320, 480}}".
+        if case .object(let index)? = unarchiving?.value(key), let archive = unarchiving?.archive, archive.objects.indices.contains(index),
+           archive.objects[index].className == "NSString",
+           case .data(let text)? = archive.objects[index].values.first(where: { $0.key == "NS.bytes" })?.value {
+            let separators: Set<UInt8> = [UInt8(ascii: "{"), UInt8(ascii: "}"), UInt8(ascii: ","), UInt8(ascii: " ")]
+            return text.split(whereSeparator: { separators.contains($0) }).compactMap { Double(String(decoding: $0, as: UTF8.self)) }
+        }
         guard case .data(let bytes)? = unarchiving?.value(key), let kind = bytes.first else { return [] }
         let size = kind == 6 ? 4 : 8
         return stride(from: 1, to: bytes.count - size + 1, by: size).map { offset in

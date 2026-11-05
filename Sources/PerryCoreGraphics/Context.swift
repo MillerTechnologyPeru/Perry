@@ -6,8 +6,11 @@ import PerryObjCInterop
 // Silica's Cairo renderer (Rendering.swift). Memory already in Cairo's
 // layout (premultiplied ARGB in 32-bit little-endian words, which is
 // kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, UIKit's
-// format) is drawn into directly; any other format is copied into a Cairo
-// surface before each painting operation and back after it.
+// format) is drawn into directly; any other format is kept in step with a
+// Cairo surface: before each painting operation the rows of memory the
+// program has changed since the last are copied into the surface, and
+// after it the rows the painting changed are copied back. A copy of the
+// memory as it was last in step tells which rows those are.
 
 final class ContextState: @unchecked Sendable {
     let width: Int
@@ -20,6 +23,14 @@ final class ContextState: @unchecked Sendable {
     let canvas: Canvas
     /// Whether the canvas draws into `data` itself.
     let direct: Bool
+    /// The layouts whose rows are converted a word at a time.
+    private enum Layout { case rgba, argb, alphaOnly, gray, other }
+    private let layout: Layout
+    /// The memory as it was when it and the canvas were last in step; made
+    /// at the first painting.
+    private var mirror: UnsafeMutableRawPointer?
+    /// A row of memory, to compare with the mirror's.
+    private var scratch: UnsafeMutableRawPointer?
 
     init?(width: Int, height: Int, bytesPerRow: Int, format: PixelFormat, space: Ref, data: UnsafeMutableRawPointer, ownsData: Bool) {
         let cairoLayout = format.bitsPerComponent == 8 && format.colorComponents == 3 && format.byteOrder == 0x2000
@@ -38,11 +49,24 @@ final class ContextState: @unchecked Sendable {
         self.ownsData = ownsData
         self.canvas = canvas
         direct = cairoLayout
+        // Bytes in the order named (kCGBitmapByteOrderDefault or 32Big).
+        let natural = format.byteOrder == 0 || format.byteOrder == 0x4000
+        if format.bitsPerComponent == 8, format.colorComponents == 3, format.bitsPerPixel == 32, natural {
+            layout = [1, 5].contains(format.alphaInfo) ? .rgba : [2, 6].contains(format.alphaInfo) ? .argb : .other
+        } else if format.bitsPerComponent == 8, format.bitsPerPixel == 8, format.alphaInfo == 7 {
+            layout = .alphaOnly
+        } else if format.bitsPerComponent == 8, format.bitsPerPixel == 8, format.colorComponents == 1, format.alphaInfo == 0 {
+            layout = .gray
+        } else {
+            layout = .other
+        }
     }
 
     deinit {
         ObjCRuntime.release(space)
         if ownsData { free(data) }
+        free(mirror)
+        free(scratch)
     }
 
     /// Runs a painting operation, with the memory and the canvas in step.
@@ -58,27 +82,104 @@ final class ContextState: @unchecked Sendable {
         store()
     }
 
-    /// Memory to canvas.
-    private func load() {
-        _ = canvas.withPixels { pixels, stride in
-            for row in 0..<height {
-                for x in 0..<width {
-                    let (r, g, b, a) = format.read(data + row * bytesPerRow + x * format.bytesPerPixel)
-                    let p = pixels + row * stride + x * 4
-                    (p[0], p[1], p[2], p[3]) = (b, g, r, a)
-                }
+    /// A row of memory as a row of the canvas: B, G, R, A, premultiplied.
+    private func convert(row source: UnsafeRawPointer, to pixels: UnsafeMutableRawPointer) {
+        let opaque: UInt32 = format.alphaInfo == 5 || format.alphaInfo == 6 ? 0xFF00_0000 : 0
+        switch layout {
+        case .rgba:
+            // R, G, B, A in memory is A, B, G, R in the word: red and blue
+            // change places.
+            for x in 0..<width {
+                let v = source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self)
+                pixels.storeBytes(of: (v & 0xFF00_FF00) | ((v & 0xFF) << 16) | ((v >> 16) & 0xFF) | opaque, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .argb:
+            for x in 0..<width {
+                let v = source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self)
+                pixels.storeBytes(of: v.byteSwapped | opaque, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .alphaOnly:
+            for x in 0..<width {
+                pixels.storeBytes(of: UInt32(source.load(fromByteOffset: x, as: UInt8.self)) << 24, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .gray:
+            for x in 0..<width {
+                let y = UInt32(source.load(fromByteOffset: x, as: UInt8.self))
+                pixels.storeBytes(of: 0xFF00_0000 | y << 16 | y << 8 | y, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .other:
+            let p = pixels.assumingMemoryBound(to: UInt8.self)
+            for x in 0..<width {
+                let (r, g, b, a) = format.read(source + x * format.bytesPerPixel)
+                (p[x * 4], p[x * 4 + 1], p[x * 4 + 2], p[x * 4 + 3]) = (b, g, r, a)
             }
         }
     }
 
-    /// Canvas to memory.
-    private func store() {
+    /// A row of the canvas as a row of memory.
+    private func convert(row pixels: UnsafeRawPointer, toMemory target: UnsafeMutableRawPointer) {
+        let opaque: UInt32 = format.alphaInfo == 5 || format.alphaInfo == 6 ? 0xFF00_0000 : 0
+        switch layout {
+        case .rgba:
+            for x in 0..<width {
+                let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self)
+                target.storeBytes(of: (v & 0xFF00_FF00) | ((v & 0xFF) << 16) | ((v >> 16) & 0xFF) | opaque, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .argb:
+            for x in 0..<width {
+                let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self) | opaque
+                target.storeBytes(of: v.byteSwapped, toByteOffset: x * 4, as: UInt32.self)
+            }
+        case .alphaOnly:
+            for x in 0..<width {
+                target.storeBytes(of: UInt8(pixels.load(fromByteOffset: x * 4, as: UInt32.self) >> 24), toByteOffset: x, as: UInt8.self)
+            }
+        case .gray:
+            for x in 0..<width {
+                let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self)
+                let (r, g, b) = ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+                target.storeBytes(of: UInt8((r * 299 + g * 587 + b * 114 + 500) / 1000), toByteOffset: x, as: UInt8.self)
+            }
+        case .other:
+            let p = pixels.assumingMemoryBound(to: UInt8.self)
+            for x in 0..<width {
+                format.write((p[x * 4 + 2], p[x * 4 + 1], p[x * 4], p[x * 4 + 3]), to: target + x * format.bytesPerPixel)
+            }
+        }
+    }
+
+    /// Memory to canvas: the rows that are not as the mirror has them, and
+    /// every row the first time.
+    private func load() {
+        let rowBytes = width * format.bytesPerPixel
+        let first = mirror == nil
+        if first {
+            mirror = malloc(max(rowBytes * height, 1))
+            scratch = malloc(max(rowBytes, 1))
+        }
+        guard let mirror else { return }
         _ = canvas.withPixels { pixels, stride in
             for row in 0..<height {
-                for x in 0..<width {
-                    let p = pixels + row * stride + x * 4
-                    format.write((p[2], p[1], p[0], p[3]), to: data + row * bytesPerRow + x * format.bytesPerPixel)
-                }
+                let source = UnsafeRawPointer(data + row * bytesPerRow), kept = mirror + row * rowBytes
+                guard first || memcmp(source, kept, rowBytes) != 0 else { continue }
+                convert(row: source, to: UnsafeMutableRawPointer(pixels + row * stride))
+                memcpy(kept, source, rowBytes)
+            }
+        }
+    }
+
+    /// Canvas to memory: the rows whose pixels are no longer what memory
+    /// has.
+    private func store() {
+        let rowBytes = width * format.bytesPerPixel
+        guard let mirror, let scratch else { return }
+        _ = canvas.withPixels { pixels, stride in
+            for row in 0..<height {
+                convert(row: UnsafeRawPointer(pixels + row * stride), toMemory: scratch)
+                let kept = mirror + row * rowBytes
+                guard memcmp(scratch, kept, rowBytes) != 0 else { continue }
+                memcpy(data + row * bytesPerRow, scratch, rowBytes)
+                memcpy(kept, scratch, rowBytes)
             }
         }
     }
@@ -434,6 +535,15 @@ public func CGContextClipToRect(_ context: Ref?, _ rect: CGRect) {
     canvas.clip(evenOdd: false)
 }
 
+/// The mask's alpha, or gray level, limits what is drawn until the
+/// graphics state is restored.
+@c(_CGContextClipToMask)
+public func CGContextClipToMask(_ context: Ref?, _ rect: CGRect, _ mask: Ref?) {
+    guard let canvas = Contexts.canvas(context), let image = Images.state(mask) else { return }
+    let r = CGRectStandardize(rect)
+    canvas.clipToMask(image, r.origin.x, r.origin.y, r.size.width, r.size.height)
+}
+
 @c(_CGContextClipToRects)
 public func CGContextClipToRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>?, _ count: Int) {
     guard let canvas = Contexts.canvas(context), let rects else { return }
@@ -471,7 +581,8 @@ public func CGContextSelectFont(_ context: Ref?, _ name: UnsafePointer<CChar>?, 
 
 @DarwinC("_CGContextSetFontSize") public func CGContextSetFontSize(_ context: Ref?, _ size: CGFloat) { Contexts.canvas(context)?.setFontSize(Double(size)) }
 @DarwinC("_CGContextSetCharacterSpacing") public func CGContextSetCharacterSpacing(_ context: Ref?, _ spacing: CGFloat) { Contexts.canvas(context)?.setCharacterSpacing(Double(spacing)) }
-@c(_CGContextSetTextDrawingMode) public func CGContextSetTextDrawingMode(_ context: Ref?, _ mode: Int32) {}
+@c(_CGContextSetTextDrawingMode)
+public func CGContextSetTextDrawingMode(_ context: Ref?, _ mode: Int32) { Contexts.canvas(context)?.setTextDrawingMode(mode) }
 
 @DarwinC("_CGContextSetTextPosition")
 public func CGContextSetTextPosition(_ context: Ref?, _ x: CGFloat, _ y: CGFloat) { Contexts.canvas(context)?.textPosition = (Double(x), Double(y)) }

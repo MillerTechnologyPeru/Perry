@@ -21,7 +21,8 @@ final class SourceState {
     private var handlers: [Kind: Handler] = [:]
     var context: UnsafeMutableRawPointer?
     var finalizer: Function?
-    /// A signal source's Darwin signal number, which Linux's differs from.
+    /// The handle Darwin gave: a signal source's signal number, which
+    /// Linux's differs from, and an inert source's file descriptor or pid.
     var signal: UInt?
 
     deinit {
@@ -93,21 +94,27 @@ private func linuxSignal(_ darwin: UInt) -> UInt? {
     }
 }
 
-/// NULL for the types Linux lacks: Mach ports, memory pressure, processes
-/// and vnodes.
+/// The types Linux lacks (Mach ports, memory pressure, processes and
+/// vnodes) give a source that never fires, over a Linux data source: apps
+/// create them unchecked, as Darwin's always can be, and resume, activate
+/// and cancel them.
 @c(_dispatch_source_create)
 public func dispatch_source_create(_ type: UnsafeRawPointer?, _ handle: UInt, _ mask: UInt, _ queue: Object?) -> Object? {
     let kind = perry_dispatch_source_kind(type)
-    guard kind >= 0, let linuxType = perry_linux_source_type(kind) else { return nil }
+    guard kind >= 0 else { return nil }
+    let inert = perry_linux_source_type(kind) == nil
+    guard let linuxType = perry_linux_source_type(inert ? Int32(PERRY_SOURCE_DATA_OR.rawValue) : kind) else { return nil }
     let darwinHandle = handle
     var handle = handle
+    var mask = mask
+    if inert { (handle, mask) = (0, 0) }
     if kind == Int32(PERRY_SOURCE_SIGNAL.rawValue) {
         guard let signal = linuxSignal(handle) else { return nil }
         handle = signal
     }
     guard let linux = linux_dispatch_source_create(linuxType, handle, mask, Objects.linux(queue)) else { return nil }
     let state = SourceState()
-    if kind == Int32(PERRY_SOURCE_SIGNAL.rawValue) { state.signal = darwinHandle }
+    if kind == Int32(PERRY_SOURCE_SIGNAL.rawValue) || inert { state.signal = darwinHandle }
     linux_dispatch_set_context(linux, Unmanaged.passRetained(state).toOpaque())
     linux_dispatch_set_finalizer_f(linux, SourceState.finalize)
     return Objects.make(Classes.source, linux: linux, state: state)
@@ -189,6 +196,7 @@ public func dispatch_source_merge_data(_ source: Object?, _ value: UInt) {
 @c(_dispatch_source_set_timer)
 public func dispatch_source_set_timer(_ source: Object?, _ start: UInt64.ObjCType, _ interval: UInt64.ObjCType,
                                       _ leeway: UInt64.ObjCType) {
-    linux_dispatch_source_set_timer(Objects.linux(source), UInt64(objCArgument: start), UInt64(objCArgument: interval),
-                                    UInt64(objCArgument: leeway))
+    // The interval and leeway are nanoseconds on both.
+    linux_dispatch_source_set_timer(Objects.linux(source), DarwinTime.linux(UInt64(objCArgument: start)),
+                                    UInt64(objCArgument: interval), UInt64(objCArgument: leeway))
 }

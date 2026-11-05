@@ -62,6 +62,7 @@ final class BundleStorage {
                 if FileManager.default.fileExists(atPath: candidate) { return candidate }
             }
         }
+        BundleTrace.log("\(Paths.lastComponent(path)): no resource \(name)\(suffix) in \(directory ?? "/")")
         return nil
     }
 
@@ -200,8 +201,21 @@ public final class NSBundle: NSObject {
 
     /// The app's classes are all in its executable, and Perry's framework
     /// classes have no bundle of their own: the main bundle.
+    /// The bundle of the image defining the class: a framework's, for a
+    /// class in one, otherwise the main bundle.
     @ObjCClassMethod("bundleForClass:")
-    static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Bundles.main }
+    static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        var info: (UnsafePointer<CChar>?, UnsafeRawPointer?, UnsafePointer<CChar>?, UnsafeRawPointer?) = (nil, nil, nil, nil)
+        guard let cls, let addressInfo = ObjC.addressInfo,
+              withUnsafeMutableBytes(of: &info, { addressInfo(cls, $0.baseAddress) }) != 0, let name = info.0 else { return Bundles.main }
+        let path = String(cString: name)
+        // …/Name.framework/Name: the framework's directory.
+        let bytes = Array(path.utf8), marker = Array(".framework/".utf8)
+        guard bytes.count > marker.count,
+              let start = (0...(bytes.count - marker.count)).last(where: { bytes[$0..<$0 + marker.count].elementsEqual(marker) })
+        else { return Bundles.main }
+        return Bundles.bundle(path: String(decoding: bytes[..<(start + marker.count - 1)], as: UTF8.self)) ?? Bundles.main
+    }
 
     @ObjCClassMethod("bundleWithPath:")
     static func bundle(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
@@ -217,9 +231,34 @@ public final class NSBundle: NSObject {
     @ObjCMethod("initWithURL:")
     func initialize(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
 
+    /// The app's own frameworks, which Darwin has loaded with it.
+    static func frameworkBundles() -> [UnsafeMutableRawPointer] {
+        guard let main = Bundles.storage(Bundles.main) else { return [] }
+        let frameworks = main.path + "/Frameworks"
+        return ((try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? []).sorted()
+            .filter { $0.hasSuffix(".framework") }
+            .compactMap { Bundles.bundle(path: frameworks + "/" + $0) }
+    }
+
+    /// The main bundle: no other non-framework bundles are loaded.
+    @ObjCClassMethod("allBundles")
+    static func allBundles() -> UnsafeMutableRawPointer? { Arrays.autoreleased([Bundles.main].compactMap { $0 }) }
+
+    @ObjCClassMethod("allFrameworks")
+    static func allFrameworks() -> UnsafeMutableRawPointer? { Arrays.autoreleased(frameworkBundles()) }
+
     @ObjCClassMethod("bundleWithIdentifier:")
     static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
-        Bundles.storage(Bundles.main)?.identifier == identifier ? Bundles.main : nil
+        guard let main = Bundles.storage(Bundles.main) else { return nil }
+        if main.identifier == identifier { return Bundles.main }
+        // The app's own frameworks, which Darwin has loaded with it.
+        let frameworks = main.path + "/Frameworks"
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? [] where name.hasSuffix(".framework") {
+            if let bundle = Bundles.bundle(path: frameworks + "/" + name), Bundles.storage(bundle)?.identifier == identifier {
+                return bundle
+            }
+        }
+        return nil
     }
 
     // Bundles live for the whole process.
@@ -232,6 +271,9 @@ public final class NSBundle: NSObject {
     @ObjCMethod("resourcePath") func resourcePath() -> String { storage.resourcePath }
     @ObjCMethod("resourceURL") func resourceURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.resourcePath, directoryHint: .isDirectory)) }
     @ObjCMethod("executablePath") func executablePath() -> String? { storage.executablePath }
+    /// Where the App Store's receipt would be. There is none.
+    @ObjCMethod("appStoreReceiptURL")
+    func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String? { storage.identifier }
     @ObjCMethod("isLoaded") func isLoaded() -> Bool { true }
@@ -240,9 +282,18 @@ public final class NSBundle: NSObject {
     @ObjCMethod("infoDictionary")
     func infoDictionary() -> NSDictionary { NSDictionary(objCArgument: storage.infoDictionary) }
 
+    /// The info dictionary; its localized InfoPlist.strings aren't merged.
+    @ObjCMethod("localizedInfoDictionary")
+    func localizedInfoDictionary() -> NSDictionary { infoDictionary() }
+
     @ObjCMethod("objectForInfoDictionaryKey:")
     func object(forInfoDictionaryKey key: ObjCObject) -> ObjCObject? {
-        Dictionaries.value(storage.infoDictionary, for: key.id).map(ObjCObject.init)
+        let value = Dictionaries.value(storage.infoDictionary, for: key.id)
+        if BundleTrace.on {
+            let described = value.flatMap { Strings.value(of: ObjC.send($0, ObjC.selector("description"))) } ?? "nil"
+            BundleTrace.log("\(Paths.lastComponent(storage.path)): info \(Strings.value(of: key.id) ?? "?") = \(described.prefix(200))")
+        }
+        return value.map(ObjCObject.init)
     }
 
     @ObjCMethod("developmentLocalization")
@@ -339,15 +390,47 @@ public final class NSBundle: NSObject {
         return value
     }
 
+    /// The localized string's inline Markdown, as Foundation reads strings
+    /// tables: emphasis, code, links and ^[…](…) attributes, with its
+    /// whitespace kept and what cannot be parsed left as text, in the
+    /// localization's language (NSLanguage). Foundation inflects the text
+    /// that asks to be (NSInflect) and drops the request; with no grammar
+    /// engine here the text stays as written.
     @ObjCMethod("localizedAttributedStringForKey:value:table:localization:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?, localization: String?) -> id? {
         let text = localizedString(forKey: key, value: value, table: table, localization: localization)
-        return ObjC.autorelease(AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: nil), mutable: false))
+        let options = MarkdownOptionsStorage()
+        options.interpretedSyntax = Markdown.Syntax.inlineOnlyPreservingWhitespace.rawValue
+        options.allowsExtendedAttributes = true
+        options.failurePolicy = 1
+        let storage = MarkdownObjects.storage(text, options: options, baseURL: nil, error: nil)
+            ?? AttributedStorage(units: Array(text.utf16), attributes: nil)
+        let language = localization.flatMap { $0.isEmpty ? nil : $0 }
+            ?? Bundles.preferred(from: self.storage.localizations, preferences: nil) ?? developmentLocalization() ?? "en"
+        let languageKey = Strings.autoreleased("NSLanguage"), inflect = Strings.autoreleased("NSInflect")
+        let languageValue = Strings.autoreleased(language)
+        storage.update(NSRange(location: 0, length: storage.units.count)) { entries in
+            entries.filter { !AttributedStorage.equal($0.key, inflect) && !AttributedStorage.equal($0.key, languageKey) }
+                + [(key: languageKey, value: languageValue)]
+        }
+        return ObjC.autorelease(AttributedStrings.make(storage, mutable: false))
     }
 
-    /// The localized string, as an attributed string without attributes.
+    /// The localized string, as an attributed string of its Markdown.
     @ObjCMethod("localizedAttributedStringForKey:value:table:")
     func localizedAttributedString(forKey key: String, value: String?, table: String?) -> id? {
         localizedAttributedString(forKey: key, value: value, table: table, localization: nil)
+    }
+}
+
+/// With PERRY_BUNDLE_TRACE set, the info dictionary keys asked for, with
+/// their values, and the resources looked for but not found.
+enum BundleTrace {
+    nonisolated(unsafe) static let on = getenv("PERRY_BUNDLE_TRACE") != nil
+
+    static func log(_ line: @autoclosure () -> String) {
+        guard on else { return }
+        let text = "perry: bundle: " + line() + "\n"
+        text.withCString { _ = write(2, $0, strlen($0)) }
     }
 }

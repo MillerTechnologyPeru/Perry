@@ -29,20 +29,38 @@ enum Display {
     /// height, the tallest the iPhone apps Perry runs lay out for.
     static let iPhoneShortSide: CGFloat = 430
 
-    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else chosen from
-    /// the display as iOS pairs a screen with a scale: the desktop's
-    /// scaling of it, or more, the least whole scale that gives its usable
-    /// area's short side an iPhone's points at most, so a handheld's 1080p
-    /// screen is 640 by 360 points at @3x rather than 1920 by 1080 at @1x;
-    /// else 1.
+    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else the native
+    /// display's: the desktop's scaling of it, fractional as it may be
+    /// (1.25 on a desktop scaled by 125%). An unscaled display (a
+    /// handheld's, with no desktop) is paired with a scale as iOS pairs a
+    /// screen with one: the least whole scale that gives its usable area's
+    /// short side an iPhone's points at most, so a 1080p screen is 640 by
+    /// 360 points at @3x rather than 1920 by 1080 at @1x; else 1.
     nonisolated(unsafe) static let scale: CGFloat = {
-        if let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE"), let value = Double(String(cString: setting)), value > 0 { return CGFloat(value) }
+        let setting = getenv("PERRY_UIKIT_DISPLAY_SCALE").flatMap { Double(String(cString: $0)) }.flatMap { $0 > 0 ? CGFloat($0) : nil }
+        // A fixed screen is drawn as large as fits the display, whatever
+        // scale the app is told, unless the setting gives its points their
+        // pixels: at 1, a @1x screen is drawn pixel for pixel, with nothing
+        // scaled.
+        if let fixed = Screen.fixed {
+            if let setting { return setting }
+            guard wanted, let pixels = SDL.usableDisplaySize() else { return fixed.scale }
+            return min(pixels.width / fixed.size.width, pixels.height / fixed.size.height)
+        }
+        if let setting { return setting }
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         guard wanted, !software else { return 1 }
         let native = SDL.nativeScale() ?? 1
         guard let pixels = SDL.usableDisplaySize() else { return native }
         let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
-        return max(native, fitting, 1)
+        let chosen = native != 1 ? native : max(fitting, 1)
+        // An iPhone's screen (PERRY_UIKIT_SCREEN=iphone) is a window that
+        // fits the usable area, in quarter steps, however small that makes
+        // it: 390 by 844 points is taller than a laptop's display at @3x.
+        guard let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" else { return chosen }
+        let screen = Screen.bounds.size
+        let fits = min(pixels.width / screen.width, pixels.height / screen.height)
+        return min(chosen, max((fits * 4).rounded(.down) / 4, 0.5))
     }()
 
     private struct X {
@@ -66,6 +84,9 @@ enum Display {
     }
 
     nonisolated(unsafe) private static var compositor: Compositor?
+    /// SDL's renderer compositing the live view ("opengles2", "vulkan"…);
+    /// nil without one.
+    nonisolated(unsafe) static var gpuRenderer: String?
 
     static var wanted: Bool {
         guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil else { return false }
@@ -193,9 +214,35 @@ enum Display {
                 ObjCRuntime.autoreleasepool { draw() }
             }
         }
-        guard let dispatchAfter, let dispatchTime else { return }
-        dispatchAfter(dispatchTime(0, 16_000_000), Updates.mainQueue, nil) { _ in Display.tick() }
+        startTimer()
     }
+
+    nonisolated(unsafe) private static var ticker: DisplayTicker?
+
+    /// Ticks sixty times a second from a timer on the main run loop in its
+    /// common modes, not from the main queue: an app may run the run loop
+    /// inside a block on the main queue (World of Goo 2 waits for frames
+    /// so), and the main queue cannot run another block then.
+    private static func startTimer() {
+        guard ticker == nil else { return }
+        let ticker = DisplayTicker()
+        Display.ticker = ticker
+        typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double, UnsafeMutableRawPointer?,
+                                         UnsafeRawPointer?, UnsafeMutableRawPointer?, Bool) -> UnsafeMutableRawPointer?
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        typealias Add = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?,
+                                        UnsafeMutableRawPointer?) -> Void
+        let timer = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(
+            ObjCRuntime.classObject("NSTimer"), ObjCRuntime.selector("timerWithTimeInterval:target:selector:userInfo:repeats:"),
+            1.0 / 60, ticker.objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
+        let main = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)(ObjCRuntime.classObject("NSRunLoop"),
+                                                                   ObjCRuntime.selector("mainRunLoop"))
+        unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(main, ObjCRuntime.selector("addTimer:forMode:"), timer,
+                                                       "kCFRunLoopCommonModes".objCArgument())
+    }
+
+    /// The display timer's action.
+    static func timerTick() { tick() }
 
     private static func handle(_ event: [UInt64]) {
         event.withUnsafeBytes { raw in
@@ -306,4 +353,11 @@ enum Animations {
         for animation in finished { animation.completion() }
         if !finished.isEmpty { Updates.schedule() }
     }
+}
+
+/// The target of the display's timer.
+@ObjCClass("_PerryDisplayTicker")
+open class DisplayTicker: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCMethod("_perryTick:") func tick(_ timer: NSObject?) { Display.timerTick() }
 }

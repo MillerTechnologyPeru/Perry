@@ -120,8 +120,55 @@ public class NSSet: NSObject {
         Sets.owned(Arrays.objects(objects, count: count, method: "+[NSSet setWithObjects:count:]"), cls: cls.pointer)
     }
 
+    @ObjCClassMethod("setWithSet:")
+    static func set(_ cls: ObjCClass, set other: ObjCObject?) -> NSSet { Sets.owned(Sets.elements(other?.id), cls: cls.pointer) }
+
     @ObjCMethod("init")
     func initialize() -> Self { setMembers([]) }
+
+    @ObjCMethod("setByAddingObject:")
+    func adding(object: ObjCObject) -> NSSet { adding(contentsOf: [object.id]) }
+
+    @ObjCMethod("setByAddingObjectsFromArray:")
+    func adding(objectsFromArray array: ObjCObject?) -> NSSet { adding(contentsOf: Arrays.elements(array?.id)) }
+
+    @ObjCMethod("setByAddingObjectsFromSet:")
+    func adding(objectsFrom other: NSSet?) -> NSSet { adding(contentsOf: other?.members ?? []) }
+
+    private func adding(contentsOf others: [id]) -> NSSet {
+        var members = self.members
+        for member in others where !members.contains(where: { $0 == member || ObjC.sendBool($0, Selectors.isEqual, member) }) {
+            members.append(member)
+        }
+        return Sets.owned(members)
+    }
+
+    @ObjCMethod("objectsPassingTest:")
+    func objects(passingTest block: ObjCBlock) -> NSSet {
+        let test = block.function(as: (@convention(c) (id, id?, UnsafeMutablePointer<Bool>) -> Bool).self)
+        var passed: [id] = []
+        var stop = false
+        for member in members {
+            if test(block.object, member, &stop) { passed.append(member) }
+            if stop { break }
+        }
+        return Sets.owned(passed)
+    }
+
+    @ObjCMethod("objectsWithOptions:passingTest:")
+    func objects(options: UInt, passingTest block: ObjCBlock) -> NSSet { objects(passingTest: block) }
+
+    @ObjCMethod("initWithSet:")
+    func initialize(set other: ObjCObject?) -> Self { setMembers(Sets.elements(other?.id)) }
+
+    /// With copyItems, each member is the member's -copy.
+    @ObjCMethod("initWithSet:copyItems:")
+    func initialize(set other: ObjCObject?, copyItems: Bool) -> Self {
+        guard copyItems else { return initialize(set: other) }
+        let copies = Sets.elements(other?.id).map { ObjC.send($0, Selectors.copyWithZone, nil) ?? ObjC.retain($0)! }
+        defer { copies.forEach { ObjC.release($0) } }
+        return setMembers(copies)
+    }
 
     @ObjCMethod("initWithArray:")
     func initialize(array: NSArray?) -> Self { setMembers(array?.elements ?? []) }
@@ -264,6 +311,15 @@ public class NSMutableSet: NSSet {
 
     @ObjCMethod("removeAllObjects")
     func removeAll() { storage.removeAll() }
+
+    /// Its members become the other set's.
+    @ObjCMethod("setSet:")
+    func setSet(_ other: NSSet?) {
+        let members = other?.members ?? []
+        members.forEach { _ = ObjC.retain($0) }
+        storage.removeAll()
+        for member in members { storage.add(member); ObjC.release(member) }
+    }
 
     @ObjCMethod("unionSet:")
     func union(_ other: NSSet?) {

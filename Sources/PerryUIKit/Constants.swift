@@ -3,6 +3,10 @@ import PerryObjCInterop
 /// Notification names.
 @ObjCConstants
 enum Notifications {
+    static let UIScreenDidConnectNotification = "UIScreenDidConnectNotification"
+    static let UIScreenDidDisconnectNotification = "UIScreenDidDisconnectNotification"
+    /// The run loop mode of a scroll view's tracking.
+    static let UITrackingRunLoopMode = "UITrackingRunLoopMode"
     static let UIApplicationDidFinishLaunchingNotification = "UIApplicationDidFinishLaunchingNotification"
     static let UIApplicationDidBecomeActiveNotification = "UIApplicationDidBecomeActiveNotification"
     static let UIApplicationWillResignActiveNotification = "UIApplicationWillResignActiveNotification"
@@ -33,6 +37,13 @@ enum Notifications {
     static let UITextViewTextDidEndEditingNotification = "UITextViewTextDidEndEditingNotification"
     static let UIApplicationOpenURLOptionsAnnotationKey = "UIApplicationOpenURLOptionsAnnotationKey"
     static let UIApplicationOpenURLOptionsSourceApplicationKey = "UIApplicationOpenURLOptionsSourceApplicationKey"
+    static let UIApplicationOpenURLOptionUniversalLinksOnly = "UIApplicationOpenURLOptionUniversalLinksOnly"
+    static let UIWindowDidBecomeVisibleNotification = "UIWindowDidBecomeVisibleNotification"
+    static let UIWindowDidBecomeHiddenNotification = "UIWindowDidBecomeHiddenNotification"
+    static let UIWindowDidBecomeKeyNotification = "UIWindowDidBecomeKeyNotification"
+    static let UIWindowDidResignKeyNotification = "UIWindowDidResignKeyNotification"
+    static let UITransitionContextFromViewKey = "UITransitionContextFromViewKey"
+    static let UITransitionContextToViewKey = "UITransitionContextToViewKey"
     static let UIApplicationOpenSettingsURLString = "app-settings:"
     static let UITransitionContextFromViewControllerKey = "UITransitionContextFromViewControllerKey"
     static let UITransitionContextToViewControllerKey = "UITransitionContextToViewControllerKey"

@@ -351,6 +351,16 @@ public final class CairoContext: CGContext {
         guard let restoredState = internalState.next
             else { throw .invalidRestore }
 
+        // What was drawn since each mask clip, painted through the mask.
+        for mask in internalState.masks.reversed() {
+            internalContext.popGroupToSource()
+            internalContext.save()
+            internalContext.matrix = .identity
+            internalContext.mask(surface: mask, at: (0, 0))
+            internalContext.restore()
+        }
+        internalState.masks = []
+
         internalContext.restore()
 
         if let error = CairoError(internalContext.status) {
@@ -745,6 +755,9 @@ internal extension CairoContext {
         var fontSize: CGFloat = 0.0
         var characterSpacing: CGFloat = 0.0
         var textMode = CGTextDrawingMode()
+        /// Masks clipped to since this state was saved: each began a group
+        /// that restoring paints through it. Not copied by a save.
+        var masks: [Cairo.Surface.Image] = []
 
         init() { }
 

@@ -15,8 +15,10 @@
 #include <pwd.h>
 #include <regex.h>
 #include <sched.h>
+#include <semaphore.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <time.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -250,6 +252,74 @@ struct darwin_passwd *darwin_getpwuid(uid_t uid) { return passwd_to_darwin(getpw
 struct darwin_passwd *darwin_getpwnam(const char *name) DARWIN_SYMBOL(getpwnam);
 struct darwin_passwd *darwin_getpwnam(const char *name) { return passwd_to_darwin(getpwnam(name)); }
 
+/// The entry in the caller's storage: the host's strings in the buffer.
+static int passwd_r_to_darwin(int status, const struct passwd *entry, struct darwin_passwd *out, struct darwin_passwd **result) {
+    *result = NULL;
+    if (status || !entry) return status;
+    *out = (struct darwin_passwd){ entry->pw_name, entry->pw_passwd, entry->pw_uid, entry->pw_gid, 0, "",
+                                   entry->pw_gecos, entry->pw_dir, entry->pw_shell, 0 };
+    *result = out;
+    return 0;
+}
+
+int darwin_getpwuid_r(uid_t uid, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result)
+    DARWIN_SYMBOL(getpwuid_r);
+int darwin_getpwuid_r(uid_t uid, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result) {
+    struct passwd entry, *found = NULL;
+    return passwd_r_to_darwin(getpwuid_r(uid, &entry, buffer, size, &found), found, out, result);
+}
+
+int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result)
+    DARWIN_SYMBOL(getpwnam_r);
+int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer, size_t size, struct darwin_passwd **result) {
+    struct passwd entry, *found = NULL;
+    return passwd_r_to_darwin(getpwnam_r(name, &entry, buffer, size, &found), found, out, result);
+}
+
+// MARK: - Locale conventions
+
+/// Darwin's lconv: glibc's, but with the international fields ordered
+/// p_cs_precedes, n_cs_precedes, p_sep_by_space, n_sep_by_space.
+struct darwin_lconv {
+    char *decimal_point, *thousands_sep, *grouping, *int_curr_symbol, *currency_symbol;
+    char *mon_decimal_point, *mon_thousands_sep, *mon_grouping, *positive_sign, *negative_sign;
+    char int_frac_digits, frac_digits, p_cs_precedes, p_sep_by_space, n_cs_precedes, n_sep_by_space, p_sign_posn, n_sign_posn;
+    char int_p_cs_precedes, int_n_cs_precedes, int_p_sep_by_space, int_n_sep_by_space, int_p_sign_posn, int_n_sign_posn;
+};
+
+struct darwin_lconv *darwin_localeconv(void) DARWIN_SYMBOL(localeconv);
+struct darwin_lconv *darwin_localeconv(void) {
+    static __thread struct darwin_lconv result;
+    const struct lconv *l = localeconv();
+    result = (struct darwin_lconv){
+        l->decimal_point, l->thousands_sep, l->grouping, l->int_curr_symbol, l->currency_symbol,
+        l->mon_decimal_point, l->mon_thousands_sep, l->mon_grouping, l->positive_sign, l->negative_sign,
+        l->int_frac_digits, l->frac_digits, l->p_cs_precedes, l->p_sep_by_space, l->n_cs_precedes, l->n_sep_by_space,
+        l->p_sign_posn, l->n_sign_posn,
+        l->int_p_cs_precedes, l->int_n_cs_precedes, l->int_p_sep_by_space, l->int_n_sep_by_space,
+        l->int_p_sign_posn, l->int_n_sign_posn,
+    };
+    return &result;
+}
+
+// MARK: - Terminals
+
+/// An app has no terminal: Darwin's termios differs from Linux's, and the
+/// standard streams are the launcher's log.
+int darwin_tcgetattr(int fd, void *attributes) DARWIN_SYMBOL(tcgetattr);
+int darwin_tcgetattr(int fd, void *attributes) {
+    (void)fd; (void)attributes;
+    errno = ENOTTY;
+    return -1;
+}
+
+int darwin_tcsetattr(int fd, int action, const void *attributes) DARWIN_SYMBOL(tcsetattr);
+int darwin_tcsetattr(int fd, int action, const void *attributes) {
+    (void)fd; (void)action; (void)attributes;
+    errno = ENOTTY;
+    return -1;
+}
+
 // MARK: - Strings
 
 // The XSI form, returning an error number.
@@ -459,6 +529,24 @@ int darwin_asl_remove_log_file(void *client, int fd) {
     (void)client; (void)fd;
     return 0;
 }
+
+int32_t darwin_OSAtomicOr32Barrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32Barrier);
+int32_t darwin_OSAtomicOr32Barrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_or_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+// Bit n counts from the most significant bit of the first byte, as Darwin's.
+bool darwin_OSAtomicTestAndClearBarrier(uint32_t n, volatile void *address) DARWIN_SYMBOL(OSAtomicTestAndClearBarrier);
+bool darwin_OSAtomicTestAndClearBarrier(uint32_t n, volatile void *address) {
+    volatile uint8_t *byte = (volatile uint8_t *)address + (n >> 3);
+    uint8_t mask = (uint8_t)(0x80u >> (n & 7));
+    return (__atomic_fetch_and(byte, (uint8_t)~mask, __ATOMIC_SEQ_CST) & mask) != 0;
+}
+
+// No library has a link-time version here: -1, as for one not linked.
+int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) DARWIN_SYMBOL(NSVersionOfLinkTimeLibrary);
+int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) { (void)name; return -1; }
+
+const char *darwin_mach_error_string(int error) DARWIN_SYMBOL(mach_error_string);
+const char *darwin_mach_error_string(int error) { return error == 0 ? "(os/kern) successful" : "(os/kern) failure"; }
 
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) DARWIN_SYMBOL(OSAtomicAdd32);
 int32_t darwin_OSAtomicAdd32(int32_t amount, volatile int32_t *value) { return __atomic_add_fetch(value, amount, __ATOMIC_RELAXED); }
@@ -888,6 +976,39 @@ int darwin_removexattr(const char *path, const char *name, int options) {
     return result;
 }
 
+ssize_t darwin_fgetxattr(int fd, const char *name, void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(fgetxattr);
+ssize_t darwin_fgetxattr(int fd, const char *name, void *value, size_t size, uint32_t position, int options) {
+    (void)position, (void)options;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    ssize_t length = fgetxattr(fd, linux_name, value, size);
+    if (length < 0 && errno == ENODATA)
+        errno = 93;
+    return length;
+}
+
+int darwin_fsetxattr(int fd, const char *name, const void *value, size_t size, uint32_t position, int options)
+    DARWIN_SYMBOL(fsetxattr);
+int darwin_fsetxattr(int fd, const char *name, const void *value, size_t size, uint32_t position, int options) {
+    (void)position;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    int flags = ((options & 2) ? XATTR_CREATE : 0) | ((options & 4) ? XATTR_REPLACE : 0);
+    return fsetxattr(fd, linux_name, value, size, flags);
+}
+
+int darwin_fremovexattr(int fd, const char *name, int options) DARWIN_SYMBOL(fremovexattr);
+int darwin_fremovexattr(int fd, const char *name, int options) {
+    (void)options;
+    char linux_name[512];
+    xattr_name(name, linux_name, sizeof(linux_name));
+    int result = fremovexattr(fd, linux_name);
+    if (result < 0 && errno == ENODATA)
+        errno = 93;
+    return result;
+}
+
 // MARK: - Signal stacks and the rest
 
 // Darwin's stack_t is { ss_sp, ss_size, ss_flags }; Linux's { ss_sp,
@@ -913,3 +1034,105 @@ int darwin_sigaltstack(const struct darwin_stack *stack, struct darwin_stack *pr
 
 const char *darwin_getprogname(void) DARWIN_SYMBOL(getprogname);
 const char *darwin_getprogname(void) { return program_invocation_short_name; }
+
+// MARK: - Semaphores
+
+// Darwin's sem_t is an int, too small for glibc's: each semaphore sem_init
+// makes is glibc's, found by the address of the app's. (Darwin itself
+// fails sem_init, but games written against other systems' semaphores
+// count on them.) Named ones, from sem_open, are glibc's pointers.
+
+typedef struct semaphore_entry { const void *key; sem_t *semaphore; } semaphore_entry;
+static pthread_mutex_t semaphores_lock = PTHREAD_MUTEX_INITIALIZER;
+static semaphore_entry *semaphore_table;
+static size_t semaphore_count, semaphore_capacity;
+
+static sem_t *unnamed(const void *key) {
+    sem_t *found = NULL;
+    pthread_mutex_lock(&semaphores_lock);
+    for (size_t i = 0; i < semaphore_count && !found; i++)
+        if (semaphore_table[i].key == key) found = semaphore_table[i].semaphore;
+    pthread_mutex_unlock(&semaphores_lock);
+    return found;
+}
+
+int darwin_sem_init(void *semaphore, int shared, unsigned value) DARWIN_SYMBOL(sem_init);
+int darwin_sem_init(void *semaphore, int shared, unsigned value) {
+    (void)shared;
+    if (!semaphore) { errno = EINVAL; return -1; }
+    sem_t *existing = unnamed(semaphore);
+    if (existing) return sem_init(existing, 0, value);
+    sem_t *made = malloc(sizeof *made);
+    if (!made || sem_init(made, 0, value) != 0) { free(made); errno = ENOSPC; return -1; }
+    pthread_mutex_lock(&semaphores_lock);
+    if (semaphore_count == semaphore_capacity) {
+        size_t capacity = semaphore_capacity ? semaphore_capacity * 2 : 16;
+        semaphore_entry *grown = realloc(semaphore_table, capacity * sizeof *grown);
+        if (!grown) { pthread_mutex_unlock(&semaphores_lock); sem_destroy(made); free(made); errno = ENOSPC; return -1; }
+        semaphore_table = grown;
+        semaphore_capacity = capacity;
+    }
+    semaphore_table[semaphore_count++] = (semaphore_entry){ semaphore, made };
+    pthread_mutex_unlock(&semaphores_lock);
+    *(int *)semaphore = 0;
+    return 0;
+}
+
+int darwin_sem_destroy(void *semaphore) DARWIN_SYMBOL(sem_destroy);
+int darwin_sem_destroy(void *semaphore) {
+    sem_t *found = NULL;
+    pthread_mutex_lock(&semaphores_lock);
+    for (size_t i = 0; i < semaphore_count; i++) {
+        if (semaphore_table[i].key == semaphore) {
+            found = semaphore_table[i].semaphore;
+            semaphore_table[i] = semaphore_table[--semaphore_count];
+            break;
+        }
+    }
+    pthread_mutex_unlock(&semaphores_lock);
+    if (!found) { errno = EINVAL; return -1; }
+    sem_destroy(found);
+    free(found);
+    return 0;
+}
+
+/// The glibc semaphore for an app's: an unnamed one's, or a named one's own.
+static sem_t *semaphore_for(void *semaphore) {
+    sem_t *found = unnamed(semaphore);
+    return found ? found : semaphore;
+}
+
+int darwin_sem_post(void *semaphore) DARWIN_SYMBOL(sem_post);
+int darwin_sem_post(void *semaphore) { return sem_post(semaphore_for(semaphore)); }
+
+int darwin_sem_wait(void *semaphore) DARWIN_SYMBOL(sem_wait);
+int darwin_sem_wait(void *semaphore) { return sem_wait(semaphore_for(semaphore)); }
+
+int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
+int darwin_sem_trywait(void *semaphore) { return sem_trywait(semaphore_for(semaphore)); }
+
+// Compares in time that depends only on the length: 0 when equal.
+int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) DARWIN_SYMBOL(timingsafe_bcmp);
+int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) {
+    const unsigned char *x = a, *y = b;
+    unsigned char difference = 0;
+    for (size_t i = 0; i < length; i++)
+        difference |= x[i] ^ y[i];
+    return difference != 0;
+}
+
+// MARK: - Time zones
+
+// time.h's zone globals, Darwin's own: tzset fills them from Linux's.
+char *darwin_tzname[2] DARWIN_SYMBOL(tzname) = { "GMT", "GMT" };
+long darwin_timezone DARWIN_SYMBOL(timezone) = 0;
+int darwin_daylight DARWIN_SYMBOL(daylight) = 0;
+
+void darwin_tzset(void) DARWIN_SYMBOL(tzset);
+void darwin_tzset(void) {
+    tzset();
+    darwin_tzname[0] = tzname[0];
+    darwin_tzname[1] = tzname[1];
+    darwin_timezone = timezone;
+    darwin_daylight = daylight;
+}

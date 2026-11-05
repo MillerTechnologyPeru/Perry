@@ -56,6 +56,13 @@ class NSBundle: NSObject {
 
     @ObjCMethod("objectForInfoDictionaryKey:")
     func infoObject(forKey key: String) -> NSObject?
+
+    @ObjCClassMethod("bundleWithPath:")
+    static func bundle(path: String) -> NSBundle?
+
+    /// The localizations to use, most preferred first.
+    @ObjCMethod("preferredLocalizations")
+    func preferredLocalizations() -> NSArray
 }
 
 @ObjCWrapper("NSNotificationCenter")
@@ -80,6 +87,9 @@ class NSRunLoop: NSObject {
 class NSUUID: NSObject {
     @ObjCClassMethod("UUID")
     static func make() -> NSUUID
+
+    @ObjCMethod("initWithUUIDString:")
+    func initialize(uuidString: String) -> NSUUID?
 
     @ObjCMethod("UUIDString")
     func uuidString() -> String

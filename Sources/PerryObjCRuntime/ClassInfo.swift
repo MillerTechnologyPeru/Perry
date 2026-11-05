@@ -22,6 +22,10 @@ public final class ClassInfo {
     /// A class's metaclass, or a metaclass's class.
     public internal(set) var partner: ClassInfo?
     public internal(set) var instanceSize: Int
+    /// The Swift metadata initializer of a class whose layout Swift's
+    /// runtime makes (RO_HAS_SWIFT_INITIALIZER), until it has run.
+    var swiftInitializer: SwiftInitializer?
+    typealias SwiftInitializer = @convention(c) (ClassPointer, UnsafeMutableRawPointer?) -> ClassPointer?
 
     /// Methods defined by this class itself, including its categories'.
     var methods: [SEL: UnsafeMutablePointer<perry_method>] = [:]
@@ -53,6 +57,13 @@ public final class ClassInfo {
         baseMethods = ro.pointee.base_methods
         self.superInfo = superInfo
         instanceSize = Int(ro.pointee.instance_size)
+        // A Swift class whose layout depends on resilient types (Foundation's
+        // Date, say) has its initializer just after the class_ro_t, which
+        // lays it out: the ivar offsets the compiler left are placeholders.
+        if !isMeta, flags & ROFlags.hasSwiftInitializer != 0,
+           let initializer = UnsafeRawPointer(ro).load(fromByteOffset: MemoryLayout<perry_class_ro>.size, as: UnsafeRawPointer?.self) {
+            swiftInitializer = unsafeBitCast(initializer, to: SwiftInitializer.self)
+        }
         if let protocols = ro.pointee.base_protocols {
             protocolLists.append(protocols)
         }
@@ -193,6 +204,9 @@ enum ROFlags {
     static let meta: UInt32 = 1 << 0
     static let root: UInt32 = 1 << 1
     static let hasCxxStructors: UInt32 = 1 << 2
+    /// RO_HAS_SWIFT_INITIALIZER: a Swift metadata initializer follows the
+    /// class_ro_t.
+    static let hasSwiftInitializer: UInt32 = 1 << 6
 }
 
 /// Reads method lists in the layouts clang and ld64 emit.

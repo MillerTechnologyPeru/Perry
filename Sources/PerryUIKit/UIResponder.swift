@@ -12,6 +12,8 @@ open class UIResponder: NSObject {
     @ObjCMethod("canResignFirstResponder") func canResignFirstResponder() -> Bool { true }
     @ObjCMethod("resignFirstResponder") func resignFirstResponder() -> Bool { true }
     @ObjCMethod("isFirstResponder") func isFirstResponder() -> Bool { false }
+    /// There is no undo here: apps that clear a field's undo stack message nil.
+    @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
 
     // UIResponderStandardEditActions, which responders that edit override.
     @ObjCMethod("selectAll:") func selectAll(_ sender: NSObject?) {}

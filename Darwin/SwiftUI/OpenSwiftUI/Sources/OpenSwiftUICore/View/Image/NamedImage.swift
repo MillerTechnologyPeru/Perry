@@ -24,6 +24,15 @@ import SFSymbols
 
 package enum NamedImage {
 
+    #if !OPENSWIFTUI_LINK_COREUI
+    /// The platform's image named `name` in a bundle, for a color scheme,
+    /// which OpenSwiftUI sets: how bundle images resolve without CoreUI.
+    nonisolated(unsafe) package static var platformImage: ((String, Bundle, ColorScheme) -> (any ImageProvider)?)?
+    /// The platform's system symbol named `name`: how Image(systemName:)
+    /// resolves without CoreUI.
+    nonisolated(unsafe) package static var platformSymbol: ((String) -> (any ImageProvider)?)?
+    #endif
+
     // MARK: - NamedImage.VectorKey
 
     package struct VectorKey: Hashable {
@@ -899,6 +908,15 @@ extension Image {
                 if let info = NamedImage.sharedCache[key, key.location] {
                     return resolveBitmap(key: key, info: info, in: context)
                 }
+            }
+            #else
+            // Without CoreUI, the platform's images: UIImage(named:in:)
+            // where OpenSwiftUI installs it.
+            if let bundle = location.bundle, let provider = NamedImage.platformImage?(name, bundle, context.environment.colorScheme) {
+                return provider.resolve(in: context)
+            }
+            if case .system = location, let provider = NamedImage.platformSymbol?(name) {
+                return provider.resolve(in: context)
             }
             #endif
             return resolveError(in: context.environment)

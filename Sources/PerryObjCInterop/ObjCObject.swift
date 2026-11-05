@@ -164,6 +164,21 @@ open class NSObject: AnyObjCObject {
     /// subclass never runs its superclass's set-up.
     open class func didDefineObjCClass(_ cls: ObjCClass) {}
 
+    /// Instance variables the class lays out as Apple's does, for code in
+    /// other images that reads them at fixed offsets. The provider's
+    /// generated startup adds those of classes that declare them in their
+    /// own body, before registering the class.
+    open class var objCInstanceVariables: [ObjCInstanceVariable] { [] }
+
+    /// Adds the class's objCInstanceVariables: a registration for
+    /// defineObjCClass.
+    public class func addObjCInstanceVariables(_ registrar: any ObjCMethodRegistrar) {
+        guard let cls = registrar as? ObjCClass else { return }
+        for ivar in objCInstanceVariables where !ObjCRuntime.addIvar(cls, ivar) {
+            objcInteropFatal("cannot add instance variable \(ivar.name) to \(objCClassName)")
+        }
+    }
+
     /// Defines this class in the runtime, with its methods and
     /// `registrations` (other classes' registerObjCMethods, applied like
     /// categories), and registers it.
@@ -173,6 +188,18 @@ open class NSObject: AnyObjCObject {
                                           [registerObjCMethods] + registrations)
         ObjCPeers.register(cls.pointer, self)
         return cls
+    }
+}
+
+/// An instance variable: its name, size, alignment (log2) and type encoding.
+public struct ObjCInstanceVariable: Sendable {
+    public let name: String
+    public let size: Int
+    public let alignment: UInt8
+    public let types: String
+
+    public init(_ name: String, size: Int = 8, alignment: UInt8 = 3, types: String) {
+        (self.name, self.size, self.alignment, self.types) = (name, size, alignment, types)
     }
 }
 

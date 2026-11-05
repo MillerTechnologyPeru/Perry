@@ -122,6 +122,8 @@ void perry_foundation_set_empty_array_class(void *cls);
 // 3 null, 4 use context.
 const void *perry_foundation_cf_allocator(int which);
 void perry_foundation_set_empty_dictionary_class(void *cls);
+// The empty @{}, which +[NSDictionary dictionary] also answers.
+void *perry_foundation_empty_dictionary(void);
 
 // Variadic entry points (variadic.S, variadic_arm.S). Apple's arm64 ABI
 // passes variadic arguments in 8-byte stack slots, its armv7 ABI in
@@ -133,6 +135,8 @@ void perry_imp_initWithFormat(void);        // - (id)initWithFormat:(NSString *)
 void perry_imp_stringByAppendingFormat(void);
 void perry_imp_arrayWithObjects(void);      // + (id)arrayWithObjects:(id)first, ... nil
 void perry_imp_setWithObjects(void);        // + (id)setWithObjects:(id)first, ... nil
+void perry_imp_orderedSetWithObjects(void); // + (id)orderedSetWithObjects:(id)first, ... nil
+void perry_imp_initOrderedSetWithObjects(void); // - (id)initWithObjects:(id)first, ... nil, for ordered sets
 void perry_imp_dictionaryWithObjectsAndKeys(void); // + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil
 void perry_imp_predicateWithFormat(void);   // + (NSPredicate *)predicateWithFormat:(NSString *)format, ...
 void perry_imp_appendFormat(void);          // - (void)appendFormat:(NSString *)format, ...

@@ -7,9 +7,20 @@ import PerryObjCInterop
 /// 4-byte boundary.
 struct DarwinArguments {
     private var cursor: UnsafeRawPointer
+    /// The first argument's slot, from which positional arguments (%2$@)
+    /// are counted.
+    private let start: UnsafeRawPointer
 
     init(_ pointer: UnsafeRawPointer) {
         cursor = pointer
+        start = pointer
+    }
+
+    /// The arguments from the `position`th, counted from 1.
+    func at(_ position: Int) -> DarwinArguments {
+        var arguments = self
+        arguments.cursor = start + (max(position, 1) - 1) * 8
+        return arguments
     }
 
     /// A word: an int or smaller integer (promoted), a long, a pointer.
@@ -57,7 +68,21 @@ enum Format {
             flushLiteral()
             index += 1
 
-            // %[flags][width][.precision][length]conversion
+            // %[position$][flags][width][.precision][length]conversion: a
+            // positional conversion takes its argument by number, leaving
+            // the next one to the next conversion without a position.
+            var digits = index
+            while digits < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[digits]) { digits += 1 }
+            let sequential = arguments
+            var positional = false
+            if digits > index, digits < bytes.count, bytes[digits] == UInt8(ascii: "$"),
+               let position = Int(String(decoding: bytes[index..<digits], as: UTF8.self)) {
+                arguments = arguments.at(position)
+                positional = true
+                index = digits + 1
+            }
+            defer { if positional { arguments = sequential } }
+
             var spec = "%"
             while index < bytes.count, "-+ #0'".utf8.contains(bytes[index]) {
                 spec.append(Character(UnicodeScalar(bytes[index])))

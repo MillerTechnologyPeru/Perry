@@ -616,6 +616,15 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@rpath/", 7) == 0) {
+        // As dyld does from iOS 12.2: the system's Swift runtime libraries
+        // over the copies apps built for earlier versions embed (which stop
+        // the app on a later one), when the runtime given has the library.
+        if (strncmp(name + 7, "libswift", 8) == 0) {
+            snprintf(buf, sizeof(buf), "%s%s", SWIFT_LIBRARY_DIR, name + 7);
+            char mapped[PATH_MAX];
+            if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
+                return strdup(mapped);
+        }
         // As dyld does, search the rpaths of the loading image, then of each
         // image that led to loading it, out to the main executable: Swift's
         // embedded overlays have none of their own.
@@ -675,7 +684,9 @@ static perry_image *find_loaded(perry_loader *loader, const char *path) {
 // UIKit's extensions) is in the framework itself, and Swift code built for
 // iOS 17 binds it there. Providers have no Swift code: a Swift image's
 // frameworks get the Swift overlay of the same name from the runtime given,
-// where their Swift symbols are looked for when the provider lacks them.
+// where their Swift symbols are looked for when the provider lacks them,
+// then libswift<Framework>Additions.dylib beside it: Swift API newer than
+// the overlay, which Perry builds (Scripts/build-overlay.sh).
 static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
     if (!loader->swift_runtime_dir)
         return;
@@ -692,13 +703,21 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
         const char *base = strrchr(dep->install_name, '/') + 1;
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/libswift%s.dylib", loader->swift_runtime_dir, base);
-        if (!file_exists(path))
-            continue;
-        perry_image *overlay = find_loaded(loader, path);
-        if (!overlay)
-            overlay = load_image(loader, path);
-        if (overlay != image)
-            dep->swift_overlay = overlay;
+        if (file_exists(path)) {
+            perry_image *overlay = find_loaded(loader, path);
+            if (!overlay)
+                overlay = load_image(loader, path);
+            if (overlay != image)
+                dep->swift_overlay = overlay;
+        }
+        snprintf(path, sizeof(path), "%s/libswift%sAdditions.dylib", loader->swift_runtime_dir, base);
+        if (file_exists(path)) {
+            perry_image *additions = find_loaded(loader, path);
+            if (!additions)
+                additions = load_image(loader, path);
+            if (additions != image)
+                dep->swift_additions = additions;
+        }
     }
 }
 
@@ -919,11 +938,15 @@ static int provider_layer(const perry_provider *provider) {
     if (strstr(name, "/Foundation.framework/") || strstr(name, "/CoreFoundation.framework/"))
         return 3;
     // UIKit's views are QuartzCore's layers' delegates, and MapKit's views
-    // are UIKit's.
-    if (strstr(name, "/UIKit.framework/") || strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") ||
-        strstr(name, "/WebKit.framework/"))
+    // are UIKit's: by the provider's library, as UIKit's stands in for
+    // several frameworks (AdSupport, OpenGLES, WebKit…), any of which an
+    // app may name first.
+    const char *library = provider->path ? strrchr(provider->path, '/') : NULL;
+    library = library ? library + 1 : provider->path;
+    if ((library && strcmp(library, "libPerryUIKit.so") == 0) || strstr(name, "/UIKit.framework/") ||
+        strstr(name, "/OpenGLES.framework/") || strstr(name, "/GLKit.framework/") || strstr(name, "/WebKit.framework/"))
         return 5;
-    if (strstr(name, "/MapKit.framework/"))
+    if ((library && strcmp(library, "libPerryMapKit.so") == 0) || strstr(name, "/MapKit.framework/"))
         return 6;
     return 4;
 }
@@ -972,6 +995,7 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     const char *slash = strrchr(argv[0], '/');
     program_name = slash ? slash + 1 : argv[0];
     start_providers(loader, image);
+    perry_make_witness_tables(loader);
     // Dependencies first, in load order, then the main executable last.
     for (perry_image *img = loader->images; img; img = img->next)
         if (img != image)

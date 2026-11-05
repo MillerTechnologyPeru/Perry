@@ -117,6 +117,15 @@ final class UnarchiverStorage {
     /// The archived object whose -initWithCoder: is running, innermost last.
     var stack: [[String: ArchiveValue]] = []
     var requiresSecureCoding = false
+    /// setClass:forClassName:'s substitutions for this unarchiver.
+    var classes: [String: UnsafeMutableRawPointer] = [:]
+
+    /// The class to decode an archived class name as: this unarchiver's
+    /// substitute, then every unarchiver's, then the class of that name.
+    func resolve(_ name: String) -> UnsafeMutableRawPointer? {
+        if let cls = classes[name] ?? Unarchivers.classes[name] { return cls }
+        return name.withCString { ObjC.getClass($0) }.map(UnsafeMutableRawPointer.init)
+    }
 
     init?(_ data: [UInt8]) {
         guard let (value, _) = PropertyLists.parse(data), case .dictionary(let root) = value,
@@ -169,7 +178,7 @@ final class UnarchiverStorage {
             return builtIn
         }
         // Any other class: the first in the hierarchy that is registered.
-        guard let cls = names.lazy.compactMap({ name in name.withCString { ObjC.getClass($0) } }).first else {
+        guard let cls = names.lazy.compactMap({ self.resolve($0) }).first else {
             foundationFatal("*** -[NSKeyedUnarchiver decodeObjectForKey:]: cannot decode object of class (\(names.first ?? "?"))")
         }
         guard let allocated = ObjC.send(UnsafeMutableRawPointer(cls), ObjC.selector("alloc")) else { return nil }
@@ -258,6 +267,8 @@ final class UnarchiverStorage {
 
 enum Unarchivers {
     nonisolated(unsafe) static var unarchiverClass: Class!
+    /// +setClass:forClassName:'s substitutions, for every unarchiver.
+    nonisolated(unsafe) static var classes: [String: UnsafeMutableRawPointer] = [:]
 
     static func storage(_ object: id?) -> UnarchiverStorage? {
         Storage.get(object, as: UnarchiverStorage.self)
@@ -287,6 +298,15 @@ public class NSKeyedUnarchiver: NSObject {
     }
 
     private var storage: UnarchiverStorage? { Unarchivers.storage(objcObject) }
+
+    @ObjCClassMethod("setClass:forClassName:")
+    static func setClass(_ cls: UnsafeMutableRawPointer?, forClassName name: String) { Unarchivers.classes[name] = cls }
+    @ObjCClassMethod("classForClassName:")
+    static func classForClassName(_ name: String) -> UnsafeMutableRawPointer? { Unarchivers.classes[name] }
+    @ObjCMethod("setClass:forClassName:")
+    func setClass(_ cls: UnsafeMutableRawPointer?, forClassName name: String) { storage?.classes[name] = cls }
+    @ObjCMethod("classForClassName:")
+    func classForClassName(_ name: String) -> UnsafeMutableRawPointer? { storage?.classes[name] }
 
     @ObjCClassMethod("unarchiveObjectWithData:")
     static func unarchive(_ data: ObjCObject?) -> ObjCObject? {

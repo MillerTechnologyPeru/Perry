@@ -224,6 +224,21 @@ static uint32_t program_sdk(void) {
     return 0;
 }
 
+/// The system's version, as libSystem gives it to the Swift runtime for
+/// availability checks: the SDK the program was built with (as
+/// NSProcessInfo's is), or iOS 18 without one.
+typedef struct { unsigned major, minor, patch; } darwin_os_system_version;
+
+int darwin_os_system_version_get_current_version(darwin_os_system_version *version)
+    DARWIN_SYMBOL(os_system_version_get_current_version);
+int darwin_os_system_version_get_current_version(darwin_os_system_version *version) {
+    if (!version) return 22;
+    uint32_t sdk = program_sdk();
+    if (!sdk) sdk = 18u << 16;
+    *version = (darwin_os_system_version){ sdk >> 16, (sdk >> 8) & 0xff, sdk & 0xff };
+    return 0;
+}
+
 // Whether the program was built with an SDK at least `version`: a
 // platform's own version, or a yearly set of them (platform 0xffffffff,
 // version year << 16 | month << 8 | day), whose iOS version is the year

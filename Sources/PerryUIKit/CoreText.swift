@@ -25,8 +25,10 @@ enum CoreTextKeys {
     static let design = "NSCTFontUIFontDesignTrait"
 }
 
-/// kCTFontTraitBold.
+/// kCTFontTraitItalic, kCTFontTraitBold and kCTFontTraitMonoSpace.
+let italicTrait: UInt32 = 1 << 0
 let boldTrait: UInt32 = 1 << 1
+let monoSpaceTrait: UInt32 = 1 << 10
 
 final class FontDescriptorState: ObjectState {
     var name: String?
@@ -92,6 +94,17 @@ open class UIFontDescriptor: NSObject {
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
     @ObjCMethod("pointSize") func pointSize() -> CGFloat { state.size }
+    @ObjCMethod("symbolicTraits") func symbolicTraits() -> UInt32 { state.symbolicTraits }
+
+    /// A copy with these symbolic traits instead of its own.
+    @ObjCMethod("fontDescriptorWithSymbolicTraits:")
+    func withSymbolicTraits(_ traits: UInt32) -> UnsafeMutableRawPointer? {
+        let original = state
+        return ObjCRuntime.autorelease(UIFontDescriptor.make { copy in
+            copy.copy(from: original)
+            copy.symbolicTraits = traits
+        })
+    }
     @ObjCMethod("postscriptName") func postscriptName() -> String { state.name ?? ".SFUI-Regular" }
 }
 
@@ -260,7 +273,8 @@ public func CTFontCreateWithFontDescriptor(_ descriptor: UnsafeMutableRawPointer
     let state = UIFontDescriptor.state(descriptor)
     let pointSize = size > 0 ? size : (state.map { $0.size > 0 ? $0.size : 12 } ?? 12)
     let name = state.flatMap { $0.isSystemFont ? nil : $0.name } ?? ".SFUI-Regular"
-    let font = UIFont.make(name: name, size: pointSize, weight: state?.effectiveWeight ?? 0)
+    let font = UIFont.make(name: name, size: pointSize, weight: state?.effectiveWeight ?? 0,
+                           traits: state?.symbolicTraits ?? 0, design: state?.design)
     return ObjCRuntime.retain(font.objcObject)
 }
 
@@ -269,6 +283,7 @@ public func CTFontCopyFontDescriptor(_ object: UnsafeMutableRawPointer?) -> Unsa
     guard let font = font(object) else { return nil }
     return UIFontDescriptor.make { state in
         (state.name, state.size, state.weight) = (font.state.name, font.state.pointSize, font.state.weight)
+        (state.symbolicTraits, state.design) = (font.state.traits, font.state.design)
         if font.state.weight >= 0.3 { state.symbolicTraits |= boldTrait }
     }
 }
@@ -283,7 +298,8 @@ public func CTFontCopyFontDescriptor(_ object: UnsafeMutableRawPointer?) -> Unsa
 
 @c(_CTFontGetSymbolicTraits)
 public func CTFontGetSymbolicTraits(_ object: UnsafeMutableRawPointer?) -> UInt32 {
-    (font(object)?.state.weight ?? 0) >= 0.3 ? boldTrait : 0
+    guard let font = font(object) else { return 0 }
+    return font.state.traits | (font.state.weight >= 0.3 ? boldTrait : 0) | (font.isMonospaced ? monoSpaceTrait : 0)
 }
 
 @c(_CTFontIsSystemUIFont)
@@ -320,3 +336,38 @@ public func CTFontCopyTallestTextStyleLanguageForString(_ string: UnsafeMutableR
 /// The default composition language for every language.
 @c(_CTParagraphStyleGetCompositionLanguageForLanguage)
 public func CTParagraphStyleGetCompositionLanguageForLanguage(_ language: UnsafeMutableRawPointer?) -> UInt8 { 0 }
+
+// MARK: - Registering fonts
+
+/// A graphics font is available from when CoreGraphics makes it, which
+/// adds its file to the fonts text is drawn with: registering it succeeds.
+@c(_CTFontManagerRegisterGraphicsFont)
+public func CTFontManagerRegisterGraphicsFont(_ font: UnsafeMutableRawPointer?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    guard let font else { return false }
+    return CG.fontRegister?(font) ?? true
+}
+
+@c(_CTFontManagerUnregisterGraphicsFont)
+public func CTFontManagerUnregisterGraphicsFont(_ font: UnsafeMutableRawPointer?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    return font != nil
+}
+
+/// Registers the font in the file at the URL, by making a graphics font of
+/// it.
+@c(_CTFontManagerRegisterFontsForURL)
+public func CTFontManagerRegisterFontsForURL(_ url: UnsafeMutableRawPointer?, _ scope: UInt32, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    guard let url, let provider = CG.dataProviderCreateWithURL(url) else { return false }
+    defer { CG.dataProviderRelease(provider) }
+    guard let font = CG.fontCreateWithDataProvider(provider) else { return false }
+    CG.fontRelease(font)
+    return true
+}
+
+@c(_CTFontManagerUnregisterFontsForURL)
+public func CTFontManagerUnregisterFontsForURL(_ url: UnsafeMutableRawPointer?, _ scope: UInt32, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    return url != nil
+}

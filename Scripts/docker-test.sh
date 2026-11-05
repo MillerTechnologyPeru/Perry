@@ -10,7 +10,10 @@ docker build --platform linux/arm64 -t "$image" .
 # Docker Desktop on Apple silicon runs armv7 programs with qemu-arm, which
 # finds Linux's armhf libraries in the armv7 SDK, when it is installed.
 sdk=$(ls -d .toolchains/swift-*-armv7-sdk/*/debian-* 2>/dev/null | head -1)
+# WebKit's web processes run without their bubblewrap sandbox, which can't
+# make namespaces in a container; the tests' pages are their own.
 exec docker run --rm --platform linux/arm64 \
+    -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
     -v "$PWD:/perry" \
     ${sdk:+-e QEMU_LD_PREFIX=/perry/$sdk} \
     "$image" \

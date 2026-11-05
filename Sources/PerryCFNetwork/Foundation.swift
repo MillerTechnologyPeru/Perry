@@ -24,6 +24,14 @@ class NSDate: NSObject {
     static func of(_ date: Date) -> NSDate { make(sinceReferenceDate: date.timeIntervalSinceReferenceDate) }
 }
 
+@ObjCWrapper("NSDateInterval")
+class NSDateInterval: NSObject {
+    @ObjCClassMethod("alloc") static func allocate() -> NSDateInterval
+    @ObjCMethod("initWithStartDate:endDate:") func initialize(start: NSDate, end: NSDate) -> NSDateInterval
+
+    static func make(start: NSDate, end: NSDate) -> NSDateInterval { allocate().initialize(start: start, end: end) }
+}
+
 @ObjCWrapper("NSData")
 class NSData: NSObject {
     @ObjCClassMethod("dataWithBytes:length:") static func make(bytes: UnsafeRawPointer?, length: UInt) -> NSData
@@ -67,6 +75,7 @@ class NSURL: NSObject {
 
 @ObjCWrapper("NSArray")
 class NSArray: NSObject {
+    @ObjCClassMethod("arrayWithObjects:count:") static func make(objects: UnsafeRawPointer?, count: UInt) -> NSArray
     @ObjCMethod("count") func count() -> UInt
     @ObjCMethod("objectAtIndex:") func object(at index: UInt) -> NSObject
 

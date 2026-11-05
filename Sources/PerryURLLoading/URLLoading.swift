@@ -313,9 +313,17 @@ public final class Configuration: @unchecked Sendable {
 
     public var identifier: String?
 
+    /// Settings corelibs doesn't use (the network service type, constrained
+    /// and expensive access, discretionary transfers…), kept by name to be
+    /// read back.
+    public var settings: [String: Int] = [:]
+    public var sharedContainerIdentifier: String?
+
     public func copy() -> Configuration {
         let copy = Configuration(value.copy() as! URLSessionConfiguration)
         copy.identifier = identifier
+        copy.settings = settings
+        copy.sharedContainerIdentifier = sharedContainerIdentifier
         copy.waitsForConnectivity = waitsForConnectivity
         copy.protocolClasses = protocolClasses
         return copy
@@ -645,6 +653,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
             return Authentication.challenge(wrapper, held, events: events, session: owner)
         }
         wrapper.markCompleted()
+        URLTrace.completed(task.originalRequest?.url, task.response, nil, error)
         events?.task(wrapper, didCompleteWith: error.map { Failure($0, url: task.originalRequest?.url) })
         self.session?.forget(task)
     }
@@ -652,6 +661,22 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession, didBecomeInvalidWithError error: (any Error)?) {
         events?.sessionDidBecomeInvalid(error.map { Failure($0, url: nil) })
         self.session?.events = nil
+    }
+}
+
+/// With PERRY_URL_TRACE set, each task's request, status and error as it
+/// completes, on standard error.
+enum URLTrace {
+    static let on = getenv("PERRY_URL_TRACE") != nil
+
+    static func completed(_ url: URL?, _ response: URLResponse?, _ bytes: Int?, _ error: (any Error)?) {
+        guard on else { return }
+        var line = "perry: URL: \(url?.absoluteString ?? "?")"
+        if let http = response as? HTTPURLResponse { line += " status \(http.statusCode)" }
+        else if response == nil { line += " no response" }
+        if let bytes { line += " \(bytes) bytes" }
+        if let error { line += " error \(error) (\(String(reflecting: error)))" }
+        FileHandle.standardError.write(Data((line + "\n").utf8))
     }
 }
 
@@ -747,7 +772,10 @@ public final class Session: @unchecked Sendable {
 
     private static func dataHandler(_ completion: @escaping DataCompletion, _ url: URL?)
         -> @Sendable (Data?, URLResponse?, (any Error)?) -> Void {
-        { data, response, error in completion(data, response.map(Response.init), error.map { Failure($0, url: url) }) }
+        { data, response, error in
+            URLTrace.completed(url, response, data?.count, error)
+            completion(data, response.map(Response.init), error.map { Failure($0, url: url) })
+        }
     }
 
     public func dataTask(_ request: Request, completion: DataCompletion? = nil) -> Task {

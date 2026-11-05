@@ -137,3 +137,16 @@ public func NSIntersectionRange(_ a: NSRange, _ b: NSRange) -> NSRange {
     let start = max(a.location, b.location), end = min(a.location + a.length, b.location + b.length)
     return end > start ? NSRange(location: start, length: end - start) : NSRange(location: 0, length: 0)
 }
+
+/// The physical memory, in bytes.
+@c(_NSRealMemoryAvailable)
+public func NSRealMemoryAvailable() -> UInt {
+    let pages = sysconf(Int32(_SC_PHYS_PAGES)), size = sysconf(Int32(_SC_PAGESIZE))
+    return pages > 0 && size > 0 ? UInt(pages) * UInt(size) : 0
+}
+
+@c(_NSPageSize)
+public func NSPageSize() -> UInt { UInt(max(sysconf(Int32(_SC_PAGESIZE)), 0)) }
+
+@c(_NSLogPageSize)
+public func NSLogPageSize() -> UInt { UInt(NSPageSize().trailingZeroBitCount) }

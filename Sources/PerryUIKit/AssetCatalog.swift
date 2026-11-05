@@ -2,8 +2,9 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-// The main bundle's compiled asset catalog, Assets.car, from which
-// +imageNamed: takes the images that are not loose files. It is a BOM file
+// A bundle's compiled asset catalog, Assets.car, from which +imageNamed:
+// and its variant for other bundles take the images that are not loose
+// files. It is a BOM file
 // of named trees: FACETKEYS maps image names to their attributes,
 // KEYFORMAT lists the attributes a rendition's key holds, and RENDITIONS
 // holds each rendition: a CSI header, then its pixels, compressed in one
@@ -22,14 +23,33 @@ enum AssetCatalog {
 
     nonisolated(unsafe) static let main: Catalog? = NSBundle.main().path(forResource: "Assets", ofType: "car").flatMap(Catalog.init)
 
-    /// The named image at the scale nearest the screen's.
-    static func image(named name: String) -> (image: Owned, scale: CGFloat)? { main?.image(named: name) }
+    /// The named image at the scale nearest the screen's, for the dark
+    /// appearance or the default one.
+    static func image(named name: String, dark: Bool = false) -> (image: Owned, scale: CGFloat)? {
+        main?.image(named: name, dark: dark)
+    }
+
+    /// Other bundles' catalogs (a Swift package's resource bundle, a
+    /// framework's), by the bundle's path, read the first time one of their
+    /// images is asked for.
+    nonisolated(unsafe) private static var catalogs: [String: Catalog?] = [:]
+    private static let lock = Lock()
+
+    static func catalog(in bundle: NSBundle) -> Catalog? {
+        guard let path = bundle.path(forResource: "Assets", ofType: "car") else { return nil }
+        return lock.withLock {
+            if let catalog = catalogs[path] { return catalog }
+            let catalog = Catalog(path: path)
+            catalogs[path] = catalog
+            return catalog
+        }
+    }
 }
 
 final class Catalog {
     /// CoreUI's rendition attributes.
     enum Attribute: UInt16 {
-        case element = 1, part = 2, dimension1 = 8, dimension2 = 9, scale = 12, idiom = 15, identifier = 17
+        case element = 1, part = 2, appearance = 7, dimension1 = 8, dimension2 = 9, scale = 12, idiom = 15, identifier = 17
     }
 
     /// A rendition's layout: an image with its pixels, a link into an
@@ -50,10 +70,20 @@ final class Catalog {
     private var identifiers: [String: UInt16] = [:]
     private var renditions: [(key: [UInt16], range: Range<Int>)] = []
     private var atlases: [Int: Pixels] = [:]
+    /// The dark appearance's number in renditions' keys (APPEARANCEKEYS),
+    /// if the catalog has renditions for it.
+    private var darkAppearance: UInt16?
+
+    /// Images Scripts/extract-assets.sh decoded on a Mac, for renditions
+    /// whose compression Perry doesn't decode (CoreUI's deepmap2):
+    /// <name>@<scale>x.png in a directory beside the catalog, and
+    /// <name>~dark@<scale>x.png for the dark appearance.
+    private let extracted: String
 
     init?(path: String) {
         guard let bytes = Files.read(path), bytes.count > 32, Array(bytes[0..<8]) == Array("BOMStore".utf8) else { return nil }
         self.bytes = bytes
+        extracted = path + ".images"
         guard parse() else { return nil }
     }
 
@@ -112,6 +142,11 @@ final class Catalog {
                 identifiers[name] = le16(value.lowerBound + 8 + index * 4)
             }
         }
+        // APPEARANCEKEYS: an appearance's name to its number.
+        for (key, value) in tree(variables["APPEARANCEKEYS"])
+        where String(decoding: bytes[key], as: UTF8.self) == "UIAppearanceDark" && value.count >= 2 {
+            darkAppearance = le16(value.lowerBound)
+        }
         renditions = tree(variables["RENDITIONS"]).map { key, value in
             ((0..<keyFormat.count).map { le16(key.lowerBound + $0 * 2) }, value)
         }
@@ -145,20 +180,43 @@ final class Catalog {
 
     // MARK: Images
 
-    /// The rendition for the screen's scale, else the next larger, else
-    /// the largest smaller; for the phone, else any device.
-    func image(named name: String) -> (image: Owned, scale: CGFloat)? {
+    /// The rendition for the appearance asked for, else the default one;
+    /// for the screen's scale, else the next larger, else the largest
+    /// smaller; for the phone, else any device.
+    func image(named name: String, dark: Bool = false) -> (image: Owned, scale: CGFloat)? {
+        decoded(named: name, dark: dark) ?? extractedImage(named: name, dark: dark)
+    }
+
+    /// The extracted image at the scale nearest the screen's, the dark
+    /// appearance's first when it is asked for.
+    private func extractedImage(named name: String, dark: Bool) -> (image: Owned, scale: CGFloat)? {
+        let screen = Int(Screen.scale.rounded())
+        let scales = [screen] + [3, 2, 1].filter { $0 != screen }
+        for variant in dark ? ["~dark", ""] : [""] {
+            for scale in scales {
+                let file = extracted + "/\(name)\(variant)@\(scale)x.png"
+                guard let data = NSData.contents(ofFile: file), let image = UIImage.decode(data) else { continue }
+                return (image, CGFloat(scale))
+            }
+        }
+        return nil
+    }
+
+    private func decoded(named name: String, dark: Bool) -> (image: Owned, scale: CGFloat)? {
         guard let identifier = identifiers[name] else { return nil }
         // UIUserInterfaceIdiom in catalogs: universal 0, phone 1.
         let candidates = renditions.indices.filter {
             attribute(renditions[$0].key, .identifier) == identifier && attribute(renditions[$0].key, .idiom) <= 1
         }
         let screen = Int(Screen.scale.rounded())
-        func rank(_ index: Int) -> (Int, Int) {
+        // The appearance asked for first: the dark one's renditions only
+        // when it is asked for.
+        func rank(_ index: Int) -> (Int, Int, Int) {
             let key = renditions[index].key
+            let isDark = darkAppearance.map { attribute(key, .appearance) == $0 } ?? false
             let scale = Int(attribute(key, .scale))
             let distance = scale == screen ? 0 : scale > screen ? scale - screen : 10 + screen - scale
-            return (distance, attribute(key, .idiom) == 1 ? 0 : 1)
+            return (isDark == dark ? 0 : 1, distance, attribute(key, .idiom) == 1 ? 0 : 1)
         }
         for index in candidates.sorted(by: { rank($0) < rank($1) }) {
             guard let pixels = pixels(index), let image = makeImage(pixels) else { continue }

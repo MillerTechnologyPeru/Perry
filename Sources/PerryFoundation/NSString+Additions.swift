@@ -14,6 +14,18 @@ enum StringEncoding {
     static let unicode: UInt = 10                   // UTF-16 with a byte order mark
     static let utf16BigEndian: UInt = 0x9000_0100
     static let utf16LittleEndian: UInt = 0x9400_0100
+    static let utf32: UInt = 0x8c00_0100              // with a byte order mark
+    static let utf32BigEndian: UInt = 0x9800_0100
+    static let utf32LittleEndian: UInt = 0x9c00_0100
+
+    /// The size of one code unit, and so of a C string's terminator.
+    static func unitSize(_ encoding: UInt) -> Int {
+        switch encoding {
+        case unicode, utf16BigEndian, utf16LittleEndian: return 2
+        case utf32, utf32BigEndian, utf32LittleEndian: return 4
+        default: return 1
+        }
+    }
 
     static func encode(_ string: String, _ encoding: UInt, lossy: Bool = false) -> [UInt8]? {
         switch encoding {
@@ -38,9 +50,77 @@ enum StringEncoding {
             return bytes
         case utf16BigEndian:
             return string.utf16.flatMap { [UInt8($0 >> 8), UInt8($0 & 0xff)] }
+        case utf32, utf32LittleEndian:
+            var bytes: [UInt8] = encoding == utf32 ? [0xff, 0xfe, 0, 0] : []
+            for scalar in string.unicodeScalars {
+                let v = scalar.value
+                bytes += [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(v >> 16 & 0xff), UInt8(v >> 24)]
+            }
+            return bytes
+        case utf32BigEndian:
+            return string.unicodeScalars.flatMap { scalar -> [UInt8] in
+                let v = scalar.value
+                return [UInt8(v >> 24), UInt8(v >> 16 & 0xff), UInt8(v >> 8 & 0xff), UInt8(v & 0xff)]
+            }
         default:
-            return nil
+            guard let name = iconvName(encoding) else { return nil }
+            return convert(Array(string.utf8), from: "UTF-8", to: lossy ? name + "//TRANSLIT" : name)
         }
+    }
+
+    /// glibc's iconv name for the other encodings Darwin has: its legacy
+    /// NSStringEncodings, and CFStringEncodings with the high bit set.
+    static func iconvName(_ encoding: UInt) -> String? {
+        let low = encoding & 0xFFFF_FFFF
+        switch low {
+        case 2: return "NEXTSTEP"
+        case 3: return "EUC-JP"
+        case 8: return "CP932"                      // Shift JIS, as Darwin's
+        case 9: return "ISO-8859-2"
+        case 11: return "CP1251"
+        case 12: return "CP1252"
+        case 13: return "CP1253"
+        case 14: return "CP1254"
+        case 15: return "CP1250"
+        case 21: return "ISO-2022-JP"
+        case 30: return "MACINTOSH"
+        default: break
+        }
+        guard low & 0x8000_0000 != 0 else { return nil }
+        switch low & 0x7FFF_FFFF {
+        case 0x0001, 0x0A01, 0x0628: return "CP932"      // Mac Japanese, Shift JIS, DOS Japanese
+        case 0x0002, 0x0A03: return "BIG5"               // Mac Chinese (Traditional), Big5
+        case 0x0003, 0x0422, 0x0940: return "CP949"      // Mac Korean, DOS Korean, EUC-KR
+        case 0x0019, 0x0421, 0x0930: return "GBK"        // Mac Chinese (Simplified), DOS Chinese, GB 2312
+        case 0x0632: return "GB18030"
+        case 0x0920: return "EUC-JP"
+        case 0x0201...0x0210: return "ISO-8859-\((low & 0x7FFF_FFFF) - 0x0200)"
+        case 0x0500: return "CP1252"
+        case 0x0501: return "CP1250"
+        case 0x0502: return "CP1251"
+        case 0x0503: return "CP1253"
+        case 0x0504: return "CP1254"
+        default: return nil
+        }
+    }
+
+    /// Bytes converted by glibc's iconv; nil if a byte or character can't be.
+    static func convert(_ input: [UInt8], from: String, to: String) -> [UInt8]? {
+        let descriptor = iconv_open(to, from)
+        guard let descriptor, Int(bitPattern: descriptor) != -1 else { return nil }
+        defer { iconv_close(descriptor) }
+        var source = input.map { CChar(bitPattern: $0) }
+        var output = [CChar](repeating: 0, count: input.count * 4 + 16)
+        let written: Int? = source.withUnsafeMutableBufferPointer { inBuffer in
+            output.withUnsafeMutableBufferPointer { outBuffer in
+                var inPointer = inBuffer.baseAddress, outPointer = outBuffer.baseAddress
+                var inLeft = inBuffer.count, outLeft = outBuffer.count
+                guard iconv(descriptor, &inPointer, &inLeft, &outPointer, &outLeft) != -1 || inLeft == 0 else { return nil }
+                return outBuffer.count - outLeft
+            }
+        }
+        guard let written else { return nil }
+        return output[..<written].map { UInt8(bitPattern: $0) }
     }
 
     static func decode(_ bytes: UnsafeRawBufferPointer, _ encoding: UInt) -> String? {
@@ -68,8 +148,26 @@ enum StringEncoding {
                 index += 2
             }
             return String(decoding: units, as: UTF16.self)
+        case utf32, utf32LittleEndian, utf32BigEndian:
+            var start = 0
+            var bigEndian = encoding == utf32BigEndian
+            if encoding == utf32 && bytes.count >= 4 {
+                if bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0xfe && bytes[3] == 0xff { bigEndian = true; start = 4 }
+                if bytes[0] == 0xff && bytes[1] == 0xfe && bytes[2] == 0 && bytes[3] == 0 { start = 4 }
+            }
+            var scalars = String.UnicodeScalarView()
+            var index = start
+            while index + 3 < bytes.count {
+                let b = (0..<4).map { UInt32(bytes[index + $0]) }
+                let value = bigEndian ? b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3] : b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]
+                guard let scalar = Unicode.Scalar(value) else { return nil }
+                scalars.append(scalar)
+                index += 4
+            }
+            return String(scalars)
         default:
-            return nil
+            guard let name = iconvName(encoding), let utf8 = convert(Array(bytes), from: name, to: "UTF-8") else { return nil }
+            return String(decoding: utf8, as: UTF8.self)
         }
     }
 }
@@ -208,7 +306,7 @@ extension NSString {
     @ObjCMethod("cStringUsingEncoding:")
     func cString(encoding: UInt) -> UnsafePointer<CChar>? {
         guard var bytes = StringEncoding.encode(value, encoding) else { return nil }
-        bytes.append(0)
+        bytes += repeatElement(0, count: StringEncoding.unitSize(encoding))
         let data = DataObjects.autoreleased(Data(bytes))
         return UnsafePointer(DataObjects.storage(data)?.bytes?.assumingMemoryBound(to: CChar.self))
     }
@@ -305,6 +403,28 @@ extension NSString {
         return bytes.withUnsafeBytes { StringEncoding.decode($0, encoding) }
     }
 
+    /// Escapes, as %XX of its UTF-8 bytes, each character not in `allowed`.
+    @ObjCMethod("stringByAddingPercentEncodingWithAllowedCharacters:")
+    func addingPercentEncoding(allowed: ObjCObject?) -> String? {
+        guard let contains = CharacterSets.storage(allowed?.id)?.contains else { return nil }
+        var escaped = ""
+        for scalar in value.unicodeScalars {
+            if contains(scalar) {
+                escaped.unicodeScalars.append(scalar)
+            } else {
+                for byte in String(scalar).utf8 {
+                    escaped += "%" + String(byte, radix: 16, uppercase: true).leftPadded(to: 2)
+                }
+            }
+        }
+        return escaped
+    }
+
+    /// Unescapes %XX sequences as UTF-8; nil if one is malformed or the
+    /// result isn't UTF-8.
+    @ObjCMethod("stringByRemovingPercentEncoding")
+    func removingPercentEncoding() -> String? { replacingPercentEscapes(encoding: StringEncoding.utf8) }
+
     /// The string in `encoding` and a terminating zero, when that fits in
     /// `maxLength` bytes.
     @ObjCMethod("getCString:maxLength:encoding:")
@@ -373,6 +493,50 @@ extension NSString {
     }
 
     /// A file's contents, or what NSURLConnection loads for other schemes.
+    @ObjCMethod("initWithContentsOfFile:encoding:error:")
+    func initialize(contentsOfFile path: String?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let path, let decoded = Self.string(contentsOfFile: path, encoding: encoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
+    /// A file's text in the encoding it is found to be in, which is given
+    /// back: UTF-16 with a byte order mark, else UTF-8 if it is that, else
+    /// ISO Latin 1, which any bytes are.
+    static func string(contentsOfFile path: String, usedEncoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
+        guard let data = try? Data(contentsOf: URL(filePath: path)) else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+            return nil
+        }
+        let marked = data.starts(with: [0xff, 0xfe]) || data.starts(with: [0xfe, 0xff])
+        for encoding: UInt in marked ? [10, 4, 5] : [4, 5] {
+            guard let decoded = data.withUnsafeBytes({ StringEncoding.decode($0, encoding) }) else { continue }
+            usedEncoding?.pointee = encoding
+            return decoded
+        }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 264, description: "The file couldn’t be opened because its text encoding couldn’t be determined.")
+        return nil
+    }
+
+    @ObjCClassMethod("stringWithContentsOfFile:usedEncoding:error:")
+    static func string(contentsOfFile path: String?, used encoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
+        path.flatMap { string(contentsOfFile: $0, usedEncoding: encoding, error: error) }
+    }
+
+    @ObjCMethod("initWithContentsOfFile:usedEncoding:error:")
+    func initialize(contentsOfFile path: String?, usedEncoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let path, let decoded = Self.string(contentsOfFile: path, usedEncoding: usedEncoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
+    @ObjCMethod("initWithContentsOfURL:encoding:error:")
+    func initialize(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let decoded = Self.string(contentsOfURL: url, encoding: encoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
     @ObjCClassMethod("stringWithContentsOfURL:encoding:error:")
     static func string(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> String? {
         let decoded = url.flatMap(NSData.contents).flatMap { $0.withUnsafeBytes { StringEncoding.decode($0, encoding) } }
@@ -409,8 +573,12 @@ extension NSString {
     @ObjCMethod("stringByDeletingLastPathComponent") func deletingLastPathComponent() -> String { Paths.deletingLastComponent(value) }
     @ObjCMethod("stringByDeletingPathExtension") func deletingPathExtension() -> String { Paths.deletingPathExtension(value) }
 
+    /// A nil component appends nothing.
     @ObjCMethod("stringByAppendingPathComponent:")
-    func appending(pathComponent component: String) -> String { Paths.appending(value, component) }
+    func appending(pathComponent component: String?) -> String {
+        guard let component, !component.isEmpty else { return value }
+        return Paths.appending(value, component)
+    }
 
     @ObjCMethod("stringByAppendingPathExtension:")
     func appending(pathExtension: String) -> String { Paths.normalized(value) + "." + pathExtension }
@@ -432,6 +600,37 @@ extension NSString {
     func expandingTilde() -> String {
         guard value == "~" || value.hasPrefix("~/"), let home = getenv("HOME") else { return value }
         return String(cString: home) + value.dropFirst()
+    }
+
+    /// The tilde expanded, and "." components, empty components and a
+    /// trailing slash removed; ".." resolved where a component precedes it
+    /// (never above the root of an absolute path).
+    @ObjCMethod("stringByStandardizingPath")
+    func standardizingPath() -> String {
+        let path = expandingTilde()
+        guard !path.isEmpty else { return path }
+        let absolute = path.hasPrefix("/")
+        var components: [Substring] = []
+        for component in path.split(separator: "/", omittingEmptySubsequences: true) where component != "." {
+            if component == "..", let last = components.last, last != ".." {
+                components.removeLast()
+            } else if component == "..", absolute {
+                continue
+            } else {
+                components.append(component)
+            }
+        }
+        let joined = components.joined(separator: "/")
+        return absolute ? "/" + joined : (joined.isEmpty ? "." : joined)
+    }
+
+    /// Symbolic links resolved when the path exists; standardized otherwise.
+    @ObjCMethod("stringByResolvingSymlinksInPath")
+    func resolvingSymlinks() -> String {
+        let standardized = standardizingPath()
+        guard let resolved = realpath(standardized, nil) else { return standardized }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     // MARK: Searching
@@ -514,6 +713,106 @@ extension NSString {
         return offsets
     }
 
+    // MARK: Enumerating substrings
+
+    /// The pieces of `range` an enumeration option names, each as its own
+    /// range and its enclosing range (with the line terminator, or the
+    /// space and punctuation up to the next word). Words are runs of
+    /// letters, digits and apostrophes; sentences end at ., ! or ? and the
+    /// spaces after them.
+    private func substrings(in range: NSRange, kind: UInt) -> [(range: Range<Int>, enclosing: Range<Int>)] {
+        let units = Array(value.utf16)
+        let start = Int(range.location), end = min(units.count, start + Int(range.length))
+        guard start < end else { return [] }
+        var pieces: [(Range<Int>, Range<Int>)] = []
+        func isLineBreak(_ unit: UInt16, paragraphs: Bool) -> Bool {
+            unit == 10 || unit == 13 || unit == 0x2029 || (!paragraphs && (unit == 0x2028 || unit == 0x85))
+        }
+        switch kind {
+        case 0, 1:      // lines, paragraphs
+            var lineStart = start, index = start
+            while index < end {
+                if isLineBreak(units[index], paragraphs: kind == 1) {
+                    var after = index + 1
+                    if units[index] == 13, after < end, units[after] == 10 { after += 1 }
+                    pieces.append((lineStart..<index, lineStart..<after))
+                    lineStart = after
+                    index = after
+                } else {
+                    index += 1
+                }
+            }
+            if lineStart < end { pieces.append((lineStart..<end, lineStart..<end)) }
+        case 2:         // composed character sequences
+            var offset = 0
+            for character in value {
+                let length = character.utf16.count
+                if offset + length > start && offset < end { pieces.append((offset..<offset + length, offset..<offset + length)) }
+                offset += length
+            }
+        case 3, 4:      // words, sentences
+            let characters = Array(String(decoding: units[start..<end], as: UTF16.self))
+            var offsets = [start]
+            for character in characters { offsets.append(offsets.last! + character.utf16.count) }
+            func isWordCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "’" }
+            var index = 0
+            while index < characters.count {
+                if kind == 3 {
+                    guard isWordCharacter(characters[index]) else { index += 1; continue }
+                    let first = index
+                    while index < characters.count, isWordCharacter(characters[index]) { index += 1 }
+                    var enclosing = index
+                    while enclosing < characters.count, !isWordCharacter(characters[enclosing]) { enclosing += 1 }
+                    pieces.append((offsets[first]..<offsets[index], offsets[first]..<offsets[enclosing]))
+                } else {
+                    let first = index
+                    while index < characters.count, !".!?".contains(characters[index]) { index += 1 }
+                    while index < characters.count, ".!?".contains(characters[index]) { index += 1 }
+                    let last = index
+                    while index < characters.count, characters[index].isWhitespace { index += 1 }
+                    pieces.append((offsets[first]..<offsets[last], offsets[first]..<offsets[index]))
+                }
+            }
+        default:
+            break
+        }
+        return pieces
+    }
+
+    /// NSStringEnumerationOptions: the kind in the low byte, reverse 1 << 8,
+    /// substring not required 1 << 9. The block takes the substring, its
+    /// range and enclosing range, and a stop flag.
+    @ObjCMethod("enumerateSubstringsInRange:options:usingBlock:")
+    func enumerateSubstrings(in range: NSRange, options: UInt, using block: ObjCBlock) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UInt, UInt, UInt, UInt,
+                                          UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        var pieces = substrings(in: range, kind: options & 0xff)
+        if options & (1 << 8) != 0 { pieces.reverse() }
+        let units = Array(value.utf16)
+        var stop = false
+        for piece in pieces {
+            let substring = options & (1 << 9) != 0 ? nil
+                : Strings.autoreleased(String(decoding: units[piece.range], as: UTF16.self))
+            invoke(block.object, substring, UInt(piece.range.lowerBound), UInt(piece.range.count),
+                   UInt(piece.enclosing.lowerBound), UInt(piece.enclosing.count), &stop)
+            if stop { break }
+        }
+    }
+
+    /// The block takes each line, without its terminator, and a stop flag.
+    @ObjCMethod("enumerateLinesUsingBlock:")
+    func enumerateLines(using block: ObjCBlock) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        let units = Array(value.utf16)
+        var stop = false
+        for piece in substrings(in: NSRange(location: 0, length: UInt(units.count)), kind: 0) {
+            invoke(block.object, Strings.autoreleased(String(decoding: units[piece.range], as: UTF16.self)), &stop)
+            if stop { break }
+        }
+    }
+
     /// The cluster around the character at `index`, as a user sees it.
     @ObjCMethod("rangeOfComposedCharacterSequenceAtIndex:")
     func rangeOfComposedCharacterSequence(at index: UInt) -> NSRange {
@@ -574,6 +873,13 @@ extension NSString {
     func compare(_ other: String, options: UInt, range: NSRange, locale: ObjCObject?) -> Int {
         compare(other, options: options, range: range)
     }
+
+    /// Not localized, as the other comparisons here.
+    @ObjCMethod("localizedCompare:")
+    func localizedCompare(_ other: String) -> Int { Strings.compare(value, other) }
+
+    @ObjCMethod("localizedCaseInsensitiveCompare:")
+    func localizedCaseInsensitiveCompare(_ other: String) -> Int { Strings.compare(value.lowercased(), other.lowercased()) }
 
     @ObjCMethod("localizedStandardCompare:")
     func localizedStandardCompare(_ other: String) -> Int { Strings.numericCompare(value.lowercased(), other.lowercased()) }

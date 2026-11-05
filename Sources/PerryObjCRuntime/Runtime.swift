@@ -51,6 +51,15 @@ public enum Runtime {
             guard let ro = UnsafePointer<perry_class_ro>(bitPattern: bits) else {
                 return nil
             }
+            // A Swift class compiled to deploy before the stable ABI is
+            // marked with the legacy bit (0) only; Swift's runtime takes a
+            // class for its own by the stable bit (1), which Darwin's libobjc
+            // sets on such classes as it realizes them. Without it Swift
+            // wraps the class as an Objective-C one, whose super calls then
+            // find the class itself.
+            if cls.pointee.bits & 3 == 1 {
+                cls.pointee.bits |= 2
+            }
             let superInfo = cls.pointee.superclass.flatMap { Runtime.info($0) }
             // A class whose superclass is not available is not available
             // either, as on Darwin when a weak-linked superclass is missing:
@@ -162,6 +171,9 @@ public enum Runtime {
     /// starting at `cls`. Runs +initialize first, tries +resolve…Method:,
     /// and falls back to _objc_msgForward.
     public static func lookUpIMP(receiver: ObjectPointer?, selector: SEL, cls: ClassPointer) -> IMP {
+        if Zombies.enabled, let receiver, Zombies.report(receiver, String(cString: selector)) {
+            objcFatal("message \(String(cString: selector)) sent to a deallocated object")
+        }
         guard let info = Runtime.info(cls) else {
             objcFatal("message \(String(cString: selector)) sent to an object whose class is unknown")
         }
@@ -251,10 +263,38 @@ public enum Runtime {
         if let forwardHandler {
             return (nil, forwardHandler)
         }
+        if Unrecognized.continues {
+            Unrecognized.report(receiver, selector)
+            return (nil, Unrecognized.returnZero)
+        }
         if let info = Runtime.info(classOf(receiver)), findMethod(info, Sel.doesNotRecognizeSelector) != nil {
             Messages.sendVoid(receiver, Sel.doesNotRecognizeSelector, UnsafeRawPointer(selector))
         }
         unrecognized(receiver, selector)
+    }
+
+    /// With PERRY_OBJC_UNRECOGNIZED=continue, for finding what a program
+    /// needs: an unrecognized message is reported, once for each class and
+    /// selector, and returns zero instead of aborting.
+    enum Unrecognized {
+        static let continues = getenv("PERRY_OBJC_UNRECOGNIZED").map { String(cString: $0) == "continue" } ?? false
+
+        nonisolated(unsafe) static var reported = Set<String>()
+        static let lock = RecursiveLock()
+
+        nonisolated(unsafe) static let returnZero: IMP = unsafeBitCast(
+            { 0 } as @convention(c) () -> UInt, to: IMP.self)
+
+        static func report(_ receiver: ObjectPointer, _ selector: SEL) {
+            let info = Runtime.info(classOf(receiver))
+            let isClass = info?.isMeta ?? false
+            let name = info.map { String(cString: $0.name) } ?? "?"
+            let message = "\(isClass ? "+" : "-")[\(name) \(String(cString: selector))]"
+            let first = lock.withLock { reported.insert(message).inserted }
+            if first {
+                objcWarning("\(message): unrecognized selector, returning 0")
+            }
+        }
     }
 
     public static func unrecognized(_ receiver: ObjectPointer, _ selector: SEL) -> Never {
@@ -343,6 +383,36 @@ extension Runtime {
         _ = makeClass(cls, metaclass: metaclass, superclass: superclass, name: name,
                       instanceSize: superSize, registerName: false)
         return cls
+    }
+
+    /// class_addIvar: an instance variable at the end of a class built at
+    /// run time, before it is registered, as Foundation lays out classes
+    /// whose instance variables other images read at fixed offsets.
+    public static func addIvar(_ cls: ClassPointer, name: UnsafePointer<CChar>, size: Int, alignment: UInt8,
+                               types: UnsafePointer<CChar>?) -> Bool {
+        guard let info = Runtime.info(cls), !info.isMeta, size >= 0, alignment < 16,
+              let ro = UnsafeMutablePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7) else { return false }
+        return lock.withLock {
+            guard classesByName.values.allSatisfy({ $0 != cls }) else { return false }
+            var ivars: [perry_ivar] = []
+            if let list = ro.pointee.ivars { IvarList.forEach(list) { ivars.append($0.pointee) } }
+            guard !ivars.contains(where: { $0.name.map { strcmp($0, name) == 0 } ?? false }) else { return false }
+            let align = 1 << Int(alignment)
+            let offset = (info.instanceSize + align - 1) & ~(align - 1)
+            let offsetWord = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+            offsetWord.initialize(to: Int32(offset))
+            ivars.append(perry_ivar(offset: offsetWord, name: UnsafePointer(strdup(name)), type: types.map { UnsafePointer(strdup($0)!) },
+                                    alignment_raw: UInt32(alignment), size: UInt32(size)))
+            let stride = MemoryLayout<perry_ivar>.stride
+            let list = UnsafeMutableRawPointer.allocate(byteCount: 8 + stride * ivars.count, alignment: 8)
+            list.storeBytes(of: UInt32(stride), as: UInt32.self)
+            list.storeBytes(of: UInt32(ivars.count), toByteOffset: 4, as: UInt32.self)
+            for (index, ivar) in ivars.enumerated() { (list + 8 + index * stride).storeBytes(of: ivar, as: perry_ivar.self) }
+            ro.pointee.ivars = UnsafeRawPointer(list)
+            info.instanceSize = offset + size
+            ro.pointee.instance_size = UInt32(info.instanceSize)
+            return true
+        }
     }
 
     public static func registerClassPair(_ cls: ClassPointer) {

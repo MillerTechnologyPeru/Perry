@@ -15,11 +15,16 @@ public struct TextField<Label>: View where Label: View {
     var text: Binding<String>
     var label: Label
     var prompt: Text?
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    var onCommit: () -> Void = {}
 
     public var body: some View {
         #if os(iOS) || os(visionOS)
-        PlatformTextField(text: text, placeholder: prompt ?? (label as? Text))
-            .frame(minHeight: 34)
+        PlatformTextField(
+            text: text, placeholder: prompt ?? (label as? Text),
+            onEditingChanged: onEditingChanged, onCommit: onCommit
+        )
+        .frame(minHeight: 34)
         #else
         _openSwiftUIUnimplementedFailure()
         #endif
@@ -45,6 +50,36 @@ extension TextField where Label == Text {
         self.text = text
         self.label = Text(title)
         self.prompt = nil
+    }
+}
+
+// MARK: - TextField + editing callbacks
+
+@available(OpenSwiftUI_v1_0, *)
+extension TextField where Label == Text {
+    @available(iOS, deprecated: 100000.0, message: "Renamed TextField.init(_:text:onEditingChanged:). Use View.onSubmit(of:_:) for functionality previously provided by the onCommit parameter.")
+    nonisolated public init(
+        _ titleKey: LocalizedStringKey,
+        text: Binding<String>,
+        onEditingChanged: @escaping (Bool) -> Void = { _ in },
+        onCommit: @escaping () -> Void = {}
+    ) {
+        self.init(titleKey, text: text)
+        self.onEditingChanged = onEditingChanged
+        self.onCommit = onCommit
+    }
+
+    @available(iOS, deprecated: 100000.0, message: "Renamed TextField.init(_:text:onEditingChanged:). Use View.onSubmit(of:_:) for functionality previously provided by the onCommit parameter.")
+    @_disfavoredOverload
+    nonisolated public init<S>(
+        _ title: S,
+        text: Binding<String>,
+        onEditingChanged: @escaping (Bool) -> Void = { _ in },
+        onCommit: @escaping () -> Void = {}
+    ) where S: StringProtocol {
+        self.init(title, text: text)
+        self.onEditingChanged = onEditingChanged
+        self.onCommit = onCommit
     }
 }
 

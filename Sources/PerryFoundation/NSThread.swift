@@ -194,6 +194,10 @@ public final class NSThread: NSObject {
     @ObjCClassMethod("currentThread") static func current() -> UnsafeMutableRawPointer? { Threads.current }
     @ObjCClassMethod("mainThread") static func main() -> UnsafeMutableRawPointer? { Threads.main }
     @ObjCClassMethod("isMainThread") static func isMainThread() -> Bool { Threads.isMainThread }
+
+    /// The call stack isn't walked: there are no frames to list.
+    @ObjCClassMethod("callStackSymbols") static func callStackSymbols() -> ObjCObject { ObjCObject(Arrays.autoreleased([])) }
+    @ObjCClassMethod("callStackReturnAddresses") static func callStackReturnAddresses() -> ObjCObject { ObjCObject(Arrays.autoreleased([])) }
     @ObjCClassMethod("isMultiThreaded") static func isMultiThreaded() -> Bool { true }
 
     /// Ends the calling thread: one NSThread started returns from its

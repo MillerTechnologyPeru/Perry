@@ -1,4 +1,6 @@
 import FoundationEssentials
+import Glibc
+import PerryInterface
 import PerryObjCInterop
 import PerryURLLoading
 
@@ -133,6 +135,46 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCMethod("setAllowsCellularAccess:") func setAllowsCellularAccess(_ value: Bool) { configuration.allowsCellularAccess = value }
     @ObjCMethod("waitsForConnectivity") func waitsForConnectivity() -> Bool { configuration.waitsForConnectivity }
     @ObjCMethod("setWaitsForConnectivity:") func setWaitsForConnectivity(_ value: Bool) { configuration.waitsForConnectivity = value }
+    // Kept and read back; they don't change how requests go here.
+    @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(configuration.settings["networkServiceType"] ?? 0) }
+    @ObjCMethod("setNetworkServiceType:") func setNetworkServiceType(_ value: UInt) { configuration.settings["networkServiceType"] = Int(value) }
+    @ObjCMethod("allowsConstrainedNetworkAccess")
+    func allowsConstrainedNetworkAccess() -> Bool { configuration.settings["allowsConstrainedNetworkAccess", default: 1] != 0 }
+    @ObjCMethod("setAllowsConstrainedNetworkAccess:")
+    func setAllowsConstrainedNetworkAccess(_ value: Bool) { configuration.settings["allowsConstrainedNetworkAccess"] = value ? 1 : 0 }
+    @ObjCMethod("allowsExpensiveNetworkAccess")
+    func allowsExpensiveNetworkAccess() -> Bool { configuration.settings["allowsExpensiveNetworkAccess", default: 1] != 0 }
+    @ObjCMethod("setAllowsExpensiveNetworkAccess:")
+    func setAllowsExpensiveNetworkAccess(_ value: Bool) { configuration.settings["allowsExpensiveNetworkAccess"] = value ? 1 : 0 }
+    @ObjCMethod("isDiscretionary") func isDiscretionary() -> Bool { configuration.settings["discretionary"] ?? 0 != 0 }
+    @ObjCMethod("setDiscretionary:") func setDiscretionary(_ value: Bool) { configuration.settings["discretionary"] = value ? 1 : 0 }
+    @ObjCMethod("sessionSendsLaunchEvents") func sessionSendsLaunchEvents() -> Bool { configuration.settings["sendsLaunchEvents", default: 1] != 0 }
+    @ObjCMethod("setSessionSendsLaunchEvents:") func setSessionSendsLaunchEvents(_ value: Bool) { configuration.settings["sendsLaunchEvents"] = value ? 1 : 0 }
+    @ObjCMethod("shouldUseExtendedBackgroundIdleMode")
+    func shouldUseExtendedBackgroundIdleMode() -> Bool { configuration.settings["extendedIdle"] ?? 0 != 0 }
+    @ObjCMethod("setShouldUseExtendedBackgroundIdleMode:")
+    func setShouldUseExtendedBackgroundIdleMode(_ value: Bool) { configuration.settings["extendedIdle"] = value ? 1 : 0 }
+    @ObjCMethod("multipathServiceType") func multipathServiceType() -> Int { configuration.settings["multipath"] ?? 0 }
+    @ObjCMethod("setMultipathServiceType:") func setMultipathServiceType(_ value: Int) { configuration.settings["multipath"] = value }
+    /// SSLProtocol and tls_protocol_version_t values, as set.
+    @ObjCMethod("TLSMinimumSupportedProtocol") func tlsMinimumProtocol() -> Int32 { Int32(configuration.settings["tlsMinimum"] ?? 0) }
+    @ObjCMethod("setTLSMinimumSupportedProtocol:") func setTLSMinimumProtocol(_ value: Int32) { configuration.settings["tlsMinimum"] = Int(value) }
+    @ObjCMethod("TLSMaximumSupportedProtocol") func tlsMaximumProtocol() -> Int32 { Int32(configuration.settings["tlsMaximum"] ?? 0) }
+    @ObjCMethod("setTLSMaximumSupportedProtocol:") func setTLSMaximumProtocol(_ value: Int32) { configuration.settings["tlsMaximum"] = Int(value) }
+    @ObjCMethod("TLSMinimumSupportedProtocolVersion")
+    func tlsMinimumVersion() -> UInt16 { UInt16(configuration.settings["tlsMinimumVersion"] ?? 0x0301) }
+    @ObjCMethod("setTLSMinimumSupportedProtocolVersion:")
+    func setTLSMinimumVersion(_ value: UInt16) { configuration.settings["tlsMinimumVersion"] = Int(value) }
+    @ObjCMethod("TLSMaximumSupportedProtocolVersion")
+    func tlsMaximumVersion() -> UInt16 { UInt16(configuration.settings["tlsMaximumVersion"] ?? 0x0304) }
+    @ObjCMethod("setTLSMaximumSupportedProtocolVersion:")
+    func setTLSMaximumVersion(_ value: UInt16) { configuration.settings["tlsMaximumVersion"] = Int(value) }
+    @ObjCMethod("sharedContainerIdentifier") func sharedContainerIdentifier() -> String? { configuration.sharedContainerIdentifier }
+    @ObjCMethod("setSharedContainerIdentifier:") func setSharedContainerIdentifier(_ value: String?) { configuration.sharedContainerIdentifier = value }
+    /// No proxies: requests go direct.
+    @ObjCMethod("connectionProxyDictionary") func connectionProxyDictionary() -> NSObject? { nil }
+    @ObjCMethod("setConnectionProxyDictionary:") func setConnectionProxyDictionary(_ value: NSObject?) {}
+
     @ObjCMethod("HTTPShouldUsePipelining") func usesPipelining() -> Bool { configuration.usesPipelining }
     @ObjCMethod("setHTTPShouldUsePipelining:") func setUsesPipelining(_ value: Bool) { configuration.usesPipelining = value }
 }
@@ -158,6 +200,9 @@ open class NSURLCache: NSObject {
 
     @ObjCMethod("memoryCapacity") func memoryCapacity() -> UInt { 512_000 }
     @ObjCMethod("diskCapacity") func diskCapacity() -> UInt { 10_000_000 }
+    /// The cache keeps nothing, whatever room it is given.
+    @ObjCMethod("setMemoryCapacity:") func setMemoryCapacity(_ capacity: UInt) {}
+    @ObjCMethod("setDiskCapacity:") func setDiskCapacity(_ capacity: UInt) {}
     @ObjCMethod("currentMemoryUsage") func currentMemoryUsage() -> UInt { 0 }
     @ObjCMethod("currentDiskUsage") func currentDiskUsage() -> UInt { 0 }
     @ObjCMethod("cachedResponseForRequest:") func cachedResponse(for request: NSObject) -> NSObject? { nil }
@@ -181,6 +226,11 @@ open class NSURLCache: NSObject {
 /// A task's Swift side and its completion handler.
 final class TaskState {
     let task: Task
+    /// When the task was made, where its metrics begin.
+    let created = Date()
+    /// Its own delegate, which hears of it before the session's.
+    var delegate: NSObject?
+    var metricsDelivered = false
 
     init(_ task: Task) {
         self.task = task
@@ -237,13 +287,21 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("countOfBytesSent") func countOfBytesSent() -> Int64 { task?.bytesSent ?? 0 }
     @ObjCMethod("countOfBytesExpectedToReceive") func countOfBytesExpectedToReceive() -> Int64 { task?.bytesExpectedToReceive ?? 0 }
     @ObjCMethod("countOfBytesExpectedToSend") func countOfBytesExpectedToSend() -> Int64 { task?.bytesExpectedToSend ?? 0 }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { Tasks.states.get(objcObject)?.delegate }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { Tasks.states.get(objcObject)?.delegate = delegate }
     @ObjCMethod("taskDescription") func taskDescription() -> String? { task?.taskDescription }
     @ObjCMethod("setTaskDescription:") func setTaskDescription(_ text: String?) { task?.taskDescription = text }
     @ObjCMethod("priority") func priority() -> Float { task?.priority ?? 0.5 }
     @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { task?.priority = priority }
     @ObjCMethod("resume") func resume() { task?.resume() }
     @ObjCMethod("suspend") func suspend() { task?.suspend() }
-    @ObjCMethod("cancel") func cancel() { task?.cancel() }
+    @ObjCMethod("cancel") func cancel() {
+        // PERRY_URL_TRACE: who cancels a task, and which.
+        if getenv("PERRY_URL_TRACE") != nil {
+            perry_print_frames("perry: URL: cancel \(task?.originalRequest?.url?.absoluteString ?? "?")")
+        }
+        task?.cancel()
+    }
 }
 
 @ObjCClass("NSURLSessionDataTask") open class NSURLSessionDataTask: NSURLSessionTask {}
@@ -335,6 +393,7 @@ final class DelegateEvents: SessionEvents, @unchecked Sendable {
 
     func task(_ task: Task, didCompleteWith error: Failure?) {
         let name = "URLSession:task:didCompleteWithError:"
+        run { [self] in Metrics.deliver(session: session, task: task, sessionDelegate: delegate) }
         if responds(name) {
             run { [self] in
                 send((@convention(c) (Object, UnsafeRawPointer, Object, Object, Object) -> Void).self)(
@@ -470,6 +529,34 @@ open class NSURLSession: NSObject {
         state?.session.invalidateAndCancel()
     }
 
+    // MARK: Tasks
+
+    /// The session's tasks, given to the handler on the delegate queue
+    /// later: its data, upload and download tasks. Tasks under way are not
+    /// listed, so each list is empty.
+    @ObjCMethod("getTasksWithCompletionHandler:")
+    func getTasks(completionHandler: ObjCBlock?) {
+        guard let completionHandler, let state else { return }
+        nonisolated(unsafe) let block = completionHandler
+        state.queue.addOperation(block: Closures.block {
+            ObjCRuntime.autoreleasepool {
+                Blocks.call(block, NSMutableArray.of([]).objcObject, NSMutableArray.of([]).objcObject, NSMutableArray.of([]).objcObject)
+            }
+        })
+    }
+
+    @ObjCMethod("getAllTasksWithCompletionHandler:")
+    func getAllTasks(completionHandler: ObjCBlock?) {
+        guard let completionHandler, let state else { return }
+        nonisolated(unsafe) let block = completionHandler
+        state.queue.addOperation(block: Closures.block {
+            ObjCRuntime.autoreleasepool {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                    block.object, NSMutableArray.of([]).objcObject)
+            }
+        })
+    }
+
     // MARK: Completion handlers
 
     /// A data or upload completion handler, run on the delegate queue.
@@ -478,10 +565,13 @@ open class NSURLSession: NSObject {
         nonisolated(unsafe) let queue = state.queue
         let box = TaskBox()
         nonisolated(unsafe) let block = handler
+        nonisolated(unsafe) let session = objcObject
+        nonisolated(unsafe) let sessionDelegate = state.delegate
         let body: Session.DataCompletion = { data, response, error in
             box.task?.markCompleted()
             Hops.run(on: queue) {
                 ObjCRuntime.autoreleasepool {
+                    if let task = box.task { Metrics.deliver(session: session, task: task, sessionDelegate: sessionDelegate) }
                     Blocks.call(block, data.map(NSData.of)?.objcObject, response.map(Responses.object)?.objcObject,
                                 Errors.object(error)?.objcObject)
                 }
@@ -539,6 +629,13 @@ open class NSURLSession: NSObject {
     @ObjCMethod("uploadTaskWithRequest:fromFile:completionHandler:")
     func uploadTask(with request: NSObject, fromFile file: NSURL, completionHandler: ObjCBlock?) -> NSObject {
         dataTask({ state!.session.uploadTask(self.request(request), file: file.url!, completion: $0) }, completionHandler)
+    }
+
+    /// The body is the request's own, its data or stream, rather than one
+    /// the delegate gives with URLSession:task:needNewBodyStream:.
+    @ObjCMethod("uploadTaskWithStreamedRequest:")
+    func uploadTask(withStreamedRequest request: NSObject) -> NSObject {
+        dataTask({ state!.session.dataTask(self.request(request), completion: $0) }, nil)
     }
 
     /// A download's handler runs before the file is removed.

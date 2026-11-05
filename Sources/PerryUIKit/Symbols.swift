@@ -8,17 +8,27 @@ import PerryObjCInterop
 // drawing give nil, as unknown symbols do.
 
 enum Symbols {
-    /// The symbol's image at the screen's scale.
-    static func image(named name: String) -> UIImage? {
-        guard let draw = drawings[name] else { return nil }
-        let size = CGSize(width: 24, height: 24)
+    /// Names that are another symbol's drawing: the leading and trailing
+    /// directions, left to right here.
+    static let aliases: [String: String] = [
+        "chevron.forward": "chevron.right", "chevron.backward": "chevron.left",
+        "arrow.forward": "arrow.right", "arrow.backward": "arrow.left",
+    ]
+
+    /// The symbol's image at the screen's scale, at the size and weight of
+    /// a configuration (UIImageSymbolConfiguration) when given one.
+    static func image(named name: String, configuration: UIImageConfiguration? = nil) -> UIImage? {
+        guard let draw = drawings[name] ?? aliases[name].flatMap({ drawings[$0] }) else { return nil }
+        let (side, lineWidth) = metrics(configuration)
+        let size = CGSize(width: side, height: side)
         guard let context = CG.makeContext(size: size, scale: Screen.scale, opaque: false) else { return nil }
         defer { CG.release(context) }
         let black = UIColor.black()
         withExtendedLifetime(black) {
+            CG.scaleCTM(context, side / 24, side / 24)
             CG.setStrokeColorWithColor(context, black.state.makeCGColor())
             CG.setFillColorWithColor(context, black.state.makeCGColor())
-            CG.setLineWidth(context, 2)
+            CG.setLineWidth(context, lineWidth)
             CG.setLineCap(context, 1)
             CG.setLineJoin(context, 1)
             draw(Pen(context: context))
@@ -27,6 +37,8 @@ enum Symbols {
         defer { CG.release(cgImage) }
         let image = UIImage.make(cgImage: cgImage, scale: Screen.scale)
         image.state.renderingMode = 2
+        image.state.symbolName = name
+        image.state.configuration = configuration
         return image
     }
 

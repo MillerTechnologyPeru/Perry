@@ -8,6 +8,7 @@
 
 #include <dlfcn.h>
 #include <limits.h>
+#include <pthread.h>
 #include <link.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -111,8 +112,12 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
     if (dep->provider && provider_lookup(loader, dep->provider, name, out))
         return true;
     // Swift symbols of a framework whose Swift code the provider lacks.
-    if (dep->swift_overlay && strncmp(name, "_$s", 3) == 0)
-        return perry_exports_lookup(loader, dep->swift_overlay, name, out, depth + 1);
+    if (strncmp(name, "_$s", 3) == 0) {
+        if (dep->swift_overlay && perry_exports_lookup(loader, dep->swift_overlay, name, out, depth + 1))
+            return true;
+        if (dep->swift_additions && perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1))
+            return true;
+    }
     return false;
 }
 
@@ -212,10 +217,13 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
+//   …/Metal.framework/Metal                               -> QuartzCore
+//   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
+//   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -256,13 +264,27 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/CoreText.framework/") ||
-        strstr(install_name, "/AVKit.framework/")) {
+        strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
+        strstr(install_name, "/AdSupport.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
     // AVFAudio's classes are AVFoundation's, which re-exports them.
     if (strstr(install_name, "/AVFAudio.framework/")) {
         snprintf(out, out_size, "AVFoundation");
+        return true;
+    }
+    // Network's path monitor reads the routes SystemConfiguration's
+    // reachability does. Its C API is libnetwork's, which Network's Swift
+    // overlay binds to directly.
+    if (strstr(install_name, "/Network.framework/") || strcmp(install_name, "/usr/lib/libnetwork.dylib") == 0) {
+        snprintf(out, out_size, "SystemConfiguration");
+        return true;
+    }
+    // Metal, without a device: QuartzCore, which has its layers, answers
+    // that there is none.
+    if (strstr(install_name, "/Metal.framework/")) {
+        snprintf(out, out_size, "QuartzCore");
         return true;
     }
     // ImageIO's images are CoreGraphics' own.
@@ -286,6 +308,39 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     return true;
 }
 
+/// Loads the Swift corelibs' Foundation before any provider, so that its
+/// own calls bind to its own functions. Its CoreFoundation has SPI named
+/// like Darwin's functions as exported, with an underscore
+/// (_CFCharacterSetCreateMutableCopy, _CFArrayReplaceValues…), which
+/// providers define as Darwin's; loaded first as a provider's dependency,
+/// it would bind those to the provider's, which return Objective-C objects.
+/// The Swift runtime's directory is the one libswiftCore is in, which the
+/// Objective-C runtime's provider loads without Foundation.
+static void load_corelibs_foundation(perry_loader *loader) {
+    static bool loaded;
+    if (loaded)
+        return;
+    loaded = true;
+    if (dlopen("libFoundation.so", RTLD_NOW | RTLD_GLOBAL))
+        return;
+    for (uint32_t i = 0; i < loader->library_dir_count; i++) {
+        char path[PATH_MAX];
+        snprintf(path, sizeof(path), "%s/libPerryobjc.so", loader->library_dirs[i]);
+        void *objc = access(path, R_OK) == 0 ? dlopen(path, RTLD_NOW | RTLD_LOCAL) : NULL;
+        void *retain = objc ? dlsym(objc, "swift_retain") : NULL;
+        Dl_info info;
+        if (!retain || !dladdr(retain, &info) || !info.dli_fname)
+            continue;
+        const char *slash = strrchr(info.dli_fname, '/');
+        if (!slash)
+            continue;
+        snprintf(path, sizeof(path), "%.*s/libFoundation.so", (int)(slash - info.dli_fname), info.dli_fname);
+        if (dlopen(path, RTLD_NOW | RTLD_GLOBAL))
+            return;
+    }
+    perry_trace(PERRY_TRACE_BIND, "corelibs Foundation not loaded first: %s", dlerror());
+}
+
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name) {
     for (uint32_t i = 0; i < loader->provider_count; i++)
         if (strcmp(loader->providers[i]->install_name, install_name) == 0)
@@ -299,6 +354,10 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
     char short_name[256];
     if (!provider_short_name(install_name, short_name, sizeof(short_name)))
         return NULL;
+    // WebKit's web views make URL requests of their own, as CFNetwork's
+    // classes, which must start with the program.
+    if (strstr(install_name, "/WebKit.framework/"))
+        perry_find_provider(loader, CFNETWORK);
 
     // Several install names may map to one provider (libSystem's sublibraries).
     for (uint32_t i = 0; i + 1 < loader->provider_count; i++) {
@@ -320,6 +379,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         snprintf(path, sizeof(path), "%s/libPerry%s.so", loader->library_dirs[i], short_name);
         if (access(path, R_OK) != 0)
             continue;
+        load_corelibs_foundation(loader);
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (!handle)
             perry_fatal("cannot load provider %s: %s", path, dlerror());
@@ -372,11 +432,30 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
 // MARK: - Unresolved stubs
 
 // Calling an unresolved import lands in a stub that reports which symbol was
-// missing instead of jumping to address zero.
-_Noreturn static void perry_unimplemented(const char *description) {
+// missing instead of jumping to address zero. With
+// PERRY_UNIMPLEMENTED=continue, for finding what a program needs, each is
+// reported the first time and returns zero.
+static uintptr_t perry_unimplemented(const char *description) {
+    static int continues = -1;
+    if (continues < 0) {
+        const char *mode = getenv("PERRY_UNIMPLEMENTED");
+        continues = mode && strcmp(mode, "continue") == 0;
+    }
     fflush(stdout);
-    fprintf(stderr, "perry: unimplemented: %s\n", description);
-    abort();
+    if (!continues) {
+        fprintf(stderr, "perry: unimplemented: %s\n", description);
+        abort();
+    }
+    static hash_table reported;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    pthread_mutex_lock(&lock);
+    void **slot = hash_lookup_string(&reported, description, true);
+    bool first = !*slot;
+    *slot = (void *)1;
+    pthread_mutex_unlock(&lock);
+    if (first)
+        fprintf(stderr, "perry: unimplemented: %s, returning 0\n", description);
+    return 0;
 }
 
 typedef struct stub_page {
@@ -477,6 +556,143 @@ const char *perry_bind_name_at(const void *location) {
 
 // MARK: - Resolution
 
+static bool ends_with(const char *name, const char *suffix) {
+    size_t n = strlen(name), m = strlen(suffix);
+    return n >= m && strcmp(name + n - m, suffix) == 0;
+}
+
+/// For an unresolved string constant's import, a pointer to a constant
+/// CFString of its name ("_UIFooNotification" is @"UIFooNotification"),
+/// made once; NULL for other symbols, or before Foundation is loaded. A
+/// constant is known by its name's ending (notification names, keys, error
+/// domains) or by the families of string constants Apple names alike: user
+/// activity types, capture device types and session presets, and
+/// authorization scopes and options.
+static void *string_constant(perry_loader *loader, const char *name) {
+    if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
+    static const char *const families[] = { "_NSUserActivityType", "_AVCaptureDeviceType", "_AVCaptureSessionPreset",
+                                            "_ASAuthorizationScope", "_ASAuthorizationPublicKeyCredential" };
+    bool family = false;
+    for (size_t i = 0; i < sizeof(families) / sizeof(families[0]) && !family; i++)
+        family = strncmp(name, families[i], strlen(families[i])) == 0;
+    if (!family && !ends_with(name, "Notification") && !ends_with(name, "NotificationName") && !ends_with(name, "Key") &&
+        !ends_with(name, "Attribute") && !ends_with(name, "AttributeName") && !ends_with(name, "Identifier") &&
+        !ends_with(name, "ErrorDomain"))
+        return NULL;
+    perry_symbol isa = { 0 };
+    for (uint32_t i = 0; i < loader->provider_count && !isa.found; i++)
+        if (loader->providers[i]->handle)
+            provider_lookup(loader, loader->providers[i], "___CFConstantStringClassReference", &isa);
+    if (!isa.found) return NULL;
+    // { isa, flags, bytes, length }, as clang emits for @"…"; then the
+    // variable holding it, which the import names.
+    struct { void *isa; uint64_t flags; const char *bytes; uint64_t length; } *string = calloc(1, sizeof *string);
+    void **variable = calloc(1, sizeof *variable);
+    if (!string || !variable) return NULL;
+    char *bytes = strdup(name + 1);
+    *string = (typeof(*string)){ isa.address, 0x7C8, bytes, strlen(bytes) };
+    *variable = string;
+    perry_trace(PERRY_TRACE_BIND, "string constant %s for unresolved import", name);
+    return variable;
+}
+
+/// Witness tables apps take directly whose conformances the libraries have
+/// only as resilient ones: each a table of this many words, filled in
+/// once every image is bound.
+#define WITNESS_TABLE_WORDS 256
+typedef struct pending_witness_table {
+    void **table;
+    const int32_t *conformance;
+    const char *name;
+    struct pending_witness_table *next;
+} pending_witness_table;
+static pending_witness_table *pending_tables;
+
+/// For an unresolved protocol witness table ("…WP"), room for the table of
+/// the conformance the library has ("…Mc"), which the Swift runtime makes
+/// before initializers run (perry_make_witness_tables). Apple's SwiftUI
+/// declares its types and their protocols in one module, so apps take its
+/// witness tables directly; Perry's declares some types in another module
+/// than the protocol, which makes the conformance resilient, with no static
+/// table. Only a conformance with no conditional requirements is made: its
+/// table is the same for every use.
+static void *resilient_witness_table(perry_loader *loader, perry_dependency *dep, const char *name) {
+    if (!dep || strncmp(name, "_$s", 3) != 0 || !ends_with(name, "WP")) return NULL;
+    static hash_table made;
+    void **slot = hash_lookup_string(&made, name, false);
+    if (slot) return *slot;
+    size_t length = strlen(name);
+    char *descriptor_name = strdup(name);
+    if (!descriptor_name) return NULL;
+    descriptor_name[length - 2] = 'M';
+    descriptor_name[length - 1] = 'c';
+    perry_symbol descriptor = { 0 };
+    lookup_in_dependency(loader, dep, descriptor_name, &descriptor, 0);
+    free(descriptor_name);
+    if (!descriptor.found) return NULL;
+    // A protocol conformance descriptor: protocol, type reference, witness
+    // table pattern (relative), then flags, with the count of conditional
+    // requirements in bits 8-15.
+    const int32_t *conformance = descriptor.address;
+    if (((uint32_t)conformance[3] >> 8) & 0xff) return NULL;
+    pending_witness_table *pending = calloc(1, sizeof *pending);
+    void **table = calloc(WITNESS_TABLE_WORDS, sizeof(void *));
+    if (!pending || !table) return NULL;
+    *pending = (pending_witness_table){ table, conformance, strdup(name), pending_tables };
+    pending_tables = pending;
+    *hash_lookup_string(&made, name, true) = table;
+    return table;
+}
+
+static const void *relative_target(const int32_t *field) {
+    return (const char *)field + *field;
+}
+
+/// A relative pointer whose low bit says it points at a pointer to the
+/// target.
+static const void *relative_indirectable_target(const int32_t *field) {
+    const char *target = (const char *)field + (*field & ~1);
+    return (*field & 1) ? *(const void *const *)target : target;
+}
+
+void perry_make_witness_tables(perry_loader *loader) {
+    typedef const void *(*access_function)(size_t request);
+    typedef const void *const *(*get_witness_table)(const void *conformance, const void *type, const void *const *arguments);
+    get_witness_table get = NULL;
+    for (pending_witness_table *pending = pending_tables; pending; pending = pending->next) {
+        if (!get) {
+            perry_symbol sym = { 0 };
+            for (perry_image *img = loader->images; img && !sym.found; img = img->next)
+                perry_exports_lookup(loader, img, "_swift_getWitnessTable", &sym, 0);
+            if (!sym.found) return;
+            get = (get_witness_table)sym.address;
+        }
+        const int32_t *conformance = pending->conformance;
+        // The type reference's kind (bits 3-5 of the flags): a type
+        // descriptor, directly or through a pointer.
+        uint32_t flags = (uint32_t)conformance[3];
+        const int32_t *type;
+        switch ((flags >> 3) & 7) {
+        case 0: type = relative_target(&conformance[1]); break;
+        case 1: type = *(const int32_t *const *)relative_target(&conformance[1]); break;
+        default: continue;
+        }
+        // A type context descriptor: flags (generic: bit 7), parent, name,
+        // then its metadata access function, relative.
+        if (!type || ((uint32_t)type[0] & 0x80)) continue;
+        // A protocol descriptor: flags, parent, name, the counts of its
+        // requirements in its signature and of its requirements.
+        const int32_t *protocol = relative_indirectable_target(&conformance[0]);
+        uint32_t words = 1 + (uint32_t)protocol[4];
+        if (words > WITNESS_TABLE_WORDS) continue;
+        const void *metadata = ((access_function)relative_target(&type[3]))(0);
+        const void *const *table = metadata ? get(conformance, metadata, NULL) : NULL;
+        if (!table) continue;
+        memcpy(pending->table, table, words * sizeof(void *));
+        perry_trace(PERRY_TRACE_BIND, "witness table %s made from its conformance", pending->name);
+    }
+}
+
 perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal, const char *name, bool weak_import) {
     perry_symbol sym = { 0 };
     const char *library;
@@ -514,6 +730,14 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], name, &sym);
 
+    if (!sym.found && ordinal > 0) {
+        void *table = resilient_witness_table(loader, &image->deps[ordinal - 1], name);
+        if (table) {
+            sym.found = true;
+            sym.address = table;
+        }
+    }
+
     if (sym.found) {
         perry_record_import(image, library, name, PERRY_IMPORT_RESOLVED);
         return sym;
@@ -521,6 +745,13 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     if (weak_import) {
         perry_record_import(image, library, name, PERRY_IMPORT_WEAK_MISSING);
         perry_trace(PERRY_TRACE_BIND, "weak import %s from %s missing", name, library);
+        // A weak string constant is there on any system the app runs on,
+        // and read without a check: it gets the constant string of its
+        // name, as a missing one that is not weak does. Other weak
+        // imports stay NULL, for the app's own checks.
+        void *constant = string_constant(loader, name);
+        if (constant)
+            sym.address = constant;
         return sym;
     }
     perry_record_import(image, library, name, PERRY_IMPORT_UNRESOLVED);
@@ -538,6 +769,14 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
             fprintf(stderr, "perry: warning: %s: class %s (%s) is not available\n", image->path, class_name, library);
         }
         sym.address = placeholder;
+        return sym;
+    }
+    // A string constant (a notification's name, a dictionary key) is data
+    // the app reads, and Apple names each for its value: it gets a constant
+    // string of its name, as the framework's would be.
+    void *constant = string_constant(loader, name);
+    if (constant) {
+        sym.address = constant;
         return sym;
     }
     sym.address = perry_unresolved_stub(library, name);

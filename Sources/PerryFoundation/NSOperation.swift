@@ -115,10 +115,19 @@ final class OperationStorage {
     var queue: QueueStorage?
     /// NSBlockOperation's blocks.
     var blocks: [id] = []
+    /// NSInvocationOperation's message: the target and argument, held,
+    /// and the selector; and what it returned.
+    var invocation: (target: id, selector: SEL, argument: id?)?
+    var result: id?
 
     deinit {
         dependencies.forEach { ObjC.release($0) }
         blocks.forEach { ObjC.release($0) }
+        if let invocation {
+            ObjC.release(invocation.target)
+            ObjC.release(invocation.argument)
+        }
+        ObjC.release(result)
         ObjC.release(completionBlock)
         ObjC.release(name)
     }
@@ -352,6 +361,41 @@ public final class NSBlockOperation: NSOperation {
     }
 }
 
+/// NSInvocationOperation: an operation that sends its target a message
+/// with one object argument, keeping what it returns.
+@ObjCClass("NSInvocationOperation")
+public final class NSInvocationOperation: NSOperation {
+    @ObjCMethod("initWithTarget:selector:object:")
+    func initialize(target: ObjCObject?, selector: ObjCSelector?, object: ObjCObject?) -> Self? {
+        guard let target, let selector else { return nil }
+        let invocation = (target: ObjC.retain(target.id)!, selector: selector.pointer.assumingMemoryBound(to: CChar.self) as SEL,
+                          argument: object.flatMap { ObjC.retain($0.id) })
+        storage.monitor.locked { storage.invocation = invocation }
+        return self
+    }
+
+    /// Sends the message, unless the operation was cancelled first.
+    @ObjCMethod("main")
+    func sendMessage() {
+        guard let invocation = storage.monitor.locked({ storage.invocation }) else { return }
+        // Only a method returning an object has a result.
+        let method = ObjC.instanceMethod(ObjC.objectGetClass(invocation.target), invocation.selector)
+        let returnsObject = ObjC.methodTypes(method).map { $0.pointee == UInt8(ascii: "@") } ?? false
+        let returned = ObjC.send(invocation.target, invocation.selector, invocation.argument)
+        let result = returnsObject ? returned.flatMap { ObjC.retain($0) } : nil
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.result = result }
+            return storage.result
+        }
+        ObjC.release(old)
+    }
+
+    @ObjCMethod("result")
+    func result() -> ObjCObject? {
+        storage.monitor.locked { storage.result }.flatMap { ObjC.autorelease($0) }.map(ObjCObject.init)
+    }
+}
+
 extension Operations {
     /// An operation's change notices say it has become finished or ready,
     /// which its queue acts on; -didChangeValueForKey: passes them here.
@@ -382,6 +426,8 @@ final class QueueStorage: @unchecked Sendable {
     var suspended = false
     var name: id?
     var qualityOfService = -1
+    /// The dispatch queue operations run on, if the app set one.
+    var underlying: id?
     /// The last barrier added, which later operations wait for.
     var barrier: id?
 
@@ -393,6 +439,7 @@ final class QueueStorage: @unchecked Sendable {
     deinit {
         ObjC.release(name)
         ObjC.release(barrier)
+        ObjC.release(underlying)
     }
 
     func add(_ operation: id) {
@@ -439,7 +486,7 @@ final class QueueStorage: @unchecked Sendable {
     private func run(_ operation: id) {
         let context = UnsafeMutablePointer<(QueueStorage, id)>.allocate(capacity: 1)
         context.initialize(to: (self, ObjC.retain(operation)!))
-        let target = isMain ? Dispatch.mainQueue : Dispatch.globalQueue(dispatchQoS(qualityOfService), 0)
+        let target = isMain ? Dispatch.mainQueue : underlying ?? Dispatch.globalQueue(dispatchQoS(qualityOfService), 0)
         Dispatch.async(target, UnsafeMutableRawPointer(context), QueueStorage.runOperation)
     }
 
@@ -634,4 +681,21 @@ public final class NSOperationQueue: NSObject {
     @ObjCMethod("qualityOfService") func qualityOfService() -> Int { storage.monitor.locked { storage.qualityOfService } }
     @ObjCMethod("setQualityOfService:")
     func setQualityOfService(_ quality: Int) { storage.monitor.locked { storage.qualityOfService = quality } }
+
+    /// The dispatch queue the operations run on; the main queue's is the
+    /// main dispatch queue and can't be changed.
+    @ObjCMethod("underlyingQueue")
+    func underlyingQueue() -> UnsafeMutableRawPointer? {
+        storage.isMain ? Dispatch.mainQueue : storage.monitor.locked { storage.underlying }
+    }
+
+    @ObjCMethod("setUnderlyingQueue:")
+    func setUnderlyingQueue(_ queue: UnsafeMutableRawPointer?) {
+        guard !storage.isMain else { return }
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.underlying = ObjC.retain(queue) }
+            return storage.underlying
+        }
+        ObjC.release(old)
+    }
 }

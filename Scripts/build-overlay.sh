@@ -6,6 +6,12 @@
 # given: the Swift runtime's (PERRY_SWIFT_RUNTIME), where the loader looks
 # up a framework's Swift symbols.
 #
+# An overlay of additions (Darwin/<Name>/module-name names the module it
+# adds to, say UIKit for Darwin/UIKitAdditions) is Swift API newer than
+# that module's overlay: it is compiled as that module, for its symbols,
+# and linked as libswift<Name>.dylib, which the loader looks in after the
+# module's overlay.
+#
 # Usage: Scripts/build-overlay.sh <Module> [output directory]
 #   default output: .build/perry-swift-runtime
 set -eu
@@ -16,6 +22,8 @@ cd "$(dirname "$0")/.."
 module=$1
 out=${2:-.build/perry-swift-runtime}
 work=.build/perry-overlays/$module
+swift_module=$module
+[ -f "Darwin/$module/module-name" ] && swift_module=$(tr -d '[:space:]' < "Darwin/$module/module-name")
 sdk=$(xcrun --sdk iphoneos --show-sdk-path)
 target=arm64-apple-ios18.0
 mkdir -p "$work" "$out"
@@ -24,14 +32,20 @@ mkdir -p "$work" "$out"
 includes=()
 [ -d "Darwin/$module/include" ] && includes=(-I "Darwin/$module/include")
 
+# Compiler flags of the module's own, one per line, in Darwin/<Module>/swiftc-flags.
+flags=()
+if [ -f "Darwin/$module/swiftc-flags" ]; then
+    while IFS= read -r flag; do [ -n "$flag" ] && flags+=("$flag"); done < "Darwin/$module/swiftc-flags"
+fi
+
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
 xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" \
-    -module-name "$module" -parse-as-library -import-underlying-module \
+    -module-name "$swift_module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
-    -emit-library -emit-module -emit-module-path "$work/$module.swiftmodule" \
-    "${includes[@]}" "${sources[@]}" -framework "$module" \
+    -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \
+    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" -framework "$swift_module" \
     -Xlinker -install_name -Xlinker "/usr/lib/swift/libswift$module.dylib" \
     -o "$out/libswift$module.dylib"
 echo "$out/libswift$module.dylib"

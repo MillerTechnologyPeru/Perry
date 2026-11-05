@@ -47,7 +47,10 @@ func providerDidStart(_ info: perry_startup_info) {
 /// The protocols Foundation's value classes adopt, which casts check: Swift
 /// casts its strings, bridged as NSString subclasses, to NSCopying.
 enum Conformances {
-    static let protocols = ["NSCopying", "NSMutableCopying", "NSCoding", "NSSecureCoding", "NSFastEnumeration"]
+    /// Each with the protocols it inherits from: secure coding is coding.
+    static let protocols: [(name: String, adopting: [String])] = [
+        ("NSCopying", []), ("NSMutableCopying", []), ("NSCoding", []), ("NSSecureCoding", ["NSCoding"]), ("NSFastEnumeration", []),
+    ]
 
     static let classes: [(name: String, protocols: [String])] = [
         ("NSString", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
@@ -58,6 +61,7 @@ enum Conformances {
         ("NSOrderedSet", ["NSCopying", "NSMutableCopying", "NSSecureCoding", "NSFastEnumeration"]),
         ("NSData", ["NSCopying", "NSMutableCopying", "NSSecureCoding"]),
         ("NSValue", ["NSCopying", "NSSecureCoding"]),
+        ("NSNumber", ["NSCopying", "NSSecureCoding"]),
         ("NSDate", ["NSCopying", "NSSecureCoding"]),
         ("NSURL", ["NSCopying", "NSSecureCoding"]),
         ("NSUUID", ["NSCopying", "NSSecureCoding"]),
@@ -69,13 +73,16 @@ enum Conformances {
         ("NSError", ["NSCopying", "NSSecureCoding"]),
         ("NSNull", ["NSCopying", "NSSecureCoding"]),
         ("NSEnumerator", ["NSFastEnumeration"]),
+        ("NSPresentationIntent", ["NSCopying"]),
+        ("NSAttributedStringMarkdownSourcePosition", ["NSCopying"]),
+        ("NSAttributedStringMarkdownParsingOptions", ["NSCopying"]),
     ]
 
     /// Declares the protocols, unless an image already has, and adds them
     /// to the classes.
     static func adopt() {
-        for name in protocols where ObjCRuntime.protocolObject(name) == nil {
-            ObjCRuntime.defineProtocol(named: name, adopting: [], methods: [])
+        for (name, adopting) in protocols where ObjCRuntime.protocolObject(name) == nil {
+            ObjCRuntime.defineProtocol(named: name, adopting: adopting, methods: [])
         }
         for (name, adopted) in classes where name.withCString({ ObjC.getClass($0) }) != nil {
             for proto in adopted {

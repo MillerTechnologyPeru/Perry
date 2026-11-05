@@ -250,6 +250,8 @@ extension NSObject {
     @ObjCClassMethod("class") static func classSelf(_ cls: ObjCClass) -> ObjCClass { cls }
     @ObjCClassMethod("superclass") static func classSuperclass(_ cls: ObjCClass) -> ObjCClass? { cls.superclass }
     @ObjCClassMethod("initialize") static func classInitialize() {}
+    /// Does nothing, as on Darwin: subclasses' +load call [super load].
+    @ObjCClassMethod("load") static func classLoad() {}
     @ObjCClassMethod("description") static func classDescription() -> UnsafeMutableRawPointer? { nil }
 
     @ObjCClassMethod("instancesRespondToSelector:")

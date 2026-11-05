@@ -114,6 +114,23 @@ int darwin_fpclassifyf(float x) { return darwin_fp_class(fpclassify(x)); }
 int darwin_issetugid(void) DARWIN_SYMBOL(issetugid);
 int darwin_issetugid(void) { return getauxval(AT_SECURE) != 0; }
 
+// csops(pid, ops, buffer, size), the code signing status Darwin keeps for a
+// process, which Swift's runtime reads at startup. CS_OPS_STATUS (0)
+// reports a valid signature that allows debugging (CS_VALID |
+// CS_GET_TASK_ALLOW), as for an app built for development; other
+// operations fail.
+int darwin_csops(int pid, unsigned int ops, void *buffer, size_t size) DARWIN_SYMBOL(csops);
+int darwin_csops(int pid, unsigned int ops, void *buffer, size_t size) {
+    (void)pid;
+    if (ops == 0 && buffer && size >= sizeof(uint32_t)) {
+        memset(buffer, 0, size);
+        *(uint32_t *)buffer = 0x1 | 0x4;
+        return 0;
+    }
+    errno = EINVAL;
+    return -1;
+}
+
 // MARK: - Signals
 
 typedef struct darwin_sigaction {

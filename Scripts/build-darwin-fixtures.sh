@@ -40,6 +40,24 @@ for src in Tests/Fixtures/Darwin/*/; do
     app="$out/$name.app"
     rm -rf "$app"
     mkdir -p "$app"
+    # A Swift fixture, main.swift, built with swiftc for its MinimumOSVersion,
+    # and for macOS for its reference. Perry runs it on Apple's Swift
+    # runtime, .build/perry-swift-runtime (Scripts/swift-runtime.sh).
+    if [ -f "$src/main.swift" ]; then
+        swift_min=$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$src/Info.plist")
+        xcrun --sdk iphoneos swiftc -target "arm64-apple-ios$swift_min" -sdk "$sdk" \
+            -swift-version 5 -O -o "$app/$name" "$src"/*.swift
+        plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
+        macos="$out/macos/$name.app/Contents"
+        rm -rf "$out/macos/$name.app"
+        mkdir -p "$macos/MacOS"
+        xcrun --sdk macosx swiftc -target arm64-apple-macos14 -sdk "$macsdk" \
+            -swift-version 5 -O -o "$macos/MacOS/$name" "$src"/*.swift
+        cp "$src/Info.plist" "$macos/Info.plist"
+        perl -e 'alarm 60; exec @ARGV' "$macos/MacOS/$name" > "$out/$name.expected" 2>/dev/null
+        echo "$app"
+        continue
+    fi
     sources=$(ls "$src"/*.m)
     includes=""
     if [ -f "$src/dependencies" ]; then
@@ -75,14 +93,20 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
     grep -q '<CoreBluetooth/' $sources && frameworks="$frameworks -framework CoreBluetooth"
+    grep -q '<Metal/' $sources && frameworks="$frameworks -framework Metal"
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
+    grep -q '<WebKit/' $sources && frameworks="$frameworks -framework WebKit"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
         -o "$app/$name" $sources
     plutil -convert binary1 -o "$app/Info.plist" "$src/Info.plist"
+    # Metal shaders, built into default.metallib as Xcode builds them.
+    if ls "$src"/*.metal >/dev/null 2>&1; then
+        xcrun -sdk iphoneos metal -std=metal3.0 -mios-version-min=$min -o "$app/default.metallib" "$src"/*.metal
+    fi
     # Core Data models, compiled as Xcode does.
     for data_model in "$src"/*.xcdatamodeld; do
         [ -d "$data_model" ] || continue
@@ -92,7 +116,7 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
+            *.m|*.metal|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$app/" ;;
         esac
     done
@@ -158,6 +182,9 @@ for src in Tests/Fixtures/Darwin/*/; do
                 -o "$macos/MacOS/$name" $sources ;;
     esac
     cp "$src/Info.plist" "$macos/Info.plist"
+    if ls "$src"/*.metal >/dev/null 2>&1; then
+        xcrun -sdk macosx metal -std=metal3.0 -mmacosx-version-min=13.0 -o "$macos/Resources/default.metallib" "$src"/*.metal
+    fi
     for data_model in "$src"/*.xcdatamodeld; do
         [ -d "$data_model" ] || continue
         model_name=$(basename "$data_model" .xcdatamodeld)
@@ -166,7 +193,7 @@ for src in Tests/Fixtures/Darwin/*/; do
 
     for resource in "$src"/*; do
         case "$resource" in
-            *.m|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
+            *.m|*.metal|*/Info.plist|*/dependencies|*.xcdatamodeld|*/Entitlements.plist|*/no-reference) ;;
             *) cp "$resource" "$macos/Resources/" ;;
         esac
     done

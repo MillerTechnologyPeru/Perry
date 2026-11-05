@@ -262,3 +262,23 @@ public func CGRectApplyAffineTransform(_ rect: CGRect, _ t: CGAffineTransform) -
     let xs = corners.map(\.x), ys = corners.map(\.y)
     return CGRect(origin: CGPoint(x: xs.min()!, y: ys.min()!), size: CGSize(width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!))
 }
+
+/// Splits off `amount` from the edge (CGRectEdge: min x 0, min y 1, max x 2,
+/// max y 3) into `slice`, the rest into `remainder`.
+@c(_CGRectDivide)
+public func CGRectDivide(_ rect: CGRect, _ slice: UnsafeMutablePointer<CGRect>?, _ remainder: UnsafeMutablePointer<CGRect>?,
+                         _ amount: Double, _ edge: UInt32) {
+    let r = CGRectStandardize(rect)
+    let horizontal = edge == 0 || edge == 2
+    let extent = horizontal ? r.size.width : r.size.height
+    let cut = min(max(amount, 0), extent)
+    var a = r, b = r
+    switch edge {
+    case 0: a.size.width = cut; b.origin.x += cut; b.size.width -= cut
+    case 1: a.size.height = cut; b.origin.y += cut; b.size.height -= cut
+    case 2: a.origin.x = r.origin.x + r.size.width - cut; a.size.width = cut; b.size.width -= cut
+    default: a.origin.y = r.origin.y + r.size.height - cut; a.size.height = cut; b.size.height -= cut
+    }
+    slice?.pointee = a
+    remainder?.pointee = b
+}

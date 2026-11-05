@@ -27,14 +27,18 @@ enum {
     DARWIN_CLOCK_THREAD_CPUTIME_ID = 16,
 };
 
-// Darwin's monotonic clock counts sleep (Linux's boot time); its uptime
-// clocks do not (Linux's monotonic ones).
+// Darwin's monotonic clocks, raw ones too, count sleep, as
+// mach_continuous_time does (Linux's boot time); its uptime clocks do not
+// (Linux's monotonic ones). Swift's ContinuousClock reads
+// CLOCK_MONOTONIC_RAW for deadlines libdispatch compares with the boot
+// time, so after a suspend a raw clock that left sleep out would put every
+// deadline in the past.
 static int clock_to_linux(int clock) {
     switch (clock) {
     case DARWIN_CLOCK_REALTIME: return CLOCK_REALTIME;
-    case DARWIN_CLOCK_MONOTONIC: return CLOCK_BOOTTIME;
+    case DARWIN_CLOCK_MONOTONIC:
     case DARWIN_CLOCK_MONOTONIC_RAW:
-    case DARWIN_CLOCK_MONOTONIC_RAW_APPROX: return CLOCK_MONOTONIC_RAW;
+    case DARWIN_CLOCK_MONOTONIC_RAW_APPROX: return CLOCK_BOOTTIME;
     case DARWIN_CLOCK_UPTIME_RAW:
     case DARWIN_CLOCK_UPTIME_RAW_APPROX: return CLOCK_MONOTONIC;
     case DARWIN_CLOCK_PROCESS_CPUTIME_ID: return CLOCK_PROCESS_CPUTIME_ID;
@@ -81,36 +85,44 @@ uint64_t darwin_clock_gettime_nsec_np(int clock) {
 
 // MARK: - Mach time
 
-// Mach time ticks in nanoseconds here: a timebase of 1/1.
+// Mach time ticks as on Apple silicon, 24 MHz: a timebase of 125/3 (a
+// tick is 125/3 nanoseconds). Apple's arm64 code takes that timebase for
+// granted: Swift's concurrency runtime makes dispatch deadlines in these
+// ticks without asking mach_timebase_info. libPerrydispatch converts
+// dispatch_time_t values between these ticks and Linux's nanoseconds.
 typedef struct {
     uint32_t numer;
     uint32_t denom;
 } darwin_timebase_info;
 
+static uint64_t ticks(int linux_clock) {
+    return (uint64_t)((unsigned __int128)nanoseconds(linux_clock) * 3 / 125);
+}
+
 uint64_t darwin_mach_absolute_time(void) DARWIN_SYMBOL(mach_absolute_time);
 uint64_t darwin_mach_absolute_time(void) {
-    return nanoseconds(CLOCK_MONOTONIC);
+    return ticks(CLOCK_MONOTONIC);
 }
 
 uint64_t darwin_mach_approximate_time(void) DARWIN_SYMBOL(mach_approximate_time);
 uint64_t darwin_mach_approximate_time(void) {
-    return nanoseconds(CLOCK_MONOTONIC_COARSE);
+    return ticks(CLOCK_MONOTONIC_COARSE);
 }
 
 uint64_t darwin_mach_continuous_time(void) DARWIN_SYMBOL(mach_continuous_time);
 uint64_t darwin_mach_continuous_time(void) {
-    return nanoseconds(CLOCK_BOOTTIME);
+    return ticks(CLOCK_BOOTTIME);
 }
 
 uint64_t darwin_mach_continuous_approximate_time(void) DARWIN_SYMBOL(mach_continuous_approximate_time);
 uint64_t darwin_mach_continuous_approximate_time(void) {
-    return nanoseconds(CLOCK_BOOTTIME);
+    return ticks(CLOCK_BOOTTIME);
 }
 
 int darwin_mach_timebase_info(darwin_timebase_info *info) DARWIN_SYMBOL(mach_timebase_info);
 int darwin_mach_timebase_info(darwin_timebase_info *info) {
-    info->numer = 1;
-    info->denom = 1;
+    info->numer = 125;
+    info->denom = 3;
     return 0;   // KERN_SUCCESS
 }
 

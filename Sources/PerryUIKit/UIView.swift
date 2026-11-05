@@ -18,6 +18,8 @@ final class ViewState: ObjectState {
     var tintColor: UIColor?
     /// UIViewContentMode: scale to fill 0.
     var contentMode = 0
+    /// Whether -drawRect: starts from a cleared context; drawing always does here.
+    var clearsContextBeforeDrawing = true
     /// UISemanticContentAttribute: unspecified 0.
     var semanticContentAttribute = 0
     var autoresizingMask: UInt = 0
@@ -36,8 +38,12 @@ final class ViewState: ObjectState {
     /// The superview, which retains this view; not retained.
     var superview: UnsafeMutableRawPointer?
     var subviews: [UIView] = []
+    /// Its interactions (pointer, context menu…), which never act here.
+    var interactions: [NSObject] = []
     /// The view controller whose view this is; not retained.
     var viewController: UnsafeMutableRawPointer?
+    /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
+    var userInterfaceStyle = 0
 
     var center: CGPoint {
         get { geometry.position }
@@ -71,10 +77,31 @@ final class ViewState: ObjectState {
 /// landscape orientations.
 enum Screen {
     /// UIInterfaceOrientation: portrait 1, landscape right 3, landscape left 4.
+    /// PERRY_UIKIT_ORIENTATION set to "landscape" or "portrait" holds an app
+    /// that supports both that way ("landscapeleft" and "landscaperight"
+    /// name the side).
     nonisolated(unsafe) static let orientation: Int = {
         let bundle = NSBundle.main()
-        let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
-            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        if let setting = getenv("PERRY_UIKIT_ORIENTATION").map({ String(cString: $0).lowercased() }) {
+            switch setting {
+            case "portrait": return 1
+            case "landscaperight": return 3
+            case "landscapeleft": return 4
+            case "landscape":
+                // The side the app lists first, if it lists one.
+                let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~ipad")
+                    ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+                let first = names.first { $0.hasPrefix("UIInterfaceOrientationLandscape") }
+                return first == "UIInterfaceOrientationLandscapeLeft" ? 4 : 3
+            default: break
+            }
+        }
+        // An iPad-only app lists them for the iPad alone; else the one it
+        // starts in.
+        var names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations")
+            ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations~ipad"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+        if names.isEmpty, let initial = bundle.infoObject(forKey: "UIInterfaceOrientation")?.stringValue { names = [initial] }
         if names.isEmpty || names.contains("UIInterfaceOrientationPortrait") { return 1 }
         for name in names {
             if name == "UIInterfaceOrientationLandscapeRight" { return 3 }
@@ -85,11 +112,33 @@ enum Screen {
 
     static var isLandscape: Bool { orientation == 3 || orientation == 4 }
 
+    /// PERRY_UIKIT_SCREEN set to "ipad" (1024 by 768 points at @2x) or to
+    /// points and a scale ("1024x768@2", or "1024x768" at @1x) gives the app
+    /// that screen whatever the display, held as the app is (landscape or
+    /// portrait; other sizes are as given), and drawn as large as fits the
+    /// display, with bars beside it.
+    nonisolated(unsafe) static let fixed: (size: CGSize, scale: CGFloat)? = {
+        guard let setting = getenv("PERRY_UIKIT_SCREEN").map({ String(cString: $0).lowercased() }) else { return nil }
+        var text = setting == "ipad" ? "1024x768@2" : setting
+        var scale: CGFloat = 1
+        if let at = text.firstIndex(of: "@") {
+            guard let value = Double(text[text.index(after: at)...]), value > 0 else { return nil }
+            scale = CGFloat(value)
+            text = String(text[..<at])
+        }
+        let sides = text.split(separator: "x").compactMap { Double($0) }
+        guard sides.count == 2, sides[0] > 0, sides[1] > 0 else { return nil }
+        // "ipad" is held as the app is; other sizes are as given.
+        guard setting == "ipad" else { return (CGSize(width: CGFloat(sides[0]), height: CGFloat(sides[1])), scale) }
+        return (isLandscape ? CGSize(width: 1024, height: 768) : CGSize(width: 768, height: 1024), scale)
+    }()
+
     /// With a live view, the screen is the display's own: its usable area,
     /// in points at the desktop's scale (one pixel a point unless it scales
     /// its display). PERRY_UIKIT_SCREEN=iphone keeps an iPhone's instead, as
     /// without a display.
     nonisolated(unsafe) static let nativeSize: CGSize? = {
+        if let fixed { return fixed.size }
         if let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" { return nil }
         guard Display.wanted, let pixels = SDL.usableDisplaySize() else { return nil }
         let scale = max(Display.scale, 1)
@@ -105,6 +154,7 @@ enum Screen {
     /// landscape, and does not require the full screen; or the screen is the
     /// display's. PERRY_UIKIT_RESIZABLE set to 1 or 0 decides it instead.
     nonisolated(unsafe) static let isResizable: Bool = {
+        if fixed != nil { return false }
         if let setting = getenv("PERRY_UIKIT_RESIZABLE") { return String(cString: setting) != "0" }
         // The display's screen is a desktop window's.
         if nativeSize != nil { return true }
@@ -140,7 +190,7 @@ enum Screen {
     /// else the iPhone's. Apps size what they draw from it (a game its
     /// renderbuffer and its interface), so an iPhone's screen keeps three
     /// whatever the live view's scale.
-    nonisolated(unsafe) static let scale: CGFloat = nativeSize != nil ? max(Display.scale, 1) : 3
+    nonisolated(unsafe) static let scale: CGFloat = fixed?.scale ?? (nativeSize != nil ? max(Display.scale, 1) : 3)
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
     /// pixels, so lines are not lost between them.
@@ -353,6 +403,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         for subview in state.subviews { subview.state.superview = nil }
         state.layer.setDelegate(nil)
         UIView.states.remove(objcObject)
+        UIView.guides.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
 
@@ -408,8 +459,48 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     // MARK: Appearance
 
-    /// The device's, for every view.
-    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+    /// The device's, in the appearance the view, its controller or the
+    /// nearest superview or controller above it overrides it with.
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device(style: interfaceStyle) }
+
+    /// Nothing to do here; subclasses override it.
+    @ObjCMethod("traitCollectionDidChange:") func traitCollectionDidChange(_ previous: UITraitCollection?) {}
+
+    @ObjCMethod("overrideUserInterfaceStyle") func overrideUserInterfaceStyle() -> Int { state.userInterfaceStyle }
+    @ObjCMethod("setOverrideUserInterfaceStyle:")
+    func setOverrideUserInterfaceStyle(_ style: Int) {
+        let previous = traitCollection()
+        state.userInterfaceStyle = style
+        announceTraitChange(from: previous)
+    }
+
+    /// The appearance this view is drawn in: the first override from it up.
+    var interfaceStyle: Int {
+        var current: UIView? = self
+        while let view = current {
+            if view.state.userInterfaceStyle != 0 { return view.state.userInterfaceStyle }
+            if let controller = view.state.viewController.map({ UIViewController.wrap($0) }),
+               controller.state.userInterfaceStyle != 0 {
+                return controller.state.userInterfaceStyle
+            }
+            current = view.state.superview.map { UIView.wrap($0) }
+        }
+        return 1
+    }
+
+    /// Sends -traitCollectionDidChange: to this view, its subviews and their
+    /// controllers when their appearance changed.
+    func announceTraitChange(from previous: UITraitCollection) {
+        guard previous.traits.style != interfaceStyle else { return }
+        var pending = [self]
+        while let view = pending.popLast() {
+            view.sendTraitCollectionDidChange(previous)
+            if let controller = view.state.viewController {
+                NSObject(controller).sendTraitCollectionDidChange(previous)
+            }
+            pending.append(contentsOf: view.state.subviews)
+        }
+    }
 
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
     /// A stack view closes up around an arranged subview that hides. As
@@ -451,6 +542,9 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ clips: Bool) { state.geometry.masksToBounds = clips }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.geometry.isOpaque }
     @ObjCMethod("setOpaque:") func setOpaque(_ opaque: Bool) { state.geometry.isOpaque = opaque }
+    @ObjCMethod("clearsContextBeforeDrawing") func clearsContextBeforeDrawing() -> Bool { state.clearsContextBeforeDrawing }
+    @ObjCMethod("setClearsContextBeforeDrawing:")
+    func setClearsContextBeforeDrawing(_ clears: Bool) { state.clearsContextBeforeDrawing = clears }
     @ObjCMethod("contentMode") func contentMode() -> Int { state.contentMode }
     @ObjCMethod("setContentMode:") func setContentMode(_ mode: Int) { state.contentMode = mode }
     @ObjCMethod("semanticContentAttribute") func semanticContentAttribute() -> Int { state.semanticContentAttribute }
@@ -505,6 +599,23 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("superview") func superview() -> UIView? { state.superview.map(UIView.wrap) }
     @ObjCMethod("subviews") func subviews() -> NSObject { NSMutableArray.of(state.subviews) }
+    @ObjCMethod("interactions") func interactions() -> NSObject { NSMutableArray.of(state.interactions) }
+    @ObjCMethod("setInteractions:") func setInteractions(_ interactions: NSObject?) {
+        state.interactions = interactions.map { $0.unsafeCast(to: NSArray.self).elements } ?? []
+    }
+    @ObjCMethod("addInteraction:") func addInteraction(_ interaction: NSObject?) {
+        guard let interaction else { return }
+        state.interactions.append(interaction)
+        // UIInteraction's -willMoveToView: and -didMoveToView:, where it has them.
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+        for selector in ["willMoveToView:", "didMoveToView:"] where interaction.responds(to: selector) {
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(interaction.objcObject, ObjCRuntime.selector(selector), objcObject)
+        }
+    }
+    @ObjCMethod("removeInteraction:") func removeInteraction(_ interaction: NSObject?) {
+        guard let interaction else { return }
+        state.interactions.removeAll { $0.objcObject == interaction.objcObject }
+    }
 
     /// The window the view is in: the nearest UIWindow at or above it.
     @ObjCMethod("window")
@@ -519,8 +630,15 @@ open class UIView: UIResponder, UICoordinateSpace {
         return nil
     }
 
+    /// Nil adds nothing, as on iOS.
     @ObjCMethod("addSubview:")
-    func addSubview(_ view: UIView) { insert(view, at: state.subviews.count) }
+    func addSubview(_ view: UIView?) {
+        guard let view else {
+            uikitWarning("-[UIView addSubview:] with nil")
+            return
+        }
+        insert(view, at: state.subviews.count)
+    }
 
     @ObjCMethod("insertSubview:atIndex:")
     func insertSubview(_ view: UIView, at index: Int) { insert(view, at: index) }
@@ -923,11 +1041,26 @@ open class UIView: UIResponder, UICoordinateSpace {
 }
 
 /// Views UIKit puts between a window and its root view controller's view.
+/// They take no touches themselves: one that nothing in the controller's
+/// views takes goes on to what is behind them in the window, such as a
+/// game's GL view under the views of its interface.
 @ObjCClass("UITransitionView")
-open class UITransitionView: UIView {}
+open class UITransitionView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 @ObjCClass("UIDropShadowView")
-open class UIDropShadowView: UIView {}
+open class UIDropShadowView: UIView {
+    @ObjCMethod("hitTest:withEvent:")
+    override func hitTest(_ point: CGPoint, with event: NSObject?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit?.objcObject == objcObject ? nil : hit
+    }
+}
 
 /// UIView's messages, sent so subclasses' overrides run.
 extension NSObject {

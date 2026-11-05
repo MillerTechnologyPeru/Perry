@@ -63,16 +63,19 @@ open class UINavigationController: UIViewController {
         return self
     }
 
+    /// Sets the controller up itself, as Darwin's does, rather than send
+    /// -initWithNibName:bundle:: a Swift subclass with initializers of its
+    /// own doesn't inherit that one, and traps when it is sent.
     @ObjCMethod("initWithRootViewController:")
     func initialize(rootViewController root: UIViewController) -> NSObject {
-        let navigation = initializeViewController(nibName: nil, bundle: nil).unsafeCast(to: UINavigationController.self)
+        let navigation = initialize(nibName: nil, bundle: nil)
         navigation.push(root, animated: false)
         return navigation
     }
 
     @ObjCMethod("initWithNavigationBarClass:toolbarClass:")
     func initialize(navigationBarClass: ObjCClass?, toolbarClass: ObjCClass?) -> NSObject {
-        initializeViewController(nibName: nil, bundle: nil)
+        initialize(nibName: nil, bundle: nil)
     }
 
     @ObjCMethod("dealloc")
@@ -502,8 +505,12 @@ open class UINavigationBar: UIView {
         withExtendedLifetime((background, separator)) {
             CG.setFillColorWithColor(context, background.state.makeCGColor())
             CG.fillRect(context, bounds)
-            CG.setFillColorWithColor(context, separator.state.makeCGColor())
-            CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
+            // A shadow image replaces the hairline; Perry draws images in
+            // its place as nothing.
+            if barState.shadowImage == nil {
+                CG.setFillColorWithColor(context, separator.state.makeCGColor())
+                CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
+            }
         }
         let tint = tintColor()
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)

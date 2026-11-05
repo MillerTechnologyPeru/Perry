@@ -1,6 +1,7 @@
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
+import Synchronization
 
 /// An NSString's contents.
 final class StringStorage {
@@ -85,8 +86,9 @@ enum Strings {
         return String(decoding: units, as: UTF16.self)
     }
 
-    /// UTF-16 literals have no C string; keep one per literal.
-    nonisolated(unsafe) private static var literalUTF8: [UInt: StringStorage] = [:]
+    /// UTF-16 literals have no C string; keep one per literal, made by
+    /// whichever thread asks first.
+    private static let literalUTF8 = Mutex<[UInt: StringStorage]>([:])
 
     static func utf8(_ object: id) -> UnsafePointer<CChar>? {
         if ObjC.objectGetClass(object) == constantClass {
@@ -95,10 +97,12 @@ enum Strings {
                 return object.load(fromByteOffset: DarwinLayout.stringCharacters, as: UnsafePointer<CChar>?.self)
             }
             let key = UInt(bitPattern: object)
-            if let cached = literalUTF8[key] { return cached.utf8 }
-            let storage = StringStorage(constantValue(object))
-            literalUTF8[key] = storage
-            return storage.utf8
+            return literalUTF8.withLock { literals in
+                if let cached = literals[key] { return cached.utf8 }
+                let storage = StringStorage(constantValue(object))
+                literals[key] = storage
+                return storage.utf8
+            }
         }
         return (Storage.get(object, as: StringStorage.self) ?? StringStorage("")).utf8
     }
@@ -187,6 +191,9 @@ public class NSString: NSObject {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Strings.stringClass = cls.storage
         cls.addMethod("stringWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
+        // Formatting isn't localized here, so it is stringWithFormat:.
+        cls.addMethod("localizedStringWithFormat:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_stringWithFormat), isClassMethod: true)
         cls.addMethod("initWithFormat:", types: "@24@0:8@16",
                       implementation: variadicEntry(perry_imp_initWithFormat), isClassMethod: false)
@@ -328,6 +335,22 @@ public class NSString: NSObject {
 
     @ObjCMethod("stringByAppendingString:")
     func appending(_ other: String) -> String { value + other }
+
+    /// Cut or padded to `length` UTF-16 units, the pad repeating from
+    /// `start`, as Foundation's.
+    @ObjCMethod("stringByPaddingToLength:withString:startingAtIndex:")
+    func padding(toLength length: UInt, with pad: String, startingAt start: UInt) -> String {
+        var units = Array(value.utf16)
+        if units.count >= Int(length) { return String(decoding: units.prefix(Int(length)), as: UTF16.self) }
+        let padUnits = Array(pad.utf16)
+        guard !padUnits.isEmpty else { return value }
+        var index = Int(start) % padUnits.count
+        while units.count < Int(length) {
+            units.append(padUnits[index])
+            index = (index + 1) % padUnits.count
+        }
+        return String(decoding: units, as: UTF16.self)
+    }
 
     @ObjCMethod("uppercaseString")
     func uppercased() -> String { value.uppercased() }

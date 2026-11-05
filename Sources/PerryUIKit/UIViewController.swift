@@ -22,6 +22,8 @@ enum Appearance {
 
 final class ViewControllerState: ObjectState {
     var view: UIView?
+    /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
+    var userInterfaceStyle = 0
     var title: String?
     var nibName: String?
     /// The parent, which retains this controller; not retained.
@@ -131,14 +133,14 @@ open class UIViewController: UIResponder {
 
     // MARK: The view
 
-    /// The view, loaded on first use.
+    /// The view, loaded on first use. A -loadView that sets none, as SDL's
+    /// does before it sets the view itself, leaves it nil, as on iOS, which
+    /// loads it again on the next use.
     @ObjCMethod("view")
     func view() -> UIView? {
         if state.view == nil {
             sendLoadView()
-            guard state.view != nil else {
-                uikitFatal("-loadView did not set the view controller's view")
-            }
+            guard state.view != nil else { return nil }
             performSeguesOnViewLoad()
             sendViewDidLoad()
         }
@@ -250,6 +252,10 @@ open class UIViewController: UIResponder {
     @ObjCMethod("hidesBottomBarWhenPushed") func hidesBottomBarWhenPushed() -> Bool { state.hidesBottomBarWhenPushed }
     @ObjCMethod("edgesForExtendedLayout") func edgesForExtendedLayout() -> Int { state.edgesForExtendedLayout }
     @ObjCMethod("setEdgesForExtendedLayout:") func setEdgesForExtendedLayout(_ edges: Int) { state.edgesForExtendedLayout = edges }
+    /// iOS 3's: whether the view lays out under the status bar. Views always
+    /// do here, as there is no status bar.
+    @ObjCMethod("wantsFullScreenLayout") func wantsFullScreenLayout() -> Bool { true }
+    @ObjCMethod("setWantsFullScreenLayout:") func setWantsFullScreenLayout(_ wants: Bool) {}
     @ObjCMethod("extendedLayoutIncludesOpaqueBars") func extendedLayoutIncludesOpaqueBars() -> Bool { state.extendedLayoutIncludesOpaqueBars }
     @ObjCMethod("setExtendedLayoutIncludesOpaqueBars:") func setExtendedLayoutIncludesOpaqueBars(_ includes: Bool) {
         state.extendedLayoutIncludesOpaqueBars = includes
@@ -265,13 +271,55 @@ open class UIViewController: UIResponder {
     @ObjCMethod("prefersStatusBarHidden") func prefersStatusBarHidden() -> Bool { false }
     @ObjCMethod("prefersHomeIndicatorAutoHidden") func prefersHomeIndicatorAutoHidden() -> Bool { false }
     @ObjCMethod("setNeedsStatusBarAppearanceUpdate") func setNeedsStatusBarAppearanceUpdate() {}
+    /// No screen edges defer system gestures and no pointer locks: there is
+    /// no home indicator, notification centre or pointer here.
+    @ObjCMethod("setNeedsUpdateOfScreenEdgesDeferringSystemGestures") func setNeedsUpdateOfScreenEdgesDeferringSystemGestures() {}
+    @ObjCMethod("setNeedsUpdateOfPrefersPointerLocked") func setNeedsUpdateOfPrefersPointerLocked() {}
+    @ObjCMethod("setNeedsUpdateOfSupportedInterfaceOrientations") func setNeedsUpdateOfSupportedInterfaceOrientations() {}
+    @ObjCMethod("preferredScreenEdgesDeferringSystemGestures") func preferredScreenEdgesDeferringSystemGestures() -> UInt { 0 }
+    @ObjCMethod("prefersPointerLocked") func prefersPointerLocked() -> Bool { false }
     @ObjCMethod("setNeedsUpdateOfHomeIndicatorAutoHidden") func setNeedsUpdateOfHomeIndicatorAutoHidden() {}
     @ObjCMethod("supportedInterfaceOrientations") func supportedInterfaceOrientations() -> UInt { 2 }
     /// The screen's orientation (deprecated in iOS 8).
     @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
     @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { Screen.orientation }
     @ObjCMethod("shouldAutorotate") func shouldAutorotate() -> Bool { true }
-    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+    // The rotation callbacks from before iOS 8, which subclasses still call
+    // on super. The screen never rotates, so nothing sends them.
+    @ObjCMethod("shouldAutorotateToInterfaceOrientation:")
+    func shouldAutorotate(toInterfaceOrientation orientation: Int) -> Bool { orientation == Screen.orientation }
+    @ObjCMethod("willRotateToInterfaceOrientation:duration:")
+    func willRotate(toInterfaceOrientation orientation: Int, duration: Double) {}
+    @ObjCMethod("willAnimateRotationToInterfaceOrientation:duration:")
+    func willAnimateRotation(toInterfaceOrientation orientation: Int, duration: Double) {}
+    @ObjCMethod("didRotateFromInterfaceOrientation:")
+    func didRotate(fromInterfaceOrientation orientation: Int) {}
+    /// The device's, in the appearance this controller overrides it with,
+    /// or its view's, or its parent's.
+    @ObjCMethod("traitCollection")
+    func traitCollection() -> UITraitCollection { UITraitCollection.device(style: interfaceStyle) }
+
+    var interfaceStyle: Int {
+        if state.userInterfaceStyle != 0 { return state.userInterfaceStyle }
+        if let view = state.view { return view.interfaceStyle }
+        if let parent = state.parent { return UIViewController.wrap(parent).interfaceStyle }
+        return 1
+    }
+
+    /// Nothing to do here; subclasses override it.
+    @ObjCMethod("traitCollectionDidChange:") func traitCollectionDidChange(_ previous: UITraitCollection?) {}
+
+    @ObjCMethod("overrideUserInterfaceStyle") func overrideUserInterfaceStyle() -> Int { state.userInterfaceStyle }
+    @ObjCMethod("setOverrideUserInterfaceStyle:")
+    func setOverrideUserInterfaceStyle(_ style: Int) {
+        let previous = traitCollection()
+        state.userInterfaceStyle = style
+        if let view = state.view {
+            view.announceTraitChange(from: previous)
+        } else if previous.traits.style != interfaceStyle {
+            sendTraitCollectionDidChange(previous)
+        }
+    }
 
     // MARK: Containment
 
@@ -281,10 +329,11 @@ open class UIViewController: UIResponder {
     @ObjCMethod("childViewControllers") func childViewControllers() -> NSObject { NSMutableArray.of(state.children) }
     @ObjCMethod("children") func children() -> NSObject { NSMutableArray.of(state.children) }
 
-    /// Adds `child`, sending it -willMoveToParentViewController:.
+    /// Adds `child`, sending it -willMoveToParentViewController:. Nil, which
+    /// World of Goo 2 passes, adds nothing.
     @ObjCMethod("addChildViewController:")
-    func addChild(_ child: UIViewController) {
-        if child.state.parent == objcObject { return }
+    func addChild(_ child: UIViewController?) {
+        guard let child, child.state.parent != objcObject else { return }
         child.state.parent.map(UIViewController.wrap)?.state.children.removeAll { $0.objcObject == child.objcObject }
         child.sendWillMove(toParent: self)
         state.children.append(child)
@@ -586,8 +635,25 @@ enum Presentations {
             presenterView.removeFromSuperview()
         }
         window.layoutIfNeeded()
+        // Animated, it slides up from below the screen, as Darwin's modal
+        // presentations do.
+        if animated, ViewAnimations.enabled {
+            let frame = view.state.frame
+            view.sendSetFrame(CGRect(x: frame.minX, y: bounds.height, width: frame.width, height: frame.height))
+            slide { view.sendSetFrame(frame) }
+        }
         controller.finishAppearance()
         if covers { presenter.finishAppearance() }
+    }
+
+    /// How long a presentation slides, and how: Darwin's.
+    static let slideDuration = 0.35
+
+    /// Runs `changes` so that the views' frames they set slide there.
+    static func slide(_ changes: () -> Void) {
+        ViewAnimations.contexts.append(ViewAnimations.Context(duration: slideDuration, delay: 0, curve: 2))
+        changes()
+        ViewAnimations.contexts.removeLast()
     }
 
     /// The window to present in: the presenter's view's, or, when an app
@@ -621,8 +687,19 @@ enum Presentations {
             presenter.state.coveredSuperview = nil
         }
         let container = controller.state.view?.superview()
-        controller.state.view?.removeFromSuperview()
-        container?.removeFromSuperview()
+        // Animated, it slides down off the screen first, and goes once it
+        // has; the presenter is back underneath it at once.
+        if animated, ViewAnimations.enabled, let view = controller.state.view, let container {
+            let frame = view.state.frame
+            slide { view.sendSetFrame(CGRect(x: frame.minX, y: container.state.bounds.height, width: frame.width, height: frame.height)) }
+            Deferred.run(after: slideDuration) {
+                view.removeFromSuperview()
+                container.removeFromSuperview()
+            }
+        } else {
+            controller.state.view?.removeFromSuperview()
+            container?.removeFromSuperview()
+        }
         // Unlinked first: the presenter's -viewDidAppear: may present again.
         presenter.state.presented = nil
         controller.state.presenting = nil

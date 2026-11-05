@@ -1,0 +1,6 @@
+module CCmarkGFM [system] {
+    header "shim.h"
+    link "perry-cmark-gfm-extensions"
+    link "perry-cmark-gfm"
+    export *
+}

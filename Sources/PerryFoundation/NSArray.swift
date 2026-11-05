@@ -151,6 +151,15 @@ public class NSArray: NSObject {
     @ObjCMethod("initWithArray:")
     func initialize(array other: NSArray?) -> Self { setElements(other?.elements ?? []) }
 
+    /// With copyItems, each element is the element's -copy.
+    @ObjCMethod("initWithArray:copyItems:")
+    func initialize(array other: NSArray?, copyItems: Bool) -> Self {
+        guard copyItems else { return initialize(array: other) }
+        let copies = (other?.elements ?? []).map { ObjC.send($0, Selectors.copyWithZone, nil) ?? ObjC.retain($0)! }
+        defer { copies.forEach { ObjC.release($0) } }
+        return setElements(copies)
+    }
+
     /// A property list file's array; nil when the file holds none.
     @ObjCMethod("initWithContentsOfFile:")
     func initialize(contentsOfFile path: String) -> Self? { initialize(contentsOf: URL(filePath: path)) }
@@ -171,6 +180,14 @@ public class NSArray: NSObject {
 
     @ObjCMethod("writeToURL:atomically:")
     func write(toURL url: NSURL, atomically: Bool) -> Bool { PropertyLists.write(objcObject, to: url.url, atomically: atomically) }
+
+    /// iOS 11's: written atomically, with an error when it can't be.
+    @ObjCMethod("writeToURL:error:")
+    func write(toURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> Bool {
+        if PropertyLists.write(objcObject, to: url.url, atomically: true) { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 512, description: "The file couldn’t be saved.")
+        return false
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
@@ -284,6 +301,11 @@ public class NSArray: NSObject {
         for element in elements { _ = ObjC.send(element, selector.pointer.assumingMemoryBound(to: CChar.self)) }
     }
 
+    @ObjCMethod("makeObjectsPerformSelector:withObject:")
+    func makeObjectsPerform(_ selector: ObjCSelector, with argument: ObjCObject?) {
+        for element in elements { _ = ObjC.send(element, selector.pointer.assumingMemoryBound(to: CChar.self), argument?.id) }
+    }
+
     @ObjCMethod("sortedArrayUsingSelector:")
     func sorted(using selector: ObjCSelector) -> NSArray {
         let sel = selector.pointer.assumingMemoryBound(to: CChar.self)
@@ -394,6 +416,18 @@ public class NSMutableArray: NSArray {
         for item in removed { ObjC.release(item) }
     }
 
+    /// Removes every element equal to one of the array's.
+    @ObjCMethod("removeObjectsInArray:")
+    func remove(objectsIn other: NSArray?) {
+        let keys = (other?.elements ?? []).map { ObjectKey(object: $0) }
+        guard !keys.isEmpty else { return }
+        let matches = { (object: id) in keys.contains(ObjectKey(object: object)) }
+        let removed = storage.objects.filter(matches)
+        storage.objects.removeAll(where: matches)
+        storage.enumeration.mutated()
+        for item in removed { ObjC.release(item) }
+    }
+
     /// Removes the elements that are `element` itself.
     @ObjCMethod("removeObjectIdenticalTo:")
     func remove(identical element: ObjCObject?) {
@@ -453,6 +487,16 @@ public class NSMutableArray: NSArray {
     func sort(comparator: ObjCBlock) {
         let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
         storage.objects.sort { compare(comparator.object, $0, $1) < 0 }
+        storage.enumeration.mutated()
+    }
+
+    /// NSInteger (*)(id, id, void *): NSComparisonResult, ascending -1
+    /// first.
+    @ObjCMethod("sortUsingFunction:context:")
+    func sort(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) {
+        guard let function else { return }
+        let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
+        storage.objects.sort { compare($0, $1, context) < 0 }
         storage.enumeration.mutated()
     }
 

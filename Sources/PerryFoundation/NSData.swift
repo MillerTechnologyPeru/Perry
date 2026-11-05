@@ -338,6 +338,13 @@ public class NSData: NSObject {
     @ObjCMethod("bytes")
     func bytes() -> UnsafeRawPointer? { UnsafeRawPointer(storage?.bytes) }
 
+    /// All the bytes; deprecated, as the buffer's size can't be checked.
+    @ObjCMethod("getBytes:")
+    func getBytes(_ buffer: UnsafeMutableRawPointer) {
+        guard let storage, let bytes = storage.bytes else { return }
+        memcpy(buffer, bytes, storage.count)
+    }
+
     @ObjCMethod("getBytes:length:")
     func getBytes(_ buffer: UnsafeMutableRawPointer, length: UInt) {
         guard let storage, let bytes = storage.bytes else { return }
@@ -398,6 +405,20 @@ public class NSData: NSObject {
 
     @ObjCMethod("description")
     func description() -> String { DataObjects.description(data) }
+
+    /// The bytes as one range, as they are contiguous here.
+    @ObjCMethod("enumerateByteRangesUsingBlock:")
+    func enumerateByteRanges(_ block: ObjCBlock) {
+        // The block takes the bytes, an NSRange (two words, in two
+        // registers) and a stop flag.
+        typealias Invoke = @convention(c) (id, UnsafeRawPointer?, UInt, UInt, UnsafeMutablePointer<Bool>) -> Void
+        guard let storage, storage.count > 0 else { return }
+        var stop = false
+        block.function(as: Invoke.self)(block.object, UnsafeRawPointer(storage.bytes), 0, UInt(storage.count), &stop)
+    }
+
+    /// The deprecated name, without line breaks.
+    @ObjCMethod("base64Encoding") func base64Encoding() -> String { base64(data, options: 0) }
 
     @ObjCMethod("base64EncodedStringWithOptions:")
     func base64String(options: UInt) -> String { base64(data, options: options) }
@@ -541,6 +562,16 @@ public class NSMutableData: NSData {
 /// NSNull: one immortal instance, also exported as kCFNull.
 enum Nulls {
     nonisolated(unsafe) static var null: id!
+    nonisolated(unsafe) static var nullClass: Class?
+
+    /// Whether the object is NSNull: the one instance, or another made
+    /// past +alloc (by the runtime's allocation functions, as Swift's
+    /// NSNull() is).
+    static func isNull(_ object: id?) -> Bool {
+        guard let object else { return false }
+        if object == null { return true }
+        return nullClass.map { ObjC.isKind(object, of: $0) } ?? false
+    }
 }
 
 /// CoreFoundation's name for the NSNull instance.
@@ -556,10 +587,12 @@ public final class NSNull: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryImmortal(cls)
         Nulls.null = ObjC.createInstance(cls.markingStatic().storage, 0)
+        Nulls.nullClass = cls.storage
     }
 
     @ObjCClassMethod("null") static func null() -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCClassMethod("alloc") static func alloc() -> UnsafeMutableRawPointer? { Nulls.null }
+    @ObjCClassMethod("allocWithZone:") static func alloc(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Nulls.null }
     @ObjCMethod("init") func initialize() -> Self { self }
     @ObjCMethod("description") func description() -> String { "<null>" }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSNull { self }

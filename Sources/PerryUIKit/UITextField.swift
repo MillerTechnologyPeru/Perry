@@ -17,6 +17,9 @@ final class TextFieldState: ObjectState {
     var textAlignment = 4
     /// UITextBorderStyle: none 0, line 1, bezel 2, rounded rect 3.
     var borderStyle = 0
+    /// Images drawn stretched over the bounds, in place of the border.
+    var background: UIImage?
+    var disabledBackground: UIImage?
     var clearButtonMode = 0
     var delegate: UnsafeMutableRawPointer?
     var leftView: UIView?
@@ -31,6 +34,14 @@ final class TextFieldState: ObjectState {
     var autocapitalizationType = 2
     var autocorrectionType = 0
     var spellCheckingType = 0
+    var smartQuotesType = 0
+    var smartDashesType = 0
+    var smartInsertDeleteType = 0
+    var keyboardAppearance = 0
+    var enablesReturnKeyAutomatically = false
+    var textContentType: String?
+    var passwordRules: NSObject?
+    var inlinePredictionType = 0
     var clearsOnBeginEditing = false
     var adjustsFontSizeToFitWidth = false
     var minimumFontSize: CGFloat = 0
@@ -53,6 +64,8 @@ open class UITextField: UIControl {
         field.placeholder = decoded.string("UIPlaceholder")
         field.font = decoded.object("UIFont")?.as(UIFont.self)
         field.textColor = decoded.object("UITextColor")?.as(UIColor.self)
+        field.background = decoded.object("UIBackground")?.as(UIImage.self)
+        field.disabledBackground = decoded.object("UIDisabledBackground")?.as(UIImage.self)
         if decoded.has("UITextAlignment") { field.textAlignment = decoded.integer("UITextAlignment") }
         field.borderStyle = decoded.integer("UIBorderStyle")
         field.clearButtonMode = decoded.integer("UIClearButtonMode")
@@ -93,6 +106,11 @@ open class UITextField: UIControl {
     @ObjCMethod("textAlignment") func textAlignment() -> Int { field.textAlignment }
     @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { field.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("borderStyle") func borderStyle() -> Int { field.borderStyle }
+    @ObjCMethod("background") func background() -> UIImage? { field.background }
+    @ObjCMethod("setBackground:") func setBackground(_ image: UIImage?) { field.background = image; setNeedsDisplay() }
+    @ObjCMethod("disabledBackground") func disabledBackground() -> UIImage? { field.disabledBackground }
+    @ObjCMethod("setDisabledBackground:") func setDisabledBackground(_ image: UIImage?) { field.disabledBackground = image; setNeedsDisplay() }
+
     @ObjCMethod("setBorderStyle:") func setBorderStyle(_ style: Int) { field.borderStyle = style; setNeedsDisplay() }
     @ObjCMethod("clearButtonMode") func clearButtonMode() -> Int { field.clearButtonMode }
     @ObjCMethod("setClearButtonMode:") func setClearButtonMode(_ mode: Int) { field.clearButtonMode = mode }
@@ -132,6 +150,24 @@ open class UITextField: UIControl {
     @ObjCMethod("setAutocorrectionType:") func setAutocorrectionType(_ type: Int) { field.autocorrectionType = type }
     @ObjCMethod("spellCheckingType") func spellCheckingType() -> Int { field.spellCheckingType }
     @ObjCMethod("setSpellCheckingType:") func setSpellCheckingType(_ type: Int) { field.spellCheckingType = type }
+    @ObjCMethod("smartQuotesType") func smartQuotesType() -> Int { field.smartQuotesType }
+    @ObjCMethod("setSmartQuotesType:") func setSmartQuotesType(_ type: Int) { field.smartQuotesType = type }
+    @ObjCMethod("smartDashesType") func smartDashesType() -> Int { field.smartDashesType }
+    @ObjCMethod("setSmartDashesType:") func setSmartDashesType(_ type: Int) { field.smartDashesType = type }
+    @ObjCMethod("smartInsertDeleteType") func smartInsertDeleteType() -> Int { field.smartInsertDeleteType }
+    @ObjCMethod("setSmartInsertDeleteType:") func setSmartInsertDeleteType(_ type: Int) { field.smartInsertDeleteType = type }
+    @ObjCMethod("keyboardAppearance") func keyboardAppearance() -> Int { field.keyboardAppearance }
+    @ObjCMethod("setKeyboardAppearance:") func setKeyboardAppearance(_ appearance: Int) { field.keyboardAppearance = appearance }
+    @ObjCMethod("enablesReturnKeyAutomatically") func enablesReturnKeyAutomatically() -> Bool { field.enablesReturnKeyAutomatically }
+    @ObjCMethod("setEnablesReturnKeyAutomatically:") func setEnablesReturnKeyAutomatically(_ enables: Bool) {
+        field.enablesReturnKeyAutomatically = enables
+    }
+    @ObjCMethod("textContentType") func textContentType() -> String? { field.textContentType }
+    @ObjCMethod("setTextContentType:") func setTextContentType(_ type: String?) { field.textContentType = type }
+    @ObjCMethod("passwordRules") func passwordRules() -> NSObject? { field.passwordRules }
+    @ObjCMethod("setPasswordRules:") func setPasswordRules(_ rules: NSObject?) { field.passwordRules = rules }
+    @ObjCMethod("inlinePredictionType") func inlinePredictionType() -> Int { field.inlinePredictionType }
+    @ObjCMethod("setInlinePredictionType:") func setInlinePredictionType(_ type: Int) { field.inlinePredictionType = type }
     @ObjCMethod("clearsOnBeginEditing") func clearsOnBeginEditing() -> Bool { field.clearsOnBeginEditing }
     @ObjCMethod("setClearsOnBeginEditing:") func setClearsOnBeginEditing(_ clears: Bool) { field.clearsOnBeginEditing = clears }
     @ObjCMethod("adjustsFontSizeToFitWidth") func adjustsFontSizeToFitWidth() -> Bool { field.adjustsFontSizeToFitWidth }
@@ -316,7 +352,11 @@ open class UITextField: UIControl {
     override func draw(_ rect: CGRect) {
         guard let context = Graphics.current else { return }
         let bounds = state.bounds
-        if field.borderStyle == 3 {
+        let enabled = UIControl.controlStates[objcObject].enabled
+        if let image = (!enabled ? field.disabledBackground : nil) ?? field.background {
+            // A background image replaces the border, as on iOS.
+            image.draw(in: bounds)
+        } else if field.borderStyle == 3 {
             let fill = UIColor.systemGray6()
             withExtendedLifetime(fill) {
                 let path = CG.pathCreateMutable()

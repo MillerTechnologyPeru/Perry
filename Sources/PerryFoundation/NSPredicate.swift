@@ -33,6 +33,8 @@ indirect enum PredicateNode {
     case truth(Bool)
     case comparison(Comparison)
     case compound(UInt, [PredicateNode])
+    /// predicateWithBlock:'s block, copied, which the predicate keeps.
+    case block(BlockReference)
 
     struct Comparison {
         var left: ExpressionNode
@@ -40,6 +42,22 @@ indirect enum PredicateNode {
         var operation: UInt
         var modifier: UInt
         var options: UInt
+    }
+}
+
+/// A block a predicate holds: copied when made, released with the last
+/// predicate to hold it.
+final class BlockReference {
+    let block: id
+    init?(_ block: id?) {
+        guard let copied = block.flatMap({ ObjC.retainBlock($0) }) else { return nil }
+        self.block = copied
+    }
+    deinit { ObjC.release(block) }
+
+    /// The block's answer for an object and substitution variables.
+    func evaluate(_ object: id?, _ bindings: id?) -> Bool {
+        Blocks.invoke(block, as: (@convention(c) (id, id?, id?) -> Bool).self)(block, object, bindings)
     }
 }
 
@@ -106,6 +124,8 @@ enum PredicateFormat {
             }
             if type == CompoundType.not { return "NOT " + (parts.first ?? "") }
             return parts.joined(separator: type == CompoundType.and ? " AND " : " OR ")
+        case .block(let reference):
+            return "BLOCKPREDICATE(\(reference.block))"
         }
     }
 }
@@ -489,9 +509,10 @@ enum PredicateEvaluation {
         return nil
     }
 
-    static func evaluate(_ node: PredicateNode, _ object: id?) -> Bool {
+    static func evaluate(_ node: PredicateNode, _ object: id?, bindings: id? = nil) -> Bool {
         switch node {
         case .truth(let value): return value
+        case .block(let reference): return reference.evaluate(object, bindings)
         case .compound(let type, let parts):
             if type == CompoundType.not { return !evaluate(parts[0], object) }
             if type == CompoundType.and { return parts.allSatisfy { evaluate($0, object) } }
@@ -600,6 +621,7 @@ enum Predicates {
     nonisolated(unsafe) static var compoundClass: Class!
     nonisolated(unsafe) static var trueClass: Class!
     nonisolated(unsafe) static var falseClass: Class!
+    nonisolated(unsafe) static var blockClass: Class!
     nonisolated(unsafe) static var expressionClass: Class!
 
     static func node(_ object: id?) -> PredicateNode {
@@ -617,6 +639,7 @@ enum Predicates {
         case .truth(let value): cls = value ? trueClass : falseClass
         case .comparison: cls = comparisonClass
         case .compound: cls = compoundClass
+        case .block: cls = blockClass
         }
         let object = Storage.allocate(UnsafeMutableRawPointer(cls))!
         Storage.set(object, PredicateStorage(node))
@@ -656,6 +679,12 @@ public class NSPredicate: NSObject {
     @ObjCClassMethod("predicateWithValue:")
     static func predicate(value: Bool) -> ObjCObject { ObjCObject(Predicates.object(.truth(value))) }
 
+    @ObjCClassMethod("predicateWithBlock:")
+    static func predicate(block: ObjCObject?) -> ObjCObject? {
+        guard let reference = BlockReference(block?.objcObject) else { return nil }
+        return ObjCObject(Predicates.object(.block(reference)))
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)
@@ -667,6 +696,11 @@ public class NSPredicate: NSObject {
 
     @ObjCMethod("evaluateWithObject:")
     func evaluate(with object: ObjCObject?) -> Bool { PredicateEvaluation.evaluate(node, object?.objcObject) }
+
+    @ObjCMethod("evaluateWithObject:substitutionVariables:")
+    func evaluate(with object: ObjCObject?, substitutionVariables: ObjCObject?) -> Bool {
+        PredicateEvaluation.evaluate(node, object?.objcObject, bindings: substitutionVariables?.objcObject)
+    }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSPredicate { self }
 
@@ -683,6 +717,12 @@ public class NSPredicate: NSObject {
 @ObjCClass("NSTruePredicate")
 public class NSTruePredicate: NSPredicate {
     override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.trueClass = cls.storage }
+}
+
+/// predicateWithBlock:'s predicates.
+@ObjCClass("NSBlockPredicate")
+public class NSBlockPredicate: NSPredicate {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) { Predicates.blockClass = cls.storage }
 }
 
 @ObjCClass("NSFalsePredicate")

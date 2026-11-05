@@ -8,6 +8,7 @@
 #include "PerrySystem.h"
 
 #include <malloc.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -32,16 +33,78 @@ typedef struct darwin_malloc_zone {
     size_t (*pressure_relief)(struct darwin_malloc_zone *zone, size_t goal);
 } darwin_malloc_zone;
 
+// MARK: - Sizes
+
+/// The room a request gets, as Darwin's allocator gives it and programs come
+/// to lean on without knowing: up to 1008 bytes in 16-byte steps, from there
+/// up to 15 KB in 512-byte steps, and beyond that in 16 KB pages. Darwin
+/// also keeps nothing of its own between blocks, where glibc keeps the next
+/// block's size; so a block in the 512-byte steps gets 64 bytes more here,
+/// for a write a little past Darwin's room to land in, as it would land in
+/// a neighbor there. (Monopoly copies 144 bytes into the last 72 of a
+/// 4560-byte object.)
+static size_t block_size(size_t size) {
+    if (size <= 1008) return size <= 16 ? 16 : (size + 15) & ~(size_t)15;
+    if (size <= 15 * 1024) return ((size + 511) & ~(size_t)511) + 64;
+    size_t pages = (size + 16383) & ~(size_t)16383;
+    return pages < size ? size : pages;
+}
+
+void *darwin_malloc(size_t size) DARWIN_SYMBOL(malloc);
+void *darwin_malloc(size_t size) { return malloc(block_size(size)); }
+
+void *darwin_calloc(size_t count, size_t size) DARWIN_SYMBOL(calloc);
+void *darwin_calloc(size_t count, size_t size) {
+    size_t total;
+    if (__builtin_mul_overflow(count, size, &total)) return calloc(count, size);
+    return calloc(1, block_size(total));
+}
+
+/// A size of zero gives a block of the least size, as Darwin's does, where
+/// glibc's frees the block.
+void *darwin_realloc(void *ptr, size_t size) DARWIN_SYMBOL(realloc);
+void *darwin_realloc(void *ptr, size_t size) { return realloc(ptr, block_size(size)); }
+
+int darwin_posix_memalign(void **ptr, size_t alignment, size_t size) DARWIN_SYMBOL(posix_memalign);
+int darwin_posix_memalign(void **ptr, size_t alignment, size_t size) { return posix_memalign(ptr, alignment, block_size(size)); }
+
+/// The size a multiple of the alignment still, as C asks.
+void *darwin_aligned_alloc(size_t alignment, size_t size) DARWIN_SYMBOL(aligned_alloc);
+void *darwin_aligned_alloc(size_t alignment, size_t size) {
+    size_t room = block_size(size);
+    if (alignment > 1) room = (room + alignment - 1) / alignment * alignment;
+    return aligned_alloc(alignment, room);
+}
+
+// The typed forms, which a type identifier is passed to last for typed
+// memory allocation; the identifier is not used here.
+
+void *darwin_malloc_type_malloc(size_t size, uint64_t type_id) DARWIN_SYMBOL(malloc_type_malloc);
+void *darwin_malloc_type_malloc(size_t size, uint64_t type_id) { (void)type_id; return darwin_malloc(size); }
+
+void *darwin_malloc_type_calloc(size_t count, size_t size, uint64_t type_id) DARWIN_SYMBOL(malloc_type_calloc);
+void *darwin_malloc_type_calloc(size_t count, size_t size, uint64_t type_id) { (void)type_id; return darwin_calloc(count, size); }
+
+void *darwin_malloc_type_realloc(void *ptr, size_t size, uint64_t type_id) DARWIN_SYMBOL(malloc_type_realloc);
+void *darwin_malloc_type_realloc(void *ptr, size_t size, uint64_t type_id) { (void)type_id; return darwin_realloc(ptr, size); }
+
+int darwin_malloc_type_posix_memalign(void **ptr, size_t alignment, size_t size, uint64_t type_id)
+    DARWIN_SYMBOL(malloc_type_posix_memalign);
+int darwin_malloc_type_posix_memalign(void **ptr, size_t alignment, size_t size, uint64_t type_id) {
+    (void)type_id;
+    return darwin_posix_memalign(ptr, alignment, size);
+}
+
 static size_t zone_size(darwin_malloc_zone *zone, const void *ptr) {
     (void)zone;
     return ptr ? malloc_usable_size((void *)ptr) : 0;
 }
 
-static void *zone_malloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return malloc(size); }
-static void *zone_calloc(darwin_malloc_zone *zone, size_t count, size_t size) { (void)zone; return calloc(count, size); }
+static void *zone_malloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return darwin_malloc(size); }
+static void *zone_calloc(darwin_malloc_zone *zone, size_t count, size_t size) { (void)zone; return darwin_calloc(count, size); }
 static void *zone_valloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return valloc(size); }
 static void zone_free(darwin_malloc_zone *zone, void *ptr) { (void)zone; free(ptr); }
-static void *zone_realloc(darwin_malloc_zone *zone, void *ptr, size_t size) { (void)zone; return realloc(ptr, size); }
+static void *zone_realloc(darwin_malloc_zone *zone, void *ptr, size_t size) { (void)zone; return darwin_realloc(ptr, size); }
 
 static void zone_destroy(darwin_malloc_zone *zone) {
     free((void *)zone->zone_name);
@@ -51,7 +114,7 @@ static void zone_destroy(darwin_malloc_zone *zone) {
 static unsigned zone_batch_malloc(darwin_malloc_zone *zone, size_t size, void **results, unsigned count) {
     (void)zone;
     unsigned made = 0;
-    while (made < count && (results[made] = malloc(size))) made++;
+    while (made < count && (results[made] = darwin_malloc(size))) made++;
     return made;
 }
 
@@ -63,7 +126,7 @@ static void zone_batch_free(darwin_malloc_zone *zone, void **ptrs, unsigned coun
 static void *zone_memalign(darwin_malloc_zone *zone, size_t alignment, size_t size) {
     (void)zone;
     void *ptr = NULL;
-    return posix_memalign(&ptr, alignment, size) == 0 ? ptr : NULL;
+    return darwin_posix_memalign(&ptr, alignment, size) == 0 ? ptr : NULL;
 }
 
 static void zone_free_definite_size(darwin_malloc_zone *zone, void *ptr, size_t size) { (void)zone; (void)size; free(ptr); }
@@ -140,16 +203,36 @@ void *darwin_malloc_zone_memalign(darwin_malloc_zone *zone, size_t alignment, si
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) DARWIN_SYMBOL(malloc_zone_free);
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) { zone->free(zone, ptr); }
 
+/// malloc_zone_malloc_with_options(zone, alignment, size, options): in
+/// `zone` (the default one when NULL), aligned to `alignment` if more than
+/// a pointer's, and zeroed with MALLOC_ZONE_MALLOC_OPTION_CLEAR (1). Under
+/// memory tagging another option picks the tag, which Linux has no use for.
+void *darwin_malloc_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size, uint64_t options)
+    DARWIN_SYMBOL(malloc_zone_malloc_with_options);
+void *darwin_malloc_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size, uint64_t options) {
+    if (!zone) zone = &default_zone;
+    void *block = alignment > sizeof(void *) ? zone->memalign(zone, alignment, size) : zone->malloc(zone, size);
+    if (block && (options & 1)) memset(block, 0, size);
+    return block;
+}
+
+/// The typed form, which a type identifier is passed to for typed memory
+/// allocation; the identifier is not used here.
+void *darwin_malloc_type_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size,
+                                                   uint64_t type_id, uint64_t options)
+    DARWIN_SYMBOL(malloc_type_zone_malloc_with_options);
+void *darwin_malloc_type_zone_malloc_with_options(darwin_malloc_zone *zone, size_t alignment, size_t size,
+                                                   uint64_t type_id, uint64_t options) {
+    (void)type_id;
+    return darwin_malloc_zone_malloc_with_options(zone, alignment, size, options);
+}
+
 // MARK: - Introspection
 
 /// The usable size of a block, which may exceed what was asked for.
 size_t darwin_malloc_size(const void *ptr) DARWIN_SYMBOL(malloc_size);
 size_t darwin_malloc_size(const void *ptr) { return ptr ? malloc_usable_size((void *)ptr) : 0; }
 
-/// The size a request of `size` bytes gets: glibc's chunks are 16-byte
-/// multiples, less their 8-byte header, and at least 24 bytes.
+/// The room a request of `size` bytes gets.
 size_t darwin_malloc_good_size(size_t size) DARWIN_SYMBOL(malloc_good_size);
-size_t darwin_malloc_good_size(size_t size) {
-    if (size <= 24) return 24;
-    return ((size + 8 + 15) & ~(size_t)15) - 8;
-}
+size_t darwin_malloc_good_size(size_t size) { return block_size(size); }

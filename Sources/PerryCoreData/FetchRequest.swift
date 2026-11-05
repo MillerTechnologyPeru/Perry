@@ -112,7 +112,9 @@ enum Fetching {
     static func matches(_ request: NSFetchRequest, in context: NSManagedObjectContext) throws -> [NSManagedObject] {
         let requestState = request.state
         guard let entity = requestState.entity ?? context.coordinator?.model?.entity(named: requestState.entityName) else {
-            coreDataFatal("executeFetchRequest:error: A fetch request must have an entity.")
+            let reason = context.coordinator == nil ? "the context has no persistent store coordinator"
+                : "the model has no entity named '\(requestState.entityName)'"
+            coreDataFatal("executeFetchRequest:error: A fetch request must have an entity (\(reason)).")
         }
         guard let backend = context.store?.state.backend else {
             throw error(134060, "This NSPersistentStoreCoordinator has no persistent stores.")
@@ -121,7 +123,7 @@ enum Fetching {
         let predicate = try Predicates.convert(requestState.predicate, entity)
         let sorts = (requestState.sortDescriptors?.unsafeCast(to: NSArray.self).elements ?? []).compactMap { descriptor in
             descriptor.unsafeCast(to: NSSortDescriptor.self).key().map {
-                FetchRequest.SortDescriptor(property: PropertyKey(rawValue: $0),
+                FetchRequest.SortDescriptor(property: PropertyKey(stored: $0),
                                             ascending: descriptor.unsafeCast(to: NSSortDescriptor.self).ascending())
             }
         }
@@ -245,7 +247,7 @@ enum Predicates {
 
     private static func expression(_ expression: NSExpression, kind: UInt?) throws -> FetchRequest.Predicate.Expression {
         switch expression.expressionType() {
-        case 3: return .keyPath(PredicateKeyPath(rawValue: expression.keyPath()))
+        case 3: return .keyPath(PredicateKeyPath(rawValue: PropertyKey.storedKeyPath(expression.keyPath())))
         case 0: return constant(expression.constantValue(), kind: kind)
         default:
             throw CoreDataError(error: StoreErrors.make(134060, "Unsupported expression type \(expression.expressionType())"))

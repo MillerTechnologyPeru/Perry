@@ -24,7 +24,13 @@ final class LivePixels {
     private(set) var width: Int
     private(set) var height: Int
     private(set) var generation = 0
+    /// The generation the compositor last put on the screen.
+    var shown = -1
     var opaque = false
+    /// B, G, R, A bytes rather than R, G, B, A, as Metal's drawables have
+    /// them; and rows top first rather than bottom first, as GL's.
+    var bgra = false
+    var topFirst = false
 
     init(width: Int, height: Int) {
         (self.width, self.height) = (width, height)
@@ -34,7 +40,7 @@ final class LivePixels {
     deinit { data.deallocate() }
 
     /// Takes a frame of `width` by `height` from `pixels`.
-    func update(from pixels: UnsafeRawPointer, width: Int, height: Int, opaque: Bool) {
+    func update(from pixels: UnsafeRawPointer, width: Int, height: Int, opaque: Bool, bgra: Bool = false, topFirst: Bool = false) {
         if width != self.width || height != self.height {
             data.deallocate()
             (self.width, self.height) = (width, height)
@@ -42,6 +48,8 @@ final class LivePixels {
         }
         data.copyMemory(from: pixels, byteCount: width * height * 4)
         self.opaque = opaque
+        self.bgra = bgra
+        self.topFirst = topFirst
         generation &+= 1
     }
 }
@@ -72,8 +80,16 @@ final class LayerState {
     var contents: NSObject?
     /// A GL drawable's frames, shown in place of contents.
     var livePixels: LivePixels?
+    /// GL frames shared as GPU buffers, which the compositor shows in
+    /// place of live pixels.
+    var sharedFrames: SharedFrames?
     var contentsScale: CGFloat = 1
     var contentsGravity = "resize"
+    /// Private: the color the contents are multiplied by, and whether their
+    /// alpha stands for every channel ("AAAA"), as template images are
+    /// drawn: the color where the contents are opaque.
+    var contentsMultiplyColor: CGRef?
+    var contentsSwizzle = "RGBA"
     var name: String?
     var isOpaque = false
     var needsDisplayOnBoundsChange = false
@@ -111,7 +127,7 @@ final class LayerState {
     var animations: [(key: String, animation: CAAnimation)] = []
 
     deinit {
-        for color in [backgroundColor, borderColor, shadowColor, backing] { if let color { CG.release(color) } }
+        for color in [backgroundColor, borderColor, shadowColor, backing, contentsMultiplyColor] { if let color { CG.release(color) } }
     }
 
     var transform: CGAffineTransform {
@@ -131,10 +147,15 @@ final class LayerState {
             if transform.isIdentity {
                 bounds.size = newValue.size
             } else {
-                // The size before the transform whose transformed box is the frame.
-                let unit = transform.apply(CGRect(x: 0, y: 0, width: 1, height: 1))
-                if unit.width > 0, unit.height > 0 {
-                    bounds.size = CGSize(width: newValue.width / unit.width, height: newValue.height / unit.height)
+                // The frame's box through the transform's inverse, as Core
+                // Animation takes it: a frame of 526 by 13 under a quarter
+                // turn makes bounds of 13 by 526.
+                let t = transform
+                let determinant = t.a * t.d - t.b * t.c
+                if abs(determinant) > 1e-9 {
+                    let width = (abs(t.d * newValue.width) + abs(t.c * newValue.height)) / abs(determinant)
+                    let height = (abs(t.b * newValue.width) + abs(t.a * newValue.height)) / abs(determinant)
+                    bounds.size = CGSize(width: width, height: height)
                 }
             }
             position = CGPoint(x: newValue.minX + anchorPoint.x * newValue.width, y: newValue.minY + anchorPoint.y * newValue.height)
@@ -178,7 +199,10 @@ final class LayerState {
         LayerState.setColor(&copy.backing, backing)
         (copy.shadowOpacity, copy.shadowOffset, copy.shadowRadius) = (shadowOpacity, shadowOffset, shadowRadius)
         (copy.contents, copy.contentsScale, copy.contentsGravity) = (contents, contentsScale, contentsGravity)
+        LayerState.setColor(&copy.contentsMultiplyColor, contentsMultiplyColor)
+        copy.contentsSwizzle = contentsSwizzle
         copy.livePixels = livePixels
+        copy.sharedFrames = sharedFrames
         (copy.isOpaque, copy.sublayers, copy.superlayer, copy.delegate, copy.mask) = (isOpaque, sublayers, superlayer, delegate, mask)
         (copy.backingSize, copy.displayedByDelegate, copy.allowsGroupOpacity) = (backingSize, displayedByDelegate, allowsGroupOpacity)
         return copy
@@ -316,14 +340,58 @@ open class CALayer: NSObject {
     /// image; nil pixels go back to the contents.
     @ObjCMethod("_perrySetPixels:width:height:opaque:")
     func setPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool) {
+        setPixels(pixels, width: width, height: height, opaque: opaque, layout: 0)
+    }
+
+    /// Perry's: the same with their layout, the sum of 1 for B, G, R, A
+    /// bytes and 2 for rows top first; Metal's drawables are 3, and shown
+    /// without converting them.
+    @ObjCMethod("_perrySetPixels:width:height:opaque:layout:")
+    func setPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool, layout: Int) {
         guard let pixels, width > 0, height > 0 else {
             changed { state.livePixels = nil }
             return
         }
         let live = state.livePixels ?? LivePixels(width: width, height: height)
-        live.update(from: pixels, width: width, height: height, opaque: opaque)
+        live.update(from: pixels, width: width, height: height, opaque: opaque, bgra: layout & 1 != 0, topFirst: layout & 2 != 0)
         changed { state.livePixels = live }
     }
+    /// Perry's: the dma-bufs GL frames will be shared in, as `count`
+    /// records of seven 64-bit values (fd, width, height, stride, offset,
+    /// fourcc, modifier), whose fds are duplicated; nil goes back to live
+    /// pixels and contents.
+    @ObjCMethod("_perrySetSharedBuffers:count:")
+    func setSharedBuffers(_ records: UnsafeRawPointer?, count: Int) {
+        let frames = records.flatMap { count > 0 ? SharedFrames(records: $0, count: count) : nil }
+        changed {
+            state.sharedFrames = frames
+            if frames != nil { state.livePixels = nil }
+        }
+    }
+
+    /// Perry's: the shared buffer at `slot` is getting a new frame, to
+    /// show once `fence` signals (a sync file descriptor, taken over; -1
+    /// when the frame is already finished).
+    @ObjCMethod("_perryPublishSharedSlot:opaque:fence:")
+    func publishSharedSlot(_ slot: Int, opaque: Bool, fence: Int) {
+        guard let frames = state.sharedFrames else {
+            if fence >= 0 { close(Int32(fence)) }
+            return
+        }
+        frames.publish(slot, opaque: opaque, fence: Int32(fence))
+        changed {}
+    }
+
+    /// Perry's: the shared buffers in use, which are not to be drawn
+    /// into, as a mask of their indexes; -1 when the compositor can't
+    /// import them (or there are none).
+    @ObjCMethod("_perrySharedSlotsInUse")
+    func sharedSlotsInUse() -> Int { state.sharedFrames?.slotsInUse ?? -1 }
+
+    /// Perry's: whether the compositor has shown the last GL frame, so a
+    /// newer one would be seen; true without one.
+    @ObjCMethod("_perryPixelsShown")
+    func pixelsShown() -> Bool { state.livePixels.map { $0.shown == $0.generation } ?? true }
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat) { changed { state.contentsScale = scale } }
     @ObjCMethod("contentsGravity") func contentsGravity() -> String { state.contentsGravity }
@@ -355,6 +423,14 @@ open class CALayer: NSObject {
     @ObjCMethod("rasterizationScale") func rasterizationScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setRasterizationScale:") func setRasterizationScale(_ scale: CGFloat) {}
     @ObjCMethod("contentsFormat") func contentsFormat() -> String { state.contentsFormat }
+    @ObjCMethod("contentsMultiplyColor") func contentsMultiplyColor() -> UnsafeMutableRawPointer? { state.contentsMultiplyColor }
+    @ObjCMethod("setContentsMultiplyColor:")
+    func setContentsMultiplyColor(_ color: UnsafeMutableRawPointer?) {
+        change("contentsMultiplyColor") { LayerState.setColor(&state.contentsMultiplyColor, color) }
+    }
+    @ObjCMethod("contentsSwizzle") func contentsSwizzle() -> String { state.contentsSwizzle }
+    @ObjCMethod("setContentsSwizzle:")
+    func setContentsSwizzle(_ swizzle: String?) { change("contentsSwizzle") { state.contentsSwizzle = swizzle ?? "RGBA" } }
     @ObjCMethod("setContentsFormat:") func setContentsFormat(_ format: String) { state.contentsFormat = format }
     @ObjCMethod("drawsAsynchronously") func drawsAsynchronously() -> Bool { false }
     @ObjCMethod("setDrawsAsynchronously:") func setDrawsAsynchronously(_ asynchronously: Bool) {}
@@ -874,17 +950,23 @@ extension CALayer {
     /// A CGImage, or an object with one (a UIImage), placed by the contents
     /// gravity.
     /// A GL frame drawn in software, as for snapshots: its rows are bottom
-    /// first, so drawn flipped back.
+    /// first, so drawn flipped back; a Metal drawable's are top first.
     static func drawLivePixels(_ live: LivePixels, of state: LayerState, in context: CGRef) {
         guard let space = CG.colorSpaceCreateDeviceRGB() else { return }
         defer { CG.release(space) }
-        // Premultiplied RGBA, first byte red.
-        guard let bitmap = CG.bitmapContextCreate(live.data, live.width, live.height, 8, live.width * 4, space, 1 | 0x4000) else { return }
+        // Premultiplied RGBA, first byte red; or BGRA, first byte blue
+        // (premultiplied first, 32-bit little-endian).
+        let info: UInt32 = live.bgra ? 2 | 0x2000 : 1 | 0x4000
+        guard let bitmap = CG.bitmapContextCreate(live.data, live.width, live.height, 8, live.width * 4, space, info) else { return }
         defer { CG.release(bitmap) }
         guard let image = CG.bitmapContextCreateImage(bitmap) else { return }
         defer { CG.release(image) }
         let rect = place(CGSize(width: CGFloat(live.width) / state.contentsScale, height: CGFloat(live.height) / state.contentsScale),
                          in: state.bounds, gravity: state.contentsGravity)
+        guard !live.topFirst else {
+            CG.drawFlipped(image, in: rect, context: context)
+            return
+        }
         CG.saveGState(context)
         CG.translateCTM(context, 0, rect.minY + rect.maxY)
         CG.scaleCTM(context, 1, -1)
@@ -897,8 +979,34 @@ extension CALayer {
         guard let image else { return }
         let size = CGSize(width: CGFloat(CG.imageGetWidth(image)) / state.contentsScale,
                           height: CGFloat(CG.imageGetHeight(image)) / state.contentsScale)
-        CG.drawFlipped(image, in: place(size, in: state.bounds, gravity: state.contentsGravity), context: context)
+        let rect = place(size, in: state.bounds, gravity: state.contentsGravity)
+        guard let color = state.contentsMultiplyColor ?? (state.contentsSwizzle == "AAAA" ? whiteColor : nil) else {
+            CG.drawFlipped(image, in: rect, context: context)
+            return
+        }
+        // CGBlendMode: multiply 1, source in 18, destination in 22.
+        CG.saveGState(context)
+        CG.beginTransparencyLayer(context, nil)
+        CG.drawFlipped(image, in: rect, context: context)
+        CG.setFillColorWithColor(context, color)
+        if state.contentsSwizzle == "AAAA" {
+            // The color where the contents are opaque.
+            CG.setBlendMode(context, 18)
+            CG.fillRect(context, rect)
+        } else {
+            // The contents' colors multiplied by it, in their own shape.
+            CG.setBlendMode(context, 1)
+            CG.fillRect(context, rect)
+            CG.setBlendMode(context, 22)
+            CG.drawFlipped(image, in: rect, context: context)
+        }
+        CG.endTransparencyLayer(context)
+        CG.restoreGState(context)
     }
+
+    /// Opaque white, which alpha-for-every-channel contents are without a
+    /// color to multiply.
+    nonisolated(unsafe) static let whiteColor: CGRef? = CG.colorCreateGenericGray(1, 1)
 
     /// Where content of `size` goes in `bounds` by a gravity.
     static func place(_ size: CGSize, in bounds: CGRect, gravity: String) -> CGRect {

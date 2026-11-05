@@ -4,9 +4,12 @@
 #include "PerrySystem.h"
 
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <wchar.h>
 
 // MARK: - Standard streams
 
@@ -91,16 +94,68 @@ int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) {
     return vdprintf(fd, fmt, va);
 }
 
+// Formatting into a string that is also one of the strings formatted, as in
+// snprintf(path, size, "%s.%s", path, "bin"): Darwin's gives the text the
+// arguments had when it was called, which programs lean on (Monopoly names
+// its particle files so), where glibc's clears the destination before it
+// reads them. So the text is made elsewhere, then copied in.
+
+int perry_vsnprintf(char *buf, size_t size, const char *fmt, va_list arguments) {
+    char local[512];
+    char *text = local;
+    va_list again;
+    va_copy(again, arguments);
+    int length = vsnprintf(local, sizeof local, fmt, arguments);
+    if (length >= (int)sizeof local) {
+        text = malloc((size_t)length + 1);
+        if (!text) {
+            va_end(again);
+            return -1;
+        }
+        vsnprintf(text, (size_t)length + 1, fmt, again);
+    }
+    va_end(again);
+    if (length >= 0 && size > 0 && buf) {
+        size_t copied = (size_t)length < size - 1 ? (size_t)length : size - 1;
+        memmove(buf, text, copied);
+        buf[copied] = 0;
+    }
+    if (text != local) free(text);
+    return length;
+}
+
+int perry_vsprintf(char *buf, const char *fmt, va_list arguments) { return perry_vsnprintf(buf, SIZE_MAX, fmt, arguments); }
+
+// The checked forms, which the compiler calls with the destination's size
+// when it knows it (-1 when it doesn't): the text is cut to fit, where
+// Darwin's would abort.
+
+int perry_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, va_list arguments) {
+    (void)flag;
+    return perry_vsnprintf(buf, slen, fmt, arguments);
+}
+
+int perry_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, va_list arguments) {
+    (void)flag;
+    return perry_vsnprintf(buf, maxlen < slen ? maxlen : slen, fmt, arguments);
+}
+
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsprintf);
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
-    return vsprintf(buf, fmt, va);
+    return perry_vsprintf(buf, fmt, va);
 }
 
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsnprintf);
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
-    return vsnprintf(buf, size, fmt, va);
+    return perry_vsnprintf(buf, size, fmt, va);
+}
+
+int darwin_vswprintf(wchar_t *buf, size_t size, const wchar_t *fmt, darwin_va_list ap) DARWIN_SYMBOL(vswprintf);
+int darwin_vswprintf(wchar_t *buf, size_t size, const wchar_t *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vswprintf(buf, size, fmt, va);
 }
 
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vasprintf);
@@ -133,20 +188,17 @@ void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) {
     vsyslog(priority, fmt, va);
 }
 
-int __vsprintf_chk(char *, int, size_t, const char *, va_list);
-int __vsnprintf_chk(char *, size_t, int, size_t, const char *, va_list);
-
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(__vsprintf_chk);
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
-    return __vsprintf_chk(buf, flag, slen, fmt, va);
+    return perry_vsprintf_chk(buf, flag, slen, fmt, va);
 }
 
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap)
     DARWIN_SYMBOL(__vsnprintf_chk);
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
-    return __vsnprintf_chk(buf, maxlen, flag, slen, fmt, va);
+    return perry_vsnprintf_chk(buf, maxlen, flag, slen, fmt, va);
 }
 
 // MARK: - Errors
@@ -191,7 +243,7 @@ __attribute__((constructor)) static void init_pointer_conversion(void) {
 // snprintf_l's body: the C locale's formatting, whatever locale is given.
 int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_list arguments) {
     (void)locale;
-    return vsnprintf(buf, size, fmt, arguments);
+    return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
 #if defined(__arm__)
@@ -214,3 +266,15 @@ int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt
 // putc's slow path, which Darwin's putc macro calls when the buffer fills.
 int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
 int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
+
+// A stream's position: Darwin's fpos_t is an offset, glibc's a structure.
+int darwin_fgetpos(FILE *f, int64_t *position) DARWIN_SYMBOL(fgetpos);
+int darwin_fgetpos(FILE *f, int64_t *position) {
+    off_t offset = ftello(f);
+    if (offset < 0) return -1;
+    *position = offset;
+    return 0;
+}
+
+int darwin_fsetpos(FILE *f, const int64_t *position) DARWIN_SYMBOL(fsetpos);
+int darwin_fsetpos(FILE *f, const int64_t *position) { return fseeko(f, (off_t)*position, SEEK_SET); }

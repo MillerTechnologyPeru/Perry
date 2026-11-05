@@ -10,6 +10,10 @@ final class FontState: ObjectState {
     var name = "Helvetica"
     var pointSize: CGFloat = 17
     var weight: CGFloat = 0
+    /// CTFontSymbolicTraits: italic, bold, monospace…
+    var traits: UInt32 = 0
+    /// A system font's design: "NSCTFontUIFontDesignMonospaced" and the like.
+    var design: String?
 }
 
 @ObjCClass("UIFont")
@@ -17,9 +21,34 @@ open class UIFont: NSObject {
     static let states = StateTable<FontState>()
     var state: FontState { UIFont.states[objcObject] }
 
-    static func make(name: String, size: CGFloat, weight: CGFloat = 0) -> UIFont {
+    /// What tells one font from another.
+    struct Key: Hashable {
+        var name: String
+        var size: CGFloat
+        var weight: CGFloat
+        var traits: UInt32
+        var design: String?
+    }
+
+    /// Every font made, kept for good as UIKit keeps them: asking for the
+    /// same font again gives the same object, and apps hold fonts they
+    /// never retained.
+    nonisolated(unsafe) private static var made: [Key: UIFont] = [:]
+    nonisolated(unsafe) private static let madeLock: UnsafeMutablePointer<pthread_mutex_t> = {
+        let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(lock, nil)
+        return lock
+    }()
+
+    static func make(name: String, size: CGFloat, weight: CGFloat = 0, traits: UInt32 = 0, design: String? = nil) -> UIFont {
+        let key = Key(name: name, size: size, weight: weight, traits: traits, design: design)
+        pthread_mutex_lock(madeLock)
+        defer { pthread_mutex_unlock(madeLock) }
+        if let font = made[key] { return font }
         let font = objCClass.object.allocated().unsafeCast(to: UIFont.self)
         (font.state.name, font.state.pointSize, font.state.weight) = (name, size, weight)
+        (font.state.traits, font.state.design) = (traits, design)
+        made[key] = font
         return font
     }
 
@@ -52,13 +81,17 @@ open class UIFont: NSObject {
 
     @ObjCClassMethod("systemFontOfSize:") static func systemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size) }
     @ObjCClassMethod("boldSystemFontOfSize:") static func boldSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-Semibold", size: size, weight: 0.4) }
-    @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont { make(name: ".SFUI-RegularItalic", size: size) }
+    @ObjCClassMethod("italicSystemFontOfSize:") static func italicSystemFont(size: CGFloat) -> UIFont {
+        make(name: ".SFUI-RegularItalic", size: size, traits: italicTrait)
+    }
 
     @ObjCClassMethod("systemFontOfSize:weight:")
     static func systemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
 
     @ObjCClassMethod("monospacedSystemFontOfSize:weight:")
-    static func monospacedSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: "Courier", size: size, weight: weight) }
+    static func monospacedSystemFont(size: CGFloat, weight: CGFloat) -> UIFont {
+        make(name: "Courier", size: size, weight: weight, traits: monoSpaceTrait)
+    }
 
     @ObjCClassMethod("monospacedDigitSystemFontOfSize:weight:")
     static func monospacedDigitSystemFont(size: CGFloat, weight: CGFloat) -> UIFont { make(name: ".SFUI-Regular", size: size, weight: weight) }
@@ -94,12 +127,27 @@ open class UIFont: NSObject {
     @ObjCMethod("leading") func leading() -> CGFloat { 0 }
 
     @ObjCMethod("fontWithSize:")
-    func withSize(_ size: CGFloat) -> UIFont { UIFont.make(name: state.name, size: size, weight: state.weight) }
+    func withSize(_ size: CGFloat) -> UIFont {
+        UIFont.make(name: state.name, size: size, weight: state.weight, traits: state.traits, design: state.design)
+    }
 
+    /// The font's descriptor: its name, size, weight, traits and design.
+    @ObjCMethod("fontDescriptor")
+    func fontDescriptor() -> UnsafeMutableRawPointer? { ObjCRuntime.autorelease(CTFontCopyFontDescriptor(objcObject)) }
+
+    /// The font a descriptor names, at `size`, or the descriptor's size when 0.
+    @ObjCClassMethod("fontWithDescriptor:size:")
+    static func font(descriptor: UnsafeMutableRawPointer?, size: CGFloat) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(CTFontCreateWithFontDescriptor(descriptor, size, nil))
+    }
+
+    /// Equal fonts draw the same: the same name, size, weight, traits and
+    /// design. (Attributed strings merge runs whose fonts are equal.)
     @ObjCMethod("isEqual:")
     func isEqual(_ other: NSObject?) -> Bool {
         guard let other = other?.as(UIFont.self) else { return false }
         return other.state.name == state.name && other.state.pointSize == state.pointSize
+            && other.state.weight == state.weight && other.state.traits == state.traits && other.state.design == state.design
     }
 
     @ObjCMethod("hash") func hash() -> UInt { UInt(bitPattern: state.name.hashValue) ^ UInt(state.pointSize) }
@@ -108,11 +156,26 @@ open class UIFont: NSObject {
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.font }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
-    /// The font CoreGraphics draws with: a bold or regular sans serif for
-    /// the system font.
+    var isBold: Bool {
+        state.weight >= 0.3 || state.traits & boldTrait != 0 || state.name.contains("Bold") || state.name.contains("Semibold")
+    }
+
+    var isItalic: Bool { state.traits & italicTrait != 0 || state.name.contains("Italic") || state.name.contains("Oblique") }
+
+    var isMonospaced: Bool {
+        state.design == "NSCTFontUIFontDesignMonospaced" || state.traits & monoSpaceTrait != 0
+            || ["Courier", "Menlo", "SFMono", "Monaco"].contains { state.name.contains($0) }
+    }
+
+    /// The font CoreGraphics draws with, as FontConfig names it
+    /// ("Family-Style"): for the system font and monospaced fonts, DejaVu
+    /// Sans or Sans Mono, bold and oblique as the font is; other fonts by
+    /// their names.
     var drawingName: String {
-        if state.name.hasPrefix(".SFUI") { return state.weight >= 0.3 ? "DejaVu Sans Bold" : "DejaVu Sans" }
-        return state.name
+        guard state.name.hasPrefix(".") || isMonospaced else { return state.name }
+        let family = isMonospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
+        let style = (isBold ? "Bold" : "") + (isItalic ? "Oblique" : "")
+        return style.isEmpty ? family : family + "-" + style
     }
 }
 
@@ -199,14 +262,15 @@ enum Text {
     }
 
     /// Draws one line of `text` in the current context with its top left
-    /// at `point`, in `color`, or the context's fill color.
-    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor?) {
+    /// at `point`, in `color`, or the context's fill color; filled, unless
+    /// `keepingMode` leaves the context's text drawing mode (as stroking).
+    static func draw(_ text: String, at point: CGPoint, font: UIFont, color: UIColor?, keepingMode: Bool = false) {
         guard let context = Graphics.current else { return }
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         font.drawingName.withCString { CG.selectFont(context, $0, font.state.pointSize, 1) }
         if let color { CG.setFillColorWithColor(context, color.state.makeCGColor()) }
-        CG.setTextDrawingMode(context, 0)
+        if !keepingMode { CG.setTextDrawingMode(context, 0) }
         // Glyphs are drawn upright in UIKit's flipped coordinates.
         CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0))
         CG.setTextPosition(context, point.x, point.y + font.state.pointSize * 0.95)
@@ -414,6 +478,17 @@ final class ImageViewState: ObjectState {
     var image: UIImage?
     var highlightedImage: UIImage?
     var highlighted = false
+    /// The frames of an animation, shown in turn while it runs.
+    var animationImages: [UIImage] = []
+    var highlightedAnimationImages: [UIImage] = []
+    /// How long one pass takes; 0 is a thirtieth of a second a frame.
+    var animationDuration = 0.0
+    /// How many passes; 0 repeats without end.
+    var animationRepeatCount = 0
+    var animating = false
+    var animationStart = 0.0
+    /// The frame showing, so the layer changes only when the frame does.
+    var animationFrame = -1
 }
 
 @ObjCClass("UIImageView")
@@ -447,8 +522,83 @@ open class UIImageView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
+        Frames.remove(imageState)
         UIImageView.imageStates.remove(objcObject)
         super.dealloc()
+    }
+
+    // MARK: Animation
+
+    @ObjCMethod("animationImages")
+    func animationImages() -> NSArray? { imageState.animationImages.isEmpty ? nil : NSMutableArray.of(imageState.animationImages) }
+    @ObjCMethod("setAnimationImages:")
+    func setAnimationImages(_ images: NSArray?) {
+        imageState.animationImages = images?.elements.compactMap { $0.as(UIImage.self) } ?? []
+        if imageState.animating { stopAnimating() }
+    }
+
+    @ObjCMethod("highlightedAnimationImages")
+    func highlightedAnimationImages() -> NSArray? {
+        imageState.highlightedAnimationImages.isEmpty ? nil : NSMutableArray.of(imageState.highlightedAnimationImages)
+    }
+    @ObjCMethod("setHighlightedAnimationImages:")
+    func setHighlightedAnimationImages(_ images: NSArray?) {
+        imageState.highlightedAnimationImages = images?.elements.compactMap { $0.as(UIImage.self) } ?? []
+    }
+
+    @ObjCMethod("animationDuration") func animationDuration() -> Double { imageState.animationDuration }
+    @ObjCMethod("setAnimationDuration:") func setAnimationDuration(_ duration: Double) { imageState.animationDuration = max(duration, 0) }
+    @ObjCMethod("animationRepeatCount") func animationRepeatCount() -> Int { imageState.animationRepeatCount }
+    @ObjCMethod("setAnimationRepeatCount:") func setAnimationRepeatCount(_ count: Int) { imageState.animationRepeatCount = max(count, 0) }
+    @ObjCMethod("isAnimating") func isAnimating() -> Bool { imageState.animating }
+
+    /// The frames being animated: the highlighted ones while highlighted,
+    /// if there are any.
+    private var animationFrames: [UIImage] {
+        let s = imageState
+        return s.highlighted && !s.highlightedAnimationImages.isEmpty ? s.highlightedAnimationImages : s.animationImages
+    }
+
+    /// Shows the animation's images in turn, from the first, until it has
+    /// repeated as often as asked or is stopped.
+    @ObjCMethod("startAnimating")
+    func startAnimating() {
+        let s = imageState
+        guard !animationFrames.isEmpty else { return }
+        s.animating = true
+        s.animationStart = Clock.now
+        s.animationFrame = -1
+        let object = objcObject
+        Frames.add(s, framesPerSecond: 60) { time in
+            UIImageView(objcObject: object, ownership: .retain).animate(at: time)
+        }
+        animate(at: s.animationStart)
+    }
+
+    /// Stops the animation, and shows the view's image again.
+    @ObjCMethod("stopAnimating")
+    func stopAnimating() {
+        let s = imageState
+        guard s.animating else { return }
+        s.animating = false
+        Frames.remove(s)
+        showImage()
+    }
+
+    private func animate(at time: Double) {
+        let s = imageState, frames = animationFrames
+        guard s.animating, !frames.isEmpty else { return }
+        let duration = s.animationDuration > 0 ? s.animationDuration : Double(frames.count) / 30
+        let elapsed = max(time - s.animationStart, 0)
+        if s.animationRepeatCount > 0, elapsed >= duration * Double(s.animationRepeatCount) {
+            stopAnimating()
+            return
+        }
+        let frame = min(Int(elapsed.truncatingRemainder(dividingBy: duration) / duration * Double(frames.count)), frames.count - 1)
+        guard frame != s.animationFrame else { return }
+        s.animationFrame = frame
+        show(frames[frame])
+        Display.markDirty()
     }
 
     @ObjCMethod("image") func image() -> UIImage? { imageState.image }
@@ -484,7 +634,14 @@ open class UIImageView: UIView {
     /// The layer shows the image, placed by the content mode.
     /// A template image shows in the tint color.
     private func showImage() {
-        var image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        // An animation's frames show in place of the image while it runs.
+        guard !imageState.animating else { return }
+        show(imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image)
+    }
+
+    /// Puts an image in the layer, by the content mode.
+    private func show(_ image: UIImage?) {
+        var image = image
         if let template = image, template.state.renderingMode == 2 { image = template.withTintColor(tintColor()) }
         let geometry = state.geometry!
         geometry.contents = image.flatMap { $0.state.cgImage.map { NSObject($0) } }

@@ -45,6 +45,42 @@ enum GLES {
     nonisolated(unsafe) static var viewport: (@convention(c) (Int32, Int32, Int32, Int32) -> Void)!
     nonisolated(unsafe) static var finish: (@convention(c) () -> Void)!
 
+    // OpenGL ES 3's pixel buffers and fences, for reading frames back
+    // without waiting for the GPU; nil where the host has none.
+    nonisolated(unsafe) static var flush: (@convention(c) () -> Void)?
+    nonisolated(unsafe) static var genBuffers: (@convention(c) (Int32, UnsafeMutablePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var deleteBuffers: (@convention(c) (Int32, UnsafePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var bindBuffer: (@convention(c) (UInt32, UInt32) -> Void)?
+    nonisolated(unsafe) static var bufferData: (@convention(c) (UInt32, Int, UnsafeRawPointer?, UInt32) -> Void)?
+    /// GL_EXT_buffer_storage's: storage the CPU reads from cached memory.
+    nonisolated(unsafe) static var bufferStorage: (@convention(c) (UInt32, Int, UnsafeRawPointer?, UInt32) -> Void)?
+    nonisolated(unsafe) static var mapBufferRange: (@convention(c) (UInt32, Int, Int, UInt32) -> UnsafeMutableRawPointer?)?
+    nonisolated(unsafe) static var unmapBuffer: (@convention(c) (UInt32) -> UInt8)?
+    nonisolated(unsafe) static var fenceSync: (@convention(c) (UInt32, UInt32) -> Pointer?)?
+    nonisolated(unsafe) static var clientWaitSync: (@convention(c) (Pointer?, UInt32, UInt64) -> UInt32)?
+    nonisolated(unsafe) static var deleteSync: (@convention(c) (Pointer?) -> Void)?
+    static let pixelPackBuffer: UInt32 = 0x88EB, pixelPackBufferBinding: UInt32 = 0x88ED
+
+    // Textures and EGL images, for sharing frames with the compositor as
+    // dma-bufs; nil where the host has none.
+    nonisolated(unsafe) static var getError: (@convention(c) () -> UInt32)?
+    nonisolated(unsafe) static var genTextures: (@convention(c) (Int32, UnsafeMutablePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var deleteTextures: (@convention(c) (Int32, UnsafePointer<UInt32>?) -> Void)?
+    nonisolated(unsafe) static var bindTexture: (@convention(c) (UInt32, UInt32) -> Void)?
+    nonisolated(unsafe) static var texParameteri: (@convention(c) (UInt32, UInt32, Int32) -> Void)?
+    nonisolated(unsafe) static var texImage2D: (@convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, UInt32, UInt32, UnsafeRawPointer?) -> Void)?
+    nonisolated(unsafe) static var copyTexSubImage2D: (@convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, Int32, Int32) -> Void)?
+    nonisolated(unsafe) static var createImage: (@convention(c) (Pointer?, Pointer?, UInt32, Pointer?, UnsafePointer<Int32>?) -> Pointer?)?
+    nonisolated(unsafe) static var destroyImage: (@convention(c) (Pointer?, Pointer?) -> UInt32)?
+    nonisolated(unsafe) static var exportImageQuery: (@convention(c) (Pointer?, Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?,
+                                                                      UnsafeMutablePointer<UInt64>?) -> UInt32)?
+    nonisolated(unsafe) static var exportImage: (@convention(c) (Pointer?, Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?,
+                                                                 UnsafeMutablePointer<Int32>?) -> UInt32)?
+    nonisolated(unsafe) static var createSync: (@convention(c) (Pointer?, UInt32, UnsafePointer<Int32>?) -> Pointer?)?
+    nonisolated(unsafe) static var destroySync: (@convention(c) (Pointer?, Pointer?) -> UInt32)?
+    nonisolated(unsafe) static var dupNativeFence: (@convention(c) (Pointer?, Pointer?) -> Int32)?
+    static let texture2D: UInt32 = 0x0DE1, textureBinding2D: UInt32 = 0x8069
+
     static let framebuffer: UInt32 = 0x8D40, renderbuffer: UInt32 = 0x8D41
     static let framebufferBinding: UInt32 = 0x8CA6, renderbufferBinding: UInt32 = 0x8CA7
     static let colorAttachment0: UInt32 = 0x8CE0, depthAttachment: UInt32 = 0x8D00, stencilAttachment: UInt32 = 0x8D20
@@ -87,6 +123,35 @@ enum GLES {
         readPixels = bind(gles, "glReadPixels")
         viewport = bind(gles, "glViewport")
         finish = bind(gles, "glFinish")
+        func host<T>(_ name: String) -> T? {
+            (dlsym(gles, name) ?? getProcAddress?(name)).map { unsafeBitCast($0, to: T.self) }
+        }
+        flush = host("glFlush")
+        genBuffers = host("glGenBuffers")
+        deleteBuffers = host("glDeleteBuffers")
+        bindBuffer = host("glBindBuffer")
+        bufferData = host("glBufferData")
+        bufferStorage = host("glBufferStorageEXT")
+        mapBufferRange = host("glMapBufferRange")
+        unmapBuffer = host("glUnmapBuffer")
+        fenceSync = host("glFenceSync")
+        clientWaitSync = host("glClientWaitSync")
+        deleteSync = host("glDeleteSync")
+        getError = host("glGetError")
+        genTextures = host("glGenTextures")
+        deleteTextures = host("glDeleteTextures")
+        bindTexture = host("glBindTexture")
+        texParameteri = host("glTexParameteri")
+        texImage2D = host("glTexImage2D")
+        copyTexSubImage2D = host("glCopyTexSubImage2D")
+        func extension_<T>(_ name: String) -> T? { getProcAddress?(name).map { unsafeBitCast($0, to: T.self) } }
+        createImage = extension_("eglCreateImageKHR")
+        destroyImage = extension_("eglDestroyImageKHR")
+        exportImageQuery = extension_("eglExportDMABUFImageQueryMESA")
+        exportImage = extension_("eglExportDMABUFImageMESA")
+        createSync = extension_("eglCreateSyncKHR")
+        destroySync = extension_("eglDestroySyncKHR")
+        dupNativeFence = extension_("eglDupNativeFenceFDANDROID")
         // Mesa's surfaceless platform: contexts without a window system.
         guard let display = getPlatformDisplay(0x31DD, nil, nil), initialize(display, nil, nil) != 0,
               bindAPI(0x30A0) != 0 else { return false }
@@ -102,7 +167,17 @@ enum GLES {
         guard name.hasPrefix("_gl") else { return nil }
         if name == "_glGetString" { return unsafeBitCast(getStringFunction, to: UnsafeMutableRawPointer.self) }
         load()
-        let cName = String(name.dropFirst())
+        // PVRTC textures are decoded for the host, which can't sample them.
+        if name == "_glCompressedTexImage2D" || name == "_glCompressedTexSubImage2D" {
+            PVRTC.bind(host)
+            return name == "_glCompressedTexImage2D" ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
+                : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self)
+        }
+        return host(String(name.dropFirst()))
+    }
+
+    /// The host's function by its C name.
+    static func host(_ cName: String) -> UnsafeMutableRawPointer? {
         for library in libraries {
             if let symbol = dlsym(library, cName) { return symbol }
         }
@@ -116,6 +191,7 @@ enum GLES {
     }
 
     nonisolated(unsafe) private static var strings: [String: UnsafePointer<UInt8>] = [:]
+    private static let pvrtcExtension = "GL_IMG_texture_compression_pvrtc"
 
     static func string(_ name: UInt32) -> UnsafePointer<UInt8>? {
         load()
@@ -127,6 +203,12 @@ enum GLES {
             text = "OpenGL ES \(api == 1 ? "1.1" : api == 3 ? "3.0" : "2.0") Perry (\(host ?? ""))"
         case 0x8B8C: // GL_SHADING_LANGUAGE_VERSION
             text = api == 1 ? nil : "OpenGL ES GLSL ES \(api == 3 ? "3.00" : "1.00")"
+        case 0x1F03: // GL_EXTENSIONS
+            // PVRTC textures, which every iOS GPU has, are decoded here
+            // (PVRTC): a program that finds them missing may fall back to
+            // a decoder of its own, never run on iOS.
+            guard let host else { return getString?(name) }
+            text = host.contains(pvrtcExtension) ? host : host + (host.hasSuffix(" ") || host.isEmpty ? "" : " ") + pvrtcExtension
         default:
             return getString?(name)
         }
@@ -150,7 +232,21 @@ final class GLContext {
         self.api = api
     }
 
-    deinit { _ = GLES.destroyContext?(GLES.display, handle) }
+    deinit {
+        if GLTrace.on { GLTrace.say("context \(handle) destroyed") }
+        _ = GLES.destroyContext?(GLES.display, handle)
+    }
+}
+
+/// PERRY_UIKIT_GL_TRACE=1 reports contexts made, destroyed and made
+/// current, renderbuffers given storage, and frame shares.
+enum GLTrace {
+    static let on = getenv("PERRY_UIKIT_GL_TRACE") != nil
+
+    static func say(_ text: String) {
+        let line = "perry: UIKit: GL: \(text) (thread \(String(UInt(pthread_self()), radix: 16)))\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
 }
 
 final class SharegroupState: ObjectState {
@@ -182,6 +278,8 @@ final class ContextState: ObjectState {
     /// Renderbuffers given storage from a layer, by name, and the layer
     /// (not retained).
     var drawables: [UInt32: UnsafeMutableRawPointer] = [:]
+    /// When the last frame was presented, for pacing.
+    var lastPresent = 0.0
 }
 
 /// The current context of each thread.
@@ -224,8 +322,16 @@ enum EAGLContexts {
         GLES.load()
         guard let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return context == nil }
         let handle = context?.state.context?.handle
-        guard makeCurrent(display, nil, nil, handle) != 0 else { return false }
-        lock.withLock { currents[UInt(pthread_self())] = context }
+        guard makeCurrent(display, nil, nil, handle) != 0 else {
+            if GLTrace.on { GLTrace.say("making context \(String(describing: handle)) current failed") }
+            return false
+        }
+        let previous = lock.withLock { () -> EAGLContext? in
+            let previous = currents[UInt(pthread_self())]
+            currents[UInt(pthread_self())] = context
+            return previous
+        }
+        if GLTrace.on, previous?.objcObject != context?.objcObject { GLTrace.say("context \(String(describing: handle)) current") }
         return true
     }
 }
@@ -253,6 +359,7 @@ open class EAGLContext: NSObject {
         let attributes: [Int32] = [0x3098, Int32(api), 0x3038]
         guard let handle = create(GLES.display, nil, group.state.root?.handle, attributes) else { return nil }
         let context = GLContext(handle: handle, api: Int(api))
+        if GLTrace.on { GLTrace.say("context \(handle) made, ES \(api), sharing with \(String(describing: group.state.root?.handle))") }
         if group.state.root == nil { group.state.root = context }
         state.context = context
         state.sharegroup = group
@@ -284,6 +391,9 @@ open class EAGLContext: NSObject {
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard name != 0, width > 0, height > 0 else { return false }
         GLES.renderbufferStorage(UInt32(target), layer.colorFormat, width, height)
+        if GLTrace.on {
+            GLTrace.say("renderbuffer \(name) of context \(String(describing: state.context?.handle)): \(width) by \(height) from layer \(layer.objcObject)")
+        }
         state.drawables[UInt32(name)] = layer.objcObject
         return true
     }
@@ -295,14 +405,31 @@ open class EAGLContext: NSObject {
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard let layerObject = state.drawables[UInt32(name)] else { return false }
         let layer = CALayer(objcObject: layerObject, ownership: .retain)
-        // The pixels go to the layer as they are read, for the compositor
-        // to stream to its texture: no image, and no flip on the CPU.
-        guard Renderbuffers.read(UInt32(name), into: { pixels, width, height in
-            layer.setPerryPixels(pixels, width: width, height: height, opaque: layer.isOpaque())
-        }) else { return false }
+        guard Renderbuffers.show(UInt32(name), context: state.context, layer: layer, opaque: layer.isOpaque()) else { return false }
         Display.markDirty()
         Updates.schedule()
+        pace()
         return true
+    }
+
+    /// Waits out what is left of the display's frame since the last
+    /// present, as presenting does on iOS, where a frame waits for the
+    /// display to take it. A program may count on it for its pace: one that
+    /// updates, presents and starts over at once (Monopoly) runs at the
+    /// display's rate there, and as fast as it can without this. The wait
+    /// is a little short of a frame, so that a program already paced by a
+    /// display link, whose presents come a frame apart give or take, is
+    /// not held back.
+    private func pace() {
+        let frame = 1.0 / 60 - 0.0005
+        let now = Clock.now
+        let due = state.lastPresent + frame
+        if due > now, due - now < frame {
+            usleep(UInt32((due - now) * 1_000_000))
+            state.lastPresent = due
+        } else {
+            state.lastPresent = now
+        }
     }
 
     @ObjCMethod("presentRenderbuffer:atTime:")
@@ -315,6 +442,356 @@ open class EAGLContext: NSObject {
 enum Renderbuffers {
     /// Where frames are read back, kept from one to the next.
     nonisolated(unsafe) private static var buffer: (pointer: UnsafeMutableRawPointer, bytes: Int)?
+
+    // MARK: Showing a frame
+
+    /// Shows the renderbuffer's frame in the layer, its context current:
+    /// shared with the compositor as a GPU buffer where the host can;
+    /// else read back, through a pixel buffer when that is asked for, or
+    /// at once. The pixels read back go to the layer as they are read, for
+    /// the compositor to stream to its texture: no image, and no flip on
+    /// the CPU.
+    static func show(_ renderbuffer: UInt32, context: GLContext?, layer: CALayer, opaque: Bool) -> Bool {
+        if let context {
+            if share(renderbuffer, context: context, layer: layer, opaque: opaque) { return true }
+            if present(renderbuffer, context: context, layer: layer) { return true }
+        }
+        return read(renderbuffer, into: { pixels, width, height in
+            layer.setPerryPixels(pixels, width: width, height: height, opaque: opaque)
+        })
+    }
+
+    // MARK: Sharing frames with the compositor
+
+    /// A renderbuffer's frames, shared with the compositor without passing
+    /// through the CPU: at each present the GPU copies the frame into one
+    /// of four textures, each exported once as a dma-buf, which
+    /// QuartzCore's compositor imports into SDL's context and draws. The
+    /// copy goes into a texture the layer isn't using (on screen, holding
+    /// the newest finished frame, or still being copied into), and comes
+    /// with a fence the GPU signals when it is done, before which the
+    /// compositor doesn't show it.
+    final class Share {
+        let context: UnsafeMutableRawPointer
+        let layer: CALayer
+        var framebuffer: UInt32 = 0
+        var textures: [UInt32] = []
+        var images: [UnsafeMutableRawPointer] = []
+        var width = 0, height = 0
+        /// Whether the first copy has been checked for an error.
+        var checked = false
+
+        /// One more than can be in use at once.
+        static let count = 4
+
+        init(context: UnsafeMutableRawPointer, layer: CALayer) { (self.context, self.layer) = (context, layer) }
+    }
+
+    nonisolated(unsafe) private static var shares: [Key: Share] = [:]
+    private static let sharesLock = Lock()
+
+    /// Whether frames can be shared: SDL composites with OpenGL ES, the
+    /// host has EGL's dma-buf export, and nothing has failed. Snapshots
+    /// need the pixels, and PERRY_UIKIT_ZERO_COPY=0 turns it off.
+    nonisolated(unsafe) private static var sharing: Bool?
+
+    private static func canShare() -> Bool {
+        if let sharing { return sharing }
+        let wanted = getenv("PERRY_UIKIT_ZERO_COPY").map { String(cString: $0) != "0" } ?? true
+        let functions = GLES.genTextures != nil && GLES.deleteTextures != nil && GLES.bindTexture != nil && GLES.texParameteri != nil
+            && GLES.texImage2D != nil && GLES.copyTexSubImage2D != nil && GLES.getError != nil && GLES.flush != nil
+            && GLES.createImage != nil && GLES.destroyImage != nil && GLES.exportImageQuery != nil && GLES.exportImage != nil
+        let result = wanted && functions && Snapshot.path == nil && Display.gpuRenderer == "opengles2"
+        sharing = result
+        return result
+    }
+
+    /// Stops sharing for good, after a failure: frames are read back.
+    private static func stopSharing(_ reason: String) {
+        if sharing != false { uikitWarning("GL frames can't be shared with the compositor (\(reason)); reading them back") }
+        sharing = false
+    }
+
+    /// Deletes a share's textures and images, its context current, and
+    /// takes its buffers from the layer.
+    private static func tearDown(_ share: Share) {
+        for image in share.images { _ = GLES.destroyImage?(GLES.display, image) }
+        if !share.textures.isEmpty { GLES.deleteTextures?(Int32(share.textures.count), share.textures) }
+        share.textures = []
+        share.images = []
+        share.checked = false
+        share.layer.setSharedBuffers(nil, count: 0)
+    }
+
+    /// Makes the share's textures for a size and gives the layer their
+    /// dma-bufs; false if the host can't export them.
+    private static func build(_ share: Share, width: Int32, height: Int32, alpha: Bool) -> Bool {
+        guard let genTextures = GLES.genTextures, let bindTexture = GLES.bindTexture, let texParameteri = GLES.texParameteri,
+              let texImage2D = GLES.texImage2D, let createImage = GLES.createImage, let query = GLES.exportImageQuery,
+              let export = GLES.exportImage else { return false }
+        // GL_RGBA or GL_RGB, as the renderbuffer has alpha or not: a copy
+        // can't make up a component.
+        let format: UInt32 = alpha ? 0x1908 : 0x1907
+        var records: [Int64] = []
+        var fds: [Int32] = []
+        defer { for fd in fds { close(fd) } }
+        for _ in 0..<Share.count {
+            var texture: UInt32 = 0
+            genTextures(1, &texture)
+            share.textures.append(texture)
+            bindTexture(GLES.texture2D, texture)
+            // Complete without mipmaps, as an EGL image's source must be.
+            texParameteri(GLES.texture2D, 0x2801, 0x2601)       // GL_TEXTURE_MIN_FILTER, GL_LINEAR
+            texParameteri(GLES.texture2D, 0x2800, 0x2601)       // GL_TEXTURE_MAG_FILTER
+            texParameteri(GLES.texture2D, 0x2802, 0x812F)       // GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE
+            texParameteri(GLES.texture2D, 0x2803, 0x812F)       // GL_TEXTURE_WRAP_T
+            texImage2D(GLES.texture2D, 0, Int32(format), width, height, 0, format, 0x1401, nil)
+            // EGL_GL_TEXTURE_2D_KHR, of the texture, with no attributes.
+            let attributes: [Int32] = [0x3038]
+            guard let image = createImage(GLES.display, share.context, 0x30B1, UnsafeMutableRawPointer(bitPattern: UInt(texture)), attributes) else {
+                return false
+            }
+            share.images.append(image)
+            var fourcc: Int32 = 0, planes: Int32 = 0, modifier: UInt64 = 0
+            guard query(GLES.display, image, &fourcc, &planes, &modifier) != 0, planes == 1 else { return false }
+            var fd: Int32 = -1, stride: Int32 = 0, offset: Int32 = 0
+            guard export(GLES.display, image, &fd, &stride, &offset) != 0, fd >= 0 else { return false }
+            fds.append(fd)
+            records += [Int64(fd), Int64(width), Int64(height), Int64(stride), Int64(offset), Int64(UInt32(bitPattern: fourcc)),
+                        Int64(bitPattern: modifier)]
+        }
+        (share.width, share.height) = (Int(width), Int(height))
+        // The layer duplicates the fds; these are closed on the way out.
+        records.withUnsafeBytes { share.layer.setSharedBuffers($0.baseAddress, count: Share.count) }
+        return true
+    }
+
+    /// Submits the commands so far, and returns a fence the GPU signals
+    /// when they are done: a sync file, the caller's to close. Without
+    /// native fences, waits for the GPU instead and returns -1.
+    private static func submit() -> Int32 {
+        if let createSync = GLES.createSync, let destroySync = GLES.destroySync, let dupFence = GLES.dupNativeFence,
+           let sync = createSync(GLES.display, 0x3144, nil) {         // EGL_SYNC_NATIVE_FENCE_ANDROID
+            GLES.flush?()
+            let fd = dupFence(GLES.display, sync)
+            _ = destroySync(GLES.display, sync)
+            if fd >= 0 { return fd }
+        }
+        GLES.finish()
+        return -1
+    }
+
+    /// Shares the renderbuffer's frame with the compositor, its context
+    /// current; false when it can't be, to read it back instead.
+    private static func share(_ renderbuffer: UInt32, context: GLContext, layer: CALayer, opaque: Bool) -> Bool {
+        guard canShare(), let bindTexture = GLES.bindTexture, let copy = GLES.copyTexSubImage2D, let getError = GLES.getError else {
+            return false
+        }
+        let key = Key(context: context.handle, renderbuffer: renderbuffer)
+        let share = sharesLock.withLock { () -> Share in
+            if let existing = shares[key], existing.layer.objcObject == layer.objcObject { return existing }
+            if GLTrace.on {
+                GLTrace.say("share for renderbuffer \(renderbuffer) of context \(context.handle), layer \(layer.objcObject)"
+                    + (shares[key] == nil ? "" : ", replacing one"))
+            }
+            let made = Share(context: context.handle, layer: layer)
+            shares[key] = made
+            return made
+        }
+        var previousFramebuffer: Int32 = 0, previousRenderbuffer: Int32 = 0, previousTexture: Int32 = 0
+        GLES.getIntegerv(GLES.framebufferBinding, &previousFramebuffer)
+        GLES.getIntegerv(GLES.renderbufferBinding, &previousRenderbuffer)
+        GLES.getIntegerv(GLES.textureBinding2D, &previousTexture)
+        defer {
+            bindTexture(GLES.texture2D, UInt32(previousTexture))
+            GLES.bindFramebuffer(GLES.framebuffer, UInt32(previousFramebuffer))
+            GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(previousRenderbuffer))
+        }
+        var width: Int32 = 0, height: Int32 = 0, alphaBits: Int32 = 0
+        GLES.bindRenderbuffer(GLES.renderbuffer, renderbuffer)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D42, &width)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D43, &height)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D53, &alphaBits)      // GL_RENDERBUFFER_ALPHA_SIZE
+        guard width > 0, height > 0 else { return false }
+        if share.textures.isEmpty || share.width != Int(width) || share.height != Int(height) {
+            if GLTrace.on { GLTrace.say("share for renderbuffer \(renderbuffer) of context \(context.handle) built at \(width) by \(height)") }
+            tearDown(share)
+            guard build(share, width: width, height: height, alpha: alphaBits > 0) else {
+                tearDown(share)
+                stopSharing("the host can't export textures as dma-bufs")
+                return false
+            }
+        }
+        // The buffers in use, which this frame must not go into.
+        let inUse = layer.sharedSlotsInUse()
+        guard inUse >= 0 else {
+            tearDown(share)
+            stopSharing("the compositor can't import them")
+            return false
+        }
+        guard let slot = (0..<share.textures.count).first(where: { inUse & (1 << $0) == 0 }) else { return true }
+        if share.framebuffer == 0 { GLES.genFramebuffers(1, &share.framebuffer) }
+        GLES.bindFramebuffer(GLES.framebuffer, share.framebuffer)
+        GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.colorAttachment0, GLES.renderbuffer, renderbuffer)
+        bindTexture(GLES.texture2D, share.textures[slot])
+        // The first copy is checked: the formats may not allow one. The
+        // app's own errors, read here, are lost only that once.
+        if !share.checked { while getError() != 0 {} }
+        copy(GLES.texture2D, 0, 0, 0, 0, 0, width, height)
+        if !share.checked {
+            share.checked = true
+            let error = getError()
+            guard error == 0 else {
+                tearDown(share)
+                stopSharing("copying a frame failed with GL error 0x\(String(error, radix: 16))")
+                return false
+            }
+        }
+        let fence = submit()
+        layer.publishSharedSlot(slot, opaque: opaque || alphaBits == 0, fence: Int(fence))
+        return true
+    }
+
+    // MARK: Reading back without waiting
+
+    /// A renderbuffer's frames, read back through a pixel buffer: the GPU
+    /// copies a frame into it when it is presented, behind the app's
+    /// drawing, and the layer takes it once a fence says the copy is done,
+    /// at a later present or when the compositor is about to draw. One copy
+    /// is under way at a time: frames presented meanwhile are skipped, and
+    /// the newest frame taken replaces one the screen has not shown.
+    final class Readback {
+        let context: UnsafeMutableRawPointer
+        let layer: CALayer
+        var framebuffer: UInt32 = 0
+        var buffer: UInt32 = 0
+        var bytes = 0, width = 0, height = 0
+        var fence: UnsafeMutableRawPointer?
+
+        init(context: UnsafeMutableRawPointer, layer: CALayer) { (self.context, self.layer) = (context, layer) }
+    }
+
+    private struct Key: Hashable {
+        let context: UnsafeMutableRawPointer
+        let renderbuffer: UInt32
+    }
+
+    nonisolated(unsafe) private static var readbacks: [Key: Readback] = [:]
+
+    /// Whether frames are read back through pixel buffers: with
+    /// PERRY_UIKIT_ASYNC_READBACK=1, on a host with OpenGL ES 3's, asked
+    /// once a context is current. Off by default: Mesa's freedreno copies
+    /// into a pixel buffer on the CPU, so it is slower there than reading
+    /// at once.
+    nonisolated(unsafe) private static var asynchronous: Bool?
+
+    private static func available() -> Bool {
+        if let asynchronous { return asynchronous }
+        let version = GLES.getString?(0x1F02).map { String(cString: $0) } ?? ""
+        let functions = GLES.genBuffers != nil && GLES.bindBuffer != nil && GLES.bufferData != nil && GLES.mapBufferRange != nil
+            && GLES.unmapBuffer != nil && GLES.fenceSync != nil && GLES.clientWaitSync != nil && GLES.deleteSync != nil && GLES.flush != nil
+        let wanted = getenv("PERRY_UIKIT_ASYNC_READBACK").map { String(cString: $0) == "1" } ?? false
+        let result = wanted && functions && (version.contains("OpenGL ES 3") || version.contains("OpenGL ES 4"))
+        asynchronous = result
+        return result
+    }
+
+    /// Presents the renderbuffer, its context current, without waiting for
+    /// the GPU; false when the host can't, to read it at once instead.
+    static func present(_ renderbuffer: UInt32, context: GLContext, layer: CALayer) -> Bool {
+        guard available() else { return false }
+        let key = Key(context: context.handle, renderbuffer: renderbuffer)
+        let readback = readbacks[key] ?? {
+            let made = Readback(context: context.handle, layer: layer)
+            readbacks[key] = made
+            return made
+        }()
+        take(readback)
+        // The GPU is still copying an earlier frame: this one is skipped,
+        // and a newer one is read when the copy is done.
+        guard readback.fence == nil else { return true }
+        return start(readback, renderbuffer: renderbuffer)
+    }
+
+    /// Has the GPU copy the renderbuffer into the readback's pixel buffer,
+    /// leaving the app's bindings as they were.
+    private static func start(_ readback: Readback, renderbuffer: UInt32) -> Bool {
+        guard let bindBuffer = GLES.bindBuffer, let fenceSync = GLES.fenceSync else { return false }
+        var previousFramebuffer: Int32 = 0, previousRenderbuffer: Int32 = 0, previousPack: Int32 = 0
+        GLES.getIntegerv(GLES.framebufferBinding, &previousFramebuffer)
+        GLES.getIntegerv(GLES.renderbufferBinding, &previousRenderbuffer)
+        GLES.getIntegerv(GLES.pixelPackBufferBinding, &previousPack)
+        defer {
+            bindBuffer(GLES.pixelPackBuffer, UInt32(previousPack))
+            GLES.bindFramebuffer(GLES.framebuffer, UInt32(previousFramebuffer))
+            GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(previousRenderbuffer))
+        }
+        var width: Int32 = 0, height: Int32 = 0
+        GLES.bindRenderbuffer(GLES.renderbuffer, renderbuffer)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D42, &width)
+        GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D43, &height)
+        guard width > 0, height > 0 else { return false }
+        if readback.framebuffer == 0 { GLES.genFramebuffers(1, &readback.framebuffer) }
+        GLES.bindFramebuffer(GLES.framebuffer, readback.framebuffer)
+        GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.colorAttachment0, GLES.renderbuffer, renderbuffer)
+        let bytes = Int(width) * Int(height) * 4
+        // Storage made for the CPU to read, in cached memory, where the host
+        // has it (and made again for a new size, as it can't change);
+        // otherwise a buffer for reading.
+        if bytes != readback.bytes, readback.buffer != 0, GLES.bufferStorage != nil {
+            GLES.deleteBuffers?(1, &readback.buffer)
+            readback.buffer = 0
+        }
+        if readback.buffer == 0 { GLES.genBuffers?(1, &readback.buffer) }
+        bindBuffer(GLES.pixelPackBuffer, readback.buffer)
+        if bytes != readback.bytes {
+            if let storage = GLES.bufferStorage {
+                storage(GLES.pixelPackBuffer, bytes, nil, 0x0001 | 0x0200)     // GL_MAP_READ_BIT, GL_CLIENT_STORAGE_BIT
+            } else {
+                GLES.bufferData?(GLES.pixelPackBuffer, bytes, nil, 0x88E1)    // GL_STREAM_READ
+            }
+            readback.bytes = bytes
+        }
+        // Into the bound pixel buffer, from its start.
+        GLES.readPixels(0, 0, width, height, 0x1908, 0x1401, nil)
+        (readback.width, readback.height) = (Int(width), Int(height))
+        readback.fence = fenceSync(0x9117, 0)      // GL_SYNC_GPU_COMMANDS_COMPLETE
+        GLES.flush?()
+        return readback.fence != nil
+    }
+
+    /// Gives the layer the readback's frame if the GPU has copied it, with
+    /// the readback's context current.
+    private static func take(_ readback: Readback) {
+        guard let fence = readback.fence, let wait = GLES.clientWaitSync, let bindBuffer = GLES.bindBuffer else { return }
+        let status = wait(fence, 0, 0)
+        // GL_TIMEOUT_EXPIRED: not yet.
+        guard status != 0x911B else { return }
+        GLES.deleteSync?(fence)
+        readback.fence = nil
+        // GL_ALREADY_SIGNALED, GL_CONDITION_SATISFIED; otherwise it failed.
+        guard status == 0x911A || status == 0x911C else { return }
+        var previousPack: Int32 = 0
+        GLES.getIntegerv(GLES.pixelPackBufferBinding, &previousPack)
+        bindBuffer(GLES.pixelPackBuffer, readback.buffer)
+        if let pixels = GLES.mapBufferRange?(GLES.pixelPackBuffer, 0, readback.bytes, 0x0001) {     // GL_MAP_READ_BIT
+            readback.layer.setPerryPixels(UnsafeRawPointer(pixels), width: readback.width, height: readback.height,
+                                          opaque: readback.layer.isOpaque())
+            _ = GLES.unmapBuffer?(GLES.pixelPackBuffer)
+            Display.markDirty()
+        }
+        bindBuffer(GLES.pixelPackBuffer, UInt32(previousPack))
+    }
+
+    /// Before the compositor draws: the frames the GPU has finished copying
+    /// go to their layers, each with its context current for the moment.
+    static func collect() {
+        let pending = readbacks.values.filter { $0.fence != nil }
+        guard !pending.isEmpty, let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return }
+        let saved = EAGLContexts.save()
+        for readback in pending where makeCurrent(display, nil, nil, readback.context) != 0 { take(readback) }
+        saved?.restore()
+    }
 
     /// A renderbuffer's pixels, RGBA rows bottom first as OpenGL reads
     /// them, passed to `body`; read through a framebuffer of its own so the

@@ -46,8 +46,8 @@
 VARIADIC _printf, vprintf, 1
 VARIADIC _fprintf, vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
-VARIADIC _sprintf, vsprintf, 2
-VARIADIC _snprintf, vsnprintf, 3
+VARIADIC _sprintf, perry_vsprintf, 2
+VARIADIC _snprintf, perry_vsnprintf, 3
 VARIADIC _snprintf_l, perry_vsnprintf_l, 4
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
@@ -55,8 +55,9 @@ VARIADIC _asprintf, vasprintf, 2
 VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
-VARIADIC ___sprintf_chk, __vsprintf_chk, 4
-VARIADIC ___snprintf_chk, __vsnprintf_chk, 5
+VARIADIC _swscanf, vswscanf, 2
+VARIADIC ___sprintf_chk, perry_vsprintf_chk, 4
+VARIADIC ___snprintf_chk, perry_vsnprintf_chk, 5
 VARIADIC _syslog, vsyslog, 2
 
 // The v* variants take a Darwin va_list (a plain pointer to stack slots)
@@ -90,7 +91,6 @@ PASSTHROUGH _pthread_self, pthread_self
 PASSTHROUGH _pthread_equal, pthread_equal
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_setstacksize, pthread_attr_setstacksize
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _access, access
 PASSTHROUGH _mkdir, mkdir
@@ -192,6 +192,14 @@ PASSTHROUGH _strcasestr, strcasestr
 PASSTHROUGH _writev, writev
 PASSTHROUGH _drand48, drand48
 PASSTHROUGH _wmemchr, wmemchr
+PASSTHROUGH _wmemcpy, wmemcpy
+PASSTHROUGH _wmemcmp, wmemcmp
+PASSTHROUGH _wcslen, wcslen
+PASSTHROUGH _wcscpy, wcscpy
+PASSTHROUGH _wcsncpy, wcsncpy
+PASSTHROUGH _wcscmp, wcscmp
+PASSTHROUGH _wcsncmp, wcsncmp
+PASSTHROUGH _wcschr, wcschr
 PASSTHROUGH _bzero, bzero
 PASSTHROUGH ___bzero, bzero
 PASSTHROUGH ___memcpy_chk, __memcpy_chk
@@ -203,18 +211,7 @@ PASSTHROUGH ___strncpy_chk, __strncpy_chk
 PASSTHROUGH ___strncat_chk, __strncat_chk
 
 // MARK: - stdlib
-PASSTHROUGH _malloc, malloc
-PASSTHROUGH _calloc, calloc
-PASSTHROUGH _realloc, realloc
 PASSTHROUGH _free, free
-PASSTHROUGH _posix_memalign, posix_memalign
-// Typed allocation takes the type's descriptor last, which glibc's
-// allocator has no use for.
-PASSTHROUGH _malloc_type_malloc, malloc
-PASSTHROUGH _malloc_type_calloc, calloc
-PASSTHROUGH _malloc_type_realloc, realloc
-PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
-PASSTHROUGH _aligned_alloc, aligned_alloc
 PASSTHROUGH _getenv, getenv
 PASSTHROUGH _setenv, setenv
 PASSTHROUGH _unsetenv, unsetenv
@@ -260,11 +257,26 @@ PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes
 PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _mktemp, mktemp
+PASSTHROUGH _memccpy, memccpy
+PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork
 PASSTHROUGH _execv, execv
 PASSTHROUGH _execve, execve
+PASSTHROUGH _div, div
+PASSTHROUGH _ldiv, ldiv
+PASSTHROUGH _ldexpf, ldexpf
+PASSTHROUGH _wcscat, wcscat
+PASSTHROUGH _gmtime_r, gmtime_r
+PASSTHROUGH _basename, __xpg_basename
+PASSTHROUGH _dirname, dirname
+PASSTHROUGH _alarm, alarm
+PASSTHROUGH _getdtablesize, getdtablesize
+PASSTHROUGH _setbuf, setbuf
+PASSTHROUGH _setuid, setuid
+PASSTHROUGH _setgid, setgid
 PASSTHROUGH _waitpid, waitpid
 PASSTHROUGH _setpgid, setpgid
 PASSTHROUGH _getloadavg, getloadavg
@@ -291,6 +303,23 @@ PASSTHROUGH _difftime, difftime
 PASSTHROUGH _fseek, fseek
 PASSTHROUGH _ftell, ftell
 PASSTHROUGH _localtime, localtime
+PASSTHROUGH _gmtime, gmtime
+PASSTHROUGH _mktime, mktime
+PASSTHROUGH _fseeko, fseeko
+PASSTHROUGH _ftello, ftello
+PASSTHROUGH _remove, remove
+PASSTHROUGH _system, system
+PASSTHROUGH _isdigit, isdigit
+PASSTHROUGH _isspace, isspace
+PASSTHROUGH _fnmatch, fnmatch
+PASSTHROUGH _inet_aton, inet_aton
+PASSTHROUGH _gethostbyname, gethostbyname
+PASSTHROUGH _wcstol, wcstol
+PASSTHROUGH _wcstof, wcstof
+PASSTHROUGH _wcstombs, wcstombs
+PASSTHROUGH _mbstowcs, mbstowcs
+PASSTHROUGH _ecvt, ecvt
+PASSTHROUGH _fcvt, fcvt
 PASSTHROUGH _pthread_cancel, pthread_cancel
 
 // MARK: - unistd
@@ -369,6 +398,7 @@ PASSTHROUGH _nextafter, nextafter
 // long double is double on Darwin arm64.
 PASSTHROUGH _fmodl, fmod
 PASSTHROUGH _lgammal_r, lgamma_r
+PASSTHROUGH _llroundl, llround
 
 // MARK: - compiler runtime
 // 128-bit division, which Darwin's libSystem exports (compiler-rt's).
@@ -376,6 +406,66 @@ PASSTHROUGH ___divti3, __divti3
 PASSTHROUGH ___modti3, __modti3
 PASSTHROUGH ___udivti3, __udivti3
 PASSTHROUGH ___umodti3, __umodti3
+
+// MARK: - setjmp
+
+// Darwin's arm64 jmp_buf is 192 bytes, glibc's 312, so glibc's setjmp
+// would write past the app's buffer: the callee-saved registers, the frame
+// and link registers, sp and d8-d15 are saved here in 168 of Darwin's 192.
+// The signal mask is not saved or restored.
+.macro SETJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    stp x19, x20, [x0, #0]
+    stp x21, x22, [x0, #16]
+    stp x23, x24, [x0, #32]
+    stp x25, x26, [x0, #48]
+    stp x27, x28, [x0, #64]
+    stp x29, x30, [x0, #80]
+    mov x9, sp
+    str x9, [x0, #96]
+    stp d8, d9, [x0, #104]
+    stp d10, d11, [x0, #120]
+    stp d12, d13, [x0, #136]
+    stp d14, d15, [x0, #152]
+    mov w0, #0
+    ret
+    .size \name, . - \name
+.endm
+
+// Returns from the matching setjmp with the value, or 1 for 0.
+.macro LONGJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    ldp x19, x20, [x0, #0]
+    ldp x21, x22, [x0, #16]
+    ldp x23, x24, [x0, #32]
+    ldp x25, x26, [x0, #48]
+    ldp x27, x28, [x0, #64]
+    ldp x29, x30, [x0, #80]
+    ldr x9, [x0, #96]
+    mov sp, x9
+    ldp d8, d9, [x0, #104]
+    ldp d10, d11, [x0, #120]
+    ldp d12, d13, [x0, #136]
+    ldp d14, d15, [x0, #152]
+    cmp w1, #0
+    csinc w0, w1, wzr, ne
+    ret
+    .size \name, . - \name
+.endm
+
+SETJMP _setjmp
+SETJMP __setjmp
+LONGJMP _longjmp
+LONGJMP __longjmp
+// sigsetjmp's buffer is setjmp's and one more int; the mask isn't kept.
+SETJMP _sigsetjmp
+LONGJMP _siglongjmp
 
 #endif
 

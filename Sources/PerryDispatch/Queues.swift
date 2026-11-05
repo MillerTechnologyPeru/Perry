@@ -284,7 +284,7 @@ public func dispatch_barrier_async_and_wait_f(_ queue: Object?, _ context: Unsaf
 
 @c(_dispatch_after)
 public func dispatch_after(_ when: UInt64.ObjCType, _ queue: Object?, _ block: UnsafeMutableRawPointer?) {
-    linux_dispatch_after_f(UInt64(objCArgument: when), Objects.linux(queue), Blocks.copy(block), Blocks.runOnce)
+    linux_dispatch_after_f(DarwinTime.linux(UInt64(objCArgument: when)), Objects.linux(queue), Blocks.copy(block), Blocks.runOnce)
 }
 
 @c(_dispatch_after_f)
@@ -292,7 +292,7 @@ public func dispatch_after_f(_ when: UInt64.ObjCType, _ queue: Object?, _ contex
                              _ work: Function?) {
     guard let work else { dispatchFatal("dispatch_after_f called with a NULL function") }
     let (call, run) = Blocks.pooled(context, work)
-    linux_dispatch_after_f(UInt64(objCArgument: when), Objects.linux(queue), call, run)
+    linux_dispatch_after_f(DarwinTime.linux(UInt64(objCArgument: when)), Objects.linux(queue), call, run)
 }
 
 private let applyBlock: @convention(c) (UnsafeMutableRawPointer?, Int) -> Void = { block, index in

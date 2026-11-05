@@ -152,12 +152,15 @@ open class GLKView: UIView {
         (glk.framebuffer, glk.color, glk.depth, glk.size) = (framebuffer, color, depth, size)
     }
 
-    /// Binds the drawable's framebuffer and sets the viewport to it.
+    /// Binds the drawable's framebuffer, and its color renderbuffer as
+    /// GLKit leaves it (apps read the drawable's size from the bound
+    /// renderbuffer), and sets the viewport to it.
     @ObjCMethod("bindDrawable")
     func bindDrawable() {
         guard glk.context != nil else { return }
         ensureDrawable()
         GLES.bindFramebuffer(GLES.framebuffer, glk.framebuffer)
+        GLES.bindRenderbuffer(GLES.renderbuffer, glk.color)
         GLES.viewport(0, 0, Int32(glk.size.width), Int32(glk.size.height))
     }
 
@@ -180,9 +183,10 @@ open class GLKView: UIView {
     @ObjCMethod("display")
     func display() {
         guard draw() else { return }
-        if let image = Renderbuffers.image(glk.color, opaque: state.geometry.isOpaque) {
-            state.geometry.contents = NSObject(image.object)
-            state.geometry.contentsScale = state.geometry.contentsScale
+        // Shown as a presented renderbuffer is: shared with the compositor
+        // or read back, with no image made and no flip on the CPU.
+        guard let layer = state.layer else { return }
+        if Renderbuffers.show(glk.color, context: glk.context?.state.context, layer: layer, opaque: state.geometry.isOpaque) {
             Display.markDirty()
         }
     }

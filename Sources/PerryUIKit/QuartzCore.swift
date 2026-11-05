@@ -39,6 +39,16 @@ class CALayer: NSObject {
     /// QuartzCore's: shows RGBA rows, bottom first, without an image.
     @ObjCMethod("_perrySetPixels:width:height:opaque:")
     func setPerryPixels(_ pixels: UnsafeRawPointer?, width: Int, height: Int, opaque: Bool)
+    /// QuartzCore's: whether the last of those has been on the screen.
+    @ObjCMethod("_perryPixelsShown") func pixelsShown() -> Bool
+    /// QuartzCore's: GL frames shared as dma-bufs: the buffers, as records
+    /// of seven 64-bit values each; the one getting a new frame, with the
+    /// fence that signals when it is finished (given up to the layer; -1
+    /// for none); and a mask of the ones in use (-1 when they can't be
+    /// imported).
+    @ObjCMethod("_perrySetSharedBuffers:count:") func setSharedBuffers(_ records: UnsafeRawPointer?, count: Int)
+    @ObjCMethod("_perryPublishSharedSlot:opaque:fence:") func publishSharedSlot(_ slot: Int, opaque: Bool, fence: Int)
+    @ObjCMethod("_perrySharedSlotsInUse") func sharedSlotsInUse() -> Int
     @ObjCMethod("contentsScale") func contentsScale() -> CGFloat
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat)
     @ObjCMethod("contentsGravity") func contentsGravity() -> String

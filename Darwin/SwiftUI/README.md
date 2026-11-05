@@ -49,7 +49,12 @@ The `perry` branch adds `OPENSWIFTUI_AS_SWIFTUI`, which the build script sets:
 
 The build also compiles against a copy of the SDK's UIKit interface without
 `import SwiftUICore`, which would otherwise bring in Apple's SwiftUI types
-next to these.
+next to these, and against Perry's DeveloperToolsSupport
+(`Scripts/build-framework.sh DeveloperToolsSupport`, built first if
+missing) in place of the SDK's, whose resources' names and bundles SwiftUI
+reads through Perry's SPI; SwiftUI links that framework by path.
+`_MapKit_SwiftUI` (`Scripts/build-mapkit-swiftui.sh`) compiles against this
+build's modules, so it is rebuilt after SwiftUI.
 
 Observation is Swift's own, not OpenObservation, so views track the
 `@Observable` types of apps built against Apple's SDK. SwiftUI records and
