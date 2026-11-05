@@ -11,6 +11,7 @@
 
 #if os(iOS) || os(visionOS)
 public import OpenSwiftUICore
+import UIKit
 
 // MARK: - TabViewStyle
 
@@ -114,13 +115,20 @@ public protocol IndexViewStyle {
 public struct PageIndexViewStyle: IndexViewStyle {
     /// The background style for the page index view.
     public struct BackgroundDisplayMode: Sendable {
-        public static let automatic = BackgroundDisplayMode()
-        public static let interactive = BackgroundDisplayMode()
-        public static let always = BackgroundDisplayMode()
-        public static let never = BackgroundDisplayMode()
+        enum Mode { case automatic, interactive, always, never }
+        let mode: Mode
+
+        public static let automatic = BackgroundDisplayMode(mode: .automatic)
+        public static let interactive = BackgroundDisplayMode(mode: .interactive)
+        public static let always = BackgroundDisplayMode(mode: .always)
+        public static let never = BackgroundDisplayMode(mode: .never)
     }
 
-    public init(backgroundDisplayMode: PageIndexViewStyle.BackgroundDisplayMode = .automatic) {}
+    let backgroundDisplayMode: BackgroundDisplayMode
+
+    public init(backgroundDisplayMode: PageIndexViewStyle.BackgroundDisplayMode = .automatic) {
+        self.backgroundDisplayMode = backgroundDisplayMode
+    }
 
     public func _makeBody(configuration: PageIndexViewStyle._Configuration) -> some View {
         EmptyView()
@@ -129,10 +137,10 @@ public struct PageIndexViewStyle: IndexViewStyle {
 
 @available(OpenSwiftUI_v2_0, *)
 extension View {
-    /// Sets the style for the index view within the current environment;
-    /// paged tab views' dots look the same whatever the style.
+    /// Sets the style for the index view within the current environment:
+    /// a page index style's background for paged tab views' dots.
     nonisolated public func indexViewStyle<S>(_ style: S) -> some View where S: IndexViewStyle {
-        self
+        environment(\.pageIndexBackground, (style as? PageIndexViewStyle)?.backgroundDisplayMode.mode ?? .automatic)
     }
 }
 
@@ -155,14 +163,19 @@ struct PagedTabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
         let values = children.indices.map { value(of: children[$0], at: $0) }
         let index = selection.wrappedValue.flatMap { values.firstIndex(of: $0) } ?? 0
         ZStack(alignment: .bottom) {
-            ZStack {
-                ForEach(children.indices, id: \.self) { i in
-                    if i == index {
-                        children[i]
+            // A page is the tab view's size, whatever its content wants, as
+            // a page view controller's are, and is clipped to it.
+            GeometryReader { proxy in
+                ZStack {
+                    ForEach(children.indices, id: \.self) { i in
+                        if i == index {
+                            children[i]
+                        }
                     }
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 20).onEnded { drag in
                 let next = drag.translation.width < -40 ? index + 1 : drag.translation.width > 40 ? index - 1 : index
@@ -171,16 +184,50 @@ struct PagedTabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
                 }
             })
             if showsIndex, children.count > 1 {
-                HStack(spacing: 8) {
-                    ForEach(children.indices, id: \.self) { i in
-                        Circle()
-                            .fill(i == index ? Color.primary : Color.secondary.opacity(0.4))
-                            .frame(width: 7, height: 7)
-                    }
-                }
-                .padding(.bottom, 12)
+                PageDots(count: children.count, index: index)
+                    .padding(.bottom, 12)
             }
         }
+    }
+}
+
+/// A page control's dots: UIPageControl's appearance colors, else white
+/// ones over the page; on a capsule when the index background is always
+/// shown.
+struct PageDots: View {
+    var count: Int
+    var index: Int
+    @Environment(\.pageIndexBackground) private var background
+
+    var body: some View {
+        let appearance = UIPageControl.appearance()
+        let current = appearance.currentPageIndicatorTintColor.map { Color(uiColor: $0) } ?? .white
+        let other = appearance.pageIndicatorTintColor.map { Color(uiColor: $0) } ?? Color.white.opacity(0.35)
+        HStack(spacing: 9) {
+            ForEach(0..<count, id: \.self) { i in
+                Circle()
+                    .fill(i == index ? current : other)
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background {
+            if background == .always {
+                Capsule().fill(Color.black.opacity(0.06))
+            }
+        }
+    }
+}
+
+private struct PageIndexBackgroundKey: EnvironmentKey {
+    static let defaultValue = PageIndexViewStyle.BackgroundDisplayMode.Mode.automatic
+}
+
+extension EnvironmentValues {
+    var pageIndexBackground: PageIndexViewStyle.BackgroundDisplayMode.Mode {
+        get { self[PageIndexBackgroundKey.self] }
+        set { self[PageIndexBackgroundKey.self] = newValue }
     }
 }
 #endif
