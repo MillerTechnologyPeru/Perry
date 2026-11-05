@@ -600,8 +600,25 @@ enum Presentations {
             presenterView.removeFromSuperview()
         }
         window.layoutIfNeeded()
+        // Animated, it slides up from below the screen, as Darwin's modal
+        // presentations do.
+        if animated, ViewAnimations.enabled {
+            let frame = view.state.frame
+            view.sendSetFrame(CGRect(x: frame.minX, y: bounds.height, width: frame.width, height: frame.height))
+            slide { view.sendSetFrame(frame) }
+        }
         controller.finishAppearance()
         if covers { presenter.finishAppearance() }
+    }
+
+    /// How long a presentation slides, and how: Darwin's.
+    static let slideDuration = 0.35
+
+    /// Runs `changes` so that the views' frames they set slide there.
+    static func slide(_ changes: () -> Void) {
+        ViewAnimations.contexts.append(ViewAnimations.Context(duration: slideDuration, delay: 0, curve: 2))
+        changes()
+        ViewAnimations.contexts.removeLast()
     }
 
     /// The window to present in: the presenter's view's, or, when an app
@@ -635,8 +652,19 @@ enum Presentations {
             presenter.state.coveredSuperview = nil
         }
         let container = controller.state.view?.superview()
-        controller.state.view?.removeFromSuperview()
-        container?.removeFromSuperview()
+        // Animated, it slides down off the screen first, and goes once it
+        // has; the presenter is back underneath it at once.
+        if animated, ViewAnimations.enabled, let view = controller.state.view, let container {
+            let frame = view.state.frame
+            slide { view.sendSetFrame(CGRect(x: frame.minX, y: container.state.bounds.height, width: frame.width, height: frame.height)) }
+            Deferred.run(after: slideDuration) {
+                view.removeFromSuperview()
+                container.removeFromSuperview()
+            }
+        } else {
+            controller.state.view?.removeFromSuperview()
+            container?.removeFromSuperview()
+        }
         // Unlinked first: the presenter's -viewDidAppear: may present again.
         presenter.state.presented = nil
         controller.state.presenting = nil
