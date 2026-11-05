@@ -382,6 +382,8 @@ final class QueueStorage: @unchecked Sendable {
     var suspended = false
     var name: id?
     var qualityOfService = -1
+    /// The dispatch queue operations run on, if the app set one.
+    var underlying: id?
     /// The last barrier added, which later operations wait for.
     var barrier: id?
 
@@ -393,6 +395,7 @@ final class QueueStorage: @unchecked Sendable {
     deinit {
         ObjC.release(name)
         ObjC.release(barrier)
+        ObjC.release(underlying)
     }
 
     func add(_ operation: id) {
@@ -439,7 +442,7 @@ final class QueueStorage: @unchecked Sendable {
     private func run(_ operation: id) {
         let context = UnsafeMutablePointer<(QueueStorage, id)>.allocate(capacity: 1)
         context.initialize(to: (self, ObjC.retain(operation)!))
-        let target = isMain ? Dispatch.mainQueue : Dispatch.globalQueue(dispatchQoS(qualityOfService), 0)
+        let target = isMain ? Dispatch.mainQueue : underlying ?? Dispatch.globalQueue(dispatchQoS(qualityOfService), 0)
         Dispatch.async(target, UnsafeMutableRawPointer(context), QueueStorage.runOperation)
     }
 
@@ -634,4 +637,21 @@ public final class NSOperationQueue: NSObject {
     @ObjCMethod("qualityOfService") func qualityOfService() -> Int { storage.monitor.locked { storage.qualityOfService } }
     @ObjCMethod("setQualityOfService:")
     func setQualityOfService(_ quality: Int) { storage.monitor.locked { storage.qualityOfService = quality } }
+
+    /// The dispatch queue the operations run on; the main queue's is the
+    /// main dispatch queue and can't be changed.
+    @ObjCMethod("underlyingQueue")
+    func underlyingQueue() -> UnsafeMutableRawPointer? {
+        storage.isMain ? Dispatch.mainQueue : storage.monitor.locked { storage.underlying }
+    }
+
+    @ObjCMethod("setUnderlyingQueue:")
+    func setUnderlyingQueue(_ queue: UnsafeMutableRawPointer?) {
+        guard !storage.isMain else { return }
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.underlying = ObjC.retain(queue) }
+            return storage.underlying
+        }
+        ObjC.release(old)
+    }
 }
