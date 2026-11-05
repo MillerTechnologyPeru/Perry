@@ -81,6 +81,20 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   Darwin's files are always large files. Files (`files.c`) work: `open` and
   `fcntl` through their variadic thunks, the 108-byte `struct stat` that
   Darwin's armv7 lays out with 4-byte alignment, `dirent`, errno numbers.
+  All of libSystem's sources build for armv7. pthread objects have Darwin's
+  32-bit sizes (mutex 44 bytes, condition 28, read-write lock 128, once 8)
+  and 32-bit signatures; glibc's armhf objects fit inside them. libm and the
+  rest of libc's floating point (`strtod`, `atof`, `difftime`, `drand48`)
+  are wrappers in `math.c` with `pcs("aapcs")` (`DARWIN_FLOAT_ABI`), which
+  takes and returns floating point in core registers; `jn` and `yn`, whose
+  double follows an int, take its two words. Signal handlers and
+  `thread_get_state` see Darwin's 32-bit machine context (`PerryContext.h`:
+  r0-r12, sp, lr, pc, cpsr; the VFP registers from Linux's `uc_regspace`;
+  the exception state). `dyld.c` and `mach.c` read 32-bit Mach-O headers,
+  segments and sections (`MachO.h`), and `getsectbynamefromheader` finds a
+  32-bit image's sections. The device is an iPhone 4S (`iPhone4,1`, N94AP,
+  CPU_TYPE_ARM, armv7) with 4 KB pages. `system.c` checks threads, libm,
+  signal handlers and socket options against macOS.
 - libobjc (`libPerryobjc.so` for armv7): `objc_msgSend` and its stret and super
   forms, message forwarding and block trampolines in ARM assembly; the Swift
   runtime reads metadata at the pointer width's offsets (`Layout`).
@@ -109,9 +123,7 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   offsets); the same types are the native ones on arm64. The type encodings
   are 32-bit Darwin's: `NSInteger` is `i`, `BOOL` `c`, offsets in words.
 - Not yet: exceptions (`@throw`, unwinding through registered contexts), the
-  rest of libSystem for Darwin's armv7 layouts (sockets, pthreads' types,
-  mach, the remaining files.c entry points, `math.c`), the rest of
-  Foundation's coverage, UIKit and the other providers (their `@c` entry
+  remaining files.c entry points, the rest of Foundation's coverage, UIKit and the other providers (their `@c` entry
   points with floating point, such as CoreGraphics', and `CGFloat`, which is
   a float on armv7), `objc_msgForward_stret`, and classic relocations (iOS
   before 3.1).
@@ -148,7 +160,8 @@ qemu-arm, which finds Linux's armhf libraries through `QEMU_LD_PREFIX`.
 `Scripts/docker-test.sh` sets it to the SDK, so the armv7 tests
 (`ARMv7Tests`) run with the rest wherever `perry32`, its providers and the
 fixtures are built. A machine whose kernel runs 32-bit ARM programs needs
-nothing more. The `libPerryobjc.so` SwiftPM builds runs the fixtures as the
+nothing more. qemu-user returns nothing for a 32-bit program's
+`SO_RCVTIMEO`, so under qemu the `system.c` test leaves that line out. The `libPerryobjc.so` SwiftPM builds runs the fixtures as the
 one `build-armv7-objc.sh` builds does. On a machine without the memory,
 `build-armv7-objc.sh` compiles the modules with `swiftc` directly and
 `build-host-macros.sh` the macro plugin against the swift-syntax libraries
