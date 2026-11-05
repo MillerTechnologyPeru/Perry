@@ -72,6 +72,7 @@ final class WPE: @unchecked Sendable {
     let free: @convention(c) (Pointer?) -> Void
     let errorFree: @convention(c) (Pointer) -> Void
     let quarkToString: @convention(c) (UInt32) -> UnsafePointer<CChar>?
+    let paramSpecGetName: @convention(c) (Pointer) -> UnsafePointer<CChar>?
 
     // WebKitLoadEvent.
     static let loadStarted: Int32 = 0, loadCommitted: Int32 = 2, loadFinished: Int32 = 3
@@ -169,6 +170,7 @@ final class WPE: @unchecked Sendable {
         free = bind(glib, "g_free", (@convention(c) (Pointer?) -> Void).self)
         errorFree = bind(glib, "g_error_free", (@convention(c) (Pointer) -> Void).self)
         quarkToString = bind(glib, "g_quark_to_string", (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
+        paramSpecGetName = bind(gobject, "g_param_spec_get_name", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
         guard missing.isEmpty else {
             WPE.log("WPE WebKit is incomplete (no \(missing.joined(separator: ", "))); web views load nothing")
             return nil
@@ -225,8 +227,9 @@ final class WebPage {
     /// A load failed: whether it had committed, then GError's domain, code
     /// and message.
     var loadFailed: ((Bool, String, Int, String) -> Void)?
-    /// The page's title changed.
-    var titleChanged: (() -> Void)?
+    /// A property of the page's changed, by WebKit's name: title, uri,
+    /// is-loading, estimated-load-progress.
+    var propertyChanged: ((String) -> Void)?
     /// Whether a navigation to a URI goes ahead, with its
     /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
     /// every navigation go ahead.
@@ -258,7 +261,10 @@ final class WebPage {
         handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "load-failed", unsafeBitCast(WebPage.onLoadFailed, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "decide-policy", unsafeBitCast(WebPage.onDecidePolicy, to: UnsafeRawPointer.self), data, nil, 0))
-        handlers.append(wpe.signalConnectData(view, "notify::title", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self), data, nil, 0))
+        for property in ["title", "uri", "is-loading", "estimated-load-progress"] {
+            handlers.append(wpe.signalConnectData(view, "notify::\(property)", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self),
+                                                  data, nil, 0))
+        }
         WebPage.count += 1
         WebPage.schedule()
     }
@@ -392,6 +398,13 @@ final class WebPage {
         return 1
     }
 
+    /// Runs `body` as an async function's body, awaiting what it returns;
+    /// `completion` hears its value as `evaluate`'s does.
+    func callAsync(_ body: String, completion: @escaping (Result<String?, EvaluationError>) -> Void) {
+        let box = Unmanaged.passRetained(Evaluation(page: self, completion: completion)).toOpaque()
+        wpe.webViewCallAsyncJavaScriptFunction(view, body, -1, nil, nil, nil, nil, unsafeBitCast(WebPage.onCalled, to: Pointer.self), box)
+    }
+
     struct EvaluationError: Error {
         let domain: String, code: Int, message: String
     }
@@ -454,17 +467,29 @@ final class WebPage {
         return 1
     }
 
-    private static let onNotify: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, _, data in
-        guard let data else { return }
-        Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue().titleChanged?()
+    private static let onNotify: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, spec, data in
+        guard let data, let spec else { return }
+        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
+        guard let name = page.wpe.paramSpecGetName(spec) else { return }
+        page.propertyChanged?(String(cString: name))
     }
 
     private static let onEvaluated: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
+        finish(source, result, data) { WPE.shared!.webViewEvaluateJavaScriptFinish($0, $1, $2) }
+    }
+
+    private static let onCalled: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { source, result, data in
+        finish(source, result, data) { WPE.shared!.webViewCallAsyncJavaScriptFunctionFinish($0, $1, $2) }
+    }
+
+    /// A script's value as JSON (nil for undefined), or its error.
+    private static func finish(_ source: Pointer?, _ result: Pointer?, _ data: Pointer?,
+                               _ finish: (Pointer, Pointer, UnsafeMutablePointer<Pointer?>) -> Pointer?) {
         guard let data else { return }
         let evaluation = Unmanaged<Evaluation>.fromOpaque(data).takeRetainedValue()
         let wpe = evaluation.page.wpe
         var error: Pointer?
-        guard let source, let result, let value = wpe.webViewEvaluateJavaScriptFinish(source, result, &error) else {
+        guard let source, let result, let value = finish(source, result, &error) else {
             let described = error.map(wpe.error) ?? (domain: "", code: 0, message: "")
             if let error { wpe.errorFree(error) }
             evaluation.completion(.failure(EvaluationError(domain: described.domain, code: described.code, message: described.message)))
