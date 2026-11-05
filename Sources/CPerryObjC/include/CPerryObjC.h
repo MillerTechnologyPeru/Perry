@@ -214,4 +214,14 @@ void *perry_objc_trampoline_create(void *block);
 void *perry_objc_trampoline_block(const void *imp);
 void perry_objc_trampoline_remove(void *imp);
 
+// MARK: - Exceptions on armv7
+
+// armv7's exceptions (exceptions_arm.c), which unwind through the contexts
+// Darwin's code registers with libSystem: libSystem's raise, found at
+// startup, and where an exception no handler catches goes (Swift, which
+// calls the uncaught exception handler and ends the process).
+typedef int (*perry_objc_raise_function)(void *exception);
+void perry_objc_set_unwinder(perry_objc_raise_function raise);
+_Noreturn void perry_objc_uncaught_exception(void *object);
+
 #endif
