@@ -38,4 +38,12 @@ const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *he
 // libSystem has started: by Mach-O name, in a library or (NULL) anywhere.
 extern void *(*perry_system_lookup)(const char *install_name, const char *name);
 
+#if defined(__arm__)
+#include <stddef.h>
+// Darwin armv7's varargs for a printf-style format, in glibc armhf's layout:
+// the bytes `format`'s arguments take, and, when `out` is not NULL (8-byte
+// aligned, that big), the arguments copied there from the Darwin va_list.
+size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *out);
+#endif
+
 #endif
