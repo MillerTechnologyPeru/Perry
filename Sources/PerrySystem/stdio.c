@@ -221,3 +221,15 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
 // putc's slow path, which Darwin's putc macro calls when the buffer fills.
 int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
 int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
+
+// A stream's position: Darwin's fpos_t is an offset, glibc's a structure.
+int darwin_fgetpos(FILE *f, int64_t *position) DARWIN_SYMBOL(fgetpos);
+int darwin_fgetpos(FILE *f, int64_t *position) {
+    off_t offset = ftello(f);
+    if (offset < 0) return -1;
+    *position = offset;
+    return 0;
+}
+
+int darwin_fsetpos(FILE *f, const int64_t *position) DARWIN_SYMBOL(fsetpos);
+int darwin_fsetpos(FILE *f, const int64_t *position) { return fseeko(f, (off_t)*position, SEEK_SET); }

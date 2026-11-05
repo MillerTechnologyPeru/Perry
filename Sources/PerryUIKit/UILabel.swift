@@ -21,10 +21,34 @@ open class UIFont: NSObject {
     static let states = StateTable<FontState>()
     var state: FontState { UIFont.states[objcObject] }
 
+    /// What tells one font from another.
+    struct Key: Hashable {
+        var name: String
+        var size: CGFloat
+        var weight: CGFloat
+        var traits: UInt32
+        var design: String?
+    }
+
+    /// Every font made, kept for good as UIKit keeps them: asking for the
+    /// same font again gives the same object, and apps hold fonts they
+    /// never retained.
+    nonisolated(unsafe) private static var made: [Key: UIFont] = [:]
+    nonisolated(unsafe) private static let madeLock: UnsafeMutablePointer<pthread_mutex_t> = {
+        let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(lock, nil)
+        return lock
+    }()
+
     static func make(name: String, size: CGFloat, weight: CGFloat = 0, traits: UInt32 = 0, design: String? = nil) -> UIFont {
+        let key = Key(name: name, size: size, weight: weight, traits: traits, design: design)
+        pthread_mutex_lock(madeLock)
+        defer { pthread_mutex_unlock(madeLock) }
+        if let font = made[key] { return font }
         let font = objCClass.object.allocated().unsafeCast(to: UIFont.self)
         (font.state.name, font.state.pointSize, font.state.weight) = (name, size, weight)
         (font.state.traits, font.state.design) = (traits, design)
+        made[key] = font
         return font
     }
 
