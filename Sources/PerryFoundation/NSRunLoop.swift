@@ -494,11 +494,11 @@ public func CFRunLoopObserverCreate(_ allocator: UnsafeMutableRawPointer?, _ act
                                     _ callout: (@convention(c) (UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> Void)?,
                                     _ context: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
     typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
-    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+    var info = context?.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
         info = UnsafeMutableRawPointer(mutating: retain(info))
     }
-    let release = context?.load(fromByteOffset: 24, as: RunLoopObserverStorage.Release?.self)
+    let release = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: RunLoopObserverStorage.Release?.self)
     return RunLoopObservers.make(RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: nil,
                                                         callout: callout, info: info, release: release))
 }
