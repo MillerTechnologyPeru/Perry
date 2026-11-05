@@ -133,7 +133,15 @@ enum {
     DARWIN_MADV_CAN_REUSE = 9,
 };
 
-void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) DARWIN_SYMBOL(mmap);
+#if defined(__arm__)
+// Darwin's armv7 passes mmap's 64-bit offset differently from glibc's ABI,
+// so the exported _mmap is an adapter (thunks_arm.S) that calls this.
+#define MMAP_SYMBOL __asm__("perry_mmap") __attribute__((visibility("hidden"), used))
+#else
+#define MMAP_SYMBOL DARWIN_SYMBOL(mmap)
+#endif
+
+void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) MMAP_SYMBOL;
 void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) {
     int linux_flags = flags & (MAP_SHARED | MAP_PRIVATE | MAP_FIXED);
     if (flags & DARWIN_MAP_ANON) {
