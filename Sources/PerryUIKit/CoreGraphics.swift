@@ -82,6 +82,11 @@ enum CG {
     nonisolated(unsafe) static var imageDestinationAddImage: (@convention(c) (Ref, Ref, Ref) -> Void)!
     nonisolated(unsafe) static var imageDestinationFinalize: (@convention(c) (Ref) -> Bool)!
 
+    nonisolated(unsafe) static var dataProviderCreateWithURL: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var fontCreateWithDataProvider: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var fontRelease: (@convention(c) (Ref) -> Void)!
+    nonisolated(unsafe) static var dataProviderRelease: (@convention(c) (Ref) -> Void)!
+
     /// Binds the functions through `lookup`; false if one is missing.
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) -> Bool {
         var complete = true
@@ -156,6 +161,10 @@ enum CG {
         imageDestinationCreateWithData = bind("CGImageDestinationCreateWithData")
         imageDestinationAddImage = bind("CGImageDestinationAddImage")
         imageDestinationFinalize = bind("CGImageDestinationFinalize")
+        dataProviderCreateWithURL = bind("CGDataProviderCreateWithURL")
+        fontCreateWithDataProvider = bind("CGFontCreateWithDataProvider")
+        fontRelease = bind("CGFontRelease")
+        dataProviderRelease = bind("CGDataProviderRelease")
         return complete
     }
 
