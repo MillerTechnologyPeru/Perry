@@ -36,7 +36,7 @@ open class UIFont: NSObject {
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
         let traits = decoded.integer("UIFontTraits")
-        let size = decoded.double("UIFontPointSize")
+        let size: CGFloat = decoded.double("UIFontPointSize")
         state.pointSize = size > 0 ? size
             : decoded.string("UIIBTextStyle").flatMap { UIFont.textStyleSizes[$0] }
             ?? (decoded.double("NSSize") > 0 ? decoded.double("NSSize") : 17)
