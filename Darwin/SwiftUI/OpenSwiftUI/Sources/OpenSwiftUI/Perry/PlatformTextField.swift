@@ -46,6 +46,14 @@ struct PlatformTextField: UIViewRepresentable {
         }
     }
 
+    /// The width offered, and a line of text high, as SwiftUI's own text
+    /// fields are: a field doesn't grow to the height it is offered.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView field: UITextField, context: Context) -> CGSize? {
+        let intrinsic = field.intrinsicContentSize
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? intrinsic.width
+        return CGSize(width: width, height: intrinsic.height)
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(text: text) }
 
     final class Coordinator: NSObject {
