@@ -247,7 +247,7 @@ struct ObjCMethodDeclaration {
 
     func cReturnType(selfType: String?) -> String {
         if isInitializer { return "UnsafeMutableRawPointer?" }
-        return returnType.map { "\(metatype($0, selfType: selfType)).ObjCType" } ?? "Void"
+        return returnType.map { "\(metatype($0, selfType: selfType)).ObjCResultType" } ?? "Void"
     }
 
     /// `ObjCTypeEncoding.method(…)`, or the explicit encoding.
@@ -287,14 +287,14 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
     let receiver = toClass ? "self.objCClass.pointer"
         : family == .initializer ? "ObjCRuntime.retain(objcObject)" : "objcObject"
     // A type alias cannot name Self.ObjCType; every wrapper's is an object pointer.
-    func cType(_ type: String) -> String {
-        type == "Self" || type == "Optional<Self>" ? "UnsafeMutableRawPointer?" : "\(type).ObjCType"
-    }
+    func isSelf(_ type: String) -> Bool { type == "Self" || type == "Optional<Self>" }
+    func cType(_ type: String) -> String { isSelf(type) ? "UnsafeMutableRawPointer?" : "\(type).ObjCType" }
+    func cResultType(_ type: String) -> String { isSelf(type) ? "UnsafeMutableRawPointer?" : "\(type).ObjCResultType" }
     let cArguments = ["UnsafeMutableRawPointer?", "UnsafeRawPointer?"] + arguments.map { cType($0.type) }
     let send = "message(" + ([receiver, "ObjCRuntime.selector(\(literal(selector)))"]
         + arguments.map { "\($0.value).objCArgument()" }).joined(separator: ", ") + ")"
     var statements = [
-        "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cType) ?? "Void")",
+        "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cResultType) ?? "Void")",
         "let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)",
     ]
     let conversion = family.returnsOwned ? "owned" : "returnValue"
@@ -304,7 +304,7 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
     } else if returnType == "Optional<Self>" {
         statements.append("return \(send).map { Self.objCValue(\(conversion): $0) }")
     } else if let returnType {
-        statements.append("return \(returnType).objCValue(\(conversion): \(send))")
+        statements.append("return \(returnType).objCValue(\(conversion): \(returnType).objCArgumentForm(ofResult: \(send)))")
     } else {
         statements.append(send)
     }
@@ -444,9 +444,9 @@ public struct ObjCClassMacro: MemberMacro {
             target = "this"
         }
         let call = "\(target).\(method.name)(\(method.callArguments(values)))"
-        if method.returnType != nil {
+        if let returnType = method.returnType {
             let conversion = method.family.returnsOwned ? "objCOwnedReturnValue" : "objCReturnValue"
-            body.append("return \(call).\(conversion)()")
+            body.append("return \(metatype(returnType, selfType: typeName)).objCResult(\(call).\(conversion)())")
         } else {
             body.append(call)
         }
