@@ -209,6 +209,8 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
+//   …/Metal.framework/Metal                               -> QuartzCore
+//   …/Network.framework/Network                           -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
@@ -262,6 +264,18 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // AVFAudio's classes are AVFoundation's, which re-exports them.
     if (strstr(install_name, "/AVFAudio.framework/")) {
         snprintf(out, out_size, "AVFoundation");
+        return true;
+    }
+    // Network's path monitor reads the routes SystemConfiguration's
+    // reachability does.
+    if (strstr(install_name, "/Network.framework/")) {
+        snprintf(out, out_size, "SystemConfiguration");
+        return true;
+    }
+    // Metal, without a device: QuartzCore, which has its layers, answers
+    // that there is none.
+    if (strstr(install_name, "/Metal.framework/")) {
+        snprintf(out, out_size, "QuartzCore");
         return true;
     }
     // ImageIO's images are CoreGraphics' own.
