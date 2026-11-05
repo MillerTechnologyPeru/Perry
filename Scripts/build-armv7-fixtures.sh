@@ -65,8 +65,10 @@ for file in $fixtures; do
         grep -q NSString "$root/Tests/Fixtures/$file" && libs="$libs $out/Foundation/Foundation.dylib" ;;
     *) flags=""; libs="$out/libSystem/libSystem.dylib" ;;
     esac
+    # softfp, as Apple's armv7 code is built: VFP instructions, with floating
+    # point passed in core registers.
     # shellcheck disable=SC2086
-    "$llvm/clang" -target "armv7-apple-ios$min" -mfloat-abi=soft -fno-stack-protector $flags -c "$root/Tests/Fixtures/$file" \
+    "$llvm/clang" -target "armv7-apple-ios$min" -mfloat-abi=softfp -mfpu=vfpv3 -fno-stack-protector $flags -c "$root/Tests/Fixtures/$file" \
         -o "$out/$name.o" -isystem "$root/Tests/Fixtures/include"
     # Before iOS 6 an executable starts at crt1's start; Perry calls _main.
     entry=""
