@@ -12,6 +12,9 @@ final class ImageState: ObjectState {
     /// UIImageRenderingMode: automatic 0, original 1, template 2.
     var renderingMode = 0
     var capInsets = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    /// The SF Symbol this image draws (Symbols), and its configuration.
+    var symbolName: String?
+    var configuration: UIImageConfiguration?
 
     deinit { if let cgImage { CG.release(cgImage) } }
 
@@ -154,7 +157,9 @@ open class UIImage: NSObject {
     @ObjCClassMethod("systemImageNamed:") static func systemImage(named name: String) -> UIImage? { Symbols.image(named: name) }
 
     @ObjCClassMethod("systemImageNamed:withConfiguration:")
-    static func systemImage(named name: String, configuration: NSObject?) -> UIImage? { Symbols.image(named: name) }
+    static func systemImage(named name: String, configuration: NSObject?) -> UIImage? {
+        Symbols.image(named: name, configuration: configuration?.as(UIImageConfiguration.self))
+    }
 
     @ObjCClassMethod("systemImageNamed:compatibleWithTraitCollection:")
     static func systemImage(named name: String, compatibleWith traits: NSObject?) -> UIImage? { Symbols.image(named: name) }
@@ -196,7 +201,27 @@ open class UIImage: NSObject {
     @ObjCMethod("imageOrientation") func imageOrientation() -> Int { state.orientation }
     @ObjCMethod("renderingMode") func renderingMode() -> Int { state.renderingMode }
     @ObjCMethod("capInsets") func capInsets() -> UIEdgeInsets { state.capInsets }
-    @ObjCMethod("isSymbolImage") func isSymbolImage() -> Bool { false }
+    @ObjCMethod("isSymbolImage") func isSymbolImage() -> Bool { state.symbolName != nil }
+    /// A symbol's drawing fills its square, with no margins or baseline.
+    @ObjCMethod("contentInsets") func contentInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+    @ObjCMethod("hasBaseline") func hasBaseline() -> Bool { false }
+    @ObjCMethod("baselineOffsetFromBottom") func baselineOffsetFromBottom() -> CGFloat { 0 }
+    @ObjCMethod("configuration") func configuration() -> UIImageConfiguration? { state.configuration }
+    @ObjCMethod("symbolConfiguration") func symbolConfiguration() -> UIImageConfiguration? {
+        state.configuration?.as(UIImageSymbolConfiguration.self).map { $0 }
+    }
+
+    /// A symbol drawn again for the configuration; other images are
+    /// themselves.
+    @ObjCMethod("imageWithConfiguration:")
+    func withConfiguration(_ configuration: UIImageConfiguration?) -> UIImage {
+        guard let name = state.symbolName else { return self }
+        let combined = state.configuration.map { $0.applying(configuration) } ?? configuration
+        return Symbols.image(named: name, configuration: combined) ?? self
+    }
+
+    @ObjCMethod("imageByApplyingSymbolConfiguration:")
+    func applyingSymbolConfiguration(_ configuration: UIImageConfiguration?) -> UIImage? { withConfiguration(configuration) }
 
     /// A copy of the image with another rendering mode.
     @ObjCMethod("imageWithRenderingMode:")
@@ -204,6 +229,7 @@ open class UIImage: NSObject {
         let image = UIImage.make(objCClass, cgImage: state.cgImage, scale: state.scale, orientation: state.orientation)
         image.state.renderingMode = mode
         image.state.capInsets = state.capInsets
+        (image.state.symbolName, image.state.configuration) = (state.symbolName, state.configuration)
         return image
     }
 
