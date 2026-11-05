@@ -25,6 +25,13 @@ extension NSObject {
     func sendDidFailProvisionalNavigation(_ view: NSObject, _ navigation: NSObject, _ error: NSObject)
 }
 
+/// WebKit's error domain, which the WKError Swift makes of WebKit's header
+/// reads.
+@ObjCConstants
+enum WebKitErrorConstants {
+    static let WKErrorDomain = "WKErrorDomain"
+}
+
 enum WebErrors {
     /// NSURLErrorNotConnectedToInternet, as without a network.
     static func offline() -> NSErrorObject { NSErrorObject.make(domain: "NSURLErrorDomain", code: -1009, userInfo: nil) }
