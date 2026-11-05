@@ -199,9 +199,35 @@ enum Display {
                 ObjCRuntime.autoreleasepool { draw() }
             }
         }
-        guard let dispatchAfter, let dispatchTime else { return }
-        dispatchAfter(dispatchTime(0, 16_000_000), Updates.mainQueue, nil) { _ in Display.tick() }
+        startTimer()
     }
+
+    nonisolated(unsafe) private static var ticker: DisplayTicker?
+
+    /// Ticks sixty times a second from a timer on the main run loop in its
+    /// common modes, not from the main queue: an app may run the run loop
+    /// inside a block on the main queue (World of Goo 2 waits for frames
+    /// so), and the main queue cannot run another block then.
+    private static func startTimer() {
+        guard ticker == nil else { return }
+        let ticker = DisplayTicker()
+        Display.ticker = ticker
+        typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double, UnsafeMutableRawPointer?,
+                                         UnsafeRawPointer?, UnsafeMutableRawPointer?, Bool) -> UnsafeMutableRawPointer?
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        typealias Add = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?,
+                                        UnsafeMutableRawPointer?) -> Void
+        let timer = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(
+            ObjCRuntime.classObject("NSTimer"), ObjCRuntime.selector("timerWithTimeInterval:target:selector:userInfo:repeats:"),
+            1.0 / 60, ticker.objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
+        let main = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)(ObjCRuntime.classObject("NSRunLoop"),
+                                                                   ObjCRuntime.selector("mainRunLoop"))
+        unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(main, ObjCRuntime.selector("addTimer:forMode:"), timer,
+                                                       "kCFRunLoopCommonModes".objCArgument())
+    }
+
+    /// The display timer's action.
+    static func timerTick() { tick() }
 
     private static func handle(_ event: [UInt64]) {
         event.withUnsafeBytes { raw in
@@ -312,4 +338,11 @@ enum Animations {
         for animation in finished { animation.completion() }
         if !finished.isEmpty { Updates.schedule() }
     }
+}
+
+/// The target of the display's timer.
+@ObjCClass("_PerryDisplayTicker")
+open class DisplayTicker: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCMethod("_perryTick:") func tick(_ timer: NSObject?) { Display.timerTick() }
 }
