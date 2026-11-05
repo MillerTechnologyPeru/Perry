@@ -11,18 +11,36 @@ public typealias CGFloat = Double
 
 // CoreGraphics' geometry as Objective-C values, and UIKit's string forms.
 
-extension CGPoint: ObjCScalar {
+extension CGPoint: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords2
+    public static var objCTypeEncoding: String { "{CGPoint=ff}" }
+    #else
+    public typealias ObjCType = CGPoint
     public static var objCTypeEncoding: String { "{CGPoint=dd}" }
+    #endif
     static let zero = CGPoint(x: 0, y: 0)
 }
 
-extension CGSize: ObjCScalar {
+extension CGSize: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords2
+    public static var objCTypeEncoding: String { "{CGSize=ff}" }
+    #else
+    public typealias ObjCType = CGSize
     public static var objCTypeEncoding: String { "{CGSize=dd}" }
+    #endif
     static let zero = CGSize(width: 0, height: 0)
 }
 
-extension CGRect: ObjCScalar {
+extension CGRect: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{CGRect={CGPoint=ff}{CGSize=ff}}" }
+    #else
+    public typealias ObjCType = CGRect
     public static var objCTypeEncoding: String { "{CGRect={CGPoint=dd}{CGSize=dd}}" }
+    #endif
     static let zero = CGRect(origin: .zero, size: .zero)
 
     init(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {
@@ -30,8 +48,14 @@ extension CGRect: ObjCScalar {
     }
 }
 
-extension CGAffineTransform: ObjCScalar {
+extension CGAffineTransform: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords6
+    public static var objCTypeEncoding: String { "{CGAffineTransform=ffffff}" }
+    #else
+    public typealias ObjCType = CGAffineTransform
     public static var objCTypeEncoding: String { "{CGAffineTransform=dddddd}" }
+    #endif
     static let identity = CGAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0)
 
     var isIdentity: Bool { a == 1 && b == 0 && c == 0 && d == 1 && tx == 0 && ty == 0 }
@@ -69,8 +93,14 @@ extension PerryRange: ObjCScalar {
     public static var objCTypeEncoding: String { "{_NSRange=QQ}" }
 }
 
-extension UIEdgeInsets: ObjCScalar {
+extension UIEdgeInsets: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{UIEdgeInsets=ffff}" }
+    #else
+    public typealias ObjCType = UIEdgeInsets
     public static var objCTypeEncoding: String { "{UIEdgeInsets=dddd}" }
+    #endif
     static let zero = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
 }
 
@@ -130,19 +160,19 @@ func describe(_ size: CGSize) -> String { "{\(format(size.width)), \(format(size
 func describe(_ rect: CGRect) -> String { "{\(describe(rect.origin)), \(describe(rect.size))}" }
 
 /// "{top, left, bottom, right}"
-@c(_NSStringFromUIEdgeInsets)
+@DarwinC("_NSStringFromUIEdgeInsets")
 public func NSStringFromUIEdgeInsets(_ insets: UIEdgeInsets) -> UnsafeMutableRawPointer? {
     "{\(format(insets.top)), \(format(insets.left)), \(format(insets.bottom)), \(format(insets.right))}".objCReturnValue()
 }
 
 /// "{x, y}"
-@c(_NSStringFromCGPoint)
+@DarwinC("_NSStringFromCGPoint")
 public func NSStringFromCGPoint(_ point: CGPoint) -> UnsafeMutableRawPointer? { describe(point).objCReturnValue() }
 
 /// "{width, height}"
-@c(_NSStringFromCGSize)
+@DarwinC("_NSStringFromCGSize")
 public func NSStringFromCGSize(_ size: CGSize) -> UnsafeMutableRawPointer? { describe(size).objCReturnValue() }
 
 /// "{{x, y}, {width, height}}"
-@c(_NSStringFromCGRect)
+@DarwinC("_NSStringFromCGRect")
 public func NSStringFromCGRect(_ rect: CGRect) -> UnsafeMutableRawPointer? { describe(rect).objCReturnValue() }
