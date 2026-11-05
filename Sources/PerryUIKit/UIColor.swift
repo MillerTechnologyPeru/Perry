@@ -14,6 +14,8 @@ final class ColorState: ObjectState {
     var white: CGFloat?
     /// The CGColor, made on first use and released with the color.
     var cgColor: CGRef?
+    /// colorWithPatternImage:'s image, which is drawn as its average color.
+    var patternImage: UIImage?
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
@@ -67,6 +69,43 @@ open class UIColor: NSObject {
     }
 
     // MARK: Making colors
+
+    /// Patterns aren't tiled here: the color is the image's average.
+    @ObjCClassMethod("colorWithPatternImage:")
+    static func color(_ cls: ObjCClass, patternImage image: UIImage?) -> UIColor {
+        let (r, g, b, a) = image.map(UIColor.averageColor) ?? (0, 0, 0, 0)
+        return make(cls) {
+            $0.set(red: r, green: g, blue: b, alpha: a)
+            $0.patternImage = image
+        }
+    }
+
+    @ObjCMethod("initWithPatternImage:")
+    func initialize(patternImage image: UIImage?) -> Self {
+        let (r, g, b, a) = image.map(UIColor.averageColor) ?? (0, 0, 0, 0)
+        state.set(red: r, green: g, blue: b, alpha: a)
+        state.patternImage = image
+        return self
+    }
+
+    /// An image's average color, from it drawn at 8 by 8 pixels.
+    static func averageColor(_ image: UIImage) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+        guard let cgImage = image.cgImage(), let context = CG.makeContext(size: CGSize(width: 8, height: 8), scale: 1, opaque: false) else {
+            return (0, 0, 0, 0)
+        }
+        defer { CG.release(context) }
+        CG.drawFlipped(cgImage, in: CGRect(x: 0, y: 0, width: 8, height: 8), context: context)
+        guard let data = CG.bitmapContextGetData(context) else { return (0, 0, 0, 0) }
+        // Premultiplied B, G, R, A per pixel.
+        var sums = (0.0, 0.0, 0.0, 0.0)
+        let bytes = data.assumingMemoryBound(to: UInt8.self)
+        for pixel in 0..<64 {
+            sums.0 += Double(bytes[pixel * 4 + 2]); sums.1 += Double(bytes[pixel * 4 + 1])
+            sums.2 += Double(bytes[pixel * 4]); sums.3 += Double(bytes[pixel * 4 + 3])
+        }
+        guard sums.3 > 0 else { return (0, 0, 0, 0) }
+        return (CGFloat(sums.0 / sums.3), CGFloat(sums.1 / sums.3), CGFloat(sums.2 / sums.3), CGFloat(sums.3 / 64 / 255))
+    }
 
     @ObjCClassMethod("colorWithRed:green:blue:alpha:")
     static func color(_ cls: ObjCClass, red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> UIColor {
