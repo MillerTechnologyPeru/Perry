@@ -46,6 +46,11 @@ docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolcha
         target=$(readlink "$link")
         case $target in /*) ln -sfnr "$SDK$target" "$link" ;; esac
     done
+    # update-alternatives would link OpenBLAS into the library directory.
+    for name in libopenblas.so libopenblas.so.0 libblas.so.3 liblapack.so.3; do
+        [ -e $SDK/usr/lib/arm-linux-gnueabihf/openblas-pthread/$name ] &&
+            ln -sfn openblas-pthread/$name $SDK/usr/lib/arm-linux-gnueabihf/$name
+    done
     echo "unpacked $(ls $debs/*.deb | wc -l) packages"
 
     cc="$LLVM/clang --target=armv7-linux-gnueabihf --sysroot=$SDK -march=armv7-a -mfloat-abi=hard -fuse-ld=lld -O2 -fPIC"
