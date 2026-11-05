@@ -9,11 +9,11 @@ sdk=${PERRY_ARMV7_SDK:-$(ls -d "$root"/.toolchains/swift-*-armv7-sdk/*/debian-* 
 out=$root/.build/armv7
 mkdir -p "$out/bin" "$out/obj"
 
-cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE
+cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
   -I$root/Sources/PerrySystem/include -I$root/Sources/PerryInterface/include"
 
 objects=""
-for name in thunks_arm.S stdio.c runtime.c errno.c; do
+for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c; do
     object=$out/obj/system-$name.o
     # shellcheck disable=SC2086
     "$llvm/clang" $cflags -c "$root/Sources/PerrySystem/$name" -o "$object"
