@@ -131,14 +131,14 @@ open class UIViewController: UIResponder {
 
     // MARK: The view
 
-    /// The view, loaded on first use.
+    /// The view, loaded on first use. A -loadView that sets none, as SDL's
+    /// does before it sets the view itself, leaves it nil, as on iOS, which
+    /// loads it again on the next use.
     @ObjCMethod("view")
     func view() -> UIView? {
         if state.view == nil {
             sendLoadView()
-            guard state.view != nil else {
-                uikitFatal("-loadView did not set the view controller's view")
-            }
+            guard state.view != nil else { return nil }
             performSeguesOnViewLoad()
             sendViewDidLoad()
         }
@@ -269,6 +269,13 @@ open class UIViewController: UIResponder {
     @ObjCMethod("prefersStatusBarHidden") func prefersStatusBarHidden() -> Bool { false }
     @ObjCMethod("prefersHomeIndicatorAutoHidden") func prefersHomeIndicatorAutoHidden() -> Bool { false }
     @ObjCMethod("setNeedsStatusBarAppearanceUpdate") func setNeedsStatusBarAppearanceUpdate() {}
+    /// No screen edges defer system gestures and no pointer locks: there is
+    /// no home indicator, notification centre or pointer here.
+    @ObjCMethod("setNeedsUpdateOfScreenEdgesDeferringSystemGestures") func setNeedsUpdateOfScreenEdgesDeferringSystemGestures() {}
+    @ObjCMethod("setNeedsUpdateOfPrefersPointerLocked") func setNeedsUpdateOfPrefersPointerLocked() {}
+    @ObjCMethod("setNeedsUpdateOfSupportedInterfaceOrientations") func setNeedsUpdateOfSupportedInterfaceOrientations() {}
+    @ObjCMethod("preferredScreenEdgesDeferringSystemGestures") func preferredScreenEdgesDeferringSystemGestures() -> UInt { 0 }
+    @ObjCMethod("prefersPointerLocked") func prefersPointerLocked() -> Bool { false }
     @ObjCMethod("setNeedsUpdateOfHomeIndicatorAutoHidden") func setNeedsUpdateOfHomeIndicatorAutoHidden() {}
     @ObjCMethod("supportedInterfaceOrientations") func supportedInterfaceOrientations() -> UInt { 2 }
     /// The screen's orientation (deprecated in iOS 8).
@@ -285,10 +292,11 @@ open class UIViewController: UIResponder {
     @ObjCMethod("childViewControllers") func childViewControllers() -> NSObject { NSMutableArray.of(state.children) }
     @ObjCMethod("children") func children() -> NSObject { NSMutableArray.of(state.children) }
 
-    /// Adds `child`, sending it -willMoveToParentViewController:.
+    /// Adds `child`, sending it -willMoveToParentViewController:. Nil, which
+    /// World of Goo 2 passes, adds nothing.
     @ObjCMethod("addChildViewController:")
-    func addChild(_ child: UIViewController) {
-        if child.state.parent == objcObject { return }
+    func addChild(_ child: UIViewController?) {
+        guard let child, child.state.parent != objcObject else { return }
         child.state.parent.map(UIViewController.wrap)?.state.children.removeAll { $0.objcObject == child.objcObject }
         child.sendWillMove(toParent: self)
         state.children.append(child)
