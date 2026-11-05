@@ -314,9 +314,20 @@ open class NSMutableParagraphStyle: NSParagraphStyle {
     @ObjCMethod("setSpansAllLines:") func setSpansAllLines(_ spans: Bool) { state.spansAllLines = spans }
 }
 
-// MARK: - Web views, which show nothing
+// MARK: - Web views
 
 final class WebViewState: ObjectState {
+    /// WKWebView's page, over WPE, and its last frame.
+    var page: WebPage?
+    var frameImage: Owned?
+    /// The navigation the delegate's calls name, and whether it failed.
+    var navigation: NSObject?
+    var navigationFailed = false
+    /// Whether the load finished, and a frame came after: snapshots wait
+    /// for one.
+    var loadFinished = false
+    var frameCurrent = false
+    var snapshotWaiters: [() -> Void] = []
     var delegate: UnsafeMutableRawPointer?
     var navigationDelegate: UnsafeMutableRawPointer?
     var uiDelegate: UnsafeMutableRawPointer?
@@ -412,7 +423,8 @@ extension NSObject {
     @ObjCMethod("webViewDidFinishLoad:") func sendWebViewDidFinishLoad(_ view: UIView)
 }
 
-/// WKWebView: an empty view that takes its loads.
+/// WKWebView: a page of WPE WebKit's, shown as the view's layer's contents
+/// and sized with it. Without WPE it takes its loads and shows nothing.
 @ObjCClass("WKWebView")
 open class WKWebView: UIView {
     static let webStates = StateTable<WebViewState>()
@@ -420,6 +432,7 @@ open class WKWebView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
+        WebViews.live.removeAll { $0 == objcObject }
         WKWebView.webStates.remove(objcObject)
         super.dealloc()
     }
@@ -436,48 +449,257 @@ open class WKWebView: UIView {
     @ObjCMethod("setNavigationDelegate:") func setNavigationDelegate(_ delegate: NSObject?) { web.navigationDelegate = delegate?.objcObject }
     @ObjCMethod("UIDelegate") func uiDelegate() -> NSObject? { web.uiDelegate.map { NSObject($0) } }
     @ObjCMethod("setUIDelegate:") func setUIDelegate(_ delegate: NSObject?) { web.uiDelegate = delegate?.objcObject }
+
     @ObjCMethod("loadHTMLString:baseURL:") func loadHTMLString(_ html: String?, baseURL: NSObject?) -> NSObject? {
         web.html = html
-        return WebNavigations.start(self, failing: nil)
+        guard let page = page() else { return WebNavigations.start(self, failing: nil) }
+        // WebKit's base for a page without one.
+        page.loadHTML(html ?? "", baseURI: baseURL?.sendAbsoluteString() ?? "about:blank")
+        return WebViews.begin(self)
     }
     @ObjCMethod("loadRequest:") func loadRequest(_ request: NSObject?) -> NSObject? {
         web.request = request
         let url = request?.unsafeCast(to: NSURLRequestObject.self).url()
-        return WebNavigations.start(self, failing: WebNavigations.isNetwork(url) ? WebErrors.offline() : nil)
+        guard let page = page(), let uri = url?.sendAbsoluteString() else {
+            return WebNavigations.start(self, failing: WebNavigations.isNetwork(url) ? WebErrors.offline() : nil)
+        }
+        page.loadURI(uri)
+        return WebViews.begin(self)
     }
     @ObjCMethod("loadFileURL:allowingReadAccessToURL:")
     func loadFileURL(_ url: NSObject?, allowingReadAccessTo directory: NSObject?) -> NSObject? {
-        WebNavigations.start(self, failing: nil)
+        guard let page = page(), let uri = url?.sendAbsoluteString() else { return WebNavigations.start(self, failing: nil) }
+        page.loadURI(uri)
+        return WebViews.begin(self)
     }
     @ObjCMethod("loadData:MIMEType:characterEncodingName:baseURL:")
     func loadData(_ data: NSObject?, mimeType: String?, encoding: String?, baseURL: NSObject?) -> NSObject? {
         WebNavigations.start(self, failing: nil)
     }
     @ObjCMethod("customUserAgent") func customUserAgent() -> String? { web.customUserAgent }
-    @ObjCMethod("setCustomUserAgent:") func setCustomUserAgent(_ agent: String?) { web.customUserAgent = agent }
+    @ObjCMethod("setCustomUserAgent:") func setCustomUserAgent(_ agent: String?) {
+        web.customUserAgent = agent
+        web.page?.setUserAgent(agent)
+    }
     @ObjCMethod("allowsBackForwardNavigationGestures") func allowsBackForwardNavigationGestures() -> Bool { false }
     @ObjCMethod("setAllowsBackForwardNavigationGestures:") func setAllowsBackForwardNavigationGestures(_ allows: Bool) {}
     @ObjCMethod("allowsLinkPreview") func allowsLinkPreview() -> Bool { false }
     @ObjCMethod("setAllowsLinkPreview:") func setAllowsLinkPreview(_ allows: Bool) {}
     @ObjCMethod("isInspectable") func isInspectable() -> Bool { false }
     @ObjCMethod("setInspectable:") func setInspectable(_ inspectable: Bool) {}
-    @ObjCMethod("URL") func url() -> NSObject? { nil }
-    @ObjCMethod("title") func title() -> String? { nil }
-    @ObjCMethod("isLoading") func isLoading() -> Bool { false }
-    @ObjCMethod("estimatedProgress") func estimatedProgress() -> Double { 1 }
-    @ObjCMethod("canGoBack") func canGoBack() -> Bool { false }
-    @ObjCMethod("canGoForward") func canGoForward() -> Bool { false }
-    @ObjCMethod("goBack") func goBack() -> NSObject? { nil }
-    @ObjCMethod("goForward") func goForward() -> NSObject? { nil }
-    @ObjCMethod("reload") func reload() -> NSObject? { nil }
-    @ObjCMethod("stopLoading") func stopLoading() {}
+    @ObjCMethod("URL") func url() -> NSObject? {
+        guard let uri = web.page?.uri else { return nil }
+        return NSURLObject.make(string: uri)
+    }
+    /// Empty until the page has one, as WebKit's.
+    @ObjCMethod("title") func title() -> String? { web.page?.title ?? "" }
+    @ObjCMethod("isLoading") func isLoading() -> Bool { web.page?.isLoading ?? false }
+    @ObjCMethod("estimatedProgress") func estimatedProgress() -> Double { web.page?.progress ?? 1 }
+    @ObjCMethod("canGoBack") func canGoBack() -> Bool { web.page?.canGoBack ?? false }
+    @ObjCMethod("canGoForward") func canGoForward() -> Bool { web.page?.canGoForward ?? false }
+    @ObjCMethod("goBack") func goBack() -> NSObject? {
+        guard let page = web.page, page.canGoBack else { return nil }
+        page.goBack()
+        return WebViews.begin(self)
+    }
+    @ObjCMethod("goForward") func goForward() -> NSObject? {
+        guard let page = web.page, page.canGoForward else { return nil }
+        page.goForward()
+        return WebViews.begin(self)
+    }
+    @ObjCMethod("reload") func reload() -> NSObject? {
+        guard let page = web.page else { return nil }
+        page.reload()
+        return WebViews.begin(self)
+    }
+    @ObjCMethod("stopLoading") func stopLoading() { web.page?.stopLoading() }
     @ObjCMethod("scrollView") func scrollView() -> NSObject? { nil }
-    /// No script runs: the handler hears an error after the pass.
+
+    /// The script's value, as WebKit gives it: strings, numbers, Booleans,
+    /// arrays and dictionaries as Foundation's, NSNull for null and nil for
+    /// undefined.
     @ObjCMethod("evaluateJavaScript:completionHandler:") func evaluateJavaScript(_ script: String?, completionHandler: ObjCBlock?) {
-        guard let completionHandler else { return }
-        Updates.afterPass {
-            typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
-            completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.noScript().objcObject)
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+        guard let page = page() else {
+            guard let completionHandler else { return }
+            Updates.afterPass {
+                completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.noScript().objcObject)
+            }
+            return
+        }
+        page.evaluate(script ?? "") { result in
+            guard let completionHandler else { return }
+            switch result {
+            case .success(let json):
+                let value = json.flatMap(WebViews.object(json:))
+                completionHandler.function(as: Invoke.self)(completionHandler.object, value?.objcObject, nil)
+            case .failure:
+                completionHandler.function(as: Invoke.self)(completionHandler.object, nil, WebErrors.exception().objcObject)
+            }
         }
     }
+
+    /// The last frame, as an image of the view's size.
+    @ObjCMethod("takeSnapshotWithConfiguration:completionHandler:")
+    func takeSnapshot(configuration: NSObject?, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        let object = objcObject
+        let deliver = {
+            let view = WKWebView(objcObject: object, ownership: .retain)
+            let image = view.web.frameImage.map {
+                UIImageFactory.make(cgImage: $0.object, scale: CGFloat(view.web.page?.scale ?? 1), orientation: 0)
+            }
+            typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+            completionHandler.function(as: Invoke.self)(completionHandler.object, image?.objcObject,
+                                                        image == nil ? WebErrors.unknown().objcObject : nil)
+        }
+        guard let page = web.page else { return Updates.afterPass(deliver) }
+        // The page is snapshotted once it has drawn what it has now, and a
+        // page still loading once it has drawn after the load.
+        page.afterRendering {
+            let view = WKWebView(objcObject: object, ownership: .retain)
+            if view.web.frameCurrent { deliver() } else { view.web.snapshotWaiters.append(deliver) }
+        }
+    }
+
+    /// The view's page, made on its first load; nil without WPE.
+    func page() -> WebPage? {
+        if let page = web.page { return page }
+        let size = state.bounds.size
+        guard let page = WebPage(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
+        else { return nil }
+        web.page = page
+        if let agent = web.customUserAgent { page.setUserAgent(agent) }
+        let object = objcObject
+        WebViews.live.append(object)
+        WebPage.tick = WebViews.tick
+        page.frame = { bytes, width, height, stride in
+            WKWebView(objcObject: object, ownership: .retain).show(bytes, width: width, height: height, stride: stride)
+        }
+        page.loadChanged = { event in WebViews.loadChanged(object, event) }
+        page.loadFailed = { committed, domain, code, message in
+            WebViews.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
+        }
+        return page
+    }
+
+    /// A frame of the page's, as the layer's contents.
+    func show(_ bytes: UnsafeRawPointer, width: Int, height: Int, stride: Int) {
+        guard let space = CG.colorSpaceCreateDeviceRGB() else { return }
+        defer { CG.release(space) }
+        // Wayland's ARGB8888: premultiplied, first byte blue.
+        guard let context = CG.bitmapContextCreate(nil, width, height, 8, width * 4, space, 2 | 0x2000) else { return }
+        defer { CG.release(context) }
+        guard let data = CG.bitmapContextGetData(context) else { return }
+        for row in 0..<height {
+            (data + row * width * 4).copyMemory(from: bytes + row * stride, byteCount: width * 4)
+        }
+        guard let image = CG.bitmapContextCreateImage(context).map(Owned.init) else { return }
+        web.frameImage = image
+        state.layer.setContents(NSObject(image.object))
+        state.layer.setContentsScale(CGFloat(web.page?.scale ?? 1))
+        Display.markDirty()
+        if web.loadFinished {
+            web.frameCurrent = true
+            let waiters = web.snapshotWaiters
+            web.snapshotWaiters = []
+            for waiter in waiters { waiter() }
+        }
+    }
+}
+
+/// The web views with pages, and their navigations.
+enum WebViews {
+    nonisolated(unsafe) static var live: [UnsafeMutableRawPointer] = []
+
+    /// A navigation for the load just started, which the delegate's calls
+    /// name until the next.
+    static func begin(_ view: WKWebView) -> NSObject {
+        let navigation = WKNavigation()
+        view.web.navigation = navigation
+        view.web.navigationFailed = false
+        view.web.loadFinished = false
+        view.web.frameCurrent = false
+        return navigation
+    }
+
+    /// Pages follow their views' sizes.
+    static func tick() {
+        for object in live {
+            let view = WKWebView(objcObject: object, ownership: .retain)
+            guard let page = view.web.page else { continue }
+            let size = view.state.bounds.size
+            page.resize(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
+        }
+    }
+
+    static func loadChanged(_ object: UnsafeMutableRawPointer, _ event: Int32) {
+        let view = WKWebView(objcObject: object, ownership: .retain)
+        let state = view.web
+        if event == WPE.loadFinished { state.loadFinished = true }
+        guard let delegate = view.navigationDelegate() else { return }
+        let navigation = state.navigation ?? WKNavigation()
+        switch event {
+        case WPE.loadStarted:
+            if delegate.responds(to: "webView:didStartProvisionalNavigation:") { delegate.sendDidStartProvisionalNavigation(view, navigation) }
+        case WPE.loadCommitted:
+            if delegate.responds(to: "webView:didCommitNavigation:") { delegate.sendDidCommitNavigation(view, navigation) }
+        case WPE.loadFinished:
+            // WebKit finishes a failed load too; the delegate heard it fail.
+            guard !state.navigationFailed else { return }
+            if delegate.responds(to: "webView:didFinishNavigation:") { delegate.sendDidFinishNavigation(view, navigation) }
+        default: break
+        }
+    }
+
+    static func loadFailed(_ object: UnsafeMutableRawPointer, committed: Bool, domain: String, code: Int, message: String) {
+        let view = WKWebView(objcObject: object, ownership: .retain)
+        view.web.navigationFailed = true
+        guard let delegate = view.navigationDelegate() else { return }
+        let navigation = view.web.navigation ?? WKNavigation()
+        let error = WebErrors.loading(domain: domain, code: code)
+        if committed {
+            if delegate.responds(to: "webView:didFailNavigation:withError:") { delegate.sendDidFailNavigation(view, navigation, error) }
+        } else if delegate.responds(to: "webView:didFailProvisionalNavigation:withError:") {
+            delegate.sendDidFailProvisionalNavigation(view, navigation, error)
+        }
+    }
+
+    /// A script's value from its JSON, fragments allowed.
+    static func object(json: String) -> NSObject? {
+        var text = json
+        return text.withUTF8 { bytes -> NSObject? in
+            guard let base = bytes.baseAddress else { return nil }
+            let data = NSDataFactory.make(bytes: UnsafeRawPointer(base), length: UInt(bytes.count))
+            return JSONSerializationObject.object(data: data, options: 4, error: nil)
+        }
+    }
+}
+
+@ObjCWrapper("NSURL")
+class NSURLObject: NSObject {
+    @ObjCClassMethod("URLWithString:") static func make(string: String) -> NSObject?
+}
+
+@ObjCWrapper("NSData")
+class NSDataFactory: NSObject {
+    @ObjCClassMethod("dataWithBytes:length:") static func make(bytes: UnsafeRawPointer, length: UInt) -> NSObject
+}
+
+@ObjCWrapper("NSJSONSerialization")
+class JSONSerializationObject: NSObject {
+    @ObjCClassMethod("JSONObjectWithData:options:error:")
+    static func object(data: NSObject, options: UInt, error: UnsafeMutableRawPointer?) -> NSObject?
+}
+
+@ObjCWrapper("UIImage")
+class UIImageFactory: NSObject {
+    @ObjCClassMethod("imageWithCGImage:scale:orientation:")
+    static func make(cgImage: UnsafeMutableRawPointer?, scale: CGFloat, orientation: Int) -> NSObject
+}
+
+extension NSObject {
+    @ObjCMethod("absoluteString") func sendAbsoluteString() -> String?
+    @ObjCMethod("webView:didFailNavigation:withError:")
+    func sendDidFailNavigation(_ view: NSObject, _ navigation: NSObject, _ error: NSObject)
 }
