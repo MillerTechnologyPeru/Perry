@@ -319,6 +319,72 @@ public func _os_log_fault_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type:
     _os_log_impl(dso, log, type, format, buffer, size)
 }
 
+// MARK: - Packs
+
+/// os_log_pack_s: the time, the wall time, the image and caller, the
+/// format, then the argument buffer. Swift's os overlay sizes one, has it
+/// filled in, writes its arguments after it, and sends it.
+private let packHeaderSize = 48
+
+@c(__os_log_pack_size)
+public func _os_log_pack_size(_ bufferSize: Int) -> Int { packHeaderSize + bufferSize }
+
+/// Fills in the header and returns where the arguments go; their size is
+/// what is left of the pack, which is kept in the continuous-time word.
+@c(__os_log_pack_fill)
+public func _os_log_pack_fill(_ pack: UnsafeMutableRawPointer?, _ size: Int, _ savedErrno: Int32,
+                              _ dso: UnsafeRawPointer?, _ format: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {
+    guard let pack, size >= packHeaderSize else { return nil }
+    pack.storeBytes(of: UInt64(size - packHeaderSize), as: UInt64.self)
+    pack.storeBytes(of: 0, toByteOffset: 8, as: UInt64.self)
+    pack.storeBytes(of: 0, toByteOffset: 16, as: UInt64.self)
+    pack.storeBytes(of: dso, toByteOffset: 24, as: UnsafeRawPointer?.self)
+    pack.storeBytes(of: nil, toByteOffset: 32, as: UnsafeRawPointer?.self)
+    pack.storeBytes(of: format, toByteOffset: 40, as: UnsafePointer<CChar>?.self)
+    return pack + packHeaderSize
+}
+
+private func packMessage(_ pack: UnsafeMutableRawPointer) -> String {
+    let size = pack.load(as: UInt64.self)
+    let format = pack.load(fromByteOffset: 40, as: UnsafePointer<CChar>?.self)
+    let buffer = UnsafePointer<UInt8>((pack + packHeaderSize).assumingMemoryBound(to: UInt8.self))
+    return Logging.message(format, Logging.arguments(buffer, UInt32(truncatingIfNeeded: size)))
+}
+
+@c(_os_log_pack_send)
+public func os_log_pack_send(_ pack: UnsafeMutableRawPointer?, _ log: Object?, _ type: UInt8) {
+    guard let pack, Logging.isEnabled(log, type) else { return }
+    Logging.emit(log, type, packMessage(pack))
+}
+
+/// Sends the pack and returns its message, which the caller frees.
+@c(_os_log_pack_send_and_compose)
+public func os_log_pack_send_and_compose(_ pack: UnsafeMutableRawPointer?, _ log: Object?, _ type: UInt8,
+                                         _ buffer: UnsafeMutablePointer<CChar>?, _ size: Int) -> UnsafeMutablePointer<CChar>? {
+    guard let pack else { return nil }
+    let message = packMessage(pack)
+    if Logging.isEnabled(log, type) { Logging.emit(log, type, message) }
+    if let buffer, size > 0 {
+        _ = message.withCString { strncpy(buffer, $0, size - 1) }
+        buffer[size - 1] = 0
+        return buffer
+    }
+    return strdup(message)
+}
+
+@c(__os_log_pack_compose)
+public func _os_log_pack_compose(_ pack: UnsafeMutableRawPointer?, _ log: Object?, _ type: UInt8,
+                                 _ buffer: UnsafeMutablePointer<CChar>?, _ size: Int) -> UnsafeMutablePointer<CChar>? {
+    guard let pack else { return nil }
+    let message = packMessage(pack)
+    if let buffer, size > 0 {
+        _ = message.withCString { strncpy(buffer, $0, size - 1) }
+        buffer[size - 1] = 0
+        return buffer
+    }
+    return strdup(message)
+}
+
 /// os_log_with_type's older entry point, without a buffer to read: the
 /// format alone.
 @c(__os_log_internal)
