@@ -273,6 +273,21 @@ public class NSDictionary: NSObject {
         Dictionaries.value(objcObject, for: key?.id).map(ObjCObject.init)
     }
 
+    // MARK: File attributes (NSFileManager's NSDictionary category)
+
+    private func attribute(_ key: String) -> id? { Dictionaries.value(objcObject, for: Strings.autoreleased(key)) }
+    private func attributeNumber(_ key: String) -> NumberStorage? { attribute(key).map { Numbers.storage($0) } }
+
+    @ObjCMethod("fileSize") func fileSize() -> UInt64 { attributeNumber("NSFileSize").map { UInt64(bitPattern: $0.int64) } ?? 0 }
+    @ObjCMethod("fileModificationDate") func fileModificationDate() -> ObjCObject? { attribute("NSFileModificationDate").map(ObjCObject.init) }
+    @ObjCMethod("fileCreationDate") func fileCreationDate() -> ObjCObject? { attribute("NSFileCreationDate").map(ObjCObject.init) }
+    @ObjCMethod("fileType") func fileType() -> ObjCObject? { attribute("NSFileType").map(ObjCObject.init) }
+    @ObjCMethod("filePosixPermissions") func filePosixPermissions() -> UInt { attributeNumber("NSFilePosixPermissions").map { UInt(truncatingIfNeeded: $0.int64) } ?? 0 }
+    @ObjCMethod("fileOwnerAccountName") func fileOwnerAccountName() -> ObjCObject? { attribute("NSFileOwnerAccountName").map(ObjCObject.init) }
+    @ObjCMethod("fileSystemNumber") func fileSystemNumber() -> Int { attributeNumber("NSFileSystemNumber").map { Int($0.int64) } ?? 0 }
+    @ObjCMethod("fileSystemFileNumber") func fileSystemFileNumber() -> UInt { attributeNumber("NSFileSystemFileNumber").map { UInt(truncatingIfNeeded: $0.int64) } ?? 0 }
+    @ObjCMethod("fileIsImmutable") func fileIsImmutable() -> Bool { (attributeNumber("NSFileImmutable")?.int64 ?? 0) != 0 }
+
     @ObjCMethod("objectForKeyedSubscript:")
     func object(subscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
 
