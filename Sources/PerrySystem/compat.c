@@ -15,6 +15,7 @@
 #include <pwd.h>
 #include <regex.h>
 #include <sched.h>
+#include <semaphore.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -999,3 +1000,71 @@ int darwin_sigaltstack(const struct darwin_stack *stack, struct darwin_stack *pr
 
 const char *darwin_getprogname(void) DARWIN_SYMBOL(getprogname);
 const char *darwin_getprogname(void) { return program_invocation_short_name; }
+
+// MARK: - Semaphores
+
+/// Darwin has no unnamed semaphores: sem_init and sem_destroy fail, as on
+/// iOS, and apps use dispatch or named ones. (Darwin's sem_t is an int,
+/// too small for glibc's.)
+int darwin_sem_init(void *semaphore, int shared, unsigned value) DARWIN_SYMBOL(sem_init);
+int darwin_sem_init(void *semaphore, int shared, unsigned value) {
+    (void)semaphore; (void)shared; (void)value;
+    errno = ENOSYS;
+    return -1;
+}
+
+int darwin_sem_destroy(void *semaphore) DARWIN_SYMBOL(sem_destroy);
+int darwin_sem_destroy(void *semaphore) {
+    (void)semaphore;
+    errno = ENOSYS;
+    return -1;
+}
+
+/// Waiting on and posting a semaphore sem_init didn't make fail as on
+/// Darwin; named semaphores, from sem_open, are glibc's.
+static bool named_semaphore(void *semaphore);
+
+int darwin_sem_post(void *semaphore) DARWIN_SYMBOL(sem_post);
+int darwin_sem_post(void *semaphore) {
+    if (named_semaphore(semaphore)) return sem_post(semaphore);
+    errno = EINVAL;
+    return -1;
+}
+
+int darwin_sem_wait(void *semaphore) DARWIN_SYMBOL(sem_wait);
+int darwin_sem_wait(void *semaphore) {
+    if (named_semaphore(semaphore)) return sem_wait(semaphore);
+    errno = EINVAL;
+    return -1;
+}
+
+int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
+int darwin_sem_trywait(void *semaphore) {
+    if (named_semaphore(semaphore)) return sem_trywait(semaphore);
+    errno = EINVAL;
+    return -1;
+}
+
+// The named semaphores open: sem_open (variadic, which Darwin passes on
+// the stack) is not bound yet, so none are, and sem_close forgets one.
+static pthread_mutex_t semaphores_lock = PTHREAD_MUTEX_INITIALIZER;
+static void *semaphores[64];
+static int semaphore_count;
+
+static bool named_semaphore(void *semaphore) {
+    pthread_mutex_lock(&semaphores_lock);
+    bool found = false;
+    for (int i = 0; i < semaphore_count && !found; i++) found = semaphores[i] == semaphore;
+    pthread_mutex_unlock(&semaphores_lock);
+    return found;
+}
+
+int darwin_sem_close(void *semaphore) DARWIN_SYMBOL(sem_close);
+int darwin_sem_close(void *semaphore) {
+    pthread_mutex_lock(&semaphores_lock);
+    for (int i = 0; i < semaphore_count; i++) {
+        if (semaphores[i] == semaphore) { semaphores[i] = semaphores[--semaphore_count]; break; }
+    }
+    pthread_mutex_unlock(&semaphores_lock);
+    return sem_close(semaphore);
+}
