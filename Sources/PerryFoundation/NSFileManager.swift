@@ -61,6 +61,13 @@ final class NSFileManager: NSObject {
     static func defaultManager() -> UnsafeMutableRawPointer? { FileManagers.defaultManager }
 
     /// No path names no file.
+    /// A path from its bytes on disk, which are UTF-8 here.
+    @ObjCMethod("stringWithFileSystemRepresentation:length:")
+    func string(fileSystemRepresentation bytes: UnsafePointer<UInt8>?, length: UInt) -> String? {
+        guard let bytes else { return nil }
+        return String(decoding: UnsafeBufferPointer(start: bytes, count: Int(length)), as: UTF8.self)
+    }
+
     @ObjCMethod("fileExistsAtPath:")
     func exists(atPath path: String?) -> Bool { path.map { files.fileExists(atPath: $0) } ?? false }
 
