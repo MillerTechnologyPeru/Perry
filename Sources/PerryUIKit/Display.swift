@@ -29,12 +29,13 @@ enum Display {
     /// height, the tallest the iPhone apps Perry runs lay out for.
     static let iPhoneShortSide: CGFloat = 430
 
-    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else chosen from
-    /// the display as iOS pairs a screen with a scale: the desktop's
-    /// scaling of it, or more, the least whole scale that gives its usable
-    /// area's short side an iPhone's points at most, so a handheld's 1080p
-    /// screen is 640 by 360 points at @3x rather than 1920 by 1080 at @1x;
-    /// else 1.
+    /// Window pixels per point: PERRY_UIKIT_DISPLAY_SCALE, else the native
+    /// display's: the desktop's scaling of it, fractional as it may be
+    /// (1.25 on a desktop scaled by 125%). An unscaled display (a
+    /// handheld's, with no desktop) is paired with a scale as iOS pairs a
+    /// screen with one: the least whole scale that gives its usable area's
+    /// short side an iPhone's points at most, so a 1080p screen is 640 by
+    /// 360 points at @3x rather than 1920 by 1080 at @1x; else 1.
     nonisolated(unsafe) static let scale: CGFloat = {
         // A fixed screen is drawn as large as fits the display, whatever
         // scale the app is told.
@@ -48,7 +49,7 @@ enum Display {
         let native = SDL.nativeScale() ?? 1
         guard let pixels = SDL.usableDisplaySize() else { return native }
         let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
-        let chosen = max(native, fitting, 1)
+        let chosen = native != 1 ? native : max(fitting, 1)
         // An iPhone's screen (PERRY_UIKIT_SCREEN=iphone) is a window that
         // fits the usable area, in quarter steps, however small that makes
         // it: 390 by 844 points is taller than a laptop's display at @3x.
