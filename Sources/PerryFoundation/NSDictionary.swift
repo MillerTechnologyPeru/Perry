@@ -398,6 +398,11 @@ public class NSMutableDictionary: NSDictionary {
         if let key { storage.remove(key.id) }
     }
 
+    @ObjCMethod("removeObjectsForKeys:")
+    func remove(forKeys keys: ObjCObject?) {
+        for key in Arrays.elements(keys?.id) { storage.remove(key) }
+    }
+
     @ObjCMethod("removeAllObjects")
     func removeAll() { storage.removeAll() }
 
