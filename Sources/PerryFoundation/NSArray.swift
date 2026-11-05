@@ -31,8 +31,8 @@ enum Arrays {
     static func elements(_ object: id?) -> [id] {
         guard let object else { return [] }
         if ObjC.objectGetClass(object) == constantClass {
-            let count = Int(object.load(fromByteOffset: 8, as: UInt64.self))
-            guard let objects = object.load(fromByteOffset: 16, as: UnsafePointer<id>?.self) else { return [] }
+            let count = Int(object.load(fromByteOffset: DarwinLayout.arrayCount, as: UInt.self))
+            guard let objects = object.load(fromByteOffset: DarwinLayout.arrayObjects, as: UnsafePointer<id>?.self) else { return [] }
             return Array(UnsafeBufferPointer(start: objects, count: count))
         }
         if let storage = storage(object) {
@@ -499,11 +499,11 @@ final class NSConstantArray: NSArray {
     override func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         guard let state, state.load(as: UInt.self) == 0 else { return 0 }
         state.storeBytes(of: 1, as: UInt.self)
-        state.storeBytes(of: objcObject.load(fromByteOffset: 16, as: UnsafeMutableRawPointer?.self),
-                         toByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-        state.storeBytes(of: UnsafeMutableRawPointer(Arrays.constantMutationCounter), toByteOffset: 16,
+        state.storeBytes(of: objcObject.load(fromByteOffset: DarwinLayout.arrayObjects, as: UnsafeMutableRawPointer?.self),
+                         toByteOffset: DarwinLayout.enumerationItems, as: UnsafeMutableRawPointer?.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(Arrays.constantMutationCounter), toByteOffset: DarwinLayout.enumerationMutations,
                          as: UnsafeMutableRawPointer.self)
-        return UInt(objcObject.load(fromByteOffset: 8, as: UInt64.self))
+        return objcObject.load(fromByteOffset: DarwinLayout.arrayCount, as: UInt.self)
     }
 }
 
