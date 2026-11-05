@@ -249,6 +249,11 @@ int perry_vfcntl(int fd, int command, va_list arguments) {
 
 // MARK: - stat
 
+// Darwin's armv7 aligns 64-bit members to 4 bytes, so st_size is at offset 60
+// and the structure is 108 bytes; arm64's is 144.
+#if defined(__arm__)
+#pragma pack(push, 4)
+#endif
 struct darwin_stat {
     int32_t st_dev;
     uint16_t st_mode;
@@ -269,8 +274,13 @@ struct darwin_stat {
     int32_t st_lspare;
     int64_t st_qspare[2];
 };
-
+#if defined(__arm__)
+#pragma pack(pop)
+_Static_assert(sizeof(struct darwin_stat) == 108, "struct stat is 108 bytes on Darwin armv7");
+_Static_assert(offsetof(struct darwin_stat, st_size) == 60, "st_size is at 60 on Darwin armv7");
+#else
 _Static_assert(sizeof(struct darwin_stat) == 144, "struct stat is 144 bytes on Darwin");
+#endif
 
 // Darwin's dev_t packs the major number into the top 8 bits.
 static int32_t device_to_darwin(uint32_t major_number, uint32_t minor_number) {
