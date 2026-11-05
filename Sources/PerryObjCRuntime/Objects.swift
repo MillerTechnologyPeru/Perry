@@ -8,6 +8,8 @@ public enum Objects {
     // MARK: - Lifetime
 
     public static func createInstance(_ cls: ClassPointer, extraBytes: Int = 0) -> ObjectPointer? {
+        guard let found = Runtime.info(cls) else { return nil }
+        Runtime.runSwiftInitializers(found)
         guard let info = Runtime.info(cls), let object = calloc(1, max(info.instanceSize + extraBytes, 16)) else {
             return nil
         }
@@ -44,12 +46,14 @@ public enum Objects {
             }
             current = cls.superInfo
         }
+        // Weak slots are cleared while the object is still marked
+        // deallocating, so no weak load in between can take it back.
+        if RetainCounts.isWeaklyReferenced(object) {
+            WeakReferences.clear(object)
+        }
         let entry = RetainCounts.remove(object)
         if entry.hasAssociations {
             Associations.removeAll(object)
-        }
-        if entry.weaklyReferenced {
-            WeakReferences.clear(object)
         }
         // The Swift object that is this object goes with it: its deinit runs
         // while the object's memory is still there.
@@ -328,6 +332,27 @@ enum RetainCounts {
         }
     }
 
+    /// Retains the object unless it is being deallocated; false if it is.
+    /// A peer is retained only while Swift still holds it.
+    static func tryRetain(_ object: ObjectPointer) -> Bool {
+        defer { if Zombies.tracing { Zombies.trace(object, "retain") } }
+        return shard(object).table.withLock { table -> Bool in
+            let key = UInt(bitPattern: object)
+            var entry = table[key] ?? Entry()
+            if entry.deallocating { return false }
+            if let peer = entry.peer { return swift_tryRetain(peer) }
+            entry.extra += 1
+            table[key] = entry
+            return true
+        }
+    }
+
+    static func isWeaklyReferenced(_ object: ObjectPointer) -> Bool {
+        shard(object).table.withLock { table in
+            table[UInt(bitPattern: object)]?.weaklyReferenced ?? false
+        }
+    }
+
     static func isDeallocating(_ object: ObjectPointer) -> Bool {
         shard(object).table.withLock { table in
             table[UInt(bitPattern: object)]?.deallocating ?? false
@@ -350,6 +375,10 @@ enum RetainCounts {
 /// The Swift runtime's strong reference count of an object.
 @_silgen_name("swift_retainCount")
 func swift_retainCount(_ object: UnsafeMutableRawPointer) -> Int
+
+/// Retains a Swift object unless its deinit has begun.
+@_silgen_name("swift_tryRetain")
+func swift_tryRetain(_ object: UnsafeMutableRawPointer) -> Bool
 
 /// __weak variables: the slots pointing at each object, cleared when it is
 /// deallocated.
@@ -379,9 +408,13 @@ public enum WeakReferences {
 
     public static func loadRetained(_ slot: UnsafeMutablePointer<ObjectPointer?>) -> ObjectPointer? {
         lock.withLock {
-            guard let object = slot.pointee, !RetainCounts.isDeallocating(object) else {
-                return nil
+            guard let object = slot.pointee else { return nil }
+            // A reference taken only if the object is not being deallocated,
+            // in one step: a release on another thread may be starting it.
+            if let info = Runtime.info(classOf(object)), Objects.usesDefaultRetainRelease(info) {
+                return RetainCounts.tryRetain(object) ? object : nil
             }
+            guard !RetainCounts.isDeallocating(object) else { return nil }
             return Objects.retain(object)
         }
     }
