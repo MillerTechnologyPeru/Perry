@@ -1,9 +1,9 @@
 import PerryObjCInterop
 
-// WebKit's navigations and the rest of its configuration: there is no web
-// engine, so loads end on the next pass as a page with nothing in it would
-// (local content finishes; network requests fail, offline), scripts fail to
-// run, and stores hold nothing.
+// WebKit's navigations and the rest of its configuration. Without WPE
+// there is no web engine, so loads end on the next pass as a page with
+// nothing in it would (local content finishes; network requests fail,
+// offline), scripts fail to run, and stores hold nothing.
 
 @ObjCWrapper("NSError")
 class NSErrorObject: NSObject {
@@ -30,6 +30,28 @@ enum WebErrors {
     static func offline() -> NSErrorObject { NSErrorObject.make(domain: "NSURLErrorDomain", code: -1009, userInfo: nil) }
     /// WKErrorJavaScriptExceptionOccurred: no script runs.
     static func noScript() -> NSErrorObject { NSErrorObject.make(domain: "WKErrorDomain", code: 4, userInfo: nil) }
+    /// WKErrorJavaScriptExceptionOccurred, for a script that threw.
+    static func exception() -> NSErrorObject { NSErrorObject.make(domain: "WKErrorDomain", code: 4, userInfo: nil) }
+    /// WKErrorUnknown.
+    static func unknown() -> NSErrorObject { NSErrorObject.make(domain: "WKErrorDomain", code: 1, userInfo: nil) }
+
+    /// A failed load's error, from WPE's GError: as NSURLErrorDomain's
+    /// codes where there is one.
+    static func loading(domain: String, code: Int) -> NSErrorObject {
+        let url: Int
+        switch (domain, code) {
+        case ("WebKitNetworkError", 302): url = -999                       // cancelled
+        case ("WebKitNetworkError", 303): url = -1100                      // file does not exist
+        case ("WebKitNetworkError", 301): url = -1002                      // unsupported URL
+        case ("WebKitPolicyError", let code): return NSErrorObject.make(domain: "WebKitErrorDomain", code: code, userInfo: nil)
+        case ("g-resolver-error-quark", _): url = -1003                    // cannot find host
+        case ("g-io-error-quark", 39): url = -1004                         // cannot connect to host (refused)
+        case ("g-io-error-quark", 24): url = -1001                         // timed out
+        case ("g-tls-error-quark", _): url = -1200                         // secure connection failed
+        default: url = -1                                                  // unknown
+        }
+        return NSErrorObject.make(domain: "NSURLErrorDomain", code: url, userInfo: nil)
+    }
 }
 
 /// What a load returns, and its delegate calls name.
