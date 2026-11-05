@@ -184,6 +184,7 @@ final class Compositor {
         }
         for key in textures.keys { textures[key]?.used = false }
         for key in liveTextures.keys { liveTextures[key]?.used = false }
+        for entry in sharedTextures.values { entry.used = false }
         _ = SDL.setDrawColor(renderer, 0, 0, 0, 1)
         _ = SDL.setClipRect(renderer, nil)
         let cleared = SDL.clear(renderer)
@@ -200,6 +201,10 @@ final class Compositor {
             SDL.destroyTexture(entry.texture)
             liveTextures[key] = nil
         }
+        for (key, entry) in sharedTextures where !entry.used {
+            entry.destroy()
+            sharedTextures[key] = nil
+        }
         if FrameRate.on { FrameRate.frame(renderer: renderer) }
         let presented = SDL.present(renderer)
         if tracingFrame, !presented { "perry: QuartzCore: presenting failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
@@ -212,7 +217,7 @@ final class Compositor {
         layer.state.rendered = true
         if tracingFrame {
             trace(layer, state: state, frame: toScreen.apply(state.bounds), depth: depth,
-                  how: state.livePixels != nil ? "live" : (layer.state.backing != nil || state.contents != nil) ? "textured"
+                  how: state.sharedFrames != nil ? "shared" : state.livePixels != nil ? "live" : (layer.state.backing != nil || state.contents != nil) ? "textured"
                       : state.backgroundColor != nil ? "filled" : "")
         }
         guard !state.hidden, state.opacity > 0 else { return }
@@ -229,7 +234,10 @@ final class Compositor {
         let rounded = state.cornerRadius > 0 && state.backgroundColor != nil
         let textured = layer.state.backing != nil || state.contents != nil || rounded || shape != nil
             || (!aligned && state.backgroundColor != nil)
-        if let live = state.livePixels {
+        if let shared = state.sharedFrames, !shared.hasFailed {
+            if let background = state.backgroundColor, !shared.opaque { fill(frame, with: background, alpha: alpha) }
+            _ = drawShared(shared, of: layer, state: state, toScreen: toScreen, alpha: alpha)
+        } else if let live = state.livePixels {
             if let background = state.backgroundColor, !live.opaque { fill(frame, with: background, alpha: alpha) }
             drawLive(live, of: layer, state: state, toScreen: toScreen, alpha: alpha)
         } else if textured {
@@ -261,7 +269,7 @@ final class Compositor {
         _ = SDL.setClipRect(renderer, &rect)
     }
 
-    private func pixels(_ rect: CGRect) -> SDL.FRect {
+    func pixels(_ rect: CGRect) -> SDL.FRect {
         SDL.FRect(x: Float(rect.minX * scale), y: Float(rect.minY * scale), w: Float(rect.width * scale), h: Float(rect.height * scale))
     }
 
@@ -324,6 +332,9 @@ final class Compositor {
         let flip: Int32 = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0 ? 1 : 0
         _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
     }
+
+    /// The imported buffers of layers whose GL frames are shared.
+    var sharedTextures: [UnsafeMutableRawPointer: SharedTextures] = [:]
 
     /// The persistent streaming textures of layers showing GL frames, and
     /// the generation each last took.
