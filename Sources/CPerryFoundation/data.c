@@ -246,3 +246,8 @@ const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFounda
 
 // Foundation's version, the same: iOS 15's.
 const double darwin_NSFoundationVersionNumber DARWIN_SYMBOL("_NSFoundationVersionNumber") = 1854.0;
+
+// NSException's C++ type info, which @catch (NSException *) clauses name
+// in unwind tables: { vtable, name, class }. Perry never unwinds into a
+// @catch, so it is only bound, not read.
+void *ns_exception_ehtype[3] DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { 0, "NSException", 0 };
