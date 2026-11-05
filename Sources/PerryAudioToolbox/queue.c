@@ -3,7 +3,10 @@
 // AAC and MP3 packets as they are, for GStreamer to decode. A buffer goes
 // back to the app's callback once its audio is in the pipeline, whose
 // limited room paces the queue. Callbacks and property listeners are called
-// on the queue's thread, whatever run loop the app names. Without GStreamer
+// on the queue's thread, whatever run loop the app names; that run loop
+// holds an input source while the queue lives, so that an app running it
+// for the queue waits there, as on Darwin, rather than spinning on a run
+// loop with nothing in it. Without GStreamer
 // a queue plays silently, taking each buffer as long as it would sound.
 
 #include "PerryAudioToolbox.h"
@@ -59,6 +62,7 @@ typedef struct queue {
     double volume;
 
     pthread_t thread;
+    void *run_loop;
     pthread_mutex_t lock;
     pthread_cond_t changed;
     pending_buffer *pending;
@@ -307,6 +311,20 @@ static void *run(void *argument) {
 
 // MARK: - Creating and disposing
 
+/// An input source on the run loop the app named, or off it; none for NULL,
+/// which on Darwin means the queue's own thread.
+static void attach_run_loop(queue *q, void *run_loop, bool attach) {
+    static const char *foundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    typedef void (*source_change)(void *);
+    static source_change add, remove;
+    if (!add) {
+        add = (source_change)perry_audio_lookup(foundation, "_perry_CFRunLoopAddInputSource");
+        remove = (source_change)perry_audio_lookup(foundation, "_perry_CFRunLoopRemoveInputSource");
+    }
+    if (!run_loop || !add || !remove) return;
+    (attach ? add : remove)(run_loop);
+}
+
 OSStatus darwin_AudioQueueNewOutput(const AudioStreamBasicDescription *format, output_callback callback, void *user,
                                     void *run_loop, const void *mode, uint32_t flags, void **out) DARWIN_SYMBOL(AudioQueueNewOutput);
 OSStatus darwin_AudioQueueNewOutput(const AudioStreamBasicDescription *format, output_callback callback, void *user,
@@ -326,6 +344,8 @@ OSStatus darwin_AudioQueueNewOutput(const AudioStreamBasicDescription *format, o
         free(q);
         return kAudio_MemFullError;
     }
+    q->run_loop = run_loop;
+    attach_run_loop(q, run_loop, true);
     perry_audio_trace("audio queue %p: '%c%c%c%c' %u Hz, %u channels", (void *)q, format->mFormatID >> 24,
                       format->mFormatID >> 16 & 0xff, format->mFormatID >> 8 & 0xff, format->mFormatID & 0xff,
                       (unsigned)format->mSampleRate, format->mChannelsPerFrame);
@@ -342,6 +362,8 @@ OSStatus darwin_AudioQueueDispose(void *handle, uint8_t immediate) {
     q->stopping = false;
     pthread_cond_broadcast(&q->changed);
     pthread_mutex_unlock(&q->lock);
+    attach_run_loop(q, q->run_loop, false);
+    q->run_loop = NULL;
     // A thread blocked pushing into a full pipeline is freed by stopping it.
     reset_pipeline(q);
     if (!pthread_equal(pthread_self(), q->thread)) pthread_join(q->thread, NULL);
