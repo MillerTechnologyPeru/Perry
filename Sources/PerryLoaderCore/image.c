@@ -580,7 +580,9 @@ static perry_image *find_loaded(perry_loader *loader, const char *path) {
 // UIKit's extensions) is in the framework itself, and Swift code built for
 // iOS 17 binds it there. Providers have no Swift code: a Swift image's
 // frameworks get the Swift overlay of the same name from the runtime given,
-// where their Swift symbols are looked for when the provider lacks them.
+// where their Swift symbols are looked for when the provider lacks them,
+// then libswift<Framework>Additions.dylib beside it: Swift API newer than
+// the overlay, which Perry builds (Scripts/build-overlay.sh).
 static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
     if (!loader->swift_runtime_dir)
         return;
@@ -597,13 +599,21 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
         const char *base = strrchr(dep->install_name, '/') + 1;
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/libswift%s.dylib", loader->swift_runtime_dir, base);
-        if (!file_exists(path))
-            continue;
-        perry_image *overlay = find_loaded(loader, path);
-        if (!overlay)
-            overlay = load_image(loader, path);
-        if (overlay != image)
-            dep->swift_overlay = overlay;
+        if (file_exists(path)) {
+            perry_image *overlay = find_loaded(loader, path);
+            if (!overlay)
+                overlay = load_image(loader, path);
+            if (overlay != image)
+                dep->swift_overlay = overlay;
+        }
+        snprintf(path, sizeof(path), "%s/libswift%sAdditions.dylib", loader->swift_runtime_dir, base);
+        if (file_exists(path)) {
+            perry_image *additions = find_loaded(loader, path);
+            if (!additions)
+                additions = load_image(loader, path);
+            if (additions != image)
+                dep->swift_additions = additions;
+        }
     }
 }
 
@@ -881,6 +891,7 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     const char *slash = strrchr(argv[0], '/');
     program_name = slash ? slash + 1 : argv[0];
     start_providers(loader, image);
+    perry_make_witness_tables(loader);
     // Dependencies first, in load order, then the main executable last.
     for (perry_image *img = loader->images; img; img = img->next)
         if (img != image)
