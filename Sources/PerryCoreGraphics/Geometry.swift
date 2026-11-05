@@ -6,8 +6,12 @@ import Glibc
 // CPerryCoreGraphics. Rects with negative sizes are standardized first, as
 // CoreGraphics does.
 
-/// CoreGraphics' scalar: double on 64-bit Darwin.
+/// CoreGraphics' scalar: double on 64-bit Darwin, float on 32-bit.
+#if _pointerBitWidth(_32)
+public typealias CGFloat = Float
+#else
 public typealias CGFloat = Double
+#endif
 
 private let null = CGRect(origin: CGPoint(x: .infinity, y: .infinity), size: CGSize(width: 0, height: 0))
 
@@ -132,7 +136,7 @@ public func CGRectIntegral(_ rect: CGRect) -> CGRect {
 
 // MARK: - Affine transforms
 
-private func transform(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ tx: Double, _ ty: Double) -> CGAffineTransform {
+private func transform(_ a: CGFloat, _ b: CGFloat, _ c: CGFloat, _ d: CGFloat, _ tx: CGFloat, _ ty: CGFloat) -> CGAffineTransform {
     CGAffineTransform(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
 }
 
@@ -149,7 +153,8 @@ public func CGAffineTransformMakeScale(_ sx: CGFloat, _ sy: CGFloat) -> CGAffine
 
 @c(_CGAffineTransformMakeRotation)
 public func CGAffineTransformMakeRotation(_ angle: CGFloat) -> CGAffineTransform {
-    transform(cos(angle), sin(angle), -sin(angle), cos(angle), 0, 0)
+    let cosine = CGFloat(cos(Double(angle))), sine = CGFloat(sin(Double(angle)))
+    return transform(cosine, sine, -sine, cosine, 0, 0)
 }
 
 /// t1 then t2.
