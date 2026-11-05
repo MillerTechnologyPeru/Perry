@@ -110,9 +110,12 @@ extension AttributeScopes.FoundationAttributes {
         }
     }
 
-    public var morphology: MorphologyAttribute.Type { MorphologyAttribute.self }
-    public var inflect: InflectionRuleAttribute.Type { InflectionRuleAttribute.self }
-    public var inlinePresentationIntent: InlinePresentationIntentAttribute.Type { InlinePresentationIntentAttribute.self }
+    // Typed as the attributes, as Foundation's stored ones are, so key paths
+    // to them bind by the names apps and SwiftUI use (run.inlinePresentation-
+    // Intent); only their types are ever used.
+    public var morphology: MorphologyAttribute { fatalError("attribute keys have no values") }
+    public var inflect: InflectionRuleAttribute { fatalError("attribute keys have no values") }
+    public var inlinePresentationIntent: InlinePresentationIntentAttribute { fatalError("attribute keys have no values") }
 }
 
 /// An Objective-C value that is not one of the attribute's values.

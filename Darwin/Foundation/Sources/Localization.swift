@@ -360,13 +360,24 @@ extension AttributedString {
         public static let insertAttributesWithoutMerging = InterpolationOptions(rawValue: 1 << 0)
     }
 
+    /// The localized string's inline Markdown, as strings tables are read:
+    /// whitespace kept, and what cannot be parsed left as text.
     @available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)
     public init(localized resource: LocalizedStringResource) {
-        self.init(String(localized: resource))
+        self.init(localizedMarkdown: String(localized: resource), including: AttributeScopes.FoundationAttributes.self)
     }
 
     @available(macOS 13, iOS 16, tvOS 16, watchOS 9, *)
     public init<S: AttributeScope>(localized resource: LocalizedStringResource, including scope: KeyPath<AttributeScopes, S.Type>) {
-        self.init(String(localized: resource))
+        self.init(localizedMarkdown: String(localized: resource), including: S.self)
+    }
+
+    init(localizedMarkdown string: String, including scope: any AttributeScope.Type) {
+        let options = MarkdownParsingOptions(allowsExtendedAttributes: true, interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                                             failurePolicy: .returnPartiallyParsedIfPossible)
+        let parsed = try? _MarkdownImport.attributedString({
+            try NSAttributedString(__markdownString: string, options: $0, baseURL: nil)
+        }, scope: scope, options: options)
+        self = parsed ?? AttributedString(string)
     }
 }
