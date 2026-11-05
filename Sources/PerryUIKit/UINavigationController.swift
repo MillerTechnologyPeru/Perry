@@ -502,8 +502,12 @@ open class UINavigationBar: UIView {
         withExtendedLifetime((background, separator)) {
             CG.setFillColorWithColor(context, background.state.makeCGColor())
             CG.fillRect(context, bounds)
-            CG.setFillColorWithColor(context, separator.state.makeCGColor())
-            CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
+            // A shadow image replaces the hairline; Perry draws images in
+            // its place as nothing.
+            if barState.shadowImage == nil {
+                CG.setFillColorWithColor(context, separator.state.makeCGColor())
+                CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
+            }
         }
         let tint = tintColor()
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
