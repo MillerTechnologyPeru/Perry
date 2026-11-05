@@ -145,6 +145,37 @@ struct ARMv7Tests {
         #expect(lines == expected)
     }
 
+    /// What exceptions.m prints with Apple's Foundation on macOS.
+    @Test("Objective-C exceptions unwind to @catch and @finally as on Darwin",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("exceptions").path)))
+    func exceptions() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("exceptions").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "caught failure 1",
+            "finally after catch",
+            "no exception",
+            "finally without one",
+            "inner finally",
+            "nested 2",
+            "caught 3, rethrowing",
+            "caught rethrown 3",
+            "caught after unwinding 4",
+            "caught any Other",
+            "caught PerryError: code 5",
+            "caught Second: raised",
+            "done",
+        ])
+    }
+
+    @Test("An exception no handler catches is reported, and ends the program",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("exceptions").path)))
+    func uncaughtException() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("exceptions").path, "uncaught"])
+        #expect(result.status != 0)
+        #expect(result.stderr.contains("*** Terminating app due to uncaught exception 'PerryError', reason: 'uncaught 6'"))
+    }
+
     /// What foundation_abi.m prints with Apple's Foundation on macOS.
     @Test("Foundation's variadic methods, KVC, KVO and floating point pass as on Darwin",
           .enabled(if: ARMv7.foundationAvailable))
