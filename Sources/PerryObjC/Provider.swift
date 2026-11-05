@@ -17,6 +17,14 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
         libSystem.withCString { library in name.withCString { lookup(library, $0) } }
     }
 
+    #if arch(arm)
+    // Exceptions unwind through the contexts Darwin's code registers with
+    // libSystem.
+    if let raise = symbol("__Unwind_SjLj_RaiseException") {
+        perry_objc_set_unwinder(unsafeBitCast(raise, to: perry_objc_raise_function.self))
+    }
+    #endif
+
     // Blocks are objects: build their classes in libSystem's storage.
     BlockClasses.install(
         .init(stack: symbol("__NSConcreteStackBlock"), malloc: symbol("__NSConcreteMallocBlock"),
