@@ -84,9 +84,28 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
 - libobjc (`libPerryobjc.so` for armv7): `objc_msgSend` and its stret and super
   forms, message forwarding and block trampolines in ARM assembly; the Swift
   runtime reads metadata at the pointer width's offsets (`Layout`).
+- Foundation (`libPerryFoundation.so`, with `libPerrydispatch.so`): the
+  `foundation_abi.m` fixture prints what macOS's Foundation does. Variadic
+  functions and methods (`variadic_arm.S`) pass a pointer to Darwin's
+  contiguous argument words, which `DarwinArguments` reads a word at a time,
+  or two for `long long` and `double`. KVO's setter (`kvo_arm.S`) passes on
+  r0-r3 and 16 words of stack arguments. KVC calls accessors with structures
+  through C function types, as Darwin's armv7 passes them in words and
+  returns those over 4 bytes through a pointer in r0. Literals, blocks,
+  callbacks and the fast enumeration state are read at word offsets
+  (`DarwinLayout`). Exported number constants have 8-byte slots, and a
+  `CGFloat` constant is a float.
+- Floating point between Darwin code and Swift: Darwin passes `float` and
+  `double` arguments and results in core registers, but Swift on armhf
+  passes them in VFP registers, so a method such as `-[NSNumber
+  doubleValue]` or `+numberWithDouble:`, or a C function with a
+  floating-point parameter or result, gets or returns the wrong value. Not
+  yet handled; it needs an entry point for each such function or method.
+  Floating point inside variadic arguments and structures is not affected.
 - Not yet: exceptions (`@throw`, unwinding through registered contexts), the
   rest of libSystem for Darwin's armv7 layouts (sockets, pthreads' types,
-  mach, the remaining files.c entry points), Foundation, UIKit, the other
+  mach, the remaining files.c entry points), Foundation's floating-point
+  methods and functions and the rest of its coverage, UIKit, the other
   providers, `objc_msgForward_stret`, and classic relocations (iOS before 3.1).
 
 ## Building and running
@@ -95,7 +114,7 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
     Scripts/build-armv7-system.sh              # .build/armv7/bin/libPerrySystem.so
     Scripts/build-host-macros.sh               # .build/macros/PerryObjCMacros
     Scripts/build-armv7-objc.sh                # .build/armv7/bin/libPerryobjc.so
-    Scripts/build-armv7-fixtures.sh 6.0 hello.c runtime.m
+    Scripts/build-armv7-fixtures.sh 6.0 hello.c runtime.m foundation_abi.m
     .build/armv7/bin/perry32 .build/perry-fixtures/armv7/runtime
 
 `Scripts/build-armv7-fixtures.sh` links with `arm-apple-darwin11-ld` from
@@ -104,7 +123,7 @@ cctools-port, installed under `.toolchains/cctools`.
 The Swift providers build with SwiftPM in the arm64 Linux container, on a
 machine with the memory for swift-syntax (a 4 GB one does not have it):
 
-    Scripts/build-armv7-swiftpm.sh             # Perryobjc and PerryFoundation
+    Scripts/build-armv7-swiftpm.sh             # Perryobjc, Perrydispatch, PerryFoundation
     Scripts/build-armv7-swiftpm.sh Perryobjc   # one product
 
 They go to `.build/armv7-pm/armv7-unknown-linux-gnueabihf/release`, built
