@@ -68,9 +68,15 @@ final class Catalog {
     private var renditions: [(key: [UInt16], range: Range<Int>)] = []
     private var atlases: [Int: Pixels] = [:]
 
+    /// Images Scripts/extract-assets.sh decoded on a Mac, for renditions
+    /// whose compression Perry doesn't decode (CoreUI's deepmap2):
+    /// <name>@<scale>x.png in a directory beside the catalog.
+    private let extracted: String
+
     init?(path: String) {
         guard let bytes = Files.read(path), bytes.count > 32, Array(bytes[0..<8]) == Array("BOMStore".utf8) else { return nil }
         self.bytes = bytes
+        extracted = path + ".images"
         guard parse() else { return nil }
     }
 
@@ -165,6 +171,22 @@ final class Catalog {
     /// The rendition for the screen's scale, else the next larger, else
     /// the largest smaller; for the phone, else any device.
     func image(named name: String) -> (image: Owned, scale: CGFloat)? {
+        decoded(named: name) ?? extractedImage(named: name)
+    }
+
+    /// The extracted image at the scale nearest the screen's.
+    private func extractedImage(named name: String) -> (image: Owned, scale: CGFloat)? {
+        let screen = Int(Screen.scale.rounded())
+        let scales = [screen] + [3, 2, 1].filter { $0 != screen }
+        for scale in scales {
+            let file = extracted + "/\(name)@\(scale)x.png"
+            guard let data = NSData.contents(ofFile: file), let image = UIImage.decode(data) else { continue }
+            return (image, CGFloat(scale))
+        }
+        return nil
+    }
+
+    private func decoded(named name: String) -> (image: Owned, scale: CGFloat)? {
         guard let identifier = identifiers[name] else { return nil }
         // UIUserInterfaceIdiom in catalogs: universal 0, phone 1.
         let candidates = renditions.indices.filter {
