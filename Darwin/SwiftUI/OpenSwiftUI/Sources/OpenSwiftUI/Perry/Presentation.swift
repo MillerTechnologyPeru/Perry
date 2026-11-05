@@ -4,7 +4,7 @@
 //
 //  Status: Perry's implementation
 //
-//  Sheets, full-screen covers, popovers and confirmation dialogs, presented
+//  Sheets, full-screen covers, popovers, confirmation dialogs and alerts, presented
 //  as UIKit presents view controllers: a hosting controller over the
 //  window's topmost one, whose views have the presenting view's
 //  environment, with a dismiss action that ends the presentation. Popovers
@@ -476,6 +476,133 @@ struct DialogActionsRoot: _VariadicView.UnaryViewRoot {
                 }
             }
         }
+    }
+}
+
+// MARK: - alert
+
+@available(OpenSwiftUI_v3_0, *)
+extension View {
+    /// Presents an alert with a message when a given condition is true.
+    @_disfavoredOverload
+    nonisolated public func alert<S, A, M>(
+        _ title: S,
+        isPresented: Binding<Bool>,
+        @ViewBuilder actions: () -> A,
+        @ViewBuilder message: () -> M
+    ) -> some View where S: StringProtocol, A: View, M: View {
+        alert(title: Text(title), isPresented: isPresented, actions: actions(), message: message())
+    }
+
+    /// Presents an alert with a message when a given condition is true.
+    nonisolated public func alert<A, M>(
+        _ titleKey: LocalizedStringKey,
+        isPresented: Binding<Bool>,
+        @ViewBuilder actions: () -> A,
+        @ViewBuilder message: () -> M
+    ) -> some View where A: View, M: View {
+        alert(title: Text(titleKey), isPresented: isPresented, actions: actions(), message: message())
+    }
+
+    /// Presents an alert using the given data to produce its actions and
+    /// message.
+    nonisolated public func alert<A, M, T>(
+        _ titleKey: LocalizedStringKey,
+        isPresented: Binding<Bool>,
+        presenting data: T?,
+        @ViewBuilder actions: (T) -> A,
+        @ViewBuilder message: (T) -> M
+    ) -> some View where A: View, M: View {
+        let shown = data.map { (actions($0), message($0)) }
+        return alert(title: Text(titleKey), isPresented: Binding(
+            get: { isPresented.wrappedValue && shown != nil },
+            set: { isPresented.wrappedValue = $0 }
+        ), actions: shown?.0, message: shown?.1)
+    }
+
+    /// Presents an alert when a given condition is true.
+    nonisolated public func alert<A>(
+        _ titleKey: LocalizedStringKey,
+        isPresented: Binding<Bool>,
+        @ViewBuilder actions: () -> A
+    ) -> some View where A: View {
+        alert(title: Text(titleKey), isPresented: isPresented, actions: actions(), message: EmptyView?.none)
+    }
+
+    /// Presents an alert when a given condition is true.
+    @_disfavoredOverload
+    nonisolated public func alert<S, A>(
+        _ title: S,
+        isPresented: Binding<Bool>,
+        @ViewBuilder actions: () -> A
+    ) -> some View where S: StringProtocol, A: View {
+        alert(title: Text(title), isPresented: isPresented, actions: actions(), message: EmptyView?.none)
+    }
+
+    nonisolated func alert<A: View, M: View>(title: Text, isPresented: Binding<Bool>, actions: A?, message: M?) -> some View {
+        modifier(PresentationModifier(
+            isPresented: isPresented.wrappedValue, style: .dialog,
+            dismiss: { isPresented.wrappedValue = false }, onDismiss: nil,
+            presented: { AlertView(title: title, message: message, actions: actions) }
+        ))
+    }
+}
+
+/// An alert: its title, message and actions in a card in the middle of the
+/// screen, over a dimmed background; an OK button when it has no actions.
+/// Tapping an action dismisses it.
+struct AlertView<Actions: View, Message: View>: View {
+    var title: Text
+    var message: Message?
+    var actions: Actions?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 4) {
+                title.font(.headline).multilineTextAlignment(.center)
+                if let message {
+                    message.font(.footnote).multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 20)
+            Divider()
+            Group {
+                if let actions {
+                    _VariadicView.Tree(DialogActionsRoot()) { actions }
+                } else {
+                    Button { dismiss() } label: {
+                        Text("OK").fontWeight(.semibold).frame(maxWidth: .infinity).padding(14)
+                    }
+                }
+            }
+            .simultaneousGesture(TapGesture().onEnded { dismiss() })
+        }
+        .frame(width: 270)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .cornerRadius(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.3))
+    }
+}
+
+// MARK: - presentationBackground
+
+@available(OpenSwiftUI_v4_0, *)
+extension View {
+    /// Sets the presentation background of the enclosing sheet using a
+    /// shape style: behind this view, the sheet's content.
+    nonisolated public func presentationBackground<S>(_ style: S) -> some View where S: ShapeStyle {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(Rectangle().fill(style).ignoresSafeArea())
+    }
+
+    /// Sets the presentation background of the enclosing sheet to a custom
+    /// view.
+    nonisolated public func presentationBackground<V>(alignment: Alignment = .center, @ViewBuilder content: () -> V) -> some View where V: View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(content().ignoresSafeArea(), alignment: alignment)
     }
 }
 #endif
