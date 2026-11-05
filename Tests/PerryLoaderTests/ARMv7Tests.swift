@@ -3,9 +3,10 @@ import Testing
 
 /// armv7 iOS programs, run by perry32. The tests need the 32-bit loader and
 /// providers and the armv7 fixtures, which Scripts/build-armv7-loader.sh,
-/// build-armv7-system.sh, build-armv7-objc.sh and build-armv7-fixtures.sh make
-/// on a machine whose kernel runs 32-bit ARM programs; without them they are
-/// skipped.
+/// build-armv7-system.sh, build-armv7-swiftpm.sh (or build-armv7-objc.sh) and
+/// build-armv7-fixtures.sh make, and a machine that runs 32-bit ARM programs:
+/// its kernel, or qemu-arm, as in Scripts/docker-test.sh. Without them they
+/// are skipped.
 @Suite("armv7", .enabled(if: ARMv7.available))
 struct ARMv7Tests {
     @Test("A C program runs through perry32")
@@ -117,6 +118,61 @@ struct ARMv7Tests {
         let result = try run(ARMv7.perry32, [ARMv7.fixture("runtime").path, "crash"])
         #expect(result.stderr.contains("-[Derived missingMethod]: unrecognized selector sent to instance 0x"))
     }
+
+    /// What foundation_abi.m prints with Apple's Foundation on macOS.
+    @Test("Foundation's variadic methods, KVC, KVO and floating point pass as on Darwin",
+          .enabled(if: ARMv7.foundationAvailable))
+    func foundation() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("foundation_abi").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stderr.contains("NSLog 1 2 3.0 four"))
+        #expect(result.stdout.lines == [
+            "int -7 long -123456 llong -9876543210 unsigned 4000000000",
+            "double 3.142 float 2.5 mixed 1 0.500000 1099511627776 object cstring",
+            " 1.50|42  |ff|123456789abc|77|Z|    3",
+            "mutable 2 3.0 4",
+            "prefix 5000000000 6",
+            "init 9 0.25",
+            "a,b,c",
+            "1 2 2",
+            "set 2",
+            "5,10,5000000000",
+            "5,5000000000",
+            "cf 1 2 3.00 four",
+            "set 3 123456789012 4 7 1.50 -2.25",
+            "count 3",
+            "big 123456789012",
+            "range range 4 7",
+            "pair pair 1.50 -2.25",
+            "numbers -2.500 -2.500 0.750 0.750 1.250 7",
+            "strings 3.250 -0.500",
+            "date 1000.250 999.750",
+            "cf date 12345.500 now 1",
+            "floats 2.500 0.125 1",
+            "weight 2.500",
+            "ratio 0.125",
+            "flag 1",
+            "changed count",
+            "  old 3",
+            "  new 4",
+            "changed big",
+            "  old 123456789012",
+            "  new 34359738368",
+            "changed range",
+            "  old range 4 7",
+            "  new range 1 2",
+            "changed pair",
+            "  old pair 1.50 -2.25",
+            "  new pair 3.50 4.75",
+            "changed weight",
+            "  old 2.500",
+            "  new -1.500",
+            "changed ratio",
+            "  old 0.125",
+            "  new 3.250",
+            "after 5 34359738368 2 4.75",
+        ])
+    }
 }
 
 enum ARMv7 {
@@ -135,5 +191,20 @@ enum ARMv7 {
             && fm.fileExists(atPath: fixture("seeko").path)
             && fm.fileExists(atPath: fixture("files").path)
             && fm.fileExists(atPath: fixture("zoo").path)
+            && runs
+    }
+
+    /// Whether perry32 runs here: the kernel runs 32-bit ARM programs, or
+    /// qemu-arm does through binfmt_misc (Docker Desktop on Apple silicon,
+    /// which has no AArch32), finding Linux's armhf libraries under
+    /// QEMU_LD_PREFIX.
+    static let runs: Bool = (try? run(perry32, [fixture("hello").path]))?.status == 7
+
+    /// Foundation's provider and its fixture, which Scripts/build-armv7-swiftpm.sh
+    /// and build-armv7-fixtures.sh make.
+    static var foundationAvailable: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: perry32.deletingLastPathComponent().appending(path: "libPerryFoundation.so").path)
+            && fm.fileExists(atPath: fixture("foundation_abi").path)
     }
 }
