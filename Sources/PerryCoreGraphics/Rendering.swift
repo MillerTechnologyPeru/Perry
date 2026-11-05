@@ -281,6 +281,11 @@ final class Canvas {
         context.textMatrix = Silica.CGAffineTransform(a: a, b: b, c: c, d: d, tx: tx, ty: ty)
     }
 
+    /// CGTextDrawingMode: fill 0, stroke 1, fill and stroke 2, invisible 3,
+    /// and the same four adding to the clip. Invisible text only advances
+    /// the text position.
+    func setTextDrawingMode(_ mode: Int32) { context.textDrawingMode = Silica.CGTextDrawingMode(rawValue: mode) ?? .fill }
+
     func showText(_ text: String) { context.show(text: text) }
 
     /// A CGFont's font, for glyphs shown by index.
