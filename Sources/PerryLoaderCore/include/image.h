@@ -112,6 +112,8 @@ typedef struct perry_loader {
 void perry_loader_init(perry_loader *loader);
 perry_image *perry_load_executable(perry_loader *loader, const char *path);
 void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
+// With PERRY_CRASH_REPORT set, prints registers and frames on a fatal signal.
+void perry_install_crash_reporter(perry_loader *loader);
 _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
 
 // Address helpers
