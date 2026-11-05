@@ -345,8 +345,10 @@ final class WebViewState: ObjectState {
     var dataDetectorTypes: UInt = 0
 }
 
-/// UIWebView: takes what it is asked to load and tells its delegate the
-/// load finished; it draws only its background.
+/// UIWebView: a page of WPE WebKit's, as WKWebView's, with UIWebView's
+/// delegate and its scripts run to completion before they return. Without
+/// WPE it takes what it is asked to load and tells its delegate the load
+/// finished, drawing only its background.
 @ObjCClass("UIWebView")
 open class UIWebView: UIView {
     static let webStates = StateTable<WebViewState>()
@@ -354,6 +356,7 @@ open class UIWebView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
+        WebViews.live.removeAll { $0.object == objcObject }
         UIWebView.webStates.remove(objcObject)
         super.dealloc()
     }
@@ -381,28 +384,79 @@ open class UIWebView: UIView {
     @ObjCMethod("dataDetectorTypes") func dataDetectorTypes() -> UInt { web.dataDetectorTypes }
     @ObjCMethod("setDataDetectorTypes:") func setDataDetectorTypes(_ value: UInt) { web.dataDetectorTypes = value }
     @ObjCMethod("request") func request() -> NSObject? { web.request }
-    @ObjCMethod("isLoading") func isLoading() -> Bool { false }
-    @ObjCMethod("canGoBack") func canGoBack() -> Bool { false }
-    @ObjCMethod("canGoForward") func canGoForward() -> Bool { false }
-    @ObjCMethod("goBack") func goBack() {}
-    @ObjCMethod("goForward") func goForward() {}
-    @ObjCMethod("reload") func reload() {}
-    @ObjCMethod("stopLoading") func stopLoading() {}
+    @ObjCMethod("isLoading") func isLoading() -> Bool { web.page?.isLoading ?? false }
+    @ObjCMethod("canGoBack") func canGoBack() -> Bool { web.page?.canGoBack ?? false }
+    @ObjCMethod("canGoForward") func canGoForward() -> Bool { web.page?.canGoForward ?? false }
+    @ObjCMethod("goBack") func goBack() { web.page?.goBack() }
+    @ObjCMethod("goForward") func goForward() { web.page?.goForward() }
+    @ObjCMethod("reload") func reload() { web.page?.reload() }
+    @ObjCMethod("stopLoading") func stopLoading() { web.page?.stopLoading() }
     @ObjCMethod("scrollView") func scrollView() -> NSObject? { nil }
 
     @ObjCMethod("loadHTMLString:baseURL:")
     func loadHTMLString(_ html: String?, baseURL: NSObject?) {
         web.html = html
-        finishLoad()
+        guard let page = page() else { return finishLoad() }
+        page.loadHTML(html ?? "", baseURI: baseURL?.sendAbsoluteString() ?? "about:blank")
     }
 
     @ObjCMethod("loadRequest:")
     func loadRequest(_ request: NSObject?) {
         web.request = request
-        finishLoad()
+        guard let page = page(), let uri = request?.unsafeCast(to: NSURLRequestObject.self).url()?.sendAbsoluteString() else {
+            return finishLoad()
+        }
+        page.loadURI(uri)
     }
 
-    @ObjCMethod("stringByEvaluatingJavaScriptFromString:") func evaluate(_ script: String?) -> String? { "" }
+    /// The script's value as a string, once it has run: strings, numbers
+    /// and Booleans; empty for other values and exceptions.
+    @ObjCMethod("stringByEvaluatingJavaScriptFromString:") func evaluate(_ script: String?) -> String? {
+        guard let page = page() else { return "" }
+        return page.evaluateString(script ?? "") ?? ""
+    }
+
+    /// The view's page, made on its first load; nil without WPE. Its
+    /// navigations ask the delegate, which hears them start, finish and
+    /// fail.
+    func page() -> WebPage? {
+        if let page = web.page { return page }
+        guard let page = makeWebPage(web) else { return nil }
+        let object = objcObject
+        // The delegate is asked with an NSURLRequest, which CFNetwork has
+        // when the program uses it; otherwise navigations go ahead.
+        page.decideNavigation = { uri, type in
+            let view = UIWebView(objcObject: object, ownership: .retain)
+            guard Classes.named("NSURLRequest") != nil, let request = NSURLObject.make(string: uri).map({ NSURLRequestFactory.make(url: $0) }) else { return true }
+            view.web.request = request
+            guard let delegate = view.delegate(), delegate.responds(to: "webView:shouldStartLoadWithRequest:navigationType:") else {
+                return true
+            }
+            return delegate.sendShouldStartLoad(view, request, Int(type))
+        }
+        page.loadChanged = { event in
+            let view = UIWebView(objcObject: object, ownership: .retain)
+            let web = view.web
+            switch event {
+            case WPE.loadStarted: web.navigationFailed = false
+            case WPE.loadFinished: web.loadFinished = true
+            default: break
+            }
+            guard let delegate = view.delegate() else { return }
+            if event == WPE.loadStarted, delegate.responds(to: "webViewDidStartLoad:") { delegate.sendWebViewDidStartLoad(view) }
+            // WebKit finishes a failed load too; the delegate heard it fail.
+            if event == WPE.loadFinished, !web.navigationFailed, delegate.responds(to: "webViewDidFinishLoad:") {
+                delegate.sendWebViewDidFinishLoad(view)
+            }
+        }
+        page.loadFailed = { _, domain, code, _ in
+            let view = UIWebView(objcObject: object, ownership: .retain)
+            view.web.navigationFailed = true
+            guard let delegate = view.delegate(), delegate.responds(to: "webView:didFailLoadWithError:") else { return }
+            delegate.sendDidFailLoad(view, WebErrors.loading(domain: domain, code: code))
+        }
+        return page
+    }
 
     /// The delegate hears the load start and finish, on the next pass. The
     /// view is kept until then, as its controller may let it go first.
@@ -421,6 +475,14 @@ open class UIWebView: UIView {
 extension NSObject {
     @ObjCMethod("webViewDidStartLoad:") func sendWebViewDidStartLoad(_ view: UIView)
     @ObjCMethod("webViewDidFinishLoad:") func sendWebViewDidFinishLoad(_ view: UIView)
+    @ObjCMethod("webView:didFailLoadWithError:") func sendDidFailLoad(_ view: UIView, _ error: NSObject)
+    @ObjCMethod("webView:shouldStartLoadWithRequest:navigationType:")
+    func sendShouldStartLoad(_ view: UIView, _ request: NSObject, _ type: Int) -> Bool
+}
+
+@ObjCWrapper("NSURLRequest")
+class NSURLRequestFactory: NSObject {
+    @ObjCClassMethod("requestWithURL:") static func make(url: NSObject) -> NSObject
 }
 
 /// WKWebView: a page of WPE WebKit's, shown as the view's layer's contents
@@ -432,7 +494,7 @@ open class WKWebView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
-        WebViews.live.removeAll { $0 == objcObject }
+        WebViews.live.removeAll { $0.object == objcObject }
         WKWebView.webStates.remove(objcObject)
         super.dealloc()
     }
@@ -565,26 +627,36 @@ open class WKWebView: UIView {
     /// The view's page, made on its first load; nil without WPE.
     func page() -> WebPage? {
         if let page = web.page { return page }
-        let size = state.bounds.size
-        guard let page = WebPage(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
-        else { return nil }
-        web.page = page
-        if let agent = web.customUserAgent { page.setUserAgent(agent) }
+        guard let page = makeWebPage(web) else { return nil }
         let object = objcObject
-        WebViews.live.append(object)
-        WebPage.tick = WebViews.tick
-        page.frame = { bytes, width, height, stride in
-            WKWebView(objcObject: object, ownership: .retain).show(bytes, width: width, height: height, stride: stride)
-        }
         page.loadChanged = { event in WebViews.loadChanged(object, event) }
         page.loadFailed = { committed, domain, code, message in
             WebViews.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
         }
         return page
     }
+}
+
+extension UIView {
+    /// A page for a web view whose state is `web`, of the view's size,
+    /// showing its frames as the view's layer's contents; nil without WPE.
+    func makeWebPage(_ web: WebViewState) -> WebPage? {
+        let size = state.bounds.size
+        guard let page = WebPage(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
+        else { return nil }
+        web.page = page
+        if let agent = web.customUserAgent { page.setUserAgent(agent) }
+        let object = objcObject
+        WebViews.live.append((object, web))
+        WebPage.tick = WebViews.tick
+        page.frame = { [unowned web] bytes, width, height, stride in
+            UIView(objcObject: object, ownership: .retain).showWebFrame(web, bytes, width: width, height: height, stride: stride)
+        }
+        return page
+    }
 
     /// A frame of the page's, as the layer's contents.
-    func show(_ bytes: UnsafeRawPointer, width: Int, height: Int, stride: Int) {
+    func showWebFrame(_ web: WebViewState, _ bytes: UnsafeRawPointer, width: Int, height: Int, stride: Int) {
         guard let space = CG.colorSpaceCreateDeviceRGB() else { return }
         defer { CG.release(space) }
         // Wayland's ARGB8888: premultiplied, first byte blue.
@@ -610,7 +682,8 @@ open class WKWebView: UIView {
 
 /// The web views with pages, and their navigations.
 enum WebViews {
-    nonisolated(unsafe) static var live: [UnsafeMutableRawPointer] = []
+    /// The views with pages, and their states.
+    nonisolated(unsafe) static var live: [(object: UnsafeMutableRawPointer, web: WebViewState)] = []
 
     /// A navigation for the load just started, which the delegate's calls
     /// name until the next.
@@ -625,10 +698,9 @@ enum WebViews {
 
     /// Pages follow their views' sizes.
     static func tick() {
-        for object in live {
-            let view = WKWebView(objcObject: object, ownership: .retain)
-            guard let page = view.web.page else { continue }
-            let size = view.state.bounds.size
+        for (object, web) in live {
+            guard let page = web.page else { continue }
+            let size = UIView(objcObject: object, ownership: .retain).state.bounds.size
             page.resize(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
         }
     }
