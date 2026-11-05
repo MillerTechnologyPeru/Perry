@@ -145,6 +145,34 @@ struct ARMv7Tests {
         #expect(lines == expected)
     }
 
+    /// What graphics.c prints with Apple's CoreGraphics on macOS.
+    @Test("CoreGraphics takes and returns float geometry as 32-bit Darwin passes it, and draws",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("graphics").path)
+                   && FileManager.default.fileExists(atPath: ARMv7.perry32.deletingLastPathComponent()
+                       .appending(path: "libPerryCoreGraphics.so").path)))
+    func graphics() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("graphics").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "mid 60.00 maxY 70.00",
+            "intersection 60.00 40.00 50.00 30.00",
+            "union 10.00 20.00 150.00 120.00",
+            "inset 15.00 22.50 90.00 45.00",
+            "offset 0.00 20.50 100.00 50.00",
+            "contains 1 0 equal 1",
+            "transform -0.000 2.000 -3.000 -0.000 3.000 10.000",
+            "point 110.00 87.00",
+            "inverted 50.00 30.00",
+            "transformed 20.00 60.00 200.00 150.00",
+            "color 1.000 0.500 0.250 0.750 alpha 0.750",
+            "path -2.00 -6.00 32.00 24.50",
+            "pixel 2,27: 0 0 255 255",
+            "pixel 10,20: 255 0 0 255",
+            "pixel 28,13: 0 255 0 255",
+            "pixel 21,18: 0 0 255 255",
+        ])
+    }
+
     /// What exceptions.m prints with Apple's Foundation on macOS.
     @Test("Objective-C exceptions unwind to @catch and @finally as on Darwin",
           .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("exceptions").path)))
