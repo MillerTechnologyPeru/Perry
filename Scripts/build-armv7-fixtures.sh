@@ -57,6 +57,7 @@ stub libobjc /usr/lib/libobjc.A.dylib _objc_msgSend_stret _objc_msgSendSuper2_st
     _objc_exception_throw _objc_exception_rethrow _objc_begin_catch _objc_end_catch _objc_terminate \
     _OBJC_EHTYPE_id _objc_ehtype_vtable _objc_retainAutorelease
 stub Foundation /System/Library/Frameworks/Foundation.framework/Foundation
+stub CoreGraphics /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics
 
 fixtures=${*:-hello.c}
 for file in $fixtures; do
@@ -65,7 +66,8 @@ for file in $fixtures; do
     *.m) flags="-fobjc-arc -fobjc-exceptions -fblocks"
         libs="$out/libSystem/libSystem.dylib $out/libobjc/libobjc.dylib"
         grep -q NSString "$root/Tests/Fixtures/$file" && libs="$libs $out/Foundation/Foundation.dylib" ;;
-    *) flags=""; libs="$out/libSystem/libSystem.dylib" ;;
+    *) flags=""; libs="$out/libSystem/libSystem.dylib"
+        grep -q CGContext "$root/Tests/Fixtures/$file" && libs="$libs $out/CoreGraphics/CoreGraphics.dylib" ;;
     esac
     # softfp, as Apple's armv7 code is built: VFP instructions, with floating
     # point passed in core registers.
