@@ -338,6 +338,13 @@ public class NSData: NSObject {
     @ObjCMethod("bytes")
     func bytes() -> UnsafeRawPointer? { UnsafeRawPointer(storage?.bytes) }
 
+    /// All the bytes; deprecated, as the buffer's size can't be checked.
+    @ObjCMethod("getBytes:")
+    func getBytes(_ buffer: UnsafeMutableRawPointer) {
+        guard let storage, let bytes = storage.bytes else { return }
+        memcpy(buffer, bytes, storage.count)
+    }
+
     @ObjCMethod("getBytes:length:")
     func getBytes(_ buffer: UnsafeMutableRawPointer, length: UInt) {
         guard let storage, let bytes = storage.bytes else { return }
