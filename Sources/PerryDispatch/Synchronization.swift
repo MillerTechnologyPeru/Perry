@@ -118,3 +118,17 @@ enum DarwinTime {
 public func dispatch_walltime(_ when: UnsafePointer<timespec>?, _ delta: Int64) -> UInt64 {
     linux_dispatch_walltime(when, delta)
 }
+
+// MARK: - Once
+
+/// libSystem's: one implementation, whichever library an image binds.
+@_cdecl("_dispatch_once")
+public func dispatch_once(_ predicate: UnsafeMutablePointer<Int>?, _ block: UnsafeMutableRawPointer?) {
+    Runtime.once(predicate, block)
+}
+
+@_cdecl("_dispatch_once_f")
+public func dispatch_once_f(_ predicate: UnsafeMutablePointer<Int>?, _ context: UnsafeMutableRawPointer?,
+                            _ function: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?) {
+    Runtime.onceFunction(predicate, context, function)
+}

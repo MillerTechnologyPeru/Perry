@@ -344,7 +344,8 @@ public func CTParagraphStyleGetCompositionLanguageForLanguage(_ language: Unsafe
 @c(_CTFontManagerRegisterGraphicsFont)
 public func CTFontManagerRegisterGraphicsFont(_ font: UnsafeMutableRawPointer?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
     error?.pointee = nil
-    return font != nil
+    guard let font else { return false }
+    return CG.fontRegister?(font) ?? true
 }
 
 @c(_CTFontManagerUnregisterGraphicsFont)

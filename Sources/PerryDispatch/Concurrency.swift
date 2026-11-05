@@ -83,15 +83,15 @@ public func dispatch_lock_override_end(_ qos: UInt32) -> Int32 { 0 }
 
 // MARK: - Vouchers
 
-/// There is never a voucher to adopt or copy.
+/// There is never a voucher to adopt or copy. Adopting takes ownership of
+/// an object; Swift's concurrency also adopts sentinels that aren't objects
+/// (VOUCHER_INVALID, all ones), which are left alone.
 @c(_voucher_copy)
 public func voucher_copy() -> Object? { nil }
 
-/// Adopting takes the voucher's reference; VOUCHER_INVALID (~0), which
-/// Swift's concurrency runtime adopts to mean "no voucher", is no object.
 @c(_voucher_adopt)
 public func voucher_adopt(_ voucher: Object?) -> Object? {
-    if let voucher, UInt(bitPattern: voucher) != UInt.max { ObjCRuntime.release(voucher) }
+    if let voucher, Int(bitPattern: voucher) & 7 == 0 { ObjCRuntime.release(voucher) }
     return nil
 }
 

@@ -29,6 +29,12 @@ enum Runtime {
     /// libSystem's errno conversion, for I/O handlers' errors.
     typealias ErrnoFromLinux = @convention(c) (Int32) -> Int32
     nonisolated(unsafe) static var darwinErrno: ErrnoFromLinux?
+    /// libSystem's dispatch_once and dispatch_once_f, which images that
+    /// link libdispatch itself import from it.
+    typealias Once = @convention(c) (UnsafeMutablePointer<Int>?, Pointer?) -> Void
+    typealias OnceFunction = @convention(c) (UnsafeMutablePointer<Int>?, Pointer?, (@convention(c) (Pointer?) -> Void)?) -> Void
+    nonisolated(unsafe) static var once: Once!
+    nonisolated(unsafe) static var onceFunction: OnceFunction!
 }
 
 /// Before the generated startup defines the classes: binds libobjc and the
@@ -41,13 +47,16 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard ObjCRuntime.load({ symbol(libobjc, $0) }),
           let createInstance = symbol(libobjc, "_class_createInstance"),
           let blockCopy = symbol(libSystem, "__Block_copy"), let blockRelease = symbol(libSystem, "__Block_release"),
-          let mallocBlockClass = symbol(libSystem, "__NSConcreteMallocBlock") else {
+          let mallocBlockClass = symbol(libSystem, "__NSConcreteMallocBlock"),
+          let once = symbol(libSystem, "_dispatch_once"), let onceFunction = symbol(libSystem, "_dispatch_once_f") else {
         dispatchFatal("libdispatch needs libPerryobjc and libPerrySystem, which are missing or incomplete")
     }
     Runtime.createInstance = unsafeBitCast(createInstance, to: Runtime.CreateInstance.self)
     Runtime.blockCopy = unsafeBitCast(blockCopy, to: Runtime.BlockCopy.self)
     Runtime.blockRelease = unsafeBitCast(blockRelease, to: Runtime.BlockRelease.self)
     Runtime.mallocBlockClass = mallocBlockClass
+    Runtime.once = unsafeBitCast(once, to: Runtime.Once.self)
+    Runtime.onceFunction = unsafeBitCast(onceFunction, to: Runtime.OnceFunction.self)
     Runtime.darwinErrno = symbol(libSystem, "perry_darwin_errno_from_linux").map { unsafeBitCast($0, to: Runtime.ErrnoFromLinux.self) }
     if let name = info.progname { Logging.programName = String(cString: name) }
     return true

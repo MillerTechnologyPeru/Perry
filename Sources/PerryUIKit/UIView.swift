@@ -73,8 +73,25 @@ final class ViewState: ObjectState {
 /// landscape orientations.
 enum Screen {
     /// UIInterfaceOrientation: portrait 1, landscape right 3, landscape left 4.
+    /// PERRY_UIKIT_ORIENTATION set to "landscape" or "portrait" holds an app
+    /// that supports both that way ("landscapeleft" and "landscaperight"
+    /// name the side).
     nonisolated(unsafe) static let orientation: Int = {
         let bundle = NSBundle.main()
+        if let setting = getenv("PERRY_UIKIT_ORIENTATION").map({ String(cString: $0).lowercased() }) {
+            switch setting {
+            case "portrait": return 1
+            case "landscaperight": return 3
+            case "landscapeleft": return 4
+            case "landscape":
+                // The side the app lists first, if it lists one.
+                let names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~ipad")
+                    ?? bundle.infoObject(forKey: "UISupportedInterfaceOrientations"))?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
+                let first = names.first { $0.hasPrefix("UIInterfaceOrientationLandscape") }
+                return first == "UIInterfaceOrientationLandscapeLeft" ? 4 : 3
+            default: break
+            }
+        }
         // An iPad-only app lists them for the iPad alone; else the one it
         // starts in.
         var names = (bundle.infoObject(forKey: "UISupportedInterfaceOrientations~iphone")
@@ -382,6 +399,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         for subview in state.subviews { subview.state.superview = nil }
         state.layer.setDelegate(nil)
         UIView.states.remove(objcObject)
+        UIView.guides.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
     }
 

@@ -122,6 +122,8 @@ void perry_foundation_set_empty_array_class(void *cls);
 // 3 null, 4 use context.
 const void *perry_foundation_cf_allocator(int which);
 void perry_foundation_set_empty_dictionary_class(void *cls);
+// The empty @{}, which +[NSDictionary dictionary] also answers.
+void *perry_foundation_empty_dictionary(void);
 
 // Variadic entry points (variadic.S). Apple's arm64 ABI passes variadic
 // arguments in 8-byte stack slots; each entry point passes a pointer to

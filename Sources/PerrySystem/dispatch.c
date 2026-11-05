@@ -1,8 +1,8 @@
-// libdispatch's once functions, which libSystem re-exports. A finished
+// libdispatch's once functions, which libSystem exports. A finished
 // predicate holds ~0, as on Darwin: callers' inline fast path (the
 // DISPATCH_EXPECT test in <dispatch/once.h>) skips the call once it is set.
 
-#define DARWIN_SYMBOL(name) __asm__("_" #name) __attribute__((visibility("default"), used))
+#include "PerrySystem.h"
 
 #include <sched.h>
 #include <stdatomic.h>

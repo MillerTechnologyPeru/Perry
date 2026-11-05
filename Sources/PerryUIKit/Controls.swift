@@ -682,12 +682,12 @@ open class NSLayoutConstraint: NSObject {
         for constraint in constraints.elements { constraint.as(NSLayoutConstraint.self)?.setActive(false) }
     }
 
-    /// The closest view both items are in.
+    /// The closest view both items (or the views that own them, for
+    /// guides) are in.
     private var holder: UIView? {
-        guard let first = state.firstItem.map({ UIView.wrap($0) }), first.is(UIView.self) else { return nil }
+        guard let first = state.firstItem.flatMap({ LayoutItems.resolve($0)?.view }) else { return nil }
         guard let secondObject = state.secondItem else { return first }
-        let second = UIView.wrap(secondObject)
-        guard second.is(UIView.self) else { return first }
+        guard let second = LayoutItems.resolve(secondObject)?.view else { return first }
         var candidate: UIView? = first
         while let view = candidate {
             if view.objcObject == second.objcObject || second.isDescendant(of: view) { return view }
@@ -710,8 +710,7 @@ open class NSLayoutConstraint: NSObject {
 
     private func invalidate() {
         for item in [state.firstItem, state.secondItem].compactMap({ $0 }) {
-            let view = UIView.wrap(item)
-            guard view.is(UIView.self) else { continue }
+            guard let view = LayoutItems.resolve(item)?.view else { continue }
             view.setNeedsLayout()
             view.superviewNeedsLayout()
         }

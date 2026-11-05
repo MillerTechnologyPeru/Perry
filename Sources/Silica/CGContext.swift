@@ -493,6 +493,11 @@ public extension CGContext {
             fontSize > 0.0 && glyphPositions.isEmpty == false
             else { return }
 
+        // Invisible text (and text that only adds to the clip) paints
+        // nothing; the text position still advances, which is how text is
+        // measured.
+        guard textDrawingMode != .invisible, textDrawingMode != .clip else { return }
+
         // Convert text-space positions to user-space baseline origins.
         // In Silica's default flipped (top-left origin) convention the text
         // position is the top of the line; in a bottom-left-origin context the

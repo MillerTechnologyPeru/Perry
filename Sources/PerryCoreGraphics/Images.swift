@@ -9,6 +9,7 @@ import PerryObjCInterop
 enum TypeIDs {
     static let colorSpace: UInt = 73, color: UInt = 74, image: UInt = 75, dataProvider: UInt = 76, context: UInt = 77
     static let imageSource: UInt = 78, imageDestination: UInt = 79
+    static let font: UInt = 80
 }
 
 // MARK: - Pixel formats

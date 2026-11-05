@@ -19,19 +19,19 @@ cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
 
 out=${1:-.build/perry-swift-runtime}
-# The newest iOS runtime simctl knows whose Swift libraries are files,
-# wherever it is mounted (iOS 26's and 27's are cryptexes, mounted under
-# /private/var/run/com.apple.security.cryptexd). From iOS 27 the runtime's
-# core libraries are only in the simulator's dyld shared cache, so an older
-# runtime installed beside it is used instead.
-runtime=$(xcrun simctl runtime list -j 2>/dev/null | /usr/bin/python3 -c '
+# The newest iOS runtime simctl knows, wherever it is mounted (iOS 27's are
+# cryptexes, mounted under /private/var/run/com.apple.security.cryptexd),
+# preferring one that still has libswiftCore as a file: from iOS 27 it is
+# only in the simulator's dyld shared cache.
+runtime=$(xcrun simctl runtime list -j 2>/dev/null | /usr/bin/python3 -I -c '
 import json, os, sys
 runtimes = [r for r in json.load(sys.stdin).values()
             if r.get("platformIdentifier", "").endswith("iphonesimulator") and r.get("runtimeBundlePath")]
 runtimes.sort(key=lambda r: [int(p) for p in r.get("version", "0").split(".")])
 core = "Contents/Resources/RuntimeRoot/usr/lib/swift/libswiftCore.dylib"
-usable = [r for r in runtimes if os.path.isfile(os.path.join(r["runtimeBundlePath"], core))]
-print((usable or runtimes)[-1]["runtimeBundlePath"] if runtimes else "")' || true)
+with_files = [r for r in runtimes if os.path.isfile(os.path.join(r["runtimeBundlePath"], core))]
+chosen = (with_files or runtimes)[-1:]
+print(chosen[0]["runtimeBundlePath"] if chosen else "")' || true)
 [ -n "$runtime" ] || runtime=$(ls -d /Library/Developer/CoreSimulator/Volumes/*/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS*.simruntime \
               /Library/Developer/CoreSimulator/Profiles/Runtimes/iOS*.simruntime 2>/dev/null | sort -V | tail -1)
 [ -n "$runtime" ] || { echo "no iOS Simulator runtime installed (Xcode > Settings > Components)" >&2; exit 1; }

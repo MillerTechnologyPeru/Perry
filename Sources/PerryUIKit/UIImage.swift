@@ -71,14 +71,16 @@ open class UIImage: NSObject {
         return self
     }
 
-    /// From a nib: the named image in the main bundle.
+    /// From a nib: the named image in the bundle the nib came from, else in
+    /// the main bundle.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
-        if let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName"),
-           let image = UIImage.image(UIImage.objCClass, named: name) {
-            state.set(image.state.cgImage, scale: image.state.scale, orientation: 0)
-        }
+        guard let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName") else { return self }
+        let nibBundle = coder.as(UINibDecoder.self)?.nib?.bundlePath.flatMap { NSBundle.bundle(path: $0) }
+        let image = nibBundle.flatMap { UIImage.image(UIImage.objCClass, named: name, in: $0, catalog: false) }
+            ?? UIImage.image(UIImage.objCClass, named: name)
+        if let image { state.set(image.state.cgImage, scale: image.state.scale, orientation: 0) }
         return self
     }
 
