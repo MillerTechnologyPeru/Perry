@@ -21,6 +21,7 @@ class NSError: NSObject {
 class NSBundle: NSObject {
     @ObjCClassMethod("mainBundle") static func main() -> NSBundle
     @ObjCMethod("pathForResource:ofType:") func path(forResource name: String, ofType type: String) -> String?
+    @ObjCMethod("bundlePath") func bundlePath() -> String?
 }
 
 @ObjCWrapper("NSURL")
