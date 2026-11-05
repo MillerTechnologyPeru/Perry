@@ -5,7 +5,7 @@ install-name: '/usr/lib/libSystem.B.dylib'
 current-version: 1351
 exports:
   - targets: [ arm64-ios, arm64-macos ]
-    symbols: [ _atan2, _atof, _cos, _exp, _floor, _fmaf, _fmod, _frexp, _getsockopt,
+    symbols: [ _atan2, _calloc, _atof, _cos, _exp, _floor, _fmaf, _fmod, _frexp, _getsockopt,
                _gettimeofday, _hypot, _jn, _ldexp, _log, _lround, _modf, _pow, _powf,
                _pthread_attr_destroy, _pthread_attr_init, _pthread_attr_setstacksize,
                _pthread_cond_broadcast, _pthread_cond_timedwait, _pthread_cond_wait,
