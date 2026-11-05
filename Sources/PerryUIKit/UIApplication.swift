@@ -135,6 +135,10 @@ open class UIApplication: UIResponder {
     }
 
     @ObjCMethod("isIdleTimerDisabled") func isIdleTimerDisabled() -> Bool { false }
+    /// UIBackgroundRefreshStatus: denied 1. Apps are never woken in the
+    /// background here.
+    @ObjCMethod("backgroundRefreshStatus") func backgroundRefreshStatus() -> Int { 1 }
+    @ObjCMethod("setMinimumBackgroundFetchInterval:") func setMinimumBackgroundFetchInterval(_ interval: Double) {}
     @ObjCMethod("setIdleTimerDisabled:") func setIdleTimerDisabled(_ disabled: Bool) {}
     @ObjCMethod("isNetworkActivityIndicatorVisible") func isNetworkActivityIndicatorVisible() -> Bool { false }
     @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
