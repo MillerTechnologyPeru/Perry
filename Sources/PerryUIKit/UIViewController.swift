@@ -22,6 +22,8 @@ enum Appearance {
 
 final class ViewControllerState: ObjectState {
     var view: UIView?
+    /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
+    var userInterfaceStyle = 0
     var title: String?
     var nibName: String?
     /// The parent, which retains this controller; not retained.
@@ -285,7 +287,32 @@ open class UIViewController: UIResponder {
     func willAnimateRotation(toInterfaceOrientation orientation: Int, duration: Double) {}
     @ObjCMethod("didRotateFromInterfaceOrientation:")
     func didRotate(fromInterfaceOrientation orientation: Int) {}
-    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+    /// The device's, in the appearance this controller overrides it with,
+    /// or its view's, or its parent's.
+    @ObjCMethod("traitCollection")
+    func traitCollection() -> UITraitCollection { UITraitCollection.device(style: interfaceStyle) }
+
+    var interfaceStyle: Int {
+        if state.userInterfaceStyle != 0 { return state.userInterfaceStyle }
+        if let view = state.view { return view.interfaceStyle }
+        if let parent = state.parent { return UIViewController.wrap(parent).interfaceStyle }
+        return 1
+    }
+
+    /// Nothing to do here; subclasses override it.
+    @ObjCMethod("traitCollectionDidChange:") func traitCollectionDidChange(_ previous: UITraitCollection?) {}
+
+    @ObjCMethod("overrideUserInterfaceStyle") func overrideUserInterfaceStyle() -> Int { state.userInterfaceStyle }
+    @ObjCMethod("setOverrideUserInterfaceStyle:")
+    func setOverrideUserInterfaceStyle(_ style: Int) {
+        let previous = traitCollection()
+        state.userInterfaceStyle = style
+        if let view = state.view {
+            view.announceTraitChange(from: previous)
+        } else if previous.traits.style != interfaceStyle {
+            sendTraitCollectionDidChange(previous)
+        }
+    }
 
     // MARK: Containment
 
