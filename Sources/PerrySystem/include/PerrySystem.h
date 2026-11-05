@@ -12,6 +12,38 @@
 // Declares a function or variable under its Darwin Mach-O name.
 #define DARWIN_SYMBOL(name) __asm__("_" #name) __attribute__((visibility("default"), used))
 
+// For a Darwin function with floating-point arguments or results: on armv7,
+// Darwin passes them in core registers, as AAPCS's base standard does, where
+// glibc's armhf passes them in VFP registers. AAPCS also starts a 64-bit
+// argument at an even register, which Darwin does not, so only functions whose
+// 64-bit arguments start at r0 or r2 (or on the stack after an even number of
+// words) take it as they are.
+#if defined(__arm__)
+#define DARWIN_FLOAT_ABI __attribute__((pcs("aapcs")))
+#else
+#define DARWIN_FLOAT_ABI
+#endif
+
+// The device Darwin code is told it runs on: an arm64 iPhone, or for armv7
+// programs an iPhone 4S (armv7, iOS 5 to 9), with Darwin's page size.
+#if defined(__arm__)
+#define PERRY_HW_MACHINE "iPhone4,1"
+#define PERRY_HW_MODEL "N94AP"
+#define PERRY_CPU_TYPE 12               // CPU_TYPE_ARM
+#define PERRY_CPU_SUBTYPE 9             // CPU_SUBTYPE_ARM_V7
+#define PERRY_CPU_FREQUENCY 800000000u
+#define PERRY_PAGE_SIZE 4096
+#define PERRY_KINFO_PROC_SIZE 492
+#else
+#define PERRY_HW_MACHINE "iPhone14,7"
+#define PERRY_HW_MODEL "D27AP"
+#define PERRY_CPU_TYPE 0x0100000c       // CPU_TYPE_ARM64
+#define PERRY_CPU_SUBTYPE 0
+#define PERRY_CPU_FREQUENCY 3230000000u
+#define PERRY_PAGE_SIZE 16384
+#define PERRY_KINFO_PROC_SIZE 648
+#endif
+
 // Darwin errno values (sys/errno.h). Values 1-34 match Linux except EAGAIN
 // and EDEADLK.
 int perry_darwin_errno_from_linux(int linux_errno);
