@@ -41,6 +41,12 @@ final class UserDefaultsStorage {
         save()
     }
 
+    /// Forgets every value set, as removing the domain does.
+    func removeAll() {
+        values = [:]
+        save()
+    }
+
     func register(_ defaults: [String: PropertyValue]) {
         registered.merge(defaults) { _, new in new }
     }
@@ -179,6 +185,28 @@ final class NSUserDefaults: NSObject {
         return object(forKey: key)
     }
 
+    /// The array, when every element is a string.
+    @ObjCMethod("stringArrayForKey:")
+    func stringArray(forKey key: String) -> ObjCObject? {
+        guard case .array(let values)? = storage.value(key),
+              values.allSatisfy({ if case .string = $0 { return true } else { return false } }) else { return nil }
+        return object(forKey: key)
+    }
+
+    /// A URL stored as its string (an absolute URL, or a path for a file).
+    @ObjCMethod("URLForKey:")
+    func url(forKey key: String) -> ObjCObject? {
+        guard case .string(let text)? = storage.value(key) else { return nil }
+        let url = text.hasPrefix("/") ? URL(filePath: text) : URL(string: text)
+        return URLs.wrapped(url).map { ObjCObject($0.objcObject) }
+    }
+
+    @ObjCMethod("setURL:forKey:")
+    func set(url: NSURL?, forKey key: String) {
+        guard let url else { storage.set(nil, for: key); return }
+        storage.set(.string(url.url.absoluteString), for: key)
+    }
+
     @ObjCMethod("dictionaryForKey:")
     func dictionary(forKey key: String) -> ObjCObject? {
         guard case .dictionary? = storage.value(key) else { return nil }
@@ -228,6 +256,12 @@ final class NSUserDefaults: NSObject {
 
     @ObjCMethod("removeObjectForKey:")
     func remove(forKey key: String) { storage.set(nil, for: key) }
+
+    /// The app's own domain only: other apps' domains aren't kept here.
+    @ObjCMethod("removePersistentDomainForName:")
+    func removePersistentDomain(forName name: String) {
+        if name == storage.suite { storage.removeAll() }
+    }
 
     @ObjCMethod("registerDefaults:")
     func register(_ defaults: ObjCObject) {
