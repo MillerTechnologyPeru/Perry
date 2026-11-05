@@ -48,10 +48,10 @@ final class FontDescriptorState: ObjectState {
         let dictionary = NSDictionary(objCArgument: attributes)
         if let name = dictionary.object(forKey: CoreTextKeys.name) { self.name = name.stringValue }
         if let family = dictionary.object(forKey: CoreTextKeys.family) { self.family = family.stringValue }
-        if let size = dictionary.object(forKey: CoreTextKeys.size)?.as(NSNumber.self) { self.size = size.doubleValue() }
+        if let size = dictionary.object(forKey: CoreTextKeys.size)?.as(NSNumber.self) { self.size = CGFloat(size.doubleValue()) }
         if let style = dictionary.object(forKey: CoreTextKeys.textStyle) { textStyle = style.stringValue }
         if let traits = dictionary.object(forKey: CoreTextKeys.traits)?.as(NSDictionary.self) {
-            if let weight = traits.object(forKey: CoreTextKeys.weight)?.as(NSNumber.self) { self.weight = weight.doubleValue() }
+            if let weight = traits.object(forKey: CoreTextKeys.weight)?.as(NSNumber.self) { self.weight = CGFloat(weight.doubleValue()) }
             if let symbolic = traits.object(forKey: CoreTextKeys.symbolic)?.as(NSNumber.self) {
                 symbolicTraits = symbolic.unsignedIntValue()
             }
@@ -203,7 +203,7 @@ public func CTFontDescriptorCopyAttribute(_ descriptor: UnsafeMutableRawPointer?
     switch key {
     case CoreTextKeys.name: return (state.name ?? ".SFUI-Regular").objCOwnedReturnValue()
     case CoreTextKeys.family: return (state.family ?? state.name ?? ".AppleSystemUIFont").objCOwnedReturnValue()
-    case CoreTextKeys.size: return ObjCRuntime.retain(NSNumber.make(double: state.size).objcObject)
+    case CoreTextKeys.size: return ObjCRuntime.retain(NSNumber.make(double: Double(state.size)).objcObject)
     case CoreTextKeys.textStyle: return state.textStyle?.objCOwnedReturnValue()
     case CoreTextKeys.traits: return ObjCRuntime.retain(traits(state).objcObject)
     default: return nil
@@ -212,7 +212,7 @@ public func CTFontDescriptorCopyAttribute(_ descriptor: UnsafeMutableRawPointer?
 
 private func traits(_ state: FontDescriptorState) -> NSMutableDictionary {
     let traits = NSMutableDictionary.empty()
-    traits.set(NSNumber.make(double: state.weight), forKey: CoreTextKeys.weight)
+    traits.set(NSNumber.make(double: Double(state.weight)), forKey: CoreTextKeys.weight)
     traits.set(NSNumber.make(unsignedInt: state.symbolicTraits), forKey: CoreTextKeys.symbolic)
     if let design = state.design { traits.set(NSObject(objCReturnValue: design.objCArgument()), forKey: CoreTextKeys.design) }
     return traits
@@ -223,7 +223,7 @@ public func CTFontDescriptorCopyAttributes(_ descriptor: UnsafeMutableRawPointer
     let attributes = NSMutableDictionary.empty()
     if let state = UIFontDescriptor.state(descriptor) {
         attributes.set(NSObject(objCReturnValue: (state.name ?? ".SFUI-Regular").objCArgument()), forKey: CoreTextKeys.name)
-        if state.size > 0 { attributes.set(NSNumber.make(double: state.size), forKey: CoreTextKeys.size) }
+        if state.size > 0 { attributes.set(NSNumber.make(double: Double(state.size)), forKey: CoreTextKeys.size) }
         if let style = state.textStyle { attributes.set(NSObject(objCReturnValue: style.objCArgument()), forKey: CoreTextKeys.textStyle) }
         attributes.set(traits(state), forKey: CoreTextKeys.traits)
     }
