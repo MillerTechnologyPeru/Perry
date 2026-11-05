@@ -24,6 +24,12 @@ mkdir -p "$work" "$out"
 includes=()
 [ -d "Darwin/$module/include" ] && includes=(-I "Darwin/$module/include")
 
+# Compiler flags of the module's own, one per line, in Darwin/<Module>/swiftc-flags.
+flags=()
+if [ -f "Darwin/$module/swiftc-flags" ]; then
+    while IFS= read -r flag; do [ -n "$flag" ] && flags+=("$flag"); done < "Darwin/$module/swiftc-flags"
+fi
+
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
@@ -31,7 +37,7 @@ xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" \
     -module-name "$module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$module.swiftmodule" \
-    "${includes[@]}" "${sources[@]}" -framework "$module" \
+    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" -framework "$module" \
     -Xlinker -install_name -Xlinker "/usr/lib/swift/libswift$module.dylib" \
     -o "$out/libswift$module.dylib"
 echo "$out/libswift$module.dylib"
