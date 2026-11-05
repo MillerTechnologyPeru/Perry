@@ -5,7 +5,8 @@
 # host and runs them itself. Products go to
 # .build/armv7-pm/armv7-unknown-linux-gnueabihf/release, optimized like the
 # Swift runtime they run with, which has no SwiftOnoneSupport on armv7
-# machines; PERRY_CONFIGURATION=debug builds them unoptimized.
+# machines (PERRY_CONFIGURATION=debug builds them unoptimized), and are
+# copied to .build/armv7/bin beside perry32, where it looks for providers.
 # Usage: Scripts/build-armv7-swiftpm.sh [product...]
 #   (default: Perryobjc Perrydispatch PerryFoundation; Foundation's provider loads
 #   libdispatch's)
@@ -44,7 +45,7 @@ EOF
 # the SDK's armv7 builds rather than the container's arm64 ones.
 pc=$sdk/usr/lib/arm-linux-gnueabihf/pkgconfig:$sdk/usr/share/pkgconfig
 configuration=${PERRY_CONFIGURATION:-release}
-exec docker run --rm --platform linux/arm64 -v "$root:/perry" \
+docker run --rm --platform linux/arm64 -v "$root:/perry" \
     -e PKG_CONFIG_SYSROOT_DIR="$sdk" -e PKG_CONFIG_LIBDIR="$pc" -e PKG_CONFIG_PATH="$pc" \
     perry-dev sh -c '
         swift=$1 configuration=$2; shift 2
@@ -52,3 +53,7 @@ exec docker run --rm --platform linux/arm64 -v "$root:/perry" \
             "$swift/swift" build --build-system native --destination .build/armv7/destination.json \
                 --scratch-path .build/armv7-pm -c "$configuration" --product "$product" || exit
         done' sh "$swift" "$configuration" "$@"
+mkdir -p .build/armv7/bin
+for product; do
+    cp ".build/armv7-pm/armv7-unknown-linux-gnueabihf/$configuration/lib$product.so" .build/armv7/bin/
+done
