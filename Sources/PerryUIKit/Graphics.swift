@@ -62,11 +62,11 @@ public func UIGraphicsPushContext(_ context: UnsafeMutableRawPointer?) {
 @c(_UIGraphicsPopContext)
 public func UIGraphicsPopContext() { Graphics.pop() }
 
-@c(_UIGraphicsBeginImageContext)
+@DarwinC("_UIGraphicsBeginImageContext")
 public func UIGraphicsBeginImageContext(_ size: CGSize) { UIGraphicsBeginImageContextWithOptions(size, false, 1) }
 
 /// A scale of 0 is the screen's.
-@c(_UIGraphicsBeginImageContextWithOptions)
+@DarwinC("_UIGraphicsBeginImageContextWithOptions")
 public func UIGraphicsBeginImageContextWithOptions(_ size: CGSize, _ opaque: Bool, _ scale: CGFloat) {
     let scale = scale > 0 ? scale : Screen.scale
     guard let context = CG.makeContext(size: size, scale: scale, opaque: opaque) else { return }
@@ -91,19 +91,19 @@ public func UIGraphicsEndImageContext() {
     }
 }
 
-@c(_UIRectFill)
+@DarwinC("_UIRectFill")
 public func UIRectFill(_ rect: CGRect) { Graphics.fill(rect, blendMode: copyBlend) }
 
-@c(_UIRectFillUsingBlendMode)
+@DarwinC("_UIRectFillUsingBlendMode")
 public func UIRectFillUsingBlendMode(_ rect: CGRect, _ blendMode: Int32) { Graphics.fill(rect, blendMode: blendMode) }
 
-@c(_UIRectFrame)
+@DarwinC("_UIRectFrame")
 public func UIRectFrame(_ rect: CGRect) { Graphics.frame(rect, blendMode: copyBlend) }
 
-@c(_UIRectFrameUsingBlendMode)
+@DarwinC("_UIRectFrameUsingBlendMode")
 public func UIRectFrameUsingBlendMode(_ rect: CGRect, _ blendMode: Int32) { Graphics.frame(rect, blendMode: blendMode) }
 
-@c(_UIRectClip)
+@DarwinC("_UIRectClip")
 public func UIRectClip(_ rect: CGRect) {
     guard let context = Graphics.current else { return }
     CG.clipToRect(context, rect)
