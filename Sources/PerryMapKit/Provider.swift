@@ -79,9 +79,9 @@ enum Dispatch {
 enum Super {
     static func initialize(_ object: UnsafeMutableRawPointer, frame: CGRect, definedOn cls: ObjCClass) {
         var superInfo = (object, cls.pointer)
-        typealias Send = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?, CGRect) -> UnsafeMutableRawPointer?
+        typealias Send = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?, CGRect.ObjCType) -> UnsafeMutableRawPointer?
         _ = withUnsafeMutablePointer(to: &superInfo) {
-            unsafeBitCast(ObjCRuntime.msgSendSuper2, to: Send.self)(UnsafeMutableRawPointer($0), ObjCRuntime.selector("initWithFrame:"), frame)
+            unsafeBitCast(ObjCRuntime.msgSendSuper2, to: Send.self)(UnsafeMutableRawPointer($0), ObjCRuntime.selector("initWithFrame:"), frame.objCArgument())
         }
     }
 
@@ -144,9 +144,33 @@ public typealias CGFloat = Float
 public typealias CGFloat = Double
 #endif
 
-extension CGPoint: ObjCScalar { public static var objCTypeEncoding: String { "{CGPoint=dd}" } }
-extension CGSize: ObjCScalar { public static var objCTypeEncoding: String { "{CGSize=dd}" } }
-extension CGRect: ObjCScalar { public static var objCTypeEncoding: String { "{CGRect={CGPoint=dd}{CGSize=dd}}" } }
+extension CGPoint: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords2
+    public static var objCTypeEncoding: String { "{CGPoint=ff}" }
+    #else
+    public typealias ObjCType = CGPoint
+    public static var objCTypeEncoding: String { "{CGPoint=dd}" }
+    #endif
+}
+extension CGSize: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords2
+    public static var objCTypeEncoding: String { "{CGSize=ff}" }
+    #else
+    public typealias ObjCType = CGSize
+    public static var objCTypeEncoding: String { "{CGSize=dd}" }
+    #endif
+}
+extension CGRect: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
+    public static var objCTypeEncoding: String { "{CGRect={CGPoint=ff}{CGSize=ff}}" }
+    #else
+    public typealias ObjCType = CGRect
+    public static var objCTypeEncoding: String { "{CGRect={CGPoint=dd}{CGSize=dd}}" }
+    #endif
+}
 
 extension NSObject {
     @ObjCMethod("new") func newInstance() -> NSObject
