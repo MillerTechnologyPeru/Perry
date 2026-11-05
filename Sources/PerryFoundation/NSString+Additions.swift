@@ -14,6 +14,18 @@ enum StringEncoding {
     static let unicode: UInt = 10                   // UTF-16 with a byte order mark
     static let utf16BigEndian: UInt = 0x9000_0100
     static let utf16LittleEndian: UInt = 0x9400_0100
+    static let utf32: UInt = 0x8c00_0100              // with a byte order mark
+    static let utf32BigEndian: UInt = 0x9800_0100
+    static let utf32LittleEndian: UInt = 0x9c00_0100
+
+    /// The size of one code unit, and so of a C string's terminator.
+    static func unitSize(_ encoding: UInt) -> Int {
+        switch encoding {
+        case unicode, utf16BigEndian, utf16LittleEndian: return 2
+        case utf32, utf32BigEndian, utf32LittleEndian: return 4
+        default: return 1
+        }
+    }
 
     static func encode(_ string: String, _ encoding: UInt, lossy: Bool = false) -> [UInt8]? {
         switch encoding {
@@ -38,6 +50,18 @@ enum StringEncoding {
             return bytes
         case utf16BigEndian:
             return string.utf16.flatMap { [UInt8($0 >> 8), UInt8($0 & 0xff)] }
+        case utf32, utf32LittleEndian:
+            var bytes: [UInt8] = encoding == utf32 ? [0xff, 0xfe, 0, 0] : []
+            for scalar in string.unicodeScalars {
+                let v = scalar.value
+                bytes += [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(v >> 16 & 0xff), UInt8(v >> 24)]
+            }
+            return bytes
+        case utf32BigEndian:
+            return string.unicodeScalars.flatMap { scalar -> [UInt8] in
+                let v = scalar.value
+                return [UInt8(v >> 24), UInt8(v >> 16 & 0xff), UInt8(v >> 8 & 0xff), UInt8(v & 0xff)]
+            }
         default:
             return nil
         }
@@ -68,6 +92,23 @@ enum StringEncoding {
                 index += 2
             }
             return String(decoding: units, as: UTF16.self)
+        case utf32, utf32LittleEndian, utf32BigEndian:
+            var start = 0
+            var bigEndian = encoding == utf32BigEndian
+            if encoding == utf32 && bytes.count >= 4 {
+                if bytes[0] == 0 && bytes[1] == 0 && bytes[2] == 0xfe && bytes[3] == 0xff { bigEndian = true; start = 4 }
+                if bytes[0] == 0xff && bytes[1] == 0xfe && bytes[2] == 0 && bytes[3] == 0 { start = 4 }
+            }
+            var scalars = String.UnicodeScalarView()
+            var index = start
+            while index + 3 < bytes.count {
+                let b = (0..<4).map { UInt32(bytes[index + $0]) }
+                let value = bigEndian ? b[0] << 24 | b[1] << 16 | b[2] << 8 | b[3] : b[3] << 24 | b[2] << 16 | b[1] << 8 | b[0]
+                guard let scalar = Unicode.Scalar(value) else { return nil }
+                scalars.append(scalar)
+                index += 4
+            }
+            return String(scalars)
         default:
             return nil
         }
@@ -208,7 +249,7 @@ extension NSString {
     @ObjCMethod("cStringUsingEncoding:")
     func cString(encoding: UInt) -> UnsafePointer<CChar>? {
         guard var bytes = StringEncoding.encode(value, encoding) else { return nil }
-        bytes.append(0)
+        bytes += repeatElement(0, count: StringEncoding.unitSize(encoding))
         let data = DataObjects.autoreleased(Data(bytes))
         return UnsafePointer(DataObjects.storage(data)?.bytes?.assumingMemoryBound(to: CChar.self))
     }
@@ -305,6 +346,28 @@ extension NSString {
         return bytes.withUnsafeBytes { StringEncoding.decode($0, encoding) }
     }
 
+    /// Escapes, as %XX of its UTF-8 bytes, each character not in `allowed`.
+    @ObjCMethod("stringByAddingPercentEncodingWithAllowedCharacters:")
+    func addingPercentEncoding(allowed: ObjCObject?) -> String? {
+        guard let contains = CharacterSets.storage(allowed?.id)?.contains else { return nil }
+        var escaped = ""
+        for scalar in value.unicodeScalars {
+            if contains(scalar) {
+                escaped.unicodeScalars.append(scalar)
+            } else {
+                for byte in String(scalar).utf8 {
+                    escaped += "%" + String(byte, radix: 16, uppercase: true).leftPadded(to: 2)
+                }
+            }
+        }
+        return escaped
+    }
+
+    /// Unescapes %XX sequences as UTF-8; nil if one is malformed or the
+    /// result isn't UTF-8.
+    @ObjCMethod("stringByRemovingPercentEncoding")
+    func removingPercentEncoding() -> String? { replacingPercentEscapes(encoding: StringEncoding.utf8) }
+
     /// The string in `encoding` and a terminating zero, when that fits in
     /// `maxLength` bytes.
     @ObjCMethod("getCString:maxLength:encoding:")
@@ -373,6 +436,20 @@ extension NSString {
     }
 
     /// A file's contents, or what NSURLConnection loads for other schemes.
+    @ObjCMethod("initWithContentsOfFile:encoding:error:")
+    func initialize(contentsOfFile path: String?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let path, let decoded = Self.string(contentsOfFile: path, encoding: encoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
+    @ObjCMethod("initWithContentsOfURL:encoding:error:")
+    func initialize(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let decoded = Self.string(contentsOfURL: url, encoding: encoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
     @ObjCClassMethod("stringWithContentsOfURL:encoding:error:")
     static func string(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> String? {
         let decoded = url.flatMap(NSData.contents).flatMap { $0.withUnsafeBytes { StringEncoding.decode($0, encoding) } }
