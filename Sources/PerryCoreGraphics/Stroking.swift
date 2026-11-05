@@ -100,7 +100,8 @@ enum Stroking {
             out.append(.close)
         }
         func circle(_ p: (Double, Double)) {
-            out += Paths.ellipse(CGRect(origin: CGPoint(x: p.0 - half, y: p.1 - half), size: CGSize(width: width, height: width)))
+            out += Paths.ellipse(CGRect(origin: CGPoint(x: CGFloat(p.0 - half), y: CGFloat(p.1 - half)),
+                                        size: CGSize(width: CGFloat(width), height: CGFloat(width))))
         }
         /// The unit direction from a to b, and its left normal scaled to
         /// the half width.
@@ -234,20 +235,20 @@ enum Stroking {
 }
 
 @c(_CGPathCreateCopyByStrokingPath)
-public func CGPathCreateCopyByStrokingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ lineWidth: Double,
-                                           _ lineCap: Int32, _ lineJoin: Int32, _ miterLimit: Double) -> Ref? {
+public func CGPathCreateCopyByStrokingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ lineWidth: CGFloat,
+                                           _ lineCap: Int32, _ lineJoin: Int32, _ miterLimit: CGFloat) -> Ref? {
     guard let state = Paths.state(path) else { return nil }
     let outline = Paths.make()
-    Paths.append(outline, t, Stroking.stroke(state.commands, width: lineWidth, cap: lineCap, join: lineJoin, miterLimit: miterLimit))
+    Paths.append(outline, t, Stroking.stroke(state.commands, width: Double(lineWidth), cap: lineCap, join: lineJoin, miterLimit: Double(miterLimit)))
     return outline
 }
 
 @c(_CGPathCreateCopyByDashingPath)
-public func CGPathCreateCopyByDashingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ phase: Double,
-                                          _ lengths: UnsafePointer<Double>?, _ count: Int) -> Ref? {
+public func CGPathCreateCopyByDashingPath(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ phase: CGFloat,
+                                          _ lengths: UnsafePointer<CGFloat>?, _ count: Int) -> Ref? {
     guard let state = Paths.state(path) else { return nil }
-    let pattern = lengths.map { Array(UnsafeBufferPointer(start: $0, count: count)) } ?? []
+    let pattern = lengths.map { UnsafeBufferPointer(start: $0, count: count).map { Double($0) } } ?? []
     let dashed = Paths.make()
-    Paths.append(dashed, t, Stroking.dash(state.commands, phase: phase, lengths: pattern))
+    Paths.append(dashed, t, Stroking.dash(state.commands, phase: Double(phase), lengths: pattern))
     return dashed
 }
