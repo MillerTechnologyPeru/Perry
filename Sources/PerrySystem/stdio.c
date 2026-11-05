@@ -194,6 +194,23 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return vsnprintf(buf, size, fmt, arguments);
 }
 
+#if defined(__arm__)
+// The same, and asl_log's, for armv7's variadic thunks, which pass a Darwin
+// va_list that the format's arguments are repacked from.
+int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
+    (void)locale;
+    return darwin_vsnprintf(buf, size, fmt, ap);
+}
+
+int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt, darwin_va_list ap) {
+    (void)client; (void)message; (void)level;
+    DARWIN_VA_FORMAT(va, fmt, ap);
+    vfprintf(stderr, fmt, va);
+    fputc('\n', stderr);
+    return 0;
+}
+#endif
+
 // putc's slow path, which Darwin's putc macro calls when the buffer fills.
 int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
 int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
