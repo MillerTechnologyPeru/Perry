@@ -433,6 +433,15 @@ public func CGContextClipToRect(_ context: Ref?, _ rect: CGRect) {
     canvas.clip(evenOdd: false)
 }
 
+/// The mask's alpha, or gray level, limits what is drawn until the
+/// graphics state is restored.
+@c(_CGContextClipToMask)
+public func CGContextClipToMask(_ context: Ref?, _ rect: CGRect, _ mask: Ref?) {
+    guard let canvas = Contexts.canvas(context), let image = Images.state(mask) else { return }
+    let r = CGRectStandardize(rect)
+    canvas.clipToMask(image, r.origin.x, r.origin.y, r.size.width, r.size.height)
+}
+
 @c(_CGContextClipToRects)
 public func CGContextClipToRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>?, _ count: Int) {
     guard let canvas = Contexts.canvas(context), let rects else { return }
