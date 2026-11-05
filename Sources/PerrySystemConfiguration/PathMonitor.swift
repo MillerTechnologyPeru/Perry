@@ -203,3 +203,36 @@ public func nw_retain(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPoi
 public func nw_release(_ object: UnsafeMutableRawPointer?) {
     if let object { ObjCRuntime.release(object) }
 }
+
+/// Paths have no endpoints: they lead to no particular host.
+@c(_nw_path_copy_effective_local_endpoint)
+public func nw_path_copy_effective_local_endpoint(_ path: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { nil }
+
+@c(_nw_path_copy_effective_remote_endpoint)
+public func nw_path_copy_effective_remote_endpoint(_ path: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { nil }
+
+/// Paths with the same status are the same: they use the same interface.
+@c(_nw_path_is_equal)
+public func nw_path_is_equal(_ path: UnsafeMutableRawPointer?, _ other: UnsafeMutableRawPointer?) -> Bool {
+    NWPathObject.states[path]?.status == NWPathObject.states[other]?.status
+}
+
+/// nw_path_unsatisfied_reason_t: not available 0.
+@c(_nw_path_get_unsatisfied_reason)
+public func nw_path_get_unsatisfied_reason(_ path: UnsafeMutableRawPointer?) -> Int32 { 0 }
+
+/// No gateways are listed.
+@c(_nw_path_enumerate_gateways)
+public func nw_path_enumerate_gateways(_ path: UnsafeMutableRawPointer?, _ block: UnsafeMutableRawPointer?) {}
+
+/// The one interface, by its index or name.
+@c(_nw_interface_create_with_index)
+public func nw_interface_create_with_index(_ index: UInt32) -> UnsafeMutableRawPointer? {
+    index == 1 ? NSObject(NWInterfaceObject.objCClass.pointer).newInstance().objCOwnedReturnValue() : nil
+}
+
+@c(_nw_interface_create_with_name)
+public func nw_interface_create_with_name(_ name: UnsafePointer<CChar>?) -> UnsafeMutableRawPointer? {
+    guard let name, let interfaceName, strcmp(name, interfaceName) == 0 else { return nil }
+    return NSObject(NWInterfaceObject.objCClass.pointer).newInstance().objCOwnedReturnValue()
+}
