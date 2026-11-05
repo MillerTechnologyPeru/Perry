@@ -219,7 +219,16 @@ public final class NSBundle: NSObject {
 
     @ObjCClassMethod("bundleWithIdentifier:")
     static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
-        Bundles.storage(Bundles.main)?.identifier == identifier ? Bundles.main : nil
+        guard let main = Bundles.storage(Bundles.main) else { return nil }
+        if main.identifier == identifier { return Bundles.main }
+        // The app's own frameworks, which Darwin has loaded with it.
+        let frameworks = main.path + "/Frameworks"
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? [] where name.hasSuffix(".framework") {
+            if let bundle = Bundles.bundle(path: frameworks + "/" + name), Bundles.storage(bundle)?.identifier == identifier {
+                return bundle
+            }
+        }
+        return nil
     }
 
     // Bundles live for the whole process.
@@ -232,6 +241,9 @@ public final class NSBundle: NSObject {
     @ObjCMethod("resourcePath") func resourcePath() -> String { storage.resourcePath }
     @ObjCMethod("resourceURL") func resourceURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.resourcePath, directoryHint: .isDirectory)) }
     @ObjCMethod("executablePath") func executablePath() -> String? { storage.executablePath }
+    /// Where the App Store's receipt would be. There is none.
+    @ObjCMethod("appStoreReceiptURL")
+    func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String? { storage.identifier }
     @ObjCMethod("isLoaded") func isLoaded() -> Bool { true }
