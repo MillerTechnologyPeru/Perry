@@ -53,14 +53,16 @@ stub libSystem /usr/lib/libSystem.B.dylib __Unwind_SjLj_Register __Unwind_SjLj_U
     __Unwind_SjLj_Resume __Unwind_SjLj_RaiseException
 # Structures too big for r0 come back through a pointer: the _stret sends,
 # which arm64 does not have.
-stub libobjc /usr/lib/libobjc.A.dylib _objc_msgSend_stret _objc_msgSendSuper2_stret
+stub libobjc /usr/lib/libobjc.A.dylib _objc_msgSend_stret _objc_msgSendSuper2_stret \
+    _objc_exception_throw _objc_exception_rethrow _objc_begin_catch _objc_end_catch _objc_terminate \
+    _OBJC_EHTYPE_id _objc_ehtype_vtable _objc_retainAutorelease
 stub Foundation /System/Library/Frameworks/Foundation.framework/Foundation
 
 fixtures=${*:-hello.c}
 for file in $fixtures; do
     name=${file%.*}
     case $file in
-    *.m) flags="-fobjc-arc -fblocks"
+    *.m) flags="-fobjc-arc -fobjc-exceptions -fblocks"
         libs="$out/libSystem/libSystem.dylib $out/libobjc/libobjc.dylib"
         grep -q NSString "$root/Tests/Fixtures/$file" && libs="$libs $out/Foundation/Foundation.dylib" ;;
     *) flags=""; libs="$out/libSystem/libSystem.dylib" ;;
