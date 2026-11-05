@@ -77,6 +77,8 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
         // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
+        // Sockets and their addresses, typed, for CFSocket.
+        .package(url: "https://github.com/PureSwift/Socket.git", from: "0.5.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
@@ -145,7 +147,10 @@ let package = Package(
         // Foundation, a client of libobjc's C API.
         .target(
             name: "PerryFoundation",
-            dependencies: ["CCmarkGFM", "CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop"],
+            dependencies: [
+                "CCmarkGFM", "CLibXML2", "CPerryFoundation", "PerryInterface", "PerryObjCInterop",
+                .product(name: "Socket", package: "Socket"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // Binding a Darwin library's imports to the Linux build of the same
