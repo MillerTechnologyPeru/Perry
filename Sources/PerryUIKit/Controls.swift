@@ -256,6 +256,10 @@ open class UIButton: UIControl {
         return label
     }
 
+    /// iOS 2's: the title label's font.
+    @ObjCMethod("font") func font() -> UIFont { titleLabel().fontObject() }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { titleLabel().setFont(font) }
+
     @ObjCMethod("imageView")
     func imageView() -> UIImageView {
         if let view = button.imageView { return view }
