@@ -32,6 +32,7 @@ enum ExceptionConstants {
     static let NSGenericException = "NSGenericException"
     static let NSRangeException = "NSRangeException"
     static let NSInvalidArgumentException = "NSInvalidArgumentException"
+    static let NSInvalidArchiveOperationException = "NSInvalidArchiveOperationException"
     static let NSInternalInconsistencyException = "NSInternalInconsistencyException"
     static let NSMallocException = "NSMallocException"
     static let NSObjectInaccessibleException = "NSObjectInaccessibleException"
