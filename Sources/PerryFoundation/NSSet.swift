@@ -126,6 +126,22 @@ public class NSSet: NSObject {
     @ObjCMethod("init")
     func initialize() -> Self { setMembers([]) }
 
+    @ObjCMethod("setByAddingObject:")
+    func adding(_ object: ObjCObject) -> NSSet {
+        var members = self.members
+        if !members.contains(where: { $0 == object.id || ObjC.sendBool($0, Selectors.isEqual, object.id) }) { members.append(object.id) }
+        return Sets.owned(members)
+    }
+
+    @ObjCMethod("setByAddingObjectsFromArray:")
+    func adding(objectsFromArray array: ObjCObject?) -> NSSet {
+        var members = self.members
+        for member in Arrays.elements(array?.id) where !members.contains(where: { $0 == member || ObjC.sendBool($0, Selectors.isEqual, member) }) {
+            members.append(member)
+        }
+        return Sets.owned(members)
+    }
+
     @ObjCMethod("setByAddingObjectsFromSet:")
     func adding(objectsFrom other: NSSet?) -> NSSet {
         var members = self.members

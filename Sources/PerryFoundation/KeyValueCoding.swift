@@ -91,6 +91,7 @@ enum KeyValueCoding {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
+        if let (storage, type) = instanceVariable(object, key) { return get(storage, type: type) }
         // As Foundation does: the object's -valueForUndefinedKey:, which
         // raises unless a class overrides it.
         return ObjC.send(object, ObjC.selector("valueForUndefinedKey:"), Strings.autoreleased(key))
@@ -105,10 +106,71 @@ enum KeyValueCoding {
         }
         let selector = ObjC.selector("set" + key.prefix(1).uppercased() + key.dropFirst() + ":")
         guard responds(object, selector) else {
+            if let (storage, type) = instanceVariable(object, key) {
+                set(storage, type: type, value)
+                return
+            }
             _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
             return
         }
         set(object, selector, value)
+    }
+
+    // MARK: Instance variables
+
+    /// The instance variable a key without accessors is kept in, as
+    /// Foundation looks for one (_key, _isKey, key, isKey): its storage in
+    /// the object and its type's first character.
+    static func instanceVariable(_ object: id, _ key: String) -> (storage: UnsafeMutableRawPointer, type: UInt8)? {
+        guard let cls = ObjC.objectGetClass(object), let find = ObjC.instanceVariable, let offset = ObjC.ivarOffset,
+              let encoding = ObjC.ivarType else { return nil }
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        for name in ["_" + key, "_is" + capitalized, key, "is" + capitalized] {
+            guard let ivar = name.withCString({ find(cls, $0) }) else { continue }
+            let type = encoding(ivar).map { UInt8(bitPattern: $0.pointee) } ?? UInt8(ascii: "@")
+            return (object + offset(ivar), type)
+        }
+        return nil
+    }
+
+    /// An instance variable's value, as an object; nil for types that
+    /// aren't objects or numbers.
+    static func get(_ storage: UnsafeMutableRawPointer, type: UInt8) -> id? {
+        switch Character(Unicode.Scalar(type)) {
+        case "@", "#": return storage.load(as: id?.self)
+        case "q", "l": return Numbers.make(nil, .signed(storage.load(as: Int64.self)))
+        case "Q", "L": return Numbers.make(nil, .unsigned(storage.load(as: UInt64.self)))
+        case "i": return Numbers.make(nil, .signed(Int64(storage.load(as: Int32.self))))
+        case "I": return Numbers.make(nil, .unsigned(UInt64(storage.load(as: UInt32.self))))
+        case "s": return Numbers.make(nil, .signed(Int64(storage.load(as: Int16.self))))
+        case "S": return Numbers.make(nil, .unsigned(UInt64(storage.load(as: UInt16.self))))
+        case "c": return Numbers.make(nil, .signed(Int64(storage.load(as: Int8.self))))
+        case "C": return Numbers.make(nil, .unsigned(UInt64(storage.load(as: UInt8.self))))
+        case "B": return perry_foundation_boolean(storage.load(as: Bool.self) ? 1 : 0)
+        case "d": return Numbers.make(nil, .double(storage.load(as: Double.self)))
+        case "f": return Numbers.make(nil, .double(Double(storage.load(as: Float.self))))
+        default: return nil
+        }
+    }
+
+    /// Sets an instance variable: an object is retained and the one before
+    /// released, a number is converted to the variable's type.
+    static func set(_ storage: UnsafeMutableRawPointer, type: UInt8, _ value: id?) {
+        let number = Numbers.storage(value)
+        switch Character(Unicode.Scalar(type)) {
+        case "@", "#":
+            let old = storage.load(as: id?.self)
+            storage.storeBytes(of: value.map { ObjC.retain($0) } ?? nil, as: id?.self)
+            if let old { ObjC.release(old) }
+        case "q", "l", "Q", "L": storage.storeBytes(of: number.int64, as: Int64.self)
+        case "i", "I": storage.storeBytes(of: Int32(truncatingIfNeeded: number.int64), as: Int32.self)
+        case "s", "S": storage.storeBytes(of: Int16(truncatingIfNeeded: number.int64), as: Int16.self)
+        case "c", "C": storage.storeBytes(of: Int8(truncatingIfNeeded: number.int64), as: Int8.self)
+        case "B": storage.storeBytes(of: number.int64 != 0, as: Bool.self)
+        case "d": storage.storeBytes(of: number.double, as: Double.self)
+        case "f": storage.storeBytes(of: Float(number.double), as: Float.self)
+        default: break
+        }
     }
 }
 

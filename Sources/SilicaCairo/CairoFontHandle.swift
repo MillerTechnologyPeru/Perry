@@ -23,6 +23,9 @@ public final class CairoFontHandle: CGFontHandle {
 
     public let familyName: String
 
+    /// The font file the face was loaded from, and the face's index in it.
+    public let file: (path: String, index: Int)?
+
     // MARK: - Initialization
 
     public init?(name: String, configuration: FontConfiguration = .current) {
@@ -55,6 +58,38 @@ public final class CairoFontHandle: CGFontHandle {
         }
 
         self.familyName = family
+        self.file = configuration.match(pattern).flatMap { matched in
+            matched.string(for: FontConfig.Pattern.Key(rawValue: "file")).map {
+                ($0, Int(matched.integer(for: FontConfig.Pattern.Key(rawValue: "index")) ?? 0))
+            }
+        }
+    }
+
+    /// A font from a font file, as fonts made from data are loaded.
+    public init?(file path: String) {
+
+        let pattern = FontConfig.Pattern()
+        guard pattern.setString(path, for: FontConfig.Pattern.Key(rawValue: "file")),
+            pattern.setInteger(0, for: FontConfig.Pattern.Key(rawValue: "index"))
+            else { return nil }
+
+        let face = FontFace(pattern: pattern)
+        guard face.status == .success else { return nil }
+
+        let options = FontOptions()
+        options.hintMetrics = .off
+        options.hintStyle = CAIRO_HINT_STYLE_NONE
+
+        guard let scaledFont = try? ScaledFont(
+            face: face,
+            matrix: .identity,
+            currentTransformation: .identity,
+            options: options
+        ), scaledFont.status == .success else { return nil }
+
+        self.scaledFont = scaledFont
+        self.familyName = scaledFont.fullName
+        self.file = (path, 0)
     }
 
     // MARK: - CGFontHandle
@@ -100,6 +135,18 @@ public extension CGFont {
 
         self.init(name: name, family: handle.familyName, handle: handle)
     }
+
+    /// Creates a font from a font file, loaded by Cairo.
+    init?(file path: String) {
+
+        guard let handle = CairoFontHandle(file: path)
+            else { return nil }
+
+        self.init(name: handle.fullName, family: handle.familyName, handle: handle)
+    }
+
+    /// The font file the font was loaded from, and its face's index there.
+    var file: (path: String, index: Int)? { (handle as? CairoFontHandle)?.file }
 
     /// The Cairo scaled font, if this font was loaded by the Cairo backend.
     var scaledFont: Cairo.ScaledFont {

@@ -479,7 +479,8 @@ public func CGContextSelectFont(_ context: Ref?, _ name: UnsafePointer<CChar>?, 
 
 @c(_CGContextSetFontSize) public func CGContextSetFontSize(_ context: Ref?, _ size: Double) { Contexts.canvas(context)?.setFontSize(size) }
 @c(_CGContextSetCharacterSpacing) public func CGContextSetCharacterSpacing(_ context: Ref?, _ spacing: Double) { Contexts.canvas(context)?.setCharacterSpacing(spacing) }
-@c(_CGContextSetTextDrawingMode) public func CGContextSetTextDrawingMode(_ context: Ref?, _ mode: Int32) {}
+@c(_CGContextSetTextDrawingMode)
+public func CGContextSetTextDrawingMode(_ context: Ref?, _ mode: Int32) { Contexts.canvas(context)?.setTextDrawingMode(mode) }
 
 @c(_CGContextSetTextPosition)
 public func CGContextSetTextPosition(_ context: Ref?, _ x: Double, _ y: Double) { Contexts.canvas(context)?.textPosition = (x, y) }
