@@ -454,6 +454,17 @@ final class ImageViewState: ObjectState {
     var image: UIImage?
     var highlightedImage: UIImage?
     var highlighted = false
+    /// The frames of an animation, shown in turn while it runs.
+    var animationImages: [UIImage] = []
+    var highlightedAnimationImages: [UIImage] = []
+    /// How long one pass takes; 0 is a thirtieth of a second a frame.
+    var animationDuration = 0.0
+    /// How many passes; 0 repeats without end.
+    var animationRepeatCount = 0
+    var animating = false
+    var animationStart = 0.0
+    /// The frame showing, so the layer changes only when the frame does.
+    var animationFrame = -1
 }
 
 @ObjCClass("UIImageView")
@@ -487,8 +498,83 @@ open class UIImageView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
+        Frames.remove(imageState)
         UIImageView.imageStates.remove(objcObject)
         super.dealloc()
+    }
+
+    // MARK: Animation
+
+    @ObjCMethod("animationImages")
+    func animationImages() -> NSArray? { imageState.animationImages.isEmpty ? nil : NSMutableArray.of(imageState.animationImages) }
+    @ObjCMethod("setAnimationImages:")
+    func setAnimationImages(_ images: NSArray?) {
+        imageState.animationImages = images?.elements.compactMap { $0.as(UIImage.self) } ?? []
+        if imageState.animating { stopAnimating() }
+    }
+
+    @ObjCMethod("highlightedAnimationImages")
+    func highlightedAnimationImages() -> NSArray? {
+        imageState.highlightedAnimationImages.isEmpty ? nil : NSMutableArray.of(imageState.highlightedAnimationImages)
+    }
+    @ObjCMethod("setHighlightedAnimationImages:")
+    func setHighlightedAnimationImages(_ images: NSArray?) {
+        imageState.highlightedAnimationImages = images?.elements.compactMap { $0.as(UIImage.self) } ?? []
+    }
+
+    @ObjCMethod("animationDuration") func animationDuration() -> Double { imageState.animationDuration }
+    @ObjCMethod("setAnimationDuration:") func setAnimationDuration(_ duration: Double) { imageState.animationDuration = max(duration, 0) }
+    @ObjCMethod("animationRepeatCount") func animationRepeatCount() -> Int { imageState.animationRepeatCount }
+    @ObjCMethod("setAnimationRepeatCount:") func setAnimationRepeatCount(_ count: Int) { imageState.animationRepeatCount = max(count, 0) }
+    @ObjCMethod("isAnimating") func isAnimating() -> Bool { imageState.animating }
+
+    /// The frames being animated: the highlighted ones while highlighted,
+    /// if there are any.
+    private var animationFrames: [UIImage] {
+        let s = imageState
+        return s.highlighted && !s.highlightedAnimationImages.isEmpty ? s.highlightedAnimationImages : s.animationImages
+    }
+
+    /// Shows the animation's images in turn, from the first, until it has
+    /// repeated as often as asked or is stopped.
+    @ObjCMethod("startAnimating")
+    func startAnimating() {
+        let s = imageState
+        guard !animationFrames.isEmpty else { return }
+        s.animating = true
+        s.animationStart = Clock.now
+        s.animationFrame = -1
+        let object = objcObject
+        Frames.add(s, framesPerSecond: 60) { time in
+            UIImageView(objcObject: object, ownership: .retain).animate(at: time)
+        }
+        animate(at: s.animationStart)
+    }
+
+    /// Stops the animation, and shows the view's image again.
+    @ObjCMethod("stopAnimating")
+    func stopAnimating() {
+        let s = imageState
+        guard s.animating else { return }
+        s.animating = false
+        Frames.remove(s)
+        showImage()
+    }
+
+    private func animate(at time: Double) {
+        let s = imageState, frames = animationFrames
+        guard s.animating, !frames.isEmpty else { return }
+        let duration = s.animationDuration > 0 ? s.animationDuration : Double(frames.count) / 30
+        let elapsed = max(time - s.animationStart, 0)
+        if s.animationRepeatCount > 0, elapsed >= duration * Double(s.animationRepeatCount) {
+            stopAnimating()
+            return
+        }
+        let frame = min(Int(elapsed.truncatingRemainder(dividingBy: duration) / duration * Double(frames.count)), frames.count - 1)
+        guard frame != s.animationFrame else { return }
+        s.animationFrame = frame
+        show(frames[frame])
+        Display.markDirty()
     }
 
     @ObjCMethod("image") func image() -> UIImage? { imageState.image }
@@ -524,7 +610,14 @@ open class UIImageView: UIView {
     /// The layer shows the image, placed by the content mode.
     /// A template image shows in the tint color.
     private func showImage() {
-        var image = imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image
+        // An animation's frames show in place of the image while it runs.
+        guard !imageState.animating else { return }
+        show(imageState.highlighted ? (imageState.highlightedImage ?? imageState.image) : imageState.image)
+    }
+
+    /// Puts an image in the layer, by the content mode.
+    private func show(_ image: UIImage?) {
+        var image = image
         if let template = image, template.state.renderingMode == 2 { image = template.withTintColor(tintColor()) }
         let geometry = state.geometry!
         geometry.contents = image.flatMap { $0.state.cgImage.map { NSObject($0) } }
