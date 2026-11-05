@@ -220,6 +220,30 @@ final class Canvas {
         return surface
     }
 
+    /// Clips to an image as CGContextClipToMask does: its alpha where it has
+    /// one, else its gray level (white shows what is drawn).
+    func clipToMask(_ image: ImageState, _ x: Double, _ y: Double, _ w: Double, _ h: Double) {
+        let bitmap = image.bitmap
+        guard bitmap.width > 0, bitmap.height > 0,
+              let mask = try? Cairo.Surface.Image(format: .a8, width: bitmap.width, height: bitmap.height) else { return }
+        let stride = mask.stride
+        let usesAlpha = image.format.hasAlpha
+        bitmap.pixels.withUnsafeBufferPointer { source in
+            _ = mask.withUnsafeMutableBytes { destination in
+                for row in 0..<bitmap.height {
+                    let from = source.baseAddress! + row * bitmap.width * 4, to = destination + row * stride
+                    for column in 0..<bitmap.width {
+                        let i = column * 4
+                        let luminance = (Int(from[i]) * 54 + Int(from[i + 1]) * 183 + Int(from[i + 2]) * 19) >> 8
+                        to[column] = usesAlpha ? from[i + 3] : UInt8(min(luminance, 255))
+                    }
+                }
+            }
+        }
+        mask.markDirty()
+        context.beginMask(mask, width: bitmap.width, height: bitmap.height, in: CGRect(x: x, y: y, width: w, height: h))
+    }
+
     func linearGradient(_ stops: [(Double, (Double, Double, Double, Double))], from: (Double, Double), to: (Double, Double), extend: Bool) {
         context.drawLinearGradient(stops: stops.map { ($0.0, CGColor(red: $0.1.0, green: $0.1.1, blue: $0.1.2, alpha: $0.1.3)) },
                                    start: CGPoint(x: from.0, y: from.1), end: CGPoint(x: to.0, y: to.1), extend: extend)
