@@ -95,18 +95,26 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   callbacks and the fast enumeration state are read at word offsets
   (`DarwinLayout`). Exported number constants have 8-byte slots, and a
   `CGFloat` constant is a float.
-- Floating point between Darwin code and Swift: Darwin passes `float` and
-  `double` arguments and results in core registers, but Swift on armhf
-  passes them in VFP registers, so a method such as `-[NSNumber
-  doubleValue]` or `+numberWithDouble:`, or a C function with a
-  floating-point parameter or result, gets or returns the wrong value. Not
-  yet handled; it needs an entry point for each such function or method.
-  Floating point inside variadic arguments and structures is not affected.
+- Floating point and 64-bit integers between Darwin code and Swift: Darwin
+  passes `float` and `double` in core registers, where Swift on armhf passes
+  them in VFP registers, and passes 64-bit values in the next two words,
+  where armhf aligns them to an even register pair. On 32-bit, `ObjCValue`
+  gives `Double`, `Int64` and `UInt64` the ABI type `ObjCWordPair` (a C
+  structure of two words, which armhf passes word by word as Darwin does)
+  and the result type `UInt64` (r0 and r1), and `Float` a `UInt32`. The
+  macros' method thunks and message sends use them, so Objective-C methods
+  are right both ways. C entry points with such parameters or results name
+  them as `Double.ObjCType` and `Double.ObjCResultType` and convert them
+  (Foundation's CF time and date functions, libdispatch's times and
+  offsets); the same types are the native ones on arm64. The type encodings
+  are 32-bit Darwin's: `NSInteger` is `i`, `BOOL` `c`, offsets in words.
 - Not yet: exceptions (`@throw`, unwinding through registered contexts), the
   rest of libSystem for Darwin's armv7 layouts (sockets, pthreads' types,
-  mach, the remaining files.c entry points), Foundation's floating-point
-  methods and functions and the rest of its coverage, UIKit, the other
-  providers, `objc_msgForward_stret`, and classic relocations (iOS before 3.1).
+  mach, the remaining files.c entry points, `math.c`), the rest of
+  Foundation's coverage, UIKit and the other providers (their `@c` entry
+  points with floating point, such as CoreGraphics', and `CGFloat`, which is
+  a float on armv7), `objc_msgForward_stret`, and classic relocations (iOS
+  before 3.1).
 
 ## Building and running
 
@@ -117,7 +125,8 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
     Scripts/build-armv7-fixtures.sh 6.0 hello.c runtime.m foundation_abi.m
     .build/armv7/bin/perry32 .build/perry-fixtures/armv7/runtime
 
-`Scripts/build-armv7-fixtures.sh` links with `arm-apple-darwin11-ld` from
+`Scripts/build-armv7-fixtures.sh` compiles with `-mfloat-abi=softfp`, as
+Apple's armv7 code is built, and links with `arm-apple-darwin11-ld` from
 cctools-port, installed under `.toolchains/cctools`.
 
 The Swift providers build with SwiftPM in the arm64 Linux container, on a
@@ -127,14 +136,20 @@ machine with the memory for swift-syntax (a 4 GB one does not have it):
     Scripts/build-armv7-swiftpm.sh Perryobjc   # one product
 
 They go to `.build/armv7-pm/armv7-unknown-linux-gnueabihf/release`, built
-with the 6.4.0 toolchain the SDK matches. SwiftPM runs the macros and the
+with the 6.4.0 toolchain the SDK matches, and are copied to `.build/armv7/bin`
+beside `perry32`. SwiftPM runs the macros and the
 provider generator on the host; pkg-config reads the SDK's `.pc` files, so
 libxml2 is the SDK's armv7 build. A library's runpath names the SDK as the
 container sees it (`/perry/.toolchains/...`), so elsewhere put the SDK's
-`usr/lib/swift/linux` on `LD_LIBRARY_PATH`. Apple silicon has no AArch32, so
-the programs run on an armv7-capable machine, beside `perry32`. The
-`libPerryobjc.so` SwiftPM builds runs the fixtures as the one
-`build-armv7-objc.sh` builds does. On a machine without the memory,
+`usr/lib/swift/linux` on `LD_LIBRARY_PATH`.
+
+Apple silicon has no AArch32, but Docker Desktop runs armv7 programs with
+qemu-arm, which finds Linux's armhf libraries through `QEMU_LD_PREFIX`.
+`Scripts/docker-test.sh` sets it to the SDK, so the armv7 tests
+(`ARMv7Tests`) run with the rest wherever `perry32`, its providers and the
+fixtures are built. A machine whose kernel runs 32-bit ARM programs needs
+nothing more. The `libPerryobjc.so` SwiftPM builds runs the fixtures as the
+one `build-armv7-objc.sh` builds does. On a machine without the memory,
 `build-armv7-objc.sh` compiles the modules with `swiftc` directly and
 `build-host-macros.sh` the macro plugin against the swift-syntax libraries
 the toolchain ships.
