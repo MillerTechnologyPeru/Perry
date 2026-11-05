@@ -72,6 +72,9 @@ enum Display {
     }
 
     nonisolated(unsafe) private static var compositor: Compositor?
+    /// SDL's renderer compositing the live view ("opengles2", "vulkan"…);
+    /// nil without one.
+    nonisolated(unsafe) static var gpuRenderer: String?
 
     static var wanted: Bool {
         guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil else { return false }
@@ -200,8 +203,19 @@ enum Display {
             }
         }
         guard let dispatchAfter, let dispatchTime else { return }
-        dispatchAfter(dispatchTime(0, 16_000_000), Updates.mainQueue, nil) { _ in Display.tick() }
+        // Sixty passes a second by the clock, whatever a pass takes: each
+        // is due a sixtieth after the last was, and one that falls a whole
+        // pass behind starts again from now.
+        let now = Clock.now
+        nextTick += tickInterval
+        if nextTick < now - tickInterval { nextTick = now }
+        let delay = max(nextTick - now, 0)
+        dispatchAfter(dispatchTime(0, Int64(delay * 1_000_000_000)), Updates.mainQueue, nil) { _ in Display.tick() }
     }
+
+    /// When the next pass is due, and how far apart passes are.
+    nonisolated(unsafe) private static var nextTick = 0.0
+    private static let tickInterval = 1.0 / 60
 
     private static func handle(_ event: [UInt64]) {
         event.withUnsafeBytes { raw in
