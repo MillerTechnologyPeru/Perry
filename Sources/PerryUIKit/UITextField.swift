@@ -34,6 +34,14 @@ final class TextFieldState: ObjectState {
     var autocapitalizationType = 2
     var autocorrectionType = 0
     var spellCheckingType = 0
+    var smartQuotesType = 0
+    var smartDashesType = 0
+    var smartInsertDeleteType = 0
+    var keyboardAppearance = 0
+    var enablesReturnKeyAutomatically = false
+    var textContentType: String?
+    var passwordRules: NSObject?
+    var inlinePredictionType = 0
     var clearsOnBeginEditing = false
     var adjustsFontSizeToFitWidth = false
     var minimumFontSize: CGFloat = 0
@@ -142,6 +150,24 @@ open class UITextField: UIControl {
     @ObjCMethod("setAutocorrectionType:") func setAutocorrectionType(_ type: Int) { field.autocorrectionType = type }
     @ObjCMethod("spellCheckingType") func spellCheckingType() -> Int { field.spellCheckingType }
     @ObjCMethod("setSpellCheckingType:") func setSpellCheckingType(_ type: Int) { field.spellCheckingType = type }
+    @ObjCMethod("smartQuotesType") func smartQuotesType() -> Int { field.smartQuotesType }
+    @ObjCMethod("setSmartQuotesType:") func setSmartQuotesType(_ type: Int) { field.smartQuotesType = type }
+    @ObjCMethod("smartDashesType") func smartDashesType() -> Int { field.smartDashesType }
+    @ObjCMethod("setSmartDashesType:") func setSmartDashesType(_ type: Int) { field.smartDashesType = type }
+    @ObjCMethod("smartInsertDeleteType") func smartInsertDeleteType() -> Int { field.smartInsertDeleteType }
+    @ObjCMethod("setSmartInsertDeleteType:") func setSmartInsertDeleteType(_ type: Int) { field.smartInsertDeleteType = type }
+    @ObjCMethod("keyboardAppearance") func keyboardAppearance() -> Int { field.keyboardAppearance }
+    @ObjCMethod("setKeyboardAppearance:") func setKeyboardAppearance(_ appearance: Int) { field.keyboardAppearance = appearance }
+    @ObjCMethod("enablesReturnKeyAutomatically") func enablesReturnKeyAutomatically() -> Bool { field.enablesReturnKeyAutomatically }
+    @ObjCMethod("setEnablesReturnKeyAutomatically:") func setEnablesReturnKeyAutomatically(_ enables: Bool) {
+        field.enablesReturnKeyAutomatically = enables
+    }
+    @ObjCMethod("textContentType") func textContentType() -> String? { field.textContentType }
+    @ObjCMethod("setTextContentType:") func setTextContentType(_ type: String?) { field.textContentType = type }
+    @ObjCMethod("passwordRules") func passwordRules() -> NSObject? { field.passwordRules }
+    @ObjCMethod("setPasswordRules:") func setPasswordRules(_ rules: NSObject?) { field.passwordRules = rules }
+    @ObjCMethod("inlinePredictionType") func inlinePredictionType() -> Int { field.inlinePredictionType }
+    @ObjCMethod("setInlinePredictionType:") func setInlinePredictionType(_ type: Int) { field.inlinePredictionType = type }
     @ObjCMethod("clearsOnBeginEditing") func clearsOnBeginEditing() -> Bool { field.clearsOnBeginEditing }
     @ObjCMethod("setClearsOnBeginEditing:") func setClearsOnBeginEditing(_ clears: Bool) { field.clearsOnBeginEditing = clears }
     @ObjCMethod("adjustsFontSizeToFitWidth") func adjustsFontSizeToFitWidth() -> Bool { field.adjustsFontSizeToFitWidth }
