@@ -135,4 +135,12 @@ RUN curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archi
  && cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h /usr/include/perry-cmark-gfm/ \
  && rm -rf /tmp/cmark /tmp/cmark-build /tmp/cmark.tar.gz
 
+# WPE WebKit, WebKit's port for embedding, which WKWebView and UIWebView
+# load at run time: its web and network processes, and WPEBackend-fdo,
+# which hands each frame the web process draws to the view in shared
+# memory.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libwpewebkit-2.0-1 libwpebackend-fdo-1.0-1 libwayland-server0 \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /perry

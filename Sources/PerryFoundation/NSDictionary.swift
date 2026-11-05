@@ -161,7 +161,14 @@ public class NSDictionary: NSObject {
     // MARK: Creating
 
     @ObjCClassMethod("dictionary")
-    static func dictionary(_ cls: ObjCClass) -> NSDictionary { Dictionaries.owned([], cls: cls.pointer) }
+    static func dictionary(_ cls: ObjCClass) -> NSDictionary {
+        // NSDictionary's own is the immortal @{}, as Apple's is: Swift's
+        // runtime keeps it for every error without user info, unretained.
+        guard cls.pointer != UnsafeMutableRawPointer(Dictionaries.dictionaryClass) else {
+            return NSDictionary(objCOwned: ObjC.retain(perry_foundation_empty_dictionary())!)
+        }
+        return Dictionaries.owned([], cls: cls.pointer)
+    }
 
     @ObjCClassMethod("dictionaryWithObject:forKey:")
     static func dictionary(_ cls: ObjCClass, object: ObjCObject, forKey key: ObjCObject) -> NSDictionary {

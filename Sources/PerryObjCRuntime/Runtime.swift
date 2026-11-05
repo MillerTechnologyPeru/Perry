@@ -340,6 +340,36 @@ extension Runtime {
         return cls
     }
 
+    /// class_addIvar: an instance variable at the end of a class built at
+    /// run time, before it is registered, as Foundation lays out classes
+    /// whose instance variables other images read at fixed offsets.
+    public static func addIvar(_ cls: ClassPointer, name: UnsafePointer<CChar>, size: Int, alignment: UInt8,
+                               types: UnsafePointer<CChar>?) -> Bool {
+        guard let info = Runtime.info(cls), !info.isMeta, size >= 0, alignment < 16,
+              let ro = UnsafeMutablePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7) else { return false }
+        return lock.withLock {
+            guard classesByName.values.allSatisfy({ $0 != cls }) else { return false }
+            var ivars: [perry_ivar] = []
+            if let list = ro.pointee.ivars { IvarList.forEach(list) { ivars.append($0.pointee) } }
+            guard !ivars.contains(where: { $0.name.map { strcmp($0, name) == 0 } ?? false }) else { return false }
+            let align = 1 << Int(alignment)
+            let offset = (info.instanceSize + align - 1) & ~(align - 1)
+            let offsetWord = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+            offsetWord.initialize(to: Int32(offset))
+            ivars.append(perry_ivar(offset: offsetWord, name: UnsafePointer(strdup(name)), type: types.map { UnsafePointer(strdup($0)!) },
+                                    alignment_raw: UInt32(alignment), size: UInt32(size)))
+            let stride = MemoryLayout<perry_ivar>.stride
+            let list = UnsafeMutableRawPointer.allocate(byteCount: 8 + stride * ivars.count, alignment: 8)
+            list.storeBytes(of: UInt32(stride), as: UInt32.self)
+            list.storeBytes(of: UInt32(ivars.count), toByteOffset: 4, as: UInt32.self)
+            for (index, ivar) in ivars.enumerated() { (list + 8 + index * stride).storeBytes(of: ivar, as: perry_ivar.self) }
+            ro.pointee.ivars = UnsafeRawPointer(list)
+            info.instanceSize = offset + size
+            ro.pointee.instance_size = UInt32(info.instanceSize)
+            return true
+        }
+    }
+
     public static func registerClassPair(_ cls: ClassPointer) {
         guard let info = Runtime.info(cls) else { return }
         register(cls, name: info.name)

@@ -28,7 +28,7 @@ final class UserDefaultsStorage {
 
     /// NSGlobalDomain's values that apps read as iOS always has them: the
     /// languages, most preferred first, and the locale.
-    static let global: [String: PropertyValue] = {
+    nonisolated(unsafe) static let global: [String: PropertyValue] = {
         let languages = Locale.preferredLanguages.isEmpty ? ["en"] : Locale.preferredLanguages
         return [
             "AppleLanguages": .array(languages.map { .string($0) }),

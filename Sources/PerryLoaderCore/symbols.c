@@ -312,6 +312,10 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
     char short_name[256];
     if (!provider_short_name(install_name, short_name, sizeof(short_name)))
         return NULL;
+    // WebKit's web views make URL requests of their own, as CFNetwork's
+    // classes, which must start with the program.
+    if (strstr(install_name, "/WebKit.framework/"))
+        perry_find_provider(loader, CFNETWORK);
 
     // Several install names may map to one provider (libSystem's sublibraries).
     for (uint32_t i = 0; i + 1 < loader->provider_count; i++) {
