@@ -79,6 +79,11 @@ final class LayerState {
     var sharedFrames: SharedFrames?
     var contentsScale: CGFloat = 1
     var contentsGravity = "resize"
+    /// Private: the color the contents are multiplied by, and whether their
+    /// alpha stands for every channel ("AAAA"), as template images are
+    /// drawn: the color where the contents are opaque.
+    var contentsMultiplyColor: CGRef?
+    var contentsSwizzle = "RGBA"
     var name: String?
     var isOpaque = false
     var needsDisplayOnBoundsChange = false
@@ -116,7 +121,7 @@ final class LayerState {
     var animations: [(key: String, animation: CAAnimation)] = []
 
     deinit {
-        for color in [backgroundColor, borderColor, shadowColor, backing] { if let color { CG.release(color) } }
+        for color in [backgroundColor, borderColor, shadowColor, backing, contentsMultiplyColor] { if let color { CG.release(color) } }
     }
 
     var transform: CGAffineTransform {
@@ -183,6 +188,8 @@ final class LayerState {
         LayerState.setColor(&copy.backing, backing)
         (copy.shadowOpacity, copy.shadowOffset, copy.shadowRadius) = (shadowOpacity, shadowOffset, shadowRadius)
         (copy.contents, copy.contentsScale, copy.contentsGravity) = (contents, contentsScale, contentsGravity)
+        LayerState.setColor(&copy.contentsMultiplyColor, contentsMultiplyColor)
+        copy.contentsSwizzle = contentsSwizzle
         copy.livePixels = livePixels
         copy.sharedFrames = sharedFrames
         (copy.isOpaque, copy.sublayers, copy.superlayer, copy.delegate, copy.mask) = (isOpaque, sublayers, superlayer, delegate, mask)
@@ -397,6 +404,14 @@ open class CALayer: NSObject {
     @ObjCMethod("rasterizationScale") func rasterizationScale() -> CGFloat { state.contentsScale }
     @ObjCMethod("setRasterizationScale:") func setRasterizationScale(_ scale: CGFloat) {}
     @ObjCMethod("contentsFormat") func contentsFormat() -> String { state.contentsFormat }
+    @ObjCMethod("contentsMultiplyColor") func contentsMultiplyColor() -> UnsafeMutableRawPointer? { state.contentsMultiplyColor }
+    @ObjCMethod("setContentsMultiplyColor:")
+    func setContentsMultiplyColor(_ color: UnsafeMutableRawPointer?) {
+        change("contentsMultiplyColor") { LayerState.setColor(&state.contentsMultiplyColor, color) }
+    }
+    @ObjCMethod("contentsSwizzle") func contentsSwizzle() -> String { state.contentsSwizzle }
+    @ObjCMethod("setContentsSwizzle:")
+    func setContentsSwizzle(_ swizzle: String?) { change("contentsSwizzle") { state.contentsSwizzle = swizzle ?? "RGBA" } }
     @ObjCMethod("setContentsFormat:") func setContentsFormat(_ format: String) { state.contentsFormat = format }
     @ObjCMethod("drawsAsynchronously") func drawsAsynchronously() -> Bool { false }
     @ObjCMethod("setDrawsAsynchronously:") func setDrawsAsynchronously(_ asynchronously: Bool) {}
@@ -939,8 +954,34 @@ extension CALayer {
         guard let image else { return }
         let size = CGSize(width: CGFloat(CG.imageGetWidth(image)) / state.contentsScale,
                           height: CGFloat(CG.imageGetHeight(image)) / state.contentsScale)
-        CG.drawFlipped(image, in: place(size, in: state.bounds, gravity: state.contentsGravity), context: context)
+        let rect = place(size, in: state.bounds, gravity: state.contentsGravity)
+        guard let color = state.contentsMultiplyColor ?? (state.contentsSwizzle == "AAAA" ? whiteColor : nil) else {
+            CG.drawFlipped(image, in: rect, context: context)
+            return
+        }
+        // CGBlendMode: multiply 1, source in 18, destination in 22.
+        CG.saveGState(context)
+        CG.beginTransparencyLayer(context, nil)
+        CG.drawFlipped(image, in: rect, context: context)
+        CG.setFillColorWithColor(context, color)
+        if state.contentsSwizzle == "AAAA" {
+            // The color where the contents are opaque.
+            CG.setBlendMode(context, 18)
+            CG.fillRect(context, rect)
+        } else {
+            // The contents' colors multiplied by it, in their own shape.
+            CG.setBlendMode(context, 1)
+            CG.fillRect(context, rect)
+            CG.setBlendMode(context, 22)
+            CG.drawFlipped(image, in: rect, context: context)
+        }
+        CG.endTransparencyLayer(context)
+        CG.restoreGState(context)
     }
+
+    /// Opaque white, which alpha-for-every-channel contents are without a
+    /// color to multiply.
+    nonisolated(unsafe) static let whiteColor: CGRef? = CG.colorCreateGenericGray(1, 1)
 
     /// Where content of `size` goes in `bounds` by a gravity.
     static func place(_ size: CGSize, in bounds: CGRect, gravity: String) -> CGRect {
