@@ -202,6 +202,6 @@ public final class NSDate: NSObject {
 }
 
 @c(_CFAbsoluteTimeGetCurrent)
-public func CFAbsoluteTimeGetCurrent() -> Double {
-    absoluteTimeNow()
+public func CFAbsoluteTimeGetCurrent() -> Double.ObjCResultType {
+    darwinResult(absoluteTimeNow())
 }
