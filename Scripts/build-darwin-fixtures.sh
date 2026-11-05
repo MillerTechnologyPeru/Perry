@@ -78,6 +78,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
     grep -q '<GLKit/' $sources && frameworks="$frameworks -framework GLKit -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
+    grep -q '<WebKit/' $sources && frameworks="$frameworks -framework WebKit"
     xcrun --sdk iphoneos clang -target "arm64-apple-ios$min" -isysroot "$sdk" \
         -fobjc-arc -fmodules -O1 $ios_includes \
         $frameworks $libraries \
