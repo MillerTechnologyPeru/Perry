@@ -683,6 +683,106 @@ extension NSString {
         return offsets
     }
 
+    // MARK: Enumerating substrings
+
+    /// The pieces of `range` an enumeration option names, each as its own
+    /// range and its enclosing range (with the line terminator, or the
+    /// space and punctuation up to the next word). Words are runs of
+    /// letters, digits and apostrophes; sentences end at ., ! or ? and the
+    /// spaces after them.
+    private func substrings(in range: NSRange, kind: UInt) -> [(range: Range<Int>, enclosing: Range<Int>)] {
+        let units = Array(value.utf16)
+        let start = Int(range.location), end = min(units.count, start + Int(range.length))
+        guard start < end else { return [] }
+        var pieces: [(Range<Int>, Range<Int>)] = []
+        func isLineBreak(_ unit: UInt16, paragraphs: Bool) -> Bool {
+            unit == 10 || unit == 13 || unit == 0x2029 || (!paragraphs && (unit == 0x2028 || unit == 0x85))
+        }
+        switch kind {
+        case 0, 1:      // lines, paragraphs
+            var lineStart = start, index = start
+            while index < end {
+                if isLineBreak(units[index], paragraphs: kind == 1) {
+                    var after = index + 1
+                    if units[index] == 13, after < end, units[after] == 10 { after += 1 }
+                    pieces.append((lineStart..<index, lineStart..<after))
+                    lineStart = after
+                    index = after
+                } else {
+                    index += 1
+                }
+            }
+            if lineStart < end { pieces.append((lineStart..<end, lineStart..<end)) }
+        case 2:         // composed character sequences
+            var offset = 0
+            for character in value {
+                let length = character.utf16.count
+                if offset + length > start && offset < end { pieces.append((offset..<offset + length, offset..<offset + length)) }
+                offset += length
+            }
+        case 3, 4:      // words, sentences
+            let characters = Array(String(decoding: units[start..<end], as: UTF16.self))
+            var offsets = [start]
+            for character in characters { offsets.append(offsets.last! + character.utf16.count) }
+            func isWordCharacter(_ c: Character) -> Bool { c.isLetter || c.isNumber || c == "'" || c == "’" }
+            var index = 0
+            while index < characters.count {
+                if kind == 3 {
+                    guard isWordCharacter(characters[index]) else { index += 1; continue }
+                    let first = index
+                    while index < characters.count, isWordCharacter(characters[index]) { index += 1 }
+                    var enclosing = index
+                    while enclosing < characters.count, !isWordCharacter(characters[enclosing]) { enclosing += 1 }
+                    pieces.append((offsets[first]..<offsets[index], offsets[first]..<offsets[enclosing]))
+                } else {
+                    let first = index
+                    while index < characters.count, !".!?".contains(characters[index]) { index += 1 }
+                    while index < characters.count, ".!?".contains(characters[index]) { index += 1 }
+                    let last = index
+                    while index < characters.count, characters[index].isWhitespace { index += 1 }
+                    pieces.append((offsets[first]..<offsets[last], offsets[first]..<offsets[index]))
+                }
+            }
+        default:
+            break
+        }
+        return pieces
+    }
+
+    /// NSStringEnumerationOptions: the kind in the low byte, reverse 1 << 8,
+    /// substring not required 1 << 9. The block takes the substring, its
+    /// range and enclosing range, and a stop flag.
+    @ObjCMethod("enumerateSubstringsInRange:options:usingBlock:")
+    func enumerateSubstrings(in range: NSRange, options: UInt, using block: ObjCBlock) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UInt, UInt, UInt, UInt,
+                                          UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        var pieces = substrings(in: range, kind: options & 0xff)
+        if options & (1 << 8) != 0 { pieces.reverse() }
+        let units = Array(value.utf16)
+        var stop = false
+        for piece in pieces {
+            let substring = options & (1 << 9) != 0 ? nil
+                : Strings.autoreleased(String(decoding: units[piece.range], as: UTF16.self))
+            invoke(block.object, substring, UInt(piece.range.lowerBound), UInt(piece.range.count),
+                   UInt(piece.enclosing.lowerBound), UInt(piece.enclosing.count), &stop)
+            if stop { break }
+        }
+    }
+
+    /// The block takes each line, without its terminator, and a stop flag.
+    @ObjCMethod("enumerateLinesUsingBlock:")
+    func enumerateLines(using block: ObjCBlock) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        let units = Array(value.utf16)
+        var stop = false
+        for piece in substrings(in: NSRange(location: 0, length: UInt(units.count)), kind: 0) {
+            invoke(block.object, Strings.autoreleased(String(decoding: units[piece.range], as: UTF16.self)), &stop)
+            if stop { break }
+        }
+    }
+
     /// The cluster around the character at `index`, as a user sees it.
     @ObjCMethod("rangeOfComposedCharacterSequenceAtIndex:")
     func rangeOfComposedCharacterSequence(at index: UInt) -> NSRange {

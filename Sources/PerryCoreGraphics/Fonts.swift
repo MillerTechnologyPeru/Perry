@@ -1,4 +1,5 @@
 import CPerryGeometry
+import CFontConfig
 import Cairo
 import Glibc
 import PerryObjCInterop
@@ -12,8 +13,12 @@ import SilicaCairo
 
 final class FontState {
     let font: Silica.CGFont
-    /// The file a font made from data was written to, removed with it.
+    /// The file a font made from data was written to, removed with it
+    /// unless the font was registered.
     let file: String?
+    /// Whether CTFontManagerRegisterGraphicsFont registered it: its file
+    /// stays, for FontConfig to find by name.
+    var registered = false
 
     init(font: Silica.CGFont, file: String? = nil) {
         self.font = font
@@ -21,7 +26,7 @@ final class FontState {
     }
 
     deinit {
-        if let file { unlink(file) }
+        if let file, !registered { unlink(file) }
     }
 
     var scaled: Cairo.ScaledFont { font.scaledFont }
@@ -88,6 +93,21 @@ enum Fonts {
 }
 
 @c(_CGFontGetTypeID) public func CGFontGetTypeID() -> UInt { TypeIDs.font }
+
+/// Adds a font made from data to the fonts FontConfig chooses from, so text
+/// drawn in its name uses it: CTFontManagerRegisterGraphicsFont, which
+/// UIKit's CoreText calls this for. A font made from a name is already
+/// among them.
+@c(_perry_cgfont_register)
+public func perryCGFontRegister(_ font: Ref?) -> Bool {
+    guard let state = Fonts.state(font) else { return false }
+    guard let file = state.file else { return true }
+    if !state.registered {
+        state.registered = true
+        _ = file.withCString { FcConfigAppFontAddFile(nil, $0) }
+    }
+    return true
+}
 
 /// A font by its PostScript or full name; nil when there is none by it.
 @c(_CGFontCreateWithFontName)

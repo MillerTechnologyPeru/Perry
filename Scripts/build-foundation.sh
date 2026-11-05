@@ -70,6 +70,11 @@ grep -rlE 'import (FoundationEssentials|FoundationInternationalization)$|(Founda
         perl -i -pe 's/^\s*(?:(?:internal|package|public|\@_exported|\@preconcurrency|\@_implementationOnly)\s+)*import (?:FoundationEssentials|FoundationInternationalization)\s*$/\n/; s/\b(FoundationEssentials|FoundationInternationalization)\./Foundation./g' "$file"
     done
 
+# The JSON coders' dates formatted by a DateFormatter, which swift-foundation
+# keeps for Apple's build: NSDateFormatter is here as there.
+perl -i -pe 's/^#if FOUNDATION_FRAMEWORK && !NO_FORMATTERS\b/#if (FOUNDATION_FRAMEWORK || FOUNDATION_OBJC_TYPES) && !NO_FORMATTERS/' \
+    "$merged/FoundationEssentials/JSON/JSONDecoder.swift" "$merged/FoundationEssentials/JSON/JSONEncoder.swift"
+
 # The settings swift-foundation's manifest gives its targets.
 settings=()
 for version in 6.0.2 6.1 6.2 6.3; do

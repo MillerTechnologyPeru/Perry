@@ -123,7 +123,14 @@ enum KeyValueCoding {
     /// the object and its type's first character.
     static func instanceVariable(_ object: id, _ key: String) -> (storage: UnsafeMutableRawPointer, type: UInt8)? {
         guard let cls = ObjC.objectGetClass(object), let find = ObjC.instanceVariable, let offset = ObjC.ivarOffset,
-              let encoding = ObjC.ivarType else { return nil }
+              let encoding = ObjC.ivarType, !key.isEmpty else { return nil }
+        // A class that answers NO to +accessInstanceVariablesDirectly keeps
+        // its instance variables to itself.
+        let allows = ObjC.selector("accessInstanceVariablesDirectly")
+        if ObjC.instanceMethod(ObjC.objectGetClass(UnsafeMutableRawPointer(cls)), allows) != nil {
+            typealias Send = @convention(c) (UnsafeMutableRawPointer, SEL) -> Bool
+            guard unsafeBitCast(ObjC.msgSend!, to: Send.self)(UnsafeMutableRawPointer(cls), allows) else { return nil }
+        }
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
         for name in ["_" + key, "_is" + capitalized, key, "is" + capitalized] {
             guard let ivar = name.withCString({ find(cls, $0) }) else { continue }

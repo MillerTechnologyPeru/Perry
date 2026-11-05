@@ -51,6 +51,15 @@ public enum Runtime {
             guard let ro = UnsafePointer<perry_class_ro>(bitPattern: bits) else {
                 return nil
             }
+            // A Swift class compiled to deploy before the stable ABI is
+            // marked with the legacy bit (0) only; Swift's runtime takes a
+            // class for its own by the stable bit (1), which Darwin's libobjc
+            // sets on such classes as it realizes them. Without it Swift
+            // wraps the class as an Objective-C one, whose super calls then
+            // find the class itself.
+            if cls.pointee.bits & 3 == 1 {
+                cls.pointee.bits |= 2
+            }
             let superInfo = cls.pointee.superclass.flatMap { Runtime.info($0) }
             // A class whose superclass is not available is not available
             // either, as on Darwin when a weak-linked superclass is missing:
@@ -254,10 +263,38 @@ public enum Runtime {
         if let forwardHandler {
             return (nil, forwardHandler)
         }
+        if Unrecognized.continues {
+            Unrecognized.report(receiver, selector)
+            return (nil, Unrecognized.returnZero)
+        }
         if let info = Runtime.info(classOf(receiver)), findMethod(info, Sel.doesNotRecognizeSelector) != nil {
             Messages.sendVoid(receiver, Sel.doesNotRecognizeSelector, UnsafeRawPointer(selector))
         }
         unrecognized(receiver, selector)
+    }
+
+    /// With PERRY_OBJC_UNRECOGNIZED=continue, for finding what a program
+    /// needs: an unrecognized message is reported, once for each class and
+    /// selector, and returns zero instead of aborting.
+    enum Unrecognized {
+        static let continues = getenv("PERRY_OBJC_UNRECOGNIZED").map { String(cString: $0) == "continue" } ?? false
+
+        nonisolated(unsafe) static var reported = Set<String>()
+        static let lock = RecursiveLock()
+
+        nonisolated(unsafe) static let returnZero: IMP = unsafeBitCast(
+            { 0 } as @convention(c) () -> UInt, to: IMP.self)
+
+        static func report(_ receiver: ObjectPointer, _ selector: SEL) {
+            let info = Runtime.info(classOf(receiver))
+            let isClass = info?.isMeta ?? false
+            let name = info.map { String(cString: $0.name) } ?? "?"
+            let message = "\(isClass ? "+" : "-")[\(name) \(String(cString: selector))]"
+            let first = lock.withLock { reported.insert(message).inserted }
+            if first {
+                objcWarning("\(message): unrecognized selector, returning 0")
+            }
+        }
     }
 
     public static func unrecognized(_ receiver: ObjectPointer, _ selector: SEL) -> Never {

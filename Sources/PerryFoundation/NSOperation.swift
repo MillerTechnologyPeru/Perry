@@ -115,10 +115,19 @@ final class OperationStorage {
     var queue: QueueStorage?
     /// NSBlockOperation's blocks.
     var blocks: [id] = []
+    /// NSInvocationOperation's message: the target and argument, held,
+    /// and the selector; and what it returned.
+    var invocation: (target: id, selector: SEL, argument: id?)?
+    var result: id?
 
     deinit {
         dependencies.forEach { ObjC.release($0) }
         blocks.forEach { ObjC.release($0) }
+        if let invocation {
+            ObjC.release(invocation.target)
+            ObjC.release(invocation.argument)
+        }
+        ObjC.release(result)
         ObjC.release(completionBlock)
         ObjC.release(name)
     }
@@ -349,6 +358,41 @@ public final class NSBlockOperation: NSOperation {
         for block in storage.monitor.locked({ storage.blocks }) {
             Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block)
         }
+    }
+}
+
+/// NSInvocationOperation: an operation that sends its target a message
+/// with one object argument, keeping what it returns.
+@ObjCClass("NSInvocationOperation")
+public final class NSInvocationOperation: NSOperation {
+    @ObjCMethod("initWithTarget:selector:object:")
+    func initialize(target: ObjCObject?, selector: ObjCSelector?, object: ObjCObject?) -> Self? {
+        guard let target, let selector else { return nil }
+        let invocation = (target: ObjC.retain(target.id)!, selector: selector.pointer.assumingMemoryBound(to: CChar.self) as SEL,
+                          argument: object.flatMap { ObjC.retain($0.id) })
+        storage.monitor.locked { storage.invocation = invocation }
+        return self
+    }
+
+    /// Sends the message, unless the operation was cancelled first.
+    @ObjCMethod("main")
+    func sendMessage() {
+        guard let invocation = storage.monitor.locked({ storage.invocation }) else { return }
+        // Only a method returning an object has a result.
+        let method = ObjC.instanceMethod(ObjC.objectGetClass(invocation.target), invocation.selector)
+        let returnsObject = ObjC.methodTypes(method).map { $0.pointee == UInt8(ascii: "@") } ?? false
+        let returned = ObjC.send(invocation.target, invocation.selector, invocation.argument)
+        let result = returnsObject ? returned.flatMap { ObjC.retain($0) } : nil
+        let old = storage.monitor.locked { () -> id? in
+            defer { storage.result = result }
+            return storage.result
+        }
+        ObjC.release(old)
+    }
+
+    @ObjCMethod("result")
+    func result() -> ObjCObject? {
+        storage.monitor.locked { storage.result }.flatMap { ObjC.autorelease($0) }.map(ObjCObject.init)
     }
 }
 

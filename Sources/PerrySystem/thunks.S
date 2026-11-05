@@ -268,6 +268,9 @@ PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes
 PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _mktemp, mktemp
+PASSTHROUGH _memccpy, memccpy
+PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork

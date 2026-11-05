@@ -105,6 +105,17 @@ static void usage(FILE *out) {
           "\n"
           "environment:\n"
           "  PERRY_TRACE         comma-separated: load, bind, init, all\n"
+          "  PERRY_CRASH_REPORT  1: on a fatal signal, print registers and frames\n"
+          "                      (with PERRY_KEEP_CRASH_HANDLERS=1, so an app's crash\n"
+          "                      reporter doesn't take the signal first)\n"
+          "  PERRY_UNIMPLEMENTED continue: an unresolved function reports itself\n"
+          "                      once and returns 0 instead of aborting\n"
+          "  PERRY_OBJC_UNRECOGNIZED continue: likewise for unrecognized selectors\n"
+          "  PERRY_SWIFT_THROW_TRACE 1: print each Swift error thrown, its task's name\n"
+          "                      and the frames that threw it\n"
+          "  PERRY_URL_TRACE     1: print each URL task as it completes, and who\n"
+          "                      cancels one\n"
+          "  PERRY_BUNDLE_TRACE  1: print info dictionary lookups and missing resources\n"
           "  PERRY_LIBRARY_PATH  colon-separated directories with provider libraries\n"
           "  PERRY_CONTAINER     an app's home directory; ~/.perry/Containers/<bundle id>\n"
           "                      unless set\n"
@@ -229,6 +240,7 @@ int main(int argc, char **argv) {
         perry_fatal("out of memory");
     char *apple[] = { apple_exe, NULL };
 
+    perry_install_crash_reporter(&loader);
     perry_run_initializers(&loader, image, app_argc, app_argv, environ, apple);
     perry_run_main(&loader, image, app_argc, app_argv, environ, apple);
 }

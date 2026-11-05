@@ -82,6 +82,13 @@ enum CG {
     nonisolated(unsafe) static var imageDestinationAddImage: (@convention(c) (Ref, Ref, Ref) -> Void)!
     nonisolated(unsafe) static var imageDestinationFinalize: (@convention(c) (Ref) -> Bool)!
 
+    nonisolated(unsafe) static var dataProviderCreateWithURL: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var fontCreateWithDataProvider: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var fontRelease: (@convention(c) (Ref) -> Void)!
+    /// Adds a font made from data to FontConfig's fonts (libPerryCoreGraphics).
+    nonisolated(unsafe) static var fontRegister: (@convention(c) (UnsafeMutableRawPointer?) -> Bool)?
+    nonisolated(unsafe) static var dataProviderRelease: (@convention(c) (Ref) -> Void)!
+
     /// Binds the functions through `lookup`; false if one is missing.
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) -> Bool {
         var complete = true
@@ -156,6 +163,11 @@ enum CG {
         imageDestinationCreateWithData = bind("CGImageDestinationCreateWithData")
         imageDestinationAddImage = bind("CGImageDestinationAddImage")
         imageDestinationFinalize = bind("CGImageDestinationFinalize")
+        dataProviderCreateWithURL = bind("CGDataProviderCreateWithURL")
+        fontCreateWithDataProvider = bind("CGFontCreateWithDataProvider")
+        fontRelease = bind("CGFontRelease")
+        fontRegister = lookup(coreGraphics, "_perry_cgfont_register").map { unsafeBitCast($0, to: (@convention(c) (UnsafeMutableRawPointer?) -> Bool).self) }
+        dataProviderRelease = bind("CGDataProviderRelease")
         return complete
     }
 

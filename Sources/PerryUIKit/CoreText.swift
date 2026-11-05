@@ -336,3 +336,38 @@ public func CTFontCopyTallestTextStyleLanguageForString(_ string: UnsafeMutableR
 /// The default composition language for every language.
 @c(_CTParagraphStyleGetCompositionLanguageForLanguage)
 public func CTParagraphStyleGetCompositionLanguageForLanguage(_ language: UnsafeMutableRawPointer?) -> UInt8 { 0 }
+
+// MARK: - Registering fonts
+
+/// A graphics font is available from when CoreGraphics makes it, which
+/// adds its file to the fonts text is drawn with: registering it succeeds.
+@c(_CTFontManagerRegisterGraphicsFont)
+public func CTFontManagerRegisterGraphicsFont(_ font: UnsafeMutableRawPointer?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    guard let font else { return false }
+    return CG.fontRegister?(font) ?? true
+}
+
+@c(_CTFontManagerUnregisterGraphicsFont)
+public func CTFontManagerUnregisterGraphicsFont(_ font: UnsafeMutableRawPointer?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    return font != nil
+}
+
+/// Registers the font in the file at the URL, by making a graphics font of
+/// it.
+@c(_CTFontManagerRegisterFontsForURL)
+public func CTFontManagerRegisterFontsForURL(_ url: UnsafeMutableRawPointer?, _ scope: UInt32, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    guard let url, let provider = CG.dataProviderCreateWithURL(url) else { return false }
+    defer { CG.dataProviderRelease(provider) }
+    guard let font = CG.fontCreateWithDataProvider(provider) else { return false }
+    CG.fontRelease(font)
+    return true
+}
+
+@c(_CTFontManagerUnregisterFontsForURL)
+public func CTFontManagerUnregisterFontsForURL(_ url: UnsafeMutableRawPointer?, _ scope: UInt32, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+    error?.pointee = nil
+    return url != nil
+}

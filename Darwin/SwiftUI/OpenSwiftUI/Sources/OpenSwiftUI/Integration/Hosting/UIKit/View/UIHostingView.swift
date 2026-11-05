@@ -90,16 +90,24 @@ open class _UIHostingView<Content>: UIView, XcodeViewDebugDataProvider where Con
         }
     }
     
-    var initialInheritedEnvironment: EnvironmentValues? = nil
+    // The base makes the environment from these, so each is the base's.
+    var initialInheritedEnvironment: EnvironmentValues? {
+        get { base.initialInheritedEnvironment }
+        set { base.initialInheritedEnvironment = newValue }
+    }
 
-    var inheritedEnvironment: EnvironmentValues? = nil {
-        didSet {
+    var inheritedEnvironment: EnvironmentValues? {
+        get { base.inheritedEnvironment }
+        set {
+            base.inheritedEnvironment = newValue
             invalidateProperties(.environment)
         }
     }
-    
-    package var environmentOverride: EnvironmentValues? = nil {
-        didSet {
+
+    package var environmentOverride: EnvironmentValues? {
+        get { base.environmentOverride }
+        set {
+            base.environmentOverride = newValue
             invalidateProperties(.environment)
         }
     }
@@ -165,6 +173,9 @@ open class _UIHostingView<Content>: UIView, XcodeViewDebugDataProvider where Con
     // MARK: - UIHostingView initialization [WIP]
 
     required public init(rootView: Content) {
+        #if !OPENSWIFTUI_LINK_COREUI
+        _ = UIImage.installNamedImages
+        #endif
         _rootView = rootView
         Update.begin()
         var options = Self.defaultViewGraphOutputs().options

@@ -490,6 +490,16 @@ public class NSMutableArray: NSArray {
         storage.enumeration.mutated()
     }
 
+    /// NSInteger (*)(id, id, void *): NSComparisonResult, ascending -1
+    /// first.
+    @ObjCMethod("sortUsingFunction:context:")
+    func sort(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) {
+        guard let function else { return }
+        let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
+        storage.objects.sort { compare($0, $1, context) < 0 }
+        storage.enumeration.mutated()
+    }
+
     /// NSSortOptions (concurrent, stable) only tune the sort.
     @ObjCMethod("sortWithOptions:usingComparator:")
     func sort(options: UInt, comparator: ObjCBlock) { sort(comparator: comparator) }
