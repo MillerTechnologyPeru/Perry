@@ -135,4 +135,25 @@ RUN curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archi
  && cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h /usr/include/perry-cmark-gfm/ \
  && rm -rf /tmp/cmark /tmp/cmark-build /tmp/cmark.tar.gz
 
+# Vulkan's loader and Mesa's Vulkan drivers (lavapipe on the CPU when a
+# container has no GPU), which metal2vulkan opens at run time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers \
+ && rm -rf /var/lib/apt/lists/*
+
+# metal2vulkan (GPL-2.0-or-later OR LGPL-3.0-or-later, taken as LGPL), the
+# Metal API on Vulkan, through the C ABI crate on MillerTechnologyPeru's
+# fork: libmetal2vulkan.so, a separate library Metal's provider opens at run
+# time. Built with the Rust its toolchain file pins, which is removed after.
+RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vulkan/archive/ab422d7332614676b010c19a73591ee51c6e92d7.tar.gz \
+ && echo "a2d82649d1dc96ded23902231d0a75ba5a8757585d7dbbecf5f2b858e78a224b  /tmp/m2v.tar.gz" | sha256sum -c - \
+ && mkdir /tmp/m2v && tar -xzf /tmp/m2v.tar.gz -C /tmp/m2v --strip-components=1 \
+        --wildcards '*/capi' '*/crates/metal2vulkan' '*/crates/metal2vulkan-air' '*/crates/metal2vulkan-runtime' \
+        '*/Cargo.toml' '*/rust-toolchain.toml' '*/LICENSE*' \
+ && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.1 \
+ && cd /tmp/m2v/capi && /root/.cargo/bin/cargo build --release \
+ && strip -o /usr/lib/aarch64-linux-gnu/libmetal2vulkan.so target/release/libmetal2vulkan_capi.so \
+ && mkdir -p /usr/share/doc/metal2vulkan && cp /tmp/m2v/LICENSE* /usr/share/doc/metal2vulkan/ \
+ && cd / && rm -rf /tmp/m2v /tmp/m2v.tar.gz /root/.cargo /root/.rustup
+
 WORKDIR /perry
