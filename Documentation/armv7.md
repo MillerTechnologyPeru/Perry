@@ -71,16 +71,20 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   info rebase and bind, unresolved-import stubs, `tlv_get_addr` and the
   Objective-C report for armv7. Chained fixups stay 64-bit.
 - libSystem (`libPerrySystem.so` for armv7): the streams, process startup,
-  errno, setjmp-and-longjmp unwinder registration, and `thunks_arm.S` with the
-  functions whose arguments and results are each one 32-bit word. Variadic
-  printf and scanf read integers, pointers and strings; `long long` and
-  `double` conversions need the format-driven repack described above.
+  errno, setjmp-and-longjmp unwinder registration, `mmap` with Darwin's flags,
+  and `thunks_arm.S`: the functions whose arguments and results are each one
+  32-bit word pass through, and `lseek`, `pread`, `pwrite`, `ftruncate`,
+  `truncate`, `fseeko`, `ftello` and `mmap` have adapters that move their
+  64-bit offsets and call glibc's *64 forms. The printf family repacks its
+  variadic arguments by reading the format (`vaformat.c`), so `long long` and
+  floating-point conversions are read as on arm64. `fopen` is `fopen64`, since
+  Darwin's files are always large files.
 - libobjc (`libPerryobjc.so` for armv7): `objc_msgSend` and its stret and super
   forms, message forwarding and block trampolines in ARM assembly; the Swift
   runtime reads metadata at the pointer width's offsets (`Layout`).
 - Not yet: exceptions (`@throw`, unwinding through registered contexts), the
-  rest of libSystem for Darwin's armv7 layouts and calling convention (files,
-  sockets, pthreads, mach, 64-bit arguments), Foundation, UIKit, the other
+  rest of libSystem for Darwin's armv7 layouts (open and stat, directories,
+  sockets, pthreads' types, mach), Foundation, UIKit, the other
   providers, `objc_msgForward_stret`, and classic relocations (iOS before 3.1).
 
 ## Building and running
