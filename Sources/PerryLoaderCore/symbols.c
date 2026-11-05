@@ -213,6 +213,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
+//   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -253,7 +254,8 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/CoreText.framework/") ||
-        strstr(install_name, "/AVKit.framework/")) {
+        strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
+        strstr(install_name, "/AdSupport.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
