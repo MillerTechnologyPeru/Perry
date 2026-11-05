@@ -54,9 +54,11 @@ public final class NSJSONSerialization: NSObject {
 
     @ObjCClassMethod("dataWithJSONObject:options:error:")
     static func data(object: ObjCObject, options: UInt, error: UnsafeMutablePointer<id?>?) -> NSData? {
+        PropertyValue.rejected = nil
         guard let value = PropertyValue(object: object.id),
               JSON.isValid(value, topLevel: true, fragments: options & JSON.writingFragmentsAllowed != 0) else {
-            foundationFatal("+[NSJSONSerialization dataWithJSONObject:options:error:]: Invalid type in JSON write")
+            let type = PropertyValue.rejected.map { " (\($0))" } ?? ""
+            foundationFatal("+[NSJSONSerialization dataWithJSONObject:options:error:]: Invalid type in JSON write\(type)")
         }
         let encoder = JSONEncoder()
         var formatting: JSONEncoder.OutputFormatting = []
