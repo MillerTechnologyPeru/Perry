@@ -136,7 +136,7 @@ public func dispatch_block_perform(_ flags: UInt, _ block: UnsafeMutableRawPoint
 
 @c(_dispatch_block_wait)
 public func dispatch_block_wait(_ block: UnsafeMutableRawPointer?, _ timeout: UInt64) -> Int {
-    linux_dispatch_group_wait(DispatchBlocks.required(block, "dispatch_block_wait").group, timeout)
+    linux_dispatch_group_wait(DispatchBlocks.required(block, "dispatch_block_wait").group, DarwinTime.linux(timeout))
 }
 
 @c(_dispatch_block_notify)
