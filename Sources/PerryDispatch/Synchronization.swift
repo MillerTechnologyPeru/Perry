@@ -1,5 +1,6 @@
 import CPerryDispatch
 import Glibc
+import PerryObjCInterop
 
 // Groups, semaphores and time. dispatch_time_t values pass through as
 // Linux's: nanoseconds of uptime, negative for wall-clock times, with
@@ -23,8 +24,8 @@ public func dispatch_group_leave(_ group: Object?) {
 }
 
 @c(_dispatch_group_wait)
-public func dispatch_group_wait(_ group: Object?, _ timeout: UInt64) -> Int {
-    linux_dispatch_group_wait(Objects.linux(group), timeout)
+public func dispatch_group_wait(_ group: Object?, _ timeout: UInt64.ObjCType) -> Int {
+    linux_dispatch_group_wait(Objects.linux(group), UInt64(objCArgument: timeout))
 }
 
 @c(_dispatch_group_async)
@@ -61,8 +62,8 @@ public func dispatch_semaphore_create(_ value: Int) -> Object? {
 }
 
 @c(_dispatch_semaphore_wait)
-public func dispatch_semaphore_wait(_ semaphore: Object?, _ timeout: UInt64) -> Int {
-    linux_dispatch_semaphore_wait(Objects.linux(semaphore), timeout)
+public func dispatch_semaphore_wait(_ semaphore: Object?, _ timeout: UInt64.ObjCType) -> Int {
+    linux_dispatch_semaphore_wait(Objects.linux(semaphore), UInt64(objCArgument: timeout))
 }
 
 @c(_dispatch_semaphore_signal)
@@ -73,11 +74,11 @@ public func dispatch_semaphore_signal(_ semaphore: Object?) -> Int {
 // MARK: - Time
 
 @c(_dispatch_time)
-public func dispatch_time(_ when: UInt64, _ delta: Int64) -> UInt64 {
-    linux_dispatch_time(when, delta)
+public func dispatch_time(_ when: UInt64.ObjCType, _ delta: Int64.ObjCType) -> UInt64 {
+    linux_dispatch_time(UInt64(objCArgument: when), Int64(objCArgument: delta))
 }
 
 @c(_dispatch_walltime)
-public func dispatch_walltime(_ when: UnsafePointer<timespec>?, _ delta: Int64) -> UInt64 {
-    linux_dispatch_walltime(when, delta)
+public func dispatch_walltime(_ when: UnsafePointer<timespec>?, _ delta: Int64.ObjCType) -> UInt64 {
+    linux_dispatch_walltime(when, Int64(objCArgument: delta))
 }
