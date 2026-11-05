@@ -118,6 +118,10 @@ static OSStatus pull(converter *c, input_proc proc, void *user, size_t frames, b
             uint32_t packet_size = in->mBytesPerPacket ? in->mBytesPerPacket : 34 * in->mChannelsPerFrame;
             const uint8_t *data = list->mBuffers[0].mData;
             uint32_t available = list->mBuffers[0].mDataByteSize / packet_size;
+            // Packets of one size follow each other: their descriptions, if
+            // the proc gives any, aren't needed, as Darwin's converter
+            // doesn't use them (apps pass ones relative to other buffers).
+            if (in->mBytesPerPacket) descriptions = NULL;
             if (!descriptions && packets > available) packets = available;
             float decoded[64 * 8];
             uint32_t channels = in->mChannelsPerFrame > 8 ? 8 : in->mChannelsPerFrame;
