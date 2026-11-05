@@ -23,10 +23,14 @@ enum KeyValueCoding {
     static func get(_ object: id, _ selector: SEL) -> id? {
         let send = ObjC.msgSend!
         switch types(object, selector)?.first ?? "@" {
-        case "q", "l", "Q", "L":
-            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int64).self)(object, selector)
-            return Numbers.make(nil, types(object, selector)?.first == "Q" || types(object, selector)?.first == "L"
-                                ? .unsigned(UInt64(bitPattern: value)) : .signed(value))
+        case "q", "Q":
+            let value = darwinResult(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int64.ObjCResultType).self)(object, selector),
+                                     as: Int64.self)
+            return Numbers.make(nil, types(object, selector)?.first == "Q" ? .unsigned(UInt64(bitPattern: value)) : .signed(value))
+        case "l":
+            return Numbers.make(nil, .signed(Int64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int).self)(object, selector))))
+        case "L":
+            return Numbers.make(nil, .unsigned(UInt64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> UInt).self)(object, selector))))
         case "i":
             return Numbers.make(nil, .signed(Int64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int32).self)(object, selector))))
         case "I":
@@ -42,9 +46,11 @@ enum KeyValueCoding {
         case "B":
             return perry_foundation_boolean(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Bool).self)(object, selector) ? 1 : 0)
         case "d":
-            return Numbers.make(nil, .double(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Double).self)(object, selector)))
+            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Double.ObjCResultType).self)(object, selector)
+            return Numbers.make(nil, .double(darwinResult(value, as: Double.self)))
         case "f":
-            return Numbers.make(nil, .double(Double(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Float).self)(object, selector))))
+            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Float.ObjCResultType).self)(object, selector)
+            return Numbers.make(nil, .double(Double(darwinResult(value, as: Float.self))))
         case "v":
             return nil
         case "{":
@@ -58,8 +64,10 @@ enum KeyValueCoding {
         let send = ObjC.msgSend!
         let number = Numbers.storage(value)
         switch types(object, selector).flatMap({ $0.count > 3 ? $0[3] : nil }) ?? "@" {
-        case "q", "l", "Q", "L":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int64) -> Void).self)(object, selector, number.int64)
+        case "q", "Q":
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int64.ObjCType) -> Void).self)(object, selector, number.int64.objCArgument())
+        case "l", "L":
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int) -> Void).self)(object, selector, Int(truncatingIfNeeded: number.int64))
         case "i", "I":
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Int32) -> Void).self)(object, selector, Int32(truncatingIfNeeded: number.int64))
         case "s", "S":
@@ -69,9 +77,10 @@ enum KeyValueCoding {
         case "B":
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Bool) -> Void).self)(object, selector, number.int64 != 0)
         case "d":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Double) -> Void).self)(object, selector, number.double)
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Double.ObjCType) -> Void).self)(object, selector, number.double.objCArgument())
         case "f":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Float) -> Void).self)(object, selector, Float(number.double))
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Float.ObjCType) -> Void).self)(object, selector,
+                                                                                         Float(number.double).objCArgument())
         case "{":
             Structures.set(object, selector, value)
         default:
