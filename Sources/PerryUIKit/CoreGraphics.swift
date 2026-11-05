@@ -15,28 +15,28 @@ enum CG {
     typealias Transform = UnsafePointer<CGAffineTransform>?
 
     nonisolated(unsafe) static var colorSpaceCreateDeviceRGB: (@convention(c) () -> Ref)!
-    nonisolated(unsafe) static var colorCreateSRGB: (@convention(c) (Double, Double, Double, Double) -> Ref)!
-    nonisolated(unsafe) static var colorCreateGenericGray: (@convention(c) (Double, Double) -> Ref)!
+    nonisolated(unsafe) static var colorCreateSRGB: (@convention(c) (CGFloat, CGFloat, CGFloat, CGFloat) -> Ref)!
+    nonisolated(unsafe) static var colorCreateGenericGray: (@convention(c) (CGFloat, CGFloat) -> Ref)!
     nonisolated(unsafe) static var colorGetNumberOfComponents: (@convention(c) (Ref) -> Int)!
-    nonisolated(unsafe) static var colorGetComponents: (@convention(c) (Ref) -> UnsafePointer<Double>?)!
+    nonisolated(unsafe) static var colorGetComponents: (@convention(c) (Ref) -> UnsafePointer<CGFloat>?)!
 
     nonisolated(unsafe) static var bitmapContextCreate: (@convention(c) (UnsafeMutableRawPointer?, Int, Int, Int, Int, Ref, UInt32) -> Ref)!
     nonisolated(unsafe) static var bitmapContextCreateImage: (@convention(c) (Ref) -> Ref)!
     nonisolated(unsafe) static var bitmapContextGetData: (@convention(c) (Ref) -> UnsafeMutableRawPointer?)!
     nonisolated(unsafe) static var saveGState: (@convention(c) (Ref) -> Void)!
     nonisolated(unsafe) static var restoreGState: (@convention(c) (Ref) -> Void)!
-    nonisolated(unsafe) static var translateCTM: (@convention(c) (Ref, Double, Double) -> Void)!
-    nonisolated(unsafe) static var scaleCTM: (@convention(c) (Ref, Double, Double) -> Void)!
+    nonisolated(unsafe) static var translateCTM: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
+    nonisolated(unsafe) static var scaleCTM: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var concatCTM: (@convention(c) (Ref, CGAffineTransform) -> Void)!
     nonisolated(unsafe) static var setFillColorWithColor: (@convention(c) (Ref, Ref) -> Void)!
     nonisolated(unsafe) static var setStrokeColorWithColor: (@convention(c) (Ref, Ref) -> Void)!
-    nonisolated(unsafe) static var setAlpha: (@convention(c) (Ref, Double) -> Void)!
+    nonisolated(unsafe) static var setAlpha: (@convention(c) (Ref, CGFloat) -> Void)!
     nonisolated(unsafe) static var setBlendMode: (@convention(c) (Ref, Int32) -> Void)!
-    nonisolated(unsafe) static var setLineWidth: (@convention(c) (Ref, Double) -> Void)!
+    nonisolated(unsafe) static var setLineWidth: (@convention(c) (Ref, CGFloat) -> Void)!
     nonisolated(unsafe) static var setLineCap: (@convention(c) (Ref, Int32) -> Void)!
     nonisolated(unsafe) static var setLineJoin: (@convention(c) (Ref, Int32) -> Void)!
-    nonisolated(unsafe) static var setMiterLimit: (@convention(c) (Ref, Double) -> Void)!
-    nonisolated(unsafe) static var setLineDash: (@convention(c) (Ref, Double, UnsafePointer<Double>?, Int) -> Void)!
+    nonisolated(unsafe) static var setMiterLimit: (@convention(c) (Ref, CGFloat) -> Void)!
+    nonisolated(unsafe) static var setLineDash: (@convention(c) (Ref, CGFloat, UnsafePointer<CGFloat>?, Int) -> Void)!
     nonisolated(unsafe) static var addPath: (@convention(c) (Ref, Ref) -> Void)!
     nonisolated(unsafe) static var fillPath: (@convention(c) (Ref) -> Void)!
     nonisolated(unsafe) static var eoFillPath: (@convention(c) (Ref) -> Void)!
@@ -49,8 +49,8 @@ enum CG {
     nonisolated(unsafe) static var drawImage: (@convention(c) (Ref, CGRect, Ref) -> Void)!
     nonisolated(unsafe) static var beginTransparencyLayer: (@convention(c) (Ref, Ref) -> Void)!
     nonisolated(unsafe) static var endTransparencyLayer: (@convention(c) (Ref) -> Void)!
-    nonisolated(unsafe) static var selectFont: (@convention(c) (Ref, UnsafePointer<CChar>?, Double, Int32) -> Void)!
-    nonisolated(unsafe) static var setTextPosition: (@convention(c) (Ref, Double, Double) -> Void)!
+    nonisolated(unsafe) static var selectFont: (@convention(c) (Ref, UnsafePointer<CChar>?, CGFloat, Int32) -> Void)!
+    nonisolated(unsafe) static var setTextPosition: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var getTextPosition: (@convention(c) (Ref) -> CGPoint)!
     nonisolated(unsafe) static var setTextMatrix: (@convention(c) (Ref, CGAffineTransform) -> Void)!
     nonisolated(unsafe) static var setTextDrawingMode: (@convention(c) (Ref, Int32) -> Void)!
@@ -59,15 +59,15 @@ enum CG {
     nonisolated(unsafe) static var pathCreateMutable: (@convention(c) () -> Ref)!
     nonisolated(unsafe) static var pathCreateMutableCopy: (@convention(c) (Ref) -> Ref)!
     nonisolated(unsafe) static var pathCreateCopyByTransformingPath: (@convention(c) (Ref, Transform) -> Ref)!
-    nonisolated(unsafe) static var pathMoveToPoint: (@convention(c) (Ref, Transform, Double, Double) -> Void)!
-    nonisolated(unsafe) static var pathAddLineToPoint: (@convention(c) (Ref, Transform, Double, Double) -> Void)!
-    nonisolated(unsafe) static var pathAddCurveToPoint: (@convention(c) (Ref, Transform, Double, Double, Double, Double, Double, Double) -> Void)!
-    nonisolated(unsafe) static var pathAddQuadCurveToPoint: (@convention(c) (Ref, Transform, Double, Double, Double, Double) -> Void)!
+    nonisolated(unsafe) static var pathMoveToPoint: (@convention(c) (Ref, Transform, CGFloat, CGFloat) -> Void)!
+    nonisolated(unsafe) static var pathAddLineToPoint: (@convention(c) (Ref, Transform, CGFloat, CGFloat) -> Void)!
+    nonisolated(unsafe) static var pathAddCurveToPoint: (@convention(c) (Ref, Transform, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat) -> Void)!
+    nonisolated(unsafe) static var pathAddQuadCurveToPoint: (@convention(c) (Ref, Transform, CGFloat, CGFloat, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var pathCloseSubpath: (@convention(c) (Ref) -> Void)!
     nonisolated(unsafe) static var pathAddRect: (@convention(c) (Ref, Transform, CGRect) -> Void)!
     nonisolated(unsafe) static var pathAddEllipseInRect: (@convention(c) (Ref, Transform, CGRect) -> Void)!
-    nonisolated(unsafe) static var pathAddRoundedRect: (@convention(c) (Ref, Transform, CGRect, Double, Double) -> Void)!
-    nonisolated(unsafe) static var pathAddArc: (@convention(c) (Ref, Transform, Double, Double, Double, Double, Double, Bool) -> Void)!
+    nonisolated(unsafe) static var pathAddRoundedRect: (@convention(c) (Ref, Transform, CGRect, CGFloat, CGFloat) -> Void)!
+    nonisolated(unsafe) static var pathAddArc: (@convention(c) (Ref, Transform, CGFloat, CGFloat, CGFloat, CGFloat, CGFloat, Bool) -> Void)!
     nonisolated(unsafe) static var pathAddPath: (@convention(c) (Ref, Transform, Ref) -> Void)!
     nonisolated(unsafe) static var pathIsEmpty: (@convention(c) (Ref) -> Bool)!
     nonisolated(unsafe) static var pathGetCurrentPoint: (@convention(c) (Ref) -> CGPoint)!
