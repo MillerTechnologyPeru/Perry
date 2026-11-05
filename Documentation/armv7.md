@@ -99,7 +99,23 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
     .build/armv7/bin/perry32 .build/perry-fixtures/armv7/runtime
 
 `Scripts/build-armv7-fixtures.sh` links with `arm-apple-darwin11-ld` from
-cctools-port, installed under `.toolchains/cctools`. The armv7 Swift modules
-are compiled with `swiftc` directly (`build-armv7-objc.sh`), and the macro
-plugin against the swift-syntax libraries the toolchain ships, because
-SwiftPM's build of swift-syntax needs more memory than a 4 GB machine has.
+cctools-port, installed under `.toolchains/cctools`.
+
+The Swift providers build with SwiftPM in the arm64 Linux container, on a
+machine with the memory for swift-syntax (a 4 GB one does not have it):
+
+    Scripts/build-armv7-swiftpm.sh             # Perryobjc and PerryFoundation
+    Scripts/build-armv7-swiftpm.sh Perryobjc   # one product
+
+They go to `.build/armv7-pm/armv7-unknown-linux-gnueabihf/release`, built
+with the 6.4.0 toolchain the SDK matches. SwiftPM runs the macros and the
+provider generator on the host; pkg-config reads the SDK's `.pc` files, so
+libxml2 is the SDK's armv7 build. A library's runpath names the SDK as the
+container sees it (`/perry/.toolchains/...`), so elsewhere put the SDK's
+`usr/lib/swift/linux` on `LD_LIBRARY_PATH`. Apple silicon has no AArch32, so
+the programs run on an armv7-capable machine, beside `perry32`. The
+`libPerryobjc.so` SwiftPM builds runs the fixtures as the one
+`build-armv7-objc.sh` builds does. On a machine without the memory,
+`build-armv7-objc.sh` compiles the modules with `swiftc` directly and
+`build-host-macros.sh` the macro plugin against the swift-syntax libraries
+the toolchain ships.
