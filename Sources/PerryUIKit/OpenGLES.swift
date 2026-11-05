@@ -278,6 +278,8 @@ final class ContextState: ObjectState {
     /// Renderbuffers given storage from a layer, by name, and the layer
     /// (not retained).
     var drawables: [UInt32: UnsafeMutableRawPointer] = [:]
+    /// When the last frame was presented, for pacing.
+    var lastPresent = 0.0
 }
 
 /// The current context of each thread.
@@ -406,7 +408,28 @@ open class EAGLContext: NSObject {
         guard Renderbuffers.show(UInt32(name), context: state.context, layer: layer, opaque: layer.isOpaque()) else { return false }
         Display.markDirty()
         Updates.schedule()
+        pace()
         return true
+    }
+
+    /// Waits out what is left of the display's frame since the last
+    /// present, as presenting does on iOS, where a frame waits for the
+    /// display to take it. A program may count on it for its pace: one that
+    /// updates, presents and starts over at once (Monopoly) runs at the
+    /// display's rate there, and as fast as it can without this. The wait
+    /// is a little short of a frame, so that a program already paced by a
+    /// display link, whose presents come a frame apart give or take, is
+    /// not held back.
+    private func pace() {
+        let frame = 1.0 / 60 - 0.0005
+        let now = Clock.now
+        let due = state.lastPresent + frame
+        if due > now, due - now < frame {
+            usleep(UInt32((due - now) * 1_000_000))
+            state.lastPresent = due
+        } else {
+            state.lastPresent = now
+        }
     }
 
     @ObjCMethod("presentRenderbuffer:atTime:")
