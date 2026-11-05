@@ -81,9 +81,12 @@ extension NSObject {
     }
 }
 
-/// metal2vulkan's functions; only reached once a device exists.
+/// metal2vulkan's functions; only reached once a device exists. The table
+/// is copied once: every encoder call reads a function from it, and taking
+/// it from perry_metal2vulkan() each time copied all of it, and checked it
+/// was loaded, every call.
 enum M2V {
-    static var api: perry_m2v { perry_metal2vulkan()!.pointee }
+    nonisolated(unsafe) static let api: perry_m2v = perry_metal2vulkan()!.pointee
 
     /// Calls a function that can fail: its result and its error message.
     static func call<Result>(_ body: (perry_m2v_error) -> Result) -> (Result, String?) {
