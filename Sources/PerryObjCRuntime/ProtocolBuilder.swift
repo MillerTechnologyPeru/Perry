@@ -67,10 +67,10 @@ extension Protocols {
 
     /// A protocol list: a count, then the pointers.
     private static func list(of protocols: [UnsafeMutablePointer<perry_protocol>]) -> UnsafeRawPointer {
-        let memory = UnsafeMutableRawPointer.allocate(byteCount: 8 * (protocols.count + 1), alignment: 8)
-        memory.storeBytes(of: UInt64(protocols.count), as: UInt64.self)
+        let memory = UnsafeMutableRawPointer.allocate(byteCount: Layout.word * (protocols.count + 1), alignment: Layout.word)
+        memory.storeBytes(of: UInt(protocols.count), as: UInt.self)
         for (index, proto) in protocols.enumerated() {
-            memory.storeBytes(of: UnsafeRawPointer(proto), toByteOffset: 8 + 8 * index, as: UnsafeRawPointer.self)
+            memory.storeBytes(of: UnsafeRawPointer(proto), toByteOffset: Layout.protocolEntry(index), as: UnsafeRawPointer.self)
         }
         return UnsafeRawPointer(memory)
     }
