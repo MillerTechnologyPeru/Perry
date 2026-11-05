@@ -112,27 +112,41 @@ public struct ToolbarContentBuilder {
 extension ToolbarContentBuilder {
     public static func buildBlock<C0, C1>(_ c0: C0, _ c1: C1) -> some ToolbarContent
     where C0: ToolbarContent, C1: ToolbarContent {
-        TupleToolbarContent(items: { c0.resolvedItems + c1.resolvedItems })
+        TupleToolbarContent<(C0, C1)>((c0, c1))
     }
 
     public static func buildBlock<C0, C1, C2>(_ c0: C0, _ c1: C1, _ c2: C2) -> some ToolbarContent
     where C0: ToolbarContent, C1: ToolbarContent, C2: ToolbarContent {
-        TupleToolbarContent(items: { c0.resolvedItems + c1.resolvedItems + c2.resolvedItems })
+        TupleToolbarContent<(C0, C1, C2)>((c0, c1, c2))
     }
 
     public static func buildBlock<C0, C1, C2, C3>(_ c0: C0, _ c1: C1, _ c2: C2, _ c3: C3) -> some ToolbarContent
     where C0: ToolbarContent, C1: ToolbarContent, C2: ToolbarContent, C3: ToolbarContent {
-        TupleToolbarContent(items: { c0.resolvedItems + c1.resolvedItems + c2.resolvedItems + c3.resolvedItems })
+        TupleToolbarContent<(C0, C1, C2, C3)>((c0, c1, c2, c3))
     }
 }
 
-/// Several toolbar contents together, as the builder makes them.
-struct TupleToolbarContent: ToolbarContent, ResolvedToolbarContent {
+/// Several toolbar contents together, as the builder makes them: a tuple
+/// of them, which apps' inlined builders make too.
+@available(OpenSwiftUI_v2_0, *)
+@usableFromInline
+nonisolated struct TupleToolbarContent<T>: ToolbarContent, ResolvedToolbarContent {
+    @usableFromInline
     typealias Body = Never
-    var items: @MainActor () -> [ResolvedToolbarItem]
+    var value: T
 
+    @usableFromInline
+    nonisolated init(_ value: T) {
+        self.value = value
+    }
+
+    /// The tuple's contents' items, in order.
     var resolvedItems: [ResolvedToolbarItem] {
-        MainActor.assumeIsolated { items() }
+        MainActor.assumeIsolated {
+            Mirror(reflecting: value).children.flatMap { child -> [ResolvedToolbarItem] in
+                (child.value as? any ToolbarContent)?.resolvedItems ?? []
+            }
+        }
     }
 }
 
