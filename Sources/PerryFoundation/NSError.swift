@@ -89,6 +89,7 @@ enum ErrorConstants {
     static let NSLocalizedFailureReasonErrorKey = "NSLocalizedFailureReason"
     static let NSFilePathErrorKey = "NSFilePath"
     static let NSUnderlyingErrorKey = "NSUnderlyingError"
+    static let NSDebugDescriptionErrorKey = "NSDebugDescription"
     static let NSOSStatusErrorDomain = "NSOSStatusErrorDomain"
     static let NSMachErrorDomain = "NSMachErrorDomain"
     static let NSLocalizedRecoverySuggestionErrorKey = "NSLocalizedRecoverySuggestion"
