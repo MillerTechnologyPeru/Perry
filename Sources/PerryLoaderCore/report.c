@@ -61,7 +61,8 @@ static bool in_image(const perry_image *image, const void *p) {
 
 // MARK: - Objective-C metadata
 
-// Offsets in Apple's 64-bit runtime structures.
+// Offsets in Apple's runtime structures, by pointer width.
+#if defined(__LP64__)
 enum {
     CLASS_DATA_OFFSET = 32,         // objc_class.bits
     CLASS_RO_NAME_OFFSET = 24,      // class_ro_t.name
@@ -72,11 +73,23 @@ enum {
     CATEGORY_PROTOCOLS_OFFSET = 32, // category_t.protocols
 };
 #define CLASS_DATA_MASK 0x00007ffffffffff8ull
+#else
+enum {
+    CLASS_DATA_OFFSET = 16,
+    CLASS_RO_NAME_OFFSET = 16,      // class_ro_t has no padding after instanceSize
+    CLASS_RO_PROTOCOLS_OFFSET = 24,
+    PROTOCOL_NAME_OFFSET = 4,
+    CATEGORY_NAME_OFFSET = 0,
+    CATEGORY_CLASS_OFFSET = 4,
+    CATEGORY_PROTOCOLS_OFFSET = 16,
+};
+#define CLASS_DATA_MASK 0xfffffffcull
+#endif
 
 static const uint8_t *class_ro(const perry_image *image, const uint8_t *cls) {
     if (!cls || !in_image(image, cls))
         return NULL;
-    uint64_t bits = *(const uint64_t *)(cls + CLASS_DATA_OFFSET);
+    uint64_t bits = *(const uintptr_t *)(cls + CLASS_DATA_OFFSET);
     const uint8_t *ro = (const uint8_t *)(uintptr_t)(bits & CLASS_DATA_MASK);
     return in_image(image, ro) ? ro : NULL;
 }
@@ -96,15 +109,15 @@ static const char *protocol_name(const perry_image *image, const uint8_t *proto)
     return in_image(image, name) ? name : NULL;
 }
 
-// Reports each protocol in a protocol_list_t: a uint64_t count followed by
+// Reports each protocol in a protocol_list_t: a pointer-sized count followed by
 // protocol_t pointers. Protocols are always emitted in the image that uses
 // them, so the names are local even for NSObject.
-static void report_protocol_list(const perry_image *image, const uint64_t *list, const char *kind,
+static void report_protocol_list(const perry_image *image, const uintptr_t *list, const char *kind,
                                  const char *owner, string_list *out) {
     if (!list || !in_image(image, list))
         return;
     const void *const *protos = (const void *const *)(list + 1);
-    for (uint64_t i = 0; i < list[0] && in_image(image, &protos[i]); i++) {
+    for (uintptr_t i = 0; i < list[0] && in_image(image, &protos[i]); i++) {
         const char *name = protocol_name(image, protos[i]);
         list_add(out, "%s\t%s\t%s", kind, owner, name ? name : "?");
     }
@@ -114,7 +127,7 @@ static void report_conformances(const perry_image *image, const uint8_t *cls, co
                                 string_list *out) {
     const uint8_t *ro = class_ro(image, cls);
     if (ro)
-        report_protocol_list(image, *(const uint64_t *const *)(ro + CLASS_RO_PROTOCOLS_OFFSET),
+        report_protocol_list(image, *(const uintptr_t *const *)(ro + CLASS_RO_PROTOCOLS_OFFSET),
                              "objc-class-conforms", cls_name, out);
 }
 
@@ -165,7 +178,7 @@ static void report_objc(const perry_image *image, string_list *out) {
         char owner[256];
         snprintf(owner, sizeof owner, "%s(%s)", cls ? cls : "?", in_image(image, cat_name) ? cat_name : "?");
         list_add(out, "objc-category\t%s", owner);
-        report_protocol_list(image, *(const uint64_t *const *)(cat + CATEGORY_PROTOCOLS_OFFSET),
+        report_protocol_list(image, *(const uintptr_t *const *)(cat + CATEGORY_PROTOCOLS_OFFSET),
                              "objc-category-conforms", owner, out);
     }
 
