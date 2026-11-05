@@ -228,7 +228,7 @@ enum Storage {
         pointer.alignedUp(for: UInt.self)
     }
 
-    private static func cookie(_ object: id) -> UInt { UInt(bitPattern: object) ^ 0x5065_7272_7953_7461 }
+    private static func cookie(_ object: id) -> UInt { UInt(bitPattern: object) ^ UInt(truncatingIfNeeded: 0x5065_7272_7953_7461 as UInt64) }
 
     /// The object's state word, when it has one: not a static object's,
     /// nor that of an object a program allocated itself at its class's
