@@ -440,6 +440,17 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
         }
     }
 
+    @ObjCMethod("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:")
+    func dispatchThreadgroups(indirectBuffer: MTLBuffer?, indirectBufferOffset: UInt, perThreadgroup: MTLSize) {
+        guard let indirectBuffer else { return }
+        commandBuffer?.keep(indirectBuffer)
+        debugBarrier()
+        encode("dispatchThreadgroupsWithIndirectBuffer:indirectBufferOffset:threadsPerThreadgroup:") {
+            M2V.api.compute_encoder_dispatch_threadgroups_indirect($0, indirectBuffer.handle, UInt64(indirectBufferOffset),
+                                                                   perThreadgroup, $1)
+        }
+    }
+
     /// Resources are tracked by the runtime as Metal's are.
     @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {}
     @ObjCMethod("memoryBarrierWithScope:") func memoryBarrier(scope: UInt) {
