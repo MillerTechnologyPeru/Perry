@@ -1003,68 +1003,76 @@ const char *darwin_getprogname(void) { return program_invocation_short_name; }
 
 // MARK: - Semaphores
 
-/// Darwin has no unnamed semaphores: sem_init and sem_destroy fail, as on
-/// iOS, and apps use dispatch or named ones. (Darwin's sem_t is an int,
-/// too small for glibc's.)
-int darwin_sem_init(void *semaphore, int shared, unsigned value) DARWIN_SYMBOL(sem_init);
-int darwin_sem_init(void *semaphore, int shared, unsigned value) {
-    (void)semaphore; (void)shared; (void)value;
-    errno = ENOSYS;
-    return -1;
-}
+// Darwin's sem_t is an int, too small for glibc's: each semaphore sem_init
+// makes is glibc's, found by the address of the app's. (Darwin itself
+// fails sem_init, but games written against other systems' semaphores
+// count on them.) Named ones, from sem_open, are glibc's pointers.
 
-int darwin_sem_destroy(void *semaphore) DARWIN_SYMBOL(sem_destroy);
-int darwin_sem_destroy(void *semaphore) {
-    (void)semaphore;
-    errno = ENOSYS;
-    return -1;
-}
-
-/// Waiting on and posting a semaphore sem_init didn't make fail as on
-/// Darwin; named semaphores, from sem_open, are glibc's.
-static bool named_semaphore(void *semaphore);
-
-int darwin_sem_post(void *semaphore) DARWIN_SYMBOL(sem_post);
-int darwin_sem_post(void *semaphore) {
-    if (named_semaphore(semaphore)) return sem_post(semaphore);
-    errno = EINVAL;
-    return -1;
-}
-
-int darwin_sem_wait(void *semaphore) DARWIN_SYMBOL(sem_wait);
-int darwin_sem_wait(void *semaphore) {
-    if (named_semaphore(semaphore)) return sem_wait(semaphore);
-    errno = EINVAL;
-    return -1;
-}
-
-int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
-int darwin_sem_trywait(void *semaphore) {
-    if (named_semaphore(semaphore)) return sem_trywait(semaphore);
-    errno = EINVAL;
-    return -1;
-}
-
-// The named semaphores open: sem_open (variadic, which Darwin passes on
-// the stack) is not bound yet, so none are, and sem_close forgets one.
+typedef struct semaphore_entry { const void *key; sem_t *semaphore; } semaphore_entry;
 static pthread_mutex_t semaphores_lock = PTHREAD_MUTEX_INITIALIZER;
-static void *semaphores[64];
-static int semaphore_count;
+static semaphore_entry *semaphore_table;
+static size_t semaphore_count, semaphore_capacity;
 
-static bool named_semaphore(void *semaphore) {
+static sem_t *unnamed(const void *key) {
+    sem_t *found = NULL;
     pthread_mutex_lock(&semaphores_lock);
-    bool found = false;
-    for (int i = 0; i < semaphore_count && !found; i++) found = semaphores[i] == semaphore;
+    for (size_t i = 0; i < semaphore_count && !found; i++)
+        if (semaphore_table[i].key == key) found = semaphore_table[i].semaphore;
     pthread_mutex_unlock(&semaphores_lock);
     return found;
 }
 
-int darwin_sem_close(void *semaphore) DARWIN_SYMBOL(sem_close);
-int darwin_sem_close(void *semaphore) {
+int darwin_sem_init(void *semaphore, int shared, unsigned value) DARWIN_SYMBOL(sem_init);
+int darwin_sem_init(void *semaphore, int shared, unsigned value) {
+    (void)shared;
+    if (!semaphore) { errno = EINVAL; return -1; }
+    sem_t *existing = unnamed(semaphore);
+    if (existing) return sem_init(existing, 0, value);
+    sem_t *made = malloc(sizeof *made);
+    if (!made || sem_init(made, 0, value) != 0) { free(made); errno = ENOSPC; return -1; }
     pthread_mutex_lock(&semaphores_lock);
-    for (int i = 0; i < semaphore_count; i++) {
-        if (semaphores[i] == semaphore) { semaphores[i] = semaphores[--semaphore_count]; break; }
+    if (semaphore_count == semaphore_capacity) {
+        size_t capacity = semaphore_capacity ? semaphore_capacity * 2 : 16;
+        semaphore_entry *grown = realloc(semaphore_table, capacity * sizeof *grown);
+        if (!grown) { pthread_mutex_unlock(&semaphores_lock); sem_destroy(made); free(made); errno = ENOSPC; return -1; }
+        semaphore_table = grown;
+        semaphore_capacity = capacity;
+    }
+    semaphore_table[semaphore_count++] = (semaphore_entry){ semaphore, made };
+    pthread_mutex_unlock(&semaphores_lock);
+    *(int *)semaphore = 0;
+    return 0;
+}
+
+int darwin_sem_destroy(void *semaphore) DARWIN_SYMBOL(sem_destroy);
+int darwin_sem_destroy(void *semaphore) {
+    sem_t *found = NULL;
+    pthread_mutex_lock(&semaphores_lock);
+    for (size_t i = 0; i < semaphore_count; i++) {
+        if (semaphore_table[i].key == semaphore) {
+            found = semaphore_table[i].semaphore;
+            semaphore_table[i] = semaphore_table[--semaphore_count];
+            break;
+        }
     }
     pthread_mutex_unlock(&semaphores_lock);
-    return sem_close(semaphore);
+    if (!found) { errno = EINVAL; return -1; }
+    sem_destroy(found);
+    free(found);
+    return 0;
 }
+
+/// The glibc semaphore for an app's: an unnamed one's, or a named one's own.
+static sem_t *semaphore_for(void *semaphore) {
+    sem_t *found = unnamed(semaphore);
+    return found ? found : semaphore;
+}
+
+int darwin_sem_post(void *semaphore) DARWIN_SYMBOL(sem_post);
+int darwin_sem_post(void *semaphore) { return sem_post(semaphore_for(semaphore)); }
+
+int darwin_sem_wait(void *semaphore) DARWIN_SYMBOL(sem_wait);
+int darwin_sem_wait(void *semaphore) { return sem_wait(semaphore_for(semaphore)); }
+
+int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
+int darwin_sem_trywait(void *semaphore) { return sem_trywait(semaphore_for(semaphore)); }
