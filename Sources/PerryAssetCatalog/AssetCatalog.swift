@@ -43,6 +43,19 @@ public final class CompiledAssetCatalog {
     /// if the catalog has renditions for it.
     private var darkAppearance: UInt16?
 
+    /// Whether AppKit draws the named image as a template: Scripts/
+    /// extract-assets.sh lists those CoreUI says are (templates.txt), and
+    /// names ending in "Template" are.
+    public func isTemplate(named name: String) -> Bool {
+        if name.hasSuffix("Template") { return true }
+        return templates.contains(name)
+    }
+
+    private lazy var templates: Set<String> = {
+        guard let bytes = Self.read(extracted + "/templates.txt") else { return [] }
+        return Set(String(decoding: bytes, as: UTF8.self).split(separator: "\n").map(String.init))
+    }()
+
     /// Images Scripts/extract-assets.sh decoded on a Mac, for renditions
     /// whose compression Perry doesn't decode (CoreUI's deepmap2):
     /// <name>@<scale>x.png in a directory beside the catalog, and
