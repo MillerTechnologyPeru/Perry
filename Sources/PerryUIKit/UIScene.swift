@@ -1,3 +1,4 @@
+import CPerryGeometry
 import PerryObjCInterop
 
 // Scenes: the session that describes one, the configuration that names its
@@ -191,11 +192,54 @@ open class UIWindowScene: UIScene {
         return NSObject(key)
     }
 
+    @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
+    @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { UIScreen.mainScreen().coordinateSpace() }
+    @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
+
+    /// The scene's size and orientation: the screen's, which it fills.
+    @ObjCMethod("effectiveGeometry")
+    func effectiveGeometry() -> UIWindowSceneGeometry {
+        let geometry = UIWindowSceneGeometry.objCClass.object.newInstance().unsafeCast(to: UIWindowSceneGeometry.self)
+        geometry.state.scene = objcObject
+        return geometry
+    }
+
+    /// Asks for another size or orientation, which the screen doesn't
+    /// change to here.
+    @ObjCMethod("requestGeometryUpdateWithPreferences:errorHandler:")
+    func requestGeometryUpdate(preferences: NSObject?, errorHandler: ObjCBlock?) {}
+
     @ObjCMethod("dealloc")
     override func dealloc() {
         UIWindowScene.windowSceneStates.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIWindowScene.objCClass.pointer)
     }
+}
+
+final class SceneGeometryState: ObjectState {
+    /// The scene whose geometry this is; not retained.
+    var scene: UnsafeMutableRawPointer?
+}
+
+/// A window scene's geometry, as UIWindowScene.effectiveGeometry gives it.
+@ObjCClass("UIWindowSceneGeometry")
+open class UIWindowSceneGeometry: NSObject {
+    static let states = StateTable<SceneGeometryState>()
+    var state: SceneGeometryState { UIWindowSceneGeometry.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIWindowSceneGeometry.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIWindowSceneGeometry.objCClass.pointer)
+    }
+
+    @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
+    @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { UIScreen.mainScreen().coordinateSpace() }
+    @ObjCMethod("systemFrame") func systemFrame() -> CGRect { Screen.bounds }
+    /// UIWindowSceneResizingRestrictions: unspecified 0.
+    @ObjCMethod("resizingRestrictions") func resizingRestrictions() -> Int { 0 }
+    @ObjCMethod("isInteractivelyResizing") func isInteractivelyResizing() -> Bool { false }
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 }
 
 /// UIScene's initializer as a message, so a subclass's runs.
