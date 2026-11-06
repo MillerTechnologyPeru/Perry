@@ -199,6 +199,9 @@ enum GLES {
                 : unsafeBitCast(GLMultisample.resolveMultisampleFramebuffer, to: UnsafeMutableRawPointer.self))
         }
         let cName = String(name.dropFirst())
+        // The screen drawn at more pixels than the program asks for: what
+        // it sets and asks in pixels goes through GLRenderScale.
+        if let scaled = GLRenderScale.function(cName) { return perry_gl_entry(scaled) }
         return perry_gl_entry(host(cName).map { perry_gles_darwin_function(cName, $0) })
     }
 
@@ -628,9 +631,10 @@ open class EAGLContext: NSObject {
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
         guard name != 0, width > 0, height > 0 else { return false }
-        GLES.renderbufferStorage(UInt32(target), layer.colorFormat, width, height)
+        let pixels = GLRenderScale.drawable(renderbuffer: UInt32(name), width: width, height: height, layerScale: scale)
+        GLES.renderbufferStorage(UInt32(target), layer.colorFormat, pixels.0, pixels.1)
         if GLTrace.on {
-            GLTrace.say("renderbuffer \(name) of context \(String(describing: state.context?.handle)): \(width) by \(height) from layer \(layer.objcObject)")
+            GLTrace.say("renderbuffer \(name) of context \(String(describing: state.context?.handle)): \(pixels.0) by \(pixels.1) from layer \(layer.objcObject)")
         }
         state.drawables[UInt32(name)] = layer.objcObject
         return true
