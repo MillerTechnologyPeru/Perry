@@ -1,6 +1,7 @@
 // File URLs' resource values, read from the file system's own
 // attributes. Of the values that can be set, a new name renames the file;
-// whether it is excluded from backups is kept, there being no backups.
+// whether it is excluded from backups is kept, there being no backups;
+// whether it is hidden is taken and ignored.
 //
 // Their keys are NSURLResourceKey, which swift-foundation's own
 // URLResourceKey hides by its Swift name here: only unavailable
@@ -55,7 +56,12 @@ public struct URLResourceValues {
     public var isSymbolicLink: Bool? { value(.isSymbolicLinkKey) }
 
     /// True if the resource is normally not displayed to users.
-    public var isHidden: Bool? { value(.isHiddenKey) }
+    /// Settable, but a file stays as its name makes it: hidden when it
+    /// begins with a dot.
+    public var isHidden: Bool? {
+        get { value(.isHiddenKey) }
+        set { set(.isHiddenKey, newValue) }
+    }
 
     /// The date the resource was created.
     public var creationDate: Date? { value(.creationDateKey) }
