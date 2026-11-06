@@ -57,12 +57,15 @@ final class RunLoopState {
 
     /// Adds a timer, retaining it until it is invalidated. Safe from any thread.
     func add(_ timer: id) {
+        // Retained before the loop has it: the loop's thread may fire a
+        // timer and let it go as soon as it is listed.
+        _ = ObjC.retain(timer)
         let added = locked {
             guard !timers.contains(timer) else { return false }
             timers.append(timer)
             return true
         }
-        if added { _ = ObjC.retain(timer) }
+        if !added { ObjC.release(timer) }
         wakeUp()
     }
 
@@ -78,12 +81,14 @@ final class RunLoopState {
     var hasTimers: Bool { locked { !timers.isEmpty } }
 
     func add(observer: id) {
+        // Retained first, as a timer is.
+        _ = ObjC.retain(observer)
         let added = locked {
             guard !observers.contains(observer) else { return false }
             observers.append(observer)
             return true
         }
-        if added { _ = ObjC.retain(observer) }
+        if !added { ObjC.release(observer) }
     }
 
     func remove(observer: id) {
@@ -182,7 +187,10 @@ final class RunLoopState {
                     timers.removeAll { !Timers.isValid($0) }
                     invalid.forEach { ObjC.release($0) }
                 }
+                // Retained while the loop looks at it: another thread may
+                // invalidate it, taking it from the loop.
                 let due = timers.min { Timers.fireDate($0) < Timers.fireDate($1) }
+                if let due { _ = ObjC.retain(due) }
                 return (due, due.map(Timers.fireDate) ?? .infinity)
             }
             guard let next else { return .stopped }
@@ -194,12 +202,12 @@ final class RunLoopState {
             }
 
             if next.fire <= now {
-                _ = ObjC.retain(timer)
                 ObjC.autoreleasepool { Timers.fire(timer, from: self) }
                 ObjC.release(timer)
                 if returnAfterSourceHandled { return .handledSource }
                 continue
             }
+            ObjC.release(timer)
             if now >= limit { return .timedOut }
             wait(until: min(next.fire, limit))
         }

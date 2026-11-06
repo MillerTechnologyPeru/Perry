@@ -439,6 +439,8 @@ enum Controllers {
     /// The controllers, by object, and in the order they connected.
     nonisolated(unsafe) static var states: [UnsafeMutableRawPointer: ControllerState] = [:]
     nonisolated(unsafe) static var connected: [GCController] = []
+    /// The first connected controller's gamepad, for readers on any thread.
+    nonisolated(unsafe) private static var firstGamepad: SDL.Pointer?
     nonisolated(unsafe) private static var started = false
     nonisolated(unsafe) private static var ticks = 0
 
@@ -508,6 +510,7 @@ enum Controllers {
             trace("disconnected \(controller.controller.name)")
             SDL.closeGamepad(controller.controller.gamepad)
             connected.removeAll { $0.objcObject == controller.objcObject }
+            firstGamepad = connected.first?.controller.gamepad
             NSNotificationCenter.defaultCenter().post(name: ControllerConstants.GCControllerDidDisconnectNotification, object: controller, userInfo: nil)
         }
         let known = Set(connected.map(\.controller.id))
@@ -520,8 +523,10 @@ enum Controllers {
             states[controller.objcObject] = state
             connected.append(controller)
             trace("connected \(name)")
+            firstGamepad = connected.first?.controller.gamepad
             NSNotificationCenter.defaultCenter().post(name: ControllerConstants.GCControllerDidConnectNotification, object: controller, userInfo: nil)
         }
+        firstGamepad = connected.first?.controller.gamepad
     }
 
     // SDL_GamepadButton and SDL_GamepadAxis.
@@ -545,6 +550,7 @@ enum Controllers {
         for combination in quitButtons where !combination.isEmpty && combination.allSatisfy({ SDL.getGamepadButton(gamepad, $0.rawValue) }) {
             Quit.now()
         }
+        if !touchButtons.isEmpty, controller.objcObject == connected.first?.objcObject { touch(with: gamepad) }
         func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
         /// A trigger, from rest at zero.
         func trigger(_ trigger: Axis) -> Float {
@@ -574,16 +580,85 @@ enum Controllers {
         }
     }
 
+    // MARK: Buttons that stand for touches
+
+    /// With PERRY_GAMECONTROLLER_TOUCHES set to buttons and the points they
+    /// touch, in the screen's coordinates ("a=608,329;b=32,327"), a finger
+    /// is on the screen at a button's point for as long as the button is
+    /// held: for a program whose own buttons only answer to touch. The
+    /// buttons are the quit combinations', and l2, r2, up, down, left and
+    /// right.
+    nonisolated(unsafe) private static let touchButtons: [(name: String, x: Double, y: Double)] = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_TOUCHES") else { return [] }
+        return String(cString: setting).lowercased().split(separator: ";").compactMap { entry in
+            let sides = entry.split(separator: "=")
+            let point = sides.last?.split(separator: ",").compactMap { Double($0.filter { $0 != " " }) } ?? []
+            guard sides.count == 2, point.count == 2 else { return nil }
+            return (String(sides[0].filter { $0 != " " }), point[0], point[1])
+        }
+    }()
+
+    /// The touch buttons held at the last read, by their place in the list.
+    nonisolated(unsafe) private static var touching: Set<Int> = []
+
+    /// PERRY_GAMECONTROLLER_HOLD, "button,seconds": a touch button held
+    /// from that long after the program started, to try what it touches
+    /// without pressing it.
+    nonisolated(unsafe) private static let pretended: (name: String, from: Double)? = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_HOLD") else { return nil }
+        let parts = String(cString: setting).lowercased().split(separator: ",")
+        guard let name = parts.first else { return nil }
+        return (String(name), now() + (parts.count > 1 ? Double(parts[1]) ?? 0 : 0))
+    }()
+
+    /// Whether the button a setting names is held.
+    private static func held(_ name: String, on gamepad: SDL.Pointer) -> Bool {
+        if let pretended, pretended.name == name, now() >= pretended.from { return true }
+        switch name {
+        case "l2": return SDL.getGamepadAxis(gamepad, Axis.leftTrigger.rawValue) > 16000
+        case "r2": return SDL.getGamepadAxis(gamepad, Axis.rightTrigger.rawValue) > 16000
+        case "up": return SDL.getGamepadButton(gamepad, Button.up.rawValue)
+        case "down": return SDL.getGamepadButton(gamepad, Button.down.rawValue)
+        case "left": return SDL.getGamepadButton(gamepad, Button.left.rawValue)
+        case "right": return SDL.getGamepadButton(gamepad, Button.right.rawValue)
+        default: return buttonNames[name].map { SDL.getGamepadButton(gamepad, $0.rawValue) } ?? false
+        }
+    }
+
+    /// Puts down and lifts the fingers of the touch buttons that changed.
+    private static func touch(with gamepad: SDL.Pointer) {
+        for (index, button) in touchButtons.enumerated() {
+            let isHeld = held(button.name, on: gamepad)
+            guard isHeld != touching.contains(index) else { continue }
+            if isHeld { touching.insert(index) } else { touching.remove(index) }
+            trace("touch \(isHeld ? "down" : "up") at \(button.x), \(button.y) for \(button.name)")
+            finger(index, phase: isHeld ? 0 : 2, x: button.x, y: button.y)
+        }
+    }
+
+    /// Sends UIKit a finger of ours, numbered apart from a touchscreen's.
+    private static func finger(_ index: Int, phase: Int, x: Double, y: Double) {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        typealias SendFinger = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt, Int, Double, Double) -> Void
+        guard let cls = "UIApplication".withCString({ ObjCRuntime.functions.getClass($0) }),
+              let application = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(cls, ObjCRuntime.selector("sharedApplication"))
+        else { return }
+        unsafeBitCast(ObjCRuntime.msgSend, to: SendFinger.self)(
+            application, ObjCRuntime.selector("_perryFinger:phase:x:y:"), 0x7065_7272_7900_0000 + UInt(index), phase, x, y)
+    }
+
+    private static let buttonNames: [String: Button] = [
+        "home": .guide, "guide": .guide, "select": .back, "back": .back, "start": .start, "a": .south, "b": .east,
+        "x": .west, "y": .north, "l1": .leftShoulder, "r1": .rightShoulder, "l3": .leftStick, "r3": .rightStick,
+    ]
+
     /// With PERRY_GAMECONTROLLER_QUIT set to buttons joined by "+" (home,
     /// select, start, a, b, x, y, l1, r1, l3, r3), holding them all quits
     /// the app, as handhelds' ports quit with home and select; several
     /// combinations, separated by commas, each quit.
     nonisolated(unsafe) private static let quitButtons: [[Button]] = {
         guard let setting = getenv("PERRY_GAMECONTROLLER_QUIT") else { return [] }
-        let names: [String: Button] = [
-            "home": .guide, "guide": .guide, "select": .back, "back": .back, "start": .start, "a": .south, "b": .east,
-            "x": .west, "y": .north, "l1": .leftShoulder, "r1": .rightShoulder, "l3": .leftStick, "r3": .rightStick,
-        ]
+        let names = buttonNames
         let combinations = String(cString: setting).lowercased().split(separator: ",").map { combination in
             combination.split(separator: "+").compactMap { names[String($0.filter { $0 != " " })] }
         }
@@ -612,6 +687,14 @@ enum Controllers {
     /// A stick's position past the dead zone, measured from the center so
     /// diagonals keep their direction, rescaled to start from zero at its
     /// edge, and multiplied by the sensitivity.
+    /// The first gamepad's left stick now, up and right positive; at rest
+    /// without a gamepad. For CoreMotion, which takes it for a tilt.
+    static func leftStick() -> (x: Float, y: Float) {
+        guard let gamepad = firstGamepad else { return (0, 0) }
+        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
+        return stick(axis(.leftX), -axis(.leftY))
+    }
+
     static func stick(_ x: Float, _ y: Float) -> (x: Float, y: Float) {
         let length = (x * x + y * y).squareRoot()
         guard length > deadZone else { return (0, 0) }

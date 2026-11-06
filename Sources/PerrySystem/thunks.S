@@ -190,6 +190,9 @@ PASSTHROUGH _memchr, memchr
 PASSTHROUGH _strcasestr, strcasestr
 PASSTHROUGH _writev, writev
 PASSTHROUGH _drand48, drand48
+PASSTHROUGH _srand48, srand48
+PASSTHROUGH _lrand48, lrand48
+PASSTHROUGH _mrand48, mrand48
 PASSTHROUGH _wmemchr, wmemchr
 PASSTHROUGH _wmemcpy, wmemcpy
 PASSTHROUGH _wmemcmp, wmemcmp

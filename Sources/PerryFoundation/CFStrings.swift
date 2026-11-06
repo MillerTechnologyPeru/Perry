@@ -134,6 +134,26 @@ public func CFStringCreateWithCString(_ allocator: UnsafeRawPointer?, _ cString:
     return CFStringEncodings.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding).map(Strings.make)
 }
 
+/// A string from a Pascal string: a length byte, then that many bytes.
+@c(_CFStringCreateWithPascalString)
+public func CFStringCreateWithPascalString(_ allocator: UnsafeRawPointer?, _ pascal: UnsafePointer<UInt8>?, _ encoding: UInt32) -> id? {
+    guard let pascal else { return nil }
+    return CFStringEncodings.decode(UnsafeRawBufferPointer(start: pascal + 1, count: Int(pascal[0])), encoding).map(Strings.make)
+}
+
+/// The string as a Pascal string in a buffer of `size` bytes, its length
+/// byte among them; false if it is longer than that or than 255 bytes.
+@c(_CFStringGetPascalString)
+public func CFStringGetPascalString(_ string: id?, _ buffer: UnsafeMutablePointer<UInt8>?, _ size: Int, _ encoding: UInt32) -> Bool {
+    guard let buffer, let bytes = CFStringEncodings.encode(CFStrings.value(string), encoding),
+          bytes.count <= 255, bytes.count < size else { return false }
+    buffer[0] = UInt8(bytes.count)
+    bytes.withUnsafeBytes { bytes in
+        if let base = bytes.baseAddress { UnsafeMutableRawPointer(buffer + 1).copyMemory(from: base, byteCount: bytes.count) }
+    }
+    return true
+}
+
 @c(_CFStringCreateWithCStringNoCopy)
 public func CFStringCreateWithCStringNoCopy(_ allocator: UnsafeRawPointer?, _ cString: UnsafePointer<CChar>?, _ encoding: UInt32,
                                             _ deallocator: UnsafeRawPointer?) -> id? {
