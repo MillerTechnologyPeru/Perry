@@ -21,7 +21,6 @@ final class MenuView: NSView {
     /// How far the rows are scrolled up, for a menu taller than its window.
     var scroll: CGFloat = 0
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")

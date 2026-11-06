@@ -18,7 +18,6 @@ open class NSPopUpButton: NSButton {
         popUpCell?.pullsDown = pullsDown
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
     @ObjCMethod("initWithFrame:")
     public required init(frame: CGRect) { super.init(frame: frame) }
@@ -355,7 +354,6 @@ open class NSColorWell: NSControl {
         if decoded.has("NSIsBordered") { bordered = decoded.bool("NSIsBordered") }
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
     @ObjCMethod("initWithFrame:")
     public required init(frame: CGRect) { super.init(frame: frame) }

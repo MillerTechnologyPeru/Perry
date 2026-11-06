@@ -302,7 +302,6 @@ open class NSTextView: NSText {
     var allowsUndo = false
     var usesFindBar = false
 
-    @ObjCMethod("init")
     public required init() {
         super.init()
         setUpText(size: frame.size)
@@ -530,7 +529,7 @@ open class NSTextView: NSText {
         guard let context = NSGraphicsContext.currentCG else { return }
         if drawsBackground {
             CG.saveGState(context)
-            CG.setFillColorWithColor(context, backgroundColor.cgColorRef)
+            CG.setFill(context, backgroundColor)
             CG.fillRect(context, bounds)
             CG.restoreGState(context)
         }

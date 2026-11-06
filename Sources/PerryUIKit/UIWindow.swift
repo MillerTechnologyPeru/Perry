@@ -147,6 +147,11 @@ open class UIWindow: UIView {
     func makeKeyAndVisible() {
         sendSetHidden(false)
         makeKeyWindow()
+        // Its views are laid out now, as UIKit's are when a window is
+        // shown, not at the run loop's next pass: a program may wait in its
+        // launch method for what its view's layoutSubviews sets up (Sonic &
+        // SEGA All-Stars Racing draws there until its game has started).
+        layoutIfNeeded()
     }
 
     @ObjCMethod("makeKeyWindow")

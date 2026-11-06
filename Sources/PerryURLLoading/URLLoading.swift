@@ -9,6 +9,47 @@ import FoundationNetworking
 
 // MARK: - Requests
 
+/// An input stream over a reader, for a body corelibs' session reads as it
+/// sends. It has bytes until a read finds none: a body written while the
+/// request goes out (a bound pair's) is read whole, waiting on the writer.
+final class ReaderStream: InputStream, @unchecked Sendable {
+    private let openReader: @Sendable () -> Void
+    private let readBytes: @Sendable (UnsafeMutablePointer<UInt8>, Int) -> Int
+    private let finish: @Sendable () -> Void
+    private var status: Stream.Status = .notOpen
+
+    init(open: @escaping @Sendable () -> Void, read: @escaping @Sendable (UnsafeMutablePointer<UInt8>, Int) -> Int,
+         finish: @escaping @Sendable () -> Void) {
+        openReader = open
+        readBytes = read
+        self.finish = finish
+        super.init(data: Data())
+    }
+
+    deinit { finish() }
+
+    override func open() {
+        guard status == .notOpen else { return }
+        openReader()
+        status = .open
+    }
+
+    override func close() { status = .closed }
+    override var streamStatus: Stream.Status { status }
+    override var hasBytesAvailable: Bool { status == .open || status == .notOpen }
+
+    override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength length: Int) -> Int {
+        if status == .notOpen { open() }
+        guard status == .open else { return 0 }
+        let count = readBytes(buffer, length)
+        if count <= 0 { status = .atEnd }
+        return max(count, 0)
+    }
+
+    override func getBuffer(_ buffer: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>,
+                            length: UnsafeMutablePointer<Int>) -> Bool { false }
+}
+
 /// A request, which NSURLRequest and NSMutableURLRequest hold.
 public final class Request: @unchecked Sendable {
     var value: URLRequest
@@ -53,6 +94,15 @@ public final class Request: @unchecked Sendable {
     public var body: Data? {
         get { value.httpBody }
         set { value.httpBody = newValue }
+    }
+
+    /// A body read from another stream as the request is sent, on the
+    /// session's own thread: `read` fills a buffer and gives the count, 0
+    /// at the end; `finish` runs once the stream is let go.
+    public func setBodyReader(open: @escaping @Sendable () -> Void, read: @escaping @Sendable (UnsafeMutablePointer<UInt8>, Int) -> Int,
+                              finish: @escaping @Sendable () -> Void) {
+        value.httpBody = nil
+        value.httpBodyStream = ReaderStream(open: open, read: read, finish: finish)
     }
 
     public var timeout: Double {

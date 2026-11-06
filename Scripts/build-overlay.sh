@@ -24,8 +24,13 @@ out=${2:-.build/perry-swift-runtime}
 work=.build/perry-overlays/$module
 swift_module=$module
 [ -f "Darwin/$module/module-name" ] && swift_module=$(tr -d '[:space:]' < "Darwin/$module/module-name")
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
+# A macOS overlay (Darwin/<Module>/platform says macosx) is built over the
+# macOS SDK, for Mac apps.
+platform=iphoneos
+[ -f "Darwin/$module/platform" ] && platform=$(tr -d '[:space:]' < "Darwin/$module/platform")
+sdk=$(xcrun --sdk "$platform" --show-sdk-path)
 target=arm64-apple-ios18.0
+[ "$platform" = macosx ] && target=arm64-apple-macos15.0
 mkdir -p "$work" "$out"
 
 # Declarations the SDK's public headers lack, in Darwin/<Module>/include.
@@ -41,7 +46,7 @@ fi
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" \
+xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
     -module-name "$swift_module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \

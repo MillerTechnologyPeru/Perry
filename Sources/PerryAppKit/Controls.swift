@@ -17,6 +17,8 @@ open class NSControl: NSView {
     var target: UnsafeMutableRawPointer?
     var action: ObjCSelector?
     var cellObject: NSCell?
+    /// What template images take as their color, the label color without one.
+    var tintColor: NSColor?
     /// A control without a cell keeps its values here.
     private var ownEnabled = true
     var ignoresMultiClick = false
@@ -24,7 +26,6 @@ open class NSControl: NSView {
     /// The mouse is down in the control and was last inside it.
     var tracking = false
 
-    @ObjCMethod("init")
     public required init() {
         super.init()
         makeCell()
@@ -309,7 +310,13 @@ open class NSButton: NSControl {
     }
     var image: NSObject? {
         get { cellObject?.image }
-        set { cellObject?.setImage(newValue?.as(NSImage.self)); valueChanged() }
+        set {
+            // A button that showed no image shows the one it is given, as
+            // AppKit's do.
+            if newValue != nil, let cell = buttonCell, cell.imagePosition == 0 { cell.setImagePosition(1) }
+            cellObject?.setImage(newValue?.as(NSImage.self))
+            valueChanged()
+        }
     }
     var buttonType: UInt {
         get { buttonCell?.buttonType ?? 7 }
@@ -378,8 +385,8 @@ open class NSButton: NSControl {
     @ObjCMethod("setTransparent:") func setTransparent(_ value: Bool) { buttonCell?.setTransparent(value) }
     @ObjCMethod("bezelColor") func bezelColor() -> NSObject? { buttonCell?.bezelColor }
     @ObjCMethod("setBezelColor:") func setBezelColor(_ color: NSObject?) { buttonCell?.setBezelColor(color?.as(NSColor.self)) }
-    @ObjCMethod("contentTintColor") func contentTintColor() -> NSObject? { nil }
-    @ObjCMethod("setContentTintColor:") func setContentTintColor(_ color: NSObject?) {}
+    @ObjCMethod("contentTintColor") func contentTintColor() -> NSColor? { tintColor }
+    @ObjCMethod("setContentTintColor:") func setContentTintColor(_ color: NSColor?) { tintColor = color; setNeedsDisplay(true) }
     @ObjCMethod("allowsMixedState") func allowsMixedState() -> Bool { cellObject?.allowsMixedState ?? false }
     @ObjCMethod("setAllowsMixedState:") func setAllowsMixedState(_ value: Bool) { cellObject?.allowsMixedState = value }
     @ObjCMethod("showsBorderOnlyWhileMouseInside") func showsBorderOnlyWhileMouseInside() -> Bool { buttonCell?.showsBorderOnlyWhileMouseInside ?? false }
@@ -456,7 +463,6 @@ open class NSTextField: NSControl {
         maximumNumberOfLines = decoded.integer("NSTextFieldMaximumNumberOfLines")
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -639,7 +645,8 @@ open class NSImageView: NSControl {
     @ObjCMethod("setAnimates:") func setAnimates(_ value: Bool) {}
     @ObjCMethod("setEditable:") func setEditable(_ value: Bool) {}
     @ObjCMethod("isEditable") func isEditable() -> Bool { false }
-    @ObjCMethod("setContentTintColor:") func setContentTintColor(_ color: NSObject?) {}
+    @ObjCMethod("contentTintColor") func contentTintColor() -> NSColor? { tintColor }
+    @ObjCMethod("setContentTintColor:") func setContentTintColor(_ color: NSColor?) { tintColor = color; setNeedsDisplay(true) }
     @ObjCMethod("setSymbolConfiguration:") func setSymbolConfiguration(_ value: NSObject?) {}
 
     @ObjCMethod("intrinsicContentSize")
@@ -672,7 +679,6 @@ open class NSProgressIndicator: NSView {
         if decoded.has("NSMaxValue") { maxValue = decoded.double("NSMaxValue") }
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")

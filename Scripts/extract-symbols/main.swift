@@ -8,6 +8,8 @@
 // Symbols.renderedPointSize (34 points) and 3 pixels a point, its image the
 // size the symbol is at that point size.
 //
+// Names the scan misses can be listed in <App.app>/SFSymbols.txt.
+//
 // Usage: extract-symbols <App.app>...
 import AppKit
 import Foundation
@@ -143,6 +145,12 @@ for path in CommandLine.arguments.dropFirst() {
     for file in sources(in: app) {
         names.formUnion(symbolNames(in: file))
         names.formUnion(smallStringNames(in: file))
+    }
+    // Names the scans can't see (made in code some other way), listed one
+    // a line in <App.app>/SFSymbols.txt: those Perry reports asked for and
+    // missing (PERRY_APPKIT_SYMBOL_TRACE, PERRY_UIKIT_SYMBOL_TRACE).
+    if let listed = try? String(contentsOf: app.appendingPathComponent("SFSymbols.txt"), encoding: .utf8) {
+        names.formUnion(listed.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
     }
     // Their filled variants too, which tab bars show for the selected tab
     // without the app naming them.

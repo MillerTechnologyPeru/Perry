@@ -52,6 +52,7 @@ let package = Package(
         .library(name: "PerryIOKit", type: .dynamic, targets: ["PerryIOKit"]),
         // CoreTelephony, on a device without a cellular radio.
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
+        .library(name: "PerryStoreKit", type: .dynamic, targets: ["PerryStoreKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         // MediaPlayer, with no media library and no movies.
         .library(name: "PerryMediaPlayer", type: .dynamic, targets: ["PerryMediaPlayer"]),
@@ -95,6 +96,9 @@ let package = Package(
         .target(name: "PerryInterface"),
         // The Cassowary constraint solver UIKit's and AppKit's Auto Layout share.
         .target(name: "PerryLayoutSolver"),
+        // Compiled asset catalogs (Assets.car), which UIKit's and AppKit's
+        // named images and colors read.
+        .target(name: "PerryAssetCatalog"),
         .target(
             name: "PerryLoaderCore",
             dependencies: ["PerryInterface"]
@@ -293,6 +297,12 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // StoreKit's Objective-C classes, with no App Store.
+        .target(
+            name: "PerryStoreKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // CoreTelephony, with no SIM and no carrier.
         .target(
             name: "PerryCoreTelephony",
@@ -369,14 +379,14 @@ let package = Package(
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
-            dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryGeometry", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Metal's declarations of metal2vulkan's C ABI, and its loader:

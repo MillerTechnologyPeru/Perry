@@ -57,6 +57,8 @@ final class BundleStorage {
     /// is preferred in each.
     func resource(_ name: String?, type: String?, directory: String?) -> String? {
         guard let name, !name.isEmpty else { return nil }
+        // The type may come with its dot, as Foundation allows.
+        let type = type.map { $0.hasPrefix(".") ? String($0.dropFirst()) : $0 }
         let suffix = type.map { $0.isEmpty ? "" : "." + $0 } ?? ""
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
@@ -85,6 +87,8 @@ final class BundleStorage {
         return lock
     }()
     private var tables: [String: [String: String]] = [:]
+    /// The device-specific entries of .stringsdict files, by path.
+    private var devices: [String: [String: String]] = [:]
 
     /// The table in `<table>.strings` in a directory of the resources,
     /// read once.
@@ -122,12 +126,36 @@ final class BundleStorage {
     func localizedString(_ key: String, table name: String?, directories: [String]) -> String? {
         let name = name.flatMap { $0.isEmpty ? nil : $0 } ?? "Localizable"
         for directory in directories {
-            if let value = table(name, in: directory)[key] { return value }
+            if let value = deviceSpecificString(key, table: name, in: directory) ?? table(name, in: directory)[key] { return value }
         }
         return nil
     }
 
+    /// A .stringsdict entry that varies by device
+    /// (NSStringDeviceSpecificRuleType): the Mac's, else the default.
+    private func deviceSpecificString(_ key: String, table name: String, in directory: String) -> String? {
+        let path = Paths.appending(Paths.appending(resourcePath, directory), name + ".stringsdict")
+        pthread_mutex_lock(tablesLock)
+        defer { pthread_mutex_unlock(tablesLock) }
+        if devices[path] == nil {
+            var table: [String: String] = [:]
+            if let data = try? Data(contentsOf: URL(filePath: path)), let (value, _) = PropertyLists.parse(Array(data)),
+               case .dictionary(let entries) = value {
+                for (entryKey, entry) in entries {
+                    guard case .dictionary(let rules) = entry, case .dictionary(let variants)? = rules["NSStringDeviceSpecificRuleType"]
+                    else { continue }
+                    for variant in ["mac", "other"] {
+                        if case .string(let text)? = variants[variant] { table[entryKey] = text; break }
+                    }
+                }
+            }
+            devices[path] = table
+        }
+        return devices[path]?[key]
+    }
+
     func resources(type: String?, directory: String?) -> [String] {
+        let type = type.map { $0.hasPrefix(".") ? String($0.dropFirst()) : $0 }
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directoryPath)) ?? []

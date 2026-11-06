@@ -158,8 +158,12 @@ open class NSViewController: NSResponder {
     var loading = false
     var presentationWindow: NSWindow?
 
-    @ObjCMethod("init")
     public required init() { super.init() }
+
+    /// -init is -initWithNibName:bundle: with neither, sent so a
+    /// subclass's initializer (a Swift class's property defaults) runs.
+    @ObjCMethod("init")
+    func initialize() -> NSObject { initializeViewController(nibName: nil, bundle: nil) }
 
     @ObjCMethod("initWithNibName:bundle:")
     public required init(nibName: String?, bundle: NSObject?) {
@@ -414,4 +418,10 @@ extension NSWindowController {
         let owner = windowNibOwner.map(NSObject.init) ?? self
         Nibs.kept += Nibs.instantiate(found.archive, owner: owner, bundlePath: found.directory)
     }
+}
+
+/// NSViewController's messages, sent so subclasses' overrides run.
+extension NSObject {
+    @ObjCMethod("initWithNibName:bundle:")
+    func initializeViewController(nibName: String?, bundle: NSObject?) -> NSObject
 }

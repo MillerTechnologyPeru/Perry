@@ -323,7 +323,12 @@ open class NSCell: NSObject {
 
     /// Text color on the cell's background: light text on an emphasized
     /// one, as in a selected table row, for the system's text colors.
+    /// A sidebar's group row heading: AppKit draws those in the secondary
+    /// label color whatever color the cell has.
+    var sourceListHeading = false
+
     func displayColor(_ color: NSColor?) -> NSColor {
+        if sourceListHeading { return NSColor.secondaryLabelColor() }
         let base = color ?? NSColor.controlTextColor()
         if !enabled { return NSColor.disabledControlTextColor() }
         if backgroundStyle == 1, base.catalogName != nil || base.alpha < 1 || (base.red + base.green + base.blue) < 0.5 {
@@ -337,10 +342,10 @@ open class NSCell: NSObject {
         if bezeled || bordered, let context = NSGraphicsContext.currentCG {
             CG.saveGState(context)
             if bezeled {
-                CG.setFillColorWithColor(context, NSColor.textBackgroundColor().cgColorRef)
+                CG.setFill(context, NSColor.textBackgroundColor())
                 CG.fillRect(context, frame)
             }
-            CG.setFillColorWithColor(context, NSColor(white: 0.72, alpha: 1).cgColorRef)
+            CG.setFill(context, NSColor(white: 0.72, alpha: 1))
             NSFrameRect(frame)
             CG.restoreGState(context)
         }
@@ -379,13 +384,14 @@ open class NSCell: NSObject {
 /// Images drawn inside a rectangle: scaled down proportionally to fit,
 /// centered.
 enum ImageDrawing {
-    static func draw(_ image: NSImage, fitting frame: CGRect, scaleUp: Bool = false) {
+    static func draw(_ image: NSImage, fitting frame: CGRect, scaleUp: Bool = false, tint: NSColor? = nil) {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return }
         var scale = min(frame.width / size.width, frame.height / size.height)
         if !scaleUp { scale = min(scale, 1) }
         let drawn = CGSize(width: size.width * scale, height: size.height * scale)
-        image.draw(in: CGRect(x: frame.midX - drawn.width / 2, y: frame.midY - drawn.height / 2, width: drawn.width, height: drawn.height))
+        image.draw(in: CGRect(x: frame.midX - drawn.width / 2, y: frame.midY - drawn.height / 2, width: drawn.width, height: drawn.height),
+                   tint: tint)
     }
 }
 
@@ -472,21 +478,21 @@ open class NSTextFieldCell: NSActionCell {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
         if bezeled {
-            CG.setFillColorWithColor(context, (drawsBackground ? backgroundColor : nil)?.cgColorRef ?? NSColor.textBackgroundColor().cgColorRef)
+            CG.setFill(context, (drawsBackground ? backgroundColor : nil) ?? NSColor.textBackgroundColor())
             if bezelStyle == 1 {
                 CG.fill(CG.roundedRect(frame.insetBy(dx: 0.5, dy: 0.5), radius: frame.height / 2), backgroundColor ?? NSColor.textBackgroundColor(), in: context)
                 CG.stroke(CG.roundedRect(frame.insetBy(dx: 0.5, dy: 0.5), radius: frame.height / 2), NSColor(white: 0.75, alpha: 1), in: context)
             } else {
                 CG.fillRect(context, frame)
-                CG.setFillColorWithColor(context, NSColor(white: 0.75, alpha: 1).cgColorRef)
+                CG.setFill(context, NSColor(white: 0.75, alpha: 1))
                 NSFrameRect(frame)
             }
         } else if drawsBackground, let backgroundColor {
-            CG.setFillColorWithColor(context, backgroundColor.cgColorRef)
+            CG.setFill(context, backgroundColor)
             CG.fillRect(context, frame)
         }
         if bordered && !bezeled {
-            CG.setFillColorWithColor(context, NSColor(white: 0.6, alpha: 1).cgColorRef)
+            CG.setFill(context, NSColor(white: 0.6, alpha: 1))
             NSFrameRect(frame)
         }
         CG.restoreGState(context)
@@ -528,7 +534,7 @@ open class NSTextFieldCell: NSActionCell {
             let flipped = NSGraphicsContext.current?.flipped ?? false
             let y = flipped ? textRect.minY + lineTop : textRect.maxY - lineTop - lineHeight
             CG.saveGState(context)
-            CG.setFillColorWithColor(context, NSColor.textColor().cgColorRef)
+            CG.setFill(context, NSColor.textColor())
             CG.fillRect(context, CGRect(x: min(x, textRect.maxX - 1), y: y, width: 1, height: lineHeight))
             CG.restoreGState(context)
         }
@@ -826,7 +832,9 @@ open class NSButtonCell: NSActionCell {
         let font = effectiveFont
         let text = Text.width(title, font: font)
         if isCheckLike { return CGSize(width: (text + 22).rounded(.up), height: 18) }
-        if let image, title.isEmpty { return CGSize(width: image.size.width + (bordered ? 16 : 0), height: max(image.size.height, bordered ? 21 : 0)) }
+        if let image, title.isEmpty || imagePosition == 1 {
+            return CGSize(width: image.size.width + (bordered ? 16 : 0), height: max(image.size.height, bordered ? 21 : 0))
+        }
         return CGSize(width: (text + (bordered ? 28 : 4)).rounded(.up), height: bordered ? 21 : Text.lineHeight(font))
     }
 
@@ -838,14 +846,22 @@ open class NSButtonCell: NSActionCell {
             return
         }
         let on = showsState && state != 0
-        if bordered {
+        if bordered, bezelStyle == 11 {
+            // A toolbar button (NSBezelStyleToolbar, once textured rounded):
+            // its image or title alone, on a light fill while pressed or on.
+            if highlighted || on {
+                CG.fill(CG.roundedRect(frame.insetBy(dx: 1, dy: 0), radius: 6), NSColor.labelColor().withAlphaComponent(highlighted ? 0.18 : 0.1), in: context)
+            }
+            drawContents(in: frame.insetBy(dx: 4, dy: 0), light: false)
+        } else if bordered {
             // A push button: rounded, white, with a gray edge, darker while
             // pressed; a default button (Return) is accent-colored.
             let bezel = CGRect(x: frame.minX + 1, y: frame.midY - min(frame.height, 22) / 2 + 0.5, width: frame.width - 2,
                                height: min(frame.height, 22) - 1)
             let isDefault = keyEquivalentValue == "\r"
-            let fill: NSColor = highlighted ? NSColor(white: 0.82, alpha: 1)
-                : isDefault || on ? (bezelColor ?? NSColor.controlAccentColor()) : (bezelColor ?? NSColor.whiteColor())
+            let dark = Appearances.currentIsDark
+            let fill: NSColor = highlighted ? NSColor(white: dark ? 0.52 : 0.82, alpha: 1)
+                : isDefault || on ? (bezelColor ?? NSColor.controlAccentColor()) : (bezelColor ?? NSColor(white: dark ? 0.40 : 1, alpha: 1))
             let radius: CGFloat = bezelStyle == 7 ? bezel.height / 2 : bezelStyle == 6 || bezelStyle == 2 || bezelStyle == 10 ? 0 : 5
             CG.fill(CG.roundedRect(bezel, radius: radius), fill, in: context)
             CG.stroke(CG.roundedRect(bezel, radius: radius), NSColor(white: 0, alpha: 0.2), width: 0.5, in: context)
@@ -869,7 +885,7 @@ open class NSButtonCell: NSActionCell {
             runs = [TextRun(text: text, font: effectiveFont, color: color)]
         }
         if imagePosition == 1 || text.isEmpty, let picture {
-            ImageDrawing.draw(picture, fitting: frame)
+            ImageDrawing.draw(picture, fitting: frame, tint: light ? NSColor.whiteColor() : controlView?.as(NSControl.self)?.tintColor)
             return
         }
         var textFrame = frame
@@ -968,13 +984,14 @@ open class NSImageCell: NSCell {
     @ObjCMethod("drawInteriorWithFrame:inView:")
     override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
         guard let image else { return }
+        let tint = view?.as(NSControl.self)?.tintColor
         switch imageScaling {
-        case 1: image.draw(in: frame)
+        case 1: image.draw(in: frame, tint: tint)
         case 2:
             let size = image.size
-            image.draw(in: CGRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height))
-        case 3: ImageDrawing.draw(image, fitting: frame, scaleUp: true)
-        default: ImageDrawing.draw(image, fitting: frame)
+            image.draw(in: CGRect(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height), tint: tint)
+        case 3: ImageDrawing.draw(image, fitting: frame, scaleUp: true, tint: tint)
+        default: ImageDrawing.draw(image, fitting: frame, tint: tint)
         }
     }
 }
@@ -987,9 +1004,9 @@ open class NSTableHeaderCell: NSTextFieldCell {
     override func draw(withFrame frame: CGRect, in view: NSView?) {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor.headerColor().cgColorRef)
+        CG.setFill(context, NSColor.headerColor())
         CG.fillRect(context, frame)
-        CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+        CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, CGRect(x: frame.maxX - 1, y: frame.minY + 3, width: 1, height: frame.height - 6))
         CG.restoreGState(context)
         drawInterior(withFrame: frame, in: view)
@@ -1268,7 +1285,7 @@ open class NSSegmentedCell: NSActionCell {
             if segment.selected { CG.fill(CG.roundedRect(rect.insetBy(dx: 1, dy: 1), radius: 4), NSColor.controlAccentColor(), in: context) }
             if index > 0 {
                 CG.saveGState(context)
-                CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+                CG.setFill(context, NSColor.separatorColor())
                 CG.fillRect(context, CGRect(x: rect.minX, y: rect.minY + 4, width: 1, height: rect.height - 8))
                 CG.restoreGState(context)
             }
