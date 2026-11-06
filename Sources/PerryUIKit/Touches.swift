@@ -146,6 +146,10 @@ enum Touches {
     nonisolated(unsafe) private static var start = CGPoint.zero
     nonisolated(unsafe) private static var startOffset = CGPoint.zero
     nonisolated(unsafe) private static var panning = false
+    /// Where a swipe across a table row began moving it.
+    nonisolated(unsafe) private static var swipeStart = CGPoint.zero
+    /// The touch closed a row's swipe actions, and does nothing else.
+    nonisolated(unsafe) private static var swallowed = false
     /// Whether the touched view has been sent -touchesBegan:withEvent:.
     nonisolated(unsafe) private static var delivered = false
     /// The gesture recognizers of the touched view and its ancestors, which
@@ -238,9 +242,15 @@ enum Touches {
             recognizer.sendReset()
         }
         scrollView = hit.flatMap(scrollingAncestor)
+        // A touch away from a row's open swipe actions closes them.
+        swallowed = false
+        if SwipeActions.isOpen, !SwipeActions.isOnButtons(hit) {
+            SwipeActions.close(animated: true)
+            swallowed = true
+        }
         // In a scroll view a cell lights up only once the touch has stayed a
         // moment without moving, as iOS waits to see whether it pans.
-        if let cell = hit.flatMap(tableCell) {
+        if !swallowed, let cell = hit.flatMap(tableCell) {
             if scrollView == nil {
                 highlighted = cell
                 cell.sendSetHighlighted(true, animated: false)
@@ -264,8 +274,22 @@ enum Touches {
         markStationary(except: touch)
         samples.append((point, Clock.now))
         samples.removeAll { Clock.now - $0.time > 0.1 }
+        if SwipeActions.dragging {
+            SwipeActions.move(dx: point.x - swipeStart.x)
+            return
+        }
         if let scrollView {
             let distance = hypot(point.x - start.x, point.y - start.y)
+            // A drag more across than down a table's row swipes it.
+            if !panning, !swallowed, distance >= 10, abs(point.x - start.x) > abs(point.y - start.y) * 1.5,
+               let table = scrollView.as(UITableView.self), let cell = touch.state.view.flatMap(rowCell),
+               SwipeActions.begin(table: table, cell: cell, dx: point.x - start.x) {
+                unhighlight()
+                if delivered { send(.cancelled) }
+                swipeStart = start
+                SwipeActions.move(dx: point.x - swipeStart.x)
+                return
+            }
             if !panning, distance >= 10 {
                 panning = true
                 unhighlight()
@@ -301,6 +325,15 @@ enum Touches {
             if others.isEmpty { event = nil }
             (Touches.touch, scrollView) = (nil, nil)
             Display.markDirty()
+        }
+        if SwipeActions.dragging {
+            scrollView?.scroll.tracking = false
+            SwipeActions.end()
+            return
+        }
+        if swallowed, !panning {
+            scrollView?.scroll.tracking = false
+            return
         }
         if let scrollView, panning {
             scrollView.scroll.dragging = false
@@ -480,6 +513,16 @@ enum Touches {
         var current: UIView? = view
         while let candidate = current {
             if isEnabledControl(candidate) { return nil }
+            if candidate.is(UITableViewCell.self) { return candidate.unsafeCast(to: UITableViewCell.self) }
+            current = candidate.state.superview.map(UIView.wrap)
+        }
+        return nil
+    }
+
+    /// The table cell `view` is in, controls and all.
+    private static func rowCell(of view: UIView) -> UITableViewCell? {
+        var current: UIView? = view
+        while let candidate = current {
             if candidate.is(UITableViewCell.self) { return candidate.unsafeCast(to: UITableViewCell.self) }
             current = candidate.state.superview.map(UIView.wrap)
         }
