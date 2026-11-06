@@ -647,7 +647,10 @@ static unsigned long key_to_darwin(pthread_key_t key) { return (unsigned long)(k
 static pthread_key_t key_to_linux(unsigned long key) { return (pthread_key_t)(((long)key - key_base) / 2); }
 
 #define RESERVED_DESTRUCTOR(n) \
-    static void reserved_destructor_##n(void *value) { if (reserved_destructors[n]) reserved_destructors[n](value); }
+    static void reserved_destructor_##n(void *value) { \
+        if (reserved_destructors[n]) \
+            PERRY_KEEP_R9(reserved_destructors[n](value)); \
+    }
 RESERVED_DESTRUCTOR(0) RESERVED_DESTRUCTOR(1) RESERVED_DESTRUCTOR(2) RESERVED_DESTRUCTOR(3)
 RESERVED_DESTRUCTOR(4) RESERVED_DESTRUCTOR(5) RESERVED_DESTRUCTOR(6) RESERVED_DESTRUCTOR(7)
 RESERVED_DESTRUCTOR(8) RESERVED_DESTRUCTOR(9) RESERVED_DESTRUCTOR(10) RESERVED_DESTRUCTOR(11)
@@ -711,6 +714,25 @@ static bool is_fixed_number(unsigned long key) { return key >= FIXED_RANGE_START
 static pthread_key_t fixed_keys[FIXED_RANGE_END];
 static _Atomic bool fixed_keys_made[FIXED_RANGE_END];
 
+// glibc calls a fixed key's destructor through one of these, which keeps r9
+// (see PERRY_KEEP_R9).
+static void (*fixed_destructors[FIXED_RANGE_END])(void *);
+#define FIXED_DESTRUCTOR(n) \
+    static void fixed_destructor_##n(void *value) { PERRY_KEEP_R9(fixed_destructors[n](value)); }
+FIXED_DESTRUCTOR(100) FIXED_DESTRUCTOR(101) FIXED_DESTRUCTOR(102) FIXED_DESTRUCTOR(103)
+FIXED_DESTRUCTOR(104) FIXED_DESTRUCTOR(105) FIXED_DESTRUCTOR(106) FIXED_DESTRUCTOR(107)
+FIXED_DESTRUCTOR(108) FIXED_DESTRUCTOR(109) FIXED_DESTRUCTOR(110) FIXED_DESTRUCTOR(111)
+FIXED_DESTRUCTOR(112) FIXED_DESTRUCTOR(113) FIXED_DESTRUCTOR(114) FIXED_DESTRUCTOR(115)
+FIXED_DESTRUCTOR(116) FIXED_DESTRUCTOR(117) FIXED_DESTRUCTOR(118) FIXED_DESTRUCTOR(119)
+
+static void (*const fixed_trampolines[FIXED_RANGE_END - FIXED_RANGE_START])(void *) = {
+    fixed_destructor_100, fixed_destructor_101, fixed_destructor_102, fixed_destructor_103,
+    fixed_destructor_104, fixed_destructor_105, fixed_destructor_106, fixed_destructor_107,
+    fixed_destructor_108, fixed_destructor_109, fixed_destructor_110, fixed_destructor_111,
+    fixed_destructor_112, fixed_destructor_113, fixed_destructor_114, fixed_destructor_115,
+    fixed_destructor_116, fixed_destructor_117, fixed_destructor_118, fixed_destructor_119,
+};
+
 int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_init_np);
 int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
     if (key < 0 || !is_fixed_number((unsigned long)key))
@@ -718,7 +740,8 @@ int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
     pthread_mutex_lock(&reserved_lock);
     int error = 0;
     if (!fixed_keys_made[key]) {
-        error = pthread_key_create(&fixed_keys[key], destructor);
+        fixed_destructors[key] = destructor;
+        error = pthread_key_create(&fixed_keys[key], destructor ? fixed_trampolines[key - FIXED_RANGE_START] : NULL);
         if (!error)
             atomic_store_explicit(&fixed_keys_made[key], true, memory_order_release);
     }
@@ -750,6 +773,8 @@ int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) {
     }
     pthread_mutex_unlock(&reserved_lock);
     // A key numbered in the fixed range is kept, unused, so it is not made again.
+    // glibc calls these keys' destructors itself, which on armv7 does not keep
+    // r9 for it as the reserved keys' do.
     pthread_key_t linux_key;
     int error;
     while (!(error = pthread_key_create(&linux_key, destructor)) && is_fixed_number(key_to_darwin(linux_key))) {}
