@@ -12,7 +12,7 @@
 # and linked as libswift<Name>.dylib, which the loader looks in after the
 # module's overlay.
 #
-# Usage: Scripts/build-overlay.sh <Module> [output directory]
+# Usage: [PERRY_OVERLAY_PLATFORM=macosx] Scripts/build-overlay.sh <Module> [output directory]
 #   default output: .build/perry-swift-runtime
 set -eu
 cd "$(dirname "$0")/.."
@@ -25,9 +25,11 @@ work=.build/perry-overlays/$module
 swift_module=$module
 [ -f "Darwin/$module/module-name" ] && swift_module=$(tr -d '[:space:]' < "Darwin/$module/module-name")
 # A macOS overlay (Darwin/<Module>/platform says macosx) is built over the
-# macOS SDK, for Mac apps.
+# macOS SDK, for Mac apps; PERRY_OVERLAY_PLATFORM=macosx builds any other
+# for them too (CryptoKit for a Mac app's runtime directory).
 platform=iphoneos
 [ -f "Darwin/$module/platform" ] && platform=$(tr -d '[:space:]' < "Darwin/$module/platform")
+platform=${PERRY_OVERLAY_PLATFORM:-$platform}
 sdk=$(xcrun --sdk "$platform" --show-sdk-path)
 target=arm64-apple-ios18.0
 [ "$platform" = macosx ] && target=arm64-apple-macos15.0
