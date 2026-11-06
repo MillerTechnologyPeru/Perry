@@ -787,6 +787,16 @@ open class UIView: UIResponder, UICoordinateSpace {
         return nil
     }
 
+    /// Has the first responder resign, if it is this view or one inside
+    /// it: true if it did, or if there was none to.
+    @ObjCMethod("endEditing:")
+    func endEditing(_ force: Bool) -> Bool {
+        guard let responder = Keyboard.responder, let view = responder.as(UIView.self), view.isDescendant(of: self) else {
+            return false
+        }
+        return responder.sendResignFirstResponder() || force
+    }
+
     @ObjCMethod("isDescendantOfView:")
     func isDescendant(of view: UIView?) -> Bool {
         guard let view else { return false }
