@@ -384,8 +384,21 @@ struct ScrollPanRecognizer: UIViewRepresentable {
         private(set) lazy var recognizer: UIPanGestureRecognizer = {
             let recognizer = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
             recognizer.delegate = self
+            made = true
             return recognizer
         }()
+        private var made = false
+
+        /// The recognizer goes with its coordinator: it doesn't retain its
+        /// target, and left on the hosting view it would send its action
+        /// to the freed coordinator.
+        deinit {
+            guard made else { return }
+            let recognizer = recognizer
+            recognizer.removeTarget(nil, action: nil)
+            recognizer.view?.removeGestureRecognizer(recognizer)
+            Coordinator.installed[ObjectIdentifier(self)] = nil
+        }
 
         /// The coordinators whose viewports are in a window.
         nonisolated(unsafe) static var installed: [ObjectIdentifier: Weak] = [:]
