@@ -1,3 +1,4 @@
+import CPerryGeometry
 import CPerryFoundation
 import FoundationEssentials
 import PerryObjCInterop
@@ -507,6 +508,71 @@ public func CFAttributedStringCreate(_ allocator: UnsafeRawPointer?, _ string: i
     guard let text = Strings.value(of: string) else { return nil }
     return AttributedStrings.make(AttributedStorage(units: Array(text.utf16), attributes: attributes), mutable: false)
 }
+
+/// An empty mutable attributed string, +1.
+@c(_CFAttributedStringCreateMutable)
+public func CFAttributedStringCreateMutable(_ allocator: UnsafeRawPointer?, _ maxLength: Int) -> id? {
+    AttributedStrings.make(AttributedStorage(units: [], attributes: nil), mutable: true)
+}
+
+/// A mutable copy of an attributed string, +1.
+@c(_CFAttributedStringCreateMutableCopy)
+public func CFAttributedStringCreateMutableCopy(_ allocator: UnsafeRawPointer?, _ maxLength: Int, _ string: id?) -> id? {
+    ObjC.send(string, ObjC.selector("mutableCopy"))
+}
+
+/// A copy of an attributed string, +1.
+@c(_CFAttributedStringCreateCopy)
+public func CFAttributedStringCreateCopy(_ allocator: UnsafeRawPointer?, _ string: id?) -> id? {
+    ObjC.send(string, ObjC.selector("copy"))
+}
+
+private func nsRange(_ range: PerryCFRange) -> PerryRange {
+    PerryRange(location: UInt(max(0, range.location)), length: UInt(max(0, range.length)))
+}
+
+@c(_CFAttributedStringReplaceString)
+public func CFAttributedStringReplaceString(_ string: id?, _ range: PerryCFRange, _ replacement: id?) {
+    typealias F = @convention(c) (id?, SEL, PerryRange, id?) -> Void
+    unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("replaceCharactersInRange:withString:"), nsRange(range),
+                                            replacement ?? Strings.autoreleased(""))
+}
+
+@c(_CFAttributedStringReplaceAttributedString)
+public func CFAttributedStringReplaceAttributedString(_ string: id?, _ range: PerryCFRange, _ replacement: id?) {
+    typealias F = @convention(c) (id?, SEL, PerryRange, id?) -> Void
+    unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("replaceCharactersInRange:withAttributedString:"), nsRange(range), replacement)
+}
+
+/// Sets one attribute over a range, or removes it for a NULL value.
+@c(_CFAttributedStringSetAttribute)
+public func CFAttributedStringSetAttribute(_ string: id?, _ range: PerryCFRange, _ name: id?, _ value: id?) {
+    guard let name else { return }
+    if let value {
+        typealias F = @convention(c) (id?, SEL, id?, id?, PerryRange) -> Void
+        unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("addAttribute:value:range:"), name, value, nsRange(range))
+    } else {
+        typealias F = @convention(c) (id?, SEL, id?, PerryRange) -> Void
+        unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector("removeAttribute:range:"), name, nsRange(range))
+    }
+}
+
+/// Sets the attributes over a range: added to those there, or in place of
+/// them when `clear` is set.
+@c(_CFAttributedStringSetAttributes)
+public func CFAttributedStringSetAttributes(_ string: id?, _ range: PerryCFRange, _ attributes: id?, _ clear: Bool) {
+    typealias F = @convention(c) (id?, SEL, id?, PerryRange) -> Void
+    unsafeBitCast(ObjC.msgSend, to: F.self)(string, ObjC.selector(clear ? "setAttributes:range:" : "addAttributes:range:"),
+                                            attributes, nsRange(range))
+}
+
+@c(_CFAttributedStringRemoveAttribute)
+public func CFAttributedStringRemoveAttribute(_ string: id?, _ range: PerryCFRange, _ name: id?) {
+    CFAttributedStringSetAttribute(string, range, name, nil)
+}
+
+@c(_CFAttributedStringBeginEditing) public func CFAttributedStringBeginEditing(_ string: id?) {}
+@c(_CFAttributedStringEndEditing) public func CFAttributedStringEndEditing(_ string: id?) {}
 
 @c(_CFAttributedStringGetLength)
 public func CFAttributedStringGetLength(_ string: id?) -> Int {
