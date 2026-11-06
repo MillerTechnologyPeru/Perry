@@ -35,6 +35,10 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     BlocksRuntime.copy = unsafeBitCast(copy, to: BlocksRuntime.Copy.self)
     BlocksRuntime.release = unsafeBitCast(release, to: BlocksRuntime.Release.self)
     BlocksRuntime.mallocBlockClass = mallocBlockClass
+    // The run loops CFNetService's callbacks are delivered through.
+    guard RunLoopCalls.load({ library, name in symbol(library, name) }) else {
+        networkFatal("CFNetwork needs CoreFoundation's run loops, which are missing")
+    }
     return true
 }
 
