@@ -182,6 +182,15 @@ enum GLES {
             guard PVRTC.storage != nil else { return nil }
             return perry_gl_entry(unsafeBitCast(PVRTC.texStorage2D, to: UnsafeMutableRawPointer.self))
         }
+        // Texture uploads and filters are reported while tracing.
+        if GLTrace.on, name == "_glTexImage2D" || name == "_glTexParameteri" || name == "_glTexParameterx" {
+            PVRTC.bind(host)
+            switch name {
+            case "_glTexImage2D": return perry_gl_entry(unsafeBitCast(PVRTC.tracedTexImage2D, to: UnsafeMutableRawPointer.self))
+            case "_glTexParameteri": return perry_gl_entry(unsafeBitCast(PVRTC.tracedTexParameteri, to: UnsafeMutableRawPointer.self))
+            default: return perry_gl_entry(unsafeBitCast(PVRTC.tracedTexParameterx, to: UnsafeMutableRawPointer.self))
+            }
+        }
         // Apple's multisampling is made of OpenGL ES 3's.
         if name == "_glRenderbufferStorageMultisampleAPPLE" || name == "_glResolveMultisampleFramebufferAPPLE" {
             guard GLMultisample.bind(host) else { return nil }
