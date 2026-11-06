@@ -296,7 +296,11 @@ func messageSend(_ selector: String, toClass: Bool, arguments: [(type: String, v
         + arguments.map { "\($0.value).objCArgument()" }).joined(separator: ", ") + ")"
     var statements = [
         "typealias Message = @convention(c) (\(cArguments.joined(separator: ", "))) -> \(returnType.map(cResultType) ?? "Void")",
-        "let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)",
+        // A structure 32-bit Darwin returns through memory goes through
+        // objc_msgSend_stret.
+        "let message = unsafeBitCast("
+            + (returnType.map { isSelf($0) ? "ObjCRuntime.msgSend" : "ObjCRuntime.msgSend(returning: \($0).self)" } ?? "ObjCRuntime.msgSend")
+            + ", to: Message.self)",
     ]
     let conversion = family.returnsOwned ? "owned" : "returnValue"
     if optionalResult, let returnType {
