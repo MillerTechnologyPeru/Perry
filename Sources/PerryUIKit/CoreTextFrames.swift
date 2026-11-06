@@ -127,19 +127,24 @@ public func CTFramesetterCreateFrame(_ framesetter: UnsafeMutableRawPointer?, _ 
 /// coordinates, y up, so flipped to UIKit's to draw them upright. A run
 /// colored from the context (kCTForegroundColorFromContextAttributeName)
 /// draws in its fill color and text drawing mode, which outlining apps set.
+/// The color a string's first run draws in: its NSColor, else CoreText's
+/// CGColor (kCTForegroundColorAttributeName), or nil to draw in the
+/// context's fill color (kCTForegroundColorFromContextAttributeName).
+private func runColor(_ string: NSAttributedString, _ layout: AttributedLayout) -> (color: UIColor?, fromContext: Bool) {
+    let attributes = string.length() > 0 ? string.attributes(at: 0, effectiveRange: nil) : nil
+    if attributes?.object(forKey: "CTForegroundColorFromContext") != nil { return (nil, true) }
+    if attributes?.object(forKey: "NSColor") == nil, let cgColor = attributes?.object(forKey: "CTForegroundColor") {
+        return (UIColor.color(UIColor.objCClass, cgColor: cgColor.objcObject), false)
+    }
+    return (layout.color, false)
+}
+
 @c(_CTFrameDraw)
 public func CTFrameDraw(_ frame: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) {
     guard let (state, string) = Typesetting.state(frame), let context else { return }
     let box = state.box
     let layout = AttributedLayout(string, size: box.size, lineLimit: 0)
-    let attributes = string.length() > 0 ? string.attributes(at: 0, effectiveRange: nil) : nil
-    let fromContext = attributes?.object(forKey: "CTForegroundColorFromContext") != nil
-    var color: UIColor? = layout.color
-    if fromContext {
-        color = nil
-    } else if attributes?.object(forKey: "NSColor") == nil, let cgColor = attributes?.object(forKey: "CTForegroundColor") {
-        color = UIColor.color(UIColor.objCClass, cgColor: cgColor.objcObject)
-    }
+    let (color, fromContext) = runColor(string, layout)
     Graphics.push(context)
     defer { Graphics.pop() }
     CG.saveGState(context)
@@ -243,11 +248,53 @@ public func CTLineGetGlyphCount(_ line: UnsafeMutableRawPointer?) -> Int {
     Int(Typesetting.state(line)?.string.length() ?? 0)
 }
 
+/// The x of the caret before the character at `index`: the width of the
+/// text before it.
+@DarwinC("_CTLineGetOffsetForStringIndex")
+public func CTLineGetOffsetForStringIndex(_ line: UnsafeMutableRawPointer?, _ index: Int, _ secondary: UnsafeMutablePointer<CGFloat>?) -> CGFloat {
+    guard let layout = lineLayout(line), let text = layout.lines.first else { return 0 }
+    let units = Array(text.utf16)
+    let prefix = String(decoding: units.prefix(max(0, min(index, units.count))), as: UTF16.self)
+    let offset = Text.size(prefix, font: layout.font).width
+    secondary?.pointee = offset
+    return offset
+}
+
+/// The index of the character boundary nearest to `position`'s x.
+@c(_CTLineGetStringIndexForPosition)
+public func CTLineGetStringIndexForPosition(_ line: UnsafeMutableRawPointer?, _ position: CGPoint) -> Int {
+    guard let layout = lineLayout(line), let text = layout.lines.first else { return 0 }
+    var index = 0
+    var previous: CGFloat = 0
+    for character in text {
+        let next = previous + Text.size(String(character), font: layout.font).width
+        if position.x < (previous + next) / 2 { return index }
+        index += character.utf16.count
+        previous = next
+    }
+    return index
+}
+
+/// A tab stop, as an NSTextTab: CTTextTabRef and NSTextTab are toll-free
+/// bridged. CTTextAlignment: left 0, right 1, center 2.
+@DarwinC("_CTTextTabCreate")
+public func CTTextTabCreate(_ alignment: UInt8, _ location: Double, _ options: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let cls = "NSTextTab".withCString({ ObjCRuntime.functions.getClass($0) }).map({ UnsafeMutableRawPointer($0) }) else { return nil }
+    typealias Alloc = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer) -> UnsafeMutableRawPointer?
+    typealias Initialize = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, Int, Double, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    let object = unsafeBitCast(ObjCRuntime.msgSend, to: Alloc.self)(cls, ObjCRuntime.selector("alloc"))
+    // NSTextAlignment: left 0, center 1, right 2.
+    let textAlignment = [0, 2, 1, 3, 4][min(Int(alignment), 4)]
+    return unsafeBitCast(ObjCRuntime.msgSend, to: Initialize.self)(object, ObjCRuntime.selector("initWithTextAlignment:location:options:"),
+                                                                   textAlignment, location, options)
+}
+
 /// Draws the line with its baseline at the context's text position, in
 /// CoreText's coordinates, y up: flipped there to draw it upright.
 @c(_CTLineDraw)
 public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) {
-    guard let layout = lineLayout(line), let text = layout.lines.first, let context else { return }
+    guard let (_, string) = Typesetting.state(line), let layout = lineLayout(line), let text = layout.lines.first, let context else { return }
+    let (color, fromContext) = runColor(string, layout)
     let position = CG.getTextPosition(context)
     Graphics.push(context)
     defer { Graphics.pop() }
@@ -255,5 +302,5 @@ public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutabl
     defer { CG.restoreGState(context) }
     CG.translateCTM(context, position.x, position.y)
     CG.scaleCTM(context, 1, -1)
-    Text.draw(text, at: CGPoint(x: 0, y: -layout.font.ascender()), font: layout.font, color: layout.color, keepingMode: false)
+    Text.draw(text, at: CGPoint(x: 0, y: -layout.font.ascender()), font: layout.font, color: color, keepingMode: fromContext)
 }
