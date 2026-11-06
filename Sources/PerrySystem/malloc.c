@@ -88,6 +88,16 @@ void *darwin_calloc(size_t count, size_t size) {
 
 /// A size of zero gives a block of the least size, as Darwin's does, where
 /// glibc's frees the block.
+/// A block aligned to a page, cleared as the others are. Programs that
+/// bring their own allocator look it up beside malloc.
+void *darwin_valloc(size_t size) DARWIN_SYMBOL(valloc);
+void *darwin_valloc(size_t size) {
+    void *block = NULL;
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    if (posix_memalign(&block, page, block_size(size)) != 0) return NULL;
+    return cleared(block);
+}
+
 void *darwin_realloc(void *ptr, size_t size) DARWIN_SYMBOL(realloc);
 /// The room a block gains is cleared, as it is on Darwin.
 void *darwin_realloc(void *ptr, size_t size) {
