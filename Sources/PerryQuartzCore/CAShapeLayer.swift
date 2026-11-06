@@ -105,7 +105,8 @@ enum PathTrimming {
     private static let collect: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void = { _, element in
         guard let element else { return }
         let type = element.load(as: Int32.self)
-        let points = element.load(fromByteOffset: 8, as: UnsafePointer<CGPoint>.self)
+        // CGPathElement: a 32-bit type, then the points at a pointer's offset.
+        let points = element.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafePointer<CGPoint>.self)
         let current = PathTrimming.polylines.last?.last ?? .zero
         func sample(_ count: Int, _ point: (CGFloat) -> CGPoint) {
             for step in 1...count { PathTrimming.polylines[PathTrimming.polylines.count - 1].append(point(CGFloat(step) / CGFloat(count))) }
