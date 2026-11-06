@@ -32,6 +32,10 @@ VARIADIC _CFCalendarDecomposeAbsoluteTime, perry_foundation_cf_calendar_decompos
 // Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime *, const char *, ...)
 VARIADIC _CFCalendarComposeAbsoluteTime, perry_foundation_cf_calendar_compose, 3
 
+// NSDictionary *_NSDictionaryOfVariableBindings(NSString *keys, id first, ...),
+// which Auto Layout's NSDictionaryOfVariableBindings expands to.
+VARIADIC __NSDictionaryOfVariableBindings, perry_foundation_dictionary_of_variable_bindings, 2
+
 // Method implementations: self, _cmd, then the fixed arguments.
     .hidden perry_imp_stringWithFormat
 VARIADIC perry_imp_stringWithFormat, perry_foundation_stringWithFormat, 3
