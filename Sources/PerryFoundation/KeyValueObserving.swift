@@ -285,6 +285,19 @@ public func perry_foundation_kvo_did(_ object: id, _ selector: SEL) {
 
 @ObjCCategory("KeyValueObserving")
 extension NSObject {
+    /// The observation info Foundation keeps for an object: here what was
+    /// set, by object, else nil; Perry keeps its observers elsewhere.
+    nonisolated(unsafe) static var observationInfos: [UnsafeMutableRawPointer: UnsafeMutableRawPointer] = [:]
+
+    @ObjCMethod("observationInfo")
+    func observationInfo() -> UnsafeMutableRawPointer? { KeyValueObserving.locked { NSObject.observationInfos[objcObject] } }
+
+    @ObjCMethod("setObservationInfo:")
+    func setObservationInfo(_ info: UnsafeMutableRawPointer?) {
+        let object = objcObject
+        KeyValueObserving.locked { NSObject.observationInfos[object] = info }
+    }
+
     @ObjCMethod("addObserver:forKeyPath:options:context:")
     func addObserver(_ observer: ObjCObject?, forKeyPath keyPath: String, options: UInt, context: UnsafeMutableRawPointer?) {
         guard let observer else { return }

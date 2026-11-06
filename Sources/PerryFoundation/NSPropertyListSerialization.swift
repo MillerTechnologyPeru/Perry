@@ -11,23 +11,18 @@ import PerryObjCInterop
 enum PropertyLists {
     enum Kind { case dictionary, array }
 
-    /// The property list in a file, when it is of `kind`; mutable
-    /// throughout when `cls` is NSMutableDictionary or NSMutableArray or a
-    /// subclass.
+    /// The property list in a file, when it is of `kind`, its containers
+    /// mutable.
     static func contents(of url: URL, _ cls: ObjCClass, expecting kind: Kind) -> UnsafeMutableRawPointer? {
         guard url.isFileURL, let bytes = try? Data(contentsOf: url), let (value, _) = parse(Array(bytes)) else { return nil }
         switch (value, kind) {
         case (.dictionary, .dictionary), (.array, .array): break
         default: return nil
         }
-        let mutableName = kind == .dictionary ? "NSMutableDictionary" : "NSMutableArray"
-        var mutable = false
-        var current: ObjCClass? = cls
-        while let candidate = current {
-            if candidate.pointer == ObjCClass(named: mutableName).pointer { mutable = true }
-            current = candidate.superclass
-        }
-        return object(value, mutability: mutable ? 1 : 0)
+        // Mutable containers, whatever the class asked, as Foundation's are
+        // (+[NSDictionary dictionaryWithContentsOfFile:] gives an
+        // __NSDictionaryM): programs add to what these read.
+        return object(value, mutability: 1)
     }
 
     static let openStep: UInt = 1, xml: UInt = 100, binary: UInt = 200

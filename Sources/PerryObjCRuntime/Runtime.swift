@@ -429,6 +429,17 @@ extension Runtime {
         register(cls, name: info.name)
     }
 
+    /// objc_disposeClassPair: the class's name is free for another. Its
+    /// memory is kept, as instances or caches may still point to it.
+    public static func disposeClassPair(_ cls: ClassPointer) {
+        guard let info = Runtime.info(cls) else { return }
+        lock.withLock {
+            let key = CStringKey(pointer: info.name)
+            if classesByName[key] == cls { classesByName[key] = nil }
+        }
+        flushCaches()
+    }
+
     public static func setImplementation(_ method: UnsafeMutablePointer<perry_method>, _ imp: IMP?) -> IMP? {
         let old = lock.withLock {
             let old = method.pointee.imp

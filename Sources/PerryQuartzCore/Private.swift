@@ -58,6 +58,12 @@ final class GradientLayerState {
     var startPoint = CGPoint(x: 0.5, y: 0)
     var endPoint = CGPoint(x: 0.5, y: 1)
     var type = "axial"
+    var premultiplied = false
+    var interpolations: NSObject?
+    /// The space colors are interpolated in, retained.
+    var colorSpace: UnsafeMutableRawPointer?
+
+    deinit { if let colorSpace { ObjCRuntime.release(colorSpace) } }
 }
 
 /// CAGradientLayer: keeps its colors, locations and points; the gradient
@@ -82,6 +88,19 @@ open class CAGradientLayer: CALayer {
     @ObjCMethod("setEndPoint:") func setEndPoint(_ point: CGPoint) { changed { gradient.endPoint = point } }
     @ObjCMethod("type") func type() -> String { gradient.type }
     @ObjCMethod("setType:") func setType(_ type: String) { changed { gradient.type = type } }
+    /// Whether colors are interpolated premultiplied, and the private
+    /// per-stop interpolations SwiftUI sets: kept, as the gradient isn't drawn.
+    @ObjCMethod("premultiplied") func premultiplied() -> Bool { gradient.premultiplied }
+    @ObjCMethod("setPremultiplied:") func setPremultiplied(_ value: Bool) { gradient.premultiplied = value }
+    @ObjCMethod("interpolations") func interpolations() -> NSObject? { gradient.interpolations }
+    @ObjCMethod("setInterpolations:") func setInterpolations(_ value: NSObject?) { gradient.interpolations = value }
+    @ObjCMethod("colorSpace") func colorSpace() -> UnsafeMutableRawPointer? { gradient.colorSpace }
+    @ObjCMethod("setColorSpace:")
+    func setColorSpace(_ space: UnsafeMutableRawPointer?) {
+        let old = gradient.colorSpace
+        gradient.colorSpace = space.flatMap { ObjCRuntime.retain($0) }
+        if let old { ObjCRuntime.release(old) }
+    }
 }
 
 // MARK: - CAReplicatorLayer

@@ -152,10 +152,14 @@ enum Regexes {
     }
 }
 
-/// A match's ranges.
+/// A match's ranges, and what a data detector found.
 final class CheckingResultStorage {
     let ranges: [NSRange]
     let regex: id?
+    /// NSTextCheckingType: regular expression, else what was detected.
+    var type: UInt64 = DataDetectors.regularExpression
+    var url: URL?
+    var phoneNumber: String?
 
     init(ranges: [NSRange], regex: id?) {
         self.ranges = ranges
@@ -169,7 +173,7 @@ final class CheckingResultStorage {
 
 /// NSRegularExpression.
 @ObjCClass("NSRegularExpression")
-public final class NSRegularExpression: NSObject {
+public class NSRegularExpression: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Regexes.regexClass = cls.storage
@@ -179,11 +183,12 @@ public final class NSRegularExpression: NSObject {
 
     @ObjCMethod("dealloc")
     func dealloc() {
+        DataDetectors.forget(objcObject)
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: Regexes.regexClass)
     }
 
-    private static func failure(_ pattern: String, _ error: UnsafeMutablePointer<id?>?) {
+    static func failure(_ pattern: String, _ error: UnsafeMutablePointer<id?>?) {
         error?.pointee = ObjC.autorelease(Errors.make(domain: Errors.cocoaDomain, code: 2048, entries: [
             ("NSInvalidValue", Strings.autoreleased(pattern))]))
     }
@@ -233,9 +238,25 @@ public final class NSRegularExpression: NSObject {
         return escaped
     }
 
-    private func checkingResult(_ ranges: [NSRange]) -> id {
+    /// A match as a result: a data detector's with what it found, its
+    /// whole match its one range.
+    private func checkingResult(_ ranges: [NSRange], _ string: String) -> id {
         let object = Storage.allocate(UnsafeMutableRawPointer(Regexes.resultClass))!
-        Storage.set(object, CheckingResultStorage(ranges: ranges, regex: objcObject))
+        let result: CheckingResultStorage
+        if let types = DataDetectors.groupTypes(objcObject) {
+            result = CheckingResultStorage(ranges: [ranges[0]], regex: nil)
+            let units = Array(string.utf16)
+            let match = ranges[0]
+            let text = String(decoding: units[Int(match.location)..<Int(match.location + match.length)], as: UTF16.self)
+            let group = ranges.indices.dropFirst().first { ranges[$0].location != notFound }
+            let type = group.flatMap { $0 - 1 < types.count ? types[$0 - 1] : nil } ?? DataDetectors.link
+            result.type = type
+            if type == DataDetectors.link { result.url = DataDetectors.url(text) }
+            if type == DataDetectors.phoneNumber { result.phoneNumber = text }
+        } else {
+            result = CheckingResultStorage(ranges: ranges, regex: objcObject)
+        }
+        Storage.set(object, result)
         return ObjC.autorelease(object)!
     }
 
@@ -247,7 +268,7 @@ public final class NSRegularExpression: NSObject {
     func matches(in string: String, options: UInt, range: NSRange) -> ObjCObject {
         var results: [id] = []
         each(string, options, range) { ranges in
-            results.append(checkingResult(ranges))
+            results.append(checkingResult(ranges, string))
             return true
         }
         return ObjCObject(Arrays.autoreleased(results))
@@ -270,7 +291,7 @@ public final class NSRegularExpression: NSObject {
             first = ranges
             return false
         }
-        return first.map(checkingResult)
+        return first.map { checkingResult($0, string) }
     }
 
     @ObjCMethod("rangeOfFirstMatchInString:options:range:")
@@ -290,7 +311,7 @@ public final class NSRegularExpression: NSObject {
         let invoke = Blocks.invoke(block.id, as: Invoke.self)
         each(string, options, range) { ranges in
             var stop = false
-            ObjC.autoreleasepool { invoke(block.id, checkingResult(ranges), 0, &stop) }
+            ObjC.autoreleasepool { invoke(block.id, checkingResult(ranges, string), 0, &stop) }
             return !stop
         }
     }
@@ -350,7 +371,9 @@ public final class NSTextCheckingResult: NSObject {
     }
 
     /// NSTextCheckingTypeRegularExpression.
-    @ObjCMethod("resultType") func resultType() -> UInt64 { 1 << 10 }
+    @ObjCMethod("resultType") func resultType() -> UInt64 { storage?.type ?? DataDetectors.regularExpression }
+    @ObjCMethod("URL") func url() -> ObjCObject? { storage?.url.flatMap { URLs.autoreleased($0) }.map(ObjCObject.init) }
+    @ObjCMethod("phoneNumber") func phoneNumber() -> String? { storage?.phoneNumber }
     @ObjCMethod("range") func range() -> NSRange { storage?.ranges.first ?? NSRange(location: notFound, length: 0) }
     @ObjCMethod("numberOfRanges") func numberOfRanges() -> UInt { UInt(storage?.ranges.count ?? 0) }
 
@@ -383,4 +406,74 @@ public final class NSTextCheckingResult: NSObject {
     }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjC.retain(objcObject)! }
+}
+
+// MARK: - NSDataDetector
+
+/// What data detectors find, as NSTextCheckingTypes, and the patterns they
+/// find them by: links (URLs, www addresses and email addresses) and phone
+/// numbers (North American, and international ones written with a +).
+/// Dates, addresses and transit information are not detected.
+enum DataDetectors {
+    static let date: UInt64 = 1 << 3, address: UInt64 = 1 << 4, link: UInt64 = 1 << 5
+    static let regularExpression: UInt64 = 1 << 10, phoneNumber: UInt64 = 1 << 11
+
+    static let patterns: [(type: UInt64, pattern: String)] = [
+        (link, #"(?i:(?:(?:https?|ftp)://|www\.)[^\s<>"]*[^\s<>".,;:!?)\]']|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"#),
+        (phoneNumber, #"(?:\+\d[\d\s().-]{7,}\d|(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d))"#),
+    ]
+
+    /// Each detector's types, a capturing group's each, by object.
+    nonisolated(unsafe) static var detectors: [UInt: [UInt64]] = [:]
+    nonisolated(unsafe) static let lock = NSRecursiveLockStorage()
+
+    static func groupTypes(_ object: id) -> [UInt64]? { lock.locked { detectors[UInt(bitPattern: object)] } }
+    static func forget(_ object: id) { lock.locked { detectors[UInt(bitPattern: object)] = nil } }
+
+    /// The pattern for `types`, a group each, and the types in group order.
+    static func pattern(_ types: UInt64) -> (String, [UInt64]) {
+        let chosen = patterns.filter { types & $0.type != 0 }
+        // A detector of nothing matches nothing.
+        guard !chosen.isEmpty else { return ("(?!)", []) }
+        return (chosen.map { "(" + $0.pattern + ")" }.joined(separator: "|"), chosen.map(\.type))
+    }
+
+    static func url(_ text: String) -> URL? {
+        if text.contains("@"), !text.contains("://") { return URL(string: "mailto:" + text) }
+        if text.lowercased().hasPrefix("www.") { return URL(string: "http://" + text) }
+        return URL(string: text)
+    }
+}
+
+/// NSDataDetector: a regular expression for the kinds of data it is asked
+/// to find.
+@ObjCClass("NSDataDetector")
+public final class NSDataDetector: NSRegularExpression {
+    @ObjCClassMethod("dataDetectorWithTypes:error:")
+    static func detector(_ cls: ObjCClass, types: UInt64, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        let (pattern, groups) = DataDetectors.pattern(types)
+        guard let regex = RegexStorage(pattern: pattern, options: 0), let object = Storage.allocate(cls.pointer) else {
+            NSRegularExpression.failure(pattern, error)
+            return nil
+        }
+        Storage.set(object, regex)
+        DataDetectors.lock.locked { DataDetectors.detectors[UInt(bitPattern: object)] = groups }
+        return ObjC.autorelease(object)
+    }
+
+    @ObjCMethod("initWithTypes:error:")
+    func initialize(types: UInt64, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        let (pattern, groups) = DataDetectors.pattern(types)
+        guard let regex = RegexStorage(pattern: pattern, options: 0) else {
+            NSRegularExpression.failure(pattern, error)
+            return nil
+        }
+        Storage.set(objcObject, regex)
+        let object = objcObject
+        DataDetectors.lock.locked { DataDetectors.detectors[UInt(bitPattern: object)] = groups }
+        return ObjC.retain(objcObject)
+    }
+
+    @ObjCMethod("checkingTypes")
+    func checkingTypes() -> UInt64 { DataDetectors.groupTypes(objcObject)?.reduce(0, |) ?? 0 }
 }

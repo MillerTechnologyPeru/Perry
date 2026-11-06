@@ -239,6 +239,20 @@ enum ColorSpaceNames {
 @c(_CGColorSpaceCreateDeviceGray) public func CGColorSpaceCreateDeviceGray() -> Ref { ColorSpaces.make(model: 0, name: nil) }
 @c(_CGColorSpaceCreateDeviceCMYK) public func CGColorSpaceCreateDeviceCMYK() -> Ref { ColorSpaces.make(model: 2, name: nil) }
 
+/// Calibrated spaces, by white and black points, gamma and a matrix: drawn
+/// as device RGB and gray are, colors passing through unconverted.
+@c(_CGColorSpaceCreateCalibratedRGB)
+public func CGColorSpaceCreateCalibratedRGB(_ whitePoint: UnsafePointer<CGFloat>?, _ blackPoint: UnsafePointer<CGFloat>?,
+                                            _ gamma: UnsafePointer<CGFloat>?, _ matrix: UnsafePointer<CGFloat>?) -> Ref {
+    ColorSpaces.make(model: 1, name: nil)
+}
+
+@c(_CGColorSpaceCreateCalibratedGray)
+public func CGColorSpaceCreateCalibratedGray(_ whitePoint: UnsafePointer<CGFloat>?, _ blackPoint: UnsafePointer<CGFloat>?,
+                                             _ gamma: CGFloat) -> Ref {
+    ColorSpaces.make(model: 0, name: nil)
+}
+
 @c(_CGColorSpaceCreateWithName)
 public func CGColorSpaceCreateWithName(_ name: Ref?) -> Ref? {
     guard let name else { return nil }

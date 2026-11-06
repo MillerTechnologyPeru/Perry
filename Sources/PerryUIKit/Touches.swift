@@ -583,7 +583,7 @@ enum Touches {
     }
 
     private static func sendRecognizers(_ phase: Phase, _ set: NSMutableSet, _ event: UIEvent) {
-        trace("\(phase) to \(recognizers.map { "\($0.objcObject):\($0.state.state)" })")
+        trace("\(phase) to \(recognizers.map { "\($0.describedByObject()):\($0.state.state)" })")
         for recognizer in recognizers where recognizer.state.state <= 2 {
             switch phase {
             case .began: recognizer.sendTouchesBegan(set, with: event)

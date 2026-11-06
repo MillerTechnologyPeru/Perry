@@ -755,17 +755,15 @@ public final class Session: @unchecked Sendable {
         }
     }
 
-    /// Sessions let go with tasks still running. corelibs' URLSession
-    /// cannot be freed while its tasks run, which Darwin's outlives: such a
-    /// session finishes them, invalidated, and is kept for good.
+    /// Sessions let go. corelibs' URLSession can't be freed safely: while
+    /// its tasks run, or after, when a finished task holding the last
+    /// reference goes, its deinit finds its curl multi handle still
+    /// referenced and traps. Darwin's outlives both. A session let go
+    /// finishes its tasks, invalidated, and is kept for good.
     nonisolated(unsafe) private static var orphans: [URLSession] = []
     private static let orphansLock = NSLock()
 
     deinit {
-        lock.lock()
-        let running = tasks.values.contains { $0.value.state != .completed }
-        lock.unlock()
-        guard running else { return }
         value.finishTasksAndInvalidate()
         Self.orphansLock.lock()
         Self.orphans.append(value)

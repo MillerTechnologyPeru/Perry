@@ -12,6 +12,8 @@ enum ConcurrencyType {
 
 final class ContextState: ObjectState {
     var coordinator: NSPersistentStoreCoordinator?
+    /// The context this one was made under, retained as Core Data does.
+    var parent: NSManagedObjectContext?
     var concurrencyType = ConcurrencyType.confinement
     var name: String?
     var registered: [String: NSManagedObject] = [:]
@@ -41,7 +43,10 @@ open class NSManagedObjectContext: NSObject {
     static let states = StateTable<ContextState>()
     var state: ContextState { NSManagedObjectContext.states[objcObject] }
 
-    var coordinator: NSPersistentStoreCoordinator? { state.coordinator }
+    /// Its own coordinator, else its parent's: a child context reads and
+    /// saves through its parent's store, a save going to the store at once
+    /// rather than into the parent.
+    var coordinator: NSPersistentStoreCoordinator? { state.coordinator ?? state.parent?.coordinator }
 
     private static func key(_ entity: String, _ id: ObjectID) -> String { entity + "/" + id.rawValue }
 
@@ -67,7 +72,8 @@ open class NSManagedObjectContext: NSObject {
     @ObjCMethod("concurrencyType") func concurrencyType() -> UInt { state.concurrencyType }
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
-    @ObjCMethod("parentContext") func parentContext() -> NSManagedObjectContext? { nil }
+    @ObjCMethod("parentContext") func parentContext() -> NSManagedObjectContext? { state.parent }
+    @ObjCMethod("setParentContext:") func setParentContext(_ parent: NSManagedObjectContext?) { state.parent = parent }
     @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
     @ObjCMethod("setUndoManager:") func setUndoManager(_ manager: NSObject?) {}
     @ObjCMethod("mergePolicy") func mergePolicy() -> NSObject? { state.mergePolicy }
