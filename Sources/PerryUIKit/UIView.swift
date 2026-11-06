@@ -895,6 +895,16 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// -viewWillLayoutSubviews and -viewDidLayoutSubviews.
     @ObjCMethod("layoutIfNeeded")
     func layoutIfNeeded() {
+        // A view whose constraints may use its safe area is laid out again
+        // when the area changes, as when its screen slides into place.
+        if let guides = UIView.guides.existing(objcObject), guides.safeArea != nil {
+            let insets = safeAreaInsets()
+            if insets != guides.laidOutSafeArea {
+                guides.laidOutSafeArea = insets
+                state.needsLayout = true
+                sendSafeAreaInsetsDidChange()
+            }
+        }
         if state.needsLayout {
             state.needsLayout = false
             let controller = state.viewController.map { NSObject($0) }
@@ -1093,6 +1103,7 @@ open class UIDropShadowView: UIView {
 
 /// UIView's messages, sent so subclasses' overrides run.
 extension NSObject {
+    @ObjCMethod("safeAreaInsetsDidChange") func sendSafeAreaInsetsDidChange()
     @ObjCMethod("initWithFrame:")
     func initializeView(frame: CGRect) -> NSObject
 
