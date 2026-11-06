@@ -915,8 +915,15 @@ extension Image {
             if let bundle = location.bundle, let provider = NamedImage.platformImage?(name, bundle, context.environment.colorScheme) {
                 return provider.resolve(in: context)
             }
-            if case .system = location, let provider = NamedImage.platformSymbol?(name) {
-                return provider.resolve(in: context)
+            if case .system = location {
+                // The fill variant first, when the environment asks for it,
+                // as tab bars do for their selected item.
+                let fill = context.environment.symbolVariants.contains(.fill) && !name.hasSuffix(".fill")
+                for candidate in fill ? [name + ".fill", name] : [name] {
+                    if let provider = NamedImage.platformSymbol?(candidate) {
+                        return provider.resolve(in: context)
+                    }
+                }
             }
             #endif
             return resolveError(in: context.environment)

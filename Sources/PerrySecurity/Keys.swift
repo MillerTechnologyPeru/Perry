@@ -551,6 +551,19 @@ public func SecKeyCreateRandomKey(_ parameters: UnsafeMutableRawPointer?,
             Status.report(error, status)
             return nil
         }
+        // macOS keeps the pair's public key beside it, with the same label
+        // and tag unless the public key's attributes give their own; apps
+        // (Xbox Live's Xal) look both up.
+        if let publicState = try? state.publicKey {
+            let publicAttributes = dictionary.object(ItemKeys.kSecPublicKeyAttrs).map { NSDictionary($0.objcObject) }
+            (publicState.label, publicState.tag) = (state.label, state.tag)
+            if let label = publicAttributes?.object(ItemKeys.kSecAttrLabel), label.isString { publicState.label = label.stringValue }
+            if let tag = publicAttributes?.object(ItemKeys.kSecAttrApplicationTag) {
+                publicState.tag = tag.isData ? NSData(tag.objcObject).data : tag.isString ? Data(tag.stringValue.utf8) : nil
+            }
+            let added = Keychain.shared.add(key: publicState, attributes: publicAttributes)
+            if added != Status.success && added != Status.duplicateItem { securityWarning("SecKeyCreateRandomKey: the public key wasn't kept: \(added)") }
+        }
     }
     return Keys.object(state)
 }
@@ -597,8 +610,9 @@ public func SecKeyGeneratePair(_ parameters: UnsafeMutableRawPointer?, _ publicK
             publicState.tag = tag.isData ? NSData(tag.objcObject).data : tag.isString ? Data(tag.stringValue.utf8) : nil
         }
         if publicAttributes.object(ItemKeys.kSecAttrIsPermanent)?.truth ?? false {
+            // SecKeyCreateRandomKey keeps it already when the pair is permanent.
             let status = Keychain.shared.add(key: publicState, attributes: publicAttributes)
-            if status != Status.success { return status }
+            if status != Status.success && status != Status.duplicateItem { return status }
         }
     }
     privateKey?.pointee = created

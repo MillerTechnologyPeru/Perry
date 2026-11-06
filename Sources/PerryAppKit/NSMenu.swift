@@ -23,6 +23,28 @@ open class NSMenu: NSObject {
         self.title = title ?? ""
     }
 
+    /// A nib's menu: "NSTitle", "NSMenuItems", and "NSName" for the menus
+    /// AppKit keeps by name.
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        title = decoded.string("NSTitle") ?? ""
+        for item in decoded.array("NSMenuItems") {
+            guard let item = item.as(NSMenuItem.self) else { continue }
+            items.append(item)
+            item.menu = objcObject
+        }
+        switch decoded.string("NSName") {
+        case "_NSMainMenu": App.shared?.mainMenu = self
+        case "_NSServicesMenu": App.shared?.servicesMenu = self
+        case "_NSHelpMenu": App.shared?.helpMenu = self
+        case "_NSWindowsMenu": App.shared?.windowsMenu = self
+        default: break
+        }
+    }
+
     @ObjCMethod("title") func menuTitle() -> String { title }
     @ObjCMethod("setTitle:") func setTitle(_ title: String?) { self.title = title ?? "" }
     @ObjCMethod("supermenu") func menuSupermenu() -> NSMenu? { supermenu.map { NSMenu.objCInstance($0, ownership: .retain) } }
@@ -119,6 +141,28 @@ open class NSMenuItem: NSObject {
         self.title = title ?? ""
         self.action = action
         self.keyEquivalent = keyEquivalent ?? ""
+    }
+
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        separator = decoded.bool("NSIsSeparator")
+        title = decoded.string("NSTitle") ?? ""
+        keyEquivalent = decoded.string("NSKeyEquiv") ?? ""
+        if decoded.has("NSKeyEquivModMask") { keyEquivalentModifierMask = UInt(bitPattern: decoded.integer("NSKeyEquivModMask")) }
+        enabled = !decoded.bool("NSIsDisabled") && !separator
+        hidden = decoded.bool("NSIsHidden")
+        tag = decoded.integer("NSTag")
+        state = decoded.integer("NSState")
+        action = decoded.selector("NSAction")
+        target = decoded.object("NSTarget")?.objcObject
+        representedObject = decoded.object("NSRepObject")
+        image = decoded.object("NSImage")
+        toolTip = decoded.string("NSToolTip")
+        indentationLevel = decoded.integer("NSIndent")
+        if let submenu = decoded.object("NSSubmenu")?.as(NSMenu.self) { setSubmenu(submenu) }
     }
 
     @ObjCClassMethod("separatorItem")

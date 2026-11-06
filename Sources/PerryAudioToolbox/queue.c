@@ -675,3 +675,20 @@ OSStatus darwin_AudioQueueGetParameter(void *handle, uint32_t id, float *value) 
     *value = id == kAudioQueueParam_Volume ? (float)q->volume : 0;
     return 0;
 }
+
+// Offline rendering, a queue rendering into the caller's buffers instead of
+// playing: queues here play through GStreamer only, so it is refused
+// (kAudioQueueErr_InvalidOfflineMode), as for a queue that can't.
+OSStatus darwin_AudioQueueSetOfflineRenderFormat(void *queue, const void *format, const void *layout)
+    DARWIN_SYMBOL(AudioQueueSetOfflineRenderFormat);
+OSStatus darwin_AudioQueueSetOfflineRenderFormat(void *queue, const void *format, const void *layout) {
+    (void)queue, (void)format, (void)layout;
+    return -66626;
+}
+
+OSStatus darwin_AudioQueueOfflineRender(void *queue, const void *time, void *buffer, uint32_t frames)
+    DARWIN_SYMBOL(AudioQueueOfflineRender);
+OSStatus darwin_AudioQueueOfflineRender(void *queue, const void *time, void *buffer, uint32_t frames) {
+    (void)queue, (void)time, (void)buffer, (void)frames;
+    return -66626;
+}

@@ -585,35 +585,53 @@ enum Controllers {
     /// With PERRY_GAMECONTROLLER_TOUCHES set to buttons and the points they
     /// touch, in the screen's coordinates ("a=608,329;b=32,327"), a finger
     /// is on the screen at a button's point for as long as the button is
-    /// held: for a program whose own buttons only answer to touch. The
-    /// buttons are the quit combinations', and l2, r2, up, down, left and
-    /// right.
-    nonisolated(unsafe) private static let touchButtons: [(name: String, x: Double, y: Double)] = {
+    /// held: for a program whose own buttons only answer to touch. A
+    /// button given two points ("a=800,250>800,480") drags: its finger
+    /// goes down at the first, moves to the second over a quarter of a
+    /// second and stays there until the button is let go, as a plunger is
+    /// pulled and released. The buttons are the quit combinations', and
+    /// l2, r2, up, down, left and right.
+    nonisolated(unsafe) private static let touchButtons: [(name: String, x: Double, y: Double, toX: Double, toY: Double)] = {
         guard let setting = getenv("PERRY_GAMECONTROLLER_TOUCHES") else { return [] }
         return String(cString: setting).lowercased().split(separator: ";").compactMap { entry in
             let sides = entry.split(separator: "=")
-            let point = sides.last?.split(separator: ",").compactMap { Double($0.filter { $0 != " " }) } ?? []
-            guard sides.count == 2, point.count == 2 else { return nil }
-            return (String(sides[0].filter { $0 != " " }), point[0], point[1])
+            let points = (sides.last ?? "").split(separator: ">").map { point in
+                point.split(separator: ",").compactMap { Double($0.filter { $0 != " " }) }
+            }
+            guard sides.count == 2, let start = points.first, start.count == 2, points.allSatisfy({ $0.count == 2 }) else { return nil }
+            let end = points.count > 1 ? points[1] : start
+            return (String(sides[0].filter { $0 != " " }), start[0], start[1], end[0], end[1])
         }
     }()
 
-    /// The touch buttons held at the last read, by their place in the list.
-    nonisolated(unsafe) private static var touching: Set<Int> = []
+    /// The touch buttons held, by their place in the list, with the reads
+    /// since each went down.
+    nonisolated(unsafe) private static var touching: [Int: Int] = [:]
+    /// The reads a drag takes: a quarter of a second's.
+    private static let dragReads = 15
 
-    /// PERRY_GAMECONTROLLER_HOLD, "button,seconds": a touch button held
-    /// from that long after the program started, to try what it touches
-    /// without pressing it.
-    nonisolated(unsafe) private static let pretended: (name: String, from: Double)? = {
-        guard let setting = getenv("PERRY_GAMECONTROLLER_HOLD") else { return nil }
-        let parts = String(cString: setting).lowercased().split(separator: ",")
-        guard let name = parts.first else { return nil }
-        return (String(name), now() + (parts.count > 1 ? Double(parts[1]) ?? 0 : 0))
+    /// PERRY_GAMECONTROLLER_HOLD, "button,seconds" or "button,from,until",
+    /// several separated by semicolons and buttons joined by "+"
+    /// ("l2+r2,20,21;a,24,27"): touch buttons held from that long after
+    /// the program started, until then if a second time is given, to try
+    /// what they touch without pressing them.
+    nonisolated(unsafe) private static let pretended: [(names: [String], from: Double, until: Double)] = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_HOLD") else { return [] }
+        let start = now()
+        return String(cString: setting).lowercased().split(separator: ";").compactMap { entry in
+            let parts = entry.split(separator: ",")
+            guard let names = parts.first else { return nil }
+            return (names.split(separator: "+").map(String.init), start + (parts.count > 1 ? Double(parts[1]) ?? 0 : 0),
+                    parts.count > 2 ? start + (Double(parts[2]) ?? 0) : .infinity)
+        }
     }()
 
     /// Whether the button a setting names is held.
     private static func held(_ name: String, on gamepad: SDL.Pointer) -> Bool {
-        if let pretended, pretended.name == name, now() >= pretended.from { return true }
+        if !pretended.isEmpty {
+            let time = now()
+            if pretended.contains(where: { $0.names.contains(name) && time >= $0.from && time < $0.until }) { return true }
+        }
         switch name {
         case "l2": return SDL.getGamepadAxis(gamepad, Axis.leftTrigger.rawValue) > 16000
         case "r2": return SDL.getGamepadAxis(gamepad, Axis.rightTrigger.rawValue) > 16000
@@ -625,14 +643,41 @@ enum Controllers {
         }
     }
 
-    /// Puts down and lifts the fingers of the touch buttons that changed.
+    /// Whether the first gamepad's button of that name is held: for
+    /// CoreMotion, which a button can shake.
+    static func isHeld(_ name: String) -> Bool {
+        if !pretended.isEmpty {
+            let time = now()
+            if pretended.contains(where: { $0.names.contains(name) && time >= $0.from && time < $0.until }) { return true }
+        }
+        return firstGamepad.map { held(name, on: $0) } ?? false
+    }
+
+    /// Puts down and lifts the fingers of the touch buttons that changed,
+    /// and moves those that drag.
     private static func touch(with gamepad: SDL.Pointer) {
         for (index, button) in touchButtons.enumerated() {
             let isHeld = held(button.name, on: gamepad)
-            guard isHeld != touching.contains(index) else { continue }
-            if isHeld { touching.insert(index) } else { touching.remove(index) }
-            trace("touch \(isHeld ? "down" : "up") at \(button.x), \(button.y) for \(button.name)")
-            finger(index, phase: isHeld ? 0 : 2, x: button.x, y: button.y)
+            func point(_ reads: Int) -> (x: Double, y: Double) {
+                let part = Double(min(reads, dragReads)) / Double(dragReads)
+                return (button.x + (button.toX - button.x) * part, button.y + (button.toY - button.y) * part)
+            }
+            if let reads = touching[index] {
+                if !isHeld {
+                    touching[index] = nil
+                    let at = point(reads)
+                    trace("touch up at \(at.x), \(at.y) for \(button.name)")
+                    finger(index, phase: 2, x: at.x, y: at.y)
+                } else if reads < dragReads, button.toX != button.x || button.toY != button.y {
+                    touching[index] = reads + 1
+                    let at = point(reads + 1)
+                    finger(index, phase: 1, x: at.x, y: at.y)
+                }
+            } else if isHeld {
+                touching[index] = 0
+                trace("touch down at \(button.x), \(button.y) for \(button.name)")
+                finger(index, phase: 0, x: button.x, y: button.y)
+            }
         }
     }
 

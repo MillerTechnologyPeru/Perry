@@ -35,13 +35,16 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Accessibility.load { symbol(libobjc, $0) }
     AssetCatalog.load(symbol)
     #if !arch(arm)
-    // A Mac app's WebKit is AppKit's; UIKit, there for its CoreText, keeps
-    // its own WebKit classes under names of its own. armv7 runs only iOS apps.
+    // A Mac app's WebKit, Auto Layout and paragraph styles are AppKit's;
+    // UIKit, there for its CoreText, keeps its own classes of those under
+    // names of its own. armv7 runs only iOS apps.
     if isMacApp(info.main_header) {
-        let webKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
+        let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
                              "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration",
-                             "WKWebpagePreferences", "WKWebsiteDataStore"]
-        for name in webKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
+                             "WKWebpagePreferences", "WKWebsiteDataStore",
+                             "NSLayoutConstraint", "NSLayoutAnchor", "NSLayoutXAxisAnchor", "NSLayoutYAxisAnchor", "NSLayoutDimension",
+                             "NSParagraphStyle", "NSMutableParagraphStyle"]
+        for name in appKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
     }
     #endif
     return true
@@ -162,6 +165,11 @@ enum Classes {
 @c(_UIAccessibilityIsSpeakScreenEnabled) public func UIAccessibilityIsSpeakScreenEnabled() -> Bool { false }
 @c(_UIAccessibilityIsSpeakSelectionEnabled) public func UIAccessibilityIsSpeakSelectionEnabled() -> Bool { false }
 @c(_UIAccessibilityDarkerSystemColorsEnabled) public func UIAccessibilityDarkerSystemColorsEnabled() -> Bool { false }
+@c(_UIAccessibilityIsOnOffSwitchLabelsEnabled) public func UIAccessibilityIsOnOffSwitchLabelsEnabled() -> Bool { false }
+/// Videos play by themselves, as they do unless the setting is turned off.
+@c(_UIAccessibilityIsVideoAutoplayEnabled) public func UIAccessibilityIsVideoAutoplayEnabled() -> Bool { true }
+/// UIAccessibilityHearingDeviceEar: no hearing device is paired.
+@c(_UIAccessibilityHearingDevicePairedEar) public func UIAccessibilityHearingDevicePairedEar() -> UInt { 0 }
 @c(_UIAccessibilityShouldDifferentiateWithoutColor)
 public func UIAccessibilityShouldDifferentiateWithoutColor() -> Bool { false }
 

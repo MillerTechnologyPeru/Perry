@@ -8,8 +8,12 @@ import PerryObjCInterop
 // the window's content view's layer tree. A layer's frame is its view's,
 // flipped into the superlayer's top-left coordinates for a superview that
 // isn't flipped. Changing a view's frame moves and resizes its layer and,
-// by their autoresizing masks, its subviews. Views don't draw with
-// -drawRect: here; their layers show what is set on them.
+// by their autoresizing masks, its subviews. A view whose class draws
+// (overrides -drawRect:) is its layer's delegate, and draws into the
+// layer's bitmap with an NSGraphicsContext current, in its own coordinates,
+// when it needs display. Views from nibs decode their frame, flags,
+// subviews and constraints; a view's constraints lay out its subviews when
+// it lays out (Layout.swift).
 
 @ObjCClass("NSView")
 open class NSView: NSResponder {
@@ -36,6 +40,11 @@ open class NSView: NSResponder {
     var toolTip: String?
     var appearance: NSObject?
     var nextKeyView: NSObject?
+    var constraints: [NSLayoutConstraint] = []
+    var translatesAutoresizingMask = true
+    var gestureRecognizers: [NSObject] = []
+    var hugging: [Float] = [250, 250]
+    var compressionResistance: [Float] = [750, 750]
 
     @ObjCMethod("init")
     public required init() { super.init() }
@@ -46,8 +55,55 @@ open class NSView: NSResponder {
         self.frame = frame
     }
 
+    /// NSView's archive: its frame ("NSFrame", or "NSFrameSize" at the
+    /// origin), "NSvFlags" (the autoresizing mask in the low six bits,
+    /// hidden in the top bit), "NSSubviews" and "NSViewConstraints".
     @ObjCMethod("initWithCoder:")
-    public required init(coder: NSObject?) { super.init() }
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        frame = NSView.frame(from: decoded)
+        decodeContents(decoded)
+    }
+
+    static func frame(from coder: Coder) -> CGRect {
+        coder.has("NSFrame") ? coder.rect("NSFrame") : CGRect(origin: .zero, size: coder.size("NSFrameSize"))
+    }
+
+    /// What a view's archive holds besides its frame.
+    func decodeContents(_ decoded: Coder) {
+        let flags = UInt32(truncatingIfNeeded: decoded.integer("NSvFlags"))
+        autoresizingMask = UInt(flags & 0x3f)
+        autoresizesSubviews = flags & 0x100 != 0 || !decoded.has("NSvFlags")
+        hidden = flags & 0x8000_0000 != 0
+        translatesAutoresizingMask = !decoded.bool("NSDoNotTranslateAutoresizingMask")
+        if decoded.bool("NSViewIsLayerTreeHost") || decoded.bool("NSViewWantsLayer") { wantsLayer = true }
+        identifier = decoded.string("NSUserInterfaceItemIdentifier") ?? decoded.string("NSViewIdentifier")
+        toolTip = decoded.string("NSToolTip")
+        if decoded.has("NSHuggingPriority") {
+            let v = decoded.string("NSHuggingPriority").map(NSView.pair) ?? []
+            if v.count == 2 { hugging = v }
+        }
+        if decoded.has("NSAntiCompressionPriority") {
+            let v = decoded.string("NSAntiCompressionPriority").map(NSView.pair) ?? []
+            if v.count == 2 { compressionResistance = v }
+        }
+        for subview in decoded.array("NSSubviews") {
+            guard let view = subview.as(NSView.self) else { continue }
+            addSubview(view)
+        }
+        for constraint in decoded.array("NSViewConstraints") {
+            if let constraint = constraint.as(NSLayoutConstraint.self) { constraints.append(constraint) }
+        }
+        if !constraints.isEmpty { needsLayout = true }
+        gestureRecognizers = decoded.array("NSGestureRecognizers")
+    }
+
+    /// "{250, 750}"
+    private static func pair(_ text: String) -> [Float] {
+        text.split(whereSeparator: { "{}, ".contains($0) }).compactMap { Float(String($0)) }
+    }
 
     deinit {
         for subview in subviews { subview.superviewObject = nil }
@@ -90,6 +146,7 @@ open class NSView: NSResponder {
         guard size != old else { return }
         frame.size = size
         updateLayerGeometry()
+        if draws { setNeedsDisplay(true) }
         if autoresizesSubviews {
             typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGSize) -> Void
             unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("resizeSubviewsWithOldSize:"), old)
@@ -102,14 +159,23 @@ open class NSView: NSResponder {
 
     @ObjCMethod("setBounds:")
     func setBounds(_ bounds: CGRect) {
-        boundsOrigin = bounds.origin
+        setBoundsOrigin(bounds.origin)
         if bounds.size != frame.size { Send.void(objcObject, "setFrameSize:", size: bounds.size) }
     }
-    @ObjCMethod("setBoundsOrigin:") func setBoundsOrigin(_ origin: CGPoint) { boundsOrigin = origin }
+    @ObjCMethod("setBoundsOrigin:")
+    func setBoundsOrigin(_ origin: CGPoint) {
+        guard origin != boundsOrigin else { return }
+        boundsOrigin = origin
+        for subview in subviews { subview.updateLayerGeometry() }
+        if draws { setNeedsDisplay(true) }
+        if postsBoundsChangedNotifications { post(Constants.NSViewBoundsDidChangeNotification, object: self) }
+    }
     @ObjCMethod("setBoundsSize:") func setBoundsSize(_ size: CGSize) { Send.void(objcObject, "setFrameSize:", size: size) }
 
     private func postFrameChanged() {
         if postsFrameChangedNotifications { post(Constants.NSViewFrameDidChangeNotification, object: self) }
+        // A clip view keeps showing its document as the document changes.
+        if let clip = superview?.as(NSClipView.self), clip.documentView === self { clip.documentFrameChanged() }
     }
 
     @ObjCMethod("resizeSubviewsWithOldSize:")
@@ -146,13 +212,26 @@ open class NSView: NSResponder {
     @ObjCMethod("setAutoresizingMask:") func setAutoresizingMask(_ mask: UInt) { autoresizingMask = mask }
     @ObjCMethod("autoresizesSubviews") func viewAutoresizesSubviews() -> Bool { autoresizesSubviews }
     @ObjCMethod("setAutoresizesSubviews:") func setAutoresizesSubviews(_ value: Bool) { autoresizesSubviews = value }
-    @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool { true }
-    @ObjCMethod("setTranslatesAutoresizingMaskIntoConstraints:") func setTranslatesAutoresizingMaskIntoConstraints(_ value: Bool) {}
+    @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool { translatesAutoresizingMask }
+    @ObjCMethod("setTranslatesAutoresizingMaskIntoConstraints:")
+    func setTranslatesAutoresizingMaskIntoConstraints(_ value: Bool) {
+        translatesAutoresizingMask = value
+        superview?.needsLayout = true
+    }
     @ObjCMethod("postsFrameChangedNotifications") func viewPostsFrameChanged() -> Bool { postsFrameChangedNotifications }
     @ObjCMethod("setPostsFrameChangedNotifications:") func setPostsFrameChangedNotifications(_ value: Bool) { postsFrameChangedNotifications = value }
     @ObjCMethod("setPostsBoundsChangedNotifications:") func setPostsBoundsChangedNotifications(_ value: Bool) { postsBoundsChangedNotifications = value }
 
-    @ObjCMethod("visibleRect") func visibleRect() -> CGRect { bounds }
+    /// The part of the bounds its superviews (clip views) show.
+    @ObjCMethod("visibleRect")
+    func visibleRect() -> CGRect {
+        guard let superview else { return bounds }
+        let shown = superview.visibleRect()
+        let mine = convert(shown, from: superview)
+        let x0 = max(bounds.minX, mine.minX), y0 = max(bounds.minY, mine.minY)
+        let x1 = min(bounds.maxX, mine.maxX), y1 = min(bounds.maxY, mine.maxY)
+        return x1 > x0 && y1 > y0 ? CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0) : .zero
+    }
     @ObjCMethod("isHidden") func isHidden() -> Bool { hidden }
     @ObjCMethod("isHiddenOrHasHiddenAncestor") func isHiddenOrHasHiddenAncestor() -> Bool { hidden || (superview?.isHiddenOrHasHiddenAncestor() ?? false) }
 
@@ -185,7 +264,57 @@ open class NSView: NSResponder {
     @ObjCMethod("setWantsRestingTouches:") func setWantsRestingTouches(_ wants: Bool) {}
     @ObjCMethod("setFocusRingType:") func setFocusRingType(_ type: UInt) {}
     @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
-    @ObjCMethod("enclosingScrollView") func enclosingScrollView() -> NSObject? { nil }
+    @ObjCMethod("enclosingScrollView")
+    func enclosingScrollView() -> NSView? {
+        var view = superview
+        while let current = view {
+            if current.is(NSScrollView.self) { return current }
+            view = current.superview
+        }
+        return nil
+    }
+    @ObjCMethod("gestureRecognizers") func viewGestureRecognizers() -> NSObject { NSMutableArray.of(gestureRecognizers) }
+    @ObjCMethod("setGestureRecognizers:") func setGestureRecognizers(_ value: NSObject?) { gestureRecognizers = value?.as(NSArray.self)?.elements ?? [] }
+    @ObjCMethod("addGestureRecognizer:") func addGestureRecognizer(_ recognizer: NSObject?) { recognizer.map { gestureRecognizers.append($0) } }
+    @ObjCMethod("removeGestureRecognizer:") func removeGestureRecognizer(_ recognizer: NSObject?) { gestureRecognizers.removeAll { $0 === recognizer } }
+    @ObjCMethod("wantsDefaultClipping") func wantsDefaultClipping() -> Bool { true }
+    @ObjCMethod("clipsToBounds") func clipsToBounds() -> Bool { false }
+    @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ value: Bool) { layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).setMasksToBounds(value) } }
+    @ObjCMethod("isRotatedFromBase") func isRotatedFromBase() -> Bool { false }
+    @ObjCMethod("isRotatedOrScaledFromBase") func isRotatedOrScaledFromBase() -> Bool { false }
+    @ObjCMethod("canDraw") func canDraw() -> Bool { windowObject != nil }
+    @ObjCMethod("canBecomeKeyView") func canBecomeKeyView() -> Bool { Send.bool(objcObject, "acceptsFirstResponder") && !hidden }
+    @ObjCMethod("previousKeyView") func previousKeyView() -> NSObject? { nil }
+    @ObjCMethod("nextValidKeyView") func nextValidKeyView() -> NSObject? { nextKeyView }
+    @ObjCMethod("setKeyboardFocusRingNeedsDisplayInRect:") func setKeyboardFocusRingNeedsDisplay(in rect: CGRect) {}
+    @ObjCMethod("focusRingType") func focusRingType() -> UInt { 0 }
+    @ObjCMethod("scrollPoint:")
+    func scroll(_ point: CGPoint) {
+        guard let clip = superview?.as(NSClipView.self) else { return }
+        clip.scroll(to: clip.constrainBoundsRect(CGRect(origin: convert(point, to: clip), size: clip.bounds.size)).origin)
+    }
+    @ObjCMethod("scrollRectToVisible:")
+    func scrollRectToVisible(_ rect: CGRect) -> Bool {
+        guard let clip = superview?.as(NSClipView.self) else { return false }
+        let target = convert(rect, to: clip)
+        var origin = clip.bounds.origin
+        if target.minX < clip.bounds.minX { origin.x = target.minX } else if target.maxX > clip.bounds.maxX { origin.x = target.maxX - clip.bounds.width }
+        if target.minY < clip.bounds.minY { origin.y = target.minY } else if target.maxY > clip.bounds.maxY { origin.y = target.maxY - clip.bounds.height }
+        guard origin != clip.bounds.origin else { return false }
+        clip.scroll(to: clip.constrainBoundsRect(CGRect(origin: origin, size: clip.bounds.size)).origin)
+        return true
+    }
+    @ObjCMethod("autoscroll:") func autoscroll(_ event: NSObject?) -> Bool { false }
+    @ObjCMethod("enclosingMenuItem") func enclosingMenuItem() -> NSObject? { nil }
+    @ObjCMethod("ancestorSharedWithView:")
+    func ancestorShared(with view: NSView?) -> NSView? {
+        var current: NSView? = self
+        while let candidate = current {
+            if let view, view.isDescendant(of: candidate) { return candidate }
+            current = candidate.superview
+        }
+        return nil
+    }
 
     // MARK: The view hierarchy
 
@@ -227,10 +356,15 @@ open class NSView: NSResponder {
         view.setWindowTree(windowObject)
         if windowObject != nil || layer != nil {
             ensureLayer()
+            // A view built apart from a window gets its layers now, its
+            // subviews' with it.
+            view.ensureLayer()
             view.attachLayer(to: self)
         }
         Send.void(view.objcObject, "viewDidMoveToSuperview")
+        Send.void(objcObject, "didAddSubview:", view.objcObject)
         if moving { view.didMoveToWindowTree() }
+        needsLayout = true
         Windows.layersChanged()
     }
 
@@ -324,6 +458,7 @@ open class NSView: NSResponder {
     }
 
     @ObjCMethod("makeBackingLayer") func makeBackingLayer() -> NSObject { CALayer.make() }
+    @ObjCMethod("makeBackingLayerIfNeeded") func makeBackingLayerIfNeeded() { ensureLayer() }
     @ObjCMethod("wantsUpdateLayer") func wantsUpdateLayer() -> Bool { false }
     @ObjCMethod("updateLayer") func updateLayer() {}
     @ObjCMethod("layerContentsRedrawPolicy") func layerContentsRedrawPolicy() -> Int { 1 }
@@ -343,6 +478,11 @@ open class NSView: NSResponder {
         let wrapped = CALayer(objcObject: made, ownership: .retain)
         if let window { wrapped.setContentsScale(window.backingScaleFactor()) }
         if hidden { wrapped.setHidden(true) }
+        // A view that draws draws its layer, as its delegate.
+        if draws {
+            wrapped.setDelegate(self)
+            wrapped.setNeedsDisplay()
+        }
         updateLayerGeometry()
         for subview in subviews {
             subview.ensureLayer()
@@ -368,12 +508,18 @@ open class NSView: NSResponder {
         var rect = frame
         if let superview {
             if !superview.flipped { rect.origin.y = superview.frame.height - frame.maxY }
+            // Scrolled by the superview's bounds origin: up a flipped view,
+            // down one whose y axis points up.
             rect.origin.x -= superview.boundsOrigin.x
-            rect.origin.y -= superview.boundsOrigin.y
+            rect.origin.y += superview.flipped ? -superview.boundsOrigin.y : superview.boundsOrigin.y
         } else if windowObject != nil {
             rect.origin = .zero
         }
-        CATransaction.withoutActions { wrapped.setFrame(rect) }
+        CATransaction.withoutActions {
+            wrapped.setFrame(rect)
+            // A layer's bounds start at the view's bounds origin, which a
+            // clip view moves to scroll.
+        }
         Windows.layersChanged()
     }
 
@@ -383,18 +529,34 @@ open class NSView: NSResponder {
     @ObjCMethod("setNeedsDisplay:")
     func setNeedsDisplay(_ needs: Bool) {
         needsDisplay = needs
-        if needs { Windows.layersChanged() }
+        guard needs else { return }
+        if draws, let layer { CALayer(objcObject: layer.objcObject, ownership: .retain).setNeedsDisplay() }
+        Windows.layersChanged()
     }
     @ObjCMethod("setNeedsDisplayInRect:") func setNeedsDisplay(in rect: CGRect) { setNeedsDisplay(true) }
-    @ObjCMethod("display") func display() { needsDisplay = false }
-    @ObjCMethod("displayIfNeeded") func displayIfNeeded() { needsDisplay = false }
+    @ObjCMethod("display") func display() { setNeedsDisplay(true) }
+    @ObjCMethod("displayIfNeeded") func displayIfNeeded() {}
+    @ObjCMethod("displayRect:") func display(_ rect: CGRect) { setNeedsDisplay(true) }
+    @ObjCMethod("displayIfNeededIgnoringOpacity") func displayIfNeededIgnoringOpacity() {}
     @ObjCMethod("drawRect:") func draw(_ rect: CGRect) {}
+    @ObjCMethod("viewWillDraw") func viewWillDraw() {}
     @ObjCMethod("lockFocus") func lockFocus() {}
     @ObjCMethod("unlockFocus") func unlockFocus() {}
     @ObjCMethod("lockFocusIfCanDraw") func lockFocusIfCanDraw() -> Bool { false }
+    @ObjCMethod("getRectsBeingDrawn:count:")
+    func getRectsBeingDrawn(_ rects: UnsafeMutablePointer<UnsafePointer<CGRect>?>?, count: UnsafeMutablePointer<Int>?) {
+        rects?.pointee = nil
+        count?.pointee = 0
+    }
+    @ObjCMethod("needsToDrawRect:") func needsToDraw(_ rect: CGRect) -> Bool { true }
     @ObjCMethod("needsLayout") func viewNeedsLayout() -> Bool { needsLayout }
-    @ObjCMethod("setNeedsLayout:") func setNeedsLayout(_ needs: Bool) { needsLayout = needs }
-    @ObjCMethod("layout") func layout() {}
+    @ObjCMethod("setNeedsLayout:")
+    func setNeedsLayout(_ needs: Bool) {
+        needsLayout = needs
+        if needs { Windows.layersChanged() }
+    }
+    /// Lays out the subviews that constraints place.
+    @ObjCMethod("layout") func layout() { Layout.apply(self) }
     @ObjCMethod("layoutSubtreeIfNeeded")
     func layoutSubtreeIfNeeded() {
         if needsLayout {
@@ -404,8 +566,86 @@ open class NSView: NSResponder {
         for subview in subviews { subview.layoutSubtreeIfNeeded() }
     }
     @ObjCMethod("updateConstraints") func updateConstraints() {}
-    @ObjCMethod("fittingSize") func fittingSize() -> CGSize { frame.size }
+    @ObjCMethod("updateConstraintsForSubtreeIfNeeded") func updateConstraintsForSubtreeIfNeeded() {}
+    @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
+    @ObjCMethod("setNeedsUpdateConstraints:") func setNeedsUpdateConstraints(_ needs: Bool) { if needs { needsLayout = true } }
+    @ObjCMethod("fittingSize") func fittingSize() -> CGSize { Layout.fittingSize(self) }
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { CGSize(width: -1, height: -1) }
+    @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { superview?.setNeedsLayout(true) }
+    @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> NSEdgeInsets { NSEdgeInsets() }
+    @ObjCMethod("baselineOffsetFromBottom") func baselineOffsetFromBottom() -> CGFloat { 0 }
+    @ObjCMethod("firstBaselineOffsetFromTop") func firstBaselineOffsetFromTop() -> CGFloat { 0 }
+    @ObjCMethod("contentHuggingPriorityForOrientation:")
+    func contentHuggingPriority(for orientation: Int) -> Float { hugging[orientation == 1 ? 1 : 0] }
+    @ObjCMethod("setContentHuggingPriority:forOrientation:")
+    func setContentHuggingPriority(_ priority: Float, for orientation: Int) { hugging[orientation == 1 ? 1 : 0] = priority }
+    @ObjCMethod("contentCompressionResistancePriorityForOrientation:")
+    func contentCompressionResistancePriority(for orientation: Int) -> Float { compressionResistance[orientation == 1 ? 1 : 0] }
+    @ObjCMethod("setContentCompressionResistancePriority:forOrientation:")
+    func setContentCompressionResistancePriority(_ priority: Float, for orientation: Int) { compressionResistance[orientation == 1 ? 1 : 0] = priority }
+
+    // MARK: Constraints
+
+    @ObjCMethod("constraints") func viewConstraints() -> NSObject { NSMutableArray.of(constraints) }
+    @ObjCMethod("addConstraint:")
+    func addConstraint(_ constraint: NSLayoutConstraint?) {
+        guard let constraint, !constraints.contains(where: { $0 === constraint }) else { return }
+        constraints.append(constraint)
+        needsLayout = true
+        Windows.layersChanged()
+    }
+    @ObjCMethod("addConstraints:")
+    func addConstraints(_ list: NSObject?) {
+        for item in list?.as(NSArray.self)?.elements ?? [] { addConstraint(item.as(NSLayoutConstraint.self)) }
+    }
+    @ObjCMethod("removeConstraint:")
+    func removeConstraint(_ constraint: NSLayoutConstraint?) {
+        constraints.removeAll { $0 === constraint }
+        needsLayout = true
+    }
+    @ObjCMethod("removeConstraints:")
+    func removeConstraints(_ list: NSObject?) {
+        for item in list?.as(NSArray.self)?.elements ?? [] { removeConstraint(item.as(NSLayoutConstraint.self)) }
+    }
+    @ObjCMethod("leadingAnchor") func leadingAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 5) }
+    @ObjCMethod("trailingAnchor") func trailingAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 6) }
+    @ObjCMethod("leftAnchor") func leftAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 1) }
+    @ObjCMethod("rightAnchor") func rightAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 2) }
+    @ObjCMethod("topAnchor") func topAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 3) }
+    @ObjCMethod("bottomAnchor") func bottomAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 4) }
+    @ObjCMethod("widthAnchor") func widthAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 7) }
+    @ObjCMethod("heightAnchor") func heightAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 8) }
+    @ObjCMethod("centerXAnchor") func centerXAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 9) }
+    @ObjCMethod("centerYAnchor") func centerYAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 10) }
+    @ObjCMethod("firstBaselineAnchor") func firstBaselineAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 12) }
+    @ObjCMethod("lastBaselineAnchor") func lastBaselineAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 11) }
+
+    // MARK: Drawing into the layer
+
+    /// Whether the view's class draws: overrides -drawRect:.
+    var draws: Bool { Methods.overrides(objcObject, "drawRect:", of: NSView.objCClass.pointer) }
+
+    @ObjCMethod("_perryDrawsLayer:") func drawsLayer(_ layer: NSObject?) -> Bool { draws }
+
+    /// Draws the view into its layer's context: in the view's bounds, y up
+    /// unless the view is flipped.
+    @ObjCMethod("drawLayer:inContext:")
+    func draw(_ layer: NSObject?, in context: UnsafeMutableRawPointer?) {
+        guard let context else { return }
+        let flipped = self.flipped
+        NSGraphicsContext.with(context, flipped: flipped) {
+            // The layer's context has its origin at the top left.
+            if !flipped {
+                CG.translateCTM(context, 0, frame.height)
+                CG.scaleCTM(context, 1, -1)
+            }
+            CG.translateCTM(context, -boundsOrigin.x, -boundsOrigin.y)
+            Send.void(objcObject, "viewWillDraw")
+            typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("drawRect:"), bounds)
+        }
+        needsDisplay = false
+    }
 
     // MARK: Hit testing and conversion
 

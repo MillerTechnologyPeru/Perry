@@ -83,6 +83,15 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setStatusBarStyle:animated:") func setStatusBarStyle(_ style: Int, animated: Bool) { Application.statusBarStyle = style }
     @ObjCMethod("statusBarOrientation") func statusBarOrientation() -> Int { Screen.orientation }
 
+    /// No local notifications are ever scheduled or delivered.
+    @ObjCMethod("cancelAllLocalNotifications") func cancelAllLocalNotifications() {}
+    @ObjCMethod("cancelLocalNotification:") func cancelLocalNotification(_ notification: NSObject?) {}
+    @ObjCMethod("scheduleLocalNotification:") func scheduleLocalNotification(_ notification: NSObject?) {}
+    @ObjCMethod("presentLocalNotificationNow:") func presentLocalNotificationNow(_ notification: NSObject?) {}
+
+    /// The text size the user prefers: the default, large.
+    @ObjCMethod("preferredContentSizeCategory") func preferredContentSizeCategory() -> String { "UICTContentSizeCategoryL" }
+
     /// A finger another provider puts on the screen, at a point in the
     /// screen's coordinates (GameController's, for a gamepad's button that
     /// stands for a touch): phase 0 is down, 1 moved, 2 up.

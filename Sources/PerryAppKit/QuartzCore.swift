@@ -24,6 +24,7 @@ class CALayer: NSObject {
     @ObjCMethod("setNeedsDisplay") func setNeedsDisplay()
     @ObjCMethod("setMasksToBounds:") func setMasksToBounds(_ masks: Bool)
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?)
+    @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: UnsafeMutableRawPointer?)
 }
 
 @ObjCWrapper("CATransaction")

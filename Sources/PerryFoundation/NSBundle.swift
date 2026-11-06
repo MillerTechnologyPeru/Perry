@@ -271,9 +271,14 @@ public final class NSBundle: NSObject {
     @ObjCMethod("resourcePath") func resourcePath() -> String { storage.resourcePath }
     @ObjCMethod("resourceURL") func resourceURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.resourcePath, directoryHint: .isDirectory)) }
     @ObjCMethod("executablePath") func executablePath() -> String? { storage.executablePath }
-    /// Where the App Store's receipt would be. There is none.
+    /// Where the App Store's receipt is: a Mac app's in Contents/_MASReceipt,
+    /// as the Mac App Store installs it; an iOS app's in StoreKit, where
+    /// there is none.
     @ObjCMethod("appStoreReceiptURL")
-    func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
+    func appStoreReceiptURL() -> NSURL? {
+        let path = storage.isMacOSLayout ? storage.contentsPath + "/_MASReceipt/receipt" : storage.path + "/StoreKit/receipt"
+        return URLs.wrapped(URL(filePath: path))
+    }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
 
     /// An executable beside the bundle's own (in Contents/MacOS), if there

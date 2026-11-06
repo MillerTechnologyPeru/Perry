@@ -440,8 +440,17 @@ retry:
         }
         load_corelibs_foundation(loader);
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        if (!handle)
-            perry_fatal("cannot load provider %s: %s", path, dlerror());
+        if (!handle) {
+            // A provider over a library the host lacks (JavaScriptCore's,
+            // on a system without WebKitGTK) is as if there were none: a
+            // program that links the framework and never needs it runs.
+            const char *error = dlerror();
+            if (error && strstr(error, "cannot open shared object file")) {
+                perry_warn("provider %s is not available: %s", path, error);
+                return NULL;
+            }
+            perry_fatal("cannot load provider %s: %s", path, error ? error : "unknown error");
+        }
         struct link_map *map = NULL;
         dlinfo(handle, RTLD_DI_LINKMAP, &map);
         provider->path = strdup(path);

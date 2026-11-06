@@ -214,6 +214,57 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
     perry_context_set_float(context, &darwin_machine.fs);
 }
 
+// MARK: - Instructions the core lacks
+
+#if defined(__aarch64__)
+// Perry owns SIGILL: an instruction Apple silicon has and this core lacks
+// is rewritten the first time it runs (isa.c), and runs again; every other
+// SIGILL goes to the app's handler, or to the handler before Perry's (the
+// crash reporter), or the default.
+int perry_isa_rewrite(void *context);
+
+static struct sigaction previous_illegal;
+static int illegal_kept;
+
+static void illegal_instruction(int linux_signal, siginfo_t *info, void *raw_context) {
+    // PERRY_ISA_TRACE names each instruction rewritten.
+    if (getenv("PERRY_ISA_TRACE")) {
+        char line[160];
+        int n = snprintf(line, sizeof(line), "perry: SIGILL at %p: %08x\n", (void *)((ucontext_t *)raw_context)->uc_mcontext.pc,
+                         *(const uint32_t *)((ucontext_t *)raw_context)->uc_mcontext.pc);
+        write(2, line, (size_t)n);
+    }
+    if (perry_isa_rewrite(raw_context))
+        return;
+    void *app = handlers[SIGILL].handler;
+    if (!illegal_kept && app && app != (void *)SIG_DFL && app != (void *)SIG_IGN) {
+        deliver(linux_signal, info, raw_context);
+        return;
+    }
+    if (app == (void *)SIG_IGN && !illegal_kept)
+        return;
+    if (previous_illegal.sa_flags & SA_SIGINFO) {
+        previous_illegal.sa_sigaction(linux_signal, info, raw_context);
+        return;
+    }
+    if (previous_illegal.sa_handler != SIG_DFL && previous_illegal.sa_handler != SIG_IGN) {
+        previous_illegal.sa_handler(linux_signal);
+        return;
+    }
+    // The default: the instruction runs again, and the process ends.
+    signal(SIGILL, SIG_DFL);
+}
+
+__attribute__((constructor)) static void own_illegal_instruction(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_sigaction = illegal_instruction;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+    sigemptyset(&action.sa_mask);
+    sigaction(SIGILL, &action, &previous_illegal);
+}
+#endif
+
 // An app's handler is installed behind a translation of the signal frame.
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) DARWIN_SYMBOL(sigaction);
 int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin_sigaction *previous) {
@@ -250,8 +301,19 @@ int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin
     }
     if (kept & (1 << linux_signal)) {
         handlers[linux_signal] = *action;
+#if defined(__aarch64__)
+        if (linux_signal == SIGILL)
+            illegal_kept = 1;
+#endif
         return 0;
     }
+#if defined(__aarch64__)
+    // Perry's SIGILL handler stays, and calls the app's.
+    if (linux_signal == SIGILL) {
+        handlers[linux_signal] = *action;
+        return 0;
+    }
+#endif
     struct sigaction linux_action;
     memset(&linux_action, 0, sizeof(linux_action));
     for (int darwin = 1; darwin <= 31; darwin++)

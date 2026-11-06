@@ -7,9 +7,9 @@ import PerryObjCInterop
 // edge is down; pushed up, its far edge is; all the way is 30 degrees
 // (PERRY_COREMOTION_TILT sets the degrees). At rest the device lies flat
 // with its screen up. A game steered by tilting the device is so steered
-// by the stick. There is no rotation rate, no acceleration but gravity's,
-// and no magnetometer; updates' queues are not used, and handlers are
-// called on the main queue.
+// by the stick. There is no rotation rate, no acceleration but gravity's
+// and a shake's (PERRY_COREMOTION_SHAKE), and no magnetometer; updates'
+// queues are not used, and handlers are called on the main queue.
 
 extension CMAcceleration: ObjCScalar { public static var objCTypeEncoding: String { "{?=ddd}" } }
 extension CMRotationRate: ObjCScalar { public static var objCTypeEncoding: String { "{?=ddd}" } }
@@ -107,6 +107,35 @@ enum Tilt {
     }
 }
 
+/// A shake of the device, for programs that take one from the
+/// accelerometer (a pinball table's nudge): with PERRY_COREMOTION_SHAKE set
+/// to a gamepad's button (as PERRY_GAMECONTROLLER_TOUCHES names them), each
+/// press of it is a third of a second of the device thrown back and
+/// forth, 2.5 g each way along each of its axes, so that the shake shows
+/// however the program holds the device.
+enum Shake {
+    nonisolated(unsafe) static let button: String? = getenv("PERRY_COREMOTION_SHAKE").map { String(cString: $0).lowercased() }
+    nonisolated(unsafe) private static var wasHeld = false
+    nonisolated(unsafe) private static var began = -Double.infinity
+    private static let length = 1.0 / 3, period = 0.1, strength = 2.5
+
+    /// What the shake adds to the device's acceleration now, in g.
+    static func acceleration() -> CMAcceleration {
+        guard let button else { return CMAcceleration(x: 0, y: 0, z: 0) }
+        let now = Controllers.now(), held = Controllers.isHeld(button)
+        if held, !wasHeld {
+            began = now
+            Controllers.trace("motion: shake")
+        }
+        wasHeld = held
+        let elapsed = now - began
+        guard elapsed >= 0, elapsed < length else { return CMAcceleration(x: 0, y: 0, z: 0) }
+        // One way for half of each period, the other for the rest.
+        let side = elapsed.truncatingRemainder(dividingBy: period) < period / 2 ? strength : -strength
+        return CMAcceleration(x: side, y: side, z: side)
+    }
+}
+
 // MARK: - Data
 
 @ObjCClass("CMLogItem")
@@ -171,10 +200,11 @@ open class CMGyroData: CMLogItem {
 @ObjCClass("CMDeviceMotion")
 open class CMDeviceMotion: CMLogItem {
     var rotation = Rotation.identity
+    var shake = CMAcceleration(x: 0, y: 0, z: 0)
 
     @ObjCMethod("attitude") func attitude() -> CMAttitude { CMAttitude.make(rotation) }
     @ObjCMethod("gravity") func gravity() -> CMAcceleration { rotation.gravity }
-    @ObjCMethod("userAcceleration") func userAcceleration() -> CMAcceleration { CMAcceleration(x: 0, y: 0, z: 0) }
+    @ObjCMethod("userAcceleration") func userAcceleration() -> CMAcceleration { shake }
     @ObjCMethod("rotationRate") func rotationRate() -> CMRotationRate { CMRotationRate(x: 0, y: 0, z: 0) }
     /// No magnetometer gives a heading.
     @ObjCMethod("heading") func heading() -> Double { -1 }
@@ -212,15 +242,21 @@ open class CMMotionManager: NSObject {
     func accelerometerData() -> CMAccelerometerData? {
         guard accelerometerActive else { return nil }
         let data = CMAccelerometerData()
-        data.value = Tilt.attitude().gravity
+        let gravity = Tilt.attitude().gravity, shake = Shake.acceleration()
+        data.value = CMAcceleration(x: gravity.x + shake.x, y: gravity.y + shake.y, z: gravity.z + shake.z)
         return data
     }
 
-    @ObjCMethod("startAccelerometerUpdates") func startAccelerometerUpdates() { accelerometerActive = true }
+    @ObjCMethod("startAccelerometerUpdates")
+    func startAccelerometerUpdates() {
+        Controllers.trace("motion: accelerometer updates start, to be read")
+        accelerometerActive = true
+    }
 
     @ObjCMethod("startAccelerometerUpdatesToQueue:withHandler:")
     func startAccelerometerUpdates(to queue: NSObject?, handler: ObjCBlock?) {
         accelerometerHandler = handler
+        Controllers.trace("motion: accelerometer updates start, to a handler every \(accelerometerInterval) s")
         guard !accelerometerActive else { return }
         accelerometerActive = true
         sendAccelerometerData()
@@ -255,20 +291,27 @@ open class CMMotionManager: NSObject {
         guard deviceMotionActive else { return nil }
         let motion = CMDeviceMotion()
         motion.rotation = Tilt.attitude()
+        motion.shake = Shake.acceleration()
         return motion
     }
 
-    @ObjCMethod("startDeviceMotionUpdates") func startDeviceMotionUpdates() { deviceMotionActive = true }
+    @ObjCMethod("startDeviceMotionUpdates")
+    func startDeviceMotionUpdates() {
+        Controllers.trace("motion: device motion updates start, to be read")
+        deviceMotionActive = true
+    }
 
     @ObjCMethod("startDeviceMotionUpdatesUsingReferenceFrame:")
     func startDeviceMotionUpdates(using frame: UInt) {
         referenceFrame = frame
+        Controllers.trace("motion: device motion updates start, to be read")
         deviceMotionActive = true
     }
 
     @ObjCMethod("startDeviceMotionUpdatesToQueue:withHandler:")
     func startDeviceMotionUpdates(to queue: NSObject?, handler: ObjCBlock?) {
         deviceMotionHandler = handler
+        Controllers.trace("motion: device motion updates start, to a handler every \(deviceMotionInterval) s")
         guard !deviceMotionActive else { return }
         deviceMotionActive = true
         sendDeviceMotion()

@@ -8,9 +8,10 @@ import PerryObjCInterop
 // of named trees: FACETKEYS maps image names to their attributes,
 // KEYFORMAT lists the attributes a rendition's key holds, and RENDITIONS
 // holds each rendition: a CSI header, then its pixels, compressed in one
-// LZFSE stream or in bands of rows. Many images are links to a rectangle
-// of a packed atlas. Pixels are premultiplied BGRA, as UIKit draws, or
-// gray and alpha.
+// LZFSE stream or in bands of rows, or as CoreUI's "deepmap-lzfse", which
+// predicts a pixel's colors from its neighbors. Many images are links to
+// a rectangle of a packed atlas. Pixels are premultiplied BGRA, as UIKit
+// draws, or gray and alpha.
 
 enum AssetCatalog {
     typealias Decode = @convention(c) (UnsafeMutablePointer<UInt8>?, Int, UnsafePointer<UInt8>?, Int, UnsafeMutableRawPointer?, Int32) -> Int
@@ -332,6 +333,7 @@ final class Catalog {
         guard gray || format == Array("BGRA".utf8), width > 0, height > 0, data.count >= 16,
               Array(bytes[data.lowerBound..<data.lowerBound + 4]) == Array("MLEC".utf8) else { return nil }
         let version = le32(data.lowerBound + 4), compression = le32(data.lowerBound + 8), count = le32(data.lowerBound + 12)
+        if compression == 10 { return deepmap(data, version: version, count: count, width: width, height: height) }
         let depth = gray ? 2 : 4
         var raw: [UInt8] = []
         if version == 0 {
@@ -364,6 +366,239 @@ final class Catalog {
             }
         }
         return Pixels(width: width, height: height, bytes: bytes)
+    }
+
+    // MARK: Deepmap
+
+    /// A rendition in CoreUI's "deepmap-lzfse" compression (10): one block
+    /// (MLEC versions 0 and 2) or bands of rows in KCBC chunks (1 and 3).
+    private func deepmap(_ data: Range<Int>, version: Int, count: Int, width: Int, height: Int) -> Pixels? {
+        var pixels: [UInt8] = []
+        pixels.reserveCapacity(width * height * 4)
+        if version == 0 || version == 2 {
+            guard count >= 0, data.lowerBound + 16 + count <= data.upperBound,
+                  let band = deepmapBand(data.lowerBound + 16..<data.lowerBound + 16 + count, width: width, rows: height) else { return nil }
+            pixels = band
+        } else {
+            var at = data.lowerBound + 16
+            for _ in 0..<count {
+                guard at + 20 <= data.upperBound, Array(bytes[at..<at + 4]) == Array("KCBC".utf8) else { return nil }
+                let rows = le32(at + 12), length = le32(at + 16)
+                guard rows > 0, length >= 0, at + 20 + length <= data.upperBound,
+                      let band = deepmapBand(at + 20..<at + 20 + length, width: width, rows: rows) else { return nil }
+                pixels += band
+                at += 20 + length
+            }
+        }
+        guard pixels.count == width * height * 4 else { return nil }
+        return Pixels(width: width, height: height, bytes: pixels)
+    }
+
+    /// One band: a header (a 5, the channels, a length), "dmap", the band's
+    /// kind and its channels again, then its tiles, of 256 by 256 pixels at
+    /// most, in rows, each with its length before it and compressed by
+    /// itself, with LZFSE or, when small, bare LZVN. By kind:
+    ///
+    /// - 3: the tile's pixels as they are, BGRA or gray and alpha.
+    /// - 4: a palette of BGRA colors before the tiles; a tile is its
+    ///   alpha, then an index into the palette for each pixel.
+    /// - 2: a tile is its alpha, a predictor for each row, then each
+    ///   pixel's colors as what they differ by from the prediction: the
+    ///   high bytes of every difference, then the low ones, the sign in
+    ///   the lowest bit. The colors are a luma and two halved chroma
+    ///   differences (t = luma - c2, B = t + c1, R = B - 2 c1,
+    ///   G = t + 2 c2), or a gray. A row predicts nothing (0), the pixel
+    ///   to the left (2), the one above (3), their rounded mean (4), or
+    ///   (1) whichever of the two the luma above and above-left say is
+    ///   nearer, as Paeth's predictor chooses between them. Tiles predict
+    ///   from nothing outside them.
+    private func deepmapBand(_ blob: Range<Int>, width: Int, rows: Int) -> [UInt8]? {
+        guard blob.count >= 24, Array(bytes[blob.lowerBound + 16..<blob.lowerBound + 20]) == Array("dmap".utf8) else { return nil }
+        let channels = le32(blob.lowerBound + 4), kind = Int(bytes[blob.lowerBound + 20])
+        guard channels == 4 || channels == 2, width > 0, rows > 0 else { return nil }
+        let colors = channels - 1
+        var at = blob.lowerBound + 24
+        var palette: ArraySlice<UInt8> = []
+        if kind == 4 {
+            let count = le32(at)
+            guard channels == 4, count >= 0, at + 4 + count * 4 <= blob.upperBound else { return nil }
+            palette = bytes[at + 4..<at + 4 + count * 4]
+            at += 4 + count * 4
+        }
+        var out = [UInt8](repeating: 0, count: width * rows * 4)
+        func clamped(_ value: Int32) -> UInt8 { UInt8(max(0, min(255, value))) }
+        for top in stride(from: 0, to: rows, by: 256) {
+            let tileRows = min(256, rows - top)
+            for left in stride(from: 0, to: width, by: 256) {
+                let tileWidth = min(256, width - left), count = tileWidth * tileRows
+                let length = le32(at)
+                guard at + 4 <= blob.upperBound, length >= 0, at + 4 + length <= blob.upperBound,
+                      let raw = expand(at + 4..<at + 4 + length, capacity: count * (2 * colors + 1) + tileRows + 64) else { return nil }
+                at += 4 + length
+                switch kind {
+                case 3:
+                    guard raw.count >= count * channels else { return nil }
+                    for row in 0..<tileRows {
+                        for column in 0..<tileWidth {
+                            let from = (row * tileWidth + column) * channels, to = ((top + row) * width + left + column) * 4
+                            if channels == 4 {
+                                (out[to], out[to + 1], out[to + 2], out[to + 3]) = (raw[from], raw[from + 1], raw[from + 2], raw[from + 3])
+                            } else {
+                                (out[to], out[to + 1], out[to + 2], out[to + 3]) = (raw[from], raw[from], raw[from], raw[from + 1])
+                            }
+                        }
+                    }
+                case 4:
+                    // An index is two bytes when the palette is past 256 colors.
+                    let wide = palette.count > 256 * 4
+                    guard raw.count >= count * (wide ? 3 : 2) else { return nil }
+                    for row in 0..<tileRows {
+                        for column in 0..<tileWidth {
+                            let pixel = row * tileWidth + column, to = ((top + row) * width + left + column) * 4
+                            let index = wide ? Int(raw[count + pixel * 2]) | Int(raw[count + pixel * 2 + 1]) << 8 : Int(raw[count + pixel])
+                            guard index * 4 + 3 < palette.count else { return nil }
+                            let color = palette.startIndex + index * 4
+                            (out[to], out[to + 1], out[to + 2], out[to + 3]) = (palette[color], palette[color + 1], palette[color + 2], raw[pixel])
+                        }
+                    }
+                case 2:
+                    let modes = count, high = count + tileRows, low = high + colors * count
+                    guard raw.count >= low + colors * count else { return nil }
+                    var above = [Int32](repeating: 0, count: tileWidth * colors), current = above
+                    for row in 0..<tileRows {
+                        let mode = raw[modes + row]
+                        guard mode <= 4 else { return nil }
+                        for column in 0..<tileWidth {
+                            let pixel = row * tileWidth + column
+                            var chooseLeft = true
+                            if mode == 1 {
+                                let leftLuma = column > 0 ? current[(column - 1) * colors] : 0
+                                let aboveLuma = row > 0 ? above[column * colors] : 0
+                                let cornerLuma = row > 0 && column > 0 ? above[(column - 1) * colors] : 0
+                                chooseLeft = abs(aboveLuma - cornerLuma) <= abs(leftLuma - cornerLuma)
+                            }
+                            for channel in 0..<colors {
+                                let leftValue = column > 0 ? current[(column - 1) * colors + channel] : 0
+                                let aboveValue = row > 0 ? above[column * colors + channel] : 0
+                                let prediction: Int32
+                                switch mode {
+                                case 0: prediction = 0
+                                case 1: prediction = chooseLeft ? leftValue : aboveValue
+                                case 2: prediction = leftValue
+                                case 3: prediction = aboveValue
+                                default: prediction = column == 0 ? aboveValue : row == 0 ? leftValue : (leftValue + aboveValue + 1) / 2
+                                }
+                                let coded = Int32(raw[high + pixel * colors + channel]) << 8 | Int32(raw[low + pixel * colors + channel])
+                                current[column * colors + channel] = prediction + (coded & 1 != 0 ? -(coded >> 1) : coded >> 1)
+                            }
+                            let to = ((top + row) * width + left + column) * 4
+                            if colors == 3 {
+                                let luma = current[column * 3], first = current[column * 3 + 1], second = current[column * 3 + 2]
+                                let middle = luma - second, blue = middle + first
+                                (out[to], out[to + 1], out[to + 2]) = (clamped(blue), clamped(middle + 2 * second), clamped(blue - 2 * first))
+                            } else {
+                                let gray = clamped(current[column])
+                                (out[to], out[to + 1], out[to + 2]) = (gray, gray, gray)
+                            }
+                            out[to + 3] = raw[pixel]
+                        }
+                        swap(&above, &current)
+                    }
+                default:
+                    return nil
+                }
+            }
+        }
+        return out
+    }
+
+    /// A tile's bytes: an LZFSE stream, which begins "bvx", or bare LZVN.
+    private func expand(_ range: Range<Int>, capacity: Int) -> [UInt8]? {
+        if range.count >= 4, Array(bytes[range.lowerBound..<range.lowerBound + 3]) == Array("bvx".utf8) {
+            return decompress(range, 4, capacity: capacity)
+        }
+        return lzvn(range, capacity: capacity)
+    }
+
+    /// LZVN without a container, as small tiles are compressed: opcodes
+    /// that copy literals from the stream and matches from what was
+    /// written, to the end-of-stream opcode.
+    private func lzvn(_ range: Range<Int>, capacity: Int) -> [UInt8]? {
+        var out: [UInt8] = []
+        out.reserveCapacity(capacity)
+        var at = range.lowerBound, distance = 0
+        func literals(_ count: Int) -> Bool {
+            guard at + count <= range.upperBound, out.count + count <= capacity else { return false }
+            out += bytes[at..<at + count]
+            at += count
+            return true
+        }
+        func match(_ count: Int) -> Bool {
+            guard distance > 0, distance <= out.count, out.count + count <= capacity else { return false }
+            var from = out.count - distance
+            for _ in 0..<count {
+                out.append(out[from])
+                from += 1
+            }
+            return true
+        }
+        while at < range.upperBound {
+            let opcode = Int(bytes[at])
+            switch opcode {
+            case 0x06:
+                return out
+            case 0x0e, 0x16:
+                at += 1
+            case 0x1e, 0x26, 0x2e, 0x36, 0x3e, 0x70...0x7f, 0xd0...0xdf:
+                return nil
+            case 0xe0...0xef:
+                // Literals alone: 1 to 15, or 16 and more with their count
+                // in the next byte.
+                var count = opcode & 15
+                if opcode == 0xe0 {
+                    guard at + 1 < range.upperBound else { return nil }
+                    count = Int(bytes[at + 1]) + 16
+                    at += 1
+                }
+                at += 1
+                guard literals(count) else { return nil }
+            case 0xf0...0xff:
+                // A match alone, at the last distance.
+                var count = opcode & 15
+                if opcode == 0xf0 {
+                    guard at + 1 < range.upperBound else { return nil }
+                    count = Int(bytes[at + 1]) + 16
+                    at += 1
+                }
+                at += 1
+                guard match(count) else { return nil }
+            default:
+                // Up to three literals, then a match of three to ten bytes
+                // (more for a medium distance), with its distance in the
+                // opcode and the bytes after it, or the last distance.
+                var literalCount = opcode >> 6, matchCount = (opcode >> 3 & 7) + 3
+                if (0xa0...0xbf).contains(opcode) {
+                    guard at + 2 < range.upperBound else { return nil }
+                    let next = Int(bytes[at + 1]) | Int(bytes[at + 2]) << 8
+                    literalCount = opcode >> 3 & 3
+                    matchCount = ((opcode & 7) << 2 | next & 3) + 3
+                    distance = next >> 2
+                    at += 3
+                } else if opcode & 7 == 6 {
+                    at += 1
+                } else if opcode & 7 == 7 {
+                    guard at + 2 < range.upperBound else { return nil }
+                    distance = Int(bytes[at + 1]) | Int(bytes[at + 2]) << 8
+                    at += 3
+                } else {
+                    guard at + 1 < range.upperBound else { return nil }
+                    distance = (opcode & 7) << 8 | Int(bytes[at + 1])
+                    at += 2
+                }
+                guard literals(literalCount), match(matchCount) else { return nil }
+            }
+        }
+        return nil
     }
 
     /// CoreUI's compression: none 0, LZVN 3 and LZFSE 4, which the LZFSE

@@ -653,9 +653,10 @@ extension UIResponder {
 /// first shows: "195,120" taps a point; "drag:195,600,195,200" swipes
 /// from the first point to the second over a quarter second; "type:Hello" types text, and
 /// "key:return", "key:backspace" and "key:escape" press those keys, for
-/// the first responder. To reach an app's later screens without a display,
-/// along with PERRY_UIKIT_SNAPSHOT, which then also keeps what shows a
-/// second after each step, numbered from 1.
+/// the first responder; "wait" does nothing for its two seconds. To reach
+/// an app's later screens without a display, along with
+/// PERRY_UIKIT_SNAPSHOT, which then also keeps what shows a second after
+/// each step, numbered from 1.
 enum TapScript {
     enum Step {
         case tap(CGPoint)
@@ -673,6 +674,7 @@ enum TapScript {
         guard !started, let setting = getenv("PERRY_UIKIT_TAPS") else { return }
         started = true
         steps = String(cString: setting).split(separator: ";").compactMap { item in
+            if item == "wait" { return .key("wait") }
             if item.hasPrefix("type:") { return .type(String(item.dropFirst(5))) }
             if item.hasPrefix("key:") { return .key(String(item.dropFirst(4))) }
             if item.hasPrefix("drag:") {
