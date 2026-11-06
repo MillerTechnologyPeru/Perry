@@ -908,25 +908,23 @@ public final class NSNetServiceBrowser: NSObject {
         operation.start()
     }
 
+    /// The browsable domains: "local.", which mDNSResponder always finds,
+    /// then any others Avahi enumerates (it leaves out "local.").
     @ObjCMethod("searchForBrowsableDomains")
     func searchForBrowsableDomains() {
         let storage = storage
         guard storage.operation == nil else { return fail(NetServices.activityInProgress) }
-        guard DNSSD.available, let enumerate = DNSSD.enumerateDomains else { return fail(NetServices.unknownError) }
+        guard DNSSD.available else { return fail(NetServices.unknownError) }
         let me = self
         let operation = NetOperation(object: objcObject, home: Threads.current)
         storage.operation = operation
-        operation.enqueue { _ = me.delegateObject?.netServiceBrowserWillSearch(me) }
+        operation.enqueue {
+            _ = me.delegateObject?.netServiceBrowserWillSearch(me)
+            _ = me.delegateObject?.netServiceBrowser(me, didFindDomain: "local.", moreComing: false)
+        }
         let context = Unmanaged.passUnretained(operation).toOpaque()
         var ref: DNSSD.Ref?
-        guard enumerate(&ref, DNSSD.browseDomains, 0, domainReply, context) == 0, let made = ref else {
-            storage.operation = nil
-            operation.enqueue {
-                _ = me.delegateObject?.netServiceBrowser(me, didNotSearch: ObjCObject(NetServices.errorDictionary(NetServices.unknownError)))
-            }
-            operation.stop()
-            return
-        }
+        guard let enumerate = DNSSD.enumerateDomains, enumerate(&ref, DNSSD.browseDomains, 0, domainReply, context) == 0, let made = ref else { return }
         operation.refs = [made]
         operation.step = { _, ref in DNSSD.process?(ref) == 0 }
         operation.start()
@@ -1008,6 +1006,8 @@ private let domainReply: DNSSD.DomainReply = { _, flags, _, error, domain, conte
     let operation = Unmanaged<NetOperation>.fromOpaque(context).takeUnretainedValue()
     let object = operation.object
     let name = NetServices.dotted(String(cString: domain))
+    // "local." was reported when the search began.
+    guard name != "local." else { return }
     let more = flags & DNSSD.moreComing != 0
     let added = flags & DNSSD.add != 0
     operation.enqueue {
