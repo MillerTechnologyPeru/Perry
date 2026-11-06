@@ -327,6 +327,62 @@ int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int
 
 // MARK: - File systems
 
+// Darwin's struct statvfs: its block and file counts are 32-bit
+// (fsblkcnt_t, fsfilcnt_t), so a large file system's are given in larger
+// fragments, as Darwin's libc scales them.
+struct darwin_statvfs {
+    unsigned long f_bsize;
+    unsigned long f_frsize;
+    uint32_t f_blocks;
+    uint32_t f_bfree;
+    uint32_t f_bavail;
+    uint32_t f_files;
+    uint32_t f_ffree;
+    uint32_t f_favail;
+    unsigned long f_fsid;
+    unsigned long f_flag;
+    unsigned long f_namemax;
+};
+
+static void convert_statvfs(const struct statvfs *in, struct darwin_statvfs *out) {
+    unsigned long fragment = in->f_frsize ? in->f_frsize : in->f_bsize;
+    uint64_t blocks = in->f_blocks, bfree = in->f_bfree, bavail = in->f_bavail;
+    while (blocks > UINT32_MAX) {
+        fragment *= 2;
+        blocks /= 2;
+        bfree /= 2;
+        bavail /= 2;
+    }
+    out->f_bsize = in->f_bsize;
+    out->f_frsize = fragment;
+    out->f_blocks = (uint32_t)blocks;
+    out->f_bfree = (uint32_t)bfree;
+    out->f_bavail = (uint32_t)bavail;
+    out->f_files = in->f_files > UINT32_MAX ? UINT32_MAX : (uint32_t)in->f_files;
+    out->f_ffree = in->f_ffree > UINT32_MAX ? UINT32_MAX : (uint32_t)in->f_ffree;
+    out->f_favail = in->f_favail > UINT32_MAX ? UINT32_MAX : (uint32_t)in->f_favail;
+    out->f_fsid = in->f_fsid;
+    // ST_RDONLY 1 and ST_NOSUID 2, as Linux's.
+    out->f_flag = in->f_flag & 3;
+    out->f_namemax = in->f_namemax;
+}
+
+int darwin_statvfs(const char *path, struct darwin_statvfs *buffer) DARWIN_SYMBOL(statvfs);
+int darwin_statvfs(const char *path, struct darwin_statvfs *buffer) {
+    struct statvfs info;
+    if (statvfs(path, &info) != 0) return -1;
+    convert_statvfs(&info, buffer);
+    return 0;
+}
+
+int darwin_fstatvfs(int fd, struct darwin_statvfs *buffer) DARWIN_SYMBOL(fstatvfs);
+int darwin_fstatvfs(int fd, struct darwin_statvfs *buffer) {
+    struct statvfs info;
+    if (fstatvfs(fd, &info) != 0) return -1;
+    convert_statvfs(&info, buffer);
+    return 0;
+}
+
 // struct statfs with 64-bit inodes, as on arm64.
 struct darwin_statfs {
     uint32_t f_bsize;
@@ -405,6 +461,23 @@ int darwin_futimes(int fd, const struct darwin_file_timeval times[2]) {
         { .tv_sec = times[1].tv_sec, .tv_usec = times[1].tv_usec },
     };
     return futimes(fd, converted);
+}
+
+// Setting attributes by list: Finder info, flags and creation dates, which
+// Linux files don't keep. The file must exist; then nothing changes.
+int darwin_setattrlist(const char *path, void *list, void *buffer, size_t size, unsigned options) DARWIN_SYMBOL(setattrlist);
+int darwin_setattrlist(const char *path, void *list, void *buffer, size_t size, unsigned options) {
+    (void)list; (void)buffer; (void)size;
+    // FSOPT_NOFOLLOW 1: the link itself.
+    struct stat info;
+    return (options & 1) ? lstat(path, &info) : stat(path, &info);
+}
+
+int darwin_fsetattrlist(int fd, void *list, void *buffer, size_t size, unsigned options) DARWIN_SYMBOL(fsetattrlist);
+int darwin_fsetattrlist(int fd, void *list, void *buffer, size_t size, unsigned options) {
+    (void)list; (void)buffer; (void)size; (void)options;
+    struct stat info;
+    return fstat(fd, &info);
 }
 
 // File system controls are HFS's and APFS's, which no Linux file system has.
