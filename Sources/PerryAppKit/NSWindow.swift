@@ -741,6 +741,7 @@ open class NSWindow: NSResponder {
     }
 
     func sdlFocus(_ gained: Bool) {
+        Trace.log("window \(windowNumber) \(gained ? "gained" : "lost") focus")
         if gained {
             makeKeyWindow()
             if Send.bool(objcObject, "canBecomeMainWindow") { makeMainWindow() }
