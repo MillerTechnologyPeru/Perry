@@ -223,6 +223,9 @@ PASSTHROUGH _getgid, getgid
 PASSTHROUGH _gethostname, gethostname
 PASSTHROUGH _getloadavg, getloadavg
 PASSTHROUGH _getpid, getpid
+PASSTHROUGH _gethostbyname, gethostbyname
+PASSTHROUGH _inet_aton, inet_aton
+PASSTHROUGH _remove, remove
 PASSTHROUGH _getppid, getppid
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _getrusage, getrusage
@@ -408,6 +411,46 @@ perry_sjlj_longjmp:
     ldr sp, [r0, #8]
     bx r1
     .size perry_sjlj_longjmp, . - perry_sjlj_longjmp
+
+// MARK: - setjmp
+//
+// Darwin's armv7 jmp_buf is 28 words (and sigjmp_buf one more), glibc's
+// larger, so glibc's setjmp cannot fill it. These keep the registers a call
+// preserves, r4 to r11, sp and lr, and then VFP's d8 to d15, in 26 of
+// them. The signal mask is not kept.
+    .fpu vfpv3
+.macro SETJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    stmia r0!, {r4-r11, sp, lr}
+    vstmia r0, {d8-d15}
+    mov r0, #0
+    bx lr
+    .size \name, . - \name
+.endm
+
+// Returns from the matching setjmp with the value, or 1 for 0.
+.macro LONGJMP name
+    .globl \name
+    .type \name, %function
+    .p2align 2
+\name:
+    ldmia r0!, {r4-r11, sp, lr}
+    vldmia r0, {d8-d15}
+    movs r0, r1
+    moveq r0, #1
+    bx lr
+    .size \name, . - \name
+.endm
+
+SETJMP _setjmp
+SETJMP __setjmp
+SETJMP _sigsetjmp
+LONGJMP _longjmp
+LONGJMP __longjmp
+LONGJMP _siglongjmp
 
 #endif
 
