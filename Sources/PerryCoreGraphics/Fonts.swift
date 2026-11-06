@@ -1,5 +1,7 @@
 import CPerryGeometry
 import CFontConfig
+import CCairo
+import CFreeType
 import Cairo
 import Glibc
 import PerryObjCInterop
@@ -187,6 +189,89 @@ public func CGFontGetGlyphAdvances(_ font: Ref?, _ glyphs: UnsafePointer<UInt16>
     guard found.count == count else { return false }
     for (index, advance) in found.enumerated() { advances[index] = Int32(advance) }
     return true
+}
+
+// MARK: - Characters and outlines, for CoreText
+
+/// The glyph of a Unicode scalar in the font's character map; 0 without one.
+@c(_perry_cgfont_glyph_for_character)
+public func perryCGFontGlyphForCharacter(_ font: Ref?, _ character: UInt32) -> UInt16 {
+    guard let state = Fonts.state(font) else { return 0 }
+    return UInt16(truncatingIfNeeded: state.scaled[UInt(character)])
+}
+
+/// A glyph's outline, in the font's units times `scale`, y up, through the
+/// transform: CTFontCreatePathForGlyph. nil for a glyph without one.
+@c(_perry_cgfont_create_path_for_glyph)
+public func perryCGFontCreatePathForGlyph(_ font: Ref?, _ glyph: UInt16, _ scale: CGFloat,
+                                          _ transform: UnsafePointer<CPerryGeometry.CGAffineTransform>?) -> Ref? {
+    guard let state = Fonts.state(font) else { return nil }
+    let commands: [PathCommand]? = state.scaled.withUnsafePointer { scaledFont in
+        guard let face = cairo_ft_scaled_font_lock_face(scaledFont) else { return nil }
+        defer { cairo_ft_scaled_font_unlock_face(scaledFont) }
+        guard FT_Load_Glyph(face, FT_UInt(glyph), Int32(FT_LOAD_NO_SCALE)) == 0,
+              face.pointee.glyph.pointee.format == FT_GLYPH_FORMAT_OUTLINE else { return nil }
+        return Fonts.decompose(face.pointee.glyph.pointee.outline, scale: Double(scale))
+    }
+    guard let commands else { return nil }
+    let path = Paths.make()
+    Paths.append(path, transform, commands)
+    return path
+}
+
+extension Fonts {
+    /// An outline's contours as path commands, as FT_Outline_Decompose
+    /// walks them: on-curve points, quadratic (conic) control points with
+    /// implied on-curve midpoints between two in a row, and cubic pairs.
+    static func decompose(_ outline: FT_Outline, scale: Double) -> [PathCommand] {
+        var commands: [PathCommand] = []
+        guard let points = outline.points, let tags = outline.tags, let contours = outline.contours else { return [] }
+        func point(_ i: Int) -> (Double, Double) { (Double(points[i].x) * scale, Double(points[i].y) * scale) }
+        func kind(_ i: Int) -> UInt8 { UInt8(truncatingIfNeeded: tags[i]) & 3 }   // 1 on, 0 conic, 2 cubic
+        var first = 0
+        for c in 0..<Int(outline.n_contours) {
+            let last = Int(contours[c])
+            defer { first = last + 1 }
+            guard last >= first else { continue }
+            var start = point(first), index = first
+            if kind(first) == 0 {
+                // Starts off the curve: from the last point if it is on, else their midpoint.
+                if kind(last) == 1 { start = point(last) } else {
+                    let l = point(last)
+                    start = ((start.0 + l.0) / 2, (start.1 + l.1) / 2)
+                }
+                index -= 1
+            }
+            commands.append(.move(start.0, start.1))
+            var i = index + 1
+            var pending: (Double, Double)?
+            while i <= last {
+                let p = point(i)
+                switch kind(i) {
+                case 1:
+                    if let control = pending { commands.append(.quad(control.0, control.1, p.0, p.1)); pending = nil }
+                    else { commands.append(.line(p.0, p.1)) }
+                    i += 1
+                case 0:
+                    if let control = pending {
+                        let mid = ((control.0 + p.0) / 2, (control.1 + p.1) / 2)
+                        commands.append(.quad(control.0, control.1, mid.0, mid.1))
+                    }
+                    pending = p
+                    i += 1
+                default:
+                    // Two cubic controls, then an on-curve point (the start, past the end).
+                    let second = i + 1 <= last ? point(i + 1) : start
+                    let end = i + 2 <= last ? point(i + 2) : start
+                    commands.append(.curve(p.0, p.1, second.0, second.1, end.0, end.1))
+                    i += 3
+                }
+            }
+            if let control = pending { commands.append(.quad(control.0, control.1, start.0, start.1)) }
+            commands.append(.close)
+        }
+        return commands
+    }
 }
 
 // MARK: - Drawing glyphs
