@@ -178,6 +178,40 @@ int darwin_pthread_setschedparam(pthread_t thread, int policy, const struct darw
     return 0;
 }
 
+// A thread attribute's priority: threads all run at the default one, 31,
+// whatever is asked for.
+int darwin_pthread_attr_getschedparam(const pthread_attr_t *attributes, struct darwin_sched_param *param)
+    DARWIN_SYMBOL(pthread_attr_getschedparam);
+int darwin_pthread_attr_getschedparam(const pthread_attr_t *attributes, struct darwin_sched_param *param) {
+    (void)attributes;
+    if (param)
+        param->priority = 31;
+    return 0;
+}
+
+// MARK: - Sorting with a block
+
+// qsort_b: the comparator is a block, whose invoke function takes the
+// block and then the two elements.
+struct compare_block {
+    void *isa;
+    int flags;
+    int reserved;
+    int (*invoke)(void *block, const void *a, const void *b);
+};
+
+static int compare_with_block(const void *a, const void *b, void *context) {
+    struct compare_block *block = context;
+    int order;
+    PERRY_KEEP_R9(order = block->invoke(block, a, b));
+    return order;
+}
+
+void darwin_qsort_b(void *base, size_t count, size_t size, void *block) DARWIN_SYMBOL(qsort_b);
+void darwin_qsort_b(void *base, size_t count, size_t size, void *block) {
+    qsort_r(base, count, size, compare_with_block, block);
+}
+
 // MARK: - Locale
 
 // Darwin: LC_ALL 0, LC_COLLATE 1, LC_CTYPE 2, LC_MONETARY 3, LC_NUMERIC 4, LC_TIME 5, LC_MESSAGES 6.
@@ -1156,6 +1190,100 @@ int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) {
     for (size_t i = 0; i < length; i++)
         difference |= x[i] ^ y[i];
     return difference != 0;
+}
+
+// MARK: - Atomic queues
+
+// OSAtomicEnqueue and OSAtomicDequeue: a last-in, first-out list threaded
+// through its elements, `offset` bytes into each. Darwin's are lock-free;
+// here one lock guards every list, as the calls are short.
+typedef struct {
+    void *first;
+    long unused;
+} darwin_queue_head;
+
+static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void darwin_OSAtomicEnqueue(darwin_queue_head *list, void *element, size_t offset) DARWIN_SYMBOL(OSAtomicEnqueue);
+void darwin_OSAtomicEnqueue(darwin_queue_head *list, void *element, size_t offset) {
+    pthread_mutex_lock(&queue_lock);
+    *(void **)((char *)element + offset) = list->first;
+    list->first = element;
+    pthread_mutex_unlock(&queue_lock);
+}
+
+void *darwin_OSAtomicDequeue(darwin_queue_head *list, size_t offset) DARWIN_SYMBOL(OSAtomicDequeue);
+void *darwin_OSAtomicDequeue(darwin_queue_head *list, size_t offset) {
+    pthread_mutex_lock(&queue_lock);
+    void *element = list->first;
+    if (element)
+        list->first = *(void **)((char *)element + offset);
+    pthread_mutex_unlock(&queue_lock);
+    return element;
+}
+
+// MARK: - The floating-point environment
+
+// Darwin's arm64 fenv_t is the status and control registers as two 64-bit
+// words, status first; glibc's is two 32-bit words, control first.
+typedef struct {
+    uint64_t status;
+    uint64_t control;
+} darwin_fenv;
+
+/// FE_DFL_ENV: nothing raised, round to nearest.
+const darwin_fenv darwin_FE_DFL_ENV DARWIN_SYMBOL(_FE_DFL_ENV) = { 0, 0 };
+
+int darwin_fegetenv(darwin_fenv *environment) DARWIN_SYMBOL(fegetenv);
+int darwin_fegetenv(darwin_fenv *environment) {
+#if defined(__aarch64__)
+    uint64_t status, control;
+    __asm__("mrs %0, fpsr" : "=r"(status));
+    __asm__("mrs %0, fpcr" : "=r"(control));
+    environment->status = status;
+    environment->control = control;
+#else
+    environment->status = environment->control = 0;
+#endif
+    return 0;
+}
+
+int darwin_fesetenv(const darwin_fenv *environment) DARWIN_SYMBOL(fesetenv);
+int darwin_fesetenv(const darwin_fenv *environment) {
+#if defined(__aarch64__)
+    uint64_t status = environment->status, control = environment->control;
+    __asm__("msr fpsr, %0" : : "r"(status));
+    __asm__("msr fpcr, %0" : : "r"(control));
+#else
+    (void)environment;
+#endif
+    return 0;
+}
+
+/// math.h's isfinite of a float, as its macro calls it.
+int darwin_isfinitef(float value) DARWIN_SYMBOL(__isfinitef);
+int darwin_isfinitef(float value) { return __builtin_isfinite(value); }
+
+// MARK: - System calls by number
+
+// syscall(2) with Darwin's numbers: the few that ask who is calling are
+// answered; any other fails with ENOSYS, as one the kernel lacks does.
+long darwin_syscall(long number) DARWIN_SYMBOL(syscall);
+long darwin_syscall(long number) {
+    switch (number) {
+    case 20: return getpid();           // SYS_getpid
+    case 24: return getuid();           // SYS_getuid
+    case 25: return geteuid();          // SYS_geteuid
+    case 39: return getppid();          // SYS_getppid
+    case 286:                           // SYS_gettid: the thread's, as thread_selfid
+    case 372: return gettid();          // SYS_thread_selfid
+    default: break;
+    }
+    static _Atomic int warned;
+    if (!atomic_exchange(&warned, 1))
+        fprintf(stderr, "perry: warning: syscall %ld is not implemented\n", number);
+    errno = ENOSYS;
+    return -1;
 }
 
 // MARK: - Time zones

@@ -249,11 +249,25 @@ extension NSObject {
         cls.pointer.assumingMemoryBound(to: perry_objc_class.self)
     }
 
+    /// NSObject's own +allocWithZone:, which +alloc need not send.
+    nonisolated(unsafe) private static let rootAllocWithZone: IMP =
+        Runtime.lookUpIMP(receiver: nil, selector: Sel.allocWithZone, cls: RootClasses.nsObject.pointee.isa)
+
+    /// A class with its own +allocWithZone: allocates through it, as on
+    /// Darwin: a class that keeps one instance takes note of it there.
     @ObjCClassMethod("alloc")
-    static func alloc(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { Objects.createInstance(classPointer(cls)) }
+    static func alloc(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
+        let pointer = classPointer(cls)
+        if Runtime.lookUpIMP(receiver: nil, selector: Sel.allocWithZone, cls: pointer.pointee.isa) != rootAllocWithZone {
+            return Messages.send(cls.pointer, Sel.allocWithZone, nil)
+        }
+        return Objects.createInstance(pointer)
+    }
 
     @ObjCClassMethod("allocWithZone:")
-    static func alloc(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { alloc(cls) }
+    static func alloc(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        Objects.createInstance(classPointer(cls))
+    }
 
     @ObjCClassMethod("new")
     static func new(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {

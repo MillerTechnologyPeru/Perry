@@ -524,6 +524,12 @@ public func CFRunLoopCopyCurrentMode(_ loop: UnsafeMutableRawPointer?) -> Unsafe
     ObjC.retain(RunLoopModes.NSDefaultRunLoopModeObject)
 }
 
+/// The modes the run loop has, +1: the default mode.
+@c(_CFRunLoopCopyAllModes)
+public func CFRunLoopCopyAllModes(_ loop: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    Arrays.make([RunLoopModes.NSDefaultRunLoopModeObject])
+}
+
 @c(_CFRunLoopStop)
 public func CFRunLoopStop(_ runLoop: UnsafeMutableRawPointer?) {
     RunLoops.state(runLoop)?.stop()

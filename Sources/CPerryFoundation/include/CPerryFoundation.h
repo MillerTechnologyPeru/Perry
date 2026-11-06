@@ -148,4 +148,15 @@ void perry_imp_raiseFormat(void);          // + (void)raise:(NSString *)name for
 /// A file's birth time, where its file system keeps one.
 bool perry_foundation_birth_time(const char *path, int64_t *seconds, uint32_t *nanoseconds);
 
+// ICU's normalizers (unorm2.h), which the Swift toolchain's ICU has, under
+// its own prefix, but its module does not declare: an instance for each
+// normalization form, and the UTF-16 a string normalizes to, with its
+// length. The status is a UErrorCode.
+const void *swift_unorm2_getNFCInstance(int32_t *status);
+const void *swift_unorm2_getNFDInstance(int32_t *status);
+const void *swift_unorm2_getNFKCInstance(int32_t *status);
+const void *swift_unorm2_getNFKDInstance(int32_t *status);
+int32_t swift_unorm2_normalize(const void *normalizer, const uint16_t *source, int32_t length, uint16_t *destination,
+                               int32_t capacity, int32_t *status);
+
 #endif

@@ -148,6 +148,11 @@ class NSKeyedUnarchiver: NSObject {
     @ObjCClassMethod("unarchiveObjectWithData:") static func unarchive(_ data: NSData) -> NSObject?
 }
 
+@ObjCWrapper("NSKeyedArchiver")
+class NSKeyedArchiver: NSObject {
+    @ObjCClassMethod("archivedDataWithRootObject:") static func archive(_ object: NSObject) -> NSData?
+}
+
 @ObjCWrapper("NSPredicate")
 class NSPredicate: NSObject {
     @ObjCMethod("predicateFormat") func predicateFormat() -> String

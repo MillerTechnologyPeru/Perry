@@ -108,7 +108,10 @@ enum ManagedObjects {
         case AttributeKind.date:
             return .date(Date(timeIntervalSinceReferenceDate: object.unsafeCast(to: NSDate.self).timeIntervalSinceReferenceDate()))
         case AttributeKind.binary, AttributeKind.transformable:
-            let data = object.unsafeCast(to: NSData.self)
+            // A transformable attribute's value is any object that can be
+            // archived, kept as its keyed archive.
+            let archived = kind == AttributeKind.transformable ? NSKeyedArchiver.archive(object) : nil
+            guard let data = archived ?? object.as(NSData.self) else { return .null }
             return .data(Data(bytes: data.bytes() ?? UnsafeRawPointer(bitPattern: 1)!, count: Int(data.length())))
         case AttributeKind.uuid:
             return UUID(uuidString: object.unsafeCast(to: NSUUID.self).uuidString()).map(AttributeValue.uuid) ?? .null
@@ -130,13 +133,36 @@ enum ManagedObjects {
     static func value(_ object: NSManagedObject, _ key: String) -> NSObject? {
         let state = object.state
         guard let property = state.entity?.property(named: key) else {
+            // A key that is a method of the object ("objectID", or one a
+            // subclass has) and no property of its entity is NSObject's.
+            if object.responds(to: key) { return inheritedValue(object, key) }
             coreDataFatal("[<\(state.entityName)> valueForUndefinedKey:]: the entity \(state.entityName) is not key value coding-compliant for the key \"\(key)\".")
         }
         if let relationship = property.as(NSRelationshipDescription.self) {
             let targets = related(object, relationship)
             return relationship.isToMany ? NSMutableSet.of(targets) : targets.first
         }
-        return self.object(state.attributes[key] ?? .null)
+        let stored = self.object(state.attributes[key] ?? .null)
+        // A transformable attribute's value, from its keyed archive; data
+        // that is no archive is the value itself.
+        if property.state.attributeType == AttributeKind.transformable, let data = stored?.as(NSData.self) {
+            return Transformables.unarchive(data) ?? stored
+        }
+        return stored
+    }
+
+    /// [super valueForKey:] of NSManagedObject's: NSObject's key-value
+    /// coding, which calls the method the key names.
+    static func inheritedValue(_ object: NSManagedObject, _ key: String) -> NSObject? {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        var superInfo = (object.objcObject, NSManagedObject.objCClass.pointer)
+        let name = key.objCOwnedReturnValue()
+        defer { ObjCRuntime.release(name) }
+        let selector = ObjCRuntime.selector("valueForKey:")
+        let result = withUnsafeMutablePointer(to: &superInfo) {
+            unsafeBitCast(ObjCRuntime.msgSendSuper2, to: Send.self)(UnsafeMutableRawPointer($0), selector, name)
+        }
+        return result.map { NSObject(objcObject: $0, ownership: .retain) }
     }
 
     static func setValue(_ object: NSManagedObject, _ key: String, _ value: NSObject?) {
@@ -293,6 +319,15 @@ enum ManagedObjects {
         return properties.first { $0 == middle }
             ?? properties.first { $0.prefix(1).uppercased() + $0.dropFirst() == middle }
             ?? middle.prefix(1).lowercased() + middle.dropFirst()
+    }
+}
+
+/// Transformable attributes' values, which are stored as keyed archives.
+enum Transformables {
+    /// The object a keyed archive holds; nil for data that is no archive.
+    static func unarchive(_ data: NSData) -> NSObject? {
+        guard data.length() >= 8, let bytes = data.bytes(), memcmp(bytes, "bplist00", 8) == 0 else { return nil }
+        return NSKeyedUnarchiver.unarchive(data)
     }
 }
 

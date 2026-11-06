@@ -150,32 +150,79 @@ enum {
 
 enum { DARWIN_PAGE_SIZE = PERRY_PAGE_SIZE };
 
+// Where a 64-bit program's mappings go when the kernel would pick the
+// address: a span of addresses of their own, below where Linux puts its own
+// mappings and glibc its heap. Darwin keeps what malloc gives out apart from
+// what mmap and vm_allocate give out, and programs lean on that: Unreal's
+// allocator notes the lowest and the highest block malloc gave it before
+// its own heap was up, and takes any pointer between the two for one of
+// those blocks, so a pool it maps later must not lie among them. The span
+// is walked upward and not used again. Where it can't be had (a kernel with
+// a smaller address space), the kernel places the mapping as before.
+#if UINTPTR_MAX > 0xffffffffu
+static uintptr_t map_span_next = (uintptr_t)1 << 44;
+static const uintptr_t map_span_end = (uintptr_t)1 << 45;
+
+/// `length` bytes of the span, mapped anonymously; NULL if none could be.
+static void *map_in_span(size_t length, int protection, int flags) {
+    for (int attempt = 0; attempt < 64; attempt++) {
+        uintptr_t address = __atomic_fetch_add(&map_span_next, length, __ATOMIC_RELAXED);
+        if (address + length > map_span_end || address + length < address)
+            return NULL;
+        void *mapped = mmap((void *)address, length, protection, flags | MAP_FIXED_NOREPLACE, -1, 0);
+        if (mapped == (void *)address)
+            return mapped;
+        if (mapped != MAP_FAILED) {
+            // A kernel that takes the address as a hint only.
+            munmap(mapped, length);
+            return NULL;
+        }
+        if (errno != EEXIST)
+            return NULL;
+    }
+    return NULL;
+}
+#else
+static void *map_in_span(size_t length, int protection, int flags) {
+    (void)length, (void)protection, (void)flags;
+    return NULL;
+}
+#endif
+
 // A mapping where the kernel picks the address, placed as Darwin places
-// one: at the start of a Darwin page, 16 KB on arm64, which is what
-// vm_page_size says, and running to the end of its last. Linux's pages may
-// be 4 KB, and programs' own allocators (Unreal's, garbage collectors') find
-// a block's page by masking its address. What is past a file's length, to
-// the end of the Darwin page, is zeros.
+// one: apart from the heap (map_in_span), at the start of a Darwin page,
+// 16 KB on arm64, which is what vm_page_size says, and running to the end
+// of its last. Linux's pages may be 4 KB, and programs' own allocators
+// (Unreal's, garbage collectors') find a block's page by masking its
+// address. What is past a file's length, to the end of the Darwin page, is
+// zeros.
 void *perry_map_pages(size_t length, int protection, int flags, int fd, off_t offset) {
     const size_t darwin_page = DARWIN_PAGE_SIZE;
     size_t page = (size_t)sysconf(_SC_PAGESIZE);
-    if (page >= darwin_page || length == 0)
+    if (length == 0)
         return mmap(NULL, length, protection, flags, fd, offset);
-    size_t whole = (length + darwin_page - 1) & ~(darwin_page - 1);
+    size_t unit = page > darwin_page ? page : darwin_page;
+    size_t whole = (length + unit - 1) & ~(unit - 1);
     if (whole < length) {
         errno = ENOMEM;
         return MAP_FAILED;
     }
-    size_t reserved = whole + darwin_page - page;
     int anonymous = MAP_PRIVATE | MAP_ANONYMOUS | (flags & MAP_NORESERVE);
-    uint8_t *start = mmap(NULL, reserved, protection, anonymous, -1, 0);
-    if (start == MAP_FAILED)
-        return MAP_FAILED;
-    uint8_t *aligned = (uint8_t *)(((uintptr_t)start + darwin_page - 1) & ~(uintptr_t)(darwin_page - 1));
-    if (aligned > start)
-        munmap(start, (size_t)(aligned - start));
-    if (aligned + whole < start + reserved)
-        munmap(aligned + whole, (size_t)(start + reserved - (aligned + whole)));
+    uint8_t *aligned = map_in_span(whole, protection, anonymous);
+    if (!aligned) {
+        if (page >= darwin_page)
+            return mmap(NULL, length, protection, flags, fd, offset);
+        // Anywhere, then: with a Darwin page to spare, cut to start on one.
+        size_t reserved = whole + darwin_page - page;
+        uint8_t *start = mmap(NULL, reserved, protection, anonymous, -1, 0);
+        if (start == MAP_FAILED)
+            return MAP_FAILED;
+        aligned = (uint8_t *)(((uintptr_t)start + darwin_page - 1) & ~(uintptr_t)(darwin_page - 1));
+        if (aligned > start)
+            munmap(start, (size_t)(aligned - start));
+        if (aligned + whole < start + reserved)
+            munmap(aligned + whole, (size_t)(start + reserved - (aligned + whole)));
+    }
     if (flags & MAP_ANONYMOUS)
         return aligned;
     if (mmap(aligned, length, protection, flags | MAP_FIXED, fd, offset) == MAP_FAILED) {

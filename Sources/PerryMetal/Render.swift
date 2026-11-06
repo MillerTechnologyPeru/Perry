@@ -301,6 +301,11 @@ open class MTLRenderCommandEncoder: NSObject, MTLRenderCommandEncoderProtocol {
     @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {}
     @ObjCMethod("useResource:usage:stages:") func useResource(_ resource: NSObject?, usage: UInt, stages: UInt) {}
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
+    // Fences order nothing here (Fences.swift).
+    @ObjCMethod("updateFence:") func updateFence(_ fence: NSObject?) {}
+    @ObjCMethod("waitForFence:") func waitForFence(_ fence: NSObject?) {}
+    @ObjCMethod("updateFence:afterStages:") func updateFence(_ fence: NSObject?, afterStages stages: UInt) {}
+    @ObjCMethod("waitForFence:beforeStages:") func waitForFence(_ fence: NSObject?, beforeStages stages: UInt) {}
     @ObjCMethod("popDebugGroup") func popDebugGroup() {}
     @ObjCMethod("insertDebugSignpost:") func insertDebugSignpost(_ name: String?) {}
 
@@ -418,6 +423,9 @@ open class MTLBlitCommandEncoder: NSObject, MTLBlitCommandEncoderProtocol {
 
     @ObjCMethod("optimizeContentsForGPUAccess:") func optimizeContentsForGPUAccess(_ texture: NSObject?) {}
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
+    // Fences order nothing here (Fences.swift).
+    @ObjCMethod("updateFence:") func updateFence(_ fence: NSObject?) {}
+    @ObjCMethod("waitForFence:") func waitForFence(_ fence: NSObject?) {}
     @ObjCMethod("popDebugGroup") func popDebugGroup() {}
 
     @ObjCMethod("endEncoding") func endEncoding() {

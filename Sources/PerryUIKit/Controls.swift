@@ -922,6 +922,10 @@ open class UIDevice: NSObject {
     @ObjCMethod("model") func model() -> String { "iPhone" }
     @ObjCMethod("localizedModel") func localizedModel() -> String { "iPhone" }
     @ObjCMethod("systemName") func systemName() -> String { "iOS" }
+    /// The Taptic Engine a device has, by a key programs read with
+    /// valueForKey: (0 none, 1 the first, 2 the second): none.
+    @ObjCMethod("_feedbackSupportLevel") func feedbackSupportLevel() -> Int { 0 }
+
     /// The iOS version the app was built for, as NSProcessInfo gives it:
     /// the platform version in its Info.plist, or iOS 18 without one.
     @ObjCMethod("systemVersion")

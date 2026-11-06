@@ -340,6 +340,15 @@ public func objc_copyStruct(_ destination: UnsafeMutableRawPointer?, _ source: U
     }
 }
 
+/// A C++ object property's atomic getter or setter: the object's own
+/// copy, `helper`, made with the property's lock held.
+@c(_objc_copyCppObjectAtomic)
+public func objc_copyCppObjectAtomic(_ destination: UnsafeMutableRawPointer?, _ source: UnsafeRawPointer?,
+                                     _ helper: (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void)?) {
+    guard let source, let helper else { return }
+    propertyLock(source).withLock { helper(destination, source) }
+}
+
 // MARK: - Classes
 
 @c(_objc_getClass)

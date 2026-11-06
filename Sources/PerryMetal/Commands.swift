@@ -480,6 +480,9 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
         encode("memoryBarrierWithScope:") { M2V.api.compute_encoder_memory_barrier($0, 3, $1) }
     }
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
+    // Fences order nothing here (Fences.swift).
+    @ObjCMethod("updateFence:") func updateFence(_ fence: NSObject?) {}
+    @ObjCMethod("waitForFence:") func waitForFence(_ fence: NSObject?) {}
     @ObjCMethod("popDebugGroup") func popDebugGroup() {}
     @ObjCMethod("insertDebugSignpost:") func insertDebugSignpost(_ name: String?) {}
 
