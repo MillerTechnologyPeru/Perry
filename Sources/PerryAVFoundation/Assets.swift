@@ -600,3 +600,17 @@ enum Background {
         }
     }
 }
+
+// MARK: - Constants
+
+/// File types, codecs, export presets and the error domain. Programs read
+/// them as they load: Unity's video code keeps AVVideoCodecHEVC, a weak
+/// import it does not check, from a static initializer.
+@ObjCConstants
+enum AssetConstants {
+    static let AVVideoCodecHEVC = "hvc1"
+    static let AVFileTypeMPEG4 = "public.mpeg-4"
+    static let AVAssetExportPresetHighestQuality = "AVAssetExportPresetHighestQuality"
+    static let AVAssetExportPresetPassthrough = "AVAssetExportPresetPassthrough"
+    static let AVFoundationErrorDomain = "AVFoundationErrorDomain"
+}
