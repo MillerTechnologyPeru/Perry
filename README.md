@@ -143,7 +143,8 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
 - Unified logging, in the same library: `os_log_create` and `os_log` at
   each level, with the argument buffers clang builds read against the
   format (`%{public}`, `%{BOOL}d`, `%{errno}d`, objects), written to
-  standard error as NSLog writes; signposts and activities
+  standard error as NSLog writes; signposts and activities;
+  `PERRY_OS_LOG_DEBUG` shows debug messages too
 - UIKit (`libPerryUIKit`), headless so far: `UIApplicationMain` with the
   app delegate's launch callbacks, the scene lifecycle from the Info.plist's
   scene manifest (`UIWindowScene`, `UISceneSession`,
@@ -152,6 +153,21 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   conversion and layout passes; `UIWindow` with its scene, root view
   controller and key window; `UIViewController` view loading; the
   responder chain from a view to the app delegate; `NSStringFromCGRect`
+- AppKit (`libPerryAppKit`), for macOS apps, a window per SDL window with
+  views drawn into QuartzCore's layers through CoreGraphics: main nibs and
+  storyboards (NIBArchive and keyed nibs decoded through `-initWithCoder:`,
+  the app's own classes Interface Builder swapped in, outlets, actions,
+  runtime attributes and placeholders), `NSStoryboard`, `NSViewController`
+  and nib-loading `NSWindowController`s; `-drawRect:` with
+  `NSGraphicsContext`, `NSColor` (system colors), `NSFont`, `NSBezierPath`,
+  images and string drawing; cells and controls (text fields that take
+  typing, buttons, check boxes, pop-up buttons, segmented controls, search
+  fields, combo boxes, color wells, progress indicators); scroll views with
+  overlay scrollers; view-based and cell-based `NSTableView` and
+  `NSOutlineView` with selection, expansion and cell view reuse; boxes,
+  split views, stack views, toolbars and text views; Auto Layout's
+  constraints between a view and its superview or siblings; array and
+  user defaults controllers
 - Core Data (`libPerryCoreData`), over CoreModel: compiled `.momd`
   models and programmatic ones, `NSManagedObject` subclasses with
   `@dynamic` accessors generated from their declared properties, SQLite
