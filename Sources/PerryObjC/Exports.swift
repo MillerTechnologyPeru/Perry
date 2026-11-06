@@ -1047,8 +1047,10 @@ public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: Unsafe
 
 // MARK: - Catching
 
+#if !arch(arm)
 /// Entering and leaving a @catch. Exceptions are never unwound to one (see
-/// objc_exception_throw), so these are bound but not reached.
+/// objc_exception_throw), so these are bound but not reached. armv7 unwinds
+/// to them, and has its own (exceptions_arm.c).
 @c(_objc_begin_catch)
 public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     objcFatal("an exception reached a @catch, which Perry cannot unwind to")
@@ -1056,3 +1058,4 @@ public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMut
 
 @c(_objc_end_catch)
 public func objc_end_catch() {}
+#endif
