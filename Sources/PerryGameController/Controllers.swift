@@ -562,6 +562,7 @@ enum Controllers {
             Quit.now()
         }
         if !touchButtons.isEmpty, controller.objcObject == connected.first?.objcObject { touch(with: gamepad) }
+        if !touchSticks.isEmpty, controller.objcObject == connected.first?.objcObject { slide(with: gamepad) }
         func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
         /// A trigger, from rest at zero.
         func trigger(_ trigger: Axis) -> Float {
@@ -688,6 +689,53 @@ enum Controllers {
                 touching[index] = 0
                 trace("touch down at \(button.x), \(button.y) for \(button.name)")
                 finger(index, phase: 0, x: button.x, y: button.y)
+            }
+        }
+    }
+
+    /// With PERRY_GAMECONTROLLER_STICK_TOUCH set to a stick, the point it
+    /// rests at and how far it reaches across and down, in the screen's
+    /// coordinates ("left=94,272,66,0"), a finger follows the stick: for a
+    /// program steered by a slider or a pad drawn on the screen. The finger
+    /// goes down at the resting point when the stick leaves its dead zone,
+    /// is moved to the stick's place from there, and is lifted when the
+    /// stick is let go. The sticks are left and right; several are
+    /// separated by semicolons.
+    nonisolated(unsafe) private static let touchSticks: [(right: Bool, x: Double, y: Double, across: Double, down: Double)] = {
+        guard let setting = getenv("PERRY_GAMECONTROLLER_STICK_TOUCH") else { return [] }
+        return String(cString: setting).lowercased().split(separator: ";").compactMap { entry in
+            let sides = entry.split(separator: "=")
+            let numbers = (sides.last ?? "").split(separator: ",").compactMap { Double($0.filter { $0 != " " }) }
+            let name = sides.first.map { $0.filter { $0 != " " } }
+            guard sides.count == 2, numbers.count >= 3, name == "left" || name == "right" else { return nil }
+            return (name == "right", numbers[0], numbers[1], numbers[2], numbers.count > 3 ? numbers[3] : numbers[2])
+        }
+    }()
+
+    /// The stick fingers down, by their place in the list.
+    nonisolated(unsafe) private static var sliding: Set<Int> = []
+    /// Their fingers are numbered after the touch buttons'.
+    private static let firstStickFinger = 64
+
+    /// Puts down, moves and lifts the fingers that follow sticks.
+    private static func slide(with gamepad: SDL.Pointer) {
+        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
+        for (index, pad) in touchSticks.enumerated() {
+            let value = pad.right ? stick(axis(.rightX), -axis(.rightY)) : stick(axis(.leftX), -axis(.leftY))
+            let at = (x: pad.x + Double(value.x) * pad.across, y: pad.y - Double(value.y) * pad.down)
+            if value.x == 0, value.y == 0 {
+                if sliding.remove(index) != nil {
+                    trace("stick touch up at \(pad.x), \(pad.y)")
+                    finger(firstStickFinger + index, phase: 2, x: pad.x, y: pad.y)
+                }
+            } else if sliding.contains(index) {
+                finger(firstStickFinger + index, phase: 1, x: at.x, y: at.y)
+            } else {
+                // Down where the stick rests, which is where a slider's
+                // knob is, and on from there at the next read.
+                sliding.insert(index)
+                trace("stick touch down at \(pad.x), \(pad.y)")
+                finger(firstStickFinger + index, phase: 0, x: pad.x, y: pad.y)
             }
         }
     }
