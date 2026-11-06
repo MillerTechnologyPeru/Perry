@@ -137,6 +137,23 @@ extension UIView {
 
     @ObjCMethod("layoutGuides") func layoutGuides() -> NSObject { NSMutableArray.of(UIView.guides[objcObject].added) }
 
+    /// A nib's guides for this view, which its constraints refer to and
+    /// which nothing else keeps: its safe area, margins and readable content
+    /// guides by their identifiers, and the guides added to it.
+    func adoptArchivedGuides(_ archived: [NSObject]) {
+        let guides = UIView.guides[objcObject]
+        for guide in archived.compactMap({ $0.as(UILayoutGuide.self) }) {
+            guide.guide.owningView = objcObject
+            switch guide.guide.identifier {
+            case "UIViewSafeAreaLayoutGuide": guides.safeArea = guide
+            case "UIViewLayoutMarginsGuide": guides.margins = guide
+            case "UIViewReadableContentGuide": guides.readable = guide
+            default:
+                if !guides.added.contains(where: { $0.objcObject == guide.objcObject }) { guides.added.append(guide) }
+            }
+        }
+    }
+
     @ObjCMethod("addLayoutGuide:")
     func addLayoutGuide(_ guide: UILayoutGuide) {
         let guides = UIView.guides[objcObject]
