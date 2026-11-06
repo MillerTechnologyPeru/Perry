@@ -336,4 +336,99 @@ extension View {
         self
     }
 }
+// MARK: - Conditional toolbar content
+
+@available(OpenSwiftUI_v2_0, *)
+extension ToolbarContentBuilder {
+    public static func buildEither<TrueContent, FalseContent>(first: TrueContent) -> _ConditionalContent<TrueContent, FalseContent>
+    where TrueContent: ToolbarContent, FalseContent: ToolbarContent {
+        _ConditionalContent(__storage: .trueContent(first))
+    }
+
+    public static func buildEither<TrueContent, FalseContent>(second: FalseContent) -> _ConditionalContent<TrueContent, FalseContent>
+    where TrueContent: ToolbarContent, FalseContent: ToolbarContent {
+        _ConditionalContent(__storage: .falseContent(second))
+    }
+}
+
+/// The branch an `if` in a toolbar builder chose.
+@available(OpenSwiftUI_v2_0, *)
+extension _ConditionalContent: ToolbarContent where TrueContent: ToolbarContent, FalseContent: ToolbarContent {}
+
+extension _ConditionalContent: ResolvedToolbarContent where TrueContent: ToolbarContent, FalseContent: ToolbarContent {
+    var resolvedItems: [ResolvedToolbarItem] {
+        MainActor.assumeIsolated {
+            switch storage {
+            case let .trueContent(content): content.resolvedItems
+            case let .falseContent(content): content.resolvedItems
+            }
+        }
+    }
+}
+
+// MARK: - Limited availability
+
+/// Toolbar content an `if #available` in a builder erases, its type
+/// unknown to older systems.
+@available(OpenSwiftUI_v5_0, *)
+@usableFromInline
+@frozen
+nonisolated struct LimitedAvailabilityToolbarContent: ToolbarContent, ResolvedToolbarContent {
+    @usableFromInline
+    typealias Body = Never
+    let storage: LimitedAvailabilityToolbarContentStorageBase
+
+    @usableFromInline
+    nonisolated init(erasing content: some ToolbarContent) {
+        storage = LimitedAvailabilityToolbarContentStorage(content)
+    }
+
+    var resolvedItems: [ResolvedToolbarItem] { storage.resolvedItems }
+}
+
+@available(OpenSwiftUI_v5_0, *)
+@usableFromInline
+class LimitedAvailabilityToolbarContentStorageBase {
+    var resolvedItems: [ResolvedToolbarItem] { [] }
+}
+
+@available(OpenSwiftUI_v5_0, *)
+final class LimitedAvailabilityToolbarContentStorage<Content: ToolbarContent>: LimitedAvailabilityToolbarContentStorageBase {
+    let content: Content
+    init(_ content: Content) { self.content = content }
+    override var resolvedItems: [ResolvedToolbarItem] { MainActor.assumeIsolated { content.resolvedItems } }
+}
+
+// MARK: - Newer toolbar modifiers
+
+/// How a toolbar item lays out along the bar.
+@available(OpenSwiftUI_v6_0, *)
+public struct ToolbarItemAxisBehavior: Hashable, Sendable {
+    let rawValue: Int
+    public static var automatic: ToolbarItemAxisBehavior { ToolbarItemAxisBehavior(rawValue: 0) }
+    public static var horizontalOnly: ToolbarItemAxisBehavior { ToolbarItemAxisBehavior(rawValue: 1) }
+    public static var verticalPreferred: ToolbarItemAxisBehavior { ToolbarItemAxisBehavior(rawValue: 2) }
+}
+
+@available(OpenSwiftUI_v6_0, *)
+extension ToolbarContent {
+    /// Sets how the content lays out along the bar; Perry's bars are
+    /// horizontal.
+    nonisolated public func axisBehavior(_ behavior: ToolbarItemAxisBehavior) -> some ToolbarContent {
+        self
+    }
+
+    /// Sets whether the items share a background; Perry draws none.
+    nonisolated public func sharedBackgroundVisibility(_ visibility: Visibility) -> some ToolbarContent {
+        self
+    }
+}
+
+@available(OpenSwiftUI_v6_0, *)
+extension EnvironmentValues {
+    /// The edge of a vertical toolbar the view is in; Perry's toolbars are
+    /// horizontal.
+    public var toolbarVerticalEdge: HorizontalEdge? { nil }
+}
+
 #endif
