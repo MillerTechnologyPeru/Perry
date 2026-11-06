@@ -96,10 +96,27 @@ package enum PathDrawingStyle {
 public struct GraphicsContext {
     @usableFromInline
     final class Storage {
-        
+        /// Perry: the Core Graphics context drawn into, and the environment
+        /// colors resolve in.
+        package let cgContext: CGContext?
+        package let environment: EnvironmentValues
+
+        package init(cgContext: CGContext?, environment: EnvironmentValues) {
+            self.cgContext = cgContext
+            self.environment = environment
+        }
     }
     
     var storage: Storage
+
+    /// Perry: a context drawing into `cgContext`, whose colors resolve in
+    /// `environment`.
+    package init(cgContext: CGContext?, environment: EnvironmentValues) {
+        storage = Storage(cgContext: cgContext, environment: environment)
+    }
+
+    /// The environment of the view drawing.
+    public var environment: EnvironmentValues { storage.environment }
     
     /// The ways that a graphics context combines new content with background
     /// content.
@@ -506,6 +523,33 @@ public struct GraphicsContext {
             self.storage = storage
         }
 
+        /// A shading that fills with a color.
+        public static func color(_ color: Color) -> Shading {
+            Shading(storage: .color(color))
+        }
+
+        /// A shading that fills with a color, in RGB components.
+        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, red: Double, green: Double, blue: Double, opacity: Double = 1) -> Shading {
+            Shading(storage: .color(Color(colorSpace, red: red, green: green, blue: blue, opacity: opacity)))
+        }
+
+        /// A shading that fills with a gray, given its white level.
+        public static func color(_ colorSpace: Color.RGBColorSpace = .sRGB, white: Double, opacity: Double = 1) -> Shading {
+            Shading(storage: .color(Color(colorSpace, white: white, opacity: opacity)))
+        }
+
+        /// The shading's color, where it has one; Perry fills gradients,
+        /// images and shaders with nothing.
+        package func cgColor(in environment: EnvironmentValues) -> CGColor? {
+            switch storage {
+            case let .color(color): color.resolve(in: environment).cgColor
+            case let .backdrop(resolved): resolved.cgColor
+            case .foreground: Color.black.resolve(in: environment).cgColor
+            case let .levels(levels): levels.first?.cgColor(in: environment)
+            default: nil
+            }
+        }
+
         // TODO
 
         public static func linearGradient(
@@ -777,3 +821,40 @@ extension GraphicsContext {
         _openSwiftUIUnimplementedFailure()
     }
 }
+
+// MARK: - Perry: drawing into a Core Graphics context
+
+#if canImport(CoreGraphics)
+@available(OpenSwiftUI_v3_0, *)
+extension GraphicsContext {
+    /// Draws `path` filled with `shading`.
+    public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
+        guard let context = storage.cgContext, let color = shading.cgColor(in: storage.environment) else { return }
+        context.saveGState()
+        context.addPath(path.cgPath)
+        context.setFillColor(color)
+        context.fillPath(using: style.isEOFilled ? .evenOdd : .winding)
+        context.restoreGState()
+    }
+
+    /// Draws `path`'s outline with `shading`.
+    public func stroke(_ path: Path, with shading: Shading, style: StrokeStyle) {
+        guard let context = storage.cgContext, let color = shading.cgColor(in: storage.environment) else { return }
+        context.saveGState()
+        context.addPath(path.cgPath)
+        context.setStrokeColor(color)
+        context.setLineWidth(style.lineWidth)
+        context.setLineCap(style.lineCap)
+        context.setLineJoin(style.lineJoin)
+        context.setMiterLimit(style.miterLimit)
+        if !style.dash.isEmpty { context.setLineDash(phase: style.dashPhase, lengths: style.dash) }
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    /// Draws `path`'s outline with `shading`, `lineWidth` wide.
+    public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
+        stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
+    }
+}
+#endif
