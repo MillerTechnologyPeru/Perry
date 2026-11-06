@@ -109,7 +109,9 @@ struct TabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
                     VStack(spacing: 2) {
                         children[index][TabItemTraitKey.self] ?? AnyView(EmptyView())
                     }
-                    .font(.caption)
+                    .labelStyle(TabItemLabelStyle())
+                    .symbolVariant(isSelected ? .fill : .none)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundColor(isSelected ? Color.accentColor : Color.gray)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -119,6 +121,21 @@ struct TabViewRoot<SelectionValue: Hashable>: _VariadicView.UnaryViewRoot {
         }
         .frame(height: Self.barHeight)
         .background(TabBarBackdrop())
+    }
+}
+
+/// A tab item's label as an iPhone's tab bar shows it: its icon above its
+/// title, which is small.
+struct TabItemLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 2) {
+            configuration.icon
+                .font(.system(size: 24))
+                .frame(height: 30)
+            configuration.title
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+        }
     }
 }
 
