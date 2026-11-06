@@ -238,7 +238,8 @@ enum MenuTracking {
     /// chain from the key window's first responder.
     static func perform(_ item: NSMenuItem) {
         guard let action = item.action, let app = App.shared else { return }
-        _ = app.sendAction(action, to: item.target.map(NSObject.init), from: item)
+        let sent = app.sendAction(action, to: item.target.map(NSObject.init), from: item)
+        Trace.log("menu item \(item.title): \(action.name) \(sent ? "sent" : "had no receiver")")
     }
 
     /// An open menu: the top one, or a submenu, with its frame in window
@@ -327,6 +328,10 @@ enum MenuTracking {
             guard let app = App.shared else { return nil }
             let opened = Clock.now
             var moved = false
+            /// The menu the button went down in: a submenu that opens under
+            /// the pointer doesn't take that click's release.
+            var downDepth: Int?
+            var movedSinceDown = false
             var typed = ""
             var lastTyped = 0.0
             let future = NSDate.distantFuture()
@@ -339,6 +344,7 @@ enum MenuTracking {
                 switch event.type {
                 case .mouseMoved, .leftMouseDragged, .rightMouseDragged:
                     moved = true
+                    movedSinceDown = true
                     guard let depth else {
                         // Off the menus, the deepest menu's highlight goes,
                         // unless it leads to an open submenu.
@@ -353,6 +359,7 @@ enum MenuTracking {
                     // The release of the click that opened the menu chooses
                     // only after the mouse moved or a moment passed.
                     guard let depth, moved || Clock.now - opened > 0.4 else { break }
+                    if let downDepth, downDepth != depth, !movedSinceDown { break }
                     let view = levels[depth].view
                     let row = view.row(at: point(location, in: levels[depth]))
                     // Releasing on an item with a submenu opens it.
@@ -362,6 +369,8 @@ enum MenuTracking {
                     guard let depth else { return nil }
                     highlight(levels[depth].view.row(at: point(location, in: levels[depth])), at: depth)
                     moved = true
+                    downDepth = depth
+                    movedSinceDown = false
                 case .scrollWheel:
                     if let depth { levels[depth].view.scroll(by: -event.scrollingDeltaY) }
                 case .keyDown:

@@ -246,18 +246,47 @@ open class NSApplication: NSResponder {
     func sendAction(_ action: ObjCSelector?, to target: NSObject?, from sender: NSObject?) -> Bool {
         guard let action else { return false }
         let name = action.name
-        let receiver = target?.objcObject ?? Windows.key?.firstResponderObject
-        guard let receiver else { return false }
-        if Send.responds(receiver, name) {
-            Send.void(receiver, name, sender?.objcObject)
+        if let target {
+            guard Send.responds(target.objcObject, name) else { return false }
+            Send.void(target.objcObject, name, sender?.objcObject)
             return true
         }
-        return NSObject(receiver).as(NSResponder.self)?.tryToPerform(action, with: sender) ?? false
+        guard let receiver = self.receiver(forAction: name) else { return false }
+        Send.void(receiver, name, sender?.objcObject)
+        return true
     }
 
-    @ObjCMethod("targetForAction:") func target(forAction action: ObjCSelector?) -> NSObject? { Windows.key?.firstResponder() }
+    /// What an action with no target goes to, as AppKit finds it: along the
+    /// key window's responder chain from its first responder, then the key
+    /// window's delegate, then the same for the main window, then the
+    /// application and its delegate.
+    func receiver(forAction name: String) -> UnsafeMutableRawPointer? {
+        var candidates: [UnsafeMutableRawPointer?] = []
+        for window in [Windows.key, Windows.main].compactMap({ $0 }) {
+            var responder: UnsafeMutableRawPointer? = window.firstResponderObject ?? window.objcObject
+            var seen = 0
+            while let current = responder, seen < 64 {
+                candidates.append(current)
+                responder = Send.object(current, "nextResponder")
+                seen += 1
+            }
+            candidates.append(window.objcObject)
+            candidates.append(window.delegateObject)
+        }
+        candidates.append(objcObject)
+        candidates.append(delegateObject)
+        return candidates.lazy.compactMap { $0 }.first { Send.responds($0, name) }
+    }
+
+    @ObjCMethod("targetForAction:")
+    func target(forAction action: ObjCSelector?) -> NSObject? {
+        action.flatMap { receiver(forAction: $0.name) }.map(NSObject.init)
+    }
     @ObjCMethod("targetForAction:to:from:")
-    func target(forAction action: ObjCSelector?, to target: NSObject?, from sender: NSObject?) -> NSObject? { target ?? Windows.key?.firstResponder() }
+    func target(forAction action: ObjCSelector?, to target: NSObject?, from sender: NSObject?) -> NSObject? {
+        if let target { return target }
+        return action.flatMap { receiver(forAction: $0.name) }.map(NSObject.init)
+    }
 
     // MARK: Activation
 

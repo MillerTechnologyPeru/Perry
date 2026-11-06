@@ -222,6 +222,11 @@ final class ParagraphStyleState: ObjectState {
     var secondaryLineBreakMode = 0
     var fullyJustified = false
     var spansAllLines = false
+    /// Tab stops: the NSTextTabs set, and their locations; 0 for the
+    /// default interval between the ones after them.
+    var tabStops: NSObject?
+    var tabLocations: [CGFloat] = []
+    var defaultTabInterval: CGFloat = 0
 
     func copy(from other: ParagraphStyleState) {
         (alignment, lineBreakMode, lineSpacing, paragraphSpacing) = (other.alignment, other.lineBreakMode, other.lineSpacing, other.paragraphSpacing)
@@ -230,6 +235,7 @@ final class ParagraphStyleState: ObjectState {
         (paragraphSpacingBefore, lineBreakStrategy, hyphenationFactor) = (other.paragraphSpacingBefore, other.lineBreakStrategy, other.hyphenationFactor)
         (baseWritingDirection, allowsDefaultTighteningForTruncation) = (other.baseWritingDirection, other.allowsDefaultTighteningForTruncation)
         (secondaryLineBreakMode, fullyJustified, spansAllLines) = (other.secondaryLineBreakMode, other.fullyJustified, other.spansAllLines)
+        (tabStops, tabLocations, defaultTabInterval) = (other.tabStops, other.tabLocations, other.defaultTabInterval)
     }
 }
 
@@ -312,6 +318,54 @@ open class NSMutableParagraphStyle: NSParagraphStyle {
     @ObjCMethod("setSecondaryLineBreakMode:") func setSecondaryLineBreakMode(_ mode: Int) { state.secondaryLineBreakMode = mode }
     @ObjCMethod("setFullyJustified:") func setFullyJustified(_ justified: Bool) { state.fullyJustified = justified }
     @ObjCMethod("setSpansAllLines:") func setSpansAllLines(_ spans: Bool) { state.spansAllLines = spans }
+    @ObjCMethod("defaultTabInterval") func defaultTabInterval() -> CGFloat { state.defaultTabInterval }
+    @ObjCMethod("setDefaultTabInterval:") func setDefaultTabInterval(_ interval: CGFloat) { state.defaultTabInterval = interval }
+    @ObjCMethod("tabStops") func tabStops() -> NSObject? { state.tabStops }
+    @ObjCMethod("setTabStops:")
+    func setTabStops(_ stops: NSObject?) {
+        state.tabStops = stops
+        state.tabLocations = TabStops.locations(stops)
+    }
+}
+
+/// The locations of an array of tab stops (NSTextTab or CTTextTab, which
+/// are the same), in order.
+enum TabStops {
+    static func locations(_ stops: NSObject?) -> [CGFloat] {
+        guard let stops else { return [] }
+        typealias Count = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> UInt
+        typealias At = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UInt) -> UnsafeMutableRawPointer?
+        typealias Location = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> CGFloat
+        let count = unsafeBitCast(ObjCRuntime.msgSend, to: Count.self)(stops.objcObject, ObjCRuntime.selector("count"))
+        var locations: [CGFloat] = []
+        for index in 0..<count {
+            guard let tab = unsafeBitCast(ObjCRuntime.msgSend, to: At.self)(stops.objcObject, ObjCRuntime.selector("objectAtIndex:"), index)
+            else { continue }
+            locations.append(unsafeBitCast(ObjCRuntime.msgSend, to: Location.self)(tab, ObjCRuntime.selector("location")))
+        }
+        return locations.sorted()
+    }
+
+    /// The tab stops of a paragraph style of any provider: its locations,
+    /// and the default interval (28 points, Darwin's, when it gives none).
+    static func of(_ style: NSObject?) -> (locations: [CGFloat], interval: CGFloat) {
+        guard let style else { return ([], 28) }
+        if let own = style.as(NSParagraphStyle.self) {
+            return (own.state.tabLocations, own.state.defaultTabInterval > 0 ? own.state.defaultTabInterval : 28)
+        }
+        typealias Interval = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> CGFloat
+        typealias Object = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> UnsafeMutableRawPointer?
+        var interval: CGFloat = 0
+        var stopLocations: [CGFloat] = []
+        if style.responds(to: "defaultTabInterval") {
+            interval = unsafeBitCast(ObjCRuntime.msgSend, to: Interval.self)(style.objcObject, ObjCRuntime.selector("defaultTabInterval"))
+        }
+        if style.responds(to: "tabStops"),
+           let stops = unsafeBitCast(ObjCRuntime.msgSend, to: Object.self)(style.objcObject, ObjCRuntime.selector("tabStops")) {
+            stopLocations = locations(NSObject(stops))
+        }
+        return (stopLocations, interval > 0 ? interval : 28)
+    }
 }
 
 // MARK: - Web views
