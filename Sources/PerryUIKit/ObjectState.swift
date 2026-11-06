@@ -23,6 +23,11 @@ final class StateTable<State: ObjectState>: @unchecked Sendable {
         }
     }
 
+    /// The object's state if it has any, without making it.
+    func existing(_ object: UnsafeMutableRawPointer) -> State? {
+        lock.withLock { states[object] }
+    }
+
     /// Drops the object's state, from its -dealloc. The state is released
     /// outside the lock, as releasing it may deallocate other objects.
     func remove(_ object: UnsafeMutableRawPointer) {

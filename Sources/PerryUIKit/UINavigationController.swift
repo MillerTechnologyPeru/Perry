@@ -21,6 +21,7 @@ final class NavigationState: ObjectState {
 
 /// The navigation bar's height on an iPhone.
 private let barHeight: CGFloat = 44
+private let searchBarHeight: CGFloat = 56
 
 @ObjCClass("UINavigationController")
 open class UINavigationController: UIViewController {
@@ -230,7 +231,9 @@ open class UINavigationController: UIViewController {
             _ = from?.beginAppearance(false, animated: animated)
             _ = top.beginAppearance(true, animated: animated)
         }
-        let bounds = contentFrame(for: top), fromBounds = contentFrame(for: from)
+        let fromBounds = contentFrame(for: from)
+        layoutContent()
+        let bounds = contentFrame(for: top)
         topView.sendSetFrame(bounds)
         // A push brings the new view in over the old; a pop uncovers the
         // one beneath.
@@ -298,7 +301,12 @@ open class UINavigationController: UIViewController {
         let bounds = view.state.bounds
         let bar = navigationBar()
         let top = view.windowObject != nil ? view.safeAreaInsets(ignoringController: true).top : 0
-        bar.sendSetFrame(CGRect(x: 0, y: top, width: bounds.width, height: barHeight))
+        // The top controller's search bar, if it has one, sits below the
+        // bar's row, the bar growing to hold it.
+        let search = navigation.viewControllers.last?.navigationItem().state.searchController?.as(UISearchController.self)?.searchBar()
+        bar.showSearchBar(search)
+        bar.sendSetFrame(CGRect(x: 0, y: top, width: bounds.width, height: barHeight + (search == nil ? 0 : searchBarHeight)))
+        search?.sendSetFrame(CGRect(x: 0, y: barHeight, width: bounds.width, height: searchBarHeight))
         bar.extendBackground(above: top)
         if let displayed = navigation.displayed, let displayedView = displayed.state.view, !navigation.animating {
             displayedView.sendSetFrame(contentFrame(for: displayed))
@@ -368,6 +376,8 @@ final class NavigationBarState: ObjectState {
     var drawn = ""
     /// The bar's background above it, behind the status bar.
     var extensionView: UIView?
+    /// The top item's search controller's bar, shown below the bar's row.
+    var searchBar: UISearchBar?
 }
 
 @ObjCClass("UINavigationBar")
@@ -479,22 +489,30 @@ open class UINavigationBar: UIView {
         if let back = backItem(), backShown {
             let title = "\u{2039} " + (back.state.backButtonTitle ?? back.state.title ?? "Back")
             let width = Text.size(title, font: font).width
-            buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: bounds.height))
+            buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: barHeight))
             left = 8 + width + 16
         }
         for item in top.state.leftItems {
             let width = item.barWidth(font: font)
-            buttons.left.append((item, CGRect(x: left, y: 0, width: width, height: bounds.height)))
+            buttons.left.append((item, CGRect(x: left, y: 0, width: width, height: barHeight)))
             left += width + 16
         }
         var right = bounds.width - 16
         for item in top.state.rightItems {
             let width = item.barWidth(font: item.state.style == 2 ? bold : font)
             right -= width
-            buttons.right.append((item, CGRect(x: right, y: 0, width: width, height: bounds.height)))
+            buttons.right.append((item, CGRect(x: right, y: 0, width: width, height: barHeight)))
             right -= 16
         }
         return buttons
+    }
+
+    /// Shows `bar` below the bar's row, in place of the one shown.
+    func showSearchBar(_ bar: UISearchBar?) {
+        guard barState.searchBar?.objcObject != bar?.objcObject else { return }
+        barState.searchBar?.removeFromSuperview()
+        barState.searchBar = bar
+        if let bar { addSubview(bar) }
     }
 
     /// A light background with a hairline below; the top item's title
@@ -517,7 +535,7 @@ open class UINavigationBar: UIView {
         }
         let tint = tintColor()
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
-        func middle(_ font: UIFont) -> CGFloat { bounds.midY - Text.size("A", font: font).height / 2 }
+        func middle(_ font: UIFont) -> CGFloat { barHeight / 2 - Text.size("A", font: font).height / 2 }
         let buttons = buttons()
         if let back = buttons.back { Text.draw(back.title, at: CGPoint(x: back.frame.minX, y: middle(font)), font: font, color: tint) }
         for (item, frame) in buttons.left + buttons.right {
@@ -525,14 +543,21 @@ open class UINavigationBar: UIView {
             let color = item.state.enabled ? (item.state.tintColor ?? tint) : UIColor.systemGray()
             if let image = item.barImage {
                 let size = item.barImageSize
-                image.withTintColor(color).draw(in: CGRect(x: frame.minX, y: bounds.midY - size.height / 2, width: size.width, height: size.height))
+                image.withTintColor(color).draw(in: CGRect(x: frame.minX, y: barHeight / 2 - size.height / 2, width: size.width, height: size.height))
             } else {
                 Text.draw(item.displayTitle, at: CGPoint(x: frame.minX, y: middle(itemFont)), font: itemFont, color: color)
             }
         }
         if let title = barState.items.last?.state.title {
-            let width = Text.size(title, font: bold).width
-            Text.draw(title, at: CGPoint(x: bounds.midX - width / 2, y: middle(bold)), font: bold, color: UIColor.label())
+            // Centered, unless that runs into the items: then centered
+            // between them, and cut short if it still does not fit.
+            let leading = ([buttons.back?.frame] + buttons.left.map { $0.frame }).compactMap { $0?.maxX }.max().map { $0 + 8 } ?? 16
+            let trailing = buttons.right.map { $0.frame.minX }.min().map { $0 - 8 } ?? bounds.width - 16
+            let line = Text.truncated(title, font: bold, width: max(trailing - leading, 0))
+            let width = Text.size(line, font: bold).width
+            var x = bounds.midX - width / 2
+            if x < leading || x + width > trailing { x = leading + (trailing - leading - width) / 2 }
+            Text.draw(line, at: CGPoint(x: x, y: middle(bold)), font: bold, color: UIColor.label())
         }
     }
 
@@ -562,7 +587,7 @@ open class UINavigationBar: UIView {
     /// Whether what the bar shows has changed since it last drew.
     func contentChanged() -> Bool {
         let items = barState.items.suffix(2)
-        var content = "\(state.bounds.width) \(barState.barTintColor.map { $0.description() } ?? "")"
+        var content = "\(state.bounds.width) \(state.bounds.height) \(barState.barTintColor.map { $0.description() } ?? "")"
         for item in items {
             content += "|\(item.state.title ?? "")|\(item.state.backButtonTitle ?? "")|\(item.state.hidesBackButton)"
             for button in item.state.leftItems + item.state.rightItems {
