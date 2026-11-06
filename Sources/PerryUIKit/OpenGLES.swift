@@ -351,13 +351,20 @@ enum EAGLContexts {
     // a program calls is entered through CPerryOpenGL's entry points,
     // which call beforeDrawing() while any thread's context is not its own
     // in EGL. The thread that has the EGL context is signalled then, and
-    // lets it go from the signal's handler, if it is waiting.
+    // lets it go from the signal's handler, if it is waiting. One that is
+    // drawing keeps it, and the thread that asked goes without for a
+    // while, as an engine's main thread does beside its render thread; one
+    // that is busy with something else, as a main thread still launching
+    // is when the program's own thread starts to draw, is waited for.
 
     /// The thread each EGL context is current on.
     nonisolated(unsafe) private static var holders: [UnsafeMutableRawPointer: UInt] = [:]
     /// When a thread last could not be given its context, to not ask for
     /// it at every call.
     nonisolated(unsafe) private static var refused: [UInt: Double] = [:]
+    /// The gl calls each thread has made while contexts were contended:
+    /// a thread whose count stands still is not drawing.
+    nonisolated(unsafe) private static var calls: [UInt: UInt] = [:]
     /// One request at a time: the thread asked, and what it is to let go.
     private static let askLock = Lock()
     nonisolated(unsafe) private static var askedThread: pthread_t = 0
@@ -455,14 +462,28 @@ enum EAGLContexts {
         guard let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return }
         let thread = UInt(pthread_self())
         let wanted = lock.withLock { () -> (handle: UnsafeMutableRawPointer, holder: UInt?)? in
+            calls[thread, default: 0] &+= 1
             guard let handle = currents[thread]?.state.context?.handle, holders[handle] != thread else { return nil }
             if let last = refused[thread], Clock.now - last < 0.1 { return nil }
             return (handle, holders[handle])
         }
         guard let wanted else { return }
         var made = makeCurrent(display, nil, nil, wanted.handle) != 0
-        if !made, let holder = wanted.holder, ask(holder, toRelease: wanted.handle, patience: 0.05) {
-            made = makeCurrent(display, nil, nil, wanted.handle) != 0
+        if !made, let holder = wanted.holder {
+            // Asked for a moment at a time: a holder that drew meanwhile
+            // keeps the context; one that did not is busy elsewhere, and
+            // lets it go once it waits, which this thread, about to draw
+            // with nothing, waits for.
+            let start = Clock.now
+            repeat {
+                let before = lock.withLock { calls[holder] }
+                // Tried again whatever it answered: a thread that ended
+                // has let its context go without being asked.
+                _ = ask(holder, toRelease: wanted.handle, patience: 0.05)
+                made = makeCurrent(display, nil, nil, wanted.handle) != 0
+                if made { break }
+                if lock.withLock({ calls[holder] }) != before { break }
+            } while Clock.now - start < 5
         }
         lock.withLock {
             if made {
