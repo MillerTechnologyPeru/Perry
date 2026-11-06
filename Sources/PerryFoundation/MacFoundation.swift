@@ -71,12 +71,13 @@ public func CFLocaleGetWindowsLocaleCodeFromLocaleIdentifier(_ identifier: id?) 
 @c(_CFHashBytes)
 public func CFHashBytes(_ bytes: UnsafePointer<UInt8>?, _ length: Int) -> UInt {
     guard let bytes else { return 0 }
-    var hash: UInt = 0xcbf2_9ce4_8422_2325
+    // FNV-1a, in 64 bits; a 32-bit word keeps the low half.
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for index in 0..<max(length, 0) {
-        hash ^= UInt(bytes[index])
+        hash ^= UInt64(bytes[index])
         hash = hash &* 0x0000_0100_0000_01b3
     }
-    return hash
+    return UInt(truncatingIfNeeded: hash)
 }
 
 @c(_NSRoundUpToMultipleOfPageSize)

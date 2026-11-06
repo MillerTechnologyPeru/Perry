@@ -941,6 +941,9 @@ open class UIDevice: NSObject {
     @ObjCMethod("orientation") func orientation() -> Int { Screen.orientation }
     @ObjCMethod("isMultitaskingSupported") func isMultitaskingSupported() -> Bool { true }
     @ObjCMethod("identifierForVendor") func identifierForVendor() -> NSObject { NSUUID.make() }
+    /// The device's identifier of iOS 2 to 5, forty hexadecimal digits: the
+    /// same for every app and every run, and no real device's.
+    @ObjCMethod("uniqueIdentifier") func uniqueIdentifier() -> String { "7065727279000000000000000000000000000001" }
     @ObjCMethod("isBatteryMonitoringEnabled") func isBatteryMonitoringEnabled() -> Bool { false }
     @ObjCMethod("setBatteryMonitoringEnabled:") func setBatteryMonitoringEnabled(_ enabled: Bool) {}
     @ObjCMethod("batteryLevel") func batteryLevel() -> Float { -1 }

@@ -90,6 +90,21 @@ static void enter_container(const perry_bundle *bundle) {
         snprintf(directory, sizeof(directory), "%s/%s", container, directories[index]);
         make_directories(directory);
     }
+    // Before iOS 8 an app's bundle was in its home directory, beside
+    // Documents, and apps of that time look for it there (some by listing
+    // the directory for a name ending in .app): a link to the bundle, for
+    // apps that run on those versions.
+    const char *minimum = perry_plist_get_string(bundle->info, "MinimumOSVersion");
+    const char *name = strrchr(bundle->path, '/');
+    if (minimum && atoi(minimum) < 8 && name && name[1]) {
+        char link[PATH_MAX];
+        snprintf(link, sizeof(link), "%s%s", container, name);
+        struct stat status;
+        if (lstat(link, &status) == 0 && S_ISLNK(status.st_mode))
+            unlink(link);
+        if (lstat(link, &status) != 0 && symlink(bundle->path, link) != 0)
+            fprintf(stderr, "perry: cannot link %s to %s: %s\n", link, bundle->path, strerror(errno));
+    }
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof(tmp), "%s/tmp/", container);
     setenv("HOME", container, 1);

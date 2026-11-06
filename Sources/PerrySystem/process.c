@@ -300,7 +300,9 @@ perry_macos_release perry_system_macos_release(void) {
     const uint8_t *header = perry_system_main_header;
     if (!header) return (perry_macos_release){ 0, 0 };
     uint32_t count = *(const uint32_t *)(header + 16);
-    const uint8_t *command = header + 32;     // mach_header_64
+    // The load commands follow the header: 32 bytes, or 28 in a 32-bit image
+    // (MH_MAGIC), which has no reserved word.
+    const uint8_t *command = header + (*(const uint32_t *)header == 0xfeedface ? 28 : 32);
     for (uint32_t i = 0; i < count; i++) {
         uint32_t cmd = *(const uint32_t *)command, size = *(const uint32_t *)(command + 4);
         // LC_BUILD_VERSION: platform, minos, sdk (xxxx.yy.zz in nibbles).
