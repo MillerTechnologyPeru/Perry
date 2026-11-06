@@ -173,7 +173,8 @@ enum GLES {
             return name == "_glCompressedTexImage2D" ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
                 : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self)
         }
-        return host(String(name.dropFirst()))
+        let cName = String(name.dropFirst())
+        return host(cName).map { perry_gles_darwin_function(cName, $0) }
     }
 
     /// The host's function by its C name.
