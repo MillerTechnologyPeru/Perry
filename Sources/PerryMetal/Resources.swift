@@ -87,6 +87,9 @@ open class MTLLibrary: NSObject, MTLLibraryProtocol {
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
     @ObjCMethod("label") func getLabel() -> String? { label }
     @ObjCMethod("setLabel:") func setLabel(_ label: String?) { self.label = label }
+    /// MTLLibraryTypeExecutable: libraries here are made from metallibs.
+    @ObjCMethod("type") func type() -> Int { 0 }
+    @ObjCMethod("installName") func installName() -> NSObject? { nil }
 
     @ObjCMethod("functionNames") func functionNames() -> NSObject {
         var names: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
@@ -101,6 +104,139 @@ open class MTLLibrary: NSObject, MTLLibraryProtocol {
         let (function, _) = M2V.call { M2V.api.library_new_function_with_name(handle, name, $0) }
         guard let function, let owner else { return nil }
         return MTLFunction(handle: function, device: owner)
+    }
+
+    /// The function specialized with the values: metal2vulkan folds them
+    /// into its translation, as Metal's compiler does.
+    @ObjCMethod("newFunctionWithName:constantValues:error:")
+    func newFunction(name: String?, constantValues: MTLFunctionConstantValues?,
+                     error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> MTLFunction? {
+        guard let name, let owner else {
+            Errors.store(error, MetalConstants.MTLLibraryErrorDomain, LibraryError.functionNotFound, "No function name")
+            return nil
+        }
+        let entries = constantValues?.entries ?? []
+        let (function, message) = MTLFunctionConstantValues.withValues(entries) { values, count in
+            M2V.call { M2V.api.library_new_function_with_constant_values(handle, name, values, count, $0) }
+        }
+        guard let function else {
+            Errors.store(error, MetalConstants.MTLLibraryErrorDomain, LibraryError.compileFailure,
+                         message ?? "Function \(name) could not be specialized")
+            return nil
+        }
+        return MTLFunction(handle: function, device: owner)
+    }
+
+    @ObjCMethod("newFunctionWithName:constantValues:completionHandler:")
+    func newFunction(name: String?, constantValues: MTLFunctionConstantValues?, completionHandler: ObjCBlock?) {
+        var error: UnsafeMutableRawPointer?
+        let function = newFunction(name: name, constantValues: constantValues, error: &error)
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+        guard let completionHandler else { return }
+        completionHandler.function(as: Invoke.self)(completionHandler.object, function?.objcObject, error)
+    }
+}
+
+// MARK: - Function constants
+
+/// The values a specialized function is made with, by index or by name:
+/// each value's MTLDataType and its packed bytes, copied when set.
+@ObjCClass("MTLFunctionConstantValues")
+open class MTLFunctionConstantValues: NSObject {
+    struct Entry {
+        var name: String?
+        var index: UInt32
+        var type: UInt32
+        var bytes: [UInt8]
+    }
+
+    private(set) var entries: [Entry] = []
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    /// The packed size of a scalar or vector MTLDataType's value; 0 for a
+    /// type a function constant can't have.
+    static func size(of type: UInt) -> Int {
+        let vector: (first: UInt, scalar: Int)?
+        switch type {
+        case 3...6: vector = (3, 4)        // float
+        case 16...19: vector = (16, 2)     // half
+        case 29...32: vector = (29, 4)     // int
+        case 33...36: vector = (33, 4)     // uint
+        case 37...40: vector = (37, 2)     // short
+        case 41...44: vector = (41, 2)     // ushort
+        case 45...48: vector = (45, 1)     // char
+        case 49...52: vector = (49, 1)     // uchar
+        case 53...56: vector = (53, 1)     // bool
+        case 81...84: vector = (81, 8)     // long
+        case 85...88: vector = (85, 8)     // ulong
+        case 121...124: vector = (121, 2)  // bfloat
+        default: vector = nil
+        }
+        guard let vector else { return 0 }
+        return vector.scalar * Int(type - vector.first + 1)
+    }
+
+    private func set(_ value: UnsafeRawPointer?, type: UInt, name: String?, index: UInt32) {
+        let size = MTLFunctionConstantValues.size(of: type)
+        let bytes = value.map { Array(UnsafeRawBufferPointer(start: $0, count: size)) } ?? []
+        entries.removeAll { $0.name == name && (name != nil || $0.index == index) }
+        entries.append(Entry(name: name, index: index, type: UInt32(type), bytes: bytes))
+    }
+
+    @ObjCMethod("setConstantValue:type:atIndex:")
+    func setConstantValue(_ value: UnsafeRawPointer?, type: UInt, index: UInt) {
+        set(value, type: type, name: nil, index: UInt32(index))
+    }
+
+    @ObjCMethod("setConstantValue:type:withName:")
+    func setConstantValue(_ value: UnsafeRawPointer?, type: UInt, name: String?) {
+        guard let name else { return }
+        set(value, type: type, name: name, index: 0)
+    }
+
+    /// Values for consecutive indices, each of the type's packed size.
+    @ObjCMethod("setConstantValues:type:withRange:")
+    func setConstantValues(_ values: UnsafeRawPointer?, type: UInt, range: PerryRange) {
+        let size = MTLFunctionConstantValues.size(of: type)
+        for i in 0..<Int(range.length) {
+            set(values.map { $0 + i * size }, type: type, name: nil, index: UInt32(range.location) + UInt32(i))
+        }
+    }
+
+    @ObjCMethod("reset") func reset() { entries.removeAll() }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTLFunctionConstantValues {
+        let copy = MTLFunctionConstantValues()
+        copy.entries = entries
+        return copy
+    }
+
+    /// The entries as metal2vulkan's ABI takes them, good during `body`.
+    static func withValues<Result>(_ entries: [Entry],
+                                   _ body: (UnsafePointer<perry_m2v_function_constant_value>?, Int) -> Result) -> Result {
+        var values: [perry_m2v_function_constant_value] = []
+        var names: [UnsafeMutablePointer<CChar>?] = []
+        var buffers: [UnsafeMutablePointer<UInt8>] = []
+        defer {
+            names.forEach { $0?.deallocate() }
+            buffers.forEach { $0.deallocate() }
+        }
+        for entry in entries {
+            let name = entry.name.map { text -> UnsafeMutablePointer<CChar> in
+                let utf8 = Array(text.utf8CString)
+                let copy = UnsafeMutablePointer<CChar>.allocate(capacity: utf8.count)
+                copy.initialize(from: utf8, count: utf8.count)
+                return copy
+            }
+            names.append(name)
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: max(entry.bytes.count, 1))
+            buffer.initialize(from: entry.bytes, count: entry.bytes.count)
+            buffers.append(buffer)
+            values.append(perry_m2v_function_constant_value(name: UnsafePointer(name), index: entry.index, data_type: entry.type,
+                                                            bytes: UnsafePointer(buffer), length: entry.bytes.count))
+        }
+        return values.withUnsafeBufferPointer { body($0.baseAddress, $0.count) }
     }
 }
 
@@ -194,6 +330,8 @@ open class MTLComputePipelineState: NSObject, MTLComputePipelineStateProtocol {
 
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
     @ObjCMethod("label") func label() -> String? { nil }
+    /// The GPU memory the state holds: none Metal's apps can count here.
+    @ObjCMethod("allocatedSize") func allocatedSize() -> UInt { 0 }
     @ObjCMethod("maxTotalThreadsPerThreadgroup") func maxTotalThreadsPerThreadgroup() -> UInt {
         UInt(M2V.api.compute_pipeline_max_total_threads_per_threadgroup(handle))
     }
