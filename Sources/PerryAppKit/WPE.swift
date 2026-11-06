@@ -400,6 +400,12 @@ final class WebPage {
         WebPage.count -= 1
     }
 
+    /// Drops the callbacks into the page's view, which has gone, while
+    /// something else keeps the page: its frames and events go nowhere.
+    func detach() {
+        (frame, loadChanged, loadFailed, propertyChanged, decideNavigation, scriptMessage) = (nil, nil, nil, nil, nil, nil)
+    }
+
     func loadHTML(_ html: String, baseURI: String?) {
         if let baseURI { wpe.webViewLoadHTML(view, html, baseURI) } else { wpe.webViewLoadHTML(view, html, nil) }
     }
