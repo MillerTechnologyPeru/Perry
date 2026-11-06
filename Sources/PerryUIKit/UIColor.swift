@@ -230,6 +230,19 @@ open class UIColor: NSObject {
         }
     }
 
+    @ObjCMethod("initWithDynamicProvider:")
+    func initialize(dynamicProvider provider: ObjCBlock) -> Self {
+        let resolved = UIColor.resolve(provider, UITraitCollection.current())
+        if let resolved {
+            let other = resolved.state
+            (state.red, state.green, state.blue, state.alpha) = (other.red, other.green, other.blue, other.alpha)
+            state.white = other.white
+            state.patternImage = other.patternImage
+        }
+        state.provider = provider
+        return self
+    }
+
     /// A dynamic color's provider's color for `traits`: the block is given
     /// a trait collection, which apps read without checking for nil, in the
     /// light appearance when `traits` leaves the appearance unspecified.

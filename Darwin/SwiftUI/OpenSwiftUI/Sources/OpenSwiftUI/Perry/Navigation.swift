@@ -232,6 +232,7 @@ public struct NavigationStack<Data, Root>: View where Root: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .coordinateSpace(name: NavigationContentSpace.name)
             .onPreferenceChange(StackTitleKey.self) { title in
                 titles[depth] = title
             }
@@ -262,6 +263,9 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
     var destination: Destination?
     var value: AnyHashable?
     var label: Label
+    /// A link bound to whether its destination shows: setting it pushes
+    /// the destination, clearing it pops it.
+    var isActive: Binding<Bool>?
     @Environment(\.navigationActions) private var actions
 
     public init(destination: Destination, @ViewBuilder label: () -> Label) {
@@ -275,13 +279,24 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
     }
 
     public var body: some View {
-        Button {
-            if let value {
-                actions?.pushValue(value)
-            } else if let destination {
-                _ = actions?.push(AnyView(destination), nil)
-            }
-        } label: {
+        if let isActive, let destination {
+            linkButton { isActive.wrappedValue = true }
+                .navigationDestination(isPresented: isActive) { destination }
+        } else {
+            linkButton { push() }
+        }
+    }
+
+    private func push() {
+        if let value {
+            actions?.pushValue(value)
+        } else if let destination {
+            _ = actions?.push(AnyView(destination), nil)
+        }
+    }
+
+    private func linkButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack {
                 label
                 Spacer(minLength: 0)
@@ -290,6 +305,34 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+@available(OpenSwiftUI_v1_0, *)
+extension NavigationLink {
+    /// Creates a navigation link that presents the destination when
+    /// `isActive` is true.
+    public init(destination: Destination, isActive: Binding<Bool>, @ViewBuilder label: () -> Label) {
+        self.destination = destination
+        self.label = label()
+        self.isActive = isActive
+    }
+
+}
+
+@available(OpenSwiftUI_v1_0, *)
+extension NavigationLink where Label == Text {
+    /// Creates a navigation link titled from a localized key that presents
+    /// the destination when `isActive` is true.
+    public init(_ titleKey: LocalizedStringKey, destination: Destination, isActive: Binding<Bool>) {
+        self.init(destination: destination, isActive: isActive) { Text(titleKey) }
+    }
+
+    /// Creates a navigation link titled with a string that presents the
+    /// destination when `isActive` is true.
+    @_disfavoredOverload
+    public init<S>(_ title: S, destination: Destination, isActive: Binding<Bool>) where S: StringProtocol {
+        self.init(destination: destination, isActive: isActive) { Text(title) }
     }
 }
 
@@ -490,25 +533,38 @@ struct NavigationBarItemsModifier<Leading: View, Trailing: View>: ViewModifier {
     var principal: AnyView? = nil
     @Environment(\.navigationBarHeight) private var barHeight
 
+    /// The items are drawn over the bar: just above the page's content,
+    /// wherever in it the view they were given to is, as a view below a
+    /// header of its own is. Labels show their icons, as in UIKit's bars.
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
             if barHeight > 0 {
-                ZStack {
-                    if let principal {
-                        principal
+                GeometryReader { proxy in
+                    let frame = proxy.frame(in: .named(NavigationContentSpace.name))
+                    ZStack {
+                        if let principal {
+                            principal
+                        }
+                        HStack(spacing: 16) {
+                            leading
+                            Spacer(minLength: 0)
+                            trailing
+                        }
+                        .labelStyle(.iconOnly)
                     }
-                    HStack(spacing: 16) {
-                        leading
-                        Spacer(minLength: 0)
-                        trailing
-                    }
+                    .padding(.horizontal, 16)
+                    .frame(width: proxy.size.width, height: barHeight)
+                    .modifier(_OffsetEffect(offset: CGSize(width: 0, height: -frame.minY - barHeight)))
                 }
-                .padding(.horizontal, 16)
-                .frame(height: barHeight)
-                .modifier(_OffsetEffect(offset: CGSize(width: 0, height: -barHeight)))
             }
         }
     }
+}
+
+/// The navigation stack's content area, below its bar, which bar items
+/// place themselves from.
+enum NavigationContentSpace {
+    static let name = "PerryNavigationContent"
 }
 
 // MARK: - The bar

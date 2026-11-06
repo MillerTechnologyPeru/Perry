@@ -680,6 +680,13 @@ extension NSString {
         return NSRange(location: found.location + scope.location, length: found.length)
     }
 
+    /// The search within `scope`, as the locale compares: the locale is
+    /// not consulted here.
+    @ObjCMethod("rangeOfString:options:range:locale:")
+    func range(of other: String, options: UInt, range scope: NSRange, locale: ObjCObject?) -> NSRange {
+        range(of: other, options: options, range: scope)
+    }
+
     @ObjCMethod("containsString:")
     func contains(_ other: String) -> Bool { range(of: other).location != notFound }
 
