@@ -52,6 +52,7 @@ let package = Package(
         .library(name: "PerryIOKit", type: .dynamic, targets: ["PerryIOKit"]),
         // CoreTelephony, on a device without a cellular radio.
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
+        .library(name: "PerryStoreKit", type: .dynamic, targets: ["PerryStoreKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         // MediaPlayer, with no media library and no movies.
         .library(name: "PerryMediaPlayer", type: .dynamic, targets: ["PerryMediaPlayer"]),
@@ -290,6 +291,12 @@ let package = Package(
         // IOKit, over a registry with the platform device and no others.
         .target(
             name: "PerryIOKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // StoreKit's Objective-C classes, with no App Store.
+        .target(
+            name: "PerryStoreKit",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
