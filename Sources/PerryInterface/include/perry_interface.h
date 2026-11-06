@@ -4,9 +4,10 @@
 // Interface between the Perry loader and the Linux provider libraries that
 // stand in for Darwin libraries (libPerrySystem.so and friends).
 
+#include <stdbool.h>
 #include <stdint.h>
 
-#define PERRY_STARTUP_INFO_VERSION 2
+#define PERRY_STARTUP_INFO_VERSION 3
 
 typedef struct perry_startup_info {
     uint32_t version;
@@ -25,6 +26,19 @@ typedef struct perry_startup_info {
     // dlsym(RTLD_DEFAULT) does: the program's images in load order, then the
     // providers loaded. NULL if missing.
     void *(*lookup_symbol)(const char *install_name, const char *name);
+
+    // Version 3.
+    // Loads a Mach-O library the program opens while it runs (dlopen,
+    // -[NSBundle load]): maps it and what it links that isn't loaded yet,
+    // binds them and runs their initializers, as for the program's own
+    // libraries at startup. True if the library is loaded, now or already;
+    // false if `path` isn't a Mach-O library.
+    bool (*load_library)(const char *path);
+
+    // Looks a symbol up as dlsym(RTLD_NEXT) does for code at `caller`: in
+    // the Mach-O images loaded after the one `caller` is in, then in the
+    // providers. NULL if missing.
+    void *(*lookup_symbol_after)(const void *caller, const char *name);
 } perry_startup_info;
 
 // Providers may export this function. The loader calls it after mapping and

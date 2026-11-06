@@ -193,6 +193,15 @@ public enum ObjCRuntime {
         }
     }
 
+    /// The class the runtime has by `name`, and its metaclass; nil before
+    /// the runtime's functions are installed, and for a class not defined
+    /// yet.
+    public static func registeredClassPair(_ name: String) -> (cls: UnsafeMutableRawPointer, metaclass: UnsafeMutableRawPointer)? {
+        guard let installed, let cls = name.withCString({ installed.getClass($0) }),
+              let metaclass = installed.objectGetClass(cls) else { return nil }
+        return (cls, metaclass)
+    }
+
     /// The class named `name`, cached once found.
     public static func classObject(_ name: String) -> UnsafeMutableRawPointer {
         if let cls = cacheLock.withLock({ classes[name] }) { return cls }

@@ -302,6 +302,20 @@ extension NSString {
     @ObjCMethod("lengthOfBytesUsingEncoding:")
     func byteLength(encoding: UInt) -> UInt { UInt(StringEncoding.encode(value, encoding)?.count ?? 0) }
 
+    /// The most bytes the string could take in the encoding, without
+    /// encoding it: per UTF-16 unit, three in UTF-8, the unit's size in
+    /// UTF-16 and UTF-32, else one.
+    @ObjCMethod("maximumLengthOfBytesUsingEncoding:")
+    func maximumByteLength(encoding: UInt) -> UInt {
+        let units = UInt(value.utf16.count)
+        switch encoding {
+        case 4: return units * 3
+        case 10, 0x9000_0100, 0x9400_0100: return units * 2
+        case 0x8c00_0100, 0x9800_0100, 0x9c00_0100: return units * 4
+        default: return units
+        }
+    }
+
     /// Valid until the current autorelease pool drains, like Foundation's.
     @ObjCMethod("cStringUsingEncoding:")
     func cString(encoding: UInt) -> UnsafePointer<CChar>? {

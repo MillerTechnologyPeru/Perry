@@ -81,7 +81,8 @@ kern_return_t darwin_vm_allocate(mach_port_t task, uintptr_t *address, size_t si
     (void)task;
     // VM_FLAGS_ANYWHERE is 1; otherwise at the address given.
     void *hint = (flags & 1) ? NULL : (void *)*address;
-    void *memory = mmap(hint, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | (hint ? MAP_FIXED_NOREPLACE : 0), -1, 0);
+    void *memory = hint ? mmap(hint, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0)
+                        : perry_map_pages(size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (memory == MAP_FAILED)
         return KERN_RESOURCE_SHORTAGE;
     *address = (uintptr_t)memory;
@@ -359,6 +360,7 @@ typedef struct suspension {
     ucontext_t *_Atomic context;  // while stopped in the handler
     sem_t stopped;
     _Atomic int resume;         // futex word: 1 lets the handler return
+    _Atomic int inside;         // futex word: 1 while the thread is in the handler
     struct suspension *next;
 } suspension;
 
@@ -389,13 +391,29 @@ static void stop_here(int signal, siginfo_t *info, void *context) {
     while (entry && entry->thread != self)
         entry = entry->next;
     if (entry) {
+        atomic_store(&entry->inside, 1);
         atomic_store(&entry->context, (ucontext_t *)context);
         sem_post(&entry->stopped);
         while (!atomic_load(&entry->resume))
             syscall(SYS_futex, &entry->resume, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
         atomic_store(&entry->context, NULL);
+        atomic_store(&entry->inside, 0);
+        syscall(SYS_futex, &entry->inside, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
     }
     errno = saved;
+}
+
+// Lets a stopped thread go, and waits, for a second at most, until it is
+// out of the handler: suspended again at once, as a garbage collector does
+// between its phases, a thread still in the handler would take the new
+// stop for the old one's wait and never say it had stopped. With the lock
+// held.
+static void release_stopped(suspension *entry) {
+    atomic_store(&entry->resume, 1);
+    syscall(SYS_futex, &entry->resume, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    struct timespec wait = { 0, 1000000 };
+    for (int tries = 0; tries < 1000 && atomic_load(&entry->inside); tries++)
+        syscall(SYS_futex, &entry->inside, FUTEX_WAIT_PRIVATE, 1, &wait, NULL, 0);
 }
 
 static void install_suspend_handler(void) {
@@ -425,6 +443,8 @@ kern_return_t darwin_thread_suspend(mach_port_t port) {
     if (syscall(SYS_tgkill, getpid(), thread, suspend_signal) != 0) {
         entry->count = 0;
         pthread_mutex_unlock(&suspension_lock);
+        if (getenv("PERRY_TRACE_THREADS"))
+            fprintf(stderr, "perry: thread_suspend: thread %d is gone: %s\n", thread, strerror(errno));
         return KERN_INVALID_ARGUMENT;
     }
     pthread_mutex_unlock(&suspension_lock);
@@ -436,10 +456,34 @@ kern_return_t darwin_thread_suspend(mach_port_t port) {
     int waited;
     while ((waited = sem_timedwait(&entry->stopped, &deadline)) != 0 && errno == EINTR) {}
     if (waited != 0) {
+        if (getenv("PERRY_TRACE_THREADS")) {
+            char path[64], name[32] = "?";
+            snprintf(path, sizeof(path), "/proc/self/task/%d/comm", thread);
+            FILE *file = fopen(path, "r");
+            if (file) {
+                if (fgets(name, sizeof(name), file))
+                    name[strcspn(name, "\n")] = 0;
+                fclose(file);
+            }
+            fprintf(stderr, "perry: thread_suspend: thread %d (%s) did not stop within a second\n", thread, name);
+            char line[256];
+            snprintf(path, sizeof(path), "/proc/self/task/%d/status", thread);
+            if ((file = fopen(path, "r"))) {
+                while (fgets(line, sizeof(line), file))
+                    if (!strncmp(line, "State:", 6) || !strncmp(line, "SigPnd:", 7) || !strncmp(line, "SigBlk:", 7))
+                        fprintf(stderr, "perry:   %s", line);
+                fclose(file);
+            }
+            snprintf(path, sizeof(path), "/proc/self/task/%d/syscall", thread);
+            if ((file = fopen(path, "r"))) {
+                if (fgets(line, sizeof(line), file))
+                    fprintf(stderr, "perry:   in system call: %s", line);
+                fclose(file);
+            }
+        }
         pthread_mutex_lock(&suspension_lock);
         entry->count = 0;
-        atomic_store(&entry->resume, 1);
-        syscall(SYS_futex, &entry->resume, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+        release_stopped(entry);
         pthread_mutex_unlock(&suspension_lock);
         return KERN_FAILURE;
     }
@@ -454,10 +498,8 @@ kern_return_t darwin_thread_resume(mach_port_t port) {
         pthread_mutex_unlock(&suspension_lock);
         return KERN_FAILURE;
     }
-    if (--entry->count == 0) {
-        atomic_store(&entry->resume, 1);
-        syscall(SYS_futex, &entry->resume, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
-    }
+    if (--entry->count == 0)
+        release_stopped(entry);
     pthread_mutex_unlock(&suspension_lock);
     return KERN_SUCCESS;
 }
@@ -571,7 +613,30 @@ kern_return_t darwin_thread_set_state(mach_port_t port, int flavor, const uint32
 
 // MARK: - Threads and the task
 
-// The process's threads, in memory vm_deallocate frees.
+// Whether a thread blocks the signal threads are suspended with: one of
+// the host's own, as Mesa's and libdispatch's service threads are, which
+// block every signal. They run none of the program's code, and can't be
+// stopped.
+static bool blocks_suspension(pid_t thread) {
+    char path[64], line[256];
+    snprintf(path, sizeof(path), "/proc/self/task/%d/status", thread);
+    FILE *file = fopen(path, "r");
+    if (!file)
+        return false;
+    unsigned long long blocked = 0;
+    while (fgets(line, sizeof(line), file)) {
+        if (strncmp(line, "SigBlk:", 7) == 0) {
+            blocked = strtoull(line + 7, NULL, 16);
+            break;
+        }
+    }
+    fclose(file);
+    return (blocked >> (SIGRTMIN + 4 - 1)) & 1;
+}
+
+// The process's threads, in memory vm_deallocate frees: those that can be
+// suspended, which a garbage collector that lists them goes on to do to
+// each.
 kern_return_t darwin_task_threads(mach_port_t task, mach_port_t **list, uint32_t *count) DARWIN_SYMBOL(task_threads);
 kern_return_t darwin_task_threads(mach_port_t task, mach_port_t **list, uint32_t *count) {
     (void)task;
@@ -584,9 +649,12 @@ kern_return_t darwin_task_threads(mach_port_t task, mach_port_t **list, uint32_t
     while ((entry = readdir(directory))) {
         if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
             continue;
+        pid_t thread = (pid_t)atoi(entry->d_name);
+        if (blocks_suspension(thread))
+            continue;
         if (found == capacity)
             ports = realloc(ports, (capacity *= 2) * sizeof(*ports));
-        ports[found++] = (mach_port_t)atoi(entry->d_name);
+        ports[found++] = (mach_port_t)thread;
     }
     closedir(directory);
     uintptr_t address = 0;
@@ -684,8 +752,13 @@ void *darwin_dlopen(const char *path, int mode) {
     (void)mode;
     library_handle *handle = calloc(1, sizeof(*handle));
     // The program, and libraries such as Mono's "__Internal" in it.
-    if (path && *path && strcmp(path, "__Internal") != 0)
+    if (path && *path && strcmp(path, "__Internal") != 0) {
         handle->name = strdup(path);
+        // A Mach-O library of the app's own that isn't loaded yet is, with
+        // what it links. Anything else is one of the system's, by name.
+        if (path[0] == '/' && perry_system_load_library)
+            perry_system_load_library(path);
+    }
     return handle;
 }
 
@@ -717,7 +790,10 @@ void *darwin_dlsym(void *handle, const char *symbol) {
     name[0] = '_';
     memcpy(name + 1, symbol, length + 1);
     const char *library = (intptr_t)handle < 0 || !handle ? NULL : ((library_handle *)handle)->name;
-    void *address = perry_system_lookup(library, name);
+    // RTLD_NEXT: what comes after the caller's own image, which may define
+    // the symbol itself to wrap the one it is looking for.
+    void *address = (intptr_t)handle == DARWIN_RTLD_NEXT && perry_system_lookup_after
+        ? perry_system_lookup_after(__builtin_return_address(0), name) : perry_system_lookup(library, name);
     // A library's handle also finds what it re-exports and depends on.
     if (!address && library)
         address = perry_system_lookup(NULL, name);

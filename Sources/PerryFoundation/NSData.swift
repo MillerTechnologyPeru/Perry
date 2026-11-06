@@ -324,6 +324,13 @@ public class NSData: NSObject {
             .map { setStorage(DataStorage($0)) }
     }
 
+    /// From Base64 text as data, ASCII.
+    @ObjCMethod("initWithBase64EncodedData:options:")
+    func initialize(base64Data encoded: NSData, options: UInt) -> Self? {
+        Data(base64Encoded: encoded.data, options: options & 1 != 0 ? .ignoreUnknownCharacters : [])
+            .map { setStorage(DataStorage($0)) }
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Storage.set(objcObject, nil)

@@ -457,7 +457,9 @@ enum PredicateEvaluation {
     /// key, when the object responds to it.
     static func value(of path: String, in object: id?) -> id? {
         var current = object
-        for key in path.split(separator: ".") {
+        // "SELF.name" is the evaluated object's name.
+        let keys = path.split(separator: ".")
+        for key in keys.first?.uppercased() == "SELF" ? keys.dropFirst() : keys[...] {
             guard let target = current else { return nil }
             let keyObject = Strings.autoreleased(String(key))
             if ObjC.isKind(target, of: Dictionaries.dictionaryClass) {

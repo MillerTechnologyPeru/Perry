@@ -1,7 +1,7 @@
 // Extended audio files: an audio file read as frames of linear PCM in the
 // format the client asks for, whatever the file holds. Built on the audio
 // files of file.c: linear PCM and IMA4 are converted as they are read, and
-// the files GStreamer decodes are already PCM once opened. Channels are
+// other formats are decoded whole by GStreamer when the file is wrapped. Channels are
 // remapped and the rate converted linearly. Files are read only.
 
 #include "PerryAudioToolbox.h"
@@ -71,6 +71,12 @@ static OSStatus wrap(void *file, bool owns, void **out) {
     if (!ext) return kAudio_MemFullError;
     uint32_t size = sizeof ext->format;
     OSStatus status = darwin_AudioFileGetProperty(file, FOURCC('d', 'f', 'm', 't'), &size, &ext->format);
+    if (!status && ext->format.mFormatID != kAudioFormatLinearPCM && ext->format.mFormatID != kAudioFormatAppleIMA4
+        && !perry_audio_file_decode(file)) {
+        // AAC and the like: read from here on as the PCM GStreamer decodes.
+        size = sizeof ext->format;
+        status = darwin_AudioFileGetProperty(file, FOURCC('d', 'f', 'm', 't'), &size, &ext->format);
+    }
     uint64_t packets = 0;
     size = sizeof packets;
     if (!status) status = darwin_AudioFileGetProperty(file, FOURCC('p', 'c', 'n', 't'), &size, &packets);

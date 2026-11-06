@@ -35,9 +35,13 @@ void perry_provider_startup(const perry_startup_info *info) {
     local_environ = info->envp;
     local_progname = info->progname;
     perry_system_lookup = info->lookup_symbol;
+    perry_system_load_library = info->version >= 3 ? info->load_library : NULL;
+    perry_system_lookup_after = info->version >= 3 ? info->lookup_symbol_after : NULL;
 }
 
 void *(*perry_system_lookup)(const char *install_name, const char *name);
+bool (*perry_system_load_library)(const char *path);
+void *(*perry_system_lookup_after)(const void *caller, const char *name);
 
 int *darwin_NSGetArgc(void) DARWIN_SYMBOL(_NSGetArgc);
 int *darwin_NSGetArgc(void) { return &program_argc; }
@@ -93,11 +97,6 @@ _Noreturn void darwin_dyld_stub_binder(void) {
 
 // MARK: - Unwinding
 
-// Cleanups in unwind tables end by resuming the exception. Perry cannot
-// unwind Mach-O frames, so an exception never gets here, but the symbol
-// must resolve.
-_Noreturn void darwin_unwind_resume(void *exception) DARWIN_SYMBOL(_Unwind_Resume);
-_Noreturn void darwin_unwind_resume(void *exception) {
-    fputs("perry: _Unwind_Resume called; unwinding Mach-O frames is not supported\n", stderr);
-    abort();
-}
+// The unwinder is the host's (libgcc's), which the loader describes Mach-O
+// images' frames to: _Unwind_Resume, which cleanups end by calling, and the
+// rest of its interface are its own, in thunks.S.

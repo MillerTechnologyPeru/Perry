@@ -62,9 +62,10 @@ open class UIWindow: UIView {
         Updates.schedule()
     }
 
-    /// A window in `scene`, the size of the screen.
+    /// A window in `scene`, the size of the screen; in none when an app
+    /// without scenes passes the nil it found.
     @ObjCMethod("initWithWindowScene:")
-    func initialize(windowScene scene: UIWindowScene) -> NSObject {
+    func initialize(windowScene scene: UIWindowScene?) -> NSObject {
         let window = initializeView(frame: Screen.bounds).unsafeCast(to: UIWindow.self)
         window.setWindowScene(scene)
         return window

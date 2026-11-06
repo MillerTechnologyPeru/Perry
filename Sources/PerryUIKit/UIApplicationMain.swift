@@ -67,7 +67,9 @@ enum Launch {
         let manifest = SceneManifest(info)
         let window = manifest == nil ? mainStoryboardWindow(info) : nil
         _ = delegate?.application(application, willFinishLaunchingWithOptions: nil)
-        _ = delegate?.application(application, didFinishLaunchingWithOptions: nil)
+        if delegate?.application(application, didFinishLaunchingWithOptions: nil) == nil {
+            delegate?.applicationDidFinishLaunching(application)
+        }
         Application.post(Notifications.UIApplicationDidFinishLaunchingNotification, object: application)
         window?.makeKeyAndVisible()
 
