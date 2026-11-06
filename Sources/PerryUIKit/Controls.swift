@@ -387,9 +387,15 @@ final class SearchBarState: ObjectState {
     var scopeButtonTitles: NSObject?
     var selectedScopeButtonIndex = 0
     var showsScopeBar = false
+    var field: UISearchTextField?
+    var cancelButton: UIButton?
+    /// The search controller whose bar this is, unretained.
+    var controller: UnsafeMutableRawPointer?
 }
 
-/// A search field: its text, or the placeholder, in a rounded field.
+/// A search field, and a Cancel button beside it while it shows one. What
+/// is typed goes to the delegate and to the search controller's results
+/// updater, as on iOS.
 @ObjCClass("UISearchBar")
 open class UISearchBar: UIView {
     static let searchStates = StateTable<SearchBarState>()
@@ -401,6 +407,13 @@ open class UISearchBar: UIView {
         super.dealloc()
     }
 
+    @ObjCMethod("initWithFrame:")
+    override func initialize(frame: CGRect) -> Self {
+        _ = super.initialize(frame: frame)
+        makeField()
+        return self
+    }
+
     @ObjCMethod("initWithCoder:")
     override func initialize(coder: NSObject) -> Self {
         _ = super.initialize(coder: coder)
@@ -410,20 +423,47 @@ open class UISearchBar: UIView {
         search.prompt = decoded.string("UIPrompt")
         search.showsCancelButton = decoded.bool("UIShowsCancelButton")
         search.searchBarStyle = decoded.integer("UISearchBarStyle")
+        makeField()
         return self
     }
 
-    @ObjCMethod("text") func text() -> String? { search.text ?? "" }
-    @ObjCMethod("setText:") func setText(_ text: String?) { search.text = text; setNeedsDisplay() }
+    private func makeField() {
+        guard search.field == nil else { return }
+        let field = UISearchTextField.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UISearchTextField.self)
+        field.setText(search.text)
+        field.setPlaceholder(search.placeholder ?? "Search")
+        field.setReturnKeyType(6)
+        field.addTarget(self, action: ObjCSelector("_perrySearchBegan:"), for: 1 << 16)
+        field.addTarget(self, action: ObjCSelector("_perrySearchChanged:"), for: 1 << 17)
+        field.addTarget(self, action: ObjCSelector("_perrySearchEnded:"), for: 1 << 18)
+        field.addTarget(self, action: ObjCSelector("_perrySearchReturn:"), for: 1 << 19)
+        search.field = field
+        addSubview(field)
+        setNeedsLayout()
+    }
+
+    var field: UISearchTextField {
+        makeField()
+        return search.field!
+    }
+
+    var controller: UISearchController? { search.controller.map { NSObject($0).unsafeCast(to: UISearchController.self) } }
+    private var barDelegate: NSObject? { search.delegate.map { NSObject($0) } }
+
+    @ObjCMethod("text") func text() -> String? { field.text() ?? "" }
+    @ObjCMethod("setText:") func setText(_ text: String?) { search.text = text; field.setText(text) }
     @ObjCMethod("placeholder") func placeholder() -> String? { search.placeholder }
-    @ObjCMethod("setPlaceholder:") func setPlaceholder(_ placeholder: String?) { search.placeholder = placeholder; setNeedsDisplay() }
+    @ObjCMethod("setPlaceholder:") func setPlaceholder(_ placeholder: String?) {
+        search.placeholder = placeholder
+        field.setPlaceholder(placeholder ?? "Search")
+    }
     @ObjCMethod("prompt") func prompt() -> String? { search.prompt }
     @ObjCMethod("setPrompt:") func setPrompt(_ prompt: String?) { search.prompt = prompt }
     @ObjCMethod("delegate") func delegate() -> NSObject? { search.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { search.delegate = delegate?.objcObject }
     @ObjCMethod("showsCancelButton") func showsCancelButton() -> Bool { search.showsCancelButton }
-    @ObjCMethod("setShowsCancelButton:") func setShowsCancelButton(_ shows: Bool) { search.showsCancelButton = shows }
-    @ObjCMethod("setShowsCancelButton:animated:") func setShowsCancelButton(_ shows: Bool, animated: Bool) { search.showsCancelButton = shows }
+    @ObjCMethod("setShowsCancelButton:") func setShowsCancelButton(_ shows: Bool) { search.showsCancelButton = shows; setNeedsLayout() }
+    @ObjCMethod("setShowsCancelButton:animated:") func setShowsCancelButton(_ shows: Bool, animated: Bool) { setShowsCancelButton(shows) }
     @ObjCMethod("searchBarStyle") func searchBarStyle() -> Int { search.searchBarStyle }
     @ObjCMethod("setSearchBarStyle:") func setSearchBarStyle(_ style: Int) { search.searchBarStyle = style }
     @ObjCMethod("barTintColor") func barTintColor() -> UIColor? { search.barTintColor }
@@ -434,31 +474,163 @@ open class UISearchBar: UIView {
     @ObjCMethod("setSelectedScopeButtonIndex:") func setSelectedScopeButtonIndex(_ index: Int) { search.selectedScopeButtonIndex = index }
     @ObjCMethod("showsScopeBar") func showsScopeBar() -> Bool { search.showsScopeBar }
     @ObjCMethod("setShowsScopeBar:") func setShowsScopeBar(_ shows: Bool) { search.showsScopeBar = shows }
-    @ObjCMethod("searchTextField") func searchTextField() -> UIView? { nil }
-    @ObjCMethod("becomeFirstResponder") override func becomeFirstResponder() -> Bool { false }
+    @ObjCMethod("searchTextField") func searchTextField() -> UISearchTextField { field }
+    @ObjCMethod("keyboardType") func keyboardType() -> Int { field.keyboardType() }
+    @ObjCMethod("setKeyboardType:") func setKeyboardType(_ type: Int) { field.setKeyboardType(type) }
+    @ObjCMethod("returnKeyType") func returnKeyType() -> Int { field.returnKeyType() }
+    @ObjCMethod("setReturnKeyType:") func setReturnKeyType(_ type: Int) { field.setReturnKeyType(type) }
+    @ObjCMethod("autocapitalizationType") func autocapitalizationType() -> Int { field.autocapitalizationType() }
+    @ObjCMethod("setAutocapitalizationType:") func setAutocapitalizationType(_ type: Int) { field.setAutocapitalizationType(type) }
+    @ObjCMethod("autocorrectionType") func autocorrectionType() -> Int { field.autocorrectionType() }
+    @ObjCMethod("setAutocorrectionType:") func setAutocorrectionType(_ type: Int) { field.setAutocorrectionType(type) }
+    @ObjCMethod("inputAccessoryView") func inputAccessoryView() -> UIView? { field.inputAccessoryView() }
+    @ObjCMethod("setInputAccessoryView:") func setInputAccessoryView(_ view: UIView?) { field.setInputAccessoryView(view) }
+
+    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { true }
+    @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(field) }
+    @ObjCMethod("becomeFirstResponder") override func becomeFirstResponder() -> Bool { field.sendBecomeFirstResponder() }
+    @ObjCMethod("resignFirstResponder") override func resignFirstResponder() -> Bool { field.sendResignFirstResponder() }
+
+    // MARK: Editing
+
+    /// Asked of the delegate before the field begins editing.
+    func shouldBeginEditing() -> Bool {
+        guard let delegate = barDelegate, delegate.responds(to: "searchBarShouldBeginEditing:") else { return true }
+        return delegate.sendSearchBarShouldBeginEditing(self)
+    }
+
+    @ObjCMethod("_perrySearchBegan:")
+    func searchBegan(_ sender: NSObject?) {
+        controller?.searchBarBeganEditing()
+        if let delegate = barDelegate, delegate.responds(to: "searchBarTextDidBeginEditing:") { delegate.sendSearchBarTextDidBeginEditing(self) }
+        setNeedsLayout()
+    }
+
+    @ObjCMethod("_perrySearchChanged:")
+    func searchChanged(_ sender: NSObject?) {
+        let text = field.text() ?? ""
+        search.text = text
+        if let delegate = barDelegate, delegate.responds(to: "searchBar:textDidChange:") { delegate.sendSearchBar(self, textDidChange: text) }
+        controller?.searchBarChanged()
+    }
+
+    @ObjCMethod("_perrySearchEnded:")
+    func searchEnded(_ sender: NSObject?) {
+        if let delegate = barDelegate, delegate.responds(to: "searchBarTextDidEndEditing:") { delegate.sendSearchBarTextDidEndEditing(self) }
+        setNeedsLayout()
+    }
+
+    @ObjCMethod("_perrySearchReturn:")
+    func searchReturn(_ sender: NSObject?) {
+        if let delegate = barDelegate, delegate.responds(to: "searchBarSearchButtonClicked:") { delegate.sendSearchBarSearchButtonClicked(self) }
+    }
+
+    /// Cancel: the delegate is told; a search controller's search ends,
+    /// its text cleared and the keyboard put away.
+    @ObjCMethod("_perrySearchCancel:")
+    func searchCancel(_ sender: NSObject?) {
+        if let delegate = barDelegate, delegate.responds(to: "searchBarCancelButtonClicked:") { delegate.sendSearchBarCancelButtonClicked(self) }
+        if let controller {
+            _ = field.sendResignFirstResponder()
+            controller.setActive(false)
+        }
+        setNeedsLayout()
+    }
+
+    // MARK: Layout
+
+    /// Cancel shows when asked for, or while a search controller's bar is
+    /// in use.
+    private var showsCancel: Bool {
+        if search.showsCancelButton { return true }
+        guard let controller, controller.searching.showsCancelButton else { return false }
+        return controller.searching.active || Keyboard.isFirstResponder(field)
+    }
 
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width > 0 ? size.width : state.bounds.width, height: 56) }
+
+    @ObjCMethod("layoutSubviews")
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let bounds = state.bounds
+        var cancelWidth: CGFloat = 0
+        if showsCancel {
+            let button: UIButton
+            if let existing = search.cancelButton {
+                button = existing
+            } else {
+                button = UIButton.button(UIButton.objCClass, type: 1).unsafeCast(to: UIButton.self)
+                button.setTitle("Cancel", for: 0)
+                button.titleLabel().setFont(UIFont.systemFont(size: 17))
+                button.addTarget(self, action: ObjCSelector("_perrySearchCancel:"), for: 1 << 6)
+                search.cancelButton = button
+                addSubview(button)
+            }
+            cancelWidth = Text.width("Cancel", font: UIFont.systemFont(size: 17)).rounded(.up) + 16
+            button.setHidden(false)
+            button.sendSetFrame(CGRect(x: bounds.width - cancelWidth - 4, y: bounds.midY - 18, width: cancelWidth, height: 36))
+        } else {
+            search.cancelButton?.setHidden(true)
+        }
+        field.sendSetFrame(CGRect(x: 8, y: bounds.midY - 18, width: max(bounds.width - 16 - (cancelWidth > 0 ? cancelWidth + 4 : 0), 0), height: 36))
+    }
+
+    @ObjCMethod("drawRect:")
+    override func draw(_ rect: CGRect) {
+        guard let context = Graphics.current, let tint = search.barTintColor else { return }
+        withExtendedLifetime(tint) {
+            CG.setFillColorWithColor(context, tint.state.makeCGColor())
+            CG.fillRect(context, state.bounds)
+        }
+    }
+}
+
+/// A search bar's field: a rounded, tinted field with a magnifying glass
+/// before its text.
+@ObjCClass("UISearchTextField")
+open class UISearchTextField: UITextField {
+    var searchBar: UISearchBar? { superview()?.as(UISearchBar.self) }
+
+    @ObjCMethod("becomeFirstResponder")
+    override func becomeFirstResponder() -> Bool {
+        if !Keyboard.isFirstResponder(self), let bar = searchBar, !bar.shouldBeginEditing() { return false }
+        return super.becomeFirstResponder()
+    }
+
+    @ObjCMethod("textRectForBounds:")
+    override func textRect(forBounds bounds: CGRect) -> CGRect {
+        CGRect(x: bounds.minX + 32, y: bounds.minY, width: max(bounds.width - 40, 0), height: bounds.height)
+    }
+
+    @ObjCMethod("intrinsicContentSize")
+    override func intrinsicContentSize() -> CGSize { CGSize(width: -1, height: 36) }
 
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard let context = Graphics.current else { return }
         let bounds = state.bounds
-        let field = CGRect(x: 8, y: bounds.midY - 18, width: bounds.width - 16, height: 36)
         let fill = UIColor.rgb(118.0 / 255, 118.0 / 255, 128.0 / 255, 0.12)
         withExtendedLifetime(fill) {
             CG.setFillColorWithColor(context, fill.state.makeCGColor())
-            if let shape = roundedRectPath(field, radius: 10, corners: 0xf) {
+            if let shape = roundedRectPath(bounds, radius: 10, corners: 0xf) {
                 CG.addPath(context, shape.object)
                 CG.fillPath(context)
             }
         }
-        let font = UIFont.systemFont(size: 17)
-        let text = search.text.flatMap { $0.isEmpty ? nil : $0 }
-        let shown = text ?? search.placeholder ?? "Search"
-        Text.draw(shown, at: CGPoint(x: field.minX + 12, y: field.midY - Text.size(shown, font: font).height / 2), font: font,
-                  color: text == nil ? UIColor.systemGray() : UIColor.label())
+        if let glass = Symbols.image(named: "magnifyingglass")?.withTintColor(UIColor.systemGray()) {
+            let size = glass.state.size
+            let height: CGFloat = 17
+            let width = size.height > 0 ? size.width * height / size.height : height
+            glass.draw(in: CGRect(x: 8, y: bounds.midY - height / 2, width: width, height: height))
+        }
+        super.draw(rect)
     }
+}
+
+extension NSObject {
+    @ObjCMethod("searchBarShouldBeginEditing:") func sendSearchBarShouldBeginEditing(_ bar: UISearchBar) -> Bool
+    @ObjCMethod("searchBarCancelButtonClicked:") func sendSearchBarCancelButtonClicked(_ bar: UISearchBar)
 }
 
 // MARK: - UITextView
