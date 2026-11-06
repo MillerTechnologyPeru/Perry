@@ -140,7 +140,10 @@ extension RoundedRectangle: InsettableShape {
 
         @usableFromInline
         nonisolated func path(in rect: CGRect) -> Path {
-            _openSwiftUIUnimplementedFailure()
+            let inset = rect.insetBy(dx: amount, dy: amount)
+            guard !inset.isNull, !inset.isEmpty else { return Path() }
+            let size = CGSize(width: max(base.cornerSize.width - amount, 0), height: max(base.cornerSize.height - amount, 0))
+            return RoundedRectangle(cornerSize: size, style: base.style).path(in: inset)
         }
 
         @usableFromInline
@@ -187,7 +190,14 @@ extension UnevenRoundedRectangle: InsettableShape {
 
         @usableFromInline
         nonisolated func path(in rect: CGRect) -> Path {
-            _openSwiftUIUnimplementedFailure()
+            let inset = rect.insetBy(dx: amount, dy: amount)
+            guard !inset.isNull, !inset.isEmpty else { return Path() }
+            var shape = base
+            shape.cornerRadii.topLeft = max(shape.cornerRadii.topLeft - amount, 0)
+            shape.cornerRadii.topRight = max(shape.cornerRadii.topRight - amount, 0)
+            shape.cornerRadii.bottomRight = max(shape.cornerRadii.bottomRight - amount, 0)
+            shape.cornerRadii.bottomLeft = max(shape.cornerRadii.bottomLeft - amount, 0)
+            return shape.path(in: inset)
         }
         
         @usableFromInline
@@ -226,7 +236,10 @@ extension Capsule: InsettableShape {
 
         @usableFromInline
         nonisolated func path(in rect: CGRect) -> Path {
-            _openSwiftUIUnimplementedFailure()
+            let (inset, style) = Self._extractInset(amount)
+            let insetRect = rect.insetBy(dx: inset, dy: inset)
+            guard !insetRect.isNull, !insetRect.isEmpty else { return Path() }
+            return Capsule(style: style).path(in: insetRect)
         }
 
         @usableFromInline
@@ -285,7 +298,9 @@ extension Ellipse: InsettableShape {
 
         @usableFromInline
         nonisolated func path(in rect: CGRect) -> Path {
-            _openSwiftUIUnimplementedFailure()
+            let inset = rect.insetBy(dx: amount, dy: amount)
+            guard !inset.isNull, !inset.isEmpty else { return Path() }
+            return Ellipse().path(in: inset)
         }
 
         @usableFromInline
@@ -329,7 +344,9 @@ extension Circle: InsettableShape {
 
         @usableFromInline
         nonisolated func path(in rect: CGRect) -> Path {
-            _openSwiftUIUnimplementedFailure()
+            let inset = rect.insetBy(dx: amount, dy: amount)
+            guard !inset.isNull, !inset.isEmpty else { return Path() }
+            return Circle().path(in: inset)
         }
 
         @usableFromInline
