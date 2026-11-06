@@ -367,6 +367,17 @@ extension NSObject {
     @ObjCMethod("setValue:forKey:")
     func setKeyValue(_ value: ObjCObject?, forKey key: String) { KeyValueCoding.setValue(objcObject, key, value?.objcObject) }
 
+    /// Asks the class's validate<Key>:error:, if it has one, whether the
+    /// value may be set; any value is valid otherwise.
+    @ObjCMethod("validateValue:forKey:error:")
+    func validateValue(_ value: UnsafeMutablePointer<id?>?, forKey key: String, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let first = key.first else { return true }
+        let selector = ObjC.selector("validate" + first.uppercased() + key.dropFirst() + ":error:")
+        guard KeyValueCoding.responds(objcObject, selector) else { return true }
+        typealias Validate = @convention(c) (id, SEL, UnsafeMutablePointer<id?>?, UnsafeMutablePointer<id?>?) -> Bool
+        return unsafeBitCast(ObjC.msgSend!, to: Validate.self)(objcObject, selector, value, error)
+    }
+
     /// What a key without accessors does: raise, as Foundation's, unless a
     /// class overrides these.
     @ObjCMethod("valueForUndefinedKey:")
