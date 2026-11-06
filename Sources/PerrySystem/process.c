@@ -254,12 +254,27 @@ int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin
         return 0;
     // PERRY_KEEP_CRASH_HANDLERS keeps the crash signals' handlers Perry
     // started with, so a crash reporter in the app does not hide where a
-    // crash happened: the app's handler is recorded but not installed.
-    static int keep = -1;
-    if (keep < 0)
-        keep = getenv("PERRY_KEEP_CRASH_HANDLERS") != NULL;
-    if (keep && (linux_signal == SIGSEGV || linux_signal == SIGBUS || linux_signal == SIGILL ||
-                 linux_signal == SIGABRT || linux_signal == SIGTRAP || linux_signal == SIGFPE)) {
+    // crash happened: the app's handler is recorded but not installed. Its
+    // value may name the signals kept (segv,bus,ill,abrt,trap,fpe), leaving
+    // the others to the app, as OpenSSL needs SIGILL to probe the CPU;
+    // otherwise all of them are kept.
+    static int kept = -1;
+    if (kept < 0) {
+        kept = 0;
+        const char *setting = getenv("PERRY_KEEP_CRASH_HANDLERS");
+        if (setting) {
+            static const struct { const char *name; int signal; } names[] = {
+                { "segv", SIGSEGV }, { "bus", SIGBUS }, { "ill", SIGILL }, { "abrt", SIGABRT }, { "trap", SIGTRAP }, { "fpe", SIGFPE },
+            };
+            for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+                if (strstr(setting, names[i].name))
+                    kept |= 1 << names[i].signal;
+            if (!kept)
+                for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+                    kept |= 1 << names[i].signal;
+        }
+    }
+    if (kept & (1 << linux_signal)) {
         handlers[linux_signal] = *action;
         return 0;
     }
