@@ -87,9 +87,11 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("allowsConstrainedNetworkAccess") func allowsConstrainedNetworkAccess() -> Bool { true }
     @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(request.networkServiceType) }
 
+    /// A copy is of the request's own class, as CFNetwork's is: a mutable
+    /// request's copy is mutable, which Swift's URLRequest relies on.
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
-        ObjCRuntime.retain(Requests.object(request.copy()).objcObject)!
+        ObjCRuntime.retain(Requests.object(request.copy(), mutable: isKind(of: NSMutableURLRequest.objCClass)).objcObject)!
     }
 
     // MARK: NSSecureCoding
