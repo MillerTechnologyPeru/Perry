@@ -359,6 +359,57 @@ public func CFURLCopyPathExtension(_ url: id?) -> id? {
 
 @c(_CFURLHasDirectoryPath) public func CFURLHasDirectoryPath(_ url: id?) -> Bool { CFURLs.url(url)?.hasDirectoryPath ?? false }
 
+// MARK: Bookmarks: NSURL's, which name the URL itself
+
+@c(_CFURLCreateBookmarkData)
+public func CFURLCreateBookmarkData(_ allocator: UnsafeRawPointer?, _ url: id?, _ options: UInt, _ keys: id?, _ relativeTo: id?,
+                                    _ error: UnsafeMutablePointer<id?>?) -> id? {
+    guard let url = CFURLs.url(url) else { return nil }
+    return ObjC.retain(DataObjects.autoreleased(NSURL.bookmark(for: url)))
+}
+
+@c(_CFURLCreateByResolvingBookmarkData)
+public func CFURLCreateByResolvingBookmarkData(_ allocator: UnsafeRawPointer?, _ bookmark: id?, _ options: UInt, _ relativeTo: id?,
+                                               _ keys: id?, _ isStale: UnsafeMutablePointer<UInt8>?,
+                                               _ error: UnsafeMutablePointer<id?>?) -> id? {
+    isStale?.pointee = 0
+    guard let url = NSURL.bookmarkURL(DataObjects.data(bookmark)) else {
+        error?.pointee = ObjC.retain(Errors.autoreleased(domain: Errors.cocoaDomain, code: 259,
+            description: "The file couldn’t be opened because it isn’t in the correct format."))
+        return nil
+    }
+    return CFURLs.make(url)
+}
+
+/// No file here is an alias file, which is what a bookmark file is.
+@c(_CFURLCreateBookmarkDataFromFile)
+public func CFURLCreateBookmarkDataFromFile(_ allocator: UnsafeRawPointer?, _ fileURL: id?, _ error: UnsafeMutablePointer<id?>?) -> id? {
+    error?.pointee = ObjC.retain(Errors.autoreleased(domain: Errors.cocoaDomain, code: 259,
+        description: "The file couldn’t be opened because it isn’t in the correct format."))
+    return nil
+}
+
+@c(_CFURLWriteBookmarkDataToFile)
+public func CFURLWriteBookmarkDataToFile(_ bookmark: id?, _ fileURL: id?, _ options: UInt, _ error: UnsafeMutablePointer<id?>?) -> Bool {
+    guard let path = CFURLs.url(fileURL)?.path(percentEncoded: false), let file = fopen(path, "wb") else { return false }
+    defer { fclose(file) }
+    let bytes = DataObjects.data(bookmark)
+    return bytes.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) == $0.count }
+}
+
+@c(_CFURLCreateResourcePropertiesForKeysFromBookmarkData)
+public func CFURLCreateResourcePropertiesForKeysFromBookmarkData(_ allocator: UnsafeRawPointer?, _ keys: id?, _ bookmark: id?) -> id? { nil }
+
+@c(_CFURLCreateResourcePropertyForKeyFromBookmarkData)
+public func CFURLCreateResourcePropertyForKeyFromBookmarkData(_ allocator: UnsafeRawPointer?, _ key: id?, _ bookmark: id?) -> id? { nil }
+
+/// Nothing is security-scoped here.
+@c(_CFURLStartAccessingSecurityScopedResource)
+public func CFURLStartAccessingSecurityScopedResource(_ url: id?) -> Bool { true }
+
+@c(_CFURLStopAccessingSecurityScopedResource)
+public func CFURLStopAccessingSecurityScopedResource(_ url: id?) {}
+
 @c(_CFURLCreateCopyAppendingPathComponent)
 public func CFURLCreateCopyAppendingPathComponent(_ allocator: UnsafeRawPointer?, _ url: id?, _ component: id?, _ isDirectory: Bool) -> id? {
     guard let url = CFURLs.url(url), let component = Strings.value(of: component) else { return nil }
