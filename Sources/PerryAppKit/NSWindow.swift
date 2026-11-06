@@ -44,6 +44,7 @@ enum Windows {
         lastDraw = now
         ObjCRuntime.autoreleasepool {
             for window in all where window.sdlWindow != nil && window.visible { window.draw() }
+            Snapshot.windowsDrew()
         }
     }
 }
@@ -54,6 +55,11 @@ open class NSWindow: NSResponder {
     var frame = CGRect(x: 0, y: 0, width: 640, height: 480)
     var styleMask: UInt = StyleMask.titled
     var title = ""
+    var representedFilename = ""
+    var representedURL: NSObject?
+    var tabbingIdentifier = ""
+    var tabbingMode = 0
+    var titlebarAccessories: [NSViewController] = []
     /// Not retained.
     var delegateObject: UnsafeMutableRawPointer?
     var contentView: NSView?
@@ -385,7 +391,7 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setHasShadow:") func setHasShadow(_ value: Bool) { hasShadow = value }
     @ObjCMethod("appearance") func windowAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
-    @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance }
+    @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance ?? App.shared?.effectiveAppearance() ?? NSAppearance.system }
     @ObjCMethod("collectionBehavior") func windowCollectionBehavior() -> UInt { collectionBehavior }
     @ObjCMethod("setCollectionBehavior:") func setCollectionBehavior(_ behavior: UInt) { collectionBehavior = behavior }
     @ObjCMethod("isReleasedWhenClosed") func isReleasedWhenClosed() -> Bool { releasedWhenClosed }
@@ -408,7 +414,42 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setMovableByWindowBackground:") func setMovableByWindowBackground(_ value: Bool) {}
     @ObjCMethod("setRestorable:") func setRestorable(_ value: Bool) {}
     @ObjCMethod("isRestorable") func isRestorable() -> Bool { false }
-    @ObjCMethod("setTabbingMode:") func setTabbingMode(_ mode: Int) {}
+    @ObjCMethod("tabbingMode") func tabbingModeValue() -> Int { tabbingMode }
+    @ObjCMethod("setTabbingMode:") func setTabbingMode(_ mode: Int) { tabbingMode = mode }
+    @ObjCMethod("tabbingIdentifier") func tabbingIdentifierValue() -> String { tabbingIdentifier }
+    @ObjCMethod("setTabbingIdentifier:") func setTabbingIdentifier(_ value: String?) { tabbingIdentifier = value ?? "" }
+    /// Windows never merge into tabs here.
+    @ObjCClassMethod("allowsAutomaticWindowTabbing") static func allowsAutomaticWindowTabbing() -> Bool { false }
+    @ObjCClassMethod("setAllowsAutomaticWindowTabbing:") static func setAllowsAutomaticWindowTabbing(_ value: Bool) {}
+    @ObjCClassMethod("userTabbingPreference") static func userTabbingPreference() -> Int { 2 }
+    @ObjCMethod("tabbedWindows") func tabbedWindows() -> NSObject? { nil }
+    @ObjCMethod("tabGroup") func tabGroup() -> NSObject? { nil }
+
+    /// The file the window shows: its name is the title.
+    @ObjCMethod("representedFilename") func representedFilenameValue() -> String { representedFilename }
+    @ObjCMethod("setRepresentedFilename:") func setRepresentedFilename(_ value: String?) { representedFilename = value ?? "" }
+    @ObjCMethod("representedURL") func representedURLValue() -> NSObject? { representedURL }
+    @ObjCMethod("setRepresentedURL:") func setRepresentedURL(_ value: NSObject?) { representedURL = value }
+
+    /// Views a controller adds to the titlebar; they show nowhere yet.
+    @ObjCMethod("titlebarAccessoryViewControllers")
+    func titlebarAccessoryViewControllers() -> NSObject? {
+        NSMutableArray.of(titlebarAccessories)
+    }
+    @ObjCMethod("addTitlebarAccessoryViewController:")
+    func addTitlebarAccessoryViewController(_ controller: NSViewController?) {
+        guard let controller, !titlebarAccessories.contains(where: { $0 === controller }) else { return }
+        titlebarAccessories.append(controller)
+    }
+    @ObjCMethod("insertTitlebarAccessoryViewController:atIndex:")
+    func insertTitlebarAccessoryViewController(_ controller: NSViewController?, at index: Int) {
+        guard let controller else { return }
+        titlebarAccessories.insert(controller, at: max(0, min(index, titlebarAccessories.count)))
+    }
+    @ObjCMethod("removeTitlebarAccessoryViewControllerAtIndex:")
+    func removeTitlebarAccessoryViewController(at index: Int) {
+        if titlebarAccessories.indices.contains(index) { titlebarAccessories.remove(at: index) }
+    }
     @ObjCMethod("setFrameAutosaveName:") func setFrameAutosaveName(_ name: String?) -> Bool { frameAutosaveName = name ?? ""; return true }
     @ObjCMethod("frameAutosaveName") func windowFrameAutosaveName() -> String { frameAutosaveName }
     @ObjCMethod("setFrameUsingName:") func setFrameUsingName(_ name: NSObject?) -> Bool { false }
@@ -617,6 +658,11 @@ open class NSWindow: NSResponder {
         if styleMask == 0 { flags |= SDL.windowBorderless }
         if styleMask & StyleMask.fullScreen != 0 { flags |= SDL.windowFullscreen }
         let name = title.isEmpty ? (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "") : title
+        // A frame an app computed from nothing has no size SDL can make.
+        if !frame.width.isFinite || !frame.height.isFinite || frame.width < 1 || frame.height < 1 {
+            appKitWarning("window \(windowNumber) has no usable size (\(frame.width)×\(frame.height)); making it 640×480")
+            frame.size = CGSize(width: 640, height: 480)
+        }
         guard let window = name.withCString({ SDL.createWindow($0, Int32(frame.width.rounded()), Int32(frame.height.rounded()), flags) }) else {
             appKitWarning("SDL could not make a window: \(SDL.lastError)")
             return
@@ -664,6 +710,7 @@ open class NSWindow: NSResponder {
     func draw() {
         guard let renderer, let contentView, let root = rootView, let layer = root.layer else { return }
         let controller = contentViewControllerObject
+        Send.void(root.objcObject, "updateConstraintsForSubtreeIfNeeded")
         let laidOut = contentView.needsLayout
         if laidOut, let controller { Send.void(controller.objcObject, "viewWillLayout") }
         root.layoutSubtreeIfNeeded()
