@@ -212,6 +212,7 @@ enum Touches {
         guard let window = keyWindow else { return }
         stopCoasting()
         let hit = window.sendHitTest(point, with: nil)
+        trace("down at \(point.x), \(point.y) hits \(hit?.describedByObject() ?? "nothing")")
         let touch = UITouch.objCClass.object.allocated().unsafeCast(to: UITouch.self)
         (touch.state.location, touch.state.previous, touch.state.window, touch.state.view) = (point, point, window, hit)
         touch.state.timestamp = Clock.now
