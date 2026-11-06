@@ -1,7 +1,10 @@
 #ifndef PERRY_SYSTEM_H
 #define PERRY_SYSTEM_H
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 // libPerrySystem: the Darwin libSystem ABI implemented over glibc.
 //
@@ -81,6 +84,10 @@ struct darwin_section_64 {
 const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section)
     DARWIN_SYMBOL(getsectbynamefromheader_64);
 
+// mmap where the kernel picks the address, placed and sized by Darwin's
+// 16 KB pages. `flags` are Linux's.
+void *perry_map_pages(size_t length, int protection, int flags, int fd, off_t offset);
+
 // The loader's symbol lookup (perry_startup_info.lookup_symbol), once
 // libSystem has started: by Mach-O name, in a library or (NULL) anywhere.
 extern void *(*perry_system_lookup)(const char *install_name, const char *name);
@@ -92,5 +99,13 @@ extern void *(*perry_system_lookup)(const char *install_name, const char *name);
 // aligned, that big), the arguments copied there from the Darwin va_list.
 size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *out);
 #endif
+
+// The loader's way to load a Mach-O library while the program runs
+// (perry_startup_info.load_library); false if the file isn't one.
+extern bool (*perry_system_load_library)(const char *path);
+
+// The loader's dlsym(RTLD_NEXT): `name`, a Mach-O name, in what was loaded
+// after the image `caller` is in (perry_startup_info.lookup_symbol_after).
+extern void *(*perry_system_lookup_after)(const void *caller, const char *name);
 
 #endif

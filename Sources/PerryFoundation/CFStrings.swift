@@ -220,9 +220,14 @@ public func CFStringGetCString(_ string: id?, _ buffer: UnsafeMutablePointer<CCh
 
 /// The string's own UTF-8 for that encoding; NULL for others, which
 /// callers then copy with CFStringGetCString.
+/// The string's UTF-8 bytes: for UTF-8, and for an ASCII string in any of
+/// the 8-bit encodings ASCII is the start of, MacRoman among them, which
+/// is what CoreFoundation keeps such a string in and names as its fastest.
 @c(_CFStringGetCStringPtr)
 public func CFStringGetCStringPtr(_ string: id?, _ encoding: UInt32) -> UnsafePointer<CChar>? {
-    guard let string, encoding == CFStringEncodings.utf8 || encoding == CFStringEncodings.ascii && CFStrings.value(string).allSatisfy(\.isASCII)
+    guard let string else { return nil }
+    let eightBit = [CFStringEncodings.ascii, CFStringEncodings.macRoman, CFStringEncodings.isoLatin1, CFStringEncodings.windowsLatin1]
+    guard encoding == CFStringEncodings.utf8 || eightBit.contains(encoding) && CFStrings.value(string).allSatisfy(\.isASCII)
     else { return nil }
     return Strings.utf8(string)
 }
@@ -297,7 +302,12 @@ public func CFStringCreateFromExternalRepresentation(_ allocator: UnsafeRawPoint
 }
 
 @c(_CFStringGetSystemEncoding) public func CFStringGetSystemEncoding() -> UInt32 { CFStringEncodings.macRoman }
-@c(_CFStringGetFastestEncoding) public func CFStringGetFastestEncoding(_ string: id?) -> UInt32 { CFStringEncodings.utf16 }
+/// MacRoman, the system encoding, for a string of ASCII, as CoreFoundation
+/// answers for the strings it keeps in 8 bits (apps go on to ask for the C
+/// string in it); else UTF-16.
+@c(_CFStringGetFastestEncoding) public func CFStringGetFastestEncoding(_ string: id?) -> UInt32 {
+    CFStrings.value(string).allSatisfy(\.isASCII) ? CFStringEncodings.macRoman : CFStringEncodings.utf16
+}
 @c(_CFStringGetSmallestEncoding) public func CFStringGetSmallestEncoding(_ string: id?) -> UInt32 {
     CFStrings.value(string).allSatisfy(\.isASCII) ? CFStringEncodings.ascii : CFStringEncodings.utf8
 }

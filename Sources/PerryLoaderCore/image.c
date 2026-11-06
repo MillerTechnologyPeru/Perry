@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <link.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -545,6 +546,36 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     return image;
 }
 
+// Darwin keeps a pointer to the thread's values, pthread_getspecific's, in
+// the register TPIDRRO_EL0, and programs read them through it directly:
+//     mrs x9, TPIDRRO_EL0;  and x9, x9, #~7;  ldr x0, [x9, key, lsl #3]
+// Linux leaves that register zero. Its thread pointer is in TPIDR_EL0, a
+// fixed distance above pthread_self(), and libPerrySystem numbers Darwin's
+// keys so that a key's value is its word from 0xe0 into pthread_self(), as
+// on iOS. So the first two instructions become
+//     mrs x9, TPIDR_EL0;    sub x9, x9, #distance
+// in the image's code, before it is made read-only.
+static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
+    enum { DARWIN_TSD_OFFSET = 0xe0 };
+    long distance = (long)((uintptr_t)__builtin_thread_pointer() - (uintptr_t)pthread_self()) - DARWIN_TSD_OFFSET;
+    if (distance <= 0 || distance > 4095 || (distance & 7))
+        return;
+    for (uint32_t j = 0; j < seg->nsects; j++) {
+        const struct section_64 *sect = &seg->sections[j];
+        // S_ATTR_PURE_INSTRUCTIONS or S_ATTR_SOME_INSTRUCTIONS.
+        if (!(sect->flags & 0x80000400u))
+            continue;
+        uint32_t *words = perry_image_vmaddr(image, sect->addr);
+        for (uint64_t k = 0; k + 1 < sect->size / 4; k++) {
+            uint32_t reg = words[k] & 31, next = words[k + 1];
+            if ((words[k] & 0xffffffe0u) != 0xd53bd060u || (next & 0xfffffc00u) != 0x927df000u || ((next >> 5) & 31) != reg)
+                continue;
+            words[k] = 0xd53bd040u | reg;
+            words[k + 1] = 0xd1000000u | (uint32_t)distance << 10 | reg << 5 | (next & 31);
+        }
+    }
+}
+
 // Applies each segment's protection once fixups are done. Segments made
 // read-only after fixups (SG_READ_ONLY: __DATA_CONST) stay writable until the
 // image's Objective-C metadata is registered, which rewrites selector and
@@ -558,6 +589,8 @@ static void protect_image(perry_image *image) {
         uint8_t *addr = perry_image_vmaddr(image, seg->vmaddr);
         size_t size = round_up(seg->vmsize, host_page_size);
         int prot = seg->initprot & (PROT_READ | PROT_WRITE | PROT_EXEC);
+        if (prot & PROT_EXEC)
+            use_linux_thread_pointer(image, seg);
         if (prot & PROT_EXEC)
             __builtin___clear_cache((char *)addr, (char *)addr + seg->vmsize);
         if (mprotect(addr, size, prot) != 0)
@@ -830,6 +863,7 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
+        perry_register_unwind_info(img);
         perry_setup_thread_locals(img);
         protect_image(img);
     }
@@ -909,8 +943,10 @@ static perry_loader *startup_loader;
 static void *lookup_symbol(const char *install_name, const char *name) {
     perry_loader *loader = startup_loader;
     for (perry_image *image = loader->images; image; image = image->next) {
+        // By install name, or by path: the main program's, and a library's
+        // that was opened by its path while the program ran.
         if (install_name && !(image->install_name && strcmp(image->install_name, install_name) == 0) &&
-            !(image == loader->main_image && image->path && strcmp(image->path, install_name) == 0))
+            !(image->path && strcmp(image->path, install_name) == 0))
             continue;
         perry_symbol sym = {0};
         if (perry_exports_lookup(loader, image, name, &sym, 0) && sym.found)
@@ -920,6 +956,33 @@ static void *lookup_symbol(const char *install_name, const char *name) {
     }
     if (install_name)
         return perry_provider_symbol(loader, install_name, name);
+    for (uint32_t i = 0; i < loader->provider_count; i++) {
+        perry_provider *provider = loader->providers[i];
+        if (!provider->handle)
+            continue;
+        void *address = perry_provider_symbol(loader, provider->install_name, name);
+        if (address)
+            return address;
+    }
+    return NULL;
+}
+
+// As dlsym(RTLD_NEXT) looks for code at `caller`: in the images loaded
+// after the one it is in, then in the providers. A library that defines a
+// function of the system's, to wrap it, finds the system's so.
+static void *lookup_symbol_after(const void *caller, const char *name) {
+    perry_loader *loader = startup_loader;
+    perry_image *from = NULL;
+    for (perry_image *image = loader->images; image && !from; image = image->next) {
+        const uint8_t *start = perry_image_vmaddr(image, image->vm_start);
+        if ((const uint8_t *)caller >= start && (const uint8_t *)caller < start + image->vm_size)
+            from = image;
+    }
+    for (perry_image *image = from ? from->next : loader->images; image; image = image->next) {
+        perry_symbol sym = {0};
+        if (perry_exports_lookup(loader, image, name, &sym, 0) && sym.found)
+            return sym.address;
+    }
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         perry_provider *provider = loader->providers[i];
         if (!provider->handle)
@@ -962,28 +1025,38 @@ static int provider_layer(const perry_provider *provider) {
 // Passes the program's arguments and bundle to providers, e.g. for
 // _NSGetArgv in libSystem and the main bundle in Foundation. Providers
 // start a layer at a time, in load order within a layer.
+static bool load_library(const char *path);
+
+// Called again when a library opened while the program runs brings in
+// providers that weren't loaded: only those are started.
 static void start_providers(perry_loader *loader, perry_image *image) {
     startup_loader = loader;
-    perry_startup_info info = {
-        .version = PERRY_STARTUP_INFO_VERSION,
-        .argc = program_argc,
-        .argv = program_argv,
-        .envp = program_envp,
-        .progname = program_name,
-        .executable_path = image->path,
-        .bundle_path = loader->bundle_path,
-        .main_header = image->header,
-        .lookup_symbol = lookup_symbol,
-    };
+    static perry_startup_info info;
+    if (!info.version) {
+        info = (perry_startup_info){
+            .version = PERRY_STARTUP_INFO_VERSION,
+            .argc = program_argc,
+            .argv = program_argv,
+            .envp = program_envp,
+            .progname = program_name,
+            .executable_path = image->path,
+            .bundle_path = loader->bundle_path,
+            .main_header = image->header,
+            .lookup_symbol = lookup_symbol,
+            .load_library = load_library,
+            .lookup_symbol_after = lookup_symbol_after,
+        };
+    }
     // Several install names may share one provider; start each library once.
     for (int layer = 0; layer <= 6; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
-        bool seen = !handle;
+        bool seen = !handle || loader->providers[i]->started;
         for (uint32_t j = 0; j < i && !seen; j++)
             seen = loader->providers[j]->handle == handle;
         if (seen || provider_layer(loader->providers[i]) != layer)
             continue;
+        loader->providers[i]->started = true;
         perry_provider_startup_fn fn = (perry_provider_startup_fn)dlsym(handle, PERRY_PROVIDER_STARTUP_SYMBOL);
         if (fn)
             fn(&info);
@@ -1060,6 +1133,44 @@ static void run_start(void *start, int argc, char **argv, char **envp, char **ap
     __builtin_unreachable();
 }
 #endif
+
+// A library the program opens while it runs. Its initializers may open
+// others, on the same thread; other threads wait.
+static bool load_library(const char *path) {
+    static pthread_mutex_t lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+    perry_loader *loader = startup_loader;
+    if (!loader || !path)
+        return false;
+    pthread_mutex_lock(&lock);
+    perry_image *image = find_loaded(loader, path);
+    if (!image) {
+        macho_file file;
+        if (!open_macho(path, &file)) {
+            pthread_mutex_unlock(&lock);
+            return false;
+        }
+        munmap(file.map, file.map_size);
+        perry_image *last = loader->images;
+        while (last && last->next)
+            last = last->next;
+        image = load_image(loader, path);
+        // Bind what was mapped once all of it is, so symbols resolve across
+        // the new images, as at startup.
+        for (perry_image *img = last ? last->next : loader->images; img; img = img->next) {
+            perry_apply_fixups(loader, img);
+            perry_register_unwind_info(img);
+            perry_setup_thread_locals(img);
+            protect_image(img);
+        }
+        start_providers(loader, loader->main_image);
+        perry_make_witness_tables(loader);
+        static char *no_apple[] = { NULL };
+        for (perry_image *img = last ? last->next : loader->images; img; img = img->next)
+            run_image_initializers(loader, img, program_argc, program_argv, program_envp, no_apple);
+    }
+    pthread_mutex_unlock(&lock);
+    return true;
+}
 
 void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple) {
     (void)loader;

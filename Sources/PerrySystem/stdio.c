@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -266,6 +267,17 @@ int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt
 // putc's slow path, which Darwin's putc macro calls when the buffer fills.
 int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
 int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
+
+// Closing no stream: Darwin's fclose fails with EFAULT, where glibc's reads
+// the stream it wasn't given. Destructors of file classes rely on it.
+int darwin_fclose(FILE *f) DARWIN_SYMBOL(fclose);
+int darwin_fclose(FILE *f) {
+    if (f == NULL) {
+        errno = EFAULT;
+        return EOF;
+    }
+    return fclose(f);
+}
 
 // A stream's position: Darwin's fpos_t is an offset, glibc's a structure.
 int darwin_fgetpos(FILE *f, int64_t *position) DARWIN_SYMBOL(fgetpos);

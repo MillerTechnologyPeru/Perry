@@ -73,9 +73,12 @@ RUN apt-get update \
 # alternate layout (its data pointer first), type_info compared as Apple's
 # arm64 compares it, by name for types marked not unique, and the ARM C++
 # ABI's constructors and destructors that return this, which apps' inlined
-# code uses (and its two-word new[] cookies, as Apple's arm64 has). Named
-# libperry-c++ so they never stand in for the system's; the CXX provider
-# opens them at run time.
+# code uses (and its two-word new[] cookies, as Apple's arm64 has). They
+# are built with Darwin's mbstate_t, 128 bytes in place of glibc's 8:
+# std::fpos, which holds one, is returned as Darwin code expects, and
+# stream buffers are laid out as it lays them out; glibc reads and writes
+# only its own fields, at the start. Named libperry-c++ so they never stand
+# in for the system's; the CXX provider opens them at run time.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends cmake ninja-build python3 xz-utils \
  && rm -rf /var/lib/apt/lists/* \
@@ -85,9 +88,19 @@ RUN apt-get update \
         llvm-project-19.1.7.src/runtimes llvm-project-19.1.7.src/libcxx llvm-project-19.1.7.src/libcxxabi \
         llvm-project-19.1.7.src/libunwind llvm-project-19.1.7.src/cmake llvm-project-19.1.7.src/llvm/cmake \
         llvm-project-19.1.7.src/llvm/utils \
+ && printf '%s\n' \
+        '#ifndef ____mbstate_t_defined' \
+        '#define ____mbstate_t_defined 1' \
+        'typedef union {' \
+        '    struct { int __count; union { unsigned int __wch; char __wchb[4]; } __value; };' \
+        '    char __darwin[128];' \
+        '    long long __align;' \
+        '} __mbstate_t;' \
+        '#endif' > /tmp/llvm/darwin-mbstate.h \
  && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm-build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
-        "-DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm" \
+        "-DCMAKE_C_FLAGS=-include /tmp/llvm/darwin-mbstate.h" \
+        "-DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm -include /tmp/llvm/darwin-mbstate.h" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
         -DLIBCXX_ABI_DEFINES=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT \
         -DLIBCXX_SHARED_OUTPUT_NAME=perry-c++ -DLIBCXXABI_SHARED_OUTPUT_NAME=perry-c++abi \

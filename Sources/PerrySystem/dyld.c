@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -278,11 +279,26 @@ bool darwin_dyld_program_minos_at_least(build_version version) {
     return program_minos() >= wanted;
 }
 
-// The OS is as new as anything a program checks for with @available.
+// The OS is as new as anything a program checks for with @available,
+// unless PERRY_OS_VERSION names the iOS version to be ("13.7"): for a
+// program whose code for newer systems needs what isn't here, when it
+// also runs on older ones.
 bool darwin_availability_version_check(uint32_t count, const build_version *versions) DARWIN_SYMBOL(_availability_version_check);
 bool darwin_availability_version_check(uint32_t count, const build_version *versions) {
-    (void)count;
-    (void)versions;
+    static uint32_t limit;
+    static bool read;
+    if (!read) {
+        const char *setting = getenv("PERRY_OS_VERSION");
+        unsigned major = 0, minor = 0, patch = 0;
+        if (setting && sscanf(setting, "%u.%u.%u", &major, &minor, &patch) >= 1)
+            limit = major << 16 | (minor & 0xff) << 8 | (patch & 0xff);
+        read = true;
+    }
+    if (!limit)
+        return true;
+    for (uint32_t i = 0; i < count; i++)
+        if (versions[i].version > limit)
+            return false;
     return true;
 }
 

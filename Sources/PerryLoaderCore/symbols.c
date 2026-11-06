@@ -211,6 +211,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /usr/lib/libSystem.B.dylib                           -> System
 //   /usr/lib/system/libsystem_c.dylib                    -> System
 //   /usr/lib/libc++.1.dylib, /usr/lib/libc++abi.dylib     -> CXX
+//   /usr/lib/libstdc++.6.dylib                           -> StdCXX
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
@@ -254,6 +255,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // libc++ and libc++abi are one provider.
     if (strncmp(install_name, "/usr/lib/libc++", 15) == 0) {
         snprintf(out, out_size, "CXX");
+        return true;
+    }
+    // GNU's libstdc++, which apps built before libc++ link.
+    if (strncmp(install_name, "/usr/lib/libstdc++", 18) == 0) {
+        snprintf(out, out_size, "StdCXX");
         return true;
     }
     // MobileCoreServices' (and macOS CoreServices') UTType functions live

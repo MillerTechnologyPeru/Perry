@@ -150,11 +150,20 @@ open class UIViewController: UIResponder {
     /// The view, loaded through the messages a subclass may override.
     var loadedView: UIView { state.view ?? sendView() }
 
+    /// A view given in place of one that is in a superview takes its place
+    /// there: an app makes a controller its window's root, then gives it
+    /// the view it had ready.
     @ObjCMethod("setView:")
     func setView(_ view: UIView?) {
-        if let old = state.view, old.state.viewController == objcObject { old.state.viewController = nil }
+        let old = state.view
+        if let old, old.state.viewController == objcObject { old.state.viewController = nil }
         state.view = view
         view?.state.viewController = objcObject
+        guard let old, let view, old.objcObject != view.objcObject, let superview = old.state.superview.map(UIView.wrap) else { return }
+        view.sendSetFrame(old.frame())
+        view.setAutoresizingMask(old.autoresizingMask())
+        superview.insertSubview(view, above: old)
+        old.removeFromSuperview()
     }
 
     @ObjCMethod("viewIfLoaded") func viewIfLoaded() -> UIView? { state.view }
@@ -283,6 +292,9 @@ open class UIViewController: UIResponder {
     /// The screen's orientation (deprecated in iOS 8).
     @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
     @ObjCMethod("preferredInterfaceOrientationForPresentation") func preferredInterfaceOrientationForPresentation() -> Int { Screen.orientation }
+    /// The display isn't turned, so there is nothing to attempt.
+    @ObjCClassMethod("attemptRotationToDeviceOrientation") static func attemptRotationToDeviceOrientation() {}
+
     @ObjCMethod("shouldAutorotate") func shouldAutorotate() -> Bool { true }
     // The rotation callbacks from before iOS 8, which subclasses still call
     // on super. The screen never rotates, so nothing sends them.

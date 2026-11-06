@@ -38,7 +38,11 @@ public final class ObjCClassExports: @unchecked Sendable {
         }
         return lock.withLock {
             guard names.contains(String(name)) else { return nil }
-            let pair = storage[String(name)] ?? allocate(String(name))
+            if let pair = storage[String(name)] { return isMetaclass ? pair.metaclass : pair.cls }
+            // Defined already, on the heap, as no image had asked for it:
+            // a library the program loads while it runs gets the class.
+            if let pair = ObjCRuntime.registeredClassPair(String(name)) { return isMetaclass ? pair.metaclass : pair.cls }
+            let pair = allocate(String(name))
             return isMetaclass ? pair.metaclass : pair.cls
         }
     }

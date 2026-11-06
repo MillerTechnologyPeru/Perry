@@ -357,8 +357,11 @@ open class UISegmentedControl: UIControl {
                 drawn.draw(in: CGRect(x: frame.midX - fitted.width / 2, y: frame.midY - fitted.height / 2,
                                       width: fitted.width, height: fitted.height))
             } else if let title = segment.title {
-                let size = Text.size(title, font: font)
-                Text.draw(title, at: CGPoint(x: frame.midX - min(size.width, frame.width - 8) / 2, y: frame.midY - size.height / 2),
+                // A title wider than its segment ends in an ellipsis, as
+                // UIKit's do, rather than run into the next segment.
+                let fitted = Text.truncated(title, font: font, width: max(frame.width - 8, 0))
+                let size = Text.size(fitted, font: font)
+                Text.draw(fitted, at: CGPoint(x: frame.midX - size.width / 2, y: frame.midY - size.height / 2),
                           font: font, color: color)
             }
         }

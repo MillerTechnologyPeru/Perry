@@ -1,4 +1,5 @@
 import CPerryGeometry
+import CPerryOpenGL
 import Glibc
 import PerryObjCInterop
 
@@ -165,16 +166,26 @@ enum GLES {
     /// iOS's does.
     static func symbol(_ name: String) -> UnsafeMutableRawPointer? {
         guard name.hasPrefix("_gl") else { return nil }
-        if name == "_glGetString" { return unsafeBitCast(getStringFunction, to: UnsafeMutableRawPointer.self) }
+        // Each is entered through an entry point, which gives the calling
+        // thread its context first when another thread has it.
+        if name == "_glGetString" { return perry_gl_entry(unsafeBitCast(getStringFunction, to: UnsafeMutableRawPointer.self)) }
         load()
         // PVRTC textures are decoded for the host, which can't sample them.
         if name == "_glCompressedTexImage2D" || name == "_glCompressedTexSubImage2D" {
             PVRTC.bind(host)
-            return name == "_glCompressedTexImage2D" ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
-                : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self)
+            return perry_gl_entry(name == "_glCompressedTexImage2D"
+                ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
+                : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self))
+        }
+        // Apple's multisampling is made of OpenGL ES 3's.
+        if name == "_glRenderbufferStorageMultisampleAPPLE" || name == "_glResolveMultisampleFramebufferAPPLE" {
+            guard GLMultisample.bind(host) else { return nil }
+            return perry_gl_entry(name == "_glRenderbufferStorageMultisampleAPPLE"
+                ? unsafeBitCast(GLMultisample.renderbufferStorageMultisample, to: UnsafeMutableRawPointer.self)
+                : unsafeBitCast(GLMultisample.resolveMultisampleFramebuffer, to: UnsafeMutableRawPointer.self))
         }
         let cName = String(name.dropFirst())
-        return host(cName).map { perry_gles_darwin_function(cName, $0) }
+        return perry_gl_entry(host(cName).map { perry_gles_darwin_function(cName, $0) })
     }
 
     /// The host's function by its C name.
@@ -208,8 +219,14 @@ enum GLES {
             // PVRTC textures, which every iOS GPU has, are decoded here
             // (PVRTC): a program that finds them missing may fall back to
             // a decoder of its own, never run on iOS.
+            // Apple's multisampling is made here too (GLMultisample).
             guard let host else { return getString?(name) }
-            text = host.contains(pvrtcExtension) ? host : host + (host.hasSuffix(" ") || host.isEmpty ? "" : " ") + pvrtcExtension
+            var extensions = host
+            for added in [pvrtcExtension] + (GLMultisample.bind(GLES.host) ? [GLMultisample.name] : [])
+            where !extensions.contains(added) {
+                extensions += (extensions.hasSuffix(" ") || extensions.isEmpty ? "" : " ") + added
+            }
+            text = extensions
         default:
             return getString?(name)
         }
@@ -242,6 +259,8 @@ final class GLContext {
 /// PERRY_UIKIT_GL_TRACE=1 reports contexts made, destroyed and made
 /// current, renderbuffers given storage, and frame shares.
 enum GLTrace {
+    /// The presents so far, of which the first few and every 300th are said.
+    nonisolated(unsafe) static var presents = 0
     static let on = getenv("PERRY_UIKIT_GL_TRACE") != nil
 
     static func say(_ text: String) {
@@ -319,20 +338,201 @@ enum EAGLContexts {
         _ = makeCurrent(display, nil, nil, current?.context.handle)
     }
 
+    // MARK: A context on two threads
+
+    // An EAGLContext can be current on several threads at once, the app
+    // keeping them from drawing with it together: it sets a context up on
+    // the main thread and draws from its own; an engine makes its context
+    // current on the main thread around each frame while its render
+    // thread, which has it too, does the drawing, and has the main thread
+    // make a renderbuffer's storage while the render thread waits. An EGL
+    // context is current on one thread. So a context is a thread's current
+    // one in EGL only when no other thread has it; otherwise in name, and
+    // the thread is given the EGL context when it draws: each gl function
+    // a program calls is entered through CPerryOpenGL's entry points,
+    // which call beforeDrawing() while any thread's context is not its own
+    // in EGL. The thread that has the EGL context is signalled then, and
+    // lets it go from the signal's handler, if it is waiting. One that is
+    // drawing keeps it, and the thread that asked goes without for a
+    // while, as an engine's main thread does beside its render thread; one
+    // that is busy with something else, as a main thread still launching
+    // is when the program's own thread starts to draw, is waited for.
+
+    /// The thread each EGL context is current on.
+    nonisolated(unsafe) private static var holders: [UnsafeMutableRawPointer: UInt] = [:]
+    /// When a thread last could not be given its context, to not ask for
+    /// it at every call.
+    nonisolated(unsafe) private static var refused: [UInt: Double] = [:]
+    /// The gl calls each thread has made while contexts were contended:
+    /// a thread whose count stands still is not drawing.
+    nonisolated(unsafe) private static var calls: [UInt: UInt] = [:]
+    /// One request at a time: the thread asked, and what it is to let go.
+    private static let askLock = Lock()
+    nonisolated(unsafe) private static var askedThread: pthread_t = 0
+    nonisolated(unsafe) private static var askedToRelease: UnsafeMutableRawPointer?
+    nonisolated(unsafe) private static var answered: UnsafeMutablePointer<sem_t>?
+    nonisolated(unsafe) private static var askSignal: Int32 = 0
+    /// 1 when the asked thread did as asked, 2 when it was busy.
+    nonisolated(unsafe) private static var askedAnswer: Int32 = 0
+
+    /// Counts the threads whose current context is not theirs in EGL, for
+    /// the entry points. With the lock held.
+    private static func updateContended() {
+        let thread = { (key: UInt, context: EAGLContext) -> Bool in
+            guard let handle = context.state.context?.handle else { return false }
+            return holders[handle] != key
+        }
+        perry_gl_set_contended(Int32(currents.reduce(0) { $0 + (thread($1.key, $1.value) ? 1 : 0) }))
+    }
+
+    /// In the asked thread, which the signal interrupted anywhere: in the
+    /// middle of an allocation, say, which changing the EGL context from
+    /// here would then deadlock or corrupt. So it lets the context go only
+    /// when it was waiting in a system call (for a semaphore, a condition,
+    /// a descriptor, a time), where nothing of its own is half done, as a
+    /// render thread waiting for the main thread is; otherwise it says it
+    /// is busy and is asked again. It touches only what was set up before
+    /// the signal was sent.
+    private static let answer: @convention(c) (Int32, UnsafeMutablePointer<siginfo_t>?, UnsafeMutableRawPointer?) -> Void = { _, _, raw in
+        guard pthread_equal(pthread_self(), EAGLContexts.askedThread) != 0, let raw,
+              let display = GLES.display, let makeCurrent = GLES.makeCurrent, let answered = EAGLContexts.answered else { return }
+        let saved = errno
+        let machine = raw.assumingMemoryBound(to: ucontext_t.self).pointee.uc_mcontext
+        // It resumes at "svc 0", to make the call again, or just after it,
+        // when the call is not restarted; x8 has the call's number: futex,
+        // ppoll, epoll_pwait(2), the sleeps, pselect6, read, recvfrom,
+        // recvmsg, accept.
+        var waiting = false
+        let pc = UInt(machine.pc)
+        if pc >= 4, UnsafePointer<UInt32>(bitPattern: pc)?.pointee == 0xd400_0001
+            || UnsafePointer<UInt32>(bitPattern: pc - 4)?.pointee == 0xd400_0001 {
+            switch machine.regs.8 {
+            case 98, 73, 22, 441, 101, 115, 72, 63, 207, 212, 202: waiting = true
+            default: break
+            }
+        }
+        if waiting, let held = EAGLContexts.askedToRelease, GLES.getCurrentContext?() == held {
+            _ = makeCurrent(display, nil, nil, nil)
+        }
+        EAGLContexts.askedAnswer = waiting ? 1 : 2
+        sem_post(answered)
+        errno = saved
+    }
+
+    /// Has `thread` let `context` go, asking again while it is busy, for
+    /// as long as `patience` seconds; false if it had not by then.
+    private static func ask(_ thread: UInt, toRelease context: UnsafeMutableRawPointer, patience: Double) -> Bool {
+        askLock.withLock {
+            if answered == nil {
+                let semaphore = UnsafeMutablePointer<sem_t>.allocate(capacity: 1)
+                sem_init(semaphore, 0, 0)
+                answered = semaphore
+                // Past the signal libPerrySystem suspends threads with.
+                askSignal = __libc_current_sigrtmin() + 6
+                var action = sigaction()
+                action.__sigaction_handler.sa_sigaction = answer
+                action.sa_flags = SA_RESTART | SA_SIGINFO
+                sigemptyset(&action.sa_mask)
+                sigaction(askSignal, &action, nil)
+            }
+            guard let answered else { return false }
+            (askedThread, askedToRelease) = (pthread_t(thread), context)
+            let start = Clock.now
+            repeat {
+                askedAnswer = 0
+                guard pthread_kill(pthread_t(thread), askSignal) == 0 else { return false }
+                var deadline = timespec()
+                clock_gettime(CLOCK_REALTIME, &deadline)
+                deadline.tv_sec += 1
+                while sem_timedwait(answered, &deadline) != 0 {
+                    if errno != EINTR { return false }
+                }
+                if askedAnswer == 1 { return true }
+                usleep(200)
+            } while Clock.now - start < patience
+            return false
+        }
+    }
+
+    /// Before the calling thread draws with its current context: by a
+    /// program's gl call, through the entry points, or by Perry's own, as
+    /// for a renderbuffer's storage or its presentation. A context that is
+    /// the thread's in name only is made its own in EGL: taken from the
+    /// thread that has it, once that one waits.
+    static func beforeDrawing() {
+        guard let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return }
+        let thread = UInt(pthread_self())
+        let wanted = lock.withLock { () -> (handle: UnsafeMutableRawPointer, holder: UInt?)? in
+            calls[thread, default: 0] &+= 1
+            guard let handle = currents[thread]?.state.context?.handle, holders[handle] != thread else { return nil }
+            if let last = refused[thread], Clock.now - last < 0.1 { return nil }
+            return (handle, holders[handle])
+        }
+        guard let wanted else { return }
+        var made = makeCurrent(display, nil, nil, wanted.handle) != 0
+        if !made, let holder = wanted.holder {
+            // Asked for a moment at a time: a holder that drew meanwhile
+            // keeps the context; one that did not is busy elsewhere, and
+            // lets it go once it waits, which this thread, about to draw
+            // with nothing, waits for.
+            let start = Clock.now
+            repeat {
+                let before = lock.withLock { calls[holder] }
+                // Tried again whatever it answered: a thread that ended
+                // has let its context go without being asked.
+                _ = ask(holder, toRelease: wanted.handle, patience: 0.05)
+                made = makeCurrent(display, nil, nil, wanted.handle) != 0
+                if made { break }
+                if lock.withLock({ calls[holder] }) != before { break }
+            } while Clock.now - start < 5
+        }
+        lock.withLock {
+            if made {
+                holders[wanted.handle] = thread
+                refused[thread] = nil
+            } else {
+                refused[thread] = Clock.now
+            }
+            updateContended()
+        }
+        if GLTrace.on {
+            GLTrace.say(made ? "context \(wanted.handle) taken for drawing\(wanted.holder.map { " from thread " + String($0, radix: 16) } ?? "")"
+                             : "context \(wanted.handle) could not be taken for drawing")
+        }
+    }
+
+    private static let beforeCall: @convention(c) () -> Void = { EAGLContexts.beforeDrawing() }
+
     static func setCurrent(_ context: EAGLContext?) -> Bool {
         GLES.load()
         guard let display = GLES.display, let makeCurrent = GLES.makeCurrent else { return context == nil }
+        perry_gl_set_before_call(beforeCall)
+        let thread = UInt(pthread_self())
         let handle = context?.state.context?.handle
-        guard makeCurrent(display, nil, nil, handle) != 0 else {
+        var made = makeCurrent(display, nil, nil, handle) != 0
+        var inNameOnly = false
+        if !made, let handle, lock.withLock({ currents.contains { $0.key != thread && $0.value.state.context?.handle == handle } }) {
+            // Another thread has it: this thread's in name, until it draws.
+            _ = makeCurrent(display, nil, nil, nil)
+            (made, inNameOnly) = (true, true)
+        }
+        guard made else {
             if GLTrace.on { GLTrace.say("making context \(String(describing: handle)) current failed") }
             return false
         }
         let previous = lock.withLock { () -> EAGLContext? in
-            let previous = currents[UInt(pthread_self())]
-            currents[UInt(pthread_self())] = context
+            let previous = currents[thread]
+            // The EGL context this thread had is let go by the change.
+            if let old = previous?.state.context?.handle, holders[old] == thread { holders[old] = nil }
+            currents[thread] = context
+            if let handle, !inNameOnly { holders[handle] = thread }
+            refused[thread] = nil
+            updateContended()
             return previous
         }
-        if GLTrace.on, previous?.objcObject != context?.objcObject { GLTrace.say("context \(String(describing: handle)) current") }
+        if GLTrace.on, previous?.objcObject != context?.objcObject || inNameOnly {
+            GLTrace.say("context \(String(describing: handle)) current\(inNameOnly ? " in name" : "")")
+        }
         return true
     }
 }
@@ -384,6 +584,7 @@ open class EAGLContext: NSObject {
     /// in its drawable's color format.
     @ObjCMethod("renderbufferStorage:fromDrawable:")
     func renderbufferStorage(_ target: UInt, fromDrawable drawable: NSObject?) -> Bool {
+        EAGLContexts.beforeDrawing()
         guard let layer = drawable?.as(CAEAGLLayer.self) else { return false }
         let bounds = layer.bounds(), scale = layer.contentsScale()
         let width = Int32((bounds.width * scale).rounded())
@@ -402,11 +603,22 @@ open class EAGLContext: NSObject {
     /// Shows the bound renderbuffer in the layer it has storage from.
     @ObjCMethod("presentRenderbuffer:")
     func presentRenderbuffer(_ target: UInt) -> Bool {
+        EAGLContexts.beforeDrawing()
+        if GLTrace.on {
+            GLTrace.presents += 1
+            if GLTrace.presents <= 3 || GLTrace.presents % 300 == 0 { GLTrace.say("present \(GLTrace.presents)") }
+        }
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
-        guard let layerObject = state.drawables[UInt32(name)] else { return false }
+        guard let layerObject = state.drawables[UInt32(name)] else {
+            if GLTrace.on { GLTrace.say("presenting renderbuffer \(name), which has no layer's storage") }
+            return false
+        }
         let layer = CALayer(objcObject: layerObject, ownership: .retain)
-        guard Renderbuffers.show(UInt32(name), context: state.context, layer: layer, opaque: layer.isOpaque()) else { return false }
+        guard Renderbuffers.show(UInt32(name), context: state.context, layer: layer, opaque: layer.isOpaque()) else {
+            if GLTrace.on { GLTrace.say("presenting renderbuffer \(name) failed") }
+            return false
+        }
         Display.markDirty()
         Updates.schedule()
         pace()

@@ -276,8 +276,42 @@ public final class NSBundle: NSObject {
     func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String? { storage.identifier }
-    @ObjCMethod("isLoaded") func isLoaded() -> Bool { true }
-    @ObjCMethod("load") func load() -> Bool { true }
+    /// The main bundle is; another is once it has been loaded, which loading
+    /// again does no harm to when the program linked it.
+    @ObjCMethod("isLoaded") func isLoaded() -> Bool {
+        guard let path = storage.executablePath, BundleLoading.loadLibrary != nil else { return true }
+        return objcObject == Bundles.main || BundleLoading.loaded.contains(path)
+    }
+    /// A bundle's executable that isn't loaded yet, a framework the app
+    /// opens while it runs, is loaded by the loader with what it links.
+    @ObjCMethod("load") func load() -> Bool {
+        guard let path = storage.executablePath, let load = BundleLoading.loadLibrary else { return true }
+        guard path.withCString({ load($0) }) else { return false }
+        BundleLoading.loaded.insert(path)
+        return true
+    }
+
+    /// The class Info.plist names as principal, else the one named as the
+    /// bundle's executable is: a framework's first class is, by convention,
+    /// the one it is named for.
+    /// The class of that name: every class loaded is found, whichever
+    /// bundle it came with.
+    @ObjCMethod("classNamed:")
+    func classNamed(_ name: String) -> UnsafeMutableRawPointer? {
+        name.withCString { ObjC.getClass($0) }.map { UnsafeMutableRawPointer($0) }
+    }
+
+    @ObjCMethod("principalClass")
+    func principalClass() -> UnsafeMutableRawPointer? {
+        let key = Strings.make("NSPrincipalClass")
+        defer { ObjC.release(key) }
+        let named = Dictionaries.value(storage.infoDictionary, for: key).flatMap { Strings.value(of: $0) }
+        let executable = storage.executablePath.map { String($0.split(separator: "/").last ?? "") }
+        for name in [named, executable].compactMap({ $0 }) where !name.isEmpty {
+            if let cls = name.withCString({ ObjC.getClass($0) }) { return UnsafeMutableRawPointer(cls) }
+        }
+        return nil
+    }
 
     @ObjCMethod("infoDictionary")
     func infoDictionary() -> NSDictionary { NSDictionary(objCArgument: storage.infoDictionary) }
@@ -433,4 +467,11 @@ enum BundleTrace {
         let text = "perry: bundle: " + line() + "\n"
         text.withCString { _ = write(2, $0, strlen($0)) }
     }
+}
+
+/// The loader's way to load a Mach-O library while the program runs.
+enum BundleLoading {
+    nonisolated(unsafe) static var loadLibrary: (@convention(c) (UnsafePointer<CChar>?) -> Bool)?
+    /// The executables of the bundles loaded so.
+    nonisolated(unsafe) static var loaded: Set<String> = []
 }
