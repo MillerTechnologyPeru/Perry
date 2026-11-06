@@ -4,7 +4,10 @@ import PerryObjCInterop
 
 // Foundation's NSPoint, NSSize and NSRect functions, which macOS apps call
 // as functions (CoreGraphics' CGRect ones are the same structures). The
-// rectangles are in a y-up space: NSMinY is the bottom edge.
+// rectangles are in a y-up space: NSMinY is the bottom edge. armv7, which
+// runs only iOS apps, leaves them out.
+
+#if !arch(arm)
 
 private func normalized(_ rect: CGRect) -> CGRect {
     var rect = rect
@@ -180,3 +183,5 @@ public func NSRectFromString(_ string: id?) -> CGRect {
     let n = numbers(string, count: 4)
     return make(n[0], n[1], n[2], n[3])
 }
+
+#endif
