@@ -28,4 +28,10 @@ typedef struct perry_words6 { uint32_t words[6]; } perry_words6;
 typedef struct perry_words8 { uint32_t words[8]; } perry_words8;
 typedef struct perry_words16 { uint32_t words[16]; } perry_words16;
 
+// Calls function(context), keeping r9 for the caller. Darwin's armv7 code may
+// change r9, which Linux's code keeps across calls, so a function a Linux
+// library calls back calls Darwin code through this (Swift's
+// keepingLinuxRegisters). Elsewhere it is a plain call.
+void perry_keep_r9(void (*function)(void *), void *context);
+
 #endif
