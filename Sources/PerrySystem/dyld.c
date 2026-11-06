@@ -30,9 +30,16 @@ __attribute__((visibility("default")))
 void perry_provider_image_init(const perry_image_info *image) {
     pthread_mutex_lock(&lock);
     images = realloc(images, sizeof(*images) * (image_count + 1));
-    images[image_count].header = image->header;
-    images[image_count].slide = image->slide;
-    images[image_count].path = strdup(image->path ? image->path : "");
+    // The program is image 0, as dyld has it, though the libraries it
+    // loads initialize before it: MH_EXECUTE is the header's file type.
+    uint32_t index = image_count;
+    if (image->header && ((const uint32_t *)image->header)[3] == 2) {
+        memmove(images + 1, images, sizeof(*images) * image_count);
+        index = 0;
+    }
+    images[index].header = image->header;
+    images[index].slide = image->slide;
+    images[index].path = strdup(image->path ? image->path : "");
     image_count++;
     uint32_t count = added_count;
     image_callback *callbacks = malloc(sizeof(*callbacks) * (count ? count : 1));
