@@ -9,6 +9,11 @@
 public struct ObjCRuntimeFunctions {
     public var msgSend: UnsafeRawPointer
     public var msgSendSuper2: UnsafeRawPointer
+    /// objc_msgSend_stret and objc_msgSendSuper2_stret, for methods whose
+    /// structures 32-bit Darwin returns through a pointer in r0; on arm64,
+    /// which has none, objc_msgSend and objc_msgSendSuper2.
+    public var msgSendStret: UnsafeRawPointer
+    public var msgSendSuper2Stret: UnsafeRawPointer
     public var retain: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
     public var release: @convention(c) (UnsafeMutableRawPointer?) -> Void
     public var autorelease: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -26,6 +31,7 @@ public struct ObjCRuntimeFunctions {
     public var registerClassPair: @convention(c) (UnsafeMutableRawPointer?) -> Void
 
     public init(msgSend: UnsafeRawPointer, msgSendSuper2: UnsafeRawPointer,
+                msgSendStret: UnsafeRawPointer? = nil, msgSendSuper2Stret: UnsafeRawPointer? = nil,
                 retain: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
                 release: @escaping @convention(c) (UnsafeMutableRawPointer?) -> Void,
                 autorelease: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
@@ -40,6 +46,8 @@ public struct ObjCRuntimeFunctions {
                 registerClassPair: @escaping @convention(c) (UnsafeMutableRawPointer?) -> Void) {
         self.msgSend = msgSend
         self.msgSendSuper2 = msgSendSuper2
+        self.msgSendStret = msgSendStret ?? msgSend
+        self.msgSendSuper2Stret = msgSendSuper2Stret ?? msgSendSuper2
         self.retain = retain
         self.release = release
         self.autorelease = autorelease
@@ -97,6 +105,8 @@ public enum ObjCRuntime {
         ObjCPeers.load(lookup)
         install(ObjCRuntimeFunctions(
             msgSend: UnsafeRawPointer(msgSend), msgSendSuper2: UnsafeRawPointer(msgSendSuper2),
+            msgSendStret: lookup("_objc_msgSend_stret").map(UnsafeRawPointer.init),
+            msgSendSuper2Stret: lookup("_objc_msgSendSuper2_stret").map(UnsafeRawPointer.init),
             retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
             getClass: getClass, objectGetClass: objectGetClass, registerSelector: registerSelector,
             addMethod: addMethod, replaceMethod: replaceMethod, initializeClassPair: initializeClassPair,
@@ -136,6 +146,18 @@ public enum ObjCRuntime {
 
     @inline(__always)
     public static var msgSendSuper2: UnsafeRawPointer { functions.msgSendSuper2 }
+
+    /// The send for a method returning `Result`: objc_msgSend_stret when
+    /// 32-bit Darwin returns it through memory, else objc_msgSend.
+    @inline(__always)
+    public static func msgSend<Result: ObjCValue>(returning type: Result.Type) -> UnsafeRawPointer {
+        Result.objCReturnsIndirectly ? functions.msgSendStret : functions.msgSend
+    }
+
+    @inline(__always)
+    public static func msgSendSuper2<Result: ObjCValue>(returning type: Result.Type) -> UnsafeRawPointer {
+        Result.objCReturnsIndirectly ? functions.msgSendSuper2Stret : functions.msgSendSuper2
+    }
 
     @discardableResult @inline(__always)
     public static func retain(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { functions.retain(object) }
