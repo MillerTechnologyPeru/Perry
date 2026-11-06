@@ -1,17 +1,13 @@
 import CPerryGeometry
+import PerryLayoutSolver
 import PerryObjCInterop
 
-// Auto Layout, as far as Interface Builder's layouts use it: constraints
-// between a view and its superview, its siblings or a constant, each
-// attribute = multiplier × other attribute + constant. When a view lays
-// out, each subview that doesn't translate its autoresizing mask gets its
-// frame from the equalities that place it, with its intrinsic size (or
-// its current one) where they leave a size open; inequalities then bound
-// its width and height. Attributes are measured with y downwards, as
-// Auto Layout's top and bottom are, whether or not the superview is
-// flipped. NSLayoutAttribute: left 1, right 2, top 3, bottom 4, leading
-// 5, trailing 6, width 7, height 8, center x 9, center y 10, last
-// baseline 11, first baseline 12, and the margins 13 to 20.
+// Auto Layout: constraints between views, their superviews and siblings,
+// each attribute (relation) multiplier × other attribute + constant at a
+// priority, solved over a whole view tree at once (see Layout).
+// NSLayoutAttribute: left 1, right 2, top 3, bottom 4, leading 5, trailing
+// 6, width 7, height 8, center x 9, center y 10, last baseline 11, first
+// baseline 12, and the margins 13 to 20.
 
 @ObjCClass("NSLayoutConstraint")
 open class NSLayoutConstraint: NSObject {
@@ -64,8 +60,8 @@ open class NSLayoutConstraint: NSObject {
 
     @ObjCClassMethod("constraintsWithVisualFormat:options:metrics:views:")
     static func constraints(visualFormat format: String?, options: UInt, metrics: NSObject?, views: NSObject?) -> NSObject {
-        Trace.log("layout: visual format \(format ?? "") isn't laid out")
-        return NSMutableArray.empty()
+        guard let format else { return NSMutableArray.empty() }
+        return NSMutableArray.of(VisualFormat.constraints(format, options: options, metrics: metrics, views: views))
     }
 
     @ObjCClassMethod("activateConstraints:")
@@ -176,155 +172,217 @@ open class NSLayoutYAxisAnchor: NSLayoutAnchor {}
 @ObjCClass("NSLayoutDimension")
 open class NSLayoutDimension: NSLayoutAnchor {}
 
+/// Lays out a window's view tree with the constraints of every view in it:
+/// one Cassowary solve over the frames of all the views, in which views
+/// that translate their autoresizing masks keep their frames, views placed
+/// by constraints prefer their current frames weakly, and intrinsic sizes
+/// count at each view's hugging and compression resistance priorities. A
+/// tree is solved again only once something changed (a view needs layout).
 enum Layout {
-    private enum Axis { case horizontal, vertical }
+    /// Bumped whenever a view needs layout.
+    nonisolated(unsafe) static var generation = 0
+    nonisolated(unsafe) private static var solvedGeneration: [ObjectIdentifier: Int] = [:]
+    nonisolated(unsafe) private static var solving = false
 
-    /// An attribute's axis, and what it measures: the minimum edge 0, the
-    /// maximum 1, the size 2, the center 3; with the margin it adds.
-    private static func role(_ attribute: Int) -> (axis: Axis, part: Int, margin: CGFloat)? {
-        switch attribute {
-        case 1, 5: return (.horizontal, 0, 0)
-        case 2, 6: return (.horizontal, 1, 0)
-        case 3, 12: return (.vertical, 0, 0)
-        case 4, 11: return (.vertical, 1, 0)
-        case 7: return (.horizontal, 2, 0)
-        case 8: return (.vertical, 2, 0)
-        case 9: return (.horizontal, 3, 0)
-        case 10: return (.vertical, 3, 0)
-        case 13, 17: return (.horizontal, 0, 8)
-        case 14, 18: return (.horizontal, 1, -8)
-        case 15: return (.vertical, 0, 8)
-        case 16: return (.vertical, 1, -8)
-        case 19: return (.horizontal, 3, 0)
-        case 20: return (.vertical, 3, 0)
-        default: return nil
+    /// A view's frame in the tree's top view's coordinates, y downwards.
+    private final class Box {
+        let view: NSView
+        let parent: Box?
+        let rect: CGRect
+        let left: LayoutVariable, top: LayoutVariable, width: LayoutVariable, height: LayoutVariable
+
+        init(_ view: NSView, parent: Box?, rect: CGRect) {
+            (self.view, self.parent, self.rect) = (view, parent, rect)
+            (left, top, width, height) = (LayoutVariable(), LayoutVariable(), LayoutVariable(), LayoutVariable())
         }
-    }
 
-    /// An attribute of a rectangle with y downwards.
-    private static func value(_ rect: CGRect, _ attribute: Int) -> CGFloat? {
-        guard let (axis, part, margin) = role(attribute) else { return nil }
-        let (low, size) = axis == .horizontal ? (rect.minX, rect.width) : (rect.minY, rect.height)
-        switch part {
-        case 0: return low + margin
-        case 1: return low + size + margin
-        case 2: return size
-        default: return low + size / 2
-        }
-    }
+        var l: LayoutExpression { LayoutExpression(left) }
+        var t: LayoutExpression { LayoutExpression(top) }
+        var w: LayoutExpression { LayoutExpression(width) }
+        var h: LayoutExpression { LayoutExpression(height) }
 
-    /// A subview's frame with y downwards in `view`.
-    private static func downward(_ subview: NSView, in view: NSView) -> CGRect {
-        var rect = subview.frame
-        if !view.flipped { rect.origin.y = view.frame.height - rect.maxY }
-        return rect
-    }
-
-    /// Places the subviews of `view` that its constraints place.
-    static func apply(_ view: NSView) {
-        let placed = view.subviews.filter { !$0.translatesAutoresizingMask }
-        guard !placed.isEmpty else { return }
-        var all = view.constraints
-        for subview in placed { all += subview.constraints }
-        let container = CGRect(origin: .zero, size: view.frame.size)
-        var frames: [ObjectIdentifier: CGRect] = [:]
-        for subview in view.subviews { frames[ObjectIdentifier(subview)] = downward(subview, in: view) }
-        func rect(of item: NSObject?) -> CGRect? {
-            guard let item else { return nil }
-            if item.objcObject == view.objcObject { return container }
-            guard let other = item.as(NSView.self), other.superviewObject == view.objcObject else {
-                // A layout guide, or a view elsewhere: the container.
-                return item.is(NSView.self) ? nil : container
-            }
-            return frames[ObjectIdentifier(other)]
-        }
-        // Siblings placed by each other settle over a few passes.
-        for _ in 0..<3 {
-            for subview in placed {
-                frames[ObjectIdentifier(subview)] = solve(subview, all, current: frames[ObjectIdentifier(subview)] ?? subview.frame, rect: rect)
+        /// An attribute: NSLayoutAttribute's left 1, right 2, top 3, bottom
+        /// 4, leading 5, trailing 6, width 7, height 8, center x 9, center y
+        /// 10, last baseline 11, first baseline 12, margins 13 to 20.
+        func attribute(_ attribute: Int) -> LayoutExpression? {
+            switch attribute {
+            case 1, 5: return l
+            case 2, 6: return l + w
+            case 3, 12: return t
+            case 4, 11: return t + h
+            case 7: return w
+            case 8: return h
+            case 9: return l + w * 0.5
+            case 10: return t + h * 0.5
+            case 13, 17: return l + 8
+            case 14, 18: return l + w + -8
+            case 15: return t + 8
+            case 16: return t + h + -8
+            case 19: return l + w * 0.5
+            case 20: return t + h * 0.5
+            default: return nil
             }
         }
-        for subview in placed {
-            guard var frame = frames[ObjectIdentifier(subview)] else { continue }
-            if !view.flipped { frame.origin.y = view.frame.height - frame.maxY }
-            frame = CGRect(x: frame.minX.rounded(), y: frame.minY.rounded(), width: max(0, frame.width.rounded()), height: max(0, frame.height.rounded()))
-            if frame != subview.frame { Send.void(subview.objcObject, "setFrame:", rect: frame) }
-        }
     }
 
-    /// The frame, y downwards, that the constraints give `subview`.
-    private static func solve(_ subview: NSView, _ constraints: [NSLayoutConstraint], current: CGRect,
-                              rect: (NSObject?) -> CGRect?) -> CGRect {
-        // What is known of each axis: minimum, maximum, size, center.
-        var known: [Axis: [Int: CGFloat]] = [.horizontal: [:], .vertical: [:]]
-        var bounds: [Axis: (low: CGFloat?, high: CGFloat?)] = [.horizontal: (nil, nil), .vertical: (nil, nil)]
-        let me = subview.objcObject
-        for constraint in constraints {
-            let first = constraint.firstItem?.objcObject, second = constraint.secondItem?.objcObject
-            let mine: Int, other: Int, otherItem: NSObject?
-            var solved: CGFloat
-            if first == me && second != me {
-                (mine, other, otherItem) = (constraint.firstAttribute, constraint.secondAttribute, constraint.secondItem)
-                let base: CGFloat
-                if otherItem == nil { base = 0 } else {
-                    guard let r = rect(otherItem), let v = value(r, other) else { continue }
-                    base = v
+    private static func weight(_ priority: Float) -> Double { LayoutSolver.strength(priority) }
+
+    /// The tree's boxes, top first, each after its parent.
+    private static func boxes(_ top: NSView, origin: CGRect) -> [Box] {
+        var boxes: [Box] = []
+        func visit(_ view: NSView, _ parent: Box?, _ rect: CGRect) {
+            let box = Box(view, parent: parent, rect: rect)
+            boxes.append(box)
+            let flipped = view.flipped
+            for subview in view.subviews {
+                let frame = subview.frame
+                let x = rect.minX + frame.minX - view.boundsOrigin.x
+                let down = flipped ? frame.minY - view.boundsOrigin.y : view.frame.height - frame.maxY + view.boundsOrigin.y
+                visit(subview, box, CGRect(x: x, y: rect.minY + down, width: frame.width, height: frame.height))
+            }
+        }
+        visit(top, nil, origin)
+        return boxes
+    }
+
+    /// Solves the tree under `top`: with its size fixed, or for fitting,
+    /// as small as its constraints allow.
+    private static func solve(_ top: NSView, fitting: Bool) -> [Box]? {
+        let boxes = boxes(top, origin: CGRect(origin: .zero, size: top.frame.size))
+        guard boxes.dropFirst().contains(where: { !$0.view.translatesAutoresizingMask }) || fitting else { return nil }
+        var byView: [UnsafeMutableRawPointer: Box] = [:]
+        for box in boxes { byView[box.view.objcObject] = box }
+        let solver = LayoutSolver()
+        var refused = 0
+        func add(_ expression: LayoutExpression, _ relation: LayoutSolver.Relation, _ strength: Double) {
+            if !solver.add(expression, relation, strength: strength) { refused += 1 }
+        }
+        let root = boxes[0]
+        add(root.l, .equal, LayoutSolver.required)
+        add(root.t, .equal, LayoutSolver.required)
+        if fitting {
+            add(root.w, .greaterOrEqual, LayoutSolver.required)
+            add(root.h, .greaterOrEqual, LayoutSolver.required)
+            add(root.w, .equal, weight(50))
+            add(root.h, .equal, weight(50))
+        } else {
+            add(root.w + -Double(root.rect.width), .equal, LayoutSolver.required)
+            add(root.h + -Double(root.rect.height), .equal, LayoutSolver.required)
+        }
+        // Frames that autoresizing places stay, relative to the superview.
+        for box in boxes.dropFirst() {
+            guard let parent = box.parent else { continue }
+            let view = box.view
+            if view.translatesAutoresizingMask {
+                // The autoresizing mask as constraints: as the superview's
+                // size changes from what it is, the change is shared among
+                // the flexible parts (margins and size) by their sizes, as
+                // -resizeWithOldSuperviewSize: shares it.
+                let mask = view.autoresizingMask
+                let flipped = parent.view.flipped
+                func axis(_ low: LayoutExpression, _ size: LayoutExpression, _ parentLow: LayoutExpression, _ parentSize: LayoutExpression,
+                          offset: CGFloat, length: CGFloat, parentLength: CGFloat, flexible: (low: Bool, size: Bool, high: Bool)) {
+                    let parts = [(flexible.low, offset), (flexible.size, length), (flexible.high, parentLength - offset - length)]
+                    let count = parts.filter { $0.0 }.count
+                    let total = parts.filter { $0.0 }.reduce(0) { $0 + max(0, $1.1) }
+                    func share(_ index: Int) -> CGFloat {
+                        guard parts[index].0 else { return 0 }
+                        return total > 0 ? max(0, parts[index].1) / total : 1 / CGFloat(count)
+                    }
+                    let delta = parentSize + -Double(parentLength)
+                    add(low - parentLow - delta * Double(share(0)) + -Double(offset), .equal, LayoutSolver.required)
+                    add(size - delta * Double(share(1)) + -Double(length), .equal, LayoutSolver.required)
                 }
-                solved = constraint.multiplier * base + constraint.constant
-            } else if second == me && first != me {
-                (mine, other, otherItem) = (constraint.secondAttribute, constraint.firstAttribute, constraint.firstItem)
-                guard let r = rect(otherItem), let v = value(r, other), constraint.multiplier != 0 else { continue }
-                solved = (v - constraint.constant) / constraint.multiplier
-            } else {
+                axis(box.l, box.w, parent.l, parent.w, offset: box.rect.minX - parent.rect.minX, length: box.rect.width,
+                     parentLength: parent.rect.width, flexible: (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0))
+                // y is downwards: the top margin is a flipped superview's
+                // minimum y margin, an unflipped one's maximum.
+                axis(box.t, box.h, parent.t, parent.h, offset: box.rect.minY - parent.rect.minY, length: box.rect.height,
+                     parentLength: parent.rect.height,
+                     flexible: (mask & (flipped ? 8 : 32) != 0, mask & 16 != 0, mask & (flipped ? 32 : 8) != 0))
                 continue
             }
-            guard let (axis, part, margin) = role(mine) else { continue }
-            solved -= part <= 1 ? margin : 0
-            // A relation's direction flips when the subview is the second item.
-            var relation = constraint.relation
-            if second == me { relation = -relation }
-            if relation == 0 {
-                if constraint.priority >= 250 || known[axis]![part] == nil { known[axis]![part] = solved }
-            } else if part == 2 {
-                var range = bounds[axis]!
-                if relation > 0 { range.low = max(range.low ?? solved, solved) } else { range.high = min(range.high ?? solved, solved) }
-                bounds[axis] = range
+            add(box.w, .greaterOrEqual, LayoutSolver.required)
+            add(box.h, .greaterOrEqual, LayoutSolver.required)
+            let intrinsic = Send.size(view.objcObject, "intrinsicContentSize")
+            if Trace.enabled { Trace.log("layout: \(view.describedByObject() ?? "?") intrinsic \(intrinsic.width)×\(intrinsic.height)") }
+            if intrinsic.width >= 0 {
+                add(box.w + -Double(intrinsic.width), .greaterOrEqual, weight(view.compressionResistance[0]))
+                add(box.w + -Double(intrinsic.width), .lessOrEqual, weight(view.hugging[0]))
+            }
+            if intrinsic.height >= 0 {
+                add(box.h + -Double(intrinsic.height), .greaterOrEqual, weight(view.compressionResistance[1]))
+                add(box.h + -Double(intrinsic.height), .lessOrEqual, weight(view.hugging[1]))
             }
         }
-        let intrinsic = Send.size(subview.objcObject, "intrinsicContentSize")
-        func resolve(_ axis: Axis, low currentLow: CGFloat, size currentSize: CGFloat, intrinsic: CGFloat) -> (CGFloat, CGFloat) {
-            let facts = known[axis]!
-            var size = facts[2] ?? (intrinsic > 0 ? intrinsic : currentSize)
-            var low = currentLow
-            if let a = facts[0], let b = facts[1] {
-                low = a
-                size = b - a
-            } else if let a = facts[0] {
-                low = a
-                if let c = facts[3], facts[2] == nil { size = 2 * (c - a) }
-            } else if let b = facts[1] {
-                if let c = facts[3], facts[2] == nil { size = 2 * (b - c) }
-                low = b - size
-            } else if let c = facts[3] {
-                low = c - size / 2
+        // The views' constraints.
+        for box in boxes {
+            for constraint in box.view.constraints {
+                func expression(_ item: NSObject?, _ attribute: Int) -> LayoutExpression? {
+                    guard let item else { return attribute == 0 ? LayoutExpression() : nil }
+                    var target = byView[item.objcObject]
+                    // A layout guide stands for its owning view.
+                    if target == nil, !item.is(NSView.self), item.responds(to: "owningView"),
+                       let owner = Send.object(item.objcObject, "owningView") { target = byView[owner] }
+                    return target?.attribute(attribute)
+                }
+                guard let first = expression(constraint.firstItem, constraint.firstAttribute) else { continue }
+                guard let second = constraint.secondItem == nil ? LayoutExpression()
+                        : expression(constraint.secondItem, constraint.secondAttribute) else { continue }
+                let relation: LayoutSolver.Relation = constraint.relation < 0 ? .lessOrEqual : constraint.relation > 0 ? .greaterOrEqual : .equal
+                if Trace.enabled {
+                    Trace.log("layout: \(constraint.firstItem?.describedByObject() ?? "nil").\(constraint.firstAttribute) \(constraint.relation) "
+                              + "\(constraint.secondItem?.describedByObject() ?? "nil").\(constraint.secondAttribute) × \(constraint.multiplier) + \(constraint.constant) @\(constraint.priority)")
+                }
+                add(first - (second * Double(constraint.multiplier) + Double(constraint.constant)), relation, weight(constraint.priority))
             }
-            if let range = bounds[axis] {
-                if let floor = range.low, size < floor { size = floor }
-                if let ceiling = range.high, size > ceiling { size = ceiling }
-            }
-            return (low, max(0, size))
         }
-        let (x, width) = resolve(.horizontal, low: current.minX, size: current.width, intrinsic: intrinsic.width)
-        let (y, height) = resolve(.vertical, low: current.minY, size: current.height, intrinsic: intrinsic.height)
-        return CGRect(x: x, y: y, width: width, height: height)
+        // Where nothing else decides, frames stay as they are.
+        for box in boxes.dropFirst() where !box.view.translatesAutoresizingMask {
+            add(box.l + -Double(box.rect.minX), .equal, 1)
+            add(box.t + -Double(box.rect.minY), .equal, 1)
+            add(box.w + -Double(box.rect.width), .equal, 1)
+            add(box.h + -Double(box.rect.height), .equal, 1)
+        }
+        if refused > 0 { Trace.log("layout: \(refused) constraints of \(top.describedByObject() ?? "a view") can't be satisfied") }
+        solver.updateVariables()
+        return boxes
     }
 
-    /// The size a view needs: its frame, or for a view whose subviews its
-    /// constraints place, what they span.
+    /// Lays out the tree `view` is in, unless it is laid out already.
+    static func apply(_ view: NSView) {
+        guard !solving else { return }
+        var top = view
+        while let superview = top.superview { top = superview }
+        let key = ObjectIdentifier(top)
+        guard solvedGeneration[key] != generation else { return }
+        solving = true
+        defer { solving = false }
+        if let boxes = solve(top, fitting: false) {
+            for box in boxes.dropFirst() where !box.view.translatesAutoresizingMask {
+                guard let parent = box.parent else { continue }
+                let superview = parent.view
+                let x = box.left.value - parent.left.value + superview.boundsOrigin.x
+                let down = box.top.value - parent.top.value
+                let height = box.height.value
+                let y = superview.flipped ? down + superview.boundsOrigin.y : parent.height.value - down - height + superview.boundsOrigin.y
+                let frame = CGRect(x: x.rounded(), y: y.rounded(), width: max(0, box.width.value.rounded()), height: max(0, height.rounded()))
+                if frame != box.view.frame { Send.void(box.view.objcObject, "setFrame:", rect: frame) }
+            }
+        }
+        solvedGeneration[key] = generation
+    }
+
+    /// The size a view needs: its intrinsic size, or the smallest its
+    /// subviews' constraints allow.
     static func fittingSize(_ view: NSView) -> CGSize {
         let intrinsic = Send.size(view.objcObject, "intrinsicContentSize")
         if intrinsic.width > 0 && intrinsic.height > 0 { return intrinsic }
-        return view.frame.size
+        guard !solving, view.subviews.contains(where: { !$0.translatesAutoresizingMask }) else { return view.frame.size }
+        solving = true
+        defer { solving = false }
+        guard let boxes = solve(view, fitting: true) else { return view.frame.size }
+        return CGSize(width: boxes[0].width.value.rounded(.up), height: boxes[0].height.value.rounded(.up))
     }
 }
 
