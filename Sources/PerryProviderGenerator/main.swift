@@ -16,6 +16,10 @@
 // A class that declares `class func didDefineObjCClass(_:)` in its own body
 // has it called right after the class is defined; one that declares
 // `objCInstanceVariables` gets them before the class is registered.
+//
+// A declaration inside #if, #elseif or #else is generated under the same
+// condition, so code for one platform (macOS's, say) can be compiled out of
+// another's provider.
 
 import Foundation
 import SwiftParser
@@ -29,24 +33,71 @@ struct ClassDeclaration {
     let adopted: [String]
     let hasSetUp: Bool
     let hasInstanceVariables: Bool
+    /// The #if condition it is declared under, if any.
+    let condition: String?
 }
 
 struct ProtocolDeclaration {
     let name: String
     let objCName: String
     let parent: String?
+    let condition: String?
 }
 
 struct CategoryDeclaration {
     let typeName: String
     let name: String
+    let condition: String?
+}
+
+struct ConstantTableDeclaration {
+    let name: String
+    let condition: String?
+}
+
+/// The condition the #if clauses around a declaration compile it under:
+/// each enclosing clause's own condition, with the earlier clauses of its
+/// #if not taken. nil outside any #if.
+func compilationCondition(of node: some SyntaxProtocol) -> String? {
+    var terms: [String] = []
+    var current: Syntax? = Syntax(node)
+    while let syntax = current {
+        if let clause = syntax.as(IfConfigClauseSyntax.self), let list = clause.parent?.as(IfConfigClauseListSyntax.self) {
+            var clauseTerms: [String] = []
+            for earlier in list {
+                if earlier.id == clause.id { break }
+                if let condition = earlier.condition { clauseTerms.append("!(\(condition.trimmedDescription))") }
+            }
+            if let condition = clause.condition { clauseTerms.append("(\(condition.trimmedDescription))") }
+            terms.insert(contentsOf: clauseTerms, at: 0)
+        }
+        current = syntax.parent
+    }
+    return terms.isEmpty ? nil : terms.joined(separator: " && ")
+}
+
+/// Lines generated for a declaration, under its #if condition when it has one.
+func conditional(_ condition: String?, _ lines: [String]) -> [String] {
+    guard let condition, !lines.isEmpty else { return lines }
+    return ["#if \(condition)"] + lines + ["#endif"]
+}
+
+/// An array constant's declaration and elements. An array literal can't hold
+/// #if, so one with conditional elements is built by a closure instead.
+func arrayDeclaration(_ declaration: String, _ type: String, _ elements: [(value: String, condition: String?)]) -> [String] {
+    guard elements.contains(where: { $0.condition != nil }) else {
+        return ["\(declaration): \(type) = ["] + elements.map { "    \($0.value)," } + ["]"]
+    }
+    return ["\(declaration): \(type) = {", "    var elements: \(type) = []"]
+        + elements.flatMap { conditional($0.condition, ["    elements.append(\($0.value))"]) }
+        + ["    return elements", "}()"]
 }
 
 final class Collector: SyntaxVisitor {
     var classes: [ClassDeclaration] = []
     var protocols: [ProtocolDeclaration] = []
     var categories: [CategoryDeclaration] = []
-    var constantTables: [String] = []
+    var constantTables: [ConstantTableDeclaration] = []
     var hasWillStart = false
     var hasDidStart = false
     var hasSymbol = false
@@ -82,9 +133,10 @@ final class Collector: SyntaxVisitor {
                 superclass: inherited.first,
                 adopted: Array(inherited.dropFirst()),
                 hasSetUp: hasSetUp,
-                hasInstanceVariables: hasInstanceVariables))
+                hasInstanceVariables: hasInstanceVariables,
+                condition: compilationCondition(of: node)))
         }
-        if attribute("ObjCConstants", in: node.attributes) != nil { constantTables.append(node.name.text) }
+        addConstantTable(node.name.text, node, node.attributes)
         return .visitChildren
     }
 
@@ -94,18 +146,25 @@ final class Collector: SyntaxVisitor {
                .expression.as(StringLiteralExprSyntax.self)?.representedLiteralValue {
             let parent = node.inheritanceClause?.inheritedTypes.map(\.type.trimmedDescription)
                 .first { $0 != "AnyObject" }
-            protocols.append(ProtocolDeclaration(name: node.name.text, objCName: objCName, parent: parent))
+            protocols.append(ProtocolDeclaration(name: node.name.text, objCName: objCName, parent: parent,
+                                                 condition: compilationCondition(of: node)))
         }
         return .skipChildren
     }
 
+    private func addConstantTable(_ name: String, _ node: some SyntaxProtocol, _ attributes: AttributeListSyntax) {
+        if attribute("ObjCConstants", in: attributes) != nil {
+            constantTables.append(ConstantTableDeclaration(name: name, condition: compilationCondition(of: node)))
+        }
+    }
+
     override func visit(_ node: EnumDeclSyntax) -> SyntaxVisitorContinueKind {
-        if attribute("ObjCConstants", in: node.attributes) != nil { constantTables.append(node.name.text) }
+        addConstantTable(node.name.text, node, node.attributes)
         return .visitChildren
     }
 
     override func visit(_ node: StructDeclSyntax) -> SyntaxVisitorContinueKind {
-        if attribute("ObjCConstants", in: node.attributes) != nil { constantTables.append(node.name.text) }
+        addConstantTable(node.name.text, node, node.attributes)
         return .visitChildren
     }
 
@@ -116,7 +175,8 @@ final class Collector: SyntaxVisitor {
             let addedAtStartup = arguments.first { $0.label?.text == "addedAtStartup" }?
                 .expression.as(BooleanLiteralExprSyntax.self)?.literal.tokenKind != .keyword(.false)
             if addedAtStartup {
-                categories.append(CategoryDeclaration(typeName: node.extendedType.trimmedDescription, name: name))
+                categories.append(CategoryDeclaration(typeName: node.extendedType.trimmedDescription, name: name,
+                                                      condition: compilationCondition(of: node)))
             }
         }
         return .visitChildren
@@ -187,23 +247,21 @@ var lines: [String] = [
     "",
 ]
 
-let constants = collector.constantTables.sorted()
+let constants = collector.constantTables.sorted { $0.name < $1.name }
 let classes = superclassesFirst(collector.classes)
 if !classes.isEmpty {
     lines += [
         "/// The Objective-C classes this module defines.",
-        "private let perryObjCClassNames: [String] = [",
-    ] + classes.map { "    \"\($0.objCName)\"," } + [
-        "]",
+    ] + arrayDeclaration("private let perryObjCClassNames", "[String]",
+                         classes.map { ("\"\($0.objCName)\"", $0.condition) }) + [
         "",
     ]
 }
 if !constants.isEmpty {
     lines += [
         "/// The constant tables of this module's @ObjCConstants types.",
-        "nonisolated(unsafe) private let perryObjCConstantTables: [any ObjCConstantTable.Type] = [",
-    ] + constants.map { "    \($0).self," } + [
-        "]",
+    ] + arrayDeclaration("nonisolated(unsafe) private let perryObjCConstantTables", "[any ObjCConstantTable.Type]",
+                         constants.map { ("\($0.name).self", $0.condition) }) + [
         "",
     ]
 }
@@ -245,30 +303,31 @@ if collector.hasWillStart {
 let protocols = refinedFirst(collector.protocols)
 if !protocols.isEmpty {
     lines += ["", "    // Protocols, refined protocols first."]
-    lines += protocols.map { "    Any\($0.name).defineObjCProtocol()" }
+    lines += protocols.flatMap { conditional($0.condition, ["    Any\($0.name).defineObjCProtocol()"]) }
 }
 if !classes.isEmpty {
     lines += ["", "    // Classes, superclasses first."]
     for declaration in classes {
         let ivars = declaration.hasInstanceVariables ? "\(declaration.name).addObjCInstanceVariables" : ""
-        if declaration.hasSetUp {
-            lines.append("    \(declaration.name).didDefineObjCClass(\(declaration.name).defineObjCClass(\(ivars)))")
-        } else {
-            lines.append("    \(declaration.name).defineObjCClass(\(ivars))")
-        }
+        let line = declaration.hasSetUp
+            ? "    \(declaration.name).didDefineObjCClass(\(declaration.name).defineObjCClass(\(ivars)))"
+            : "    \(declaration.name).defineObjCClass(\(ivars))"
+        lines += conditional(declaration.condition, [line])
     }
 }
 let protocolNames = Dictionary(protocols.map { ($0.name, $0.objCName) }, uniquingKeysWith: { first, _ in first })
 let conformances = classes.flatMap { declaration in
-    declaration.adopted.compactMap { protocolNames[$0] }.map { (declaration.name, $0) }
+    declaration.adopted.compactMap { protocolNames[$0] }.map { (declaration, $0) }
 }
 if !conformances.isEmpty {
     lines += ["", "    // Classes' adopted protocols."]
-    lines += conformances.map { "    ObjCRuntime.addProtocol(named: \"\($0.1)\", to: \($0.0).objCClass)" }
+    lines += conformances.flatMap {
+        conditional($0.0.condition, ["    ObjCRuntime.addProtocol(named: \"\($0.1)\", to: \($0.0.name).objCClass)"])
+    }
 }
 if !collector.categories.isEmpty {
     lines += ["", "    // Categories."]
-    lines += collector.categories.map { "    \($0.typeName).addObjCCategory\($0.name)()" }
+    lines += collector.categories.flatMap { conditional($0.condition, ["    \($0.typeName).addObjCCategory\($0.name)()"]) }
 }
 if !constants.isEmpty {
     lines += [
