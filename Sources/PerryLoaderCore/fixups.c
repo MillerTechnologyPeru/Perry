@@ -28,6 +28,17 @@ static void write_bind(perry_loader *loader, slot_t *loc, uint64_t value, const 
     perry_trace(PERRY_TRACE_BIND, "bind %p = 0x%llx %s", (void *)loc, (unsigned long long)value, name);
 }
 
+// What a lazy pointer, which only calls go through, is bound to: on armv7
+// the function's aligned entry.
+static uint64_t called_function(uint64_t function, const char *name) {
+#if defined(__arm__)
+    return (uint64_t)(uintptr_t)perry_aligned_entry((void *)(uintptr_t)function, name);
+#else
+    (void)name;
+    return function;
+#endif
+}
+
 // MARK: - Chained fixups
 
 // Chained fixups are 64-bit: DYLD_CHAINED_PTR_64 and its offset form. Images
@@ -241,7 +252,8 @@ static void run_bind_opcodes(perry_loader *loader, perry_image *image, const uin
             cache_valid = true; \
         } \
         if (kind != BIND_WEAK || cached) \
-            write_bind(loader, (slot_t *)segment_address(image, seg, offset), cached + (uint64_t)addend, name); \
+            write_bind(loader, (slot_t *)segment_address(image, seg, offset), \
+                       (kind == BIND_LAZY ? called_function(cached, name) : cached) + (uint64_t)addend, name); \
     } while (0)
 
     while (p < end) {
@@ -397,6 +409,8 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
                 }
                 const char *name;
                 uint32_t value = classic_symbol_value(loader, image, &table, index, &name);
+                if (type == S_LAZY_SYMBOL_POINTERS)
+                    value = (uint32_t)called_function(value, name);
                 write_bind(loader, &slots[n], value, name);
             }
         }
