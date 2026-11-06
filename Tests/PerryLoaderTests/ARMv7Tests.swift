@@ -173,6 +173,62 @@ struct ARMv7Tests {
         ])
     }
 
+    /// What callbacks.m prints on macOS.
+    @Test("Darwin callbacks that change r9 return safely to the Linux libraries that call them",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("callbacks").path)
+                   && FileManager.default.fileExists(atPath: ARMv7.perry32.deletingLastPathComponent()
+                       .appending(path: "libPerrydispatch.so").path)))
+    func callbacks() throws {
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("callbacks").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "qsort 1 bsearch 123",
+            "hread read ead ad",
+            "destroyed 10",
+            "once 1",
+            "work 20506031 indexes 90",
+            "deallocs 10",
+            "atexit",
+        ])
+    }
+
+    /// What uikit_abi.m prints with Apple's UIKit in Mac Catalyst.
+    @Test("UIKit takes and returns float geometry, and calls a subclass's overrides with it, as on Darwin",
+          .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("uikit_abi").path)
+                   && FileManager.default.fileExists(atPath: ARMv7.perry32.deletingLastPathComponent()
+                       .appending(path: "libPerryUIKit.so").path)))
+    func uikit() throws {
+        // The views draw into an image context; no window opens.
+        let result = try run(ARMv7.perry32, [ARMv7.fixture("uikit_abi").path])
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "frame 20.50 40.00 100.00 60.00",
+            "bounds 0.00 0.00 100.00 60.00",
+            "center 70.50 70.00",
+            "moved 110.00 210.25 100.00 60.00",
+            "converted 120.00 215.25",
+            "from root 10.00 9.75 10.00 10.00",
+            "transform 2.00 0.00 0.00 0.50 0.00 0.00",
+            "scaled frame 60.00 225.25 200.00 30.00",
+            "sizeThatFits 100.00 60.00",
+            "sized 110.00 210.25 50.50 40.25",
+            "sizeThatFits 30.00 7.50",
+            "fits 15.50 40.25",
+            "pointInside 20.00 10.00",
+            "hit box 1",
+            "alpha 0.25 corner 6.50 border 1.50 opacity 0.25",
+            "position 35.00 35.00",
+            "layer bounds 0.00 0.00 50.00 50.00",
+            "color 1 1.000 0.500 0.250 0.750",
+            "white 1 0.400 1.000",
+            "faded 1.000 0.500 0.250 0.500",
+            "rounded 5.00 6.00 30.00 20.00",
+            "oval -30.00 0.00 60.00 20.00",
+            "drawRect 0.00 0.00 50.00 50.00",
+            "drawn 1",
+        ])
+    }
+
     /// What exceptions.m prints with Apple's Foundation on macOS.
     @Test("Objective-C exceptions unwind to @catch and @finally as on Darwin",
           .enabled(if: FileManager.default.fileExists(atPath: ARMv7.fixture("exceptions").path)))
