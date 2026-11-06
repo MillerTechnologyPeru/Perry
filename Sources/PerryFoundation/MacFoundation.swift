@@ -39,10 +39,42 @@ public func _CFBundleCopyBundleURLForExecutableURL(_ url: id?) -> id? {
     return ObjC.retain(bundleURL.objcObject)
 }
 
-/// A function in a bundle's executable, by name: Mach-O images' symbols
-/// aren't looked up by name here.
+/// A function in a bundle's executable, by name, as dlsym finds it: in the
+/// bundle's own Mach-O image, in the provider standing in for a system
+/// framework, which has no executable here, or else in any image.
 @c(_CFBundleGetFunctionPointerForName)
-public func CFBundleGetFunctionPointerForName(_ bundle: id?, _ name: id?) -> UnsafeMutableRawPointer? { nil }
+public func CFBundleGetFunctionPointerForName(_ bundle: id?, _ name: id?) -> UnsafeMutableRawPointer? {
+    BundleLoading.symbol(bundle, name)
+}
+
+/// A variable in a bundle's executable, by name, found as functions are.
+@c(_CFBundleGetDataPointerForName)
+public func CFBundleGetDataPointerForName(_ bundle: id?, _ name: id?) -> UnsafeMutableRawPointer? {
+    BundleLoading.symbol(bundle, name)
+}
+
+extension BundleLoading {
+    nonisolated(unsafe) static var lookupSymbol: (@convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?)?
+
+    static func symbol(_ bundle: id?, _ name: id?) -> UnsafeMutableRawPointer? {
+        guard let lookupSymbol, let name = Strings.value(of: name) else { return nil }
+        let symbol = "_" + name
+        var libraries: [String] = []
+        if let executable = ObjC.send(bundle, ObjC.selector("executablePath")).flatMap({ Strings.value(of: $0) }) {
+            libraries.append(executable)
+        }
+        // A system framework's install name, Name.framework/Name, names its provider.
+        if let path = ObjC.send(bundle, ObjC.selector("bundlePath")).flatMap({ Strings.value(of: $0) }),
+           path.hasPrefix("/System/Library/"), path.hasSuffix(".framework") {
+            let framework = String(path.split(separator: "/").last ?? "").replacing(".framework", with: "")
+            libraries.append(path + "/" + framework)
+        }
+        for library in libraries {
+            if let address = library.withCString({ library in symbol.withCString { lookupSymbol(library, $0) } }) { return address }
+        }
+        return symbol.withCString { lookupSymbol(nil, $0) }
+    }
+}
 
 @c(_CFLocaleCreateCanonicalLanguageIdentifierFromString)
 public func CFLocaleCreateCanonicalLanguageIdentifierFromString(_ allocator: UnsafeRawPointer?, _ string: id?) -> id? {

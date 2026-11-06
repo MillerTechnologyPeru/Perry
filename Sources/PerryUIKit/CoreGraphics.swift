@@ -169,6 +169,7 @@ enum CG {
         fontCreateWithDataProvider = bind("CGFontCreateWithDataProvider")
         fontRelease = bind("CGFontRelease")
         fontRegister = lookup(coreGraphics, "_perry_cgfont_register").map { unsafeBitCast($0, to: (@convention(c) (UnsafeMutableRawPointer?) -> Bool).self) }
+        CTFonts.load { lookup(coreGraphics, $0) }
         dataProviderRelease = bind("CGDataProviderRelease")
         return complete
     }

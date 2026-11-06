@@ -30,6 +30,22 @@ func rows(format: UInt32, height: UInt64) -> UInt64 {
     return (height + blockHeight - 1) / blockHeight
 }
 
+/// The bytes a texel of an MTLPixelFormat takes, compressed formats' blocks
+/// spread over their texels; 4 for a format not listed.
+func bytesPerTexel(_ format: UInt32) -> Double {
+    switch format {
+    case 1, 10...14, 253: return 1                   // A8, R8, Stencil8
+    case 20...25, 30...34, 40...44, 250: return 2    // R16, RG8, packed 16-bit, Depth16
+    case 53...55, 60...65, 70...81, 90...94, 252, 255: return 4 // R32, RG16, RGBA8, packed 32-bit, Depth32, D24S8
+    case 103...105, 110...115, 260: return 8         // RG32, RGBA16, D32S8
+    case 123...125: return 16                        // RGBA32
+    case 130...131, 140...141, 170...171, 180...183: return 0.5 // BC1, BC4, EAC R11, ETC2 RGB8(A1)
+    case 132...139, 142...143, 172...179: return 1   // BC2, BC3, BC5–BC7, EAC RG11 and RGBA8
+    case 186...236: return 1                         // ASTC, at 4×4
+    default: return 4
+    }
+}
+
 private func astcBlockHeight(_ format: UInt32) -> UInt64 {
     // MTLPixelFormatASTC_<w>x<h>, from each group's 4x4: sRGB at 186, LDR at
     // 204, HDR at 222, each with a gap after 6x6: 4x4 5x4 5x5 6x5 6x6 _ 8x5
@@ -88,6 +104,25 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
     @ObjCMethod("heapOffset") func heapOffset() -> UInt { 0 }
     @ObjCMethod("isAliasable") func isAliasable() -> Bool { false }
     @ObjCMethod("makeAliasable") func makeAliasable() {}
+    /// A view's place in its parent: the first level and slice it shows.
+    /// Views here keep only their parent, so they start at its first.
+    @ObjCMethod("parentRelativeLevel") func parentRelativeLevel() -> UInt { 0 }
+    @ObjCMethod("parentRelativeSlice") func parentRelativeSlice() -> UInt { 0 }
+
+    /// The bytes the texture's texels take, every level, slice and sample:
+    /// an estimate, as Metal's own is of its allocation; a view takes none.
+    @ObjCMethod("allocatedSize") func allocatedSize() -> UInt {
+        if parent != nil { return 0 }
+        let slices = UInt64(max(descriptor.array_length, 1)) * (descriptor.texture_type == 5 || descriptor.texture_type == 6 ? 6 : 1)
+        var (width, height, depth) = (max(descriptor.width, 1), max(descriptor.height, 1), max(descriptor.depth, 1))
+        var texels: UInt64 = 0
+        for _ in 0..<max(descriptor.mipmap_level_count, 1) {
+            texels += width * height * depth
+            (width, height, depth) = (max(width / 2, 1), max(height / 2, 1), max(depth / 2, 1))
+        }
+        let bytes = Double(texels * slices * UInt64(max(descriptor.sample_count, 1))) * bytesPerTexel(descriptor.pixel_format)
+        return UInt(bytes.rounded(.up))
+    }
 
     // MARK: Contents
 
@@ -309,4 +344,6 @@ open class MTLRenderPipelineState: NSObject, MTLRenderPipelineStateProtocol {
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
     @ObjCMethod("label") func getLabel() -> String? { label }
     @ObjCMethod("supportIndirectCommandBuffers") func supportIndirectCommandBuffers() -> Bool { false }
+    /// The GPU memory the state holds: none Metal's apps can count here.
+    @ObjCMethod("allocatedSize") func allocatedSize() -> UInt { 0 }
 }

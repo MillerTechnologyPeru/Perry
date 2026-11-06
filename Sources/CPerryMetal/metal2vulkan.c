@@ -12,7 +12,7 @@
 // kept for the life of the process.
 
 /// The ABI these declarations are of.
-#define ABI_VERSION 8
+#define ABI_VERSION 9
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static perry_m2v table;
@@ -78,6 +78,7 @@ static void load(void) {
     BIND(library_function_names)
     BIND(strings_free)
     BIND(library_new_function_with_name)
+    BIND(library_new_function_with_constant_values)
     BIND(function_release)
     BIND(function_name)
     BIND(function_type)

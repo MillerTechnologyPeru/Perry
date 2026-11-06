@@ -8,7 +8,7 @@
 // object an opaque handle, freed by its release; a call that can fail takes
 // `char **error` last, stores a message that string_free frees, and returns
 // NULL, false or -1. Version 2 adds rendering, 3 vertex attribute reflection, 4 compute
-// textures and samplers.
+// textures and samplers, 9 function constant values.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -205,6 +205,17 @@ typedef struct perry_m2v_device_properties {
 
 typedef void *perry_m2v_handle;
 typedef char **perry_m2v_error;
+
+/// One MTLFunctionConstantValues entry: by [[function_constant(index)]]
+/// index, or by name where name is not NULL; its MTLDataType and its packed
+/// bytes.
+typedef struct perry_m2v_function_constant_value {
+    const char *name;
+    uint32_t index;
+    uint32_t data_type;
+    const uint8_t *bytes;
+    size_t length;
+} perry_m2v_function_constant_value;
 typedef void (*perry_m2v_handler)(void *context);
 
 /// libmetal2vulkan.so's functions.
@@ -230,6 +241,10 @@ typedef struct perry_m2v {
     size_t (* _Nonnull library_function_names)(perry_m2v_handle, char ***names);
     void (* _Nonnull strings_free)(char **, size_t);
     perry_m2v_handle (* _Nonnull library_new_function_with_name)(perry_m2v_handle, const char *, perry_m2v_error);
+    /// Version 9: newFunctionWithName:constantValues:error:.
+    perry_m2v_handle (* _Nonnull library_new_function_with_constant_values)(perry_m2v_handle, const char *,
+                                                                              const perry_m2v_function_constant_value *,
+                                                                              size_t, perry_m2v_error);
     void (* _Nonnull function_release)(perry_m2v_handle);
     const char *(* _Nonnull function_name)(perry_m2v_handle);
     uint32_t (* _Nonnull function_type)(perry_m2v_handle);

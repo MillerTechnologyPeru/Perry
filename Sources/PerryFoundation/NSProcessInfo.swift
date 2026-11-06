@@ -113,6 +113,23 @@ public final class NSProcessInfo: NSObject {
             >= (version.majorVersion, version.minorVersion, version.patchVersion)
     }
 
+    // MARK: Activities
+
+    /// An activity's token: nothing here sleeps or throttles an app, so it
+    /// only has to be an object the app keeps until it ends the activity.
+    @ObjCMethod("beginActivityWithOptions:reason:")
+    func beginActivity(options: UInt64, reason: id?) -> id? { Arrays.autoreleased([]) }
+
+    @ObjCMethod("endActivity:") func endActivity(_ activity: id?) {}
+
+    /// Runs the block at once, on this thread.
+    @ObjCMethod("performActivityWithOptions:reason:usingBlock:")
+    func performActivity(options: UInt64, reason: id?, block: ObjCBlock?) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer) -> Void
+        guard let block else { return }
+        block.function(as: Invoke.self)(block.object)
+    }
+
     // The shared instance lives for the whole process.
     @ObjCMethod("retain") func retain() -> UnsafeMutableRawPointer { objcObject }
     @ObjCMethod("release", types: "Vv16@0:8") func release() {}

@@ -119,9 +119,11 @@ static void mutex_lock(darwin_mutex *mutex) {
 }
 static _Bool mutex_try_lock(darwin_mutex *mutex) { load_darwin(); return darwin.mutex_trylock(mutex) == 0; }
 static void mutex_unlock(darwin_mutex *mutex) { load_darwin(); darwin.mutex_unlock(mutex); }
-static void mutex_destroy(darwin_mutex *mutex) { load_darwin(); darwin.mutex_destroy(mutex); }
+// Apple's arm64 C++ ABI has constructors and destructors return this,
+// which callers use: these return the object they were given.
+static darwin_mutex *mutex_destroy(darwin_mutex *mutex) { load_darwin(); darwin.mutex_destroy(mutex); return mutex; }
 
-static void recursive_mutex_init(darwin_mutex *mutex) {
+static darwin_mutex *recursive_mutex_init(darwin_mutex *mutex) {
     load_darwin();
     darwin_mutexattr attributes;
     darwin.mutexattr_init(&attributes);
@@ -129,11 +131,12 @@ static void recursive_mutex_init(darwin_mutex *mutex) {
     int error = darwin.mutex_init(mutex, &attributes);
     darwin.mutexattr_destroy(&attributes);
     if (error) lock_failed("recursive_mutex constructor", error);
+    return mutex;
 }
 
 static void cond_notify_one(darwin_cond *cond) { load_darwin(); darwin.cond_signal(cond); }
 static void cond_notify_all(darwin_cond *cond) { load_darwin(); darwin.cond_broadcast(cond); }
-static void cond_destroy(darwin_cond *cond) { load_darwin(); darwin.cond_destroy(cond); }
+static darwin_cond *cond_destroy(darwin_cond *cond) { load_darwin(); darwin.cond_destroy(cond); return cond; }
 
 static void cond_wait(darwin_cond *cond, unique_lock *lock) {
     load_darwin();

@@ -410,8 +410,41 @@ open class MTLRenderPipelineDescriptor: NSObject {
     var rasterizationEnabled = true
     var inputPrimitiveTopology: UInt32 = 0
     var label: String?
+    /// Tessellation's settings, with Metal's defaults. metal2vulkan's ABI
+    /// has no tessellation, so pipelines are made without them; only a
+    /// pipeline with a post-tessellation vertex function would need them.
+    var tessellation = Tessellation()
+
+    struct Tessellation {
+        var maxFactor: UInt = 16
+        var factorScaleEnabled = false
+        var factorFormat: UInt = 0
+        var controlPointIndexType: UInt = 0
+        var factorStepFunction: UInt = 0
+        var outputWindingOrder: UInt = 0
+        var partitionMode: UInt = 0
+    }
 
     @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("maxTessellationFactor") func maxTessellationFactor() -> UInt { tessellation.maxFactor }
+    @ObjCMethod("setMaxTessellationFactor:") func setMaxTessellationFactor(_ value: UInt) { tessellation.maxFactor = value }
+    @ObjCMethod("isTessellationFactorScaleEnabled") func isTessellationFactorScaleEnabled() -> Bool { tessellation.factorScaleEnabled }
+    @ObjCMethod("setTessellationFactorScaleEnabled:")
+    func setTessellationFactorScaleEnabled(_ value: Bool) { tessellation.factorScaleEnabled = value }
+    @ObjCMethod("tessellationFactorFormat") func tessellationFactorFormat() -> UInt { tessellation.factorFormat }
+    @ObjCMethod("setTessellationFactorFormat:") func setTessellationFactorFormat(_ value: UInt) { tessellation.factorFormat = value }
+    @ObjCMethod("tessellationControlPointIndexType") func tessellationControlPointIndexType() -> UInt { tessellation.controlPointIndexType }
+    @ObjCMethod("setTessellationControlPointIndexType:")
+    func setTessellationControlPointIndexType(_ value: UInt) { tessellation.controlPointIndexType = value }
+    @ObjCMethod("tessellationFactorStepFunction") func tessellationFactorStepFunction() -> UInt { tessellation.factorStepFunction }
+    @ObjCMethod("setTessellationFactorStepFunction:")
+    func setTessellationFactorStepFunction(_ value: UInt) { tessellation.factorStepFunction = value }
+    @ObjCMethod("tessellationOutputWindingOrder") func tessellationOutputWindingOrder() -> UInt { tessellation.outputWindingOrder }
+    @ObjCMethod("setTessellationOutputWindingOrder:")
+    func setTessellationOutputWindingOrder(_ value: UInt) { tessellation.outputWindingOrder = value }
+    @ObjCMethod("tessellationPartitionMode") func tessellationPartitionMode() -> UInt { tessellation.partitionMode }
+    @ObjCMethod("setTessellationPartitionMode:") func setTessellationPartitionMode(_ value: UInt) { tessellation.partitionMode = value }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTLRenderPipelineDescriptor {
         let copy = MTLRenderPipelineDescriptor()
@@ -423,6 +456,7 @@ open class MTLRenderPipelineDescriptor: NSObject {
         (copy.alphaToCoverage, copy.alphaToOne, copy.rasterizationEnabled) = (alphaToCoverage, alphaToOne, rasterizationEnabled)
         copy.inputPrimitiveTopology = inputPrimitiveTopology
         copy.label = label
+        copy.tessellation = tessellation
         return copy
     }
 
@@ -594,6 +628,95 @@ open class MTLRenderPassStencilAttachmentDescriptor: MTLRenderPassAttachmentDesc
 
     @ObjCMethod("clearStencil") func clearStencil() -> UInt32 { UInt32(value.clear.0) }
     @ObjCMethod("setClearStencil:") func setClearStencil(_ stencil: UInt32) { value.clear.0 = Double(stencil) }
+
+    /// MTLMultisampleStencilResolveFilter: kept for the app; metal2vulkan's
+    /// passes resolve with the sample's own.
+    var resolveFilter: UInt = 0
+    @ObjCMethod("stencilResolveFilter") func stencilResolveFilter() -> UInt { resolveFilter }
+    @ObjCMethod("setStencilResolveFilter:") func setStencilResolveFilter(_ filter: UInt) { resolveFilter = filter }
+}
+
+// MARK: - Counter sample buffer attachments
+
+/// Where a pass samples GPU counters into. Devices here have no counter
+/// sets, so no sample buffer can be made and passes sample nothing; the
+/// attachments only keep what the app sets.
+@ObjCClass("MTLPassSampleBufferAttachmentDescriptor")
+open class MTLPassSampleBufferAttachmentDescriptor: NSObject {
+    var sampleBuffer: NSObject?
+    var indices = [UInt](repeating: UInt.max, count: 4)
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    func copy(from other: MTLPassSampleBufferAttachmentDescriptor) {
+        sampleBuffer = other.sampleBuffer
+        indices = other.indices
+    }
+
+    @ObjCMethod("sampleBuffer") func getSampleBuffer() -> NSObject? { sampleBuffer }
+    @ObjCMethod("setSampleBuffer:") func setSampleBuffer(_ buffer: NSObject?) { sampleBuffer = buffer }
+    @ObjCMethod("startOfEncoderSampleIndex") func startOfEncoderSampleIndex() -> UInt { indices[0] }
+    @ObjCMethod("setStartOfEncoderSampleIndex:") func setStartOfEncoderSampleIndex(_ index: UInt) { indices[0] = index }
+    @ObjCMethod("endOfEncoderSampleIndex") func endOfEncoderSampleIndex() -> UInt { indices[1] }
+    @ObjCMethod("setEndOfEncoderSampleIndex:") func setEndOfEncoderSampleIndex(_ index: UInt) { indices[1] = index }
+    @ObjCMethod("startOfVertexSampleIndex") func startOfVertexSampleIndex() -> UInt { indices[0] }
+    @ObjCMethod("setStartOfVertexSampleIndex:") func setStartOfVertexSampleIndex(_ index: UInt) { indices[0] = index }
+    @ObjCMethod("endOfVertexSampleIndex") func endOfVertexSampleIndex() -> UInt { indices[1] }
+    @ObjCMethod("setEndOfVertexSampleIndex:") func setEndOfVertexSampleIndex(_ index: UInt) { indices[1] = index }
+    @ObjCMethod("startOfFragmentSampleIndex") func startOfFragmentSampleIndex() -> UInt { indices[2] }
+    @ObjCMethod("setStartOfFragmentSampleIndex:") func setStartOfFragmentSampleIndex(_ index: UInt) { indices[2] = index }
+    @ObjCMethod("endOfFragmentSampleIndex") func endOfFragmentSampleIndex() -> UInt { indices[3] }
+    @ObjCMethod("setEndOfFragmentSampleIndex:") func setEndOfFragmentSampleIndex(_ index: UInt) { indices[3] = index }
+}
+
+@ObjCClass("MTLPassSampleBufferAttachmentDescriptorArray")
+open class MTLPassSampleBufferAttachmentDescriptorArray: NSObject {
+    var slots = Slots<MTLPassSampleBufferAttachmentDescriptor>(make: { MTLPassSampleBufferAttachmentDescriptor() },
+                                                               copy: { $0.copy(from: $1) })
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("objectAtIndexedSubscript:")
+    func object(at index: UInt) -> MTLPassSampleBufferAttachmentDescriptor { slots.at(Int(index)) }
+    @ObjCMethod("setObject:atIndexedSubscript:")
+    func setObject(_ object: MTLPassSampleBufferAttachmentDescriptor?, at index: UInt) { slots.set(object, at: Int(index)) }
+}
+
+/// A blit pass: only its counter sample buffers.
+@ObjCClass("MTLBlitPassDescriptor")
+open class MTLBlitPassDescriptor: NSObject {
+    var attachments = MTLPassSampleBufferAttachmentDescriptorArray()
+
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCClassMethod("blitPassDescriptor") static func blitPassDescriptor() -> MTLBlitPassDescriptor { MTLBlitPassDescriptor() }
+    @ObjCMethod("sampleBufferAttachments") func sampleBufferAttachments() -> MTLPassSampleBufferAttachmentDescriptorArray { attachments }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTLBlitPassDescriptor {
+        let copy = MTLBlitPassDescriptor()
+        for (index, attachment) in attachments.slots.elements { copy.attachments.slots.set(attachment, at: index) }
+        return copy
+    }
+}
+
+/// A compute pass: its dispatch type and counter sample buffers.
+@ObjCClass("MTLComputePassDescriptor")
+open class MTLComputePassDescriptor: NSObject {
+    var attachments = MTLPassSampleBufferAttachmentDescriptorArray()
+    /// MTLDispatchTypeSerial.
+    var dispatchType: UInt = 0
+
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCClassMethod("computePassDescriptor") static func computePassDescriptor() -> MTLComputePassDescriptor { MTLComputePassDescriptor() }
+    @ObjCMethod("sampleBufferAttachments") func sampleBufferAttachments() -> MTLPassSampleBufferAttachmentDescriptorArray { attachments }
+    @ObjCMethod("dispatchType") func getDispatchType() -> UInt { dispatchType }
+    @ObjCMethod("setDispatchType:") func setDispatchType(_ type: UInt) { dispatchType = type }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTLComputePassDescriptor {
+        let copy = MTLComputePassDescriptor()
+        for (index, attachment) in attachments.slots.elements { copy.attachments.slots.set(attachment, at: index) }
+        copy.dispatchType = dispatchType
+        return copy
+    }
 }
 
 @ObjCClass("MTLRenderPassColorAttachmentDescriptorArray")
@@ -619,8 +742,12 @@ open class MTLRenderPassDescriptor: NSObject {
     var renderTargetHeight: UInt = 0
     var renderTargetArrayLength: UInt = 0
     var defaultRasterSampleCount: UInt = 0
+    var sampleAttachments = MTLPassSampleBufferAttachmentDescriptorArray()
 
     @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("sampleBufferAttachments")
+    func sampleBufferAttachments() -> MTLPassSampleBufferAttachmentDescriptorArray { sampleAttachments }
 
     @ObjCClassMethod("renderPassDescriptor") static func renderPassDescriptor() -> MTLRenderPassDescriptor { MTLRenderPassDescriptor() }
 
