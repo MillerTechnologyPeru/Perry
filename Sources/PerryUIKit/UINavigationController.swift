@@ -473,7 +473,10 @@ open class UINavigationBar: UIView {
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
         guard let top = barState.items.last else { return buttons }
         var left: CGFloat = 16
-        if let back = backItem(), !top.state.hidesBackButton {
+        // Left items take the back button's place, unless they supplement
+        // it, as UIKit's do.
+        let backShown = !top.state.hidesBackButton && (top.state.leftItems.isEmpty || top.state.leftItemsSupplementBackButton)
+        if let back = backItem(), backShown {
             let title = "\u{2039} " + (back.state.backButtonTitle ?? back.state.title ?? "Back")
             let width = Text.size(title, font: font).width
             buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: bounds.height))
