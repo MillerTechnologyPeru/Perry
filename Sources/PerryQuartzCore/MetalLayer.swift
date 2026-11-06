@@ -192,8 +192,6 @@ open class CAMetalLayer: CALayer {
     @ObjCMethod("setAllowsNextDrawableTimeout:") func setAllowsNextDrawableTimeout(_ allows: Bool) { metal.allowsNextDrawableTimeout = allows }
     @ObjCMethod("colorspace") func colorspace() -> UnsafeMutableRawPointer? { metal.colorspace }
     @ObjCMethod("setColorspace:") func setColorspace(_ space: UnsafeMutableRawPointer?) { metal.colorspace = space }
-    @ObjCMethod("wantsExtendedDynamicRangeContent") func wantsExtendedDynamicRangeContent() -> Bool { false }
-    @ObjCMethod("setWantsExtendedDynamicRangeContent:") func setWantsExtendedDynamicRangeContent(_ wants: Bool) {}
 
     @ObjCMethod("drawableSize") func drawableSize() -> CGSize {
         if let size = metal.drawableSize { return size }
