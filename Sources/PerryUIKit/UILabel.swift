@@ -113,6 +113,13 @@ open class UIFont: NSObject {
         make(name: ".SFUI-Regular", size: textStyleSizes[textStyle] ?? 17, weight: textStyle == "UICTFontTextStyleHeadline" ? 0.3 : 0)
     }
 
+    /// Text styles at the sizes of the traits' content size category.
+    @ObjCClassMethod("preferredFontForTextStyle:compatibleWithTraitCollection:")
+    static func preferredFont(textStyle: String, compatibleWith traits: UITraitCollection?) -> UIFont {
+        make(name: ".SFUI-Regular", size: textStyleSize(textStyle, category: traits?.preferredContentSizeCategory()),
+             weight: textStyle == "UICTFontTextStyleHeadline" ? 0.3 : 0)
+    }
+
     @ObjCClassMethod("systemFontSize") static func systemFontSize() -> CGFloat { 14 }
     @ObjCClassMethod("labelFontSize") static func labelFontSize() -> CGFloat { 17 }
 

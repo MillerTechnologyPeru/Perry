@@ -242,6 +242,30 @@ extension Range where Bound == String.Index {
     }
 }
 
+@available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
+extension NSRange {
+    /// The UTF-16 offsets of a range of an attributed string's indices.
+    public init<R, S>(_ region: R, in target: S) where R: RangeExpression, S: AttributedStringProtocol, R.Bound == AttributedString.Index {
+        let range = region.relative(to: target.characters)
+        let utf16 = target.utf16
+        self.init(location: utf16.distance(from: utf16.startIndex, to: range.lowerBound),
+                  length: utf16.distance(from: range.lowerBound, to: range.upperBound))
+    }
+}
+
+@available(macOS 12, iOS 15, tvOS 15, watchOS 8, *)
+extension Range where Bound == AttributedString.Index {
+    /// The indices of a range of an attributed string's UTF-16 offsets, or
+    /// nil when they aren't in it.
+    public init?<S>(_ range: NSRange, in string: S) where S: AttributedStringProtocol {
+        let utf16 = string.utf16
+        guard range.location != NSNotFound, range.location >= 0, range.length >= 0,
+              range.location + range.length <= utf16.count else { return nil }
+        let start = utf16.index(utf16.startIndex, offsetBy: range.location)
+        self = start ..< utf16.index(start, offsetBy: range.length)
+    }
+}
+
 // MARK: - Percent encoding
 
 @available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)

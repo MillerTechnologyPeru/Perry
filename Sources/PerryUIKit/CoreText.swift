@@ -93,6 +93,34 @@ open class UIFontDescriptor: NSObject {
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.fontDescriptor }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
+    /// A descriptor of the font with this name and size.
+    @ObjCClassMethod("fontDescriptorWithName:size:")
+    static func descriptor(name: String, size: CGFloat) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(make { descriptor in
+            descriptor.name = name
+            descriptor.size = size
+        })
+    }
+
+    /// A text style's descriptor, at its size for the content size category.
+    static func preferred(textStyle: String, category: String?) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(make { descriptor in
+            descriptor.textStyle = textStyle
+            descriptor.size = textStyleSize(textStyle, category: category)
+            descriptor.weight = textStyle == "UICTFontTextStyleHeadline" ? 0.4 : 0
+        })
+    }
+
+    @ObjCClassMethod("preferredFontDescriptorWithTextStyle:")
+    static func preferredDescriptor(textStyle: String) -> UnsafeMutableRawPointer? {
+        preferred(textStyle: textStyle, category: Application.shared?.preferredContentSizeCategory())
+    }
+
+    @ObjCClassMethod("preferredFontDescriptorWithTextStyle:compatibleWithTraitCollection:")
+    static func preferredDescriptor(textStyle: String, compatibleWith traits: UITraitCollection?) -> UnsafeMutableRawPointer? {
+        preferred(textStyle: textStyle, category: traits?.preferredContentSizeCategory() ?? Application.shared?.preferredContentSizeCategory())
+    }
+
     @ObjCMethod("pointSize") func pointSize() -> CGFloat { state.size }
     @ObjCMethod("symbolicTraits") func symbolicTraits() -> UInt32 { state.symbolicTraits }
 
@@ -263,7 +291,13 @@ public func CTFontDescriptorGetTextStyleSize(
     _ style: UnsafeMutableRawPointer?, _ category: UnsafeMutableRawPointer?, _ options: Int32,
     _ weight: UnsafeMutablePointer<CGFloat>?, _ size: UnsafeMutablePointer<CGFloat>?
 ) -> CGFloat {
-    textStyleSize(string(style) ?? "UICTFontTextStyleBody", category: string(category))
+    // The size and weight are given through the pointers too, which is
+    // where SwiftUI reads them for its scaled metrics.
+    let style = string(style) ?? "UICTFontTextStyleBody"
+    let points = textStyleSize(style, category: string(category))
+    size?.pointee = points
+    weight?.pointee = style == "UICTFontTextStyleHeadline" ? 0.4 : 0
+    return points
 }
 
 // MARK: Fonts

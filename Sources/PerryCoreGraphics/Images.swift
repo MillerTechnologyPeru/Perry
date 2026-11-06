@@ -249,6 +249,14 @@ public func CGColorSpaceGetNumberOfComponents(_ space: Ref?) -> Int { ColorSpace
 
 @c(_CGColorSpaceGetModel) public func CGColorSpaceGetModel(_ space: Ref?) -> Int32 { ColorSpaces.state(space)?.model ?? -1 }
 
+/// Whether the space uses an ITU-R BT.2100 transfer function, PQ or HLG,
+/// as the spaces named for it do.
+@c(_CGColorSpaceUsesITUR_2100TF)
+public func CGColorSpaceUsesITUR_2100TF(_ space: Ref?) -> Bool {
+    guard let name = ColorSpaces.state(space)?.name else { return false }
+    return name.contains("2100_PQ") || name.contains("2100_HLG")
+}
+
 @c(_CGColorSpaceCopyName)
 public func CGColorSpaceCopyName(_ space: Ref?) -> Ref? { ColorSpaces.state(space)?.name.flatMap { $0.objCOwnedReturnValue() } }
 

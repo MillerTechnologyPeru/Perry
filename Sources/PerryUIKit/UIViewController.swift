@@ -49,6 +49,7 @@ final class ViewControllerState: ObjectState {
     var definesPresentationContext = false
     var providesPresentationContextTransitionStyle = false
     var modalInPresentation = false
+    var capturesStatusBarAppearance = false
     var additionalSafeAreaInsets = UIEdgeInsets.zero
     var hidesBottomBarWhenPushed = false
     /// UIRectEdge: the edges whose bars the view extends under; all 15.
@@ -245,6 +246,14 @@ open class UIViewController: UIResponder {
     @ObjCMethod("setModalTransitionStyle:") func setModalTransitionStyle(_ style: Int) { state.modalTransitionStyle = style }
     @ObjCMethod("isModalInPresentation") func isModalInPresentation() -> Bool { state.modalInPresentation }
     @ObjCMethod("setModalInPresentation:") func setModalInPresentation(_ modal: Bool) { state.modalInPresentation = modal }
+    /// Whether a presented controller sets the status bar: the status bar
+    /// is not drawn, so this is read back only.
+    @ObjCMethod("modalPresentationCapturesStatusBarAppearance") func modalPresentationCapturesStatusBarAppearance() -> Bool {
+        state.capturesStatusBarAppearance
+    }
+    @ObjCMethod("setModalPresentationCapturesStatusBarAppearance:") func setModalPresentationCapturesStatusBarAppearance(_ captures: Bool) {
+        state.capturesStatusBarAppearance = captures
+    }
     @ObjCMethod("definesPresentationContext") func definesPresentationContext() -> Bool { state.definesPresentationContext }
     @ObjCMethod("setDefinesPresentationContext:") func setDefinesPresentationContext(_ defines: Bool) { state.definesPresentationContext = defines }
     @ObjCMethod("providesPresentationContextTransitionStyle") func providesPresentationContextTransitionStyle() -> Bool {

@@ -127,6 +127,9 @@ open class UISceneConnectionOptions: NSObject {
     @ObjCMethod("URLContexts") func urlContexts() -> NSObject { NSMutableSet.empty() }
     @ObjCMethod("sourceApplication") func sourceApplication() -> String? { nil }
     @ObjCMethod("userActivities") func userActivities() -> NSObject { NSMutableSet.empty() }
+    /// The quick action the scene was opened from: none, with no home screen.
+    @ObjCMethod("shortcutItem") func shortcutItem() -> NSObject? { nil }
+    @ObjCMethod("notificationResponse") func notificationResponse() -> NSObject? { nil }
 }
 
 // MARK: - UIScene

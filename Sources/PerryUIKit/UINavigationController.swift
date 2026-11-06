@@ -372,6 +372,7 @@ final class NavigationBarState: ObjectState {
     var standardAppearance: NSObject?
     var scrollEdgeAppearance: NSObject?
     var compactAppearance: NSObject?
+    var compactScrollEdgeAppearance: NSObject?
     var shadowImage: NSObject?
     /// What the bar last drew, to tell when its items have changed.
     var drawn = ""
@@ -493,6 +494,10 @@ open class UINavigationBar: UIView {
     @ObjCMethod("setScrollEdgeAppearance:") func setScrollEdgeAppearance(_ appearance: NSObject?) { barState.scrollEdgeAppearance = appearance }
     @ObjCMethod("compactAppearance") func compactAppearance() -> NSObject? { barState.compactAppearance }
     @ObjCMethod("setCompactAppearance:") func setCompactAppearance(_ appearance: NSObject?) { barState.compactAppearance = appearance }
+    @ObjCMethod("compactScrollEdgeAppearance") func compactScrollEdgeAppearance() -> NSObject? { barState.compactScrollEdgeAppearance }
+    @ObjCMethod("setCompactScrollEdgeAppearance:") func setCompactScrollEdgeAppearance(_ appearance: NSObject?) {
+        barState.compactScrollEdgeAppearance = appearance
+    }
     @ObjCMethod("shadowImage") func shadowImage() -> NSObject? { barState.shadowImage }
     @ObjCMethod("setShadowImage:") func setShadowImage(_ image: NSObject?) { barState.shadowImage = image }
 
@@ -520,7 +525,14 @@ open class UINavigationBar: UIView {
         // it, as UIKit's do.
         let backShown = !top.state.hidesBackButton && (top.state.leftItems.isEmpty || top.state.leftItemsSupplementBackButton)
         if let back = backItem(), backShown {
-            let title = "\u{2039} " + (back.state.backButtonTitle ?? back.state.title ?? "Back")
+            // The back item's title, "Back" in the generic mode, or the
+            // chevron alone in the minimal one.
+            let name = switch back.state.backButtonDisplayMode {
+            case 1: back.state.backButtonTitle ?? "Back"
+            case 2: ""
+            default: back.state.backButtonTitle ?? back.state.title ?? "Back"
+            }
+            let title = name.isEmpty ? "\u{2039}" : "\u{2039} " + name
             let width = Text.size(title, font: font).width
             buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: barHeight))
             left = 8 + width + 16
@@ -672,10 +684,17 @@ final class NavigationItemState: ObjectState {
     var rightItems: [UIBarButtonItem] = []
     var leftItemsSupplementBackButton = false
     var largeTitleDisplayMode = 0
+    /// UINavigationItemBackButtonDisplayMode: default 0, generic 1, minimal 2.
+    var backButtonDisplayMode = 0
     var searchController: NSObject?
     var hidesSearchBarWhenScrolling = true
     var standardAppearance: NSObject?
     var scrollEdgeAppearance: NSObject?
+    var compactAppearance: NSObject?
+    var compactScrollEdgeAppearance: NSObject?
+    /// The item groups set, whose items are the left and right items.
+    var leadingGroups: [UIBarButtonItemGroup] = []
+    var trailingGroups: [UIBarButtonItemGroup] = []
 }
 
 @ObjCClass("UINavigationItem")
@@ -724,6 +743,8 @@ open class UINavigationItem: NSObject {
     @ObjCMethod("setPrompt:") func setPrompt(_ prompt: String?) { state.prompt = prompt }
     @ObjCMethod("backButtonTitle") func backButtonTitle() -> String? { state.backButtonTitle }
     @ObjCMethod("setBackButtonTitle:") func setBackButtonTitle(_ title: String?) { state.backButtonTitle = title }
+    @ObjCMethod("backButtonDisplayMode") func backButtonDisplayMode() -> Int { state.backButtonDisplayMode }
+    @ObjCMethod("setBackButtonDisplayMode:") func setBackButtonDisplayMode(_ mode: Int) { state.backButtonDisplayMode = mode }
     @ObjCMethod("backBarButtonItem") func backBarButtonItem() -> UIBarButtonItem? { state.backBarButtonItem }
     @ObjCMethod("setBackBarButtonItem:") func setBackBarButtonItem(_ item: UIBarButtonItem?) { state.backBarButtonItem = item }
     @ObjCMethod("hidesBackButton") func hidesBackButton() -> Bool { state.hidesBackButton }
@@ -768,6 +789,93 @@ open class UINavigationItem: NSObject {
 
     @ObjCMethod("setRightBarButtonItems:animated:")
     func setRightBarButtonItems(_ items: NSArray?, animated: Bool) { setRightBarButtonItems(items) }
+
+    @ObjCMethod("compactAppearance") func compactAppearance() -> NSObject? { state.compactAppearance }
+    @ObjCMethod("setCompactAppearance:") func setCompactAppearance(_ appearance: NSObject?) { state.compactAppearance = appearance }
+    @ObjCMethod("compactScrollEdgeAppearance") func compactScrollEdgeAppearance() -> NSObject? { state.compactScrollEdgeAppearance }
+    @ObjCMethod("setCompactScrollEdgeAppearance:") func setCompactScrollEdgeAppearance(_ appearance: NSObject?) {
+        state.compactScrollEdgeAppearance = appearance
+    }
+
+    // MARK: Item groups
+
+    /// The groups' visible items, in order, for the bar to draw.
+    private static func items(_ groups: [UIBarButtonItemGroup]) -> [UIBarButtonItem] {
+        groups.filter { !$0.groupState.hidden }.flatMap(\.groupState.items)
+    }
+
+    private static func groups(_ array: NSArray?) -> [UIBarButtonItemGroup] {
+        array?.elements.compactMap { $0.as(UIBarButtonItemGroup.self) } ?? []
+    }
+
+    @ObjCMethod("leadingItemGroups") func leadingItemGroups() -> NSObject { NSMutableArray.of(state.leadingGroups) }
+    @ObjCMethod("setLeadingItemGroups:")
+    func setLeadingItemGroups(_ groups: NSArray?) {
+        state.leadingGroups = Self.groups(groups)
+        state.leftItems = Self.items(state.leadingGroups)
+    }
+
+    @ObjCMethod("trailingItemGroups") func trailingItemGroups() -> NSObject { NSMutableArray.of(state.trailingGroups) }
+    @ObjCMethod("setTrailingItemGroups:")
+    func setTrailingItemGroups(_ groups: NSArray?) {
+        state.trailingGroups = Self.groups(groups)
+        state.rightItems = Self.items(state.trailingGroups)
+    }
+
+    /// Groups the bar may move into an overflow menu: Perry's bar shows
+    /// them with the others.
+    @ObjCMethod("centerItemGroups") func centerItemGroups() -> NSObject { NSMutableArray.of([UIBarButtonItemGroup]()) }
+    @ObjCMethod("setCenterItemGroups:") func setCenterItemGroups(_ groups: NSArray?) {}
+}
+
+// MARK: - UIBarButtonItemGroup
+
+final class BarItemGroupState: ObjectState {
+    var items: [UIBarButtonItem] = []
+    var representativeItem: UIBarButtonItem?
+    var hidden = false
+}
+
+/// Bar button items shown together.
+@ObjCClass("UIBarButtonItemGroup")
+open class UIBarButtonItemGroup: NSObject {
+    static let states = StateTable<BarItemGroupState>()
+    var groupState: BarItemGroupState { UIBarButtonItemGroup.states[objcObject] }
+
+    @ObjCMethod("initWithBarButtonItems:representativeItem:")
+    func initialize(barButtonItems items: NSArray?, representativeItem: UIBarButtonItem?) -> Self {
+        groupState.items = items?.elements.map { $0.unsafeCast(to: UIBarButtonItem.self) } ?? []
+        groupState.representativeItem = representativeItem
+        return self
+    }
+
+    /// A group of fixed items, which the bar keeps in place.
+    @ObjCClassMethod("fixedGroupWithRepresentativeItem:items:")
+    static func fixedGroup(representativeItem: UIBarButtonItem?, items: NSArray?) -> UIBarButtonItemGroup {
+        let group = UIBarButtonItemGroup.objCClass.object.allocated().unsafeCast(to: UIBarButtonItemGroup.self)
+        return group.initialize(barButtonItems: items, representativeItem: representativeItem)
+    }
+
+    /// A group the bar may move to an overflow menu.
+    @ObjCClassMethod("movableGroupWithCustomizationIdentifier:representativeItem:items:")
+    static func movableGroup(customizationIdentifier: String?, representativeItem: UIBarButtonItem?, items: NSArray?) -> UIBarButtonItemGroup {
+        fixedGroup(representativeItem: representativeItem, items: items)
+    }
+
+    @ObjCMethod("barButtonItems") func barButtonItems() -> NSObject { NSMutableArray.of(groupState.items) }
+    @ObjCMethod("setBarButtonItems:")
+    func setBarButtonItems(_ items: NSArray?) { groupState.items = items?.elements.map { $0.unsafeCast(to: UIBarButtonItem.self) } ?? [] }
+    @ObjCMethod("representativeItem") func representativeItem() -> UIBarButtonItem? { groupState.representativeItem }
+    @ObjCMethod("setRepresentativeItem:") func setRepresentativeItem(_ item: UIBarButtonItem?) { groupState.representativeItem = item }
+    @ObjCMethod("isHidden") func isHidden() -> Bool { groupState.hidden }
+    @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) { groupState.hidden = hidden }
+    @ObjCMethod("isDisplayingRepresentativeItem") func isDisplayingRepresentativeItem() -> Bool { false }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIBarButtonItemGroup.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIBarButtonItemGroup.objCClass.pointer)
+    }
 }
 
 extension NSObject {
