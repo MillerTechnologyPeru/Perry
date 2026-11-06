@@ -1,6 +1,8 @@
 import Glibc
 import PerryObjCInterop
 
+// Mac apps' alone: armv7 runs only iOS apps, so it has none of this.
+#if !arch(arm)
 // The rest of CoreServices that Mac apps call: UCKeyTranslate with the U.S.
 // keyboard layout (the one AppKit's text input source names), Gestalt's
 // system version (macOS 14), Launch Services, which finds no other apps
@@ -109,3 +111,5 @@ public func UCConvertLongDateTimeToCFAbsoluteTime(_ longDate: Int64, _ time: Uns
 extension NSObject {
     @ObjCMethod("description") func describedByObject() -> String
 }
+
+#endif
