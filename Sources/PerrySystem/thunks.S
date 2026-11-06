@@ -267,6 +267,9 @@ PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork
+// vfork as fork: the child gets its own copy, which is safe for what a
+// vfork child may do (exec or _exit), where vfork itself shares the stack.
+PASSTHROUGH _vfork, fork
 PASSTHROUGH _execv, execv
 PASSTHROUGH _execve, execve
 PASSTHROUGH _div, div
