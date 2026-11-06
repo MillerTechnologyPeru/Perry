@@ -214,13 +214,14 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
-//   …/Metal.framework/Metal                               -> QuartzCore
+//   …/Metal.framework/Metal                               -> Metal, else QuartzCore
 //   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
+//   …/Carbon.framework, …/HIToolbox.framework             -> AppKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -266,6 +267,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UIKit");
         return true;
     }
+    // Carbon's (HIToolbox's) text input sources are AppKit's: the keyboard
+    // layouts AppKit's key events are typed with.
+    if (strstr(install_name, "/Carbon.framework/") || strstr(install_name, "/HIToolbox.framework/")) {
+        snprintf(out, out_size, "AppKit");
+        return true;
+    }
     // AVFAudio's classes are AVFoundation's, which re-exports them.
     if (strstr(install_name, "/AVFAudio.framework/")) {
         snprintf(out, out_size, "AVFoundation");
@@ -276,12 +283,6 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // overlay binds to directly.
     if (strstr(install_name, "/Network.framework/") || strcmp(install_name, "/usr/lib/libnetwork.dylib") == 0) {
         snprintf(out, out_size, "SystemConfiguration");
-        return true;
-    }
-    // Metal, without a device: QuartzCore, which has its layers, answers
-    // that there is none.
-    if (strstr(install_name, "/Metal.framework/")) {
-        snprintf(out, out_size, "QuartzCore");
         return true;
     }
     // ImageIO's images are CoreGraphics' own.
@@ -371,11 +372,29 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         }
     }
 
+    // Metal is libPerryMetal's, on Vulkan; without it, QuartzCore, which
+    // has the layers, answers that there is no device, so apps that can
+    // draw with OpenGL ES do.
+    bool metal = strcmp(short_name, "Metal") == 0;
+retry:
     for (uint32_t i = 0; i < loader->library_dir_count; i++) {
         char path[PATH_MAX];
         snprintf(path, sizeof(path), "%s/libPerry%s.so", loader->library_dirs[i], short_name);
         if (access(path, R_OK) != 0)
             continue;
+        // A provider loaded for another name already (QuartzCore, standing
+        // in for Metal) is the same one.
+        for (uint32_t j = 0; j + 1 < loader->provider_count; j++) {
+            perry_provider *other = loader->providers[j];
+            if (other->handle && other->path && strcmp(other->path, path) == 0) {
+                provider->path = other->path;
+                provider->handle = other->handle;
+                provider->base = other->base;
+                provider->symbol = other->symbol;
+                memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
+                return provider;
+            }
+        }
         load_corelibs_foundation(loader);
         void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (!handle)
@@ -392,6 +411,11 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
         link_provider(loader, provider, short_name);
         return provider;
+    }
+    if (metal) {
+        metal = false;
+        snprintf(short_name, sizeof(short_name), "QuartzCore");
+        goto retry;
     }
     return NULL;
 }
