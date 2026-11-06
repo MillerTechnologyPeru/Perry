@@ -204,10 +204,6 @@ open class UIWindowScene: UIScene {
         return NSObject(key)
     }
 
-    @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
-    @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { UIScreen.mainScreen().coordinateSpace() }
-    @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
-
     /// The scene's size and orientation: the screen's, which it fills.
     @ObjCMethod("effectiveGeometry")
     func effectiveGeometry() -> UIWindowSceneGeometry {
