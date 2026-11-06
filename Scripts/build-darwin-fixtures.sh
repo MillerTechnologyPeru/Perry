@@ -93,6 +93,7 @@ for src in Tests/Fixtures/Darwin/*/; do
     grep -q '<CoreData/' $sources && frameworks="$frameworks -framework CoreData"
     grep -q '<Security/' $sources && frameworks="$frameworks -framework Security"
     grep -q '<CoreBluetooth/' $sources && frameworks="$frameworks -framework CoreBluetooth"
+    grep -q '<CFNetwork/' $sources && frameworks="$frameworks -framework CFNetwork"
     grep -q '<Metal/' $sources && frameworks="$frameworks -framework Metal"
     # OpenGL ES works on iOS, deprecated; the warnings are not the point.
     grep -q '<OpenGLES/' $sources && frameworks="$frameworks -framework OpenGLES -DGLES_SILENCE_DEPRECATION"
