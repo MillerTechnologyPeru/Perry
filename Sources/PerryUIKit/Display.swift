@@ -227,14 +227,14 @@ enum Display {
         guard ticker == nil else { return }
         let ticker = DisplayTicker()
         Display.ticker = ticker
-        typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double, UnsafeMutableRawPointer?,
+        typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double.ObjCType, UnsafeMutableRawPointer?,
                                          UnsafeRawPointer?, UnsafeMutableRawPointer?, Bool) -> UnsafeMutableRawPointer?
         typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
         typealias Add = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?,
                                         UnsafeMutableRawPointer?) -> Void
         let timer = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(
             ObjCRuntime.classObject("NSTimer"), ObjCRuntime.selector("timerWithTimeInterval:target:selector:userInfo:repeats:"),
-            1.0 / 60, ticker.objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
+            (1.0 / 60).objCArgument(), ticker.objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
         let main = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)(ObjCRuntime.classObject("NSRunLoop"),
                                                                    ObjCRuntime.selector("mainRunLoop"))
         unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(main, ObjCRuntime.selector("addTimer:forMode:"), timer,
