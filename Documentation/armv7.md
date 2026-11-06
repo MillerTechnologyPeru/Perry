@@ -53,6 +53,19 @@ Checked with clang for `armv7-apple-ios` against `armv7-linux-gnueabihf`.
 - The stack is 4-byte aligned at calls on Darwin (`S32`), 8 on Linux. Entry
   points that call into C on Linux realign the stack (see `tlv_thunk.S`).
 - `long double` is `double` on both.
+- A structure over 4 bytes is returned through a pointer the caller passes
+  in r0, so the receiver and selector of a message returning one are in r1
+  and r2: `objc_msgSend_stret`. `ObjCValue.objCReturnsIndirectly` says
+  which results need it, and `ObjCRuntime.msgSend(returning:)` picks the
+  send.
+- r9 is a scratch register in Darwin's code (since iOS 3) and callee-saved in
+  Linux's. Perry's armv7 code is built with `-ffixed-r9`, so it keeps nothing
+  there across a call into Darwin code. Linux libraries do, so where one calls
+  back into Darwin code, directly or through Perry's, r9 is saved around it:
+  libSystem's `qsort`, `pthread_create`, `atexit` and thread-specific
+  destructors (`PERRY_KEEP_R9`, `callbacks.c`), and libdispatch's work
+  functions, Foundation's threads and libxml2's SAX callbacks
+  (`keepingLinuxRegisters`). `callbacks.m` changes r9 in each such callback.
 - Functions are Thumb or ARM; a function pointer's low bit says which. Export
   trie addresses and `N_ARM_THUMB_DEF` symbols carry it. Providers' `dlsym`
   results already have it.
@@ -148,12 +161,18 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   for CoreGraphics prefer, so providers call each other as Swift does. The
   loader loads Foundation's provider with CoreGraphics', as CoreGraphics
   links CoreFoundation. `graphics.c` checks geometry, transforms, colors,
-  paths and drawing against macOS.
+  paths and drawing against macOS. libdispatch's Darwin objects and blocks
+  are laid out at the word size (`DarwinLayout`). `uikit_abi.m` checks a
+  view's geometry, a subclass's `-sizeThatFits:`, `-pointInside:withEvent:`
+  and `-drawRect:` as UIKit calls them, colors and Bézier paths against Mac
+  Catalyst, with no display.
 - Not yet: C++ exceptions (`__gxx_personality_sj0`), the remaining files.c
   entry points, the rest of Foundation's coverage, UIKit's live view and
   apps on armv7, the variadic formats and `double` functions of the wrapped
-  libraries (SQLite, libxml2, zlib), `objc_msgForward_stret`, and classic
-  relocations (iOS before 3.1).
+  libraries (SQLite, libxml2, zlib) and r9 around the Darwin callbacks they
+  call, r9 around libdispatch's finalizers and the destructors of
+  thread-specific keys past the reserved ones, `objc_msgForward_stret`, and
+  classic relocations (iOS before 3.1).
 
 ## Building and running
 
