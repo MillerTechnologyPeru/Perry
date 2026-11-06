@@ -158,7 +158,8 @@ final class RunLoopState {
 
     /// Runs timers until `limit` (absolute time), a stop, or no timers.
     /// With `waitWhenEmpty`, running out of timers waits for `limit` instead,
-    /// as a Darwin run loop with an input source does.
+    /// as a Darwin run loop with an input source does; without it given,
+    /// the main loop and one with an input source wait.
     func run(until limit: Double, returnAfterSourceHandled: Bool = false, waitWhenEmpty: Bool? = nil) -> Result {
         notify(RunLoopActivity.entry)
         let result = runPasses(until: limit, returnAfterSourceHandled: returnAfterSourceHandled, waitWhenEmpty: waitWhenEmpty)
@@ -167,7 +168,6 @@ final class RunLoopState {
     }
 
     private func runPasses(until limit: Double, returnAfterSourceHandled: Bool, waitWhenEmpty: Bool?) -> Result {
-        let waitWhenEmpty = waitWhenEmpty ?? isMain
         while true {
             if runBlocks(), returnAfterSourceHandled { return .handledSource }
             notify(RunLoopActivity.beforeTimers)
@@ -196,7 +196,10 @@ final class RunLoopState {
             guard let next else { return .stopped }
             let now = absoluteTimeNow()
             guard let timer = next.timer else {
-                guard waitWhenEmpty, now < limit else { return .finished }
+                // With no timers, a loop with an input source (and the
+                // main one) waits for it, as Darwin's does; one with
+                // nothing to wait for is finished.
+                guard waitWhenEmpty ?? (isMain || locked { ports > 0 }), now < limit else { return .finished }
                 wait(until: limit)
                 continue
             }
