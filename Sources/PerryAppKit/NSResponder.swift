@@ -10,6 +10,8 @@ open class NSResponder: NSObject {
     /// Not retained, as AppKit's.
     var nextResponderObject: UnsafeMutableRawPointer?
     var menu: NSObject?
+    var touchBar: NSObject?
+    var touchBarMade = false
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -26,6 +28,19 @@ open class NSResponder: NSObject {
     @ObjCMethod("menu") func responderMenu() -> NSObject? { menu }
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) { self.menu = menu }
     @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
+
+    /// There's no Touch Bar to show it on: kept, and made by -makeTouchBar
+    /// the first time it is asked for.
+    @ObjCMethod("touchBar")
+    func responderTouchBar() -> NSObject? {
+        if touchBar == nil, !touchBarMade {
+            touchBarMade = true
+            touchBar = Send.object(objcObject, "makeTouchBar").map(NSObject.init)
+        }
+        return touchBar
+    }
+    @ObjCMethod("setTouchBar:") func setTouchBar(_ touchBar: NSObject?) { self.touchBar = touchBar }
+    @ObjCMethod("makeTouchBar") func makeTouchBar() -> NSObject? { nil }
 
     /// Passes `event` on to the next responder.
     func forward(_ selector: String, _ event: NSObject?) {
