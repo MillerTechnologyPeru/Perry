@@ -19,6 +19,7 @@ typedef struct perry_provider {
     void *base;     // load address, used to reject symbols found in the provider's own dependencies
     void *(*symbol)(const char *name);  // perry_provider_symbol, if the provider has one
     const char *reexports[2];   // install names of libraries whose symbols it re-exports, as libSystem does libdispatch's
+    bool started;               // its startup function has been called
 } perry_provider;
 
 typedef struct perry_dependency {
@@ -128,6 +129,11 @@ const char *perry_platform_name(uint32_t platform);
 
 // Fixups (fixups.c)
 void perry_apply_fixups(perry_loader *loader, perry_image *image);
+
+// Describes the image's frames to the host's unwinder, from its
+// __unwind_info, so that exceptions pass through its code and are caught
+// in it. After its fixups, which bind its personality routines.
+void perry_register_unwind_info(perry_image *image);
 
 // Symbol resolution (symbols.c)
 typedef struct perry_symbol {
