@@ -265,9 +265,9 @@ public func CGRectApplyAffineTransform(_ rect: CGRect, _ t: CGAffineTransform) -
 
 /// Splits off `amount` from the edge (CGRectEdge: min x 0, min y 1, max x 2,
 /// max y 3) into `slice`, the rest into `remainder`.
-@c(_CGRectDivide)
+@DarwinC("_CGRectDivide")
 public func CGRectDivide(_ rect: CGRect, _ slice: UnsafeMutablePointer<CGRect>?, _ remainder: UnsafeMutablePointer<CGRect>?,
-                         _ amount: Double, _ edge: UInt32) {
+                         _ amount: CGFloat, _ edge: UInt32) {
     let r = CGRectStandardize(rect)
     let horizontal = edge == 0 || edge == 2
     let extent = horizontal ? r.size.width : r.size.height
