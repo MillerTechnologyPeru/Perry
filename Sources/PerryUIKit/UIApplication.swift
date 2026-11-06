@@ -85,6 +85,8 @@ open class UIApplication: UIResponder {
 
     /// No local notifications are ever scheduled or delivered.
     @ObjCMethod("cancelAllLocalNotifications") func cancelAllLocalNotifications() {}
+    @ObjCMethod("scheduledLocalNotifications") func scheduledLocalNotifications() -> NSObject { NSMutableArray.of([]) }
+    @ObjCMethod("setScheduledLocalNotifications:") func setScheduledLocalNotifications(_ notifications: NSObject?) {}
     @ObjCMethod("cancelLocalNotification:") func cancelLocalNotification(_ notification: NSObject?) {}
     @ObjCMethod("scheduleLocalNotification:") func scheduleLocalNotification(_ notification: NSObject?) {}
     @ObjCMethod("presentLocalNotificationNow:") func presentLocalNotificationNow(_ notification: NSObject?) {}
