@@ -611,7 +611,17 @@ open class UITableView: UIScrollView {
     @ObjCMethod("setDragInteractionEnabled:") func setDragInteractionEnabled(_ enabled: Bool) {}
 
     @ObjCMethod("backgroundView") func backgroundView() -> UIView? { table.backgroundView }
-    @ObjCMethod("setBackgroundView:") func setBackgroundView(_ view: UIView?) { table.backgroundView = view }
+    /// A view behind the rows, the size of the visible area wherever the
+    /// table has scrolled, as UIKit's: often an empty table's message.
+    @ObjCMethod("setBackgroundView:") func setBackgroundView(_ view: UIView?) {
+        if let old = table.backgroundView, old.objcObject != view?.objcObject, old.state.superview == objcObject { old.removeFromSuperview() }
+        table.backgroundView = view
+        if let view {
+            if view.state.superview != objcObject { insertSubview(view, at: 0) }
+            view.sendSetFrame(state.bounds)
+        }
+        setNeedsLayout()
+    }
 
     @ObjCMethod("tableHeaderView") func tableHeaderView() -> UIView? { table.tableHeaderView }
 
@@ -872,6 +882,7 @@ open class UITableView: UIScrollView {
         let layout = layout
         let bounds = state.bounds
         layOutTableViews(layout)
+        if let background = table.backgroundView, background.state.frame != bounds { background.sendSetFrame(bounds) }
 
         let wanted = Set(rows(in: bounds))
         let delegate = delegate()
