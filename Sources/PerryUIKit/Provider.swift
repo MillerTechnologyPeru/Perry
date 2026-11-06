@@ -34,7 +34,30 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard QuartzCore.load(symbol) else { uikitFatal("UIKit needs libPerryQuartzCore, which is missing or incomplete") }
     Accessibility.load { symbol(libobjc, $0) }
     AssetCatalog.load(symbol)
+    // A Mac app's WebKit is AppKit's; UIKit, there for its CoreText, keeps
+    // its own WebKit classes under names of its own.
+    if isMacApp(info.main_header) {
+        let webKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
+                             "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration",
+                             "WKWebpagePreferences", "WKWebsiteDataStore"]
+        for name in webKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
+    }
     return true
+}
+
+/// Whether the main executable is a macOS program: its LC_BUILD_VERSION's
+/// platform is PLATFORM_MACOS.
+private func isMacApp(_ header: UnsafeRawPointer?) -> Bool {
+    guard let header, header.load(as: UInt32.self) == 0xFEED_FACF else { return false }
+    let count = header.load(fromByteOffset: 16, as: UInt32.self)
+    var command = header + 32    // mach_header_64
+    for _ in 0..<count {
+        let cmd = command.load(as: UInt32.self), size = command.load(fromByteOffset: 4, as: UInt32.self)
+        if cmd == 0x32 { return command.load(fromByteOffset: 8, as: UInt32.self) == 1 }   // LC_BUILD_VERSION, PLATFORM_MACOS
+        guard size >= 8 else { return false }
+        command += Int(size)
+    }
+    return false
 }
 
 /// UIKit's numeric and structure constants, which the loader asks for
