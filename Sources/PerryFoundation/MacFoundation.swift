@@ -136,3 +136,38 @@ enum ZeroGeometry {
         ["_NSZeroPoint", "_NSZeroSize", "_NSZeroRect"].contains(name) ? storage : nil
     }
 }
+
+// MARK: - Property lists
+
+/// A property list read from data, +1: NSPropertyListSerialization's, with
+/// its format and, when it can't be read, the error, +1 too.
+@c(_CFPropertyListCreateWithData)
+public func CFPropertyListCreateWithData(_ allocator: id?, _ data: id?, _ options: UInt, _ format: UnsafeMutablePointer<UInt>?,
+                                         _ error: UnsafeMutablePointer<id?>?) -> id? {
+    typealias Read = @convention(c) (id?, SEL, id?, UInt, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<id?>?) -> id?
+    let read = unsafeBitCast(ObjC.msgSend, to: Read.self)
+    let made = read(named("NSPropertyListSerialization"), ObjC.selector("propertyListWithData:options:format:error:"),
+                    data, options, format, error)
+    if let error, let reported = error.pointee { error.pointee = ObjC.retain(reported) }
+    return ObjC.retain(made)
+}
+
+/// A property list written as data in a format, +1.
+@c(_CFPropertyListCreateData)
+public func CFPropertyListCreateData(_ allocator: id?, _ plist: id?, _ format: UInt, _ options: UInt,
+                                     _ error: UnsafeMutablePointer<id?>?) -> id? {
+    typealias Write = @convention(c) (id?, SEL, id?, UInt, UInt, UnsafeMutablePointer<id?>?) -> id?
+    let write = unsafeBitCast(ObjC.msgSend, to: Write.self)
+    let made = write(named("NSPropertyListSerialization"), ObjC.selector("dataWithPropertyList:format:options:error:"),
+                     plist, format, options, error)
+    if let error, let reported = error.pointee { error.pointee = ObjC.retain(reported) }
+    return ObjC.retain(made)
+}
+
+/// A deep copy of a property list, +1: mutable as `options` says.
+@c(_CFPropertyListCreateDeepCopy)
+public func CFPropertyListCreateDeepCopy(_ allocator: id?, _ plist: id?, _ options: UInt) -> id? {
+    guard let data = CFPropertyListCreateData(allocator, plist, 200, 0, nil) else { return nil }
+    defer { ObjC.release(data) }
+    return CFPropertyListCreateWithData(allocator, data, options, nil, nil)
+}
