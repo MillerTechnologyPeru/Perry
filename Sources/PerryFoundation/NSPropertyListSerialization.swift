@@ -184,7 +184,9 @@ enum PropertyLists {
 
     /// Reads an XML property list.
     static func parseXML(_ bytes: [UInt8]) -> ArchiveValue? {
-        var parser = XMLPlistParser(Array(String(decoding: bytes, as: UTF8.self).unicodeScalars))
+        // In UTF-16 after a byte order mark (as Xcode writes some strings
+        // files), else UTF-8.
+        var parser = XMLPlistParser(Array(PropertyLists.text(bytes).unicodeScalars))
         return parser.document()
     }
 
