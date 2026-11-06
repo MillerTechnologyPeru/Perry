@@ -288,6 +288,8 @@ PASSTHROUGH _writev, writev
 PASSTHROUGH _read, read
 PASSTHROUGH _write, write
 PASSTHROUGH _close, close
+PASSTHROUGH _closelog, closelog
+PASSTHROUGH _openlog, openlog
 PASSTHROUGH _dup, dup
 PASSTHROUGH _dup2, dup2
 PASSTHROUGH _pipe, pipe
