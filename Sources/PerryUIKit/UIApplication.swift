@@ -83,6 +83,19 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setStatusBarStyle:animated:") func setStatusBarStyle(_ style: Int, animated: Bool) { Application.statusBarStyle = style }
     @ObjCMethod("statusBarOrientation") func statusBarOrientation() -> Int { Screen.orientation }
 
+    /// A finger another provider puts on the screen, at a point in the
+    /// screen's coordinates (GameController's, for a gamepad's button that
+    /// stands for a touch): phase 0 is down, 1 moved, 2 up.
+    @ObjCMethod("_perryFinger:phase:x:y:")
+    func finger(_ finger: UInt, phase: Int, x: Double, y: Double) {
+        let point = CGPoint(x: x, y: y)
+        switch phase {
+        case 0: Touches.down(at: point, finger: UInt64(finger))
+        case 1: Touches.move(to: point, finger: UInt64(finger))
+        default: Touches.up(at: point, finger: UInt64(finger))
+        }
+    }
+
     /// The delegate's answer, else the orientations Info.plist lists, as a
     /// UIInterfaceOrientationMask (portrait 2, upside down 4, landscape
     /// left 16, landscape right 8).
