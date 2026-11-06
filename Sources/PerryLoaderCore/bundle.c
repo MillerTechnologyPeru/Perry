@@ -28,15 +28,19 @@ bool perry_bundle_open(const char *path, perry_bundle *bundle) {
         perry_fatal("%s: cannot resolve bundle path", path);
 
     // iOS bundles keep Info.plist and the executable at the top level;
-    // macOS bundles keep them under Contents/.
+    // macOS bundles keep them under Contents/. perry32 runs only iOS apps.
     char plist_path[PATH_MAX + 32], exe_dir[PATH_MAX + 32];
     snprintf(plist_path, sizeof(plist_path), "%s/Info.plist", root);
     snprintf(exe_dir, sizeof(exe_dir), "%s", root);
     if (!is_file(plist_path)) {
+#if defined(__arm__)
+        perry_fatal("%s: directory is not an iOS bundle (no Info.plist)", path);
+#else
         snprintf(plist_path, sizeof(plist_path), "%s/Contents/Info.plist", root);
         snprintf(exe_dir, sizeof(exe_dir), "%s/Contents/MacOS", root);
         if (!is_file(plist_path))
             perry_fatal("%s: directory is not a bundle (no Info.plist)", path);
+#endif
     }
 
     const char *error = NULL;
