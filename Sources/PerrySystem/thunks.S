@@ -124,6 +124,7 @@ PASSTHROUGH _flock, flock
 VARIADIC _open, perry_vopen, 2
 VARIADIC _open_dprotected_np, perry_vopen_dprotected, 4
 VARIADIC _openat, perry_vopenat, 3
+VARIADIC _sem_open, perry_vsem_open, 2
 VARIADIC _fcntl, perry_vfcntl, 2
 
 // ___chkstk_darwin probes each page of a large stack frame, which Darwin
