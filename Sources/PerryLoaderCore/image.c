@@ -917,6 +917,17 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
         inserted += length + (inserted[length] == ':');
     }
 
+    // A gamepad's settings (PERRY_GAMECONTROLLER_..., PERRY_COREMOTION_...)
+    // are GameController's provider's, which reads gamepads: it is loaded
+    // for them though the program links neither framework, as one from
+    // before either does not.
+    for (char **variable = environ; variable && *variable; variable++) {
+        if (strncmp(*variable, "PERRY_GAMECONTROLLER_", 21) == 0 || strncmp(*variable, "PERRY_COREMOTION_", 17) == 0) {
+            perry_find_provider(loader, "/System/Library/Frameworks/GameController.framework/GameController");
+            break;
+        }
+    }
+
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
