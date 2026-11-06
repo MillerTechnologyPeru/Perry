@@ -140,6 +140,23 @@ enum Constants {
     static let NSLigatureAttributeName = "NSLigature"
     static let NSFontAttributeNameAlias = "NSFont"
     static let NSFontWeightTrait = "NSCTFontWeightTrait"
+    // NSFontWeight values, CoreText's.
+    static let NSFontWeightUltraLight: CGFloat = -0.8
+    static let NSFontWeightThin: CGFloat = -0.6
+    static let NSFontWeightLight: CGFloat = -0.4
+    static let NSFontWeightRegular: CGFloat = 0
+    static let NSFontWeightMedium: CGFloat = 0.23
+    static let NSFontWeightSemibold: CGFloat = 0.3
+    static let NSFontWeightBold: CGFloat = 0.4
+    static let NSFontWeightHeavy: CGFloat = 0.56
+    static let NSFontWeightBlack: CGFloat = 0.62
+    /// A view's intrinsic size in a dimension it has none in.
+    static let NSViewNoIntrinsicMetric: CGFloat = -1
+    // The gray levels of NSColor's white component.
+    static let NSBlack: CGFloat = 0
+    static let NSDarkGray: CGFloat = 1.0 / 3
+    static let NSLightGray: CGFloat = 2.0 / 3
+    static let NSWhite: CGFloat = 1
     static let NSFontSymbolicTrait = "NSCTFontSymbolicTrait"
     static let NSFontTraitsAttribute = "NSCTFontTraitsAttribute"
     static let NSFontFamilyAttribute = "NSFontFamilyAttribute"
@@ -446,6 +463,7 @@ class NSNumber: NSObject {
     @ObjCClassMethod("numberWithDouble:") static func make(double: Double) -> NSNumber
     @ObjCClassMethod("numberWithUnsignedInt:") static func make(unsignedInt: UInt32) -> NSNumber
     @ObjCClassMethod("numberWithBool:") static func make(bool: Bool) -> NSNumber
+    @ObjCMethod("doubleValue") func doubleValue() -> Double
 }
 
 @ObjCWrapper("NSValue")
