@@ -13,9 +13,14 @@ open class NSMenu: NSObject {
     var supermenu: UnsafeMutableRawPointer?
     var delegate: UnsafeMutableRawPointer?
     var autoenablesItems = true
+    var font: NSFont?
 
     @ObjCMethod("init")
     public required override init() { super.init() }
+
+    /// The menu's items' font: the menu font unless one was set.
+    @ObjCMethod("font") func menuFont() -> NSFont { font ?? NSFont.menuFont(ofSize: 0) }
+    @ObjCMethod("setFont:") func setFont(_ value: NSFont?) { font = value }
 
     @ObjCMethod("initWithTitle:")
     public required init(title: String?) {
