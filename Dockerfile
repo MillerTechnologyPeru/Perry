@@ -125,6 +125,13 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends dbus-daemon python3-dbus python3-gi \
  && rm -rf /var/lib/apt/lists/*
 
+# Avahi and its Bonjour compatibility library (libdns_sd), which
+# NSNetService and NSNetServiceBrowser run over; the tests that need the
+# daemon start it on a bus of their own.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends avahi-daemon libavahi-compat-libdnssd1 \
+ && rm -rf /var/lib/apt/lists/*
+
 # DejaVu's oblique faces, for italic text in the system font.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends fonts-dejavu-extra \
