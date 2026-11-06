@@ -18,7 +18,6 @@ open class NSVisualEffectView: NSView {
     var emphasized = false
     var maskImage: NSImage?
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
