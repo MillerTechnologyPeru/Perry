@@ -245,15 +245,20 @@ enum Display {
     static func timerTick() { tick() }
 
     private static func handle(_ event: [UInt64]) {
+        // Xlib's events: a button or motion event's x is eight words in (after
+        // type, serial, send_event, display, window, root, subwindow and
+        // time), its button 20 bytes after; a client message's data seven.
+        let word = MemoryLayout<UInt>.size
+        let x = 8 * word, button = x + 20, data = 7 * word
         event.withUnsafeBytes { raw in
             let type = raw.load(fromByteOffset: 0, as: Int32.self)
             func point() -> CGPoint {
-                CGPoint(x: CGFloat(raw.load(fromByteOffset: 64, as: Int32.self)) / scale,
-                        y: CGFloat(raw.load(fromByteOffset: 68, as: Int32.self)) / scale)
+                CGPoint(x: CGFloat(raw.load(fromByteOffset: x, as: Int32.self)) / scale,
+                        y: CGFloat(raw.load(fromByteOffset: x + 4, as: Int32.self)) / scale)
             }
             switch type {
             case 4: // ButtonPress
-                let button = raw.load(fromByteOffset: 84, as: UInt32.self)
+                let button = raw.load(fromByteOffset: button, as: UInt32.self)
                 switch button {
                 case 1: Touches.down(at: point())
                 case 4: Touches.wheel(at: point(), by: -40)
@@ -262,14 +267,14 @@ enum Display {
                 }
                 dirty = true
             case 5: // ButtonRelease
-                if raw.load(fromByteOffset: 84, as: UInt32.self) == 1 { Touches.up(at: point()) }
+                if raw.load(fromByteOffset: button, as: UInt32.self) == 1 { Touches.up(at: point()) }
                 dirty = true
             case 6: // MotionNotify
                 Touches.move(to: point())
             case 12: // Expose
                 dirty = true
             case 33: // ClientMessage: the window was closed.
-                if raw.load(fromByteOffset: 56, as: UInt.self) == deleteAtom { Lifecycle.terminate() }
+                if raw.load(fromByteOffset: data, as: UInt.self) == deleteAtom { Lifecycle.terminate() }
             default:
                 break
             }
