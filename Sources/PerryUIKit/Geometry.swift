@@ -89,8 +89,13 @@ extension CGAffineTransform: ObjCStructure {
     }
 }
 
-extension PerryRange: ObjCScalar {
+extension PerryRange: ObjCStructure {
+    public typealias ObjCType = PerryRange
+    #if _pointerBitWidth(_32)
+    public static var objCTypeEncoding: String { "{_NSRange=II}" }
+    #else
     public static var objCTypeEncoding: String { "{_NSRange=QQ}" }
+    #endif
 }
 
 extension UIEdgeInsets: ObjCStructure {
