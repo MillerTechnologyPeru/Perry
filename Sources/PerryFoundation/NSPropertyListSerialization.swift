@@ -235,8 +235,11 @@ enum PropertyLists {
 
     private static func byteCount(_ value: Int) -> Int { value < 1 << 8 ? 1 : value < 1 << 16 ? 2 : value < 1 << 32 ? 4 : 8 }
 
-    private static func bigEndian(_ value: Int, _ size: Int) -> [UInt8] {
-        (0..<size).reversed().map { UInt8(truncatingIfNeeded: value >> (8 * $0)) }
+    /// The value's low `size` bytes, the highest first. A real number's
+    /// and a date's are 64 bits, more than an Int holds on armv7.
+    private static func bigEndian<Value: BinaryInteger>(_ value: Value, _ size: Int) -> [UInt8] {
+        let wide = Int64(truncatingIfNeeded: value)
+        return (0..<size).reversed().map { UInt8(truncatingIfNeeded: wide >> Int64(8 * $0)) }
     }
 
     private static func header(_ kind: UInt8, _ count: Int) -> [UInt8] {
@@ -245,9 +248,9 @@ enum PropertyLists {
     }
 
     private static func integer(_ value: Int64) -> [UInt8] {
-        if value < 0 { return [0x13] + bigEndian(Int(value), 8) }
+        if value < 0 { return [0x13] + bigEndian(value, 8) }
         let size = value < 1 << 8 ? 0 : value < 1 << 16 ? 1 : value < 1 << 32 ? 2 : 3
-        return [0x10 | UInt8(size)] + bigEndian(Int(value), 1 << size)
+        return [0x10 | UInt8(size)] + bigEndian(value, 1 << size)
     }
 
     private static func scalar(_ value: ArchiveValue) -> [UInt8] {
@@ -255,8 +258,8 @@ enum PropertyLists {
         case .null: return [0x00]
         case .bool(let flag): return [flag ? 0x09 : 0x08]
         case .integer(let number): return integer(number)
-        case .real(let number): return [0x23] + bigEndian(Int(Int64(bitPattern: number.bitPattern)), 8)
-        case .date(let seconds): return [0x33] + bigEndian(Int(Int64(bitPattern: seconds.bitPattern)), 8)
+        case .real(let number): return [0x23] + bigEndian(number.bitPattern, 8)
+        case .date(let seconds): return [0x33] + bigEndian(seconds.bitPattern, 8)
         case .data(let bytes): return header(0x4, bytes.count) + bytes
         case .string(let text):
             if text.utf8.allSatisfy({ $0 < 0x80 }) { return header(0x5, text.utf8.count) + Array(text.utf8) }

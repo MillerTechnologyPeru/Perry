@@ -22,6 +22,9 @@ enum Appearance {
 
 final class ViewControllerState: ObjectState {
     var view: UIView?
+    /// The view a nib holds with the controller itself, as nibs from before
+    /// storyboards do: the controller's view when it is first asked for.
+    var archivedView: UIView?
     /// overrideUserInterfaceStyle: unspecified 0, light 1, dark 2.
     var userInterfaceStyle = 0
     var title: String?
@@ -119,6 +122,7 @@ open class UIViewController: UIResponder {
         state.extendedLayoutIncludesOpaqueBars = decoded.bool("UIKeyExtendedLayoutIncludesOpaqueBars")
         state.hidesBottomBarWhenPushed = decoded.bool("UIHidesBottomBarWhenPushed")
         if decoded.has("UIPreferredContentSize") { state.preferredContentSize = decoded.size("UIPreferredContentSize") }
+        state.archivedView = decoded.object("UIView")?.as(UIView.self)
         return self
     }
 
@@ -140,7 +144,12 @@ open class UIViewController: UIResponder {
     @ObjCMethod("view")
     func view() -> UIView? {
         if state.view == nil {
-            sendLoadView()
+            if let archived = state.archivedView {
+                state.archivedView = nil
+                setView(archived)
+            } else {
+                sendLoadView()
+            }
             guard state.view != nil else { return nil }
             performSeguesOnViewLoad()
             sendViewDidLoad()

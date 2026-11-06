@@ -142,3 +142,80 @@ public final class NSCondition: NSObject {
     @ObjCMethod("broadcast")
     func broadcast() { Locks.storage(objcObject).map { pthread_cond_broadcast($0.condition) } }
 }
+
+/// A condition lock's state: whether it is held, and the condition it was
+/// left with, under a mutex of its own.
+final class ConditionLockStorage {
+    let lock = LockStorage(recursive: false)
+    var held = false
+    var condition = 0
+
+    /// Takes the lock when it is free and, with `wanted`, when its
+    /// condition is that, waiting until `date` (absolute time) if there is
+    /// one; false when the date passes first, or at once when not waiting.
+    func take(when wanted: Int?, until date: Double?, waiting: Bool = true) -> Bool {
+        pthread_mutex_lock(lock.mutex)
+        defer { pthread_mutex_unlock(lock.mutex) }
+        while held || (wanted != nil && wanted != condition) {
+            guard waiting else { return false }
+            if let date {
+                if absoluteTimeNow() >= date || !lock.wait(until: date) {
+                    if held || (wanted != nil && wanted != condition) { return false }
+                }
+            } else {
+                pthread_cond_wait(lock.condition, lock.mutex)
+            }
+        }
+        held = true
+        return true
+    }
+
+    func leave(with condition: Int?) {
+        pthread_mutex_lock(lock.mutex)
+        if let condition { self.condition = condition }
+        held = false
+        pthread_cond_broadcast(lock.condition)
+        pthread_mutex_unlock(lock.mutex)
+    }
+}
+
+/// NSConditionLock: a lock taken when it holds a given condition, an
+/// integer its last holder left it with.
+@ObjCClass("NSConditionLock")
+public final class NSConditionLock: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+    }
+
+    private var storage: ConditionLockStorage? { Storage.get(objcObject, as: ConditionLockStorage.self) }
+
+    @ObjCMethod("init")
+    func initialize() -> Self { initialize(condition: 0) }
+
+    @ObjCMethod("initWithCondition:")
+    func initialize(condition: Int) -> Self {
+        let storage = ConditionLockStorage()
+        storage.condition = condition
+        Storage.set(objcObject, storage)
+        return self
+    }
+
+    @ObjCMethod("condition") func condition() -> Int { storage?.condition ?? 0 }
+
+    // Named apart from NSLocking's, which NSObject's category has.
+    @ObjCMethod("lock") func take() { _ = storage?.take(when: nil, until: nil) }
+    @ObjCMethod("lockWhenCondition:") func take(whenCondition condition: Int) { _ = storage?.take(when: condition, until: nil) }
+    @ObjCMethod("tryLock") func tryTake() -> Bool { storage?.take(when: nil, until: nil, waiting: false) ?? false }
+    @ObjCMethod("tryLockWhenCondition:")
+    func tryTake(whenCondition condition: Int) -> Bool { storage?.take(when: condition, until: nil, waiting: false) ?? false }
+
+    @ObjCMethod("lockBeforeDate:")
+    func take(before date: ObjCObject) -> Bool { storage?.take(when: nil, until: Dates.interval(date.id)) ?? false }
+    @ObjCMethod("lockWhenCondition:beforeDate:")
+    func take(whenCondition condition: Int, before date: ObjCObject) -> Bool {
+        storage?.take(when: condition, until: Dates.interval(date.id)) ?? false
+    }
+
+    @ObjCMethod("unlock") func leave() { storage?.leave(with: nil) }
+    @ObjCMethod("unlockWithCondition:") func leave(withCondition condition: Int) { storage?.leave(with: condition) }
+}

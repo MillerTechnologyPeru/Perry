@@ -1,11 +1,14 @@
-// Audio converters: linear PCM or IMA4 in, linear PCM out, at any sample
-// rates and channel counts. Input is decoded to floats, remapped to the
-// output's channels and resampled linearly; the converter keeps what one
-// call doesn't use for the next.
+// Audio converters: linear PCM, IMA4, AAC or MP3 in, linear PCM out, at any
+// sample rates and channel counts. Input is decoded to floats, remapped to
+// the output's channels and resampled linearly; the converter keeps what
+// one call doesn't use for the next. AAC and MP3 packets are decoded by
+// GStreamer, as an audio queue's are: a game may decode its music itself
+// and play what comes out.
 
 #include "PerryAudioToolbox.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +23,11 @@ typedef struct converter {
     size_t count, capacity;
     /// The next output frame's position in pending.
     double position;
+    /// For compressed input: GStreamer's decoder, its source and sink, the
+    /// packets pushed and whether the input has ended.
+    void *pipeline, *src, *sink;
+    uint64_t pushed;
+    bool ended;
 } converter;
 
 #define CONVERTER_MAGIC FOURCC('p', 'a', 'c', 'v')
@@ -29,10 +37,48 @@ static converter *valid(void *handle) {
     return c && c->magic == CONVERTER_MAGIC ? c : NULL;
 }
 
+static bool compressed(const AudioStreamBasicDescription *f) {
+    return f->mFormatID == kAudioFormatMPEG4AAC || f->mFormatID == kAudioFormatMPEGLayer3;
+}
+
 static bool input_supported(const AudioStreamBasicDescription *f) {
     if (f->mSampleRate <= 0) return false;
-    if (f->mFormatID == kAudioFormatAppleIMA4) return f->mChannelsPerFrame > 0;
+    if (f->mFormatID == kAudioFormatAppleIMA4 || compressed(f)) return f->mChannelsPerFrame > 0;
     return perry_pcm_supported(f);
+}
+
+/// The decoder for compressed input: packets in, interleaved floats out at
+/// the input's rate and channels. False when GStreamer can't make it.
+static bool build_decoder(converter *c) {
+    const perry_gst *g = perry_gst_get();
+    char caps[256], description[640];
+    if (!g || !perry_gst_caps(&c->in, NULL, 0, caps, sizeof caps)) return false;
+    bool aac = c->in.mFormatID == kAudioFormatMPEG4AAC;
+    const char *decoder = aac && g->factory_find && g->factory_find("avdec_aac") ? "avdec_aac !"
+        : !aac && g->factory_find && g->factory_find("mpegaudioparse") && g->factory_find("mpg123audiodec")
+            ? "mpegaudioparse ! mpg123audiodec !" : "decodebin !";
+    snprintf(description, sizeof description,
+             "appsrc name=src format=time caps=\"%s\" ! %s audioconvert ! audioresample ! "
+             "audio/x-raw,format=F32LE,layout=interleaved,rate=%d,channels=%d ! appsink name=sink sync=false",
+             caps, decoder, (int)c->in.mSampleRate, (int)c->in.mChannelsPerFrame);
+    perry_audio_trace("converter %p: %s", (void *)c, description);
+    c->pipeline = g->parse_launch(description, NULL);
+    if (c->pipeline) {
+        c->src = g->bin_get_by_name(c->pipeline, "src");
+        c->sink = g->bin_get_by_name(c->pipeline, "sink");
+    }
+    if (!c->pipeline || !c->src || !c->sink || g->set_state(c->pipeline, PERRY_GST_STATE_PLAYING) == 0) return false;
+    return true;
+}
+
+static void free_decoder(converter *c) {
+    const perry_gst *g = c->pipeline ? perry_gst_get() : NULL;
+    if (!g) return;
+    g->set_state(c->pipeline, PERRY_GST_STATE_NULL);
+    if (c->src) g->object_unref(c->src);
+    if (c->sink) g->object_unref(c->sink);
+    g->object_unref(c->pipeline);
+    c->pipeline = c->src = c->sink = NULL;
 }
 
 OSStatus darwin_AudioConverterNew(const AudioStreamBasicDescription *in, const AudioStreamBasicDescription *out, void **result)
@@ -51,6 +97,13 @@ OSStatus darwin_AudioConverterNew(const AudioStreamBasicDescription *in, const A
     c->magic = CONVERTER_MAGIC;
     c->in = *in;
     c->out = *out;
+    if (compressed(in) && !build_decoder(c)) {
+        perry_audio_warn("can't decode '%c%c%c%c': GStreamer has no decoder for it", in->mFormatID >> 24,
+                         in->mFormatID >> 16 & 0xff, in->mFormatID >> 8 & 0xff, in->mFormatID & 0xff);
+        free_decoder(c);
+        free(c);
+        return kAudioConverterErr_FormatNotSupported;
+    }
     perry_audio_trace("converter %p: %u Hz %u ch '%c%c%c%c' to %u Hz %u ch, flags %#x, %u bits", (void *)c,
                       (unsigned)in->mSampleRate, in->mChannelsPerFrame, in->mFormatID >> 24, in->mFormatID >> 16 & 0xff,
                       in->mFormatID >> 8 & 0xff, in->mFormatID & 0xff, (unsigned)out->mSampleRate, out->mChannelsPerFrame,
@@ -64,6 +117,7 @@ OSStatus darwin_AudioConverterDispose(void *handle) {
     converter *c = valid(handle);
     if (!c) return kAudio_ParamError;
     c->magic = 0;
+    free_decoder(c);
     free(c->pending);
     free(c);
     return 0;
@@ -75,6 +129,13 @@ OSStatus darwin_AudioConverterReset(void *handle) {
     if (!c) return kAudio_ParamError;
     c->count = 0;
     c->position = 0;
+    // Compressed input starts over with a decoder that has heard nothing.
+    if (c->pipeline) {
+        free_decoder(c);
+        c->pushed = 0;
+        c->ended = false;
+        if (!build_decoder(c)) free_decoder(c);
+    }
     return 0;
 }
 
@@ -97,9 +158,74 @@ static void append(converter *c, const float *frames, uint32_t in_channels, size
     c->count += count;
 }
 
+/// Takes what the decoder has ready, waiting up to `timeout` for the
+/// first of it; whether there was any.
+static bool drain_decoder(converter *c, uint64_t timeout) {
+    const perry_gst *g = perry_gst_get();
+    bool any = false;
+    void *sample;
+    while ((sample = g->app_sink_try_pull_sample(c->sink, any ? 0 : timeout))) {
+        void *buffer = g->sample_get_buffer(sample);
+        uint8_t info[PERRY_GST_MAP_INFO_SIZE];
+        if (buffer && g->buffer_map(buffer, info, PERRY_GST_MAP_READ)) {
+            const float *floats = *(void **)(info + PERRY_GST_MAP_INFO_DATA);
+            size_t length = *(size_t *)(info + PERRY_GST_MAP_INFO_LENGTH);
+            append(c, floats, c->in.mChannelsPerFrame, length / sizeof(float) / c->in.mChannelsPerFrame);
+            g->buffer_unmap(buffer, info);
+            any = true;
+        }
+        g->mini_object_unref(sample);
+    }
+    return any;
+}
+
+/// Compressed input: asks the input proc for packets, gives them to the
+/// decoder and takes what it has decoded. The decoder is a few packets
+/// behind, so this gives as long as there were packets or anything decoded.
+static OSStatus pull_compressed(converter *c, input_proc proc, void *user, bool *gave) {
+    const perry_gst *g = perry_gst_get();
+    *gave = false;
+    if (!g || !c->pipeline) return kAudioConverterErr_FormatNotSupported;
+    OSStatus status = 0;
+    if (!c->ended) {
+        uint32_t packets = 8;
+        AudioBufferList list = { 1, {{ c->in.mChannelsPerFrame, 0, NULL }} };
+        AudioStreamPacketDescription *descriptions = NULL;
+        status = proc(c, &packets, &list, &descriptions, user);
+        const uint8_t *data = list.mBuffers[0].mData;
+        if (packets > 0 && data) {
+            uint32_t total = list.mBuffers[0].mDataByteSize, fixed = c->in.mBytesPerPacket;
+            for (uint32_t i = 0; i < packets; i++) {
+                // Without descriptions, packets of one size, or the lot as one.
+                uint64_t start = descriptions ? (uint64_t)descriptions[i].mStartOffset : (uint64_t)i * fixed;
+                uint32_t size = descriptions ? descriptions[i].mDataByteSize : fixed ? fixed : total;
+                if (start + size > total || !size) break;
+                void *buffer = g->buffer_new_allocate(NULL, size, NULL);
+                if (!buffer) break;
+                g->buffer_fill(buffer, 0, data + start, size);
+                double frames = c->in.mFramesPerPacket ? c->in.mFramesPerPacket : 1024;
+                uint64_t duration = (uint64_t)(frames / c->in.mSampleRate * PERRY_GST_SECOND);
+                perry_gst_buffer_set_time(buffer, c->pushed * duration, duration);
+                g->app_src_push_buffer(c->src, buffer);
+                c->pushed++;
+                if (!descriptions && !fixed) break;
+            }
+            *gave = true;
+        } else {
+            c->ended = true;
+            g->app_src_end_of_stream(c->src);
+        }
+    }
+    // What is decoded so far; at the end, all that is left.
+    if (drain_decoder(c, c->ended ? PERRY_GST_SECOND : PERRY_GST_SECOND / 10)) *gave = true;
+    perry_gst_check_error(g, c->pipeline, "decoding for a converter");
+    return status;
+}
+
 /// Asks the input proc for about `frames` frames and decodes them; the
 /// proc's status, and whether it gave any.
 static OSStatus pull(converter *c, input_proc proc, void *user, size_t frames, bool *gave) {
+    if (c->pipeline) return pull_compressed(c, proc, user, gave);
     const AudioStreamBasicDescription *in = &c->in;
     bool ima4 = in->mFormatID == kAudioFormatAppleIMA4;
     uint32_t packets = ima4 ? (uint32_t)((frames + 63) / 64) : (uint32_t)frames;

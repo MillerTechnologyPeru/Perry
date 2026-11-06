@@ -42,6 +42,9 @@ enum GLRenderScale {
     /// The framebuffer each depth or stencil renderbuffer is attached to,
     /// whose color target's size it has to match.
     nonisolated(unsafe) private static var attachedTo: [UInt32: UInt32] = [:]
+    /// Each framebuffer's color renderbuffer: one attached before it has
+    /// the drawable's storage is the screen's once it does.
+    nonisolated(unsafe) private static var colorRenderbuffer: [UInt32: UInt32] = [:]
     /// The drawable's size as the program knows it, and its renderbuffer.
     nonisolated(unsafe) private static var drawableWidth: Int32 = 0
     nonisolated(unsafe) private static var drawableHeight: Int32 = 0
@@ -117,6 +120,12 @@ enum GLRenderScale {
             drawableHeight = height
             drawableRenderbuffer = name
             scaledRenderbuffers.insert(name)
+            // A program may attach the renderbuffer to its framebuffer
+            // first and give it the layer's storage after.
+            for (framebuffer, color) in colorRenderbuffer where color == name {
+                scaledFramebuffers.insert(framebuffer)
+                unscaledFramebuffers.remove(framebuffer)
+            }
         }
         if GLTrace.on || factor > 1 {
             uikitWarning("OpenGL ES: the \(width) by \(height) screen is drawn at \(scaled(width)) by \(scaled(height))")
@@ -227,6 +236,7 @@ enum GLRenderScale {
         let fb = bound(framebufferBinding)
         let color = lock.withLock { () -> Bool? in
             if attachment == colorAttachment {
+                colorRenderbuffer[fb] = name
                 if scaledRenderbuffers.contains(name) {
                     scaledFramebuffers.insert(fb)
                     unscaledFramebuffers.remove(fb)
@@ -249,6 +259,7 @@ enum GLRenderScale {
         let fb = bound(framebufferBinding)
         if attachment == colorAttachment {
             lock.withLock {
+                colorRenderbuffer[fb] = nil
                 scaledFramebuffers.remove(fb)
                 unscaledFramebuffers.insert(fb)
             }
