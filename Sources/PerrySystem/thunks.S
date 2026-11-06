@@ -108,7 +108,6 @@ PASSTHROUGH _chdir, chdir
 PASSTHROUGH _fchdir, fchdir
 PASSTHROUGH _getcwd, getcwd
 PASSTHROUGH _umask, umask
-PASSTHROUGH _getpagesize, getpagesize
 PASSTHROUGH _time, time
 PASSTHROUGH _nanosleep, nanosleep
 PASSTHROUGH _gettimeofday, gettimeofday
@@ -149,7 +148,6 @@ PASSTHROUGH _ungetc, ungetc
 PASSTHROUGH _fwrite, fwrite
 PASSTHROUGH _fread, fread
 PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fclose, fclose
 PASSTHROUGH _fopen, fopen
 PASSTHROUGH _fdopen, fdopen
 PASSTHROUGH _fileno, fileno
@@ -157,6 +155,7 @@ PASSTHROUGH _feof, feof
 PASSTHROUGH _ferror, ferror
 PASSTHROUGH _clearerr, clearerr
 PASSTHROUGH _rewind, rewind
+PASSTHROUGH _clock, clock
 PASSTHROUGH _setvbuf, setvbuf
 PASSTHROUGH _getline, getline
 PASSTHROUGH _flockfile, flockfile
@@ -287,6 +286,21 @@ PASSTHROUGH _backtrace_symbols, backtrace_symbols
 PASSTHROUGH _pthread_exit, pthread_exit
 PASSTHROUGH __Unwind_Backtrace, _Unwind_Backtrace
 PASSTHROUGH __Unwind_GetIP, _Unwind_GetIP
+PASSTHROUGH __Unwind_Resume, _Unwind_Resume
+PASSTHROUGH __Unwind_RaiseException, _Unwind_RaiseException
+PASSTHROUGH __Unwind_Resume_or_Rethrow, _Unwind_Resume_or_Rethrow
+PASSTHROUGH __Unwind_DeleteException, _Unwind_DeleteException
+PASSTHROUGH __Unwind_ForcedUnwind, _Unwind_ForcedUnwind
+PASSTHROUGH __Unwind_GetLanguageSpecificData, _Unwind_GetLanguageSpecificData
+PASSTHROUGH __Unwind_GetRegionStart, _Unwind_GetRegionStart
+PASSTHROUGH __Unwind_GetIPInfo, _Unwind_GetIPInfo
+PASSTHROUGH __Unwind_SetIP, _Unwind_SetIP
+PASSTHROUGH __Unwind_GetGR, _Unwind_GetGR
+PASSTHROUGH __Unwind_SetGR, _Unwind_SetGR
+PASSTHROUGH __Unwind_GetCFA, _Unwind_GetCFA
+PASSTHROUGH __Unwind_GetDataRelBase, _Unwind_GetDataRelBase
+PASSTHROUGH __Unwind_GetTextRelBase, _Unwind_GetTextRelBase
+PASSTHROUGH __Unwind_FindEnclosingFunction, _Unwind_FindEnclosingFunction
 PASSTHROUGH "_fopen$DARWIN_EXTSN", fopen
 PASSTHROUGH _acosf, acosf
 PASSTHROUGH _atanf, atanf
