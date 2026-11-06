@@ -53,6 +53,8 @@ let package = Package(
         // CoreTelephony, on a device without a cellular radio.
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
+        // MediaPlayer, with no media library and no movies.
+        .library(name: "PerryMediaPlayer", type: .dynamic, targets: ["PerryMediaPlayer"]),
         .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
         // CoreBluetooth, a central over BlueZ.
         .library(name: "PerryCoreBluetooth", type: .dynamic, targets: ["PerryCoreBluetooth"]),
@@ -291,6 +293,12 @@ let package = Package(
         // CoreTelephony, with no SIM and no carrier.
         .target(
             name: "PerryCoreTelephony",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // MediaPlayer's names, and players with nothing to play.
+        .target(
+            name: "PerryMediaPlayer",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
