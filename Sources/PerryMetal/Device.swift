@@ -128,6 +128,8 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
     func newCommandQueue(maxCommandBufferCount: UInt) -> MTLCommandQueue? { newCommandQueue() }
 
 
+    @ObjCMethod("newFence") func newFence() -> MTLFence? { MTLFence(device: self) }
+
     // MARK: Buffers
 
     @ObjCMethod("newBufferWithLength:options:")
