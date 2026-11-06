@@ -206,6 +206,11 @@ open class UIImage: NSObject {
     @ObjCMethod("renderingMode") func renderingMode() -> Int { state.renderingMode }
     @ObjCMethod("capInsets") func capInsets() -> UIEdgeInsets { state.capInsets }
     @ObjCMethod("isSymbolImage") func isSymbolImage() -> Bool { state.symbolName != nil }
+    /// Perry's images have no image asset of variants by trait.
+    @ObjCMethod("_hasImageAsset") func hasImageAsset() -> Bool { false }
+    @ObjCMethod("imageAsset") func imageAsset() -> NSObject? { nil }
+    /// Perry's images are CGImages, never IOSurfaces.
+    @ObjCMethod("ioSurface") func ioSurface() -> UnsafeMutableRawPointer? { nil }
     /// A symbol's drawing fills its square, with no margins or baseline.
     @ObjCMethod("contentInsets") func contentInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
     @ObjCMethod("hasBaseline") func hasBaseline() -> Bool { false }
