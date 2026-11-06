@@ -270,10 +270,11 @@ let package = Package(
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // GameController, over SDL3's gamepads.
+        // GameController, over SDL3's gamepads, and CoreMotion, whose
+        // attitude is a gamepad's stick.
         .target(
             name: "PerryGameController",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryMotion", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // SystemConfiguration's network reachability, always offline.
@@ -316,6 +317,8 @@ let package = Package(
         .target(name: "CPerryGeometry"),
         // CoreMedia's times, which AVFoundation's provider passes.
         .target(name: "CPerryMedia"),
+        // CoreMotion's accelerations, quaternions and rotation matrices.
+        .target(name: "CPerryMotion"),
         // Entry points for programs' OpenGL ES calls, which give the calling
         // thread its context.
         .target(name: "CPerryOpenGL"),
