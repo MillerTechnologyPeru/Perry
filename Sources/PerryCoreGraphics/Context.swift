@@ -537,11 +537,11 @@ public func CGContextClipToRect(_ context: Ref?, _ rect: CGRect) {
 
 /// The mask's alpha, or gray level, limits what is drawn until the
 /// graphics state is restored.
-@c(_CGContextClipToMask)
+@DarwinC("_CGContextClipToMask")
 public func CGContextClipToMask(_ context: Ref?, _ rect: CGRect, _ mask: Ref?) {
     guard let canvas = Contexts.canvas(context), let image = Images.state(mask) else { return }
     let r = CGRectStandardize(rect)
-    canvas.clipToMask(image, r.origin.x, r.origin.y, r.size.width, r.size.height)
+    canvas.clipToMask(image, Double(r.origin.x), Double(r.origin.y), Double(r.size.width), Double(r.size.height))
 }
 
 @c(_CGContextClipToRects)
@@ -911,7 +911,9 @@ public func CGPathApply(_ path: Ref?, _ info: UnsafeMutableRawPointer?,
 public func CGPathApplyWithBlock(_ path: Ref?, _ block: UnsafeMutableRawPointer?) {
     guard let block else { return }
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void
-    let invoke = unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)
+    // A block's invoke follows its isa and two 32-bit fields.
+    let invoke = unsafeBitCast(block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self),
+                               to: Invoke.self)
     nonisolated(unsafe) let context = block
     withoutActuallyEscaping({ (element: UnsafeRawPointer?) in invoke(context, element) }) { body in
         PathBlock.body = body
