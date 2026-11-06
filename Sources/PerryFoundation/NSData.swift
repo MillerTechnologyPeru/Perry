@@ -12,6 +12,13 @@ final class DataStorage {
     private var capacity: Int
     /// dataWithBytesNoCopy: buffers the caller still owns.
     private let freeWhenDone: Bool
+    /// What frees a buffer that was given with its own way of being freed
+    /// (initWithBytesNoCopy:length:deallocator:), called with the buffer
+    /// and its length when the data goes.
+    private var deallocator: ObjCBlock?
+    /// The buffer adopted and its length, which the deallocator is given.
+    private var original: UnsafeMutableRawPointer?
+    private var originalCount = 0
 
     init(copying source: UnsafeRawPointer?, count: Int) {
         self.count = count
@@ -36,6 +43,8 @@ final class DataStorage {
         self.count = count
         capacity = count
         self.freeWhenDone = freeWhenDone
+        original = buffer
+        originalCount = count
     }
 
     convenience init(_ data: Data) {
@@ -43,8 +52,17 @@ final class DataStorage {
         if let bytes { data.copyBytes(to: bytes.assumingMemoryBound(to: UInt8.self), count: data.count) }
     }
 
+    convenience init(adopting buffer: UnsafeMutableRawPointer?, count: Int, deallocator: ObjCBlock?) {
+        self.init(adopting: buffer, count: count, freeWhenDone: false)
+        self.deallocator = deallocator
+    }
+
     deinit {
         if freeWhenDone { free(bytes) }
+        if let deallocator {
+            typealias Free = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UInt) -> Void
+            deallocator.function(as: Free.self)(deallocator.object, original ?? bytes, UInt(originalCount))
+        }
     }
 
     var data: Data {
@@ -285,6 +303,11 @@ public class NSData: NSObject {
     @ObjCMethod("initWithBytesNoCopy:length:freeWhenDone:")
     func initialize(noCopy bytes: UnsafeMutableRawPointer?, length: UInt, freeWhenDone: Bool) -> Self {
         setStorage(DataStorage(adopting: bytes, count: Int(length), freeWhenDone: freeWhenDone))
+    }
+
+    @ObjCMethod("initWithBytesNoCopy:length:deallocator:")
+    func initialize(noCopy bytes: UnsafeMutableRawPointer?, length: UInt, deallocator: ObjCBlock?) -> Self {
+        setStorage(DataStorage(adopting: bytes, count: Int(length), deallocator: deallocator))
     }
 
     @ObjCMethod("initWithData:")
