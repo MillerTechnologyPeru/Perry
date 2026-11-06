@@ -757,6 +757,18 @@ public func objc_getClassList(_ buffer: UnsafeMutablePointer<Class?>?, _ count: 
     return Int32(classes.count)
 }
 
+/// Every class, in a malloc'd array ending in NULL for the caller to free,
+/// with their number in `count`.
+@c(_objc_copyClassList)
+public func objc_copyClassList(_ count: UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<Class?>? {
+    let classes = Runtime.classes
+    count?.pointee = UInt32(classes.count)
+    let array = UnsafeMutablePointer<Class?>(OpaquePointer(malloc((classes.count + 1) * MemoryLayout<Class?>.stride)!))
+    for (index, cls) in classes.enumerated() { array[index] = cls }
+    array[classes.count] = nil
+    return array
+}
+
 @c(_property_getName)
 public func property_getName(_ property: UnsafeRawPointer?) -> UnsafePointer<CChar>? {
     property.flatMap(Properties.name)
