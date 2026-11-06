@@ -104,4 +104,9 @@ typedef struct PerryCFRange {
     long length;
 } PerryCFRange;
 
+// The function Darwin code calls for the host's OpenGL ES function `name`
+// ("glClearColor"): on armv7 a thunk for those with floating-point
+// parameters, which Darwin passes in core registers; otherwise `host`.
+void *perry_gles_darwin_function(const char *name, void *host);
+
 #endif
