@@ -144,6 +144,9 @@ for path in CommandLine.arguments.dropFirst() {
         names.formUnion(symbolNames(in: file))
         names.formUnion(smallStringNames(in: file))
     }
+    // Their filled variants too, which tab bars show for the selected tab
+    // without the app naming them.
+    names.formUnion(names.map { $0 + ".fill" })
     let output = app.appendingPathComponent("SFSymbols")
     try? FileManager.default.removeItem(at: output)
     var written = 0
