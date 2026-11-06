@@ -114,7 +114,9 @@ const perry_gst *perry_gst_get(void) {
 }
 
 void perry_gst_buffer_set_time(void *buffer, uint64_t pts, uint64_t duration) {
-    uint64_t *fields = (uint64_t *)((uint8_t *)buffer + 72);
+    // After GstMiniObject and the pool: 72 bytes in, or 40 where pointers
+    // (and GType) are 32 bits.
+    uint64_t *fields = (uint64_t *)((uint8_t *)buffer + (sizeof(void *) == 4 ? 40 : 72));
     fields[0] = pts;        // pts
     fields[1] = pts;        // dts
     fields[2] = duration;   // duration

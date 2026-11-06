@@ -365,6 +365,11 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
     }
     if (strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0) {
         uint64_t bytes = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
+        // A 32-bit app keeps the size in 32 bits, often signed, and scales
+        // what it loads by it: more than any 32-bit device had (1 GB) would
+        // read as little or less than none.
+        if (sizeof(void *) == 4 && bytes > (1ull << 30))
+            bytes = 1ull << 30;
         if (strcmp(name, "hw.physmem") == 0) {
             uint32_t clamped = bytes > UINT32_MAX ? UINT32_MAX : (uint32_t)bytes;
             return sysctl_value(old, old_length, &clamped, sizeof(clamped));

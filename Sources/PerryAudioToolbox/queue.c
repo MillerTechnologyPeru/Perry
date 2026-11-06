@@ -656,8 +656,8 @@ OSStatus darwin_AudioQueueRemovePropertyListener(void *handle, uint32_t id, prop
     return 0;
 }
 
-OSStatus darwin_AudioQueueSetParameter(void *handle, uint32_t id, float value) DARWIN_SYMBOL(AudioQueueSetParameter);
-OSStatus darwin_AudioQueueSetParameter(void *handle, uint32_t id, float value) {
+DARWIN_FLOAT_ABI OSStatus darwin_AudioQueueSetParameter(void *handle, uint32_t id, float value) DARWIN_SYMBOL(AudioQueueSetParameter);
+DARWIN_FLOAT_ABI OSStatus darwin_AudioQueueSetParameter(void *handle, uint32_t id, float value) {
     queue *q = valid(handle);
     if (!q) return kAudio_ParamError;
     if (id == kAudioQueueParam_Volume) {

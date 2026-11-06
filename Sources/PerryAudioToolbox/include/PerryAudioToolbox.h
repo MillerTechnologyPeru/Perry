@@ -21,6 +21,15 @@
 
 #define DARWIN_SYMBOL(name) __asm__("_" #name) __attribute__((visibility("default"), used))
 
+// For a function with floating-point parameters: 32-bit Darwin passes them
+// in core registers and on the stack, as AAPCS's base standard does, where
+// Linux's armhf passes them in VFP registers.
+#if defined(__arm__)
+#define DARWIN_FLOAT_ABI __attribute__((pcs("aapcs")))
+#else
+#define DARWIN_FLOAT_ABI
+#endif
+
 typedef int32_t OSStatus;
 typedef uint32_t SystemSoundID;
 typedef uint32_t AudioServicesPropertyID;
@@ -192,10 +201,11 @@ const perry_gst *perry_gst_get(void);
 #define PERRY_GST_MESSAGE_ERROR (1u << 1)
 #define PERRY_GST_SECOND 1000000000ull
 #define PERRY_GST_MAP_READ 1
-/// GstMapInfo's size, and where its data and size are.
+/// GstMapInfo's size (at most), and where its data and size are: after its
+/// memory pointer and flags, a word each with the flags' padding.
 #define PERRY_GST_MAP_INFO_SIZE 104
-#define PERRY_GST_MAP_INFO_DATA 16
-#define PERRY_GST_MAP_INFO_LENGTH 24
+#define PERRY_GST_MAP_INFO_DATA (2 * sizeof(void *))
+#define PERRY_GST_MAP_INFO_LENGTH (3 * sizeof(void *))
 
 /// Sets a buffer's presentation time and duration (GstBuffer's pts and
 /// duration fields, after its GstMiniObject and pool).

@@ -88,7 +88,7 @@ open class UIApplication: UIResponder {
     /// stands for a touch): phase 0 is down, 1 moved, 2 up.
     @ObjCMethod("_perryFinger:phase:x:y:")
     func finger(_ finger: UInt, phase: Int, x: Double, y: Double) {
-        let point = CGPoint(x: x, y: y)
+        let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
         switch phase {
         case 0: Touches.down(at: point, finger: UInt64(finger))
         case 1: Touches.move(to: point, finger: UInt64(finger))

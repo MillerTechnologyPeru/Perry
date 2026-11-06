@@ -921,9 +921,11 @@ static float *parameter(unit *u, uint32_t id, uint32_t scope, uint32_t element) 
     }
 }
 
-OSStatus darwin_AudioUnitSetParameter(void *handle, uint32_t id, uint32_t scope, uint32_t element, float value, uint32_t offset)
+DARWIN_FLOAT_ABI OSStatus darwin_AudioUnitSetParameter(void *handle, uint32_t id, uint32_t scope, uint32_t element, float value,
+                                                         uint32_t offset)
     DARWIN_SYMBOL(AudioUnitSetParameter);
-OSStatus darwin_AudioUnitSetParameter(void *handle, uint32_t id, uint32_t scope, uint32_t element, float value, uint32_t offset) {
+DARWIN_FLOAT_ABI OSStatus darwin_AudioUnitSetParameter(void *handle, uint32_t id, uint32_t scope, uint32_t element, float value,
+                                                         uint32_t offset) {
     unit *u = valid(handle);
     if (!u) return kAudio_ParamError;
     pthread_mutex_lock(&u->lock);
