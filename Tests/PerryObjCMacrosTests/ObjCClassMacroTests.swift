@@ -300,7 +300,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
             class NSBundle: NSObject {
                 static func main() -> NSBundle {
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> NSBundle.ObjCResultType
-                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    let message = unsafeBitCast(ObjCRuntime.msgSend(returning: NSBundle.self), to: Message.self)
                     return NSBundle.objCValue(returnValue: NSBundle.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCRuntime.selector("mainBundle"))))
                 }
                 func path() -> String {
@@ -334,7 +334,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 var tag: Int {
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Int.ObjCResultType
-                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Int.self), to: Message.self)
                         return Int.objCValue(returnValue: Int.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("tag"))))
                     }
                     set {
@@ -346,14 +346,14 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 var hidden: Bool {
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Bool.ObjCResultType
-                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Bool.self), to: Message.self)
                         return Bool.objCValue(returnValue: Bool.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("isHidden"))))
                     }
                 }
                 static var count: UInt {
                     get {
                         typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UInt.ObjCResultType
-                        let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                        let message = unsafeBitCast(ObjCRuntime.msgSend(returning: UInt.self), to: Message.self)
                         return UInt.objCValue(returnValue: UInt.objCArgumentForm(ofResult: message(self.objCClass.pointer, ObjCRuntime.selector("count"))))
                     }
                 }
@@ -570,7 +570,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
 
                 public func windowScene() -> UIWindowScene {
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UIWindowScene.ObjCResultType
-                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    let message = unsafeBitCast(ObjCRuntime.msgSend(returning: UIWindowScene.self), to: Message.self)
                     return UIWindowScene.objCValue(returnValue: UIWindowScene.objCArgumentForm(ofResult: message(objcObject, ObjCRuntime.selector("windowScene"))))
                 }
 
@@ -588,7 +588,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                         return nil
                     }
                     typealias Message = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UIScene.ObjCType) -> Bool.ObjCResultType
-                    let message = unsafeBitCast(ObjCRuntime.msgSend, to: Message.self)
+                    let message = unsafeBitCast(ObjCRuntime.msgSend(returning: Bool.self), to: Message.self)
                     return objCOptionalResult(message(objcObject, ObjCRuntime.selector("shouldConnect:"), scene.objCArgument()), as: Bool.self, owned: false)
                 }
 
