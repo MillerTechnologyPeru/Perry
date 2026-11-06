@@ -936,6 +936,15 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("gestureRecognizers")
     func gestureRecognizers() -> NSObject? { state.gestureRecognizers.isEmpty ? nil : NSMutableArray.of(state.gestureRecognizers) }
 
+    /// Replaces the recognizers, as a nib's outlet collection connects them.
+    @ObjCMethod("setGestureRecognizers:")
+    func setGestureRecognizers(_ recognizers: NSArray?) {
+        for recognizer in state.gestureRecognizers { removeGestureRecognizer(recognizer) }
+        for recognizer in recognizers?.elements.compactMap({ $0.as(UIGestureRecognizer.self) }) ?? [] {
+            addGestureRecognizer(recognizer)
+        }
+    }
+
     @ObjCMethod("addGestureRecognizer:")
     func addGestureRecognizer(_ recognizer: UIGestureRecognizer) {
         if let old = recognizer.state.view, old != objcObject { UIView.wrap(old).removeGestureRecognizer(recognizer) }
