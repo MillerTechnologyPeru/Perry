@@ -239,6 +239,18 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Foundation");
         return true;
     }
+    // The compiler's runtime, whose arithmetic helpers armv6 code calls, and
+    // the operators new and delete programs built with GCC take from
+    // libstdc++: both are libSystem's provider's.
+    if (strncmp(install_name, "/usr/lib/libgcc_s.", 18) == 0 || strncmp(install_name, "/usr/lib/libstdc++.", 19) == 0) {
+        snprintf(out, out_size, "System");
+        return true;
+    }
+    // CoreAudio has the types AudioToolbox's functions take.
+    if (strstr(install_name, "/CoreAudio.framework/")) {
+        snprintf(out, out_size, "AudioToolbox");
+        return true;
+    }
     // libc++ and libc++abi are one provider.
     if (strncmp(install_name, "/usr/lib/libc++", 15) == 0) {
         snprintf(out, out_size, "CXX");
