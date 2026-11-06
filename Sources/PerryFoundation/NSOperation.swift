@@ -192,11 +192,16 @@ enum Operations {
     }
 
     /// A ready operation's dependencies have finished; a cancelled one is
-    /// always ready.
+    /// always ready. A dependency has finished when it has been seen to
+    /// finish (its -start returned finished, or it told of finishing with a
+    /// change notice), as Darwin tracks it, rather than when its -isFinished
+    /// says so now: an asynchronous operation's -isFinished may answer YES
+    /// before it has started (Vungle's, "not running"), and its dependents
+    /// then ran before it.
     static func isReady(_ object: id) -> Bool {
         let storage = storage(object)
         let (cancelled, dependencies) = storage.monitor.locked { (storage.cancelled, storage.dependencies) }
-        return cancelled || dependencies.allSatisfy { Messages.bool($0, "isFinished") }
+        return cancelled || dependencies.allSatisfy { isFinished($0) }
     }
 
     static func isFinished(_ object: id) -> Bool {
