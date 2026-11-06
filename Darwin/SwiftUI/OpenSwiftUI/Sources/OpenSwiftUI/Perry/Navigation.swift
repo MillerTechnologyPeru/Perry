@@ -232,6 +232,7 @@ public struct NavigationStack<Data, Root>: View where Root: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .coordinateSpace(name: NavigationContentSpace.name)
             .onPreferenceChange(StackTitleKey.self) { title in
                 titles[depth] = title
             }
@@ -532,25 +533,38 @@ struct NavigationBarItemsModifier<Leading: View, Trailing: View>: ViewModifier {
     var principal: AnyView? = nil
     @Environment(\.navigationBarHeight) private var barHeight
 
+    /// The items are drawn over the bar: just above the page's content,
+    /// wherever in it the view they were given to is, as a view below a
+    /// header of its own is. Labels show their icons, as in UIKit's bars.
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
             if barHeight > 0 {
-                ZStack {
-                    if let principal {
-                        principal
+                GeometryReader { proxy in
+                    let frame = proxy.frame(in: .named(NavigationContentSpace.name))
+                    ZStack {
+                        if let principal {
+                            principal
+                        }
+                        HStack(spacing: 16) {
+                            leading
+                            Spacer(minLength: 0)
+                            trailing
+                        }
+                        .labelStyle(.iconOnly)
                     }
-                    HStack(spacing: 16) {
-                        leading
-                        Spacer(minLength: 0)
-                        trailing
-                    }
+                    .padding(.horizontal, 16)
+                    .frame(width: proxy.size.width, height: barHeight)
+                    .modifier(_OffsetEffect(offset: CGSize(width: 0, height: -frame.minY - barHeight)))
                 }
-                .padding(.horizontal, 16)
-                .frame(height: barHeight)
-                .modifier(_OffsetEffect(offset: CGSize(width: 0, height: -barHeight)))
             }
         }
     }
+}
+
+/// The navigation stack's content area, below its bar, which bar items
+/// place themselves from.
+enum NavigationContentSpace {
+    static let name = "PerryNavigationContent"
 }
 
 // MARK: - The bar
