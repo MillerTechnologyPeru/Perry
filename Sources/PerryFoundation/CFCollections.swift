@@ -217,6 +217,27 @@ public class NSCFDictionary: NSObject {
 
     @ObjCMethod("count") func count() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFTypeIDs.dictionary }
+
+    /// NSDictionary's reads, as Darwin's __NSCFDictionary answers them for
+    /// a dictionary of objects with the program's own callbacks (such as
+    /// kCFCopyStringDictionaryKeyCallBacks), by the callbacks' equality.
+    @ObjCMethod("objectForKey:")
+    func object(forKey key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        CFDictionaries.value(objcObject, UnsafeRawPointer(key)).flatMap { UnsafeMutableRawPointer(mutating: $0) }
+    }
+
+    @ObjCMethod("objectForKeyedSubscript:")
+    func object(forKeyedSubscript key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { object(forKey: key) }
+
+    @ObjCMethod("allKeys")
+    func allKeys() -> UnsafeMutableRawPointer? {
+        Arrays.autoreleased(CFDictionaries.entries(objcObject).compactMap { $0.key.map { UnsafeMutableRawPointer(mutating: $0) } })
+    }
+
+    @ObjCMethod("allValues")
+    func allValues() -> UnsafeMutableRawPointer? {
+        Arrays.autoreleased(CFDictionaries.entries(objcObject).compactMap { $0.value.map { UnsafeMutableRawPointer(mutating: $0) } })
+    }
 }
 
 /// A CFSet of the program's pointers.
