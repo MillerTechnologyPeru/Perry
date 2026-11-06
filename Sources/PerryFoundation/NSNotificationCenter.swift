@@ -232,6 +232,20 @@ public func CFNotificationCenterGetLocalCenter() -> id? { Notifications.defaultC
 /// they reach this process's own observers.
 nonisolated(unsafe) private var darwinCenter: id?
 
+/// Notifications for other apps, as distributed notifications are: none
+/// are listening, so they reach this process's own observers of the
+/// distributed center.
+nonisolated(unsafe) private var distributedCenter: id?
+
+@c(_CFNotificationCenterGetDistributedCenter)
+public func CFNotificationCenterGetDistributedCenter() -> id? {
+    if let distributedCenter { return distributedCenter }
+    guard let center = Storage.allocate(UnsafeMutableRawPointer(Notifications.centerClass)) else { return nil }
+    Storage.set(center, NotificationCenterStorage())
+    distributedCenter = center
+    return center
+}
+
 @c(_CFNotificationCenterGetDarwinNotifyCenter)
 public func CFNotificationCenterGetDarwinNotifyCenter() -> id? {
     if let darwinCenter { return darwinCenter }
