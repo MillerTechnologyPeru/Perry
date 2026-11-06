@@ -32,6 +32,15 @@ extension Color {
 
     private struct AccentColorProvider: ColorProvider {
         func resolve(in environment: EnvironmentValues) -> Color.Resolved {
+            // Perry: controls Perry draws itself use the accent color for
+            // the tint, so a tint set with tint(_:) is theirs, as UIKit's
+            // controls take it. Resolved without it, should it be the
+            // accent color itself.
+            if environment.accentColor == nil, let tint = environment.tintColor {
+                var untinted = environment
+                untinted.tint = nil
+                return tint.resolve(in: untinted)
+            }
             let accent = environment.accentColor ?? environment.defaultAccentColor
             if let accent {
                 #if os(macOS)
