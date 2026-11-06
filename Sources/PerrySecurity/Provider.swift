@@ -28,6 +28,11 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     return true
 }
 
+func securityWarning(_ message: String) {
+    let line = "perry: Security: \(message)\n"
+    line.withCString { _ = write(2, $0, strlen($0)) }
+}
+
 func securityFatal(_ message: String) -> Never {
     let line = "perry: Security: *** \(message)\n"
     line.withCString { _ = write(2, $0, strlen($0)) }
