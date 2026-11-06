@@ -64,7 +64,11 @@ enum Launch {
         // Without scenes, the main storyboard's initial controller is the
         // root of a window the delegate is given before it hears of the
         // launch, and which shows once it has.
-        let manifest = SceneManifest(info)
+        // Scenes come from the Info.plist's manifest, or from an app
+        // delegate that configures them, as SwiftUI's App lifecycle's does
+        // in apps whose Info.plist names none.
+        let configuresScenes = Application.delegate?.responds(to: "application:configurationForConnectingSceneSession:options:") ?? false
+        let manifest = SceneManifest(info) ?? (configuresScenes ? SceneManifest.empty : nil)
         let window = manifest == nil ? mainStoryboardWindow(info) : nil
         _ = delegate?.application(application, willFinishLaunchingWithOptions: nil)
         if delegate?.application(application, didFinishLaunchingWithOptions: nil) == nil {
@@ -124,6 +128,13 @@ struct SceneManifest {
 
     /// Configurations by session role.
     let configurations: [String: [Entry]]
+
+    /// No configurations: the app delegate gives them.
+    static let empty = SceneManifest(configurations: [:])
+
+    private init(configurations: [String: [Entry]]) {
+        self.configurations = configurations
+    }
 
     init?(_ bundle: NSBundle) {
         guard let manifest = bundle.infoObject(forKey: "UIApplicationSceneManifest")?.as(NSDictionary.self) else {
