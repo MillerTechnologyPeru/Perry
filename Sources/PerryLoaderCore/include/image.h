@@ -158,6 +158,11 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
 /// conformances, once every image is bound.
 void perry_make_witness_tables(perry_loader *loader);
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth);
+#if defined(__arm__)
+/// The entry an armv7 image calls an imported function through, which aligns
+/// the stack; `function` itself for the few that must be called directly.
+void *perry_aligned_entry(void *function, const char *name);
+#endif
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name);
 void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name);
 void *perry_unresolved_stub(const char *library, const char *name);
