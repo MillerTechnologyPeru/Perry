@@ -4,14 +4,16 @@ import PerryObjCInterop
 // Queues: each Darwin queue stands for a Linux queue, which does the work.
 // Blocks are copied with Darwin's _Block_copy and run by the _f variants
 // through a function that invokes and releases them, in an autorelease
-// pool as Darwin's worker threads drain one per item.
+// pool as Darwin's worker threads drain one per item. Each function
+// libdispatch calls keeps the registers Linux's code expects kept
+// (keepingLinuxRegisters) around the Darwin code it runs.
 
 enum Blocks {
     /// The block's invoke function, which takes the block first.
     @inline(__always)
     static func invoke(_ block: UnsafeMutableRawPointer) {
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer) -> Void
-        unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(block)
+        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(block)
     }
 
     /// A heap copy of a block (+1).
@@ -24,14 +26,16 @@ enum Blocks {
     /// Runs a copied block once and releases it.
     static let runOnce: Function = { block in
         guard let block else { return }
-        ObjCRuntime.autoreleasepool { Blocks.invoke(block) }
-        Runtime.blockRelease(block)
+        keepingLinuxRegisters {
+            ObjCRuntime.autoreleasepool { Blocks.invoke(block) }
+            Runtime.blockRelease(block)
+        }
     }
 
     /// Runs a block the caller keeps, for the synchronous calls.
     static let run: Function = { block in
         guard let block else { return }
-        Blocks.invoke(block)
+        keepingLinuxRegisters { Blocks.invoke(block) }
     }
 
     /// Runs a function the caller passed with its context, in a pool.
@@ -45,8 +49,49 @@ enum Blocks {
         guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, Function).self) else { return }
         let (context, work) = call.pointee
         call.deallocate()
-        ObjCRuntime.autoreleasepool { work(context) }
+        keepingLinuxRegisters { ObjCRuntime.autoreleasepool { work(context) } }
     }
+
+    /// For the synchronous _f calls, which libdispatch runs before they
+    /// return: the context and function to give it for a Darwin function and
+    /// its context, valid during `body`. On armv7 they keep r9 around the
+    /// call; elsewhere they are the Darwin ones.
+    static func synchronous(_ context: UnsafeMutableRawPointer?, _ work: Function?,
+                            _ body: (UnsafeMutableRawPointer?, Function?) -> Void) {
+#if arch(arm)
+        guard let work else { return body(context, nil) }
+        var call = (context, work)
+        withUnsafeMutablePointer(to: &call) { body(UnsafeMutableRawPointer($0), Blocks.runCall) }
+#else
+        body(context, work)
+#endif
+    }
+
+    typealias ApplyFunction = @convention(c) (UnsafeMutableRawPointer?, Int) -> Void
+
+    /// synchronous(_:_:_:) for dispatch_apply_f's function of an index.
+    static func synchronous(_ context: UnsafeMutableRawPointer?, _ work: ApplyFunction?,
+                            _ body: (UnsafeMutableRawPointer?, ApplyFunction?) -> Void) {
+#if arch(arm)
+        guard let work else { return body(context, nil) }
+        var call = (context, work)
+        withUnsafeMutablePointer(to: &call) { body(UnsafeMutableRawPointer($0), Blocks.runApply) }
+#else
+        body(context, work)
+#endif
+    }
+
+#if arch(arm)
+    private static let runCall: Function = { pointer in
+        guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, Function).self) else { return }
+        keepingLinuxRegisters { call.pointee.1(call.pointee.0) }
+    }
+
+    private static let runApply: ApplyFunction = { pointer, index in
+        guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, ApplyFunction).self) else { return }
+        keepingLinuxRegisters { call.pointee.1(call.pointee.0, index) }
+    }
+#endif
 }
 
 /// Queue attributes' flags, kept in their state word.
@@ -64,7 +109,7 @@ enum QueueAttributes {
             if let wrapper = wrappers[linux] { return wrapper }
             let wrapper = Objects.make(Classes.queueAttribute, linux: linux)
             wrapper.storeBytes(of: UnsafeMutableRawPointer(bitPattern: concurrent ? QueueAttributes.concurrent : 0),
-                               toByteOffset: 16, as: UnsafeMutableRawPointer?.self)
+                               toByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer?.self)
             wrappers[linux] = wrapper
             return wrapper
         }
@@ -236,7 +281,7 @@ public func dispatch_sync(_ queue: Object?, _ block: UnsafeMutableRawPointer?) {
 
 @c(_dispatch_sync_f)
 public func dispatch_sync_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
-    linux_dispatch_sync_f(Objects.linux(queue), context, work)
+    Blocks.synchronous(context, work) { linux_dispatch_sync_f(Objects.linux(queue), $0, $1) }
 }
 
 @c(_dispatch_async_and_wait)
@@ -246,7 +291,7 @@ public func dispatch_async_and_wait(_ queue: Object?, _ block: UnsafeMutableRawP
 
 @c(_dispatch_async_and_wait_f)
 public func dispatch_async_and_wait_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
-    linux_dispatch_async_and_wait_f(Objects.linux(queue), context, work)
+    Blocks.synchronous(context, work) { linux_dispatch_async_and_wait_f(Objects.linux(queue), $0, $1) }
 }
 
 @c(_dispatch_barrier_async)
@@ -268,7 +313,7 @@ public func dispatch_barrier_sync(_ queue: Object?, _ block: UnsafeMutableRawPoi
 
 @c(_dispatch_barrier_sync_f)
 public func dispatch_barrier_sync_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
-    linux_dispatch_barrier_sync_f(Objects.linux(queue), context, work)
+    Blocks.synchronous(context, work) { linux_dispatch_barrier_sync_f(Objects.linux(queue), $0, $1) }
 }
 
 @c(_dispatch_barrier_async_and_wait)
@@ -279,7 +324,7 @@ public func dispatch_barrier_async_and_wait(_ queue: Object?, _ block: UnsafeMut
 @c(_dispatch_barrier_async_and_wait_f)
 public func dispatch_barrier_async_and_wait_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?,
                                               _ work: Function?) {
-    linux_dispatch_barrier_async_and_wait_f(Objects.linux(queue), context, work)
+    Blocks.synchronous(context, work) { linux_dispatch_barrier_async_and_wait_f(Objects.linux(queue), $0, $1) }
 }
 
 @c(_dispatch_after)
@@ -298,7 +343,9 @@ public func dispatch_after_f(_ when: UInt64.ObjCType, _ queue: Object?, _ contex
 private let applyBlock: @convention(c) (UnsafeMutableRawPointer?, Int) -> Void = { block, index in
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Int) -> Void
     guard let block else { return }
-    unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(block, index)
+    keepingLinuxRegisters {
+        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(block, index)
+    }
 }
 
 /// DISPATCH_APPLY_AUTO is NULL, as on Linux.
@@ -310,5 +357,5 @@ public func dispatch_apply(_ iterations: Int, _ queue: Object?, _ block: UnsafeM
 @c(_dispatch_apply_f)
 public func dispatch_apply_f(_ iterations: Int, _ queue: Object?, _ context: UnsafeMutableRawPointer?,
                              _ work: (@convention(c) (UnsafeMutableRawPointer?, Int) -> Void)?) {
-    linux_dispatch_apply_f(iterations, Objects.linux(queue), context, work)
+    Blocks.synchronous(context, work) { linux_dispatch_apply_f(iterations, Objects.linux(queue), $0, $1) }
 }
