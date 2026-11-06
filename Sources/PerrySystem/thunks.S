@@ -241,6 +241,7 @@ PASSTHROUGH _srandom, srandom
 PASSTHROUGH _abort, abort
 PASSTHROUGH _exit, exit
 PASSTHROUGH __exit, _exit
+PASSTHROUGH __Exit, _Exit
 PASSTHROUGH _atexit, atexit
 PASSTHROUGH ___cxa_atexit, __cxa_atexit
 PASSTHROUGH _stpcpy, stpcpy
@@ -328,6 +329,7 @@ PASSTHROUGH _isspace, isspace
 PASSTHROUGH _fnmatch, fnmatch
 PASSTHROUGH _inet_aton, inet_aton
 PASSTHROUGH _gethostbyname, gethostbyname
+PASSTHROUGH _gethostbyaddr, gethostbyaddr
 PASSTHROUGH _wcstol, wcstol
 PASSTHROUGH _wcstof, wcstof
 PASSTHROUGH _wcstombs, wcstombs
@@ -412,6 +414,8 @@ PASSTHROUGH _nextafter, nextafter
 // long double is double on Darwin arm64.
 PASSTHROUGH _fmodl, fmod
 PASSTHROUGH _lgammal_r, lgamma_r
+PASSTHROUGH _llround, llround
+PASSTHROUGH _llroundf, llroundf
 PASSTHROUGH _llroundl, llround
 
 // MARK: - compiler runtime
