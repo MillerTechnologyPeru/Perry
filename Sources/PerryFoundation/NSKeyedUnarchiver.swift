@@ -50,6 +50,12 @@ struct BinaryPropertyList {
         (0..<size).reduce(0) { $0 << 8 | Int(bytes[at + $1]) }
     }
 
+    /// An integer's, a real number's or a date's bytes: as many as 64 bits,
+    /// more than an Int holds on armv7.
+    private func wide(_ at: Int, _ size: Int) -> UInt64 {
+        (0..<size).reduce(0) { $0 << 8 | UInt64(bytes[at + $1]) }
+    }
+
     /// A length from the marker's low nibble, or the integer after it.
     private func length(_ at: Int) -> (count: Int, start: Int) {
         let low = Int(bytes[at] & 0x0f)
@@ -67,14 +73,15 @@ struct BinaryPropertyList {
             return marker == 0x09 ? .bool(true) : marker == 0x08 ? .bool(false) : .null
         case 0x1:
             let size = 1 << Int(marker & 0x0f)
-            let raw = UInt64(truncatingIfNeeded: number(at + 1, min(size, 8)))
-            return .integer(size == 8 ? Int64(bitPattern: raw) : Int64(raw))
+            // A 16-byte integer's low 8 bytes are its value.
+            let raw = wide(size > 8 ? at + 1 + size - 8 : at + 1, min(size, 8))
+            return .integer(size >= 8 ? Int64(bitPattern: raw) : Int64(raw))
         case 0x2:
             let size = 1 << Int(marker & 0x0f)
-            let raw = UInt64(truncatingIfNeeded: number(at + 1, size))
-            return .real(size == 4 ? Double(Float(bitPattern: UInt32(raw))) : Double(bitPattern: raw))
+            let raw = wide(at + 1, min(size, 8))
+            return .real(size == 4 ? Double(Float(bitPattern: UInt32(truncatingIfNeeded: raw))) : Double(bitPattern: raw))
         case 0x3:
-            return .date(Double(bitPattern: UInt64(truncatingIfNeeded: number(at + 1, 8))))
+            return .date(Double(bitPattern: wide(at + 1, 8)))
         case 0x4:
             let (count, start) = length(at)
             return .data(Array(bytes[start..<start + count]))
