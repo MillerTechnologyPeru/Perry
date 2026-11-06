@@ -20,11 +20,22 @@ final class DataStorage {
     private var original: UnsafeMutableRawPointer?
     private var originalCount = 0
 
+    /// The room a buffer of `count` bytes gets, as CoreFoundation rounds a
+    /// mutable data's capacity up: 16 bytes at least, the power of two
+    /// above the count below 64 KB, and beyond that the 16 KB above it.
+    /// Programs write a little past a mutable data's length without
+    /// knowing (AppLovin's request encoding, eight bytes past it).
+    static func room(for count: Int) -> Int {
+        if count < 16 { return 16 }
+        if count < 1 << 16 { return 1 << (Int.bitWidth - count.leadingZeroBitCount) }
+        return (count + 16 + 16383) & ~16383
+    }
+
     init(copying source: UnsafeRawPointer?, count: Int) {
         self.count = count
-        capacity = count
+        capacity = count > 0 ? DataStorage.room(for: count) : 0
         freeWhenDone = true
-        bytes = count > 0 ? malloc(count) : nil
+        bytes = count > 0 ? malloc(capacity) : nil
         if let bytes, let source { memcpy(bytes, source, count) }
     }
 
@@ -33,7 +44,7 @@ final class DataStorage {
     /// through CFDataGetMutableBytePtr before setting the length.
     init(reserving capacity: Int) {
         count = 0
-        self.capacity = max(capacity, 16)
+        self.capacity = DataStorage.room(for: capacity)
         freeWhenDone = true
         bytes = malloc(self.capacity)
     }
@@ -73,7 +84,7 @@ final class DataStorage {
     /// of its own first.
     func setCount(_ newCount: Int) {
         if newCount > capacity || !freeWhenDone {
-            let newCapacity = max(newCount, capacity * 2, 16)
+            let newCapacity = max(DataStorage.room(for: newCount), freeWhenDone ? capacity * 2 : 0)
             let grown = malloc(newCapacity)!
             if let bytes { memcpy(grown, bytes, min(count, newCount)) }
             if freeWhenDone { free(bytes) }
