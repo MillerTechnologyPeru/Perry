@@ -49,7 +49,7 @@ enum DispatchBlocks {
     static let barrier: UInt = 0x1
 
     /// Block_layout, with the state captured after the descriptor.
-    private static let size = 48
+    private static let size = DarwinLayout.blockCaptures + DarwinLayout.word
 
     private static let invoke: @convention(c) (UnsafeMutableRawPointer?) -> Void = { block in
         DispatchBlocks.state(block)?.run()
@@ -59,24 +59,24 @@ enum DispatchBlocks {
     /// stack), and the dispose helper, when the last reference goes.
     private static let copyHelper: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void = { _, source in
         guard let source else { return }
-        let state = source.load(fromByteOffset: 32, as: UnsafeMutableRawPointer.self)
+        let state = source.load(fromByteOffset: DarwinLayout.blockCaptures, as: UnsafeMutableRawPointer.self)
         _ = Unmanaged<DispatchBlockState>.fromOpaque(state).retain()
     }
 
     private static let disposeHelper: @convention(c) (UnsafeRawPointer?) -> Void = { block in
         guard let block else { return }
-        Unmanaged<DispatchBlockState>.fromOpaque(block.load(fromByteOffset: 32, as: UnsafeMutableRawPointer.self))
+        Unmanaged<DispatchBlockState>.fromOpaque(block.load(fromByteOffset: DarwinLayout.blockCaptures, as: UnsafeMutableRawPointer.self))
             .release()
     }
 
     /// Block_descriptor with copy and dispose helpers.
     nonisolated(unsafe) private static let descriptor: UnsafeMutableRawPointer = {
-        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 32, alignment: 8)
+        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: DarwinLayout.descriptorBytes, alignment: 8)
         descriptor.storeBytes(of: 0, as: UInt.self)
-        descriptor.storeBytes(of: UInt(size), toByteOffset: 8, as: UInt.self)
-        descriptor.storeBytes(of: unsafeBitCast(copyHelper, to: UnsafeRawPointer.self), toByteOffset: 16,
+        descriptor.storeBytes(of: UInt(size), toByteOffset: DarwinLayout.descriptorSize, as: UInt.self)
+        descriptor.storeBytes(of: unsafeBitCast(copyHelper, to: UnsafeRawPointer.self), toByteOffset: DarwinLayout.descriptorCopy,
                               as: UnsafeRawPointer.self)
-        descriptor.storeBytes(of: unsafeBitCast(disposeHelper, to: UnsafeRawPointer.self), toByteOffset: 24,
+        descriptor.storeBytes(of: unsafeBitCast(disposeHelper, to: UnsafeRawPointer.self), toByteOffset: DarwinLayout.descriptorDispose,
                               as: UnsafeRawPointer.self)
         return descriptor
     }()
@@ -87,19 +87,21 @@ enum DispatchBlocks {
         guard let block = malloc(size) else { dispatchFatal("out of memory") }
         block.storeBytes(of: Runtime.mallocBlockClass, as: UnsafeMutableRawPointer.self)
         // BLOCK_NEEDS_FREE | BLOCK_HAS_COPY_DISPOSE, one reference.
-        block.storeBytes(of: Int32(1 << 24 | 1 << 25 | 2), toByteOffset: 8, as: Int32.self)
-        block.storeBytes(of: Int32(0), toByteOffset: 12, as: Int32.self)
-        block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: 16, as: UnsafeRawPointer.self)
-        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 24, as: UnsafeRawPointer.self)
-        block.storeBytes(of: Unmanaged.passRetained(state).toOpaque(), toByteOffset: 32, as: UnsafeMutableRawPointer.self)
+        block.storeBytes(of: Int32(1 << 24 | 1 << 25 | 2), toByteOffset: DarwinLayout.blockFlags, as: Int32.self)
+        block.storeBytes(of: Int32(0), toByteOffset: DarwinLayout.blockReserved, as: Int32.self)
+        block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: DarwinLayout.blockInvoke,
+                         as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: DarwinLayout.blockDescriptor, as: UnsafeRawPointer.self)
+        block.storeBytes(of: Unmanaged.passRetained(state).toOpaque(), toByteOffset: DarwinLayout.blockCaptures,
+                         as: UnsafeMutableRawPointer.self)
         return block
     }
 
     /// The state of a block dispatch_block_create made; nil for others.
     static func state(_ block: UnsafeMutableRawPointer?) -> DispatchBlockState? {
-        guard let block, block.load(fromByteOffset: 16, as: UnsafeRawPointer.self)
+        guard let block, block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self)
                 == unsafeBitCast(invoke, to: UnsafeRawPointer.self) else { return nil }
-        return Unmanaged<DispatchBlockState>.fromOpaque(block.load(fromByteOffset: 32, as: UnsafeMutableRawPointer.self))
+        return Unmanaged<DispatchBlockState>.fromOpaque(block.load(fromByteOffset: DarwinLayout.blockCaptures, as: UnsafeMutableRawPointer.self))
             .takeUnretainedValue()
     }
 
