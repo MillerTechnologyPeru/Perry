@@ -88,11 +88,14 @@ enum Logging {
         }
     }
 
-    /// Darwin keeps info and above; debug only when configured to.
+    /// Darwin keeps info and above; debug only when configured to, as
+    /// PERRY_OS_LOG_DEBUG does here.
     static func isEnabled(_ log: Object?, _ type: UInt8) -> Bool {
         guard let state = state(log), !state.disabled else { return false }
-        return type != debug
+        return type != debug || showsDebug
     }
+
+    nonisolated(unsafe) static let showsDebug = getenv("PERRY_OS_LOG_DEBUG") != nil
 
     // MARK: Messages
 
