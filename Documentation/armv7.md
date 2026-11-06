@@ -166,7 +166,22 @@ pools, unrecognized selectors) prints what it does on arm64, byte for byte.
   view's geometry, a subclass's `-sizeThatFits:`, `-pointInside:withEvent:`
   and `-drawRect:` as UIKit calls them, colors and Bézier paths against Mac
   Catalyst, with no display.
-- Not yet: C++ exceptions (`__gxx_personality_sj0`), the remaining files.c
+- C++: 32-bit Darwin and Linux pass arguments and lay out structures
+  differently, and C++ is mostly code inlined in the program that shares
+  its objects with the library, so libc++ cannot be a Linux build as it
+  is on arm64. A Mach-O `libc++.1.dylib` beside `perry32` stands in for
+  `/usr/lib/libc++.1.dylib` (the loader looks there for any library of
+  `/usr/lib` before a provider): LLVM's libc++ and libc++abi built for
+  `armv7-apple-ios10.0` with the iOS SDK's C headers, linked into one
+  library with ld64 against a stub libSystem. Its SjLj personality
+  (`__gxx_personality_sj0`) unwinds through libSystem's `_Unwind_SjLj_*`.
+  There is no script for it yet: it was built by hand, in the container,
+  from LLVM 19.1.7's `runtimes` with CMake (`CMAKE_SYSTEM_NAME=Generic`,
+  static libraries, no filesystem, `-D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC
+  -U__STRICT_ANSI__`). libSystem has the xlocale and wide-character
+  functions it imports. Cut the Rope 2 1.6.9 loads with it and runs into
+  its own code; it has not thrown through it yet.
+- Not yet: the remaining files.c
   entry points, the rest of Foundation's coverage, UIKit's live view and
   apps on armv7, the variadic formats and `double` functions of the wrapped
   libraries (SQLite, libxml2, zlib) and r9 around the Darwin callbacks they

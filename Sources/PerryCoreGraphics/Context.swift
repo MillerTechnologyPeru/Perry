@@ -214,11 +214,18 @@ enum Contexts {
 @c(_CGBitmapContextCreate)
 public func CGBitmapContextCreate(_ data: UnsafeMutableRawPointer?, _ width: Int, _ height: Int, _ bitsPerComponent: Int,
                                   _ bytesPerRow: Int, _ space: Ref?, _ bitmapInfo: UInt32) -> Ref? {
-    guard width > 0, height > 0, let space, let spaceState = ColorSpaces.state(space) else { return nil }
     let alpha = bitmapInfo & 0x1f
-    let channels = spaceState.components + (alpha == 0 ? 0 : 1)
+    // A context of alpha alone (kCGImageAlphaOnly) has no colors, and is
+    // made with no color space: a mask that text is drawn into for a
+    // texture. Its state keeps a gray space, which is never read.
+    let alphaOnly = alpha == 7
+    let stand = alphaOnly && space == nil ? CGColorSpaceCreateDeviceGray() : nil
+    defer { if let stand { ObjCRuntime.release(stand) } }
+    guard width > 0, height > 0, let space = space ?? stand, let spaceState = ColorSpaces.state(space) else { return nil }
+    let colorComponents = alphaOnly ? 0 : spaceState.components
+    let channels = colorComponents + (alpha == 0 ? 0 : 1)
     let format = PixelFormat(bitsPerComponent: bitsPerComponent, bitsPerPixel: channels * bitsPerComponent,
-                             colorComponents: spaceState.components, bitmapInfo: bitmapInfo)
+                             colorComponents: colorComponents, bitmapInfo: bitmapInfo)
     guard bitsPerComponent == 8, format.isSupported, alpha != 3, alpha != 4 else { return nil }
     let minimum = width * format.bytesPerPixel
     let rowBytes = bytesPerRow > 0 ? bytesPerRow : (minimum + 31) / 32 * 32
@@ -245,7 +252,11 @@ public func CGBitmapContextCreateWithData(_ data: UnsafeMutableRawPointer?, _ wi
 @c(_CGBitmapContextGetBytesPerRow) public func CGBitmapContextGetBytesPerRow(_ context: Ref?) -> Int { Contexts.state(context)?.bytesPerRow ?? 0 }
 @c(_CGBitmapContextGetBitsPerComponent) public func CGBitmapContextGetBitsPerComponent(_ context: Ref?) -> Int { Contexts.state(context)?.format.bitsPerComponent ?? 0 }
 @c(_CGBitmapContextGetBitsPerPixel) public func CGBitmapContextGetBitsPerPixel(_ context: Ref?) -> Int { Contexts.state(context)?.format.bitsPerPixel ?? 0 }
-@c(_CGBitmapContextGetColorSpace) public func CGBitmapContextGetColorSpace(_ context: Ref?) -> Ref? { Contexts.state(context)?.space }
+/// None for a context of alpha alone.
+@c(_CGBitmapContextGetColorSpace) public func CGBitmapContextGetColorSpace(_ context: Ref?) -> Ref? {
+    guard let state = Contexts.state(context), state.format.alphaInfo != 7 else { return nil }
+    return state.space
+}
 @c(_CGBitmapContextGetAlphaInfo) public func CGBitmapContextGetAlphaInfo(_ context: Ref?) -> UInt32 { Contexts.state(context)?.format.alphaInfo ?? 0 }
 @c(_CGBitmapContextGetBitmapInfo) public func CGBitmapContextGetBitmapInfo(_ context: Ref?) -> UInt32 { Contexts.state(context)?.format.bitmapInfo ?? 0 }
 

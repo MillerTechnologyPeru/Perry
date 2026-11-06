@@ -47,6 +47,16 @@ final class UserDefaultsStorage {
         save()
     }
 
+    /// The values set, without the registered defaults: the domain as it
+    /// is kept.
+    var persistent: [String: PropertyValue] { values }
+
+    /// Replaces every value set, as setting the domain does.
+    func replace(_ domain: [String: PropertyValue]) {
+        values = domain
+        save()
+    }
+
     func register(_ defaults: [String: PropertyValue]) {
         registered.merge(defaults) { _, new in new }
     }
@@ -256,6 +266,22 @@ final class NSUserDefaults: NSObject {
 
     @ObjCMethod("removeObjectForKey:")
     func remove(forKey key: String) { storage.set(nil, for: key) }
+
+    /// A domain's values as they are kept: the app's own, or another
+    /// suite's of this app; nil for a domain with nothing set.
+    @ObjCMethod("persistentDomainForName:")
+    func persistentDomain(forName name: String?) -> ObjCObject? {
+        guard let name else { return nil }
+        let domain = name == storage.suite ? storage.persistent : UserDefaultsStorage(suite: name).persistent
+        guard !domain.isEmpty else { return nil }
+        return PropertyValue.dictionary(domain).object().map { ObjCObject($0) }
+    }
+
+    @ObjCMethod("setPersistentDomain:forName:")
+    func setPersistentDomain(_ domain: ObjCObject?, forName name: String?) {
+        guard let name, let domain, case .dictionary(let values)? = PropertyValue(object: domain.id) else { return }
+        if name == storage.suite { storage.replace(values) } else { UserDefaultsStorage(suite: name).replace(values) }
+    }
 
     /// The app's own domain only: other apps' domains aren't kept here.
     @ObjCMethod("removePersistentDomainForName:")

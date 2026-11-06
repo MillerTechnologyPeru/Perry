@@ -255,6 +255,17 @@ int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *f
     return darwin_vsnprintf(buf, size, fmt, ap);
 }
 
+// asprintf_l's and sscanf_l's, in the C locale as well.
+int perry_darwin_vasprintf_l(char **out, void *locale, const char *fmt, darwin_va_list ap) {
+    (void)locale;
+    return darwin_vasprintf(out, fmt, ap);
+}
+
+int perry_darwin_vsscanf_l(const char *str, void *locale, const char *fmt, darwin_va_list ap) {
+    (void)locale;
+    return darwin_vsscanf(str, fmt, ap);
+}
+
 int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt, darwin_va_list ap) {
     (void)client; (void)message; (void)level;
     DARWIN_VA_FORMAT(va, fmt, ap);

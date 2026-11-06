@@ -113,6 +113,9 @@ VARIADIC _sscanf, vsscanf, 2
 VARIADIC _syslog, _vsyslog, 2
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC_STACK _snprintf_l, perry_darwin_vsnprintf_l, 4
+VARIADIC _asprintf_l, perry_darwin_vasprintf_l, 3
+VARIADIC _sscanf_l, perry_darwin_vsscanf_l, 3
+VARIADIC _swprintf, _vswprintf, 3
 VARIADIC_STACK _asl_log, perry_darwin_asl_log, 4
 VARIADIC_STACK ___sprintf_chk, ___vsprintf_chk, 4
 VARIADIC_STACK ___snprintf_chk, ___vsnprintf_chk, 5
@@ -190,6 +193,7 @@ PASSTHROUGH _unsetenv, unsetenv
 // argument from the va_list.
 VARIADIC _open, perry_vopen, 2
 VARIADIC _openat, perry_vopenat, 3
+VARIADIC _sem_open, perry_vsem_open, 2
 VARIADIC _fcntl, perry_vfcntl, 2
 VARIADIC_STACK _open_dprotected_np, perry_vopen_dprotected, 4
 
@@ -267,6 +271,18 @@ PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes
 PASSTHROUGH _waitpid, waitpid
 PASSTHROUGH _wmemchr, wmemchr
+PASSTHROUGH _wmemcmp, wmemcmp
+PASSTHROUGH _wcslen, wcslen
+PASSTHROUGH _wcstol, wcstol
+PASSTHROUGH _wcstoul, wcstoul
+PASSTHROUGH _wcstoll, wcstoll
+PASSTHROUGH _wcstoull, wcstoull
+PASSTHROUGH _fputwc, fputwc
+PASSTHROUGH _getwc, getwc
+PASSTHROUGH _ungetwc, ungetwc
+PASSTHROUGH _catopen, catopen
+PASSTHROUGH _catgets, catgets
+PASSTHROUGH _catclose, catclose
 PASSTHROUGH _writev, writev
 
 PASSTHROUGH _read, read
