@@ -316,6 +316,10 @@ public class NSDictionary: NSObject {
     @ObjCMethod("objectForKeyedSubscript:")
     func object(subscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
 
+    /// Swift's subscript of a dictionary bridged from Objective-C.
+    @ObjCMethod("__swift_objectForKeyedSubscript:")
+    func object(swiftSubscript key: ObjCObject?) -> ObjCObject? { object(forKey: key) }
+
     @ObjCMethod("allKeys")
     func allKeys() -> NSArray { Arrays.owned(entries.map(\.key)) }
 
