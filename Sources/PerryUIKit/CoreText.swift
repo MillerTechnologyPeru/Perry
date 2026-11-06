@@ -93,6 +93,34 @@ open class UIFontDescriptor: NSObject {
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.fontDescriptor }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
+    /// A descriptor of the font with this name and size.
+    @ObjCClassMethod("fontDescriptorWithName:size:")
+    static func descriptor(name: String, size: CGFloat) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(make { descriptor in
+            descriptor.name = name
+            descriptor.size = size
+        })
+    }
+
+    /// A text style's descriptor, at its size for the content size category.
+    static func preferred(textStyle: String, category: String?) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(make { descriptor in
+            descriptor.textStyle = textStyle
+            descriptor.size = textStyleSize(textStyle, category: category)
+            descriptor.weight = textStyle == "UICTFontTextStyleHeadline" ? 0.4 : 0
+        })
+    }
+
+    @ObjCClassMethod("preferredFontDescriptorWithTextStyle:")
+    static func preferredDescriptor(textStyle: String) -> UnsafeMutableRawPointer? {
+        preferred(textStyle: textStyle, category: Application.shared?.preferredContentSizeCategory())
+    }
+
+    @ObjCClassMethod("preferredFontDescriptorWithTextStyle:compatibleWithTraitCollection:")
+    static func preferredDescriptor(textStyle: String, compatibleWith traits: UITraitCollection?) -> UnsafeMutableRawPointer? {
+        preferred(textStyle: textStyle, category: traits?.preferredContentSizeCategory() ?? Application.shared?.preferredContentSizeCategory())
+    }
+
     @ObjCMethod("pointSize") func pointSize() -> CGFloat { state.size }
     @ObjCMethod("symbolicTraits") func symbolicTraits() -> UInt32 { state.symbolicTraits }
 
