@@ -144,7 +144,12 @@ final class WebContent {
 
     init(_ view: NSView) { self.view = view }
 
-    deinit { Bitmaps.release(frameImage) }
+    /// A JavaScript evaluation still on its way keeps the page, whose
+    /// callbacks name this content and its view, both gone by then.
+    deinit {
+        page?.detach()
+        Bitmaps.release(frameImage)
+    }
 
     /// The view's page; nil without WPE.
     func ensurePage() -> WebPage? {
