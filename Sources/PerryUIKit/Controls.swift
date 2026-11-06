@@ -944,10 +944,31 @@ open class UIDevice: NSObject {
     /// The device's identifier of iOS 2 to 5, forty hexadecimal digits: the
     /// same for every app and every run, and no real device's.
     @ObjCMethod("uniqueIdentifier") func uniqueIdentifier() -> String { "7065727279000000000000000000000000000001" }
-    @ObjCMethod("isBatteryMonitoringEnabled") func isBatteryMonitoringEnabled() -> Bool { false }
-    @ObjCMethod("setBatteryMonitoringEnabled:") func setBatteryMonitoringEnabled(_ enabled: Bool) {}
-    @ObjCMethod("batteryLevel") func batteryLevel() -> Float { -1 }
-    @ObjCMethod("batteryState") func batteryState() -> Int { 0 }
+    /// Whether the battery is reported, as on iOS only once asked for.
+    nonisolated(unsafe) static var batteryMonitoring = false
+    @ObjCMethod("isBatteryMonitoringEnabled") func isBatteryMonitoringEnabled() -> Bool { UIDevice.batteryMonitoring }
+    @ObjCMethod("setBatteryMonitoringEnabled:") func setBatteryMonitoringEnabled(_ enabled: Bool) { UIDevice.batteryMonitoring = enabled }
+
+    /// The charge left, from 0 to 1, of the machine's battery; -1 while
+    /// monitoring is off or there is none.
+    @ObjCMethod("batteryLevel")
+    func batteryLevel() -> Float {
+        guard UIDevice.batteryMonitoring, let battery = PowerSupply.battery,
+              let capacity = PowerSupply.read(battery, "capacity").flatMap(Float.init) else { return -1 }
+        return min(max(capacity / 100, 0), 1)
+    }
+
+    /// UIDeviceBatteryState: unknown 0, unplugged 1, charging 2, full 3.
+    @ObjCMethod("batteryState")
+    func batteryState() -> Int {
+        guard UIDevice.batteryMonitoring, let battery = PowerSupply.battery else { return 0 }
+        switch PowerSupply.read(battery, "status") {
+        case "Charging": return 2
+        case "Full": return 3
+        case "Discharging", "Not charging": return 1
+        default: return 0
+        }
+    }
     @ObjCMethod("isProximityMonitoringEnabled") func isProximityMonitoringEnabled() -> Bool { false }
     @ObjCMethod("setProximityMonitoringEnabled:") func setProximityMonitoringEnabled(_ enabled: Bool) {}
     /// How many more times the notifications were begun than ended.
@@ -1417,3 +1438,35 @@ extension Blocks {
     }
 }
 
+/// The machine's batteries, as Linux lists them in /sys/class/power_supply.
+enum PowerSupply {
+    static let directory = "/sys/class/power_supply"
+
+    /// The system's battery: a battery whose scope isn't a device's (a
+    /// stylus's or a keyboard's), with a charge to report.
+    static var battery: String? {
+        guard let listing = opendir(directory) else { return nil }
+        defer { closedir(listing) }
+        var names: [String] = []
+        while let entry = readdir(listing) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
+            if !name.hasPrefix(".") { names.append(name) }
+        }
+        return names.sorted().first { name in
+            read(name, "type") == "Battery" && read(name, "scope") != "Device" && read(name, "capacity") != nil
+        }
+    }
+
+    /// A supply's attribute, without surrounding white space; nil when it
+    /// has none.
+    static func read(_ supply: String, _ attribute: String) -> String? {
+        guard let file = fopen("\(directory)/\(supply)/\(attribute)", "r") else { return nil }
+        defer { fclose(file) }
+        var buffer = [CChar](repeating: 0, count: 256)
+        guard fgets(&buffer, Int32(buffer.count), file) != nil else { return nil }
+        var value = Substring(String(cString: buffer))
+        while value.first?.isWhitespace == true { value.removeFirst() }
+        while value.last?.isWhitespace == true { value.removeLast() }
+        return value.isEmpty ? nil : String(value)
+    }
+}
