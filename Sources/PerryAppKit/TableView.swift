@@ -82,7 +82,6 @@ open class NSTableView: NSControl {
     var loaded = false
     var reloading = false
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -339,7 +338,22 @@ open class NSTableView: NSControl {
     @ObjCMethod("setFloatsGroupRows:") func setFloatsGroupRows(_ value: Bool) { floatsGroupRows = value }
 
     /// A row's height: the delegate's, or the row height and spacing.
-    var standardRowHeight: CGFloat { max(1, rowHeight + intercellSpacing.height) }
+    var standardRowHeight: CGFloat { max(1, effectiveRowHeight + intercellSpacing.height) }
+
+    /// A source list (NSTableViewStyleSourceList, or the source-list
+    /// highlight) draws as a sidebar.
+    var isSourceList: Bool { style == 3 || selectionHighlightStyle == 1 }
+
+    /// A sidebar's rows are as tall as its row size style says (small,
+    /// medium, large), unless it is custom; other tables' are rowHeight.
+    var effectiveRowHeight: CGFloat {
+        guard isSourceList, rowSizeStyle != 0 else { return rowHeight }
+        switch effectiveRowSizeStyle() {
+        case 1: return 20
+        case 3: return 32
+        default: return 24
+        }
+    }
 
     func rowTop(_ row: Int) -> CGFloat { rowTops.isEmpty ? CGFloat(row) * standardRowHeight : rowTops.indices.contains(row) ? rowTops[row] : 0 }
     func height(ofRow row: Int) -> CGFloat {
@@ -426,7 +440,7 @@ open class NSTableView: NSControl {
             var y: CGFloat = 0
             for row in 0..<rowCount {
                 tops.append(y)
-                y += max(1, (heightFromDelegate(row: row) ?? rowHeight) + intercellSpacing.height)
+                y += max(1, (heightFromDelegate(row: row) ?? effectiveRowHeight) + intercellSpacing.height)
             }
             rowTops = tops
             rowsHeight = y
@@ -499,6 +513,12 @@ open class NSTableView: NSControl {
         }
     }
 
+    /// A sidebar's group row's text fields draw as headings.
+    private func markHeadings(in view: NSView) {
+        if let cell = view.as(NSTextField.self)?.cellObject?.as(NSTextFieldCell.self) { cell.sourceListHeading = true }
+        for subview in view.subviews { markHeadings(in: subview) }
+    }
+
     @discardableResult
     func makeRowView(_ row: Int) -> NSTableRowView? {
         let rowView = rowViewFromDelegate(row: row) ?? NSTableRowView(frame: .zero)
@@ -522,7 +542,10 @@ open class NSTableView: NSControl {
                 cellView.setObjectValue(item)
             }
             rowView.cellViews.append(cell)
-            if rowView.groupRowStyle { break }
+            if rowView.groupRowStyle {
+                if isSourceList { markHeadings(in: cell) }
+                break
+            }
         }
         rowView.updateBackgroundStyle()
         rowViews[row] = rowView
@@ -820,12 +843,12 @@ open class NSTableView: NSControl {
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         if let backgroundColor {
-            CG.setFillColorWithColor(context, backgroundColor.cgColorRef)
+            CG.setFill(context, backgroundColor)
             CG.fillRect(context, rect)
         }
         guard usesAlternatingRowBackgroundColors else { return }
         let alternate = NSColor(red: 0.96, green: 0.96, blue: 0.96, alpha: 1)
-        CG.setFillColorWithColor(context, alternate.cgColorRef)
+        CG.setFill(context, alternate)
         // Past the last row, rows of the standard height go on alternating.
         var row = 0
         var y: CGFloat = 0
@@ -842,7 +865,7 @@ open class NSTableView: NSControl {
     func drawGrid(inClipRect rect: CGRect) {
         guard gridStyleMask != 0, let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, gridColor.cgColorRef)
+        CG.setFill(context, gridColor)
         if gridStyleMask & 1 != 0 {
             for entry in columnRects() { CG.fillRect(context, CGRect(x: entry.x + entry.width - 1, y: rect.minY, width: 1, height: rect.height)) }
         }
@@ -898,7 +921,6 @@ open class NSOutlineView: NSTableView {
         autosaveExpandedItems = decoded.bool("NSOutlineViewAutosaveExpandedItemsKey")
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -1177,12 +1199,13 @@ open class NSOutlineView: NSTableView {
 
     /// The triangle, pointing right when closed and down when open.
     func drawTriangle(row: Int, in rowRect: CGRect, context: CGRef, light: Bool) {
-        guard let rect = disclosureRect(row: row) else { return }
+        // A sidebar's group rows show theirs only under the mouse.
+        guard !(isSourceList && isGroup(row: row)), let rect = disclosureRect(row: row) else { return }
         let open = expanded.contains(items[row].item.objcObject)
         let cx = rect.midX, cy = rowRect.midY
         let points = open ? [CGPoint(x: cx - 4, y: cy - 2), CGPoint(x: cx + 4, y: cy - 2), CGPoint(x: cx, y: cy + 3)]
             : [CGPoint(x: cx - 2, y: cy - 4), CGPoint(x: cx + 3, y: cy), CGPoint(x: cx - 2, y: cy + 4)]
-        CG.fill(CG.polygon(points), light ? NSColor.whiteColor() : NSColor(white: 0, alpha: 0.5), in: context)
+        CG.fill(CG.polygon(points), light ? NSColor.whiteColor() : NSColor.tertiaryLabelColor(), in: context)
     }
 
     override func drawDisclosure(row: Int, column: NSTableColumn, context: CGRef) {
@@ -1323,7 +1346,6 @@ open class NSTableHeaderView: NSView {
         if let coder { tableViewObject = Coder(coder: coder).object("NSTableView")?.objcObject }
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -1347,9 +1369,9 @@ open class NSTableHeaderView: NSView {
     override func draw(_ rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG, let tableView else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor.headerColor().cgColorRef)
+        CG.setFill(context, NSColor.headerColor())
         CG.fillRect(context, bounds)
-        CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+        CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1))
         CG.restoreGState(context)
         for entry in tableView.columnRects() {
@@ -1399,7 +1421,6 @@ open class NSTableRowView: NSView {
     var backgroundColorValue: NSColor?
     var selectionHighlightStyle = 0
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -1455,12 +1476,13 @@ open class NSTableRowView: NSView {
         guard let context = NSGraphicsContext.currentCG else { return }
         if let backgroundColorValue {
             CG.saveGState(context)
-            CG.setFillColorWithColor(context, backgroundColorValue.cgColorRef)
+            CG.setFill(context, backgroundColorValue)
             CG.fillRect(context, rect)
             CG.restoreGState(context)
-        } else if groupRowStyle {
+        } else if groupRowStyle, tableView?.isSourceList != true {
+            // A sidebar's group rows are headings on its own background.
             CG.saveGState(context)
-            CG.setFillColorWithColor(context, NSColor(white: 0.95, alpha: 1).cgColorRef)
+            CG.setFill(context, NSColor(white: Appearances.currentIsDark ? 0.16 : 0.95, alpha: 1))
             CG.fillRect(context, bounds)
             CG.restoreGState(context)
         }
@@ -1470,8 +1492,10 @@ open class NSTableRowView: NSView {
     func drawSelection(in rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG else { return }
         let color = emphasized ? NSColor.selectedContentBackgroundColor() : NSColor.unemphasizedSelectedContentBackgroundColor()
-        let inset = bounds.insetBy(dx: 0, dy: 0)
-        CG.fill(CG.roundedRect(inset, radius: 0), color, in: context)
+        // A sidebar's selection is a rounded bar inside the row.
+        let sidebar = tableView?.isSourceList == true
+        let inset = sidebar ? bounds.insetBy(dx: 10, dy: 1) : bounds
+        CG.fill(CG.roundedRect(inset, radius: sidebar ? 5 : 0), color, in: context)
     }
 
     @ObjCMethod("drawSeparatorInRect:") func drawSeparator(in rect: CGRect) {}
@@ -1489,7 +1513,6 @@ open class NSTableCellView: NSView {
     var rowSizeStyle = -1
     var draggingImageComponents: NSObject?
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -1537,7 +1560,7 @@ open class NSCornerView: NSView {
     override func draw(_ rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor.headerColor().cgColorRef)
+        CG.setFill(context, NSColor.headerColor())
         CG.fillRect(context, bounds)
         CG.restoreGState(context)
     }
