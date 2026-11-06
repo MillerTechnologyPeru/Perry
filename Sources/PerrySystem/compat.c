@@ -9,6 +9,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
 #include <pthread.h>
@@ -29,6 +30,8 @@
 #include <sys/resource.h>
 #include <sys/xattr.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <wctype.h>
 
 // MARK: - Signals
 
@@ -362,6 +365,98 @@ struct darwin_lconv *darwin_localeconv(void) {
     return &result;
 }
 
+// MARK: - xlocale
+
+// The forms of libc's functions that name their locale, which libc++ is
+// built on. A locale is glibc's (newlocale's), so each runs glibc's
+// function with that locale as the thread's; no locale is the C locale's,
+// as xlocale takes NULL.
+static locale_t c_locale(void) {
+    static locale_t made;
+    if (!made)
+        made = newlocale(LC_ALL_MASK, "C", NULL);
+    return made;
+}
+
+#define IN_LOCALE(locale, expression) ({ \
+    locale_t previous_locale = uselocale((locale) ? (locale) : c_locale()); \
+    __typeof__(expression) locale_result = (expression); \
+    uselocale(previous_locale); \
+    locale_result; })
+
+int darwin_mb_cur_max_l(locale_t locale) DARWIN_SYMBOL(___mb_cur_max_l);
+int darwin_mb_cur_max_l(locale_t locale) { return IN_LOCALE(locale, (int)MB_CUR_MAX); }
+
+struct darwin_lconv *darwin_localeconv_l(locale_t locale) DARWIN_SYMBOL(localeconv_l);
+struct darwin_lconv *darwin_localeconv_l(locale_t locale) { return IN_LOCALE(locale, darwin_localeconv()); }
+
+wint_t darwin_btowc_l(int c, locale_t locale) DARWIN_SYMBOL(btowc_l);
+wint_t darwin_btowc_l(int c, locale_t locale) { return IN_LOCALE(locale, btowc(c)); }
+
+int darwin_wctob_l(wint_t c, locale_t locale) DARWIN_SYMBOL(wctob_l);
+int darwin_wctob_l(wint_t c, locale_t locale) { return IN_LOCALE(locale, wctob(c)); }
+
+int darwin_mbtowc_l(wchar_t *out, const char *s, size_t n, locale_t locale) DARWIN_SYMBOL(mbtowc_l);
+int darwin_mbtowc_l(wchar_t *out, const char *s, size_t n, locale_t locale) { return IN_LOCALE(locale, mbtowc(out, s, n)); }
+
+// A conversion state is Darwin's 128 bytes, which glibc's 8 fit in, and
+// both start as zeros.
+size_t darwin_mbrlen_l(const char *s, size_t n, mbstate_t *state, locale_t locale) DARWIN_SYMBOL(mbrlen_l);
+size_t darwin_mbrlen_l(const char *s, size_t n, mbstate_t *state, locale_t locale) {
+    return IN_LOCALE(locale, mbrlen(s, n, state));
+}
+
+size_t darwin_mbrtowc_l(wchar_t *out, const char *s, size_t n, mbstate_t *state, locale_t locale) DARWIN_SYMBOL(mbrtowc_l);
+size_t darwin_mbrtowc_l(wchar_t *out, const char *s, size_t n, mbstate_t *state, locale_t locale) {
+    return IN_LOCALE(locale, mbrtowc(out, s, n, state));
+}
+
+size_t darwin_mbsrtowcs_l(wchar_t *out, const char **source, size_t length, mbstate_t *state, locale_t locale)
+    DARWIN_SYMBOL(mbsrtowcs_l);
+size_t darwin_mbsrtowcs_l(wchar_t *out, const char **source, size_t length, mbstate_t *state, locale_t locale) {
+    return IN_LOCALE(locale, mbsrtowcs(out, source, length, state));
+}
+
+size_t darwin_mbsnrtowcs_l(wchar_t *out, const char **source, size_t bytes, size_t length, mbstate_t *state, locale_t locale)
+    DARWIN_SYMBOL(mbsnrtowcs_l);
+size_t darwin_mbsnrtowcs_l(wchar_t *out, const char **source, size_t bytes, size_t length, mbstate_t *state, locale_t locale) {
+    return IN_LOCALE(locale, mbsnrtowcs(out, source, bytes, length, state));
+}
+
+size_t darwin_wcrtomb_l(char *out, wchar_t c, mbstate_t *state, locale_t locale) DARWIN_SYMBOL(wcrtomb_l);
+size_t darwin_wcrtomb_l(char *out, wchar_t c, mbstate_t *state, locale_t locale) { return IN_LOCALE(locale, wcrtomb(out, c, state)); }
+
+size_t darwin_wcsnrtombs_l(char *out, const wchar_t **source, size_t characters, size_t length, mbstate_t *state, locale_t locale)
+    DARWIN_SYMBOL(wcsnrtombs_l);
+size_t darwin_wcsnrtombs_l(char *out, const wchar_t **source, size_t characters, size_t length, mbstate_t *state, locale_t locale) {
+    return IN_LOCALE(locale, wcsnrtombs(out, source, characters, length, state));
+}
+
+int darwin_strcoll_l(const char *a, const char *b, locale_t locale) DARWIN_SYMBOL(strcoll_l);
+int darwin_strcoll_l(const char *a, const char *b, locale_t locale) { return IN_LOCALE(locale, strcoll(a, b)); }
+
+size_t darwin_strxfrm_l(char *out, const char *s, size_t n, locale_t locale) DARWIN_SYMBOL(strxfrm_l);
+size_t darwin_strxfrm_l(char *out, const char *s, size_t n, locale_t locale) { return IN_LOCALE(locale, strxfrm(out, s, n)); }
+
+int darwin_wcscoll_l(const wchar_t *a, const wchar_t *b, locale_t locale) DARWIN_SYMBOL(wcscoll_l);
+int darwin_wcscoll_l(const wchar_t *a, const wchar_t *b, locale_t locale) { return IN_LOCALE(locale, wcscoll(a, b)); }
+
+size_t darwin_wcsxfrm_l(wchar_t *out, const wchar_t *s, size_t n, locale_t locale) DARWIN_SYMBOL(wcsxfrm_l);
+size_t darwin_wcsxfrm_l(wchar_t *out, const wchar_t *s, size_t n, locale_t locale) { return IN_LOCALE(locale, wcsxfrm(out, s, n)); }
+
+size_t darwin_strftime_l(char *out, size_t size, const char *format, const struct tm *time, locale_t locale) DARWIN_SYMBOL(strftime_l);
+size_t darwin_strftime_l(char *out, size_t size, const char *format, const struct tm *time, locale_t locale) {
+    return IN_LOCALE(locale, strftime(out, size, format, time));
+}
+
+long long darwin_strtoll_l(const char *s, char **end, int base, locale_t locale) DARWIN_SYMBOL(strtoll_l);
+long long darwin_strtoll_l(const char *s, char **end, int base, locale_t locale) { return IN_LOCALE(locale, strtoll(s, end, base)); }
+
+unsigned long long darwin_strtoull_l(const char *s, char **end, int base, locale_t locale) DARWIN_SYMBOL(strtoull_l);
+unsigned long long darwin_strtoull_l(const char *s, char **end, int base, locale_t locale) {
+    return IN_LOCALE(locale, strtoull(s, end, base));
+}
+
 // MARK: - Terminals
 
 /// An app has no terminal: Darwin's termios differs from Linux's, and the
@@ -406,6 +501,17 @@ int darwin___tolower(int c) { return c >= 0 && c < 256 ? tolower(c) : c; }
 
 int darwin___toupper(int c) DARWIN_SYMBOL(__toupper);
 int darwin___toupper(int c) { return c >= 0 && c < 256 ? toupper(c) : c; }
+
+// The same in a locale given: a character or a wide character, whose
+// classes past the first 256 none here has.
+unsigned long darwin_maskrune_l(int c, unsigned long mask, locale_t locale) DARWIN_SYMBOL(__maskrune_l);
+unsigned long darwin_maskrune_l(int c, unsigned long mask, locale_t locale) { (void)locale; return darwin_maskrune(c, mask); }
+
+int darwin___tolower_l(int c, locale_t locale) DARWIN_SYMBOL(___tolower_l);
+int darwin___tolower_l(int c, locale_t locale) { return IN_LOCALE(locale, (int)(c >= 0 && c < 256 ? tolower(c) : towlower(c))); }
+
+int darwin___toupper_l(int c, locale_t locale) DARWIN_SYMBOL(___toupper_l);
+int darwin___toupper_l(int c, locale_t locale) { return IN_LOCALE(locale, (int)(c >= 0 && c < 256 ? toupper(c) : towupper(c))); }
 
 // The fortified strlcpy and strlcat: abort if the size given exceeds the
 // destination's.
@@ -1181,6 +1287,45 @@ int darwin_sem_wait(void *semaphore) { return sem_wait(semaphore_for(semaphore))
 
 int darwin_sem_trywait(void *semaphore) DARWIN_SYMBOL(sem_trywait);
 int darwin_sem_trywait(void *semaphore) { return sem_trywait(semaphore_for(semaphore)); }
+
+/// A named semaphore's name for glibc: one slash, then the rest without any.
+static void semaphore_name(const char *name, char *out, size_t size) {
+    while (*name == '/') name++;
+    snprintf(out, size, "/%s", name);
+    for (char *c = out + 1; *c; c++)
+        if (*c == '/') *c = '_';
+}
+
+// sem_open(name, flags, mode, value): glibc's semaphore, with Darwin's
+// O_CREAT and O_EXCL. Darwin's SEM_FAILED is -1, where glibc's is 0.
+sem_t *perry_vsem_open(const char *name, int flags, va_list arguments) {
+    enum { DARWIN_O_CREAT = 0x200, DARWIN_O_EXCL = 0x800 };
+    int linux_flags = 0;
+    mode_t mode = 0;
+    unsigned value = 0;
+    if (flags & DARWIN_O_CREAT) {
+        linux_flags |= O_CREAT;
+        mode = (mode_t)va_arg(arguments, int);
+        value = va_arg(arguments, unsigned);
+    }
+    if (flags & DARWIN_O_EXCL) linux_flags |= O_EXCL;
+    if (!name) { errno = EINVAL; return (sem_t *)-1; }
+    char path[256];
+    semaphore_name(name, path, sizeof path);
+    sem_t *opened = sem_open(path, linux_flags, mode, value);
+    return opened == SEM_FAILED ? (sem_t *)-1 : opened;
+}
+
+int darwin_sem_close(void *semaphore) DARWIN_SYMBOL(sem_close);
+int darwin_sem_close(void *semaphore) { return sem_close(semaphore); }
+
+int darwin_sem_unlink(const char *name) DARWIN_SYMBOL(sem_unlink);
+int darwin_sem_unlink(const char *name) {
+    if (!name) { errno = EINVAL; return -1; }
+    char path[256];
+    semaphore_name(name, path, sizeof path);
+    return sem_unlink(path);
+}
 
 // Compares in time that depends only on the length: 0 when equal.
 int darwin_timingsafe_bcmp(const void *a, const void *b, size_t length) DARWIN_SYMBOL(timingsafe_bcmp);
