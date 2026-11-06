@@ -1004,6 +1004,8 @@ open class UITableView: UIScrollView {
     /// Every visible cell goes back to its pool; layout asks again.
     @ObjCMethod("reloadData")
     func reloadData() {
+        // Its cells are reused: a row's open swipe actions close.
+        SwipeActions.close(animated: false)
         for (_, cell) in table.visibleCells { enqueue(cell) }
         table.visibleCells = [:]
         for (_, view) in table.visibleHeaders { view.removeFromSuperview() }
