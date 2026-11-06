@@ -226,6 +226,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
 //   …/Carbon.framework, …/HIToolbox.framework             -> AppKit
+//   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -272,6 +273,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // Accelerate's sub-frameworks (vecLib, vImage) are the umbrella's provider.
     if (strstr(install_name, "/Accelerate.framework/")) {
         snprintf(out, out_size, "Accelerate");
+        return true;
+    }
+    // A Mac app's WebKit (a versioned framework) is AppKit's: its web views
+    // are NSViews.
+    if (strstr(install_name, "/WebKit.framework/Versions/")) {
+        snprintf(out, out_size, "AppKit");
         return true;
     }
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
