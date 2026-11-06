@@ -254,11 +254,11 @@ enum Text {
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         if let background = run.background {
-            CG.setFillColorWithColor(context, background.cgColorRef)
+            CG.setFill(context, background)
             CG.fillRect(context, CGRect(x: point.x, y: flipped ? lineTop : lineTop - lineHeight, width: width, height: lineHeight))
         }
         let color = run.color ?? NSColor.textColor()
-        CG.setFillColorWithColor(context, color.cgColorRef)
+        CG.setFill(context, color)
         run.font.drawingName.withCString { CG.selectFont(context, $0, run.font.size, 1) }
         CG.setTextDrawingMode(context, 0)
         CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: flipped ? -1 : 1, tx: 0, ty: 0))
