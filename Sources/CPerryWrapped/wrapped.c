@@ -10,7 +10,16 @@
 static void load(perry_wrapped_library *library) {
     Dl_info info;
     if (library->soname) {
-        library->handle = dlopen(library->soname, RTLD_NOW | RTLD_LOCAL);
+        // Its own symbols and its dependencies' before the process's: a
+        // namesake that is among the global ones (libstdc++ is, once
+        // something loaded for all to see depends on it) would otherwise
+        // take the place of the library's own, when its references to
+        // itself are bound.
+        int own_first = 0;
+#ifdef RTLD_DEEPBIND
+        own_first = RTLD_DEEPBIND;
+#endif
+        library->handle = dlopen(library->soname, RTLD_NOW | RTLD_LOCAL | own_first);
         struct link_map *map = NULL;
         if (library->handle && dlinfo(library->handle, RTLD_DI_LINKMAP, &map) == 0 && map)
             library->base = (void *)map->l_addr;
