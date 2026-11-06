@@ -753,7 +753,11 @@ open class UIDevice: NSObject {
     /// The iOS version the app was built for, as NSProcessInfo gives it:
     /// the platform version in its Info.plist, or iOS 18 without one.
     @ObjCMethod("systemVersion")
-    func systemVersion() -> String { NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0" }
+    func systemVersion() -> String {
+        // PERRY_OS_VERSION, else the version the app was built for.
+        if let setting = getenv("PERRY_OS_VERSION") { return String(cString: setting) }
+        return NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0"
+    }
     /// UIUserInterfaceIdiom: phone 0.
     @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { 0 }
     /// UIDeviceOrientation: portrait 1.
@@ -844,6 +848,7 @@ open class UIScreen: NSObject {
     @ObjCMethod("setBrightness:") func setBrightness(_ brightness: CGFloat) {}
     @ObjCMethod("maximumFramesPerSecond") func maximumFramesPerSecond() -> Int { 60 }
     @ObjCMethod("coordinateSpace") func coordinateSpace() -> NSObject? { Windows.key.map { NSObject($0) } }
+    @ObjCMethod("fixedCoordinateSpace") func fixedCoordinateSpace() -> NSObject { UIScreenFixedSpace.shared }
 
     /// A display link for this screen, the only one.
     @ObjCMethod("displayLinkWithTarget:selector:")
@@ -915,6 +920,38 @@ open class UIPasteboard: NSObject {
         state.items = value.map { [type: $0] } ?? [:]
     }
     @ObjCMethod("valueForPasteboardType:") func value(forPasteboardType type: String) -> NSObject? { state.items[type] }
+    /// Data is kept as any other value is.
+    @ObjCMethod("setData:forPasteboardType:") func setData(_ data: NSObject?, forPasteboardType type: String) {
+        setValue(data, forPasteboardType: type)
+    }
+    @ObjCMethod("dataForPasteboardType:") func data(forPasteboardType type: String) -> NSObject? { state.items[type] }
+    @ObjCMethod("pasteboardTypes") func pasteboardTypes() -> NSObject {
+        NSMutableArray.of(state.items.keys.sorted().map { NSObject.nibString($0, mutable: false) })
+    }
+    @ObjCMethod("containsPasteboardTypes:") func contains(pasteboardTypes types: NSObject?) -> Bool {
+        types?.as(NSArray.self)?.elements.contains { state.items[$0.stringValue] != nil } ?? false
+    }
+}
+
+/// A screen's fixed coordinate space: the screen as held upright, its
+/// short side across. Points are converted as they are: the display is
+/// not turned from how the screen is drawn.
+@ObjCClass("_UIScreenFixedCoordinateSpace")
+open class UIScreenFixedSpace: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    nonisolated(unsafe) static let shared = UIScreenFixedSpace()
+
+    @ObjCMethod("bounds")
+    func bounds() -> CGRect {
+        let size = Screen.bounds.size
+        return CGRect(x: 0, y: 0, width: min(size.width, size.height), height: max(size.width, size.height))
+    }
+
+    @ObjCMethod("convertPoint:toCoordinateSpace:") func convert(_ point: CGPoint, to space: NSObject?) -> CGPoint { point }
+    @ObjCMethod("convertPoint:fromCoordinateSpace:") func convert(_ point: CGPoint, from space: NSObject?) -> CGPoint { point }
+    @ObjCMethod("convertRect:toCoordinateSpace:") func convert(_ rect: CGRect, to space: NSObject?) -> CGRect { rect }
+    @ObjCMethod("convertRect:fromCoordinateSpace:") func convert(_ rect: CGRect, from space: NSObject?) -> CGRect { rect }
 }
 
 /// The edit menu, which is not shown.
