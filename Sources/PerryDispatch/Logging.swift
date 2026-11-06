@@ -70,10 +70,10 @@ enum Logging {
         let cls = OSLog.objCClass.pointer
         Objects.setUpStatic(perry_log_default(), cls, linux: nil)
         perry_log_default().storeBytes(of: Unmanaged.passRetained(LogState(subsystem: nil, category: nil)).toOpaque(),
-                                       toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+                                       toByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer.self)
         Objects.setUpStatic(perry_log_disabled(), cls, linux: nil)
         perry_log_disabled().storeBytes(of: Unmanaged.passRetained(LogState(subsystem: nil, category: nil, disabled: true)).toOpaque(),
-                                        toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+                                        toByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer.self)
         let activity = OSActivity.objCClass.pointer
         Objects.setUpStatic(perry_activity_current(), activity, linux: nil)
         Objects.setUpStatic(perry_activity_none(), activity, linux: nil)
