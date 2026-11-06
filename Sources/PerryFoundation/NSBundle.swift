@@ -57,6 +57,8 @@ final class BundleStorage {
     /// is preferred in each.
     func resource(_ name: String?, type: String?, directory: String?) -> String? {
         guard let name, !name.isEmpty else { return nil }
+        // The type may come with its dot, as Foundation allows.
+        let type = type.map { $0.hasPrefix(".") ? String($0.dropFirst()) : $0 }
         let suffix = type.map { $0.isEmpty ? "" : "." + $0 } ?? ""
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
@@ -128,6 +130,7 @@ final class BundleStorage {
     }
 
     func resources(type: String?, directory: String?) -> [String] {
+        let type = type.map { $0.hasPrefix(".") ? String($0.dropFirst()) : $0 }
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
         let names = (try? FileManager.default.contentsOfDirectory(atPath: directoryPath)) ?? []
