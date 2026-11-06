@@ -145,6 +145,45 @@ enum {
     DARWIN_MADV_CAN_REUSE = 9,
 };
 
+enum { DARWIN_PAGE_SIZE = 16384 };
+
+// A mapping where the kernel picks the address, placed as Darwin places
+// one: at the start of a Darwin page, 16 KB on arm64, which is what
+// vm_page_size says, and running to the end of its last. Linux's pages may
+// be 4 KB, and programs' own allocators (Unreal's, garbage collectors') find
+// a block's page by masking its address. What is past a file's length, to
+// the end of the Darwin page, is zeros.
+void *perry_map_pages(size_t length, int protection, int flags, int fd, off_t offset) {
+    const size_t darwin_page = DARWIN_PAGE_SIZE;
+    size_t page = (size_t)sysconf(_SC_PAGESIZE);
+    if (page >= darwin_page || length == 0)
+        return mmap(NULL, length, protection, flags, fd, offset);
+    size_t whole = (length + darwin_page - 1) & ~(darwin_page - 1);
+    if (whole < length) {
+        errno = ENOMEM;
+        return MAP_FAILED;
+    }
+    size_t reserved = whole + darwin_page - page;
+    int anonymous = MAP_PRIVATE | MAP_ANONYMOUS | (flags & MAP_NORESERVE);
+    uint8_t *start = mmap(NULL, reserved, protection, anonymous, -1, 0);
+    if (start == MAP_FAILED)
+        return MAP_FAILED;
+    uint8_t *aligned = (uint8_t *)(((uintptr_t)start + darwin_page - 1) & ~(uintptr_t)(darwin_page - 1));
+    if (aligned > start)
+        munmap(start, (size_t)(aligned - start));
+    if (aligned + whole < start + reserved)
+        munmap(aligned + whole, (size_t)(start + reserved - (aligned + whole)));
+    if (flags & MAP_ANONYMOUS)
+        return aligned;
+    if (mmap(aligned, length, protection, flags | MAP_FIXED, fd, offset) == MAP_FAILED) {
+        int error = errno;
+        munmap(aligned, whole);
+        errno = error;
+        return MAP_FAILED;
+    }
+    return aligned;
+}
+
 void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) DARWIN_SYMBOL(mmap);
 void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) {
     int linux_flags = flags & (MAP_SHARED | MAP_PRIVATE | MAP_FIXED);
@@ -155,6 +194,10 @@ void *darwin_mmap(void *address, size_t length, int protection, int flags, int f
     }
     if (flags & DARWIN_MAP_NORESERVE)
         linux_flags |= MAP_NORESERVE;
+    // An address that isn't fixed is a hint, which Darwin's own placement
+    // stands in for.
+    if (!(linux_flags & MAP_FIXED))
+        return perry_map_pages(length, protection, linux_flags, fd, offset);
     return mmap(address, length, protection, linux_flags, fd, offset);
 }
 
@@ -247,5 +290,14 @@ long darwin_sysconf(int name) {
         errno = EINVAL;
         return -1;
     }
+    // Darwin's pages, as vm_page_size and mmap here have them; memory
+    // counted in pages is counted in those.
+    if (linux_name == _SC_PAGESIZE)
+        return DARWIN_PAGE_SIZE;
+    if (linux_name == _SC_PHYS_PAGES || linux_name == _SC_AVPHYS_PAGES)
+        return (long)((uint64_t)sysconf(linux_name) * (uint64_t)sysconf(_SC_PAGESIZE) / DARWIN_PAGE_SIZE);
     return sysconf(linux_name);
 }
+
+int darwin_getpagesize(void) DARWIN_SYMBOL(getpagesize);
+int darwin_getpagesize(void) { return DARWIN_PAGE_SIZE; }
