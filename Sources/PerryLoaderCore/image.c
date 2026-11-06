@@ -768,6 +768,25 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
         return;
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
+        // A Swift overlay bound directly, as code built for iOS before 17
+        // binds /usr/lib/swift/libswiftUIKit.dylib, has the Swift API Perry
+        // adds to it beside it too.
+        bool bound_overlay = dep->image && strncmp(dep->install_name, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) == 0;
+        const char *overlay_name = bound_overlay ? dep->install_name + strlen(SWIFT_LIBRARY_DIR) : "";
+        if (bound_overlay && strncmp(overlay_name, "libswift", 8) == 0 && !strstr(overlay_name, "Additions")) {
+            const char *dot = strrchr(overlay_name, '.');
+            int length = dot ? (int)(dot - overlay_name) : (int)strlen(overlay_name);
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/%.*sAdditions.dylib", loader->swift_runtime_dir, length, overlay_name);
+            if (file_exists(path)) {
+                perry_image *additions = find_loaded(loader, path);
+                if (!additions)
+                    additions = load_image(loader, path);
+                if (additions != image && additions != dep->image)
+                    dep->swift_additions = additions;
+            }
+            continue;
+        }
         const char *framework = strstr(dep->install_name, "/System/Library/Frameworks/");
         if (!dep->provider || !framework)
             continue;
