@@ -331,7 +331,9 @@ final class Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
-        let small = 1e-9
+        // What rounding leaves of a zero: a float CGFloat's quarter turn has
+        // a cosine near 4e-8.
+        let small: CGFloat = MemoryLayout<CGFloat>.size == 4 ? 1e-5 : 1e-9
         // Scaled only, perhaps mirrored: into the layer's box on the
         // display, flipped where a scale is negative (SDL_FLIP_HORIZONTAL
         // 1, SDL_FLIP_VERTICAL 2).
