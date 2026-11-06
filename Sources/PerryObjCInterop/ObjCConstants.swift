@@ -1,3 +1,5 @@
+import Glibc
+
 // Constants that Objective-C code reads as exported data symbols, such as
 // `NSString *const NSCocoaErrorDomain`. Swift cannot define a data symbol by
 // name, so the provider's perry_provider_symbol hook hands the loader a
@@ -6,7 +8,8 @@
 
 /// What an exported constant holds.
 public enum ObjCConstantValue {
-    /// An NSString with this text, which lives forever.
+    /// An NSString with this text, which lives forever: releases do not
+    /// free it.
     case string(String)
     /// The same object as another constant, as Darwin's toll-free names are
     /// (NSDefaultRunLoopMode and kCFRunLoopDefaultMode).
@@ -78,7 +81,7 @@ public final class ObjCConstantExports: @unchecked Sendable {
         let entries = lock.withLock { order.map { ($0, values[$0]!) } }
         for (name, value) in entries {
             switch value {
-            case .string(let text): slot(name)?.pointee = text.objCOwnedReturnValue()
+            case .string(let text): slot(name)?.pointee = Self.literal(text) ?? text.objCOwnedReturnValue()
             case .object(let make): slot(name)?.pointee = make()
             case .integer(let number): slot(name).map { UnsafeMutableRawPointer($0).storeBytes(of: number, as: Int64.self) }
             case .double(let number): slot(name).map { UnsafeMutableRawPointer($0).storeBytes(of: number, as: Double.self) }
@@ -93,6 +96,26 @@ public final class ObjCConstantExports: @unchecked Sendable {
         for (name, value) in entries {
             if case .alias(let target) = value { slot(name)?.pointee = slot(target)?.pointee }
         }
+    }
+
+    /// A string as a compiler lays a literal out (CFConstantString: isa,
+    /// flags, characters, length), which no release deallocates: Darwin's
+    /// own string constants are such, and programs lean on it. One taken
+    /// with `__bridge_transfer` is released once for each use (HockeySDK's
+    /// keychain code does so with kSecClass and its kin), which freed a
+    /// constant that was an object with one reference. Nil for text that is
+    /// not ASCII, or before Foundation defines the class.
+    private static func literal(_ text: String) -> UnsafeMutableRawPointer? {
+        guard text.utf8.allSatisfy({ $0 < 0x80 && $0 != 0 }),
+              let cls = ObjCRuntime.registeredClassPair("__NSCFConstantString")?.cls else { return nil }
+        let word = MemoryLayout<UInt>.size
+        guard let object = calloc(4, word), let characters = strdup(text) else { return nil }
+        object.storeBytes(of: cls, as: UnsafeMutableRawPointer.self)
+        // What the compiler sets for a literal of 8-bit characters.
+        object.storeBytes(of: 0x7c8, toByteOffset: word, as: UInt.self)
+        object.storeBytes(of: UnsafeRawPointer(characters), toByteOffset: 2 * word, as: UnsafeRawPointer.self)
+        object.storeBytes(of: UInt(text.utf8.count), toByteOffset: 3 * word, as: UInt.self)
+        return object
     }
 
     /// A constant's object, once exported.
