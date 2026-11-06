@@ -559,3 +559,46 @@ public func SecTrustSetExceptions(_ object: UnsafeMutableRawPointer?, _ exceptio
     state.result = 1   // proceed
     return true
 }
+
+// MARK: - The system's anchors
+
+/// The system's trusted roots: the distribution's CA bundle, as Darwin's
+/// keychain of anchors. Read once.
+enum SystemAnchors {
+    static let bundles = ["/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem"]
+
+    static let certificates: [Data] = {
+        for path in bundles {
+            guard let file = fopen(path, "r") else { continue }
+            defer { fclose(file) }
+            var text = ""
+            var line = [CChar](repeating: 0, count: 4096)
+            while fgets(&line, Int32(line.count), file) != nil { text += String(cString: line) }
+            return ders(pem: text)
+        }
+        return []
+    }()
+
+    /// The DER of each certificate in a PEM file.
+    static func ders(pem: String) -> [Data] {
+        var result: [Data] = [], body: String?
+        for line in pem.split(whereSeparator: \.isNewline) {
+            if line.hasPrefix("-----BEGIN CERTIFICATE-----") { body = "" }
+            else if line.hasPrefix("-----END CERTIFICATE-----") {
+                if let text = body, let der = Data(base64Encoded: text) { result.append(der) }
+                body = nil
+            } else if body != nil { body! += line.trimmingCharacters(in: .whitespaces) }
+        }
+        return result
+    }
+}
+
+/// The anchors a trust uses when none are set: the system's roots.
+@c(_SecTrustCopyAnchorCertificates)
+public func SecTrustCopyAnchorCertificates(_ anchors: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let anchors else { return Status.param }
+    let objects = SystemAnchors.certificates.compactMap { CertificateState(der: $0) }.map(Certificates.object)
+    anchors.pointee = ObjCRuntime.retain(NSMutableArray.of(objects.map(NSObject.init)).objcObject)
+    objects.forEach { ObjCRuntime.release($0) }
+    return 0
+}
