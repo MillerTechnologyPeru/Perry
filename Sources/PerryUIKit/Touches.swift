@@ -253,7 +253,7 @@ enum Touches {
         if !swallowed, let cell = hit.flatMap(tableCell) {
             if scrollView == nil {
                 highlighted = cell
-                cell.sendSetHighlighted(true, animated: false)
+                setHighlighted(cell, true)
             } else {
                 pendingHighlight = (cell, Clock.now)
             }
@@ -439,7 +439,7 @@ enum Touches {
         if let (cell, since) = pendingHighlight, touch != nil, !panning, Clock.now - since >= highlightDelay {
             pendingHighlight = nil
             highlighted = cell
-            cell.sendSetHighlighted(true, animated: false)
+            setHighlighted(cell, true)
             Display.markDirty()
         }
         guard let (view, velocity, time) = coasting else { return }
@@ -495,28 +495,50 @@ enum Touches {
     }
 
     /// The cell a touch began in, highlighted until it lifts or pans.
-    nonisolated(unsafe) private static var highlighted: UITableViewCell?
+    nonisolated(unsafe) private static var highlighted: UIView?
     /// A cell in a scroll view, to light up if the touch stays.
-    nonisolated(unsafe) private static var pendingHighlight: (cell: UITableViewCell, since: Double)?
+    nonisolated(unsafe) private static var pendingHighlight: (cell: UIView, since: Double)?
     /// UIScrollView's delay before content hears of a touch.
     private static let highlightDelay = 0.15
 
     private static func unhighlight() {
         pendingHighlight = nil
-        highlighted?.sendSetHighlighted(false, animated: false)
+        if let highlighted { setHighlighted(highlighted, false) }
         highlighted = nil
     }
 
     /// The table cell `view` is in, if any, unless the touch is an
     /// enabled control's, which takes it from the cell.
-    private static func tableCell(of view: UIView) -> UITableViewCell? {
+    private static func tableCell(of view: UIView) -> UIView? {
         var current: UIView? = view
         while let candidate = current {
             if isEnabledControl(candidate) { return nil }
-            if candidate.is(UITableViewCell.self) { return candidate.unsafeCast(to: UITableViewCell.self) }
+            if candidate.is(UITableViewCell.self) { return candidate }
+            if candidate.is(UICollectionViewCell.self), let collection = collectionView(of: candidate) {
+                let cell = candidate.unsafeCast(to: UICollectionViewCell.self)
+                guard let path = collection.collection.visibleCells.first(where: { $0.value.objcObject == cell.objcObject })?.key,
+                      collection.shouldHighlight(path) else { return nil }
+                return candidate
+            }
             current = candidate.state.superview.map(UIView.wrap)
         }
         return nil
+    }
+
+    /// A table cell lights up through -setHighlighted:animated:, a
+    /// collection view's cell through -setHighlighted:.
+    private static func setHighlighted(_ cell: UIView, _ highlighted: Bool) {
+        if cell.is(UITableViewCell.self) {
+            cell.sendSetHighlighted(highlighted, animated: false)
+        } else {
+            cell.sendSetHighlighted(highlighted)
+        }
+    }
+
+    /// The collection view a cell is shown in: its superview.
+    private static func collectionView(of cell: UIView) -> UICollectionView? {
+        guard let parent = cell.state.superview, ObjCRuntime.isKind(parent, of: UICollectionView.objCClass.pointer) else { return nil }
+        return UICollectionView(objcObject: parent, ownership: .retain)
     }
 
     /// The table cell `view` is in, controls and all.
@@ -617,7 +639,13 @@ enum Touches {
                 view.unsafeCast(to: UITabBar.self).tap(at: touch.location(in: view))
                 return
             }
-            if view.is(UITableViewCell.self), inControl { return }
+            if view.is(UITableViewCell.self) || view.is(UICollectionViewCell.self), inControl { return }
+            if view.is(UICollectionViewCell.self), let collection = collectionView(of: view) {
+                if let path = collection.collection.visibleCells.first(where: { $0.value.objcObject == view.objcObject })?.key {
+                    collection.tapItem(path)
+                }
+                return
+            }
             if view.is(UITableViewCell.self), let tableObject = view.state.superview, ObjCRuntime.isKind(tableObject, of: UITableView.objCClass.pointer) {
                 let table = UITableView(objcObject: tableObject, ownership: .retain)
                 if let path = table.table.visibleCells.first(where: { $0.value.objcObject == view.objcObject })?.key {
