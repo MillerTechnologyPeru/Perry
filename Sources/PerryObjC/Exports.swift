@@ -544,10 +544,14 @@ public func sel_getUid(_ name: UnsafePointer<CChar>?) -> UnsafePointer<CChar>? {
     name.map { Selectors.register($0) }
 }
 
+/// A selector's name; for a null selector, "<null selector>", as Darwin's
+/// libobjc answers.
 @c(_sel_getName)
 public func sel_getName(_ sel: UnsafePointer<CChar>?) -> UnsafePointer<CChar>? {
-    sel
+    sel ?? nullSelectorName
 }
+
+nonisolated(unsafe) private let nullSelectorName = UnsafePointer(strdup("<null selector>")!)
 
 @c(_sel_isEqual)
 public func sel_isEqual(_ lhs: UnsafePointer<CChar>?, _ rhs: UnsafePointer<CChar>?) -> Bool {
