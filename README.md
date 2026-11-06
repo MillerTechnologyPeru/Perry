@@ -308,6 +308,8 @@ perry [--report] [--strict] <executable | App.app> [arguments...]
 - `--strict` fails on the first unresolved non-weak import.
 - `PERRY_TRACE=load,bind,init` (or `all`) traces loading.
 - `PERRY_LIBRARY_PATH` adds directories to search for providers.
+- `DYLD_INSERT_LIBRARIES` loads Mach-O libraries (paths separated by colons) with the
+  program, as dyld does; their initializers run before the program's.
 
 ## Design
 
