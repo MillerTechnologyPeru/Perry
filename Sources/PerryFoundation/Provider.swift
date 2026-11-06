@@ -31,6 +31,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     MainDispatchQueue.load(libSystem)
     Dispatch.load(libSystem)
     BundleLoading.loadLibrary = info.version >= 3 ? info.load_library : nil
+    BundleLoading.lookupSymbol = lookup
     return true
 }
 
