@@ -18,6 +18,7 @@ class CALayer: NSObject {
     @ObjCMethod("insertSublayer:atIndex:") func insertSublayer(_ layer: NSObject, at index: UInt32)
     @ObjCMethod("removeFromSuperlayer") func removeFromSuperlayer()
     @ObjCMethod("superlayer") func superlayer() -> NSObject?
+    @ObjCMethod("setContents:") func setContents(_ contents: NSObject?)
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat)
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool)
     @ObjCMethod("setNeedsDisplay") func setNeedsDisplay()

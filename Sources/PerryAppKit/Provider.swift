@@ -27,6 +27,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         appKitFatal("AppKit needs libPerryobjc and libPerryFoundation, which are missing or incomplete")
     }
     Methods.implementation = symbol(libobjc, "_class_getMethodImplementation").map { unsafeBitCast($0, to: Methods.Implementation.self) }
+    Symbols.lookup = symbol
     guard Methods.implementation != nil, Dispatch.load({ symbol(libdispatch, $0) }) else {
         appKitFatal("AppKit needs libdispatch's main queue")
     }
@@ -154,17 +155,38 @@ enum Trace {
 
 // MARK: - libdispatch and CoreFoundation's run loop
 
+/// Symbols of other libraries, by install name, for what AppKit binds
+/// when it first needs it.
+enum Symbols {
+    nonisolated(unsafe) static var lookup: ((String, String) -> UnsafeMutableRawPointer?)?
+
+    static func symbol(_ library: String, _ name: String) -> UnsafeMutableRawPointer? { lookup?(library, name) }
+}
+
 enum Dispatch {
     typealias Function = @convention(c) (UnsafeMutableRawPointer?) -> Void
     typealias Async = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Function) -> Void
+    typealias After = @convention(c) (UInt64, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Function) -> Void
+    typealias Time = @convention(c) (UInt64, Int64) -> UInt64
     nonisolated(unsafe) static var async: Async!
     nonisolated(unsafe) static var main: UnsafeMutableRawPointer!
+    nonisolated(unsafe) static var afterFunction: After?
+    nonisolated(unsafe) static var time: Time?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
         guard let async = lookup("_dispatch_async_f"), let main = lookup("__dispatch_main_q") else { return false }
         self.async = unsafeBitCast(async, to: Async.self)
         self.main = main
+        afterFunction = lookup("_dispatch_after_f").map { unsafeBitCast($0, to: After.self) }
+        time = lookup("_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
         return true
+    }
+
+    /// Runs `body` on the main queue `nanoseconds` from now; at once, on
+    /// the main queue's next turn, without dispatch_after.
+    static func after(nanoseconds: Int64, _ body: @escaping () -> Void) {
+        guard let afterFunction, let time else { return onMain(body) }
+        afterFunction(time(0, nanoseconds), main, Unmanaged.passRetained(Work(body)).toOpaque(), run)
     }
 
     private final class Work {

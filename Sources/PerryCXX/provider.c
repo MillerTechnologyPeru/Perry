@@ -172,8 +172,49 @@ static const struct { const char *name; void *function; } locks[] = {
       (void *)cond_timed_wait },
 };
 
+// MARK: ctype<char>'s table
+
+// Darwin code's inlined ctype<char>::is reads its facet's table as Darwin's:
+// 32-bit entries with <runetype.h>'s bits (_CTYPE_S for a space). Linux's
+// libc++ builds the classic facet over glibc's 16-bit table with glibc's
+// bits, where Darwin's space bit is something else, so a game's XML reader
+// sees "\n\t" as text. The table is libPerrySystem's _DefaultRuneLocale's
+// __runetype, which Darwin's classic_table is too; the classic facet is
+// pointed at it before the program runs.
+
+/// _DefaultRuneLocale.__runetype: after an 8-byte magic, a 32-byte encoding
+/// name, two function pointers and the invalid rune.
+static const uint32_t *darwin_ctype_table(void) {
+    static const uint32_t *table;
+    if (!table) {
+        const uint8_t *locale = system_symbol("__DefaultRuneLocale");
+        if (!locale) { fprintf(stderr, "perry: libc++: libPerrySystem has no _DefaultRuneLocale\n"); abort(); }
+        table = (const uint32_t *)(locale + 60);
+    }
+    return table;
+}
+
+static const uint32_t *classic_table(void) { return darwin_ctype_table(); }
+
+/// The classic locale's ctype<char>, whose table follows the facet's vtable
+/// pointer and reference count, takes Darwin's table.
+static void use_darwin_ctype_table(void) {
+    static _Bool done;
+    if (done) return;
+    done = 1;
+    const void *(*classic)(void) = (const void *(*)(void))library_symbol("__ZNSt3__16locale7classicEv");
+    void *(*use_facet)(const void *, void *) = (void *(*)(const void *, void *))library_symbol("__ZNKSt3__16locale9use_facetERNS0_2idE");
+    void *id = library_symbol("__ZNSt3__15ctypeIcE2idE");
+    if (!classic || !use_facet || !id) return;
+    void *facet = use_facet(classic(), id);
+    if (facet) *(const uint32_t **)((uint8_t *)facet + 16) = darwin_ctype_table();
+}
+
 __attribute__((visibility("default")))
 void *perry_provider_symbol(const char *name) {
+    // Before Darwin code reads a locale's ctype<char>.
+    if (strstr(name, "5ctypeIc") || strstr(name, "6locale7classic")) use_darwin_ctype_table();
+    if (strcmp(name, "__ZNSt3__15ctypeIcE13classic_tableEv") == 0) return (void *)classic_table;
     for (size_t i = 0; i < sizeof(locks) / sizeof(locks[0]); i++) {
         if (strcmp(name, locks[i].name) == 0) return locks[i].function;
     }
