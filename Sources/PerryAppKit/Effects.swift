@@ -75,7 +75,6 @@ open class NSTitlebarAccessoryViewController: NSViewController {
     var hidden = false
     var automaticallyAdjustsSize = true
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithNibName:bundle:")
