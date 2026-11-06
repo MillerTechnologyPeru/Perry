@@ -226,8 +226,8 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
 //   …/CoreImage.framework/CoreImage                       -> UIKit
-//   …/Carbon.framework, …/HIToolbox.framework             -> AppKit
-//   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit
+//   …/Carbon.framework, …/HIToolbox.framework             -> AppKit (not on armv7)
+//   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit (not on armv7)
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
         snprintf(out, out_size, "dispatch");
@@ -276,12 +276,14 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Accelerate");
         return true;
     }
+#if !defined(__arm__)
     // A Mac app's WebKit (a versioned framework) is AppKit's: its web views
-    // are NSViews.
+    // are NSViews. perry32 runs only iOS apps and has no AppKit.
     if (strstr(install_name, "/WebKit.framework/Versions/")) {
         snprintf(out, out_size, "AppKit");
         return true;
     }
+#endif
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
@@ -296,12 +298,14 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UIKit");
         return true;
     }
+#if !defined(__arm__)
     // Carbon's (HIToolbox's) text input sources are AppKit's: the keyboard
     // layouts AppKit's key events are typed with.
     if (strstr(install_name, "/Carbon.framework/") || strstr(install_name, "/HIToolbox.framework/")) {
         snprintf(out, out_size, "AppKit");
         return true;
     }
+#endif
     // AVFAudio's classes are AVFoundation's, which re-exports them; and
     // AVFoundation's provider has the times of CoreMedia, the pixel buffers
     // of CoreVideo and the audio taps of MediaToolbox that its players and
