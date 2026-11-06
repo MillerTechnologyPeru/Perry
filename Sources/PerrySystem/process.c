@@ -383,16 +383,34 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
     return -1;
 }
 
-// MARK: - Interface addresses
+// getifaddrs and freeifaddrs are in sockets.c, with the address conversions.
 
-// No interfaces are listed: Darwin's sockaddrs differ from Linux's (they
-// begin with a length byte), and apps read them for analytics.
-int darwin_getifaddrs(void **list) DARWIN_SYMBOL(getifaddrs);
-int darwin_getifaddrs(void **list) {
-    if (list)
-        *list = NULL;
-    return 0;
+// MARK: - The host's UUID
+
+// gethostuuid: the machine's ID, /etc/machine-id (or D-Bus's copy of it):
+// 32 hexadecimal digits, the UUID's 16 bytes. EINVAL without one.
+int darwin_gethostuuid(unsigned char uuid[16], const void *wait) DARWIN_SYMBOL(gethostuuid);
+int darwin_gethostuuid(unsigned char uuid[16], const void *wait) {
+    (void)wait;
+    static const char *const paths[] = { "/etc/machine-id", "/var/lib/dbus/machine-id" };
+    for (size_t p = 0; p < sizeof(paths) / sizeof(paths[0]); p++) {
+        FILE *file = fopen(paths[p], "r");
+        if (!file)
+            continue;
+        char text[64] = { 0 };
+        size_t length = fread(text, 1, sizeof(text) - 1, file);
+        fclose(file);
+        if (length < 32)
+            continue;
+        int valid = 1;
+        for (int i = 0; i < 16 && valid; i++) {
+            unsigned int byte;
+            valid = sscanf(text + 2 * i, "%2x", &byte) == 1;
+            uuid[i] = (unsigned char)byte;
+        }
+        if (valid)
+            return 0;
+    }
+    errno = EINVAL;
+    return -1;
 }
-
-void darwin_freeifaddrs(void *list) DARWIN_SYMBOL(freeifaddrs);
-void darwin_freeifaddrs(void *list) { (void)list; }
