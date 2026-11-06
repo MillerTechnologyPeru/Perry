@@ -22,8 +22,12 @@ final class NotificationStorage {
 /// A notification center's observers, in the order they were added.
 final class NotificationCenterStorage {
     struct Observer {
-        /// Not retained, as Foundation does not retain observers.
+        /// Not retained, as Foundation does not retain observers: their
+        /// address, to remove them by.
         let observer: id?
+        /// A selector observer, weakly: one that goes away without removing
+        /// itself is passed over, as Foundation has done since iOS 9.
+        var weakObserver: WeakObject? = nil
         let selector: SEL?
         /// Block observers: the block and the token returned for removing it, both retained.
         let block: id?
@@ -85,8 +89,15 @@ enum Notifications {
             (observer.name == nil || observer.name == name)
                 && (observer.object == nil || observer.object == storage.object)
         }
+        var gone = false
         for observer in matching {
-            if let callback = observer.callback {
+            if let weak = observer.weakObserver {
+                guard let live = weak.object else {
+                    gone = true
+                    continue
+                }
+                if let selector = observer.selector { _ = ObjC.send(live, selector, notification) }
+            } else if let callback = observer.callback {
                 callback(centerObject, observer.observer, storage.name, storage.object, storage.userInfo)
             } else if let block = observer.block {
                 Blocks.invoke(block, as: (@convention(c) (id, id?) -> Void).self)(block, notification)
@@ -94,6 +105,7 @@ enum Notifications {
                 _ = ObjC.send(observer.observer, selector, notification)
             }
         }
+        if gone { center.remove { $0.weakObserver.map { $0.object == nil } ?? false } }
     }
 
 }
@@ -179,7 +191,8 @@ public final class NSNotificationCenter: NSObject {
     @ObjCMethod("addObserver:selector:name:object:")
     func add(observer: ObjCObject?, selector: ObjCSelector, name: String?, object: ObjCObject?) {
         guard let observer else { return }
-        observers.observers.append(.init(observer: observer.id, selector: selector.pointer.assumingMemoryBound(to: CChar.self),
+        observers.observers.append(.init(observer: observer.id, weakObserver: WeakObject(observer.id),
+                                         selector: selector.pointer.assumingMemoryBound(to: CChar.self),
                                          block: nil, token: nil, name: name, object: object?.id))
     }
 
