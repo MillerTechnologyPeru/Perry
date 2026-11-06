@@ -736,8 +736,13 @@ open class CALayer: NSObject {
             state.backingSize = state.bounds.size
             return
         }
-        guard draws, state.bounds.width > 0, state.bounds.height > 0,
-              let context = CG.makeContext(size: state.bounds.size, scale: state.contentsScale, opaque: false) else { return }
+        // An empty layer shows nothing: not what it drew when it was larger.
+        guard state.bounds.width > 0, state.bounds.height > 0 else {
+            LayerState.setColor(&state.backing, nil)
+            state.backingSize = state.bounds.size
+            return
+        }
+        guard draws, let context = CG.makeContext(size: state.bounds.size, scale: state.contentsScale, opaque: false) else { return }
         defer { CG.release(context) }
         CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
         sendDraw(in: context)

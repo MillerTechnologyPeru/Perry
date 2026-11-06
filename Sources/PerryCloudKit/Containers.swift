@@ -1,3 +1,4 @@
+import Dispatch
 import PerryObjCInterop
 
 // CKContainer without iCloud: every container reports that no account is
@@ -17,12 +18,16 @@ open class CKContainer: NSObject {
     @ObjCClassMethod("defaultContainer") static func defaultContainer() -> CKContainer { named("") }
     @ObjCClassMethod("containerWithIdentifier:") static func container(identifier: String) -> CKContainer { named(identifier) }
 
-    /// CKAccountStatusNoAccount 3, with no error.
+    /// CKAccountStatusNoAccount 3, with no error, on another queue, as
+    /// CloudKit answers: apps start their loading indicators after asking.
     @ObjCMethod("accountStatusWithCompletionHandler:")
     func accountStatus(completionHandler: ObjCBlock?) {
         guard let completionHandler else { return }
-        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void
-        completionHandler.function(as: Invoke.self)(completionHandler.object, 3, nil)
+        let handler = UnsafeSendableBlock(block: completionHandler)
+        DispatchQueue.global().async {
+            typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void
+            handler.block.function(as: Invoke.self)(handler.block.object, 3, nil)
+        }
     }
 
     @ObjCMethod("containerIdentifier")
@@ -38,4 +43,10 @@ enum CloudKitConstants {
     static let CKAccountChangedNotification = "CKAccountChangedNotification"
     static let CKErrorDomain = "CKErrorDomain"
     static let CKCurrentUserDefaultName = "__defaultOwner__"
+}
+
+/// A block carried to another queue, which CloudKit calls its completion
+/// handlers on.
+struct UnsafeSendableBlock: @unchecked Sendable {
+    let block: ObjCBlock
 }
