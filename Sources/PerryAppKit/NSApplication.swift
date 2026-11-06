@@ -79,9 +79,30 @@ open class NSApplication: NSResponder {
         activate(true)
     }
 
+    /// With PERRY_APPKIT_TYPE set, its text is typed into the key window
+    /// four seconds after launch, a key at a time ("\\n" is Return), to try
+    /// an app's text input without a keyboard.
+    @ObjCMethod("_perryTypeScriptedText")
+    func typeScriptedText() {
+        guard let text = getenv("PERRY_APPKIT_TYPE").map({ String(cString: $0) }) else { return }
+        let window = Windows.key ?? Windows.all.last { $0.visible }
+        for character in text.replacingEscapes() {
+            let (keyCode, characters): (UInt16, String) = character == "\n" ? (0x24, "\r") : character == "\t" ? (0x30, "\t") : (0, String(character))
+            guard let event = NSEvent.keyEvent(type: EventType.keyDown.rawValue, location: .zero, modifierFlags: 0, timestamp: Clock.now,
+                                               windowNumber: window?.windowNumber ?? 0, context: nil, characters: characters,
+                                               charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode) else { continue }
+            Send.void(objcObject, "sendEvent:", event.objcObject)
+        }
+    }
+
     @ObjCMethod("run")
     func run() {
         Send.void(objcObject, "finishLaunching")
+        if getenv("PERRY_APPKIT_TYPE") != nil {
+            typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, Double) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("performSelector:withObject:afterDelay:"),
+                                                           ObjCRuntime.selector("_perryTypeScriptedText"), nil, 4)
+        }
         running = true
         let mode = "kCFRunLoopDefaultMode".objCArgument()
         let future = NSDate.distantFuture()
@@ -335,7 +356,8 @@ open class NSApplication: NSResponder {
     @ObjCMethod("dockTile") func dockTile() -> NSObject? { nil }
     @ObjCMethod("appearance") func appAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
-    @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance }
+    /// The app's appearance, or the desktop's.
+    @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance ?? NSAppearance.system }
     @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
     @ObjCMethod("isFullKeyboardAccessEnabled") func isFullKeyboardAccessEnabled() -> Bool { false }
     @ObjCMethod("orderFrontStandardAboutPanel:") func orderFrontStandardAboutPanel(_ sender: NSObject?) {}
@@ -414,5 +436,24 @@ enum Signals {
                 Dispatch.onMain { if let app = App.shared { Send.void(app.objcObject, "terminate:", nil) } else { exit(0) } }
             }
         }
+    }
+}
+
+private extension String {
+    /// "\\n" and "\\t" as the characters they stand for.
+    func replacingEscapes() -> String {
+        var result = ""
+        var escaped = false
+        for character in self {
+            if escaped {
+                result.append(character == "n" ? "\n" : character == "t" ? "\t" : character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        return result
     }
 }
