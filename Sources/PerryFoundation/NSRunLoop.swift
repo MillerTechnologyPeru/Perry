@@ -370,6 +370,11 @@ public final class NSRunLoop: NSObject {
         return true
     }
 
+    /// One pass for input, until `date`: as a run in the mode, which is
+    /// the one mode run loops have here.
+    @ObjCMethod("acceptInputForMode:beforeDate:")
+    func acceptInput(forMode mode: ObjCObject?, before date: NSDate) { _ = run(mode: mode, before: date) }
+
     /// No messages arrive on ports, but one keeps the loop running.
     @ObjCMethod("addPort:forMode:") func add(port: ObjCObject?, forMode mode: ObjCObject?) { state?.ports += 1 }
     @ObjCMethod("removePort:forMode:")
