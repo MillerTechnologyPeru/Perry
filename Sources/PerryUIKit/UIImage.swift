@@ -261,7 +261,17 @@ open class UIImage: NSObject {
         CG.fillRect(context, rect)
         guard let tinted = CG.bitmapContextCreateImage(context) else { return self }
         defer { CG.release(tinted) }
-        return UIImage.make(objCClass, cgImage: tinted, scale: state.scale)
+        let image = UIImage.make(objCClass, cgImage: tinted, scale: state.scale)
+        image.state.renderingMode = 1
+        return image
+    }
+
+    /// The image drawn in `color`, with a rendering mode.
+    @ObjCMethod("imageWithTintColor:renderingMode:")
+    func withTintColor(_ color: UIColor, renderingMode: Int) -> UIImage {
+        let image = withTintColor(color)
+        image.state.renderingMode = renderingMode
+        return image
     }
 
     // MARK: Drawing

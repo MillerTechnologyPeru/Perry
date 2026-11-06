@@ -35,6 +35,9 @@ class NSMutableArray: NSArray {
 class NSDictionary: NSObject {
     @ObjCMethod("objectForKey:")
     func object(forKey key: String) -> NSObject?
+
+    @ObjCClassMethod("dictionaryWithObject:forKey:")
+    static func make(object: NSObject, forKey key: String) -> NSDictionary
 }
 
 @ObjCWrapper("NSSet")

@@ -2,10 +2,12 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-// System images: SF Symbols are Apple's font, so the common ones are drawn
-// here instead, in lines of the regular weight on a 24-point square, as
-// templates that take the tint of the view showing them. Names with no
-// drawing give nil, as unknown symbols do.
+// System images: SF Symbols are Apple's font, so they are drawn from what
+// macOS renders of them into the app's copy (<App>.app/SFSymbols, by
+// Scripts/extract-assets.sh), or else, for the common ones, drawn here in
+// lines of the regular weight on a 24-point square. Either is a template
+// that takes the tint of the view showing it. Names with neither give nil,
+// as unknown symbols do.
 
 enum Symbols {
     /// Names that are another symbol's drawing: the leading and trailing
@@ -18,7 +20,11 @@ enum Symbols {
     /// The symbol's image at the screen's scale, at the size and weight of
     /// a configuration (UIImageSymbolConfiguration) when given one.
     static func image(named name: String, configuration: UIImageConfiguration? = nil) -> UIImage? {
-        guard let draw = drawings[name] ?? aliases[name].flatMap({ drawings[$0] }) else { return nil }
+        if let image = renderedImage(named: name, configuration: configuration) { return image }
+        guard let draw = drawings[name] ?? aliases[name].flatMap({ drawings[$0] }) else {
+            missing(name)
+            return nil
+        }
         let (side, lineWidth) = metrics(configuration)
         let size = CGSize(width: side, height: side)
         guard let context = CG.makeContext(size: size, scale: Screen.scale, opaque: false) else { return nil }
@@ -41,6 +47,53 @@ enum Symbols {
         image.state.configuration = configuration
         return image
     }
+
+    /// The point size Scripts/extract-symbols renders symbols at, at 3
+    /// pixels a point.
+    static let renderedPointSize: CGFloat = 34
+
+    /// Symbols macOS rendered, by name: nil for one it didn't.
+    nonisolated(unsafe) private static var rendered: [String: Owned?] = [:]
+
+    /// The symbol as macOS rendered it into the app's copy, at the
+    /// configuration's point size and scale (the body text's, 17 points, when
+    /// none is given); nil if it wasn't rendered.
+    static func renderedImage(named name: String, configuration: UIImageConfiguration?) -> UIImage? {
+        let glyph: Owned?
+        if let cached = rendered[name] {
+            glyph = cached
+        } else {
+            let path = NSBundle.main().bundlePath() + "/SFSymbols/" + name + ".png"
+            glyph = NSData.contents(ofFile: path).flatMap { UIImage.decode($0) }
+            rendered[name] = glyph
+        }
+        guard let glyph else { return nil }
+        let state = configuration?.configuration
+        let scale: CGFloat = state?.scale == 1 ? 0.8 : state?.scale == 3 ? 1.3 : 1
+        let pointSize = (state?.pointSize ?? 0) > 0 ? state!.pointSize : 17
+        let factor = pointSize / renderedPointSize * scale
+        let size = CGSize(width: (CGFloat(CG.imageGetWidth(glyph.object)) / 3 * factor).rounded(),
+                          height: (CGFloat(CG.imageGetHeight(glyph.object)) / 3 * factor).rounded())
+        guard size.width > 0, size.height > 0, let context = CG.makeContext(size: size, scale: Screen.scale, opaque: false) else { return nil }
+        defer { CG.release(context) }
+        CG.drawFlipped(glyph.object, in: CGRect(origin: .zero, size: size), context: context)
+        guard let cgImage = CG.bitmapContextCreateImage(context) else { return nil }
+        defer { CG.release(cgImage) }
+        let image = UIImage.make(cgImage: cgImage, scale: Screen.scale)
+        image.state.renderingMode = 2
+        image.state.symbolName = name
+        image.state.configuration = configuration
+        return image
+    }
+
+    /// Says once, with PERRY_UIKIT_SYMBOL_TRACE set, which symbol an app
+    /// asked for has no drawing.
+    private static func missing(_ name: String) {
+        guard getenv("PERRY_UIKIT_SYMBOL_TRACE") != nil, reported.insert(name).inserted else { return }
+        let line = "perry: UIKit: no drawing for SF Symbol \(name)\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+    nonisolated(unsafe) private static var reported: Set<String> = []
 
     /// Strokes and fills in the 24-point square.
     struct Pen {

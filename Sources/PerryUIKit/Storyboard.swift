@@ -75,7 +75,14 @@ open class UIStoryboard: NSObject {
         guard let controller = objects.first(where: { $0.is(UIViewController.self) })?.unsafeCast(to: UIViewController.self) else {
             return nil
         }
-        if controller.state.storyboard == nil { controller.state.storyboard = self }
+        // Every controller the scene makes is the storyboard's, a navigation
+        // controller's root as much as the navigation controller, so their
+        // segues find their destinations.
+        var pending = objects.filter { $0.is(UIViewController.self) }.map { $0.unsafeCast(to: UIViewController.self) }
+        while let each = pending.popLast() {
+            if each.state.storyboard == nil { each.state.storyboard = self }
+            pending.append(contentsOf: each.state.children)
+        }
         return controller
     }
 }

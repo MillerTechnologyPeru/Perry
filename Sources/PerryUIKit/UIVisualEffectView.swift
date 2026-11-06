@@ -91,6 +91,11 @@ final class VisualEffectViewState: ObjectState {
     var backdrop: UIView?
 }
 
+/// The view a visual effect view's subviews go in, which nibs archive with
+/// its own class.
+@ObjCClass("_UIVisualEffectContentView")
+open class _UIVisualEffectContentView: UIView {}
+
 @ObjCClass("UIVisualEffectView")
 open class UIVisualEffectView: UIView {
     static let effectViewStates = StateTable<VisualEffectViewState>()
