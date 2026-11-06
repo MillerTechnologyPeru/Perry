@@ -125,8 +125,42 @@ open class NSColor: NSObject {
     @ObjCClassMethod("colorWithCatalogName:colorName:")
     static func color(catalogName: String?, colorName: String?) -> NSColor? { colorName.flatMap(system) }
 
-    /// The system's named colors, in macOS's light appearance.
+    /// The system's named colors in macOS's dark appearance, where they
+    /// differ from the light one's.
+    static let darkSystemColors: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = {
+        let accent: (CGFloat, CGFloat, CGFloat) = (0.04, 0.52, 1.0)
+        return [
+            "windowBackgroundColor": (0.196, 0.196, 0.196, 1), "underPageBackgroundColor": (0.157, 0.157, 0.157, 1),
+            "controlColor": (1, 1, 1, 0.25), "controlBackgroundColor": (0.118, 0.118, 0.118, 1), "textBackgroundColor": (0.118, 0.118, 0.118, 1),
+            "controlTextColor": (1, 1, 1, 0.85), "textColor": (1, 1, 1, 1), "labelColor": (1, 1, 1, 0.85),
+            "secondaryLabelColor": (1, 1, 1, 0.55), "tertiaryLabelColor": (1, 1, 1, 0.25), "quaternaryLabelColor": (1, 1, 1, 0.1),
+            "disabledControlTextColor": (1, 1, 1, 0.25), "placeholderTextColor": (1, 1, 1, 0.25),
+            "headerColor": (0.118, 0.118, 0.118, 1), "headerTextColor": (1, 1, 1, 0.85), "gridColor": (0.1, 0.1, 0.1, 1),
+            "separatorColor": (1, 1, 1, 0.1), "windowFrameColor": (0.2, 0.2, 0.2, 1), "windowFrameTextColor": (1, 1, 1, 0.85),
+            "selectedTextBackgroundColor": (0.25, 0.39, 0.55, 1), "selectedTextColor": (1, 1, 1, 1),
+            "selectedContentBackgroundColor": (accent.0, accent.1, accent.2, 1), "selectedControlColor": (0.25, 0.39, 0.55, 1),
+            "selectedControlTextColor": (1, 1, 1, 0.85), "alternateSelectedControlColor": (accent.0, accent.1, accent.2, 1),
+            "unemphasizedSelectedContentBackgroundColor": (0.27, 0.27, 0.27, 1),
+            "unemphasizedSelectedTextBackgroundColor": (0.27, 0.27, 0.27, 1), "unemphasizedSelectedTextColor": (1, 1, 1, 1),
+            "keyboardFocusIndicatorColor": (accent.0, accent.1, accent.2, 0.5), "controlAccentColor": (accent.0, accent.1, accent.2, 1),
+            "linkColor": (0.2, 0.6, 1, 1), "scrollBarColor": (0.4, 0.4, 0.4, 1), "knobColor": (1, 1, 1, 0.5),
+            "selectedKnobColor": (1, 1, 1, 0.6), "highlightColor": (1, 1, 1, 0.25), "controlShadowColor": (0, 0, 0, 1),
+            "controlHighlightColor": (1, 1, 1, 0.25), "controlLightHighlightColor": (1, 1, 1, 0.25),
+            "systemBlueColor": (accent.0, accent.1, accent.2, 1), "systemRedColor": (1, 0.27, 0.23, 1),
+            "systemGreenColor": (0.19, 0.82, 0.35, 1), "systemOrangeColor": (1, 0.62, 0.04, 1), "systemYellowColor": (1, 0.84, 0.04, 1),
+            "systemPinkColor": (1, 0.22, 0.37, 1), "systemPurpleColor": (0.75, 0.35, 0.95, 1), "systemTealColor": (0.39, 0.82, 1, 1),
+            "systemIndigoColor": (0.37, 0.36, 0.9, 1), "systemBrownColor": (0.67, 0.56, 0.4, 1), "systemMintColor": (0.4, 0.83, 0.81, 1),
+            "systemCyanColor": (0.35, 0.78, 0.98, 1), "systemGrayColor": (0.6, 0.6, 0.62, 1),
+            "systemFillColor": (1, 1, 1, 0.1), "secondarySystemFillColor": (1, 1, 1, 0.08), "tertiarySystemFillColor": (1, 1, 1, 0.05),
+        ]
+    }()
+
+    /// The system's named colors, in the current appearance: macOS's light
+    /// one, or its dark one when the desktop prefers dark.
     static func system(_ name: String) -> NSColor? {
+        if Appearances.currentIsDark, let value = darkSystemColors[name] {
+            return NSColor(named: name, red: value.0, green: value.1, blue: value.2, alpha: value.3)
+        }
         let accent = (0.0, 0.48, 1.0)
         let values: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = [
             "clearColor": (0, 0, 0, 0), "blackColor": (0, 0, 0, 1), "whiteColor": (1, 1, 1, 1),
