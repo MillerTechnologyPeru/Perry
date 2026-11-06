@@ -199,6 +199,7 @@ enum Selectors {
     nonisolated(unsafe) static let objectAtIndex = ObjC.selector("objectAtIndex:")
     nonisolated(unsafe) static let objectForKey = ObjC.selector("objectForKey:")
     nonisolated(unsafe) static let keyEnumerator = ObjC.selector("keyEnumerator")
+    nonisolated(unsafe) static let getObjectsAndKeys = ObjC.selector("getObjects:andKeys:count:")
     nonisolated(unsafe) static let objectEnumerator = ObjC.selector("objectEnumerator")
     nonisolated(unsafe) static let nextObject = ObjC.selector("nextObject")
     nonisolated(unsafe) static let length = ObjC.selector("length")
