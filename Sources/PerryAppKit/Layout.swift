@@ -269,16 +269,31 @@ enum Layout {
             add(root.w + -Double(root.rect.width), .equal, LayoutSolver.required)
             add(root.h + -Double(root.rect.height), .equal, LayoutSolver.required)
         }
+        // The views constraints mention (a layout guide stands for its
+        // owning view). AppKit's engine leaves the others alone: a view with
+        // no constraints keeps the frame its code sets even when it doesn't
+        // translate its autoresizing mask, as NetNewsWire's timeline cells do.
+        var constrained: Set<UnsafeMutableRawPointer> = []
+        for box in boxes {
+            for constraint in box.view.constraints {
+                for item in [constraint.firstItem, constraint.secondItem].compactMap({ $0 }) {
+                    constrained.insert(item.objcObject)
+                    if !item.is(NSView.self), item.responds(to: "owningView"), let owner = Send.object(item.objcObject, "owningView") {
+                        constrained.insert(owner)
+                    }
+                }
+            }
+        }
         // Frames that autoresizing places stay, relative to the superview.
         for box in boxes.dropFirst() {
             guard let parent = box.parent else { continue }
             let view = box.view
-            if view.translatesAutoresizingMask {
+            if view.translatesAutoresizingMask || !constrained.contains(view.objcObject) {
                 // The autoresizing mask as constraints: as the superview's
                 // size changes from what it is, the change is shared among
                 // the flexible parts (margins and size) by their sizes, as
                 // -resizeWithOldSuperviewSize: shares it.
-                let mask = view.autoresizingMask
+                let mask = view.translatesAutoresizingMask ? view.autoresizingMask : 0
                 let flipped = parent.view.flipped
                 func axis(_ low: LayoutExpression, _ size: LayoutExpression, _ parentLow: LayoutExpression, _ parentSize: LayoutExpression,
                           offset: CGFloat, length: CGFloat, parentLength: CGFloat, flexible: (low: Bool, size: Bool, high: Bool)) {
