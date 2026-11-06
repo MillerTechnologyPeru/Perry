@@ -95,7 +95,7 @@ public class NSMutableString: NSString {
     func replaceOccurrences(of target: String, with replacement: String, options: UInt, range: NSRange) -> UInt {
         guard !target.isEmpty else { return 0 }
         let search = ObjC.selector("rangeOfString:options:range:")
-        let find = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)
+        let find = unsafeBitCast(ObjCRuntime.msgSend(returning: NSRange.self), to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)
         let replacementLength = UInt(replacement.utf16.count)
         var scope = range
         var count: UInt = 0
