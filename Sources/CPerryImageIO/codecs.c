@@ -69,8 +69,9 @@ static uint8_t *cgbi_normalize(const uint8_t *data, size_t size, size_t *out_siz
         if (memcmp(type, "IHDR", 4) == 0 && length >= 13) {
             width = read_be32(type + 4);
             height = read_be32(type + 8);
-            // Only 8-bit, non-interlaced, as Xcode writes them.
-            if (type[4 + 8] != 8 || type[4 + 12] != 0) return NULL;
+            // Only 8-bit, as Xcode writes them; interlaced (Adam7) or not,
+            // which libpng undoes.
+            if (type[4 + 8] != 8 || type[4 + 12] > 1) return NULL;
         }
         position += length + 12;
         if (memcmp(type, "IEND", 4) == 0) break;
@@ -85,8 +86,9 @@ static uint8_t *cgbi_normalize(const uint8_t *data, size_t size, size_t *out_siz
         if (memcmp(data + position + 4, "IEND", 4) == 0) break;
         position += length + 12;
     }
-    // Four bytes a pixel and a filter byte a row at most.
-    size_t raw_capacity = ((size_t)width * 4 + 1) * height;
+    // Four bytes a pixel and a filter byte a row at most; interlaced, the
+    // seven passes' rows come to under three times the height.
+    size_t raw_capacity = (size_t)width * 4 * height + (size_t)height * 3 + 16;
     uint8_t *raw = malloc(raw_capacity);
     z_stream stream;
     memset(&stream, 0, sizeof(stream));
