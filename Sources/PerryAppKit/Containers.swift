@@ -22,7 +22,6 @@ open class NSBox: NSView {
     var transparent = false
     var contentView: NSView?
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -98,7 +97,7 @@ open class NSBox: NSView {
         if boxType == 2 {
             // A separator: a line across its longer side.
             CG.saveGState(context)
-            CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+            CG.setFill(context, NSColor.separatorColor())
             if bounds.width >= bounds.height {
                 CG.fillRect(context, CGRect(x: 0, y: (bounds.height / 2).rounded(.down), width: bounds.width, height: 1))
             } else {
@@ -148,7 +147,6 @@ open class NSSplitView: NSView {
         paneLimits?(pane) ?? (0, .greatestFiniteMagnitude)
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -239,6 +237,12 @@ open class NSSplitView: NSView {
             offset += size + thickness
         }
         setNeedsDisplay(true)
+        dividersMoved()
+    }
+
+    /// Toolbar sections that track the dividers follow them.
+    func dividersMoved() {
+        if vertical { window?.toolbarView?.arrange() }
     }
 
     @ObjCMethod("setPosition:ofDividerAtIndex:")
@@ -262,6 +266,7 @@ open class NSSplitView: NSView {
         }
         post("NSSplitViewDidResizeSubviewsNotification", object: self)
         setNeedsDisplay(true)
+        dividersMoved()
     }
 
     @ObjCMethod("setFrameSize:")
@@ -288,7 +293,7 @@ open class NSSplitView: NSView {
     func drawDivider(in rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+        CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, rect)
         CG.restoreGState(context)
     }
@@ -339,7 +344,6 @@ open class NSStackView: NSView {
     var detachesHiddenViews = true
     var views: [NSView] = []
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -445,7 +449,6 @@ open class NSStackView: NSView {
 open class NSStackViewContainer: NSView {
     var views: [NSView] = []
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
