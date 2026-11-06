@@ -13,7 +13,7 @@ enum Requests {
 
     static func request(_ object: UnsafeMutableRawPointer) -> Request {
         if let request = states.get(object) {
-            if let stream = bodyStreams.removeValue(forKey: object) { request.body = drain(stream) }
+            if let stream = bodyStreams.removeValue(forKey: object) { read(stream, into: request) }
             return request
         }
         let request = Request(url: nil)
@@ -21,23 +21,26 @@ enum Requests {
         return request
     }
 
-    /// Reads a body stream to its end, as the loader sends a body: the
-    /// whole of it, read before the request goes out. Releases the stream.
-    static func drain(_ stream: UnsafeMutableRawPointer) -> Data {
+    /// The request's body from a stream, read as the request goes out, on
+    /// the session's thread: a bound pair's output is written by the caller
+    /// after it makes the task, so reading it first, on the caller's
+    /// thread, waited forever (Unity's web requests). Takes the stream's
+    /// reference, let go when the body has been read.
+    static func read(_ stream: UnsafeMutableRawPointer, into request: Request) {
         typealias Send = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?) -> Void
         typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeMutablePointer<UInt8>, Int) -> Int
-        defer { ObjCRuntime.release(stream) }
-        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("open"))
-        var data = Data(), buffer = [UInt8](repeating: 0, count: 65536)
-        while true {
-            let count = buffer.withUnsafeMutableBufferPointer {
-                unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(stream, ObjCRuntime.selector("read:maxLength:"), $0.baseAddress!, $0.count)
-            }
-            if count <= 0 { break }
-            data.append(contentsOf: buffer[0..<count])
-        }
-        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("close"))
-        return data
+        let address = UInt(bitPattern: stream)
+        request.setBodyReader(open: {
+            let stream = UnsafeMutableRawPointer(bitPattern: address)!
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("open"))
+        }, read: { buffer, length in
+            let stream = UnsafeMutableRawPointer(bitPattern: address)!
+            return unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(stream, ObjCRuntime.selector("read:maxLength:"), buffer, length)
+        }, finish: {
+            let stream = UnsafeMutableRawPointer(bitPattern: address)!
+            unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("close"))
+            ObjCRuntime.release(stream)
+        })
     }
 
     /// A new request object of `cls` (+0) holding `request`.
