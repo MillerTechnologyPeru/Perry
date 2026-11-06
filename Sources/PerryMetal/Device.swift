@@ -83,6 +83,32 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
     @ObjCMethod("supportsFunctionPointers") func supportsFunctionPointers() -> Bool { false }
     @ObjCMethod("isDepth24Stencil8PixelFormatSupported") func isDepth24Stencil8PixelFormatSupported() -> Bool { false }
 
+    // The answers a Mac's GPU gives, which Mac games ask before they start:
+    // BC compressed textures, filtering and multisampling 32-bit floats, and
+    // texture LOD queries, as every Apple-silicon Mac has. metal2vulkan's ABI
+    // doesn't report the Vulkan features behind them yet, so these aren't
+    // the device's own answers.
+    @ObjCMethod("supportsBCTextureCompression") func supportsBCTextureCompression() -> Bool { true }
+    @ObjCMethod("supports32BitFloatFiltering") func supports32BitFloatFiltering() -> Bool { true }
+    @ObjCMethod("supports32BitMSAA") func supports32BitMSAA() -> Bool { true }
+    @ObjCMethod("supportsQueryTextureLOD") func supportsQueryTextureLOD() -> Bool { true }
+    @ObjCMethod("supportsPullModelInterpolation") func supportsPullModelInterpolation() -> Bool { false }
+    @ObjCMethod("supportsPrimitiveMotionBlur") func supportsPrimitiveMotionBlur() -> Bool { false }
+    @ObjCMethod("supportsRenderDynamicLibraries") func supportsRenderDynamicLibraries() -> Bool { false }
+    /// Vertex amplification: one view, without it.
+    @ObjCMethod("supportsVertexAmplificationCount:") func supportsVertexAmplificationCount(_ count: UInt) -> Bool { count <= 1 }
+    /// Counter sampling at stage, draw, dispatch, tile or blit boundaries: none.
+    @ObjCMethod("supportsCounterSampling:") func supportsCounterSampling(_ point: UInt) -> Bool { false }
+    @ObjCMethod("counterSets") func counterSets() -> NSObject? { nil }
+    /// Samplers an argument buffer holds: Apple's tier 2 limit, or tier 1's.
+    @ObjCMethod("maxArgumentBufferSamplerCount")
+    func maxArgumentBufferSamplerCount() -> UInt { properties.argument_buffers_support >= 1 ? 1024 : 16 }
+    /// Bytes a second between the CPU and the GPU: 0, as for unified memory.
+    @ObjCMethod("maxTransferRate") func maxTransferRate() -> UInt64 { 0 }
+    @ObjCMethod("shouldMaximizeConcurrentCompilation") func shouldMaximizeConcurrentCompilation() -> Bool { false }
+    @ObjCMethod("setShouldMaximizeConcurrentCompilation:") func setShouldMaximizeConcurrentCompilation(_ value: Bool) {}
+    @ObjCMethod("maximumConcurrentCompilationTaskCount") func maximumConcurrentCompilationTaskCount() -> UInt { 1 }
+
     // MARK: Queues
 
     @ObjCMethod("newCommandQueue") func newCommandQueue() -> MTLCommandQueue? {
@@ -370,4 +396,28 @@ public func MTLCreateSystemDefaultDevice() -> UnsafeMutableRawPointer? {
 @c(_MTLCopyAllDevices)
 public func MTLCopyAllDevices() -> UnsafeMutableRawPointer? {
     NSObject.array(Devices.all).objCOwnedReturnValue()
+}
+
+/// NSArray<id<MTLDevice>> *MTLCopyAllDevicesWithObserver(id<NSObject> *observer,
+/// MTLDeviceNotificationHandler handler): the devices, retained. Devices
+/// are never added or removed, so the handler is never called and the
+/// observer is nil.
+@c(_MTLCopyAllDevicesWithObserver)
+public func MTLCopyAllDevicesWithObserver(_ observer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                                          _ handler: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    observer?.pointee = nil
+    return MTLCopyAllDevices()
+}
+
+@c(_MTLRemoveDeviceObserver) public func MTLRemoveDeviceObserver(_ observer: UnsafeMutableRawPointer?) {}
+
+/// The device notifications' names, and the common counters' and counter
+/// sets' names.
+@ObjCConstants
+enum DeviceNotifications {
+    static let MTLDeviceWasAddedNotification = "MTLDeviceWasAddedNotification"
+    static let MTLDeviceRemovalRequestedNotification = "MTLDeviceRemovalRequestedNotification"
+    static let MTLDeviceWasRemovedNotification = "MTLDeviceWasRemovedNotification"
+    static let MTLCommonCounterTimestamp = "timestamp"
+    static let MTLCommonCounterSetTimestamp = "timestamp"
 }
