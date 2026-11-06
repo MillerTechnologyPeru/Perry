@@ -8,12 +8,15 @@ sdk=${PERRY_ARMV7_SDK:-$(ls -d "$root"/.toolchains/swift-*-armv7-sdk/*/debian-* 
 out=$root/.build/armv7
 mkdir -p "$out/bin" "$out/obj"
 
-cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
+# r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
+# register, which Linux's preserves across calls, so Perry's code never keeps
+# a value in it across a call into Darwin code.
+cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -ffixed-r9 -D_FILE_OFFSET_BITS=64
   -I$root/Sources/PerrySystem/include -I$root/Sources/PerryInterface/include"
 
 objects=""
 for name in thunks_arm.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c \
-    pthread.c process.c mach.c sockets.c math.c dyld.c compat.c dispatch.c commoncryptor.c commondigest.c; do
+    pthread.c process.c mach.c sockets.c math.c dyld.c compat.c callbacks.c dispatch.c commoncryptor.c commondigest.c; do
     object=$out/obj/system-$name.o
     # shellcheck disable=SC2086
     "$llvm/clang" $cflags -c "$root/Sources/PerrySystem/$name" -o "$object"
