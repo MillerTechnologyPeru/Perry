@@ -509,6 +509,11 @@ public func objc_registerClassPair(_ cls: Class?) {
     if let cls { Runtime.registerClassPair(cls) }
 }
 
+@c(_objc_disposeClassPair)
+public func objc_disposeClassPair(_ cls: Class?) {
+    if let cls { Runtime.disposeClassPair(cls) }
+}
+
 // MARK: - Methods
 
 @c(_method_getName)
