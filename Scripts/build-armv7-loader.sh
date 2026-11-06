@@ -22,6 +22,11 @@ for source in "$root"/Sources/PerryLoaderCore/*.c "$root"/Sources/PerryLoaderCor
     "$llvm/clang" $cflags -c "$source" -o "$object"
     objects="$objects $object"
 done
+# Apps from before iOS 4.3 are not position independent: they load at 0x1000
+# and run for as much as hundreds of megabytes from there, where the kernel
+# would put a position-independent perry32 and its heap. So perry32 is linked
+# at a fixed address far above them.
 # shellcheck disable=SC2086
-"$llvm/clang" --target=armv7-linux-gnueabihf --sysroot="$sdk" -fuse-ld=lld $objects -o "$out/bin/perry32" -ldl -lpthread
+"$llvm/clang" --target=armv7-linux-gnueabihf --sysroot="$sdk" -fuse-ld=lld -no-pie -Wl,--image-base=0x70000000 \
+    $objects -o "$out/bin/perry32" -ldl -lpthread
 echo "$out/bin/perry32"
