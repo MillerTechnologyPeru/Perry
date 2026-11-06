@@ -680,9 +680,11 @@ static bool ends_with(const char *name, const char *suffix) {
 /// CFString of its name ("_UIFooNotification" is @"UIFooNotification"),
 /// made once; NULL for other symbols, or before Foundation is loaded. A
 /// constant is known by its name's ending (notification names, keys, error
-/// domains) or by the families of string constants Apple names alike: user
-/// activity types, capture device types and session presets, and
-/// authorization scopes and options.
+/// domains, pasteboard types, accessibility roles and actions, bindings and
+/// their options, exception names, run loop modes) or by the families of
+/// string constants Apple names alike: user activity types, capture device
+/// types and session presets, authorization scopes and options, pasteboard
+/// types and image names.
 static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
     static const char *const families[] = { "_NSUserActivityType", "_AVCaptureDeviceType", "_AVCaptureSessionPreset",
@@ -690,9 +692,12 @@ static void *string_constant(perry_loader *loader, const char *name) {
     bool family = false;
     for (size_t i = 0; i < sizeof(families) / sizeof(families[0]) && !family; i++)
         family = strncmp(name, families[i], strlen(families[i])) == 0;
-    if (!family && !ends_with(name, "Notification") && !ends_with(name, "NotificationName") && !ends_with(name, "Key") &&
-        !ends_with(name, "Attribute") && !ends_with(name, "AttributeName") && !ends_with(name, "Identifier") &&
-        !ends_with(name, "ErrorDomain"))
+    static const char *const endings[] = { "Notification", "NotificationName", "Key", "Attribute", "AttributeName", "Identifier",
+                                           "ErrorDomain", "PboardType", "Role", "Subrole", "Action", "Binding", "BindingOption",
+                                           "Exception", "RunLoopMode" };
+    for (size_t i = 0; i < sizeof(endings) / sizeof(endings[0]) && !family; i++)
+        family = ends_with(name, endings[i]);
+    if (!family && strncmp(name, "_NSPasteboardType", 17) != 0 && strncmp(name, "_NSImageName", 12) != 0)
         return NULL;
     perry_symbol isa = { 0 };
     for (uint32_t i = 0; i < loader->provider_count && !isa.found; i++)
