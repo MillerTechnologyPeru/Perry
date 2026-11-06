@@ -186,7 +186,21 @@ open class UIApplication: UIResponder {
     @ObjCMethod("endIgnoringInteractionEvents") func endIgnoringInteractionEvents() {
         Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
     }
-    @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
+    /// There is no push service to register with: the delegate hears that
+    /// registering failed, afterwards, as the iOS Simulator's did, so code
+    /// awaiting a device token gets an answer.
+    @ObjCMethod("registerForRemoteNotifications")
+    func registerForRemoteNotifications() {
+        Updates.afterPass {
+            guard let delegate = Application.delegate,
+                  delegate.responds(to: "application:didFailToRegisterForRemoteNotificationsWithError:") else { return }
+            let info = NSMutableDictionary.empty()
+            info.set(string: "remote notifications are not supported on this device", forKey: "NSLocalizedDescription")
+            // REMOTE_NOTIFICATION_SIMULATOR_NOT_SUPPORTED_ERROR.
+            let error = NSErrorObject.make(domain: "NSCocoaErrorDomain", code: 3010, userInfo: info)
+            delegate.sendApplication(self, didFailToRegisterForRemoteNotificationsWithError: error)
+        }
+    }
     /// iOS 3's form, which names the kinds of notification wanted.
     @ObjCMethod("registerForRemoteNotificationTypes:") func registerForRemoteNotifications(types: UInt) {}
     @ObjCMethod("isRegisteredForRemoteNotifications") func isRegisteredForRemoteNotifications() -> Bool { false }
@@ -262,6 +276,9 @@ extension NSObject {
 }
 
 extension NSObject {
+    @ObjCMethod("application:didFailToRegisterForRemoteNotificationsWithError:")
+    func sendApplication(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: NSObject)
+
     @ObjCMethod("application:supportedInterfaceOrientationsForWindow:")
     func sendSupportedInterfaceOrientations(_ application: UIApplication, for window: UIWindow?) -> UInt
 }
