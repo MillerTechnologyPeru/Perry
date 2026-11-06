@@ -61,6 +61,7 @@ open class NSColor: NSObject {
             colorName = decoded.string("NSColorName")
             if let name = colorName, let system = NSColor.system(name) {
                 (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
+                resolvedDark = Appearances.currentIsDark
             } else if let fallback = decoded.object("NSColor")?.as(NSColor.self) {
                 (red, green, blue, alpha) = (fallback.red, fallback.green, fallback.blue, fallback.alpha)
             }
@@ -76,8 +77,20 @@ open class NSColor: NSObject {
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
-    /// The color as a CGColor, made once.
+    /// For a system color from a nib, the appearance its components are
+    /// for: it takes the current one's when drawn, as AppKit's dynamic
+    /// colors do.
+    var resolvedDark: Bool?
+
+    /// The color as a CGColor, made once (again when a system color's
+    /// appearance changes).
     var cgColorRef: CGRef? {
+        if let dark = resolvedDark, dark != Appearances.currentIsDark, let name = colorName, let system = NSColor.system(name) {
+            (red, green, blue, alpha) = (system.red, system.green, system.blue, system.alpha)
+            resolvedDark = Appearances.currentIsDark
+            if let cgColor { CG.release(cgColor) }
+            cgColor = nil
+        }
         if let cgColor { return cgColor }
         guard CG.ready else { return nil }
         cgColor = CG.colorCreateSRGB(red, green, blue, alpha)
@@ -120,8 +133,11 @@ open class NSColor: NSObject {
         return nil
     }
     @ObjCClassMethod("colorWithPatternImage:") static func color(patternImage: NSObject?) -> NSColor { NSColor(white: 0.9, alpha: 1) }
-    @ObjCClassMethod("colorNamed:") static func color(named name: String?) -> NSColor? { name.flatMap(system) }
-    @ObjCClassMethod("colorNamed:bundle:") static func color(named name: String?, bundle: NSObject?) -> NSColor? { name.flatMap(system) }
+    /// A system color by name, else the app's asset catalog's.
+    @ObjCClassMethod("colorNamed:")
+    static func color(named name: String?) -> NSColor? { name.flatMap { system($0) ?? AppKitAssets.color(named: $0) } }
+    @ObjCClassMethod("colorNamed:bundle:")
+    static func color(named name: String?, bundle: NSObject?) -> NSColor? { color(named: name) }
     @ObjCClassMethod("colorWithCatalogName:colorName:")
     static func color(catalogName: String?, colorName: String?) -> NSColor? { colorName.flatMap(system) }
 
@@ -672,11 +688,36 @@ open class NSImage: NSObject {
                 return
             }
         }
+        // The app's asset catalog's.
+        if let (image, imageSize) = AppKitAssets.image(named: name) {
+            cgImage = image
+            decoded = true
+            size = imageSize
+            path = ""
+            template = AppKitAssets.isTemplate(named: name)
+            return
+        }
+        if let (file, scale) = AppKitAssets.extractedImage(named: name), let pixels = Self.pngSize(file) {
+            path = file
+            size = CGSize(width: pixels.width / CGFloat(scale), height: pixels.height / CGFloat(scale))
+            template = AppKitAssets.isTemplate(named: name)
+            return
+        }
         size = CGSize(width: 16, height: 16)
     }
 
+    /// A PNG's size in pixels, from its header, without decoding it.
+    static func pngSize(_ path: String) -> CGSize? {
+        guard let file = fopen(path, "rb") else { return nil }
+        defer { fclose(file) }
+        var header = [UInt8](repeating: 0, count: 24)
+        guard fread(&header, 1, 24, file) == 24, header[0] == 0x89, header[1] == 0x50 else { return nil }
+        func be32(_ at: Int) -> Int { header[at...at + 3].reduce(0) { $0 << 8 | Int($1) } }
+        return CGSize(width: CGFloat(be32(16)), height: CGFloat(be32(20)))
+    }
+
     /// Decodes the bitmap now, for its size.
-    private func decodeSize() {
+    func decodeSize() {
         guard let image = bitmap() else { return }
         if size == .zero { size = CGSize(width: CGFloat(CG.imageGetWidth(image)), height: CGFloat(CG.imageGetHeight(image))) }
     }
@@ -686,8 +727,9 @@ open class NSImage: NSObject {
     func bitmap() -> CGRef? {
         if decoded { return cgImage }
         if drawingHandler != nil || drawing != nil { return drawnBitmap() }
-        decoded = true
+        // Decoded once CoreGraphics is there to decode it.
         guard CG.ready else { return nil }
+        decoded = true
         var source = data
         if source == nil, let path, let read = Send.object(Classes.named("NSData")?.pointer, "dataWithContentsOfFile:", path.objCArgument()) {
             source = NSObject(read)
@@ -756,7 +798,19 @@ open class NSImage: NSObject {
         let image = NSImage(size: CGSize(width: 16, height: 16))
         image.name = name
         image.template = true
+        // As macOS rendered it into the app's copy (Scripts/extract-symbols,
+        // 34 points at 3 pixels a point), at the system font's 13 points.
+        if let name, case let file = NSBundle.main().bundlePath() + "/SFSymbols/" + name + ".png", access(file, R_OK) == 0 {
+            image.path = file
+            let pixels = pngSize(file) ?? CGSize(width: 48, height: 48)
+            let factor: CGFloat = 13.0 / 34.0 / 3.0
+            image.size = CGSize(width: (pixels.width * factor).rounded(), height: (pixels.height * factor).rounded())
+            return image
+        }
         image.drawing = name.flatMap(SystemImages.drawing)
+        if image.drawing == nil, let name, getenv("PERRY_APPKIT_SYMBOL_TRACE") != nil {
+            appKitWarning("SF Symbol \(name) isn't rendered: list it in the app's SFSymbols.txt for Scripts/extract-symbols")
+        }
         return image
     }
 
@@ -779,16 +833,24 @@ open class NSImage: NSObject {
 
     /// Draws the bitmap in `rect` of the current context, upright in a
     /// flipped view as AppKit draws images whose -respectFlipped is set.
-    func draw(in rect: CGRect, fraction: CGFloat = 1) {
+    /// A template bitmap (one Perry doesn't draw itself) takes the tint
+    /// color, the label color by default, through its alpha.
+    func draw(in rect: CGRect, fraction: CGFloat = 1, tint: NSColor? = nil) {
         guard let context = NSGraphicsContext.currentCG, let image = bitmap() else { return }
         CG.saveGState(context)
         if fraction < 1 { CG.setAlpha(context, fraction) }
+        var target = rect
         if NSGraphicsContext.current?.flipped == true {
             CG.translateCTM(context, rect.minX, rect.maxY)
             CG.scaleCTM(context, 1, -1)
-            CG.drawImage(context, CGRect(origin: .zero, size: rect.size), image)
+            target = CGRect(origin: .zero, size: rect.size)
+        }
+        if template, drawing == nil, drawingHandler == nil, let clipToMask = CG.clipToMask {
+            clipToMask(context, target, image)
+            CG.setFill(context, (tint ?? NSColor.labelColor()))
+            CG.fillRect(context, target)
         } else {
-            CG.drawImage(context, rect, image)
+            CG.drawImage(context, target, image)
         }
         CG.restoreGState(context)
     }
@@ -1062,7 +1124,7 @@ public func NSFrameRectWithWidthUsingOperation(_ rect: CGRect, _ width: CGFloat,
 public func NSEraseRect(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.saveGState(context)
-    CG.setFillColorWithColor(context, NSColor.whiteColor().cgColorRef)
+    CG.setFill(context, NSColor.whiteColor())
     CG.fillRect(context, rect)
     CG.restoreGState(context)
 }
@@ -1071,7 +1133,7 @@ public func NSEraseRect(_ rect: CGRect) {
 public func NSDrawWindowBackground(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.saveGState(context)
-    CG.setFillColorWithColor(context, NSColor.windowBackgroundColor().cgColorRef)
+    CG.setFill(context, NSColor.windowBackgroundColor())
     CG.fillRect(context, rect)
     CG.restoreGState(context)
 }
@@ -1115,6 +1177,14 @@ enum SystemImages {
                 for offset in [-3.5, 0, 3.5] as [CGFloat] {
                     NSBezierPath.bezierPath(ovalIn: CGRect(x: rect.midX + offset - 1.1, y: rect.midY - 1.1, width: 2.2, height: 2.2)).fill()
                 }
+            }
+        case "sidebar.left", "sidebar.leading":
+            // A window outline with its left third set off.
+            return { rect in
+                let frame = rect.insetBy(dx: 1.5, dy: 3)
+                stroke(NSBezierPath.bezierPath(roundedRect: frame, xRadius: 2.5, yRadius: 2.5))
+                let x = (frame.minX + frame.width * 0.36).rounded() + 0.5
+                stroke(line([CGPoint(x: x, y: frame.minY), CGPoint(x: x, y: frame.maxY)]))
             }
         case "NSAddTemplate", "plus":
             return { rect in stroke(line([CGPoint(x: rect.midX, y: rect.minY + 3), CGPoint(x: rect.midX, y: rect.maxY - 3)]));

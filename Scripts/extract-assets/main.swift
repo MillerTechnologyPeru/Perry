@@ -39,6 +39,15 @@ func integer(_ object: AnyObject, _ selector: String) -> Int {
     return unsafeBitCast(method_getImplementation(method), to: Getter.self)(object, sel)
 }
 
+/// Whether the name is a custom symbol: CoreUI finds a vector glyph for it
+/// (at 2x, medium size, regular weight, 13 points).
+func isVectorGlyph(_ catalog: AnyObject, _ name: String) -> Bool {
+    let sel = NSSelectorFromString("namedVectorGlyphWithName:scaleFactor:deviceIdiom:glyphSize:glyphWeight:glyphPointSize:appearanceName:")
+    guard catalog.responds(to: sel), let method = class_getInstanceMethod(type(of: catalog), sel) else { return false }
+    typealias Lookup = @convention(c) (AnyObject, Selector, NSString, Double, Int, Int, Int, Double, NSString?) -> AnyObject?
+    return unsafeBitCast(method_getImplementation(method), to: Lookup.self)(catalog, sel, name as NSString, 2, 0, 2, 4, 13, nil) != nil
+}
+
 var failed = false
 for path in CommandLine.arguments.dropFirst() {
     let url = URL(fileURLWithPath: path)
@@ -58,6 +67,10 @@ for path in CommandLine.arguments.dropFirst() {
     try? FileManager.default.removeItem(at: output)
     try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
     var written = 0
+    // The names AppKit draws as templates, tinted: renditions rendered as
+    // template and custom symbols (vector glyphs), which Perry can't tell
+    // from the pixels.
+    var templates: [String] = []
     for name in names {
         let images = (catalog.perform(NSSelectorFromString("imagesWithName:"), with: name)?.takeUnretainedValue() as? [AnyObject]) ?? []
         // One image a scale and appearance: a phone's (idiom 1) over a
@@ -65,6 +78,9 @@ for path in CommandLine.arguments.dropFirst() {
         // for the phone. Appearances other than dark are the default's.
         struct Slot: Hashable { let scale: Int, dark: Bool }
         var chosen: [Slot: (idiom: Int, image: CGImage)] = [:]
+        if isVectorGlyph(catalog, name) || images.contains(where: { integer($0, "isTemplate") & 0xFF == 1 }) {
+            templates.append(name)
+        }
         for named in images {
             guard let raw = pointer(named, "image") else { continue }
             let image = Unmanaged<CGImage>.fromOpaque(raw).takeUnretainedValue()
@@ -85,6 +101,7 @@ for path in CommandLine.arguments.dropFirst() {
             if CGImageDestinationFinalize(destination) { written += 1 }
         }
     }
-    print("\(output.path): \(written) images of \(names.count) names")
+    try Data(templates.sorted().map { $0 + "\n" }.joined().utf8).write(to: output.appendingPathComponent("templates.txt"))
+    print("\(output.path): \(written) images of \(names.count) names, \(templates.count) templates")
 }
 exit(failed ? 1 : 0)

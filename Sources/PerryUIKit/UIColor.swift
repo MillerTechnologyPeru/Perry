@@ -173,7 +173,7 @@ open class UIColor: NSObject {
         guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else {
             return catalogColor(cls, AssetCatalog.color(named: name, dark: dark))
         }
-        return catalogColor(cls, AssetCatalog.catalog(in: bundle)?.color(named: name, dark: dark))
+        return catalogColor(cls, AssetCatalog.catalog(in: bundle)?.components(named: name, dark: dark))
     }
 
     /// A color of a catalog's components: white and alpha, or red, green,

@@ -890,7 +890,6 @@ open class NSWindowController: NSResponder {
     var windowFrameAutosaveName = ""
     var pendingContentViewController: NSViewController?
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithWindow:")
@@ -900,24 +899,35 @@ open class NSWindowController: NSResponder {
         window?.windowControllerObject = objcObject
     }
 
+    // The other initializers send -initWithWindow:, as AppKit's do, so a
+    // subclass's designated initializer (a Swift class's property
+    // defaults) runs.
+
+    @ObjCMethod("init")
+    func initialize() -> NSObject { initializeWindowController(window: nil) }
+
     @ObjCMethod("initWithWindowNibName:")
-    public required init(windowNibName: String?) {
-        super.init()
-        self.windowNibName = windowNibName
-    }
+    func initialize(windowNibName: String?) -> NSObject { initialize(windowNibName: windowNibName, owner: nil) }
 
     @ObjCMethod("initWithWindowNibName:owner:")
-    public required init(windowNibName: String?, owner: NSObject?) {
-        super.init()
-        self.windowNibName = windowNibName
-        windowNibOwner = owner?.objcObject
+    func initialize(windowNibName: String?, owner: NSObject?) -> NSObject {
+        let initialized = initializeWindowController(window: nil)
+        if let controller = initialized.as(NSWindowController.self) {
+            controller.windowNibName = windowNibName
+            controller.windowNibOwner = owner?.objcObject
+        }
+        return initialized
     }
 
     @ObjCMethod("initWithWindowNibPath:owner:")
-    public required init(windowNibPath: String?, owner: NSObject?) {
-        super.init()
+    func initialize(windowNibPath: String?, owner: NSObject?) -> NSObject {
         let file = windowNibPath.map { String($0.split(separator: "/").last ?? "") } ?? ""
-        windowNibName = file.hasSuffix(".nib") ? String(file.dropLast(4)) : file
+        return initialize(windowNibName: file.hasSuffix(".nib") ? String(file.dropLast(4)) : file, owner: owner)
+    }
+
+    public convenience init(windowNibName: String?, owner: NSObject? = nil) {
+        self.init(window: nil)
+        self.windowNibName = windowNibName
         windowNibOwner = owner?.objcObject
     }
 
@@ -983,4 +993,10 @@ open class NSWindowController: NSResponder {
     @ObjCMethod("synchronizeWindowTitleWithDocumentName") func synchronizeWindowTitleWithDocumentName() {}
     @ObjCMethod("windowTitleForDocumentDisplayName:") func windowTitle(forDocumentDisplayName name: String?) -> String? { name }
     @ObjCMethod("dismissController:") func dismissController(_ sender: NSObject?) { close() }
+}
+
+/// NSWindowController's messages, sent so subclasses' overrides run.
+extension NSObject {
+    @ObjCMethod("initWithWindow:")
+    func initializeWindowController(window: NSWindow?) -> NSObject
 }

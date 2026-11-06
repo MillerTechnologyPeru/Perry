@@ -44,6 +44,7 @@ enum CG {
     nonisolated(unsafe) static var fillRect: (@convention(c) (Ref, CGRect) -> Void)!
     nonisolated(unsafe) static var strokeRect: (@convention(c) (Ref, CGRect) -> Void)!
     nonisolated(unsafe) static var drawImage: (@convention(c) (Ref, CGRect, Ref) -> Void)!
+    nonisolated(unsafe) static var clipToMask: (@convention(c) (Ref, CGRect, Ref) -> Void)!
     nonisolated(unsafe) static var selectFont: (@convention(c) (Ref, UnsafePointer<CChar>?, CGFloat, Int32) -> Void)!
     nonisolated(unsafe) static var setTextPosition: (@convention(c) (Ref, CGFloat, CGFloat) -> Void)!
     nonisolated(unsafe) static var getTextPosition: (@convention(c) (Ref) -> CGPoint)!
@@ -125,6 +126,7 @@ enum CG {
         fillRect = bind("CGContextFillRect")
         strokeRect = bind("CGContextStrokeRect")
         drawImage = bind("CGContextDrawImage")
+        clipToMask = bind("CGContextClipToMask")
         selectFont = bind("CGContextSelectFont")
         setTextPosition = bind("CGContextSetTextPosition")
         getTextPosition = bind("CGContextGetTextPosition")
@@ -187,11 +189,23 @@ enum CG {
         return path
     }
 
+    /// Sets the fill color, keeping `color` (and so its CGColor) alive
+    /// until the context has taken its components: a temporary NSColor's
+    /// CGColor is released with it, which Swift may do before the call.
+    static func setFill(_ context: CGRef, _ color: NSColor) {
+        withExtendedLifetime(color) { setFillColorWithColor(context, color.cgColorRef) }
+    }
+
+    /// The stroke color, as setFill(_:_:) the fill color.
+    static func setStroke(_ context: CGRef, _ color: NSColor) {
+        withExtendedLifetime(color) { setStrokeColorWithColor(context, color.cgColorRef) }
+    }
+
     /// Fills `path` in `color`, and releases it.
     static func fill(_ path: CGRef?, _ color: NSColor, in context: CGRef) {
         guard let path else { return }
         saveGState(context)
-        setFillColorWithColor(context, color.cgColorRef)
+        setFill(context, color)
         addPath(context, path)
         fillPath(context)
         restoreGState(context)

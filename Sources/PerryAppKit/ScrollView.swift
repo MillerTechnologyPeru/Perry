@@ -32,7 +32,6 @@ open class NSScrollView: NSView {
     var usesPredominantAxisScrolling = true
     var findBarPosition = 1
 
-    @ObjCMethod("init")
     public required init() {
         super.init()
         setUpClip()
@@ -294,7 +293,7 @@ open class NSScrollView: NSView {
     override func draw(_ rect: CGRect) {
         guard borderType != 0, let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor(white: 0.75, alpha: 1).cgColorRef)
+        CG.setFill(context, NSColor(white: 0.75, alpha: 1))
         NSFrameRect(bounds)
         CG.restoreGState(context)
     }
@@ -309,7 +308,6 @@ open class NSClipView: NSView {
     var contentInsets = NSEdgeInsets()
     var automaticallyAdjustsContentInsets = true
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
@@ -415,7 +413,7 @@ open class NSClipView: NSView {
     override func draw(_ rect: CGRect) {
         guard drawsBackground, let backgroundColor, let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, backgroundColor.cgColorRef)
+        CG.setFill(context, backgroundColor)
         CG.fillRect(context, bounds)
         CG.restoreGState(context)
     }
@@ -445,7 +443,6 @@ open class NSScroller: NSControl {
         if decoded.has("NSPercent") { knobProportion = decoded.double("NSPercent") }
     }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithFrame:")
