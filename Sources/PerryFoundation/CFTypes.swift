@@ -654,6 +654,11 @@ public func CFBundleCopyResourcesDirectoryURL(_ bundle: id?) -> id? { ObjC.retai
 @c(_CFBundleCopyExecutableURL)
 public func CFBundleCopyExecutableURL(_ bundle: id?) -> id? { ObjC.retain(ObjC.send(bundle, ObjC.selector("executableURL"))) }
 
+@c(_CFBundleCopyAuxiliaryExecutableURL)
+public func CFBundleCopyAuxiliaryExecutableURL(_ bundle: id?, _ name: id?) -> id? {
+    ObjC.retain(ObjC.send(bundle, ObjC.selector("URLForAuxiliaryExecutable:"), name))
+}
+
 @c(_CFBundleCopyResourceURL)
 public func CFBundleCopyResourceURL(_ bundle: id?, _ name: id?, _ type: id?, _ subdirectory: id?) -> id? {
     ObjC.retain(unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, id?, id?) -> id?).self)(
