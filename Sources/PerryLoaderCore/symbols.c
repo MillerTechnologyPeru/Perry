@@ -537,6 +537,61 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     return code;
 }
 
+// MARK: - Aligned entries
+
+#if defined(__arm__)
+void perry_align_call(void);
+
+// Functions that keep or use their caller's frame, which a call through
+// perry_align_call would put a frame of its own under: setjmp returns a
+// second time, after that frame is gone.
+static bool keeps_callers_frame(const char *name) {
+    static const char *const names[] = {
+        "_setjmp", "__setjmp", "_sigsetjmp", "_vfork", "_getcontext", "_swapcontext", "_alloca",
+        "__Unwind_SjLj_Register", "__Unwind_SjLj_Unregister",
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (strcmp(names[i], name) == 0)
+            return true;
+    return false;
+}
+
+// What an image's lazy pointer to `function` holds: an entry that calls it
+// through perry_align_call, which aligns the stack 32-bit Darwin code calls
+// with. One entry a function, so its address compares as one.
+void *perry_aligned_entry(void *function, const char *name) {
+    static hash_table entries;
+    static uint32_t *page;
+    static size_t used;
+    enum { ENTRY_WORDS = 4, PAGE_SIZE = 0x10000 };
+    if (!function || keeps_callers_frame(name))
+        return function;
+    char key[24];
+    snprintf(key, sizeof(key), "%p", function);
+    void **slot = hash_lookup_string(&entries, key, true);
+    if (*slot)
+        return *slot;
+    if (!page || used + ENTRY_WORDS * 4 > PAGE_SIZE) {
+        page = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page == MAP_FAILED) {
+            // A host that refuses writable code: the function itself.
+            page = NULL;
+            return function;
+        }
+        used = 0;
+    }
+    uint32_t *code = (uint32_t *)((uint8_t *)page + used);
+    used += ENTRY_WORDS * 4;
+    code[0] = 0xe59fc000;   // ldr r12, [pc]      (the function, at +8)
+    code[1] = 0xe59ff000;   // ldr pc, [pc]       (perry_align_call, at +12)
+    code[2] = (uint32_t)(uintptr_t)function;
+    code[3] = (uint32_t)(uintptr_t)&perry_align_call;
+    __builtin___clear_cache((char *)code, (char *)code + ENTRY_WORDS * 4);
+    *slot = code;
+    return code;
+}
+#endif
+
 // MARK: - Import records
 
 static perry_import_record *records;
