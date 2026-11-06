@@ -63,7 +63,21 @@ enum Exceptions {
         let name = Strings.value(of: storage?.name) ?? "NSException"
         let reason = Strings.value(of: storage?.reason) ?? ""
         log("*** Terminating app due to uncaught exception '\(name)', reason: '\(reason)'")
+        if let setting = getenv("PERRY_CRASH_REPORT"), setting.pointee != 0, String(cString: setting) != "0" { Exceptions.reportFrames() }
         Exceptions.handler?(exception)
+    }
+
+    /// The frames that threw, with PERRY_CRASH_REPORT set: by symbol where
+    /// the address is in a library dladdr knows, else the bare address (an
+    /// app's Mach-O images).
+    static func reportFrames() {
+        var addresses = [UInt](repeating: 0, count: 64)
+        let count = perry_frame_return_addresses(&addresses, addresses.count)
+        var line = [CChar](repeating: 0, count: 512)
+        for (index, address) in addresses.prefix(count).enumerated() {
+            perry_describe_address(address, &line, line.count)
+            log("  #\(index) " + String(cString: line))
+        }
     }
 
     typealias Throw = @convention(c) (id?) -> Void
