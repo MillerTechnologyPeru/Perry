@@ -23,5 +23,10 @@ exports:
                _close, _closedir, _fclose, _fileno, _fstat, _lstat, _mkdir, _open, _opendir, _read,
                _readdir, _readlink, _rename, _rmdir, _stat, _symlink, _write, _fputs, _memcpy, _memset, _fseeko, _ftello, _ftruncate, _lseek,
                _mmap, _munmap, _pread, _pwrite, _unlink,
+               _bsearch, _atexit, _dispatch_queue_create, _dispatch_get_global_queue,
+               _dispatch_queue_attr_make_with_autorelease_frequency, _dispatch_sync, _dispatch_sync_f,
+               _dispatch_async, _dispatch_async_f, _dispatch_barrier_sync_f, _dispatch_apply,
+               _dispatch_apply_f, _dispatch_group_create, _dispatch_group_async, _dispatch_group_async_f,
+               _dispatch_group_wait,
                _perry_fixture_absent, _perry_fixture_unimplemented ]
 ...
