@@ -20,6 +20,7 @@
 #include "PerrySteamAPI.h"
 
 #include <dlfcn.h>
+#include <pwd.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -113,7 +114,12 @@ static void *client_generic_interface(HSteamUser user, HSteamPipe pipe, const ch
         steam_client, user, pipe, version);
 }
 
+/// The user's home, where Steam keeps ~/.steam: the account's, as Perry
+/// points HOME at the app's container.
 static const char *home_directory(void) {
+    struct passwd *user = getpwuid(getuid());
+    if (user && user->pw_dir && *user->pw_dir)
+        return user->pw_dir;
     const char *home = getenv("HOME");
     return home && *home ? home : "/";
 }
