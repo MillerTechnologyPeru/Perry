@@ -24,6 +24,10 @@ enum PVRTC {
     nonisolated(unsafe) static var compressedImage: CompressedImage?
     nonisolated(unsafe) static var compressedSubImage: CompressedSubImage?
     nonisolated(unsafe) static var storage: Storage?
+    nonisolated(unsafe) static var getError: (@convention(c) () -> UInt32)?
+    typealias Parameter = @convention(c) (UInt32, UInt32, Int32) -> Void
+    nonisolated(unsafe) static var texParameteri: Parameter?
+    nonisolated(unsafe) static var texParameterx: Parameter?
 
     static func bind(_ host: (String) -> UnsafeMutableRawPointer?) {
         texImage = host("glTexImage2D").map { unsafeBitCast($0, to: TexImage.self) }
@@ -31,18 +35,47 @@ enum PVRTC {
         compressedImage = host("glCompressedTexImage2D").map { unsafeBitCast($0, to: CompressedImage.self) }
         compressedSubImage = host("glCompressedTexSubImage2D").map { unsafeBitCast($0, to: CompressedSubImage.self) }
         storage = (host("glTexStorage2D") ?? host("glTexStorage2DEXT")).map { unsafeBitCast($0, to: Storage.self) }
+        getError = host("glGetError").map { unsafeBitCast($0, to: (@convention(c) () -> UInt32).self) }
+        texParameteri = host("glTexParameteri").map { unsafeBitCast($0, to: Parameter.self) }
+        texParameterx = host("glTexParameterx").map { unsafeBitCast($0, to: Parameter.self) }
     }
 
     static func isPVRTC(_ format: UInt32) -> Bool { format >= rgb4 && format <= rgba2 }
 
+    /// With PERRY_UIKIT_GL_TRACE, what an upload was and the error it left.
+    static func traced(_ text: @autoclosure () -> String) {
+        guard GLTrace.on else { return }
+        let error = getError?() ?? 0
+        GLTrace.say(text() + (error != 0 ? ", error 0x" + String(error, radix: 16) : ""))
+    }
+
+    /// glTexImage2D and the filter parameters, reported: bound in place of
+    /// the host's only while tracing.
+    static let tracedTexImage2D: TexImage = { target, level, internalFormat, width, height, border, format, type, pixels in
+        PVRTC.texImage?(target, level, internalFormat, width, height, border, format, type, pixels)
+        traced("texture image level \(level), \(width) by \(height), format 0x\(String(format, radix: 16)) type 0x\(String(type, radix: 16)) internal 0x\(String(UInt32(bitPattern: internalFormat), radix: 16))\(pixels == nil ? ", no pixels" : "")")
+    }
+
+    static let tracedTexParameteri: Parameter = { target, name, value in
+        PVRTC.texParameteri?(target, name, value)
+        traced("texture parameter 0x\(String(name, radix: 16)) = 0x\(String(UInt32(bitPattern: value), radix: 16))")
+    }
+
+    static let tracedTexParameterx: Parameter = { target, name, value in
+        PVRTC.texParameterx?(target, name, value)
+        traced("texture parameter (fixed) 0x\(String(name, radix: 16)) = 0x\(String(UInt32(bitPattern: value), radix: 16))")
+    }
+
     static let compressedTexImage2D: CompressedImage = { target, level, format, width, height, border, size, data in
         guard isPVRTC(format) else {
             PVRTC.compressedImage?(target, level, format, width, height, border, size, data)
+            traced("compressed image level \(level), \(width) by \(height), format 0x\(String(format, radix: 16)), \(size) bytes, the host's")
             return
         }
         let pixels = data.flatMap { decode($0, Int(size), width: Int(width), height: Int(height), twoBit: format == rgb2 || format == rgba2) }
         // GL_RGBA, GL_UNSIGNED_BYTE; rows of RGBA are 4-byte aligned.
         PVRTC.texImage?(target, level, 0x1908, width, height, 0, 0x1908, 0x1401, pixels)
+        traced("PVRTC image level \(level), \(width) by \(height), format 0x\(String(format, radix: 16)), \(size) bytes\(pixels == nil ? ", not decoded" : "")")
         pixels?.deallocate()
     }
 
