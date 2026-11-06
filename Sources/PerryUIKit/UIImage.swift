@@ -321,11 +321,11 @@ public func UIImagePNGRepresentation(_ image: UnsafeMutableRawPointer?) -> Unsaf
 }
 
 /// The image as JPEG data, at a quality from 0 to 1.
-@c(_UIImageJPEGRepresentation)
+@DarwinC("_UIImageJPEGRepresentation")
 public func UIImageJPEGRepresentation(_ image: UnsafeMutableRawPointer?, _ quality: CGFloat) -> UnsafeMutableRawPointer? {
     guard let image, let cgImage = UIImage.states[image].cgImage else { return nil }
     let properties = NSMutableDictionary.empty()
-    properties.set(NSNumber.make(double: quality), forKey: "kCGImageDestinationLossyCompressionQuality")
+    properties.set(NSNumber.make(double: Double(quality)), forKey: "kCGImageDestinationLossyCompressionQuality")
     return UIImage.encode(cgImage, type: "public.jpeg", properties: properties)?.objCReturnValue()
 }
 

@@ -184,7 +184,8 @@ enum GLES {
                 ? unsafeBitCast(GLMultisample.renderbufferStorageMultisample, to: UnsafeMutableRawPointer.self)
                 : unsafeBitCast(GLMultisample.resolveMultisampleFramebuffer, to: UnsafeMutableRawPointer.self))
         }
-        return perry_gl_entry(host(String(name.dropFirst())))
+        let cName = String(name.dropFirst())
+        return perry_gl_entry(host(cName).map { perry_gles_darwin_function(cName, $0) })
     }
 
     /// The host's function by its C name.
@@ -402,6 +403,23 @@ enum EAGLContexts {
         // ppoll, epoll_pwait(2), the sleeps, pselect6, read, recvfrom,
         // recvmsg, accept.
         var waiting = false
+#if arch(arm)
+        // 32-bit ARM: "svc 0" is 0xef000000, or 0xdf00 in Thumb code (the
+        // T bit of cpsr), and r7 has the call's number, which has a second
+        // one where the call takes a 64-bit time.
+        let pc = UInt(machine.arm_pc)
+        let thumb = machine.arm_cpsr & 0x20 != 0
+        func isCall(_ address: UInt) -> Bool {
+            thumb ? UnsafePointer<UInt16>(bitPattern: address)?.pointee == 0xdf00
+                : UnsafePointer<UInt32>(bitPattern: address)?.pointee == 0xef00_0000
+        }
+        if pc >= 4, isCall(pc) || isCall(pc - (thumb ? 2 : 4)) {
+            switch machine.arm_r7 {
+            case 240, 422, 336, 414, 346, 441, 252, 168, 162, 265, 407, 335, 413, 142, 3, 292, 297, 285: waiting = true
+            default: break
+            }
+        }
+#else
         let pc = UInt(machine.pc)
         if pc >= 4, UnsafePointer<UInt32>(bitPattern: pc)?.pointee == 0xd400_0001
             || UnsafePointer<UInt32>(bitPattern: pc - 4)?.pointee == 0xd400_0001 {
@@ -410,6 +428,7 @@ enum EAGLContexts {
             default: break
             }
         }
+#endif
         if waiting, let held = EAGLContexts.askedToRelease, GLES.getCurrentContext?() == held {
             _ = makeCurrent(display, nil, nil, nil)
         }

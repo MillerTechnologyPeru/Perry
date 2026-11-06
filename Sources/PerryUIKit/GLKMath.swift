@@ -147,7 +147,7 @@ public func GLKMathUnproject(_ window: GLKVector3, _ model: GLKMatrix4, _ projec
     return GLKVector3(v: (out[0] / out[3], out[1] / out[3], out[2] / out[3]))
 }
 
-@c(_GLKQuaternionAngle)
+@DarwinC("_GLKQuaternionAngle")
 public func GLKQuaternionAngle(_ quaternion: GLKQuaternion) -> Float {
     let q = quaternion.q
     let length = (q.0 * q.0 + q.1 * q.1 + q.2 * q.2 + q.3 * q.3).squareRoot()
@@ -163,7 +163,7 @@ public func GLKQuaternionAxis(_ quaternion: GLKQuaternion) -> GLKVector3 {
     return GLKVector3(v: (q.0 / scale, q.1 / scale, q.2 / scale))
 }
 
-@c(_GLKQuaternionSlerp)
+@DarwinC("_GLKQuaternionSlerp")
 public func GLKQuaternionSlerp(_ start: GLKQuaternion, _ end: GLKQuaternion, _ t: Float) -> GLKQuaternion {
     let a = [start.q.0, start.q.1, start.q.2, start.q.3]
     var b = [end.q.0, end.q.1, end.q.2, end.q.3]

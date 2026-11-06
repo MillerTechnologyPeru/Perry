@@ -24,9 +24,11 @@ public class NSEnumerator: NSObject {
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         guard let state, let objects, count > 0, let next = ObjC.send(objcObject, ObjC.selector("nextObject")) else { return 0 }
         objects[0] = next
-        state.storeBytes(of: UnsafeMutableRawPointer(objects), toByteOffset: 8, as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(objects), toByteOffset: DarwinLayout.enumerationItems,
+                         as: UnsafeMutableRawPointer.self)
         // The mutation pointer must point somewhere that does not change.
-        state.storeBytes(of: UnsafeMutableRawPointer(state), toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(state), toByteOffset: DarwinLayout.enumerationMutations,
+                         as: UnsafeMutableRawPointer.self)
         return 1
     }
 }

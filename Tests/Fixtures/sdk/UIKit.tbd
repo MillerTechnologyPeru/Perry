@@ -1,0 +1,12 @@
+--- !tapi-tbd
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/UIKit.framework/UIKit'
+current-version: 1
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ _UIApplicationMain, _UIGraphicsBeginImageContextWithOptions, _UIGraphicsEndImageContext,
+               _UIGraphicsGetCurrentContext ]
+    objc-classes: [ UIApplication, UIBezierPath, UIButton, UIColor, UIControl, UIFont, UILabel, UIResponder,
+                    UIScreen, UIView, UIViewController, UIWindow ]
+...

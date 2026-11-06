@@ -5,11 +5,28 @@ install-name: '/usr/lib/libSystem.B.dylib'
 current-version: 1351
 exports:
   - targets: [ arm64-ios, arm64-macos ]
-    symbols: [ ___error, ___stderrp, ___stdoutp, _exit, _fflush, _fopen,
+    symbols: [ _atan2, _calloc, _atof, _cos, _exp, _floor, _fmaf, _fmod, _frexp, _getsockopt,
+               _gettimeofday, _hypot, _jn, _ldexp, _log, _lround, _modf, _pow, _powf,
+               _pthread_attr_destroy, _pthread_attr_init, _pthread_attr_setstacksize,
+               _pthread_cond_broadcast, _pthread_cond_timedwait, _pthread_cond_wait,
+               _pthread_create, _pthread_getspecific, _pthread_join, _pthread_key_create,
+               _pthread_mutex_lock, _pthread_mutex_unlock, _pthread_once,
+               _pthread_rwlock_rdlock, _pthread_rwlock_unlock, _pthread_rwlock_wrlock,
+               _pthread_setspecific, _qsort, _raise, _setsockopt, _sigaction, _sigprocmask, _sin, _sinf,
+               _socketpair, _sqrt, _sqrtf, _strtod, _strtof, 
+               ___error, ___stderrp, ___stdoutp, _exit, _fflush, _fopen,
                _fprintf, _free, _malloc, _printf, _puts, _snprintf, _strcmp,
                _strerror, _strlen, _strtol, _vsnprintf, dyld_stub_binder,
                __Block_copy, __Block_object_assign, __Block_object_dispose,
                __Block_release, __NSConcreteGlobalBlock, __NSConcreteStackBlock,
                __Unwind_Resume,
+               _close, _closedir, _fclose, _fileno, _fstat, _lstat, _mkdir, _open, _opendir, _read,
+               _readdir, _readlink, _rename, _rmdir, _stat, _symlink, _write, _fputs, _memcpy, _memset, _fseeko, _ftello, _ftruncate, _lseek,
+               _mmap, _munmap, _pread, _pwrite, _unlink,
+               _bsearch, _atexit, _dispatch_queue_create, _dispatch_get_global_queue,
+               _dispatch_queue_attr_make_with_autorelease_frequency, _dispatch_sync, _dispatch_sync_f,
+               _dispatch_async, _dispatch_async_f, _dispatch_barrier_sync_f, _dispatch_apply,
+               _dispatch_apply_f, _dispatch_group_create, _dispatch_group_async, _dispatch_group_async_f,
+               _dispatch_group_wait,
                _perry_fixture_absent, _perry_fixture_unimplemented ]
 ...

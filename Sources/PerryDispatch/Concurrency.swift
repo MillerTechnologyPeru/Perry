@@ -39,11 +39,14 @@ enum Workloops {
 // MARK: - Swift's jobs
 
 /// Runs a Swift job as its metadata's dispatch invoke function does:
-/// DispatchClassMetadata keeps it 48 bytes into the metadata.
+/// DispatchClassMetadata keeps it six words into the metadata.
 private let runSwiftJob: Function = { job in
     guard let job, let metadata = job.load(as: UnsafeRawPointer?.self) else { return }
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UInt32) -> Void
-    unsafeBitCast(metadata.load(fromByteOffset: 48, as: UnsafeRawPointer.self), to: Invoke.self)(job, nil, 0)
+    keepingLinuxRegisters {
+        unsafeBitCast(metadata.load(fromByteOffset: DarwinLayout.metadataInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(
+            job, nil, 0)
+    }
 }
 
 /// Enqueues a Swift job, whatever its priority.

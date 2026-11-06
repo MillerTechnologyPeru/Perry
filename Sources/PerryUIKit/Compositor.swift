@@ -312,8 +312,9 @@ final class Compositor {
                     case 0x1B: Keyboard.escape()
                     default: break
                     }
-                case 0x303: // text input: UTF-8 at 24
-                    if let text = raw.load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self) {
+                case 0x303: // text input: the UTF-8 after the window ID, at a pointer's alignment
+                    let textOffset = (20 + MemoryLayout<UnsafeRawPointer>.alignment - 1) & ~(MemoryLayout<UnsafeRawPointer>.alignment - 1)
+                    if let text = raw.load(fromByteOffset: textOffset, as: UnsafePointer<CChar>?.self) {
                         Keyboard.insert(String(cString: text))
                     }
                 case 0x403: // wheel: positive y scrolls up, unless flipped
@@ -341,7 +342,7 @@ final class Compositor {
         Renderbuffers.collect()
         rendererContext?.restore()
         fit()
-        _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, scale, $0, $1) }
+        _ = QuartzCore.withRoots(windows) { QuartzCore.composite?(renderer, Double(scale), $0, $1) }
         // The renderer's context was current while it drew; the app's is
         // again.
         EAGLContexts.restore()

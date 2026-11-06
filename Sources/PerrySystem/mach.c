@@ -9,6 +9,8 @@
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
+#include "PerryContext.h"
+#include "MachO.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -511,27 +513,6 @@ kern_return_t darwin_thread_abort(mach_port_t port) { (void)port; return KERN_SU
 kern_return_t darwin_thread_abort_safely(mach_port_t port) DARWIN_SYMBOL(thread_abort_safely);
 kern_return_t darwin_thread_abort_safely(mach_port_t port) { (void)port; return KERN_SUCCESS; }
 
-// Darwin's arm64 states.
-typedef struct { uint64_t x[29], fp, lr, sp, pc; uint32_t cpsr, pad; } darwin_thread_state;
-typedef struct { __uint128_t v[32]; uint32_t fpsr, fpcr; } darwin_neon_state;
-typedef struct { uint64_t far; uint32_t esr, exception; } darwin_exception_state;
-
-enum {
-    ARM_THREAD_STATE64 = 6, ARM_THREAD_STATE64_COUNT = sizeof(darwin_thread_state) / 4,
-    ARM_EXCEPTION_STATE64 = 7, ARM_EXCEPTION_STATE64_COUNT = sizeof(darwin_exception_state) / 4,
-    ARM_NEON_STATE64 = 17, ARM_NEON_STATE64_COUNT = sizeof(darwin_neon_state) / 4,
-};
-
-static struct fpsimd_context *neon_context(ucontext_t *context) {
-    struct _aarch64_ctx *header = (struct _aarch64_ctx *)context->uc_mcontext.__reserved;
-    while (header->magic) {
-        if (header->magic == FPSIMD_MAGIC)
-            return (struct fpsimd_context *)header;
-        header = (struct _aarch64_ctx *)((char *)header + header->size);
-    }
-    return NULL;
-}
-
 static ucontext_t *stopped_context(mach_port_t port) {
     pthread_mutex_lock(&suspension_lock);
     suspension *entry = find_suspension((pid_t)port, 0);
@@ -540,43 +521,30 @@ static ucontext_t *stopped_context(mach_port_t port) {
     return context;
 }
 
+// The states are PerryContext.h's, for arm64 or armv7. 32-bit Darwin's
+// ARM_THREAD_STATE32 is its ARM_THREAD_STATE.
+static int is_thread_flavor(int flavor) {
+    return flavor == DARWIN_THREAD_FLAVOR || (sizeof(void *) == 4 && flavor == 9);
+}
+
 kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) DARWIN_SYMBOL(thread_get_state);
 kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) {
     ucontext_t *context = stopped_context(port);
     if (!context)
         return KERN_FAILURE;
-    mcontext_t *machine = &context->uc_mcontext;
-    if (flavor == ARM_THREAD_STATE64 && *count >= ARM_THREAD_STATE64_COUNT) {
-        darwin_thread_state *out = (darwin_thread_state *)state;
-        memcpy(out->x, machine->regs, sizeof(out->x));
-        out->fp = machine->regs[29];
-        out->lr = machine->regs[30];
-        out->sp = machine->sp;
-        out->pc = machine->pc;
-        out->cpsr = (uint32_t)machine->pstate;
-        out->pad = 0;
-        *count = ARM_THREAD_STATE64_COUNT;
+    if (is_thread_flavor(flavor) && *count >= DARWIN_THREAD_COUNT) {
+        perry_context_get_thread(context, (darwin_thread_state *)state);
+        *count = DARWIN_THREAD_COUNT;
         return KERN_SUCCESS;
     }
-    if (flavor == ARM_NEON_STATE64 && *count >= ARM_NEON_STATE64_COUNT) {
-        darwin_neon_state *out = (darwin_neon_state *)state;
-        struct fpsimd_context *neon = neon_context(context);
-        if (neon) {
-            memcpy(out->v, neon->vregs, sizeof(out->v));
-            out->fpsr = neon->fpsr;
-            out->fpcr = neon->fpcr;
-        } else {
-            memset(out, 0, sizeof(*out));
-        }
-        *count = ARM_NEON_STATE64_COUNT;
+    if (flavor == DARWIN_FLOAT_FLAVOR && *count >= DARWIN_FLOAT_COUNT) {
+        perry_context_get_float(context, (darwin_float_state *)state);
+        *count = DARWIN_FLOAT_COUNT;
         return KERN_SUCCESS;
     }
-    if (flavor == ARM_EXCEPTION_STATE64 && *count >= ARM_EXCEPTION_STATE64_COUNT) {
-        darwin_exception_state *out = (darwin_exception_state *)state;
-        out->far = machine->fault_address;
-        out->esr = 0;
-        out->exception = 0;
-        *count = ARM_EXCEPTION_STATE64_COUNT;
+    if (flavor == DARWIN_EXCEPTION_FLAVOR && *count >= DARWIN_EXCEPTION_COUNT) {
+        perry_context_get_exception(context, (darwin_exception_state *)state);
+        *count = DARWIN_EXCEPTION_COUNT;
         return KERN_SUCCESS;
     }
     return KERN_INVALID_ARGUMENT;
@@ -588,24 +556,12 @@ kern_return_t darwin_thread_set_state(mach_port_t port, int flavor, const uint32
     ucontext_t *context = stopped_context(port);
     if (!context)
         return KERN_FAILURE;
-    mcontext_t *machine = &context->uc_mcontext;
-    if (flavor == ARM_THREAD_STATE64 && count >= ARM_THREAD_STATE64_COUNT) {
-        const darwin_thread_state *in = (const darwin_thread_state *)state;
-        memcpy(machine->regs, in->x, sizeof(in->x));
-        machine->regs[29] = in->fp;
-        machine->regs[30] = in->lr;
-        machine->sp = in->sp;
-        machine->pc = in->pc;
+    if (is_thread_flavor(flavor) && count >= DARWIN_THREAD_COUNT) {
+        perry_context_set_thread(context, (const darwin_thread_state *)state);
         return KERN_SUCCESS;
     }
-    if (flavor == ARM_NEON_STATE64 && count >= ARM_NEON_STATE64_COUNT) {
-        const darwin_neon_state *in = (const darwin_neon_state *)state;
-        struct fpsimd_context *neon = neon_context(context);
-        if (neon) {
-            memcpy(neon->vregs, in->v, sizeof(in->v));
-            neon->fpsr = in->fpsr;
-            neon->fpcr = in->fpcr;
-        }
+    if (flavor == DARWIN_FLOAT_FLAVOR && count >= DARWIN_FLOAT_COUNT) {
+        perry_context_set_float(context, (const darwin_float_state *)state);
         return KERN_SUCCESS;
     }
     return KERN_INVALID_ARGUMENT;
@@ -717,23 +673,28 @@ kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint
 
 // MARK: - Mach-O sections
 
+static const void *find_section(const void *header, const char *segment, const char *section);
+
 // The section's header in the image's load commands, or NULL.
 const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *header, const char *segment, const char *section) {
     if (!header)
         return NULL;
-    const uint32_t *mach = header;
-    uint32_t command_count = mach[4];
-    const uint8_t *command = (const uint8_t *)header + 32;
-    for (uint32_t i = 0; i < command_count; i++) {
-        uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
-        if (kind == 0x19 /* LC_SEGMENT_64 */ && strncmp((const char *)command + 8, segment, 16) == 0) {
-            uint32_t sections = *(const uint32_t *)(command + 64);
-            const struct darwin_section_64 *entry = (const struct darwin_section_64 *)(command + 72);
-            for (uint32_t j = 0; j < sections; j++, entry++)
-                if (strncmp(entry->sectname, section, 16) == 0)
-                    return entry;
+    return perry_macho_is64(header) ? find_section(header, segment, section) : NULL;
+}
+
+// A section's header, either size, by segment and section name.
+static const void *find_section(const void *header, const char *segment, const char *section) {
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment found;
+        if (!perry_macho_segment_at(command, &found) || strncmp(found.name, segment, 16) != 0)
+            continue;
+        for (uint32_t j = 0; j < found.section_count; j++) {
+            uint64_t addr, size;
+            const uint8_t *entry = perry_macho_section(&found, j, &addr, &size);
+            if (strncmp((const char *)entry, section, 16) == 0)
+                return entry;
         }
-        command += size;
     }
     return NULL;
 }
@@ -809,7 +770,7 @@ void *darwin_dlsym(void *handle, const char *symbol) {
 // MARK: - Hosts, exceptions and memory
 
 // The host's basic information (HOST_BASIC_INFO, 1): its processors and
-// memory, as an arm64 device reports them.
+// memory, as the device PERRY_HW_MACHINE names reports them.
 typedef struct {
     int32_t max_cpus, avail_cpus;
     uint32_t memory_size;
@@ -827,7 +788,7 @@ kern_return_t darwin_host_info(mach_port_t host, int flavor, int32_t *info, uint
     uint64_t memory = (uint64_t)sysconf(_SC_PHYS_PAGES) * (uint64_t)sysconf(_SC_PAGESIZE);
     darwin_host_basic_info basic = {
         (int32_t)cpus, (int32_t)cpus, memory > UINT32_MAX ? UINT32_MAX : (uint32_t)memory,
-        0x0100000c /* CPU_TYPE_ARM64 */, 0, 0, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, memory,
+        PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 0, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, (int32_t)cpus, memory,
     };
     memcpy(info, &basic, sizeof(basic));
     *count = words;
@@ -902,8 +863,9 @@ int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t rece
 const uint8_t darwin_NDR_record[8] DARWIN_SYMBOL(NDR_record) = { 0, 0, 0, 0, 1, 0, 0, 0 };
 
 // iOS's 16 KB pages.
-uintptr_t darwin_vm_page_size DARWIN_SYMBOL(vm_page_size) = 16384;
-uintptr_t darwin_vm_page_mask DARWIN_SYMBOL(vm_page_mask) = 16383;
+// arm64 iOS's pages are 16 KB, armv7's 4 KB.
+uintptr_t darwin_vm_page_size DARWIN_SYMBOL(vm_page_size) = PERRY_PAGE_SIZE;
+uintptr_t darwin_vm_page_mask DARWIN_SYMBOL(vm_page_mask) = PERRY_PAGE_SIZE - 1;
 
 // Copies another address's memory, failing rather than faulting where none
 // is mapped.
@@ -929,22 +891,25 @@ pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
 
 // The architecture, as NXGetLocalArchInfo describes it.
 typedef struct { const char *name; int cputype; int cpusubtype; int byteorder; const char *description; } darwin_arch_info;
-static const darwin_arch_info arm64_info = { "arm64", 0x0100000c, 0, 1, "ARM64" };
+#if defined(__arm__)
+static const darwin_arch_info local_arch_info = { "armv7", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "arm v7" };
+#else
+static const darwin_arch_info local_arch_info = { "arm64", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "ARM64" };
+#endif
 
 const darwin_arch_info *darwin_NXGetLocalArchInfo(void) DARWIN_SYMBOL(NXGetLocalArchInfo);
-const darwin_arch_info *darwin_NXGetLocalArchInfo(void) { return &arm64_info; }
+const darwin_arch_info *darwin_NXGetLocalArchInfo(void) { return &local_arch_info; }
 
 const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) DARWIN_SYMBOL(NXGetArchInfoFromCpuType);
 const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) {
     (void)subtype;
-    return type == arm64_info.cputype ? &arm64_info : NULL;
+    return type == local_arch_info.cputype ? &local_arch_info : NULL;
 }
 
 // The 32-bit header's lookup: a 64-bit image has no 32-bit segments, so
-// nothing is found, as on 64-bit Darwin.
+// nothing is found there, as on 64-bit Darwin.
 const void *darwin_getsectbynamefromheader(const void *header, const char *segment, const char *section)
     DARWIN_SYMBOL(getsectbynamefromheader);
 const void *darwin_getsectbynamefromheader(const void *header, const char *segment, const char *section) {
-    (void)header, (void)segment, (void)section;
-    return NULL;
+    return header && !perry_macho_is64(header) ? find_section(header, segment, section) : NULL;
 }

@@ -1,0 +1,15 @@
+--- !tapi-tbd
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/OpenGLES.framework/OpenGLES'
+current-version: 1
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ _glBindFramebufferOES, _glBindRenderbufferOES, _glCheckFramebufferStatusOES, _glClear,
+               _glClearColor, _glColorPointer, _glDrawElements, _glEnable, _glEnableClientState,
+               _glFramebufferRenderbufferOES, _glFrustumf, _glGenFramebuffersOES, _glGenRenderbuffersOES,
+               _glGetError, _glGetRenderbufferParameterivOES, _glGetString, _glLoadIdentity, _glMatrixMode,
+               _glReadPixels, _glRenderbufferStorageOES, _glRotatef, _glTranslatef, _glVertexPointer,
+               _glViewport ]
+    objc-classes: [ EAGLContext ]
+...

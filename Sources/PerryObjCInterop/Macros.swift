@@ -92,6 +92,15 @@ public macro ObjCCategory(_ categoryName: String, addedAtStartup: Bool = true) =
 public macro ObjCConstants() =
     #externalMacro(module: "PerryObjCMacros", type: "ObjCConstantsMacro")
 
+/// Exports the function as a C function named `name` ("_CGRectMake"), as
+/// @c(name) would, with Darwin's calling convention for floating point,
+/// 64-bit integers and structures of them (their ObjCType and
+/// ObjCResultType), and as perry_native_<name without its underscore>
+/// unchanged, for other providers.
+@attached(peer, names: prefixed(__darwin_), prefixed(__native_))
+public macro DarwinC(_ name: String) =
+    #externalMacro(module: "PerryObjCMacros", type: "DarwinCMacro")
+
 /// An instance method. With a body, the function implements the selector;
 /// without one, calling it sends the message. The function's arguments are
 /// the selector's.
@@ -147,15 +156,17 @@ public macro ObjCProperty(getter: String? = nil, readonly: Bool = false) =
 // MARK: - Type encodings
 
 /// Method type encodings, as clang writes them: return type, frame size,
-/// then each argument at its offset ("S24@0:8Q16").
+/// then each argument at its offset ("S24@0:8Q16", or on 32-bit Darwin
+/// "S16@0:4Q8").
 public enum ObjCTypeEncoding {
     private static func size<Value: ObjCValue>(_ type: Value.Type) -> Int {
         max(MemoryLayout<Value.ObjCType>.size, 4)
     }
 
     public static func method(returning result: (any ObjCValue.Type)?, arguments: [any ObjCValue.Type]) -> String {
-        var offset = 16
-        var encoded = "@0:8"
+        let word = MemoryLayout<UInt>.size
+        var offset = 2 * word
+        var encoded = "@0:\(word)"
         for argument in arguments {
             encoded += "\(argument.objCTypeEncoding)\(offset)"
             offset += size(argument)

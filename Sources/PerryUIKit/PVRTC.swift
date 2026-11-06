@@ -82,12 +82,13 @@ enum PVRTC {
 
     /// Color B, from the color word's high half.
     static func colorB(_ word: UInt32) -> (Int, Int, Int, Int) {
-        let c = Int(word)
+        // The word's top bit is set, which a 32-bit Int does not hold.
+        let c = word
         if c & 0x8000_0000 != 0 {
-            return ((c >> 26) & 0x1F, (c >> 21) & 0x1F, (c >> 16) & 0x1F, 0xF)
+            return (Int((c >> 26) & 0x1F), Int((c >> 21) & 0x1F), Int((c >> 16) & 0x1F), 0xF)
         }
-        return (((c >> 23) & 0x1E) | ((c >> 27) & 0x1), ((c >> 19) & 0x1E) | ((c >> 23) & 0x1),
-                ((c >> 15) & 0x1E) | ((c >> 19) & 0x1), (c >> 27) & 0xE)
+        return (Int(((c >> 23) & 0x1E) | ((c >> 27) & 0x1)), Int(((c >> 19) & 0x1E) | ((c >> 23) & 0x1)),
+                Int(((c >> 15) & 0x1E) | ((c >> 19) & 0x1)), Int((c >> 27) & 0xE))
     }
 
     /// RGBA pixels, top row first, allocated; nil if the data is short.

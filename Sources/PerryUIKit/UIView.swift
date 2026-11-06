@@ -204,7 +204,7 @@ enum Screen {
         if isResizable { return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
         if isLandscape { return UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47) }
         let statusBar = getenv("PERRY_UIKIT_STATUS_BAR_HEIGHT").flatMap { Double(String(cString: $0)) } ?? 0
-        return UIEdgeInsets(top: max(statusBar, 0), left: 0, bottom: 34, right: 0)
+        return UIEdgeInsets(top: CGFloat(max(statusBar, 0)), left: 0, bottom: 34, right: 0)
     }()
 }
 

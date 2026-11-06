@@ -163,10 +163,11 @@ enum PredicateArguments {
         }
     }
 
-    mutating func word() -> UInt64 {
+    /// An int, long or pointer argument; `wide` for a long long or a double.
+    mutating func word(wide: Bool = false) -> UInt64 {
         switch self {
         case .variadic(var arguments):
-            let value = arguments.next()
+            let value = wide ? arguments.next64() : arguments.next()
             self = .variadic(arguments)
             return value
         case .array:
@@ -424,15 +425,17 @@ struct PredicateParser {
             guard let path = Strings.value(of: arguments.object()) else { fail("%K needs a key path string") }
             return .keyPath(path)
         case "%f", "%lf", "%g", "%e", "%F", "%Lf":
-            return .constant(ObjCObject(Numbers.make(nil, .double(Double(bitPattern: arguments.word())))!))
+            return .constant(ObjCObject(Numbers.make(nil, .double(Double(bitPattern: arguments.word(wide: true))))!))
         case "%u", "%lu", "%llu", "%qu", "%zu", "%x", "%lx", "%llx":
-            let raw = arguments.word()
+            let raw = arguments.word(wide: ["%llu", "%qu", "%llx"].contains(spec))
             let value = spec == "%u" || spec == "%x" ? UInt64(UInt32(truncatingIfNeeded: raw)) : raw
             return .constant(ObjCObject(Numbers.make(nil, .unsigned(value))!))
         case "%d", "%i", "%hd", "%hhd", "%c":
             return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(Int32(truncatingIfNeeded: arguments.word()))))!))
-        case "%ld", "%li", "%lld", "%lli", "%qd", "%zd":
-            return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(bitPattern: arguments.word())))!))
+        case "%lld", "%lli", "%qd":
+            return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(bitPattern: arguments.word(wide: true))))!))
+        case "%ld", "%li", "%zd":
+            return .constant(ObjCObject(Numbers.make(nil, .signed(Int64(Int(truncatingIfNeeded: arguments.word()))))!))
         case "%s":
             let pointer = arguments.object()
             return .constant(ObjCObject(Strings.autoreleased(pointer.map { String(cString: $0.assumingMemoryBound(to: CChar.self)) } ?? "")))
@@ -485,9 +488,9 @@ enum PredicateEvaluation {
     /// changes over a string.
     static func function(_ name: String, _ arguments: [id?]) -> id? {
         let items = arguments.first.flatMap { elements($0) } ?? []
-        typealias DoubleValue = @convention(c) (id?, SEL) -> Double
+        typealias DoubleValue = @convention(c) (id?, SEL) -> Double.ObjCResultType
         let doubleValue = unsafeBitCast(ObjC.msgSend, to: DoubleValue.self)
-        let numbers = items.map { doubleValue($0, ObjC.selector("doubleValue")) }
+        let numbers = items.map { darwinResult(doubleValue($0, ObjC.selector("doubleValue")), as: Double.self) }
         switch name {
         case "count:": return Numbers.make(nil, .signed(Int64(items.count)))
         case "sum:": return Numbers.make(nil, .double(numbers.reduce(0, +)))

@@ -106,7 +106,7 @@ public func CFCopyDescription(_ object: UnsafeMutableRawPointer?) -> UnsafeMutab
 @c(_NSStringFromProtocol)
 public func NSStringFromProtocol(_ proto: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     // protocol_t: isa, then the name.
-    proto?.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self).map { Strings.autoreleased(String(cString: $0)) }
+    proto?.load(fromByteOffset: DarwinLayout.protocolName, as: UnsafePointer<CChar>?.self).map { Strings.autoreleased(String(cString: $0)) }
 }
 
 // MARK: - Ranges

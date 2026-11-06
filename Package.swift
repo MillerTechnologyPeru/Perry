@@ -120,9 +120,11 @@ let package = Package(
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]
         ),
+        // C types for values at the Objective-C boundary.
+        .target(name: "CPerryObjCInterop"),
         .target(
             name: "PerryObjCInterop",
-            dependencies: ["PerryObjCMacros"]
+            dependencies: ["CPerryObjCInterop", "PerryObjCMacros"]
         ),
         .testTarget(
             name: "PerryObjCMacrosTests",

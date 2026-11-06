@@ -40,7 +40,7 @@ typedef struct perry_segment {
     uint64_t filesize;
     int initprot;
     uint32_t flags;
-    const struct section_64 *sections;
+    const section_t *sections;
     uint32_t nsects;
     bool mapped;                // false for __PAGEZERO and empty segments
 } perry_segment;
@@ -54,7 +54,7 @@ typedef struct perry_image {
     intptr_t slide;             // added to unslid vmaddrs
     uint64_t vm_start;          // lowest unslid vmaddr (ignoring __PAGEZERO)
     size_t vm_size;
-    const struct mach_header_64 *header;
+    const mach_header_t *header;
 
     perry_segment *segments;
     uint32_t segment_count;
@@ -77,6 +77,11 @@ typedef struct perry_image {
     // Entry point (LC_MAIN), as an offset from the mach header.
     bool has_entry;
     uint64_t entryoff;
+    bool unixthread;            // started by LC_UNIXTHREAD rather than LC_MAIN
+    const struct symtab_command *symtab;
+    const struct dysymtab_command *dysymtab;
+    void *legacy_main;          // _main, for LC_UNIXTHREAD executables, which have no LC_MAIN
+    uint32_t thread_pc;         // LC_UNIXTHREAD's unslid pc: crt1's `start`
 
     // Linkedit data. Pointers are into the mapped __LINKEDIT segment.
     const struct linkedit_data_command *chained_fixups;
@@ -118,13 +123,19 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
 void perry_install_crash_reporter(perry_loader *loader);
 _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
 
+// The architectures a Mach-O file holds, as PERRY_ARCH_* bits: a thin file's
+// one, or each slice of a universal file. Zero when the file is not Mach-O.
+#define PERRY_ARCH_ARM64    1u
+#define PERRY_ARCH_ARMV7    2u
+unsigned perry_macho_architectures(const char *path);
+
 // Address helpers
 void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
 
 // Points the image's thread-local variable descriptors at Perry's tlv_get_addr.
 void perry_setup_thread_locals(perry_image *image);
 void *perry_image_fileoff(const perry_image *image, uint64_t fileoff);
-const struct section_64 *perry_image_section(const perry_image *image, const char *segname, const char *sectname);
+const section_t *perry_image_section(const perry_image *image, const char *segname, const char *sectname);
 const char *perry_platform_name(uint32_t platform);
 
 // Fixups (fixups.c)
@@ -147,6 +158,11 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
 /// conformances, once every image is bound.
 void perry_make_witness_tables(perry_loader *loader);
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth);
+#if defined(__arm__)
+/// The entry an armv7 image calls an imported function through, which aligns
+/// the stack; `function` itself for the few that must be called directly.
+void *perry_aligned_entry(void *function, const char *name);
+#endif
 perry_provider *perry_find_provider(perry_loader *loader, const char *install_name);
 void *perry_provider_symbol(perry_loader *loader, const char *install_name, const char *name);
 void *perry_unresolved_stub(const char *library, const char *name);

@@ -52,11 +52,20 @@ public enum RootClasses {
         _ = MethodTable(proto, NSObject.registerObjCCategoryImmortal)
     }()
 
+    #if arch(arm)
+    private static var stretSend: UnsafeRawPointer? { perry_objc_msgSend_stret_address() }
+    private static var stretSuperSend: UnsafeRawPointer? { perry_objc_msgSendSuper2_stret_address() }
+    #else
+    private static var stretSend: UnsafeRawPointer? { nil }
+    private static var stretSuperSend: UnsafeRawPointer? { nil }
+    #endif
+
     /// Points the interop layer at this runtime's functions.
     private static func installInterop() {
         ObjCRuntime.install(ObjCRuntimeFunctions(
             msgSend: perry_objc_msgSend_address(),
             msgSendSuper2: perry_objc_msgSendSuper2_address(),
+            msgSendStret: stretSend, msgSendSuper2Stret: stretSuperSend,
             retain: { $0.map(Objects.retain) },
             release: { if let object = $0 { Objects.release(object) } },
             autorelease: { $0.map(Objects.autorelease) },

@@ -49,7 +49,7 @@ public enum BlockClasses {
         func make(_ name: String, _ storage: UnsafeMutableRawPointer?, _ registrations: ObjCMethodRegistration...) {
             guard let storage else { return }
             let info = Runtime.makeClass(storage.assumingMemoryBound(to: perry_objc_class.self),
-                                         metaclass: (storage + 128).assumingMemoryBound(to: perry_objc_class.self),
+                                         metaclass: (storage + 16 * Layout.word).assumingMemoryBound(to: perry_objc_class.self),
                                          superclass: block.cls, name: permanentCString(name),
                                          instanceSize: 8, registerName: true)
             _ = MethodTable(info, registrations)
@@ -77,7 +77,7 @@ class NSBlock: NSObject {
     @ObjCMethod("invoke")
     func invokeBlock() {
         typealias Invoke = @convention(c) (ObjectPointer) -> Void
-        unsafeBitCast(objcObject.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
+        unsafeBitCast(objcObject.load(fromByteOffset: Layout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(objcObject)
     }
 }
 

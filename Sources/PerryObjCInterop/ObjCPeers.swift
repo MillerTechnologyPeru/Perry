@@ -75,7 +75,7 @@ public enum ObjCPeers {
         var current = ObjCRuntime.objectClass(object)
         while let cls = current {
             if let type = lock.withLock({ classes[cls] }), let match = type as? Base.Type { return match }
-            current = cls.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
+            current = cls.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeMutableRawPointer?.self)
         }
         return base
     }

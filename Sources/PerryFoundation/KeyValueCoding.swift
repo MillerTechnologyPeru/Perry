@@ -23,10 +23,14 @@ enum KeyValueCoding {
     static func get(_ object: id, _ selector: SEL) -> id? {
         let send = ObjC.msgSend!
         switch types(object, selector)?.first ?? "@" {
-        case "q", "l", "Q", "L":
-            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int64).self)(object, selector)
-            return Numbers.make(nil, types(object, selector)?.first == "Q" || types(object, selector)?.first == "L"
-                                ? .unsigned(UInt64(bitPattern: value)) : .signed(value))
+        case "q", "Q":
+            let value = darwinResult(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int64.ObjCResultType).self)(object, selector),
+                                     as: Int64.self)
+            return Numbers.make(nil, types(object, selector)?.first == "Q" ? .unsigned(UInt64(bitPattern: value)) : .signed(value))
+        case "l":
+            return Numbers.make(nil, .signed(Int64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int).self)(object, selector))))
+        case "L":
+            return Numbers.make(nil, .unsigned(UInt64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> UInt).self)(object, selector))))
         case "i":
             return Numbers.make(nil, .signed(Int64(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Int32).self)(object, selector))))
         case "I":
@@ -42,9 +46,11 @@ enum KeyValueCoding {
         case "B":
             return perry_foundation_boolean(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Bool).self)(object, selector) ? 1 : 0)
         case "d":
-            return Numbers.make(nil, .double(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Double).self)(object, selector)))
+            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Double.ObjCResultType).self)(object, selector)
+            return Numbers.make(nil, .double(darwinResult(value, as: Double.self)))
         case "f":
-            return Numbers.make(nil, .double(Double(unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Float).self)(object, selector))))
+            let value = unsafeBitCast(send, to: (@convention(c) (id, SEL) -> Float.ObjCResultType).self)(object, selector)
+            return Numbers.make(nil, .double(Double(darwinResult(value, as: Float.self))))
         case "v":
             return nil
         case "{":
@@ -58,8 +64,10 @@ enum KeyValueCoding {
         let send = ObjC.msgSend!
         let number = Numbers.storage(value)
         switch types(object, selector).flatMap({ $0.count > 3 ? $0[3] : nil }) ?? "@" {
-        case "q", "l", "Q", "L":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int64) -> Void).self)(object, selector, number.int64)
+        case "q", "Q":
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int64.ObjCType) -> Void).self)(object, selector, number.int64.objCArgument())
+        case "l", "L":
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Int) -> Void).self)(object, selector, Int(truncatingIfNeeded: number.int64))
         case "i", "I":
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Int32) -> Void).self)(object, selector, Int32(truncatingIfNeeded: number.int64))
         case "s", "S":
@@ -69,9 +77,10 @@ enum KeyValueCoding {
         case "B":
             unsafeBitCast(send, to: (@convention(c) (id, SEL, Bool) -> Void).self)(object, selector, number.int64 != 0)
         case "d":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Double) -> Void).self)(object, selector, number.double)
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Double.ObjCType) -> Void).self)(object, selector, number.double.objCArgument())
         case "f":
-            unsafeBitCast(send, to: (@convention(c) (id, SEL, Float) -> Void).self)(object, selector, Float(number.double))
+            unsafeBitCast(send, to: (@convention(c) (id, SEL, Float.ObjCType) -> Void).self)(object, selector,
+                                                                                         Float(number.double).objCArgument())
         case "{":
             Structures.set(object, selector, value)
         default:
@@ -181,9 +190,12 @@ enum KeyValueCoding {
     }
 }
 
-/// Structures passed to and returned from accessors as arm64 passes them:
-/// up to four floats or doubles in d0 to d3, others up to 16 bytes in two
-/// general registers, larger ones through memory. KVC wraps them in NSValue.
+/// Structures passed to and returned from accessors as Darwin passes them,
+/// which KVC wraps in NSValue. On arm64: up to four floats or doubles in d0
+/// to d3, others up to 16 bytes in two general registers, larger ones
+/// through memory. On armv7: arguments as words in r2, r3 and then on the
+/// stack; results of up to 4 bytes in r0, larger ones through a pointer
+/// passed in r0, before self.
 enum Structures {
     /// A method's types, whole: "{_NSRange=QQ}", "@", ":".
     static func encodedTypes(_ object: id, _ selector: SEL) -> [String] {
@@ -229,6 +241,40 @@ enum Structures {
         return (first, members.count)
     }
 
+    #if _pointerBitWidth(_32)
+    /// The most words a structure argument may take.
+    static let argumentWords = 16
+
+    static func get(_ object: id, _ selector: SEL, type: String) -> id? {
+        guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return nil }
+        var bytes = [UInt8](repeating: 0, count: max(size, 4))
+        if size <= 4 {
+            var word = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> UInt32).self)(object, selector)
+            withUnsafeBytes(of: &word) { word in bytes.withUnsafeMutableBytes { $0.copyMemory(from: word) } }
+        } else {
+            let getter = unsafeBitCast(imp, to: (@convention(c) (UnsafeMutableRawPointer, id, SEL) -> Void).self)
+            bytes.withUnsafeMutableBytes { getter($0.baseAddress!, object, selector) }
+        }
+        return bytes.prefix(size).withUnsafeBytes {
+            ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: $0.baseAddress, type: type))
+        }
+    }
+
+    static func set(_ object: id, _ selector: SEL, _ value: id?) {
+        guard let storage = Values.storage(value), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
+        else { return }
+        guard storage.bytes.count <= argumentWords * 4 else {
+            foundationFatal("-[\(ObjC.className(object)) \(String(cString: selector))]: a \(storage.bytes.count)-byte structure is too large for key-value coding")
+        }
+        var w = [UInt32](repeating: 0, count: argumentWords)
+        storage.bytes.withUnsafeBytes { source in w.withUnsafeMutableBytes { $0.copyMemory(from: source) } }
+        typealias Setter = @convention(c) (id, SEL, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                                           UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32) -> Void
+        unsafeBitCast(imp, to: Setter.self)(object, selector, w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+                                            w[8], w[9], w[10], w[11], w[12], w[13], w[14], w[15])
+    }
+    #else
     static func get(_ object: id, _ selector: SEL, type: String) -> id? {
         guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
         else { return nil }
@@ -272,7 +318,7 @@ enum Structures {
                 perry_foundation_call_setter(object, selector, imp, registers)
             }
         }
-    }
+    }    #endif
 }
 
 /// Key-value coding's collection operators: @count, @sum, @avg, @max,

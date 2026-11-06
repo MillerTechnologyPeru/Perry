@@ -156,6 +156,8 @@ open class UIApplication: UIResponder {
         Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
     }
     @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
+    /// iOS 3's form, which names the kinds of notification wanted.
+    @ObjCMethod("registerForRemoteNotificationTypes:") func registerForRemoteNotifications(types: UInt) {}
     @ObjCMethod("isRegisteredForRemoteNotifications") func isRegisteredForRemoteNotifications() -> Bool { false }
 
     /// Notification settings are granted as asked, and the delegate hears

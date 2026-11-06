@@ -583,31 +583,31 @@ open class UINibDecoder: NSObject {
 
     @ObjCMethod("decodeCGPointForKey:")
     func decodeCGPoint(forKey key: String) -> CGPoint {
-        let v = doubles(key)
+        let v = doubles(key).map { CGFloat($0) }
         return v.count >= 2 ? CGPoint(x: v[0], y: v[1]) : .zero
     }
 
     @ObjCMethod("decodeCGSizeForKey:")
     func decodeCGSize(forKey key: String) -> CGSize {
-        let v = doubles(key)
+        let v = doubles(key).map { CGFloat($0) }
         return v.count >= 2 ? CGSize(width: v[0], height: v[1]) : .zero
     }
 
     @ObjCMethod("decodeCGRectForKey:")
     func decodeCGRect(forKey key: String) -> CGRect {
-        let v = doubles(key)
+        let v = doubles(key).map { CGFloat($0) }
         return v.count >= 4 ? CGRect(x: v[0], y: v[1], width: v[2], height: v[3]) : .zero
     }
 
     @ObjCMethod("decodeUIEdgeInsetsForKey:")
     func decodeUIEdgeInsets(forKey key: String) -> UIEdgeInsets {
-        let v = doubles(key)
+        let v = doubles(key).map { CGFloat($0) }
         return v.count >= 4 ? UIEdgeInsets(top: v[0], left: v[1], bottom: v[2], right: v[3]) : .zero
     }
 
     @ObjCMethod("decodeCGAffineTransformForKey:")
     func decodeCGAffineTransform(forKey key: String) -> CGAffineTransform {
-        let v = doubles(key)
+        let v = doubles(key).map { CGFloat($0) }
         return v.count >= 6 ? CGAffineTransform(a: v[0], b: v[1], c: v[2], d: v[3], tx: v[4], ty: v[5]) : .identity
     }
 
@@ -652,6 +652,8 @@ struct Coder {
     func bool(_ key: String) -> Bool { coder.sendDecodeBool(forKey: key) }
     func integer(_ key: String) -> Int { coder.sendDecodeInteger(forKey: key) }
     func double(_ key: String) -> Double { coder.sendDecodeDouble(forKey: key) }
+    /// The same, as a CGFloat or another floating-point type where one is wanted.
+    func double<T: BinaryFloatingPoint>(_ key: String) -> T { T(double(key)) }
     func rect(_ key: String) -> CGRect { coder.sendDecodeCGRect(forKey: key) }
     func point(_ key: String) -> CGPoint { coder.sendDecodeCGPoint(forKey: key) }
     func size(_ key: String) -> CGSize { coder.sendDecodeCGSize(forKey: key) }

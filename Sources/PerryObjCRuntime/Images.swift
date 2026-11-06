@@ -6,31 +6,46 @@ struct MachOImage {
     let header: UnsafeRawPointer
     let slide: Int
 
-    private static let segmentCommand: UInt32 = 0x19    // LC_SEGMENT_64
+    // LC_SEGMENT_64 and LC_SEGMENT, and the sizes of the structures that follow
+    // the pointer width: mach_header, segment_command, section.
+    private static let segmentCommand: UInt32 = Layout.is64 ? 0x19 : 0x1
+    private static let headerSize = Layout.is64 ? 32 : 28
+    private static let segmentSectionCount = Layout.is64 ? 64 : 48
+    private static let firstSection = Layout.is64 ? 72 : 56
+    private static let sectionSize = Layout.is64 ? 80 : 68
+    private static let sectionAddress = 32
+    private static let sectionBytes = Layout.is64 ? 40 : 36
 
     /// A section in a __DATA* segment, as an array of pointer-sized slots.
     func pointers(_ name: String) -> UnsafeMutableBufferPointer<UnsafeMutableRawPointer?>? {
         let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
-        var command = header + 32
+        var command = header + Self.headerSize
         for _ in 0..<count {
             let cmd = command.load(as: UInt32.self)
             let size = Int(command.load(fromByteOffset: 4, as: UInt32.self))
             if cmd == Self.segmentCommand, strncmp(command.assumingMemoryBound(to: CChar.self) + 8, "__DATA", 6) == 0 {
-                let sections = Int(command.load(fromByteOffset: 64, as: UInt32.self))
+                let sections = Int(command.load(fromByteOffset: Self.segmentSectionCount, as: UInt32.self))
                 for index in 0..<sections {
-                    let section = command + 72 + index * 80
+                    let section = command + Self.firstSection + index * Self.sectionSize
                     let matches = name.withCString { strncmp(section.assumingMemoryBound(to: CChar.self), $0, 16) == 0 }
                     if matches {
-                        let address = Int(section.load(fromByteOffset: 32, as: UInt64.self)) + slide
-                        let bytes = Int(section.load(fromByteOffset: 40, as: UInt64.self))
+                        let address = Int(section.loadWord(at: Self.sectionAddress)) + slide
+                        let bytes = Int(section.loadWord(at: Self.sectionBytes))
                         return UnsafeMutableBufferPointer(
-                            start: UnsafeMutablePointer(bitPattern: address), count: bytes / 8)
+                            start: UnsafeMutablePointer(bitPattern: address), count: bytes / Layout.word)
                     }
                 }
             }
             command += size
         }
         return nil
+    }
+}
+
+private extension UnsafeRawPointer {
+    /// A section header's address or size: 64 bits for arm64, 32 for armv7.
+    func loadWord(at offset: Int) -> UInt64 {
+        Layout.is64 ? load(fromByteOffset: offset, as: UInt64.self) : UInt64(load(fromByteOffset: offset, as: UInt32.self))
     }
 }
 
@@ -220,9 +235,9 @@ public enum Protocols {
     }
 
     static func listContains(_ list: UnsafeRawPointer, _ target: UnsafePointer<perry_protocol>) -> Bool {
-        let count = Int(list.load(as: UInt64.self))
+        let count = Int(list.load(as: UInt.self))
         for index in 0..<count {
-            if let proto = list.load(fromByteOffset: 8 + index * 8, as: UnsafePointer<perry_protocol>?.self),
+            if let proto = list.load(fromByteOffset: Layout.protocolEntry(index), as: UnsafePointer<perry_protocol>?.self),
                conforms(proto, to: target) {
                 return true
             }
@@ -254,16 +269,16 @@ extension Protocols {
     /// The protocols a protocol adopts, from its list: count, then pointers.
     public static func adopted(_ proto: UnsafePointer<perry_protocol>) -> [UnsafeMutablePointer<perry_protocol>] {
         guard let list = proto.pointee.protocols else { return [] }
-        let count = Int(list.load(as: UInt64.self))
-        return (0..<count).compactMap { list.load(fromByteOffset: 8 + $0 * 8, as: UnsafeMutablePointer<perry_protocol>?.self) }
+        let count = Int(list.load(as: UInt.self))
+        return (0..<count).compactMap { list.load(fromByteOffset: Layout.protocolEntry($0), as: UnsafeMutablePointer<perry_protocol>?.self) }
     }
 
     /// The protocols a class lists itself, its categories' included.
     public static func listed(by info: ClassInfo) -> [UnsafeMutablePointer<perry_protocol>] {
         let lists = Runtime.lock.withLock { info.protocolLists }
         return lists.flatMap { list -> [UnsafeMutablePointer<perry_protocol>] in
-            let count = Int(list.load(as: UInt64.self))
-            return (0..<count).compactMap { list.load(fromByteOffset: 8 + $0 * 8, as: UnsafeMutablePointer<perry_protocol>?.self) }
+            let count = Int(list.load(as: UInt.self))
+            return (0..<count).compactMap { list.load(fromByteOffset: Layout.protocolEntry($0), as: UnsafeMutablePointer<perry_protocol>?.self) }
         }
     }
 

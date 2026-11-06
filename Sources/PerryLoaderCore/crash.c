@@ -2,7 +2,7 @@
 // PERRY_CRASH_REPORT=1, a fatal signal prints the faulting thread's
 // registers and its frames, by following frame pointers, each as the
 // Mach-O image and offset it is in (for atos -l 0), or the Linux library
-// and symbol. Use it with PERRY_KEEP_CRASH_HANDLERS=1, so an app's own crash
+// and symbol. On armv7 the frames are Darwin code's, chained through r7. Use it with PERRY_KEEP_CRASH_HANDLERS=1, so an app's own crash
 // reporter doesn't take the signals first.
 
 #define _GNU_SOURCE
@@ -54,11 +54,33 @@ static void describe(const char *label, uintptr_t address) {
     crash_print("  %s 0x%016lx\n", label, (unsigned long)address);
 }
 
-static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
-    ucontext_t *context = raw_context;
-    mcontext_t *machine = &context->uc_mcontext;
-    crash_print("perry: crash: signal %d (%s) at 0x%lx, thread %ld\n", signal, strsignal(signal),
-                (unsigned long)(uintptr_t)info->si_addr, (long)gettid());
+#if defined(__arm__)
+// Darwin's armv7 code keeps its frame records, {previous r7, return
+// address}, in r7; they are 4-byte aligned.
+#define FRAME_POINTER(machine) ((machine)->arm_r7)
+#define FRAME_ALIGNMENT 3
+
+static void print_registers(const mcontext_t *machine) {
+    describe("pc", machine->arm_pc);
+    describe("lr", machine->arm_lr);
+    crash_print("  sp 0x%08lx r7 0x%08lx cpsr 0x%08lx\n", machine->arm_sp, machine->arm_r7, machine->arm_cpsr);
+    const unsigned long r[] = {
+        machine->arm_r0, machine->arm_r1, machine->arm_r2, machine->arm_r3, machine->arm_r4, machine->arm_r5,
+        machine->arm_r6, machine->arm_r7, machine->arm_r8, machine->arm_r9, machine->arm_r10, machine->arm_fp,
+        machine->arm_ip,
+    };
+    for (int i = 0; i < 13; i += 4) {
+        crash_print("  r%-2d %08lx", i, r[i]);
+        for (int j = i + 1; j < i + 4 && j < 13; j++)
+            crash_print(" r%-2d %08lx", j, r[j]);
+        crash_print("\n");
+    }
+}
+#else
+#define FRAME_POINTER(machine) ((machine)->regs[29])
+#define FRAME_ALIGNMENT 7
+
+static void print_registers(const mcontext_t *machine) {
     describe("pc", machine->pc);
     describe("lr", machine->regs[30]);
     crash_print("  sp 0x%016lx fp 0x%016lx\n", (unsigned long)machine->sp, (unsigned long)machine->regs[29]);
@@ -66,9 +88,22 @@ static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
         crash_print("  x%-2d %016lx x%-2d %016lx x%-2d %016lx x%-2d %016lx\n", i, (unsigned long)machine->regs[i],
                     i + 1, (unsigned long)machine->regs[i + 1], i + 2, (unsigned long)(i + 2 < 31 ? machine->regs[i + 2] : 0),
                     i + 3, (unsigned long)(i + 3 < 31 ? machine->regs[i + 3] : 0));
+}
+#endif
+
+static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
+    ucontext_t *context = raw_context;
+    mcontext_t *machine = &context->uc_mcontext;
+    crash_print("perry: crash: signal %d (%s) at 0x%lx, thread %ld\n", signal, strsignal(signal),
+                (unsigned long)(uintptr_t)info->si_addr, (long)gettid());
+    print_registers(machine);
     // Frame records are {previous fp, return address}, ascending the stack.
-    uintptr_t fp = machine->regs[29], low = machine->sp;
-    for (int frame = 0; frame < 48 && fp && (fp & 7) == 0 && fp >= low && fp - low < (64 << 20); frame++) {
+#if defined(__arm__)
+    uintptr_t fp = FRAME_POINTER(machine), low = machine->arm_sp;
+#else
+    uintptr_t fp = FRAME_POINTER(machine), low = machine->sp;
+#endif
+    for (int frame = 0; frame < 48 && fp && (fp & FRAME_ALIGNMENT) == 0 && fp >= low && fp - low < (64 << 20); frame++) {
         uintptr_t *record = (uintptr_t *)fp;
         uintptr_t next = record[0], ret = record[1];
         if (!ret)

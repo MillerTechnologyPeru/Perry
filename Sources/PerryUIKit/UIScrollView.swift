@@ -505,7 +505,7 @@ open class UIPanGestureRecognizer: UIGestureRecognizer {
     @ObjCMethod("velocityInView:")
     func velocity(in view: UIView?) -> CGPoint {
         guard let first = pan.samples.first, let last = pan.samples.last, last.time > first.time else { return .zero }
-        let elapsed = last.time - first.time
+        let elapsed = CGFloat(last.time - first.time)
         return CGPoint(x: (last.point.x - first.point.x) / elapsed, y: (last.point.y - first.point.y) / elapsed)
     }
 

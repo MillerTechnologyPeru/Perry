@@ -249,12 +249,17 @@ enum CFTimeConstants {
 @c(_CFDateGetTypeID) public func CFDateGetTypeID() -> UInt { CFTypeIDs.date }
 
 @c(_CFDateCreate)
-public func CFDateCreate(_ allocator: UnsafeRawPointer?, _ time: Double) -> id? { ObjC.retain(Dates.autoreleased(time)) }
+public func CFDateCreate(_ allocator: UnsafeRawPointer?, _ time: Double.ObjCType) -> id? {
+    ObjC.retain(Dates.autoreleased(Double(objCArgument: time)))
+}
 
-@c(_CFDateGetAbsoluteTime) public func CFDateGetAbsoluteTime(_ date: id?) -> Double { Dates.interval(date) }
+@c(_CFDateGetAbsoluteTime)
+public func CFDateGetAbsoluteTime(_ date: id?) -> Double.ObjCResultType { darwinResult(Dates.interval(date)) }
 
 @c(_CFDateGetTimeIntervalSinceDate)
-public func CFDateGetTimeIntervalSinceDate(_ date: id?, _ other: id?) -> Double { Dates.interval(date) - Dates.interval(other) }
+public func CFDateGetTimeIntervalSinceDate(_ date: id?, _ other: id?) -> Double.ObjCResultType {
+    darwinResult(Dates.interval(date) - Dates.interval(other))
+}
 
 @c(_CFDateCompare)
 public func CFDateCompare(_ date: id?, _ other: id?, _ context: UnsafeRawPointer?) -> Int {
@@ -569,20 +574,21 @@ public func CFTimeZoneCreateWithName(_ allocator: UnsafeRawPointer?, _ name: id?
 }
 
 @c(_CFTimeZoneCreateWithTimeIntervalFromGMT)
-public func CFTimeZoneCreateWithTimeIntervalFromGMT(_ allocator: UnsafeRawPointer?, _ interval: Double) -> id? {
-    TimeZone(secondsFromGMT: Int(interval)).map { ObjC.retain(TimeZones.autoreleased($0))! }
+public func CFTimeZoneCreateWithTimeIntervalFromGMT(_ allocator: UnsafeRawPointer?, _ interval: Double.ObjCType) -> id? {
+    TimeZone(secondsFromGMT: Int(Double(objCArgument: interval))).map { ObjC.retain(TimeZones.autoreleased($0))! }
 }
 
 @c(_CFTimeZoneGetName) public func CFTimeZoneGetName(_ zone: id?) -> id? { ObjC.send(zone, ObjC.selector("name")) }
 
 @c(_CFTimeZoneGetSecondsFromGMT)
-public func CFTimeZoneGetSecondsFromGMT(_ zone: id?, _ time: Double) -> Double {
-    Double(TimeZones.zone(zone)?.secondsFromGMT(for: Date(timeIntervalSinceReferenceDate: time)) ?? 0)
+public func CFTimeZoneGetSecondsFromGMT(_ zone: id?, _ time: Double.ObjCType) -> Double.ObjCResultType {
+    let date = Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))
+    return darwinResult(Double(TimeZones.zone(zone)?.secondsFromGMT(for: date) ?? 0))
 }
 
 @c(_CFTimeZoneIsDaylightSavingTime)
-public func CFTimeZoneIsDaylightSavingTime(_ zone: id?, _ time: Double) -> Bool {
-    TimeZones.zone(zone)?.isDaylightSavingTime(for: Date(timeIntervalSinceReferenceDate: time)) ?? false
+public func CFTimeZoneIsDaylightSavingTime(_ zone: id?, _ time: Double.ObjCType) -> Bool {
+    TimeZones.zone(zone)?.isDaylightSavingTime(for: Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))) ?? false
 }
 
 @c(_CFLocaleGetTypeID) public func CFLocaleGetTypeID() -> UInt { CFTypeIDs.locale }

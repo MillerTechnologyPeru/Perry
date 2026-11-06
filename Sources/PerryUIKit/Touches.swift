@@ -411,10 +411,10 @@ enum Touches {
         }
         guard let (view, velocity, time) = coasting else { return }
         let now = Clock.now, elapsed = now - time
-        let rate = pow(view.scroll.decelerationRate, elapsed * 1000)
+        let rate = pow(view.scroll.decelerationRate, CGFloat(elapsed) * 1000)
         let next = CGPoint(x: velocity.x * rate, y: velocity.y * rate)
         let offset = view.state.bounds.origin
-        let target = clamped(view, CGPoint(x: offset.x - velocity.x * elapsed, y: offset.y - velocity.y * elapsed))
+        let target = clamped(view, CGPoint(x: offset.x - velocity.x * CGFloat(elapsed), y: offset.y - velocity.y * CGFloat(elapsed)))
         pan(view, to: target)
         Display.markDirty()
         if hypot(next.x, next.y) < 10 || target == offset {
@@ -458,7 +458,7 @@ enum Touches {
     private static func velocity(_ view: UIScrollView) -> CGPoint {
         guard let first = samples.first, let last = samples.last, last.time > first.time else { return .zero }
         let axis = axis(view), time = last.time - first.time
-        return CGPoint(x: (last.point.x - first.point.x) / time * axis.x, y: (last.point.y - first.point.y) / time * axis.y)
+        return CGPoint(x: (last.point.x - first.point.x) / CGFloat(time) * axis.x, y: (last.point.y - first.point.y) / CGFloat(time) * axis.y)
     }
 
     /// The cell a touch began in, highlighted until it lifts or pans.
@@ -633,11 +633,12 @@ enum TapScript {
             if item.hasPrefix("type:") { return .type(String(item.dropFirst(5))) }
             if item.hasPrefix("key:") { return .key(String(item.dropFirst(4))) }
             if item.hasPrefix("drag:") {
-                let values = item.dropFirst(5).split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+                let values: [CGFloat] = item.dropFirst(5).split(separator: ",")
+                    .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
                 guard values.count == 4 else { return nil }
                 return .drag(CGPoint(x: values[0], y: values[1]), CGPoint(x: values[2], y: values[3]))
             }
-            let values = item.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
+            let values: [CGFloat] = item.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
             return values.count == 2 ? .tap(CGPoint(x: values[0], y: values[1])) : nil
         }
         next()

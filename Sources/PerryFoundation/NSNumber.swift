@@ -88,17 +88,17 @@ enum Numbers {
         guard let object else { return NumberStorage(.signed(0)) }
         switch ObjC.objectGetClass(object) {
         case constantIntegerClass:
-            let encoding = object.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self)?.pointee ?? 0
-            let raw = object.load(fromByteOffset: 16, as: UInt64.self)
+            let encoding = object.load(fromByteOffset: DarwinLayout.numberEncoding, as: UnsafePointer<CChar>?.self)?.pointee ?? 0
+            let raw = object.loadUnaligned(fromByteOffset: DarwinLayout.integerNumberValue, as: UInt64.self)
             // Unsigned encodings: C, S, I, L, Q.
             if "CSILQ".utf8.contains(UInt8(bitPattern: encoding)) {
                 return NumberStorage(.unsigned(raw))
             }
             return NumberStorage(.signed(Int64(bitPattern: raw)))
         case constantDoubleClass:
-            return NumberStorage(.double(object.load(fromByteOffset: 8, as: Double.self)))
+            return NumberStorage(.double(object.loadUnaligned(fromByteOffset: DarwinLayout.floatingNumberValue, as: Double.self)))
         case constantFloatClass:
-            return NumberStorage(.double(Double(object.load(fromByteOffset: 8, as: Float.self))))
+            return NumberStorage(.double(Double(object.load(fromByteOffset: DarwinLayout.floatingNumberValue, as: Float.self))))
         case booleanClass:
             return NumberStorage(.bool(object.load(fromByteOffset: 8, as: UInt64.self) != 0))
         default:

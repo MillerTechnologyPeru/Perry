@@ -96,7 +96,9 @@ typedef struct {
 } darwin_timebase_info;
 
 static uint64_t ticks(int linux_clock) {
-    return (uint64_t)((unsigned __int128)nanoseconds(linux_clock) * 3 / 125);
+    // n * 3 / 125 without overflow, or the 128-bit arithmetic armv7 lacks.
+    uint64_t n = nanoseconds(linux_clock);
+    return n / 125 * 3 + n % 125 * 3 / 125;
 }
 
 uint64_t darwin_mach_absolute_time(void) DARWIN_SYMBOL(mach_absolute_time);
@@ -145,7 +147,7 @@ enum {
     DARWIN_MADV_CAN_REUSE = 9,
 };
 
-enum { DARWIN_PAGE_SIZE = 16384 };
+enum { DARWIN_PAGE_SIZE = PERRY_PAGE_SIZE };
 
 // A mapping where the kernel picks the address, placed as Darwin places
 // one: at the start of a Darwin page, 16 KB on arm64, which is what
@@ -184,7 +186,15 @@ void *perry_map_pages(size_t length, int protection, int flags, int fd, off_t of
     return aligned;
 }
 
-void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) DARWIN_SYMBOL(mmap);
+#if defined(__arm__)
+// Darwin's armv7 passes mmap's 64-bit offset differently from glibc's ABI,
+// so the exported _mmap is an adapter (thunks_arm.S) that calls this.
+#define MMAP_SYMBOL __asm__("perry_mmap") __attribute__((visibility("hidden"), used))
+#else
+#define MMAP_SYMBOL DARWIN_SYMBOL(mmap)
+#endif
+
+void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) MMAP_SYMBOL;
 void *darwin_mmap(void *address, size_t length, int protection, int flags, int fd, off_t offset) {
     int linux_flags = flags & (MAP_SHARED | MAP_PRIVATE | MAP_FIXED);
     if (flags & DARWIN_MAP_ANON) {

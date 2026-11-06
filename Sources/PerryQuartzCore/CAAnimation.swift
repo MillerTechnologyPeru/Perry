@@ -329,41 +329,41 @@ enum AnimatedValue {
         let affine = state.transform
         switch key {
         case "opacity": return .number(Double(state.opacity))
-        case "zPosition": return .number(state.zPosition)
-        case "cornerRadius": return .number(state.cornerRadius)
-        case "borderWidth": return .number(state.borderWidth)
+        case "zPosition": return .number(Double(state.zPosition))
+        case "cornerRadius": return .number(Double(state.cornerRadius))
+        case "borderWidth": return .number(Double(state.borderWidth))
         case "shadowOpacity": return .number(Double(state.shadowOpacity))
-        case "shadowRadius": return .number(state.shadowRadius)
+        case "shadowRadius": return .number(Double(state.shadowRadius))
         case "shadowOffset": return .size(state.shadowOffset)
         case "position": return .point(state.position)
-        case "position.x": return .number(state.position.x)
-        case "position.y": return .number(state.position.y)
+        case "position.x": return .number(Double(state.position.x))
+        case "position.y": return .number(Double(state.position.y))
         case "anchorPoint": return .point(state.anchorPoint)
         case "bounds": return .rect(state.bounds)
         case "bounds.size": return .size(state.bounds.size)
         case "bounds.origin": return .point(state.bounds.origin)
-        case "bounds.size.width": return .number(state.bounds.width)
-        case "bounds.size.height": return .number(state.bounds.height)
-        case "bounds.origin.x": return .number(state.bounds.minX)
-        case "bounds.origin.y": return .number(state.bounds.minY)
+        case "bounds.size.width": return .number(Double(state.bounds.width))
+        case "bounds.size.height": return .number(Double(state.bounds.height))
+        case "bounds.origin.x": return .number(Double(state.bounds.minX))
+        case "bounds.origin.y": return .number(Double(state.bounds.minY))
         case "transform": return .transform(state.transform3D)
         case "sublayerTransform": return .transform(state.sublayerTransform)
-        case "transform.rotation", "transform.rotation.z": return .number(atan2(affine.b, affine.a))
-        case "transform.scale", "transform.scale.x": return .number((affine.a * affine.a + affine.b * affine.b).squareRoot())
-        case "transform.scale.y": return .number((affine.c * affine.c + affine.d * affine.d).squareRoot())
-        case "transform.translation.x": return .number(affine.tx)
-        case "transform.translation.y": return .number(affine.ty)
+        case "transform.rotation", "transform.rotation.z": return .number(atan2(Double(affine.b), Double(affine.a)))
+        case "transform.scale", "transform.scale.x": return .number(Double((affine.a * affine.a + affine.b * affine.b).squareRoot()))
+        case "transform.scale.y": return .number(Double((affine.c * affine.c + affine.d * affine.d).squareRoot()))
+        case "transform.translation.x": return .number(Double(affine.tx))
+        case "transform.translation.y": return .number(Double(affine.ty))
         case "backgroundColor": return color(state.backgroundColor)
         case "borderColor": return color(state.borderColor)
         case "shadowColor": return color(state.shadowColor)
         case "hidden": return .number(state.hidden ? 1 : 0)
         case "masksToBounds": return .number(state.masksToBounds ? 1 : 0)
         case "contents": return .object(state.contents)
-        case "strokeStart": return shape.map { .number($0.strokeStart) }
-        case "strokeEnd": return shape.map { .number($0.strokeEnd) }
-        case "lineWidth": return shape.map { .number($0.lineWidth) }
-        case "lineDashPhase": return shape.map { .number($0.lineDashPhase) }
-        case "miterLimit": return shape.map { .number($0.miterLimit) }
+        case "strokeStart": return shape.map { .number(Double($0.strokeStart)) }
+        case "strokeEnd": return shape.map { .number(Double($0.strokeEnd)) }
+        case "lineWidth": return shape.map { .number(Double($0.lineWidth)) }
+        case "lineDashPhase": return shape.map { .number(Double($0.lineDashPhase)) }
+        case "miterLimit": return shape.map { .number(Double($0.miterLimit)) }
         case "strokeColor": return shape.flatMap { color($0.strokeColor) }
         case "fillColor": return shape.flatMap { color($0.fillColor) }
         case "path": return shape.map { .object($0.path.map { NSObject($0) }) }
@@ -381,23 +381,23 @@ enum AnimatedValue {
         }
         switch (key, self) {
         case ("opacity", .number(let value)): state.opacity = Float(value)
-        case ("zPosition", .number(let value)): state.zPosition = value
-        case ("cornerRadius", .number(let value)): state.cornerRadius = value
-        case ("borderWidth", .number(let value)): state.borderWidth = value
+        case ("zPosition", .number(let value)): state.zPosition = CGFloat(value)
+        case ("cornerRadius", .number(let value)): state.cornerRadius = CGFloat(value)
+        case ("borderWidth", .number(let value)): state.borderWidth = CGFloat(value)
         case ("shadowOpacity", .number(let value)): state.shadowOpacity = Float(value)
-        case ("shadowRadius", .number(let value)): state.shadowRadius = value
+        case ("shadowRadius", .number(let value)): state.shadowRadius = CGFloat(value)
         case ("shadowOffset", .size(let value)): state.shadowOffset = value
         case ("position", .point(let value)): state.position = value
-        case ("position.x", .number(let value)): state.position.x = value
-        case ("position.y", .number(let value)): state.position.y = value
+        case ("position.x", .number(let value)): state.position.x = CGFloat(value)
+        case ("position.y", .number(let value)): state.position.y = CGFloat(value)
         case ("anchorPoint", .point(let value)): state.anchorPoint = value
         case ("bounds", .rect(let value)): state.bounds = value
         case ("bounds.size", .size(let value)): state.bounds.size = value
         case ("bounds.origin", .point(let value)): state.bounds.origin = value
-        case ("bounds.size.width", .number(let value)): state.bounds.size.width = value
-        case ("bounds.size.height", .number(let value)): state.bounds.size.height = value
-        case ("bounds.origin.x", .number(let value)): state.bounds.origin.x = value
-        case ("bounds.origin.y", .number(let value)): state.bounds.origin.y = value
+        case ("bounds.size.width", .number(let value)): state.bounds.size.width = CGFloat(value)
+        case ("bounds.size.height", .number(let value)): state.bounds.size.height = CGFloat(value)
+        case ("bounds.origin.x", .number(let value)): state.bounds.origin.x = CGFloat(value)
+        case ("bounds.origin.y", .number(let value)): state.bounds.origin.y = CGFloat(value)
         case ("transform", .transform(let value)): state.transform3D = value
         case ("sublayerTransform", .transform(let value)): state.sublayerTransform = value
         case ("transform.rotation", .number(let value)), ("transform.rotation.z", .number(let value)): transformed { $0.rotation = value }
@@ -412,11 +412,11 @@ enum AnimatedValue {
         case ("hidden", _): state.hidden = (number() ?? 0) >= 0.5
         case ("masksToBounds", _): state.masksToBounds = (number() ?? 0) >= 0.5
         case ("contents", .object(let value)): state.contents = value
-        case ("strokeStart", .number(let value)): shape?.strokeStart = value
-        case ("strokeEnd", .number(let value)): shape?.strokeEnd = value
-        case ("lineWidth", .number(let value)): shape?.lineWidth = value
-        case ("lineDashPhase", .number(let value)): shape?.lineDashPhase = value
-        case ("miterLimit", .number(let value)): shape?.miterLimit = value
+        case ("strokeStart", .number(let value)): shape?.strokeStart = CGFloat(value)
+        case ("strokeEnd", .number(let value)): shape?.strokeEnd = CGFloat(value)
+        case ("lineWidth", .number(let value)): shape?.lineWidth = CGFloat(value)
+        case ("lineDashPhase", .number(let value)): shape?.lineDashPhase = CGFloat(value)
+        case ("miterLimit", .number(let value)): shape?.miterLimit = CGFloat(value)
         case ("strokeColor", .color(let value)): if let shape { AnimatedValue.assign(&shape.strokeColor, value) }
         case ("fillColor", .color(let value)): if let shape { AnimatedValue.assign(&shape.fillColor, value) }
         case ("path", .object(let value)): if let shape { LayerState.setColor(&shape.path, value?.objcObject) }
@@ -431,12 +431,19 @@ enum AnimatedValue {
 
     private static func color(_ color: CGRef?) -> AnimatedValue? {
         guard let color, let components = CG.colorGetComponents(color) else { return .color([0, 0, 0, 0]) }
-        if CG.colorGetNumberOfComponents(color) == 2 { return .color([components[0], components[0], components[0], components[1]]) }
-        return .color([components[0], components[1], components[2], components[3]])
+        return .color(rgba(components, count: CG.colorGetNumberOfComponents(color)))
     }
 
     /// A new CGColor, +1.
-    static func makeColor(_ rgba: [Double]) -> CGRef? { CG.colorCreateSRGB(rgba[0], rgba[1], rgba[2], rgba[3]) }
+    static func makeColor(_ rgba: [Double]) -> CGRef? {
+        CG.colorCreateSRGB(CGFloat(rgba[0]), CGFloat(rgba[1]), CGFloat(rgba[2]), CGFloat(rgba[3]))
+    }
+
+    /// A color's RGBA from its gray and alpha, or red, green, blue and alpha.
+    static func rgba(_ components: UnsafePointer<CGFloat>, count: Int) -> [Double] {
+        let c = (0..<min(max(count, 2), 4)).map { Double(components[$0]) }
+        return count == 2 ? [c[0], c[0], c[0], c[1]] : [c[0], c[1], c[2], c[3]]
+    }
 
     /// Puts a new color of `rgba` in `slot`.
     static func assign(_ slot: inout CGRef?, _ rgba: [Double]) {
@@ -455,9 +462,7 @@ enum AnimatedValue {
         }
         if AnimatedValue.colorKeys.contains(key) {
             guard let components = CG.colorGetComponents(object.objcObject) else { return nil }
-            let count = CG.colorGetNumberOfComponents(object.objcObject)
-            self = .color(count == 2 ? [components[0], components[0], components[0], components[1]]
-                                     : [components[0], components[1], components[2], components[3]])
+            self = .color(AnimatedValue.rgba(components, count: CG.colorGetNumberOfComponents(object.objcObject)))
             return
         }
         if key == "contents" || key == "path" { self = .object(object); return }
@@ -492,12 +497,14 @@ enum AnimatedValue {
     /// `a` at 0, `b` at 1.
     static func interpolate(_ a: AnimatedValue, _ b: AnimatedValue, _ t: Double) -> AnimatedValue {
         func mix(_ x: Double, _ y: Double) -> Double { x + (y - x) * t }
+        func mixed(_ x: CGFloat, _ y: CGFloat) -> CGFloat { CGFloat(mix(Double(x), Double(y))) }
         switch (a, b) {
         case (.number(let x), .number(let y)): return .number(mix(x, y))
-        case (.point(let x), .point(let y)): return .point(CGPoint(x: mix(x.x, y.x), y: mix(x.y, y.y)))
-        case (.size(let x), .size(let y)): return .size(CGSize(width: mix(x.width, y.width), height: mix(x.height, y.height)))
+        case (.point(let x), .point(let y)): return .point(CGPoint(x: mixed(x.x, y.x), y: mixed(x.y, y.y)))
+        case (.size(let x), .size(let y)): return .size(CGSize(width: mixed(x.width, y.width), height: mixed(x.height, y.height)))
         case (.rect(let x), .rect(let y)):
-            return .rect(CGRect(x: mix(x.minX, y.minX), y: mix(x.minY, y.minY), width: mix(x.width, y.width), height: mix(x.height, y.height)))
+            return .rect(CGRect(x: mixed(x.minX, y.minX), y: mixed(x.minY, y.minY), width: mixed(x.width, y.width),
+                                height: mixed(x.height, y.height)))
         case (.transform(let x), .transform(let y)):
             // By parts, so rotations turn rather than shear.
             guard x.isAffine, y.isAffine else { return .transform(CATransform3D(rows: zip(x.rows, y.rows).map { mix($0, $1) })) }
@@ -543,17 +550,19 @@ struct Decomposed {
     var scaleX, scaleY, rotation, tx, ty: Double
 
     init(_ t: CGAffineTransform) {
-        scaleX = (t.a * t.a + t.b * t.b).squareRoot()
-        rotation = atan2(t.b, t.a)
+        let a = Double(t.a), b = Double(t.b), c = Double(t.c), d = Double(t.d)
+        scaleX = (a * a + b * b).squareRoot()
+        rotation = atan2(b, a)
         // The y axis's length, signed to keep a mirror image mirrored.
-        let determinant = t.a * t.d - t.b * t.c
-        scaleY = scaleX == 0 ? (t.c * t.c + t.d * t.d).squareRoot() : determinant / scaleX
-        (tx, ty) = (t.tx, t.ty)
+        let determinant = a * d - b * c
+        scaleY = scaleX == 0 ? (c * c + d * d).squareRoot() : determinant / scaleX
+        (tx, ty) = (Double(t.tx), Double(t.ty))
     }
 
     var affine: CGAffineTransform {
         let c = cos(rotation), s = sin(rotation)
-        return CGAffineTransform(a: scaleX * c, b: scaleX * s, c: -scaleY * s, d: scaleY * c, tx: tx, ty: ty)
+        return CGAffineTransform(a: CGFloat(scaleX * c), b: CGFloat(scaleX * s), c: CGFloat(-scaleY * s), d: CGFloat(scaleY * c),
+                                 tx: CGFloat(tx), ty: CGFloat(ty))
     }
 }
 

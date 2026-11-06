@@ -40,5 +40,24 @@ perry_tlv_get_addr:
     ldp x29, x30, [sp], #16
     ret
     .size perry_tlv_get_addr, .-perry_tlv_get_addr
+#elif defined(__arm__)
+// The same for Darwin's armv7, which keeps its stack four-byte aligned where
+// C on Linux expects eight, so the thunk aligns it for perry_tlv_address.
+    .text
+    .arm
+    .globl perry_tlv_get_addr
+    .type perry_tlv_get_addr, %function
+    .p2align 2
+perry_tlv_get_addr:
+    push {r1-r4, r12, lr}
+    mov r4, sp
+    bic sp, sp, #7
+    vpush {d0-d7}
+    bl perry_tlv_address
+    vpop {d0-d7}
+    mov sp, r4
+    pop {r1-r4, r12, lr}
+    bx lr
+    .size perry_tlv_get_addr, .-perry_tlv_get_addr
 #endif
     .section .note.GNU-stack,"",%progbits

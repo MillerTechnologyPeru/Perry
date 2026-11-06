@@ -30,9 +30,14 @@ enum {
     SIG_MUTEX_ERRORCHECK = 0x32AAABA1,
     SIG_COND = 0x3CB0B1BB,
     SIG_RWLOCK = 0x2DA8B3B4,
-    // Perry's: set up, and being set up.
+    // Perry's: set up, and being set up, in a signature word.
+#if __LP64__
     SIG_READY = 0x5045525259524459,     // "PERRYRDY"
     SIG_BUSY = 0x5045525259425359,      // "PERRYBSY"
+#else
+    SIG_READY = 0x50524459,             // "PRDY"
+    SIG_BUSY = 0x50425359,              // "PBSY"
+#endif
     // Darwin's attribute values that differ.
     DARWIN_DETACHED = 2,
     DARWIN_JOINABLE = 1,
@@ -40,27 +45,55 @@ enum {
     DARWIN_PROCESS_SHARED = 1,
 };
 
-typedef struct { _Atomic long sig; pthread_mutex_t value; char rest[56 - sizeof(pthread_mutex_t)]; } darwin_mutex;
-typedef struct { long sig; pthread_mutexattr_t value; } darwin_mutexattr;
-typedef struct { _Atomic long sig; pthread_cond_t *_Atomic value; char rest[32]; } darwin_cond;
-typedef struct { long sig; pthread_condattr_t value; } darwin_condattr;
+// Darwin's sizes: a signature word, then the opaque bytes
+// (sys/_pthread/_pthread_types.h), for 64-bit and 32-bit Darwin.
+#if __LP64__
+enum { MUTEX_SIZE = 64, MUTEXATTR_SIZE = 16, COND_SIZE = 48, CONDATTR_SIZE = 16,
+       RWLOCK_SIZE = 200, RWLOCKATTR_SIZE = 24, ONCE_SIZE = 16 };
+#else
+enum { MUTEX_SIZE = 44, MUTEXATTR_SIZE = 12, COND_SIZE = 28, CONDATTR_SIZE = 8,
+       RWLOCK_SIZE = 128, RWLOCKATTR_SIZE = 16, ONCE_SIZE = 8 };
+#endif
+
+typedef struct {
+    _Atomic long sig;
+    pthread_mutex_t value;
+    char rest[MUTEX_SIZE - sizeof(long) - sizeof(pthread_mutex_t)];
+} darwin_mutex;
+typedef struct {
+    long sig;
+    pthread_mutexattr_t value;
+    char rest[MUTEXATTR_SIZE - sizeof(long) - sizeof(pthread_mutexattr_t)];
+} darwin_mutexattr;
+typedef struct { _Atomic long sig; pthread_cond_t *_Atomic value; char rest[COND_SIZE - 2 * sizeof(long)]; } darwin_cond;
+typedef struct {
+    long sig;
+    pthread_condattr_t value;
+    char rest[CONDATTR_SIZE - sizeof(long) - sizeof(pthread_condattr_t)];
+} darwin_condattr;
 // A read-write lock also keeps the thread holding it for writing.
 typedef struct {
     _Atomic long sig;
     pthread_rwlock_t value;
     _Atomic(pthread_t) writer;
-    char rest[192 - sizeof(pthread_rwlock_t) - sizeof(pthread_t)];
+    char rest[RWLOCK_SIZE - sizeof(long) - sizeof(pthread_rwlock_t) - sizeof(pthread_t)];
 } darwin_rwlock;
-typedef struct { long sig; pthread_rwlockattr_t value; char rest[16 - sizeof(pthread_rwlockattr_t)]; } darwin_rwlockattr;
+typedef struct {
+    long sig;
+    pthread_rwlockattr_t value;
+    char rest[RWLOCKATTR_SIZE - sizeof(long) - sizeof(pthread_rwlockattr_t)];
+} darwin_rwlockattr;
 typedef struct { long sig; _Atomic long state; } darwin_once;
 
-_Static_assert(sizeof(darwin_mutex) == 64, "pthread_mutex_t is 64 bytes on Darwin");
-_Static_assert(sizeof(darwin_mutexattr) == 16, "pthread_mutexattr_t is 16 bytes on Darwin");
-_Static_assert(sizeof(darwin_cond) == 48, "pthread_cond_t is 48 bytes on Darwin");
-_Static_assert(sizeof(darwin_condattr) == 16, "pthread_condattr_t is 16 bytes on Darwin");
-_Static_assert(sizeof(darwin_rwlock) == 200, "pthread_rwlock_t is 200 bytes on Darwin");
-_Static_assert(sizeof(darwin_rwlockattr) == 24, "pthread_rwlockattr_t is 24 bytes on Darwin");
-_Static_assert(sizeof(darwin_once) == 16, "pthread_once_t is 16 bytes on Darwin");
+_Static_assert(sizeof(darwin_mutex) == MUTEX_SIZE, "pthread_mutex_t has Darwin's size");
+_Static_assert(sizeof(darwin_mutexattr) == MUTEXATTR_SIZE, "pthread_mutexattr_t has Darwin's size");
+_Static_assert(sizeof(darwin_cond) == COND_SIZE, "pthread_cond_t has Darwin's size");
+_Static_assert(sizeof(darwin_condattr) == CONDATTR_SIZE, "pthread_condattr_t has Darwin's size");
+_Static_assert(sizeof(darwin_rwlock) == RWLOCK_SIZE, "pthread_rwlock_t has Darwin's size");
+_Static_assert(sizeof(darwin_rwlockattr) == RWLOCKATTR_SIZE, "pthread_rwlockattr_t has Darwin's size");
+_Static_assert(sizeof(darwin_once) == ONCE_SIZE, "pthread_once_t has Darwin's size");
+// Darwin's pthread_attr_t is glibc's, which fits in it.
+_Static_assert(sizeof(pthread_attr_t) <= (sizeof(long) == 8 ? 64 : 40), "pthread_attr_t fits Darwin's");
 
 static int result(int linux_error) {
     return perry_darwin_errno_from_linux(linux_error);
@@ -614,7 +647,10 @@ static unsigned long key_to_darwin(pthread_key_t key) { return (unsigned long)(k
 static pthread_key_t key_to_linux(unsigned long key) { return (pthread_key_t)(((long)key - key_base) / 2); }
 
 #define RESERVED_DESTRUCTOR(n) \
-    static void reserved_destructor_##n(void *value) { if (reserved_destructors[n]) reserved_destructors[n](value); }
+    static void reserved_destructor_##n(void *value) { \
+        if (reserved_destructors[n]) \
+            PERRY_KEEP_R9(reserved_destructors[n](value)); \
+    }
 RESERVED_DESTRUCTOR(0) RESERVED_DESTRUCTOR(1) RESERVED_DESTRUCTOR(2) RESERVED_DESTRUCTOR(3)
 RESERVED_DESTRUCTOR(4) RESERVED_DESTRUCTOR(5) RESERVED_DESTRUCTOR(6) RESERVED_DESTRUCTOR(7)
 RESERVED_DESTRUCTOR(8) RESERVED_DESTRUCTOR(9) RESERVED_DESTRUCTOR(10) RESERVED_DESTRUCTOR(11)
@@ -655,9 +691,10 @@ static void reserve_keys(void) {
         pthread_setspecific(reserved_keys[0], &canary);
         void **words = (void **)pthread_self();
         for (unsigned long word = 0; word < 512; word++) {
-            // The value's word is DARWIN_TSD_OFFSET / 8 + its Darwin key.
+            // The value's word is DARWIN_TSD_OFFSET in words + its Darwin
+            // key. glibc's {sequence, value} pairs are two words on armv7 too.
             if (words[word] == &canary) {
-                key_base = (long)word - DARWIN_TSD_OFFSET / 8 - 2 * (long)reserved_keys[0];
+                key_base = (long)word - DARWIN_TSD_OFFSET / (long)sizeof(void *) - 2 * (long)reserved_keys[0];
                 break;
             }
         }
@@ -677,6 +714,25 @@ static bool is_fixed_number(unsigned long key) { return key >= FIXED_RANGE_START
 static pthread_key_t fixed_keys[FIXED_RANGE_END];
 static _Atomic bool fixed_keys_made[FIXED_RANGE_END];
 
+// glibc calls a fixed key's destructor through one of these, which keeps r9
+// (see PERRY_KEEP_R9).
+static void (*fixed_destructors[FIXED_RANGE_END])(void *);
+#define FIXED_DESTRUCTOR(n) \
+    static void fixed_destructor_##n(void *value) { PERRY_KEEP_R9(fixed_destructors[n](value)); }
+FIXED_DESTRUCTOR(100) FIXED_DESTRUCTOR(101) FIXED_DESTRUCTOR(102) FIXED_DESTRUCTOR(103)
+FIXED_DESTRUCTOR(104) FIXED_DESTRUCTOR(105) FIXED_DESTRUCTOR(106) FIXED_DESTRUCTOR(107)
+FIXED_DESTRUCTOR(108) FIXED_DESTRUCTOR(109) FIXED_DESTRUCTOR(110) FIXED_DESTRUCTOR(111)
+FIXED_DESTRUCTOR(112) FIXED_DESTRUCTOR(113) FIXED_DESTRUCTOR(114) FIXED_DESTRUCTOR(115)
+FIXED_DESTRUCTOR(116) FIXED_DESTRUCTOR(117) FIXED_DESTRUCTOR(118) FIXED_DESTRUCTOR(119)
+
+static void (*const fixed_trampolines[FIXED_RANGE_END - FIXED_RANGE_START])(void *) = {
+    fixed_destructor_100, fixed_destructor_101, fixed_destructor_102, fixed_destructor_103,
+    fixed_destructor_104, fixed_destructor_105, fixed_destructor_106, fixed_destructor_107,
+    fixed_destructor_108, fixed_destructor_109, fixed_destructor_110, fixed_destructor_111,
+    fixed_destructor_112, fixed_destructor_113, fixed_destructor_114, fixed_destructor_115,
+    fixed_destructor_116, fixed_destructor_117, fixed_destructor_118, fixed_destructor_119,
+};
+
 int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) DARWIN_SYMBOL(pthread_key_init_np);
 int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
     if (key < 0 || !is_fixed_number((unsigned long)key))
@@ -684,7 +740,8 @@ int darwin_pthread_key_init_np(int key, void (*destructor)(void *)) {
     pthread_mutex_lock(&reserved_lock);
     int error = 0;
     if (!fixed_keys_made[key]) {
-        error = pthread_key_create(&fixed_keys[key], destructor);
+        fixed_destructors[key] = destructor;
+        error = pthread_key_create(&fixed_keys[key], destructor ? fixed_trampolines[key - FIXED_RANGE_START] : NULL);
         if (!error)
             atomic_store_explicit(&fixed_keys_made[key], true, memory_order_release);
     }
@@ -716,6 +773,8 @@ int darwin_pthread_key_create(unsigned long *key, void (*destructor)(void *)) {
     }
     pthread_mutex_unlock(&reserved_lock);
     // A key numbered in the fixed range is kept, unused, so it is not made again.
+    // glibc calls these keys' destructors itself, which on armv7 does not keep
+    // r9 for it as the reserved keys' do.
     pthread_key_t linux_key;
     int error;
     while (!(error = pthread_key_create(&linux_key, destructor)) && is_fixed_number(key_to_darwin(linux_key))) {}
