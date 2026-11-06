@@ -1152,6 +1152,15 @@ static bool load_library(const char *path) {
         return false;
     pthread_mutex_lock(&lock);
     perry_image *image = find_loaded(loader, path);
+    // A Linux provider stands in for a library by its name, as for those a
+    // program links, even when the app ships its own: libsteam_api.dylib's
+    // is libPerrysteam_api.so, over the Linux Steam client. dlsym then finds
+    // the provider's symbols by the same name.
+    if (!image && perry_find_provider(loader, path)) {
+        perry_trace(PERRY_TRACE_LOAD, "%s -> provider %s", path, perry_find_provider(loader, path)->path);
+        pthread_mutex_unlock(&lock);
+        return true;
+    }
     if (!image) {
         macho_file file;
         if (!open_macho(path, &file)) {
