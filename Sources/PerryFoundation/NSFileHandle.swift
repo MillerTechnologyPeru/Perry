@@ -132,6 +132,57 @@ public final class NSFileHandle: NSObject {
     @ObjCMethod("offsetInFile") func offsetInFile() -> UInt64 { UInt64(max(0, lseek(storage?.descriptor ?? -1, 0, SEEK_CUR))) }
     @ObjCMethod("seekToEndOfFile") func seekToEndOfFile() -> UInt64 { UInt64(max(0, lseek(storage?.descriptor ?? -1, 0, SEEK_END))) }
     @ObjCMethod("seekToFileOffset:") func seek(toFileOffset offset: UInt64) { _ = lseek(storage?.descriptor ?? -1, off_t(offset), SEEK_SET) }
+
+    // MARK: Throwing
+
+    /// Reports errno as a POSIX error, for the methods that throw in Swift.
+    private func fail(_ error: UnsafeMutablePointer<id?>?) -> Bool {
+        error?.pointee = Errors.autoreleased(domain: ErrorConstants.NSPOSIXErrorDomainObject, code: Int(errno), description: nil)
+        return false
+    }
+
+    @ObjCMethod("writeData:error:")
+    func write(_ data: ObjCObject?, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let storage, !storage.closed else { errno = EBADF; return fail(error) }
+        storage.write(DataObjects.data(data?.id))
+        return true
+    }
+
+    @ObjCMethod("getOffset:error:")
+    func getOffset(_ offset: UnsafeMutablePointer<UInt64>?, error: UnsafeMutablePointer<id?>?) -> Bool {
+        let position = lseek(storage?.descriptor ?? -1, 0, SEEK_CUR)
+        guard position >= 0 else { return fail(error) }
+        offset?.pointee = UInt64(position)
+        return true
+    }
+
+    @ObjCMethod("seekToEndReturningOffset:error:")
+    func seekToEnd(offset: UnsafeMutablePointer<UInt64>?, error: UnsafeMutablePointer<id?>?) -> Bool {
+        let position = lseek(storage?.descriptor ?? -1, 0, SEEK_END)
+        guard position >= 0 else { return fail(error) }
+        offset?.pointee = UInt64(position)
+        return true
+    }
+
+    @ObjCMethod("seekToOffset:error:")
+    func seekReturningError(toOffset offset: UInt64, error: UnsafeMutablePointer<id?>?) -> Bool {
+        lseek(storage?.descriptor ?? -1, off_t(offset), SEEK_SET) >= 0 || fail(error)
+    }
+
+    @ObjCMethod("truncateAtOffset:error:")
+    func truncateReturningError(atOffset offset: UInt64, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let descriptor = storage?.descriptor, ftruncate(descriptor, off_t(offset)) == 0 else { return fail(error) }
+        return lseek(descriptor, off_t(offset), SEEK_SET) >= 0 || fail(error)
+    }
+
+    @ObjCMethod("synchronizeAndReturnError:")
+    func synchronize(error: UnsafeMutablePointer<id?>?) -> Bool { fsync(storage?.descriptor ?? -1) == 0 || fail(error) }
+
+    @ObjCMethod("closeAndReturnError:")
+    func closeReturningError(_ error: UnsafeMutablePointer<id?>?) -> Bool {
+        closeFile()
+        return true
+    }
     @ObjCMethod("truncateFileAtOffset:")
     func truncateFile(atOffset offset: UInt64) {
         guard let descriptor = storage?.descriptor else { return }
