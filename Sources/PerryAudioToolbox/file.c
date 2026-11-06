@@ -1,7 +1,8 @@
-// Audio files, read whole when opened. CAF, WAV and AIFF/AIFC are parsed
-// here and read in their own format, their packets as stored; anything else
-// GStreamer can decode (MP3, AAC, M4A, Ogg…) is decoded when opened and read
-// as interleaved 16-bit PCM. Files are read only.
+// Audio files, read whole when opened. CAF, WAV, AIFF/AIFC and AAC in MPEG-4
+// (M4A) are parsed here and read in their own format, their packets as
+// stored; anything else GStreamer can decode (MP3, Ogg, Apple Lossless…) is
+// decoded when opened and read as interleaved 16-bit PCM. Files are read
+// only.
 
 #include "PerryAudioToolbox.h"
 
@@ -242,6 +243,225 @@ static OSStatus parse_aiff(audio_file *file, bool aifc) {
 
 /// Anything else GStreamer decodes, kept as 16-bit PCM in place of the
 /// file's bytes.
+// MARK: - MPEG-4
+
+/// The atom of `type` among those in [p, end): its body and the body's end.
+static bool atom(const uint8_t *p, const uint8_t *end, uint32_t type, const uint8_t **body, const uint8_t **body_end) {
+    while (end - p >= 8) {
+        uint64_t size = be32(p);
+        const uint8_t *start = p + 8;
+        if (size == 1) {
+            if (end - p < 16) return false;
+            size = be64(p + 8);
+            start = p + 16;
+        } else if (size == 0) {
+            size = (uint64_t)(end - p);
+        }
+        if (size < (uint64_t)(start - p) || size > (uint64_t)(end - p)) return false;
+        if (be32(p + 4) == type) {
+            *body = start;
+            *body_end = p + size;
+            return true;
+        }
+        p += size;
+    }
+    return false;
+}
+
+/// The atom at the end of a path of types, each inside the one before.
+static bool atom_at(const uint8_t *p, const uint8_t *end, const uint32_t *path, int count, const uint8_t **body,
+                    const uint8_t **body_end) {
+    for (int i = 0; i < count; i++) {
+        if (!atom(p, end, path[i], &p, &end)) return false;
+    }
+    *body = p;
+    *body_end = end;
+    return true;
+}
+
+/// The length of an MPEG-4 descriptor, after its tag.
+static bool descriptor_size(const uint8_t **p, const uint8_t *end, uint32_t *size) {
+    uint32_t value = 0;
+    for (int i = 0; i < 4; i++) {
+        if (*p >= end) return false;
+        uint8_t byte = *(*p)++;
+        value = value << 7 | (byte & 0x7f);
+        if (!(byte & 0x80)) {
+            *size = value;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The AudioSpecificConfig in an ES_Descriptor, when the stream is MPEG-4
+/// audio.
+static bool audio_config(const uint8_t *p, const uint8_t *end, const uint8_t **config, uint32_t *config_size) {
+    uint32_t size;
+    if (p >= end || *p++ != 0x03 || !descriptor_size(&p, end, &size) || end - p < 3) return false;
+    uint8_t flags = p[2];
+    p += 3;
+    if (flags & 0x80) p += 2;                               // depends on another stream
+    if (flags & 0x40) { if (p >= end) return false; p += 1 + *p; }   // a URL
+    if (flags & 0x20) p += 2;                               // a clock reference stream
+    if (p >= end || *p++ != 0x04 || !descriptor_size(&p, end, &size) || end - p < 13) return false;
+    if (p[0] != 0x40) return false;                         // objectTypeIndication: MPEG-4 audio
+    p += 13;
+    if (p >= end || *p++ != 0x05 || !descriptor_size(&p, end, &size) || size < 2 || (uint32_t)(end - p) < size) return false;
+    *config = p;
+    *config_size = size;
+    return true;
+}
+
+/// An MPEG-4 file whose sound track is AAC-LC: the packets as stored, each
+/// 1024 frames, and the track's ES_Descriptor as the magic cookie. Other
+/// codecs (Apple Lossless, HE-AAC) are left for GStreamer to decode.
+static OSStatus parse_mpeg4(audio_file *file) {
+    const uint8_t *b = file->bytes, *end = b + file->size;
+    const uint8_t *moov, *moov_end, *trak, *trak_end, *stbl, *stbl_end, *p, *q;
+    if (!atom(b, end, FOURCC('m', 'o', 'o', 'v'), &moov, &moov_end)) return kAudioFileUnsupportedDataFormatError;
+    // The first track with a sample description for MPEG-4 audio.
+    static const uint32_t to_stbl[] = { FOURCC('m', 'd', 'i', 'a'), FOURCC('m', 'i', 'n', 'f'), FOURCC('s', 't', 'b', 'l') };
+    const uint8_t *entry = NULL, *entry_end = NULL;
+    for (const uint8_t *next = moov; atom(next, moov_end, FOURCC('t', 'r', 'a', 'k'), &trak, &trak_end); next = trak_end) {
+        if (!atom_at(trak, trak_end, to_stbl, 3, &stbl, &stbl_end)) continue;
+        if (!atom(stbl, stbl_end, FOURCC('s', 't', 's', 'd'), &p, &q) || q - p < 8 || be32(p + 4) < 1) continue;
+        if (atom(p + 8, q, FOURCC('m', 'p', '4', 'a'), &entry, &entry_end)) break;
+        entry = NULL;
+    }
+    if (!entry || entry_end - entry < 28) return kAudioFileUnsupportedDataFormatError;
+
+    // The sample entry: its sound description, then the esds atom, which a
+    // QuickTime file keeps inside a wave atom.
+    uint32_t version = be16(entry + 8), channels = be16(entry + 16);
+    const uint8_t *children = entry + 28 + (version == 1 ? 16 : version == 2 ? 36 : 0);
+    if (children > entry_end) return kAudioFileUnsupportedDataFormatError;
+    const uint8_t *esds, *esds_end;
+    if (!atom(children, entry_end, FOURCC('e', 's', 'd', 's'), &esds, &esds_end)) {
+        const uint8_t *wave, *wave_end;
+        if (!atom(children, entry_end, FOURCC('w', 'a', 'v', 'e'), &wave, &wave_end)
+            || !atom(wave, wave_end, FOURCC('e', 's', 'd', 's'), &esds, &esds_end)) return kAudioFileUnsupportedDataFormatError;
+    }
+    if (esds_end - esds < 4) return kAudioFileUnsupportedDataFormatError;
+    esds += 4;                                              // version and flags
+    const uint8_t *config;
+    uint32_t config_size;
+    if (!audio_config(esds, esds_end, &config, &config_size)) return kAudioFileUnsupportedDataFormatError;
+    static const uint32_t rates[] = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350 };
+    uint32_t object = config[0] >> 3, rate_index = (config[0] & 7) << 1 | config[1] >> 7, layout = config[1] >> 3 & 15;
+    if (object != 2 || rate_index > 12) return kAudioFileUnsupportedDataFormatError;
+    if (layout) channels = layout == 7 ? 8 : layout;
+    if (!channels) return kAudioFileUnsupportedDataFormatError;
+
+    // Where the samples are: their sizes, how many each chunk holds, and
+    // where the chunks start.
+    const uint8_t *stsz, *stsz_end, *stsc, *stsc_end, *stco, *stco_end;
+    bool wide = false;
+    if (!atom(stbl, stbl_end, FOURCC('s', 't', 's', 'z'), &stsz, &stsz_end) || stsz_end - stsz < 12
+        || !atom(stbl, stbl_end, FOURCC('s', 't', 's', 'c'), &stsc, &stsc_end) || stsc_end - stsc < 8) {
+        return kAudioFileInvalidFileError;
+    }
+    if (!atom(stbl, stbl_end, FOURCC('s', 't', 'c', 'o'), &stco, &stco_end)) {
+        if (!atom(stbl, stbl_end, FOURCC('c', 'o', '6', '4'), &stco, &stco_end)) return kAudioFileInvalidFileError;
+        wide = true;
+    }
+    if (stco_end - stco < 8) return kAudioFileInvalidFileError;
+    uint32_t fixed_size = be32(stsz + 4), count = be32(stsz + 8);
+    uint32_t runs = be32(stsc + 4), chunks = be32(stco + 4);
+    if ((!fixed_size && (uint64_t)count * 4 > (uint64_t)(stsz_end - stsz - 12)) || (uint64_t)runs * 12 > (uint64_t)(stsc_end - stsc - 8)
+        || (uint64_t)chunks * (wide ? 8 : 4) > (uint64_t)(stco_end - stco - 8) || count > file->size) {
+        return kAudioFileInvalidFileError;
+    }
+    AudioStreamPacketDescription *table = calloc(count ? count : 1, sizeof *table);
+    if (!table) return kAudio_MemFullError;
+    uint64_t first = UINT64_MAX, last = 0;
+    uint32_t sample = 0, run = 0, per_chunk = 0, largest = 0;
+    for (uint32_t chunk = 0; chunk < chunks && sample < count; chunk++) {
+        // The run of chunks this one belongs to says how many samples it has.
+        while (run < runs && be32(stsc + 8 + 12 * run) <= chunk + 1) per_chunk = be32(stsc + 8 + 12 * run++ + 4);
+        uint64_t offset = wide ? be64(stco + 8 + 8 * (size_t)chunk) : be32(stco + 8 + 4 * (size_t)chunk);
+        for (uint32_t i = 0; i < per_chunk && sample < count; i++, sample++) {
+            uint32_t size = fixed_size ? fixed_size : be32(stsz + 12 + 4 * (size_t)sample);
+            if (offset + size > file->size) { free(table); return kAudioFileInvalidFileError; }
+            table[sample] = (AudioStreamPacketDescription){ (int64_t)offset, 0, size };
+            if (offset < first) first = offset;
+            if (offset + size > last) last = offset + size;
+            if (size > largest) largest = size;
+            offset += size;
+        }
+    }
+    if (!sample) { free(table); return kAudioFileInvalidFileError; }
+    // Packets are placed from the first one's start, the audio data's.
+    for (uint32_t i = 0; i < sample; i++) table[i].mStartOffset -= (int64_t)first;
+
+    file->format = (AudioStreamBasicDescription){ .mSampleRate = rates[rate_index], .mFormatID = kAudioFormatMPEG4AAC,
+                                                  .mFramesPerPacket = 1024, .mChannelsPerFrame = channels };
+    file->table = table;
+    file->packets = sample;
+    file->max_packet = largest;
+    file->data_offset = (size_t)first;
+    file->data_size = (size_t)(last - first);
+    file->cookie_size = (uint32_t)(esds_end - esds);
+    file->cookie = malloc(file->cookie_size);
+    if (!file->cookie) return kAudio_MemFullError;
+    memcpy(file->cookie, esds, file->cookie_size);
+
+    // What plays of it: an edit list gives the encoder's priming frames and
+    // the length without them; without one, an AAC encoder's usual priming.
+    int64_t total = (int64_t)sample * 1024, priming = 2112, valid = -1;
+    static const uint32_t to_elst[] = { FOURCC('e', 'd', 't', 's'), FOURCC('e', 'l', 's', 't') };
+    const uint8_t *mvhd, *mvhd_end, *mdhd, *mdhd_end;
+    static const uint32_t to_mdhd[] = { FOURCC('m', 'd', 'i', 'a'), FOURCC('m', 'd', 'h', 'd') };
+    if (atom_at(trak, trak_end, to_elst, 2, &p, &q) && q - p >= 8 && be32(p + 4) >= 1
+        && atom(moov, moov_end, FOURCC('m', 'v', 'h', 'd'), &mvhd, &mvhd_end)
+        && atom_at(trak, trak_end, to_mdhd, 2, &mdhd, &mdhd_end)) {
+        bool long_edit = p[0] == 1, long_movie = mvhd_end > mvhd && mvhd[0] == 1, long_media = mdhd_end > mdhd && mdhd[0] == 1;
+        if (q - p >= (long_edit ? 28 : 20) && mvhd_end - mvhd >= (long_movie ? 24 : 16) && mdhd_end - mdhd >= (long_media ? 24 : 16)) {
+            uint64_t duration = long_edit ? be64(p + 8) : be32(p + 8);
+            int64_t media_time = long_edit ? (int64_t)be64(p + 16) : (int32_t)be32(p + 12);
+            uint32_t movie_scale = be32(mvhd + (long_movie ? 20 : 12)), media_scale = be32(mdhd + (long_media ? 20 : 12));
+            if (media_time >= 0 && media_time < total && movie_scale) {
+                priming = media_time;
+                valid = (int64_t)llround((double)duration * media_scale / movie_scale);
+            }
+        }
+    }
+    // iTunes writes them as text instead, in its iTunSMPB tag: zeros, the
+    // priming, the remainder and the length, in hexadecimal.
+    static const char tag[] = "iTunSMPB";
+    for (const uint8_t *t = moov; valid < 0 && moov_end - t >= 8 && (t = memchr(t, 'i', (size_t)(moov_end - t - 7))); t++) {
+        if (memcmp(t, tag, 8)) continue;
+        const uint8_t *text = NULL;
+        for (const uint8_t *d = t + 8; d + 12 <= moov_end && d < t + 40; d++) {
+            if (!memcmp(d, "data", 4)) { text = d + 12; break; }
+        }
+        char line[64] = "";
+        if (text) memcpy(line, text, (size_t)(moov_end - text) < sizeof line - 1 ? (size_t)(moov_end - text) : sizeof line - 1);
+        unsigned zero, start, padding;
+        unsigned long long length;
+        if (sscanf(line, " %x %x %x %llx", &zero, &start, &padding, &length) == 4 && (int64_t)start + (int64_t)length <= total) {
+            priming = start;
+            valid = (int64_t)length;
+        }
+        break;
+    }
+    if (priming > total) priming = 0;
+    if (valid < 0 || valid > total - priming) valid = total - priming;
+    file->valid_frames = valid;
+    file->priming = (int32_t)priming;
+    file->remainder = (int32_t)(total - priming - valid);
+    file->type = kAudioFileM4AType;
+    return 0;
+}
+
+/// Whether the bytes begin as an MPEG-4 or QuickTime file does.
+static bool is_mpeg4(const uint8_t *bytes, size_t size) {
+    if (size < 12) return false;
+    uint32_t type = be32(bytes + 4);
+    return type == FOURCC('f', 't', 'y', 'p') || type == FOURCC('m', 'o', 'o', 'v') || type == FOURCC('m', 'd', 'a', 't')
+        || type == FOURCC('f', 'r', 'e', 'e') || type == FOURCC('w', 'i', 'd', 'e');
+}
+
 static OSStatus decode_other(audio_file *file, uint32_t hint) {
     int16_t *samples;
     size_t frames;
@@ -250,6 +470,13 @@ static OSStatus decode_other(audio_file *file, uint32_t hint) {
         return kAudioFileUnsupportedFileTypeError;
     }
     free(file->bytes);
+    free(file->cookie);
+    free(file->table);
+    file->cookie = NULL;
+    file->cookie_size = 0;
+    file->table = NULL;
+    file->valid_frames = -1;
+    file->priming = file->remainder = 0;
     file->decoded = true;
     file->bytes = (uint8_t *)samples;
     file->size = frames * channels * 2;
@@ -276,7 +503,14 @@ static OSStatus open_bytes(uint8_t *bytes, size_t size, uint32_t hint, audio_fil
         status = parse_wave(file);
     } else if (size >= 12 && !memcmp(bytes, "FORM", 4) && (!memcmp(bytes + 8, "AIFF", 4) || !memcmp(bytes + 8, "AIFC", 4))) {
         status = parse_aiff(file, !memcmp(bytes + 8, "AIFC", 4));
+    } else if (is_mpeg4(bytes, size) && !parse_mpeg4(file)) {
+        status = 0;
     } else {
+        // A sound track parse_mpeg4 left half read is read again, decoded.
+        free(file->cookie);
+        free(file->table);
+        file->cookie = NULL;
+        file->table = NULL;
         status = decode_other(file, hint);
     }
     if (status) {
@@ -297,6 +531,15 @@ static OSStatus open_bytes(uint8_t *bytes, size_t size, uint32_t hint, audio_fil
 static audio_file *valid(void *file) {
     audio_file *f = file;
     return f && f->magic == FILE_MAGIC ? f : NULL;
+}
+
+/// Turns an open file of compressed audio into its decoded PCM, for the
+/// extended audio files built on these. Fails when GStreamer can't.
+OSStatus perry_audio_file_decode(void *handle) {
+    audio_file *file = valid(handle);
+    if (!file) return kAudioFileNotOpenError;
+    if (file->decoded || file->format.mFormatID == kAudioFormatLinearPCM) return 0;
+    return decode_other(file, file->type);
 }
 
 // MARK: - Opening and closing
