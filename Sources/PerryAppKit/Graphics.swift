@@ -120,8 +120,11 @@ open class NSColor: NSObject {
         return nil
     }
     @ObjCClassMethod("colorWithPatternImage:") static func color(patternImage: NSObject?) -> NSColor { NSColor(white: 0.9, alpha: 1) }
-    @ObjCClassMethod("colorNamed:") static func color(named name: String?) -> NSColor? { name.flatMap(system) }
-    @ObjCClassMethod("colorNamed:bundle:") static func color(named name: String?, bundle: NSObject?) -> NSColor? { name.flatMap(system) }
+    /// A system color by name, else the app's asset catalog's.
+    @ObjCClassMethod("colorNamed:")
+    static func color(named name: String?) -> NSColor? { name.flatMap { system($0) ?? AppKitAssets.color(named: $0) } }
+    @ObjCClassMethod("colorNamed:bundle:")
+    static func color(named name: String?, bundle: NSObject?) -> NSColor? { color(named: name) }
     @ObjCClassMethod("colorWithCatalogName:colorName:")
     static func color(catalogName: String?, colorName: String?) -> NSColor? { colorName.flatMap(system) }
 
@@ -671,6 +674,14 @@ open class NSImage: NSObject {
                 decodeSize()
                 return
             }
+        }
+        // The app's asset catalog's.
+        if let (image, imageSize) = AppKitAssets.image(named: name) {
+            cgImage = image
+            decoded = true
+            size = imageSize
+            path = ""
+            return
         }
         size = CGSize(width: 16, height: 16)
     }
