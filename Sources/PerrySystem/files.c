@@ -383,6 +383,48 @@ static void statfs_to_darwin(const struct statfs *info, struct darwin_statfs *ou
     strcpy(out->f_mntfromname, "/dev/disk1s1");
 }
 
+#if defined(__arm__)
+// struct statvfs on 32-bit Darwin: eleven 32-bit words, where glibc's
+// has 64-bit counts.
+struct darwin_statvfs {
+    uint32_t f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, f_files, f_ffree, f_favail, f_fsid, f_flag, f_namemax;
+};
+
+// A count too large for 32 bits is the largest there is.
+static uint32_t count32(uint64_t count) { return count > UINT32_MAX ? UINT32_MAX : (uint32_t)count; }
+
+static void statvfs_to_darwin(const struct statvfs64 *info, struct darwin_statvfs *out) {
+    out->f_bsize = (uint32_t)info->f_bsize;
+    out->f_frsize = (uint32_t)info->f_frsize;
+    out->f_blocks = count32(info->f_blocks);
+    out->f_bfree = count32(info->f_bfree);
+    out->f_bavail = count32(info->f_bavail);
+    out->f_files = count32(info->f_files);
+    out->f_ffree = count32(info->f_ffree);
+    out->f_favail = count32(info->f_favail);
+    out->f_fsid = (uint32_t)info->f_fsid;
+    // ST_RDONLY and ST_NOSUID are bits 0 and 1 on both.
+    out->f_flag = (uint32_t)info->f_flag & 3;
+    out->f_namemax = (uint32_t)info->f_namemax;
+}
+
+int darwin_statvfs(const char *path, struct darwin_statvfs *out) DARWIN_SYMBOL(statvfs);
+int darwin_statvfs(const char *path, struct darwin_statvfs *out) {
+    struct statvfs64 info;
+    if (statvfs64(path, &info) != 0) return -1;
+    statvfs_to_darwin(&info, out);
+    return 0;
+}
+
+int darwin_fstatvfs(int fd, struct darwin_statvfs *out) DARWIN_SYMBOL(fstatvfs);
+int darwin_fstatvfs(int fd, struct darwin_statvfs *out) {
+    struct statvfs64 info;
+    if (fstatvfs64(fd, &info) != 0) return -1;
+    statvfs_to_darwin(&info, out);
+    return 0;
+}
+#endif
+
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) DARWIN_SYMBOL(statfs);
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     struct statfs info;
