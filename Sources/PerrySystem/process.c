@@ -320,8 +320,32 @@ static int sysctl_string(void *old, size_t *old_length, const char *value) {
     return sysctl_value(old, old_length, value, strlen(value) + 1);
 }
 
+// A macOS program's system, from its LC_BUILD_VERSION: the Darwin release
+// of the macOS its SDK is (macOS 26 is Darwin 25, macOS 11 to 15 Darwin
+// 20 to 24) and an Apple-silicon Mac, as apps that check the OS read it
+// from kern.osrelease. Zero for other programs.
+perry_macos_release perry_system_macos_release(void) {
+    const uint8_t *header = perry_system_main_header;
+    if (!header) return (perry_macos_release){ 0, 0 };
+    uint32_t count = *(const uint32_t *)(header + 16);
+    const uint8_t *command = header + 32;     // mach_header_64
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t cmd = *(const uint32_t *)command, size = *(const uint32_t *)(command + 4);
+        // LC_BUILD_VERSION: platform, minos, sdk (xxxx.yy.zz in nibbles).
+        if (cmd == 0x32 && *(const uint32_t *)(command + 8) == 1) {   // PLATFORM_MACOS
+            uint32_t sdk = *(const uint32_t *)(command + 16);
+            int major = (int)(sdk >> 16), minor = (int)((sdk >> 8) & 0xff);
+            return (perry_macos_release){ major >= 26 ? major - 1 : major + 9, minor };
+        }
+        if (size == 0) break;
+        command += size;
+    }
+    return (perry_macos_release){ 0, 0 };
+}
+
 // The names apps read to identify the device: an iPhone 14 running iOS 15,
-// as UIDevice reports, with this machine's processors and memory.
+// as UIDevice reports, or for a macOS program an Apple-silicon Mac running
+// the macOS of its SDK; with this machine's processors and memory.
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length)
     DARWIN_SYMBOL(sysctlbyname);
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length) {
@@ -331,16 +355,27 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         errno = EINVAL;
         return -1;
     }
+    perry_macos_release mac = perry_system_macos_release();
     if (strcmp(name, "hw.machine") == 0)
-        return sysctl_string(old, old_length, "iPhone14,7");
+        return sysctl_string(old, old_length, mac.darwin ? "arm64" : "iPhone14,7");
     if (strcmp(name, "hw.model") == 0)
-        return sysctl_string(old, old_length, "D27AP");
+        return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : "D27AP");
     if (strcmp(name, "kern.ostype") == 0)
         return sysctl_string(old, old_length, "Darwin");
-    if (strcmp(name, "kern.osrelease") == 0)
-        return sysctl_string(old, old_length, "21.0.0");
-    if (strcmp(name, "kern.osversion") == 0)
-        return sysctl_string(old, old_length, "19A346");
+    if (strcmp(name, "kern.osrelease") == 0) {
+        if (!mac.darwin) return sysctl_string(old, old_length, "21.0.0");
+        char release[16];
+        snprintf(release, sizeof(release), "%d.%d.0", mac.darwin, mac.minor);
+        return sysctl_string(old, old_length, release);
+    }
+    if (strcmp(name, "kern.osversion") == 0) {
+        if (!mac.darwin) return sysctl_string(old, old_length, "19A346");
+        // A build number of that release: its Darwin major, a letter for its
+        // minor version, and a build.
+        char build[16];
+        snprintf(build, sizeof(build), "%d%c100", mac.darwin, 'A' + (mac.minor % 26));
+        return sysctl_string(old, old_length, build);
+    }
     if (strcmp(name, "kern.hostname") == 0) {
         char host[256] = "localhost";
         gethostname(host, sizeof(host) - 1);
