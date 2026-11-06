@@ -78,7 +78,9 @@ typedef struct perry_image {
     uint64_t entryoff;
     bool unixthread;            // started by LC_UNIXTHREAD rather than LC_MAIN
     const struct symtab_command *symtab;
+    const struct dysymtab_command *dysymtab;
     void *legacy_main;          // _main, for LC_UNIXTHREAD executables, which have no LC_MAIN
+    uint32_t thread_pc;         // LC_UNIXTHREAD's unslid pc: crt1's `start`
 
     // Linkedit data. Pointers are into the mapped __LINKEDIT segment.
     const struct linkedit_data_command *chained_fixups;
