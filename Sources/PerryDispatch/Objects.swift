@@ -19,13 +19,13 @@ enum Objects {
     /// The Linux object `object` stands for.
     @inline(__always)
     static func linux(_ object: Object?) -> Object? {
-        object?.load(fromByteOffset: 8, as: Object?.self)
+        object?.load(fromByteOffset: DarwinLayout.objectLinux, as: Object?.self)
     }
 
     /// The object's state word.
     @inline(__always)
     static func word(_ object: Object?) -> UnsafeMutableRawPointer? {
-        object?.load(fromByteOffset: 16, as: UnsafeMutableRawPointer?.self)
+        object?.load(fromByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer?.self)
     }
 
     /// The object's Swift state, for the classes that keep one.
@@ -36,8 +36,8 @@ enum Objects {
     /// A new object of `cls` (+1) taking over a reference to `linux`, if any.
     static func make(_ cls: Object, linux: Object?, state: AnyObject? = nil) -> Object {
         guard let object = Runtime.createInstance(cls, extraBytes) else { dispatchFatal("out of memory") }
-        object.storeBytes(of: linux, toByteOffset: 8, as: Object?.self)
-        object.storeBytes(of: state.map { Unmanaged.passRetained($0).toOpaque() }, toByteOffset: 16,
+        object.storeBytes(of: linux, toByteOffset: DarwinLayout.objectLinux, as: Object?.self)
+        object.storeBytes(of: state.map { Unmanaged.passRetained($0).toOpaque() }, toByteOffset: DarwinLayout.objectState,
                           as: UnsafeMutableRawPointer?.self)
         return object
     }
@@ -278,6 +278,8 @@ public func dispatch_set_finalizer_f(_ object: Object?, _ finalizer: Function?) 
     if let source = Objects.state(object, as: SourceState.self) {
         source.finalizer = finalizer
     } else {
+        // libdispatch calls it with only the context; on armv7 it does not
+        // keep r9 for libdispatch as the functions it runs do.
         linux_dispatch_set_finalizer_f(Objects.linux(object), finalizer)
     }
 }
