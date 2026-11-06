@@ -202,6 +202,13 @@ public class NSDictionary: NSObject {
         PropertyLists.contents(of: url.url, cls, expecting: .dictionary)
     }
 
+    @ObjCClassMethod("dictionaryWithContentsOfURL:error:")
+    static func dictionary(_ cls: ObjCClass, contentsOfURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        if let made = PropertyLists.contents(of: url.url, cls, expecting: .dictionary) { return made }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+        return nil
+    }
+
     @ObjCClassMethod("dictionaryWithDictionary:")
     static func dictionary(_ cls: ObjCClass, dictionary other: NSDictionary?) -> NSDictionary {
         Dictionaries.owned(other?.entries ?? [], cls: cls.pointer)
@@ -241,6 +248,14 @@ public class NSDictionary: NSObject {
 
     @ObjCMethod("initWithContentsOfURL:")
     func initialize(contentsOfURL url: NSURL) -> Self? { initialize(contentsOf: url.url) }
+
+    /// macOS 10.13's: nil and an error when the file holds no dictionary.
+    @ObjCMethod("initWithContentsOfURL:error:")
+    func initialize(contentsOfURL url: NSURL, error: UnsafeMutablePointer<id?>?) -> Self? {
+        if let made = initialize(contentsOf: url.url) { return made }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+        return nil
+    }
 
     private func initialize(contentsOf url: URL) -> Self? {
         guard let object = PropertyLists.contents(of: url, ObjCClass(named: "NSDictionary"), expecting: .dictionary) else { return nil }

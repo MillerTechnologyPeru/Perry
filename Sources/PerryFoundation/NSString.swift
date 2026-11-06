@@ -3,19 +3,29 @@ import Glibc
 import PerryObjCInterop
 import Synchronization
 
-/// An NSString's contents.
+/// An NSString's contents: its own, or for an NSMutableAttributedString's
+/// -mutableString, the attributed string's characters, read and changed in
+/// place.
 final class StringStorage {
+    private var stored: String
+    /// The attributed string this string is the characters of.
+    var attributed: AttributedStorage?
+
     /// Changes only for NSMutableString.
     var value: String {
-        didSet {
+        get { attributed?.string ?? stored }
+        set {
+            if let attributed { attributed.replaceChanged(with: Array(newValue.utf16)) } else { stored = newValue }
             free(cString)
             cString = nil
         }
     }
     private var cString: UnsafeMutablePointer<CChar>?
+    /// What cString was made from, for a string changed behind its back.
+    private var cStringSource: String?
 
     init(_ value: String) {
-        self.value = value
+        stored = value
     }
 
     deinit {
@@ -24,9 +34,12 @@ final class StringStorage {
 
     /// UTF8String: valid as long as the string.
     var utf8: UnsafePointer<CChar> {
-        if let cString { return UnsafePointer(cString) }
-        let created = strdup(value)!
+        let current = value
+        if let cString, attributed == nil || cStringSource == current { return UnsafePointer(cString) }
+        free(cString)
+        let created = strdup(current)!
         cString = created
+        cStringSource = attributed == nil ? nil : current
         return UnsafePointer(created)
     }
 }

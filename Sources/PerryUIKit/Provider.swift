@@ -34,13 +34,16 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard QuartzCore.load(symbol) else { uikitFatal("UIKit needs libPerryQuartzCore, which is missing or incomplete") }
     Accessibility.load { symbol(libobjc, $0) }
     AssetCatalog.load(symbol)
-    // A Mac app's WebKit is AppKit's; UIKit, there for its CoreText, keeps
-    // its own WebKit classes under names of its own.
+    // A Mac app's WebKit, Auto Layout and paragraph styles are AppKit's;
+    // UIKit, there for its CoreText, keeps its own classes of those under
+    // names of its own.
     if isMacApp(info.main_header) {
-        let webKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
+        let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
                              "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration",
-                             "WKWebpagePreferences", "WKWebsiteDataStore"]
-        for name in webKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
+                             "WKWebpagePreferences", "WKWebsiteDataStore",
+                             "NSLayoutConstraint", "NSLayoutAnchor", "NSLayoutXAxisAnchor", "NSLayoutYAxisAnchor", "NSLayoutDimension",
+                             "NSParagraphStyle", "NSMutableParagraphStyle"]
+        for name in appKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
     }
     return true
 }

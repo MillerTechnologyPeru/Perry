@@ -72,10 +72,15 @@ open class NSPasteboard: NSObject {
 
     @ObjCMethod("dataForType:") func data(forType type: String?) -> NSObject? { nil }
     @ObjCMethod("setData:forType:") func setData(_ data: NSObject?, forType type: String?) -> Bool { false }
+    /// Strings, and pasteboard items' strings, go on the clipboard.
     @ObjCMethod("writeObjects:")
     func writeObjects(_ objects: NSObject?) -> Bool {
-        guard let first = objects?.as(NSArray.self)?.elements.first,
-              ObjCRuntime.isKind(first.objcObject, of: ObjCRuntime.classObject("NSString")) else { return false }
+        guard let first = objects?.as(NSArray.self)?.elements.first else { return false }
+        if let item = first.as(NSPasteboardItem.self) {
+            guard let text = item.strings[Constants.NSPasteboardTypeString] ?? item.strings.values.first else { return false }
+            return setString(text, forType: Constants.NSPasteboardTypeString)
+        }
+        guard ObjCRuntime.isKind(first.objcObject, of: ObjCRuntime.classObject("NSString")) else { return false }
         return setString(first.stringValue, forType: Constants.NSPasteboardTypeString)
     }
     @ObjCMethod("readObjectsForClasses:options:")
@@ -88,6 +93,43 @@ open class NSPasteboard: NSObject {
     @ObjCMethod("canReadObjectForClasses:options:")
     func canReadObject(forClasses classes: NSObject?, options: NSObject?) -> Bool { string(forType: nil) != nil }
     @ObjCMethod("pasteboardItems") func pasteboardItems() -> NSObject { NSMutableArray.empty() }
+}
+
+/// NSPasteboardItem: an item's data, by type; strings are what the
+/// clipboard takes.
+@ObjCClass("NSPasteboardItem")
+open class NSPasteboardItem: NSObject {
+    var strings: [String: String] = [:]
+    var data: [String: NSObject] = [:]
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("types")
+    func types() -> NSObject { NSMutableArray.of((Array(strings.keys) + Array(data.keys)).compactMap { $0.objCArgument().map(NSObject.init) }) }
+    @ObjCMethod("setString:forType:")
+    func setString(_ string: String?, forType type: String?) -> Bool {
+        guard let type else { return false }
+        strings[type] = string
+        return true
+    }
+    @ObjCMethod("stringForType:") func string(forType type: String?) -> String? { type.flatMap { strings[$0] } }
+    @ObjCMethod("setData:forType:")
+    func setData(_ value: NSObject?, forType type: String?) -> Bool {
+        guard let type else { return false }
+        data[type] = value
+        return true
+    }
+    @ObjCMethod("dataForType:") func data(forType type: String?) -> NSObject? { type.flatMap { data[$0] } }
+    @ObjCMethod("setPropertyList:forType:") func setPropertyList(_ value: NSObject?, forType type: String?) -> Bool { setData(value, forType: type) }
+    @ObjCMethod("propertyListForType:") func propertyList(forType type: String?) -> NSObject? { data(forType: type) }
+    @ObjCMethod("availableTypeFromArray:")
+    func availableType(from types: NSObject?) -> String? {
+        types?.as(NSArray.self)?.elements.map(\.stringValue).first { strings[$0] != nil || data[$0] != nil }
+    }
+    @ObjCMethod("setDataProvider:forTypes:") func setDataProvider(_ provider: NSObject?, forTypes types: NSObject?) -> Bool { false }
+    @ObjCMethod("pasteboardPropertyListForType:") func pasteboardPropertyList(forType type: String?) -> NSObject? { data(forType: type) }
+    @ObjCMethod("writableTypesForPasteboard:") func writableTypes(for pasteboard: NSObject?) -> NSObject { types() }
 }
 
 @ObjCClass("NSSound")

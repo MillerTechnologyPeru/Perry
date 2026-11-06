@@ -372,6 +372,23 @@ public func NSApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
         if let nib = info.infoObject(forKey: "NSMainNibFile")?.stringValue, let application {
             NibLoader.loadMainNib(named: nib, owner: NSObject(application))
         }
+        // The main storyboard: its menu, then its initial controller shown.
+        if let name = info.infoObject(forKey: "NSMainStoryboardFile")?.stringValue, let application {
+            if let storyboard = NSStoryboard.load(named: name, bundle: nil) {
+                NSStoryboard.main = storyboard
+                storyboard.loadMainMenu(owner: NSObject(application))
+                if let controller = storyboard.instantiateInitialController() {
+                    Nibs.kept.append(controller)
+                    if let windowController = controller.as(NSWindowController.self) {
+                        Send.void(windowController.objcObject, "showWindow:", nil)
+                    } else if let viewController = controller.as(NSViewController.self) {
+                        viewController.presentInWindow()
+                    }
+                }
+            } else {
+                appKitWarning("no main storyboard \(name)")
+            }
+        }
         Send.void(application, "run")
     }
     return 0

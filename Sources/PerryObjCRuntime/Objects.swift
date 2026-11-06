@@ -352,7 +352,7 @@ enum RetainCounts {
             let key = UInt(bitPattern: object)
             var entry = table[key] ?? Entry()
             if entry.deallocating { return false }
-            if let peer = entry.peer { return swift_tryRetain(peer) }
+            if let peer = entry.peer { return swift_tryRetain(peer) != nil }
             entry.extra += 1
             table[key] = entry
             return true
@@ -388,9 +388,10 @@ enum RetainCounts {
 @_silgen_name("swift_retainCount")
 func swift_retainCount(_ object: UnsafeMutableRawPointer) -> Int
 
-/// Retains a Swift object unless its deinit has begun.
+/// Retains a Swift object unless its deinit has begun: the object, or nil
+/// (a pointer, not a Bool: its low byte can be 0).
 @_silgen_name("swift_tryRetain")
-func swift_tryRetain(_ object: UnsafeMutableRawPointer) -> Bool
+func swift_tryRetain(_ object: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer?
 
 /// __weak variables: the slots pointing at each object, cleared when it is
 /// deallocated.
