@@ -21,6 +21,15 @@
 
 #define DARWIN_SYMBOL(name) __asm__("_" #name) __attribute__((visibility("default"), used))
 
+// For a function with floating-point parameters: 32-bit Darwin passes them
+// in core registers and on the stack, as AAPCS's base standard does, where
+// Linux's armhf passes them in VFP registers.
+#if defined(__arm__)
+#define DARWIN_FLOAT_ABI __attribute__((pcs("aapcs")))
+#else
+#define DARWIN_FLOAT_ABI
+#endif
+
 typedef int32_t OSStatus;
 typedef uint32_t SystemSoundID;
 typedef uint32_t AudioServicesPropertyID;
