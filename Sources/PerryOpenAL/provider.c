@@ -71,7 +71,58 @@ char darwin_alcIsExtensionPresent(void *device, const char *name) {
     return apple_extension(name) && present && present(device, name);
 }
 
+#if defined(__arm__)
+
+// 32-bit Darwin passes and returns floating point in core registers, as
+// AAPCS's base standard does, where Linux's armhf uses VFP registers: the
+// functions that take or return it are entered through these, or a source's
+// gain and pitch arrive as whatever the VFP registers held.
+#define DARWIN_FLOAT_ABI __attribute__((pcs("aapcs")))
+
+#define THUNK(name, result, parameters, arguments) \
+    static result (*host_##name) parameters; \
+    static DARWIN_FLOAT_ABI result thunk_##name parameters { return host_##name arguments; }
+
+THUNK(alSourcef, void, (unsigned source, int parameter, float value), (source, parameter, value))
+THUNK(alSource3f, void, (unsigned source, int parameter, float x, float y, float z), (source, parameter, x, y, z))
+THUNK(alListenerf, void, (int parameter, float value), (parameter, value))
+THUNK(alListener3f, void, (int parameter, float x, float y, float z), (parameter, x, y, z))
+THUNK(alBufferf, void, (unsigned buffer, int parameter, float value), (buffer, parameter, value))
+THUNK(alBuffer3f, void, (unsigned buffer, int parameter, float x, float y, float z), (buffer, parameter, x, y, z))
+THUNK(alDopplerFactor, void, (float value), (value))
+THUNK(alDopplerVelocity, void, (float value), (value))
+THUNK(alSpeedOfSound, void, (float value), (value))
+THUNK(alGetFloat, float, (int parameter), (parameter))
+THUNK(alGetDouble, double, (int parameter), (parameter))
+
+#define ENTRY(name) { "_" #name, (void **)&host_##name, (void *)thunk_##name }
+static const struct { const char *name; void **host; void *thunk; } thunks[] = {
+    ENTRY(alSourcef), ENTRY(alSource3f), ENTRY(alListenerf), ENTRY(alListener3f), ENTRY(alBufferf), ENTRY(alBuffer3f),
+    ENTRY(alDopplerFactor), ENTRY(alDopplerVelocity), ENTRY(alSpeedOfSound), ENTRY(alGetFloat), ENTRY(alGetDouble),
+};
+
+/// The thunk for a function that takes or returns floating point, with the
+/// host's function behind it; else the host's function itself.
+static void *darwin_function(const char *name, void *host) {
+    for (unsigned i = 0; host && i < sizeof(thunks) / sizeof(thunks[0]); i++) {
+        if (strcmp(thunks[i].name, name) == 0) {
+            *thunks[i].host = host;
+            return thunks[i].thunk;
+        }
+    }
+    return host;
+}
+
+#else
+
+static void *darwin_function(const char *name, void *host) {
+    (void)name;
+    return host;
+}
+
+#endif
+
 __attribute__((visibility("default")))
 void *perry_provider_symbol(const char *name) {
-    return perry_wrapped_symbol(&openal, name, NULL);
+    return darwin_function(name, perry_wrapped_symbol(&openal, name, NULL));
 }
