@@ -177,19 +177,29 @@ public enum ObjCRuntime {
     /// ObjCClassExports is used otherwise.
     nonisolated(unsafe) public static var classStorage: ((String) -> (UnsafeMutableRawPointer, UnsafeMutableRawPointer)?)?
 
+    /// Classes this provider registers under names of its own, by their
+    /// Swift-side names: classes another provider defines for the program,
+    /// such as WKWebView, which a Mac app's WebKit has from AppKit while
+    /// UIKit stands in for its CoreText. The provider still finds them by
+    /// their public names. Set before the classes are defined.
+    nonisolated(unsafe) public static var privateClassNames: [String: String] = [:]
+
     /// Defines a class: in the provider's exported storage when it has
     /// some, otherwise on the heap; installs `registrations`, then registers
     /// it. What @ObjCClass's defineObjCClass() calls.
     @discardableResult
     public static func defineClass(named name: String, superclass: ObjCClass?,
                                    _ registrations: [ObjCMethodRegistration]) -> ObjCClass {
-        let created: UnsafeMutableRawPointer? = name.withCString { cName in
-            if let (cls, metaclass) = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name) {
+        // A class registered under a private name is the provider's own,
+        // on the heap; the public name stays free for another provider.
+        let registeredName = privateClassNames[name] ?? name
+        let created: UnsafeMutableRawPointer? = registeredName.withCString { cName in
+            if registeredName == name, let (cls, metaclass) = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name) {
                 return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
             }
             return functions.allocateClassPair(superclass?.pointer, cName, 0)
         }
-        guard let created else { objcInteropFatal("cannot define class \(name); is the name taken?") }
+        guard let created else { objcInteropFatal("cannot define class \(registeredName); is the name taken?") }
         let cls = ObjCClass(created)
         for register in registrations { register(cls) }
         functions.registerClassPair(created)
