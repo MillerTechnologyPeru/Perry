@@ -678,6 +678,13 @@ public class NSPredicate: NSObject {
         ObjCObject(Predicates.parse(format, .array(argumentArray.map { Arrays.elements($0.objcObject) } ?? [])))
     }
 
+    /// A Darwin va_list is a pointer to the argument slots.
+    @ObjCClassMethod("predicateWithFormat:arguments:", types: "@32@0:8@16*24")
+    static func predicate(format: String, arguments: UnsafeRawPointer?) -> ObjCObject {
+        guard let arguments else { return ObjCObject(Predicates.parse(format, .array([]))) }
+        return ObjCObject(Predicates.parse(format, .variadic(DarwinArguments(arguments))))
+    }
+
     @ObjCClassMethod("predicateWithValue:")
     static func predicate(value: Bool) -> ObjCObject { ObjCObject(Predicates.object(.truth(value))) }
 
