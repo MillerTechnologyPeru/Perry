@@ -86,7 +86,15 @@ public final class NSProcessInfo: NSObject {
     @ObjCMethod("processIdentifier") func processIdentifier() -> Int32 { getpid() }
     @ObjCMethod("globallyUniqueString") func globallyUniqueString() -> String { Self.info.globallyUniqueString }
     @ObjCMethod("hostName") func hostName() -> String { Self.info.hostName }
-    @ObjCMethod("physicalMemory") func physicalMemory() -> UInt64 { Self.info.physicalMemory }
+    /// The machine's memory, as hw.memsize reports it: at most 1 GB to a
+    /// 32-bit program, which takes more for a fault. Counted here, as
+    /// swift-foundation's count of it overflows a 32-bit Int.
+    @ObjCMethod("physicalMemory")
+    func physicalMemory() -> UInt64 {
+        let pages = UInt64(max(sysconf(Int32(_SC_PHYS_PAGES)), 0)), size = UInt64(max(sysconf(Int32(_SC_PAGESIZE)), 0))
+        let bytes = pages * size
+        return MemoryLayout<Int>.size == 4 ? min(bytes, 1 << 30) : bytes
+    }
     @ObjCMethod("processorCount") func processorCount() -> UInt { UInt(Self.info.processorCount) }
     @ObjCMethod("activeProcessorCount") func activeProcessorCount() -> UInt { UInt(Self.info.activeProcessorCount) }
     @ObjCMethod("systemUptime") func systemUptime() -> Double { Self.info.systemUptime }
