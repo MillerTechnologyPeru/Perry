@@ -117,6 +117,9 @@ enum CFCollections {
     nonisolated(unsafe) static var arrayClass: Class!
     nonisolated(unsafe) static var dictionaryClass: Class!
     nonisolated(unsafe) static var setClass: Class!
+    /// For fast enumeration of the program's own collections, whose
+    /// changes while enumerated are not looked for.
+    nonisolated(unsafe) static let enumeration = EnumerationBuffer()
 
     /// The storage of a collection of the program's pointers; nil for a
     /// bridged collection.
@@ -201,61 +204,165 @@ public class NSCFArray: NSArray {
     }
 }
 
-/// A CFDictionary of the program's pointers.
+/// A CFDictionary of the program's pointers. An NSDictionary, as every
+/// CFDictionary is on Darwin: the methods here are the ones NSDictionary's
+/// others are built on, and those that change it, by its callbacks.
 @ObjCClass("__NSCFDictionary")
-public class NSCFDictionary: NSObject {
+public class NSCFDictionary: NSDictionary {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         CFCollections.dictionaryClass = cls.storage
     }
 
     @ObjCMethod("dealloc")
-    func dealloc() {
+    func cfDealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: CFCollections.dictionaryClass)
     }
 
-    @ObjCMethod("count") func count() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
-    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFTypeIDs.dictionary }
+    @ObjCMethod("count") func cfCount() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
+    @ObjCMethod("_cfTypeID") func cfDictionaryTypeID() -> UInt { CFTypeIDs.dictionary }
+
+    private var cfKeys: [id] {
+        CFDictionaries.entries(objcObject).compactMap { $0.key.map { UnsafeMutableRawPointer(mutating: $0) } }
+    }
 
     /// NSDictionary's reads, as Darwin's __NSCFDictionary answers them for
     /// a dictionary of objects with the program's own callbacks (such as
     /// kCFCopyStringDictionaryKeyCallBacks), by the callbacks' equality.
     @ObjCMethod("objectForKey:")
-    func object(forKey key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    func cfObject(forKey key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         CFDictionaries.value(objcObject, UnsafeRawPointer(key)).flatMap { UnsafeMutableRawPointer(mutating: $0) }
     }
 
     @ObjCMethod("objectForKeyedSubscript:")
-    func object(forKeyedSubscript key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { object(forKey: key) }
+    func cfObject(forKeyedSubscript key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { cfObject(forKey: key) }
 
-    @ObjCMethod("allKeys")
-    func allKeys() -> UnsafeMutableRawPointer? {
-        Arrays.autoreleased(CFDictionaries.entries(objcObject).compactMap { $0.key.map { UnsafeMutableRawPointer(mutating: $0) } })
-    }
+    @ObjCMethod("keyEnumerator") func cfKeyEnumerator() -> ObjCObject { Enumerators.make(cfKeys) }
+
+    @ObjCMethod("allKeys") func cfAllKeys() -> UnsafeMutableRawPointer? { Arrays.autoreleased(cfKeys) }
 
     @ObjCMethod("allValues")
-    func allValues() -> UnsafeMutableRawPointer? {
+    func cfAllValues() -> UnsafeMutableRawPointer? {
         Arrays.autoreleased(CFDictionaries.entries(objcObject).compactMap { $0.value.map { UnsafeMutableRawPointer(mutating: $0) } })
     }
+
+    @ObjCMethod("countByEnumeratingWithState:objects:count:")
+    func cfEnumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        CFCollections.enumeration.enumerate(cfKeys, state: state, buffer: objects, count: count)
+    }
+
+    /// NSMutableDictionary's changes, which a program sends a dictionary
+    /// it made with CFDictionaryCreateMutable and its own callbacks.
+    @ObjCMethod("setObject:forKey:")
+    func cfSet(_ value: UnsafeMutableRawPointer?, forKey key: UnsafeMutableRawPointer?) {
+        CFDictionarySetValue(objcObject, UnsafeRawPointer(key), UnsafeRawPointer(value))
+    }
+
+    @ObjCMethod("setObject:forKeyedSubscript:")
+    func cfSet(_ value: UnsafeMutableRawPointer?, forKeyedSubscript key: UnsafeMutableRawPointer?) {
+        if value == nil { cfRemoveObject(forKey: key) } else { cfSet(value, forKey: key) }
+    }
+
+    @ObjCMethod("removeObjectForKey:")
+    func cfRemoveObject(forKey key: UnsafeMutableRawPointer?) { CFDictionaryRemoveValue(objcObject, UnsafeRawPointer(key)) }
+
+    @ObjCMethod("removeAllObjects") func cfRemoveAllObjects() { CFDictionaryRemoveAllValues(objcObject) }
+
+    /// A dictionary of the same entries and callbacks, +1.
+    @ObjCMethod("copyWithZone:")
+    func cfCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { CFDictionaryCreateCopy(nil, objcObject) }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    func cfMutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { CFDictionaryCreateMutableCopy(nil, 0, objcObject) }
 }
 
-/// A CFSet of the program's pointers.
+/// A CFSet of the program's pointers. An NSSet, as every CFSet is on
+/// Darwin: the methods here are the ones NSSet's others are built on, and
+/// those that change it, by its callbacks. A program keeps its delegates
+/// in one made without callbacks, so as not to retain them, and
+/// enumerates it as a set.
 @ObjCClass("__NSCFSet")
-public class NSCFSet: NSObject {
+public class NSCFSet: NSSet {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         CFCollections.setClass = cls.storage
     }
 
     @ObjCMethod("dealloc")
-    func dealloc() {
+    func cfDealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: CFCollections.setClass)
     }
 
-    @ObjCMethod("count") func count() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
-    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CFTypeIDs.set }
+    @ObjCMethod("count") func cfCount() -> UInt { UInt(CFCollections.storage(objcObject)?.keys.count ?? 0) }
+    @ObjCMethod("_cfTypeID") func cfSetTypeID() -> UInt { CFTypeIDs.set }
+
+    private var cfMembers: [id] { CFSets.members(objcObject).compactMap { $0.map { UnsafeMutableRawPointer(mutating: $0) } } }
+
+    @ObjCMethod("containsObject:")
+    func cfContains(_ value: UnsafeMutableRawPointer?) -> Bool { CFSetContainsValue(objcObject, UnsafeRawPointer(value)) }
+
+    @ObjCMethod("member:")
+    func cfMember(_ value: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        CFSetGetValue(objcObject, UnsafeRawPointer(value)).map { UnsafeMutableRawPointer(mutating: $0) }
+    }
+
+    @ObjCMethod("allObjects") func cfAllObjects() -> UnsafeMutableRawPointer? { Arrays.autoreleased(cfMembers) }
+    @ObjCMethod("objectEnumerator") func cfObjectEnumerator() -> ObjCObject { Enumerators.make(cfMembers) }
+
+    @ObjCMethod("countByEnumeratingWithState:objects:count:")
+    func cfEnumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        CFCollections.enumeration.enumerate(cfMembers, state: state, buffer: objects, count: count)
+    }
+
+    /// NSMutableSet's changes, which a program sends a set it made with
+    /// CFSetCreateMutable and its own callbacks.
+    @ObjCMethod("addObject:") func cfAdd(_ value: UnsafeMutableRawPointer?) { CFSetAddValue(objcObject, UnsafeRawPointer(value)) }
+    @ObjCMethod("removeObject:") func cfRemove(_ value: UnsafeMutableRawPointer?) { CFSetRemoveValue(objcObject, UnsafeRawPointer(value)) }
+    @ObjCMethod("removeAllObjects") func cfRemoveAllObjects() { CFSetRemoveAllValues(objcObject) }
+
+    @ObjCMethod("addObjectsFromArray:")
+    func cfAdd(objectsFrom array: NSArray?) {
+        for member in array?.elements ?? [] { CFSetAddValue(objcObject, UnsafeRawPointer(member)) }
+    }
+
+    @ObjCMethod("unionSet:")
+    func cfUnion(_ other: NSSet?) {
+        for member in other?.members ?? [] { CFSetAddValue(objcObject, UnsafeRawPointer(member)) }
+    }
+
+    @ObjCMethod("minusSet:")
+    func cfMinus(_ other: NSSet?) {
+        for member in other?.members ?? [] { CFSetRemoveValue(objcObject, UnsafeRawPointer(member)) }
+    }
+
+    @ObjCMethod("intersectSet:")
+    func cfIntersect(_ other: NSSet?) {
+        let kept = other?.members ?? []
+        for member in cfMembers where !kept.contains(where: { CFSets.isEqual(objcObject, UnsafeRawPointer($0), UnsafeRawPointer(member)) }) {
+            CFSetRemoveValue(objcObject, UnsafeRawPointer(member))
+        }
+    }
+
+    /// Its members become the other set's.
+    @ObjCMethod("setSet:")
+    func cfSetSet(_ other: NSSet?) {
+        let members = other?.members ?? []
+        members.forEach { _ = ObjC.retain($0) }
+        CFSetRemoveAllValues(objcObject)
+        for member in members {
+            CFSetAddValue(objcObject, UnsafeRawPointer(member))
+            ObjC.release(member)
+        }
+    }
+
+    /// A set of the same members and callbacks, +1.
+    @ObjCMethod("copyWithZone:")
+    func cfCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { CFSetCreateCopy(nil, objcObject) }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    func cfMutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { CFSetCreateMutableCopy(nil, 0, objcObject) }
 }
 
 // MARK: - Arrays
@@ -609,6 +716,11 @@ public func CFDictionaryRemoveAllValues(_ dictionary: id?) {
 // MARK: - Sets
 
 enum CFSets {
+    static func isEqual(_ set: id?, _ a: CFValue, _ b: CFValue) -> Bool {
+        if let storage = CFCollections.storage(set) { return storage.keyCallbacks.isEqual(a, b) }
+        return perry_foundation_cf_equal(a, b) != 0
+    }
+
     static func members(_ set: id?) -> [CFValue] {
         if let storage = CFCollections.storage(set) { return storage.keys }
         return Sets.elements(set).map { UnsafeRawPointer($0) }
