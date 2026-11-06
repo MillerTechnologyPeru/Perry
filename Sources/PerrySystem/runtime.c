@@ -35,9 +35,11 @@ void perry_provider_startup(const perry_startup_info *info) {
     local_environ = info->envp;
     local_progname = info->progname;
     perry_system_lookup = info->lookup_symbol;
+    perry_system_main_header = info->main_header;
 }
 
 void *(*perry_system_lookup)(const char *install_name, const char *name);
+const void *perry_system_main_header;
 
 int *darwin_NSGetArgc(void) DARWIN_SYMBOL(_NSGetArgc);
 int *darwin_NSGetArgc(void) { return &program_argc; }
