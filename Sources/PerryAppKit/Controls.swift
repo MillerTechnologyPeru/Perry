@@ -302,7 +302,10 @@ open class NSAlert: NSObject {
         let titles = buttons.map(\.title)
         appKitWarning("alert: \(messageText)\(informativeText.isEmpty ? "" : " — \(informativeText)")"
                       + (titles.isEmpty ? "" : " [\(titles.joined(separator: ", "))]"))
-        if SDL.start() {
+        // PERRY_APPKIT_QUIET_ALERTS: an alert with no choice to make (one
+        // button or none) is only logged, so a game showing one runs on.
+        let quiet = getenv("PERRY_APPKIT_QUIET_ALERTS") != nil && titles.count <= 1
+        if !quiet, SDL.start() {
             // SDL_MESSAGEBOX_ERROR 0x10, WARNING 0x20, INFORMATION 0x40.
             let flags: UInt32 = style == 2 ? 0x10 : style == 1 ? 0x40 : 0x20
             _ = messageText.withCString { title in
