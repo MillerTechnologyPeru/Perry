@@ -84,7 +84,9 @@ enum Updates {
 
 /// With PERRY_UIKIT_SNAPSHOT set to a path, the visible windows are
 /// written there as a PNG at the screen's scale after update passes and
-/// changes to layers, to look at what an app shows without a display.
+/// changes to layers, to look at what an app shows without a display;
+/// with PERRY_UIKIT_SNAPSHOT_STEPS as well, only after the tap script's
+/// steps.
 enum Snapshot {
     nonisolated(unsafe) static let path: String? = getenv("PERRY_UIKIT_SNAPSHOT").map { String(cString: $0) }
 
@@ -93,13 +95,18 @@ enum Snapshot {
         write(to: path)
     }
 
+    /// PERRY_UIKIT_SNAPSHOT_STEPS: only the numbered snapshots of the tap
+    /// script's steps are written. One a second, each encoded on the main
+    /// thread, stalls a game that draws every frame.
+    private static let stepsOnly = getenv("PERRY_UIKIT_SNAPSHOT_STEPS") != nil
+
     nonisolated(unsafe) private static var requested = false
 
     /// Writes the snapshot a second after an update pass or a change to
     /// layers, at most once a second: encoding it is slow. The numbered
     /// snapshots are written when they are due.
     static func requestWrite() {
-        guard path != nil, !requested else { return }
+        guard path != nil, !requested, !stepsOnly else { return }
         requested = true
         Deferred.run(after: 1) {
             Snapshot.requested = false
