@@ -92,11 +92,16 @@ enum Tilt {
         return unsafeBitCast(ObjCRuntime.msgSend, to: SendInteger.self)(application, ObjCRuntime.selector("statusBarOrientation"))
     }
 
+    /// The stick now: the first gamepad's left one, or the one held.
+    static func stick() -> (x: Float, y: Float) {
+        if let held { return Controllers.now() >= held.from ? (held.x, held.y) : (0, 0) }
+        return Controllers.leftStick()
+    }
+
     /// The device's attitude now. The stick is in the interface's
     /// directions, which the device's axes are turned from in landscape.
     static func attitude() -> Rotation {
-        var stick = Controllers.leftStick()
-        if let held { stick = Controllers.now() >= held.from ? (held.x, held.y) : (0, 0) }
+        let stick = stick()
         let right = Double(stick.x) * limit, far = Double(stick.y) * limit
         switch orientation() {
         case 3: return Rotation(roll: far, pitch: right, yaw: 0)
