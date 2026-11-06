@@ -1,5 +1,6 @@
-// Rebasing and binding: chained fixups (LC_DYLD_CHAINED_FIXUPS) and the
-// older dyld info opcode streams (LC_DYLD_INFO_ONLY).
+// Rebasing and binding: chained fixups (LC_DYLD_CHAINED_FIXUPS), the older
+// dyld info opcode streams (LC_DYLD_INFO_ONLY), and before those (iOS 2 and
+// 3.0) the symbol table's indirect symbols and relocations.
 
 #include "image.h"
 #include "leb128.h"
@@ -330,6 +331,106 @@ static void apply_dyld_info(perry_loader *loader, perry_image *image) {
 #undef STREAM
 }
 
+// MARK: - Symbol table binding
+
+// Images linked before LC_DYLD_INFO, which are 32-bit. Symbol pointer
+// sections (the non-lazy pointers and the stubs' lazy ones, bound now) have
+// an entry each in the indirect symbol table, from the section's reserved1;
+// other pointers to imports have external relocations, whose addend is in
+// place. Local relocations only move an image that is slid.
+#if !defined(__LP64__)
+typedef struct classic_symbols {
+    const struct nlist *symbols;
+    uint32_t count;
+    const char *strings;
+    uint32_t strings_size;
+} classic_symbols;
+
+static uint32_t classic_symbol_value(perry_loader *loader, perry_image *image, const classic_symbols *table,
+                                     uint32_t index, const char **name_out) {
+    if (index >= table->count)
+        perry_fatal("%s: symbol index %u out of range", image->path, index);
+    const struct nlist *symbol = &table->symbols[index];
+    const char *name = symbol->n_strx < table->strings_size ? table->strings + symbol->n_strx : "";
+    *name_out = name;
+    if ((symbol->n_type & N_TYPE) == N_UNDF) {
+        int ordinal = GET_LIBRARY_ORDINAL((uint16_t)symbol->n_desc);
+        // 0xfe and 0xff are the dynamic lookup and the executable.
+        if (ordinal >= 0xfe)
+            ordinal = (int)(int8_t)ordinal;
+        return (uint32_t)bind_target(loader, image, ordinal, name, (symbol->n_desc & N_WEAK_REF) != 0);
+    }
+    uint32_t address = (uint32_t)(uintptr_t)perry_image_vmaddr(image, symbol->n_value & ~1u);
+    return address | ((symbol->n_desc & N_ARM_THUMB_DEF) || (symbol->n_value & 1) ? 1 : 0);
+}
+
+static void apply_symbol_table(perry_loader *loader, perry_image *image) {
+    const struct symtab_command *st = image->symtab;
+    const struct dysymtab_command *dst = image->dysymtab;
+    classic_symbols table = {
+        perry_image_fileoff(image, st->symoff), st->nsyms, perry_image_fileoff(image, st->stroff), st->strsize,
+    };
+    if (!table.symbols || !table.strings)
+        perry_fatal("%s: the symbol table is not in a mapped segment", image->path);
+
+    const uint32_t *indirect = dst->nindirectsyms ? perry_image_fileoff(image, dst->indirectsymoff) : NULL;
+    for (uint32_t s = 0; s < image->segment_count; s++) {
+        const perry_segment *segment = &image->segments[s];
+        for (uint32_t i = 0; segment->mapped && i < segment->nsects; i++) {
+            const section_t *section = &segment->sections[i];
+            uint32_t type = section->flags & SECTION_TYPE;
+            if (type != S_NON_LAZY_SYMBOL_POINTERS && type != S_LAZY_SYMBOL_POINTERS)
+                continue;
+            slot_t *slots = perry_image_vmaddr(image, section->addr);
+            uint32_t count = (uint32_t)(section->size / sizeof(slot_t));
+            if (!indirect || section->reserved1 + count > dst->nindirectsyms)
+                perry_fatal("%s: %.16s has no indirect symbols", image->path, section->sectname);
+            for (uint32_t n = 0; n < count; n++) {
+                uint32_t index = indirect[section->reserved1 + n];
+                if (index & INDIRECT_SYMBOL_ABS)
+                    continue;
+                if (index & INDIRECT_SYMBOL_LOCAL) {
+                    // A pointer to the image's own symbol, there already.
+                    if (type == S_NON_LAZY_SYMBOL_POINTERS)
+                        slots[n] += (slot_t)image->slide;
+                    continue;
+                }
+                const char *name;
+                uint32_t value = classic_symbol_value(loader, image, &table, index, &name);
+                write_bind(loader, &slots[n], value, name);
+            }
+        }
+    }
+
+    // r_address is from the first segment, __PAGEZERO in an executable.
+    uint8_t *relocation_base = perry_image_vmaddr(image, image->segment_count ? image->segments[0].vmaddr : 0);
+    const struct relocation_info *external = dst->nextrel ? perry_image_fileoff(image, dst->extreloff) : NULL;
+    for (uint32_t i = 0; external && i < dst->nextrel; i++) {
+        const struct relocation_info *relocation = &external[i];
+        if (((uint32_t)relocation->r_address & R_SCATTERED) || !relocation->r_extern || relocation->r_pcrel
+            || relocation->r_length != 2 || relocation->r_type != GENERIC_RELOC_VANILLA)
+            perry_fatal("%s: unsupported external relocation %u", image->path, i);
+        slot_t *slot = (slot_t *)(relocation_base + relocation->r_address);
+        const char *name;
+        uint32_t value = classic_symbol_value(loader, image, &table, relocation->r_symbolnum, &name);
+        // A missing weak import stays NULL, whatever the addend.
+        write_bind(loader, slot, value ? value + *slot : 0, name);
+    }
+
+    const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
+    for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
+        const struct relocation_info *relocation = &local[i];
+        // Scattered entries are parts of instructions' immediates, which are
+        // not slid; the rest are pointers.
+        if ((uint32_t)relocation->r_address & R_SCATTERED)
+            continue;
+        if (relocation->r_length != 2 || relocation->r_type != GENERIC_RELOC_VANILLA)
+            perry_fatal("%s: unsupported local relocation %u", image->path, i);
+        *(slot_t *)(relocation_base + relocation->r_address) += (slot_t)image->slide;
+    }
+}
+#endif
+
 void perry_apply_fixups(perry_loader *loader, perry_image *image) {
     if (image->fixed_up)
         return;
@@ -338,6 +439,10 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
         apply_chained_fixups(loader, image);
     else if (image->dyld_info)
         apply_dyld_info(loader, image);
+#if !defined(__LP64__)
+    else if (image->symtab && image->dysymtab)
+        apply_symbol_table(loader, image);
+#endif
     else if (image->slide != 0 && image->header->filetype != MH_EXECUTE)
         perry_warn("%s: no fixup information; image may not work when slid", image->path);
 }
