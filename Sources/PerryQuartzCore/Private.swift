@@ -3,7 +3,8 @@ import Glibc
 import PerryObjCInterop
 
 // Core Animation's private functions that SwiftUI calls, and the gradient
-// layer, which keeps its properties but draws as a plain layer.
+// and replicator layers, which keep their properties but draw as plain
+// layers.
 
 /// The layer's superlayer, not retained.
 @c(_CALayerGetSuperlayer)
@@ -81,6 +82,54 @@ open class CAGradientLayer: CALayer {
     @ObjCMethod("setEndPoint:") func setEndPoint(_ point: CGPoint) { changed { gradient.endPoint = point } }
     @ObjCMethod("type") func type() -> String { gradient.type }
     @ObjCMethod("setType:") func setType(_ type: String) { changed { gradient.type = type } }
+}
+
+// MARK: - CAReplicatorLayer
+
+final class ReplicatorLayerState {
+    var instanceCount = 1
+    var preservesDepth = false
+    var instanceDelay: Double = 0
+    var instanceTransform = CATransform3D.identity
+    var instanceColor: NSObject?
+    var instanceRedOffset: Float = 0
+    var instanceGreenOffset: Float = 0
+    var instanceBlueOffset: Float = 0
+    var instanceAlphaOffset: Float = 0
+}
+
+/// CAReplicatorLayer: keeps its instance count, transform and color
+/// offsets; its sublayers are drawn once, as the first instance.
+@ObjCClass("CAReplicatorLayer")
+open class CAReplicatorLayer: CALayer {
+    var replicator = ReplicatorLayerState()
+
+    @ObjCMethod("init")
+    public required init() { super.init() }
+
+    @ObjCMethod("initWithLayer:")
+    public required init(layer: CALayer) { super.init(layer: layer) }
+
+    @ObjCMethod("instanceCount") func instanceCount() -> Int { replicator.instanceCount }
+    @ObjCMethod("setInstanceCount:") func setInstanceCount(_ count: Int) { changed { replicator.instanceCount = count } }
+    @ObjCMethod("preservesDepth") func preservesDepth() -> Bool { replicator.preservesDepth }
+    @ObjCMethod("setPreservesDepth:") func setPreservesDepth(_ preserves: Bool) { replicator.preservesDepth = preserves }
+    @ObjCMethod("instanceDelay") func instanceDelay() -> Double { replicator.instanceDelay }
+    @ObjCMethod("setInstanceDelay:") func setInstanceDelay(_ delay: Double) { replicator.instanceDelay = delay }
+    @ObjCMethod("instanceTransform") func instanceTransform() -> CATransform3D { replicator.instanceTransform }
+    @ObjCMethod("setInstanceTransform:") func setInstanceTransform(_ transform: CATransform3D) {
+        changed { replicator.instanceTransform = transform }
+    }
+    @ObjCMethod("instanceColor") func instanceColor() -> NSObject? { replicator.instanceColor }
+    @ObjCMethod("setInstanceColor:") func setInstanceColor(_ color: NSObject?) { changed { replicator.instanceColor = color } }
+    @ObjCMethod("instanceRedOffset") func instanceRedOffset() -> Float { replicator.instanceRedOffset }
+    @ObjCMethod("setInstanceRedOffset:") func setInstanceRedOffset(_ offset: Float) { replicator.instanceRedOffset = offset }
+    @ObjCMethod("instanceGreenOffset") func instanceGreenOffset() -> Float { replicator.instanceGreenOffset }
+    @ObjCMethod("setInstanceGreenOffset:") func setInstanceGreenOffset(_ offset: Float) { replicator.instanceGreenOffset = offset }
+    @ObjCMethod("instanceBlueOffset") func instanceBlueOffset() -> Float { replicator.instanceBlueOffset }
+    @ObjCMethod("setInstanceBlueOffset:") func setInstanceBlueOffset(_ offset: Float) { replicator.instanceBlueOffset = offset }
+    @ObjCMethod("instanceAlphaOffset") func instanceAlphaOffset() -> Float { replicator.instanceAlphaOffset }
+    @ObjCMethod("setInstanceAlphaOffset:") func setInstanceAlphaOffset(_ offset: Float) { replicator.instanceAlphaOffset = offset }
 }
 
 // MARK: - Presentation modifiers
