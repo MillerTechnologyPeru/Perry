@@ -869,6 +869,23 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
     free(image);
     loader->main_image = loaded;
 
+    // DYLD_INSERT_LIBRARIES, as dyld has it: Mach-O libraries, separated by
+    // colons, loaded with the program though it does not link them. Their
+    // initializers run before the program's.
+    const char *inserted = getenv("DYLD_INSERT_LIBRARIES");
+    while (inserted && *inserted) {
+        size_t length = strcspn(inserted, ":");
+        char *library = strndup(inserted, length);
+        if (length && !find_loaded(loader, library)) {
+            if (file_exists(library))
+                load_image(loader, library);
+            else
+                perry_warn("DYLD_INSERT_LIBRARIES: %s: not found", library);
+        }
+        free(library);
+        inserted += length + (inserted[length] == ':');
+    }
+
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
