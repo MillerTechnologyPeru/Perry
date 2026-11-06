@@ -107,8 +107,13 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
 
 static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, const char *name,
                                  perry_symbol *out, int depth) {
-    if (dep->image)
-        return perry_exports_lookup(loader, dep->image, name, out, depth + 1);
+    if (dep->image) {
+        if (perry_exports_lookup(loader, dep->image, name, out, depth + 1))
+            return true;
+        // Swift API Perry adds to an overlay bound directly.
+        return strncmp(name, "_$s", 3) == 0 && dep->swift_additions &&
+               perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1);
+    }
     if (dep->provider && provider_lookup(loader, dep->provider, name, out))
         return true;
     // Swift symbols of a framework whose Swift code the provider lacks.
