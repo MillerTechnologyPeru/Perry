@@ -60,6 +60,13 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   `NSKeyedUnarchiver` (binary and XML archives, app classes'
   `NSSecureCoding`, conditional objects, cycles), `NSLog`; `%s` reads bytes
   as Mac OS Roman, as on Darwin
+- Bonjour over Avahi's compatibility library (`libdns_sd`, loaded at run
+  time, talking to avahi-daemon): `NSNetService` and `NSNetServiceBrowser`
+  with publishing, browsing, resolution (hosts, ports, addresses as
+  Darwin's sockaddrs, TXT records) and Darwin's delegate order and error
+  dictionaries; and CFNetwork's `CFNetService`, `CFNetServiceBrowser` and
+  `CFNetServiceMonitor`, asynchronous on their scheduled run loops or
+  blocking without a client, as on Darwin
 - CoreFoundation, toll-free bridged to Foundation's classes: `CFArray`,
   `CFDictionary` and `CFSet` (with CoreFoundation's callbacks, the bridged
   classes; with the program's own or none, collections of any pointers),
