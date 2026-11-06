@@ -18,11 +18,32 @@ enum FileManagers {
     /// NSSearchPathDirectory values apps ask for, in the user's home.
     static func directory(_ kind: UInt) -> String? {
         let home = getenv("HOME").map { String(cString: $0) } ?? "/"
+        // Every domain's directory is the home's, as an app's sandbox has them.
         switch kind {
-        case 5: return home + "/Library"                        // NSLibraryDirectory
+        case 1, 100: return home + "/Applications"              // NSApplicationDirectory, NSAllApplicationsDirectory
+        case 2: return home + "/Applications/Demos"             // NSDemoApplicationDirectory
+        case 3: return home + "/Developer/Applications"         // NSDeveloperApplicationDirectory
+        case 4: return home + "/Applications/Utilities"         // NSAdminApplicationDirectory
+        case 5, 101: return home + "/Library"                   // NSLibraryDirectory, NSAllLibrariesDirectory
+        case 6: return home + "/Developer"                      // NSDeveloperDirectory
+        case 7: return "/" + home.split(separator: "/").dropLast().joined(separator: "/")   // NSUserDirectory: the homes' folder
+        case 8: return home + "/Library/Documentation"          // NSDocumentationDirectory
         case 9: return home + "/Documents"                      // NSDocumentDirectory
+        case 10: return home + "/Library/CoreServices"          // NSCoreServiceDirectory
+        case 11: return home + "/Library/Autosave Information"  // NSAutosavedInformationDirectory
+        case 12: return home + "/Desktop"                       // NSDesktopDirectory
         case 13: return home + "/Library/Caches"                // NSCachesDirectory
         case 14: return home + "/Library/Application Support"   // NSApplicationSupportDirectory
+        case 15: return home + "/Downloads"                     // NSDownloadsDirectory
+        case 16: return home + "/Library/Input Methods"         // NSInputMethodsDirectory
+        case 17: return home + "/Movies"                        // NSMoviesDirectory
+        case 18: return home + "/Music"                         // NSMusicDirectory
+        case 19: return home + "/Pictures"                      // NSPicturesDirectory
+        case 20: return home + "/Library/Printers/PPDs"         // NSPrinterDescriptionDirectory
+        case 21: return home + "/Public"                        // NSSharedPublicDirectory
+        case 22: return home + "/Library/PreferencePanes"       // NSPreferencePanesDirectory
+        case 23: return home + "/Library/Application Scripts"   // NSApplicationScriptsDirectory
+        case 102: return home + "/.Trash"                       // NSTrashDirectory
         default: return nil
         }
     }
