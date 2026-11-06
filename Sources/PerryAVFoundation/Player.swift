@@ -379,6 +379,8 @@ final class AVPlayerState {
     /// AVPlayerActionAtItemEnd: advance 0, pause 1, none 2.
     var actionAtItemEnd = 1
     var frame = VideoFrame()
+    /// AVPlayerStatus: unknown 0, ready to play 1, failed 2.
+    var status: Int?
 }
 
 @ObjCClass("AVPlayer")
@@ -402,6 +404,7 @@ open class AVPlayer: NSObject {
     static func make(_ cls: ObjCClass, url: NSObject?) -> AVPlayer {
         let player = NSObject(cls.pointer).newInstance().unsafeCast(to: AVPlayer.self)
         player.player.item = AVPlayerItem.make(AVPlayerItem.objCClass, url: url)
+        player.becomeReadySoon()
         return player
     }
 
@@ -410,7 +413,24 @@ open class AVPlayer: NSObject {
         let player = NSObject(cls.pointer).newInstance().unsafeCast(to: AVPlayer.self)
         player.player.item = item
         AVPlayer.ready(item)
+        player.becomeReadySoon()
         return player
+    }
+
+    /// A new player's status is unknown: it becomes ready to play from the
+    /// main queue, as those observing its status are told. A program may
+    /// wait for that before it plays.
+    func becomeReadySoon() {
+        let state = player
+        guard state.status == nil else { return }
+        state.status = 0
+        let player = AVPlayer(objcObject: objcObject, ownership: .retain)
+        Players.onMain {
+            player.sendWillChangeValue(forKey: "status")
+            state.status = GStreamer.shared == nil ? 2 : 1
+            player.sendDidChangeValue(forKey: "status")
+            Players.trace("player \(state.status == 1 ? "ready to play" : "failed")")
+        }
     }
 
     /// Has an item made with an asset become ready, from the main queue,
@@ -423,6 +443,7 @@ open class AVPlayer: NSObject {
     @ObjCMethod("initWithURL:")
     func initialize(url: NSObject?) -> Self {
         player.item = AVPlayerItem.make(AVPlayerItem.objCClass, url: url)
+        becomeReadySoon()
         return self
     }
 
@@ -430,6 +451,7 @@ open class AVPlayer: NSObject {
     func initialize(item: AVPlayerItem?) -> Self {
         player.item = item
         AVPlayer.ready(item)
+        becomeReadySoon()
         return self
     }
 
@@ -510,8 +532,9 @@ open class AVPlayer: NSObject {
 
     @ObjCMethod("actionAtItemEnd") func actionAtItemEnd() -> Int { player.actionAtItemEnd }
     @ObjCMethod("setActionAtItemEnd:") func setActionAtItemEnd(_ action: Int) { player.actionAtItemEnd = action }
-    /// AVPlayerStatus: ready to play 1, failed 2.
-    @ObjCMethod("status") func status() -> Int { GStreamer.shared == nil ? 2 : 1 }
+    /// AVPlayerStatus: unknown 0, ready to play 1, failed 2. A player made
+    /// with -init is ready from the start.
+    @ObjCMethod("status") func status() -> Int { player.status ?? (GStreamer.shared == nil ? 2 : 1) }
     @ObjCMethod("error") func error() -> NSObject? { nil }
     @ObjCMethod("allowsExternalPlayback") func allowsExternalPlayback() -> Bool { false }
     @ObjCMethod("setAllowsExternalPlayback:") func setAllowsExternalPlayback(_ allows: Bool) {}
