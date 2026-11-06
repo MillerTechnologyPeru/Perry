@@ -829,6 +829,17 @@ void darwin_tlv_bootstrap(void) {
     abort();
 }
 
+// C++ thread_local destructors: dyld runs them when the thread exits, or at
+// exit for the main thread, in reverse order, as glibc's
+// __cxa_thread_atexit_impl does. glibc runs them before pthread keys'
+// destructors, so the thread's copy of the variable (tlv.c) is still there.
+extern int __cxa_thread_atexit_impl(void (*func)(void *), void *object, void *dso_symbol);
+extern void *__dso_handle;
+void darwin_tlv_atexit(void (*func)(void *), void *object) DARWIN_SYMBOL(_tlv_atexit);
+void darwin_tlv_atexit(void (*func)(void *), void *object) {
+    __cxa_thread_atexit_impl(func, object, &__dso_handle);
+}
+
 // MARK: - More atomics
 
 int32_t darwin_OSAtomicIncrement32(volatile int32_t *value) DARWIN_SYMBOL(OSAtomicIncrement32);

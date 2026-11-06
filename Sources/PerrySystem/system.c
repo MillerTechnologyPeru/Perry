@@ -6,6 +6,7 @@
 #include "PerrySystem.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -261,9 +262,13 @@ int darwin_uname(struct darwin_utsname *out) {
     memset(out, 0, sizeof(*out));
     strncpy(out->sysname, "Darwin", sizeof(out->sysname) - 1);
     strncpy(out->nodename, names.nodename, sizeof(out->nodename) - 1);
-    strncpy(out->release, "24.0.0", sizeof(out->release) - 1);
-    strncpy(out->version, "Darwin Kernel Version 24.0.0: Perry on Linux", sizeof(out->version) - 1);
-    strncpy(out->machine, perry_device_model(), sizeof(out->machine) - 1);
+    // A macOS program's Darwin is its SDK's macOS's, on an arm64 Mac.
+    perry_macos_release mac = perry_system_macos_release();
+    char release[32] = "24.0.0";
+    if (mac.darwin) snprintf(release, sizeof(release), "%d.%d.0", mac.darwin, mac.minor);
+    strncpy(out->release, release, sizeof(out->release) - 1);
+    snprintf(out->version, sizeof(out->version), "Darwin Kernel Version %s: Perry on Linux", release);
+    strncpy(out->machine, mac.darwin ? "arm64" : perry_device_model(), sizeof(out->machine) - 1);
     return 0;
 }
 

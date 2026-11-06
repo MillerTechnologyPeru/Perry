@@ -35,8 +35,11 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 }
 
 /// Foundation's data symbols, which the loader asks for while binding
-/// images: the empty array and dictionary @[] and @{} compile to.
-func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { EmptyCollections.slots[name].map(UnsafeMutableRawPointer.init) }
+/// images: the empty array and dictionary @[] and @{} compile to, and the
+/// zero geometry constants.
+func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? {
+    EmptyCollections.slots[name].map(UnsafeMutableRawPointer.init) ?? ZeroGeometry.symbol(name)
+}
 
 /// Once Foundation's classes are defined: their protocols, and the empty
 /// collections.

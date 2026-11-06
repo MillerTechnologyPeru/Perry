@@ -561,11 +561,18 @@ public func SecKeyCreateWithData(_ data: UnsafeMutableRawPointer?, _ attributes:
     guard let bytes = Keys.data(data), let attributes,
           let type = NSDictionary(attributes).object(ItemKeys.kSecAttrKeyType), type.isString,
           let keyClass = NSDictionary(attributes).object(ItemKeys.kSecAttrKeyClass) else {
+        securityWarning("SecKeyCreateWithData: no data, or no key type or class in the attributes")
         Status.report(error, Status.param)
         return nil
     }
     let isPrivate = keyClass.stringValue == ItemKeys.kSecAttrKeyClassPrivate
-    guard let state = try? KeyState.make(type: type.stringValue, isPrivate: isPrivate, data: bytes) else {
+    let state: KeyState
+    do {
+        state = try KeyState.make(type: type.stringValue, isPrivate: isPrivate, data: bytes)
+    } catch let failure {
+        let prefix = bytes.prefix(8).map { String($0, radix: 16) }.joined(separator: " ")
+        securityWarning("SecKeyCreateWithData: a \(isPrivate ? "private" : "public") key of type \(type.stringValue), "
+                        + "\(bytes.count) bytes (\(prefix)…), can't be read: \(failure)")
         Status.report(error, Status.decode, "Failed to create key from data")
         return nil
     }

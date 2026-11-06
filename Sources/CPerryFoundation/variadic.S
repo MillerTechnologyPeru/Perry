@@ -26,6 +26,12 @@ VARIADIC _CFStringCreateWithFormat, perry_foundation_cf_create_with_format, 3
 // void CFStringAppendFormat(CFMutableStringRef, CFDictionaryRef, CFStringRef, ...)
 VARIADIC _CFStringAppendFormat, perry_foundation_cf_append_format, 3
 
+// Boolean CFCalendarDecomposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime, const char *, ...):
+// the time is in d0, so two fixed arguments are in x registers.
+VARIADIC _CFCalendarDecomposeAbsoluteTime, perry_foundation_cf_calendar_decompose, 2
+// Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime *, const char *, ...)
+VARIADIC _CFCalendarComposeAbsoluteTime, perry_foundation_cf_calendar_compose, 3
+
 // Method implementations: self, _cmd, then the fixed arguments.
     .hidden perry_imp_stringWithFormat
 VARIADIC perry_imp_stringWithFormat, perry_foundation_stringWithFormat, 3

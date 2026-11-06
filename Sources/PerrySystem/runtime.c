@@ -35,11 +35,13 @@ void perry_provider_startup(const perry_startup_info *info) {
     local_environ = info->envp;
     local_progname = info->progname;
     perry_system_lookup = info->lookup_symbol;
+    perry_system_main_header = info->main_header;
     perry_system_load_library = info->version >= 3 ? info->load_library : NULL;
     perry_system_lookup_after = info->version >= 3 ? info->lookup_symbol_after : NULL;
 }
 
 void *(*perry_system_lookup)(const char *install_name, const char *name);
+const void *perry_system_main_header;
 bool (*perry_system_load_library)(const char *path);
 void *(*perry_system_lookup_after)(const void *caller, const char *name);
 

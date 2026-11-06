@@ -441,6 +441,82 @@ public func CFRunLoopRemoveTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: U
     state.remove(timer)
 }
 
+// MARK: - CFRunLoopTimer
+
+/// A CFRunLoopTimer is an NSTimer, toll-free bridged: one that repeats when
+/// its interval is positive. The context is { version, info, retain,
+/// release, copyDescription }; the timer keeps info until it goes away.
+@c(_CFRunLoopTimerCreate)
+public func CFRunLoopTimerCreate(_ allocator: UnsafeMutableRawPointer?, _ fireDate: Double, _ interval: Double,
+                                 _ flags: UInt, _ order: Int,
+                                 _ callout: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void)?,
+                                 _ context: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+    typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
+    let storage = TimerStorage(fireDate: fireDate, interval: interval > 0 ? Timers.clamp(interval) : 0,
+                               repeats: interval > 0, target: nil, selector: nil, userInfo: nil, block: nil)
+    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+        info = UnsafeMutableRawPointer(mutating: retain(info))
+    }
+    storage.callout = callout
+    storage.info = info
+    storage.releaseInfo = context?.load(fromByteOffset: 24, as: TimerStorage.Release?.self)
+    return Timers.make(storage)
+}
+
+/// The block is called with the timer.
+@c(_CFRunLoopTimerCreateWithHandler)
+public func CFRunLoopTimerCreateWithHandler(_ allocator: UnsafeMutableRawPointer?, _ fireDate: Double, _ interval: Double,
+                                            _ flags: UInt, _ order: Int,
+                                            _ block: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    let storage = TimerStorage(fireDate: fireDate, interval: interval > 0 ? Timers.clamp(interval) : 0,
+                               repeats: interval > 0, target: nil, selector: nil, userInfo: nil, block: block)
+    return Timers.make(storage)
+}
+
+@c(_CFRunLoopTimerSetNextFireDate)
+public func CFRunLoopTimerSetNextFireDate(_ timer: UnsafeMutableRawPointer?, _ fireDate: Double) {
+    guard let storage = Timers.storage(timer), storage.isValid else { return }
+    storage.fireDate = fireDate
+    storage.runLoops.forEach { $0.wakeUp() }
+}
+
+@c(_CFRunLoopTimerGetNextFireDate)
+public func CFRunLoopTimerGetNextFireDate(_ timer: UnsafeMutableRawPointer?) -> Double {
+    Timers.storage(timer)?.fireDate ?? 0
+}
+
+@c(_CFRunLoopTimerGetInterval)
+public func CFRunLoopTimerGetInterval(_ timer: UnsafeMutableRawPointer?) -> Double {
+    guard let storage = Timers.storage(timer), storage.repeats else { return 0 }
+    return storage.interval
+}
+
+@c(_CFRunLoopTimerDoesRepeat)
+public func CFRunLoopTimerDoesRepeat(_ timer: UnsafeMutableRawPointer?) -> Bool {
+    Timers.storage(timer)?.repeats ?? false
+}
+
+@c(_CFRunLoopTimerIsValid)
+public func CFRunLoopTimerIsValid(_ timer: UnsafeMutableRawPointer?) -> Bool {
+    guard let timer else { return false }
+    return Timers.isValid(timer)
+}
+
+@c(_CFRunLoopTimerInvalidate)
+public func CFRunLoopTimerInvalidate(_ timer: UnsafeMutableRawPointer?) {
+    guard let timer else { return }
+    Timers.invalidate(timer)
+}
+
+/// Every mode is the same run loop here.
+@c(_CFRunLoopContainsTimer)
+public func CFRunLoopContainsTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: UnsafeMutableRawPointer?,
+                                   _ mode: UnsafeMutableRawPointer?) -> Bool {
+    guard let state = RunLoops.state(runLoop), let storage = Timers.storage(timer) else { return false }
+    return storage.isValid && storage.runLoops.contains { $0 === state }
+}
+
 /// The mode the run loop is running in, +1: the default mode, the only
 /// one run loops here run in.
 @c(_CFRunLoopCopyCurrentMode)

@@ -55,6 +55,18 @@ enum CalendarIdentifierNames {
     static let NSIndianCalendar = "indian"
     static let NSISO8601Calendar = "iso8601"
     static let NSCalendarDayChangedNotification = "NSCalendarDayChangedNotification"
+    // CoreFoundation's names for the same calendars.
+    static let kCFGregorianCalendar = NSCalendarIdentifierGregorian
+    static let kCFBuddhistCalendar = NSCalendarIdentifierBuddhist
+    static let kCFChineseCalendar = NSCalendarIdentifierChinese
+    static let kCFHebrewCalendar = NSCalendarIdentifierHebrew
+    static let kCFIslamicCalendar = NSCalendarIdentifierIslamic
+    static let kCFIslamicCivilCalendar = NSCalendarIdentifierIslamicCivil
+    static let kCFJapaneseCalendar = NSCalendarIdentifierJapanese
+    static let kCFRepublicOfChinaCalendar = NSCalendarIdentifierRepublicOfChina
+    static let kCFPersianCalendar = NSCalendarIdentifierPersian
+    static let kCFIndianCalendar = NSCalendarIdentifierIndian
+    static let kCFISO8601Calendar = NSCalendarIdentifierISO8601
 }
 
 /// NSCalendarUnit bits.

@@ -254,6 +254,56 @@ public final class NSURL: NSObject {
             : Errors.autoreleased(domain: Errors.cocoaDomain, code: 262, description: "The operation couldn’t be completed.")
         return false
     }
+    // MARK: Bookmarks
+
+    /// A bookmark is the URL itself here: there are no file IDs or volumes
+    /// to find a moved file by, and nothing is security-scoped.
+    static let bookmarkPrefix = "perry-bookmark:"
+
+    @ObjCMethod("bookmarkDataWithOptions:includingResourceValuesForKeys:relativeToURL:error:")
+    func bookmarkData(options: UInt, includingResourceValuesForKeys keys: ObjCObject?, relativeTo base: NSURL?,
+                      error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        DataObjects.autoreleased(Data((NSURL.bookmarkPrefix + url.absoluteString).utf8))
+    }
+
+    /// An alias file's bookmark: no file here is an alias file.
+    @ObjCClassMethod("bookmarkDataWithContentsOfURL:error:")
+    static func bookmarkData(withContentsOf bookmarkFile: NSURL?, error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        let exists = bookmarkFile.map { access($0.path(), F_OK) == 0 } ?? false
+        error?.pointee = exists
+            ? Errors.autoreleased(domain: Errors.cocoaDomain, code: 259, description: "The file couldn’t be opened because it isn’t in the correct format.")
+            : Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened because there is no such file.")
+        return nil
+    }
+
+    @ObjCClassMethod("URLByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:")
+    static func resolving(bookmarkData data: ObjCObject?, options: UInt, relativeTo base: NSURL?,
+                          bookmarkDataIsStale stale: UnsafeMutablePointer<Bool>?, error: UnsafeMutablePointer<id?>?) -> NSURL? {
+        stale?.pointee = false
+        let text = String(decoding: DataObjects.data(data?.id), as: UTF8.self)
+        guard text.hasPrefix(bookmarkPrefix), let url = URL(string: String(text.dropFirst(bookmarkPrefix.count))) else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 259,
+                                                 description: "The file couldn’t be opened because it isn’t in the correct format.")
+            return nil
+        }
+        return URLs.wrapped(url)
+    }
+
+    /// Writes the bookmark where an alias file would go.
+    @ObjCClassMethod("writeBookmarkData:toURL:options:error:")
+    static func writeBookmarkData(_ data: ObjCObject?, to url: NSURL?, options: UInt, error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let url, let file = fopen(url.path(), "wb") else { return false }
+        defer { fclose(file) }
+        let bytes = DataObjects.data(data?.id)
+        return bytes.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) == $0.count }
+    }
+
+    @ObjCClassMethod("resourceValuesForKeys:fromBookmarkData:")
+    static func resourceValues(forKeys keys: ObjCObject?, fromBookmarkData data: ObjCObject?) -> ObjCObject? { nil }
+
+    @ObjCMethod("startAccessingSecurityScopedResource") func startAccessingSecurityScopedResource() -> Bool { true }
+    @ObjCMethod("stopAccessingSecurityScopedResource") func stopAccessingSecurityScopedResource() {}
+
     @ObjCMethod("hasDirectoryPath") func hasDirectoryPath() -> Bool { url.hasDirectoryPath }
 
     @ObjCMethod("fileSystemRepresentation")

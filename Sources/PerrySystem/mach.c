@@ -143,6 +143,101 @@ kern_return_t darwin_vm_remap(mach_port_t target, uintptr_t *address, size_t siz
     return KERN_SUCCESS;
 }
 
+kern_return_t darwin_mach_vm_allocate(mach_port_t task, uintptr_t *address, size_t size, int flags) DARWIN_SYMBOL(mach_vm_allocate);
+kern_return_t darwin_mach_vm_allocate(mach_port_t task, uintptr_t *address, size_t size, int flags) {
+    return darwin_vm_allocate(task, address, size, flags);
+}
+
+kern_return_t darwin_mach_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) DARWIN_SYMBOL(mach_vm_deallocate);
+kern_return_t darwin_mach_vm_deallocate(mach_port_t task, uintptr_t address, size_t size) {
+    return darwin_vm_deallocate(task, address, size);
+}
+
+// VM_PROT_READ 1, VM_PROT_WRITE 2, VM_PROT_EXECUTE 4, as Linux's PROT_*.
+// Setting the maximum protection has nothing to change here.
+kern_return_t darwin_vm_protect(mach_port_t task, uintptr_t address, size_t size, int set_maximum, int protection)
+    DARWIN_SYMBOL(vm_protect);
+kern_return_t darwin_vm_protect(mach_port_t task, uintptr_t address, size_t size, int set_maximum, int protection) {
+    (void)task;
+    if (set_maximum)
+        return KERN_SUCCESS;
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    uintptr_t start = address & ~(page - 1);
+    if (mprotect((void *)start, size + (address - start), protection & 7) != 0)
+        return errno == ENOMEM ? KERN_INVALID_ADDRESS : KERN_FAILURE;
+    return KERN_SUCCESS;
+}
+
+// vm_region_basic_info_64, packed to 4 bytes as Darwin's.
+#pragma pack(push, 4)
+typedef struct {
+    int protection;
+    int max_protection;
+    unsigned inheritance;
+    unsigned shared;
+    unsigned reserved;
+    uint64_t offset;
+    int behavior;
+    unsigned short user_wired_count;
+} darwin_vm_region_basic_info_64;
+#pragma pack(pop)
+
+enum {
+    VM_REGION_BASIC_INFO_64 = 9,
+    VM_REGION_BASIC_INFO_COUNT_64 = sizeof(darwin_vm_region_basic_info_64) / sizeof(int),
+    VM_INHERIT_COPY = 1,
+};
+
+// The region that holds *address, or else the first one above it, from
+// /proc/self/maps: its start and size, and VM_REGION_BASIC_INFO_64.
+// Linux splits a region where Darwin might not, which callers walking the
+// address space don't mind.
+kern_return_t darwin_vm_region_64(mach_port_t task, uintptr_t *address, size_t *size, int flavor, int *info,
+                                  uint32_t *count, mach_port_t *object_name) DARWIN_SYMBOL(vm_region_64);
+kern_return_t darwin_vm_region_64(mach_port_t task, uintptr_t *address, size_t *size, int flavor, int *info,
+                                  uint32_t *count, mach_port_t *object_name) {
+    (void)task;
+    if (flavor != VM_REGION_BASIC_INFO_64 || !count || *count < VM_REGION_BASIC_INFO_COUNT_64)
+        return KERN_INVALID_ARGUMENT;
+    FILE *maps = fopen("/proc/self/maps", "r");
+    if (!maps)
+        return KERN_FAILURE;
+    kern_return_t result = KERN_INVALID_ADDRESS;
+    char line[512];
+    while (fgets(line, sizeof(line), maps)) {
+        unsigned long start, end, offset;
+        char perms[5];
+        if (sscanf(line, "%lx-%lx %4s %lx", &start, &end, perms, &offset) != 4 || end <= *address)
+            continue;
+        int protection = (perms[0] == 'r' ? 1 : 0) | (perms[1] == 'w' ? 2 : 0) | (perms[2] == 'x' ? 4 : 0);
+        darwin_vm_region_basic_info_64 basic = {
+            .protection = protection,
+            .max_protection = 7,
+            .inheritance = VM_INHERIT_COPY,
+            .shared = perms[3] == 's',
+            .offset = offset,
+        };
+        memcpy(info, &basic, sizeof(basic));
+        *count = VM_REGION_BASIC_INFO_COUNT_64;
+        *address = start;
+        *size = end - start;
+        if (object_name)
+            *object_name = 0;
+        result = KERN_SUCCESS;
+        break;
+    }
+    fclose(maps);
+    return result;
+}
+
+// mach_vm_address_t and mach_vm_size_t are 64 bits, as vm_address_t is on arm64.
+kern_return_t darwin_mach_vm_region(mach_port_t task, uintptr_t *address, size_t *size, int flavor, int *info,
+                                    uint32_t *count, mach_port_t *object_name) DARWIN_SYMBOL(mach_vm_region);
+kern_return_t darwin_mach_vm_region(mach_port_t task, uintptr_t *address, size_t *size, int flavor, int *info,
+                                    uint32_t *count, mach_port_t *object_name) {
+    return darwin_vm_region_64(task, address, size, flavor, info, count, object_name);
+}
+
 void darwin_sys_icache_invalidate(void *start, size_t length) DARWIN_SYMBOL(sys_icache_invalidate);
 void darwin_sys_icache_invalidate(void *start, size_t length) {
     __builtin___clear_cache((char *)start, (char *)start + length);
@@ -881,6 +976,15 @@ kern_return_t darwin_vm_read_overwrite(mach_port_t task, uintptr_t address, uint
     if (out_size)
         *out_size = size;
     return KERN_SUCCESS;
+}
+
+// mach_vm_read_overwrite: the same, with 64-bit addresses, which
+// vm_address_t is on arm64.
+kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                            uintptr_t *out_size) DARWIN_SYMBOL(mach_vm_read_overwrite);
+kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                            uintptr_t *out_size) {
+    return darwin_vm_read_overwrite(task, address, size, data, out_size);
 }
 
 // The pthread for a thread port; only the calling thread's is known.

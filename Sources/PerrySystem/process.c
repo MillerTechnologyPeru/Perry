@@ -226,12 +226,27 @@ int darwin_sigaction_function(int signal, const darwin_sigaction *action, darwin
         return 0;
     // PERRY_KEEP_CRASH_HANDLERS keeps the crash signals' handlers Perry
     // started with, so a crash reporter in the app does not hide where a
-    // crash happened: the app's handler is recorded but not installed.
-    static int keep = -1;
-    if (keep < 0)
-        keep = getenv("PERRY_KEEP_CRASH_HANDLERS") != NULL;
-    if (keep && (linux_signal == SIGSEGV || linux_signal == SIGBUS || linux_signal == SIGILL ||
-                 linux_signal == SIGABRT || linux_signal == SIGTRAP || linux_signal == SIGFPE)) {
+    // crash happened: the app's handler is recorded but not installed. Its
+    // value may name the signals kept (segv,bus,ill,abrt,trap,fpe), leaving
+    // the others to the app, as OpenSSL needs SIGILL to probe the CPU;
+    // otherwise all of them are kept.
+    static int kept = -1;
+    if (kept < 0) {
+        kept = 0;
+        const char *setting = getenv("PERRY_KEEP_CRASH_HANDLERS");
+        if (setting) {
+            static const struct { const char *name; int signal; } names[] = {
+                { "segv", SIGSEGV }, { "bus", SIGBUS }, { "ill", SIGILL }, { "abrt", SIGABRT }, { "trap", SIGTRAP }, { "fpe", SIGFPE },
+            };
+            for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+                if (strstr(setting, names[i].name))
+                    kept |= 1 << names[i].signal;
+            if (!kept)
+                for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+                    kept |= 1 << names[i].signal;
+        }
+    }
+    if (kept & (1 << linux_signal)) {
         handlers[linux_signal] = *action;
         return 0;
     }
@@ -277,8 +292,32 @@ static int sysctl_string(void *old, size_t *old_length, const char *value) {
     return sysctl_value(old, old_length, value, strlen(value) + 1);
 }
 
+// A macOS program's system, from its LC_BUILD_VERSION: the Darwin release
+// of the macOS its SDK is (macOS 26 is Darwin 25, macOS 11 to 15 Darwin
+// 20 to 24) and an Apple-silicon Mac, as apps that check the OS read it
+// from kern.osrelease. Zero for other programs.
+perry_macos_release perry_system_macos_release(void) {
+    const uint8_t *header = perry_system_main_header;
+    if (!header) return (perry_macos_release){ 0, 0 };
+    uint32_t count = *(const uint32_t *)(header + 16);
+    const uint8_t *command = header + 32;     // mach_header_64
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t cmd = *(const uint32_t *)command, size = *(const uint32_t *)(command + 4);
+        // LC_BUILD_VERSION: platform, minos, sdk (xxxx.yy.zz in nibbles).
+        if (cmd == 0x32 && *(const uint32_t *)(command + 8) == 1) {   // PLATFORM_MACOS
+            uint32_t sdk = *(const uint32_t *)(command + 16);
+            int major = (int)(sdk >> 16), minor = (int)((sdk >> 8) & 0xff);
+            return (perry_macos_release){ major >= 26 ? major - 1 : major + 9, minor };
+        }
+        if (size == 0) break;
+        command += size;
+    }
+    return (perry_macos_release){ 0, 0 };
+}
+
 // The names apps read to identify the device: an iPhone 14 running iOS 15,
-// as UIDevice reports, with this machine's processors and memory.
+// as UIDevice reports, or for a macOS program an Apple-silicon Mac running
+// the macOS of its SDK; with this machine's processors and memory.
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length)
     DARWIN_SYMBOL(sysctlbyname);
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length) {
@@ -288,16 +327,27 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         errno = EINVAL;
         return -1;
     }
+    perry_macos_release mac = perry_system_macos_release();
     if (strcmp(name, "hw.machine") == 0)
-        return sysctl_string(old, old_length, PERRY_HW_MACHINE);
+        return sysctl_string(old, old_length, mac.darwin ? "arm64" : PERRY_HW_MACHINE);
     if (strcmp(name, "hw.model") == 0)
-        return sysctl_string(old, old_length, PERRY_HW_MODEL);
+        return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : PERRY_HW_MODEL);
     if (strcmp(name, "kern.ostype") == 0)
         return sysctl_string(old, old_length, "Darwin");
-    if (strcmp(name, "kern.osrelease") == 0)
-        return sysctl_string(old, old_length, "21.0.0");
-    if (strcmp(name, "kern.osversion") == 0)
-        return sysctl_string(old, old_length, "19A346");
+    if (strcmp(name, "kern.osrelease") == 0) {
+        if (!mac.darwin) return sysctl_string(old, old_length, "21.0.0");
+        char release[16];
+        snprintf(release, sizeof(release), "%d.%d.0", mac.darwin, mac.minor);
+        return sysctl_string(old, old_length, release);
+    }
+    if (strcmp(name, "kern.osversion") == 0) {
+        if (!mac.darwin) return sysctl_string(old, old_length, "19A346");
+        // A build number of that release: its Darwin major, a letter for its
+        // minor version, and a build.
+        char build[16];
+        snprintf(build, sizeof(build), "%d%c100", mac.darwin, 'A' + (mac.minor % 26));
+        return sysctl_string(old, old_length, build);
+    }
     if (strcmp(name, "kern.hostname") == 0) {
         char host[256] = "localhost";
         gethostname(host, sizeof(host) - 1);
