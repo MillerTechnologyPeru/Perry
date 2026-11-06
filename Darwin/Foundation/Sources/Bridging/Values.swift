@@ -123,6 +123,55 @@ extension URL: _ObjectiveCBridgeable {
     }
 }
 
+// MARK: URLComponents
+
+extension URLComponents: _ObjectiveCBridgeable {
+    public typealias _ObjectiveCType = NSURLComponents
+
+    /// The components, part by part as they are encoded.
+    @_semantics("convertToObjectiveC")
+    public func _bridgeToObjectiveC() -> NSURLComponents {
+        let components = NSURLComponents()
+        components.scheme = scheme
+        components.percentEncodedUser = percentEncodedUser
+        components.percentEncodedPassword = percentEncodedPassword
+        components.percentEncodedHost = percentEncodedHost
+        components.port = port.map { NSNumber(value: $0) }
+        components.percentEncodedPath = percentEncodedPath
+        components.percentEncodedQuery = percentEncodedQuery
+        components.percentEncodedFragment = percentEncodedFragment
+        return components
+    }
+
+    static func _bridging(_ source: NSURLComponents) -> URLComponents {
+        var components = URLComponents()
+        components.scheme = source.scheme
+        components.percentEncodedUser = source.percentEncodedUser
+        components.percentEncodedPassword = source.percentEncodedPassword
+        components.percentEncodedHost = source.percentEncodedHost
+        components.port = source.port?.intValue
+        components.percentEncodedPath = source.percentEncodedPath ?? ""
+        components.percentEncodedQuery = source.percentEncodedQuery
+        components.percentEncodedFragment = source.percentEncodedFragment
+        return components
+    }
+
+    public static func _forceBridgeFromObjectiveC(_ source: NSURLComponents, result: inout URLComponents?) {
+        result = _bridging(source)
+    }
+
+    @discardableResult
+    public static func _conditionallyBridgeFromObjectiveC(_ source: NSURLComponents, result: inout URLComponents?) -> Bool {
+        result = _bridging(source)
+        return true
+    }
+
+    @_effects(readonly)
+    public static func _unconditionallyBridgeFromObjectiveC(_ source: NSURLComponents?) -> URLComponents {
+        source.map(_bridging) ?? URLComponents()
+    }
+}
+
 // MARK: UUID
 
 extension UUID: _ObjectiveCBridgeable {
