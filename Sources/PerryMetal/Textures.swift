@@ -83,6 +83,11 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
     @ObjCMethod("allowGPUOptimizedContents") func allowGPUOptimizedContents() -> Bool { true }
     @ObjCMethod("isShareable") func isShareable() -> Bool { false }
     @ObjCMethod("setPurgeableState:") func setPurgeableState(_ state: UInt) -> UInt { 2 }
+    /// A texture made by the device, not from a heap, so never aliasable.
+    @ObjCMethod("heap") func heap() -> NSObject? { nil }
+    @ObjCMethod("heapOffset") func heapOffset() -> UInt { 0 }
+    @ObjCMethod("isAliasable") func isAliasable() -> Bool { false }
+    @ObjCMethod("makeAliasable") func makeAliasable() {}
 
     // MARK: Contents
 

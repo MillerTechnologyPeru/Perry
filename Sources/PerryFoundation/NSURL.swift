@@ -260,10 +260,18 @@ public final class NSURL: NSObject {
     /// to find a moved file by, and nothing is security-scoped.
     static let bookmarkPrefix = "perry-bookmark:"
 
+    static func bookmark(for url: URL) -> Data { Data((bookmarkPrefix + url.absoluteString).utf8) }
+
+    static func bookmarkURL(_ data: Data) -> URL? {
+        let text = String(decoding: data, as: UTF8.self)
+        guard text.hasPrefix(bookmarkPrefix) else { return nil }
+        return URL(string: String(text.dropFirst(bookmarkPrefix.count)))
+    }
+
     @ObjCMethod("bookmarkDataWithOptions:includingResourceValuesForKeys:relativeToURL:error:")
     func bookmarkData(options: UInt, includingResourceValuesForKeys keys: ObjCObject?, relativeTo base: NSURL?,
                       error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
-        DataObjects.autoreleased(Data((NSURL.bookmarkPrefix + url.absoluteString).utf8))
+        DataObjects.autoreleased(NSURL.bookmark(for: url))
     }
 
     /// An alias file's bookmark: no file here is an alias file.
@@ -280,8 +288,7 @@ public final class NSURL: NSObject {
     static func resolving(bookmarkData data: ObjCObject?, options: UInt, relativeTo base: NSURL?,
                           bookmarkDataIsStale stale: UnsafeMutablePointer<Bool>?, error: UnsafeMutablePointer<id?>?) -> NSURL? {
         stale?.pointee = false
-        let text = String(decoding: DataObjects.data(data?.id), as: UTF8.self)
-        guard text.hasPrefix(bookmarkPrefix), let url = URL(string: String(text.dropFirst(bookmarkPrefix.count))) else {
+        guard let url = bookmarkURL(DataObjects.data(data?.id)) else {
             error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 259,
                                                  description: "The file couldn’t be opened because it isn’t in the correct format.")
             return nil

@@ -63,6 +63,9 @@ open class MTLBuffer: NSObject, MTLBufferProtocol {
     @ObjCMethod("setPurgeableState:") func setPurgeableState(_ state: UInt) -> UInt { 2 }
     @ObjCMethod("makeAliasable") func makeAliasable() {}
     @ObjCMethod("isAliasable") func isAliasable() -> Bool { false }
+    /// A buffer made by the device, not from a heap.
+    @ObjCMethod("heap") func heap() -> NSObject? { nil }
+    @ObjCMethod("heapOffset") func heapOffset() -> UInt { 0 }
 }
 
 @ObjCClass("_MTLLibrary")

@@ -97,6 +97,9 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
     @ObjCMethod("supportsRenderDynamicLibraries") func supportsRenderDynamicLibraries() -> Bool { false }
     /// Vertex amplification: one view, without it.
     @ObjCMethod("supportsVertexAmplificationCount:") func supportsVertexAmplificationCount(_ count: UInt) -> Bool { count <= 1 }
+    /// Variable rasterization rates: none, so no rate maps are made.
+    @ObjCMethod("supportsRasterizationRateMapWithLayerCount:")
+    func supportsRasterizationRateMap(layerCount: UInt) -> Bool { false }
     /// Counter sampling at stage, draw, dispatch, tile or blit boundaries: none.
     @ObjCMethod("supportsCounterSampling:") func supportsCounterSampling(_ point: UInt) -> Bool { false }
     @ObjCMethod("counterSets") func counterSets() -> NSObject? { nil }

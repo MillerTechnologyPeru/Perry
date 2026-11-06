@@ -103,10 +103,12 @@ static void load_darwin(void) {
     loaded = 1;
 }
 
+enum { DARWIN_ETIMEDOUT = 60 };
+
 /// libc++ reports a failed lock as std::system_error, which nothing here
 /// can throw; Darwin's would end the process all the same.
 static void lock_failed(const char *what, int error) {
-    fprintf(stderr, "perry: libc++: %s failed: %s\n", what, strerror(error));
+    fprintf(stderr, "perry: libc++: %s failed: Darwin error %d\n", what, error);
     abort();
 }
 
@@ -146,8 +148,10 @@ static void cond_timed_wait(darwin_cond *cond, unique_lock *lock, int64_t deadli
     if (!lock->owns) lock_failed("condition_variable::timed wait: mutex not locked", EPERM);
     struct timespec time = { .tv_sec = deadline / 1000000000, .tv_nsec = deadline % 1000000000 };
     if (time.tv_nsec < 0) { time.tv_sec -= 1; time.tv_nsec += 1000000000; }
+    // Darwin's pthread_cond_timedwait answers in Darwin's errno values:
+    // ETIMEDOUT is 60 there, not Linux's 110.
     int error = darwin.cond_timedwait(cond, lock->mutex, &time);
-    if (error && error != ETIMEDOUT) lock_failed("condition_variable timed wait", error);
+    if (error && error != DARWIN_ETIMEDOUT) lock_failed("condition_variable timed wait", error);
 }
 
 static const struct { const char *name; void *function; } locks[] = {
