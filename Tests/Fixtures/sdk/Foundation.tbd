@@ -7,8 +7,8 @@ exports:
   - targets: [ armv7-ios ]
     symbols: [ _CFAbsoluteTimeGetCurrent, _CFDateCreate, _CFDateGetAbsoluteTime,
                _CFRelease, _CFStringCreateWithFormat, _NSKeyValueChangeNewKey,
-               _NSKeyValueChangeOldKey, _NSLog, _OBJC_EHTYPE_$_NSException,
+               _NSKeyValueChangeOldKey, _NSLog, _NSStringFromClass, _OBJC_EHTYPE_$_NSException,
                ___CFConstantStringClassReference ]
     objc-classes: [ NSArray, NSDate, NSDictionary, NSException, NSMutableString, NSNumber, NSPredicate,
-                    NSSet, NSString, NSValue ]
+                    NSSet, NSString, NSTimer, NSValue ]
 ...
