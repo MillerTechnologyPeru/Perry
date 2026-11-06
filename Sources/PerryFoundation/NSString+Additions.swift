@@ -932,6 +932,36 @@ extension NSString {
     @ObjCMethod("capitalizedStringWithLocale:")
     func capitalized(locale: ObjCObject?) -> String { capitalized() }
 
+    // Unicode's normalization forms, by ICU: composed or decomposed, with
+    // canonical or compatibility mappings. A string ICU can't normalize is
+    // given back as it is.
+    private func normalized(_ normalizer: (UnsafeMutablePointer<Int32>?) -> UnsafeRawPointer?) -> String {
+        var status: Int32 = 0
+        guard let form = normalizer(&status), status <= 0 else { return value }
+        let units = Array(value.utf16)
+        var result = [UInt16](repeating: 0, count: units.count * 2 + 16)
+        var length = swift_unorm2_normalize(form, units, Int32(units.count), &result, Int32(result.count), &status)
+        if status == 15 {   // U_BUFFER_OVERFLOW_ERROR: it says how long
+            status = 0
+            result = [UInt16](repeating: 0, count: Int(length) + 1)
+            length = swift_unorm2_normalize(form, units, Int32(units.count), &result, Int32(result.count), &status)
+        }
+        guard status <= 0, length >= 0 else { return value }
+        return String(decoding: result.prefix(Int(length)), as: UTF16.self)
+    }
+
+    @ObjCMethod("precomposedStringWithCanonicalMapping")
+    func precomposedStringWithCanonicalMapping() -> String { normalized(swift_unorm2_getNFCInstance) }
+
+    @ObjCMethod("decomposedStringWithCanonicalMapping")
+    func decomposedStringWithCanonicalMapping() -> String { normalized(swift_unorm2_getNFDInstance) }
+
+    @ObjCMethod("precomposedStringWithCompatibilityMapping")
+    func precomposedStringWithCompatibilityMapping() -> String { normalized(swift_unorm2_getNFKCInstance) }
+
+    @ObjCMethod("decomposedStringWithCompatibilityMapping")
+    func decomposedStringWithCompatibilityMapping() -> String { normalized(swift_unorm2_getNFKDInstance) }
+
     @ObjCMethod("localizedUppercaseString")
     func localizedUppercase() -> String { value.uppercased() }
 
