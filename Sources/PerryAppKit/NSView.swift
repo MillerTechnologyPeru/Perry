@@ -19,6 +19,8 @@ import PerryObjCInterop
 open class NSView: NSResponder {
     var frame = CGRect.zero
     var boundsOrigin = CGPoint.zero
+    var draggedTypes: NSObject?
+    var constraintsNeedUpdate = true
     var subviews: [NSView] = []
     /// Not retained.
     var superviewObject: UnsafeMutableRawPointer?
@@ -30,7 +32,9 @@ open class NSView: NSResponder {
     var autoresizingMask: UInt = 0
     var autoresizesSubviews = true
     var needsDisplay = false
-    var needsLayout = false
+    var needsLayout = false {
+        didSet { if needsLayout { Layout.generation &+= 1 } }
+    }
     var alphaValue: CGFloat = 1
     var tag = -1
     var trackingAreas: [NSTrackingArea] = []
@@ -46,8 +50,12 @@ open class NSView: NSResponder {
     var hugging: [Float] = [250, 250]
     var compressionResistance: [Float] = [750, 750]
 
-    @ObjCMethod("init")
     public required init() { super.init() }
+
+    /// -init is -initWithFrame: with an empty frame, sent so a subclass's
+    /// -initWithFrame: runs, as Darwin's NSView does.
+    @ObjCMethod("init")
+    func initialize() -> NSObject { initializeView(frame: .zero) }
 
     @ObjCMethod("initWithFrame:")
     public required init(frame: CGRect) {
@@ -107,6 +115,7 @@ open class NSView: NSResponder {
 
     deinit {
         for subview in subviews { subview.superviewObject = nil }
+        InputContexts.contexts[objcObject] = nil
     }
 
     static func wrap(_ object: UnsafeMutableRawPointer) -> NSView { NSView.objCInstance(object, ownership: .retain) }
@@ -136,6 +145,7 @@ open class NSView: NSResponder {
     func setFrameOrigin(_ origin: CGPoint) {
         guard origin != frame.origin else { return }
         frame.origin = origin
+        Layout.generation &+= 1
         updateLayerGeometry()
         postFrameChanged()
     }
@@ -252,7 +262,10 @@ open class NSView: NSResponder {
     @ObjCMethod("setToolTip:") func setToolTip(_ toolTip: String?) { self.toolTip = toolTip }
     @ObjCMethod("appearance") func viewAppearance() -> NSObject? { appearance }
     @ObjCMethod("setAppearance:") func setAppearance(_ appearance: NSObject?) { self.appearance = appearance }
-    @ObjCMethod("effectiveAppearance") func effectiveAppearance() -> NSObject? { appearance ?? superview?.effectiveAppearance() }
+    @ObjCMethod("effectiveAppearance")
+    func effectiveAppearance() -> NSObject? {
+        appearance ?? superview?.effectiveAppearance() ?? window?.effectiveAppearance() ?? App.shared?.effectiveAppearance() ?? NSAppearance.system
+    }
     @ObjCMethod("nextKeyView") func viewNextKeyView() -> NSObject? { nextKeyView }
     @ObjCMethod("setNextKeyView:") func setNextKeyView(_ view: NSObject?) { nextKeyView = view }
     @ObjCMethod("inLiveResize") func inLiveResize() -> Bool { false }
@@ -526,6 +539,16 @@ open class NSView: NSResponder {
     // MARK: Display and layout
 
     @ObjCMethod("needsDisplay") func viewNeedsDisplay() -> Bool { needsDisplay }
+    /// The view's text input context, for a view that adopts
+    /// NSTextInputClient.
+    @ObjCMethod("inputContext") func inputContext() -> NSTextInputContext? { InputContexts.context(for: self) }
+
+    // Dragging: nothing is dragged between views or apps here, so the types
+    // are kept only to be read back.
+    @ObjCMethod("registerForDraggedTypes:") func registerForDraggedTypes(_ types: NSObject?) { draggedTypes = types }
+    @ObjCMethod("unregisterDraggedTypes") func unregisterDraggedTypes() { draggedTypes = nil }
+    @ObjCMethod("registeredDraggedTypes") func registeredDraggedTypes() -> NSObject { draggedTypes ?? NSMutableArray.empty() }
+
     @ObjCMethod("setNeedsDisplay:")
     func setNeedsDisplay(_ needs: Bool) {
         needsDisplay = needs
@@ -565,10 +588,29 @@ open class NSView: NSResponder {
         }
         for subview in subviews { subview.layoutSubtreeIfNeeded() }
     }
+    /// Where a view adds the constraints it makes itself; subclasses call
+    /// super's.
     @ObjCMethod("updateConstraints") func updateConstraints() {}
-    @ObjCMethod("updateConstraintsForSubtreeIfNeeded") func updateConstraintsForSubtreeIfNeeded() {}
-    @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { false }
-    @ObjCMethod("setNeedsUpdateConstraints:") func setNeedsUpdateConstraints(_ needs: Bool) { if needs { needsLayout = true } }
+    /// The update pass before layout: subviews first, then the view, each
+    /// once it needs it (as every view does at first).
+    @ObjCMethod("updateConstraintsForSubtreeIfNeeded")
+    func updateConstraintsForSubtreeIfNeeded() {
+        for subview in subviews { Send.void(subview.objcObject, "updateConstraintsForSubtreeIfNeeded") }
+        if constraintsNeedUpdate {
+            constraintsNeedUpdate = false
+            Send.void(objcObject, "updateConstraints")
+            needsLayout = true
+        }
+    }
+    @ObjCMethod("needsUpdateConstraints") func needsUpdateConstraints() -> Bool { constraintsNeedUpdate }
+    @ObjCMethod("setNeedsUpdateConstraints:")
+    func setNeedsUpdateConstraints(_ needs: Bool) {
+        constraintsNeedUpdate = needs
+        if needs {
+            needsLayout = true
+            Windows.layersChanged()
+        }
+    }
     @ObjCMethod("fittingSize") func fittingSize() -> CGSize { Layout.fittingSize(self) }
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSize() -> CGSize { CGSize(width: -1, height: -1) }
     @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { superview?.setNeedsLayout(true) }
@@ -771,4 +813,10 @@ open class NSTrackingArea: NSObject {
     @ObjCMethod("options") func areaOptions() -> UInt { options }
     @ObjCMethod("owner") func areaOwner() -> NSObject? { owner.map(NSObject.init) }
     @ObjCMethod("userInfo") func areaUserInfo() -> NSObject? { userInfo }
+}
+
+/// NSView's messages, sent so subclasses' overrides run.
+extension NSObject {
+    @ObjCMethod("initWithFrame:")
+    func initializeView(frame: CGRect) -> NSObject
 }
