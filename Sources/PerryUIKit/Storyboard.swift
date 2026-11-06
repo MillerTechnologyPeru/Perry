@@ -334,26 +334,43 @@ extension UIViewController {
 
 extension UIViewController {
     /// Loads the view from the controller's nib, in its storyboard or
-    /// bundle; false when it has none.
+    /// bundle; false when it has none. A controller that was given no nib
+    /// name has the nib named for its class, if the bundle has one: the
+    /// class's name without "Controller" (MyView for MyViewController),
+    /// then the class's name.
     func loadViewFromNib() -> Bool {
-        guard let name = state.nibName else { return false }
+        var names: [String] = []
+        if let name = state.nibName {
+            names = [name]
+        } else if state.storyboard == nil, let className = objCClass.object.describedByObject() {
+            // A Swift class's name is after its module's.
+            let name = className.split(separator: ".").last.map(String.init) ?? className
+            if name.hasSuffix("Controller"), name.count > 10 { names.append(String(name.dropLast(10))) }
+            names.append(name)
+        }
+        guard !names.isEmpty else { return false }
         let directory = state.storyboard?.state.path ?? state.nibBundlePath ?? NSBundle.main().bundlePath()
-        // The bundle's own directory, its preferred localizations' and then
-        // Base.lproj, as Darwin looks for a nib.
-        var archive = Nibs.load(named: name, in: directory)
+        var archive: NibArchive?
         var path = directory
-        if archive == nil, state.storyboard == nil, let bundle = NSBundle.bundle(path: directory) {
-            for localization in bundle.preferredLocalizations().elements {
-                let candidate = directory + "/" + String(objCArgument: localization.objcObject) + ".lproj"
-                if let found = Nibs.load(named: name, in: candidate) {
-                    (archive, path) = (found, candidate)
-                    break
+        for name in names {
+            // The bundle's own directory, its preferred localizations' and
+            // then Base.lproj, as Darwin looks for a nib.
+            archive = Nibs.load(named: name, in: directory)
+            path = directory
+            if archive == nil, state.storyboard == nil, let bundle = NSBundle.bundle(path: directory) {
+                for localization in bundle.preferredLocalizations().elements {
+                    let candidate = directory + "/" + String(objCArgument: localization.objcObject) + ".lproj"
+                    if let found = Nibs.load(named: name, in: candidate) {
+                        (archive, path) = (found, candidate)
+                        break
+                    }
                 }
             }
-        }
-        if archive == nil {
-            path = directory + "/Base.lproj"
-            archive = Nibs.load(named: name, in: path)
+            if archive == nil {
+                path = directory + "/Base.lproj"
+                archive = Nibs.load(named: name, in: path)
+            }
+            if archive != nil { break }
         }
         guard let archive else { return false }
         var external = state.externalObjects
