@@ -153,10 +153,11 @@ open class NSToolbarItem: NSObject {
     var visibilityPriority = 0
     var navigational = false
     var menuFormRepresentation: NSObject?
+    var hidden = false
     /// Not retained.
     var toolbarObject: UnsafeMutableRawPointer?
 
-    var visible: Bool { true }
+    var visible: Bool { !hidden }
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -192,18 +193,29 @@ open class NSToolbarItem: NSObject {
         menuFormRepresentation = decoded.object("NSToolbarItemMenuFormRepresentation")
     }
 
-    /// The items AppKit provides by identifier: spaces and separators.
+    /// The items AppKit provides by identifier: spaces, separators and the
+    /// sidebar's button.
     static func standard(_ identifier: String) -> NSToolbarItem? {
         switch identifier {
         case "NSToolbarFlexibleSpaceItem": return NSToolbarFlexibleSpaceItem(itemIdentifier: identifier)
-        case "NSToolbarSpaceItem": return NSToolbarSpaceItem(itemIdentifier: identifier)
-        case "NSToolbarSeparatorItem", "NSToolbarSidebarTrackingSeparatorItemIdentifier": return NSToolbarSpaceItem(itemIdentifier: identifier)
+        case "NSToolbarSpaceItem", "NSToolbarSeparatorItem": return NSToolbarSpaceItem(itemIdentifier: identifier)
+        case "NSToolbarSidebarTrackingSeparatorItemIdentifier":
+            // The window's split view's first divider, found when laid out.
+            return NSTrackingSeparatorToolbarItem(itemIdentifier: identifier)
+        case "NSToolbarToggleSidebarItemIdentifier":
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Sidebar"
+            item.image = NSImage.image(systemSymbolName: "sidebar.left", accessibilityDescription: nil)
+            item.action = ObjCSelector("toggleSidebar:")
+            return item
         default: return nil
         }
     }
 
     var isFlexibleSpace: Bool { false }
     var isSpace: Bool { false }
+    /// Where a tracking separator's divider is, in the toolbar view.
+    func trackedDividerX(in view: ToolbarView) -> CGFloat? { nil }
 
     @ObjCMethod("itemIdentifier") func itemIdentifier() -> String { identifier }
     @ObjCMethod("toolbar") func toolbar() -> NSToolbar? { toolbarObject.map { NSToolbar.objCInstance($0, ownership: .retain) } }
@@ -242,10 +254,12 @@ open class NSToolbarItem: NSObject {
     @ObjCMethod("menuFormRepresentation") func itemMenuFormRepresentation() -> NSObject? { menuFormRepresentation }
     @ObjCMethod("setMenuFormRepresentation:") func setMenuFormRepresentation(_ value: NSObject?) { menuFormRepresentation = value }
     @ObjCMethod("isVisible") func isVisible() -> Bool { visible }
+    @ObjCMethod("isHidden") func isHidden() -> Bool { hidden }
+    @ObjCMethod("setHidden:") func setHidden(_ value: Bool) { hidden = value; changed() }
     @ObjCMethod("validate") func validate() {}
     @ObjCMethod("allowsDuplicatesInToolbar") func allowsDuplicatesInToolbar() -> Bool { false }
 
-    private func changed() { toolbar()?.window?.toolbarChanged() }
+    func changed() { toolbar()?.window?.toolbarChanged() }
 }
 
 @ObjCClass("NSToolbarFlexibleSpaceItem")
@@ -256,6 +270,89 @@ open class NSToolbarFlexibleSpaceItem: NSToolbarItem {
 @ObjCClass("NSToolbarSpaceItem")
 open class NSToolbarSpaceItem: NSToolbarItem {
     override var isSpace: Bool { true }
+}
+
+/// Lines the items after it up with a split view's divider: the toolbar's
+/// sections sit over the panes.
+@ObjCClass("NSTrackingSeparatorToolbarItem")
+open class NSTrackingSeparatorToolbarItem: NSToolbarItem {
+    weak var splitView: NSSplitView?
+    var dividerIndex = 0
+
+    @ObjCClassMethod("trackingSeparatorToolbarItemWithIdentifier:splitView:dividerIndex:")
+    class func item(identifier: String?, splitView: NSSplitView?, dividerIndex: Int) -> NSTrackingSeparatorToolbarItem {
+        let item = NSTrackingSeparatorToolbarItem(itemIdentifier: identifier)
+        item.splitView = splitView
+        item.dividerIndex = dividerIndex
+        return item
+    }
+
+    @ObjCMethod("splitView") func trackedSplitView() -> NSSplitView? { splitView }
+    @ObjCMethod("setSplitView:") func setSplitView(_ value: NSSplitView?) { splitView = value; changed() }
+    @ObjCMethod("dividerIndex") func trackedDividerIndex() -> Int { dividerIndex }
+    @ObjCMethod("setDividerIndex:") func setDividerIndex(_ value: Int) { dividerIndex = value; changed() }
+
+    override func trackedDividerX(in view: ToolbarView) -> CGFloat? {
+        guard let splitView = splitView ?? view.window?.contentView.flatMap(Self.firstSplitView), splitView.vertical,
+              splitView.window != nil else { return nil }
+        let dividers = splitView.dividers
+        guard dividers.indices.contains(dividerIndex) else { return nil }
+        let divider = dividers[dividerIndex]
+        return view.convert(splitView.convert(CGPoint(x: divider.maxX, y: divider.minY), to: nil), from: nil).x
+    }
+
+    private static func firstSplitView(_ view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView, split.vertical { return split }
+        for subview in view.subviews { if let found = firstSplitView(subview) { return found } }
+        return nil
+    }
+}
+
+/// A search field in the toolbar.
+@ObjCClass("NSSearchToolbarItem")
+open class NSSearchToolbarItem: NSToolbarItem {
+    var preferredWidth: CGFloat = 220
+    var resignsFirstResponderWithCancel = true
+
+    var field: NSSearchField {
+        if let field = view?.as(NSSearchField.self) { return field }
+        let field = NSSearchField(frame: CGRect(x: 0, y: 0, width: preferredWidth, height: 22))
+        view = field
+        minSize = CGSize(width: 140, height: 22)
+        maxSize = CGSize(width: preferredWidth, height: 22)
+        return field
+    }
+
+    @ObjCMethod("searchField") func searchField() -> NSSearchField { field }
+    @ObjCMethod("setSearchField:")
+    func setSearchField(_ value: NSSearchField?) {
+        view = value
+        changed()
+    }
+    @ObjCMethod("view") override func itemView() -> NSView? { field }
+    @ObjCMethod("preferredWidthForSearchField") func preferredWidthForSearchField() -> CGFloat { preferredWidth }
+    @ObjCMethod("setPreferredWidthForSearchField:")
+    func setPreferredWidthForSearchField(_ value: CGFloat) {
+        preferredWidth = value
+        maxSize = CGSize(width: value, height: 22)
+        changed()
+    }
+    @ObjCMethod("resignsFirstResponderWithCancel") func itemResignsFirstResponderWithCancel() -> Bool { resignsFirstResponderWithCancel }
+    @ObjCMethod("setResignsFirstResponderWithCancel:") func setResignsFirstResponderWithCancel(_ value: Bool) { resignsFirstResponderWithCancel = value }
+    @ObjCMethod("beginSearchInteraction") func beginSearchInteraction() { field.window?.makeFirstResponder(field) }
+    @ObjCMethod("endSearchInteraction") func endSearchInteraction() {}
+}
+
+/// An image that shows a menu when pressed.
+@ObjCClass("NSMenuToolbarItem")
+open class NSMenuToolbarItem: NSToolbarItem {
+    var menu: NSMenu?
+    var showsIndicator = true
+
+    @ObjCMethod("menu") func itemMenu() -> NSMenu? { menu }
+    @ObjCMethod("setMenu:") func setMenu(_ value: NSMenu?) { menu = value }
+    @ObjCMethod("showsIndicator") func itemShowsIndicator() -> Bool { showsIndicator }
+    @ObjCMethod("setShowsIndicator:") func setShowsIndicator(_ value: Bool) { showsIndicator = value; changed() }
 }
 
 /// The strip across the top of a window that shows its toolbar's items.
@@ -272,42 +369,75 @@ open class ToolbarView: NSView {
     @ObjCMethod("isFlipped") override func isFlipped() -> Bool { true }
 
     /// The items left to right: views at their size (within their min and
-    /// max), images and labels in a square, flexible spaces sharing what is
-    /// left.
+    /// max), images in a square, flexible spaces sharing what is left of
+    /// their section. Tracking separators end a section at their split
+    /// view's divider, so the next starts over the next pane.
+    /// The width the items were last arranged for.
+    var arrangedWidth: CGFloat = -1
+
     func arrange() {
         guard let toolbar else { return }
+        arrangedWidth = bounds.width
         toolbar.loadItems()
-        for view in subviews { view.removeFromSuperview() }
+        // Views stay where they are when still shown, so a search field
+        // keeps its typing as dividers move.
+        let shown = toolbar.items.filter(\.visible).compactMap { $0.itemView() }
+        for view in subviews where !shown.contains(where: { $0 === view }) { view.removeFromSuperview() }
         buttons = []
-        let items = toolbar.items
         func width(_ item: NSToolbarItem) -> CGFloat {
             if item.isFlexibleSpace { return 0 }
             if item.isSpace { return 8 }
-            if let view = item.view {
+            if let view = item.itemView() {
                 let intrinsic = Send.size(view.objcObject, "intrinsicContentSize").width
                 var width = item.minSize.width > 0 ? item.minSize.width : intrinsic > 0 ? intrinsic : view.frame.width
                 if item.maxSize.width > 0 { width = min(max(width, view.frame.width), item.maxSize.width) }
                 return max(width, 20)
             }
+            if item.image != nil { return item is NSMenuToolbarItem ? 44 : 32 }
             return max(32, Text.width(item.label, font: NSFont.system(size: 11)) + 8)
         }
-        let fixed = items.reduce(0) { $0 + width($1) } + CGFloat(max(0, items.count - 1)) * 8
-        let flexible = items.filter(\.isFlexibleSpace)
-        // Without flexible spaces, a view whose max width allows it grows.
-        let extra = max(0, bounds.width - 16 - fixed)
-        let share = flexible.isEmpty ? 0 : extra / CGFloat(flexible.count)
-        var x: CGFloat = 8
-        for item in items {
-            let w = item.isFlexibleSpace ? share : width(item)
-            if let view = item.view {
-                let height = min(max(view.frame.height, 22), bounds.height - 8)
-                addSubview(view)
-                view.translatesAutoresizingMask = true
-                Send.void(view.objcObject, "setFrame:", rect: CGRect(x: x, y: ((bounds.height - height) / 2).rounded(), width: w, height: height))
-            } else if !item.isFlexibleSpace && !item.isSpace {
-                buttons.append((item, CGRect(x: x, y: 3, width: w, height: bounds.height - 6)))
+        var sections: [(items: [NSToolbarItem], end: CGFloat)] = []
+        var current: [NSToolbarItem] = []
+        for item in toolbar.items where item.visible {
+            if item is NSTrackingSeparatorToolbarItem {
+                if let x = item.trackedDividerX(in: self) {
+                    sections.append((current, x))
+                    current = []
+                }
+            } else {
+                current.append(item)
             }
-            x += w + 8
+        }
+        sections.append((current, bounds.width))
+        var start: CGFloat = 8
+        for (items, end) in sections {
+            var widths = items.map(width)
+            // Too wide for its section: items that can (a search field down
+            // to its min size) shrink, the last first.
+            var overflow = widths.reduce(0, +) + CGFloat(max(0, items.count - 1)) * 8 - (end - 8 - start)
+            for index in items.indices.reversed() where overflow > 0 && items[index].minSize.width > 0 {
+                let give = min(overflow, max(0, widths[index] - items[index].minSize.width))
+                widths[index] -= give
+                overflow -= give
+            }
+            let fixed = widths.reduce(0, +) + CGFloat(max(0, items.count - 1)) * 8
+            let flexible = items.filter(\.isFlexibleSpace)
+            let extra = max(0, end - 8 - start - fixed)
+            let share = flexible.isEmpty ? 0 : extra / CGFloat(flexible.count)
+            var x = start
+            for (index, item) in items.enumerated() {
+                let w = item.isFlexibleSpace ? share : widths[index]
+                if let view = item.itemView() {
+                    let height = min(max(view.frame.height, 22), bounds.height - 8)
+                    if view.superview !== self { addSubview(view) }
+                    view.translatesAutoresizingMask = true
+                    Send.void(view.objcObject, "setFrame:", rect: CGRect(x: x, y: ((bounds.height - height) / 2).rounded(), width: w, height: height))
+                } else if !item.isFlexibleSpace && !item.isSpace {
+                    buttons.append((item, CGRect(x: x, y: 5, width: w, height: bounds.height - 10)))
+                }
+                x += w + 8
+            }
+            start = max(x, end + 8)
         }
         setNeedsDisplay(true)
     }
@@ -322,15 +452,37 @@ open class ToolbarView: NSView {
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG else { return }
+        // Resized without hearing of it (its window grew in one go).
+        if arrangedWidth != bounds.width { arrange() }
         CG.saveGState(context)
-        CG.setFillColorWithColor(context, NSColor.windowBackgroundColor().cgColorRef)
+        CG.setFill(context, NSColor.windowBackgroundColor())
         CG.fillRect(context, bounds)
-        CG.setFillColorWithColor(context, NSColor.separatorColor().cgColorRef)
+        CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1))
         CG.restoreGState(context)
         let selected = toolbar?.selectedItemIdentifier
         for (item, frame) in buttons {
-            if item.identifier == selected { CG.fill(CG.roundedRect(frame, radius: 5), NSColor(white: 0, alpha: 0.08), in: context) }
+            if item.identifier == selected || item === pressed {
+                CG.fill(CG.roundedRect(frame, radius: 6), NSColor.labelColor().withAlphaComponent(0.12), in: context)
+            }
+            if let image = item.image {
+                // Icons alone, as unified toolbars show them; a menu's with
+                // a small chevron after.
+                let menu = (item as? NSMenuToolbarItem).map { $0.showsIndicator } ?? false
+                let iconFrame = CGRect(x: frame.minX, y: frame.minY, width: frame.width - (menu ? 12 : 0), height: frame.height)
+                let tint = item.enabled ? NSColor.secondaryLabelColor() : NSColor.tertiaryLabelColor()
+                ImageDrawing.draw(image, fitting: iconFrame.insetBy(dx: 4, dy: 3), tint: tint)
+                if menu {
+                    let path = NSBezierPath()
+                    path.move(to: CGPoint(x: frame.maxX - 13, y: frame.midY - 1.5))
+                    path.line(to: CGPoint(x: frame.maxX - 10, y: frame.midY + 1.5))
+                    path.line(to: CGPoint(x: frame.maxX - 7, y: frame.midY - 1.5))
+                    tint.setStroke()
+                    path.setLineWidth(1.2)
+                    path.stroke()
+                }
+                continue
+            }
             let font = NSFont.system(size: 10)
             let labelHeight = Text.lineHeight(font)
             if let image = item.image {
@@ -346,11 +498,32 @@ open class ToolbarView: NSView {
         }
     }
 
-    @ObjCMethod("mouseUp:")
-    override func mouseUp(_ eventObject: NSObject?) {
+    /// The item being pressed, drawn darker.
+    weak var pressed: NSToolbarItem?
+
+    @ObjCMethod("mouseDown:")
+    override func mouseDown(_ eventObject: NSObject?) {
         guard let event = eventObject?.as(NSEvent.self) else { return }
         let point = convert(event.locationInWindow, from: nil)
-        guard let (item, _) = buttons.first(where: { $0.frame.contains(point) }), item.enabled, let action = item.action else { return }
+        guard let (item, frame) = buttons.first(where: { $0.frame.contains(point) }), item.enabled else { return }
+        if let menu = (item as? NSMenuToolbarItem)?.menu {
+            // Its menu, below it.
+            _ = menu.popUp(positioning: nil, at: CGPoint(x: frame.minX, y: frame.maxY + 2), in: self)
+            return
+        }
+        pressed = item
+        setNeedsDisplay(true)
+    }
+
+    @ObjCMethod("mouseUp:")
+    override func mouseUp(_ eventObject: NSObject?) {
+        let wasPressed = pressed
+        pressed = nil
+        setNeedsDisplay(true)
+        guard let event = eventObject?.as(NSEvent.self) else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let (item, _) = buttons.first(where: { $0.frame.contains(point) }), item === wasPressed, item.enabled,
+              let action = item.action else { return }
         _ = App.shared?.sendAction(action, to: item.target.map(NSObject.init), from: item)
     }
 }
