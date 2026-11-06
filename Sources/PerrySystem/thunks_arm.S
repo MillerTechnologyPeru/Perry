@@ -130,7 +130,6 @@ PASSTHROUGH _ungetc, ungetc
 PASSTHROUGH _fwrite, fwrite
 PASSTHROUGH _fread, fread
 PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fclose, fclose
 PASSTHROUGH _fopen, fopen64
 PASSTHROUGH _fdopen, fdopen
 PASSTHROUGH _fileno, fileno
@@ -300,7 +299,6 @@ PASSTHROUGH _mprotect, mprotect
 PASSTHROUGH _mlock, mlock
 PASSTHROUGH _munlock, munlock
 PASSTHROUGH _getcwd, getcwd
-PASSTHROUGH _getpagesize, getpagesize
 PASSTHROUGH _munmap, munmap
 PASSTHROUGH _sched_yield, sched_yield
 PASSTHROUGH _arc4random, arc4random
