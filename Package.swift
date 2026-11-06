@@ -45,6 +45,8 @@ let package = Package(
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
+        // IOKit: the registry a Mac app reads, HID managers and power sources.
+        .library(name: "PerryIOKit", type: .dynamic, targets: ["PerryIOKit"]),
         // CoreTelephony, on a device without a cellular radio.
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
@@ -61,6 +63,8 @@ let package = Package(
         .library(name: "PerryQuartzCore", type: .dynamic, targets: ["PerryQuartzCore"]),
         // UIKit.
         .library(name: "PerryUIKit", type: .dynamic, targets: ["PerryUIKit"]),
+        // AppKit, for macOS apps.
+        .library(name: "PerryAppKit", type: .dynamic, targets: ["PerryAppKit"]),
         // Metal, on Vulkan.
         .library(name: "PerryMetal", type: .dynamic, targets: ["PerryMetal"]),
     ],
@@ -270,6 +274,12 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // IOKit, over a registry with the platform device and no others.
+        .target(
+            name: "PerryIOKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // CoreTelephony, with no SIM and no carrier.
         .target(
             name: "PerryCoreTelephony",
@@ -332,6 +342,13 @@ let package = Package(
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // AppKit, a client of libobjc's C API and Foundation's classes, whose
+        // views are backed by QuartzCore's layers.
+        .target(
+            name: "PerryAppKit",
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
