@@ -262,6 +262,9 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
     var destination: Destination?
     var value: AnyHashable?
     var label: Label
+    /// A link bound to whether its destination shows: setting it pushes
+    /// the destination, clearing it pops it.
+    var isActive: Binding<Bool>?
     @Environment(\.navigationActions) private var actions
 
     public init(destination: Destination, @ViewBuilder label: () -> Label) {
@@ -275,13 +278,24 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
     }
 
     public var body: some View {
-        Button {
-            if let value {
-                actions?.pushValue(value)
-            } else if let destination {
-                _ = actions?.push(AnyView(destination), nil)
-            }
-        } label: {
+        if let isActive, let destination {
+            linkButton { isActive.wrappedValue = true }
+                .navigationDestination(isPresented: isActive) { destination }
+        } else {
+            linkButton { push() }
+        }
+    }
+
+    private func push() {
+        if let value {
+            actions?.pushValue(value)
+        } else if let destination {
+            _ = actions?.push(AnyView(destination), nil)
+        }
+    }
+
+    private func linkButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack {
                 label
                 Spacer(minLength: 0)
@@ -290,6 +304,34 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+@available(OpenSwiftUI_v1_0, *)
+extension NavigationLink {
+    /// Creates a navigation link that presents the destination when
+    /// `isActive` is true.
+    public init(destination: Destination, isActive: Binding<Bool>, @ViewBuilder label: () -> Label) {
+        self.destination = destination
+        self.label = label()
+        self.isActive = isActive
+    }
+
+}
+
+@available(OpenSwiftUI_v1_0, *)
+extension NavigationLink where Label == Text {
+    /// Creates a navigation link titled from a localized key that presents
+    /// the destination when `isActive` is true.
+    public init(_ titleKey: LocalizedStringKey, destination: Destination, isActive: Binding<Bool>) {
+        self.init(destination: destination, isActive: isActive) { Text(titleKey) }
+    }
+
+    /// Creates a navigation link titled with a string that presents the
+    /// destination when `isActive` is true.
+    @_disfavoredOverload
+    public init<S>(_ title: S, destination: Destination, isActive: Binding<Bool>) where S: StringProtocol {
+        self.init(destination: destination, isActive: isActive) { Text(title) }
     }
 }
 
