@@ -747,7 +747,10 @@ static OSStatus read_packets(audio_file *file, uint32_t *bytes, AudioStreamPacke
         packet(file, (uint64_t)start + count, &offset, &size, &frames);
         if (written + size > capacity) break;
         if (!copy_data(file, offset, size, (uint8_t *)buffer + written)) break;
-        if (descriptions) descriptions[count] = (AudioStreamPacketDescription){ (int64_t)written, frames, size };
+        // Only packets of varying size are described: a program reading a
+        // format of constant packets (IMA4's 34 bytes) may give room for
+        // one description, or none, with all the file's packets asked for.
+        if (descriptions && file->table) descriptions[count] = (AudioStreamPacketDescription){ (int64_t)written, frames, size };
         written += size;
         count++;
     }
