@@ -21,6 +21,9 @@ swift=$(cd .toolchains && ls -d swift-6.4.0-RELEASE-*/usr/bin | head -1)
 sdk=$(cd .toolchains && ls -d swift-*-armv7-sdk/*/debian-* | head -1)
 swift=/perry/.toolchains/$swift sdk=/perry/.toolchains/$sdk
 
+# r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
+# register, which Linux's preserves across calls, so Perry's code never keeps
+# a value in it across a call into Darwin code.
 mkdir -p .build/armv7
 cat > .build/armv7/destination.json <<EOF
 {
@@ -29,10 +32,10 @@ cat > .build/armv7/destination.json <<EOF
    "toolchain-bin-dir": "$swift",
    "target": "armv7-unknown-linux-gnueabihf",
    "dynamic-library-extension": "so",
-   "extra-cc-flags": ["-march=armv7-a", "-mfpu=neon", "-mfloat-abi=hard", "-D_FILE_OFFSET_BITS=64", "-fPIC"],
+   "extra-cc-flags": ["-march=armv7-a", "-mfpu=neon", "-mfloat-abi=hard", "-D_FILE_OFFSET_BITS=64", "-fPIC", "-ffixed-r9"],
    "extra-swiftc-flags": [
       "-target", "armv7-unknown-linux-gnueabihf", "-use-ld=lld",
-      "-Xcc", "--gcc-toolchain=$sdk/usr",
+      "-Xcc", "--gcc-toolchain=$sdk/usr", "-Xcc", "-ffixed-r9",
       "-Xlinker", "-rpath", "-Xlinker", "/usr/lib/swift/linux",
       "-Xlinker", "-rpath", "-Xlinker", "/usr/lib/swift/linux/armv7",
       "-resource-dir", "$sdk/usr/lib/swift", "-sdk", "$sdk", "-latomic"
