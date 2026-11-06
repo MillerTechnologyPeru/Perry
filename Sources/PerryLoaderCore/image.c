@@ -555,6 +555,7 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
 // on iOS. So the first two instructions become
 //     mrs x9, TPIDR_EL0;    sub x9, x9, #distance
 // in the image's code, before it is made read-only.
+#if defined(__LP64__)
 static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
     enum { DARWIN_TSD_OFFSET = 0xe0 };
     long distance = (long)((uintptr_t)__builtin_thread_pointer() - (uintptr_t)pthread_self()) - DARWIN_TSD_OFFSET;
@@ -575,6 +576,14 @@ static void use_linux_thread_pointer(perry_image *image, const perry_segment *se
         }
     }
 }
+#else
+// armv7 code calls pthread_getspecific, or reads the thread register for
+// keys libPerrySystem places the same way; there is nothing to rewrite.
+static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
+    (void)image;
+    (void)seg;
+}
+#endif
 
 // Applies each segment's protection once fixups are done. Segments made
 // read-only after fixups (SG_READ_ONLY: __DATA_CONST) stay writable until the
