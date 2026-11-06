@@ -185,6 +185,18 @@ open class UIWindowScene: UIScene {
     @ObjCMethod("windows")
     func windows() -> NSObject { NSMutableArray.of(windowSceneState.windows.map(NSObject.init)) }
 
+    /// The orientation the interface is in, the screen's.
+    @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
+
+    /// The one screen, which the scene fills.
+    @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
+
+    /// The scene's coordinate space, the screen's in its orientation: the
+    /// key window, which fills the screen, or before there is one the
+    /// screen, for its bounds.
+    @ObjCMethod("coordinateSpace")
+    func coordinateSpace() -> NSObject? { UIScreen.mainScreen().coordinateSpace() ?? UIScreen.mainScreen() }
+
     @ObjCMethod("keyWindow")
     func keyWindow() -> NSObject? {
         guard let key = Windows.key, windowSceneState.windows.contains(key) else { return nil }
