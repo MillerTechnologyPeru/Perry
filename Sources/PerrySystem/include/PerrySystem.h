@@ -37,5 +37,11 @@ const struct darwin_section_64 *darwin_getsectbynamefromheader_64(const void *he
 // The loader's symbol lookup (perry_startup_info.lookup_symbol), once
 // libSystem has started: by Mach-O name, in a library or (NULL) anywhere.
 extern void *(*perry_system_lookup)(const char *install_name, const char *name);
+// The main executable's mach header, for what the system says it is.
+extern const void *perry_system_main_header;
+// For a macOS program, the Darwin release of its SDK's macOS (25.5 for
+// macOS 26.5); zeros for others.
+typedef struct { int darwin, minor; } perry_macos_release;
+perry_macos_release perry_system_macos_release(void);
 
 #endif
