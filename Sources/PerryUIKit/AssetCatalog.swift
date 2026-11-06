@@ -23,6 +23,10 @@ enum AssetCatalog {
 
     nonisolated(unsafe) static let main: Catalog? = NSBundle.main().path(forResource: "Assets", ofType: "car").flatMap(Catalog.init)
 
+    /// The named color's components, for the dark appearance or the
+    /// default one.
+    static func color(named name: String, dark: Bool = false) -> [CGFloat]? { main?.color(named: name, dark: dark) }
+
     /// The named image at the scale nearest the screen's, for the dark
     /// appearance or the default one.
     static func image(named name: String, dark: Bool = false) -> (image: Owned, scale: CGFloat)? {
@@ -197,6 +201,40 @@ final class Catalog {
                 let file = extracted + "/\(name)\(variant)@\(scale)x.png"
                 guard let data = NSData.contents(ofFile: file), let image = UIImage.decode(data) else { continue }
                 return (image, CGFloat(scale))
+            }
+        }
+        return nil
+    }
+
+    // MARK: Colors
+
+    /// A named color's components (white and alpha, or red, green, blue and
+    /// alpha), for the appearance asked for, else the default one. A color
+    /// rendition's data is 'RLOC', a version, flags, the count of
+    /// components, then the components as doubles.
+    func color(named name: String, dark: Bool) -> [CGFloat]? {
+        guard let identifier = identifiers[name] else { return nil }
+        let candidates = renditions.indices.filter {
+            attribute(renditions[$0].key, .identifier) == identifier && attribute(renditions[$0].key, .idiom) <= 1
+        }
+        let ordered = candidates.sorted { first, second in
+            let isDark = { (index: Int) in self.darkAppearance.map { self.attribute(self.renditions[index].key, .appearance) == $0 } ?? false }
+            return (isDark(first) == dark ? 0 : 1) < (isDark(second) == dark ? 0 : 1)
+        }
+        let magic = Array("RLOC".utf8)
+        for index in ordered {
+            let range = renditions[index].range
+            var at = range.lowerBound
+            while at + 16 <= range.upperBound {
+                defer { at += 1 }
+                guard bytes[at] == magic[0], Array(bytes[at..<at + 4]) == magic else { continue }
+                let count = le32(at + 12)
+                guard (1...5).contains(count), at + 16 + count * 8 <= range.upperBound else { continue }
+                return (0..<count).map { component in
+                    var bits: UInt64 = 0
+                    for byte in 0..<8 { bits |= UInt64(bytes[at + 16 + component * 8 + byte]) << (8 * UInt64(byte)) }
+                    return CGFloat(Double(bitPattern: bits))
+                }
             }
         }
         return nil
