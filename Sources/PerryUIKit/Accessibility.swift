@@ -61,6 +61,11 @@ extension NSObject {
     @ObjCMethod("setAccessibilityTraits:")
     func setAccessibilityTraits(_ traits: UInt64) { Accessibility.set(self, .traits, NSNumber.make(integer: Int(bitPattern: UInt(traits)))) }
 
+    /// Whether Smart Invert leaves the view as it is: colors are never
+    /// inverted here.
+    @ObjCMethod("accessibilityIgnoresInvertColors") func accessibilityIgnoresInvertColors() -> Bool { false }
+    @ObjCMethod("setAccessibilityIgnoresInvertColors:") func setAccessibilityIgnoresInvertColors(_ ignores: Bool) {}
+
     @ObjCMethod("isAccessibilityElement")
     func isAccessibilityElement() -> Bool { (Accessibility.get(self, .isElement)?.sendIntegerValue() ?? 0) != 0 }
     @ObjCMethod("setIsAccessibilityElement:")
