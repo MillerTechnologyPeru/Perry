@@ -33,10 +33,12 @@ _Noreturn void darwin_assert_rtn(const char *function, const char *file, int lin
 
 // MARK: - Memory
 
+void *darwin_realloc(void *ptr, size_t size) DARWIN_SYMBOL(realloc);
+
 // realloc that frees the block when it cannot grow it.
 void *darwin_reallocf(void *pointer, size_t size) DARWIN_SYMBOL(reallocf);
 void *darwin_reallocf(void *pointer, size_t size) {
-    void *resized = realloc(pointer, size);
+    void *resized = darwin_realloc(pointer, size);
     if (!resized && size)
         free(pointer);
     return resized;
