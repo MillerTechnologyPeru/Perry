@@ -268,3 +268,17 @@ public func CATransform3DGetAffineTransform(_ t: CATransform3D) -> CGAffineTrans
 /// Seconds on the clock animations are timed by.
 @DarwinC("_CACurrentMediaTime")
 public func CACurrentMediaTime() -> Double { Clock.now }
+
+// MARK: - NSValue
+
+/// NSValue's QuartzCore additions: a 3D transform boxed under its type
+/// encoding, as animations and layer code keep one.
+@ObjCCategory("CATransform3DAdditions")
+extension NSValue {
+    @ObjCClassMethod("valueWithCATransform3D:")
+    static func value(transform: CATransform3D) -> NSValue { NSValue.boxing(transform) }
+
+    /// The transform, or the identity when the value holds another type.
+    @ObjCMethod("CATransform3DValue")
+    func transform3DValue() -> CATransform3D { unboxed(CATransform3D.self) ?? CATransform3D.identity }
+}
