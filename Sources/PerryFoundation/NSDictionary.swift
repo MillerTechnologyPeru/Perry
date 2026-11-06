@@ -515,3 +515,17 @@ public func perry_foundation_initWithObjectsAndKeys(_ object: id?, _ cmd: SEL?, 
     }
     return Dictionaries.initialize(object, entries)
 }
+
+/// NSDictionaryOfVariableBindings(a, b): the values by the names the macro
+/// wrote, "a, b". The values after the first are the Darwin va_list's
+/// slots, one per name.
+@c
+public func perry_foundation_dictionary_of_variable_bindings(_ keys: id?, _ first: id?, _ arguments: UnsafeRawPointer?) -> id? {
+    let names = (Strings.value(of: keys) ?? "").split(separator: ",").map { String($0.filter { !$0.isWhitespace }) }
+    var entries: [(key: id, value: id)] = []
+    for (index, name) in names.enumerated() {
+        let value = index == 0 ? first : arguments?.load(fromByteOffset: (index - 1) * 8, as: id?.self)
+        if let value { entries.append((Strings.autoreleased(name), value)) }
+    }
+    return Dictionaries.autoreleased(entries)
+}
