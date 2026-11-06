@@ -93,6 +93,7 @@ END _objc_msgSend
 
 // void objc_msgSend_stret(void *result, id self, SEL _cmd, ...)
 ENTRY _objc_msgSend_stret
+.Lmsgsend_stret:
     cmp r1, #0
     beq .Lnil_stret
     ldr r12, [r1]
@@ -128,6 +129,7 @@ ENTRY _objc_msgSendSuper_stret
 END _objc_msgSendSuper_stret
 
 ENTRY _objc_msgSendSuper2_stret
+.Lmsgsend_super2_stret:
     ldr r12, [r1, #4]
     ldr r12, [r12, #4]
     ldr r1, [r1]
@@ -175,6 +177,22 @@ perry_objc_msgSendSuper2_address:
     adr r0, .Lmsgsend_super2
     bx lr
     .size perry_objc_msgSendSuper2_address, . - perry_objc_msgSendSuper2_address
+
+    .globl perry_objc_msgSend_stret_address
+    .type perry_objc_msgSend_stret_address, %function
+    .p2align 2
+perry_objc_msgSend_stret_address:
+    adr r0, .Lmsgsend_stret
+    bx lr
+    .size perry_objc_msgSend_stret_address, . - perry_objc_msgSend_stret_address
+
+    .globl perry_objc_msgSendSuper2_stret_address
+    .type perry_objc_msgSendSuper2_stret_address, %function
+    .p2align 2
+perry_objc_msgSendSuper2_stret_address:
+    adr r0, .Lmsgsend_super2_stret
+    bx lr
+    .size perry_objc_msgSendSuper2_stret_address, . - perry_objc_msgSendSuper2_stret_address
 
     .globl perry_objc_msgForward_address
     .type perry_objc_msgForward_address, %function
