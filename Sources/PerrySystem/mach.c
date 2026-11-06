@@ -940,6 +940,15 @@ kern_return_t darwin_vm_read_overwrite(mach_port_t task, uintptr_t address, uint
     return KERN_SUCCESS;
 }
 
+// mach_vm_read_overwrite: the same, with 64-bit addresses, which
+// vm_address_t is on arm64.
+kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                            uintptr_t *out_size) DARWIN_SYMBOL(mach_vm_read_overwrite);
+kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address, uintptr_t size, uintptr_t data,
+                                            uintptr_t *out_size) {
+    return darwin_vm_read_overwrite(task, address, size, data, out_size);
+}
+
 // The pthread for a thread port; only the calling thread's is known.
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) DARWIN_SYMBOL(pthread_from_mach_thread_np);
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
