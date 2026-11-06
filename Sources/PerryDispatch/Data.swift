@@ -78,9 +78,11 @@ private let applyRegion: @convention(c) (UnsafeMutableRawPointer?, UnsafeMutable
     // Linux lends the region; the Darwin one holds its own reference.
     if let region { linux_dispatch_retain(region) }
     let darwin = DataObjects.wrap(region)
-    defer { ObjCRuntime.release(darwin) }
-    return unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(
-        block, darwin, offset, buffer, size)
+    return keepingLinuxRegisters {
+        defer { ObjCRuntime.release(darwin) }
+        return unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(
+            block, darwin, offset, buffer, size)
+    }
 }
 
 @c(_dispatch_data_apply)

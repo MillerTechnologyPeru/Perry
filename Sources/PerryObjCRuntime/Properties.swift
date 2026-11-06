@@ -19,7 +19,7 @@ public enum Properties {
     }
 
     public static func attributes(_ property: PropertyPointer) -> UnsafePointer<CChar>? {
-        property.load(fromByteOffset: 8, as: UnsafePointer<CChar>?.self)
+        property.load(fromByteOffset: Layout.word, as: UnsafePointer<CChar>?.self)
     }
 
     /// Adds a property list to a class, as class_addProperty does.

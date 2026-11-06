@@ -242,7 +242,7 @@ enum Storage {
         pointer.alignedUp(for: UInt.self)
     }
 
-    private static func cookie(_ object: id) -> UInt { UInt(bitPattern: object) ^ 0x5065_7272_7953_7461 }
+    private static func cookie(_ object: id) -> UInt { UInt(bitPattern: object) ^ UInt(truncatingIfNeeded: 0x5065_7272_7953_7461 as UInt64) }
 
     /// The object's state word, when it has one: not a static object's,
     /// nor that of an object a program allocated itself at its class's
@@ -292,18 +292,44 @@ func foundationFatal(_ message: String) -> Never {
     abort()
 }
 
+// MARK: - Darwin's calling convention
+
+/// A value a C function or an IMP returned as Darwin returns it (its
+/// ObjCResultType, which on 32-bit Darwin is a double's or a 64-bit
+/// integer's r0 and r1, a float's r0).
+@inline(__always)
+func darwinResult<Value: ObjCValue>(_ raw: Value.ObjCResultType, as type: Value.Type) -> Value {
+    Value.objCValue(returnValue: Value.objCArgumentForm(ofResult: raw))
+}
+
+/// A value as a C function returns it to Darwin code.
+@inline(__always)
+func darwinResult<Value: ObjCValue>(_ value: Value) -> Value.ObjCResultType {
+    Value.objCResult(value.objCReturnValue())
+}
+
 // MARK: - Foundation's C structs as Objective-C values
 
-extension NSRange: ObjCScalar {
+extension NSRange: ObjCStructure {
+    public typealias ObjCType = NSRange
+    #if _pointerBitWidth(_32)
+    public static var objCTypeEncoding: String { "{_NSRange=II}" }
+    #else
     public static var objCTypeEncoding: String { "{_NSRange=QQ}" }
+    #endif
 
     init(location: Int, length: Int) {
         self.init(location: UInt(location), length: UInt(length))
     }
 }
 
-extension NSOperatingSystemVersion: ObjCScalar {
+extension NSOperatingSystemVersion: ObjCStructure {
+    public typealias ObjCType = NSOperatingSystemVersion
+    #if _pointerBitWidth(_32)
+    public static var objCTypeEncoding: String { "{NSOperatingSystemVersion=iii}" }
+    #else
     public static var objCTypeEncoding: String { "{NSOperatingSystemVersion=qqq}" }
+    #endif
 }
 
 extension AnyObjCObject {

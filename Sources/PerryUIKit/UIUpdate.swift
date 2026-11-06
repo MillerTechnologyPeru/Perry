@@ -11,7 +11,7 @@ import PerryObjCInterop
 @c(__UIUpdateAdaptiveRateNeeded) public func _UIUpdateAdaptiveRateNeeded() -> Bool { false }
 
 /// The factor UIKit slows animations by (Debug > Slow Animations): none.
-@c(_UIAnimationDragCoefficient) public func UIAnimationDragCoefficient() -> Float { 1 }
+@DarwinC("_UIAnimationDragCoefficient") public func UIAnimationDragCoefficient() -> Float { 1 }
 
 /// Whether a view ignores touches during an animation; views here never do.
 @c(_UIViewIgnoresTouchEvents) public func UIViewIgnoresTouchEvents(_ view: UnsafeMutableRawPointer?) -> Bool { false }

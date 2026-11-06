@@ -315,32 +315,32 @@ enum Colors {
 @c(_CGColorGetTypeID) public func CGColorGetTypeID() -> UInt { TypeIDs.color }
 
 @c(_CGColorCreate)
-public func CGColorCreate(_ space: Ref?, _ components: UnsafePointer<Double>?) -> Ref? {
+public func CGColorCreate(_ space: Ref?, _ components: UnsafePointer<CGFloat>?) -> Ref? {
     guard let space, let components, let state = ColorSpaces.state(space) else { return nil }
-    return Colors.make(space, Array(UnsafeBufferPointer(start: components, count: state.components + 1)))
+    return Colors.make(space, UnsafeBufferPointer(start: components, count: state.components + 1).map { Double($0) })
 }
 
-@c(_CGColorCreateGenericRGB)
-public func CGColorCreateGenericRGB(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> Ref {
+@DarwinC("_CGColorCreateGenericRGB")
+public func CGColorCreateGenericRGB(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> Ref {
     let space = CGColorSpaceCreateWithName(NSObject.string("kCGColorSpaceSRGB").objcObject)!
     defer { ObjCRuntime.release(space) }
-    return Colors.make(space, [r, g, b, a])
+    return Colors.make(space, [Double(r), Double(g), Double(b), Double(a)])
 }
 
-@c(_CGColorCreateSRGB)
-public func CGColorCreateSRGB(_ r: Double, _ g: Double, _ b: Double, _ a: Double) -> Ref { CGColorCreateGenericRGB(r, g, b, a) }
+@DarwinC("_CGColorCreateSRGB")
+public func CGColorCreateSRGB(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) -> Ref { CGColorCreateGenericRGB(r, g, b, a) }
 
-@c(_CGColorCreateGenericGray)
-public func CGColorCreateGenericGray(_ gray: Double, _ a: Double) -> Ref {
+@DarwinC("_CGColorCreateGenericGray")
+public func CGColorCreateGenericGray(_ gray: CGFloat, _ a: CGFloat) -> Ref {
     let space = CGColorSpaceCreateDeviceGray()
     defer { ObjCRuntime.release(space) }
-    return Colors.make(space, [gray, a])
+    return Colors.make(space, [Double(gray), Double(a)])
 }
 
-@c(_CGColorCreateCopyWithAlpha)
-public func CGColorCreateCopyWithAlpha(_ color: Ref?, _ alpha: Double) -> Ref? {
+@DarwinC("_CGColorCreateCopyWithAlpha")
+public func CGColorCreateCopyWithAlpha(_ color: Ref?, _ alpha: CGFloat) -> Ref? {
     guard let state = Colors.state(color) else { return nil }
-    return Colors.make(state.space, Array(state.components.dropLast()) + [alpha])
+    return Colors.make(state.space, Array(state.components.dropLast()) + [Double(alpha)])
 }
 
 /// The color in another color space, its alpha kept: gray, RGB and CMYK
@@ -374,25 +374,25 @@ public func CGColorCreateCopyByMatchingToColorSpace(_ space: Ref?, _ intent: Int
 }
 
 @c(_CGColorGetNumberOfComponents) public func CGColorGetNumberOfComponents(_ color: Ref?) -> Int { Colors.state(color)?.components.count ?? 0 }
-@c(_CGColorGetAlpha) public func CGColorGetAlpha(_ color: Ref?) -> Double { Colors.state(color)?.components.last ?? 0 }
+@DarwinC("_CGColorGetAlpha") public func CGColorGetAlpha(_ color: Ref?) -> CGFloat { CGFloat(Colors.state(color)?.components.last ?? 0) }
 @c(_CGColorGetColorSpace) public func CGColorGetColorSpace(_ color: Ref?) -> Ref? { Colors.state(color)?.space }
 
-/// The components live as long as the color.
+/// The components live as long as the color, as CGFloats.
 @c(_CGColorGetComponents)
-public func CGColorGetComponents(_ color: Ref?) -> UnsafePointer<Double>? {
+public func CGColorGetComponents(_ color: Ref?) -> UnsafePointer<CGFloat>? {
     guard let state = Colors.state(color) else { return nil }
     return ComponentBuffers.buffer(for: color!, state.components)
 }
 
 enum ComponentBuffers {
     static let lock = Lock()
-    nonisolated(unsafe) static var buffers: [Ref: UnsafeMutablePointer<Double>] = [:]
+    nonisolated(unsafe) static var buffers: [Ref: UnsafeMutablePointer<CGFloat>] = [:]
 
-    static func buffer(for color: Ref, _ components: [Double]) -> UnsafePointer<Double> {
+    static func buffer(for color: Ref, _ components: [Double]) -> UnsafePointer<CGFloat> {
         lock.withLock {
             if let buffer = buffers[color] { return UnsafePointer(buffer) }
-            let buffer = UnsafeMutablePointer<Double>.allocate(capacity: components.count)
-            buffer.initialize(from: components, count: components.count)
+            let buffer = UnsafeMutablePointer<CGFloat>.allocate(capacity: components.count)
+            buffer.initialize(from: components.map { CGFloat($0) }, count: components.count)
             buffers[color] = buffer
             return UnsafePointer(buffer)
         }
@@ -577,7 +577,7 @@ enum Images {
 
 @c(_CGImageCreate)
 public func CGImageCreate(_ width: Int, _ height: Int, _ bitsPerComponent: Int, _ bitsPerPixel: Int, _ bytesPerRow: Int, _ space: Ref?,
-                          _ bitmapInfo: UInt32, _ provider: Ref?, _ decode: UnsafePointer<Double>?, _ shouldInterpolate: Bool,
+                          _ bitmapInfo: UInt32, _ provider: Ref?, _ decode: UnsafePointer<CGFloat>?, _ shouldInterpolate: Bool,
                           _ intent: Int32) -> Ref? {
     guard let provider, width > 0, height > 0 else { return nil }
     let components = ColorSpaces.state(space)?.components ?? (bitmapInfo & 0x1f == 7 ? 0 : 3)
@@ -591,18 +591,18 @@ public func CGImageCreate(_ width: Int, _ height: Int, _ bitsPerComponent: Int, 
 
 @c(_CGImageMaskCreate)
 public func CGImageMaskCreate(_ width: Int, _ height: Int, _ bitsPerComponent: Int, _ bitsPerPixel: Int, _ bytesPerRow: Int,
-                              _ provider: Ref?, _ decode: UnsafePointer<Double>?, _ shouldInterpolate: Bool) -> Ref? {
+                              _ provider: Ref?, _ decode: UnsafePointer<CGFloat>?, _ shouldInterpolate: Bool) -> Ref? {
     CGImageCreate(width, height, bitsPerComponent, bitsPerPixel, bytesPerRow, nil, 7, provider, decode, shouldInterpolate, 0)
 }
 
 @c(_CGImageCreateCopy) public func CGImageCreateCopy(_ image: Ref?) -> Ref? { ObjCRuntime.retain(image) }
 
 /// The rect is in pixels from the top-left, clipped to the image.
-@c(_CGImageCreateWithImageInRect)
+@DarwinC("_CGImageCreateWithImageInRect")
 public func CGImageCreateWithImageInRect(_ image: Ref?, _ rect: CGRect) -> Ref? {
     guard let state = Images.state(image) else { return nil }
     let r = CGRectIntegral(CGRectIntersection(CGRectStandardize(rect), CGRect(origin: CGPoint(x: 0, y: 0),
-                                                                              size: CGSize(width: Double(state.width), height: Double(state.height)))))
+                                                                              size: CGSize(width: CGFloat(state.width), height: CGFloat(state.height)))))
     guard !CGRectIsEmpty(r) else { return nil }
     let x0 = Int(r.origin.x), y0 = Int(r.origin.y), w = Int(r.size.width), h = Int(r.size.height)
     let source = state.bitmap
@@ -630,7 +630,7 @@ public func CGImageCreateWithImageInRect(_ image: Ref?, _ rect: CGRect) -> Ref? 
 @c(_CGImageGetDataProvider) public func CGImageGetDataProvider(_ image: Ref?) -> Ref? { Images.state(image)?.provider }
 @c(_CGImageGetShouldInterpolate) public func CGImageGetShouldInterpolate(_ image: Ref?) -> Bool { Images.state(image)?.shouldInterpolate ?? false }
 @c(_CGImageGetRenderingIntent) public func CGImageGetRenderingIntent(_ image: Ref?) -> Int32 { 0 }
-@c(_CGImageGetDecode) public func CGImageGetDecode(_ image: Ref?) -> UnsafePointer<Double>? { nil }
+@c(_CGImageGetDecode) public func CGImageGetDecode(_ image: Ref?) -> UnsafePointer<CGFloat>? { nil }
 @c(_CGImageIsMask) public func CGImageIsMask(_ image: Ref?) -> Bool { Images.state(image)?.format.alphaInfo == 7 }
 
 @c(_CGImageGetUTType)

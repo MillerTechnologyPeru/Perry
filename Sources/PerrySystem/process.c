@@ -4,6 +4,7 @@
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
+#include "PerryContext.h"
 
 #include <errno.h>
 #include <math.h>
@@ -101,10 +102,10 @@ static int darwin_fp_class(int linux_class) {
     }
 }
 
-int darwin_fpclassifyd(double x) DARWIN_SYMBOL(__fpclassifyd);
+DARWIN_FLOAT_ABI int darwin_fpclassifyd(double x) DARWIN_SYMBOL(__fpclassifyd);
 int darwin_fpclassifyd(double x) { return darwin_fp_class(fpclassify(x)); }
 
-int darwin_fpclassifyf(float x) DARWIN_SYMBOL(__fpclassifyf);
+DARWIN_FLOAT_ABI int darwin_fpclassifyf(float x) DARWIN_SYMBOL(__fpclassifyf);
 int darwin_fpclassifyf(float x) { return darwin_fp_class(fpclassify(x)); }
 
 // MARK: - Credentials
@@ -143,8 +144,8 @@ enum {
     DARWIN_SA_SIGINFO = 0x40,
 };
 
-// Darwin's arm64 signal frame: siginfo_t, ucontext_t and the machine
-// context it points to.
+// Darwin's signal frame: siginfo_t, ucontext_t and the machine context it
+// points to (PerryContext.h's states, for arm64 or armv7).
 // (Fields named without si_, which glibc defines as macros.)
 typedef struct {
     int signo, error, code;
@@ -158,9 +159,9 @@ typedef struct {
 } darwin_siginfo;
 
 typedef struct {
-    struct { uint64_t far; uint32_t esr, exception; } es;
-    struct { uint64_t x[29], fp, lr, sp, pc; uint32_t cpsr, pad; } ss;
-    struct { __uint128_t v[32]; uint32_t fpsr, fpcr; } __attribute__((aligned(16))) ns;
+    darwin_exception_state es;
+    darwin_thread_state ss;
+    darwin_float_state fs;
 } darwin_mcontext;
 
 typedef struct {
@@ -174,16 +175,6 @@ typedef struct {
 
 // The apps' handlers, by Linux signal number.
 static darwin_sigaction handlers[65];
-
-static struct fpsimd_context *fpsimd(ucontext_t *context) {
-    struct _aarch64_ctx *header = (struct _aarch64_ctx *)context->uc_mcontext.__reserved;
-    while (header->magic) {
-        if (header->magic == FPSIMD_MAGIC)
-            return (struct fpsimd_context *)header;
-        header = (struct _aarch64_ctx *)((char *)header + header->size);
-    }
-    return NULL;
-}
 
 // Calls the app's handler with Darwin's signal frame, made from Linux's,
 // then copies back the registers it changed: runtimes such as Mono turn
@@ -199,7 +190,6 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
         return;
     }
     ucontext_t *context = raw_context;
-    mcontext_t *machine = &context->uc_mcontext;
     darwin_siginfo darwin_info;
     memset(&darwin_info, 0, sizeof(darwin_info));
     darwin_info.signo = darwin_signal;
@@ -210,34 +200,16 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
     darwin_info.address = info->si_addr;
     darwin_mcontext darwin_machine;
     memset(&darwin_machine, 0, sizeof(darwin_machine));
-    darwin_machine.es.far = machine->fault_address;
-    memcpy(darwin_machine.ss.x, machine->regs, sizeof(darwin_machine.ss.x));
-    darwin_machine.ss.fp = machine->regs[29];
-    darwin_machine.ss.lr = machine->regs[30];
-    darwin_machine.ss.sp = machine->sp;
-    darwin_machine.ss.pc = machine->pc;
-    darwin_machine.ss.cpsr = (uint32_t)machine->pstate;
-    struct fpsimd_context *neon = fpsimd(context);
-    if (neon) {
-        memcpy(darwin_machine.ns.v, neon->vregs, sizeof(darwin_machine.ns.v));
-        darwin_machine.ns.fpsr = neon->fpsr;
-        darwin_machine.ns.fpcr = neon->fpcr;
-    }
+    perry_context_get_exception(context, &darwin_machine.es);
+    perry_context_get_thread(context, &darwin_machine.ss);
+    perry_context_get_float(context, &darwin_machine.fs);
     darwin_ucontext darwin_context;
     memset(&darwin_context, 0, sizeof(darwin_context));
     darwin_context.uc_mcsize = sizeof(darwin_machine);
     darwin_context.uc_mcontext = &darwin_machine;
     ((void (*)(int, darwin_siginfo *, darwin_ucontext *))action.handler)(darwin_signal, &darwin_info, &darwin_context);
-    memcpy(machine->regs, darwin_machine.ss.x, sizeof(darwin_machine.ss.x));
-    machine->regs[29] = darwin_machine.ss.fp;
-    machine->regs[30] = darwin_machine.ss.lr;
-    machine->sp = darwin_machine.ss.sp;
-    machine->pc = darwin_machine.ss.pc;
-    if (neon) {
-        memcpy(neon->vregs, darwin_machine.ns.v, sizeof(darwin_machine.ns.v));
-        neon->fpsr = darwin_machine.ns.fpsr;
-        neon->fpcr = darwin_machine.ns.fpcr;
-    }
+    perry_context_set_thread(context, &darwin_machine.ss);
+    perry_context_set_float(context, &darwin_machine.fs);
 }
 
 // An app's handler is installed behind a translation of the signal frame.
@@ -357,9 +329,9 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
     }
     perry_macos_release mac = perry_system_macos_release();
     if (strcmp(name, "hw.machine") == 0)
-        return sysctl_string(old, old_length, mac.darwin ? "arm64" : "iPhone14,7");
+        return sysctl_string(old, old_length, mac.darwin ? "arm64" : PERRY_HW_MACHINE);
     if (strcmp(name, "hw.model") == 0)
-        return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : "D27AP");
+        return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : PERRY_HW_MODEL);
     if (strcmp(name, "kern.ostype") == 0)
         return sysctl_string(old, old_length, "Darwin");
     if (strcmp(name, "kern.osrelease") == 0) {
@@ -396,11 +368,11 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         return sysctl_value(old, old_length, &bytes, sizeof(bytes));
     }
     if (strcmp(name, "hw.pagesize") == 0) {
-        int64_t size = 16384;
+        int64_t size = PERRY_PAGE_SIZE;
         return sysctl_value(old, old_length, &size, sizeof(size));
     }
     if (strcmp(name, "hw.cpufrequency") == 0 || strcmp(name, "hw.cpufrequency_max") == 0) {
-        uint64_t hertz = 3230000000u;
+        uint64_t hertz = PERRY_CPU_FREQUENCY;
         return sysctl_value(old, old_length, &hertz, sizeof(hertz));
     }
     errno = ENOENT;

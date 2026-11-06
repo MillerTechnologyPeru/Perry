@@ -89,7 +89,7 @@ open class CAShapeLayer: CALayer {
         // CGLineCap: butt 0, round 1, square 2; CGLineJoin: miter 0, round 1, bevel 2.
         CG.setLineCap(context, shape.lineCap == "round" ? 1 : shape.lineCap == "square" ? 2 : 0)
         CG.setLineJoin(context, shape.lineJoin == "round" ? 1 : shape.lineJoin == "bevel" ? 2 : 0)
-        let dashes = shape.lineDashPattern?.as(NSArray.self)?.elements.map { $0.sendDoubleValue() } ?? []
+        let dashes = shape.lineDashPattern?.as(NSArray.self)?.elements.map { CGFloat($0.sendDoubleValue()) } ?? []
         if !dashes.isEmpty { dashes.withUnsafeBufferPointer { CG.setLineDash(context, shape.lineDashPhase, $0.baseAddress, $0.count) } }
         CG.addPath(context, trimmed ?? path)
         CG.strokePath(context)
@@ -105,7 +105,8 @@ enum PathTrimming {
     private static let collect: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void = { _, element in
         guard let element else { return }
         let type = element.load(as: Int32.self)
-        let points = element.load(fromByteOffset: 8, as: UnsafePointer<CGPoint>.self)
+        // CGPathElement: a 32-bit type, then the points at a pointer's offset.
+        let points = element.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafePointer<CGPoint>.self)
         let current = PathTrimming.polylines.last?.last ?? .zero
         func sample(_ count: Int, _ point: (CGFloat) -> CGPoint) {
             for step in 1...count { PathTrimming.polylines[PathTrimming.polylines.count - 1].append(point(CGFloat(step) / CGFloat(count))) }

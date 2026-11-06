@@ -306,10 +306,17 @@ enum AutoLayout {
             let view = item.view
             var size = view.sendIntrinsicContentSize()
             if let label = view.as(UILabel.self), label.label.numberOfLines != 1 {
-                // Measured again once the width is known.
-                size = label.sizeThatFits(CGSize(width: max(view.state.bounds.width, 1), height: 0))
-                if label.label.preferredMaxLayoutWidth > 0 || view.state.bounds.width <= 1 { size = label.sizeThatFits(.zero) }
-                labels.append((item, size.height))
+                // As wide as its text unwrapped (or its preferred width), as
+                // tall as the text wraps to at the width it has, measured
+                // again once that is known: a width it was squeezed to once
+                // never becomes the width it wants.
+                let natural = label.sizeThatFits(.zero)
+                var height = natural.height
+                if label.label.preferredMaxLayoutWidth <= 0, view.state.bounds.width > 1 {
+                    height = label.sizeThatFits(CGSize(width: view.state.bounds.width, height: 0)).height
+                }
+                size = CGSize(width: natural.width, height: height)
+                labels.append((item, height))
             }
             let hugging = view.state.contentHuggingPriority, compression = view.state.compressionResistancePriority
             if size.width >= 0 {

@@ -4,9 +4,10 @@
 // libPerryAudioToolbox: the provider for AudioToolbox.framework.
 //
 // - System sounds: created and disposed of; playing one finishes at once.
-// - Audio files: CAF, WAV and AIFF are read as they are, their packets in
-//   the file's own format; other files GStreamer can decode (MP3, AAC, M4A,
-//   Ogg) are decoded when opened and read as 16-bit PCM.
+// - Audio files: CAF, WAV, AIFF and AAC in MPEG-4 (M4A) are read as they
+//   are, their packets in the file's own format; other files GStreamer can
+//   decode (MP3, Ogg, Apple Lossless) are decoded when opened and read as
+//   16-bit PCM.
 // - Audio converters: linear PCM to linear PCM, with any sample rate and
 //   channel count, and Apple's IMA4 to linear PCM.
 // - Audio queues: output queues, played through GStreamer, which decodes
@@ -177,6 +178,10 @@ struct perry_gst {
 };
 
 /// GStreamer, initialized; NULL when it isn't installed.
+/// Turns an open audio file (an AudioFileID) of compressed audio into its
+/// decoded PCM.
+OSStatus perry_audio_file_decode(void *file);
+
 const perry_gst *perry_gst_get(void);
 
 #define PERRY_GST_STATE_NULL 1

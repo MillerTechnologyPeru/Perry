@@ -29,15 +29,15 @@ struct CFCallbacks {
 
     init(_ pointer: UnsafeRawPointer?, hashed: Bool) {
         guard let pointer else { return }
-        retain = pointer.load(fromByteOffset: 8, as: Retain?.self)
-        release = pointer.load(fromByteOffset: 16, as: Release?.self)
-        equal = pointer.load(fromByteOffset: 32, as: Equal?.self)
-        if hashed { hash = pointer.load(fromByteOffset: 40, as: Hash?.self) }
+        retain = pointer.load(fromByteOffset: DarwinLayout.callbackRetain, as: Retain?.self)
+        release = pointer.load(fromByteOffset: DarwinLayout.callbackRelease, as: Release?.self)
+        equal = pointer.load(fromByteOffset: DarwinLayout.callbackEqual, as: Equal?.self)
+        if hashed { hash = pointer.load(fromByteOffset: DarwinLayout.callbackHash, as: Hash?.self) }
     }
 
     /// CoreFoundation's own callbacks, for objects: the bridged classes.
     static func isStandard(_ pointer: UnsafeRawPointer?) -> Bool {
-        guard let pointer, let retain = pointer.load(fromByteOffset: 8, as: UnsafeRawPointer?.self) else { return false }
+        guard let pointer, let retain = pointer.load(fromByteOffset: DarwinLayout.callbackRetain, as: UnsafeRawPointer?.self) else { return false }
         return retain == unsafeBitCast(perry_foundation_cf_retain as Retain, to: UnsafeRawPointer.self)
             || retain == unsafeBitCast(perry_foundation_cf_copy_string as Retain, to: UnsafeRawPointer.self)
     }

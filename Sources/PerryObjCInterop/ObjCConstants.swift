@@ -15,10 +15,13 @@ public enum ObjCConstantValue {
     case object(() -> UnsafeMutableRawPointer?)
     /// Numbers, in the slot's bits: NSURLSessionTransferSizeUnknown is an
     /// int64_t, UIFontWeightBold a CGFloat, NSURLSessionTaskPriorityHigh a
-    /// float in the slot's low four bytes.
+    /// float in the slot's low four bytes. An integer's low bytes are also
+    /// a 32-bit NSInteger's.
     case integer(Int64)
     case double(Double)
     case float(Float)
+    /// A CGFloat: a double on 64-bit Darwin, a float on 32-bit.
+    case cgFloat(Double)
 }
 
 /// A type whose constants @ObjCConstants collects.
@@ -48,13 +51,16 @@ public final class ObjCConstantExports: @unchecked Sendable {
     }
 
     /// The slot for a constant, by its C name ("NSCocoaErrorDomain"), or nil
-    /// if no table defines it. Slots never move.
+    /// if no table defines it. Slots never move. They are 8 bytes, a
+    /// pointer's or a number's, so on 32-bit Darwin too they hold an int64_t
+    /// or a double.
     public func slot(_ name: String) -> UnsafeMutablePointer<UnsafeMutableRawPointer?>? {
         lock.withLock {
             guard values[name] != nil else { return nil }
             if let slot = slots[name] { return slot }
-            let slot = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: 1)
-            slot.initialize(to: nil)
+            let words = 8 / MemoryLayout<UInt>.size
+            let slot = UnsafeMutablePointer<UnsafeMutableRawPointer?>.allocate(capacity: words)
+            slot.initialize(repeating: nil, count: words)
             slots[name] = slot
             return slot
         }
@@ -74,9 +80,13 @@ public final class ObjCConstantExports: @unchecked Sendable {
             switch value {
             case .string(let text): slot(name)?.pointee = text.objCOwnedReturnValue()
             case .object(let make): slot(name)?.pointee = make()
-            case .integer(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: Int(number))
-            case .double(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: UInt(number.bitPattern))
-            case .float(let number): slot(name)?.pointee = UnsafeMutableRawPointer(bitPattern: UInt(number.bitPattern))
+            case .integer(let number): slot(name).map { UnsafeMutableRawPointer($0).storeBytes(of: number, as: Int64.self) }
+            case .double(let number): slot(name).map { UnsafeMutableRawPointer($0).storeBytes(of: number, as: Double.self) }
+            case .float(let number): slot(name).map { UnsafeMutableRawPointer($0).storeBytes(of: number, as: Float.self) }
+            case .cgFloat(let number):
+                guard let slot = slot(name).map(UnsafeMutableRawPointer.init) else { break }
+                if MemoryLayout<UInt>.size == 8 { slot.storeBytes(of: number, as: Double.self) }
+                else { slot.storeBytes(of: Float(number), as: Float.self) }
             case .alias: break
             }
         }

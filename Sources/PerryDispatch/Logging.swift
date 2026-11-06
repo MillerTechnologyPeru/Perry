@@ -70,10 +70,10 @@ enum Logging {
         let cls = OSLog.objCClass.pointer
         Objects.setUpStatic(perry_log_default(), cls, linux: nil)
         perry_log_default().storeBytes(of: Unmanaged.passRetained(LogState(subsystem: nil, category: nil)).toOpaque(),
-                                       toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+                                       toByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer.self)
         Objects.setUpStatic(perry_log_disabled(), cls, linux: nil)
         perry_log_disabled().storeBytes(of: Unmanaged.passRetained(LogState(subsystem: nil, category: nil, disabled: true)).toOpaque(),
-                                        toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+                                        toByteOffset: DarwinLayout.objectState, as: UnsafeMutableRawPointer.self)
         let activity = OSActivity.objCClass.pointer
         Objects.setUpStatic(perry_activity_current(), activity, linux: nil)
         Objects.setUpStatic(perry_activity_none(), activity, linux: nil)
@@ -410,8 +410,8 @@ public func os_signpost_enabled(_ log: Object?) -> Bool { !(Logging.state(log)?.
 
 /// Signposts mark intervals for Instruments, which Linux lacks.
 @c(__os_signpost_emit_with_name_impl)
-public func _os_signpost_emit_with_name_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type: UInt8, _ identifier: UInt64,
-                                             _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
+public func _os_signpost_emit_with_name_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type: UInt8,
+                                             _ identifier: UInt64.ObjCType, _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
                                              _ buffer: UnsafePointer<UInt8>?, _ size: UInt32) {}
 
 // MARK: - Activities

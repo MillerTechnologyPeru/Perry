@@ -20,12 +20,21 @@ enum Process {
         if let path = info.executable_path { executablePath = String(cString: path) }
         bundlePath = info.bundle_path.map { String(cString: $0) }
         if let header = info.main_header, let version = buildSDK(header) { sdkVersion = version }
+        // PERRY_OS_VERSION ("13.7") is the iOS version to be, in place of
+        // the one the app was built for.
+        if let setting = getenv("PERRY_OS_VERSION") {
+            let parts = String(cString: setting).split(separator: ".").compactMap { Int($0) }
+            if let major = parts.first {
+                sdkVersion = NSOperatingSystemVersion(majorVersion: major, minorVersion: parts.count > 1 ? parts[1] : 0,
+                                                      patchVersion: parts.count > 2 ? parts[2] : 0)
+            }
+        }
     }
 
     /// LC_BUILD_VERSION's sdk field: xxxx.yy.zz in nibbles.
     private static func buildSDK(_ header: UnsafeRawPointer) -> NSOperatingSystemVersion? {
         let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
-        var command = header + 32
+        var command = header + DarwinLayout.machHeaderSize(header)
         for _ in 0..<count {
             let cmd = command.load(as: UInt32.self)
             if cmd == 0x32 {                        // LC_BUILD_VERSION

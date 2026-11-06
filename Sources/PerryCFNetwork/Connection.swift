@@ -267,7 +267,8 @@ enum Thread {
         let work = Unmanaged.passRetained(Work(body)).toOpaque()
         let result = pthread_create(&handle, nil, { context in
             guard let context else { return nil }
-            Unmanaged<Work>.fromOpaque(context).takeRetainedValue().body()
+            let work = Unmanaged<Work>.fromOpaque(context).takeRetainedValue()
+            keepingLinuxRegisters { work.body() }
             return nil
         }, work)
         if result == 0 { pthread_detach(handle) } else { Unmanaged<Work>.fromOpaque(work).release() }

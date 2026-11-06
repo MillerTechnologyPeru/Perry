@@ -204,7 +204,7 @@ enum Screen {
         if isResizable { return UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
         if isLandscape { return UIEdgeInsets(top: 0, left: 47, bottom: 21, right: 47) }
         let statusBar = getenv("PERRY_UIKIT_STATUS_BAR_HEIGHT").flatMap { Double(String(cString: $0)) } ?? 0
-        return UIEdgeInsets(top: max(statusBar, 0), left: 0, bottom: 34, right: 0)
+        return UIEdgeInsets(top: CGFloat(max(statusBar, 0)), left: 0, bottom: 34, right: 0)
     }()
 }
 
@@ -302,6 +302,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         if let color = decoded.object("UIBackgroundColor")?.as(UIColor.self) { setBackgroundColor(color) }
         state.translatesAutoresizingMaskIntoConstraints = !decoded.bool("UIViewDoesNotTranslateAutoresizingMaskIntoConstraints")
         state.constraints = decoded.array("UIViewAutolayoutConstraints")
+        adoptArchivedGuides(decoded.array("UIViewLayoutGuides"))
         if let hugging = UIView.priorities(decoded.string("UIViewContentHuggingPriority")) { state.contentHuggingPriority = hugging }
         if let compression = UIView.priorities(decoded.string("UIViewContentCompressionResistancePriority")) {
             state.compressionResistancePriority = compression
@@ -693,6 +694,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     func removeFromSuperview() {
         guard let superviewObject = state.superview else { return }
         let superview = UIView.wrap(superviewObject)
+        removeConstraintsToSubtree()
         let window = windowObject
         superview.sendWillRemoveSubview(self)
         sendWillMoveToSuperview(nil)
@@ -703,6 +705,33 @@ open class UIView: UIResponder, UICoordinateSpace {
         if window != nil { UIView.didMoveToWindow(self) }
         sendDidMoveToSuperview()
         Updates.schedule()
+    }
+
+    /// Removes from the view's ancestors the constraints that refer to it,
+    /// to a view in its subtree or to a guide one of them owns, as UIKit
+    /// does when a view leaves its superview: constraints don't keep their
+    /// items, which would otherwise outlive them.
+    private func removeConstraintsToSubtree() {
+        var subtree: Set<UnsafeMutableRawPointer> = []
+        var pending = [self]
+        while let view = pending.popLast() {
+            subtree.insert(view.objcObject)
+            pending.append(contentsOf: view.state.subviews)
+        }
+        func refers(_ item: UnsafeMutableRawPointer?) -> Bool {
+            guard let item else { return false }
+            return subtree.contains(item) || (LayoutItems.resolve(item).map { subtree.contains($0.view.objcObject) } ?? false)
+        }
+        var ancestor = state.superview.map(UIView.wrap)
+        while let view = ancestor {
+            view.state.constraints.removeAll { constraint in
+                guard let constraintState = constraint.as(NSLayoutConstraint.self)?.state,
+                      refers(constraintState.firstItem) || refers(constraintState.secondItem) else { return false }
+                constraintState.active = false
+                return true
+            }
+            ancestor = view.state.superview.map(UIView.wrap)
+        }
     }
 
     /// Adds or moves `view` here, with UIKit's callbacks: the superview

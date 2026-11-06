@@ -370,6 +370,11 @@ public final class NSRunLoop: NSObject {
         return true
     }
 
+    /// One pass for input, until `date`: as a run in the mode, which is
+    /// the one mode run loops have here.
+    @ObjCMethod("acceptInputForMode:beforeDate:")
+    func acceptInput(forMode mode: ObjCObject?, before date: NSDate) { _ = run(mode: mode, before: date) }
+
     /// No messages arrive on ports, but one keeps the loop running.
     @ObjCMethod("addPort:forMode:") func add(port: ObjCObject?, forMode mode: ObjCObject?) { state?.ports += 1 }
     @ObjCMethod("removePort:forMode:")
@@ -399,11 +404,11 @@ public func CFRunLoopRun() {
 }
 
 @c(_CFRunLoopRunInMode)
-public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double,
+public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double.ObjCType,
                                _ returnAfterSourceHandled: Bool) -> Int32 {
     // A loop with an input source waits for it, as on Darwin.
     let state = RunLoops.current
-    return state.run(until: absoluteTimeNow() + seconds, returnAfterSourceHandled: returnAfterSourceHandled,
+    return state.run(until: absoluteTimeNow() + Double(objCArgument: seconds), returnAfterSourceHandled: returnAfterSourceHandled,
                      waitWhenEmpty: state.ports > 0 ? true : nil).rawValue
 }
 
@@ -619,11 +624,11 @@ public func CFRunLoopObserverCreate(_ allocator: UnsafeMutableRawPointer?, _ act
                                     _ callout: (@convention(c) (UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> Void)?,
                                     _ context: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
     typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
-    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+    var info = context?.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
         info = UnsafeMutableRawPointer(mutating: retain(info))
     }
-    let release = context?.load(fromByteOffset: 24, as: RunLoopObserverStorage.Release?.self)
+    let release = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: RunLoopObserverStorage.Release?.self)
     return RunLoopObservers.make(RunLoopObserverStorage(activities: activities, repeats: repeats, order: order, block: nil,
                                                         callout: callout, info: info, release: release))
 }

@@ -696,11 +696,11 @@ public func class_addProperty(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ at
         return String(cString: key) + (attribute.value.map { String(cString: $0) } ?? "")
     }.joined(separator: ",")
     // A property list of one entry: entsize and count, then name and attributes.
-    let list = malloc(8 + 16)!
-    list.storeBytes(of: UInt32(16), as: UInt32.self)
+    let list = malloc(8 + Layout.pair)!
+    list.storeBytes(of: UInt32(Layout.pair), as: UInt32.self)
     list.storeBytes(of: UInt32(1), toByteOffset: 4, as: UInt32.self)
     list.storeBytes(of: UnsafePointer(strdup(name)), toByteOffset: 8, as: UnsafePointer<CChar>?.self)
-    list.storeBytes(of: UnsafePointer(strdup(text)), toByteOffset: 16, as: UnsafePointer<CChar>?.self)
+    list.storeBytes(of: UnsafePointer(strdup(text)), toByteOffset: 8 + Layout.word, as: UnsafePointer<CChar>?.self)
     Properties.add(UnsafeRawPointer(list), to: info)
     return true
 }
@@ -709,7 +709,7 @@ public func class_addProperty(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ at
 
 /// The class's own ivar_t entries, from its class_ro_t.
 private func ivars(of cls: Class) -> [UnsafeMutablePointer<perry_ivar>] {
-    guard let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7), let list = ro.pointee.ivars else { return [] }
+    guard let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & Layout.classBitsMask), let list = ro.pointee.ivars else { return [] }
     var result: [UnsafeMutablePointer<perry_ivar>] = []
     IvarList.forEach(list) { result.append($0) }
     return result
@@ -947,33 +947,44 @@ public func objc_setUncaughtExceptionHandler(_ handler: (@convention(c) (UnsafeM
     return previous
 }
 
-/// Throws an exception. Perry cannot unwind Mach-O frames to a @catch, so
-/// every exception is uncaught: the handler reports it, and the process
+/// An exception no @catch handles: the handler reports it, and the process
 /// ends as Darwin's does after an uncaught exception.
-@c(_objc_exception_throw)
-public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
+@c
+public func perry_objc_uncaught_exception(_ exception: UnsafeMutableRawPointer?) -> Never {
     if let handler = uncaughtExceptionHandler { handler(exception) }
     objcFatal("terminating with uncaught exception of type NSException")
+}
+
+#if !arch(arm)
+/// Throws an exception. Perry cannot unwind arm64 Mach-O frames to a
+/// @catch, so every exception is uncaught. On armv7, exceptions_arm.c
+/// throws and catches them.
+@c(_objc_exception_throw)
+public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
+    perry_objc_uncaught_exception(exception)
 }
 
 @c(_objc_exception_rethrow)
 public func objc_exception_rethrow() -> Never {
     objcFatal("an exception was rethrown, which Perry cannot unwind")
 }
+#endif
 
 @c(_objc_terminate)
 public func objc_terminate() -> Never {
     objcFatal("terminating")
 }
 
+#if !arch(arm)
 /// The personality routine Objective-C code's unwind tables name. Code
 /// that only cleans up (ARC, @autoreleasepool) refers to it without
-/// throwing; Perry cannot unwind Mach-O frames, so reaching it stops.
+/// throwing; Perry cannot unwind arm64 Mach-O frames, so reaching it stops.
 @c(___objc_personality_v0)
 public func objc_personality_v0(_ version: Int32, _ actions: Int32, _ exceptionClass: UInt64, _ exception: UnsafeMutableRawPointer?,
                                 _ context: UnsafeMutableRawPointer?) -> Int32 {
     objcFatal("an exception is unwinding through Objective-C code, which Perry cannot do")
 }
+#endif
 
 // MARK: - Protocol introspection
 
@@ -1009,10 +1020,10 @@ public func protocol_copyMethodDescriptionList(_ proto: ProtocolPointer?, _ requ
     let methods = proto.map { Protocols.methods($0, required: required, instance: instance) } ?? []
     count?.pointee = UInt32(methods.count)
     guard !methods.isEmpty else { return nil }
-    let buffer = calloc(methods.count + 1, 16)!
+    let buffer = calloc(methods.count + 1, Layout.pair)!
     for (index, method) in methods.enumerated() {
-        buffer.storeBytes(of: method.0, toByteOffset: index * 16, as: SEL.self)
-        buffer.storeBytes(of: method.1, toByteOffset: index * 16 + 8, as: UnsafePointer<CChar>?.self)
+        buffer.storeBytes(of: method.0, toByteOffset: index * Layout.pair, as: SEL.self)
+        buffer.storeBytes(of: method.1, toByteOffset: index * Layout.pair + Layout.word, as: UnsafePointer<CChar>?.self)
     }
     return buffer
 }
@@ -1036,8 +1047,10 @@ public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: Unsafe
 
 // MARK: - Catching
 
+#if !arch(arm)
 /// Entering and leaving a @catch. Exceptions are never unwound to one (see
-/// objc_exception_throw), so these are bound but not reached.
+/// objc_exception_throw), so these are bound but not reached. armv7 unwinds
+/// to them, and has its own (exceptions_arm.c).
 @c(_objc_begin_catch)
 public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     objcFatal("an exception reached a @catch, which Perry cannot unwind to")
@@ -1045,3 +1058,4 @@ public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMut
 
 @c(_objc_end_catch)
 public func objc_end_catch() {}
+#endif

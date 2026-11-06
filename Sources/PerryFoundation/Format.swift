@@ -1,8 +1,10 @@
 import Glibc
 import PerryObjCInterop
 
-/// Variadic arguments in Apple's arm64 convention: consecutive 8-byte stack
-/// slots, the Darwin va_list. Integers, pointers and doubles take one slot.
+/// Variadic arguments as Darwin lays them out, the memory a Darwin va_list
+/// points to. On arm64 each takes an 8-byte stack slot. On armv7 they are
+/// contiguous words, with 64-bit integers and doubles in two words at any
+/// 4-byte boundary.
 struct DarwinArguments {
     private var cursor: UnsafeRawPointer
     /// The first argument's slot, from which positional arguments (%2$@)
@@ -21,8 +23,16 @@ struct DarwinArguments {
         return arguments
     }
 
+    /// A word: an int or smaller integer (promoted), a long, a pointer.
     mutating func next() -> UInt64 {
-        let value = cursor.load(as: UInt64.self)
+        let value = UInt64(cursor.loadUnaligned(as: UInt.self))
+        cursor += MemoryLayout<UInt>.size
+        return value
+    }
+
+    /// A long long or a double (a float, promoted).
+    mutating func next64() -> UInt64 {
+        let value = cursor.loadUnaligned(as: UInt64.self)
         cursor += 8
         return value
     }
@@ -104,7 +114,10 @@ enum Format {
             let conversion = Character(UnicodeScalar(bytes[index]))
             index += 1
 
-            let wide = ["l", "ll", "q", "z", "j", "t"].contains(length)
+            // 64-bit integers, and word-sized ones (long, size_t, ptrdiff_t),
+            // which are 64-bit too on arm64.
+            let wordSized = ["l", "z", "t"].contains(length)
+            let wide = ["ll", "q", "j"].contains(length) || (wordSized && MemoryLayout<Int>.size == 8)
             let cLength = length == "q" ? "ll" : (length == "L" ? "" : length)
             let raw: UInt64
             switch conversion {
@@ -113,13 +126,15 @@ enum Format {
             case "@":
                 output += describe(arguments.nextPointer())
             case "d", "i":
-                raw = arguments.next()
+                raw = wide ? arguments.next64() : arguments.next()
                 output += wide ? c(spec + cLength + String(conversion), Int64(bitPattern: raw))
-                               : c(spec + String(conversion), Int32(truncatingIfNeeded: raw))
+                    : wordSized ? c(spec + cLength + String(conversion), Int(truncatingIfNeeded: raw))
+                    : c(spec + String(conversion), Int32(truncatingIfNeeded: raw))
             case "u", "o", "x", "X":
-                raw = arguments.next()
+                raw = wide ? arguments.next64() : arguments.next()
                 output += wide ? c(spec + cLength + String(conversion), raw)
-                               : c(spec + String(conversion), UInt32(truncatingIfNeeded: raw))
+                    : wordSized ? c(spec + cLength + String(conversion), UInt(truncatingIfNeeded: raw))
+                    : c(spec + String(conversion), UInt32(truncatingIfNeeded: raw))
             case "c":
                 output += c(spec + "c", Int32(truncatingIfNeeded: arguments.next()), encoding: .macOSRoman)
             case "C":
@@ -150,7 +165,7 @@ enum Format {
                     output += "0x0"
                 }
             case "f", "F", "e", "E", "g", "G", "a", "A":
-                output += c(spec + String(conversion), Double(bitPattern: arguments.next()))
+                output += c(spec + String(conversion), Double(bitPattern: arguments.next64()))
             default:
                 // Unknown conversion: keep it as written.
                 output += spec + length + String(conversion)

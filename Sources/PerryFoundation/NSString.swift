@@ -38,9 +38,9 @@ enum Strings {
     /// String literals: { isa, flags, characters, length }. Flag 0x10 marks
     /// UTF-16 characters; otherwise they are NUL-terminated ASCII.
     private static func constantValue(_ object: id) -> String {
-        let flags = object.load(fromByteOffset: 8, as: UInt64.self)
-        let characters = object.load(fromByteOffset: 16, as: UnsafeRawPointer?.self)
-        let length = object.load(fromByteOffset: 24, as: Int.self)
+        let flags = object.load(fromByteOffset: DarwinLayout.stringFlags, as: UInt.self)
+        let characters = object.load(fromByteOffset: DarwinLayout.stringCharacters, as: UnsafeRawPointer?.self)
+        let length = object.load(fromByteOffset: DarwinLayout.stringLength, as: Int.self)
         guard let characters, length > 0 else { return "" }
         if flags & 0x10 != 0 {
             return String(decoding: UnsafeBufferPointer(start: characters.assumingMemoryBound(to: UInt16.self), count: length),
@@ -92,9 +92,9 @@ enum Strings {
 
     static func utf8(_ object: id) -> UnsafePointer<CChar>? {
         if ObjC.objectGetClass(object) == constantClass {
-            let flags = object.load(fromByteOffset: 8, as: UInt64.self)
+            let flags = object.load(fromByteOffset: DarwinLayout.stringFlags, as: UInt.self)
             if flags & 0x10 == 0 {
-                return object.load(fromByteOffset: 16, as: UnsafePointer<CChar>?.self)
+                return object.load(fromByteOffset: DarwinLayout.stringCharacters, as: UnsafePointer<CChar>?.self)
             }
             let key = UInt(bitPattern: object)
             return literalUTF8.withLock { literals in
@@ -127,11 +127,18 @@ enum Strings {
         return ObjC.autorelease(object)!
     }
 
-    /// FNV-1a over UTF-16, so equal strings hash equally in every process.
+    /// FNV-1a over UTF-16, so equal strings hash equally in every process:
+    /// the 64-bit or the 32-bit variant, as wide as NSUInteger.
     static func hash(_ value: String) -> UInt {
+        #if _pointerBitWidth(_64)
         var hash: UInt = 0xcbf2_9ce4_8422_2325
+        let prime: UInt = 0x100_0000_01b3
+        #else
+        var hash: UInt = 0x811c_9dc5
+        let prime: UInt = 0x0100_0193
+        #endif
         for unit in value.utf16 {
-            hash = (hash ^ UInt(unit)) &* 0x100_0000_01b3
+            hash = (hash ^ UInt(unit)) &* prime
         }
         return hash
     }

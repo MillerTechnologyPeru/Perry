@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -27,6 +28,7 @@ __attribute__((constructor)) static void init_streams(void) {
 
 // MARK: - Darwin va_list
 
+#if defined(__aarch64__)
 // A Darwin arm64 va_list is a pointer to 8-byte stack slots. An AAPCS64
 // va_list with empty register save areas reads the same slots.
 typedef struct aapcs64_va_list {
@@ -45,24 +47,51 @@ _Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list l
         aapcs64_va_list tmp_ = { (darwin_ap), NULL, NULL, 0, 0 }; \
         memcpy(&name, &tmp_, sizeof(name)); \
     } while (0)
+#else
+// A Darwin armv7 va_list is a pointer to the 4-byte slots after the fixed
+// arguments, and glibc armhf's is a struct holding such a pointer. Slots read
+// the same for integers, pointers and strings.
+_Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
+
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name; \
+    do { \
+        void *tmp_ = (darwin_ap); \
+        memcpy(&name, &tmp_, sizeof(name)); \
+    } while (0)
+
+// For a format's arguments: copied to where glibc reads 64-bit values.
+#define DARWIN_VA_FORMAT(name, format, darwin_ap) \
+    size_t size_##name = perry_repack_arguments((format), (darwin_ap), NULL); \
+    uintptr_t raw_##name = (uintptr_t)__builtin_alloca(size_##name + 8); \
+    void *repacked_##name = (void *)((raw_##name + 7) & ~(uintptr_t)7); \
+    perry_repack_arguments((format), (darwin_ap), repacked_##name); \
+    va_list name; \
+    memcpy(&name, &repacked_##name, sizeof(name))
+#endif
+
+#if defined(__aarch64__)
+// Arguments need no repacking on arm64.
+#define DARWIN_VA_FORMAT(name, format, darwin_ap) DARWIN_VA(name, darwin_ap)
+#endif
 
 typedef void *darwin_va_list;
 
 int darwin_vprintf(const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vprintf);
 int darwin_vprintf(const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vprintf(fmt, va);
 }
 
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfprintf);
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vfprintf(f, fmt, va);
 }
 
 int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vdprintf);
 int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vdprintf(fd, fmt, va);
 }
 
@@ -114,13 +143,13 @@ int perry_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const c
 
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsprintf);
 int darwin_vsprintf(char *buf, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return perry_vsprintf(buf, fmt, va);
 }
 
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsnprintf);
 int darwin_vsnprintf(char *buf, size_t size, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return perry_vsnprintf(buf, size, fmt, va);
 }
 
@@ -132,7 +161,7 @@ int darwin_vswprintf(wchar_t *buf, size_t size, const wchar_t *fmt, darwin_va_li
 
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vasprintf);
 int darwin_vasprintf(char **out, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return vasprintf(out, fmt, va);
 }
 
@@ -156,20 +185,20 @@ int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) {
 
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsyslog);
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     vsyslog(priority, fmt, va);
 }
 
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(__vsprintf_chk);
 int darwin_vsprintf_chk(char *buf, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return perry_vsprintf_chk(buf, flag, slen, fmt, va);
 }
 
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap)
     DARWIN_SYMBOL(__vsnprintf_chk);
 int darwin_vsnprintf_chk(char *buf, size_t maxlen, int flag, size_t slen, const char *fmt, darwin_va_list ap) {
-    DARWIN_VA(va, ap);
+    DARWIN_VA_FORMAT(va, fmt, ap);
     return perry_vsnprintf_chk(buf, maxlen, flag, slen, fmt, va);
 }
 
@@ -218,9 +247,37 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
+#if defined(__arm__)
+// The same, and asl_log's, for armv7's variadic thunks, which pass a Darwin
+// va_list that the format's arguments are repacked from.
+int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
+    (void)locale;
+    return darwin_vsnprintf(buf, size, fmt, ap);
+}
+
+int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt, darwin_va_list ap) {
+    (void)client; (void)message; (void)level;
+    DARWIN_VA_FORMAT(va, fmt, ap);
+    vfprintf(stderr, fmt, va);
+    fputc('\n', stderr);
+    return 0;
+}
+#endif
+
 // putc's slow path, which Darwin's putc macro calls when the buffer fills.
 int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
 int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
+
+// Closing no stream: Darwin's fclose fails with EFAULT, where glibc's reads
+// the stream it wasn't given. Destructors of file classes rely on it.
+int darwin_fclose(FILE *f) DARWIN_SYMBOL(fclose);
+int darwin_fclose(FILE *f) {
+    if (f == NULL) {
+        errno = EFAULT;
+        return EOF;
+    }
+    return fclose(f);
+}
 
 // A stream's position: Darwin's fpos_t is an offset, glibc's a structure.
 int darwin_fgetpos(FILE *f, int64_t *position) DARWIN_SYMBOL(fgetpos);

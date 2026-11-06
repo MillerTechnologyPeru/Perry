@@ -1,19 +1,24 @@
 #ifndef CPERRY_GEOMETRY_H
 #define CPERRY_GEOMETRY_H
 
-// CoreGraphics' geometry types, laid out as on 64-bit Darwin. Declared in C
-// so Swift passes them as clang does: a CGRect is four doubles in d0-d3.
-// CGFloat is double on 64-bit Darwin; it is spelled out because Swift's C
-// importer treats a typedef named CGFloat specially and drops it on Linux.
+// CoreGraphics' geometry types, laid out as on Darwin. Declared in C so Swift
+// passes them as clang does: a CGRect is four doubles in d0-d3. CGFloat is
+// double on 64-bit Darwin and float on 32-bit; it is a macro because Swift's
+// C importer treats a typedef named CGFloat specially and drops it on Linux.
+#if defined(__LP64__)
+#define PERRY_CGFLOAT double
+#else
+#define PERRY_CGFLOAT float
+#endif
 
 typedef struct CGPoint {
-    double x;
-    double y;
+    PERRY_CGFLOAT x;
+    PERRY_CGFLOAT y;
 } CGPoint;
 
 typedef struct CGSize {
-    double width;
-    double height;
+    PERRY_CGFLOAT width;
+    PERRY_CGFLOAT height;
 } CGSize;
 
 typedef struct CGRect {
@@ -22,20 +27,20 @@ typedef struct CGRect {
 } CGRect;
 
 typedef struct CGAffineTransform {
-    double a, b, c, d;
-    double tx, ty;
+    PERRY_CGFLOAT a, b, c, d;
+    PERRY_CGFLOAT tx, ty;
 } CGAffineTransform;
 
 typedef struct UIEdgeInsets {
-    double top, left, bottom, right;
+    PERRY_CGFLOAT top, left, bottom, right;
 } UIEdgeInsets;
 
 // Core Animation's 4x4 transform, row by row, as CATransform3D is.
 typedef struct CATransform3D {
-    double m11, m12, m13, m14;
-    double m21, m22, m23, m24;
-    double m31, m32, m33, m34;
-    double m41, m42, m43, m44;
+    PERRY_CGFLOAT m11, m12, m13, m14;
+    PERRY_CGFLOAT m21, m22, m23, m24;
+    PERRY_CGFLOAT m31, m32, m33, m34;
+    PERRY_CGFLOAT m41, m42, m43, m44;
 } CATransform3D;
 
 // A display link's frame rates: lowest, highest, and preferred; zero for
@@ -98,5 +103,10 @@ typedef struct PerryCFRange {
     long location;
     long length;
 } PerryCFRange;
+
+// The function Darwin code calls for the host's OpenGL ES function `name`
+// ("glClearColor"): on armv7 a thunk for those with floating-point
+// parameters, which Darwin passes in core registers; otherwise `host`.
+void *perry_gles_darwin_function(const char *name, void *host);
 
 #endif

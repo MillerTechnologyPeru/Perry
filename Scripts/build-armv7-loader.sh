@@ -1,0 +1,32 @@
+#!/bin/sh
+# Builds perry32, the loader as a 32-bit ARM program, with the LLVM and Swift
+# armv7 SDK under .toolchains, into .build/armv7/bin. It runs armv7 iOS
+# binaries on a kernel that runs 32-bit ARM programs.
+set -eu
+root=$(cd "$(dirname "$0")/.." && pwd)
+llvm=$(ls -d "$root"/.toolchains/LLVM-*/bin | head -1)
+sdk=${PERRY_ARMV7_SDK:-$(ls -d "$root"/.toolchains/swift-*-armv7-sdk/*/debian-* | head -1)}
+out=$root/.build/armv7
+mkdir -p "$out/bin" "$out/obj"
+
+# r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
+# register, which Linux's preserves across calls, so Perry's code never keeps
+# a value in it across a call into Darwin code.
+cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -ffixed-r9
+  -I$root/Sources/PerryLoaderCore/include -I$root/Sources/PerryInterface/include"
+
+objects=""
+for source in "$root"/Sources/PerryLoaderCore/*.c "$root"/Sources/PerryLoaderCore/*.S "$root"/Sources/PerryInterface/interface.c "$root"/Sources/PerryLoader/main.c; do
+    object=$out/obj/loader-$(basename "$source").o
+    # shellcheck disable=SC2086
+    "$llvm/clang" $cflags -c "$source" -o "$object"
+    objects="$objects $object"
+done
+# Apps from before iOS 4.3 are not position independent: they load at 0x1000
+# and run for as much as hundreds of megabytes from there, where the kernel
+# would put a position-independent perry32 and its heap. So perry32 is linked
+# at a fixed address far above them.
+# shellcheck disable=SC2086
+"$llvm/clang" --target=armv7-linux-gnueabihf --sysroot="$sdk" -fuse-ld=lld -no-pie -Wl,--image-base=0x70000000 \
+    $objects -o "$out/bin/perry32" -ldl -lpthread
+echo "$out/bin/perry32"

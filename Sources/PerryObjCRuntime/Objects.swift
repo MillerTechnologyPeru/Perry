@@ -1,5 +1,6 @@
 import CPerryObjC
 import Glibc
+import PerryObjCInterop
 import Synchronization
 
 /// Allocation, reference counting and destruction.
@@ -525,11 +526,13 @@ public enum AutoreleasePool {
     static let key: pthread_key_t = {
         var key = pthread_key_t()
         pthread_key_create(&key) { pointer in
-            // Thread exit: drain whatever is left.
+            // Thread exit, from glibc: drain whatever is left.
             guard let pointer else { return }
             let stack = Unmanaged<Stack>.fromOpaque(pointer).takeRetainedValue()
-            while let last = stack.objects.popLast() {
-                if let object = last { Objects.release(object) }
+            keepingLinuxRegisters {
+                while let last = stack.objects.popLast() {
+                    if let object = last { Objects.release(object) }
+                }
             }
         }
         return key

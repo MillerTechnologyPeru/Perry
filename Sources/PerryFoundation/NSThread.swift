@@ -59,7 +59,7 @@ enum Threads {
     /// The NSThread object of each thread that has one.
     static let key: pthread_key_t = {
         var key = pthread_key_t()
-        pthread_key_create(&key) { object in ObjC.release(object) }
+        pthread_key_create(&key) { object in keepingLinuxRegisters { ObjC.release(object) } }
         return key
     }()
 
@@ -100,10 +100,12 @@ enum Threads {
         let result = pthread_create(&handle, &attributes, { context in
             guard let thread = context else { return nil }
             pthread_setspecific(Threads.key, thread)
-            // +exit jumps out of the body, past its frames, to here.
-            let pool = ObjC.poolPush()
-            perry_foundation_thread_run({ thread in Threads.storage(thread)?.main(thread!) }, thread)
-            ObjC.poolPop(pool)
+            keepingLinuxRegisters {
+                // +exit jumps out of the body, past its frames, to here.
+                let pool = ObjC.poolPush()
+                perry_foundation_thread_run({ thread in Threads.storage(thread)?.main(thread!) }, thread)
+                ObjC.poolPop(pool)
+            }
             if let storage = Threads.storage(thread) {
                 storage.isExecuting = false
                 storage.isFinished = true

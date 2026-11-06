@@ -108,7 +108,7 @@ public func PerryCADisplayLayers(_ roots: UnsafePointer<UnsafeMutableRawPointer?
 public func PerryCAComposite(_ renderer: UnsafeMutableRawPointer?, _ scale: Double, _ roots: UnsafePointer<UnsafeMutableRawPointer?>?,
                              _ count: Int) -> Bool {
     guard let renderer, SDL.loadOnce() else { return false }
-    let compositor = Compositor.shared(renderer, scale: scale)
+    let compositor = Compositor.shared(renderer, scale: CGFloat(scale))
     let layers = (0..<count).compactMap { roots?[$0] }.map(CALayer.wrap)
     compositor.draw(layers)
     return true
@@ -331,7 +331,9 @@ final class Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
-        let small = 1e-9
+        // What rounding leaves of a zero: a float CGFloat's quarter turn has
+        // a cosine near 4e-8.
+        let small: CGFloat = MemoryLayout<CGFloat>.size == 4 ? 1e-5 : 1e-9
         // Scaled only, perhaps mirrored: into the layer's box on the
         // display, flipped where a scale is negative (SDL_FLIP_HORIZONTAL
         // 1, SDL_FLIP_VERTICAL 2).
@@ -357,7 +359,7 @@ final class Compositor {
         if abs(toScreen.a) < small, abs(toScreen.d) < small {
             let box = pixels(toScreen.apply(state.bounds))
             var target = SDL.FRect(x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w)
-            _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
+            _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
             return
         }
         // Any other turn is placed as it falls, not on whole pixels.
@@ -366,7 +368,7 @@ final class Compositor {
         let height = state.bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
         var target = SDL.FRect(x: Float((center.x - width / 2) * scale), y: Float((center.y - height / 2) * scale),
                                w: Float(width * scale), h: Float(height * scale))
-        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, degrees, nil, flip)
+        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
     }
 
     /// The imported buffers of layers whose GL frames are shared.

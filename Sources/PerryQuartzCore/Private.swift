@@ -37,7 +37,7 @@ public func CALayerMapGeometry(
 
 /// Whether two CAFrameRateRange values (three floats each, passed in
 /// floating point registers) are the same.
-@c(_CAFrameRateRangeIsEqualToRange)
+@DarwinC("_CAFrameRateRangeIsEqualToRange")
 public func CAFrameRateRangeIsEqualToRange(_ minimum: Float, _ maximum: Float, _ preferred: Float,
                                            _ otherMinimum: Float, _ otherMaximum: Float, _ otherPreferred: Float) -> Bool {
     minimum == otherMinimum && maximum == otherMaximum && preferred == otherPreferred

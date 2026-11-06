@@ -276,6 +276,32 @@ int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer,
     return passwd_r_to_darwin(getpwnam_r(name, &entry, buffer, size, &found), found, out, result);
 }
 
+// A locale object: glibc's, opaque to the program. Darwin's category masks
+// are bits 0 to 5 for collate, ctype, messages, monetary, numeric and time.
+locale_t darwin_newlocale(int mask, const char *name, locale_t base) DARWIN_SYMBOL(newlocale);
+locale_t darwin_newlocale(int mask, const char *name, locale_t base) {
+    static const int masks[] = { LC_COLLATE_MASK, LC_CTYPE_MASK, LC_MESSAGES_MASK, LC_MONETARY_MASK, LC_NUMERIC_MASK, LC_TIME_MASK };
+    int linux_mask = 0;
+    for (int i = 0; i < 6; i++)
+        if (mask & (1 << i))
+            linux_mask |= masks[i];
+    locale_t made = newlocale(linux_mask, name ? name : "C", base);
+    // A locale this system lacks is the C locale's, as with setlocale.
+    return made ? made : newlocale(linux_mask, "C", base);
+}
+
+void darwin_freelocale(locale_t locale) DARWIN_SYMBOL(freelocale);
+void darwin_freelocale(locale_t locale) {
+    if (locale)
+        freelocale(locale);
+}
+
+locale_t darwin_duplocale(locale_t locale) DARWIN_SYMBOL(duplocale);
+locale_t darwin_duplocale(locale_t locale) { return duplocale(locale ? locale : LC_GLOBAL_LOCALE); }
+
+locale_t darwin_uselocale(locale_t locale) DARWIN_SYMBOL(uselocale);
+locale_t darwin_uselocale(locale_t locale) { return uselocale(locale); }
+
 // MARK: - Locale conventions
 
 /// Darwin's lconv: glibc's, but with the international fields ordered
@@ -427,12 +453,12 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         case KERN_OSRELEASE: name = "kern.osrelease"; break;
         case KERN_OSVERSION: name = "kern.osversion"; break;
         case KERN_PROC: {
-            // struct kinfo_proc is 648 bytes on arm64.
+            // struct kinfo_proc is 648 bytes on arm64, 492 on armv7.
             if (!old_length)
                 return -1;
             if (old)
-                memset(old, 0, *old_length < 648 ? *old_length : 648);
-            *old_length = 648;
+                memset(old, 0, *old_length < PERRY_KINFO_PROC_SIZE ? *old_length : PERRY_KINFO_PROC_SIZE);
+            *old_length = PERRY_KINFO_PROC_SIZE;
             return 0;
         }
         }
@@ -444,7 +470,7 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         case HW_PHYSMEM: name = "hw.physmem"; break;
         case HW_MEMSIZE: name = "hw.memsize"; break;
         case HW_PAGESIZE: {
-            int32_t size = 16384;
+            int32_t size = PERRY_PAGE_SIZE;
             if (!old_length)
                 return -1;
             if (old && *old_length >= sizeof(size))

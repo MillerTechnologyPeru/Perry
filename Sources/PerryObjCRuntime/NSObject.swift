@@ -35,7 +35,12 @@ public enum RootClasses {
         let object = Runtime.makeClass(perry_objc_nsobject_class(), metaclass: perry_objc_nsobject_metaclass(),
                                        superclass: nil, name: permanentCString("NSObject"),
                                        instanceSize: 8, registerName: true)
-        _ = MethodTable(object, NSObject.registerObjCCategoryRuntime)
+        let methods = MethodTable(object, NSObject.registerObjCCategoryRuntime)
+        // -init gives the receiver back as it came, taking and dropping no
+        // reference: a class that overrides -release would be sent it before
+        // its own initializer had set anything.
+        let initialize: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { receiver, _ in receiver }
+        methods.addMethod("init", types: "@16@0:8", implementation: unsafeBitCast(initialize, to: UnsafeRawPointer.self), isClassMethod: false)
         Objects.defaultRetain = Runtime.findMethod(object, Sel.retain)?.pointee.imp
         Objects.defaultRelease = Runtime.findMethod(object, Sel.release)?.pointee.imp
         Objects.defaultAutorelease = Runtime.findMethod(object, Sel.autorelease)?.pointee.imp
@@ -47,11 +52,20 @@ public enum RootClasses {
         _ = MethodTable(proto, NSObject.registerObjCCategoryImmortal)
     }()
 
+    #if arch(arm)
+    private static var stretSend: UnsafeRawPointer? { perry_objc_msgSend_stret_address() }
+    private static var stretSuperSend: UnsafeRawPointer? { perry_objc_msgSendSuper2_stret_address() }
+    #else
+    private static var stretSend: UnsafeRawPointer? { nil }
+    private static var stretSuperSend: UnsafeRawPointer? { nil }
+    #endif
+
     /// Points the interop layer at this runtime's functions.
     private static func installInterop() {
         ObjCRuntime.install(ObjCRuntimeFunctions(
             msgSend: perry_objc_msgSend_address(),
             msgSendSuper2: perry_objc_msgSendSuper2_address(),
+            msgSendStret: stretSend, msgSendSuper2Stret: stretSuperSend,
             retain: { $0.map(Objects.retain) },
             release: { if let object = $0 { Objects.release(object) } },
             autorelease: { $0.map(Objects.autorelease) },
@@ -110,7 +124,6 @@ public enum RootClasses {
 extension NSObject {
     // MARK: Identity
 
-    @ObjCMethod("init") func initialize() -> Self { self }
     @ObjCMethod("self") func this() -> UnsafeMutableRawPointer { objcObject }
     @ObjCMethod("class") func cls() -> ObjCClass { objCClass }
     @ObjCMethod("superclass") func superclass() -> ObjCClass? { objCClass.superclass }

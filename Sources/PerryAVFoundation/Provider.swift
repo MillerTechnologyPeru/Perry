@@ -2,7 +2,9 @@ import Glibc
 import PerryInterface
 import PerryObjCInterop
 
-// libPerryAVFoundation: the provider for AVFoundation. PerryProviderPlugin
+// libPerryAVFoundation: the provider for AVFoundation, and for CoreMedia,
+// CoreVideo and MediaToolbox, whose times, pixel buffers and audio taps
+// are what AVFoundation's players hand out. PerryProviderPlugin
 // generates its entry points from the module's Objective-C declarations;
 // this file binds libobjc first.
 
@@ -19,6 +21,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         abort()
     }
     Players.load(symbol)
+    VideoGL.lookup = lookup
     return true
 }
 

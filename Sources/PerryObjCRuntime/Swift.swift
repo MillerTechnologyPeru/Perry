@@ -33,7 +33,7 @@ extension Runtime {
         lock.withLock {
             let known = perry_load_acquire(cacheSlot(cls)).map { $0 != emptyCache } ?? false
             guard let info = info(cls), known,
-                  let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7) else { return }
+                  let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & Layout.classBitsMask) else { return }
             info.instanceSize = Int(ro.pointee.instance_size)
             slideIvars(info, ro: ro)
         }

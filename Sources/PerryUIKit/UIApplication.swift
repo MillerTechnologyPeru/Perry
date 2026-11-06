@@ -19,6 +19,7 @@ enum Application {
     nonisolated(unsafe) static var statusBarHidden = false
     nonisolated(unsafe) static var statusBarStyle = 0
     nonisolated(unsafe) static var ignoringInteractionEvents = 0
+    nonisolated(unsafe) static var supportsShakeToEdit = true
     nonisolated(unsafe) static var userNotificationSettings: UIUserNotificationSettings?
     /// The last background task identifier given out;
     /// UIBackgroundTaskInvalid is 0.
@@ -134,6 +135,12 @@ open class UIApplication: UIResponder {
         completionHandler.map { Blocks.call($0, false) }
     }
 
+    /// Shaking undoes nothing here; what apps set is read back.
+    @ObjCMethod("applicationSupportsShakeToEdit") func applicationSupportsShakeToEdit() -> Bool { Application.supportsShakeToEdit }
+    @ObjCMethod("setApplicationSupportsShakeToEdit:") func setApplicationSupportsShakeToEdit(_ supports: Bool) {
+        Application.supportsShakeToEdit = supports
+    }
+
     @ObjCMethod("isIdleTimerDisabled") func isIdleTimerDisabled() -> Bool { false }
     /// UIBackgroundRefreshStatus: denied 1. Apps are never woken in the
     /// background here.
@@ -149,6 +156,8 @@ open class UIApplication: UIResponder {
         Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
     }
     @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}
+    /// iOS 3's form, which names the kinds of notification wanted.
+    @ObjCMethod("registerForRemoteNotificationTypes:") func registerForRemoteNotifications(types: UInt) {}
     @ObjCMethod("isRegisteredForRemoteNotifications") func isRegisteredForRemoteNotifications() -> Bool { false }
 
     /// Notification settings are granted as asked, and the delegate hears
@@ -190,6 +199,11 @@ protocol UIApplicationDelegate {
 
     @ObjCOptional("application:didFinishLaunchingWithOptions:")
     func application(_ application: UIApplication, didFinishLaunchingWithOptions options: NSDictionary?) -> Bool?
+
+    /// The launch as delegates heard of it before iOS 3, which those that
+    /// don't take the options still do.
+    @ObjCOptional("applicationDidFinishLaunching:")
+    func applicationDidFinishLaunching(_ application: UIApplication)
 
     @ObjCOptional("applicationDidBecomeActive:")
     func applicationDidBecomeActive(_ application: UIApplication)

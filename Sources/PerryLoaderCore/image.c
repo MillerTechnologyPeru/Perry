@@ -10,6 +10,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <link.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,7 +83,7 @@ void *perry_image_fileoff(const perry_image *image, uint64_t fileoff) {
     return NULL;
 }
 
-const struct section_64 *perry_image_section(const perry_image *image, const char *segname, const char *sectname) {
+const section_t *perry_image_section(const perry_image *image, const char *segname, const char *sectname) {
     for (uint32_t i = 0; i < image->segment_count; i++) {
         const perry_segment *seg = &image->segments[i];
         if (segname && strncmp(seg->name, segname, 16) != 0)
@@ -124,18 +125,100 @@ static bool file_exists(const char *path) {
 typedef struct macho_file {
     uint8_t *map;
     size_t map_size;
-    const uint8_t *data;   // start of the arm64 slice
+    const uint8_t *data;   // start of the slice for this loader's architecture
     size_t size;
 } macho_file;
 
 static uint32_t be32(uint32_t v) { return __builtin_bswap32(v); }
 static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 
+#if defined(__LP64__)
+#define NATIVE_CPU_TYPE CPU_TYPE_ARM64
+#define NATIVE_CPU_NAME "arm64"
+#else
+#define NATIVE_CPU_TYPE CPU_TYPE_ARM
+#define NATIVE_CPU_NAME "armv7"
+#endif
+
+// Whether this loader can run a slice of the architecture given. A 64-bit
+// loader runs arm64 (not arm64e); a 32-bit one runs armv7 and its variants
+// and armv6, whose code the armv7 cores run.
+static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
+    uint32_t sub = (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK;
+    if (cputype != NATIVE_CPU_TYPE)
+        return false;
+#if defined(__LP64__)
+    return sub != CPU_SUBTYPE_ARM64E;
+#else
+    return sub == CPU_SUBTYPE_ARM_ALL || sub == CPU_SUBTYPE_ARM_V6 || sub == CPU_SUBTYPE_ARM_V7 ||
+           sub == CPU_SUBTYPE_ARM_V7F || sub == CPU_SUBTYPE_ARM_V7S || sub == CPU_SUBTYPE_ARM_V7K;
+#endif
+}
+
+// How much a slice is preferred: later ARM generations over earlier ones.
+static int cpu_rank(int32_t cpusubtype) {
+#if defined(__LP64__)
+    (void)cpusubtype;
+    return 0;
+#else
+    switch ((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) {
+    case CPU_SUBTYPE_ARM_V7S: return 4;
+    case CPU_SUBTYPE_ARM_V7K: return 3;
+    case CPU_SUBTYPE_ARM_V7F: return 3;
+    case CPU_SUBTYPE_ARM_V7: return 2;
+    case CPU_SUBTYPE_ARM_V6: return 1;
+    default: return 0;
+    }
+#endif
+}
+
 static void check_cpu(const char *path, int32_t cputype, int32_t cpusubtype) {
+#if defined(__LP64__)
     if (cputype != CPU_TYPE_ARM64)
         perry_fatal("%s: not an arm64 binary (cputype 0x%x)", path, cputype);
     if (((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_ARM64E)
         perry_fatal("%s: arm64e binaries are not supported (pointer authentication)", path);
+#else
+    if (!cpu_supported(cputype, cpusubtype))
+        perry_fatal("%s: not an armv7 binary (cputype 0x%x, subtype %u)", path, cputype,
+                    (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK);
+#endif
+}
+
+unsigned perry_macho_architectures(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return 0;
+    union {
+        struct mach_header mh;
+        struct fat_header fat;
+        uint8_t bytes[4096];
+    } head;
+    ssize_t got = pread(fd, &head, sizeof(head), 0);
+    unsigned archs = 0;
+    if (got >= (ssize_t)sizeof(struct mach_header)) {
+        uint32_t magic = head.fat.magic;
+        if (magic == MH_MAGIC || magic == MH_MAGIC_64) {
+            if (head.mh.cputype == CPU_TYPE_ARM)
+                archs |= PERRY_ARCH_ARMV7;
+            else if (head.mh.cputype == CPU_TYPE_ARM64)
+                archs |= PERRY_ARCH_ARM64;
+        } else if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
+            bool is64 = magic == be32(FAT_MAGIC_64);
+            size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
+            uint32_t count = be32(head.fat.nfat_arch);
+            for (uint32_t i = 0; i < count && sizeof(struct fat_header) + (i + 1) * entry <= (size_t)got; i++) {
+                const struct fat_arch *arch = (const struct fat_arch *)(head.bytes + sizeof(struct fat_header) + i * entry);
+                int32_t cputype = (int32_t)be32((uint32_t)arch->cputype);
+                if (cputype == CPU_TYPE_ARM)
+                    archs |= PERRY_ARCH_ARMV7;
+                else if (cputype == CPU_TYPE_ARM64)
+                    archs |= PERRY_ARCH_ARM64;
+            }
+        }
+    }
+    close(fd);
+    return archs;
 }
 
 static bool open_macho(const char *path, macho_file *out) {
@@ -143,7 +226,7 @@ static bool open_macho(const char *path, macho_file *out) {
     if (fd < 0)
         return false;
     struct stat st;
-    if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(struct mach_header_64)) {
+    if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(mach_header_t)) {
         close(fd);
         perry_fatal("%s: file too small to be a Mach-O binary", path);
     }
@@ -164,7 +247,8 @@ static bool open_macho(const char *path, macho_file *out) {
         uint32_t count = be32(fat->nfat_arch);
         const uint8_t *arches = (const uint8_t *)(fat + 1);
         bool found = false;
-        for (uint32_t i = 0; i < count && !found; i++) {
+        int best = -1;
+        for (uint32_t i = 0; i < count; i++) {
             int32_t cputype, cpusubtype;
             uint64_t offset, size;
             if (is64) {
@@ -180,22 +264,22 @@ static bool open_macho(const char *path, macho_file *out) {
                 offset = be32(arch->offset);
                 size = be32(arch->size);
             }
-            uint32_t sub = (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK;
-            if (cputype == CPU_TYPE_ARM64 && sub != CPU_SUBTYPE_ARM64E) {
+            if (cpu_supported(cputype, cpusubtype) && cpu_rank(cpusubtype) > best) {
                 if (offset + size > out->map_size)
                     perry_fatal("%s: truncated fat slice", path);
                 out->data = (const uint8_t *)map + offset;
                 out->size = size;
+                best = cpu_rank(cpusubtype);
                 found = true;
             }
         }
         if (!found)
-            perry_fatal("%s: universal binary has no arm64 slice", path);
+            perry_fatal("%s: universal binary has no " NATIVE_CPU_NAME " slice", path);
     }
 
-    const struct mach_header_64 *mh = (const struct mach_header_64 *)out->data;
-    if (mh->magic != MH_MAGIC_64)
-        perry_fatal("%s: not a 64-bit Mach-O binary (magic 0x%08x)", path, mh->magic);
+    const mach_header_t *mh = (const mach_header_t *)out->data;
+    if (mh->magic != MH_MAGIC_NATIVE)
+        perry_fatal("%s: not a %d-bit Mach-O binary (magic 0x%08x)", path, (int)(sizeof(void *) * 8), mh->magic);
     check_cpu(path, mh->cputype, mh->cpusubtype);
     if (sizeof(*mh) + mh->sizeofcmds > out->size)
         perry_fatal("%s: load commands exceed file size", path);
@@ -205,7 +289,7 @@ static bool open_macho(const char *path, macho_file *out) {
 // MARK: - Load command parsing
 
 #define FOR_EACH_LOAD_COMMAND(mh, lc) \
-    for (const struct load_command *lc = (const struct load_command *)((const struct mach_header_64 *)(mh) + 1), \
+    for (const struct load_command *lc = (const struct load_command *)((const mach_header_t *)(mh) + 1), \
          *lc##_end = (const struct load_command *)((const uint8_t *)(lc) + (mh)->sizeofcmds); \
          lc < lc##_end && lc->cmdsize >= sizeof(struct load_command); \
          lc = (const struct load_command *)((const uint8_t *)lc + lc->cmdsize))
@@ -213,7 +297,7 @@ static bool open_macho(const char *path, macho_file *out) {
 // Parses load commands from the mapped header so that every pointer kept in
 // the image stays valid after the file mapping is released.
 static void parse_load_commands(perry_image *image) {
-    const struct mach_header_64 *mh = image->header;
+    const mach_header_t *mh = image->header;
     uint32_t dep_cap = 0, rpath_cap = 0;
 
     FOR_EACH_LOAD_COMMAND(mh, lc) {
@@ -256,11 +340,24 @@ static void parse_load_commands(perry_image *image) {
             break;
         }
         case LC_UNIXTHREAD:
+#if defined(__LP64__)
             if (mh->filetype == MH_EXECUTE)
                 perry_fatal("%s: LC_UNIXTHREAD executables are not supported", image->path);
+#else
+            // iOS before 6 starts an executable at crt1's `start`, with the
+            // kernel's stack. It calls _main, so find that and call it as
+            // LC_MAIN's entry is; a stripped executable has no _main to
+            // find, and is started at `start` itself.
+            if (mh->filetype == MH_EXECUTE) {
+                const struct thread_command *thread = (const void *)lc;
+                image->unixthread = true;
+                if (thread->flavor == ARM_THREAD_STATE && thread->count > ARM_THREAD_STATE_PC)
+                    image->thread_pc = thread->state[ARM_THREAD_STATE_PC];
+            }
+#endif
             break;
-        case LC_ENCRYPTION_INFO_64: {
-            const struct encryption_info_command_64 *ec = (const void *)lc;
+        case LC_ENCRYPTION_INFO_NATIVE: {
+            const encryption_info_command_t *ec = (const void *)lc;
             image->cryptid = ec->cryptid;
             image->encrypted = ec->cryptid != 0;
             break;
@@ -282,6 +379,12 @@ static void parse_load_commands(perry_image *image) {
             }
             break;
         }
+        case LC_SYMTAB:
+            image->symtab = (const void *)lc;
+            break;
+        case LC_DYSYMTAB:
+            image->dysymtab = (const void *)lc;
+            break;
         case LC_DYLD_CHAINED_FIXUPS:
             image->chained_fixups = (const void *)lc;
             break;
@@ -317,8 +420,18 @@ static uint64_t round_up(uint64_t value, uint64_t align) {
 // class data pointers to 47 bits, and iOS processes normally live below
 // 64 GB. Linux hands out mmap addresses just under 2^48, so images are placed
 // upward from 4 GB, where dyld puts them, instead.
+//
+// A 32-bit process has 4 GB in all. Executables linked without PIE sit at
+// their own addresses, from 0x1000; slid images are placed from 256 MB, where
+// iOS's dyld puts them, up to 1.75 GB, leaving the rest to Linux's own
+// mappings (providers, the stack and the heap) at the top of the space.
+#if defined(__LP64__)
 #define PERRY_IMAGE_REGION_START  0x100000000ull
 #define PERRY_IMAGE_REGION_END    0x1000000000ull     // 64 GB
+#else
+#define PERRY_IMAGE_REGION_START  0x10000000ull
+#define PERRY_IMAGE_REGION_END    0x70000000ull       // 1.75 GB
+#endif
 #define PERRY_IMAGE_ALIGN         0x4000ull           // Mach-O segment alignment
 
 static void *reserve_low(perry_loader *loader, size_t span) {
@@ -337,12 +450,12 @@ static void *reserve_low(perry_loader *loader, size_t span) {
             break;
         addr += 0x1000000;      // skip past whatever occupies this range
     }
-    perry_warn("no free address range below 64 GB; mapping image high");
+    perry_warn("no free address range in the image region; mapping image high");
     return mmap(NULL, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 }
 
 static perry_image *map_image(perry_loader *loader, const char *path, const macho_file *file) {
-    const struct mach_header_64 *fmh = (const struct mach_header_64 *)file->data;
+    const mach_header_t *fmh = (const mach_header_t *)file->data;
     if (fmh->filetype != MH_EXECUTE && fmh->filetype != MH_DYLIB && fmh->filetype != MH_BUNDLE)
         perry_fatal("%s: unsupported Mach-O file type %u", path, fmh->filetype);
 
@@ -353,11 +466,11 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     uint32_t seg_cap = 0;
     uint64_t vm_start = UINT64_MAX, vm_end = 0, header_vmaddr = UINT64_MAX;
     FOR_EACH_LOAD_COMMAND(fmh, lc) {
-        if (lc->cmd != LC_SEGMENT_64)
+        if (lc->cmd != LC_SEGMENT_NATIVE)
             continue;
-        const struct segment_command_64 *sc = (const void *)lc;
+        const segment_command_t *sc = (const void *)lc;
         bool pagezero = sc->vmaddr == 0 && sc->filesize == 0 && sc->initprot == 0;
-        if (sc->fileoff + sc->filesize > file->size)
+        if ((uint64_t)sc->fileoff + sc->filesize > file->size)
             perry_fatal("%s: segment %.16s extends past end of file", path, sc->segname);
         if (image->segment_count == seg_cap) {
             seg_cap = seg_cap ? seg_cap * 2 : 8;
@@ -375,13 +488,13 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
         seg->nsects = sc->nsects;
         seg->mapped = !pagezero && sc->vmsize != 0;
         // Section headers follow the segment command; rebased to the mapped copy below.
-        seg->sections = (const struct section_64 *)((const uint8_t *)sc - file->data + sizeof(*sc));
+        seg->sections = (const section_t *)((const uint8_t *)sc - file->data + sizeof(*sc));
         if (!seg->mapped)
             continue;
         if (sc->vmaddr < vm_start)
             vm_start = sc->vmaddr;
-        if (sc->vmaddr + sc->vmsize > vm_end)
-            vm_end = sc->vmaddr + sc->vmsize;
+        if ((uint64_t)sc->vmaddr + sc->vmsize > vm_end)
+            vm_end = (uint64_t)sc->vmaddr + sc->vmsize;
         if (sc->fileoff == 0 && sc->filesize)
             header_vmaddr = sc->vmaddr;
     }
@@ -422,9 +535,9 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     }
 
     image->base = perry_image_vmaddr(image, header_vmaddr);
-    image->header = (const struct mach_header_64 *)image->base;
+    image->header = (const mach_header_t *)image->base;
     for (uint32_t i = 0; i < image->segment_count; i++)
-        image->segments[i].sections = (const struct section_64 *)(image->base + (uintptr_t)image->segments[i].sections);
+        image->segments[i].sections = (const section_t *)(image->base + (uintptr_t)image->segments[i].sections);
 
     parse_load_commands(image);
 
@@ -432,6 +545,45 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
     loader->images_tail = &image->next;
     return image;
 }
+
+// Darwin keeps a pointer to the thread's values, pthread_getspecific's, in
+// the register TPIDRRO_EL0, and programs read them through it directly:
+//     mrs x9, TPIDRRO_EL0;  and x9, x9, #~7;  ldr x0, [x9, key, lsl #3]
+// Linux leaves that register zero. Its thread pointer is in TPIDR_EL0, a
+// fixed distance above pthread_self(), and libPerrySystem numbers Darwin's
+// keys so that a key's value is its word from 0xe0 into pthread_self(), as
+// on iOS. So the first two instructions become
+//     mrs x9, TPIDR_EL0;    sub x9, x9, #distance
+// in the image's code, before it is made read-only.
+#if defined(__LP64__)
+static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
+    enum { DARWIN_TSD_OFFSET = 0xe0 };
+    long distance = (long)((uintptr_t)__builtin_thread_pointer() - (uintptr_t)pthread_self()) - DARWIN_TSD_OFFSET;
+    if (distance <= 0 || distance > 4095 || (distance & 7))
+        return;
+    for (uint32_t j = 0; j < seg->nsects; j++) {
+        const struct section_64 *sect = &seg->sections[j];
+        // S_ATTR_PURE_INSTRUCTIONS or S_ATTR_SOME_INSTRUCTIONS.
+        if (!(sect->flags & 0x80000400u))
+            continue;
+        uint32_t *words = perry_image_vmaddr(image, sect->addr);
+        for (uint64_t k = 0; k + 1 < sect->size / 4; k++) {
+            uint32_t reg = words[k] & 31, next = words[k + 1];
+            if ((words[k] & 0xffffffe0u) != 0xd53bd060u || (next & 0xfffffc00u) != 0x927df000u || ((next >> 5) & 31) != reg)
+                continue;
+            words[k] = 0xd53bd040u | reg;
+            words[k + 1] = 0xd1000000u | (uint32_t)distance << 10 | reg << 5 | (next & 31);
+        }
+    }
+}
+#else
+// armv7 code calls pthread_getspecific, or reads the thread register for
+// keys libPerrySystem places the same way; there is nothing to rewrite.
+static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
+    (void)image;
+    (void)seg;
+}
+#endif
 
 // Applies each segment's protection once fixups are done. Segments made
 // read-only after fixups (SG_READ_ONLY: __DATA_CONST) stay writable until the
@@ -446,6 +598,8 @@ static void protect_image(perry_image *image) {
         uint8_t *addr = perry_image_vmaddr(image, seg->vmaddr);
         size_t size = round_up(seg->vmsize, host_page_size);
         int prot = seg->initprot & (PROT_READ | PROT_WRITE | PROT_EXEC);
+        if (prot & PROT_EXEC)
+            use_linux_thread_pointer(image, seg);
         if (prot & PROT_EXEC)
             __builtin___clear_cache((char *)addr, (char *)addr + seg->vmsize);
         if (mprotect(addr, size, prot) != 0)
@@ -701,7 +855,7 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
     macho_file file;
     if (!open_macho(path, &file))
         perry_fatal("cannot open %s: %s", path, strerror(errno));
-    const struct mach_header_64 *mh = (const struct mach_header_64 *)file.data;
+    const mach_header_t *mh = (const mach_header_t *)file.data;
     if (mh->filetype != MH_EXECUTE)
         perry_fatal("%s: not an executable (file type %u)", path, mh->filetype);
     munmap(file.map, file.map_size);
@@ -718,6 +872,7 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
+        perry_register_unwind_info(img);
         perry_setup_thread_locals(img);
         protect_image(img);
     }
@@ -770,7 +925,7 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
     for (uint32_t s = 0; s < image->segment_count; s++) {
         const perry_segment *seg = &image->segments[s];
         for (uint32_t j = 0; j < seg->nsects; j++) {
-            const struct section_64 *sect = &seg->sections[j];
+            const section_t *sect = &seg->sections[j];
             uint32_t type = sect->flags & SECTION_TYPE;
             if (type == S_MOD_INIT_FUNC_POINTERS) {
                 initializer_fn *fns = perry_image_vmaddr(image, sect->addr);
@@ -797,8 +952,10 @@ static perry_loader *startup_loader;
 static void *lookup_symbol(const char *install_name, const char *name) {
     perry_loader *loader = startup_loader;
     for (perry_image *image = loader->images; image; image = image->next) {
+        // By install name, or by path: the main program's, and a library's
+        // that was opened by its path while the program ran.
         if (install_name && !(image->install_name && strcmp(image->install_name, install_name) == 0) &&
-            !(image == loader->main_image && image->path && strcmp(image->path, install_name) == 0))
+            !(image->path && strcmp(image->path, install_name) == 0))
             continue;
         perry_symbol sym = {0};
         if (perry_exports_lookup(loader, image, name, &sym, 0) && sym.found)
@@ -808,6 +965,33 @@ static void *lookup_symbol(const char *install_name, const char *name) {
     }
     if (install_name)
         return perry_provider_symbol(loader, install_name, name);
+    for (uint32_t i = 0; i < loader->provider_count; i++) {
+        perry_provider *provider = loader->providers[i];
+        if (!provider->handle)
+            continue;
+        void *address = perry_provider_symbol(loader, provider->install_name, name);
+        if (address)
+            return address;
+    }
+    return NULL;
+}
+
+// As dlsym(RTLD_NEXT) looks for code at `caller`: in the images loaded
+// after the one it is in, then in the providers. A library that defines a
+// function of the system's, to wrap it, finds the system's so.
+static void *lookup_symbol_after(const void *caller, const char *name) {
+    perry_loader *loader = startup_loader;
+    perry_image *from = NULL;
+    for (perry_image *image = loader->images; image && !from; image = image->next) {
+        const uint8_t *start = perry_image_vmaddr(image, image->vm_start);
+        if ((const uint8_t *)caller >= start && (const uint8_t *)caller < start + image->vm_size)
+            from = image;
+    }
+    for (perry_image *image = from ? from->next : loader->images; image; image = image->next) {
+        perry_symbol sym = {0};
+        if (perry_exports_lookup(loader, image, name, &sym, 0) && sym.found)
+            return sym.address;
+    }
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         perry_provider *provider = loader->providers[i];
         if (!provider->handle)
@@ -850,28 +1034,38 @@ static int provider_layer(const perry_provider *provider) {
 // Passes the program's arguments and bundle to providers, e.g. for
 // _NSGetArgv in libSystem and the main bundle in Foundation. Providers
 // start a layer at a time, in load order within a layer.
+static bool load_library(const char *path);
+
+// Called again when a library opened while the program runs brings in
+// providers that weren't loaded: only those are started.
 static void start_providers(perry_loader *loader, perry_image *image) {
     startup_loader = loader;
-    perry_startup_info info = {
-        .version = PERRY_STARTUP_INFO_VERSION,
-        .argc = program_argc,
-        .argv = program_argv,
-        .envp = program_envp,
-        .progname = program_name,
-        .executable_path = image->path,
-        .bundle_path = loader->bundle_path,
-        .main_header = image->header,
-        .lookup_symbol = lookup_symbol,
-    };
+    static perry_startup_info info;
+    if (!info.version) {
+        info = (perry_startup_info){
+            .version = PERRY_STARTUP_INFO_VERSION,
+            .argc = program_argc,
+            .argv = program_argv,
+            .envp = program_envp,
+            .progname = program_name,
+            .executable_path = image->path,
+            .bundle_path = loader->bundle_path,
+            .main_header = image->header,
+            .lookup_symbol = lookup_symbol,
+            .load_library = load_library,
+            .lookup_symbol_after = lookup_symbol_after,
+        };
+    }
     // Several install names may share one provider; start each library once.
     for (int layer = 0; layer <= 6; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
-        bool seen = !handle;
+        bool seen = !handle || loader->providers[i]->started;
         for (uint32_t j = 0; j < i && !seen; j++)
             seen = loader->providers[j]->handle == handle;
         if (seen || provider_layer(loader->providers[i]) != layer)
             continue;
+        loader->providers[i]->started = true;
         perry_provider_startup_fn fn = (perry_provider_startup_fn)dlsym(handle, PERRY_PROVIDER_STARTUP_SYMBOL);
         if (fn)
             fn(&info);
@@ -899,12 +1093,115 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     run_image_initializers(loader, image, argc, argv, envp, apple);
 }
 
+#if !defined(__LP64__)
+// Finds _main in an executable's symbol table, with the Thumb bit its
+// definition carries, for executables that LC_UNIXTHREAD starts.
+static void *find_main(perry_image *image) {
+    const struct symtab_command *st = image->symtab;
+    if (!st)
+        return NULL;
+    const struct nlist *syms = perry_image_fileoff(image, st->symoff);
+    const char *strings = perry_image_fileoff(image, st->stroff);
+    if (!syms || !strings)
+        return NULL;
+    for (uint32_t i = 0; i < st->nsyms; i++) {
+        const struct nlist *sym = &syms[i];
+        if ((sym->n_type & N_STAB) || (sym->n_type & N_TYPE) != N_SECT || sym->n_strx >= st->strsize)
+            continue;
+        if (strcmp(strings + sym->n_strx, "_main") != 0)
+            continue;
+        uintptr_t address = (uintptr_t)perry_image_vmaddr(image, sym->n_value & ~1u);
+        return (void *)(address | ((sym->n_desc & N_ARM_THUMB_DEF) || (sym->n_value & 1) ? 1 : 0));
+    }
+    return NULL;
+}
+#endif
+
+#if defined(__arm__)
+// Starts a program at crt1's `start` as the kernel does: sp at argc, then
+// argv, the environment and the apple strings, each ended by a NULL. `start`
+// calls main with them and exits with its result.
+__attribute__((noreturn))
+static void run_start(void *start, int argc, char **argv, char **envp, char **apple) {
+    size_t envc = 0, applec = 0;
+    while (envp && envp[envc]) envc++;
+    while (apple && apple[applec]) applec++;
+    size_t words = 1 + (size_t)argc + 1 + envc + 1 + applec + 1;
+    // On this thread's stack, below this frame, which is never returned to.
+    uintptr_t *stack = __builtin_alloca(words * sizeof(uintptr_t) + 8);
+    stack = (uintptr_t *)(((uintptr_t)stack + 7) & ~(uintptr_t)7);
+    size_t n = 0;
+    stack[n++] = (uintptr_t)argc;
+    for (int i = 0; i < argc; i++) stack[n++] = (uintptr_t)argv[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < envc; i++) stack[n++] = (uintptr_t)envp[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < applec; i++) stack[n++] = (uintptr_t)apple[i];
+    stack[n++] = 0;
+    __asm__ volatile("mov sp, %0\n mov lr, #0\n bx %1" : : "r"(stack), "r"(start));
+    __builtin_unreachable();
+}
+#endif
+
+// A library the program opens while it runs. Its initializers may open
+// others, on the same thread; other threads wait.
+static bool load_library(const char *path) {
+    static pthread_mutex_t lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+    perry_loader *loader = startup_loader;
+    if (!loader || !path)
+        return false;
+    pthread_mutex_lock(&lock);
+    perry_image *image = find_loaded(loader, path);
+    if (!image) {
+        macho_file file;
+        if (!open_macho(path, &file)) {
+            pthread_mutex_unlock(&lock);
+            return false;
+        }
+        munmap(file.map, file.map_size);
+        perry_image *last = loader->images;
+        while (last && last->next)
+            last = last->next;
+        image = load_image(loader, path);
+        // Bind what was mapped once all of it is, so symbols resolve across
+        // the new images, as at startup.
+        for (perry_image *img = last ? last->next : loader->images; img; img = img->next) {
+            perry_apply_fixups(loader, img);
+            perry_register_unwind_info(img);
+            perry_setup_thread_locals(img);
+            protect_image(img);
+        }
+        start_providers(loader, loader->main_image);
+        perry_make_witness_tables(loader);
+        static char *no_apple[] = { NULL };
+        for (perry_image *img = last ? last->next : loader->images; img; img = img->next)
+            run_image_initializers(loader, img, program_argc, program_argv, program_envp, no_apple);
+    }
+    pthread_mutex_unlock(&lock);
+    return true;
+}
+
 void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple) {
     (void)loader;
+#if !defined(__LP64__)
+    if (!image->has_entry && image->unixthread)
+        image->legacy_main = find_main(image);
+#if defined(__arm__)
+    if (!image->has_entry && !image->legacy_main && image->thread_pc) {
+        void *start = perry_image_vmaddr(image, image->thread_pc & ~1u);
+        perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
+        run_start((void *)((uintptr_t)start | (image->thread_pc & 1)), argc, argv, envp, apple);
+    }
+#endif
+    if (!image->has_entry && !image->legacy_main)
+        perry_fatal("%s: no LC_MAIN entry point and no _main", image->path);
+#else
     if (!image->has_entry)
         perry_fatal("%s: no LC_MAIN entry point", image->path);
+#endif
     typedef int (*main_fn)(int, char **, char **, char **);
-    main_fn entry = (main_fn)(void *)(image->base + image->entryoff);
+    main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
+                                     : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
     exit(entry(argc, argv, envp, apple));
 }

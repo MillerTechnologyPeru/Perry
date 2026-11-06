@@ -7,12 +7,14 @@
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
+#include "MachO.h"
 #include "perry_interface.h"
 
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -96,13 +98,11 @@ const void *darwin_NSGetMachExecuteHeader(void) {
 // How far an image moved from where it was linked: its header's address
 // less its __TEXT segment's.
 static intptr_t image_slide(const void *header) {
-    const uint32_t *mach = header;
-    const uint8_t *command = (const uint8_t *)header + 32;
-    for (uint32_t i = 0; i < mach[4]; i++) {
-        uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
-        if (kind == 0x19 /* LC_SEGMENT_64 */ && strncmp((const char *)command + 8, "__TEXT", 16) == 0)
-            return (intptr_t)header - (intptr_t)*(const uint64_t *)(command + 24);
-        command += size;
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment segment;
+        if (perry_macho_segment_at(command, &segment) && strncmp(segment.name, "__TEXT", 16) == 0)
+            return (intptr_t)header - (intptr_t)segment.vmaddr;
     }
     return 0;
 }
@@ -111,13 +111,24 @@ static intptr_t image_slide(const void *header) {
 uint8_t *darwin_getsectiondata(const void *header, const char *segment, const char *section, unsigned long *size)
     DARWIN_SYMBOL(getsectiondata);
 uint8_t *darwin_getsectiondata(const void *header, const char *segment, const char *section, unsigned long *size) {
-    const struct darwin_section_64 *entry = darwin_getsectbynamefromheader_64(header, segment, section);
-    if (!entry) {
-        *size = 0;
+    *size = 0;
+    if (!header)
         return NULL;
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment found;
+        if (!perry_macho_segment_at(command, &found) || strncmp(found.name, segment, 16) != 0)
+            continue;
+        for (uint32_t j = 0; j < found.section_count; j++) {
+            uint64_t addr, length;
+            const uint8_t *entry = perry_macho_section(&found, j, &addr, &length);
+            if (strncmp((const char *)entry, section, 16) == 0) {
+                *size = (unsigned long)length;
+                return (uint8_t *)(uintptr_t)(addr + (uint64_t)image_slide(header));
+            }
+        }
     }
-    *size = (unsigned long)entry->size;
-    return (uint8_t *)(uintptr_t)(entry->addr + (uint64_t)image_slide(header));
+    return NULL;
 }
 
 // The Swift runtime's sections, which dyld finds for it by kind.
@@ -146,16 +157,15 @@ struct section_info darwin_dyld_lookup_section_info(const void *header, void *lo
 static int image_containing(const void *address) {
     uintptr_t target = (uintptr_t)address;
     for (uint32_t i = 0; i < image_count; i++) {
-        const uint32_t *mach = images[i].header;
-        const uint8_t *command = (const uint8_t *)mach + 32;
-        for (uint32_t c = 0; c < mach[4]; c++) {
-            uint32_t kind = ((const uint32_t *)command)[0], size = ((const uint32_t *)command)[1];
-            if (kind == 0x19 /* LC_SEGMENT_64 */ && *(const uint64_t *)(command + 48) /* filesize */) {
-                uintptr_t start = (uintptr_t)(*(const uint64_t *)(command + 24) + (uint64_t)images[i].slide);
-                if (target >= start && target - start < *(const uint64_t *)(command + 32))
+        const void *header = images[i].header;
+        const uint8_t *command = perry_macho_commands(header);
+        for (uint32_t c = 0; c < perry_macho_command_count(header); c++, command = perry_macho_next(command)) {
+            perry_macho_segment segment;
+            if (perry_macho_segment_at(command, &segment) && segment.filesize) {
+                uintptr_t start = (uintptr_t)(segment.vmaddr + (uint64_t)images[i].slide);
+                if (target >= start && target - start < segment.vmsize)
                     return (int)i;
             }
-            command += size;
         }
     }
     return -1;
@@ -269,11 +279,26 @@ bool darwin_dyld_program_minos_at_least(build_version version) {
     return program_minos() >= wanted;
 }
 
-// The OS is as new as anything a program checks for with @available.
+// The OS is as new as anything a program checks for with @available,
+// unless PERRY_OS_VERSION names the iOS version to be ("13.7"): for a
+// program whose code for newer systems needs what isn't here, when it
+// also runs on older ones.
 bool darwin_availability_version_check(uint32_t count, const build_version *versions) DARWIN_SYMBOL(_availability_version_check);
 bool darwin_availability_version_check(uint32_t count, const build_version *versions) {
-    (void)count;
-    (void)versions;
+    static uint32_t limit;
+    static bool read;
+    if (!read) {
+        const char *setting = getenv("PERRY_OS_VERSION");
+        unsigned major = 0, minor = 0, patch = 0;
+        if (setting && sscanf(setting, "%u.%u.%u", &major, &minor, &patch) >= 1)
+            limit = major << 16 | (minor & 0xff) << 8 | (patch & 0xff);
+        read = true;
+    }
+    if (!limit)
+        return true;
+    for (uint32_t i = 0; i < count; i++)
+        if (versions[i].version > limit)
+            return false;
     return true;
 }
 

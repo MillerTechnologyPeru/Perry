@@ -222,7 +222,7 @@ public final class ObjCBlock: ObjCNullable {
     /// The block's invoke function, cast to its C signature: the block
     /// itself, then the block's arguments.
     public func function<Function>(as type: Function.Type) -> Function {
-        unsafeBitCast(object.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: type)
+        unsafeBitCast(object.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self), to: type)
     }
 
     public typealias ObjCType = UnsafeMutableRawPointer?

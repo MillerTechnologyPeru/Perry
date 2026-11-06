@@ -2,7 +2,8 @@ import Glibc
 
 // PVRTC, the compressed texture format of iOS's PowerVR GPUs, which other
 // GPUs can't sample: glCompressedTexImage2D decodes it to RGBA here and
-// uploads that instead. Every other format goes to the host's function.
+// uploads that instead, and storage made for it ahead (glTexStorage2D) is
+// RGBA's. Every other format goes to the host's function.
 //
 // PVRTC1 stores 64-bit blocks of 4×4 pixels (4 bits a pixel) or 8×4 (2
 // bits), in Morton order. Each block has two colors, A and B, and a
@@ -16,17 +17,20 @@ enum PVRTC {
     typealias TexSubImage = @convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, UInt32, UInt32, UnsafeRawPointer?) -> Void
     typealias CompressedImage = @convention(c) (UInt32, Int32, UInt32, Int32, Int32, Int32, Int32, UnsafeRawPointer?) -> Void
     typealias CompressedSubImage = @convention(c) (UInt32, Int32, Int32, Int32, Int32, Int32, UInt32, Int32, UnsafeRawPointer?) -> Void
+    typealias Storage = @convention(c) (UInt32, Int32, UInt32, Int32, Int32) -> Void
 
     nonisolated(unsafe) static var texImage: TexImage?
     nonisolated(unsafe) static var texSubImage: TexSubImage?
     nonisolated(unsafe) static var compressedImage: CompressedImage?
     nonisolated(unsafe) static var compressedSubImage: CompressedSubImage?
+    nonisolated(unsafe) static var storage: Storage?
 
     static func bind(_ host: (String) -> UnsafeMutableRawPointer?) {
         texImage = host("glTexImage2D").map { unsafeBitCast($0, to: TexImage.self) }
         texSubImage = host("glTexSubImage2D").map { unsafeBitCast($0, to: TexSubImage.self) }
         compressedImage = host("glCompressedTexImage2D").map { unsafeBitCast($0, to: CompressedImage.self) }
         compressedSubImage = host("glCompressedTexSubImage2D").map { unsafeBitCast($0, to: CompressedSubImage.self) }
+        storage = (host("glTexStorage2D") ?? host("glTexStorage2DEXT")).map { unsafeBitCast($0, to: Storage.self) }
     }
 
     static func isPVRTC(_ format: UInt32) -> Bool { format >= rgb4 && format <= rgba2 }
@@ -40,6 +44,12 @@ enum PVRTC {
         // GL_RGBA, GL_UNSIGNED_BYTE; rows of RGBA are 4-byte aligned.
         PVRTC.texImage?(target, level, 0x1908, width, height, 0, 0x1908, 0x1401, pixels)
         pixels?.deallocate()
+    }
+
+    /// glTexStorage2D: a PVRTC texture's storage is RGBA's (GL_RGBA8),
+    /// which is what its levels are decoded to as they are given.
+    static let texStorage2D: Storage = { target, levels, format, width, height in
+        PVRTC.storage?(target, levels, isPVRTC(format) ? 0x8058 : format, width, height)
     }
 
     static let compressedTexSubImage2D: CompressedSubImage = { target, level, x, y, width, height, format, size, data in
@@ -82,12 +92,13 @@ enum PVRTC {
 
     /// Color B, from the color word's high half.
     static func colorB(_ word: UInt32) -> (Int, Int, Int, Int) {
-        let c = Int(word)
+        // The word's top bit is set, which a 32-bit Int does not hold.
+        let c = word
         if c & 0x8000_0000 != 0 {
-            return ((c >> 26) & 0x1F, (c >> 21) & 0x1F, (c >> 16) & 0x1F, 0xF)
+            return (Int((c >> 26) & 0x1F), Int((c >> 21) & 0x1F), Int((c >> 16) & 0x1F), 0xF)
         }
-        return (((c >> 23) & 0x1E) | ((c >> 27) & 0x1), ((c >> 19) & 0x1E) | ((c >> 23) & 0x1),
-                ((c >> 15) & 0x1E) | ((c >> 19) & 0x1), (c >> 27) & 0xE)
+        return (Int(((c >> 23) & 0x1E) | ((c >> 27) & 0x1)), Int(((c >> 19) & 0x1E) | ((c >> 23) & 0x1)),
+                Int(((c >> 15) & 0x1E) | ((c >> 19) & 0x1)), Int((c >> 27) & 0xE))
     }
 
     /// RGBA pixels, top row first, allocated; nil if the data is short.

@@ -5,8 +5,14 @@ import PerryObjCInterop
 // CLLocation and the coordinate functions and constants. Locations are
 // values an app makes or is given; there is no location to be given here.
 
-extension CLLocationCoordinate2D: ObjCScalar {
+extension CLLocationCoordinate2D: ObjCStructure {
+    #if _pointerBitWidth(_32)
+    public typealias ObjCType = ObjCWords4
     public static var objCTypeEncoding: String { "{CLLocationCoordinate2D=dd}" }
+    #else
+    public typealias ObjCType = CLLocationCoordinate2D
+    public static var objCTypeEncoding: String { "{CLLocationCoordinate2D=dd}" }
+    #endif
 }
 
 enum Coordinates {
@@ -48,12 +54,12 @@ enum FakeLocation {
     }
 }
 
-@c(_CLLocationCoordinate2DMake)
+@DarwinC("_CLLocationCoordinate2DMake")
 public func CLLocationCoordinate2DMake(_ latitude: Double, _ longitude: Double) -> CLLocationCoordinate2D {
     CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
 }
 
-@c(_CLLocationCoordinate2DIsValid)
+@DarwinC("_CLLocationCoordinate2DIsValid")
 public func CLLocationCoordinate2DIsValid(_ coordinate: CLLocationCoordinate2D) -> Bool { Coordinates.isValid(coordinate) }
 
 @ObjCConstants

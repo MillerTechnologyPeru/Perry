@@ -50,10 +50,10 @@ final class FontDescriptorState: ObjectState {
         let dictionary = NSDictionary(objCArgument: attributes)
         if let name = dictionary.object(forKey: CoreTextKeys.name) { self.name = name.stringValue }
         if let family = dictionary.object(forKey: CoreTextKeys.family) { self.family = family.stringValue }
-        if let size = dictionary.object(forKey: CoreTextKeys.size)?.as(NSNumber.self) { self.size = size.doubleValue() }
+        if let size = dictionary.object(forKey: CoreTextKeys.size)?.as(NSNumber.self) { self.size = CGFloat(size.doubleValue()) }
         if let style = dictionary.object(forKey: CoreTextKeys.textStyle) { textStyle = style.stringValue }
         if let traits = dictionary.object(forKey: CoreTextKeys.traits)?.as(NSDictionary.self) {
-            if let weight = traits.object(forKey: CoreTextKeys.weight)?.as(NSNumber.self) { self.weight = weight.doubleValue() }
+            if let weight = traits.object(forKey: CoreTextKeys.weight)?.as(NSNumber.self) { self.weight = CGFloat(weight.doubleValue()) }
             if let symbolic = traits.object(forKey: CoreTextKeys.symbolic)?.as(NSNumber.self) {
                 symbolicTraits = symbolic.unsignedIntValue()
             }
@@ -141,7 +141,7 @@ public func CTFontGetTypeID() -> UInt { CoreTextTypeIDs.font }
 @c(_CTGlyphInfoGetTypeID)
 public func CTGlyphInfoGetTypeID() -> UInt { CoreTextTypeIDs.glyphInfo }
 
-@c(_CTFontDescriptorCreateWithNameAndSize)
+@DarwinC("_CTFontDescriptorCreateWithNameAndSize")
 public func CTFontDescriptorCreateWithNameAndSize(_ name: UnsafeMutableRawPointer?, _ size: CGFloat) -> UnsafeMutableRawPointer? {
     UIFontDescriptor.make { ($0.name, $0.size) = (string(name), size) }
 }
@@ -170,7 +170,7 @@ public func CTFontDescriptorCreateWithTextStyleAndAttributes(
 }
 
 /// A user interface font: the system font, at the size given or 12.
-@c(_CTFontDescriptorCreateForUIType)
+@DarwinC("_CTFontDescriptorCreateForUIType")
 public func CTFontDescriptorCreateForUIType(_ type: UInt32, _ size: CGFloat, _ language: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     UIFontDescriptor.make { ($0.name, $0.size) = (".SFUI-Regular", size > 0 ? size : 12) }
 }
@@ -199,7 +199,7 @@ public func CTFontDescriptorCreateCopyWithSymbolicTraits(_ original: UnsafeMutab
 
 /// The weight axis ('wght', 1 to 1000) sets the weight; other variations
 /// are not drawn.
-@c(_CTFontDescriptorCreateCopyWithVariation)
+@DarwinC("_CTFontDescriptorCreateCopyWithVariation")
 public func CTFontDescriptorCreateCopyWithVariation(_ original: UnsafeMutableRawPointer?, _ identifier: UnsafeMutableRawPointer?, _ value: CGFloat) -> UnsafeMutableRawPointer? {
     UIFontDescriptor.make { state in
         UIFontDescriptor.state(original).map(state.copy(from:))
@@ -216,7 +216,7 @@ public func CTFontDescriptorCopyAttribute(_ descriptor: UnsafeMutableRawPointer?
     switch key {
     case CoreTextKeys.name: return (state.name ?? ".SFUI-Regular").objCOwnedReturnValue()
     case CoreTextKeys.family: return (state.family ?? state.name ?? ".AppleSystemUIFont").objCOwnedReturnValue()
-    case CoreTextKeys.size: return ObjCRuntime.retain(NSNumber.make(double: state.size).objcObject)
+    case CoreTextKeys.size: return ObjCRuntime.retain(NSNumber.make(double: Double(state.size)).objcObject)
     case CoreTextKeys.textStyle: return state.textStyle?.objCOwnedReturnValue()
     case CoreTextKeys.traits: return ObjCRuntime.retain(traits(state).objcObject)
     default: return nil
@@ -225,7 +225,7 @@ public func CTFontDescriptorCopyAttribute(_ descriptor: UnsafeMutableRawPointer?
 
 private func traits(_ state: FontDescriptorState) -> NSMutableDictionary {
     let traits = NSMutableDictionary.empty()
-    traits.set(NSNumber.make(double: state.weight), forKey: CoreTextKeys.weight)
+    traits.set(NSNumber.make(double: Double(state.weight)), forKey: CoreTextKeys.weight)
     traits.set(NSNumber.make(unsignedInt: state.symbolicTraits), forKey: CoreTextKeys.symbolic)
     if let design = state.design { traits.set(NSObject(objCReturnValue: design.objCArgument()), forKey: CoreTextKeys.design) }
     return traits
@@ -236,7 +236,7 @@ public func CTFontDescriptorCopyAttributes(_ descriptor: UnsafeMutableRawPointer
     let attributes = NSMutableDictionary.empty()
     if let state = UIFontDescriptor.state(descriptor) {
         attributes.set(NSObject(objCReturnValue: (state.name ?? ".SFUI-Regular").objCArgument()), forKey: CoreTextKeys.name)
-        if state.size > 0 { attributes.set(NSNumber.make(double: state.size), forKey: CoreTextKeys.size) }
+        if state.size > 0 { attributes.set(NSNumber.make(double: Double(state.size)), forKey: CoreTextKeys.size) }
         if let style = state.textStyle { attributes.set(NSObject(objCReturnValue: style.objCArgument()), forKey: CoreTextKeys.textStyle) }
         attributes.set(traits(state), forKey: CoreTextKeys.traits)
     }
@@ -248,7 +248,7 @@ public func CTFontDescriptorGetSymbolicTraits(_ descriptor: UnsafeMutableRawPoin
     UIFontDescriptor.state(descriptor)?.symbolicTraits ?? 0
 }
 
-@c(_CTFontDescriptorGetWeight)
+@DarwinC("_CTFontDescriptorGetWeight")
 public func CTFontDescriptorGetWeight(_ descriptor: UnsafeMutableRawPointer?) -> CGFloat {
     UIFontDescriptor.state(descriptor)?.effectiveWeight ?? 0
 }
@@ -258,7 +258,7 @@ public func CTFontDescriptorIsSystemUIFont(_ descriptor: UnsafeMutableRawPointer
     UIFontDescriptor.state(descriptor)?.isSystemFont ?? false
 }
 
-@c(_CTFontDescriptorGetTextStyleSize)
+@DarwinC("_CTFontDescriptorGetTextStyleSize")
 public func CTFontDescriptorGetTextStyleSize(
     _ style: UnsafeMutableRawPointer?, _ category: UnsafeMutableRawPointer?, _ options: Int32,
     _ weight: UnsafeMutablePointer<CGFloat>?, _ size: UnsafeMutablePointer<CGFloat>?
@@ -268,7 +268,7 @@ public func CTFontDescriptorGetTextStyleSize(
 
 // MARK: Fonts
 
-@c(_CTFontCreateWithFontDescriptor)
+@DarwinC("_CTFontCreateWithFontDescriptor")
 public func CTFontCreateWithFontDescriptor(_ descriptor: UnsafeMutableRawPointer?, _ size: CGFloat, _ matrix: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
     let state = UIFontDescriptor.state(descriptor)
     let pointSize = size > 0 ? size : (state.map { $0.size > 0 ? $0.size : 12 } ?? 12)
@@ -288,13 +288,13 @@ public func CTFontCopyFontDescriptor(_ object: UnsafeMutableRawPointer?) -> Unsa
     }
 }
 
-@c(_CTFontGetSize) public func CTFontGetSize(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.pointSize() ?? 0 }
-@c(_CTFontGetAscent) public func CTFontGetAscent(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.ascender() ?? 0 }
+@DarwinC("_CTFontGetSize") public func CTFontGetSize(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.pointSize() ?? 0 }
+@DarwinC("_CTFontGetAscent") public func CTFontGetAscent(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.ascender() ?? 0 }
 /// Positive, unlike UIFont's descender.
-@c(_CTFontGetDescent) public func CTFontGetDescent(_ object: UnsafeMutableRawPointer?) -> CGFloat { -(font(object)?.descender() ?? 0) }
-@c(_CTFontGetLeading) public func CTFontGetLeading(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.leading() ?? 0 }
-@c(_CTFontGetCapHeight) public func CTFontGetCapHeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.capHeight() ?? 0 }
-@c(_CTFontGetWeight) public func CTFontGetWeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.state.weight ?? 0 }
+@DarwinC("_CTFontGetDescent") public func CTFontGetDescent(_ object: UnsafeMutableRawPointer?) -> CGFloat { -(font(object)?.descender() ?? 0) }
+@DarwinC("_CTFontGetLeading") public func CTFontGetLeading(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.leading() ?? 0 }
+@DarwinC("_CTFontGetCapHeight") public func CTFontGetCapHeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.capHeight() ?? 0 }
+@DarwinC("_CTFontGetWeight") public func CTFontGetWeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.state.weight ?? 0 }
 
 @c(_CTFontGetSymbolicTraits)
 public func CTFontGetSymbolicTraits(_ object: UnsafeMutableRawPointer?) -> UInt32 {
@@ -308,7 +308,7 @@ public func CTFontIsSystemUIFont(_ object: UnsafeMutableRawPointer?) -> Bool {
 }
 
 /// Bold Text's weight for a weight: a step heavier, as UIKit's.
-@c(_CTFontGetAccessibilityBoldWeightOfWeight)
+@DarwinC("_CTFontGetAccessibilityBoldWeightOfWeight")
 public func CTFontGetAccessibilityBoldWeightOfWeight(_ weight: CGFloat) -> CGFloat { Swift.min(weight + 0.2, 0.62) }
 
 @c(_CTFontGetClippingMetrics)

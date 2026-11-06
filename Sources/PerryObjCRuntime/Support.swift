@@ -1,6 +1,40 @@
 import CPerryObjC
 import Glibc
 
+/// Sizes and offsets of the metadata that follow the process's pointer width:
+/// 8 bytes for arm64, 4 for armv7. objc_msgSend (msgsend.S, msgsend_arm.S)
+/// reads the same layouts.
+public enum Layout {
+    public static let word = MemoryLayout<UInt>.size
+    public static let is64 = word == 8
+
+    /// objc_class: isa, superclass, cache, vtable, bits.
+    public static let classSuperclass = word
+    public static let classCache = 2 * word
+    public static let classVtable = 3 * word
+
+    /// A realized class's cache points to { table, info }.
+    public static let headerInfo = word
+
+    /// A cache table is { mask, buckets of { sel, imp } }.
+    public static let bucketsOffset = word
+    public static let bucketSize = 2 * word
+    /// How a selector's address becomes a bucket index.
+    public static let hashShift: UInt = is64 ? 3 : 2
+
+    /// Clears the Swift flag bits from objc_class.bits.
+    public static let classBitsMask = ~UInt(PERRY_CLASS_BITS_FLAGS)
+
+    /// A block's invoke pointer, after isa, flags and reserved.
+    public static let blockInvoke = word + 8
+
+    /// A protocol list is a pointer-sized count, then the pointers.
+    public static func protocolEntry(_ index: Int) -> Int { word + index * word }
+
+    /// property_t, method_description, and other pairs of pointers.
+    public static let pair = 2 * word
+}
+
 /// An Objective-C object: a pointer whose first word is its class.
 public typealias ObjectPointer = UnsafeMutableRawPointer
 

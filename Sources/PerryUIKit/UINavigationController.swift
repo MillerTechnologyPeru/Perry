@@ -473,20 +473,23 @@ open class UINavigationBar: UIView {
         let font = UIFont.systemFont(size: 17), bold = UIFont.boldSystemFont(size: 17)
         guard let top = barState.items.last else { return buttons }
         var left: CGFloat = 16
-        if let back = backItem(), !top.state.hidesBackButton {
+        // Left items take the back button's place, unless they supplement
+        // it, as UIKit's do.
+        let backShown = !top.state.hidesBackButton && (top.state.leftItems.isEmpty || top.state.leftItemsSupplementBackButton)
+        if let back = backItem(), backShown {
             let title = "\u{2039} " + (back.state.backButtonTitle ?? back.state.title ?? "Back")
             let width = Text.size(title, font: font).width
             buttons.back = (title, CGRect(x: 8, y: 0, width: width, height: bounds.height))
             left = 8 + width + 16
         }
         for item in top.state.leftItems {
-            let width = Text.size(item.displayTitle, font: font).width
+            let width = item.barWidth(font: font)
             buttons.left.append((item, CGRect(x: left, y: 0, width: width, height: bounds.height)))
             left += width + 16
         }
         var right = bounds.width - 16
         for item in top.state.rightItems {
-            let width = Text.size(item.displayTitle, font: item.state.style == 2 ? bold : font).width
+            let width = item.barWidth(font: item.state.style == 2 ? bold : font)
             right -= width
             buttons.right.append((item, CGRect(x: right, y: 0, width: width, height: bounds.height)))
             right -= 16
@@ -519,8 +522,13 @@ open class UINavigationBar: UIView {
         if let back = buttons.back { Text.draw(back.title, at: CGPoint(x: back.frame.minX, y: middle(font)), font: font, color: tint) }
         for (item, frame) in buttons.left + buttons.right {
             let itemFont = item.state.style == 2 ? bold : font
-            Text.draw(item.displayTitle, at: CGPoint(x: frame.minX, y: middle(itemFont)), font: itemFont,
-                      color: item.state.enabled ? (item.state.tintColor ?? tint) : UIColor.systemGray())
+            let color = item.state.enabled ? (item.state.tintColor ?? tint) : UIColor.systemGray()
+            if let image = item.barImage {
+                let size = item.barImageSize
+                image.withTintColor(color).draw(in: CGRect(x: frame.minX, y: bounds.midY - size.height / 2, width: size.width, height: size.height))
+            } else {
+                Text.draw(item.displayTitle, at: CGPoint(x: frame.minX, y: middle(itemFont)), font: itemFont, color: color)
+            }
         }
         if let title = barState.items.last?.state.title {
             let width = Text.size(title, font: bold).width
@@ -769,6 +777,21 @@ open class UIBarButtonItem: UIBarItem {
     }
 
     /// The title shown for the item, or its system item's.
+    /// The image shown for an item without a title, in the bar.
+    var barImage: UIImage? { displayTitle.isEmpty ? state.image : nil }
+
+    /// The bar image's size: its own, at most 24 points tall.
+    var barImageSize: CGSize {
+        guard let size = barImage?.state.size, size.height > 0 else { return .zero }
+        let scale = min(1, 24 / size.height)
+        return CGSize(width: size.width * scale, height: size.height * scale)
+    }
+
+    /// How wide the item is in a bar: its image's width, else its title's.
+    func barWidth(font: UIFont) -> CGFloat {
+        barImage != nil ? barImageSize.width : Text.size(displayTitle, font: font).width
+    }
+
     var displayTitle: String {
         if let title = state.title { return title }
         let system = ["Done", "Cancel", "Edit", "Save", "+", "", "", "Compose", "Reply", "Action", "Organize", "Bookmarks",
@@ -875,6 +898,17 @@ open class UIBarButtonItem: UIBarItem {
     /// Sends the action to the target, or without one up the responder
     /// chain from the top view controller, to the first that handles it.
     func sendAction(from bar: UINavigationBar) {
+        // An item with a primary action performs it; one with a menu and no
+        // action shows the menu.
+        if let primary = state.primaryAction?.as(UIAction.self) {
+            primary.perform()
+            return
+        }
+        if state.action == nil, let menu = state.menu?.as(UIMenu.self), let navigation = bar.barState.navigationController {
+            let top = UINavigationController(objcObject: navigation, ownership: .retain).topViewController()
+            top?.unsafeCast(to: UIViewController.self).present(PerryMenuSheetController.sheet(for: menu), animated: true, completion: nil)
+            return
+        }
         guard let action = state.action else { return }
         var receiver: NSObject? = state.target.map { NSObject($0) }
         if receiver == nil, let navigation = bar.barState.navigationController {

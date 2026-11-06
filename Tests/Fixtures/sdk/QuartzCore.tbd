@@ -1,0 +1,9 @@
+--- !tapi-tbd
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/QuartzCore.framework/QuartzCore'
+current-version: 1
+exports:
+  - targets: [ armv7-ios ]
+    objc-classes: [ CAEAGLLayer, CALayer ]
+...

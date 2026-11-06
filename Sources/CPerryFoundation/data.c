@@ -25,6 +25,12 @@ void *perry_foundation_empty_dictionary(void) { return ns_dictionary0; }
 
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 
+// What @catch (NSException *) names: objc_typeinfo { vtable, name, class }.
+// NSException's class is made at startup, so the record has none, and
+// libobjc's personality routine matches it by name.
+struct perry_objc_typeinfo { const void *vtable; const char *name; void *cls; };
+const struct perry_objc_typeinfo ns_exception_ehtype DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { NULL, "NSException", NULL };
+
 perry_class_storage ns_string DARWIN_SYMBOL("_OBJC_CLASS_$_NSString");
 perry_class_storage ns_string_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSString");
 // String literals' isa. CoreFoundation exports it as an array; it is the
@@ -248,7 +254,3 @@ const double darwin_kCFCoreFoundationVersionNumber DARWIN_SYMBOL("_kCFCoreFounda
 // Foundation's version, the same: iOS 15's.
 const double darwin_NSFoundationVersionNumber DARWIN_SYMBOL("_NSFoundationVersionNumber") = 1854.0;
 
-// NSException's C++ type info, which @catch (NSException *) clauses name
-// in unwind tables: { vtable, name, class }. Perry never unwinds into a
-// @catch, so it is only bound, not read.
-void *ns_exception_ehtype[3] DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { 0, "NSException", 0 };

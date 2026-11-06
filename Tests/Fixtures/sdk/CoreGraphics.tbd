@@ -1,0 +1,22 @@
+--- !tapi-tbd
+tbd-version: 4
+targets: [ armv7-ios ]
+install-name: '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+current-version: 1
+exports:
+  - targets: [ armv7-ios ]
+    symbols: [ _CGAffineTransformConcat, _CGAffineTransformInvert,
+               _CGAffineTransformMakeRotation, _CGAffineTransformMakeScale,
+               _CGAffineTransformTranslate, _CGBitmapContextCreate,
+               _CGColorCreate, _CGColorGetAlpha, _CGColorGetComponents,
+               _CGColorRelease, _CGColorSpaceCreateDeviceRGB,
+               _CGColorSpaceRelease, _CGContextFillEllipseInRect,
+               _CGContextFillRect, _CGContextRelease, _CGContextScaleCTM,
+               _CGContextSetRGBFillColor, _CGContextTranslateCTM,
+               _CGPathAddLineToPoint, _CGPathAddRect, _CGPathCreateMutable,
+               _CGPathGetBoundingBox, _CGPathMoveToPoint, _CGPathRelease,
+               _CGPointApplyAffineTransform, _CGRectApplyAffineTransform,
+               _CGRectContainsPoint, _CGRectEqualToRect, _CGRectGetMaxY,
+               _CGRectGetMidX, _CGRectInset, _CGRectIntersection,
+               _CGRectOffset, _CGRectUnion ]
+...

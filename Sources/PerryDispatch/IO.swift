@@ -30,37 +30,44 @@ enum IO {
     /// cleanup_handler(int error), called once.
     static let cleanup: linux_dispatch_io_cleanup = { context, error in
         guard let block = context else { return }
-        ObjCRuntime.autoreleasepool {
-            typealias Handler = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
-            unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Handler.self)(block, IO.darwinError(error))
+        keepingLinuxRegisters {
+            ObjCRuntime.autoreleasepool {
+                typealias Handler = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
+                unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                    block, IO.darwinError(error))
+            }
+            Runtime.blockRelease(block)
         }
-        Runtime.blockRelease(block)
     }
 
     /// io_handler(bool done, dispatch_data_t data, int error), called until done.
     static let handler: linux_dispatch_io_handler = { context, done, data, error in
         guard let block = context else { return }
-        IO.withData(data) { data in
-            ObjCRuntime.autoreleasepool {
-                typealias Handler = @convention(c) (UnsafeMutableRawPointer, Bool, Object?, Int32) -> Void
-                unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Handler.self)(
-                    block, done, data, IO.darwinError(error))
+        keepingLinuxRegisters {
+            IO.withData(data) { data in
+                ObjCRuntime.autoreleasepool {
+                    typealias Handler = @convention(c) (UnsafeMutableRawPointer, Bool, Object?, Int32) -> Void
+                    unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                        block, done, data, IO.darwinError(error))
+                }
             }
+            if done { Runtime.blockRelease(block) }
         }
-        if done { Runtime.blockRelease(block) }
     }
 
     /// dispatch_read and dispatch_write's handler(dispatch_data_t data, int error).
     static let dataHandler: linux_dispatch_data_handler = { context, data, error in
         guard let block = context else { return }
-        IO.withData(data) { data in
-            ObjCRuntime.autoreleasepool {
-                typealias Handler = @convention(c) (UnsafeMutableRawPointer, Object?, Int32) -> Void
-                unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Handler.self)(
-                    block, data, IO.darwinError(error))
+        keepingLinuxRegisters {
+            IO.withData(data) { data in
+                ObjCRuntime.autoreleasepool {
+                    typealias Handler = @convention(c) (UnsafeMutableRawPointer, Object?, Int32) -> Void
+                    unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                        block, data, IO.darwinError(error))
+                }
             }
+            Runtime.blockRelease(block)
         }
-        Runtime.blockRelease(block)
     }
 
     static func wrap(_ linux: Object?) -> Object? {
@@ -101,15 +108,15 @@ public func dispatch_io_create_with_io(_ type: UInt, _ io: Object?, _ queue: Obj
 }
 
 @c(_dispatch_io_read)
-public func dispatch_io_read(_ channel: Object?, _ offset: Int64, _ length: Int, _ queue: Object?,
+public func dispatch_io_read(_ channel: Object?, _ offset: Int64.ObjCType, _ length: Int, _ queue: Object?,
                              _ handler: UnsafeMutableRawPointer?) {
-    linux_dispatch_io_read_f(Objects.linux(channel), offset, length, Objects.linux(queue), IO.context(handler), IO.handler)
+    linux_dispatch_io_read_f(Objects.linux(channel), Int64(objCArgument: offset), length, Objects.linux(queue), IO.context(handler), IO.handler)
 }
 
 @c(_dispatch_io_write)
-public func dispatch_io_write(_ channel: Object?, _ offset: Int64, _ data: Object?, _ queue: Object?,
+public func dispatch_io_write(_ channel: Object?, _ offset: Int64.ObjCType, _ data: Object?, _ queue: Object?,
                               _ handler: UnsafeMutableRawPointer?) {
-    linux_dispatch_io_write_f(Objects.linux(channel), offset, Objects.linux(data), Objects.linux(queue),
+    linux_dispatch_io_write_f(Objects.linux(channel), Int64(objCArgument: offset), Objects.linux(data), Objects.linux(queue),
                               IO.context(handler), IO.handler)
 }
 
@@ -125,7 +132,9 @@ public func dispatch_io_barrier(_ channel: Object?, _ barrier: UnsafeMutableRawP
 
 @c(_dispatch_io_barrier_f)
 public func dispatch_io_barrier_f(_ channel: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
-    linux_dispatch_io_barrier_f(Objects.linux(channel), context, work)
+    guard let work else { dispatchFatal("dispatch_io_barrier_f called with a NULL function") }
+    let (call, run) = Blocks.pooled(context, work)
+    linux_dispatch_io_barrier_f(Objects.linux(channel), call, run)
 }
 
 @c(_dispatch_io_get_descriptor)
@@ -144,8 +153,8 @@ public func dispatch_io_set_low_water(_ channel: Object?, _ lowWater: Int) {
 }
 
 @c(_dispatch_io_set_interval)
-public func dispatch_io_set_interval(_ channel: Object?, _ interval: UInt64, _ flags: UInt) {
-    linux_dispatch_io_set_interval(Objects.linux(channel), interval, flags)
+public func dispatch_io_set_interval(_ channel: Object?, _ interval: UInt64.ObjCType, _ flags: UInt) {
+    linux_dispatch_io_set_interval(Objects.linux(channel), UInt64(objCArgument: interval), flags)
 }
 
 // MARK: - Whole reads and writes

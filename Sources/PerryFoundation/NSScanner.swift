@@ -265,10 +265,10 @@ public final class NSScanner: NSObject {
     func scanHexLongLong(_ value: UnsafeMutablePointer<UInt64>?) -> Bool { Scanners.store(value, hex()) }
 
     @ObjCMethod("scanHexDouble:")
-    func scanHexDouble(_ value: UnsafeMutablePointer<Double>?) -> Bool { Scanners.store(value, hex().map(Double.init)) }
+    func scanHexDouble(_ value: UnsafeMutablePointer<Double>?) -> Bool { Scanners.store(value, hex().map { Double($0) }) }
 
     @ObjCMethod("scanHexFloat:")
-    func scanHexFloat(_ value: UnsafeMutablePointer<Float>?) -> Bool { Scanners.store(value, hex().map(Float.init)) }
+    func scanHexFloat(_ value: UnsafeMutablePointer<Float>?) -> Bool { Scanners.store(value, hex().map { Float($0) }) }
 
     // MARK: Strings
 

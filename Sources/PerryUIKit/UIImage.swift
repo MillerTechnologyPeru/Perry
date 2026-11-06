@@ -105,14 +105,15 @@ open class UIImage: NSObject {
         return self
     }
 
+    /// No path gives no image, as for the others that take a name or path.
     @ObjCClassMethod("imageWithContentsOfFile:")
-    static func image(_ cls: ObjCClass, contentsOfFile path: String) -> UIImage? {
-        load(path).map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
+    static func image(_ cls: ObjCClass, contentsOfFile path: String?) -> UIImage? {
+        path.flatMap(load).map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
     }
 
     @ObjCMethod("initWithContentsOfFile:")
-    func initialize(contentsOfFile path: String) -> Self? {
-        guard let loaded = UIImage.load(path) else { return nil }
+    func initialize(contentsOfFile path: String?) -> Self? {
+        guard let loaded = path.flatMap(UIImage.load) else { return nil }
         state.set(loaded.image.object, scale: loaded.scale, orientation: 0)
         return self
     }
@@ -121,7 +122,9 @@ open class UIImage: NSObject {
     /// there is one, else the next larger, else the smaller; else the
     /// asset catalog's.
     @ObjCClassMethod("imageNamed:")
-    static func image(_ cls: ObjCClass, named name: String) -> UIImage? { image(cls, named: name, in: NSBundle.main(), catalog: true) }
+    static func image(_ cls: ObjCClass, named name: String?) -> UIImage? {
+        name.flatMap { image(cls, named: $0, in: NSBundle.main(), catalog: true) }
+    }
 
     /// The named image's file in `bundle`, else the bundle's asset
     /// catalog's.
@@ -143,13 +146,14 @@ open class UIImage: NSObject {
     /// In the bundle given, the main bundle when none is; the catalog's
     /// image for the dark appearance when the traits are dark.
     @ObjCClassMethod("imageNamed:inBundle:compatibleWithTraitCollection:")
-    static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIImage? {
+    static func image(_ cls: ObjCClass, named name: String?, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIImage? {
+        guard let name else { return nil }
         let dark = traits?.as(UITraitCollection.self)?.traits.style == 2
         return image(cls, named: name, in: bundle?.as(NSBundle.self) ?? NSBundle.main(), catalog: true, dark: dark)
     }
 
     @ObjCClassMethod("imageNamed:inBundle:withConfiguration:")
-    static func image(_ cls: ObjCClass, named name: String, in bundle: NSObject?, configuration: NSObject?) -> UIImage? {
+    static func image(_ cls: ObjCClass, named name: String?, in bundle: NSObject?, configuration: NSObject?) -> UIImage? {
         image(cls, named: name, in: bundle, compatibleWith: nil)
     }
 
@@ -261,7 +265,17 @@ open class UIImage: NSObject {
         CG.fillRect(context, rect)
         guard let tinted = CG.bitmapContextCreateImage(context) else { return self }
         defer { CG.release(tinted) }
-        return UIImage.make(objCClass, cgImage: tinted, scale: state.scale)
+        let image = UIImage.make(objCClass, cgImage: tinted, scale: state.scale)
+        image.state.renderingMode = 1
+        return image
+    }
+
+    /// The image drawn in `color`, with a rendering mode.
+    @ObjCMethod("imageWithTintColor:renderingMode:")
+    func withTintColor(_ color: UIColor, renderingMode: Int) -> UIImage {
+        let image = withTintColor(color)
+        image.state.renderingMode = renderingMode
+        return image
     }
 
     // MARK: Drawing
@@ -307,11 +321,11 @@ public func UIImagePNGRepresentation(_ image: UnsafeMutableRawPointer?) -> Unsaf
 }
 
 /// The image as JPEG data, at a quality from 0 to 1.
-@c(_UIImageJPEGRepresentation)
+@DarwinC("_UIImageJPEGRepresentation")
 public func UIImageJPEGRepresentation(_ image: UnsafeMutableRawPointer?, _ quality: CGFloat) -> UnsafeMutableRawPointer? {
     guard let image, let cgImage = UIImage.states[image].cgImage else { return nil }
     let properties = NSMutableDictionary.empty()
-    properties.set(NSNumber.make(double: quality), forKey: "kCGImageDestinationLossyCompressionQuality")
+    properties.set(NSNumber.make(double: Double(quality)), forKey: "kCGImageDestinationLossyCompressionQuality")
     return UIImage.encode(cgImage, type: "public.jpeg", properties: properties)?.objCReturnValue()
 }
 

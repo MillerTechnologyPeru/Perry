@@ -170,17 +170,20 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define LIBOBJC "/usr/lib/libobjc.A.dylib"
 #define CFNETWORK "/System/Library/Frameworks/CFNetwork.framework/CFNetwork"
 #define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
+#define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
-// queue, and UIKit's views are backed by QuartzCore's layers. Loading them
-// while binding gives them their startup too.
+// queue, CoreGraphics' objects are CoreFoundation's (Foundation's provider),
+// and UIKit's views are backed by QuartzCore's layers. Loading them while
+// binding gives them their startup too.
 static const struct {
     const char *short_name;
     const char *install_name;
 } provider_links[] = {
     {"dispatch", LIBOBJC},
     {"Foundation", LIBDISPATCH},
+    {"CoreGraphics", COREFOUNDATION},
     {"UIKit", QUARTZCORE},
 };
 
@@ -208,6 +211,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /usr/lib/libSystem.B.dylib                           -> System
 //   /usr/lib/system/libsystem_c.dylib                    -> System
 //   /usr/lib/libc++.1.dylib, /usr/lib/libc++abi.dylib     -> CXX
+//   /usr/lib/libstdc++.6.dylib                           -> StdCXX
 //   /System/Library/Frameworks/UIKit.framework/UIKit     -> UIKit
 //   …/CoreFoundation.framework/CoreFoundation             -> Foundation
 //   /usr/lib/system/libdispatch.dylib                    -> dispatch
@@ -237,9 +241,26 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Foundation");
         return true;
     }
+    // The compiler's runtime, whose arithmetic helpers armv6 code calls, and
+    // the operators new and delete programs built with GCC take from
+    // libstdc++: both are libSystem's provider's.
+    if (strncmp(install_name, "/usr/lib/libgcc_s.", 18) == 0 || strncmp(install_name, "/usr/lib/libstdc++.", 19) == 0) {
+        snprintf(out, out_size, "System");
+        return true;
+    }
+    // CoreAudio has the types AudioToolbox's functions take.
+    if (strstr(install_name, "/CoreAudio.framework/")) {
+        snprintf(out, out_size, "AudioToolbox");
+        return true;
+    }
     // libc++ and libc++abi are one provider.
     if (strncmp(install_name, "/usr/lib/libc++", 15) == 0) {
         snprintf(out, out_size, "CXX");
+        return true;
+    }
+    // GNU's libstdc++, which apps built before libc++ link.
+    if (strncmp(install_name, "/usr/lib/libstdc++", 18) == 0) {
+        snprintf(out, out_size, "StdCXX");
         return true;
     }
     // MobileCoreServices' (and macOS CoreServices') UTType functions live
@@ -273,8 +294,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "AppKit");
         return true;
     }
-    // AVFAudio's classes are AVFoundation's, which re-exports them.
-    if (strstr(install_name, "/AVFAudio.framework/")) {
+    // AVFAudio's classes are AVFoundation's, which re-exports them; and
+    // AVFoundation's provider has the times of CoreMedia, the pixel buffers
+    // of CoreVideo and the audio taps of MediaToolbox that its players and
+    // video outputs hand out.
+    if (strstr(install_name, "/AVFAudio.framework/") || strstr(install_name, "/CoreMedia.framework/") ||
+        strstr(install_name, "/CoreVideo.framework/") || strstr(install_name, "/MediaToolbox.framework/")) {
         snprintf(out, out_size, "AVFoundation");
         return true;
     }
@@ -515,12 +540,23 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     uint32_t *code = (uint32_t *)(current_page.base + current_page.used);
     current_page.used += STUB_SIZE;
 
+#if defined(__LP64__)
     code[0] = 0x58000080;   // ldr x0, #16    (description)
     code[1] = 0x580000b0;   // ldr x16, #20   (handler)
     code[2] = 0xd61f0200;   // br x16
     code[3] = 0xd503201f;   // nop
     *(uint64_t *)&code[4] = (uint64_t)(uintptr_t)strdup(description);
     *(uint64_t *)&code[6] = (uint64_t)(uintptr_t)&perry_unimplemented;
+#else
+    // ARM state, so the stub's address has no Thumb bit; callers reach it by
+    // blx or bx, which switch to ARM state by that bit.
+    code[0] = 0xe59f0008;   // ldr r0, [pc, #8]   (description, at +16)
+    code[1] = 0xe59ff008;   // ldr pc, [pc, #8]   (handler, at +20)
+    code[2] = 0xe320f000;   // nop
+    code[3] = 0xe320f000;   // nop
+    code[4] = (uint32_t)(uintptr_t)strdup(description);
+    code[5] = (uint32_t)(uintptr_t)&perry_unimplemented;
+#endif
     __builtin___clear_cache((char *)code, (char *)code + STUB_SIZE);
     if (!current_page.writable_exec)
         mprotect(current_page.base, current_page.size, PROT_READ | PROT_EXEC);
@@ -528,6 +564,61 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     *slot = code;
     return code;
 }
+
+// MARK: - Aligned entries
+
+#if defined(__arm__)
+void perry_align_call(void);
+
+// Functions that keep or use their caller's frame, which a call through
+// perry_align_call would put a frame of its own under: setjmp returns a
+// second time, after that frame is gone.
+static bool keeps_callers_frame(const char *name) {
+    static const char *const names[] = {
+        "_setjmp", "__setjmp", "_sigsetjmp", "_vfork", "_getcontext", "_swapcontext", "_alloca",
+        "__Unwind_SjLj_Register", "__Unwind_SjLj_Unregister",
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (strcmp(names[i], name) == 0)
+            return true;
+    return false;
+}
+
+// What an image's lazy pointer to `function` holds: an entry that calls it
+// through perry_align_call, which aligns the stack 32-bit Darwin code calls
+// with. One entry a function, so its address compares as one.
+void *perry_aligned_entry(void *function, const char *name) {
+    static hash_table entries;
+    static uint32_t *page;
+    static size_t used;
+    enum { ENTRY_WORDS = 4, PAGE_SIZE = 0x10000 };
+    if (!function || keeps_callers_frame(name))
+        return function;
+    char key[24];
+    snprintf(key, sizeof(key), "%p", function);
+    void **slot = hash_lookup_string(&entries, key, true);
+    if (*slot)
+        return *slot;
+    if (!page || used + ENTRY_WORDS * 4 > PAGE_SIZE) {
+        page = mmap(NULL, PAGE_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (page == MAP_FAILED) {
+            // A host that refuses writable code: the function itself.
+            page = NULL;
+            return function;
+        }
+        used = 0;
+    }
+    uint32_t *code = (uint32_t *)((uint8_t *)page + used);
+    used += ENTRY_WORDS * 4;
+    code[0] = 0xe59fc000;   // ldr r12, [pc]      (the function, at +8)
+    code[1] = 0xe59ff000;   // ldr pc, [pc]       (perry_align_call, at +12)
+    code[2] = (uint32_t)(uintptr_t)function;
+    code[3] = (uint32_t)(uintptr_t)&perry_align_call;
+    __builtin___clear_cache((char *)code, (char *)code + ENTRY_WORDS * 4);
+    *slot = code;
+    return code;
+}
+#endif
 
 // MARK: - Import records
 

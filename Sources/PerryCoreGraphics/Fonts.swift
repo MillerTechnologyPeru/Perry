@@ -83,7 +83,7 @@ enum Fonts {
     static func state(_ font: Ref?) -> FontState? { CGFontObject.states[font] }
 
     static func rect(_ x: Int, _ y: Int, _ width: Int, _ height: Int) -> CGRect {
-        CGRect(origin: CGPoint(x: Double(x), y: Double(y)), size: CGSize(width: Double(width), height: Double(height)))
+        CGRect(origin: CGPoint(x: CGFloat(x), y: CGFloat(y)), size: CGSize(width: CGFloat(width), height: CGFloat(height)))
     }
 
     /// Where fonts made from data are written for FreeType to open.
@@ -156,7 +156,7 @@ public func CGFontCopyPostScriptName(_ font: Ref?) -> Ref? {
 @c(_CGFontGetXHeight) public func CGFontGetXHeight(_ font: Ref?) -> Int32 { Int32(Fonts.state(font)?.scaled.xHeight ?? 0) }
 @c(_CGFontGetNumberOfGlyphs) public func CGFontGetNumberOfGlyphs(_ font: Ref?) -> Int { Fonts.state(font)?.scaled.glyphCount ?? 0 }
 
-@c(_CGFontGetFontBBox)
+@DarwinC("_CGFontGetFontBBox")
 public func CGFontGetFontBBox(_ font: Ref?) -> CGRect {
     guard let box = Fonts.state(font)?.scaled.fontBBox else { return Fonts.rect(0, 0, 0, 0) }
     return Fonts.rect(box.x, box.y, box.width, box.height)
@@ -205,8 +205,8 @@ public func CGContextShowGlyphs(_ context: Ref?, _ glyphs: UnsafePointer<UInt16>
     Contexts.paint(context) { $0.showGlyphs(indexes) }
 }
 
-@c(_CGContextShowGlyphsAtPoint)
-public func CGContextShowGlyphsAtPoint(_ context: Ref?, _ x: Double, _ y: Double, _ glyphs: UnsafePointer<UInt16>?, _ count: Int) {
+@DarwinC("_CGContextShowGlyphsAtPoint")
+public func CGContextShowGlyphsAtPoint(_ context: Ref?, _ x: CGFloat, _ y: CGFloat, _ glyphs: UnsafePointer<UInt16>?, _ count: Int) {
     CGContextSetTextPosition(context, x, y)
     CGContextShowGlyphs(context, glyphs, count)
 }
@@ -233,7 +233,7 @@ public func CGContextShowGlyphsAtPositions(_ context: Ref?, _ glyphs: UnsafePoin
 
 /// An image from PNG data; the decode array and interpolation are not used.
 @c(_CGImageCreateWithPNGDataProvider)
-public func CGImageCreateWithPNGDataProvider(_ provider: Ref?, _ decode: UnsafePointer<Double>?, _ interpolate: Bool, _ intent: Int32) -> Ref? {
+public func CGImageCreateWithPNGDataProvider(_ provider: Ref?, _ decode: UnsafePointer<CGFloat>?, _ interpolate: Bool, _ intent: Int32) -> Ref? {
     guard let source = CGImageSourceCreateWithDataProvider(provider, nil) else { return nil }
     defer { ObjCRuntime.release(source) }
     return CGImageSourceCreateImageAtIndex(source, 0, nil)
@@ -241,6 +241,6 @@ public func CGImageCreateWithPNGDataProvider(_ provider: Ref?, _ decode: UnsafeP
 
 /// An image from JPEG data.
 @c(_CGImageCreateWithJPEGDataProvider)
-public func CGImageCreateWithJPEGDataProvider(_ provider: Ref?, _ decode: UnsafePointer<Double>?, _ interpolate: Bool, _ intent: Int32) -> Ref? {
+public func CGImageCreateWithJPEGDataProvider(_ provider: Ref?, _ decode: UnsafePointer<CGFloat>?, _ interpolate: Bool, _ intent: Int32) -> Ref? {
     CGImageCreateWithPNGDataProvider(provider, decode, interpolate, intent)
 }

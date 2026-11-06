@@ -118,12 +118,12 @@ public final class ClassInfo {
         let table = perry_load_acquire(cacheSlot)!
         let mask = table.load(as: UInt.self)
         let key = UInt(bitPattern: selector)
-        var index = (key >> 3) & mask
+        var index = (key >> Layout.hashShift) & mask
         while true {
-            let bucket = table + 8 + Int(index) * 16
+            let bucket = table + Layout.bucketsOffset + Int(index) * Layout.bucketSize
             let sel = bucket.load(as: UInt.self)
             if sel == key {
-                return IMP(bitPattern: bucket.load(fromByteOffset: 8, as: UInt.self))
+                return IMP(bitPattern: bucket.load(fromByteOffset: Layout.word, as: UInt.self))
             }
             if sel == 0 {
                 return nil
@@ -142,15 +142,16 @@ public final class ClassInfo {
         let isEmpty = table == Runtime.emptyTable
         if isEmpty || (cacheCount + 1) * 4 > Int(mask + 1) * 3 {
             let capacity = isEmpty ? 8 : Int(mask + 1) * 2
-            let grown = UnsafeMutableRawPointer.allocate(byteCount: 8 + capacity * 16, alignment: 16)
-            memset(grown, 0, 8 + capacity * 16)
+            let tableSize = Layout.bucketsOffset + capacity * Layout.bucketSize
+            let grown = UnsafeMutableRawPointer.allocate(byteCount: tableSize, alignment: 16)
+            memset(grown, 0, tableSize)
             grown.storeBytes(of: UInt(capacity - 1), as: UInt.self)
             var count = 0
             if !isEmpty {
                 for index in 0...Int(mask) {
-                    let bucket = table + 8 + index * 16
+                    let bucket = table + Layout.bucketsOffset + index * Layout.bucketSize
                     let sel = bucket.load(as: UInt.self)
-                    let oldIMP = bucket.load(fromByteOffset: 8, as: UInt.self)
+                    let oldIMP = bucket.load(fromByteOffset: Layout.word, as: UInt.self)
                     if sel != 0 && oldIMP != 0 {
                         Self.place(sel, oldIMP, in: grown, mask: UInt(capacity - 1))
                         count += 1
@@ -163,15 +164,15 @@ public final class ClassInfo {
             cacheCount = count
         }
         let key = UInt(bitPattern: selector)
-        var index = (key >> 3) & mask
+        var index = (key >> Layout.hashShift) & mask
         while true {
-            let bucket = table + 8 + Int(index) * 16
+            let bucket = table + Layout.bucketsOffset + Int(index) * Layout.bucketSize
             let sel = bucket.load(as: UInt.self)
             if sel == key {
                 return
             }
             if sel == 0 {
-                bucket.storeBytes(of: UInt(bitPattern: imp), toByteOffset: 8, as: UInt.self)
+                bucket.storeBytes(of: UInt(bitPattern: imp), toByteOffset: Layout.word, as: UInt.self)
                 perry_release_fence()
                 bucket.storeBytes(of: key, as: UInt.self)
                 cacheCount += 1
@@ -182,12 +183,13 @@ public final class ClassInfo {
     }
 
     private static func place(_ sel: UInt, _ imp: UInt, in table: UnsafeMutableRawPointer, mask: UInt) {
-        var index = (sel >> 3) & mask
-        while table.load(fromByteOffset: 8 + Int(index) * 16, as: UInt.self) != 0 {
+        var index = (sel >> Layout.hashShift) & mask
+        let origin = Layout.bucketsOffset
+        while table.load(fromByteOffset: origin + Int(index) * Layout.bucketSize, as: UInt.self) != 0 {
             index = (index + 1) & mask
         }
-        table.storeBytes(of: sel, toByteOffset: 8 + Int(index) * 16, as: UInt.self)
-        table.storeBytes(of: imp, toByteOffset: 16 + Int(index) * 16, as: UInt.self)
+        table.storeBytes(of: sel, toByteOffset: origin + Int(index) * Layout.bucketSize, as: UInt.self)
+        table.storeBytes(of: imp, toByteOffset: origin + Int(index) * Layout.bucketSize + Layout.word, as: UInt.self)
     }
 
     /// Empties the cache. Called with the runtime lock held.

@@ -91,12 +91,14 @@ open class ObjCProtocolObject: NSObject {
 
 /// An optional method's result as an Optional: a scalar is always present
 /// once the method ran.
-public func objCOptionalResult<Value: ObjCValue>(_ value: Value.ObjCType, as type: Value.Type, owned: Bool) -> Value? {
-    owned ? Value.objCValue(owned: value) : Value.objCValue(returnValue: value)
+public func objCOptionalResult<Value: ObjCValue>(_ result: Value.ObjCResultType, as type: Value.Type, owned: Bool) -> Value? {
+    let value = Value.objCArgumentForm(ofResult: result)
+    return owned ? Value.objCValue(owned: value) : Value.objCValue(returnValue: value)
 }
 
 /// An object result is nil when the method returned nil.
-public func objCOptionalResult<Value: ObjCNullable>(_ value: Value.ObjCType, as type: Value.Type, owned: Bool) -> Value? {
+public func objCOptionalResult<Value: ObjCNullable>(_ result: Value.ObjCResultType, as type: Value.Type, owned: Bool) -> Value? {
+    let value = Value.objCArgumentForm(ofResult: result)
     if Value.objCIsNil(value) { return nil }
     return owned ? Value.objCValue(owned: value) : Value.objCValue(returnValue: value)
 }

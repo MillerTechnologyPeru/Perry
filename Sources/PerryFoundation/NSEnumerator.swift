@@ -24,9 +24,11 @@ public class NSEnumerator: NSObject {
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         guard let state, let objects, count > 0, let next = ObjC.send(objcObject, ObjC.selector("nextObject")) else { return 0 }
         objects[0] = next
-        state.storeBytes(of: UnsafeMutableRawPointer(objects), toByteOffset: 8, as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(objects), toByteOffset: DarwinLayout.enumerationItems,
+                         as: UnsafeMutableRawPointer.self)
         // The mutation pointer must point somewhere that does not change.
-        state.storeBytes(of: UnsafeMutableRawPointer(state), toByteOffset: 16, as: UnsafeMutableRawPointer.self)
+        state.storeBytes(of: UnsafeMutableRawPointer(state), toByteOffset: DarwinLayout.enumerationMutations,
+                         as: UnsafeMutableRawPointer.self)
         return 1
     }
 }
@@ -89,6 +91,15 @@ extension NSDictionary {
         let sorted = entries.sorted { compare(comparator.object, $0.value, $1.value) < 0 }.map(\.key)
         return NSArray(objcObject: Arrays.autoreleased(sorted), ownership: .retain)
     }
+
+    /// The keys in the order of their values, each compared with the next
+    /// by sending it `selector`.
+    @ObjCMethod("keysSortedByValueUsingSelector:")
+    func keysSortedByValue(using selector: ObjCSelector) -> NSArray {
+        let sel = selector.pointer.assumingMemoryBound(to: CChar.self)
+        let sorted = entries.sorted { ObjC.sendInt($0.value, sel, $1.value) < 0 }.map(\.key)
+        return NSArray(objcObject: Arrays.autoreleased(sorted), ownership: .retain)
+    }
 }
 
 @ObjCCategory("Enumerators")
@@ -97,5 +108,18 @@ extension NSSet {
     func setObjectEnumerator() -> ObjCObject {
         let all = ObjC.send(objcObject, ObjC.selector("allObjects")).map { Arrays.elements($0) } ?? []
         return Enumerators.make(all)
+    }
+
+    /// Each member is sent the message, in no particular order.
+    @ObjCMethod("makeObjectsPerformSelector:")
+    func setMakeObjectsPerform(_ selector: ObjCSelector) {
+        let all = ObjC.send(objcObject, ObjC.selector("allObjects")).map { Arrays.elements($0) } ?? []
+        for element in all { _ = ObjC.send(element, selector.pointer.assumingMemoryBound(to: CChar.self)) }
+    }
+
+    @ObjCMethod("makeObjectsPerformSelector:withObject:")
+    func setMakeObjectsPerform(_ selector: ObjCSelector, with argument: ObjCObject?) {
+        let all = ObjC.send(objcObject, ObjC.selector("allObjects")).map { Arrays.elements($0) } ?? []
+        for element in all { _ = ObjC.send(element, selector.pointer.assumingMemoryBound(to: CChar.self), argument?.id) }
     }
 }

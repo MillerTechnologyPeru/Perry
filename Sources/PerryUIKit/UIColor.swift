@@ -158,13 +158,35 @@ open class UIColor: NSObject {
         return self
     }
 
-    /// Asset catalogs' colors aren't read yet: there is no color by any
-    /// name.
+    /// The main bundle's asset catalog's color of that name, in the light
+    /// appearance.
     @ObjCClassMethod("colorNamed:")
-    static func color(_ cls: ObjCClass, named name: String) -> UIColor? { nil }
+    static func color(_ cls: ObjCClass, named name: String) -> UIColor? {
+        catalogColor(cls, AssetCatalog.color(named: name))
+    }
 
+    /// A bundle's asset catalog's color of that name, in the traits'
+    /// appearance.
     @ObjCClassMethod("colorNamed:inBundle:compatibleWithTraitCollection:")
-    static func color(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIColor? { nil }
+    static func color(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIColor? {
+        let dark = traits?.as(UITraitCollection.self)?.traits.style == 2
+        guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else {
+            return catalogColor(cls, AssetCatalog.color(named: name, dark: dark))
+        }
+        return catalogColor(cls, AssetCatalog.catalog(in: bundle)?.color(named: name, dark: dark))
+    }
+
+    /// A color of a catalog's components: white and alpha, or red, green,
+    /// blue and alpha.
+    private static func catalogColor(_ cls: ObjCClass, _ components: [CGFloat]?) -> UIColor? {
+        guard let components else { return nil }
+        switch components.count {
+        case 1, 2: return make(cls) { $0.set(white: components[0], alpha: components.count > 1 ? components[1] : 1) }
+        case 3, 4, 5:
+            return make(cls) { $0.set(red: components[0], green: components[1], blue: components[2], alpha: components.count > 3 ? components[3] : 1) }
+        default: return nil
+        }
+    }
 
     /// Display P3 is taken as sRGB.
     @ObjCClassMethod("colorWithDisplayP3Red:green:blue:alpha:")
@@ -185,7 +207,7 @@ open class UIColor: NSObject {
                 return self
             }
         }
-        let alpha = decoded.has("UIAlpha") ? decoded.double("UIAlpha") : 1
+        let alpha: CGFloat = decoded.has("UIAlpha") ? decoded.double("UIAlpha") : 1
         if decoded.integer("UIColorComponentCount") == 2 || (decoded.has("UIWhite") && !decoded.has("UIRed")) {
             state.set(white: decoded.double("UIWhite"), alpha: alpha)
         } else {
