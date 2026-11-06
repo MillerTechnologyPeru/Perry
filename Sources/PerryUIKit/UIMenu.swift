@@ -62,6 +62,14 @@ open class UIAction: UIMenuElement {
         make(cls) { ($0.title, $0.image, $0.identifier, $0.handler) = (title, image, identifier, handler) }
     }
 
+    /// The initializer Swift's UIAction(title:…handler:) is made by.
+    @ObjCMethod("initWithPerryTitle:image:identifier:handler:")
+    func initialize(title: String, image: UIImage?, identifier: String?, handler: ObjCBlock?) -> Self {
+        let element = element
+        (element.title, element.image, element.identifier, element.handler) = (title, image, identifier, handler)
+        return self
+    }
+
     @ObjCMethod("identifier") func identifier() -> String { element.identifier ?? "" }
     @ObjCMethod("discoverabilityTitle") func discoverabilityTitle() -> String? { element.discoverabilityTitle }
     @ObjCMethod("setDiscoverabilityTitle:") func setDiscoverabilityTitle(_ title: String?) { element.discoverabilityTitle = title }
@@ -88,6 +96,15 @@ open class UIMenu: UIMenuElement {
     @ObjCClassMethod("menuWithTitle:image:identifier:options:children:")
     static func menu(_ cls: ObjCClass, title: String, image: UIImage?, identifier: String?, options: UInt, children: NSArray) -> UIMenuElement {
         make(cls) { ($0.title, $0.image, $0.identifier, $0.options, $0.children) = (title, image, identifier, options, children.elements) }
+    }
+
+    /// The initializer Swift's UIMenu(title:…children:) is made by.
+    @ObjCMethod("initWithPerryTitle:image:identifier:options:children:")
+    func initialize(title: String, image: UIImage?, identifier: String?, options: UInt, children: NSArray) -> Self {
+        let element = element
+        (element.title, element.image, element.identifier, element.options, element.children) =
+            (title, image, identifier, options, children.elements)
+        return self
     }
 
     @ObjCMethod("identifier") func identifier() -> String { element.identifier ?? "" }
