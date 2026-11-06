@@ -1,3 +1,4 @@
+import Glibc
 import CPerryGeometry
 import PerryAssetCatalog
 import PerryObjCInterop
@@ -41,4 +42,13 @@ enum AppKitAssets {
         guard let image else { return nil }
         return (image, CGSize(width: CGFloat(pixels.width) / scale, height: CGFloat(pixels.height) / scale))
     }
+
+    /// A PNG Scripts/extract-assets.sh decoded on a Mac for a rendition
+    /// Perry can't decode (vector and deepmap ones), and its scale.
+    static func extractedImage(named name: String) -> (path: String, scale: Int)? {
+        main?.extractedImageFiles(named: name, dark: Appearances.currentIsDark, screenScale: 2)
+            .first { access($0.path, R_OK) == 0 }
+    }
+
+    static func isTemplate(named name: String) -> Bool { main?.isTemplate(named: name) ?? false }
 }
