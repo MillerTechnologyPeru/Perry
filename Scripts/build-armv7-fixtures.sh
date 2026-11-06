@@ -59,6 +59,8 @@ stub libobjc /usr/lib/libobjc.A.dylib _objc_msgSend_stret _objc_msgSendSuper2_st
 stub Foundation /System/Library/Frameworks/Foundation.framework/Foundation
 stub CoreGraphics /System/Library/Frameworks/CoreGraphics.framework/CoreGraphics
 stub UIKit /System/Library/Frameworks/UIKit.framework/UIKit
+stub OpenGLES /System/Library/Frameworks/OpenGLES.framework/OpenGLES
+stub QuartzCore /System/Library/Frameworks/QuartzCore.framework/QuartzCore
 
 fixtures=${*:-hello.c}
 for file in $fixtures; do
@@ -68,6 +70,8 @@ for file in $fixtures; do
         libs="$out/libSystem/libSystem.dylib $out/libobjc/libobjc.dylib"
         grep -q NSString "$root/Tests/Fixtures/$file" && libs="$libs $out/Foundation/Foundation.dylib"
         grep -q UIView "$root/Tests/Fixtures/$file" && libs="$libs $out/UIKit/UIKit.dylib"
+        grep -q EAGLContext "$root/Tests/Fixtures/$file" &&
+            libs="$libs $out/OpenGLES/OpenGLES.dylib $out/QuartzCore/QuartzCore.dylib"
         grep -q -E "CGContext|CGAffineTransformMake" "$root/Tests/Fixtures/$file" &&
             libs="$libs $out/CoreGraphics/CoreGraphics.dylib" ;;
     *) flags=""; libs="$out/libSystem/libSystem.dylib"
