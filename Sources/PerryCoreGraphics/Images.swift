@@ -210,6 +210,9 @@ enum ColorSpaces {
 /// Color space names.
 @ObjCConstants
 enum ColorSpaceNames {
+    static let kCGColorWhite = "kCGColorWhite"
+    static let kCGColorBlack = "kCGColorBlack"
+    static let kCGColorClear = "kCGColorClear"
     static let kCGColorSpaceSRGB = "kCGColorSpaceSRGB"
     static let kCGColorSpaceLinearDisplayP3 = "kCGColorSpaceLinearDisplayP3"
     static let kCGColorSpaceExtendedLinearDisplayP3 = "kCGColorSpaceExtendedLinearDisplayP3"
@@ -335,6 +338,26 @@ public func CGColorCreateGenericGray(_ gray: CGFloat, _ a: CGFloat) -> Ref {
     let space = CGColorSpaceCreateDeviceGray()
     defer { ObjCRuntime.release(space) }
     return Colors.make(space, [Double(gray), Double(a)])
+}
+
+/// The constant colors by name, kCGColorWhite, kCGColorBlack and
+/// kCGColorClear, made once.
+nonisolated(unsafe) private var constantColors: [String: Ref] = [:]
+
+@c(_CGColorGetConstantColor)
+public func CGColorGetConstantColor(_ name: UnsafeMutableRawPointer?) -> Ref? {
+    guard let name else { return nil }
+    let key = String(objCArgument: name)
+    if let color = constantColors[key] { return color }
+    let color: Ref
+    switch key {
+    case "kCGColorWhite": color = CGColorCreateGenericGray(1, 1)
+    case "kCGColorBlack": color = CGColorCreateGenericGray(0, 1)
+    case "kCGColorClear": color = CGColorCreateGenericGray(0, 0)
+    default: return nil
+    }
+    constantColors[key] = color
+    return color
 }
 
 @DarwinC("_CGColorCreateCopyWithAlpha")
