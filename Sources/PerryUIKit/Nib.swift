@@ -436,12 +436,17 @@ enum Nibs {
         let all = list(unarchiving.value("UINibObjectsKey"), unarchiving, decoder)
         let topLevel = list(unarchiving.value("UINibTopLevelObjectsKey"), unarchiving, decoder)
         let connections = list(unarchiving.value("UINibConnectionsKey"), unarchiving, decoder)
+        let visibleWindows = list(unarchiving.value("UINibVisibleWindowsKey"), unarchiving, decoder)
         unarchiving.stack.removeLast()
         for connection in connections where connection.responds(to: "connect") { connection.sendConnect() }
         let placeholders = Set([owner?.objcObject].compactMap { $0 } + external.values.map(\.objcObject))
         for object in all where !placeholders.contains(object.objcObject) && !object.isProxyClass && object.responds(to: "awakeFromNib") {
             object.sendAwakeFromNib()
         }
+        // The windows Interface Builder marked "Visible at Launch" show
+        // once the nib's objects are awake: a program with such a window
+        // does not show it itself.
+        for window in visibleWindows where window.responds(to: "makeKeyAndVisible") { window.sendMakeKeyAndVisible() }
         return topLevel.filter { !placeholders.contains($0.objcObject) && !$0.isProxyClass }
     }
 
@@ -487,6 +492,7 @@ extension NSObject {
     @ObjCMethod("initWithCoder:") func sendInitWithCoder(_ coder: NSObject) -> NSObject
     @ObjCMethod("init") func initialized() -> NSObject
     @ObjCMethod("awakeFromNib") func sendAwakeFromNib()
+    @ObjCMethod("makeKeyAndVisible") func sendMakeKeyAndVisible()
     @ObjCMethod("connect") func sendConnect()
     @ObjCMethod("mutableCopy") func mutableCopied() -> NSObject
     @ObjCMethod("setValue:forKey:") func sendSetValue(_ value: NSObject?, forKey key: String)
