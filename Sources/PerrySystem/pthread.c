@@ -873,6 +873,22 @@ int darwin_pthread_attr_setinheritsched(pthread_attr_t *attributes, int inherit)
     return inherit == 1 || inherit == 2 ? 0 : 22;
 }
 
+// The getters answer Darwin's defaults: PTHREAD_INHERIT_SCHED (1) and
+// SCHED_OTHER (1).
+int darwin_pthread_attr_getinheritsched(const pthread_attr_t *attributes, int *inherit) DARWIN_SYMBOL(pthread_attr_getinheritsched);
+int darwin_pthread_attr_getinheritsched(const pthread_attr_t *attributes, int *inherit) {
+    if (!attributes || !inherit) return 22;
+    *inherit = 1;
+    return 0;
+}
+
+int darwin_pthread_attr_getschedpolicy(const pthread_attr_t *attributes, int *policy) DARWIN_SYMBOL(pthread_attr_getschedpolicy);
+int darwin_pthread_attr_getschedpolicy(const pthread_attr_t *attributes, int *policy) {
+    if (!attributes || !policy) return 22;
+    *policy = 1;
+    return 0;
+}
+
 int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *parameters) DARWIN_SYMBOL(pthread_attr_setschedparam);
 int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *parameters) {
     (void)attributes;
