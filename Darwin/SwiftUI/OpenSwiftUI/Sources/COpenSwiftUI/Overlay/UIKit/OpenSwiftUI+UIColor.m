@@ -24,6 +24,7 @@ BOOL _UIColorDependsOnTraitCollection(UIColor *color) {
 
 - (instancetype)initWithColor__openSwiftUI__:(UIColor *)color {
     self = color;
+    return self;
 }
 
 @end
