@@ -2,6 +2,9 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
+// Mac apps' alone: iOS has no display services or CGEvent, so armv7, which
+// runs only iOS apps, has none of this.
+#if !arch(arm)
 // Quartz Display Services and the cursor, as games ask about the screen:
 // one display, the primary one SDL3 reports (loaded at run time, as
 // AppKit's windows do), with its desktop mode and the full-screen modes
@@ -345,3 +348,5 @@ public func CGSessionCopyCurrentDictionary() -> Ref? {
     NSMutableDictionary.of([("kCGSSessionOnConsoleKey", NSNumber.make(bool: true)),
                             ("kCGSSessionUserIDKey", NSObject.number(Int(getuid())))]).objCOwnedReturnValue()
 }
+
+#endif
