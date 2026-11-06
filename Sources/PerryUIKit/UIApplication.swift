@@ -19,6 +19,8 @@ enum Application {
     nonisolated(unsafe) static var statusBarHidden = false
     nonisolated(unsafe) static var statusBarStyle = 0
     nonisolated(unsafe) static var ignoringInteractionEvents = 0
+    /// The quick actions the app set, kept for it to read back.
+    nonisolated(unsafe) static var shortcutItems: NSObject?
     nonisolated(unsafe) static var supportsShakeToEdit = true
     nonisolated(unsafe) static var userNotificationSettings: UIUserNotificationSettings?
     /// The last background task identifier given out;
@@ -173,6 +175,11 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
     @ObjCMethod("applicationIconBadgeNumber") func applicationIconBadgeNumber() -> Int { 0 }
     @ObjCMethod("setApplicationIconBadgeNumber:") func setApplicationIconBadgeNumber(_ number: Int) {}
+    /// Home screen quick actions, which have no home screen to show on.
+    @ObjCMethod("shortcutItems") func shortcutItems() -> NSObject? { Application.shortcutItems }
+    @ObjCMethod("setShortcutItems:") func setShortcutItems(_ items: NSObject?) {
+        Application.shortcutItems = items
+    }
     @ObjCMethod("beginIgnoringInteractionEvents") func beginIgnoringInteractionEvents() { Application.ignoringInteractionEvents += 1 }
     @ObjCMethod("endIgnoringInteractionEvents") func endIgnoringInteractionEvents() {
         Application.ignoringInteractionEvents = max(0, Application.ignoringInteractionEvents - 1)
