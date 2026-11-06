@@ -57,6 +57,21 @@ public func NSClassFromString(_ string: UnsafeMutableRawPointer?) -> UnsafeMutab
     Strings.value(of: string).flatMap { name in name.withCString { ObjC.getClass($0) } }.map(UnsafeMutableRawPointer.init)
 }
 
+/// A new instance of the class with room after its instance variables,
+/// as class_createInstance makes it: what a class's own +allocWithZone:
+/// calls. The zone is ignored.
+@c(_NSAllocateObject)
+public func NSAllocateObject(_ cls: UnsafeMutableRawPointer?, _ extraBytes: UInt,
+                             _ zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let cls else { return nil }
+    return ObjC.createInstance(cls.assumingMemoryBound(to: perry_class_storage.self), Int(extraBytes))
+}
+
+@c(_NSDeallocateObject)
+public func NSDeallocateObject(_ object: UnsafeMutableRawPointer?) {
+    _ = ObjC.dispose?(object)
+}
+
 @c(_NSProtocolFromString)
 public func NSProtocolFromString(_ string: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     guard let name = Strings.value(of: string) else { return nil }
