@@ -53,6 +53,87 @@ static void warn(const char *message) {
     fprintf(stderr, "[S_API FAIL] %s\n", message);
 }
 
+// MARK: - Call tracing
+
+// With PERRY_STEAM_TRACE_CALLS, the interfaces the game asks for are the
+// provider's objects, whose methods (trace.S) log each call's first
+// arguments and its result around the client's own method.
+
+enum { TRACE_SLOTS = 128, TRACE_DEPTH = 256, TRACED_INTERFACES = 64 };
+
+typedef struct {
+    void **vtable;
+    void *object;
+    char name[64];
+} traced_interface;
+
+typedef struct {
+    void *return_address;
+    traced_interface *interface;
+    uint64_t slot;
+} trace_frame;
+
+extern char perry_steam_trace_stubs[];
+
+static __thread trace_frame trace_frames[TRACE_DEPTH];
+static __thread unsigned trace_depth;
+
+static bool tracing_calls(void) {
+    static int enabled = -1;
+    if (enabled < 0)
+        enabled = getenv("PERRY_STEAM_TRACE_CALLS") != NULL;
+    return enabled;
+}
+
+void *perry_steam_trace_enter(traced_interface *interface, uint64_t slot, void *return_address, uint64_t *arguments)
+    __attribute__((visibility("hidden")));
+void *perry_steam_trace_enter(traced_interface *interface, uint64_t slot, void *return_address, uint64_t *arguments) {
+    if (trace_depth == TRACE_DEPTH) {
+        fprintf(stderr, "perry: steam: traced calls nest too deep\n");
+        abort();
+    }
+    trace_frames[trace_depth++] = (trace_frame){ return_address, interface, slot };
+    arguments[0] = (uint64_t)(uintptr_t)interface->object;
+    fprintf(stderr, "perry: steam: %s[%llu](%#llx, %#llx, %#llx, %#llx) from %p\n", interface->name,
+            (unsigned long long)slot, (unsigned long long)arguments[1], (unsigned long long)arguments[2],
+            (unsigned long long)arguments[3], (unsigned long long)arguments[4], return_address);
+    return (*(void ***)interface->object)[slot];
+}
+
+void *perry_steam_trace_leave(uint64_t result, uint64_t second) __attribute__((visibility("hidden")));
+void *perry_steam_trace_leave(uint64_t result, uint64_t second) {
+    trace_frame frame = trace_frames[--trace_depth];
+    fprintf(stderr, "perry: steam: %s[%llu] = %#llx (%#llx)\n", frame.interface->name,
+            (unsigned long long)frame.slot, (unsigned long long)result, (unsigned long long)second);
+    return frame.return_address;
+}
+
+/// The traced object for one of the client's, made once for each.
+static void *traced(void *object, const char *version) {
+    static void *stubs[TRACE_SLOTS];
+    static traced_interface interfaces[TRACED_INTERFACES];
+    static unsigned count;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    if (!object || !tracing_calls())
+        return object;
+    pthread_mutex_lock(&lock);
+    if (!stubs[0])
+        for (unsigned i = 0; i < TRACE_SLOTS; i++)
+            stubs[i] = perry_steam_trace_stubs + 8 * i;
+    traced_interface *found = NULL;
+    for (unsigned i = 0; i < count && !found; i++)
+        if (interfaces[i].object == object)
+            found = &interfaces[i];
+    if (!found && count < TRACED_INTERFACES) {
+        found = &interfaces[count++];
+        found->vtable = stubs;
+        found->object = object;
+        snprintf(found->name, sizeof(found->name), "%s", version);
+    }
+    pthread_mutex_unlock(&lock);
+    return found ? (void *)found : object;
+}
+
 // MARK: - steamclient
 
 // ISteamClient's first methods, whose places every version since 017 keeps.
@@ -351,7 +432,7 @@ void *darwin_SteamInternal_CreateInterface(const char *version) {
                       : steam_client                           ? client_generic_interface(steam_user, steam_pipe, version)
                                                                : NULL;
     TRACE("SteamInternal_CreateInterface(%s) = %p", version, interface);
-    return interface;
+    return strncmp(version, "SteamClient", 11) == 0 ? interface : traced(interface, version);
 }
 
 void *darwin_SteamInternal_FindOrCreateUserInterface(HSteamUser user, const char *version)
@@ -361,7 +442,7 @@ void *darwin_SteamInternal_FindOrCreateUserInterface(HSteamUser user, const char
         return NULL;
     void *interface = client_generic_interface(user, steam_pipe, version);
     TRACE("SteamInternal_FindOrCreateUserInterface(%d, %s) = %p", user, version, interface);
-    return interface;
+    return traced(interface, version);
 }
 
 /// There is no game server here.
