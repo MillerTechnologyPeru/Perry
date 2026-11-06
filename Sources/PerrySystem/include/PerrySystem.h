@@ -24,6 +24,21 @@
 #define DARWIN_FLOAT_ABI
 #endif
 
+// Runs `call`, which may run Darwin code, from a function glibc's or another
+// Linux library's code called. On armv7 Darwin's code may change r9, which
+// Linux's keeps across calls; Perry's code leaves it alone (it is built with
+// -ffixed-r9), so keeping r9 here keeps it for the Linux code that called.
+#if defined(__arm__)
+#define PERRY_KEEP_R9(call) do { \
+        unsigned long perry_r9; \
+        __asm__ volatile("mov %0, r9" : "=r"(perry_r9)); \
+        call; \
+        __asm__ volatile("mov r9, %0" : : "r"(perry_r9) : "memory"); \
+    } while (0)
+#else
+#define PERRY_KEEP_R9(call) do { call; } while (0)
+#endif
+
 // The device Darwin code is told it runs on: an arm64 iPhone, or for armv7
 // programs an iPhone 4S (armv7, iOS 5 to 9), with Darwin's page size.
 #if defined(__arm__)
