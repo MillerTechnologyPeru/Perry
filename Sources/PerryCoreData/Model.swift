@@ -68,11 +68,21 @@ final class PropertyState: ObjectState {
     var name = ""
     var optional = true
     var transient = false
+    /// Whether the store should index it, and whether Spotlight should:
+    /// kept and given back, as stores here index nothing by them.
+    var indexed = false
+    var indexedBySpotlight = false
     /// The entity; not retained.
     var entity: UnsafeMutableRawPointer?
     // Attributes.
     var attributeType = AttributeKind.undefined
     var defaultValue: NSObject?
+    /// The class a program names for the attribute's values, the name of
+    /// a transformable attribute's transformer, and the dictionary of its
+    /// own a program gives a property: kept and given back.
+    var valueClassName: String?
+    var valueTransformerName: String?
+    var userInfo: NSObject?
     // Relationships: the entities they connect, not retained.
     var destination: UnsafeMutableRawPointer?
     var inverse: UnsafeMutableRawPointer?
@@ -344,6 +354,18 @@ open class NSPropertyDescription: NSObject {
     @ObjCMethod("setOptional:") func setOptional(_ value: Bool) { state.optional = value }
     @ObjCMethod("isTransient") func isTransient() -> Bool { state.transient }
     @ObjCMethod("setTransient:") func setTransient(_ value: Bool) { state.transient = value }
+    @ObjCMethod("isIndexed") func isIndexed() -> Bool { state.indexed }
+    @ObjCMethod("setIndexed:") func setIndexed(_ value: Bool) { state.indexed = value }
+    @ObjCMethod("isIndexedBySpotlight") func isIndexedBySpotlight() -> Bool { state.indexedBySpotlight }
+    @ObjCMethod("setIndexedBySpotlight:") func setIndexedBySpotlight(_ value: Bool) { state.indexedBySpotlight = value }
+    @ObjCMethod("userInfo") func userInfo() -> NSObject? { state.userInfo }
+    @ObjCMethod("setUserInfo:") func setUserInfo(_ info: NSObject?) { state.userInfo = info }
+    @ObjCMethod("versionHashModifier") func versionHashModifier() -> String? { nil }
+    @ObjCMethod("setVersionHashModifier:") func setVersionHashModifier(_ modifier: String?) {}
+    @ObjCMethod("renamingIdentifier") func renamingIdentifier() -> String? { state.name }
+    @ObjCMethod("setRenamingIdentifier:") func setRenamingIdentifier(_ identifier: String?) {}
+    @ObjCMethod("isStoredInExternalRecord") func isStoredInExternalRecord() -> Bool { false }
+    @ObjCMethod("setStoredInExternalRecord:") func setStoredInExternalRecord(_ value: Bool) {}
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSPropertyDescription { self }
 }
 
@@ -362,8 +384,13 @@ open class NSAttributeDescription: NSPropertyDescription {
     @ObjCMethod("defaultValue") func defaultValue() -> NSObject? { state.defaultValue }
     @ObjCMethod("setDefaultValue:") func setDefaultValue(_ value: NSObject?) { state.defaultValue = value }
     @ObjCMethod("attributeValueClassName") func attributeValueClassName() -> String? {
-        AttributeKind.className(state.attributeType)
+        state.valueClassName ?? AttributeKind.className(state.attributeType)
     }
+    @ObjCMethod("setAttributeValueClassName:") func setAttributeValueClassName(_ name: String?) { state.valueClassName = name }
+    @ObjCMethod("valueTransformerName") func valueTransformerName() -> String? { state.valueTransformerName }
+    @ObjCMethod("setValueTransformerName:") func setValueTransformerName(_ name: String?) { state.valueTransformerName = name }
+    @ObjCMethod("allowsExternalBinaryDataStorage") func allowsExternalBinaryDataStorage() -> Bool { false }
+    @ObjCMethod("setAllowsExternalBinaryDataStorage:") func setAllowsExternalBinaryDataStorage(_ allows: Bool) {}
 }
 
 @ObjCClass("NSRelationshipDescription")
