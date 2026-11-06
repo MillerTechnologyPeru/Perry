@@ -60,9 +60,11 @@ final class SourceState {
         context.map { Unmanaged<SourceState>.fromOpaque($0).takeUnretainedValue() }
     }
 
-    static let event: Function = { SourceState.from($0)?.fire(.event) }
-    static let cancel: Function = { SourceState.from($0)?.fire(.cancel) }
-    static let registration: Function = { SourceState.from($0)?.fire(.registration) }
+    static let event: Function = { context in keepingLinuxRegisters { SourceState.from(context)?.fire(.event) } }
+    static let cancel: Function = { context in keepingLinuxRegisters { SourceState.from(context)?.fire(.cancel) } }
+    static let registration: Function = { context in
+        keepingLinuxRegisters { SourceState.from(context)?.fire(.registration) }
+    }
 
     /// The Linux source's finalizer: the program's, then the state's
     /// reference goes.
@@ -70,7 +72,7 @@ final class SourceState {
         guard let context else { return }
         let state = Unmanaged<SourceState>.fromOpaque(context)
         let source = state.takeUnretainedValue()
-        if let finalizer = source.finalizer { finalizer(source.context) }
+        if let finalizer = source.finalizer { keepingLinuxRegisters { finalizer(source.context) } }
         state.release()
     }
 }
