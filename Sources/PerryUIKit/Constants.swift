@@ -277,3 +277,12 @@ enum CoreTextFontKeys {
     static let kCTFontContentSizeCategoryAccessibilityXXL = "UICTContentSizeCategoryAccessibilityXXL"
     static let kCTFontContentSizeCategoryAccessibilityXXXL = "UICTContentSizeCategoryAccessibilityXXXL"
 }
+
+/// StoreKit's SKAdNetwork coarse conversion values, which ad SDKs look up
+/// by name (dlsym), StoreKit having no provider of its own.
+@ObjCConstants
+enum StoreKitConstants {
+    static let SKAdNetworkCoarseConversionValueHigh = "high"
+    static let SKAdNetworkCoarseConversionValueMedium = "medium"
+    static let SKAdNetworkCoarseConversionValueLow = "low"
+}
