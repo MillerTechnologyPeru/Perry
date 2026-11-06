@@ -315,6 +315,11 @@ extension NSObject {
 
     // Classes are never deallocated.
     @ObjCClassMethod("retain") static func classRetain(_ cls: ObjCClass) -> UnsafeMutableRawPointer { cls.pointer }
+    /// A class copied is itself, as Darwin's are: classes are dictionary
+    /// keys so (Pangle's SDK keys a dictionary by class).
+    @ObjCClassMethod("copyWithZone:")
+    static func classCopy(_ cls: ObjCClass, zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { cls.pointer }
+    @ObjCClassMethod("copy") static func classCopyObject(_ cls: ObjCClass) -> UnsafeMutableRawPointer { cls.pointer }
     @ObjCClassMethod("release", types: "Vv16@0:8") static func classRelease() {}
     @ObjCClassMethod("autorelease") static func classAutorelease(_ cls: ObjCClass) -> UnsafeMutableRawPointer { cls.pointer }
     @ObjCClassMethod("retainCount") static func classRetainCount() -> UInt { UInt.max }

@@ -327,6 +327,7 @@ enum SessionConstants {
     static let AVAudioSessionPortBuiltInMic = "MicrophoneBuiltIn"
     static let AVAudioSessionPortBuiltInReceiver = "Receiver"
     static let AVAudioSessionPortBuiltInSpeaker = "Speaker"
+    static let AVAudioSessionPortBluetoothLE = "BluetoothLE"
     static let AVAudioSessionPortHDMI = "HDMIOutput"
     static let AVAudioSessionPortHeadphones = "Headphones"
     static let AVAudioSessionPortLineOut = "LineOut"

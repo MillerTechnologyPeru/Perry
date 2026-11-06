@@ -1128,6 +1128,36 @@ uint32_t darwin_notify_register_dispatch(const char *name, int *token, void *que
 uint32_t darwin_notify_cancel(int token) DARWIN_SYMBOL(notify_cancel);
 uint32_t darwin_notify_cancel(int token) { (void)token; return 0; }
 
+// A token to poll, which no notification is ever posted to: a check finds
+// none.
+uint32_t darwin_notify_register_check(const char *name, int *token) DARWIN_SYMBOL(notify_register_check);
+uint32_t darwin_notify_register_check(const char *name, int *token) {
+    (void)name;
+    if (token)
+        *token = atomic_fetch_add(&notify_tokens, 1) + 1;
+    return 0;
+}
+
+uint32_t darwin_notify_check(int token, int *check) DARWIN_SYMBOL(notify_check);
+uint32_t darwin_notify_check(int token, int *check) {
+    (void)token;
+    if (check)
+        *check = 0;
+    return 0;
+}
+
+// A name's state, which nothing here sets: zero.
+uint32_t darwin_notify_get_state(int token, uint64_t *state) DARWIN_SYMBOL(notify_get_state);
+uint32_t darwin_notify_get_state(int token, uint64_t *state) {
+    (void)token;
+    if (state)
+        *state = 0;
+    return 0;
+}
+
+uint32_t darwin_notify_post(const char *name) DARWIN_SYMBOL(notify_post);
+uint32_t darwin_notify_post(const char *name) { (void)name; return 0; }
+
 // MARK: - Extended attributes
 
 // Darwin's take a position and options (XATTR_NOFOLLOW 1); Linux keeps an

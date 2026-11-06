@@ -90,6 +90,15 @@ public struct URLResourceValues {
 
     /// The resource's path.
     public var path: String? { value(.pathKey) }
+
+    /// The bytes free on the volume the file is on.
+    public var volumeAvailableCapacity: Int? { value(.volumeAvailableCapacityKey) }
+
+    /// The same: nothing here is purged to make room for important uses.
+    public var volumeAvailableCapacityForImportantUsage: Int64? { value(.volumeAvailableCapacityForImportantUsageKey) }
+
+    /// The volume's size in bytes.
+    public var volumeTotalCapacity: Int? { value(.volumeTotalCapacityKey) }
 }
 
 @available(*, unavailable)
@@ -165,6 +174,16 @@ extension URL {
             case .fileAllocatedSizeKey:
                 if type == S_IFREG { values[key] = Int(info.st_blocks) * 512 }
             case .pathKey: values[key] = path
+            case .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey:
+                var volume = statfs()
+                guard statfs(path, &volume) == 0 else { break }
+                let blocks = key == .volumeTotalCapacityKey ? UInt64(volume.f_blocks) : UInt64(volume.f_bavail)
+                let bytes = blocks * UInt64(volume.f_bsize)
+                if key == .volumeAvailableCapacityForImportantUsageKey {
+                    values[key] = Int64(clamping: bytes)
+                } else {
+                    values[key] = Int(clamping: bytes)
+                }
             default: break
             }
         }
