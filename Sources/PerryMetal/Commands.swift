@@ -147,6 +147,16 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
         return MTLRenderCommandEncoder(handle: encoder, commandBuffer: self)
     }
 
+    /// A pass descriptor's only addition is counter sampling, which no
+    /// device here has.
+    @ObjCMethod("blitCommandEncoderWithDescriptor:")
+    func blitCommandEncoder(descriptor: MTLBlitPassDescriptor?) -> MTLBlitCommandEncoder? { blitCommandEncoder() }
+
+    @ObjCMethod("computeCommandEncoderWithDescriptor:")
+    func computeCommandEncoder(descriptor: MTLComputePassDescriptor?) -> MTLComputeCommandEncoder? {
+        computeCommandEncoder(dispatchType: descriptor?.dispatchType ?? 0)
+    }
+
     @ObjCMethod("blitCommandEncoder") func blitCommandEncoder() -> MTLBlitCommandEncoder? {
         let (encoder, message) = M2V.call { M2V.api.command_buffer_blit_command_encoder(handle, $0) }
         guard let encoder else {
