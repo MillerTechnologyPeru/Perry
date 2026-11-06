@@ -81,6 +81,30 @@ public final class NSFileHandle: NSObject {
         FileHandles.open(cls.pointer, path, O_RDWR).map(ObjCObject.init)
     }
 
+    /// The URL forms, which say why a file can't be opened.
+    private static func open(_ cls: ObjCClass, _ url: NSURL?, _ flags: Int32, _ error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        let path = url.flatMap { $0.url.isFileURL ? $0.url.path : nil }
+        if let handle = FileHandles.open(cls.pointer, path, flags) { return ObjCObject(handle) }
+        error?.pointee = Errors.autoreleased(domain: ErrorConstants.NSPOSIXErrorDomainObject, code: Int(errno == 0 ? ENOENT : errno),
+                                             description: nil)
+        return nil
+    }
+
+    @ObjCClassMethod("fileHandleForReadingFromURL:error:")
+    static func reading(_ cls: ObjCClass, url: NSURL?, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        open(cls, url, O_RDONLY, error)
+    }
+
+    @ObjCClassMethod("fileHandleForWritingToURL:error:")
+    static func writing(_ cls: ObjCClass, url: NSURL?, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        open(cls, url, O_WRONLY, error)
+    }
+
+    @ObjCClassMethod("fileHandleForUpdatingURL:error:")
+    static func updating(_ cls: ObjCClass, url: NSURL?, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        open(cls, url, O_RDWR, error)
+    }
+
     @ObjCClassMethod("fileHandleWithStandardInput")
     static func standardInput(_ cls: ObjCClass) -> ObjCObject? { FileHandles.make(cls.pointer, descriptor: 0, closeOnDealloc: false).map(ObjCObject.init) }
     @ObjCClassMethod("fileHandleWithStandardOutput")
