@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <wchar.h>
 
 struct darwin_float2 { float sinval, cosval; };
 struct darwin_double2 { double sinval, cosval; };
@@ -168,6 +169,14 @@ DARWIN_FLOAT_ABI float darwin_strtof_l(const char *s, char **end, void *locale) 
 DARWIN_FLOAT_ABI float darwin_strtof_l(const char *s, char **end, void *locale) { (void)locale; return strtof(s, end); }
 DARWIN_FLOAT_ABI double darwin_strtold_l(const char *s, char **end, void *locale) DARWIN_SYMBOL(strtold_l);
 DARWIN_FLOAT_ABI double darwin_strtold_l(const char *s, char **end, void *locale) { (void)locale; return strtod(s, end); }
+DARWIN_FLOAT_ABI double darwin_strtold(const char *s, char **end) DARWIN_SYMBOL(strtold);
+DARWIN_FLOAT_ABI double darwin_strtold(const char *s, char **end) { return strtod(s, end); }
+DARWIN_FLOAT_ABI double darwin_wcstod(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstod);
+DARWIN_FLOAT_ABI double darwin_wcstod(const wchar_t *s, wchar_t **end) { return wcstod(s, end); }
+DARWIN_FLOAT_ABI float darwin_wcstof(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstof);
+DARWIN_FLOAT_ABI float darwin_wcstof(const wchar_t *s, wchar_t **end) { return wcstof(s, end); }
+DARWIN_FLOAT_ABI double darwin_wcstold(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstold);
+DARWIN_FLOAT_ABI double darwin_wcstold(const wchar_t *s, wchar_t **end) { return wcstod(s, end); }
 DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) DARWIN_SYMBOL(difftime);
 DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) { return difftime(end, start); }
 DARWIN_FLOAT_ABI double darwin_drand48(void) DARWIN_SYMBOL(drand48);
