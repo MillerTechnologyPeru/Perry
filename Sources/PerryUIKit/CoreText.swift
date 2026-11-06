@@ -93,6 +93,28 @@ open class UIFontDescriptor: NSObject {
     @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { CoreTextTypeIDs.fontDescriptor }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
+    /// A descriptor with the attributes a dictionary gives.
+    @ObjCMethod("initWithFontAttributes:")
+    func initialize(fontAttributes attributes: UnsafeMutableRawPointer?) -> Self {
+        state.apply(attributes)
+        return self
+    }
+
+    @ObjCClassMethod("fontDescriptorWithFontAttributes:")
+    static func descriptor(fontAttributes attributes: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        ObjCRuntime.autorelease(make { $0.apply(attributes) })
+    }
+
+    /// A copy with these attributes over its own.
+    @ObjCMethod("fontDescriptorByAddingAttributes:")
+    func adding(attributes: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        let original = state
+        return ObjCRuntime.autorelease(UIFontDescriptor.make { copy in
+            copy.copy(from: original)
+            copy.apply(attributes)
+        })
+    }
+
     /// A descriptor of the font with this name and size.
     @ObjCClassMethod("fontDescriptorWithName:size:")
     static func descriptor(name: String, size: CGFloat) -> UnsafeMutableRawPointer? {
