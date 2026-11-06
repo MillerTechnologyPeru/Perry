@@ -1240,6 +1240,8 @@ open class UITableViewController: UIViewController {
 
     @ObjCMethod("numberOfSectionsInTableView:") func numberOfSections(in table: UITableView) -> Int { 1 }
     @ObjCMethod("tableView:numberOfRowsInSection:") func tableView(_ table: UITableView, numberOfRowsInSection section: Int) -> Int { 0 }
+    @ObjCMethod("tableView:titleForHeaderInSection:") func tableView(_ table: UITableView, titleForHeaderInSection section: Int) -> String? { nil }
+    @ObjCMethod("tableView:titleForFooterInSection:") func tableView(_ table: UITableView, titleForFooterInSection section: Int) -> String? { nil }
 
     /// Clears the selection as the controller appears, when it should.
     @ObjCMethod("viewWillAppear:")
