@@ -572,7 +572,6 @@ open class WKWebView: NSView {
     @ObjCMethod("initWithFrame:")
     public required init(frame: CGRect) { super.init(frame: frame) }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithCoder:")
@@ -973,7 +972,6 @@ open class WebView: NSView {
     @ObjCMethod("initWithFrame:")
     public required init(frame: CGRect) { super.init(frame: frame) }
 
-    @ObjCMethod("init")
     public required init() { super.init() }
 
     @ObjCMethod("initWithCoder:")
