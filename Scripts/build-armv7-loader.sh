@@ -9,7 +9,10 @@ sdk=${PERRY_ARMV7_SDK:-$(ls -d "$root"/.toolchains/swift-*-armv7-sdk/*/debian-* 
 out=$root/.build/armv7
 mkdir -p "$out/bin" "$out/obj"
 
-cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE
+# r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
+# register, which Linux's preserves across calls, so Perry's code never keeps
+# a value in it across a call into Darwin code.
+cflags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -ffixed-r9
   -I$root/Sources/PerryLoaderCore/include -I$root/Sources/PerryInterface/include"
 
 objects=""
