@@ -311,6 +311,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "AVFoundation");
         return true;
     }
+    // CoreMotion's attitude here is a gamepad's stick, which
+    // GameController's provider reads.
+    if (strstr(install_name, "/CoreMotion.framework/")) {
+        snprintf(out, out_size, "GameController");
+        return true;
+    }
     // Network's path monitor reads the routes SystemConfiguration's
     // reachability does. Its C API is libnetwork's, which Network's Swift
     // overlay binds to directly.
