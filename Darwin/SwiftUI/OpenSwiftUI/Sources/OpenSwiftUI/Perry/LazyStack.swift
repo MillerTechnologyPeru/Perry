@@ -345,17 +345,26 @@ struct LazyStackLayout: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let across = axis == .vertical ? bounds.width : bounds.height
+        // Bounds unbounded across, as an alignment query may give, leave
+        // each child its ideal size there, placed at the leading edge.
+        let bounded = axis == .vertical ? bounds.width : bounds.height
+        let across: CGFloat? = bounded.isFinite ? bounded : nil
         for (index, subview) in subviews.enumerated() where index < positions.count {
-            let size = subview.sizeThatFits(self.proposal(across: across))
+            // A child without a finite size, as one that grows without
+            // bound gives with nothing proposed along the stack, counts as
+            // none in that direction.
+            var size = subview.sizeThatFits(self.proposal(across: across))
+            if !size.width.isFinite || !size.height.isFinite {
+                size = CGSize(width: size.width.isFinite ? size.width : 0, height: size.height.isFinite ? size.height : 0)
+            }
             let along = axis == .vertical ? size.height : size.width
             measurements.record(along, for: ids[index])
             let extent = axis == .vertical ? size.width : size.height
-            let cross: CGFloat = switch crossAlignment {
+            let cross: CGFloat = if let across, extent.isFinite { switch crossAlignment {
             case .leading: 0
             case .center: (across - extent) / 2
             case .trailing: across - extent
-            }
+            } } else { 0 }
             let point = axis == .vertical
                 ? CGPoint(x: bounds.minX + cross, y: bounds.minY + positions[index])
                 : CGPoint(x: bounds.minX + positions[index], y: bounds.minY + cross)
