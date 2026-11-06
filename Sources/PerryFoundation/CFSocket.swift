@@ -504,23 +504,153 @@ public func CFSocketCreateRunLoopSource(_ allocator: UnsafeRawPointer?, _ socket
     return object
 }
 
+/// A source a program makes itself (a version 0 source): signalled from any
+/// thread, its perform function is called, with its info, on the run loops
+/// it is added to.
+final class CustomSourceStorage {
+    typealias Perform = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    typealias Release = @convention(c) (UnsafeRawPointer?) -> Void
+    /// Told of a run loop the source is added to or removed from, and the
+    /// mode: (info, run loop, mode).
+    typealias Scheduled = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+
+    let info: UnsafeMutableRawPointer?
+    let perform: Perform?
+    let release: Release?
+    var schedule: Scheduled?
+    var cancel: Scheduled?
+    private let lock = NSLockStorage()
+    private var loops: [RunLoopState] = []
+    private var signalled = false
+    private var valid = true
+
+    init(info: UnsafeMutableRawPointer?, perform: Perform?, release: Release?) {
+        (self.info, self.perform, self.release) = (info, perform, release)
+    }
+
+    deinit { release?(UnsafeRawPointer(info)) }
+
+    func add(to loop: RunLoopState) {
+        let pending = lock.locked { () -> Bool in
+            guard valid, !loops.contains(where: { $0 === loop }) else { return false }
+            loops.append(loop)
+            return signalled
+        }
+        loop.addSource()
+        if pending { schedule(on: [loop]) }
+    }
+
+    /// From one loop, or from them all and for good.
+    func remove(from loop: RunLoopState?) {
+        let removed = lock.locked { () -> [RunLoopState] in
+            let leaving = loops.filter { loop == nil || $0 === loop }
+            loops.removeAll { loop == nil || $0 === loop }
+            if loop == nil { valid = false }
+            return leaving
+        }
+        removed.forEach { $0.removeSource() }
+    }
+
+    func signal() {
+        let loops = lock.locked { () -> [RunLoopState] in
+            guard valid else { return [] }
+            signalled = true
+            return self.loops
+        }
+        schedule(on: loops)
+    }
+
+    /// Performs on the loops' next pass: once for each signal's worth,
+    /// whichever loop comes first.
+    private func schedule(on loops: [RunLoopState]) {
+        for loop in loops {
+            loop.perform(work: { [self] in
+                let due = lock.locked { () -> Bool in
+                    defer { signalled = false }
+                    return signalled && valid
+                }
+                if due { perform?(info) }
+            })
+        }
+    }
+}
+
+/// A mutex for Swift state.
+final class NSLockStorage {
+    private let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+    init() { pthread_mutex_init(mutex, nil) }
+    deinit {
+        pthread_mutex_destroy(mutex)
+        mutex.deallocate()
+    }
+    func locked<T>(_ body: () -> T) -> T {
+        pthread_mutex_lock(mutex)
+        defer { pthread_mutex_unlock(mutex) }
+        return body()
+    }
+}
+
+private func customSource(_ source: UnsafeMutableRawPointer?) -> CustomSourceStorage? {
+    Storage.get(source, as: CustomSourceStorage.self)
+}
+
+/// The context is { version, info, retain, release, copyDescription, equal,
+/// hash, schedule, cancel, perform }, of version 0.
+@c(_CFRunLoopSourceCreate)
+public func CFRunLoopSourceCreate(_ allocator: UnsafeRawPointer?, _ order: Int,
+                                  _ context: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+    typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
+    guard let context, context.load(as: Int.self) == 0,
+          let object = Storage.allocate(UnsafeMutableRawPointer(Sockets.sourceClass)) else { return nil }
+    var info = context.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    if let retain = context.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
+        info = UnsafeMutableRawPointer(mutating: retain(info))
+    }
+    let storage = CustomSourceStorage(
+        info: info, perform: context.load(fromByteOffset: 9 * DarwinLayout.word, as: CustomSourceStorage.Perform?.self),
+        release: context.load(fromByteOffset: DarwinLayout.contextRelease, as: CustomSourceStorage.Release?.self))
+    storage.schedule = context.load(fromByteOffset: 7 * DarwinLayout.word, as: CustomSourceStorage.Scheduled?.self)
+    storage.cancel = context.load(fromByteOffset: 8 * DarwinLayout.word, as: CustomSourceStorage.Scheduled?.self)
+    Storage.set(object, storage)
+    return object
+}
+
+@c(_CFRunLoopSourceSignal)
+public func CFRunLoopSourceSignal(_ source: UnsafeMutableRawPointer?) { customSource(source)?.signal() }
+
+@c(_CFRunLoopSourceIsValid)
+public func CFRunLoopSourceIsValid(_ source: UnsafeMutableRawPointer?) -> Bool { source != nil }
+
 /// Every mode is the same run loop here.
 @c(_CFRunLoopAddSource)
 public func CFRunLoopAddSource(_ runLoop: UnsafeMutableRawPointer?, _ source: UnsafeMutableRawPointer?,
                                _ mode: UnsafeMutableRawPointer?) {
-    guard let loop = RunLoops.state(runLoop), let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
+    guard let loop = RunLoops.state(runLoop) else { return }
+    if let custom = customSource(source) {
+        custom.add(to: loop)
+        custom.schedule?(custom.info, runLoop, mode)
+        return
+    }
+    guard let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
     Sockets.schedule(storage, on: loop)
 }
 
 @c(_CFRunLoopRemoveSource)
 public func CFRunLoopRemoveSource(_ runLoop: UnsafeMutableRawPointer?, _ source: UnsafeMutableRawPointer?,
                                   _ mode: UnsafeMutableRawPointer?) {
-    guard let loop = RunLoops.state(runLoop), let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
+    guard let loop = RunLoops.state(runLoop) else { return }
+    if let custom = customSource(source) {
+        custom.remove(from: loop)
+        custom.cancel?(custom.info, runLoop, mode)
+        return
+    }
+    guard let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
     Sockets.unschedule(storage, from: loop)
 }
 
 @c(_CFRunLoopSourceInvalidate)
 public func CFRunLoopSourceInvalidate(_ source: UnsafeMutableRawPointer?) {
+    if let custom = customSource(source) { return custom.remove(from: nil) }
     guard let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
     Sockets.unschedule(storage, from: nil)
 }
