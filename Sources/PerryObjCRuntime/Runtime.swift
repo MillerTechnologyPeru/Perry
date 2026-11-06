@@ -54,11 +54,20 @@ public enum Runtime {
             // A Swift class compiled to deploy before the stable ABI is
             // marked with the legacy bit (0) only; Swift's runtime takes a
             // class for its own by the stable bit (1), which Darwin's libobjc
-            // sets on such classes as it realizes them. Without it Swift
-            // wraps the class as an Objective-C one, whose super calls then
-            // find the class itself.
+            // gives such classes in place of the legacy one as it reads them.
+            // Without it Swift wraps the class as an Objective-C one, whose
+            // super calls then find the class itself; with the legacy bit
+            // left, Swift's runtime, which masks only the stable bit off,
+            // reads the class_ro_t a byte off. A class of the legacy ABI
+            // itself, which the low bit of its Swift flags (after the data
+            // pointer) says, keeps its bit.
             if cls.pointee.bits & 3 == 1 {
-                cls.pointee.bits |= 2
+                let swiftFlags = UnsafeRawPointer(cls).load(fromByteOffset: 40, as: UInt32.self)
+                if swiftFlags & 1 == 0 {
+                    cls.pointee.bits = (cls.pointee.bits & ~1) | 2
+                } else {
+                    cls.pointee.bits |= 2
+                }
             }
             let superInfo = cls.pointee.superclass.flatMap { Runtime.info($0) }
             // A class whose superclass is not available is not available
