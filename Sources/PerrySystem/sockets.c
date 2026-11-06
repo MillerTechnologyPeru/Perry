@@ -11,6 +11,8 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -161,6 +163,89 @@ static void address_to_darwin(const struct sockaddr *linux_address, socklen_t li
     darwin.bytes[0] = (unsigned char)size;
     memcpy(address, &darwin, *length < size ? *length : size);
     *length = size;
+}
+
+// MARK: - Interface addresses
+
+// Darwin's struct ifaddrs: Linux's layout, with Darwin's sockaddrs.
+// (glibc's <ifaddrs.h> makes ifa_dstaddr a macro, so the fields are named
+// apart from it.)
+struct darwin_ifaddrs {
+    struct darwin_ifaddrs *next;
+    char *name;
+    unsigned int flags;
+    void *address;
+    void *netmask;
+    void *destination;
+    void *data;
+};
+
+enum { DARWIN_IFF_MULTICAST = 0x8000 };
+
+// The interface flags Darwin shares with Linux, and multicast at Darwin's bit.
+static unsigned int interface_flags_to_darwin(unsigned int flags) {
+    unsigned int darwin = flags & (IFF_UP | IFF_BROADCAST | IFF_DEBUG | IFF_LOOPBACK | IFF_POINTOPOINT | IFF_NOTRAILERS |
+                                   IFF_RUNNING | IFF_NOARP | IFF_PROMISC | IFF_ALLMULTI);
+    if (flags & IFF_MULTICAST)
+        darwin |= DARWIN_IFF_MULTICAST;
+    return darwin;
+}
+
+// One Darwin entry and its strings and addresses, in one allocation that
+// freeifaddrs frees. Darwin also lists each interface's AF_LINK address,
+// which Linux's AF_PACKET entries don't map to: only IPv4 and IPv6 ones are.
+static struct darwin_ifaddrs *interface_to_darwin(const struct ifaddrs *entry) {
+    size_t name = strlen(entry->ifa_name) + 1;
+    struct darwin_ifaddrs *darwin = calloc(1, sizeof(*darwin) + 3 * 128 + name);
+    if (!darwin)
+        return NULL;
+    unsigned char *addresses = (unsigned char *)(darwin + 1);
+    darwin->name = (char *)(addresses + 3 * 128);
+    memcpy(darwin->name, entry->ifa_name, name);
+    darwin->flags = interface_flags_to_darwin(entry->ifa_flags);
+    const struct sockaddr *linux_addresses[3] = { entry->ifa_addr, entry->ifa_netmask, entry->ifa_broadaddr };
+    void **outs[3] = { &darwin->address, &darwin->netmask, &darwin->destination };
+    for (int i = 0; i < 3; i++) {
+        const struct sockaddr *address = linux_addresses[i];
+        if (!address || (address->sa_family != AF_INET && address->sa_family != AF_INET6))
+            continue;
+        socklen_t length = 128;
+        address_to_darwin(address, address->sa_family == AF_INET ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6),
+                          addresses + i * 128, &length);
+        *outs[i] = addresses + i * 128;
+    }
+    return darwin;
+}
+
+int darwin_getifaddrs(struct darwin_ifaddrs **list) DARWIN_SYMBOL(getifaddrs);
+int darwin_getifaddrs(struct darwin_ifaddrs **list) {
+    if (!list)
+        return fail(EINVAL);
+    *list = NULL;
+    struct ifaddrs *entries;
+    if (getifaddrs(&entries) != 0)
+        return -1;
+    struct darwin_ifaddrs **next = list;
+    for (struct ifaddrs *entry = entries; entry; entry = entry->ifa_next) {
+        if (!entry->ifa_addr || (entry->ifa_addr->sa_family != AF_INET && entry->ifa_addr->sa_family != AF_INET6))
+            continue;
+        struct darwin_ifaddrs *darwin = interface_to_darwin(entry);
+        if (!darwin)
+            break;
+        *next = darwin;
+        next = &darwin->next;
+    }
+    freeifaddrs(entries);
+    return 0;
+}
+
+void darwin_freeifaddrs(struct darwin_ifaddrs *list) DARWIN_SYMBOL(freeifaddrs);
+void darwin_freeifaddrs(struct darwin_ifaddrs *list) {
+    while (list) {
+        struct darwin_ifaddrs *following = list->next;
+        free(list);
+        list = following;
+    }
 }
 
 // MARK: - Options and flags
