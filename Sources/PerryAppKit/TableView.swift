@@ -771,7 +771,6 @@ open class NSTableView: NSControl {
     @ObjCMethod("autosaveTableColumns") func autosaveTableColumns() -> Bool { false }
     @ObjCMethod("setVerticalMotionCanBeginDrag:") func setVerticalMotionCanBeginDrag(_ value: Bool) {}
     @ObjCMethod("setDraggingSourceOperationMask:forLocal:") func setDraggingSourceOperationMask(_ mask: UInt, forLocal local: Bool) {}
-    @ObjCMethod("registerForDraggedTypes:") func registerForDraggedTypes(_ types: NSObject?) {}
     @ObjCMethod("setDraggingDestinationFeedbackStyle:") func setDraggingDestinationFeedbackStyle(_ style: Int) {}
     @ObjCMethod("setDropRow:dropOperation:") func setDropRow(_ row: Int, dropOperation: UInt) {}
     @ObjCMethod("editColumn:row:withEvent:select:") func editColumn(_ column: Int, row: Int, with event: NSObject?, select: Bool) {}
