@@ -113,6 +113,20 @@ final class AttributedStorage {
         merge()
     }
 
+    /// The characters become `text`: what changed between the two is
+    /// replaced, so the characters around it keep their attributes, as an
+    /// edit through -mutableString does.
+    func replaceChanged(with text: [UInt16]) {
+        var prefix = 0
+        while prefix < units.count, prefix < text.count, units[prefix] == text[prefix] { prefix += 1 }
+        var suffix = 0
+        while suffix < units.count - prefix, suffix < text.count - prefix,
+              units[units.count - 1 - suffix] == text[text.count - 1 - suffix] { suffix += 1 }
+        let range = NSRange(location: UInt(prefix), length: UInt(units.count - prefix - suffix))
+        guard range.length > 0 || text.count - prefix - suffix > 0 else { return }
+        replace(range, with: Array(text[prefix..<text.count - suffix]), attributes: nil)
+    }
+
     /// The runs of `range`, cut to it.
     func runs(in range: NSRange) -> [AttributeRun] {
         var result: [AttributeRun] = []
@@ -385,6 +399,15 @@ public class NSAttributedString: NSObject {
 public final class NSMutableAttributedString: NSAttributedString {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         AttributedStrings.mutableClass = cls.storage
+    }
+
+    /// The characters as an NSMutableString: changes to it change the
+    /// attributed string, as Foundation's proxy does.
+    @ObjCMethod("mutableString")
+    func mutableString() -> UnsafeMutableRawPointer? {
+        let string = MutableStrings.make("")
+        MutableStrings.storage(string).attributed = storage
+        return ObjC.autorelease(string)
     }
 
     @ObjCMethod("replaceCharactersInRange:withString:")
