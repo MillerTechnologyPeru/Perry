@@ -96,7 +96,9 @@ typedef struct {
 } darwin_timebase_info;
 
 static uint64_t ticks(int linux_clock) {
-    return (uint64_t)((unsigned __int128)nanoseconds(linux_clock) * 3 / 125);
+    // n * 3 / 125 without overflow, or the 128-bit arithmetic armv7 lacks.
+    uint64_t n = nanoseconds(linux_clock);
+    return n / 125 * 3 + n % 125 * 3 / 125;
 }
 
 uint64_t darwin_mach_absolute_time(void) DARWIN_SYMBOL(mach_absolute_time);
