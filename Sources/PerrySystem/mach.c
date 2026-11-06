@@ -602,6 +602,15 @@ kern_return_t darwin_thread_resume(mach_port_t port) {
 }
 
 // Interrupting a thread's system call: the suspension's signal already does.
+// A thread's scheduling policy (its time constraints, its affinity) is
+// taken and not acted on: Linux schedules the thread as it would.
+kern_return_t darwin_thread_policy_set(mach_port_t thread, int flavor, const int32_t *policy, uint32_t count)
+    DARWIN_SYMBOL(thread_policy_set);
+kern_return_t darwin_thread_policy_set(mach_port_t thread, int flavor, const int32_t *policy, uint32_t count) {
+    (void)thread, (void)flavor, (void)policy, (void)count;
+    return KERN_SUCCESS;
+}
+
 kern_return_t darwin_thread_abort(mach_port_t port) DARWIN_SYMBOL(thread_abort);
 kern_return_t darwin_thread_abort(mach_port_t port) { (void)port; return KERN_SUCCESS; }
 
