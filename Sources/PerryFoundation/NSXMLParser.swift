@@ -140,7 +140,7 @@ private func qualified(_ prefix: String?, _ local: String) -> String {
 
 /// libxml2's SAX2 callbacks. The context they receive is the parser
 /// context, so libxml2's own xmlSAX2 functions can run; the state is its
-/// _private.
+/// _private. Those that call the delegate keep libxml2's registers around it.
 private func makeHandler() -> xmlSAXHandler {
     var handler = xmlSAXHandler()
     handler.initialized = XML_SAX2_MAGIC
@@ -160,102 +160,122 @@ private func makeHandler() -> xmlSAXHandler {
     }
 
     handler.startDocument = { context in
-        xmlSAX2StartDocument(context)
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parserDidStartDocument(parser)
+        keepingLinuxRegisters {
+            xmlSAX2StartDocument(context)
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parserDidStartDocument(parser)
+        }
     }
     handler.endDocument = { context in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parserDidEndDocument(parser)
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parserDidEndDocument(parser)
+        }
     }
     handler.startElementNs = { context, localName, prefix, uri, namespaceCount, namespaces, attributeCount, _, attributes in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper,
-              let local = string(localName) else { return }
-        state.notePosition()
-        let prefix = string(prefix)
-        var entries: [(key: id, value: id)] = []
-        var declared: [(prefix: String, uri: String)] = []
-        for index in 0..<Int(namespaceCount) {
-            let declaredPrefix = string(namespaces?[2 * index])
-            let declaredURI = string(namespaces?[2 * index + 1]) ?? ""
-            declared.append((declaredPrefix ?? "", declaredURI))
-            if !state.processNamespaces {
-                // Namespace declarations stay attributes: xmlns, xmlns:p.
-                let name = declaredPrefix.map { "xmlns:\($0)" } ?? "xmlns"
-                entries.append((Strings.autoreleased(name), Strings.autoreleased(declaredURI)))
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper,
+                  let local = string(localName) else { return }
+            state.notePosition()
+            let prefix = string(prefix)
+            var entries: [(key: id, value: id)] = []
+            var declared: [(prefix: String, uri: String)] = []
+            for index in 0..<Int(namespaceCount) {
+                let declaredPrefix = string(namespaces?[2 * index])
+                let declaredURI = string(namespaces?[2 * index + 1]) ?? ""
+                declared.append((declaredPrefix ?? "", declaredURI))
+                if !state.processNamespaces {
+                    // Namespace declarations stay attributes: xmlns, xmlns:p.
+                    let name = declaredPrefix.map { "xmlns:\($0)" } ?? "xmlns"
+                    entries.append((Strings.autoreleased(name), Strings.autoreleased(declaredURI)))
+                }
             }
-        }
-        for index in 0..<Int(attributeCount) {
-            guard let attribute = attributes?.advanced(by: 5 * index), let name = string(attribute[0]) else { continue }
-            let value: String
-            if let start = attribute[3], let end = attribute[4] {
-                value = string(start, count: Int32(end - start))
+            for index in 0..<Int(attributeCount) {
+                guard let attribute = attributes?.advanced(by: 5 * index), let name = string(attribute[0]) else { continue }
+                let value: String
+                if let start = attribute[3], let end = attribute[4] {
+                    value = string(start, count: Int32(end - start))
+                } else {
+                    value = ""
+                }
+                entries.append((Strings.autoreleased(qualified(string(attribute[1]), name)), Strings.autoreleased(value)))
+            }
+            if state.reportNamespacePrefixes {
+                for (declaredPrefix, declaredURI) in declared {
+                    state.delegateObject?.parser(parser, didStartMappingPrefix: declaredPrefix, toURI: declaredURI)
+                }
+            }
+            state.declaredPrefixes.append(declared.map(\.prefix))
+            let attributesObject = ObjCObject(Dictionaries.autoreleased(entries))
+            if state.processNamespaces {
+                state.delegateObject?.parser(parser, didStartElement: local, namespaceURI: string(uri),
+                                             qualifiedName: qualified(prefix, local), attributes: attributesObject)
             } else {
-                value = ""
+                state.delegateObject?.parser(parser, didStartElement: qualified(prefix, local), namespaceURI: nil,
+                                             qualifiedName: nil, attributes: attributesObject)
             }
-            entries.append((Strings.autoreleased(qualified(string(attribute[1]), name)), Strings.autoreleased(value)))
-        }
-        if state.reportNamespacePrefixes {
-            for (declaredPrefix, declaredURI) in declared {
-                state.delegateObject?.parser(parser, didStartMappingPrefix: declaredPrefix, toURI: declaredURI)
-            }
-        }
-        state.declaredPrefixes.append(declared.map(\.prefix))
-        let attributesObject = ObjCObject(Dictionaries.autoreleased(entries))
-        if state.processNamespaces {
-            state.delegateObject?.parser(parser, didStartElement: local, namespaceURI: string(uri),
-                                         qualifiedName: qualified(prefix, local), attributes: attributesObject)
-        } else {
-            state.delegateObject?.parser(parser, didStartElement: qualified(prefix, local), namespaceURI: nil,
-                                         qualifiedName: nil, attributes: attributesObject)
         }
     }
     handler.endElementNs = { context, localName, prefix, uri in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper,
-              let local = string(localName) else { return }
-        let prefix = string(prefix)
-        if state.processNamespaces {
-            state.delegateObject?.parser(parser, didEndElement: local, namespaceURI: string(uri),
-                                         qualifiedName: qualified(prefix, local))
-        } else {
-            state.delegateObject?.parser(parser, didEndElement: qualified(prefix, local), namespaceURI: nil,
-                                         qualifiedName: nil)
-        }
-        let declared = state.declaredPrefixes.popLast() ?? []
-        if state.reportNamespacePrefixes {
-            for declaredPrefix in declared {
-                state.delegateObject?.parser(parser, didEndMappingPrefix: declaredPrefix)
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper,
+                  let local = string(localName) else { return }
+            let prefix = string(prefix)
+            if state.processNamespaces {
+                state.delegateObject?.parser(parser, didEndElement: local, namespaceURI: string(uri),
+                                             qualifiedName: qualified(prefix, local))
+            } else {
+                state.delegateObject?.parser(parser, didEndElement: qualified(prefix, local), namespaceURI: nil,
+                                             qualifiedName: nil)
+            }
+            let declared = state.declaredPrefixes.popLast() ?? []
+            if state.reportNamespacePrefixes {
+                for declaredPrefix in declared {
+                    state.delegateObject?.parser(parser, didEndMappingPrefix: declaredPrefix)
+                }
             }
         }
     }
     handler.characters = { context, characters, length in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parser(parser, foundCharacters: string(characters, count: length))
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parser(parser, foundCharacters: string(characters, count: length))
+        }
     }
     handler.ignorableWhitespace = { context, characters, length in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parser(parser, foundIgnorableWhitespace: string(characters, count: length))
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parser(parser, foundIgnorableWhitespace: string(characters, count: length))
+        }
     }
     handler.cdataBlock = { context, bytes, length in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        let data = bytes.map { Data(UnsafeBufferPointer(start: $0, count: Int(length))) } ?? Data()
-        guard let block = DataObjects.autoreleased(data) else { return }
-        state.delegateObject?.parser(parser, foundCDATA: ObjCObject(block))
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            let data = bytes.map { Data(UnsafeBufferPointer(start: $0, count: Int(length))) } ?? Data()
+            guard let block = DataObjects.autoreleased(data) else { return }
+            state.delegateObject?.parser(parser, foundCDATA: ObjCObject(block))
+        }
     }
     handler.comment = { context, text in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parser(parser, foundComment: string(text) ?? "")
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parser(parser, foundComment: string(text) ?? "")
+        }
     }
     handler.processingInstruction = { context, target, data in
-        guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
-        state.delegateObject?.parser(parser, foundProcessingInstructionWithTarget: string(target) ?? "",
-                                     data: string(data))
+        keepingLinuxRegisters {
+            guard let state = XMLParserState.from(context), let parser = state.wrapper else { return }
+            state.delegateObject?.parser(parser, foundProcessingInstructionWithTarget: string(target) ?? "",
+                                         data: string(data))
+        }
     }
     // Errors, but not warnings, stop the parse.
     handler.serror = { context, error in
-        guard let error, error.pointee.level.rawValue >= XML_ERR_ERROR.rawValue,
-              let state = XMLParserState.from(error.pointee.ctxt ?? context) else { return }
-        state.fail(code: Int(error.pointee.code))
+        keepingLinuxRegisters {
+            guard let error, error.pointee.level.rawValue >= XML_ERR_ERROR.rawValue,
+                  let state = XMLParserState.from(error.pointee.ctxt ?? context) else { return }
+            state.fail(code: Int(error.pointee.code))
+        }
     }
     return handler
 }
