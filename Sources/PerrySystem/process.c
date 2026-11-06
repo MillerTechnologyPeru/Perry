@@ -361,6 +361,10 @@ static int sysctl_string(void *old, size_t *old_length, const char *value) {
 // 20 to 24) and an Apple-silicon Mac, as apps that check the OS read it
 // from kern.osrelease. Zero for other programs.
 perry_macos_release perry_system_macos_release(void) {
+#if defined(__arm__)
+    // armv7 runs only iOS programs.
+    return (perry_macos_release){ 0, 0 };
+#else
     const uint8_t *header = perry_system_main_header;
     if (!header) return (perry_macos_release){ 0, 0 };
     uint32_t count = *(const uint32_t *)(header + 16);
@@ -379,6 +383,7 @@ perry_macos_release perry_system_macos_release(void) {
         command += size;
     }
     return (perry_macos_release){ 0, 0 };
+#endif
 }
 
 // The names apps read to identify the device: an iPhone 14 running iOS 15,

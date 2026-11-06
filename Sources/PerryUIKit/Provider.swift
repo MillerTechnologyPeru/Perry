@@ -34,9 +34,10 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard QuartzCore.load(symbol) else { uikitFatal("UIKit needs libPerryQuartzCore, which is missing or incomplete") }
     Accessibility.load { symbol(libobjc, $0) }
     AssetCatalog.load(symbol)
+    #if !arch(arm)
     // A Mac app's WebKit, Auto Layout and paragraph styles are AppKit's;
     // UIKit, there for its CoreText, keeps its own classes of those under
-    // names of its own.
+    // names of its own. armv7 runs only iOS apps.
     if isMacApp(info.main_header) {
         let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
                              "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration",
@@ -45,9 +46,11 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
                              "NSParagraphStyle", "NSMutableParagraphStyle"]
         for name in appKitClasses { ObjCRuntime.privateClassNames[name] = "PerryUIKit" + name }
     }
+    #endif
     return true
 }
 
+#if !arch(arm)
 /// Whether the main executable is a macOS program: its LC_BUILD_VERSION's
 /// platform is PLATFORM_MACOS.
 private func isMacApp(_ header: UnsafeRawPointer?) -> Bool {
@@ -62,6 +65,7 @@ private func isMacApp(_ header: UnsafeRawPointer?) -> Bool {
     }
     return false
 }
+#endif
 
 /// UIKit's numeric and structure constants, which the loader asks for
 /// while binding images, before the provider starts.

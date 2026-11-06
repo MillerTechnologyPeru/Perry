@@ -201,6 +201,18 @@ libxml2 is the SDK's armv7 build. A library's runpath names the SDK as the
 container sees it (`/perry/.toolchains/...`), so elsewhere put the SDK's
 `usr/lib/swift/linux` on `LD_LIBRARY_PATH`.
 
+armv7 runs only iOS apps, so it builds no Mac code. The script refuses the
+providers only Mac apps load (`PerryAppKit`, `PerryIOKit`,
+`Perrysteam_api`). In the shared providers, Mac-only code is under
+`#if !arch(arm)` in Swift and `#if !defined(__arm__)` in C: CoreGraphics'
+display services and `CGEvent`, CoreServices' `Gestalt`, `UCKeyTranslate`
+and Launch Services, UIKit's names for a Mac app's WebKit classes, the
+macOS release `uname` and `sysctl` report, and `perry32`'s routing of Carbon
+and a Mac app's WebKit to AppKit and its macOS bundle layout. The provider
+generator emits a declaration under the `#if` it sits in, so an
+`@ObjCClass` there is left out with it. CoreFoundation's functions in
+`MacFoundation.swift` stay, since iOS has them too.
+
 Apple silicon has no AArch32, but Docker Desktop runs armv7 programs with
 qemu-arm, which finds Linux's armhf libraries through `QEMU_LD_PREFIX`.
 `Scripts/docker-test.sh` sets it to the SDK, so the armv7 tests
