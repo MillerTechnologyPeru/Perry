@@ -10,7 +10,9 @@
 @available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
 public struct NSFastEnumerationIterator: IteratorProtocol {
     let enumerable: any NSFastEnumeration
-    var objects: [AnyObject?] = Array(repeating: nil, count: 16)
+    /// Room for the objects an enumerable copies out, which it does not
+    /// retain: unowned, so they are not released again here.
+    var objects: [Unmanaged<AnyObject>?] = Array(repeating: nil, count: 16)
     var state = NSFastEnumerationState(state: 0, itemsPtr: nil, mutationsPtr: nil, extra: (0, 0, 0, 0, 0))
     var index = 0
     var count = 0
@@ -25,7 +27,7 @@ public struct NSFastEnumerationIterator: IteratorProtocol {
             let enumerable = enumerable
             count = objects.withUnsafeMutableBufferPointer { buffer in
                 enumerable.countByEnumerating(with: &state,
-                                              objects: AutoreleasingUnsafeMutablePointer(buffer.baseAddress!),
+                                              objects: AutoreleasingUnsafeMutablePointer<AnyObject?>(buffer.baseAddress!),
                                               count: buffer.count)
             }
             index = 0
@@ -213,6 +215,13 @@ extension NSPredicate {
     public convenience init(format predicateFormat: __shared String, _ args: any CVarArg...) {
         self.init(format: predicateFormat, arguments: getVaList(args))
     }
+}
+
+// MARK: - Logging
+
+/// Logs a formatted message, as the Objective-C NSLog does.
+public func NSLog(_ format: String, _ args: any CVarArg...) {
+    withVaList(args) { NSLogv(format, $0) }
 }
 
 // MARK: - Ranges

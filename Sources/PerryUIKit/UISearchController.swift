@@ -33,7 +33,8 @@ open class UISearchController: UIViewController {
 
     @ObjCMethod("initWithSearchResultsController:")
     func initialize(searchResultsController: UIViewController?) -> Self {
-        _ = initializeViewController(nibName: nil, bundle: nil)
+        // UIViewController's initializer, as a super call.
+        _ = initialize(nibName: nil, bundle: nil)
         searching.resultsController = searchResultsController
         return self
     }

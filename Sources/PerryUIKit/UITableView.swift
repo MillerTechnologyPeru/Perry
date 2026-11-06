@@ -1207,7 +1207,9 @@ open class UITableViewController: UIViewController {
 
     @ObjCMethod("initWithStyle:")
     func initialize(style: Int) -> NSObject {
-        let controller = initializeViewController(nibName: nil, bundle: nil).unsafeCast(to: UITableViewController.self)
+        // UIViewController's initializer, as a super call: a Swift
+        // subclass need not have -initWithNibName:bundle: of its own.
+        let controller = initialize(nibName: nil, bundle: nil).unsafeCast(to: UITableViewController.self)
         controller.tableController.style = style
         return controller
     }

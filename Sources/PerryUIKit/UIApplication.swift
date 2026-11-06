@@ -265,3 +265,133 @@ extension NSObject {
     @ObjCMethod("application:supportedInterfaceOrientationsForWindow:")
     func sendSupportedInterfaceOrientations(_ application: UIApplication, for window: UIWindow?) -> UInt
 }
+
+// MARK: - Quick actions
+
+final class ShortcutIconState: ObjectState {
+    /// UIApplicationShortcutIconType, for an icon of a standard type.
+    var type = 0
+    var templateImageName: String?
+    var systemImageName: String?
+}
+
+/// A quick action's icon: a standard type, or an image by name.
+@ObjCClass("UIApplicationShortcutIcon")
+open class UIApplicationShortcutIcon: NSObject {
+    static let states = StateTable<ShortcutIconState>()
+    var iconState: ShortcutIconState { UIApplicationShortcutIcon.states[objcObject] }
+
+    static func make(_ cls: ObjCClass, _ configure: (ShortcutIconState) -> Void) -> UIApplicationShortcutIcon {
+        let icon = cls.object.allocated().unsafeCast(to: UIApplicationShortcutIcon.self)
+        configure(icon.iconState)
+        return icon
+    }
+
+    @ObjCClassMethod("iconWithType:")
+    static func icon(_ cls: ObjCClass, type: Int) -> UIApplicationShortcutIcon { make(cls) { $0.type = type } }
+
+    @ObjCClassMethod("iconWithTemplateImageName:")
+    static func icon(_ cls: ObjCClass, templateImageName name: String) -> UIApplicationShortcutIcon {
+        make(cls) { $0.templateImageName = name }
+    }
+
+    @ObjCClassMethod("iconWithSystemImageName:")
+    static func icon(_ cls: ObjCClass, systemImageName name: String) -> UIApplicationShortcutIcon {
+        make(cls) { $0.systemImageName = name }
+    }
+
+    /// Immutable: a copy is the icon itself.
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIApplicationShortcutIcon.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIApplicationShortcutIcon.objCClass.pointer)
+    }
+}
+
+final class ShortcutItemState: ObjectState {
+    var type = ""
+    var localizedTitle = ""
+    var localizedSubtitle: String?
+    var icon: UIApplicationShortcutIcon?
+    var userInfo: NSObject?
+    var targetContentIdentifier: NSObject?
+}
+
+/// A home screen quick action. There is no home screen here to show it;
+/// apps set them and read them back.
+@ObjCClass("UIApplicationShortcutItem")
+open class UIApplicationShortcutItem: NSObject {
+    static let states = StateTable<ShortcutItemState>()
+    var itemState: ShortcutItemState { UIApplicationShortcutItem.states[objcObject] }
+
+    @ObjCMethod("initWithType:localizedTitle:localizedSubtitle:icon:userInfo:")
+    func initialize(type: String, localizedTitle title: String, localizedSubtitle subtitle: String?,
+                    icon: UIApplicationShortcutIcon?, userInfo: NSObject?) -> Self {
+        itemState.type = type
+        itemState.localizedTitle = title
+        itemState.localizedSubtitle = subtitle
+        itemState.icon = icon
+        itemState.userInfo = userInfo
+        return self
+    }
+
+    @ObjCMethod("initWithType:localizedTitle:")
+    func initialize(type: String, localizedTitle title: String) -> Self {
+        initialize(type: type, localizedTitle: title, localizedSubtitle: nil, icon: nil, userInfo: nil)
+    }
+
+    @ObjCMethod("type") func type() -> String { itemState.type }
+    @ObjCMethod("localizedTitle") func localizedTitle() -> String { itemState.localizedTitle }
+    @ObjCMethod("localizedSubtitle") func localizedSubtitle() -> String? { itemState.localizedSubtitle }
+    @ObjCMethod("icon") func icon() -> UIApplicationShortcutIcon? { itemState.icon }
+    @ObjCMethod("userInfo") func userInfo() -> NSObject? { itemState.userInfo }
+    @ObjCMethod("targetContentIdentifier") func targetContentIdentifier() -> NSObject? { itemState.targetContentIdentifier }
+
+    /// A new item of `cls` with this one's values, +1.
+    func copied(as cls: ObjCClass) -> UnsafeMutableRawPointer {
+        let copy = cls.object.newInstance().unsafeCast(to: UIApplicationShortcutItem.self)
+        let state = copy.itemState, source = itemState
+        state.type = source.type
+        state.localizedTitle = source.localizedTitle
+        state.localizedSubtitle = source.localizedSubtitle
+        state.icon = source.icon
+        state.userInfo = source.userInfo
+        state.targetContentIdentifier = source.targetContentIdentifier
+        return copy.objcObject
+    }
+
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { copied(as: UIApplicationShortcutItem.objCClass) }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { copied(as: UIMutableApplicationShortcutItem.objCClass) }
+
+    @ObjCMethod("isEqual:")
+    func isEqual(_ other: NSObject?) -> Bool {
+        guard let other = other?.as(UIApplicationShortcutItem.self) else { return false }
+        return other.itemState.type == itemState.type && other.itemState.localizedTitle == itemState.localizedTitle
+            && other.itemState.localizedSubtitle == itemState.localizedSubtitle
+    }
+
+    @ObjCMethod("hash") func hashValue() -> UInt { UInt(bitPattern: itemState.type.hashValue) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIApplicationShortcutItem.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIApplicationShortcutItem.objCClass.pointer)
+    }
+}
+
+@ObjCClass("UIMutableApplicationShortcutItem")
+open class UIMutableApplicationShortcutItem: UIApplicationShortcutItem {
+    @ObjCMethod("setType:") func setType(_ type: String) { itemState.type = type }
+    @ObjCMethod("setLocalizedTitle:") func setLocalizedTitle(_ title: String) { itemState.localizedTitle = title }
+    @ObjCMethod("setLocalizedSubtitle:") func setLocalizedSubtitle(_ subtitle: String?) { itemState.localizedSubtitle = subtitle }
+    @ObjCMethod("setIcon:") func setIcon(_ icon: UIApplicationShortcutIcon?) { itemState.icon = icon }
+    @ObjCMethod("setUserInfo:") func setUserInfo(_ userInfo: NSObject?) { itemState.userInfo = userInfo }
+    @ObjCMethod("setTargetContentIdentifier:") func setTargetContentIdentifier(_ identifier: NSObject?) {
+        itemState.targetContentIdentifier = identifier
+    }
+}

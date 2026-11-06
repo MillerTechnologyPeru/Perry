@@ -450,6 +450,10 @@ open class UISearchBar: UIView {
     var controller: UISearchController? { search.controller.map { NSObject($0).unsafeCast(to: UISearchController.self) } }
     private var barDelegate: NSObject? { search.delegate.map { NSObject($0) } }
 
+    /// The bar's text field, by its private names too, which apps reach
+    /// through key-value coding.
+    @ObjCMethod("searchField") func searchField() -> UISearchTextField { field }
+    @ObjCMethod("_searchField") func privateSearchField() -> UISearchTextField { field }
     @ObjCMethod("text") func text() -> String? { field.text() ?? "" }
     @ObjCMethod("setText:") func setText(_ text: String?) { search.text = text; field.setText(text) }
     @ObjCMethod("placeholder") func placeholder() -> String? { search.placeholder }

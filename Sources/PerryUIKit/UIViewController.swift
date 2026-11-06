@@ -240,6 +240,11 @@ open class UIViewController: UIResponder {
     @ObjCMethod("editButtonItem")
     func editButtonItem() -> UIBarButtonItem { UIBarButtonItem.make(systemItem: 2, target: self, action: nil) }
 
+    /// The deprecated top and bottom layout guides: the view's bands
+    /// outside its safe area.
+    @ObjCMethod("topLayoutGuide") func topLayoutGuide() -> UILayoutGuide { sendView().controllerLayoutGuide(top: true) }
+    @ObjCMethod("bottomLayoutGuide") func bottomLayoutGuide() -> UILayoutGuide { sendView().controllerLayoutGuide(top: false) }
+
     @ObjCMethod("modalPresentationStyle") func modalPresentationStyle() -> Int { state.modalPresentationStyle }
     @ObjCMethod("setModalPresentationStyle:") func setModalPresentationStyle(_ style: Int) { state.modalPresentationStyle = style }
     @ObjCMethod("modalTransitionStyle") func modalTransitionStyle() -> Int { state.modalTransitionStyle }
@@ -445,6 +450,9 @@ open class UIViewController: UIResponder {
             guard state.appearance == .disappeared || state.appearance == .disappearing else { return false }
             state.appearance = .appearing
             state.animated = animated
+            // Its view is loaded first, as UIKit's always is by now: an
+            // app's -viewWillAppear: reads the outlets its nib connects.
+            _ = sendView()
             sendViewWillAppear(animated)
             // A navigation controller that appears shows its top controller.
             if self.is(UINavigationController.self) {
@@ -755,6 +763,7 @@ enum Blocks {
 extension NSObject {
     @ObjCMethod("initWithNibName:bundle:")
     func initializeViewController(nibName: String?, bundle: NSObject?) -> NSObject
+    @ObjCMethod("tabBarItem") func sendTabBarItem() -> UITabBarItem
 
     @ObjCMethod("view") func sendView() -> UIView
     @ObjCMethod("loadView") func sendLoadView()

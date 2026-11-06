@@ -48,12 +48,19 @@ enum LayoutGuideKind: Int {
     case safeArea
     /// The bounds inside the layout margins.
     case margins
+    /// A view controller's top layout guide: from the top of its view down
+    /// to the safe area.
+    case top
+    /// Its bottom layout guide: from the safe area down to the bottom.
+    case bottom
 }
 
 final class ViewGuides: ObjectState {
     var safeArea: UILayoutGuide?
     var margins: UILayoutGuide?
     var readable: UILayoutGuide?
+    var top: UILayoutGuide?
+    var bottom: UILayoutGuide?
     var added: [UILayoutGuide] = []
     /// The safe area insets the view was last laid out with.
     var laidOutSafeArea: UIEdgeInsets?
@@ -72,6 +79,8 @@ extension UILayoutGuide {
         let identifier = guide.identifier
         if identifier.hasPrefix("UIViewSafeAreaLayoutGuide") { return .safeArea }
         if identifier.hasPrefix("UIViewLayoutMarginsGuide") || identifier.hasPrefix("UIViewReadableContentGuide") { return .margins }
+        if identifier == "UIViewControllerTopLayoutGuide" { return .top }
+        if identifier == "UIViewControllerBottomLayoutGuide" { return .bottom }
         return .custom
     }
 
@@ -82,6 +91,22 @@ extension UILayoutGuide {
         case .custom: return .zero
         case .safeArea: return view.safeAreaInsets()
         case .margins: return view.sendLayoutMargins()
+        case .top:
+            return UIEdgeInsets(top: 0, left: 0, bottom: max(view.state.bounds.height - view.safeAreaInsets().top, 0), right: 0)
+        case .bottom:
+            return UIEdgeInsets(top: max(view.state.bounds.height - view.safeAreaInsets().bottom, 0), left: 0, bottom: 0, right: 0)
+        }
+    }
+
+    /// UILayoutSupport's length: how far the top or bottom guide reaches
+    /// into its view.
+    @ObjCMethod("length")
+    func length() -> CGFloat {
+        guard let view = owningView() else { return 0 }
+        switch kind {
+        case .top: return view.safeAreaInsets().top
+        case .bottom: return view.safeAreaInsets().bottom
+        default: return view.state.bounds.height
         }
     }
 
@@ -134,6 +159,17 @@ extension UIView {
         if let guide = guides.readable { return guide }
         let guide = UILayoutGuide.make(.margins, identifier: "UIViewReadableContentGuide", in: self)
         guides.readable = guide
+        return guide
+    }
+
+    /// A view controller's top and bottom layout guides, which its view
+    /// keeps.
+    func controllerLayoutGuide(top: Bool) -> UILayoutGuide {
+        let guides = UIView.guides[objcObject]
+        if let guide = top ? guides.top : guides.bottom { return guide }
+        let guide = UILayoutGuide.make(top ? .top : .bottom,
+                                       identifier: top ? "UIViewControllerTopLayoutGuide" : "UIViewControllerBottomLayoutGuide", in: self)
+        if top { guides.top = guide } else { guides.bottom = guide }
         return guide
     }
 

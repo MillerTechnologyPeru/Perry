@@ -589,11 +589,14 @@ open class NSURLSession: NSObject {
         return Tasks.object(task)
     }
 
-    private func request(_ url: NSURL) -> Request { Request(url: url.url) }
+    /// A request for the URL; one without a URL for nil, as Apple's
+    /// sessions make a task for nil (libraries ask for one in +load, to
+    /// find the task classes).
+    private func request(_ url: NSURL?) -> Request { Request(url: url?.url) }
     private func request(_ object: NSObject) -> Request { Requests.request(object.objcObject).copy() }
 
     @ObjCMethod("dataTaskWithURL:")
-    func dataTask(with url: NSURL) -> NSObject { dataTask({ state!.session.dataTask(request(url), completion: $0) }, nil) }
+    func dataTask(with url: NSURL?) -> NSObject { dataTask({ state!.session.dataTask(request(url), completion: $0) }, nil) }
 
     @ObjCMethod("dataTaskWithRequest:")
     func dataTask(with request: NSObject) -> NSObject {
@@ -601,7 +604,7 @@ open class NSURLSession: NSObject {
     }
 
     @ObjCMethod("dataTaskWithURL:completionHandler:")
-    func dataTask(with url: NSURL, completionHandler: ObjCBlock?) -> NSObject {
+    func dataTask(with url: NSURL?, completionHandler: ObjCBlock?) -> NSObject {
         dataTask({ state!.session.dataTask(request(url), completion: $0) }, completionHandler)
     }
 
@@ -658,13 +661,13 @@ open class NSURLSession: NSObject {
         return Tasks.object(task)
     }
 
-    @ObjCMethod("downloadTaskWithURL:") func downloadTask(with url: NSURL) -> NSObject { downloadTask(request(url), nil) }
+    @ObjCMethod("downloadTaskWithURL:") func downloadTask(with url: NSURL?) -> NSObject { downloadTask(request(url), nil) }
     @ObjCMethod("downloadTaskWithRequest:") func downloadTask(with request: NSObject) -> NSObject {
         downloadTask(self.request(request), nil)
     }
 
     @ObjCMethod("downloadTaskWithURL:completionHandler:")
-    func downloadTask(with url: NSURL, completionHandler: ObjCBlock?) -> NSObject { downloadTask(request(url), completionHandler) }
+    func downloadTask(with url: NSURL?, completionHandler: ObjCBlock?) -> NSObject { downloadTask(request(url), completionHandler) }
 
     @ObjCMethod("downloadTaskWithRequest:completionHandler:")
     func downloadTask(with request: NSObject, completionHandler: ObjCBlock?) -> NSObject {

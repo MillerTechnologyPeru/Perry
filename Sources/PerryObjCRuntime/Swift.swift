@@ -35,6 +35,15 @@ extension Runtime {
             guard let info = info(cls), known,
                   let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & Layout.classBitsMask) else { return }
             info.instanceSize = Int(ro.pointee.instance_size)
+            // A class whose superclass Swift's runtime makes, a generic
+            // class's specialization, gets it as its metadata is first
+            // initialized: one realized before then, from its image, had
+            // none, and moves under it now.
+            if let superclass = cls.pointee.superclass, info.superInfo?.cls != superclass, let superInfo = Runtime.info(superclass) {
+                info.superInfo = superInfo
+                if let meta = info.partner, let superMeta = superInfo.partner { meta.superInfo = superMeta }
+                flushCaches()
+            }
             slideIvars(info, ro: ro)
         }
         return cls

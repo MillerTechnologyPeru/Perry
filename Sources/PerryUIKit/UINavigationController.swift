@@ -67,6 +67,16 @@ open class UINavigationController: UIViewController {
     /// Sets the controller up itself, as Darwin's does, rather than send
     /// -initWithNibName:bundle:: a Swift subclass with initializers of its
     /// own doesn't inherit that one, and traps when it is sent.
+    /// Its own tab bar item if it was given one, else its root
+    /// controller's, as UIKit's: apps set the item on the controller they
+    /// put in it.
+    @ObjCMethod("tabBarItem")
+    override func tabBarItem() -> UITabBarItem {
+        if let item = state.tabBarItem { return item }
+        if let root = navigation.viewControllers.first { return root.sendTabBarItem() }
+        return super.tabBarItem()
+    }
+
     @ObjCMethod("initWithRootViewController:")
     func initialize(rootViewController root: UIViewController) -> NSObject {
         let navigation = initialize(nibName: nil, bundle: nil)
@@ -1025,6 +1035,25 @@ open class UIBarButtonItem: UIBarItem {
     @ObjCMethod("initWithPrimaryAction:")
     func initialize(primaryAction: NSObject?) -> Self {
         state.primaryAction = primaryAction
+        return self
+    }
+
+    @ObjCMethod("initWithTitle:image:target:action:menu:")
+    func initialize(title: String?, image: UIImage?, target: NSObject?, action: ObjCSelector?, menu: NSObject?) -> Self {
+        (state.title, state.image, state.target, state.action, state.menu) = (title, image, target?.objcObject, action?.pointer, menu)
+        return self
+    }
+
+    @ObjCMethod("initWithBarButtonSystemItem:primaryAction:menu:")
+    func initialize(systemItem: Int, primaryAction: NSObject?, menu: NSObject?) -> Self {
+        configure(systemItem: systemItem, target: nil, action: nil)
+        (state.primaryAction, state.menu) = (primaryAction, menu)
+        return self
+    }
+
+    @ObjCMethod("initWithImage:style:target:action:menu:")
+    func initialize(image: UIImage?, style: Int, target: NSObject?, action: ObjCSelector?, menu: NSObject?) -> Self {
+        (state.image, state.style, state.target, state.action, state.menu) = (image, style, target?.objcObject, action?.pointer, menu)
         return self
     }
 
