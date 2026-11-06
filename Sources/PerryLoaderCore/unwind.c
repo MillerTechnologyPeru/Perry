@@ -18,6 +18,12 @@
 #include "image.h"
 #include "log.h"
 
+// armv7's code has no unwind tables: it unwinds with setjmp and longjmp,
+// through contexts it registers with libSystem as it runs.
+#if !defined(__LP64__)
+void perry_register_unwind_info(perry_image *image) { (void)image; }
+#else
+
 #include <dlfcn.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -484,3 +490,4 @@ void perry_register_unwind_info(perry_image *image) {
     perry_trace(PERRY_TRACE_LOAD, "%s: unwind information for %u functions (%u with their own DWARF), %u without",
                 image->path, compact + dwarf, dwarf, without);
 }
+#endif
