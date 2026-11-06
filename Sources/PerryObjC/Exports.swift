@@ -411,6 +411,13 @@ public func class_getSuperclass(_ cls: Class?) -> Class? {
     cls?.pointee.superclass
 }
 
+/// Whether the object is a class (or metaclass).
+@c(_object_isClass)
+public func object_isClass(_ object: UnsafeMutableRawPointer?) -> Bool {
+    guard let object, let isa = object_getClass(object) else { return false }
+    return Runtime.info(isa)?.isMeta ?? false
+}
+
 @c(_class_isMetaClass)
 public func class_isMetaClass(_ cls: Class?) -> Bool {
     cls.flatMap(Runtime.info)?.isMeta ?? false
@@ -517,6 +524,104 @@ public func method_getImplementation(_ method: Method?) -> UnsafeMutableRawPoint
 @c(_method_getTypeEncoding)
 public func method_getTypeEncoding(_ method: Method?) -> UnsafePointer<CChar>? {
     method?.pointee.types
+}
+
+// A method's type encoding, as its parts: the return type, then each
+// argument's (the receiver and selector first), each a type with its
+// qualifiers and its stack offset after it ("v24@0:8@16").
+enum MethodTypes {
+    /// The types without their offsets.
+    static func parts(_ types: UnsafePointer<CChar>?) -> [String] {
+        guard let types else { return [] }
+        let bytes = Array(String(cString: types).utf8)
+        var parts: [String] = []
+        var index = 0
+        while index < bytes.count {
+            let start = index
+            index = skipType(bytes, index)
+            parts.append(String(decoding: bytes[start..<index], as: UTF8.self))
+            while index < bytes.count, bytes[index] == UInt8(ascii: "-") || (bytes[index] >= 0x30 && bytes[index] <= 0x39) {
+                index += 1
+            }
+        }
+        return parts
+    }
+
+    /// The index after the type starting at `index`.
+    private static func skipType(_ bytes: [UInt8], _ start: Int) -> Int {
+        var index = start
+        // Qualifiers: const, in, inout, out, bycopy, byref, oneway, atomic.
+        while index < bytes.count, "rnNoORVA".utf8.contains(bytes[index]) { index += 1 }
+        guard index < bytes.count else { return index }
+        let byte = bytes[index]
+        index += 1
+        switch byte {
+        case UInt8(ascii: "^"):
+            return skipType(bytes, index)
+        case UInt8(ascii: "@"):
+            // An object with its class name ("@\"NSString\""), or a block ("@?").
+            if index < bytes.count, bytes[index] == UInt8(ascii: "?") { return index + 1 }
+            if index < bytes.count, bytes[index] == UInt8(ascii: "\"") {
+                index += 1
+                while index < bytes.count, bytes[index] != UInt8(ascii: "\"") { index += 1 }
+                return min(index + 1, bytes.count)
+            }
+            return index
+        case UInt8(ascii: "["), UInt8(ascii: "{"), UInt8(ascii: "("):
+            let close: UInt8 = byte == UInt8(ascii: "[") ? UInt8(ascii: "]") : byte == UInt8(ascii: "{") ? UInt8(ascii: "}") : UInt8(ascii: ")")
+            var depth = 1
+            while index < bytes.count, depth > 0 {
+                if bytes[index] == byte { depth += 1 } else if bytes[index] == close { depth -= 1 }
+                index += 1
+            }
+            return index
+        case UInt8(ascii: "b"):
+            while index < bytes.count, bytes[index] >= 0x30, bytes[index] <= 0x39 { index += 1 }
+            return index
+        default:
+            return index
+        }
+    }
+
+    /// Copies `text` into `buffer` of `length` bytes, NUL-terminated and
+    /// cut to fit; an empty string for none, as Darwin's functions give.
+    static func copy(_ text: String?, _ buffer: UnsafeMutablePointer<CChar>?, _ length: Int) {
+        guard let buffer, length > 0 else { return }
+        let bytes = Array((text ?? "").utf8.prefix(length - 1))
+        for (offset, byte) in bytes.enumerated() { buffer[offset] = CChar(bitPattern: byte) }
+        buffer[bytes.count] = 0
+    }
+}
+
+@c(_method_getNumberOfArguments)
+public func method_getNumberOfArguments(_ method: Method?) -> UInt32 {
+    UInt32(max(MethodTypes.parts(method?.pointee.types).count - 1, 0))
+}
+
+/// The return type, malloc'd for the caller to free.
+@c(_method_copyReturnType)
+public func method_copyReturnType(_ method: Method?) -> UnsafeMutablePointer<CChar>? {
+    strdup(MethodTypes.parts(method?.pointee.types).first ?? "")
+}
+
+/// An argument's type, malloc'd for the caller to free; NULL past the last.
+@c(_method_copyArgumentType)
+public func method_copyArgumentType(_ method: Method?, _ index: UInt32) -> UnsafeMutablePointer<CChar>? {
+    let parts = MethodTypes.parts(method?.pointee.types)
+    let position = Int(index) + 1
+    return position < parts.count ? strdup(parts[position]) : nil
+}
+
+@c(_method_getReturnType)
+public func method_getReturnType(_ method: Method?, _ buffer: UnsafeMutablePointer<CChar>?, _ length: Int) {
+    MethodTypes.copy(MethodTypes.parts(method?.pointee.types).first, buffer, length)
+}
+
+@c(_method_getArgumentType)
+public func method_getArgumentType(_ method: Method?, _ index: UInt32, _ buffer: UnsafeMutablePointer<CChar>?, _ length: Int) {
+    let parts = MethodTypes.parts(method?.pointee.types)
+    let position = Int(index) + 1
+    MethodTypes.copy(position < parts.count ? parts[position] : nil, buffer, length)
 }
 
 @c(_method_setImplementation)
