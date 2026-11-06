@@ -153,13 +153,14 @@ ENTRY __objc_msgForward
     ldr r12, [sp]                   // target
     ldr lr, [sp, #4]                // handler
     mov sp, r4
-    mov r5, lr                      // handler, out of lr
-    pop {r0-r3, r4, lr}
     cmp r12, #0
     beq 1f
+    pop {r0-r3, r4, lr}
     mov r0, r12                     // resend to the new target
     b .Lmsgsend
-1:  bx r5
+1:  mov r12, lr                     // the handler, in the one free scratch register
+    pop {r0-r3, r4, lr}
+    bx r12
 END __objc_msgForward
 
     .globl perry_objc_msgSend_address
