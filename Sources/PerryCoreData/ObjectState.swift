@@ -101,7 +101,7 @@ final class SerialQueue: @unchecked Sendable {
             let context = Unmanaged.passRetained(self).toOpaque()
             pthread_create(&created, nil, { context in
                 let queue = Unmanaged<SerialQueue>.fromOpaque(context!).takeRetainedValue()
-                queue.run()
+                keepingLinuxRegisters { queue.run() }
                 return nil
             }, context)
             pthread_detach(created)
