@@ -7,10 +7,16 @@
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <malloc.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/uio.h>
+#include <unistd.h>
 
 /// malloc_zone_t (malloc/malloc.h), up to the fields code reaches into.
 typedef struct darwin_malloc_zone {
@@ -95,9 +101,95 @@ int darwin_malloc_type_posix_memalign(void **ptr, size_t alignment, size_t size,
     return darwin_posix_memalign(ptr, alignment, size);
 }
 
+// MARK: - Whose block
+
+// Darwin's malloc_size gives 0 for a pointer malloc did not give out, and
+// programs ask it for just that: an engine with heaps of its own (Unity's
+// memory manager) takes a block for the system's when its size is not 0,
+// and frees it as one. glibc's malloc_usable_size reads the words before
+// any pointer as a block's header, and so answers for them all. Here the
+// header is looked at first, as glibc's own checks would: the size it
+// gives must be a block's, the block after it must say this one is in use,
+// and what an arena's or a mapping's own records say must agree.
+
+/// Reads `count` bytes at `address`, if they are there to read: a pointer
+/// that is not a block's may have anything around it, or nothing.
+static bool read_memory(uintptr_t address, void *out, size_t count) {
+    static int cannot_read_self;
+    if (!__atomic_load_n(&cannot_read_self, __ATOMIC_RELAXED)) {
+        struct iovec local = { out, count }, remote = { (void *)address, count };
+        ssize_t got = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+        if (got == (ssize_t)count) return true;
+        if (got >= 0 || (errno != EPERM && errno != ENOSYS)) return false;
+        __atomic_store_n(&cannot_read_self, 1, __ATOMIC_RELAXED);
+    }
+    // Where a process may not read itself that way: through a pipe, which
+    // the kernel fills from the address, or fails to.
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static int ends[2] = { -1, -1 };
+    bool ok = false;
+    pthread_mutex_lock(&lock);
+    if (ends[0] >= 0 || pipe2(ends, O_CLOEXEC | O_NONBLOCK) == 0)
+        ok = count <= 4096 && write(ends[1], (const void *)address, count) == (ssize_t)count
+            && read(ends[0], out, count) == (ssize_t)count;
+    pthread_mutex_unlock(&lock);
+    return ok;
+}
+
+/// The room in a block glibc's malloc gave out and has not been given
+/// back; 0 for any other pointer.
+static size_t block_room(const void *ptr) {
+    enum { PREVIOUS_IN_USE = 1, MAPPED = 2, OTHER_ARENA = 4, FLAGS = 7, HEADER = 2 * sizeof(size_t) };
+    // An arena that is not the main one is made of heaps this large at
+    // most, each starting where its size divides the address: the arena,
+    // the heap before, then the heap's size and how much of it is in use.
+    const uintptr_t heap_span = (uintptr_t)64 << 20;
+    uintptr_t address = (uintptr_t)ptr;
+    if (!address || (address & (HEADER - 1))) return 0;
+    int saved = errno;
+    size_t room = 0, head[2], next[2];
+    uintptr_t chunk = address - HEADER;
+    if (!read_memory(chunk, head, sizeof head)) goto done;
+    size_t size = head[1] & ~(size_t)FLAGS;
+    if (size < 2 * HEADER || (size & (HEADER - 1)) || size > ((size_t)1 << 46)) goto done;
+    if (head[1] & MAPPED) {
+        // A mapping of its own: whole pages, the block some way into them.
+        size_t page = (size_t)sysconf(_SC_PAGESIZE), total = head[0] + size;
+        uint8_t last;
+        if ((head[1] & (PREVIOUS_IN_USE | OTHER_ARENA)) || head[0] > ((size_t)1 << 46) || ((chunk - head[0]) | total) & (page - 1))
+            goto done;
+        if (!read_memory(chunk - head[0] + total - 1, &last, 1)) goto done;
+    } else {
+        // In an arena: the block after says whether this one is in use,
+        // and the one before, if it is free, how long it is.
+        if (!read_memory(chunk + size, next, sizeof next)) goto done;
+        size_t next_size = next[1] & ~(size_t)FLAGS;
+        if (!(next[1] & PREVIOUS_IN_USE) || (next[1] & MAPPED) || next_size < HEADER || (next_size & (HEADER - 1))
+            || next_size > ((size_t)1 << 46))
+            goto done;
+        if (!(head[1] & PREVIOUS_IN_USE)) {
+            size_t before[2];
+            if (head[0] < 2 * HEADER || (head[0] & (HEADER - 1)) || head[0] > chunk || !read_memory(chunk - head[0], before, sizeof before)
+                || (before[1] & ~(size_t)FLAGS) != head[0])
+                goto done;
+        }
+        if (head[1] & OTHER_ARENA) {
+            uintptr_t heap = chunk & ~(heap_span - 1);
+            size_t record[4];
+            if (!read_memory(heap, record, sizeof record) || record[2] > heap_span || record[3] > heap_span || record[2] > record[3]
+                || chunk + size > heap + record[2])
+                goto done;
+        }
+    }
+    room = malloc_usable_size((void *)ptr);
+done:
+    errno = saved;
+    return room;
+}
+
 static size_t zone_size(darwin_malloc_zone *zone, const void *ptr) {
     (void)zone;
-    return ptr ? malloc_usable_size((void *)ptr) : 0;
+    return block_room(ptr);
 }
 
 static void *zone_malloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return darwin_malloc(size); }
@@ -177,9 +269,10 @@ void darwin_malloc_set_zone_name(darwin_malloc_zone *zone, const char *name) {
 const char *darwin_malloc_get_zone_name(darwin_malloc_zone *zone) DARWIN_SYMBOL(malloc_get_zone_name);
 const char *darwin_malloc_get_zone_name(darwin_malloc_zone *zone) { return zone ? zone->zone_name : NULL; }
 
-/// Every block is in the default zone, as far as anyone can tell.
+/// Every block is in the default zone; a pointer that is no block's is in
+/// none.
 darwin_malloc_zone *darwin_malloc_zone_from_ptr(const void *ptr) DARWIN_SYMBOL(malloc_zone_from_ptr);
-darwin_malloc_zone *darwin_malloc_zone_from_ptr(const void *ptr) { return ptr ? &default_zone : NULL; }
+darwin_malloc_zone *darwin_malloc_zone_from_ptr(const void *ptr) { return block_room(ptr) ? &default_zone : NULL; }
 
 // MARK: - Allocating in a zone
 
@@ -229,9 +322,10 @@ void *darwin_malloc_type_zone_malloc_with_options(darwin_malloc_zone *zone, size
 
 // MARK: - Introspection
 
-/// The usable size of a block, which may exceed what was asked for.
+/// The usable size of a block, which may exceed what was asked for; 0 for
+/// a pointer that is not a block's.
 size_t darwin_malloc_size(const void *ptr) DARWIN_SYMBOL(malloc_size);
-size_t darwin_malloc_size(const void *ptr) { return ptr ? malloc_usable_size((void *)ptr) : 0; }
+size_t darwin_malloc_size(const void *ptr) { return block_room(ptr); }
 
 /// The room a request of `size` bytes gets.
 size_t darwin_malloc_good_size(size_t size) DARWIN_SYMBOL(malloc_good_size);
