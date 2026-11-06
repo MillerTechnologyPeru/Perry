@@ -275,6 +275,20 @@ public final class NSBundle: NSObject {
     @ObjCMethod("appStoreReceiptURL")
     func appStoreReceiptURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.path + "/StoreKit/receipt")) }
     @ObjCMethod("executableURL") func executableURL() -> NSURL? { URLs.wrapped(storage.executablePath.map { URL(filePath: $0) }) }
+
+    /// An executable beside the bundle's own (in Contents/MacOS), if there
+    /// is one by that name.
+    @ObjCMethod("pathForAuxiliaryExecutable:")
+    func pathForAuxiliaryExecutable(_ name: String) -> String? {
+        guard let executable = storage.executablePath, let slash = executable.lastIndex(of: "/") else { return nil }
+        let path = String(executable[..<slash]) + "/" + name
+        return access(path, F_OK) == 0 ? path : nil
+    }
+
+    @ObjCMethod("URLForAuxiliaryExecutable:")
+    func urlForAuxiliaryExecutable(_ name: String) -> NSURL? {
+        URLs.wrapped(pathForAuxiliaryExecutable(name).map { URL(filePath: $0) })
+    }
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String? { storage.identifier }
     @ObjCMethod("isLoaded") func isLoaded() -> Bool { true }
     @ObjCMethod("load") func load() -> Bool { true }
