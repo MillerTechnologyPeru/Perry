@@ -15,7 +15,10 @@ mkdir -p "$out/bin" "$out/obj" "$out/modules" "$out/include/CPerryObjC" "$out/in
 macros=${PERRY_OBJC_MACROS:-$root/.build/macros/PerryObjCMacros}
 [ -x "$macros" ] || { echo "build the macro plugin first: Scripts/build-host-macros.sh" >&2; exit 1; }
 
-clang_flags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE"
+# r9 is fixed (-ffixed-r9): Darwin's armv7 code treats it as a scratch
+# register, which Linux's preserves across calls, so Perry's code never keeps
+# a value in it across a call into Darwin code.
+clang_flags="--target=armv7-linux-gnueabihf --sysroot=$sdk -march=armv7-a -mfloat-abi=hard -fPIC -O1 -g -D_GNU_SOURCE -ffixed-r9"
 for name in msgsend_arm.S trampolines.c data.c exceptions_arm.c; do
     "$llvm/clang" $clang_flags -I"$root/Sources/CPerryObjC/include" -c "$root/Sources/CPerryObjC/$name" \
         -o "$out/obj/cobjc-$name.o"
@@ -29,7 +32,7 @@ printf 'module PerryInterface { header "perry_interface.h" export * }\n' > "$out
 
 swiftc() {
     "$swift/swiftc" -target armv7-unknown-linux-gnueabihf -use-ld=lld -sdk "$sdk" \
-        -resource-dir "$sdk/usr/lib/swift" -Xcc --gcc-toolchain="$sdk/usr" \
+        -resource-dir "$sdk/usr/lib/swift" -Xcc --gcc-toolchain="$sdk/usr" -Xcc -ffixed-r9 \
         -tools-directory "$swift" \
         -I "$out/include/CPerryObjC" -I "$out/include/PerryInterface" -I "$out/modules" \
         -load-plugin-executable "$macros#PerryObjCMacros" \
