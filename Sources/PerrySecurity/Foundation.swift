@@ -66,7 +66,16 @@ class NSDictionary: NSObject {
     @ObjCMethod("objectForKey:") func object(forKey key: NSObject) -> NSObject?
     @ObjCMethod("allKeys") func allKeys() -> NSArray
 
-    func object(_ key: String) -> NSObject? { object(forKey: NSObject.string(key)) }
+    /// The value for a key, looked up first with the constants Security
+    /// exports for that text (kSecAttrKeyType and the rest), as Darwin's
+    /// Security looks up its own keys: a dictionary made with the
+    /// program's own callbacks may compare keys by pointer.
+    func object(_ key: String) -> NSObject? {
+        for constant in ExportedKeys.objects(for: key) {
+            if let value = object(forKey: NSObject(constant)) { return value }
+        }
+        return object(forKey: NSObject.string(key))
+    }
 
     var entries: [(String, NSObject)] {
         allKeys().elements.compactMap { key in
@@ -98,6 +107,7 @@ class NSError: NSObject {
 class NSBundle: NSObject {
     @ObjCClassMethod("mainBundle") static func main() -> NSBundle
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String?
+    @ObjCMethod("bundlePath") func bundlePath() -> String
 }
 
 extension NSObject {
@@ -144,5 +154,28 @@ extension ObjCClass {
     func ownedInstance() -> UnsafeMutableRawPointer {
         let instance = object.newInstance()
         return withExtendedLifetime(instance) { ObjCRuntime.retain(instance.objcObject)! }
+    }
+}
+
+/// Security's exported string constants, by their text.
+enum ExportedKeys {
+    nonisolated(unsafe) private static var byText: [String: [UnsafeMutableRawPointer]]?
+    private static let lock = Lock()
+
+    static func objects(for text: String) -> [UnsafeMutableRawPointer] {
+        lock.withLock {
+            if byText == nil {
+                var table: [String: [UnsafeMutableRawPointer]] = [:]
+                let tables: [any ObjCConstantTable.Type] = [ItemKeys.self, MoreItemKeys.self, KeyAlgorithms.self, CodeSigningKeys.self]
+                for constants in tables {
+                    for (name, value) in constants.objCConstants {
+                        guard case .string(let string) = value, let object = ObjCConstantExports.shared.slot(name)?.pointee else { continue }
+                        table[string, default: []].append(object)
+                    }
+                }
+                byText = table
+            }
+            return byText?[text] ?? []
+        }
     }
 }
