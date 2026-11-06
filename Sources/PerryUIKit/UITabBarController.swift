@@ -135,8 +135,8 @@ open class UITabBarController: UIViewController {
     /// The bar shows the controllers' items, the selected one selected.
     func itemsChanged() {
         let bar = tabBar()
-        bar.bar.items = tabs.viewControllers.map { $0.tabBarItem() }
-        bar.bar.selected = selectedController?.tabBarItem()
+        bar.bar.items = tabs.viewControllers.map { $0.sendTabBarItem() }
+        bar.bar.selected = selectedController?.sendTabBarItem()
         bar.setNeedsDisplay()
     }
 
@@ -327,6 +327,16 @@ open class UITabBar: UIView {
     @ObjCMethod("setTranslucent:") func setTranslucent(_ translucent: Bool) { bar.translucent = translucent }
     @ObjCMethod("barTintColor") func barTintColor() -> UIColor? { bar.barTintColor }
     @ObjCMethod("setBarTintColor:") func setBarTintColor(_ color: UIColor?) { bar.barTintColor = color; setNeedsDisplay() }
+    /// A color the app set on the appearance proxy of the bar's class or
+    /// of UITabBar.
+    private func appearanceStyle(_ key: String) -> UIColor? {
+        let classes = [ObjCRuntime.objectClass(objcObject), UITabBar.objCClass.pointer]
+        for cls in classes {
+            if let color = AppearanceProxies.style(key, of: cls)?.as(UIColor.self) { return color }
+        }
+        return nil
+    }
+
     @ObjCMethod("unselectedItemTintColor") func unselectedItemTintColor() -> UIColor? { bar.unselectedItemTintColor }
     @ObjCMethod("setUnselectedItemTintColor:")
     func setUnselectedItemTintColor(_ color: UIColor?) { bar.unselectedItemTintColor = color; setNeedsDisplay() }
@@ -380,7 +390,10 @@ open class UITabBar: UIView {
             CG.setFillColorWithColor(context, separator.state.makeCGColor())
             CG.fillRect(context, CGRect(x: 0, y: 0, width: bounds.width, height: Screen.pixel))
         }
-        let tint = tintColor(), unselected = bar.unselectedItemTintColor ?? UIColor.systemGray()
+        // Its own colors, else those the app gave UITabBar's appearance
+        // proxy, else the tint it inherits.
+        let tint = state.tintColor ?? appearanceStyle("tintColor") ?? tintColor()
+        let unselected = bar.unselectedItemTintColor ?? appearanceStyle("unselectedItemTintColor") ?? UIColor.systemGray()
         for (item, frame) in itemFrames() {
             let isSelected = item.objcObject == bar.selected?.objcObject
             let color = !item.state.enabled ? UIColor.systemGray3() : isSelected ? tint : unselected
