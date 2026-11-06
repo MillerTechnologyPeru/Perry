@@ -169,6 +169,10 @@ public enum Objects {
 /// PERRY_OBJC_TRACE set to a class's name reports each retain, release,
 /// autorelease and deallocation of its instances, with the count after.
 ///
+/// PERRY_OBJC_TRACE_FRAMES=1 ends each report with the return addresses of
+/// the frames it came from, nearest first, to tell which code retains and
+/// which releases (arm64; /proc/<pid>/maps says whose each address is).
+///
 /// PERRY_OBJC_TRAP=1 raises SIGTRAP at each report, for a debugger to show
 /// where it came from.
 enum Zombies {
@@ -215,7 +219,16 @@ enum Zombies {
         say("perry: objc: \(String(cString: traced)) 0x\(String(UInt(bitPattern: object), radix: 16)) \(event), count \(RetainCounts.count(object))\n")
     }
 
+    static let frames: Bool = getenv("PERRY_OBJC_TRACE_FRAMES").map { String(cString: $0) != "0" } ?? false
+
     static func say(_ text: String) {
+        var text = text
+        if frames {
+            var addresses = [UInt](repeating: 0, count: 24)
+            let count = addresses.withUnsafeMutableBufferPointer { perry_caller_frames($0.baseAddress, 24) }
+            let list = addresses.prefix(count).map { "0x" + String($0, radix: 16) }.joined(separator: " ")
+            text = text.dropLast() + " frames \(list)\n"
+        }
         text.withCString { _ = write(2, $0, strlen($0)) }
         if traps { raise(SIGTRAP) }
     }
