@@ -21,8 +21,8 @@ OSStatus darwin_AudioSessionSetActive(uint8_t active) { return 0; }
 OSStatus darwin_AudioSessionSetProperty(uint32_t property, uint32_t size, const void *value) DARWIN_SYMBOL(AudioSessionSetProperty);
 OSStatus darwin_AudioSessionSetProperty(uint32_t property, uint32_t size, const void *value) { return 0; }
 
-/// The output's rate and channels, no other audio playing, and a short
-/// buffer; other properties aren't supported.
+/// The output's rate and channels, no other audio playing, a short buffer
+/// and the speaker as the route; other properties aren't supported.
 OSStatus darwin_AudioSessionGetProperty(uint32_t property, uint32_t *size, void *value) DARWIN_SYMBOL(AudioSessionGetProperty);
 OSStatus darwin_AudioSessionGetProperty(uint32_t property, uint32_t *size, void *value) {
     if (!size || !value) return -50;
@@ -53,6 +53,19 @@ OSStatus darwin_AudioSessionGetProperty(uint32_t property, uint32_t *size, void 
         if (*size < 4) return -50;
         memcpy(value, &duration, 4);
         *size = 4;
+        return 0;
+    }
+    case FOURCC('r', 'o', 'u', 't'): {      // AudioRoute: a CFString the caller releases
+        typedef const void *(*create_string)(const void *allocator, const char *text, uint32_t encoding);
+        static create_string create;
+        if (!create) {
+            create = (create_string)perry_audio_lookup(
+                "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", "_CFStringCreateWithCString");
+        }
+        if (*size < sizeof(void *) || !create) return -50;
+        const void *route = create(NULL, "Speaker", 0x08000100);    // kCFStringEncodingUTF8
+        memcpy(value, &route, sizeof(route));
+        *size = sizeof(route);
         return 0;
     }
     default:
