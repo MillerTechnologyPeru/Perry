@@ -56,8 +56,28 @@ static size_t block_size(size_t size) {
     return pages < size ? size : pages;
 }
 
+/// Large blocks stay in the heap, among other blocks, where glibc would map
+/// each by itself with nothing after it. On Darwin what follows a block is
+/// mostly mapped, and programs read a little past a block's end without
+/// knowing. (Nanosaur 2 copies a model's arrays from a buffer some
+/// kilobytes short.) 32 MB is the most glibc takes; larger blocks are still
+/// mapped. A 32-bit program's heaps are too small for it.
+__attribute__((constructor)) static void keep_blocks_in_heap(void) {
+    if (sizeof(void *) == 8) mallopt(M_MMAP_THRESHOLD, 32 << 20);
+}
+
+/// Blocks come zeroed. Darwin's allocator has cleared memory as it is freed
+/// since iOS 16.1, so what malloc gives is zero in practice, and programs
+/// lean on that too without knowing. (Nanosaur 2 releases the object a
+/// structure straight from malloc points to before it first sets it.)
 void *darwin_malloc(size_t size) DARWIN_SYMBOL(malloc);
-void *darwin_malloc(size_t size) { return malloc(block_size(size)); }
+void *darwin_malloc(size_t size) { return calloc(1, block_size(size)); }
+
+/// Clears a block that glibc gave with what was there before.
+static void *cleared(void *ptr) {
+    if (ptr) memset(ptr, 0, malloc_usable_size(ptr));
+    return ptr;
+}
 
 void *darwin_calloc(size_t count, size_t size) DARWIN_SYMBOL(calloc);
 void *darwin_calloc(size_t count, size_t size) {
@@ -69,17 +89,30 @@ void *darwin_calloc(size_t count, size_t size) {
 /// A size of zero gives a block of the least size, as Darwin's does, where
 /// glibc's frees the block.
 void *darwin_realloc(void *ptr, size_t size) DARWIN_SYMBOL(realloc);
-void *darwin_realloc(void *ptr, size_t size) { return realloc(ptr, block_size(size)); }
+/// The room a block gains is cleared, as it is on Darwin.
+void *darwin_realloc(void *ptr, size_t size) {
+    size_t before = ptr ? malloc_usable_size(ptr) : 0;
+    void *resized = realloc(ptr, block_size(size));
+    if (resized) {
+        size_t after = malloc_usable_size(resized);
+        if (after > before) memset((char *)resized + before, 0, after - before);
+    }
+    return resized;
+}
 
 int darwin_posix_memalign(void **ptr, size_t alignment, size_t size) DARWIN_SYMBOL(posix_memalign);
-int darwin_posix_memalign(void **ptr, size_t alignment, size_t size) { return posix_memalign(ptr, alignment, block_size(size)); }
+int darwin_posix_memalign(void **ptr, size_t alignment, size_t size) {
+    int error = posix_memalign(ptr, alignment, block_size(size));
+    if (!error) cleared(*ptr);
+    return error;
+}
 
 /// The size a multiple of the alignment still, as C asks.
 void *darwin_aligned_alloc(size_t alignment, size_t size) DARWIN_SYMBOL(aligned_alloc);
 void *darwin_aligned_alloc(size_t alignment, size_t size) {
     size_t room = block_size(size);
     if (alignment > 1) room = (room + alignment - 1) / alignment * alignment;
-    return aligned_alloc(alignment, room);
+    return cleared(aligned_alloc(alignment, room));
 }
 
 // The typed forms, which a type identifier is passed to last for typed
@@ -194,7 +227,7 @@ static size_t zone_size(darwin_malloc_zone *zone, const void *ptr) {
 
 static void *zone_malloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return darwin_malloc(size); }
 static void *zone_calloc(darwin_malloc_zone *zone, size_t count, size_t size) { (void)zone; return darwin_calloc(count, size); }
-static void *zone_valloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return valloc(size); }
+static void *zone_valloc(darwin_malloc_zone *zone, size_t size) { (void)zone; return cleared(valloc(size)); }
 static void zone_free(darwin_malloc_zone *zone, void *ptr) { (void)zone; free(ptr); }
 static void *zone_realloc(darwin_malloc_zone *zone, void *ptr, size_t size) { (void)zone; return darwin_realloc(ptr, size); }
 
