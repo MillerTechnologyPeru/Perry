@@ -43,6 +43,12 @@ public func CAFrameRateRangeIsEqualToRange(_ minimum: Float, _ maximum: Float, _
     minimum == otherMinimum && maximum == otherMaximum && preferred == otherPreferred
 }
 
+/// CAFrameRateRange CAFrameRateRangeMake(float minimum, float maximum, float preferred).
+@c(_CAFrameRateRangeMake)
+public func CAFrameRateRangeMake(_ minimum: Float, _ maximum: Float, _ preferred: Float) -> CAFrameRateRange {
+    CAFrameRateRange(minimum: minimum, maximum: maximum, preferred: preferred)
+}
+
 // MARK: - CAGradientLayer
 
 final class GradientLayerState {
