@@ -77,9 +77,20 @@ enum Dictionaries {
         if let storage = storage(object) {
             return Array(zip(storage.keys, storage.values)).map { (key: $0.0, value: $0.1) }
         }
-        // Another library's dictionary, such as Swift's: its keys, and the
-        // value for each.
+        // Another library's dictionary, such as Swift's: its keys and
+        // values together where it gives them so (Swift's bridged
+        // dictionaries do, from their own storage: an [AnyHashable: Any]'s
+        // can't always find a key given back as an Objective-C object),
+        // else its keys and the value for each.
         guard ObjC.overrides(object, Selectors.count, of: dictionaryClass) else { return [] }
+        if ObjC.overrides(object, Selectors.getObjectsAndKeys, of: dictionaryClass) {
+            let count = Int(bitPattern: UInt(bitPattern: ObjC.send(object, Selectors.count)))
+            guard count > 0 else { return [] }
+            var keys = [id?](repeating: nil, count: count), values = [id?](repeating: nil, count: count)
+            typealias GetObjects = @convention(c) (id, SEL, UnsafeMutablePointer<id?>, UnsafeMutablePointer<id?>, Int) -> Void
+            unsafeBitCast(ObjC.msgSend, to: GetObjects.self)(object, Selectors.getObjectsAndKeys, &values, &keys, count)
+            return zip(keys, values).compactMap { pair in pair.0.flatMap { key in pair.1.map { (key: key, value: $0) } } }
+        }
         return ObjC.enumerated(ObjC.send(object, Selectors.keyEnumerator)).compactMap { key in
             ObjC.send(object, Selectors.objectForKey, key).map { (key: key, value: $0) }
         }
