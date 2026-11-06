@@ -380,6 +380,73 @@ extension NSString {
         for index in 0..<length { buffer[index] = units[location + index] }
     }
 
+    // MARK: Lines and paragraphs
+
+    /// The bounds of the lines (or paragraphs) a range touches: where the
+    /// first starts, where the last ends after its terminator, and where its
+    /// contents end before it. Lines end at LF, CR, CRLF, NEL, LS and PS;
+    /// paragraphs at the same but LS.
+    private func lineBounds(_ range: NSRange, paragraphs: Bool, _ method: String) -> (start: Int, end: Int, contentsEnd: Int) {
+        let all = check(range, method)
+        func isTerminator(_ unit: UInt16) -> Bool {
+            switch unit {
+            case 0x0A, 0x0D, 0x85, 0x2029: return true
+            case 0x2028: return !paragraphs
+            default: return false
+            }
+        }
+        let count = all.count
+        /// Whether `index` is the LF of a CR LF pair, which is one terminator.
+        func isPairedLF(_ index: Int) -> Bool { index > 0 && index < count && all[index - 1] == 0x0D && all[index] == 0x0A }
+        var start = Int(range.location)
+        if isPairedLF(start) { start -= 1 }
+        while start > 0, !isTerminator(all[start - 1]) { start -= 1 }
+        // A range ending just after a terminator ends on that line.
+        var index = Int(range.location + range.length)
+        if range.length > 0, isTerminator(all[index - 1]),
+           !(all[index - 1] == 0x0D && index < count && all[index] == 0x0A) {
+            index -= 1
+        }
+        if isPairedLF(index) { index -= 1 }
+        while index < count, !isTerminator(all[index]) { index += 1 }
+        let contentsEnd = index
+        var end = index
+        if end < count {
+            end += (all[end] == 0x0D && end + 1 < count && all[end + 1] == 0x0A) ? 2 : 1
+        }
+        return (start, end, contentsEnd)
+    }
+
+    @ObjCMethod("lineRangeForRange:")
+    func lineRange(for range: NSRange) -> NSRange {
+        let bounds = lineBounds(range, paragraphs: false, "lineRangeForRange:")
+        return NSRange(location: UInt(bounds.start), length: UInt(bounds.end - bounds.start))
+    }
+
+    @ObjCMethod("paragraphRangeForRange:")
+    func paragraphRange(for range: NSRange) -> NSRange {
+        let bounds = lineBounds(range, paragraphs: true, "paragraphRangeForRange:")
+        return NSRange(location: UInt(bounds.start), length: UInt(bounds.end - bounds.start))
+    }
+
+    @ObjCMethod("getLineStart:end:contentsEnd:forRange:")
+    func getLineStart(_ start: UnsafeMutablePointer<UInt>?, end: UnsafeMutablePointer<UInt>?,
+                      contentsEnd: UnsafeMutablePointer<UInt>?, for range: NSRange) {
+        let bounds = lineBounds(range, paragraphs: false, "getLineStart:end:contentsEnd:forRange:")
+        start?.pointee = UInt(bounds.start)
+        end?.pointee = UInt(bounds.end)
+        contentsEnd?.pointee = UInt(bounds.contentsEnd)
+    }
+
+    @ObjCMethod("getParagraphStart:end:contentsEnd:forRange:")
+    func getParagraphStart(_ start: UnsafeMutablePointer<UInt>?, end: UnsafeMutablePointer<UInt>?,
+                           contentsEnd: UnsafeMutablePointer<UInt>?, for range: NSRange) {
+        let bounds = lineBounds(range, paragraphs: true, "getParagraphStart:end:contentsEnd:forRange:")
+        start?.pointee = UInt(bounds.start)
+        end?.pointee = UInt(bounds.end)
+        contentsEnd?.pointee = UInt(bounds.contentsEnd)
+    }
+
     @ObjCMethod("getCharacters:")
     func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>?) {
         guard let buffer else { return }
