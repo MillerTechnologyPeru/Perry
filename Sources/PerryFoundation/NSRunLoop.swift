@@ -169,11 +169,19 @@ final class RunLoopState {
 
     private func runPasses(until limit: Double, returnAfterSourceHandled: Bool, waitWhenEmpty: Bool?) -> Result {
         while true {
-            if runBlocks(), returnAfterSourceHandled { return .handledSource }
+            if runBlocks(), returnAfterSourceHandled {
+                fireDueTimers()
+                return .handledSource
+            }
             notify(RunLoopActivity.beforeTimers)
             if servesMainQueue, MainDispatchQueue.isReady() {
                 MainDispatchQueue.drain()
-                if returnAfterSourceHandled { return .handledSource }
+                if returnAfterSourceHandled {
+                    // Timers come due while the main queue keeps it busy too,
+                    // as on Darwin, where each wake-up fires the timers due.
+                    fireDueTimers()
+                    return .handledSource
+                }
             }
             let next: (timer: id?, fire: Double)? = locked {
                 if stopRequested {
@@ -213,6 +221,22 @@ final class RunLoopState {
             ObjC.release(timer)
             if now >= limit { return .timedOut }
             wait(until: min(next.fire, limit))
+        }
+    }
+
+    /// Fires the timers due now, earliest first, each once.
+    private func fireDueTimers() {
+        let now = absoluteTimeNow()
+        let due: [id] = locked {
+            timers.filter { Timers.isValid($0) && Timers.fireDate($0) <= now }
+                .sorted { Timers.fireDate($0) < Timers.fireDate($1) }
+                .map { timer -> id in _ = ObjC.retain(timer); return timer }
+        }
+        for timer in due {
+            if Timers.isValid(timer), Timers.fireDate(timer) <= now {
+                ObjC.autoreleasepool { Timers.fire(timer, from: self) }
+            }
+            ObjC.release(timer)
         }
     }
 
