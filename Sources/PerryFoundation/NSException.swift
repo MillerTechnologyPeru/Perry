@@ -78,6 +78,15 @@ enum Exceptions {
         _ = unsafeBitCast(set, to: SetHandler.self)(uncaught)
     }
 
+    /// Raises a new exception by name with a reason, as Foundation's own
+    /// checks do.
+    static func raise(name: String, reason: String) -> Never {
+        guard let cls = "NSException".withCString({ ObjC.getClass($0) }),
+              let exception = Storage.allocate(UnsafeMutableRawPointer(cls)) else { foundationFatal(reason) }
+        Storage.set(exception, ExceptionStorage(name: Strings.autoreleased(name), reason: Strings.autoreleased(reason), userInfo: nil))
+        raise(ObjC.autorelease(exception))
+    }
+
     static func raise(_ exception: id?) -> Never {
         throwException?(exception)
         uncaught(exception)

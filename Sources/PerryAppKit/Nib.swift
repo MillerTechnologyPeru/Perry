@@ -612,7 +612,8 @@ enum Nibs {
             let items = unarchiving.archive.objects[values].elements.map { unarchiving.object(at: $0, decoder: decoder) }
             for (key, item) in zip(keys, items) { target.sendSetValue(item, forKeyPath: key) }
         case "NSNibBindingConnector":
-            Bindings.connect(source: object("NSSource"), destination: object("NSDestination"), connector: connector, unarchiving: unarchiving)
+            Bindings.connect(source: object("NSSource"), destination: object("NSDestination"), options: object("NSOptions"),
+                             connector: connector, unarchiving: unarchiving)
         default:
             break
         }
@@ -685,20 +686,15 @@ enum Outlets {
     }
 }
 
-/// Cocoa bindings a nib makes: kept as the binding's key path, for the
-/// views that read their value once; bound objects don't observe changes.
+/// Cocoa bindings a nib makes, with their options, through
+/// -bind:toObject:withKeyPath:options:.
 enum Bindings {
-    static func connect(source: NSObject?, destination: NSObject?, connector: NibArchive.Object, unarchiving: NibUnarchiving) {
+    static func connect(source: NSObject?, destination: NSObject?, options: NSObject?, connector: NibArchive.Object,
+                        unarchiving: NibUnarchiving) {
         guard let source, let destination, let binding = unarchiving.string("NSBinding", of: connector),
               let keyPath = unarchiving.string("NSKeyPath", of: connector) else { return }
         Trace.log("nib: binding \(binding) to \(keyPath)")
-        guard binding == "value" || binding == "hidden" || binding == "enabled" else { return }
-        guard let value = destination.sendValue(forKeyPath: keyPath) else { return }
-        switch binding {
-        case "hidden": Send.void(source.objcObject, "setHidden:", bool: Send.bool(value.objcObject, "boolValue"))
-        case "enabled": Send.void(source.objcObject, "setEnabled:", bool: Send.bool(value.objcObject, "boolValue"))
-        default: Send.void(source.objcObject, "setObjectValue:", value.objcObject)
-        }
+        BindingTable.bind(source.objcObject, binding, to: destination, keyPath: keyPath, options: options)
     }
 }
 
@@ -961,9 +957,29 @@ open class NSNib: NSObject {
     }
 }
 
-/// -[NSBundle loadNibNamed:owner:topLevelObjects:], AppKit's addition.
+/// -[NSBundle loadNibNamed:owner:topLevelObjects:] and -imageForResource:,
+/// AppKit's additions.
 @ObjCCategory("NSNibLoading")
 extension NSBundle {
+    /// An image file among the bundle's resources, by name with or without
+    /// its extension, or nil.
+    @ObjCMethod("imageForResource:")
+    func image(forResource name: String?) -> NSImage? {
+        guard let name, !name.isEmpty else { return nil }
+        guard let resourcesObject = Send.object(objcObject, "resourcePath") else { return nil }
+        let resources = String(objCArgument: resourcesObject)
+        let hasExtension = name.split(separator: "/").last?.contains(".") ?? false
+        let candidates = hasExtension ? [name] : ["png", "pdf", "tiff", "tif", "jpg", "icns", "gif"].flatMap { [name + "@2x." + $0, name + "." + $0] }
+        for directory in [resources, resources + "/Base.lproj", resources + "/en.lproj"] {
+            for candidate in candidates where access(directory + "/" + candidate, R_OK) == 0 {
+                let image = NSImage(contentsOfFile: directory + "/" + candidate)
+                image.name = name
+                return image
+            }
+        }
+        return nil
+    }
+
     @ObjCMethod("loadNibNamed:owner:topLevelObjects:")
     func loadNib(named name: String?, owner: NSObject?, topLevelObjects: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
         NSNib(nibNamed: name, bundle: self).instantiate(owner: owner, topLevelObjects: topLevelObjects)

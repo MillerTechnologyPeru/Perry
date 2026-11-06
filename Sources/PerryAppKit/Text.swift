@@ -489,6 +489,8 @@ open class NSParagraphStyle: NSObject {
     var hyphenationFactor: Float = 0
     var allowsDefaultTighteningForTruncation = false
     var tabStops: NSObject?
+    var textBlocks: NSObject?
+    var textLists: NSObject?
     var defaultTabInterval: CGFloat = 0
 
     @ObjCMethod("init")
@@ -515,6 +517,7 @@ open class NSParagraphStyle: NSObject {
         (copy.minimumLineHeight, copy.maximumLineHeight, copy.lineHeightMultiple) = (minimumLineHeight, maximumLineHeight, lineHeightMultiple)
         (copy.baseWritingDirection, copy.hyphenationFactor, copy.tabStops, copy.defaultTabInterval) =
             (baseWritingDirection, hyphenationFactor, tabStops, defaultTabInterval)
+        (copy.textBlocks, copy.textLists) = (textBlocks, textLists)
         copy.allowsDefaultTighteningForTruncation = allowsDefaultTighteningForTruncation
     }
 
@@ -548,8 +551,8 @@ open class NSParagraphStyle: NSObject {
     @ObjCMethod("allowsDefaultTighteningForTruncation") func styleAllowsTightening() -> Bool { allowsDefaultTighteningForTruncation }
     @ObjCMethod("tabStops") func styleTabStops() -> NSObject { tabStops ?? NSMutableArray.empty() }
     @ObjCMethod("defaultTabInterval") func styleDefaultTabInterval() -> CGFloat { defaultTabInterval }
-    @ObjCMethod("textBlocks") func textBlocks() -> NSObject { NSMutableArray.empty() }
-    @ObjCMethod("textLists") func textLists() -> NSObject { NSMutableArray.empty() }
+    @ObjCMethod("textBlocks") func textBlocksValue() -> NSObject { textBlocks ?? NSMutableArray.empty() }
+    @ObjCMethod("textLists") func textListsValue() -> NSObject { textLists ?? NSMutableArray.empty() }
     @ObjCMethod("headerLevel") func headerLevel() -> Int { 0 }
 }
 
@@ -570,6 +573,8 @@ open class NSMutableParagraphStyle: NSParagraphStyle {
     @ObjCMethod("setHyphenationFactor:") func setHyphenationFactor(_ value: Float) { hyphenationFactor = value }
     @ObjCMethod("setAllowsDefaultTighteningForTruncation:") func setAllowsTightening(_ value: Bool) { allowsDefaultTighteningForTruncation = value }
     @ObjCMethod("setTabStops:") func setTabStops(_ value: NSObject?) { tabStops = value }
+    @ObjCMethod("setTextBlocks:") func setTextBlocks(_ value: NSObject?) { textBlocks = value }
+    @ObjCMethod("setTextLists:") func setTextLists(_ value: NSObject?) { textLists = value }
     @ObjCMethod("setDefaultTabInterval:") func setDefaultTabInterval(_ value: CGFloat) { defaultTabInterval = value }
     @ObjCMethod("setParagraphStyle:")
     func setParagraphStyle(_ other: NSParagraphStyle?) { other?.copyValues(to: self) }

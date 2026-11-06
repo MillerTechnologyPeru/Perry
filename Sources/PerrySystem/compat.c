@@ -571,14 +571,15 @@ void darwin_srandomdev(void) { srandom(arc4random()); }
 
 // MARK: - sysctl
 
-enum { CTL_KERN = 1, CTL_HW = 6, KERN_OSTYPE = 1, KERN_OSRELEASE = 2, KERN_PROC = 14, KERN_OSVERSION = 65,
+enum { CTL_KERN = 1, CTL_HW = 6, CTL_USER = 8, USER_CS_PATH = 1, KERN_OSTYPE = 1, KERN_OSRELEASE = 2, KERN_PROC = 14, KERN_OSVERSION = 65,
        HW_MACHINE = 1, HW_MODEL = 2, HW_NCPU = 3, HW_PHYSMEM = 5, HW_PAGESIZE = 7, HW_MEMSIZE = 24, HW_AVAILCPU = 25 };
 
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length)
     __asm__("_sysctlbyname");
 
-// The names sysctlbyname answers, by number; a process's information is
-// all zeros (no flags: not being debugged).
+// The names sysctlbyname answers, by number, and the standard utilities'
+// path (user.cs_path); a process's information is all zeros (no flags: not
+// being debugged).
 int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_length, void *new_value, size_t new_length)
     DARWIN_SYMBOL(sysctl);
 int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_length, void *new_value, size_t new_length) {
@@ -602,6 +603,19 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
             return 0;
         }
         }
+    } else if (names[0] == CTL_USER && names[1] == USER_CS_PATH) {
+        // The standard utilities' search path, as confstr gives it.
+        if (!old_length)
+            return -1;
+        size_t length = confstr(_CS_PATH, NULL, 0);
+        if (old && *old_length < length) {
+            errno = ENOMEM;
+            return -1;
+        }
+        if (old)
+            confstr(_CS_PATH, old, length);
+        *old_length = length;
+        return 0;
     } else if (names[0] == CTL_HW) {
         switch (names[1]) {
         case HW_MACHINE: name = "hw.machine"; break;

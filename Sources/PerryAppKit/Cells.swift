@@ -1017,6 +1017,10 @@ open class NSTableHeaderCell: NSTextFieldCell {
 open class NSPopUpButtonCell: NSButtonCell {
     var menu: NSMenu?
     var selectedIndex = -1
+    /// The item the button shows: the menu's selected (or a pull-down's
+    /// first) item, or with usesItemFromMenu off, the one set.
+    var usesItemFromMenu = true
+    var shownItem: NSMenuItem?
     var pullsDown = false
     var autoenablesItems = true
     var preferredEdge: UInt = 1
@@ -1080,6 +1084,22 @@ open class NSPopUpButtonCell: NSButtonCell {
     @ObjCMethod("setObjectValue:")
     override func setObjectValue(_ value: NSObject?) { selectItem(at: value.map { Send.integer($0.objcObject, "integerValue") } ?? -1) }
     @ObjCMethod("title") override func cellTitle() -> String { selectedItem?.title ?? "" }
+    @ObjCMethod("usesItemFromMenu") func usesItemFromMenuValue() -> Bool { usesItemFromMenu }
+    @ObjCMethod("setUsesItemFromMenu:") func setUsesItemFromMenu(_ value: Bool) { usesItemFromMenu = value; shownItemChanged() }
+    @ObjCMethod("menuItem") func cellMenuItem() -> NSMenuItem? { shownItem ?? displayedItem }
+    @ObjCMethod("setMenuItem:") func setMenuItem(_ item: NSMenuItem?) { shownItem = item; shownItemChanged() }
+
+    /// The button's size follows the item it shows.
+    func shownItemChanged() {
+        guard let view = controlView else { return }
+        view.setNeedsDisplay(true)
+        Send.void(view.objcObject, "invalidateIntrinsicContentSize")
+    }
+
+    var displayedItem: NSMenuItem? {
+        if !usesItemFromMenu { return shownItem }
+        return pullsDown ? items.first : selectedItem
+    }
 
     @ObjCMethod("drawWithFrame:inView:")
     override func draw(withFrame frame: CGRect, in view: NSView?) {
@@ -1095,7 +1115,15 @@ open class NSPopUpButtonCell: NSButtonCell {
             Arrows.draw(in: CGRect(x: frame.maxX - 14, y: frame.minY, width: 12, height: frame.height), color: NSColor.secondaryLabelColor(),
                         context: context, double: !pullsDown)
         }
-        let text = pullsDown ? (items.first?.title ?? title) : (selectedItem?.title ?? "")
+        let shown = displayedItem
+        let text = shown?.title ?? (pullsDown ? title : "")
+        // An item with an image and no title shows the image.
+        if text.isEmpty, let image = shown?.image?.as(NSImage.self) {
+            let size = image.size == .zero ? CGSize(width: 16, height: 16) : image.size
+            let box = CGRect(x: frame.minX + 4, y: frame.midY - size.height / 2, width: size.width, height: size.height)
+            ImageDrawing.draw(image, fitting: box, scaleUp: true)
+            return
+        }
         var style = TextStyle()
         style.maximumLines = 1
         style.lineBreakMode = 4
@@ -1104,10 +1132,18 @@ open class NSPopUpButtonCell: NSButtonCell {
         Text.draw([TextRun(text: text, font: effectiveFont, color: displayColor(nil))], in: rect, style: style)
     }
 
+    /// Wide enough for the widest item and the item shown, with the
+    /// arrows; an item shown as an image, the image and the arrows.
     @ObjCMethod("cellSize")
     override func cellSize() -> CGSize {
-        let widest = items.map { Text.width($0.title, font: effectiveFont) }.max() ?? 40
-        return CGSize(width: (widest + 40).rounded(.up), height: 21)
+        let shown = displayedItem
+        if let shown, shown.title.isEmpty, let image = shown.image?.as(NSImage.self) {
+            let size = image.size == .zero ? CGSize(width: 16, height: 16) : image.size
+            return CGSize(width: (size.width + (bordered ? 30 : 18)).rounded(.up), height: max(21, size.height))
+        }
+        let titles = (usesItemFromMenu ? items : []) + [shown].compactMap { $0 }
+        let widest = titles.map { Text.width($0.title, font: effectiveFont) }.max() ?? 0
+        return CGSize(width: (max(widest, 10) + (bordered ? 40 : 22)).rounded(.up), height: 21)
     }
 }
 

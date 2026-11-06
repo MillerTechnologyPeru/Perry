@@ -75,22 +75,7 @@ open class NSResponder: NSObject {
     func interpretKeyEvents(_ events: NSObject?) {
         guard let events = events?.as(NSArray.self) else { return }
         for object in events.elements {
-            guard let event = object.as(NSEvent.self), event.type == .keyDown else { continue }
-            let commands: [UInt16: String] = [0x24: "insertNewline:", 0x4C: "insertNewline:", 0x30: "insertTab:", 0x33: "deleteBackward:",
-                                              0x75: "deleteForward:", 0x35: "cancelOperation:", 0x7B: "moveLeft:", 0x7C: "moveRight:",
-                                              0x7D: "moveDown:", 0x7E: "moveUp:"]
-            if let command = commands[event.keyCode] {
-                if Send.responds(objcObject, "doCommandBySelector:") {
-                    typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeRawPointer) -> Void
-                    unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("doCommandBySelector:"),
-                                                                   ObjCRuntime.selector(command))
-                }
-                continue
-            }
-            let text = event.characters
-            guard !text.isEmpty, text.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value < 0xF700 && $0.value != 0x7F }),
-                  Send.responds(objcObject, "insertText:") else { continue }
-            Send.void(objcObject, "insertText:", text.objCArgument())
+            if let event = object.as(NSEvent.self) { KeyBindings.handle(event, for: objcObject) }
         }
     }
 

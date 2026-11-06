@@ -83,32 +83,48 @@ open class NSPopUpButton: NSButton {
         valueChanged()
     }
     @ObjCMethod("synchronizeTitleAndSelectedItem") func synchronizeTitleAndSelectedItem() { setNeedsDisplay(true) }
+    /// A pull-down's title is its first item's; a pop-up selects the item
+    /// with the title, added when there is none.
     @ObjCMethod("setTitle:") override func setTitle(_ title: String?) {
+        if pullsDown() {
+            if let first = items.first { first.title = title ?? "" } else { addItem(withTitle: title) }
+            popUpCell?.shownItemChanged()
+            return
+        }
         if let index = items.firstIndex(where: { $0.title == title }) { selectItem(at: index) } else { addItem(withTitle: title); selectItem(at: items.count - 1) }
     }
     @ObjCMethod("objectValue") override func objectValue() -> NSObject? { NSNumber.make(integer: indexOfSelectedItem()) }
 
-    /// Without a menu on screen, a click chooses the next enabled item.
+    /// A click shows the menu: a pop-up's with the selected item over the
+    /// button, a pull-down's below it.
     override func clicked() {
-        guard let cell = popUpCell, !cell.items.isEmpty else { return }
+        guard let cell = popUpCell else { return }
+        // Observers fill the menu now, as TextMate's status bar does.
+        NSNotificationCenter.defaultCenter().post(NSNotification.make(name: "NSPopUpButtonCellWillPopUpNotification", object: cell))
+        NSNotificationCenter.defaultCenter().post(NSNotification.make(name: "NSPopUpButtonWillPopUpNotification", object: self))
+        guard let menu = cell.menu else { return }
+        let flipped = self.flipped
+        let chosen: NSMenuItem?
         if cell.pullsDown {
-            if let item = cell.items.dropFirst().first(where: { $0.enabled && !$0.separator }) { perform(item) }
-            return
+            chosen = MenuTracking.popUp(menu, positioning: nil, at: CGPoint(x: 0, y: flipped ? bounds.maxY : 0), in: self,
+                                        minimumWidth: bounds.width, font: font?.as(NSFont.self), skipsFirstItem: true, performs: false)
+        } else {
+            chosen = MenuTracking.popUp(menu, positioning: cell.selectedItem, at: CGPoint(x: 0, y: bounds.midY), in: self,
+                                        minimumWidth: bounds.width + 20, font: font?.as(NSFont.self), performs: false)
         }
-        var index = cell.selectedIndex
-        for _ in cell.items.indices {
-            index = (index + 1) % cell.items.count
-            if cell.items[index].enabled && !cell.items[index].separator { break }
-        }
-        cell.selectItem(at: index)
-        perform(cell.items[index])
+        guard let chosen, let index = cell.items.firstIndex(where: { $0 === chosen }) else { return }
+        if !cell.pullsDown { cell.selectItem(at: index) }
+        setNeedsDisplay(true)
+        perform(chosen)
     }
 
+    /// The item's action, or without one the button's.
     private func perform(_ item: NSMenuItem) {
         if let itemAction = item.action {
-            _ = sendAction(itemAction, to: item.target.map(NSObject.init))
+            _ = App.shared?.sendAction(itemAction, to: item.target.map(NSObject.init), from: item)
+        } else {
+            _ = sendAction(action, to: target.map(NSObject.init))
         }
-        _ = sendAction(action, to: target.map(NSObject.init))
     }
 
     @ObjCMethod("performClick:")

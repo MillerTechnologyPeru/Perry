@@ -383,7 +383,10 @@ public class NSMutableArray: NSArray {
     override func copy(zone: UnsafeMutableRawPointer?) -> NSArray { Arrays.owned(storage.objects) }
 
     @ObjCMethod("addObject:")
-    func add(_ element: ObjCObject) {
+    func add(_ element: ObjCObject?) {
+        guard let element else {
+            Exceptions.raise(name: "NSInvalidArgumentException", reason: "*** -[__NSArrayM insertObject:atIndex:]: object cannot be nil")
+        }
         storage.objects.append(ObjC.retain(element.id)!)
         storage.enumeration.mutated()
     }

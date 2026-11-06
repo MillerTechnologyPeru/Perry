@@ -328,6 +328,7 @@ public func CTFontCopyFontDescriptor(_ object: UnsafeMutableRawPointer?) -> Unsa
 @DarwinC("_CTFontGetDescent") public func CTFontGetDescent(_ object: UnsafeMutableRawPointer?) -> CGFloat { -(font(object)?.descender() ?? 0) }
 @DarwinC("_CTFontGetLeading") public func CTFontGetLeading(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.leading() ?? 0 }
 @DarwinC("_CTFontGetCapHeight") public func CTFontGetCapHeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.capHeight() ?? 0 }
+@DarwinC("_CTFontGetXHeight") public func CTFontGetXHeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.xHeight() ?? 0 }
 @DarwinC("_CTFontGetWeight") public func CTFontGetWeight(_ object: UnsafeMutableRawPointer?) -> CGFloat { font(object)?.state.weight ?? 0 }
 
 @c(_CTFontGetSymbolicTraits)

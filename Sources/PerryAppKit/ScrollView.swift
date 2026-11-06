@@ -216,6 +216,12 @@ open class NSScrollView: NSView {
             content.origin.y += height
             content.size.height = max(0, content.height - height)
         }
+        // As tiling places them, also when constraints resize the scroll
+        // view: the clip view grows with it, the scrollers keep to its
+        // right and bottom edges.
+        contentClip?.autoresizingMask = 2 | 16
+        verticalScroller?.autoresizingMask = 1 | 16
+        horizontalScroller?.autoresizingMask = 2 | 32
         if let contentClip, contentClip.frame != content { Send.void(contentClip.objcObject, "setFrame:", rect: content) }
         if let verticalScroller {
             verticalScroller.setFrame(CGRect(x: content.maxX - 15, y: content.minY, width: 15, height: content.height))
@@ -339,7 +345,12 @@ open class NSClipView: NSView {
     @ObjCMethod("drawsBackground") func clipDrawsBackground() -> Bool { drawsBackground }
     @ObjCMethod("setDrawsBackground:") func setDrawsBackground(_ value: Bool) { drawsBackground = value; setNeedsDisplay(true) }
     @ObjCMethod("backgroundColor") func clipBackgroundColor() -> NSColor? { backgroundColor }
-    @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: NSColor?) { backgroundColor = color; setNeedsDisplay(true) }
+    @ObjCMethod("setBackgroundColor:")
+    func setBackgroundColor(_ color: NSColor?) {
+        backgroundColor = color
+        if Trace.enabled, let color { Trace.log("\(describedByObject() ?? "clip") of \(documentView?.describedByObject() ?? "nothing") background \(color.red) \(color.green) \(color.blue) \(color.alpha), draws \(drawsBackground)") }
+        setNeedsDisplay(true)
+    }
     @ObjCMethod("copiesOnScroll") func clipCopiesOnScroll() -> Bool { copiesOnScroll }
     @ObjCMethod("setCopiesOnScroll:") func setCopiesOnScroll(_ value: Bool) { copiesOnScroll = value }
     @ObjCMethod("contentInsets") func clipContentInsets() -> NSEdgeInsets { contentInsets }

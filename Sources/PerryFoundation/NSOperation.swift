@@ -20,8 +20,11 @@ enum Dispatch {
     nonisolated(unsafe) static var async: Async!
     nonisolated(unsafe) static var globalQueue: GlobalQueue!
     nonisolated(unsafe) static var mainQueue: UnsafeMutableRawPointer?
+    /// Global blocks' isa, _NSConcreteGlobalBlock.
+    nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) {
+        globalBlockClass = lookup("__NSConcreteGlobalBlock")
         async = lookup("_dispatch_async_f").map { unsafeBitCast($0, to: Async.self) }
         globalQueue = lookup("_dispatch_get_global_queue").map { unsafeBitCast($0, to: GlobalQueue.self) }
         mainQueue = lookup("__dispatch_main_q")

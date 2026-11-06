@@ -271,6 +271,17 @@ public final class NSBundle: NSObject {
     @ObjCMethod("resourcePath") func resourcePath() -> String { storage.resourcePath }
     @ObjCMethod("resourceURL") func resourceURL() -> NSURL? { URLs.wrapped(URL(filePath: storage.resourcePath, directoryHint: .isDirectory)) }
     @ObjCMethod("executablePath") func executablePath() -> String? { storage.executablePath }
+    // The standard folders inside a bundle, whether or not they exist: a Mac
+    // bundle's under Contents, an iOS bundle's at its top level.
+    @ObjCMethod("builtInPlugInsPath") func builtInPlugInsPath() -> String { storage.contentsPath + "/PlugIns" }
+    @ObjCMethod("builtInPlugInsURL") func builtInPlugInsURL() -> NSURL? { folderURL(builtInPlugInsPath()) }
+    @ObjCMethod("privateFrameworksPath") func privateFrameworksPath() -> String { storage.contentsPath + "/Frameworks" }
+    @ObjCMethod("privateFrameworksURL") func privateFrameworksURL() -> NSURL? { folderURL(privateFrameworksPath()) }
+    @ObjCMethod("sharedFrameworksPath") func sharedFrameworksPath() -> String { storage.contentsPath + "/SharedFrameworks" }
+    @ObjCMethod("sharedFrameworksURL") func sharedFrameworksURL() -> NSURL? { folderURL(sharedFrameworksPath()) }
+    @ObjCMethod("sharedSupportPath") func sharedSupportPath() -> String { storage.contentsPath + "/SharedSupport" }
+    @ObjCMethod("sharedSupportURL") func sharedSupportURL() -> NSURL? { folderURL(sharedSupportPath()) }
+    private func folderURL(_ path: String) -> NSURL? { URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory)) }
     /// Where the App Store's receipt is: a Mac app's in Contents/_MASReceipt,
     /// as the Mac App Store installs it; an iOS app's in StoreKit, where
     /// there is none.

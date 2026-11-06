@@ -125,8 +125,42 @@ open class NSColor: NSObject {
     @ObjCClassMethod("colorWithCatalogName:colorName:")
     static func color(catalogName: String?, colorName: String?) -> NSColor? { colorName.flatMap(system) }
 
-    /// The system's named colors, in macOS's light appearance.
+    /// The system's named colors in macOS's dark appearance, where they
+    /// differ from the light one's.
+    static let darkSystemColors: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = {
+        let accent: (CGFloat, CGFloat, CGFloat) = (0.04, 0.52, 1.0)
+        return [
+            "windowBackgroundColor": (0.196, 0.196, 0.196, 1), "underPageBackgroundColor": (0.157, 0.157, 0.157, 1),
+            "controlColor": (1, 1, 1, 0.25), "controlBackgroundColor": (0.118, 0.118, 0.118, 1), "textBackgroundColor": (0.118, 0.118, 0.118, 1),
+            "controlTextColor": (1, 1, 1, 0.85), "textColor": (1, 1, 1, 1), "labelColor": (1, 1, 1, 0.85),
+            "secondaryLabelColor": (1, 1, 1, 0.55), "tertiaryLabelColor": (1, 1, 1, 0.25), "quaternaryLabelColor": (1, 1, 1, 0.1),
+            "disabledControlTextColor": (1, 1, 1, 0.25), "placeholderTextColor": (1, 1, 1, 0.25),
+            "headerColor": (0.118, 0.118, 0.118, 1), "headerTextColor": (1, 1, 1, 0.85), "gridColor": (0.1, 0.1, 0.1, 1),
+            "separatorColor": (1, 1, 1, 0.1), "windowFrameColor": (0.2, 0.2, 0.2, 1), "windowFrameTextColor": (1, 1, 1, 0.85),
+            "selectedTextBackgroundColor": (0.25, 0.39, 0.55, 1), "selectedTextColor": (1, 1, 1, 1),
+            "selectedContentBackgroundColor": (accent.0, accent.1, accent.2, 1), "selectedControlColor": (0.25, 0.39, 0.55, 1),
+            "selectedControlTextColor": (1, 1, 1, 0.85), "alternateSelectedControlColor": (accent.0, accent.1, accent.2, 1),
+            "unemphasizedSelectedContentBackgroundColor": (0.27, 0.27, 0.27, 1),
+            "unemphasizedSelectedTextBackgroundColor": (0.27, 0.27, 0.27, 1), "unemphasizedSelectedTextColor": (1, 1, 1, 1),
+            "keyboardFocusIndicatorColor": (accent.0, accent.1, accent.2, 0.5), "controlAccentColor": (accent.0, accent.1, accent.2, 1),
+            "linkColor": (0.2, 0.6, 1, 1), "scrollBarColor": (0.4, 0.4, 0.4, 1), "knobColor": (1, 1, 1, 0.5),
+            "selectedKnobColor": (1, 1, 1, 0.6), "highlightColor": (1, 1, 1, 0.25), "controlShadowColor": (0, 0, 0, 1),
+            "controlHighlightColor": (1, 1, 1, 0.25), "controlLightHighlightColor": (1, 1, 1, 0.25),
+            "systemBlueColor": (accent.0, accent.1, accent.2, 1), "systemRedColor": (1, 0.27, 0.23, 1),
+            "systemGreenColor": (0.19, 0.82, 0.35, 1), "systemOrangeColor": (1, 0.62, 0.04, 1), "systemYellowColor": (1, 0.84, 0.04, 1),
+            "systemPinkColor": (1, 0.22, 0.37, 1), "systemPurpleColor": (0.75, 0.35, 0.95, 1), "systemTealColor": (0.39, 0.82, 1, 1),
+            "systemIndigoColor": (0.37, 0.36, 0.9, 1), "systemBrownColor": (0.67, 0.56, 0.4, 1), "systemMintColor": (0.4, 0.83, 0.81, 1),
+            "systemCyanColor": (0.35, 0.78, 0.98, 1), "systemGrayColor": (0.6, 0.6, 0.62, 1),
+            "systemFillColor": (1, 1, 1, 0.1), "secondarySystemFillColor": (1, 1, 1, 0.08), "tertiarySystemFillColor": (1, 1, 1, 0.05),
+        ]
+    }()
+
+    /// The system's named colors, in the current appearance: macOS's light
+    /// one, or its dark one when the desktop prefers dark.
     static func system(_ name: String) -> NSColor? {
+        if Appearances.currentIsDark, let value = darkSystemColors[name] {
+            return NSColor(named: name, red: value.0, green: value.1, blue: value.2, alpha: value.3)
+        }
         let accent = (0.0, 0.48, 1.0)
         let values: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = [
             "clearColor": (0, 0, 0, 0), "blackColor": (0, 0, 0, 1), "whiteColor": (1, 1, 1, 1),
@@ -562,6 +596,10 @@ open class NSImage: NSObject {
     /// The decoded bitmap: retained; nil until it is first drawn.
     var cgImage: CGRef?
     private var decoded = false
+    /// An image drawn by code: an app's block, or a system image's drawing.
+    var drawingHandler: ObjCBlock?
+    var drawing: ((CGRect) -> Void)?
+    var handlerFlipped = false
 
     nonisolated(unsafe) static var named: [String: NSImage] = [:]
 
@@ -643,9 +681,11 @@ open class NSImage: NSObject {
         if size == .zero { size = CGSize(width: CGFloat(CG.imageGetWidth(image)), height: CGFloat(CG.imageGetHeight(image))) }
     }
 
-    /// The bitmap ImageIO decodes from the file or data.
+    /// The bitmap ImageIO decodes from the file or data, or that a drawing
+    /// handler draws, at twice the image's size.
     func bitmap() -> CGRef? {
         if decoded { return cgImage }
+        if drawingHandler != nil || drawing != nil { return drawnBitmap() }
         decoded = true
         guard CG.ready else { return nil }
         var source = data
@@ -658,15 +698,55 @@ open class NSImage: NSObject {
         return cgImage
     }
 
-    /// Named images: the app's resources by name, else a blank system image
-    /// of the size apps expect.
+    private func drawnBitmap() -> CGRef? {
+        decoded = true
+        guard CG.ready, size.width > 0, size.height > 0, let context = CG.makeContext(size: size, scale: 2) else { return nil }
+        defer { CG.release(context) }
+        let bounds = CGRect(origin: .zero, size: size)
+        NSGraphicsContext.with(context, flipped: handlerFlipped) {
+            if handlerFlipped {
+                CG.translateCTM(context, 0, size.height)
+                CG.scaleCTM(context, 1, -1)
+            }
+            if let drawing {
+                drawing(bounds)
+            } else if let drawingHandler {
+                typealias Invoke = @convention(c) (UnsafeMutableRawPointer, CGRect) -> Bool
+                _ = drawingHandler.function(as: Invoke.self)(drawingHandler.object, bounds)
+            }
+        }
+        cgImage = CG.bitmapContextCreateImage(context)
+        return cgImage
+    }
+
+    /// An image its block draws, each time at its size, y upwards unless
+    /// flipped.
+    @ObjCClassMethod("imageWithSize:flipped:drawingHandler:")
+    static func image(size: CGSize, flipped: Bool, drawingHandler: ObjCBlock?) -> NSImage {
+        let image = NSImage(size: size)
+        image.drawingHandler = drawingHandler
+        image.handlerFlipped = flipped
+        return image
+    }
+
+    /// Named images: the app's resources by name, else a system image (the
+    /// templates and symbols Perry draws, or a blank one of the size apps
+    /// expect).
     @ObjCClassMethod("imageNamed:")
     static func image(named name: String?) -> NSImage? {
         guard let name else { return nil }
         if let image = named[name] { return image }
         let image = NSImage(size: .zero)
         image.load(named: name)
-        if image.path == nil { image.size = CGSize(width: 32, height: 32) }
+        if image.path == nil {
+            if let drawing = SystemImages.drawing(for: name) {
+                image.size = CGSize(width: 16, height: 16)
+                image.drawing = drawing
+                image.template = true
+            } else {
+                image.size = CGSize(width: 32, height: 32)
+            }
+        }
         named[name] = image
         return image
     }
@@ -676,6 +756,7 @@ open class NSImage: NSObject {
         let image = NSImage(size: CGSize(width: 16, height: 16))
         image.name = name
         image.template = true
+        image.drawing = name.flatMap(SystemImages.drawing)
         return image
     }
 
@@ -1007,3 +1088,66 @@ public func NSDrawLightBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect
 
 @c(_NSDrawGrayBezel)
 public func NSDrawGrayBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect, clip) }
+
+/// System template images and symbols Perry draws itself, in the label
+/// color of the appearance they are first drawn in.
+enum SystemImages {
+    static func drawing(for name: String) -> ((CGRect) -> Void)? {
+        func stroke(_ path: NSBezierPath, width: CGFloat = 1.3) {
+            NSColor.labelColor().setStroke()
+            path.setLineWidth(width)
+            path.setLineCapStyle(1)
+            path.stroke()
+        }
+        func line(_ points: [CGPoint]) -> NSBezierPath {
+            let path = NSBezierPath()
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.line(to: point) }
+            return path
+        }
+        switch name {
+        case "NSActionTemplate", "ellipsis.circle":
+            // Three dots in a circle.
+            return { rect in
+                let circle = rect.insetBy(dx: 1.5, dy: 1.5)
+                stroke(NSBezierPath.bezierPath(ovalIn: circle))
+                NSColor.labelColor().setFill()
+                for offset in [-3.5, 0, 3.5] as [CGFloat] {
+                    NSBezierPath.bezierPath(ovalIn: CGRect(x: rect.midX + offset - 1.1, y: rect.midY - 1.1, width: 2.2, height: 2.2)).fill()
+                }
+            }
+        case "NSAddTemplate", "plus":
+            return { rect in stroke(line([CGPoint(x: rect.midX, y: rect.minY + 3), CGPoint(x: rect.midX, y: rect.maxY - 3)]));
+                stroke(line([CGPoint(x: rect.minX + 3, y: rect.midY), CGPoint(x: rect.maxX - 3, y: rect.midY)])) }
+        case "NSRemoveTemplate", "minus":
+            return { rect in stroke(line([CGPoint(x: rect.minX + 3, y: rect.midY), CGPoint(x: rect.maxX - 3, y: rect.midY)])) }
+        case "NSGoLeftTemplate", "chevron.left":
+            return { rect in stroke(line([CGPoint(x: rect.midX + 2.5, y: rect.minY + 3), CGPoint(x: rect.midX - 2.5, y: rect.midY),
+                                         CGPoint(x: rect.midX + 2.5, y: rect.maxY - 3)]), width: 1.6) }
+        case "NSGoRightTemplate", "chevron.right":
+            return { rect in stroke(line([CGPoint(x: rect.midX - 2.5, y: rect.minY + 3), CGPoint(x: rect.midX + 2.5, y: rect.midY),
+                                         CGPoint(x: rect.midX - 2.5, y: rect.maxY - 3)]), width: 1.6) }
+        case "NSStopProgressTemplate", "xmark":
+            return { rect in
+                let box = rect.insetBy(dx: 4, dy: 4)
+                stroke(line([CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)]))
+                stroke(line([CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.minY)]))
+            }
+        case "NSStopProgressFreestandingTemplate", "xmark.circle.fill":
+            return { rect in
+                NSColor.labelColor().setFill()
+                NSBezierPath.bezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                let box = rect.insetBy(dx: 5, dy: 5)
+                NSColor.textBackgroundColor().setStroke()
+                for points in [[CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)],
+                               [CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.minY)]] {
+                    let path = line(points)
+                    path.setLineWidth(1.5)
+                    path.stroke()
+                }
+            }
+        default:
+            return nil
+        }
+    }
+}

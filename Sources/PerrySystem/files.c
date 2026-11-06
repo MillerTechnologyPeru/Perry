@@ -676,6 +676,58 @@ int darwin_readdir_r(darwin_dir *dir, struct darwin_dirent *entry, struct darwin
     return 0;
 }
 
+// A directory's entries, those `select` takes, each allocated on its own
+// and sorted with `compare`, in an array the caller frees with them.
+int darwin_scandir(const char *path, struct darwin_dirent ***list, int (*select)(const struct darwin_dirent *),
+                   int (*compare)(const struct darwin_dirent **, const struct darwin_dirent **)) DARWIN_SYMBOL(scandir);
+int darwin_scandir(const char *path, struct darwin_dirent ***list, int (*select)(const struct darwin_dirent *),
+                   int (*compare)(const struct darwin_dirent **, const struct darwin_dirent **)) {
+    DIR *dir = opendir(path);
+    if (!dir)
+        return -1;
+    struct darwin_dirent **entries = NULL;
+    size_t count = 0, capacity = 0;
+    struct dirent *found;
+    while ((found = readdir(dir))) {
+        struct darwin_dirent *entry = malloc(sizeof(*entry));
+        if (!entry)
+            goto failed;
+        entry_to_darwin(found, entry);
+        if (select && !select(entry)) {
+            free(entry);
+            continue;
+        }
+        if (count == capacity) {
+            capacity = capacity ? capacity * 2 : 16;
+            struct darwin_dirent **grown = realloc(entries, capacity * sizeof(*entries));
+            if (!grown) {
+                free(entry);
+                goto failed;
+            }
+            entries = grown;
+        }
+        entries[count++] = entry;
+    }
+    closedir(dir);
+    if (compare && count > 1)
+        qsort(entries, count, sizeof(*entries), (int (*)(const void *, const void *))compare);
+    *list = entries;
+    return (int)count;
+
+failed:
+    for (size_t i = 0; i < count; i++)
+        free(entries[i]);
+    free(entries);
+    closedir(dir);
+    errno = ENOMEM;
+    return -1;
+}
+
+int darwin_alphasort(const struct darwin_dirent **a, const struct darwin_dirent **b) DARWIN_SYMBOL(alphasort);
+int darwin_alphasort(const struct darwin_dirent **a, const struct darwin_dirent **b) {
+    return strcoll((*a)->d_name, (*b)->d_name);
+}
+
 int darwin_closedir(darwin_dir *dir) DARWIN_SYMBOL(closedir);
 int darwin_closedir(darwin_dir *dir) {
     int result = closedir(dir->dir);
