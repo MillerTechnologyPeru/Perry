@@ -85,5 +85,12 @@ for file in $fixtures; do
     # shellcheck disable=SC2086
     "$ld" -arch armv7 -ios_version_min "$min" $entry -o "$out/$name" "$out/$name.o" $libs \
         2>&1 | grep -v 'directory not found' || true
+    # A fixture with an Info.plist beside it is an app: NAME.app holds both.
+    if [ -f "$root/Tests/Fixtures/$name.plist" ]; then
+        mkdir -p "$out/$name.app"
+        cp "$out/$name" "$out/$name.app/$name"
+        cp "$root/Tests/Fixtures/$name.plist" "$out/$name.app/Info.plist"
+        echo "$out/$name.app"
+    fi
     echo "$out/$name"
 done
