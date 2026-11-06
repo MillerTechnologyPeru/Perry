@@ -596,6 +596,10 @@ open class NSImage: NSObject {
     /// The decoded bitmap: retained; nil until it is first drawn.
     var cgImage: CGRef?
     private var decoded = false
+    /// An image drawn by code: an app's block, or a system image's drawing.
+    var drawingHandler: ObjCBlock?
+    var drawing: ((CGRect) -> Void)?
+    var handlerFlipped = false
 
     nonisolated(unsafe) static var named: [String: NSImage] = [:]
 
@@ -677,9 +681,11 @@ open class NSImage: NSObject {
         if size == .zero { size = CGSize(width: CGFloat(CG.imageGetWidth(image)), height: CGFloat(CG.imageGetHeight(image))) }
     }
 
-    /// The bitmap ImageIO decodes from the file or data.
+    /// The bitmap ImageIO decodes from the file or data, or that a drawing
+    /// handler draws, at twice the image's size.
     func bitmap() -> CGRef? {
         if decoded { return cgImage }
+        if drawingHandler != nil || drawing != nil { return drawnBitmap() }
         decoded = true
         guard CG.ready else { return nil }
         var source = data
@@ -692,15 +698,55 @@ open class NSImage: NSObject {
         return cgImage
     }
 
-    /// Named images: the app's resources by name, else a blank system image
-    /// of the size apps expect.
+    private func drawnBitmap() -> CGRef? {
+        decoded = true
+        guard CG.ready, size.width > 0, size.height > 0, let context = CG.makeContext(size: size, scale: 2) else { return nil }
+        defer { CG.release(context) }
+        let bounds = CGRect(origin: .zero, size: size)
+        NSGraphicsContext.with(context, flipped: handlerFlipped) {
+            if handlerFlipped {
+                CG.translateCTM(context, 0, size.height)
+                CG.scaleCTM(context, 1, -1)
+            }
+            if let drawing {
+                drawing(bounds)
+            } else if let drawingHandler {
+                typealias Invoke = @convention(c) (UnsafeMutableRawPointer, CGRect) -> Bool
+                _ = drawingHandler.function(as: Invoke.self)(drawingHandler.object, bounds)
+            }
+        }
+        cgImage = CG.bitmapContextCreateImage(context)
+        return cgImage
+    }
+
+    /// An image its block draws, each time at its size, y upwards unless
+    /// flipped.
+    @ObjCClassMethod("imageWithSize:flipped:drawingHandler:")
+    static func image(size: CGSize, flipped: Bool, drawingHandler: ObjCBlock?) -> NSImage {
+        let image = NSImage(size: size)
+        image.drawingHandler = drawingHandler
+        image.handlerFlipped = flipped
+        return image
+    }
+
+    /// Named images: the app's resources by name, else a system image (the
+    /// templates and symbols Perry draws, or a blank one of the size apps
+    /// expect).
     @ObjCClassMethod("imageNamed:")
     static func image(named name: String?) -> NSImage? {
         guard let name else { return nil }
         if let image = named[name] { return image }
         let image = NSImage(size: .zero)
         image.load(named: name)
-        if image.path == nil { image.size = CGSize(width: 32, height: 32) }
+        if image.path == nil {
+            if let drawing = SystemImages.drawing(for: name) {
+                image.size = CGSize(width: 16, height: 16)
+                image.drawing = drawing
+                image.template = true
+            } else {
+                image.size = CGSize(width: 32, height: 32)
+            }
+        }
         named[name] = image
         return image
     }
@@ -710,6 +756,7 @@ open class NSImage: NSObject {
         let image = NSImage(size: CGSize(width: 16, height: 16))
         image.name = name
         image.template = true
+        image.drawing = name.flatMap(SystemImages.drawing)
         return image
     }
 
@@ -1041,3 +1088,66 @@ public func NSDrawLightBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect
 
 @c(_NSDrawGrayBezel)
 public func NSDrawGrayBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect, clip) }
+
+/// System template images and symbols Perry draws itself, in the label
+/// color of the appearance they are first drawn in.
+enum SystemImages {
+    static func drawing(for name: String) -> ((CGRect) -> Void)? {
+        func stroke(_ path: NSBezierPath, width: CGFloat = 1.3) {
+            NSColor.labelColor().setStroke()
+            path.setLineWidth(width)
+            path.setLineCapStyle(1)
+            path.stroke()
+        }
+        func line(_ points: [CGPoint]) -> NSBezierPath {
+            let path = NSBezierPath()
+            path.move(to: points[0])
+            for point in points.dropFirst() { path.line(to: point) }
+            return path
+        }
+        switch name {
+        case "NSActionTemplate", "ellipsis.circle":
+            // Three dots in a circle.
+            return { rect in
+                let circle = rect.insetBy(dx: 1.5, dy: 1.5)
+                stroke(NSBezierPath.bezierPath(ovalIn: circle))
+                NSColor.labelColor().setFill()
+                for offset in [-3.5, 0, 3.5] as [CGFloat] {
+                    NSBezierPath.bezierPath(ovalIn: CGRect(x: rect.midX + offset - 1.1, y: rect.midY - 1.1, width: 2.2, height: 2.2)).fill()
+                }
+            }
+        case "NSAddTemplate", "plus":
+            return { rect in stroke(line([CGPoint(x: rect.midX, y: rect.minY + 3), CGPoint(x: rect.midX, y: rect.maxY - 3)]));
+                stroke(line([CGPoint(x: rect.minX + 3, y: rect.midY), CGPoint(x: rect.maxX - 3, y: rect.midY)])) }
+        case "NSRemoveTemplate", "minus":
+            return { rect in stroke(line([CGPoint(x: rect.minX + 3, y: rect.midY), CGPoint(x: rect.maxX - 3, y: rect.midY)])) }
+        case "NSGoLeftTemplate", "chevron.left":
+            return { rect in stroke(line([CGPoint(x: rect.midX + 2.5, y: rect.minY + 3), CGPoint(x: rect.midX - 2.5, y: rect.midY),
+                                         CGPoint(x: rect.midX + 2.5, y: rect.maxY - 3)]), width: 1.6) }
+        case "NSGoRightTemplate", "chevron.right":
+            return { rect in stroke(line([CGPoint(x: rect.midX - 2.5, y: rect.minY + 3), CGPoint(x: rect.midX + 2.5, y: rect.midY),
+                                         CGPoint(x: rect.midX - 2.5, y: rect.maxY - 3)]), width: 1.6) }
+        case "NSStopProgressTemplate", "xmark":
+            return { rect in
+                let box = rect.insetBy(dx: 4, dy: 4)
+                stroke(line([CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)]))
+                stroke(line([CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.minY)]))
+            }
+        case "NSStopProgressFreestandingTemplate", "xmark.circle.fill":
+            return { rect in
+                NSColor.labelColor().setFill()
+                NSBezierPath.bezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                let box = rect.insetBy(dx: 5, dy: 5)
+                NSColor.textBackgroundColor().setStroke()
+                for points in [[CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)],
+                               [CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.minY)]] {
+                    let path = line(points)
+                    path.setLineWidth(1.5)
+                    path.stroke()
+                }
+            }
+        default:
+            return nil
+        }
+    }
+}
