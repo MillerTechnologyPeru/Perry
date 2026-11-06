@@ -323,6 +323,64 @@ open class WKUserScript: NSObject {
     @ObjCMethod("isForMainFrameOnly") func isForMainFrameOnly() -> Bool { mainFrameOnly }
 }
 
+/// A compiled set of content-blocking rules. Pages here don't apply them
+/// (there is no rule compiler), but apps that compile and add lists at
+/// launch get lists back.
+@ObjCClass("WKContentRuleList")
+open class WKContentRuleList: NSObject {
+    var identifier = ""
+    var encoded = ""
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("identifier") func ruleListIdentifier() -> String { identifier }
+}
+
+@ObjCClass("WKContentRuleListStore")
+open class WKContentRuleListStore: NSObject {
+    nonisolated(unsafe) private static let shared = WKContentRuleListStore()
+    private var lists: [String: WKContentRuleList] = [:]
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCClassMethod("defaultStore") class func defaultStore() -> WKContentRuleListStore { shared }
+    @ObjCClassMethod("storeWithURL:") class func store(url: NSObject?) -> WKContentRuleListStore { WKContentRuleListStore() }
+
+    @ObjCMethod("compileContentRuleListForIdentifier:encodedContentRuleList:completionHandler:")
+    func compile(identifier: String?, encoded: String?, completionHandler: ObjCBlock?) {
+        let list = WKContentRuleList()
+        list.identifier = identifier ?? ""
+        list.encoded = encoded ?? ""
+        lists[list.identifier] = list
+        guard let completionHandler else { return }
+        Dispatch.onMain { Blocks.call(completionHandler, list.objcObject, nil) }
+    }
+
+    @ObjCMethod("lookUpContentRuleListForIdentifier:completionHandler:")
+    func lookUp(identifier: String?, completionHandler: ObjCBlock?) {
+        let list = identifier.flatMap { lists[$0] }
+        guard let completionHandler else { return }
+        Dispatch.onMain {
+            Blocks.call(completionHandler, list?.objcObject,
+                        list == nil ? Calls.error(domain: "WKErrorDomain", code: 7, description: "No rule list with that identifier") : nil)
+        }
+    }
+
+    @ObjCMethod("removeContentRuleListForIdentifier:completionHandler:")
+    func remove(identifier: String?, completionHandler: ObjCBlock?) {
+        if let identifier { lists[identifier] = nil }
+        if let completionHandler { Dispatch.onMain { Blocks.call(completionHandler, nil) } }
+    }
+
+    @ObjCMethod("getAvailableContentRuleListIdentifiers:")
+    func availableIdentifiers(completionHandler: ObjCBlock?) {
+        let identifiers = NSMutableArray.of(lists.keys.sorted().compactMap { $0.objCArgument().map(NSObject.init) })
+        if let completionHandler { Dispatch.onMain { Blocks.call(completionHandler, identifiers.objcObject) } }
+    }
+}
+
 /// A page's view of a controller: weak, as the views own their pages.
 private final class PageReference {
     weak var page: WebPage?
@@ -388,6 +446,13 @@ open class WKUserContentController: NSObject {
     }
 
     @ObjCMethod("userScripts") func userScripts() -> NSObject { NSMutableArray.of(scripts) }
+
+    var ruleLists: [WKContentRuleList] = []
+    @ObjCMethod("addContentRuleList:")
+    func addContentRuleList(_ list: WKContentRuleList?) { if let list, !ruleLists.contains(where: { $0 === list }) { ruleLists.append(list) } }
+    @ObjCMethod("removeContentRuleList:")
+    func removeContentRuleList(_ list: WKContentRuleList?) { ruleLists.removeAll { $0 === list } }
+    @ObjCMethod("removeAllContentRuleLists") func removeAllContentRuleLists() { ruleLists = [] }
 }
 
 @ObjCClass("WKWebViewConfiguration")
