@@ -161,6 +161,11 @@ enum Classes {
 @c(_UIAccessibilityIsSpeakScreenEnabled) public func UIAccessibilityIsSpeakScreenEnabled() -> Bool { false }
 @c(_UIAccessibilityIsSpeakSelectionEnabled) public func UIAccessibilityIsSpeakSelectionEnabled() -> Bool { false }
 @c(_UIAccessibilityDarkerSystemColorsEnabled) public func UIAccessibilityDarkerSystemColorsEnabled() -> Bool { false }
+@c(_UIAccessibilityIsOnOffSwitchLabelsEnabled) public func UIAccessibilityIsOnOffSwitchLabelsEnabled() -> Bool { false }
+/// Videos play by themselves, as they do unless the setting is turned off.
+@c(_UIAccessibilityIsVideoAutoplayEnabled) public func UIAccessibilityIsVideoAutoplayEnabled() -> Bool { true }
+/// UIAccessibilityHearingDeviceEar: no hearing device is paired.
+@c(_UIAccessibilityHearingDevicePairedEar) public func UIAccessibilityHearingDevicePairedEar() -> UInt { 0 }
 @c(_UIAccessibilityShouldDifferentiateWithoutColor)
 public func UIAccessibilityShouldDifferentiateWithoutColor() -> Bool { false }
 

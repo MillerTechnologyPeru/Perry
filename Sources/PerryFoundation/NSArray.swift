@@ -121,13 +121,16 @@ public class NSArray: NSObject {
     /// A property list file's array; mutable throughout when sent to a
     /// mutable class.
     @ObjCClassMethod("arrayWithContentsOfFile:")
-    static func array(_ cls: ObjCClass, contentsOfFile path: String) -> UnsafeMutableRawPointer? {
-        PropertyLists.contents(of: URL(filePath: path), cls, expecting: .array)
+    static func array(_ cls: ObjCClass, contentsOfFile path: String?) -> UnsafeMutableRawPointer? {
+        // No path, as a resource that is not in the bundle has none, gives nil.
+        guard let path else { return nil }
+        return PropertyLists.contents(of: URL(filePath: path), cls, expecting: .array)
     }
 
     @ObjCClassMethod("arrayWithContentsOfURL:")
-    static func array(_ cls: ObjCClass, contentsOfURL url: NSURL) -> UnsafeMutableRawPointer? {
-        PropertyLists.contents(of: url.url, cls, expecting: .array)
+    static func array(_ cls: ObjCClass, contentsOfURL url: NSURL?) -> UnsafeMutableRawPointer? {
+        guard let url else { return nil }
+        return PropertyLists.contents(of: url.url, cls, expecting: .array)
     }
 
     @ObjCClassMethod("arrayWithContentsOfURL:error:")
@@ -169,10 +172,10 @@ public class NSArray: NSObject {
 
     /// A property list file's array; nil when the file holds none.
     @ObjCMethod("initWithContentsOfFile:")
-    func initialize(contentsOfFile path: String) -> Self? { initialize(contentsOf: URL(filePath: path)) }
+    func initialize(contentsOfFile path: String?) -> Self? { path.flatMap { initialize(contentsOf: URL(filePath: $0)) } }
 
     @ObjCMethod("initWithContentsOfURL:")
-    func initialize(contentsOfURL url: NSURL) -> Self? { initialize(contentsOf: url.url) }
+    func initialize(contentsOfURL url: NSURL?) -> Self? { url.flatMap { initialize(contentsOf: $0.url) } }
 
     /// macOS 10.13's: nil and an error when the file holds no array.
     @ObjCMethod("initWithContentsOfURL:error:")

@@ -138,9 +138,14 @@ open class UIImage: NSObject {
             }
         }
         guard catalog else { return nil }
-        let found = bundle.objcObject == NSBundle.main().objcObject
-            ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
-        return found.map { make(cls, cgImage: $0.image.object, scale: $0.scale) }
+        // A catalog's images have no extension in their names; a nib
+        // names one with the file's ("Header.png").
+        for name in name == base ? [name] : [name, base] {
+            let found = bundle.objcObject == NSBundle.main().objcObject
+                ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
+            if let found { return make(cls, cgImage: found.image.object, scale: found.scale) }
+        }
+        return nil
     }
 
     /// In the bundle given, the main bundle when none is; the catalog's
