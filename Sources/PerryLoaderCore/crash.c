@@ -133,6 +133,13 @@ void perry_install_crash_reporter(perry_loader *loader) {
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&action.sa_mask);
     int signals[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGABRT };
-    for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++)
+    for (size_t i = 0; i < sizeof(signals) / sizeof(signals[0]); i++) {
+        // libSystem's provider owns SIGILL on cores that lack instructions
+        // Apple silicon has, to rewrite them; a real one reaches the
+        // default there.
+        struct sigaction current;
+        if (signals[i] == SIGILL && sigaction(SIGILL, NULL, &current) == 0 && (current.sa_flags & SA_SIGINFO))
+            continue;
         sigaction(signals[i], &action, NULL);
+    }
 }

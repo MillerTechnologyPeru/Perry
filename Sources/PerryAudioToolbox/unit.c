@@ -39,6 +39,9 @@ static const component components[] = {
     { { FOURCC('a', 'u', 'o', 'u'), FOURCC('v', 'p', 'i', 'o'), APPLE, 0, 0 }, OUTPUT, "AUVoiceProcessingIO" },
     { { FOURCC('a', 'u', 'o', 'u'), FOURCC('g', 'e', 'n', 'r'), APPLE, 0, 0 }, OUTPUT, "AUGenericOutput" },
     { { FOURCC('a', 'u', 'o', 'u'), FOURCC('d', 'e', 'f', ' '), APPLE, 0, 0 }, OUTPUT, "AUDefaultOutput" },
+    // macOS's HAL and system outputs: the one device (hardware.c).
+    { { FOURCC('a', 'u', 'o', 'u'), FOURCC('a', 'h', 'a', 'l'), APPLE, 0, 0 }, OUTPUT, "AUHAL" },
+    { { FOURCC('a', 'u', 'o', 'u'), FOURCC('s', 'y', 's', ' '), APPLE, 0, 0 }, OUTPUT, "AUSystemOutput" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('m', 'c', 'm', 'x'), APPLE, 0, 0 }, MULTICHANNEL_MIXER, "AUMultiChannelMixer" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('3', 'd', 'e', 'm'), APPLE, 0, 0 }, MIXER_3D, "AU3DMixerEmbedded" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('3', 'd', 'm', 'x'), APPLE, 0, 0 }, MIXER_3D, "AU3DMixer" },
