@@ -217,6 +217,9 @@ PASSTHROUGH _execve, execve
 PASSTHROUGH _exit, exit
 PASSTHROUGH _flock, flock
 PASSTHROUGH _fork, fork
+// vfork as fork: the child gets its own copy, which is safe for what a
+// vfork child may do (exec or _exit), where vfork itself shares the stack.
+PASSTHROUGH _vfork, fork
 PASSTHROUGH _fseek, fseek
 PASSTHROUGH _ftell, ftell
 PASSTHROUGH _getdomainname, getdomainname
@@ -288,6 +291,8 @@ PASSTHROUGH _writev, writev
 PASSTHROUGH _read, read
 PASSTHROUGH _write, write
 PASSTHROUGH _close, close
+PASSTHROUGH _closelog, closelog
+PASSTHROUGH _openlog, openlog
 PASSTHROUGH _dup, dup
 PASSTHROUGH _dup2, dup2
 PASSTHROUGH _pipe, pipe

@@ -754,3 +754,77 @@ int darwin_dirfd(darwin_dir *dir) DARWIN_SYMBOL(dirfd);
 int darwin_dirfd(darwin_dir *dir) {
     return dirfd(dir->dir);
 }
+
+// MARK: - copyfile
+
+// copyfile(3)'s flags: ACL, stat, extended attributes, data. Linux files
+// have no ACLs or extended attributes this copies; their permissions are
+// the stat information, and the data is copied whole.
+enum {
+    DARWIN_COPYFILE_STAT = 1 << 1,
+    DARWIN_COPYFILE_DATA = 1 << 3,
+};
+
+static int copy_file_data(int from, int to, uint32_t flags) {
+    if (flags & DARWIN_COPYFILE_DATA) {
+        char buffer[65536];
+        off_t offset = 0;
+        for (;;) {
+            ssize_t got = pread(from, buffer, sizeof(buffer), offset);
+            if (got < 0) {
+                if (errno == EINTR) continue;
+                return -1;
+            }
+            if (got == 0) break;
+            for (ssize_t done = 0; done < got;) {
+                ssize_t put = pwrite(to, buffer + done, (size_t)(got - done), offset + done);
+                if (put < 0) {
+                    if (errno == EINTR) continue;
+                    return -1;
+                }
+                done += put;
+            }
+            offset += got;
+        }
+        if (ftruncate(to, offset) != 0) return -1;
+    }
+    if (flags & DARWIN_COPYFILE_STAT) {
+        struct stat info;
+        if (fstat(from, &info) != 0 || fchmod(to, info.st_mode & 07777) != 0) return -1;
+    }
+    return 0;
+}
+
+// fcopyfile(from, to, state, flags): between open files, from their
+// starts. Unity copies its cache files so.
+int darwin_fcopyfile(int from, int to, void *state, uint32_t flags) DARWIN_SYMBOL(fcopyfile);
+int darwin_fcopyfile(int from, int to, void *state, uint32_t flags) {
+    (void)state;
+    return copy_file_data(from, to, flags);
+}
+
+// copyfile(from, to, state, flags): by path, making the destination.
+int darwin_copyfile(const char *from, const char *to, void *state, uint32_t flags) DARWIN_SYMBOL(copyfile);
+int darwin_copyfile(const char *from, const char *to, void *state, uint32_t flags) {
+    (void)state;
+    if (!from || !to) {
+        errno = EINVAL;
+        return -1;
+    }
+    int in = open(from, O_RDONLY | O_CLOEXEC);
+    if (in < 0) return -1;
+    struct stat info;
+    int out = fstat(in, &info) == 0 ? open(to, O_WRONLY | O_CREAT | O_CLOEXEC, info.st_mode & 0777) : -1;
+    if (out < 0) {
+        int saved = errno;
+        close(in);
+        errno = saved;
+        return -1;
+    }
+    int result = copy_file_data(in, out, flags);
+    int saved = errno;
+    close(in);
+    close(out);
+    errno = saved;
+    return result;
+}

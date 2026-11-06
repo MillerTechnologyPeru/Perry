@@ -112,16 +112,18 @@ open class NSPopUpButton: NSButton {
             chosen = MenuTracking.popUp(menu, positioning: cell.selectedItem, at: CGPoint(x: 0, y: bounds.midY), in: self,
                                         minimumWidth: bounds.width + 20, font: font?.as(NSFont.self), performs: false)
         }
-        guard let chosen, let index = cell.items.firstIndex(where: { $0 === chosen }) else { return }
-        if !cell.pullsDown { cell.selectItem(at: index) }
+        guard let chosen else { return }
+        // An item of the button's own menu becomes a pop-up's selection; one
+        // from a submenu only sends its action.
+        if !cell.pullsDown, let index = cell.items.firstIndex(where: { $0 === chosen }) { cell.selectItem(at: index) }
         setNeedsDisplay(true)
         perform(chosen)
     }
 
     /// The item's action, or without one the button's.
     private func perform(_ item: NSMenuItem) {
-        if let itemAction = item.action {
-            _ = App.shared?.sendAction(itemAction, to: item.target.map(NSObject.init), from: item)
+        if item.action != nil {
+            MenuTracking.perform(item)
         } else {
             _ = sendAction(action, to: target.map(NSObject.init))
         }

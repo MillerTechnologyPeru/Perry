@@ -107,8 +107,8 @@ open class NSMenu: NSObject {
     func setSubmenu(_ menu: NSMenu?, for item: NSMenuItem?) { item?.setSubmenu(menu) }
     /// Items enable as their targets validate them, when the menu enables
     /// its items itself: an item with an action is enabled when its target
-    /// (or the first responder chain's) implements it and, asked with
-    /// -validateMenuItem:, agrees.
+    /// (or what the action would reach without one) implements it and,
+    /// asked with -validateMenuItem:, agrees.
     @ObjCMethod("update")
     func update() {
         guard autoenablesItems else { return }
@@ -118,18 +118,7 @@ open class NSMenu: NSObject {
                 continue
             }
             let name = action.name
-            var receiver: UnsafeMutableRawPointer? = item.target ?? Windows.key?.firstResponderObject
-            if item.target == nil {
-                // Along the responder chain, then the window's delegate, the
-                // app and its delegate.
-                while let current = receiver, !Send.responds(current, name) { receiver = Send.object(current, "nextResponder") }
-                if receiver == nil, let window = Windows.key {
-                    for candidate in [window.delegateObject, App.shared?.objcObject, App.shared?.delegateObject] where Send.responds(candidate, name) {
-                        receiver = candidate
-                        break
-                    }
-                }
-            }
+            let receiver = item.target ?? App.shared?.receiver(forAction: name)
             guard let receiver, Send.responds(receiver, name) else {
                 item.enabled = false
                 continue

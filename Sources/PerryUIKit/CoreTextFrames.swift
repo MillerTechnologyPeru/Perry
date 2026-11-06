@@ -86,6 +86,9 @@ public func CTParagraphStyleCreate(_ settings: UnsafeRawPointer?, _ count: Int) 
         case 6:     // line break mode, a uint8_t
             style.setLineBreakMode(Int(value.load(as: UInt8.self)))
         case 1: style.setFirstLineHeadIndent(float())
+        case 4:     // tab stops, a CFArray of CTTextTabs
+            if setting.valueSize >= 8, let stops = value.load(as: UnsafeMutableRawPointer?.self) { style.setTabStops(NSObject(stops)) }
+        case 5: style.setDefaultTabInterval(float())
         case 10: style.setParagraphSpacing(float())
         case 11, 13: style.setLineSpacing(float())     // line spacing, or the maximum
         default: break
@@ -212,30 +215,137 @@ public func CTLineCreateWithAttributedString(_ string: UnsafeMutableRawPointer?)
     return Typesetting.make(CTLine.objCClass, copy)
 }
 
-/// The line's text on one line, with no width limit.
-private func lineLayout(_ line: UnsafeMutableRawPointer?) -> AttributedLayout? {
-    guard let (_, string) = Typesetting.state(line) else { return nil }
-    return AttributedLayout(string, size: CGSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude), lineLimit: 1)
+/// A line laid out run by run: each run's text in its own font and color,
+/// and each tab advancing to the paragraph's next tab stop.
+struct LineSegments {
+    struct Segment {
+        var text: String
+        var font: UIFont
+        var color: UIColor?
+        var fromContext: Bool
+        var x: CGFloat
+        var width: CGFloat
+        /// Where the text is in the string, in UTF-16 units.
+        var start: Int
+        var length: Int
+        var isTab: Bool
+    }
+
+    var segments: [Segment] = []
+    var width: CGFloat = 0
+    var ascent: CGFloat = 0
+    var descent: CGFloat = 0
+    var leading: CGFloat = 0
+
+    init(_ string: NSAttributedString) {
+        let text = Array(string.string().utf16)
+        var index = 0
+        var x: CGFloat = 0
+        while index < text.count {
+            var range = PerryRange(location: 0, length: 0)
+            let attributes = withUnsafeMutablePointer(to: &range) { string.attributes(at: UInt(index), effectiveRange: UnsafeMutableRawPointer($0)) }
+            let end = max(index + 1, min(text.count, Int(range.location + range.length)))
+            let font = attributes?.object(forKey: "NSFont")?.as(UIFont.self) ?? UIFont.systemFont(size: 12)
+            let (color, fromContext) = LineSegments.color(attributes)
+            let tabs = TabStops.of(attributes?.object(forKey: "NSParagraphStyle"))
+            ascent = max(ascent, font.ascender())
+            descent = max(descent, -font.descender())
+            leading = max(leading, font.leading())
+            // The run's text, split at its tabs.
+            var pieceStart = index
+            func flush(_ pieceEnd: Int) {
+                guard pieceEnd > pieceStart else { return }
+                let piece = String(decoding: text[pieceStart..<pieceEnd], as: UTF16.self)
+                let width = Text.size(piece, font: font).width
+                segments.append(Segment(text: piece, font: font, color: color, fromContext: fromContext, x: x, width: width,
+                                        start: pieceStart, length: pieceEnd - pieceStart, isTab: false))
+                x += width
+            }
+            for position in index..<end where text[position] == 0x09 {
+                flush(position)
+                let stop = tabs.locations.first { $0 > x + 0.5 } ?? ((x / tabs.interval).rounded(.down) + 1) * tabs.interval
+                segments.append(Segment(text: "", font: font, color: color, fromContext: fromContext, x: x, width: stop - x,
+                                        start: position, length: 1, isTab: true))
+                x = stop
+                pieceStart = position + 1
+            }
+            flush(end)
+            index = end
+        }
+        width = x
+        if segments.isEmpty {
+            // An empty line still has its font's height.
+            let font = UIFont.systemFont(size: 12)
+            (ascent, descent, leading) = (font.ascender(), -font.descender(), font.leading())
+        }
+    }
+
+    /// A run's color: its NSColor (UIKit's, or another provider's by its
+    /// CGColor), CoreText's CGColor, or the context's fill color.
+    static func color(_ attributes: NSDictionary?) -> (UIColor?, Bool) {
+        if attributes?.object(forKey: "CTForegroundColorFromContext") != nil { return (nil, true) }
+        if let color = attributes?.object(forKey: "NSColor") {
+            if let own = color.as(UIColor.self) { return (own, false) }
+            if color.responds(to: "CGColor") {
+                typealias Get = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> UnsafeMutableRawPointer?
+                let cgColor = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)(color.objcObject, ObjCRuntime.selector("CGColor"))
+                return (UIColor.color(UIColor.objCClass, cgColor: cgColor), false)
+            }
+        }
+        if let cgColor = attributes?.object(forKey: "CTForegroundColor") {
+            return (UIColor.color(UIColor.objCClass, cgColor: cgColor.objcObject), false)
+        }
+        return (UIColor.black(), false)
+    }
+
+    /// The x of the caret before the UTF-16 unit at `index`.
+    func offset(at index: Int) -> CGFloat {
+        for segment in segments where index < segment.start + segment.length {
+            guard index > segment.start, !segment.isTab else { return segment.x }
+            let units = Array(segment.text.utf16).prefix(index - segment.start)
+            return segment.x + Text.size(String(decoding: units, as: UTF16.self), font: segment.font).width
+        }
+        return width
+    }
+
+    /// The character boundary nearest an x.
+    func index(at x: CGFloat) -> Int {
+        for segment in segments where x < segment.x + segment.width {
+            if segment.isTab { return x < segment.x + segment.width / 2 ? segment.start : segment.start + 1 }
+            var index = segment.start
+            var previous = segment.x
+            for character in segment.text {
+                let next = previous + Text.size(String(character), font: segment.font).width
+                if x < (previous + next) / 2 { return index }
+                index += character.utf16.count
+                previous = next
+            }
+            return index
+        }
+        return segments.last.map { $0.start + $0.length } ?? 0
+    }
 }
 
-/// The width, and the font's ascent, descent and leading.
+private func lineSegments(_ line: UnsafeMutableRawPointer?) -> LineSegments? {
+    Typesetting.state(line).map { LineSegments($0.string) }
+}
+
+/// The width, and the fonts' greatest ascent, descent and leading.
 @c(_CTLineGetTypographicBounds)
 public func CTLineGetTypographicBounds(_ line: UnsafeMutableRawPointer?, _ ascent: UnsafeMutablePointer<CGFloat>?,
                                        _ descent: UnsafeMutablePointer<CGFloat>?, _ leading: UnsafeMutablePointer<CGFloat>?) -> Double {
-    guard let layout = lineLayout(line) else { return 0 }
-    ascent?.pointee = layout.font.ascender()
-    descent?.pointee = -layout.font.descender()
-    leading?.pointee = layout.font.leading()
-    return Double(layout.lines.first.map { Text.size($0, font: layout.font).width } ?? 0)
+    guard let layout = lineSegments(line) else { return 0 }
+    ascent?.pointee = layout.ascent
+    descent?.pointee = layout.descent
+    leading?.pointee = layout.leading
+    return Double(layout.width)
 }
 
 /// The box from the baseline down by the descent to up by the ascent.
 @c(_CTLineGetImageBounds)
 public func CTLineGetImageBounds(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) -> CGRect {
-    guard lineLayout(line) != nil else { return .zero }
-    var ascent: CGFloat = 0, descent: CGFloat = 0
-    let width = CTLineGetTypographicBounds(line, &ascent, &descent, nil)
-    return CGRect(x: 0, y: -descent, width: CGFloat(width), height: ascent + descent)
+    guard let layout = lineSegments(line) else { return .zero }
+    return CGRect(x: 0, y: -layout.descent, width: layout.width, height: layout.ascent + layout.descent)
 }
 
 @c(_CTLineGetStringRange)
@@ -248,14 +358,10 @@ public func CTLineGetGlyphCount(_ line: UnsafeMutableRawPointer?) -> Int {
     Int(Typesetting.state(line)?.string.length() ?? 0)
 }
 
-/// The x of the caret before the character at `index`: the width of the
-/// text before it.
+/// The x of the caret before the character at `index`.
 @DarwinC("_CTLineGetOffsetForStringIndex")
 public func CTLineGetOffsetForStringIndex(_ line: UnsafeMutableRawPointer?, _ index: Int, _ secondary: UnsafeMutablePointer<CGFloat>?) -> CGFloat {
-    guard let layout = lineLayout(line), let text = layout.lines.first else { return 0 }
-    let units = Array(text.utf16)
-    let prefix = String(decoding: units.prefix(max(0, min(index, units.count))), as: UTF16.self)
-    let offset = Text.size(prefix, font: layout.font).width
+    let offset = lineSegments(line)?.offset(at: index) ?? 0
     secondary?.pointee = offset
     return offset
 }
@@ -263,16 +369,7 @@ public func CTLineGetOffsetForStringIndex(_ line: UnsafeMutableRawPointer?, _ in
 /// The index of the character boundary nearest to `position`'s x.
 @c(_CTLineGetStringIndexForPosition)
 public func CTLineGetStringIndexForPosition(_ line: UnsafeMutableRawPointer?, _ position: CGPoint) -> Int {
-    guard let layout = lineLayout(line), let text = layout.lines.first else { return 0 }
-    var index = 0
-    var previous: CGFloat = 0
-    for character in text {
-        let next = previous + Text.size(String(character), font: layout.font).width
-        if position.x < (previous + next) / 2 { return index }
-        index += character.utf16.count
-        previous = next
-    }
-    return index
+    lineSegments(line)?.index(at: position.x) ?? 0
 }
 
 /// A tab stop, as an NSTextTab: CTTextTabRef and NSTextTab are toll-free
@@ -289,12 +386,12 @@ public func CTTextTabCreate(_ alignment: UInt8, _ location: Double, _ options: U
                                                                    textAlignment, location, options)
 }
 
-/// Draws the line with its baseline at the context's text position, in
-/// CoreText's coordinates, y up: flipped there to draw it upright.
+/// Draws the line's runs with their baseline at the context's text
+/// position, in CoreText's coordinates, y up: flipped there to draw them
+/// upright.
 @c(_CTLineDraw)
 public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) {
-    guard let (_, string) = Typesetting.state(line), let layout = lineLayout(line), let text = layout.lines.first, let context else { return }
-    let (color, fromContext) = runColor(string, layout)
+    guard let layout = lineSegments(line), let context else { return }
     let position = CG.getTextPosition(context)
     Graphics.push(context)
     defer { Graphics.pop() }
@@ -302,5 +399,8 @@ public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutabl
     defer { CG.restoreGState(context) }
     CG.translateCTM(context, position.x, position.y)
     CG.scaleCTM(context, 1, -1)
-    Text.draw(text, at: CGPoint(x: 0, y: -layout.font.ascender()), font: layout.font, color: color, keepingMode: fromContext)
+    for segment in layout.segments where !segment.isTab && !segment.text.isEmpty {
+        Text.draw(segment.text, at: CGPoint(x: segment.x, y: -segment.font.ascender()), font: segment.font, color: segment.color,
+                  keepingMode: segment.fromContext)
+    }
 }

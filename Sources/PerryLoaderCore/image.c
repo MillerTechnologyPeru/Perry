@@ -768,16 +768,17 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
         return;
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
-        // A Swift overlay bound directly, as code built for iOS before 17
-        // binds /usr/lib/swift/libswiftUIKit.dylib, has the Swift API Perry
-        // adds to it beside it too.
-        bool bound_overlay = dep->image && strncmp(dep->install_name, SWIFT_LIBRARY_DIR, strlen(SWIFT_LIBRARY_DIR)) == 0;
-        const char *overlay_name = bound_overlay ? dep->install_name + strlen(SWIFT_LIBRARY_DIR) : "";
-        if (bound_overlay && strncmp(overlay_name, "libswift", 8) == 0 && !strstr(overlay_name, "Additions")) {
-            const char *dot = strrchr(overlay_name, '.');
-            int length = dot ? (int)(dot - overlay_name) : (int)strlen(overlay_name);
+        // Code built against an SDK from before iOS 17 binds a framework's
+        // Swift API to its overlay, /usr/lib/swift/libswift<Name>.dylib:
+        // the additions beside it are searched after the overlay too.
+        size_t prefix = strlen(SWIFT_LIBRARY_DIR "libswift");
+        size_t length = strlen(dep->install_name);
+        if (dep->image && length > prefix + 6 &&
+            strncmp(dep->install_name, SWIFT_LIBRARY_DIR "libswift", prefix) == 0 &&
+            strcmp(dep->install_name + length - 6, ".dylib") == 0) {
             char path[PATH_MAX];
-            snprintf(path, sizeof(path), "%s/%.*sAdditions.dylib", loader->swift_runtime_dir, length, overlay_name);
+            snprintf(path, sizeof(path), "%s/libswift%.*sAdditions.dylib", loader->swift_runtime_dir,
+                     (int)(length - prefix - 6), dep->install_name + prefix);
             if (file_exists(path)) {
                 perry_image *additions = find_loaded(loader, path);
                 if (!additions)
@@ -936,6 +937,17 @@ perry_image *perry_load_executable(perry_loader *loader, const char *path) {
         inserted += length + (inserted[length] == ':');
     }
 
+    // A gamepad's settings (PERRY_GAMECONTROLLER_..., PERRY_COREMOTION_...)
+    // are GameController's provider's, which reads gamepads: it is loaded
+    // for them though the program links neither framework, as one from
+    // before either does not.
+    for (char **variable = environ; variable && *variable; variable++) {
+        if (strncmp(*variable, "PERRY_GAMECONTROLLER_", 21) == 0 || strncmp(*variable, "PERRY_COREMOTION_", 17) == 0) {
+            perry_find_provider(loader, "/System/Library/Frameworks/GameController.framework/GameController");
+            break;
+        }
+    }
+
     // Bind every image after all of them are mapped, so symbols resolve across images.
     for (perry_image *img = loader->images; img; img = img->next) {
         perry_apply_fixups(loader, img);
@@ -1032,6 +1044,14 @@ static void *lookup_symbol(const char *install_name, const char *name) {
     }
     if (install_name)
         return perry_provider_symbol(loader, install_name, name);
+    // Metal's functions by name, as Unity looks MTLCreateSystemDefaultDevice
+    // up with dlsym: Metal's provider before QuartzCore's, which has
+    // stand-ins that answer there is no device, for when Metal's is missing.
+    if (strncmp(name, "_MTL", 4) == 0) {
+        void *address = perry_provider_symbol(loader, "/System/Library/Frameworks/Metal.framework/Metal", name);
+        if (address)
+            return address;
+    }
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         perry_provider *provider = loader->providers[i];
         if (!provider->handle)

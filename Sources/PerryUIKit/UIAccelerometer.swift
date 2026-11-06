@@ -5,7 +5,13 @@ import PerryObjCInterop
 // accelerometer, so its delegate hears of a device held still and upright
 // in the interface's orientation, gravity along the side that is down: an
 // app that hears nothing may take the device for lying flat or dropped
-// (Call of Duty: Zombies pauses itself).
+// (Call of Duty: Zombies pauses itself). With a gamepad, its left stick
+// tilts the device, as it does CoreMotion's: pushed right, the device is
+// turned clockwise like a steering wheel; pushed up, its top is tipped
+// away. A game steered by tilting is so steered by the stick.
+// PERRY_UIKIT_ACCELEROMETER_ORIENTATION sets the orientation the device is
+// held in (1 to 4, as UIInterfaceOrientation) for a program that draws
+// itself turned without telling UIKit.
 
 @ObjCClass("UIAccelerometer")
 open class UIAccelerometer: NSObject {
@@ -32,16 +38,37 @@ open class UIAccelerometer: NSObject {
     @ObjCMethod("updateInterval") func updateInterval() -> Double { UIAccelerometer.updateInterval }
     @ObjCMethod("setUpdateInterval:") func setUpdateInterval(_ interval: Double) { UIAccelerometer.updateInterval = interval }
 
-    /// Gravity for the interface's orientation, in g: down the device's
-    /// bottom edge upright, its top upside down, and its left or right edge
-    /// on its side (landscape right has the home button, and so the device's
-    /// right edge, up).
+    /// The orientation the device is held in: the interface's, or the
+    /// setting's.
+    private static let heldOrientation: Int? = getenv("PERRY_UIKIT_ACCELEROMETER_ORIENTATION")
+        .flatMap { Int(String(cString: $0)) }.flatMap { (1...4).contains($0) ? $0 : nil }
+
+    /// The stick that tilts the device and the tilt at its end, in
+    /// radians, from GameController's provider when it is loaded.
+    private static func tilt() -> (roll: Double, pitch: Double) {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutablePointer<Float>?) -> Void
+        guard let cls = "GCController".withCString({ ObjCRuntime.functions.getClass($0) }) else { return (0, 0) }
+        var stick: [Float] = [0, 0, 0]
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(UnsafeMutableRawPointer(cls), ObjCRuntime.selector("_perryTiltStick:"),
+                                                          &stick)
+        return (Double(stick[0] * stick[2]), Double(stick[1] * stick[2]))
+    }
+
+    /// Gravity in g, in the device's axes (x to the right of the portrait
+    /// screen, y to its top, z out of it), for a device held facing the
+    /// player in the interface's orientation: down the device's bottom
+    /// edge upright, its top upside down, and its left or right edge on its
+    /// side (landscape right has the home button, and so the device's right
+    /// edge, up). The stick turns it like a steering wheel and tips it.
     static var gravity: (x: Double, y: Double, z: Double) {
-        switch Screen.orientation {
-        case 2: return (0, 1, 0)
-        case 3: return (-1, 0, 0)
-        case 4: return (1, 0, 0)
-        default: return (0, -1, 0)
+        let tilt = tilt()
+        // As the player sees it: u right, v up, w toward the player.
+        let u = cos(tilt.pitch) * sin(tilt.roll), v = -cos(tilt.pitch) * cos(tilt.roll), w = -sin(tilt.pitch)
+        switch heldOrientation ?? Screen.orientation {
+        case 2: return (-u, -v, w)
+        case 3: return (v, -u, w)
+        case 4: return (-v, u, w)
+        default: return (u, v, w)
         }
     }
 

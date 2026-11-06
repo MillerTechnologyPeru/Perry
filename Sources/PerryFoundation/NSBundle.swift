@@ -16,7 +16,9 @@ final class BundleStorage {
         return ObjC.retain(dictionary)!
     }()
 
-    init(path: String) {
+    /// `executable` names the executable of a bundle with no Info.plist to
+    /// say so: a system framework's, which a provider stands in for.
+    init(path: String, executable: String? = nil) {
         self.path = Paths.normalized(path)
         let macOS = FileManager.default.fileExists(atPath: self.path + "/Contents/Info.plist")
         contentsPath = macOS ? self.path + "/Contents" : self.path
@@ -25,6 +27,9 @@ final class BundleStorage {
             .flatMap { try? PropertyListDecoder().decode(PropertyValue.self, from: $0) }
         if case .dictionary(let values) = plist {
             info = values
+        } else if let executable {
+            info = ["CFBundleExecutable": .string(executable), "CFBundleName": .string(executable),
+                    "CFBundleIdentifier": .string("com.apple." + executable)]
         } else {
             info = [:]
         }
@@ -171,11 +176,26 @@ enum Bundles {
         let key = Paths.normalized(path)
         if let existing = byPath[key] { return existing }
         var info = stat()
-        guard stat(key, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+        let provided = stat(key, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR ? nil : providedFramework(key)
+        guard provided != nil || info.st_mode & S_IFMT == S_IFDIR,
               let object = Storage.allocate(UnsafeMutableRawPointer(bundleClass)) else { return nil }
-        Storage.set(object, BundleStorage(path: key))
+        Storage.set(object, BundleStorage(path: key, executable: provided))
         byPath[key] = object
         return object
+    }
+
+    /// The executable's name of a system framework that has no directory
+    /// here and that the loader has a provider for
+    /// (/System/Library/Frameworks/Metal.framework), or nil. Unity finds
+    /// Metal so: it asks for the framework's bundle, loads it, and looks
+    /// MTLCreateSystemDefaultDevice up by name; with no bundle it draws
+    /// nothing.
+    private static func providedFramework(_ path: String) -> String? {
+        let suffix = ".framework"
+        guard path.hasPrefix("/System/Library/"), path.hasSuffix(suffix), let load = BundleLoading.loadLibrary,
+              let last = path.split(separator: "/").last else { return nil }
+        let name = String(last.dropLast(suffix.count))
+        return (path + "/" + name).withCString { load($0) } ? name : nil
     }
 
 }

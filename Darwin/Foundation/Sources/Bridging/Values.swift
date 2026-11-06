@@ -172,6 +172,32 @@ extension URLComponents: _ObjectiveCBridgeable {
     }
 }
 
+// MARK: URLQueryItem
+
+extension URLQueryItem: _ObjectiveCBridgeable {
+    public typealias _ObjectiveCType = NSURLQueryItem
+
+    @_semantics("convertToObjectiveC")
+    public func _bridgeToObjectiveC() -> NSURLQueryItem {
+        NSURLQueryItem(name: name, value: value)
+    }
+
+    public static func _forceBridgeFromObjectiveC(_ source: NSURLQueryItem, result: inout URLQueryItem?) {
+        result = URLQueryItem(name: source.name, value: source.value)
+    }
+
+    @discardableResult
+    public static func _conditionallyBridgeFromObjectiveC(_ source: NSURLQueryItem, result: inout URLQueryItem?) -> Bool {
+        result = URLQueryItem(name: source.name, value: source.value)
+        return true
+    }
+
+    @_effects(readonly)
+    public static func _unconditionallyBridgeFromObjectiveC(_ source: NSURLQueryItem?) -> URLQueryItem {
+        source.map { URLQueryItem(name: $0.name, value: $0.value) } ?? URLQueryItem(name: "", value: nil)
+    }
+}
+
 // MARK: UUID
 
 extension UUID: _ObjectiveCBridgeable {
