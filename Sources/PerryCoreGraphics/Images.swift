@@ -597,6 +597,11 @@ public func CGImageMaskCreate(_ width: Int, _ height: Int, _ bitsPerComponent: I
 
 @c(_CGImageCreateCopy) public func CGImageCreateCopy(_ image: Ref?) -> Ref? { ObjCRuntime.retain(image) }
 
+/// The image in another color space of the same model: the image itself,
+/// as its samples stay what they are and colors are not matched here.
+@c(_CGImageCreateCopyWithColorSpace)
+public func CGImageCreateCopyWithColorSpace(_ image: Ref?, _ space: Ref?) -> Ref? { ObjCRuntime.retain(image) }
+
 /// The rect is in pixels from the top-left, clipped to the image.
 @DarwinC("_CGImageCreateWithImageInRect")
 public func CGImageCreateWithImageInRect(_ image: Ref?, _ rect: CGRect) -> Ref? {
