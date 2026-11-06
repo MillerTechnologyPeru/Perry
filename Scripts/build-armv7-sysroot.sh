@@ -2,8 +2,8 @@
 # Installs the C libraries Perry's providers build on into the armv7 SDK's
 # sysroot: Debian trixie's armhf packages (the SDK's own Debian), which apt in
 # a container downloads with their dependencies, unpacked over the sysroot,
-# and Perry's libperry-sqlite3 and liblzfse, built for armv7 from the
-# sources the Dockerfile pins. The same sysroot is QEMU_LD_PREFIX for armv7
+# and Perry's libperry-sqlite3, liblzfse and libperry-cmark-gfm, built for
+# armv7 from the sources the Dockerfile pins. The same sysroot is QEMU_LD_PREFIX for armv7
 # programs under qemu, so the libraries providers open at run time (SDL3,
 # Mesa, OpenAL, GStreamer) are installed too.
 # Usage: Scripts/build-armv7-sysroot.sh
@@ -74,4 +74,23 @@ docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolcha
     $LLVM/llvm-ar rcs $lib/liblzfse.a /tmp/lzfse/*.o
     cp /tmp/lzfse/src/lzfse.h $SDK/usr/include/
     echo "built libperry-sqlite3 and liblzfse"
+
+    # swift-cmark, as the Dockerfile builds it: static archives for
+    # PerryFoundation, named libperry-cmark-gfm.
+    apt-get install -y -qq --no-install-recommends cmake ninja-build >/dev/null
+    curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archive/437611671145d47e6d9679761b8a5987766f4ae5.tar.gz
+    echo "bcc825cecd1710cdca28f7cc0a74423a691966be2f3a4c6fa8739a2009ed5bf2  /tmp/cmark.tar.gz" | sha256sum -c - >/dev/null
+    mkdir /tmp/cmark && tar -xzf /tmp/cmark.tar.gz -C /tmp/cmark --strip-components=1
+    cmake -G Ninja -S /tmp/cmark -B /tmp/cmark-build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TESTING=OFF -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+        -DCMAKE_C_COMPILER=$LLVM/clang -DCMAKE_C_COMPILER_TARGET=armv7-linux-gnueabihf \
+        -DCMAKE_SYSROOT=$SDK -DCMAKE_C_FLAGS="-march=armv7-a -mfloat-abi=hard" \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_AR=$LLVM/llvm-ar -DCMAKE_RANLIB=$LLVM/llvm-ranlib \
+        -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY >/dev/null
+    ninja -C /tmp/cmark-build libcmark-gfm libcmark-gfm-extensions >/dev/null
+    cp /tmp/cmark-build/src/libcmark-gfm.a $lib/libperry-cmark-gfm.a
+    cp /tmp/cmark-build/extensions/libcmark-gfm-extensions.a $lib/libperry-cmark-gfm-extensions.a
+    mkdir -p $SDK/usr/include/perry-cmark-gfm
+    cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h $SDK/usr/include/perry-cmark-gfm/
+    echo "built libperry-cmark-gfm"
 '
