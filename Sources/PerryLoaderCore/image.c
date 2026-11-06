@@ -649,6 +649,27 @@ static bool swift_runtime_framework(perry_loader *loader, const char *path, char
     return file_exists(out);
 }
 
+// A library of /usr/lib built for Perry as Mach-O, beside the loader where
+// the providers are: LLVM's libc++ for armv7 (libc++.1.dylib), which has to
+// be Darwin's own code, as 32-bit Darwin and Linux pass arguments and lay
+// out structures differently, and C++ is mostly code inlined in the program
+// that shares its objects with the library.
+static bool darwin_library_file(perry_loader *loader, const char *path, char *out, size_t out_size) {
+    static const char directory[] = "/usr/lib/";
+    size_t length = strlen(path);
+    if (strncmp(path, directory, strlen(directory)) != 0 || length < 6 || strcmp(path + length - 6, ".dylib") != 0)
+        return false;
+    const char *name = path + strlen(directory);
+    if (strchr(name, '/'))
+        return false;
+    for (uint32_t i = 0; i < loader->library_dir_count; i++) {
+        snprintf(out, out_size, "%s/%s", loader->library_dirs[i], name);
+        if (file_exists(out))
+            return true;
+    }
+    return false;
+}
+
 // Expands @executable_path, @loader_path and @rpath. Returns a malloc'd path
 // to an existing file, or NULL.
 static char *expand_install_name(perry_loader *loader, perry_image *image, const char *name) {
@@ -799,6 +820,16 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
                     dep->image = load_image(loader, framework_path);
                 continue;
             }
+        }
+
+        // A system library built for Perry as Mach-O, over a provider.
+        char darwin_path[PATH_MAX];
+        if (darwin_library_file(loader, name, darwin_path, sizeof(darwin_path))) {
+            perry_trace(PERRY_TRACE_LOAD, "%s -> %s", name, darwin_path);
+            dep->image = find_loaded(loader, darwin_path);
+            if (!dep->image)
+                dep->image = load_image(loader, darwin_path);
+            continue;
         }
 
         // Linux providers stand in for system libraries.
