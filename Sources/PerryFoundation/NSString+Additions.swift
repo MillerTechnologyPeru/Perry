@@ -616,6 +616,15 @@ extension NSString {
         return String(cString: home) + value.dropFirst()
     }
 
+    /// The home folder at the start of the path as "~".
+    @ObjCMethod("stringByAbbreviatingWithTildeInPath")
+    func abbreviatingWithTilde() -> String {
+        guard let home = getenv("HOME").map({ String(cString: $0) }), !home.isEmpty, home != "/" else { return value }
+        let trimmed = home.hasSuffix("/") ? String(home.dropLast()) : home
+        if value == trimmed { return "~" }
+        return value.hasPrefix(trimmed + "/") ? "~" + value.dropFirst(trimmed.count) : value
+    }
+
     /// The tilde expanded, and "." components, empty components and a
     /// trailing slash removed; ".." resolved where a component precedes it
     /// (never above the root of an absolute path).
