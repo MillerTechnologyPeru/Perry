@@ -191,12 +191,12 @@ open class CADisplayLink: NSObject {
         state.duration = 1 / 60
         if let runLoop = state.runLoop {
             // A repeating timer on the link's run loop, which calls -_perryTick:.
-            typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double, UnsafeMutableRawPointer?,
+            typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, Double.ObjCType, UnsafeMutableRawPointer?,
                                              UnsafeRawPointer?, UnsafeMutableRawPointer?, Bool) -> UnsafeMutableRawPointer?
             typealias Add = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
             let timer = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(
                 ObjCRuntime.classObject("NSTimer"), ObjCRuntime.selector("timerWithTimeInterval:target:selector:userInfo:repeats:"),
-                1 / Double(rate), objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
+                (1 / Double(rate)).objCArgument(), objcObject, ObjCRuntime.selector("_perryTick:"), nil, true)
             state.timer = ObjCRuntime.retain(timer)
             let mode = state.mode ?? "kCFRunLoopDefaultMode".objCArgument()
             unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(runLoop, ObjCRuntime.selector("addTimer:forMode:"), timer, mode)
