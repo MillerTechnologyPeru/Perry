@@ -141,6 +141,9 @@ class NSMutableDictionary: NSDictionary {
 
     @ObjCMethod("setObject:forKey:")
     func set(_ object: NSObject, forKey key: String)
+
+    @ObjCMethod("setObject:forKey:")
+    func set(string: String, forKey key: String)
 }
 
 @ObjCWrapper("NSNumber")
