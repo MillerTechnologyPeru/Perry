@@ -28,6 +28,8 @@ final class StreamStorage {
         case memory                                     // output to memory
         case buffer(UnsafeMutablePointer<UInt8>, Int)   // output to a caller's buffer
         case fileOutput(String, append: Bool)
+        case pipeInput(StreamPipe)                      // a bound pair's ends
+        case pipeOutput(StreamPipe)
     }
 
     let source: Source
@@ -49,6 +51,22 @@ final class StreamStorage {
         ObjC.release(error)
         for value in properties.values { ObjC.release(value) }
     }
+}
+
+/// A bound pair's buffer: what the output stream writes, the input stream
+/// reads, up to the size given. Reading waits for bytes until the output
+/// stream is closed, as a bound pair's does.
+final class StreamPipe: @unchecked Sendable {
+    let monitor = Monitor()
+    let capacity: Int
+    var bytes: [UInt8] = []
+    var outputClosed = false
+    var inputClosed = false
+    /// The two streams, not retained: each retains this.
+    var input: id?
+    var output: id?
+
+    init(capacity: Int) { self.capacity = max(capacity, 1) }
 }
 
 enum Streams {
@@ -135,6 +153,17 @@ enum Streams {
 
     static func close(_ object: id) {
         let storage = storage(object)
+        switch storage.source {
+        case .pipeOutput(let pipe):
+            pipe.monitor.locked { pipe.outputClosed = true }
+            pipe.monitor.broadcast()
+            if let input = pipe.input { post(input, Streams.storage(input), StreamEvent.endEncountered) }
+        case .pipeInput(let pipe):
+            pipe.monitor.locked { pipe.inputClosed = true }
+            pipe.monitor.broadcast()
+        default:
+            break
+        }
         if storage.descriptor >= 0 {
             Glibc.close(storage.descriptor)
             storage.descriptor = -1
@@ -146,6 +175,7 @@ enum Streams {
         switch storage.source {
         case .data(let data): return storage.offset < data.count
         case .file: return storage.status == StreamStatus.open
+        case .pipeInput(let pipe): return pipe.monitor.locked { !pipe.bytes.isEmpty || pipe.outputClosed }
         default: return false
         }
     }
@@ -174,6 +204,17 @@ enum Streams {
             }
             storage.offset += count
             if count == 0 { storage.status = StreamStatus.atEnd }
+        case .pipeInput(let pipe):
+            pipe.monitor.wait { !pipe.bytes.isEmpty || pipe.outputClosed || pipe.inputClosed }
+            count = pipe.monitor.locked {
+                let taken = min(length, pipe.bytes.count)
+                pipe.bytes.withUnsafeBufferPointer { memcpy(buffer, $0.baseAddress!, taken) }
+                pipe.bytes.removeFirst(taken)
+                return taken
+            }
+            pipe.monitor.broadcast()
+            if count == 0 { storage.status = StreamStatus.atEnd }
+            if count > 0, let output = pipe.output { post(output, Streams.storage(output), StreamEvent.hasSpaceAvailable) }
         default:
             storage.status = StreamStatus.atEnd
         }
@@ -200,6 +241,16 @@ enum Streams {
                 fail(object, storage, code: errno)
                 return -1
             }
+        case .pipeOutput(let pipe):
+            count = pipe.monitor.locked {
+                guard !pipe.inputClosed else { return -1 }
+                let taken = min(length, pipe.capacity - pipe.bytes.count)
+                if taken > 0 { pipe.bytes.append(contentsOf: UnsafeBufferPointer(start: buffer, count: taken)) }
+                return taken
+            }
+            pipe.monitor.broadcast()
+            if count > 0, let input = pipe.input { post(input, Streams.storage(input), StreamEvent.hasBytesAvailable) }
+            return count
         default:
             return -1
         }
@@ -207,9 +258,23 @@ enum Streams {
         return count
     }
 
+    /// A bound pair: an input stream that reads what the output stream
+    /// writes, through a buffer of `size` bytes. Both are +1.
+    static func boundPair(size: Int) -> (input: id, output: id)? {
+        let pipe = StreamPipe(capacity: size)
+        guard let input = Storage.allocate(UnsafeMutableRawPointer(inputClass)),
+              let output = Storage.allocate(UnsafeMutableRawPointer(outputClass)) else { return nil }
+        Storage.set(input, StreamStorage(.pipeInput(pipe)))
+        Storage.set(output, StreamStorage(.pipeOutput(pipe)))
+        pipe.input = input
+        pipe.output = output
+        return (input, output)
+    }
+
     static func hasSpace(_ storage: StreamStorage) -> Bool {
         guard storage.status == StreamStatus.open else { return false }
         if case .buffer(_, let capacity) = storage.source { return storage.offset < capacity }
+        if case .pipeOutput(let pipe) = storage.source { return pipe.monitor.locked { pipe.bytes.count < pipe.capacity } }
         return true
     }
 
@@ -299,6 +364,16 @@ public class NSStream: NSObject {
     func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: Streams.streamClass)
+    }
+
+    /// +getBoundStreamsWithBufferSize:inputStream:outputStream:, both
+    /// autoreleased.
+    @ObjCClassMethod("getBoundStreamsWithBufferSize:inputStream:outputStream:")
+    static func boundStreams(size: UInt, input: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                             output: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        let pair = Streams.boundPair(size: Int(min(size, UInt(Int.max))))
+        input?.pointee = pair.map { ObjC.autorelease($0.input) } ?? nil
+        output?.pointee = pair.map { ObjC.autorelease($0.output) } ?? nil
     }
 
     @ObjCMethod("open") func open() { Streams.open(objcObject, input: ObjC.isKind(objcObject, of: Streams.inputClass)) }
@@ -452,4 +527,132 @@ public class NSOutputStream: NSStream {
     }
 
     @ObjCMethod("hasSpaceAvailable") func hasSpaceAvailable() -> Bool { Streams.hasSpace(storage) }
+}
+
+// MARK: - CoreFoundation's streams
+
+// CFReadStream and CFWriteStream are NSInputStream and NSOutputStream, toll
+// free; these are their functions over the classes' methods, and the
+// client callbacks are the delegate's events.
+
+private typealias StreamSend = @convention(c) (id?, SEL) -> Void
+private typealias StreamSendBool = @convention(c) (id?, SEL) -> Bool
+private typealias StreamSendUInt = @convention(c) (id?, SEL) -> UInt
+private typealias StreamSendObject = @convention(c) (id?, SEL) -> id?
+
+private func send(_ stream: id?, _ name: String) {
+    guard let stream else { return }
+    unsafeBitCast(ObjC.msgSend, to: StreamSend.self)(stream, ObjC.selector(name))
+}
+
+private func sendBool(_ stream: id?, _ name: String) -> Bool {
+    guard let stream else { return false }
+    return unsafeBitCast(ObjC.msgSend, to: StreamSendBool.self)(stream, ObjC.selector(name))
+}
+
+/// The status, as CFStreamStatus numbers it (as NSStreamStatus does).
+private func status(_ stream: id?) -> Int {
+    guard let stream else { return 0 }
+    return Int(unsafeBitCast(ObjC.msgSend, to: StreamSendUInt.self)(stream, ObjC.selector("streamStatus")))
+}
+
+/// +1 pair of bound streams, as CFStreamCreateBoundPair gives them.
+@c(_CFStreamCreateBoundPair)
+public func CFStreamCreateBoundPair(_ allocator: UnsafeRawPointer?, _ read: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                                    _ write: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, _ size: Int) {
+    let pair = Streams.boundPair(size: size)
+    read?.pointee = pair?.input
+    write?.pointee = pair?.output
+}
+
+@c(_CFReadStreamOpen) public func CFReadStreamOpen(_ stream: UnsafeMutableRawPointer?) -> Bool {
+    send(stream, "open")
+    return status(stream) != 7
+}
+@c(_CFWriteStreamOpen) public func CFWriteStreamOpen(_ stream: UnsafeMutableRawPointer?) -> Bool {
+    send(stream, "open")
+    return status(stream) != 7
+}
+@c(_CFReadStreamClose) public func CFReadStreamClose(_ stream: UnsafeMutableRawPointer?) { send(stream, "close") }
+@c(_CFWriteStreamClose) public func CFWriteStreamClose(_ stream: UnsafeMutableRawPointer?) { send(stream, "close") }
+@c(_CFReadStreamGetStatus) public func CFReadStreamGetStatus(_ stream: UnsafeMutableRawPointer?) -> Int { status(stream) }
+@c(_CFWriteStreamGetStatus) public func CFWriteStreamGetStatus(_ stream: UnsafeMutableRawPointer?) -> Int { status(stream) }
+
+@c(_CFReadStreamHasBytesAvailable)
+public func CFReadStreamHasBytesAvailable(_ stream: UnsafeMutableRawPointer?) -> Bool { sendBool(stream, "hasBytesAvailable") }
+
+@c(_CFWriteStreamCanAcceptBytes)
+public func CFWriteStreamCanAcceptBytes(_ stream: UnsafeMutableRawPointer?) -> Bool { sendBool(stream, "hasSpaceAvailable") }
+
+@c(_CFReadStreamRead)
+public func CFReadStreamRead(_ stream: UnsafeMutableRawPointer?, _ buffer: UnsafeMutablePointer<UInt8>?, _ length: Int) -> Int {
+    guard let stream else { return -1 }
+    typealias Read = @convention(c) (id?, SEL, UnsafeMutablePointer<UInt8>?, UInt) -> Int
+    return unsafeBitCast(ObjC.msgSend, to: Read.self)(stream, ObjC.selector("read:maxLength:"), buffer, UInt(max(length, 0)))
+}
+
+@c(_CFWriteStreamWrite)
+public func CFWriteStreamWrite(_ stream: UnsafeMutableRawPointer?, _ buffer: UnsafePointer<UInt8>?, _ length: Int) -> Int {
+    guard let stream else { return -1 }
+    typealias Write = @convention(c) (id?, SEL, UnsafePointer<UInt8>?, UInt) -> Int
+    return unsafeBitCast(ObjC.msgSend, to: Write.self)(stream, ObjC.selector("write:maxLength:"), buffer, UInt(max(length, 0)))
+}
+
+/// The stream's error, +1, or NULL.
+private func copyError(_ stream: id?) -> id? {
+    guard let stream else { return nil }
+    return ObjC.retain(unsafeBitCast(ObjC.msgSend, to: StreamSendObject.self)(stream, ObjC.selector("streamError")))
+}
+@c(_CFReadStreamCopyError) public func CFReadStreamCopyError(_ stream: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { copyError(stream) }
+@c(_CFWriteStreamCopyError) public func CFWriteStreamCopyError(_ stream: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { copyError(stream) }
+
+/// A property, +1.
+private func copyProperty(_ stream: id?, _ key: id?) -> id? {
+    guard let stream else { return nil }
+    typealias Get = @convention(c) (id?, SEL, id?) -> id?
+    return ObjC.retain(unsafeBitCast(ObjC.msgSend, to: Get.self)(stream, ObjC.selector("propertyForKey:"), key))
+}
+private func setProperty(_ stream: id?, _ key: id?, _ value: id?) -> Bool {
+    guard let stream else { return false }
+    typealias Set = @convention(c) (id?, SEL, id?, id?) -> Bool
+    return unsafeBitCast(ObjC.msgSend, to: Set.self)(stream, ObjC.selector("setProperty:forKey:"), value, key)
+}
+@c(_CFReadStreamCopyProperty)
+public func CFReadStreamCopyProperty(_ stream: UnsafeMutableRawPointer?, _ key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    copyProperty(stream, key)
+}
+@c(_CFWriteStreamCopyProperty)
+public func CFWriteStreamCopyProperty(_ stream: UnsafeMutableRawPointer?, _ key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    copyProperty(stream, key)
+}
+@c(_CFReadStreamSetProperty)
+public func CFReadStreamSetProperty(_ stream: UnsafeMutableRawPointer?, _ key: UnsafeMutableRawPointer?, _ value: UnsafeMutableRawPointer?) -> Bool {
+    setProperty(stream, key, value)
+}
+@c(_CFWriteStreamSetProperty)
+public func CFWriteStreamSetProperty(_ stream: UnsafeMutableRawPointer?, _ key: UnsafeMutableRawPointer?, _ value: UnsafeMutableRawPointer?) -> Bool {
+    setProperty(stream, key, value)
+}
+
+private func schedule(_ stream: id?, _ runLoop: id?, _ mode: id?, _ name: String) {
+    guard let stream else { return }
+    typealias Schedule = @convention(c) (id?, SEL, id?, id?) -> Void
+    // A CFRunLoop is its NSRunLoop here.
+    unsafeBitCast(ObjC.msgSend, to: Schedule.self)(stream, ObjC.selector(name), runLoop, mode)
+}
+@c(_CFReadStreamScheduleWithRunLoop)
+public func CFReadStreamScheduleWithRunLoop(_ stream: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {
+    schedule(stream, runLoop, mode, "scheduleInRunLoop:forMode:")
+}
+@c(_CFWriteStreamScheduleWithRunLoop)
+public func CFWriteStreamScheduleWithRunLoop(_ stream: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {
+    schedule(stream, runLoop, mode, "scheduleInRunLoop:forMode:")
+}
+@c(_CFReadStreamUnscheduleFromRunLoop)
+public func CFReadStreamUnscheduleFromRunLoop(_ stream: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {
+    schedule(stream, runLoop, mode, "removeFromRunLoop:forMode:")
+}
+@c(_CFWriteStreamUnscheduleFromRunLoop)
+public func CFWriteStreamUnscheduleFromRunLoop(_ stream: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {
+    schedule(stream, runLoop, mode, "removeFromRunLoop:forMode:")
 }
