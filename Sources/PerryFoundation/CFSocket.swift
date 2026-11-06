@@ -400,11 +400,11 @@ public func CFSocketCreate(_ allocator: UnsafeRawPointer?, _ family: Int32, _ ty
     }
     guard let descriptor else { return nil }
     typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
-    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+    var info = context?.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
         info = UnsafeMutableRawPointer(mutating: retain(info))
     }
-    let release = context?.load(fromByteOffset: 24, as: SocketStorage.Release?.self)
+    let release = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: SocketStorage.Release?.self)
     return Sockets.make(SocketStorage(descriptor: descriptor, isIPv6: family == 30, types: types, callout: callout, info: info,
                                       release: release))
 }

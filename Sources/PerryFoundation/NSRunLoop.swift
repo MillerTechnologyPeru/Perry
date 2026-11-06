@@ -454,7 +454,7 @@ public func CFRunLoopRemoveTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: U
 /// A CFRunLoopTimer is an NSTimer, toll-free bridged: one that repeats when
 /// its interval is positive. The context is { version, info, retain,
 /// release, copyDescription }; the timer keeps info until it goes away.
-@c(_CFRunLoopTimerCreate)
+@DarwinC("_CFRunLoopTimerCreate")
 public func CFRunLoopTimerCreate(_ allocator: UnsafeMutableRawPointer?, _ fireDate: Double, _ interval: Double,
                                  _ flags: UInt, _ order: Int,
                                  _ callout: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void)?,
@@ -462,18 +462,18 @@ public func CFRunLoopTimerCreate(_ allocator: UnsafeMutableRawPointer?, _ fireDa
     typealias Retain = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
     let storage = TimerStorage(fireDate: fireDate, interval: interval > 0 ? Timers.clamp(interval) : 0,
                                repeats: interval > 0, target: nil, selector: nil, userInfo: nil, block: nil)
-    var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-    if let retain = context?.load(fromByteOffset: 16, as: Retain?.self) {
+    var info = context?.load(fromByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    if let retain = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: Retain?.self) {
         info = UnsafeMutableRawPointer(mutating: retain(info))
     }
     storage.callout = callout
     storage.info = info
-    storage.releaseInfo = context?.load(fromByteOffset: 24, as: TimerStorage.Release?.self)
+    storage.releaseInfo = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: TimerStorage.Release?.self)
     return Timers.make(storage)
 }
 
 /// The block is called with the timer.
-@c(_CFRunLoopTimerCreateWithHandler)
+@DarwinC("_CFRunLoopTimerCreateWithHandler")
 public func CFRunLoopTimerCreateWithHandler(_ allocator: UnsafeMutableRawPointer?, _ fireDate: Double, _ interval: Double,
                                             _ flags: UInt, _ order: Int,
                                             _ block: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
@@ -482,19 +482,19 @@ public func CFRunLoopTimerCreateWithHandler(_ allocator: UnsafeMutableRawPointer
     return Timers.make(storage)
 }
 
-@c(_CFRunLoopTimerSetNextFireDate)
+@DarwinC("_CFRunLoopTimerSetNextFireDate")
 public func CFRunLoopTimerSetNextFireDate(_ timer: UnsafeMutableRawPointer?, _ fireDate: Double) {
     guard let storage = Timers.storage(timer), storage.isValid else { return }
     storage.fireDate = fireDate
     storage.runLoops.forEach { $0.wakeUp() }
 }
 
-@c(_CFRunLoopTimerGetNextFireDate)
+@DarwinC("_CFRunLoopTimerGetNextFireDate")
 public func CFRunLoopTimerGetNextFireDate(_ timer: UnsafeMutableRawPointer?) -> Double {
     Timers.storage(timer)?.fireDate ?? 0
 }
 
-@c(_CFRunLoopTimerGetInterval)
+@DarwinC("_CFRunLoopTimerGetInterval")
 public func CFRunLoopTimerGetInterval(_ timer: UnsafeMutableRawPointer?) -> Double {
     guard let storage = Timers.storage(timer), storage.repeats else { return 0 }
     return storage.interval

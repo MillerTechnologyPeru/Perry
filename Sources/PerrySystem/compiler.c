@@ -16,6 +16,7 @@
 #if defined(__arm__)
 
 #include <stdlib.h>
+#include <unistd.h>
 
 #define LIBGCC(name) __asm__("_" #name) __attribute__((visibility("default"), used)) DARWIN_FLOAT_ABI
 
@@ -99,6 +100,8 @@ long long perry_divdi3(long long a, long long b) LIBGCC(__divdi3);
 long long perry_divdi3(long long a, long long b) { return b ? (b == -1 ? (long long)(0 - (unsigned long long)a) : a / b) : 0; }
 long long perry_moddi3(long long a, long long b) LIBGCC(__moddi3);
 long long perry_moddi3(long long a, long long b) { return b ? (b == -1 ? 0 : a % b) : a; }
+long long perry_muldi3(long long a, long long b) LIBGCC(__muldi3);
+long long perry_muldi3(long long a, long long b) { return (long long)((unsigned long long)a * (unsigned long long)b); }
 unsigned long long perry_udivdi3(unsigned long long a, unsigned long long b) LIBGCC(__udivdi3);
 unsigned long long perry_udivdi3(unsigned long long a, unsigned long long b) { return b ? a / b : 0; }
 unsigned long long perry_umoddi3(unsigned long long a, unsigned long long b) LIBGCC(__umoddi3);
@@ -120,5 +123,30 @@ void perry_operator_delete(void *block) __asm__("__ZdlPv") __attribute__((visibi
 void perry_operator_delete(void *block) { free(block); }
 void perry_operator_delete_array(void *block) __asm__("__ZdaPv") __attribute__((visibility("default"), used));
 void perry_operator_delete_array(void *block) { free(block); }
+
+// The rest of what C++ code built with GCC takes from libstdc++ when it
+// neither throws nor casts dynamically: the function a pure virtual
+// function's place in a vtable calls, the vtables its classes' type
+// information is made with, which only those would read, and the
+// personality routine its cleanups name, which only an exception would
+// call.
+void perry_cxa_pure_virtual(void) __asm__("___cxa_pure_virtual") __attribute__((visibility("default"), used));
+void perry_cxa_pure_virtual(void) {
+    static const char message[] = "pure virtual method called\n";
+    if (write(2, message, sizeof(message) - 1) < 0) { }
+    abort();
+}
+void *const perry_class_type_info_vtable[16] __asm__("__ZTVN10__cxxabiv117__class_type_infoE")
+    __attribute__((visibility("default"), used)) = { 0 };
+void *const perry_si_class_type_info_vtable[16] __asm__("__ZTVN10__cxxabiv120__si_class_type_infoE")
+    __attribute__((visibility("default"), used)) = { 0 };
+void *const perry_vmi_class_type_info_vtable[16] __asm__("__ZTVN10__cxxabiv121__vmi_class_type_infoE")
+    __attribute__((visibility("default"), used)) = { 0 };
+int perry_gxx_personality_sj0(int version, int actions, unsigned long long exception_class, void *exception, void *context)
+    __asm__("___gxx_personality_sj0") __attribute__((visibility("default"), used));
+int perry_gxx_personality_sj0(int version, int actions, unsigned long long exception_class, void *exception, void *context) {
+    (void)version, (void)actions, (void)exception_class, (void)exception, (void)context;
+    return 8;   // _URC_CONTINUE_UNWIND: nothing here catches
+}
 
 #endif

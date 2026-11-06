@@ -449,6 +449,26 @@ extension NSString {
         return true
     }
 
+    /// The deprecated ones, in the default C string encoding: the whole
+    /// string and a terminating zero into a buffer taken to be big enough,
+    /// or as much as fits in `maxLength` bytes, which leave room for the
+    /// zero.
+    @ObjCMethod("getCString:")
+    func getCString(_ buffer: UnsafeMutablePointer<CChar>?) {
+        getCString(buffer, maxLength: UInt(Int.max - 1))
+    }
+
+    @ObjCMethod("getCString:maxLength:")
+    func getCString(_ buffer: UnsafeMutablePointer<CChar>?, maxLength: UInt) {
+        guard let buffer else { return }
+        let bytes = Array(value.utf8).prefix(Int(min(maxLength, UInt(Int.max))))
+        for (index, byte) in bytes.enumerated() { buffer[index] = CChar(bitPattern: byte) }
+        buffer[bytes.count] = 0
+    }
+
+    /// The bytes of the string in the default C string encoding.
+    @ObjCMethod("cStringLength") func cStringLength() -> UInt { UInt(value.utf8.count) }
+
     /// Converts the characters in `range` to `encoding`, as many whole
     /// characters as fit in `maxLength` bytes (any number, without a
     /// buffer), stopping at one the encoding lacks unless lossy conversion

@@ -347,6 +347,17 @@ open class GCController: NSObject {
         Controllers.start()
         return Controllers.connected.first
     }
+    /// For UIKit's accelerometer, which older programs read: the stick
+    /// that stands for the device's tilt, and the tilt at its end in
+    /// radians, as three floats.
+    @ObjCClassMethod("_perryTiltStick:")
+    static func tiltStick(_ stick: UnsafeMutablePointer<Float>?) {
+        Controllers.start()
+        let now = Tilt.stick()
+        stick?[0] = now.x
+        stick?[1] = now.y
+        stick?[2] = Float(Tilt.limit)
+    }
     @ObjCClassMethod("shouldMonitorBackgroundEvents") static func shouldMonitorBackgroundEvents() -> Bool { false }
     @ObjCClassMethod("setShouldMonitorBackgroundEvents:") static func setShouldMonitorBackgroundEvents(_ monitor: Bool) {}
     @ObjCClassMethod("supportsHIDDevice:") static func supportsHIDDevice(_ device: NSObject?) -> Bool { false }
@@ -684,12 +695,17 @@ enum Controllers {
     /// Sends UIKit a finger of ours, numbered apart from a touchscreen's.
     private static func finger(_ index: Int, phase: Int, x: Double, y: Double) {
         typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
-        typealias SendFinger = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt, Int, Double, Double) -> Void
+        typealias SendFinger = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt, Int, Double.ObjCType,
+                                               Double.ObjCType) -> Void
         guard let cls = "UIApplication".withCString({ ObjCRuntime.functions.getClass($0) }),
               let application = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(cls, ObjCRuntime.selector("sharedApplication"))
         else { return }
+        // "perry" in the number's high bytes, as many as a word has; the
+        // points as Darwin passes floating point.
+        let ours = UInt(truncatingIfNeeded: UInt64(0x7065_7272_7900_0000) >> UInt64(64 - UInt.bitWidth))
         unsafeBitCast(ObjCRuntime.msgSend, to: SendFinger.self)(
-            application, ObjCRuntime.selector("_perryFinger:phase:x:y:"), 0x7065_7272_7900_0000 + UInt(index), phase, x, y)
+            application, ObjCRuntime.selector("_perryFinger:phase:x:y:"), ours + UInt(index), phase, x.objCArgument(),
+            y.objCArgument())
     }
 
     private static let buttonNames: [String: Button] = [
