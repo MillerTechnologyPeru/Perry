@@ -291,7 +291,13 @@ public func CTFontDescriptorGetTextStyleSize(
     _ style: UnsafeMutableRawPointer?, _ category: UnsafeMutableRawPointer?, _ options: Int32,
     _ weight: UnsafeMutablePointer<CGFloat>?, _ size: UnsafeMutablePointer<CGFloat>?
 ) -> CGFloat {
-    textStyleSize(string(style) ?? "UICTFontTextStyleBody", category: string(category))
+    // The size and weight are given through the pointers too, which is
+    // where SwiftUI reads them for its scaled metrics.
+    let style = string(style) ?? "UICTFontTextStyleBody"
+    let points = textStyleSize(style, category: string(category))
+    size?.pointee = points
+    weight?.pointee = style == "UICTFontTextStyleHeadline" ? 0.4 : 0
+    return points
 }
 
 // MARK: Fonts
