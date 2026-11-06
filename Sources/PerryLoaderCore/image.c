@@ -768,6 +768,26 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
         return;
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
+        // Code built against an SDK from before iOS 17 binds a framework's
+        // Swift API to its overlay, /usr/lib/swift/libswift<Name>.dylib:
+        // the additions beside it are searched after the overlay too.
+        size_t prefix = strlen(SWIFT_LIBRARY_DIR "libswift");
+        size_t length = strlen(dep->install_name);
+        if (dep->image && length > prefix + 6 &&
+            strncmp(dep->install_name, SWIFT_LIBRARY_DIR "libswift", prefix) == 0 &&
+            strcmp(dep->install_name + length - 6, ".dylib") == 0) {
+            char path[PATH_MAX];
+            snprintf(path, sizeof(path), "%s/libswift%.*sAdditions.dylib", loader->swift_runtime_dir,
+                     (int)(length - prefix - 6), dep->install_name + prefix);
+            if (file_exists(path)) {
+                perry_image *additions = find_loaded(loader, path);
+                if (!additions)
+                    additions = load_image(loader, path);
+                if (additions != image && additions != dep->image)
+                    dep->swift_additions = additions;
+            }
+            continue;
+        }
         const char *framework = strstr(dep->install_name, "/System/Library/Frameworks/");
         if (!dep->provider || !framework)
             continue;
@@ -1024,6 +1044,14 @@ static void *lookup_symbol(const char *install_name, const char *name) {
     }
     if (install_name)
         return perry_provider_symbol(loader, install_name, name);
+    // Metal's functions by name, as Unity looks MTLCreateSystemDefaultDevice
+    // up with dlsym: Metal's provider before QuartzCore's, which has
+    // stand-ins that answer there is no device, for when Metal's is missing.
+    if (strncmp(name, "_MTL", 4) == 0) {
+        void *address = perry_provider_symbol(loader, "/System/Library/Frameworks/Metal.framework/Metal", name);
+        if (address)
+            return address;
+    }
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         perry_provider *provider = loader->providers[i];
         if (!provider->handle)
