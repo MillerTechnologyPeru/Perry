@@ -181,12 +181,7 @@ PASSTHROUGH ___strncpy_chk, __strncpy_chk
 PASSTHROUGH ___strncat_chk, __strncat_chk
 
 // MARK: - memory and environment
-PASSTHROUGH _malloc, malloc
-PASSTHROUGH _calloc, calloc
-PASSTHROUGH _realloc, realloc
 PASSTHROUGH _free, free
-PASSTHROUGH _posix_memalign, posix_memalign
-PASSTHROUGH _aligned_alloc, aligned_alloc
 PASSTHROUGH _getenv, getenv
 PASSTHROUGH _setenv, setenv
 PASSTHROUGH _unsetenv, unsetenv
@@ -204,19 +199,16 @@ VARIADIC_STACK _open_dprotected_np, perry_vopen_dprotected, 4
 // r1, or a 64-bit argument that comes first, all of which pass the same.
 // Darwin's structures they take are laid out as glibc's armhf ones: rusage,
 // tm, timeval, utimbuf and iovec, with a 32-bit time_t on both.
-// malloc_type_* take a type identifier after the arguments malloc's do.
-PASSTHROUGH ___cxa_atexit, __cxa_atexit
+// Those that take callbacks are in callbacks.c.
 PASSTHROUGH __exit, _exit
 PASSTHROUGH _abort, abort
 PASSTHROUGH _abs, abs
-PASSTHROUGH _atexit, atexit
 PASSTHROUGH _atoi, atoi
 PASSTHROUGH _atol, atol
 PASSTHROUGH _atoll, atoll
 PASSTHROUGH _backtrace, backtrace
 PASSTHROUGH _backtrace_symbols, backtrace_symbols
 PASSTHROUGH _bcopy, bcopy
-PASSTHROUGH _bsearch, bsearch
 PASSTHROUGH _execv, execv
 PASSTHROUGH _execve, execve
 PASSTHROUGH _exit, exit
@@ -243,23 +235,16 @@ PASSTHROUGH _listen, listen
 PASSTHROUGH _llabs, llabs
 PASSTHROUGH _localtime, localtime
 PASSTHROUGH _localtime_r, localtime_r
-PASSTHROUGH _malloc_type_calloc, calloc
-PASSTHROUGH _malloc_type_malloc, malloc
-PASSTHROUGH _malloc_type_posix_memalign, posix_memalign
-PASSTHROUGH _malloc_type_realloc, realloc
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
-PASSTHROUGH _pthread_attr_setstacksize, pthread_attr_setstacksize
 PASSTHROUGH _pthread_cancel, pthread_cancel
-PASSTHROUGH _pthread_create, pthread_create
 PASSTHROUGH _pthread_detach, pthread_detach
 PASSTHROUGH _pthread_equal, pthread_equal
 PASSTHROUGH _pthread_exit, pthread_exit
 PASSTHROUGH _pthread_join, pthread_join
 PASSTHROUGH _pthread_self, pthread_self
-PASSTHROUGH _qsort, qsort
 PASSTHROUGH _rand, rand
 PASSTHROUGH _random, random
 PASSTHROUGH _setpgid, setpgid
