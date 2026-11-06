@@ -9,12 +9,23 @@
 # copied to .build/armv7/bin beside perry32, where it looks for providers.
 # Usage: Scripts/build-armv7-swiftpm.sh [product...]
 #   (default: Perryobjc Perrydispatch PerryFoundation; Foundation's provider loads
-#   libdispatch's)
+#   libdispatch's). Mac-only providers (PerryAppKit, PerryIOKit,
+#   Perrysteam_api) are refused.
 # swift-syntax needs several GB of memory to build; a 4 GB machine is not enough.
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 [ $# -gt 0 ] || set -- Perryobjc Perrydispatch PerryFoundation
+
+# armv7 runs iOS apps, so the providers only Mac apps load are not built
+# for it: AppKit, IOKit and Steam's API.
+for product; do
+    case $product in
+    PerryAppKit|PerryIOKit|Perrysteam_api)
+        echo "$0: $product is for Mac apps and is not built for armv7" >&2
+        exit 2 ;;
+    esac
+done
 
 # Paths as the container sees the checkout, at /perry.
 swift=$(cd .toolchains && ls -d swift-6.4.0-RELEASE-*/usr/bin | head -1)
