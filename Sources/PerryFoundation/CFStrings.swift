@@ -116,7 +116,7 @@ enum CFStrings {
     }
 
     static func find(_ string: id?, _ target: id?, _ range: CFRange, _ flags: UInt) -> CFRange {
-        let found = unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)(
+        let found = unsafeBitCast(ObjCRuntime.msgSend(returning: NSRange.self), to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)(
             string, ObjC.selector("rangeOfString:options:range:"), target, flags & (1 | 4 | 8 | 64),
             NSRange(location: UInt(range.location), length: UInt(range.length)))
         return found.location == UInt(Int.max) ? CFRange(location: -1, length: 0)
