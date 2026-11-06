@@ -1,8 +1,8 @@
 import Glibc
 
 // GStreamer, loaded when a player first needs it: a playbin per item, its
-// video converted to RGBA into an appsink the player pulls frames from, its
-// audio to the system's output. Without GStreamer (or the plugins a file
+// video converted to RGBA (or BGRA) into an appsink the player or its
+// item's video output pulls frames from, its audio to the system's output. Without GStreamer (or the plugins a file
 // needs) an item can't play, and players report it as finished.
 
 final class GStreamer: @unchecked Sendable {
@@ -33,6 +33,16 @@ final class GStreamer: @unchecked Sendable {
     /// variadic call passes its arguments as a fixed one would.
     let setDouble: @convention(c) (Pointer, UnsafePointer<CChar>, Double, Pointer?) -> Void
     let setBool: @convention(c) (Pointer, UnsafePointer<CChar>, Int32, Pointer?) -> Void
+    // For reading what a stream holds before it plays; nil where an older
+    // GStreamer lacks them.
+    /// gst_element_get_state: waits, for as long as the nanoseconds given,
+    /// for a change of state to finish.
+    var getState: (@convention(c) (Pointer, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?, UInt64) -> Int32)?
+    var pullPreroll: (@convention(c) (Pointer, UInt64) -> Pointer?)?
+    var structureGetFraction: (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeMutablePointer<Int32>,
+                                               UnsafeMutablePointer<Int32>) -> Int32)?
+    /// g_object_get with one int property.
+    var getInt: (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeMutablePointer<Int32>, Pointer?) -> Void)?
 
     // GstState, GstMessageType, GstFormat, GstSeekFlags and GstMapFlags.
     static let stateNull: Int32 = 1, statePaused: Int32 = 3, statePlaying: Int32 = 4
@@ -98,6 +108,13 @@ final class GStreamer: @unchecked Sendable {
             (capsGetStructure, structureGetInt, bufferMap, bufferUnmap)
         (self.queryPosition, self.queryDuration, self.seekSimple, self.setDouble, self.setBool) =
             (queryPosition, queryDuration, seekSimple, setDouble, setBool)
+        getState = bind(core, "gst_element_get_state", (@convention(c) (Pointer, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?,
+                                                                        UInt64) -> Int32).self)
+        pullPreroll = bind(app, "gst_app_sink_try_pull_preroll", (@convention(c) (Pointer, UInt64) -> Pointer?).self)
+        structureGetFraction = bind(core, "gst_structure_get_fraction",
+                                    (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeMutablePointer<Int32>,
+                                                     UnsafeMutablePointer<Int32>) -> Int32).self)
+        getInt = bind(gobject, "g_object_get", (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeMutablePointer<Int32>, Pointer?) -> Void).self)
     }
 
     static func log(_ message: String) {
@@ -113,11 +130,15 @@ final class Pipeline {
     /// The appsink, found once playbin has put its video sink in place.
     private(set) var sink: GStreamer.Pointer?
     let bus: GStreamer.Pointer?
+    /// The order of a frame's bytes: RGBA or BGRA.
+    let format: String
     /// Ticks the position has been at the end; see `finished()`.
     private var ticksAtEnd = 0
     private let mapInfo = UnsafeMutableRawPointer.allocate(byteCount: GStreamer.mapInfoSize, alignment: 8)
 
-    init?(uri: String, gst: GStreamer, video: Bool = true) {
+    /// `format` is the order of a frame's four bytes: RGBA, or BGRA for
+    /// the pixel buffers a video output hands out.
+    init?(uri: String, gst: GStreamer, video: Bool = true, format: String = "RGBA") {
         // In quotes, as the pipeline description reads them.
         var quoted = ""
         for character in uri {
@@ -126,7 +147,7 @@ final class Pipeline {
         }
         // Sound alone, as for AVAudioPlayer, sends any video nowhere.
         let description = video
-            ? "playbin uri=\"\(quoted)\" video-sink=\"videoconvert ! videoscale ! video/x-raw,format=RGBA "
+            ? "playbin uri=\"\(quoted)\" video-sink=\"videoconvert ! videoscale ! video/x-raw,format=\(format) "
                 + "! appsink name=perryvideo max-buffers=1 drop=true\""
             : "playbin uri=\"\(quoted)\" video-sink=fakesink"
         var error: GStreamer.Pointer?
@@ -136,6 +157,7 @@ final class Pipeline {
         }
         self.gst = gst
         self.element = element
+        self.format = format
         bus = gst.getBus(element)
     }
 
@@ -211,7 +233,75 @@ final class Pipeline {
         frame.width = Int(width)
         frame.height = Int(height)
         frame.pixels = [UInt8](UnsafeRawBufferPointer(start: data, count: rowBytes * Int(height)))
+        // A view shows RGBA: an asset's pipeline, which makes BGRA for
+        // video outputs, has its red and blue changed places.
+        if format == "BGRA" {
+            frame.pixels.withUnsafeMutableBufferPointer { pixels in
+                var index = 0
+                while index + 3 < pixels.count {
+                    pixels.swapAt(index, index + 2)
+                    index += 4
+                }
+            }
+        }
         frame.number &+= 1
+        return true
+    }
+
+    /// What the stream holds, read with it paused on its first frame:
+    /// waits for that as long as `timeout` seconds. Nil when it can't play.
+    func describe(timeout: Double) -> MediaDescription? {
+        guard let getState = gst.getState, let pullPreroll = gst.pullPreroll else { return nil }
+        pause()
+        // GST_STATE_CHANGE_FAILURE is 0.
+        guard getState(element, nil, nil, UInt64(timeout * 1e9)) != 0 else { return nil }
+        var description = MediaDescription()
+        description.duration = duration ?? 0
+        var audio: Int32 = 0
+        if let getInt = gst.getInt { "n-audio".withCString { getInt(element, $0, &audio, nil) } }
+        description.audioStreams = Int(audio)
+        if sink == nil { sink = "perryvideo".withCString { gst.binGetByName(element, $0) } }
+        if let sink, let sample = pullPreroll(sink, UInt64(min(timeout, 2) * 1e9)) {
+            defer { gst.miniObjectUnref(sample) }
+            var width: Int32 = 0, height: Int32 = 0, numerator: Int32 = 0, denominator: Int32 = 1
+            if let caps = gst.sampleGetCaps(sample), let structure = gst.capsGetStructure(caps, 0) {
+                _ = "width".withCString { gst.structureGetInt(structure, $0, &width) }
+                _ = "height".withCString { gst.structureGetInt(structure, $0, &height) }
+                if let fraction = gst.structureGetFraction {
+                    _ = "framerate".withCString { fraction(structure, $0, &numerator, &denominator) }
+                }
+            }
+            (description.width, description.height) = (Int(width), Int(height))
+            if numerator > 0, denominator > 0 { description.frameRate = Double(numerator) / Double(denominator) }
+        }
+        return description
+    }
+
+    /// The newest decoded frame, if one came since last asked, copied by
+    /// `copy` (given its width, height, bytes and their count) while the
+    /// frame is mapped.
+    func pullFrame(_ copy: (Int, Int, UnsafeRawPointer, Int) -> Void) -> Bool {
+        if sink == nil { sink = "perryvideo".withCString { gst.binGetByName(element, $0) } }
+        guard let sink else { return false }
+        var latest: GStreamer.Pointer?
+        while let sample = gst.pullSample(sink, 0) {
+            if let latest { gst.miniObjectUnref(latest) }
+            latest = sample
+        }
+        guard let sample = latest else { return false }
+        defer { gst.miniObjectUnref(sample) }
+        var width: Int32 = 0, height: Int32 = 0
+        guard let caps = gst.sampleGetCaps(sample), let structure = gst.capsGetStructure(caps, 0),
+              "width".withCString({ gst.structureGetInt(structure, $0, &width) }) != 0,
+              "height".withCString({ gst.structureGetInt(structure, $0, &height) }) != 0,
+              width > 0, height > 0, let buffer = gst.sampleGetBuffer(sample),
+              gst.bufferMap(buffer, mapInfo, GStreamer.mapRead) != 0 else { return false }
+        defer { gst.bufferUnmap(buffer, mapInfo) }
+        let data = mapInfo.load(fromByteOffset: GStreamer.mapInfoData, as: UnsafeRawPointer?.self)
+        let length = mapInfo.load(fromByteOffset: GStreamer.mapInfoLength, as: Int.self)
+        let count = Int(width) * 4 * Int(height)
+        guard let data, length >= count else { return false }
+        copy(Int(width), Int(height), data, count)
         return true
     }
 
@@ -228,6 +318,16 @@ final class Pipeline {
     func seek(to seconds: Double) {
         _ = gst.seekSimple(element, GStreamer.formatTime, GStreamer.seekFlush | GStreamer.seekKeyUnit, Int64(max(seconds, 0) * 1e9))
     }
+}
+
+/// What a stream holds: its length in seconds, its video's size and
+/// frames a second (zeros without video), and how many audio streams.
+struct MediaDescription {
+    var duration = 0.0
+    var width = 0
+    var height = 0
+    var frameRate = 30.0
+    var audioStreams = 0
 }
 
 /// A decoded video frame.
