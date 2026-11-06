@@ -223,10 +223,12 @@ enum GLES {
         load()
         let host = getString?(name).map { String(cString: $0) }
         let api = EAGLContexts.current?.context.api ?? 2
+        if GLTrace.on { GLTrace.say("string 0x\(String(name, radix: 16)) for ES \(api): \(host ?? "none from the host")") }
         let text: String?
         switch name {
         case 0x1F02: // GL_VERSION
-            text = "OpenGL ES \(api == 1 ? "1.1" : api == 3 ? "3.0" : "2.0") Perry (\(host ?? ""))"
+            // OpenGL ES 1's names its profile, the common one.
+            text = "OpenGL ES\(api == 1 ? "-CM 1.1" : api == 3 ? " 3.0" : " 2.0") Perry (\(host ?? ""))"
         case 0x8B8C: // GL_SHADING_LANGUAGE_VERSION
             text = api == 1 ? nil : "OpenGL ES GLSL ES \(api == 3 ? "3.00" : "1.00")"
         case 0x1F03: // GL_EXTENSIONS
@@ -235,10 +237,12 @@ enum GLES {
             // a decoder of its own, never run on iOS.
             // Apple's multisampling is made here too (GLMultisample).
             guard let host else { return getString?(name) }
+            // They go first: the host's list is long, and an old engine
+            // may read only as much of it as iOS's ran to.
             var extensions = host
             for added in [pvrtcExtension] + (GLMultisample.bind(GLES.host) ? [GLMultisample.name] : [])
             where !extensions.contains(added) {
-                extensions += (extensions.hasSuffix(" ") || extensions.isEmpty ? "" : " ") + added
+                extensions = added + (extensions.isEmpty ? "" : " ") + extensions
             }
             text = extensions
         default:
