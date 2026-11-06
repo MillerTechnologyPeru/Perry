@@ -84,6 +84,17 @@ open class NSWindow: NSResponder {
     /// The view that took the last mouse-down, which gets its drags and up.
     var mouseDownView: NSView?
     var excludedFromWindowsMenu = false
+    var contentViewControllerObject: NSViewController?
+    var frameAutosaveName = ""
+    var toolbar: NSToolbar?
+    var dumpedViews = false
+    /// With a toolbar, the view holding it above the content view.
+    var frameView: NSView?
+    var toolbarView: ToolbarView?
+
+    /// The view at the root of the window's views.
+    var rootView: NSView? { frameView ?? contentView }
+    var toolbarHeight: CGFloat { toolbarView.map { $0.hidden ? 0 : ToolbarView.height } ?? 0 }
 
     @ObjCMethod("init")
     public required init() {
@@ -145,6 +156,16 @@ open class NSWindow: NSResponder {
 
     private func installContentView(_ view: NSView) {
         view.removeFromSuperview()
+        if let frameView {
+            // Under the toolbar, in the frame view.
+            contentView = view
+            frameView.addSubview(view, positioned: -1, relativeTo: nil)
+            view.autoresizingMask = 2 | 16
+            Send.void(view.objcObject, "setFrame:", rect: CGRect(x: 0, y: 0, width: frame.width, height: frame.height - toolbarHeight))
+            view.nextResponderObject = objcObject
+            Windows.layersChanged()
+            return
+        }
         Send.void(view.objcObject, "viewWillMoveToWindow:", objcObject)
         contentView = view
         view.nextResponderObject = objcObject
@@ -156,7 +177,90 @@ open class NSWindow: NSResponder {
         Windows.layersChanged()
     }
 
-    @ObjCMethod("contentViewController") func contentViewController() -> NSObject? { nil }
+    // MARK: Toolbar
+
+    @ObjCMethod("toolbar") func windowToolbar() -> NSToolbar? { toolbar }
+
+    @ObjCMethod("setToolbar:")
+    func setToolbar(_ value: NSToolbar?) {
+        toolbar?.windowObject = nil
+        toolbar = value
+        value?.windowObject = objcObject
+        toolbarChanged()
+    }
+
+    @ObjCMethod("toggleToolbarShown:")
+    func toggleToolbarShown(_ sender: NSObject?) {
+        guard let toolbar else { return }
+        toolbar.visible.toggle()
+        toolbarChanged()
+    }
+
+    @ObjCMethod("runToolbarCustomizationPalette:") func runToolbarCustomizationPalette(_ sender: NSObject?) {}
+    @ObjCMethod("toolbarStyle") func toolbarStyle() -> Int { 0 }
+    @ObjCMethod("setToolbarStyle:") func setToolbarStyle(_ style: Int) {}
+
+    /// The toolbar shows above the content view, which keeps its size: the
+    /// window grows by the toolbar's height.
+    func toolbarChanged() {
+        let shows = toolbar?.visible == true
+        if shows, frameView == nil, let content = contentView {
+            let height = ToolbarView.height
+            let root = NSView(frame: CGRect(x: 0, y: 0, width: frame.width, height: frame.height + height))
+            root.autoresizingMask = 2 | 16
+            // The content view leaves the root for the frame view.
+            content.layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).removeFromSuperlayer() }
+            content.setWindowTree(nil)
+            frameView = root
+            root.nextResponderObject = objcObject
+            root.setWindowTree(objcObject)
+            root.ensureLayer()
+            root.updateLayerGeometry()
+            let bar = ToolbarView(frame: CGRect(x: 0, y: frame.height, width: frame.width, height: height))
+            bar.autoresizingMask = 2 | 8
+            bar.toolbarObject = toolbar?.objcObject
+            toolbarView = bar
+            root.addSubview(bar)
+            root.addSubview(content, positioned: -1, relativeTo: nil)
+            content.autoresizingMask = 2 | 16
+            content.setFrame(CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
+            content.nextResponderObject = objcObject
+            frame = CGRect(x: frame.minX, y: frame.minY - height, width: frame.width, height: frame.height + height)
+            if let sdlWindow { _ = SDL.setWindowSize(sdlWindow, Int32(frame.width.rounded()), Int32(frame.height.rounded())) }
+            root.didMoveToWindowTree()
+        } else if let bar = toolbarView, bar.hidden == shows, let root = frameView {
+            // Shown or hidden again: the window grows or shrinks by it.
+            bar.setHidden(!shows)
+            let delta = shows ? ToolbarView.height : -ToolbarView.height
+            place(CGRect(x: frame.minX, y: frame.minY - delta, width: frame.width, height: frame.height + delta))
+            contentView?.setFrame(CGRect(x: 0, y: 0, width: frame.width, height: frame.height - toolbarHeight))
+            root.setNeedsDisplay(true)
+        }
+        toolbarView?.toolbarObject = toolbar?.objcObject
+        toolbarView?.arrange()
+        Windows.layersChanged()
+    }
+
+    @ObjCMethod("contentViewController") func contentViewController() -> NSViewController? { contentViewControllerObject }
+
+    /// The controller's view becomes the content view; the window takes
+    /// the view's size.
+    @ObjCMethod("setContentViewController:")
+    func setContentViewController(_ controller: NSViewController?) {
+        contentViewControllerObject = controller
+        guard let controller, let view = controller.view() else { return }
+        let size = view.frame.size
+        if size.width > 0, size.height > 0, size != frame.size {
+            place(CGRect(x: frame.minX, y: frame.maxY - size.height, width: size.width, height: size.height))
+        }
+        Send.void(objcObject, "setContentView:", view.objcObject)
+        view.nextResponderObject = controller.objcObject
+        controller.nextResponderObject = objcObject
+        if visible {
+            Send.void(controller.objcObject, "viewWillAppear")
+            Send.void(controller.objcObject, "viewDidAppear")
+        }
+    }
     @ObjCMethod("windowController") func windowController() -> NSObject? { windowControllerObject.map(NSObject.init) }
     @ObjCMethod("setWindowController:") func setWindowController(_ controller: NSObject?) { windowControllerObject = controller?.objcObject }
 
@@ -207,7 +311,7 @@ open class NSWindow: NSResponder {
 
     /// The content view takes the frame's size.
     func contentResized() {
-        if let contentView { Send.void(contentView.objcObject, "setFrameSize:", size: frame.size) }
+        if let root = rootView { Send.void(root.objcObject, "setFrameSize:", size: frame.size) }
         notify("windowDidResize:", Constants.NSWindowDidResizeNotification)
         Windows.layersChanged()
     }
@@ -305,7 +409,8 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setRestorable:") func setRestorable(_ value: Bool) {}
     @ObjCMethod("isRestorable") func isRestorable() -> Bool { false }
     @ObjCMethod("setTabbingMode:") func setTabbingMode(_ mode: Int) {}
-    @ObjCMethod("setFrameAutosaveName:") func setFrameAutosaveName(_ name: NSObject?) -> Bool { true }
+    @ObjCMethod("setFrameAutosaveName:") func setFrameAutosaveName(_ name: String?) -> Bool { frameAutosaveName = name ?? ""; return true }
+    @ObjCMethod("frameAutosaveName") func windowFrameAutosaveName() -> String { frameAutosaveName }
     @ObjCMethod("setFrameUsingName:") func setFrameUsingName(_ name: NSObject?) -> Bool { false }
     @ObjCMethod("saveFrameUsingName:") func saveFrameUsingName(_ name: NSObject?) {}
     @ObjCMethod("setTitleVisibility:") func setTitleVisibility(_ visibility: Int) {}
@@ -373,8 +478,11 @@ open class NSWindow: NSResponder {
     @ObjCMethod("orderFront:")
     func orderFront(_ sender: NSObject?) {
         if !visible {
+            let controller = contentViewControllerObject
+            if let controller { Send.void(controller.objcObject, "viewWillAppear") }
             visible = true
             show()
+            if let controller { Send.void(controller.objcObject, "viewDidAppear") }
         } else if let sdlWindow {
             _ = SDL.raiseWindow(sdlWindow)
         }
@@ -537,7 +645,7 @@ open class NSWindow: NSResponder {
         let density = CGFloat(SDL.windowPixelDensity(sdlWindow))
         guard density > 0, density != backingScale else { return }
         backingScale = density
-        for view in contentView?.allViews ?? [] {
+        for view in rootView?.allViews ?? [] {
             view.layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).setContentsScale(density) }
             Send.void(view.objcObject, "viewDidChangeBackingProperties")
         }
@@ -554,9 +662,20 @@ open class NSWindow: NSResponder {
 
     /// Composites the content view's layers into the window.
     func draw() {
-        guard let renderer, let contentView, let layer = contentView.layer else { return }
-        contentView.layoutSubtreeIfNeeded()
+        guard let renderer, let contentView, let root = rootView, let layer = root.layer else { return }
+        let controller = contentViewControllerObject
+        let laidOut = contentView.needsLayout
+        if laidOut, let controller { Send.void(controller.objcObject, "viewWillLayout") }
+        root.layoutSubtreeIfNeeded()
+        if laidOut, let controller { Send.void(controller.objcObject, "viewDidLayout") }
+        // The window's background shows behind its views.
+        let background = backgroundColor?.as(NSColor.self) ?? NSColor.windowBackgroundColor()
+        CALayer(objcObject: layer.objcObject, ownership: .retain).setBackgroundColor(background.cgColorRef)
         QuartzCore.draw(CALayer(objcObject: layer.objcObject, ownership: .retain), renderer: renderer, scale: backingScale)
+        if Trace.enabled, !dumpedViews {
+            dumpedViews = true
+            Trace.log("window \(windowNumber) views:\n" + Trace.describe(root))
+        }
     }
 
     // MARK: SDL's window events
@@ -669,14 +788,14 @@ open class NSWindow: NSResponder {
 
     /// The deepest view at a point in the window's base coordinates.
     func viewAt(_ point: CGPoint) -> NSView? {
-        guard let contentView, let hit = Send.hitTest(contentView.objcObject, point) else { return nil }
+        guard let root = rootView, let hit = Send.hitTest(root.objcObject, point) else { return nil }
         return NSView.wrap(hit)
     }
 
     /// Tracking areas' owners hear the mouse move, enter and leave.
     func track(_ event: NSEvent, moved: Bool) {
-        guard let contentView else { return }
-        for view in contentView.allViews where view.windowObject == objcObject {
+        guard let root = rootView else { return }
+        for view in root.allViews where view.windowObject == objcObject {
             for area in view.trackingAreas {
                 let rect = area.options & 0x200 != 0 ? view.bounds : area.rect
                 let inside = rect.contains(view.fromWindow(event.locationInWindow))
@@ -707,12 +826,21 @@ open class NSPanel: NSWindow {
     @ObjCMethod("setWorksWhenModal:") func setWorksWhenModal(_ value: Bool) {}
 }
 
-/// NSWindowController: owns a window and shows it.
+
+/// NSWindowController: owns a window, loaded from its nib (or a
+/// storyboard's), and shows it.
 @ObjCClass("NSWindowController")
 open class NSWindowController: NSResponder {
     var window: NSWindow?
     var windowNibName: String?
+    /// Not retained: File's Owner of the window's nib, when it isn't the controller.
+    var windowNibOwner: UnsafeMutableRawPointer?
     var document: NSObject?
+    var storyboard: NSStoryboard?
+    var loadingWindow = false
+    var shouldCascadeWindows = true
+    var windowFrameAutosaveName = ""
+    var pendingContentViewController: NSViewController?
 
     @ObjCMethod("init")
     public required init() { super.init() }
@@ -724,38 +852,87 @@ open class NSWindowController: NSResponder {
         window?.windowControllerObject = objcObject
     }
 
-    /// Nib files aren't loaded here: the controller has no window until it
-    /// is given one.
     @ObjCMethod("initWithWindowNibName:")
     public required init(windowNibName: String?) {
         super.init()
         self.windowNibName = windowNibName
-        appKitWarning("NSWindowController: nib \(windowNibName ?? "") is not loaded")
     }
 
     @ObjCMethod("initWithWindowNibName:owner:")
     public required init(windowNibName: String?, owner: NSObject?) {
         super.init()
         self.windowNibName = windowNibName
+        windowNibOwner = owner?.objcObject
     }
 
-    @ObjCMethod("window") func controllerWindow() -> NSWindow? { window }
+    @ObjCMethod("initWithWindowNibPath:owner:")
+    public required init(windowNibPath: String?, owner: NSObject?) {
+        super.init()
+        let file = windowNibPath.map { String($0.split(separator: "/").last ?? "") } ?? ""
+        windowNibName = file.hasSuffix(".nib") ? String(file.dropLast(4)) : file
+        windowNibOwner = owner?.objcObject
+    }
+
+    /// A storyboard's window controller: its window (a template) and the
+    /// window's content view controller.
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        if let window = decoded.object("IBWindowTemplate")?.as(NSWindow.self) {
+            self.window = window
+            window.windowControllerObject = objcObject
+        }
+        pendingContentViewController = decoded.object("IBWindowTemplateContentViewController")?.as(NSViewController.self)
+        windowFrameAutosaveName = decoded.string("NSWindowFrameAutosaveName") ?? ""
+    }
+
+    @ObjCMethod("window")
+    func controllerWindow() -> NSWindow? {
+        loadWindowIfNeeded()
+        return window
+    }
     @ObjCMethod("setWindow:")
     func setWindow(_ window: NSWindow?) {
         self.window = window
         window?.windowControllerObject = objcObject
     }
     @ObjCMethod("windowNibName") func controllerWindowNibName() -> String? { windowNibName }
+    @ObjCMethod("windowNibPath") func windowNibPath() -> String? { nil }
     @ObjCMethod("isWindowLoaded") func isWindowLoaded() -> Bool { window != nil }
-    @ObjCMethod("loadWindow") func loadWindow() {}
+    @ObjCMethod("loadWindow") func loadWindow() { loadWindowNib() }
     @ObjCMethod("windowDidLoad") func windowDidLoad() {}
     @ObjCMethod("windowWillLoad") func windowWillLoad() {}
-    @ObjCMethod("showWindow:") func showWindow(_ sender: NSObject?) { window.map { Send.void($0.objcObject, "makeKeyAndOrderFront:", sender?.objcObject) } }
+
+    @ObjCMethod("showWindow:")
+    func showWindow(_ sender: NSObject?) {
+        guard let window = controllerWindow() else { return }
+        if let pending = pendingContentViewController, window.contentViewControllerObject == nil {
+            window.setContentViewController(pending)
+        }
+        pendingContentViewController = nil
+        Send.void(window.objcObject, "makeKeyAndOrderFront:", sender?.objcObject)
+    }
     @ObjCMethod("close") func close() { window.map { Send.void($0.objcObject, "close") } }
     @ObjCMethod("document") func controllerDocument() -> NSObject? { document }
     @ObjCMethod("setDocument:") func setDocument(_ document: NSObject?) { self.document = document }
-    @ObjCMethod("owner") func owner() -> NSObject? { self }
-    @ObjCMethod("contentViewController") func contentViewController() -> NSObject? { nil }
-    @ObjCMethod("setShouldCascadeWindows:") func setShouldCascadeWindows(_ value: Bool) {}
-    @ObjCMethod("setWindowFrameAutosaveName:") func setWindowFrameAutosaveName(_ name: NSObject?) {}
+    @ObjCMethod("owner") func owner() -> NSObject? { windowNibOwner.map(NSObject.init) ?? self }
+    @ObjCMethod("storyboard") func controllerStoryboard() -> NSStoryboard? { storyboard }
+    @ObjCMethod("setStoryboard:") func setStoryboard(_ value: NSStoryboard?) { storyboard = value }
+    @ObjCMethod("contentViewController")
+    func contentViewController() -> NSViewController? { window?.contentViewControllerObject ?? pendingContentViewController }
+    @ObjCMethod("setContentViewController:")
+    func setContentViewController(_ controller: NSViewController?) {
+        if let window = controllerWindow() { window.setContentViewController(controller) } else { pendingContentViewController = controller }
+    }
+    @ObjCMethod("shouldCascadeWindows") func controllerShouldCascadeWindows() -> Bool { shouldCascadeWindows }
+    @ObjCMethod("setShouldCascadeWindows:") func setShouldCascadeWindows(_ value: Bool) { shouldCascadeWindows = value }
+    @ObjCMethod("windowFrameAutosaveName") func controllerWindowFrameAutosaveName() -> String { windowFrameAutosaveName }
+    @ObjCMethod("setWindowFrameAutosaveName:") func setWindowFrameAutosaveName(_ name: String?) { windowFrameAutosaveName = name ?? "" }
+    @ObjCMethod("shouldCloseDocument") func shouldCloseDocument() -> Bool { false }
+    @ObjCMethod("setShouldCloseDocument:") func setShouldCloseDocument(_ value: Bool) {}
+    @ObjCMethod("synchronizeWindowTitleWithDocumentName") func synchronizeWindowTitleWithDocumentName() {}
+    @ObjCMethod("windowTitleForDocumentDisplayName:") func windowTitle(forDocumentDisplayName name: String?) -> String? { name }
+    @ObjCMethod("dismissController:") func dismissController(_ sender: NSObject?) { close() }
 }
