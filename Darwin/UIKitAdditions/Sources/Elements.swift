@@ -4,6 +4,7 @@
 // are the SDK interface's, for its ABI.
 
 public import Foundation
+public import _UIKitPrivate
 
 // MARK: - Actions and menus
 
@@ -11,7 +12,7 @@ public import Foundation
 @available(watchOS, unavailable)
 extension UIAction {
   @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = "", image: UIImage? = nil, identifier: UIAction.Identifier? = nil, discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off, handler: @escaping UIActionHandler) {
-    self.init(title: title, image: image, identifier: identifier, handler: handler)
+    self.init(_perryTitle: title, image: image, identifier: identifier, handler: handler)
     self.discoverabilityTitle = discoverabilityTitle
     self.attributes = attributes
     self.state = state
@@ -22,7 +23,7 @@ extension UIAction {
 @available(watchOS, unavailable)
 extension UIMenu {
   @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = "", image: UIImage? = nil, identifier: UIMenu.Identifier? = nil, options: UIMenu.Options = [], children: [UIMenuElement] = []) {
-    self.init(title: title, image: image, identifier: identifier, options: options, children: children)
+    self.init(_perryTitle: title, image: image, identifier: identifier, options: options, children: children)
   }
 }
 
