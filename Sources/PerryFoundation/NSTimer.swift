@@ -13,6 +13,13 @@ final class TimerStorage {
     let selector: SEL?
     private(set) var userInfo: id?
     private(set) var block: id?
+    /// A CFRunLoopTimer's callout and its context's info, which the timer
+    /// releases with the context's release callback when it goes away.
+    typealias Callout = @convention(c) (id?, UnsafeMutableRawPointer?) -> Void
+    typealias Release = @convention(c) (UnsafeRawPointer?) -> Void
+    var callout: Callout?
+    var info: UnsafeMutableRawPointer?
+    var releaseInfo: Release?
     /// For performSelector:withObject:afterDelay:, which sends the argument
     /// rather than the timer.
     private(set) var argument: id?
@@ -40,6 +47,7 @@ final class TimerStorage {
 
     deinit {
         releaseReferences()
+        releaseInfo?(info)
     }
 
     func invalidate() {
@@ -114,6 +122,8 @@ enum Timers {
             Blocks.invoke(block, as: (@convention(c) (id, id?) -> Void).self)(block, timer)
         } else if let selector = storage.selector {
             _ = ObjC.send(storage.target, selector, storage.isPerformRequest ? storage.argument : timer)
+        } else if let callout = storage.callout {
+            callout(timer, storage.info)
         }
         storage.firing = false
         storage.onFired?()
