@@ -310,7 +310,8 @@ func darwinResult<Value: ObjCValue>(_ value: Value) -> Value.ObjCResultType {
 
 // MARK: - Foundation's C structs as Objective-C values
 
-extension NSRange: ObjCScalar {
+extension NSRange: ObjCStructure {
+    public typealias ObjCType = NSRange
     #if _pointerBitWidth(_32)
     public static var objCTypeEncoding: String { "{_NSRange=II}" }
     #else
@@ -322,7 +323,8 @@ extension NSRange: ObjCScalar {
     }
 }
 
-extension NSOperatingSystemVersion: ObjCScalar {
+extension NSOperatingSystemVersion: ObjCStructure {
+    public typealias ObjCType = NSOperatingSystemVersion
     #if _pointerBitWidth(_32)
     public static var objCTypeEncoding: String { "{NSOperatingSystemVersion=iii}" }
     #else
