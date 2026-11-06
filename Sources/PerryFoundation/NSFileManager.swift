@@ -92,6 +92,33 @@ final class NSFileManager: NSObject {
     @ObjCMethod("fileExistsAtPath:")
     func exists(atPath path: String?) -> Bool { path.map { files.fileExists(atPath: $0) } ?? false }
 
+    /// The name Finder shows: the last path component, without the
+    /// extension of a bundle (.app and the like), whose extension Finder
+    /// hides. No file is localized here.
+    @ObjCMethod("displayNameAtPath:")
+    func displayName(atPath path: String?) -> String {
+        guard let path, !path.isEmpty else { return "" }
+        var name = path
+        while name.count > 1, name.hasSuffix("/") { name.removeLast() }
+        name = String(name.split(separator: "/").last ?? Substring(name))
+        for suffix in [".app", ".bundle", ".framework", ".plugin"] where name.hasSuffix(suffix) {
+            name.removeLast(suffix.count)
+        }
+        return name
+    }
+
+    /// Each component's display name, from the root.
+    @ObjCMethod("componentsToDisplayForPath:")
+    func componentsToDisplay(forPath path: String?) -> NSArray? {
+        guard let path, path.hasPrefix("/") else { return nil }
+        var components: [String] = [], prefix = ""
+        for part in path.split(separator: "/") {
+            prefix += "/" + part
+            components.append(displayName(atPath: prefix))
+        }
+        return Arrays.owned(components.map { Strings.autoreleased($0) })
+    }
+
     @ObjCMethod("fileExistsAtPath:isDirectory:")
     func exists(atPath path: String?, isDirectory: UnsafeMutablePointer<Bool>?) -> Bool {
         guard let path else { return false }
