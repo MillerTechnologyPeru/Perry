@@ -225,6 +225,10 @@ open class AVAudioSession: NSObject {
     @ObjCMethod("setPreferredSampleRate:error:")
     func setPreferredSampleRate(_ rate: Double, error: ErrorOut) -> Bool { session.preferredSampleRate = rate; return true }
     @ObjCMethod("IOBufferDuration") func ioBufferDuration() -> Double { 0.023 }
+    /// Seconds from output to sound and from sound to input: a buffer's
+    /// worth, about what Linux's audio servers add.
+    @ObjCMethod("outputLatency") func outputLatency() -> Double { 0.023 }
+    @ObjCMethod("inputLatency") func inputLatency() -> Double { 0.023 }
     @ObjCMethod("preferredIOBufferDuration") func preferredIOBufferDuration() -> Double { session.preferredIOBufferDuration }
     @ObjCMethod("setPreferredIOBufferDuration:error:")
     func setPreferredIOBufferDuration(_ duration: Double, error: ErrorOut) -> Bool { session.preferredIOBufferDuration = duration; return true }
