@@ -1,4 +1,5 @@
 import CPerryFoundation
+import FoundationEssentials
 import PerryObjCInterop
 
 /// An index set's indexes as sorted, separate ranges.
@@ -127,6 +128,73 @@ public class NSIndexSet: NSObject {
     func initialize(indexSet other: ObjCObject?) -> Self {
         Storage.set(objcObject, IndexSetStorage(IndexSets.storage(other?.id).ranges))
         return self
+    }
+
+    // MARK: Coding
+
+    /// As Darwin's keyed archives hold an index set: NSRangeCount, then for
+    /// one range NSLocation and NSLength, for more NSRangeData, each range's
+    /// location and length as unsigned LEB128 numbers.
+    @ObjCClassMethod("supportsSecureCoding") static func supportsSecureCoding() -> Bool { true }
+
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject) -> Self {
+        typealias DecodeInteger = @convention(c) (id, SEL, id?) -> Int
+        let integer = { (key: String) in
+            unsafeBitCast(ObjC.msgSend, to: DecodeInteger.self)(coder.id, ObjC.selector("decodeIntegerForKey:"), Strings.autoreleased(key))
+        }
+        var ranges: [Range<Int>] = []
+        let count = integer("NSRangeCount")
+        if count == 1 {
+            let location = integer("NSLocation")
+            ranges = [location..<location + integer("NSLength")]
+        } else if count > 1,
+                  let data = ObjC.send(coder.id, ObjC.selector("decodeObjectForKey:"), Strings.autoreleased("NSRangeData")) {
+            let bytes = DataObjects.data(data)
+            var numbers: [Int] = [], value = 0, shift = 0
+            for byte in bytes {
+                value |= Int(byte & 0x7f) << shift
+                if byte & 0x80 != 0 {
+                    shift += 7
+                } else {
+                    numbers.append(value)
+                    value = 0
+                    shift = 0
+                }
+            }
+            for pair in stride(from: 0, to: numbers.count - 1, by: 2) {
+                ranges.append(numbers[pair]..<numbers[pair] + numbers[pair + 1])
+            }
+        }
+        Storage.set(objcObject, IndexSetStorage(ranges))
+        return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: ObjCObject) {
+        typealias EncodeInteger = @convention(c) (id, SEL, Int, id?) -> Void
+        let encode = { (value: Int, key: String) in
+            unsafeBitCast(ObjC.msgSend, to: EncodeInteger.self)(coder.id, ObjC.selector("encodeInteger:forKey:"), value, Strings.autoreleased(key))
+        }
+        let ranges = storage.ranges
+        encode(ranges.count, "NSRangeCount")
+        if ranges.count == 1 {
+            encode(ranges[0].lowerBound, "NSLocation")
+            encode(ranges[0].count, "NSLength")
+        } else if ranges.count > 1 {
+            var bytes: [UInt8] = []
+            for number in ranges.flatMap({ [$0.lowerBound, $0.count] }) {
+                var value = UInt(number)
+                repeat {
+                    let low = UInt8(value & 0x7f)
+                    value >>= 7
+                    bytes.append(value != 0 ? low | 0x80 : low)
+                } while value != 0
+            }
+            typealias EncodeObject = @convention(c) (id, SEL, id?, id?) -> Void
+            unsafeBitCast(ObjC.msgSend, to: EncodeObject.self)(coder.id, ObjC.selector("encodeObject:forKey:"),
+                                                                DataObjects.autoreleased(Data(bytes)), Strings.autoreleased("NSRangeData"))
+        }
     }
 
     @ObjCMethod("count") func count() -> UInt { UInt(storage.count) }

@@ -188,6 +188,7 @@ final class ButtonState: ObjectState {
     var type = 0
     var titles: [UInt: String] = [:]
     var titleColors: [UInt: UIColor] = [:]
+    var titleShadowColors: [UInt: UIColor] = [:]
     var images: [UInt: UIImage] = [:]
     var backgroundImages: [UInt: UIImage] = [:]
     var titleLabel: UILabel?
@@ -276,6 +277,13 @@ open class UIButton: UIControl {
     @ObjCMethod("setTitle:forState:") func setTitle(_ title: String?, for state: UInt) { button.titles[state] = title; update() }
     @ObjCMethod("titleColorForState:") func titleColor(for state: UInt) -> UIColor? { button.titleColors[state] ?? button.titleColors[0] }
     @ObjCMethod("setTitleColor:forState:") func setTitleColor(_ color: UIColor?, for state: UInt) { button.titleColors[state] = color; update() }
+    /// The title's shadow colors are kept, as a nib or the program sets
+    /// them; the title is drawn without its shadow.
+    @ObjCMethod("titleShadowColorForState:")
+    func titleShadowColor(for state: UInt) -> UIColor? { button.titleShadowColors[state] ?? button.titleShadowColors[0] }
+    @ObjCMethod("setTitleShadowColor:forState:")
+    func setTitleShadowColor(_ color: UIColor?, for state: UInt) { button.titleShadowColors[state] = color }
+    @ObjCMethod("currentTitleShadowColor") func currentTitleShadowColor() -> UIColor? { current(button.titleShadowColors) }
     @ObjCMethod("imageForState:") func image(for state: UInt) -> UIImage? { button.images[state] ?? button.images[0] }
     @ObjCMethod("setImage:forState:") func setImage(_ image: UIImage?, for state: UInt) { button.images[state] = image; update() }
     @ObjCMethod("backgroundImageForState:") func backgroundImage(for state: UInt) -> UIImage? { button.backgroundImages[state] ?? button.backgroundImages[0] }
