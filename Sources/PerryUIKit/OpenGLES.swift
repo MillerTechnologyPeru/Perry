@@ -177,6 +177,11 @@ enum GLES {
                 ? unsafeBitCast(PVRTC.compressedTexImage2D, to: UnsafeMutableRawPointer.self)
                 : unsafeBitCast(PVRTC.compressedTexSubImage2D, to: UnsafeMutableRawPointer.self))
         }
+        if name == "_glTexStorage2D" || name == "_glTexStorage2DEXT" {
+            PVRTC.bind(host)
+            guard PVRTC.storage != nil else { return nil }
+            return perry_gl_entry(unsafeBitCast(PVRTC.texStorage2D, to: UnsafeMutableRawPointer.self))
+        }
         // Apple's multisampling is made of OpenGL ES 3's.
         if name == "_glRenderbufferStorageMultisampleAPPLE" || name == "_glResolveMultisampleFramebufferAPPLE" {
             guard GLMultisample.bind(host) else { return nil }
