@@ -85,6 +85,18 @@ final class LayerState {
     var sharedFrames: SharedFrames?
     var contentsScale: CGFloat = 1
     var contentsGravity = "resize"
+    /// The part of the contents shown, in unit coordinates; kept, though
+    /// the whole of the contents is drawn.
+    var contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    /// The part of the contents that stretches, in unit coordinates; kept,
+    /// though the contents are drawn scaled as a whole.
+    var contentsCenter = CGRect(x: 0, y: 0, width: 1, height: 1)
+    /// CALayerContentsScaling ("stretch", "repeat"); kept, as contents are
+    /// stretched here.
+    var contentsScaling = "stretch"
+    /// Extended dynamic range, which Perry's compositor doesn't show: kept.
+    var wantsExtendedDynamicRangeContent = false
+    var contentsMaximumDesiredEDR: CGFloat = 1
     /// Private: the color the contents are multiplied by, and whether their
     /// alpha stands for every channel ("AAAA"), as template images are
     /// drawn: the color where the contents are opaque.
@@ -396,6 +408,18 @@ open class CALayer: NSObject {
     @ObjCMethod("setContentsScale:") func setContentsScale(_ scale: CGFloat) { changed { state.contentsScale = scale } }
     @ObjCMethod("contentsGravity") func contentsGravity() -> String { state.contentsGravity }
     @ObjCMethod("setContentsGravity:") func setContentsGravity(_ gravity: String) { changed { state.contentsGravity = gravity } }
+    @ObjCMethod("contentsRect") func contentsRect() -> CGRect { state.contentsRect }
+    @ObjCMethod("setContentsRect:") func setContentsRect(_ rect: CGRect) { changed { state.contentsRect = rect } }
+    @ObjCMethod("contentsCenter") func contentsCenter() -> CGRect { state.contentsCenter }
+    @ObjCMethod("setContentsCenter:") func setContentsCenter(_ rect: CGRect) { changed { state.contentsCenter = rect } }
+    @ObjCMethod("contentsScaling") func contentsScaling() -> String { state.contentsScaling }
+    @ObjCMethod("setContentsScaling:") func setContentsScaling(_ scaling: String) { state.contentsScaling = scaling }
+    @ObjCMethod("wantsExtendedDynamicRangeContent") func wantsExtendedDynamicRangeContent() -> Bool { state.wantsExtendedDynamicRangeContent }
+    @ObjCMethod("setWantsExtendedDynamicRangeContent:") func setWantsExtendedDynamicRangeContent(_ wants: Bool) {
+        state.wantsExtendedDynamicRangeContent = wants
+    }
+    @ObjCMethod("contentsMaximumDesiredEDR") func contentsMaximumDesiredEDR() -> CGFloat { state.contentsMaximumDesiredEDR }
+    @ObjCMethod("setContentsMaximumDesiredEDR:") func setContentsMaximumDesiredEDR(_ edr: CGFloat) { state.contentsMaximumDesiredEDR = edr }
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.isOpaque }
