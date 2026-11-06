@@ -669,6 +669,16 @@ extension NSString {
     @ObjCMethod("containsString:")
     func contains(_ other: String) -> Bool { range(of: other).location != notFound }
 
+    /// Whether the string contains `other`, ignoring case, as the user's
+    /// locale compares: case is folded here, whatever the locale.
+    @ObjCMethod("localizedCaseInsensitiveContainsString:")
+    func localizedCaseInsensitiveContains(_ other: String) -> Bool { value.lowercased().contains(other.lowercased()) }
+
+    /// Whether the string contains `other` as a search in Finder finds it:
+    /// ignoring case here.
+    @ObjCMethod("localizedStandardContainsString:")
+    func localizedStandardContains(_ other: String) -> Bool { localizedCaseInsensitiveContains(other) }
+
     @ObjCMethod("componentsSeparatedByString:")
     func components(separatedBy separator: String) -> NSArray {
         let parts = separator.isEmpty ? [value] : value.split(separator: separator, omittingEmptySubsequences: false).map(String.init)
