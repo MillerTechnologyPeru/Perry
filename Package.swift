@@ -284,10 +284,11 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // AVFoundation's audio player and session, without sound.
+        // AVFoundation's players, assets and video outputs, played through
+        // GStreamer, with CoreMedia's times and CoreVideo's pixel buffers.
         .target(
             name: "PerryAVFoundation",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "CPerryMedia", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Core Data over CoreModel: SQLite stores through CoreModel-SQLite,
@@ -303,6 +304,8 @@ let package = Package(
         ),
         // CoreGraphics' geometry types, shared by the providers that pass them.
         .target(name: "CPerryGeometry"),
+        // CoreMedia's times, which AVFoundation's provider passes.
+        .target(name: "CPerryMedia"),
         // Entry points for programs' OpenGL ES calls, which give the calling
         // thread its context.
         .target(name: "CPerryOpenGL"),

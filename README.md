@@ -162,6 +162,19 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   maps here: image sources reading PNG, JPEG (with orientation), GIF, WebP
   and HEIC with their properties and thumbnails, and destinations writing
   PNG, JPEG and animated GIF
+- AVFoundation (`libPerryAVFoundation`), played through GStreamer:
+  `AVAudioPlayer` and `AVAudioSession`; `AVPlayer` and `AVPlayerItem`,
+  made with a URL or with an `AVURLAsset`, whose values load in the
+  background, with its video track, `AVMutableComposition` standing for
+  the asset put in it, and resource loader delegates, through which an
+  engine serves a movie kept inside its own data files;
+  `AVPlayerItemVideoOutput`, whose frames are BGRA `CVPixelBuffer`s; and,
+  as the loader maps them here, CoreMedia's `CMTime` arithmetic and format
+  descriptions, CoreVideo's pixel buffers and OpenGL ES texture caches
+  (the pixels are uploaded to a new texture), and MediaToolbox. A movie's
+  sound plays to the system's output: assets have no audio tracks, and
+  there are no audio taps, asset readers or Metal textures.
+  `PERRY_AVFOUNDATION_TRACE` traces it
 - Steamworks (`libPerrysteam_api`, for the `libsteam_api.dylib` games ship):
   `SteamAPI_Init` and the interfaces' accessors over the running Linux
   Steam client's `steamclient.so` (`~/.steam/sdkarm64`, or

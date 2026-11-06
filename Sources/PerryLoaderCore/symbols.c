@@ -287,8 +287,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UIKit");
         return true;
     }
-    // AVFAudio's classes are AVFoundation's, which re-exports them.
-    if (strstr(install_name, "/AVFAudio.framework/")) {
+    // AVFAudio's classes are AVFoundation's, which re-exports them; and
+    // AVFoundation's provider has the times of CoreMedia, the pixel buffers
+    // of CoreVideo and the audio taps of MediaToolbox that its players and
+    // video outputs hand out.
+    if (strstr(install_name, "/AVFAudio.framework/") || strstr(install_name, "/CoreMedia.framework/") ||
+        strstr(install_name, "/CoreVideo.framework/") || strstr(install_name, "/MediaToolbox.framework/")) {
         snprintf(out, out_size, "AVFoundation");
         return true;
     }
