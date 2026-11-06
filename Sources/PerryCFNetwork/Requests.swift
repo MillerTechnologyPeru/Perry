@@ -8,11 +8,36 @@ import PerryURLLoading
 enum Requests {
     static let states = StateTable<Request>()
 
+    /// Body streams set and not yet read, by request object, retained.
+    nonisolated(unsafe) static var bodyStreams: [UnsafeMutableRawPointer: UnsafeMutableRawPointer] = [:]
+
     static func request(_ object: UnsafeMutableRawPointer) -> Request {
-        if let request = states.get(object) { return request }
+        if let request = states.get(object) {
+            if let stream = bodyStreams.removeValue(forKey: object) { request.body = drain(stream) }
+            return request
+        }
         let request = Request(url: nil)
         states.set(object, request)
         return request
+    }
+
+    /// Reads a body stream to its end, as the loader sends a body: the
+    /// whole of it, read before the request goes out. Releases the stream.
+    static func drain(_ stream: UnsafeMutableRawPointer) -> Data {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?) -> Void
+        typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer?, UnsafeMutablePointer<UInt8>, Int) -> Int
+        defer { ObjCRuntime.release(stream) }
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("open"))
+        var data = Data(), buffer = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let count = buffer.withUnsafeMutableBufferPointer {
+                unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(stream, ObjCRuntime.selector("read:maxLength:"), $0.baseAddress!, $0.count)
+            }
+            if count <= 0 { break }
+            data.append(contentsOf: buffer[0..<count])
+        }
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(stream, ObjCRuntime.selector("close"))
+        return data
     }
 
     /// A new request object of `cls` (+0) holding `request`.
@@ -35,6 +60,7 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         Requests.states.remove(objcObject)
+        if let stream = Requests.bodyStreams.removeValue(forKey: objcObject) { ObjCRuntime.release(stream) }
         ObjCRuntime.superDealloc(objcObject, definedOn: NSURLRequest.objCClass.pointer)
     }
 
@@ -76,7 +102,7 @@ open class NSURLRequest: NSObject {
 
     @ObjCMethod("valueForHTTPHeaderField:") func value(forHTTPHeaderField name: String) -> String? { request.header(name) }
     @ObjCMethod("HTTPBody") func httpBody() -> NSData? { request.body.map(NSData.of) }
-    @ObjCMethod("HTTPBodyStream") func httpBodyStream() -> NSObject? { nil }
+    @ObjCMethod("HTTPBodyStream") func httpBodyStream() -> NSObject? { Requests.bodyStreams[objcObject].map { NSObject($0) } }
     @ObjCMethod("timeoutInterval") func timeoutInterval() -> Double { request.timeout }
     @ObjCMethod("cachePolicy") func cachePolicy() -> UInt { UInt(request.cachePolicy) }
     @ObjCMethod("HTTPShouldHandleCookies") func httpShouldHandleCookies() -> Bool { request.handlesCookies }
@@ -164,7 +190,18 @@ open class NSMutableURLRequest: NSURLRequest {
     @ObjCMethod("addValue:forHTTPHeaderField:")
     func addValue(_ value: String, forHTTPHeaderField name: String) { request.addHeader(value, for: name) }
 
-    @ObjCMethod("setHTTPBody:") func setHTTPBody(_ body: NSData?) { request.body = body?.data }
+    @ObjCMethod("setHTTPBody:") func setHTTPBody(_ body: NSData?) {
+        if let stream = Requests.bodyStreams.removeValue(forKey: objcObject) { ObjCRuntime.release(stream) }
+        request.body = body?.data
+    }
+
+    /// The body, read from the stream when the request is next used.
+    @ObjCMethod("setHTTPBodyStream:") func setHTTPBodyStream(_ stream: NSObject?) {
+        let request = request
+        if let old = Requests.bodyStreams.removeValue(forKey: objcObject) { ObjCRuntime.release(old) }
+        request.body = nil
+        if let stream { Requests.bodyStreams[objcObject] = ObjCRuntime.retain(stream.objcObject) }
+    }
     @ObjCMethod("setTimeoutInterval:") func setTimeoutInterval(_ timeout: Double) { request.timeout = timeout }
     @ObjCMethod("setCachePolicy:") func setCachePolicy(_ policy: UInt) { request.cachePolicy = Int(policy) }
     @ObjCMethod("setHTTPShouldHandleCookies:") func setHTTPShouldHandleCookies(_ value: Bool) { request.handlesCookies = value }
