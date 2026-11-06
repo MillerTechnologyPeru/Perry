@@ -43,9 +43,35 @@ enum ManagedObjects {
     nonisolated(unsafe) static var installed: Set<String> = []
     static let lock = Lock()
 
-    /// The class an entity's objects are instances of.
+    /// Classes made for entities whose objects are plain NSManagedObjects,
+    /// by entity name.
+    nonisolated(unsafe) static var genericClasses: [String: ObjCClass] = [:]
+
+    /// The class an entity's objects are instances of: for an entity of
+    /// NSManagedObject, a subclass made for it with its properties'
+    /// accessors, as Core Data makes.
     static func objectClass(_ entity: NSEntityDescription) -> ObjCClass {
-        Classes.named(entity.state.className) ?? NSManagedObject.objCClass
+        if entity.state.className == "NSManagedObject", let made = lock.withLock({ genericClasses[entity.state.name] }) { return made }
+        return Classes.named(entity.state.className) ?? NSManagedObject.objCClass
+    }
+
+    /// NSManagedObject_<Entity>_, with object-valued accessors for the
+    /// entity's properties.
+    private static func genericClass(_ entity: NSEntityDescription) -> ObjCClass? {
+        let name = entity.state.name
+        if let made = genericClasses[name] { return made }
+        let className = "NSManagedObject_\(name)_"
+        if let existing = Classes.named(className) {
+            genericClasses[name] = existing
+            return existing
+        }
+        guard let created = className.withCString({ ObjCRuntime.functions.allocateClassPair(NSManagedObject.objCClass.pointer, $0, 0) })
+        else { return nil }
+        ObjCRuntime.functions.registerClassPair(created)
+        let cls = ObjCClass(created)
+        genericClasses[name] = cls
+        entitiesByClass[className] = entity
+        return cls
     }
 
     // MARK: Values as objects
@@ -223,16 +249,21 @@ enum ManagedObjects {
     static func install(_ model: NSManagedObjectModel) {
         lock.withLock {
             for entity in model.entityList {
-                let className = entity.state.className
+                var className = entity.state.className
                 entitiesByClass[className] = entity
-                guard className != "NSManagedObject", !installed.contains(className),
-                      let cls = Classes.named(className) else { continue }
+                var generic = false
+                if className == "NSManagedObject" {
+                    guard let made = genericClass(entity) else { continue }
+                    className = Runtime.name(made)
+                    generic = true
+                }
+                guard !installed.contains(className), let cls = Classes.named(className) else { continue }
                 installed.insert(className)
                 for property in entity.state.properties {
                     let name = property.state.name
                     let capitalized = name.prefix(1).uppercased() + name.dropFirst()
                     let relationship = property.as(NSRelationshipDescription.self)
-                    let declared = Runtime.propertyType(cls, name) ?? "@"
+                    let declared = generic ? "@" : Runtime.propertyType(cls, name) ?? "@"
                     let code = declared.first.map(String.init) ?? "@"
                     let accessors = Accessors.pair(code)
                     add(cls, name, accessors.getterTypes, accessors.getter)

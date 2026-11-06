@@ -1233,6 +1233,11 @@ open class UIAlertController: UIViewController {
     override func loadView() {
         let view = UIView.objCClass.object.allocated().initializeView(frame: Screen.bounds).unsafeCast(to: UIView.self)
         view.setBackgroundColor(UIColor.gray(0, 0.4))
+        if alert.style == 0 {
+            loadSheet(in: view)
+            setView(view)
+            return
+        }
         let width: CGFloat = 270
         let panel = UIView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIView.self)
         panel.setBackgroundColor(UIColor.gray(0.97))
@@ -1292,6 +1297,90 @@ open class UIAlertController: UIViewController {
         panel.sendSetFrame(CGRect(x: (Screen.bounds.width - width) / 2, y: (Screen.bounds.height - y) / 2, width: width, height: y))
         view.addSubview(panel)
         setView(view)
+    }
+
+    /// An action sheet: its title and message, small and gray, above its
+    /// actions, in a panel across the bottom of the screen; Cancel in a
+    /// panel of its own below. A tap outside the panels cancels.
+    private func loadSheet(in view: UIView) {
+        let safe = Screen.safeAreaInsets
+        let width = min(Screen.bounds.width - safe.left - safe.right - 16, 400)
+        let x = (Screen.bounds.width - width) / 2
+        func makePanel() -> UIView {
+            let panel = UIView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIView.self)
+            panel.setBackgroundColor(UIColor.gray(0.97))
+            panel.state.geometry.cornerRadius = 14
+            panel.state.geometry.masksToBounds = true
+            return panel
+        }
+        func separator(_ panel: UIView, _ y: CGFloat) {
+            let line = UIView.objCClass.object.allocated().initializeView(frame: CGRect(x: 0, y: y, width: width, height: Screen.pixel))
+                .unsafeCast(to: UIView.self)
+            line.setBackgroundColor(UIColor.separator())
+            panel.addSubview(line)
+        }
+        func addButton(_ panel: UIView, _ action: UIAlertAction, _ y: CGFloat) {
+            let button = UIButton.button(UIButton.objCClass, type: 1).unsafeCast(to: UIButton.self)
+            button.sendSetFrame(CGRect(x: 0, y: y, width: width, height: 57))
+            button.setTitle(action.state.title, for: 0)
+            button.titleLabel().setFont(action.state.style == 1 ? UIFont.boldSystemFont(size: 20) : UIFont.systemFont(size: 20))
+            if action.state.style == 2 { button.setTitleColor(UIColor.systemRed(), for: 0) }
+            if !action.state.enabled {
+                button.setTitleColor(UIColor.systemGray(), for: 0)
+                button.setEnabled(false)
+            }
+            button.addTarget(self, action: ObjCSelector("_perryChoose:"), for: 1 << 6)
+            button.setTag(alert.actions.firstIndex { $0.objcObject == action.objcObject } ?? 0)
+            panel.addSubview(button)
+        }
+        var actions = alert.actions
+        let cancel = actions.firstIndex { $0.state.style == 1 }.map { actions.remove(at: $0) }
+        let panel = makePanel()
+        var y: CGFloat = 0
+        let header = [(state.title, true), (alert.message, false)].compactMap { text, bold in
+            text.flatMap { $0.isEmpty ? nil : ($0, bold) }
+        }
+        if !header.isEmpty {
+            y = 14
+            for (text, bold) in header {
+                let font = bold ? UIFont.boldSystemFont(size: 13) : UIFont.systemFont(size: 13)
+                for line in TextLayout.lines(text, font: font, width: width - 32) {
+                    let label = UILabel.objCClass.object.allocated()
+                        .initializeView(frame: CGRect(x: 16, y: y, width: width - 32, height: font.lineHeight())).unsafeCast(to: UILabel.self)
+                    label.setText(line)
+                    label.setFont(font)
+                    label.setTextColor(UIColor.systemGray())
+                    label.setTextAlignment(1)
+                    panel.addSubview(label)
+                    y += font.lineHeight()
+                }
+                y += 4
+            }
+            y += 10
+        }
+        for (index, action) in actions.enumerated() {
+            if index > 0 || !header.isEmpty { separator(panel, y) }
+            addButton(panel, action, y)
+            y += 57
+        }
+        var bottom = Screen.bounds.height - max(safe.bottom, 8)
+        if let cancel {
+            let outside = UIButton.button(UIButton.objCClass, type: 0).unsafeCast(to: UIButton.self)
+            outside.sendSetFrame(Screen.bounds)
+            outside.addTarget(self, action: ObjCSelector("_perryChoose:"), for: 1 << 6)
+            outside.setTag(alert.actions.firstIndex { $0.objcObject == cancel.objcObject } ?? 0)
+            view.addSubview(outside)
+            let cancelPanel = makePanel()
+            cancelPanel.setBackgroundColor(UIColor.white())
+            addButton(cancelPanel, cancel, 0)
+            cancelPanel.sendSetFrame(CGRect(x: x, y: bottom - 57, width: width, height: 57))
+            view.addSubview(cancelPanel)
+            bottom -= 57 + 8
+        }
+        if y > 0 {
+            panel.sendSetFrame(CGRect(x: x, y: max(bottom - y, safe.top + 8), width: width, height: y))
+            view.addSubview(panel)
+        }
     }
 
     @ObjCMethod("_perryChoose:")

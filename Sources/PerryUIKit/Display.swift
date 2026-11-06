@@ -76,11 +76,14 @@ enum Display {
     typealias DispatchTime = @convention(c) (UInt64, Int64) -> UInt64
     nonisolated(unsafe) static var dispatchAfter: DispatchAfter?
     nonisolated(unsafe) static var dispatchTime: DispatchTime?
+    /// Global blocks' isa, _NSConcreteGlobalBlock, for blocks UIKit hands apps.
+    nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer?
 
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) {
         let library = "/usr/lib/system/libdispatch.dylib"
         dispatchAfter = lookup(library, "_dispatch_after_f").map { unsafeBitCast($0, to: DispatchAfter.self) }
         dispatchTime = lookup(library, "_dispatch_time").map { unsafeBitCast($0, to: DispatchTime.self) }
+        globalBlockClass = lookup("/usr/lib/libSystem.B.dylib", "__NSConcreteGlobalBlock")
     }
 
     nonisolated(unsafe) private static var compositor: Compositor?
