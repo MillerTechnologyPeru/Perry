@@ -55,6 +55,8 @@ final class ViewGuides: ObjectState {
     var margins: UILayoutGuide?
     var readable: UILayoutGuide?
     var added: [UILayoutGuide] = []
+    /// The safe area insets the view was last laid out with.
+    var laidOutSafeArea: UIEdgeInsets?
 }
 
 extension UILayoutGuide {
