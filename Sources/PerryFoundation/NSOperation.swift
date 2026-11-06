@@ -605,10 +605,12 @@ public final class NSOperationQueue: NSObject {
         }
     }
 
+    /// A nil block adds nothing.
     @ObjCMethod("addOperationWithBlock:")
-    func addOperation(block: ObjCObject) {
-        guard let operation = Storage.allocate(UnsafeMutableRawPointer(Operations.blockOperationClass)) else { return }
-        Operations.storage(operation).blocks.append(ObjC.retainBlock(block.id)!)
+    func addOperation(block: ObjCObject?) {
+        guard let block, let copied = ObjC.retainBlock(block.id),
+              let operation = Storage.allocate(UnsafeMutableRawPointer(Operations.blockOperationClass)) else { return }
+        Operations.storage(operation).blocks.append(copied)
         storage.add(operation)
         ObjC.release(operation)
     }
