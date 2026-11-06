@@ -32,7 +32,10 @@ enum GLMultisample {
     static let renderbufferStorageMultisample: Storage = { target, samples, format, width, height in
         var most: Int32 = 0
         GLES.getIntegerv(0x8D57, &most)     // GL_MAX_SAMPLES
-        storage?(target, most > 0 ? min(samples, most) : samples, format, width, height)
+        // The screen's multisample buffer has the pixels the screen is
+        // drawn at.
+        let pixels = GLRenderScale.storage(width: width, height: height)
+        storage?(target, most > 0 ? min(samples, most) : samples, format, pixels.0, pixels.1)
     }
 
     /// glResolveMultisampleFramebufferAPPLE: the whole of the read
