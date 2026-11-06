@@ -486,3 +486,15 @@ int darwin_gethostuuid(unsigned char uuid[16], const void *wait) {
     errno = EINVAL;
     return -1;
 }
+
+// ptrace, which programs call to keep debuggers away (PT_DENY_ATTACH, 31)
+// or to ask whether one is attached (PT_TRACE_ME, 0). Nothing is traced
+// here: those succeed and do nothing, and the rest fail as unsupported.
+int darwin_ptrace(int request, int pid, void *address, int data) DARWIN_SYMBOL(ptrace);
+int darwin_ptrace(int request, int pid, void *address, int data) {
+    (void)pid, (void)address, (void)data;
+    if (request == 31 || request == 0)
+        return 0;
+    errno = ENOTSUP;
+    return -1;
+}
