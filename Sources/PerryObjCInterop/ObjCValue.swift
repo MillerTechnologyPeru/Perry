@@ -48,6 +48,14 @@ public protocol ObjCValue {
     /// A result's ABI form from its argument form, and back.
     static func objCResult(_ value: ObjCType) -> ObjCResultType
     static func objCArgumentForm(ofResult value: ObjCResultType) -> ObjCType
+
+    /// Whether 32-bit Darwin returns it through a pointer in r0 (a structure
+    /// of more than 4 bytes), which its sends must use objc_msgSend_stret for.
+    static var objCReturnsIndirectly: Bool { get }
+}
+
+extension ObjCValue {
+    public static var objCReturnsIndirectly: Bool { false }
 }
 
 extension ObjCValue where ObjCResultType == ObjCType {
@@ -106,6 +114,14 @@ extension UInt8: ObjCScalar { public static var objCTypeEncoding: String { "C" }
 public protocol ObjCStructure: ObjCValue {}
 
 extension ObjCStructure {
+    public static var objCReturnsIndirectly: Bool {
+        #if _pointerBitWidth(_32)
+        MemoryLayout<ObjCResultType>.size > 4
+        #else
+        false
+        #endif
+    }
+
     @inline(__always) public init(objCArgument value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
     @inline(__always) public init(objCReturnValue value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
     @inline(__always) public init(objCOwned value: ObjCType) { self = unsafeBitCast(value, to: Self.self) }
