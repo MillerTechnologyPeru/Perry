@@ -14,6 +14,7 @@ open class NSMenu: NSObject {
     var delegate: UnsafeMutableRawPointer?
     var autoenablesItems = true
     var font: NSFont?
+    var minimumWidth: CGFloat = 0
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -104,14 +105,61 @@ open class NSMenu: NSObject {
 
     @ObjCMethod("setSubmenu:forItem:")
     func setSubmenu(_ menu: NSMenu?, for item: NSMenuItem?) { item?.setSubmenu(menu) }
-    @ObjCMethod("update") func update() {}
+    /// Items enable as their targets validate them, when the menu enables
+    /// its items itself: an item with an action is enabled when its target
+    /// (or the first responder chain's) implements it and, asked with
+    /// -validateMenuItem:, agrees.
+    @ObjCMethod("update")
+    func update() {
+        guard autoenablesItems else { return }
+        for item in items where !item.separator {
+            guard let action = item.action else {
+                item.enabled = item.submenu != nil
+                continue
+            }
+            let name = action.name
+            var receiver: UnsafeMutableRawPointer? = item.target ?? Windows.key?.firstResponderObject
+            if item.target == nil {
+                // Along the responder chain, then the window's delegate, the
+                // app and its delegate.
+                while let current = receiver, !Send.responds(current, name) { receiver = Send.object(current, "nextResponder") }
+                if receiver == nil, let window = Windows.key {
+                    for candidate in [window.delegateObject, App.shared?.objcObject, App.shared?.delegateObject] where Send.responds(candidate, name) {
+                        receiver = candidate
+                        break
+                    }
+                }
+            }
+            guard let receiver, Send.responds(receiver, name) else {
+                item.enabled = false
+                continue
+            }
+            if Send.responds(receiver, "validateMenuItem:") {
+                item.enabled = Send.bool(receiver, "validateMenuItem:", item.objcObject)
+            } else if Send.responds(receiver, "validateUserInterfaceItem:") {
+                item.enabled = Send.bool(receiver, "validateUserInterfaceItem:", item.objcObject)
+            } else {
+                item.enabled = true
+            }
+        }
+    }
     @ObjCMethod("performKeyEquivalent:") func performKeyEquivalent(_ event: NSObject?) -> Bool { false }
     @ObjCMethod("popUpMenuPositioningItem:atLocation:inView:")
-    func popUp(positioning item: NSMenuItem?, at location: CGPoint, in view: NSObject?) -> Bool { false }
+    func popUp(positioning item: NSMenuItem?, at location: CGPoint, in view: NSObject?) -> Bool {
+        MenuTracking.popUp(self, positioning: item, at: location, in: view?.as(NSView.self)) != nil
+    }
+
+    /// A context menu at the event's place.
+    @ObjCClassMethod("popUpContextMenu:withEvent:forView:")
+    static func popUpContextMenu(_ menu: NSMenu?, with event: NSEvent?, for view: NSView?) {
+        guard let menu, let event else { return }
+        let point = view.map { $0.convert(event.locationInWindow, from: nil) } ?? event.locationInWindow
+        MenuTracking.popUp(menu, positioning: nil, at: point, in: view)
+    }
     @ObjCMethod("cancelTracking") func cancelTracking() {}
     @ObjCMethod("setShowsStateColumn:") func setShowsStateColumn(_ value: Bool) {}
-    @ObjCMethod("setMinimumWidth:") func setMinimumWidth(_ width: Double) {}
-    @ObjCMethod("setFont:") func setFont(_ font: NSObject?) {}
+    @ObjCMethod("setMinimumWidth:") func setMinimumWidth(_ width: Double) { minimumWidth = width }
+    @ObjCMethod("minimumWidth") func menuMinimumWidth() -> Double { minimumWidth }
     @ObjCClassMethod("setMenuBarVisible:") static func setMenuBarVisible(_ visible: Bool) {}
     @ObjCClassMethod("menuBarVisible") static func menuBarVisible() -> Bool { false }
 }
