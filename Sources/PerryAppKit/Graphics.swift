@@ -808,6 +808,9 @@ open class NSImage: NSObject {
             return image
         }
         image.drawing = name.flatMap(SystemImages.drawing)
+        if image.drawing == nil, let name, getenv("PERRY_APPKIT_SYMBOL_TRACE") != nil {
+            appKitWarning("SF Symbol \(name) isn't rendered: list it in the app's SFSymbols.txt for Scripts/extract-symbols")
+        }
         return image
     }
 
