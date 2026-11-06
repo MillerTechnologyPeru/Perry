@@ -307,6 +307,7 @@ open class UINavigationController: UIViewController {
         bar.showSearchBar(search)
         bar.sendSetFrame(CGRect(x: 0, y: top, width: bounds.width, height: barHeight + (search == nil ? 0 : searchBarHeight)))
         search?.sendSetFrame(CGRect(x: 0, y: barHeight, width: bounds.width, height: searchBarHeight))
+        bar.layoutTitleView()
         bar.extendBackground(above: top)
         if let displayed = navigation.displayed, let displayedView = displayed.state.view, !navigation.animating {
             displayedView.sendSetFrame(contentFrame(for: displayed))
@@ -378,6 +379,8 @@ final class NavigationBarState: ObjectState {
     var extensionView: UIView?
     /// The top item's search controller's bar, shown below the bar's row.
     var searchBar: UISearchBar?
+    /// The top item's title view, shown in its title's place.
+    var titleView: UIView?
 }
 
 @ObjCClass("UINavigationBar")
@@ -409,11 +412,41 @@ open class UINavigationBar: UIView {
     func setItems(_ items: NSArray?, animated: Bool) {
         barState.items = items?.elements.map { $0.unsafeCast(to: UINavigationItem.self) } ?? []
         setNeedsDisplay()
+        layoutTitleView()
     }
 
     func setItemsFromStack(_ items: [UINavigationItem]) {
         barState.items = items
         setNeedsDisplay()
+        layoutTitleView()
+    }
+
+    @ObjCMethod("layoutSubviews")
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutTitleView()
+    }
+
+    /// The top item's title view, in its title's place: its own size, no
+    /// wider than the room between the bar's items nor taller than its
+    /// row, centered as far as the items allow.
+    func layoutTitleView() {
+        let view = topItem()?.state.titleView
+        if barState.titleView?.objcObject != view?.objcObject {
+            barState.titleView?.removeFromSuperview()
+            barState.titleView = view
+            if let view { addSubview(view) }
+        }
+        guard let view else { return }
+        let bounds = state.bounds
+        let buttons = buttons()
+        let leading = ([buttons.back?.frame] + buttons.left.map { $0.frame }).compactMap { $0?.maxX }.max().map { $0 + 8 } ?? 16
+        let trailing = buttons.right.map { $0.frame.minX }.min().map { $0 - 8 } ?? bounds.width - 16
+        var size = view.state.bounds.size
+        if size.width <= 0 || size.height <= 0 { size = view.sendSizeThatFits(CGSize(width: trailing - leading, height: barHeight)) }
+        let width = max(min(size.width, trailing - leading), 0), height = min(size.height, barHeight)
+        let x = min(max(bounds.midX - width / 2, leading), trailing - width)
+        view.sendSetFrame(CGRect(x: x, y: (barHeight - height) / 2, width: width, height: height))
     }
 
     @ObjCMethod("topItem") func topItem() -> UINavigationItem? { barState.items.last }
@@ -548,7 +581,7 @@ open class UINavigationBar: UIView {
                 Text.draw(item.displayTitle, at: CGPoint(x: frame.minX, y: middle(itemFont)), font: itemFont, color: color)
             }
         }
-        if let title = barState.items.last?.state.title {
+        if barState.items.last?.state.titleView == nil, let title = barState.items.last?.state.title {
             // Centered, unless that runs into the items: then centered
             // between them, and cut short if it still does not fit.
             let leading = ([buttons.back?.frame] + buttons.left.map { $0.frame }).compactMap { $0?.maxX }.max().map { $0 + 8 } ?? 16

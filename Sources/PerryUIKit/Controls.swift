@@ -1322,8 +1322,10 @@ open class UIAlertController: UIViewController {
         func addButton(_ panel: UIView, _ action: UIAlertAction, _ y: CGFloat) {
             let button = UIButton.button(UIButton.objCClass, type: 1).unsafeCast(to: UIButton.self)
             button.sendSetFrame(CGRect(x: 0, y: y, width: width, height: 57))
-            button.setTitle(action.state.title, for: 0)
-            button.titleLabel().setFont(action.state.style == 1 ? UIFont.boldSystemFont(size: 20) : UIFont.systemFont(size: 20))
+            let font = action.state.style == 1 ? UIFont.boldSystemFont(size: 20) : UIFont.systemFont(size: 20)
+            // A long title ends in an ellipsis, within the sheet's margins.
+            button.setTitle(action.state.title.map { Text.truncated($0, font: font, width: width - 32) }, for: 0)
+            button.titleLabel().setFont(font)
             if action.state.style == 2 { button.setTitleColor(UIColor.systemRed(), for: 0) }
             if !action.state.enabled {
                 button.setTitleColor(UIColor.systemGray(), for: 0)
@@ -1336,6 +1338,10 @@ open class UIAlertController: UIViewController {
         var actions = alert.actions
         let cancel = actions.firstIndex { $0.state.style == 1 }.map { actions.remove(at: $0) }
         let panel = makePanel()
+        // The title and actions scroll when they are taller than the screen.
+        let content = UIScrollView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIScrollView.self)
+        content.setShowsVerticalScrollIndicator(true)
+        panel.addSubview(content)
         var y: CGFloat = 0
         let header = [(state.title, true), (alert.message, false)].compactMap { text, bold in
             text.flatMap { $0.isEmpty ? nil : ($0, bold) }
@@ -1351,7 +1357,7 @@ open class UIAlertController: UIViewController {
                     label.setFont(font)
                     label.setTextColor(UIColor.systemGray())
                     label.setTextAlignment(1)
-                    panel.addSubview(label)
+                    content.addSubview(label)
                     y += font.lineHeight()
                 }
                 y += 4
@@ -1359,8 +1365,8 @@ open class UIAlertController: UIViewController {
             y += 10
         }
         for (index, action) in actions.enumerated() {
-            if index > 0 || !header.isEmpty { separator(panel, y) }
-            addButton(panel, action, y)
+            if index > 0 || !header.isEmpty { separator(content, y) }
+            addButton(content, action, y)
             y += 57
         }
         var bottom = Screen.bounds.height - max(safe.bottom, 8)
@@ -1378,7 +1384,10 @@ open class UIAlertController: UIViewController {
             bottom -= 57 + 8
         }
         if y > 0 {
-            panel.sendSetFrame(CGRect(x: x, y: max(bottom - y, safe.top + 8), width: width, height: y))
+            let top = max(bottom - y, safe.top + 8)
+            panel.sendSetFrame(CGRect(x: x, y: top, width: width, height: bottom - top))
+            content.sendSetFrame(CGRect(x: 0, y: 0, width: width, height: bottom - top))
+            content.setContentSize(CGSize(width: width, height: y))
             view.addSubview(panel)
         }
     }

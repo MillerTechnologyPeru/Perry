@@ -225,6 +225,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
+//   …/CoreImage.framework/CoreImage                       -> UIKit
 //   …/Carbon.framework, …/HIToolbox.framework             -> AppKit
 //   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
@@ -284,14 +285,14 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
-    // controllers, CoreText's text attributes and AVKit's player view
-    // controller.
+    // controllers, CoreText's text attributes, AVKit's player view
+    // controller and Core Image's images and filters.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/CoreText.framework/") ||
         strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
-        strstr(install_name, "/AdSupport.framework/")) {
+        strstr(install_name, "/AdSupport.framework/") || strstr(install_name, "/CoreImage.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }

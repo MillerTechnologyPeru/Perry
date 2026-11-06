@@ -72,13 +72,12 @@ func render(_ name: String) -> Data? {
     bitmap.size = size
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
-    let black = symbol.copy() as! NSImage
-    black.isTemplate = false
-    black.lockFocus()
-    NSColor.black.set()
-    NSRect(origin: .zero, size: size).fill(using: .sourceAtop)
-    black.unlockFocus()
-    black.draw(in: NSRect(origin: .zero, size: size))
+    // Drawn as it is, a template symbol comes out black in the light
+    // appearance, its cut-out parts (the lines in a filled circle's)
+    // left clear. Filling over it would fill those too.
+    NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
+        symbol.draw(in: NSRect(origin: .zero, size: size))
+    }
     NSGraphicsContext.restoreGraphicsState()
     return bitmap.representation(using: .png, properties: [:])
 }

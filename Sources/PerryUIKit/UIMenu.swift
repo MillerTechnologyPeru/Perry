@@ -127,32 +127,60 @@ open class UIDeferredMenuElement: UIMenuElement {
 
 // MARK: - Showing menus
 
-/// An action sheet of a menu's actions; choosing one dismisses the sheet
-/// and performs the action.
+/// What a menu sheet's button does: performs an action, or opens a
+/// submenu's own sheet.
+enum MenuEntry {
+    case action(UIAction)
+    case submenu(UIMenu)
+}
+
+extension UIMenu {
+    /// The menu's entries in order: its actions, its inline submenus'
+    /// entries among them, and its other submenus as entries of their own,
+    /// leaving out hidden actions and deferred elements.
+    var entries: [MenuEntry] {
+        element.children.flatMap { child -> [MenuEntry] in
+            if let menu = child.as(UIMenu.self) {
+                return menu.element.options & 1 != 0 || menu.element.title.isEmpty ? menu.entries : [.submenu(menu)]
+            }
+            guard let action = child.as(UIAction.self), action.element.attributes & 4 == 0 else { return [] }
+            return [.action(action)]
+        }
+    }
+}
+
+/// An action sheet of a menu's entries. Choosing an action dismisses the
+/// sheet, and any it was opened from, and performs it; choosing a submenu
+/// opens its sheet over this one, whose Cancel goes back.
 @ObjCClass("_PerryMenuSheetController")
 open class PerryMenuSheetController: UIAlertController {
-    static func sheet(for menu: UIMenu) -> PerryMenuSheetController {
+    static func sheet(for menu: UIMenu, root: UnsafeMutableRawPointer? = nil) -> PerryMenuSheetController {
         let title = menu.element.title
         let sheet = UIAlertController.alert(objCClass, title: title.isEmpty ? nil : title, message: nil, preferredStyle: 0)
             .unsafeCast(to: PerryMenuSheetController.self)
-        for action in menu.actions {
-            let check = action.element.elementState == 1 ? "\u{2713} " : ""
-            let style = action.element.attributes & 2 != 0 ? 2 : 0
-            let button = UIAlertAction.action(UIAlertAction.objCClass, title: check + action.element.title, style: style, handler: nil)
-                .unsafeCast(to: UIAlertAction.self)
-            button.state.enabled = action.element.attributes & 1 == 0
+        let entries = menu.entries
+        for entry in entries {
+            let button: UIAlertAction
+            switch entry {
+            case .action(let action):
+                let check = action.element.elementState == 1 ? "\u{2713} " : ""
+                let style = action.element.attributes & 2 != 0 ? 2 : 0
+                button = UIAlertAction.action(UIAlertAction.objCClass, title: check + action.element.title, style: style, handler: nil)
+                    .unsafeCast(to: UIAlertAction.self)
+                button.state.enabled = action.element.attributes & 1 == 0
+            case .submenu(let submenu):
+                button = UIAlertAction.action(UIAlertAction.objCClass, title: submenu.element.title + " \u{203A}", style: 0, handler: nil)
+                    .unsafeCast(to: UIAlertAction.self)
+            }
             sheet.addAction(button)
-            sheet.menuActions.append(action)
         }
         sheet.addAction(UIAlertAction.action(UIAlertAction.objCClass, title: "Cancel", style: 1, handler: nil).unsafeCast(to: UIAlertAction.self))
+        let state = PerryMenuSheetController.menus[sheet.objcObject]
+        state.entries = entries
+        state.root = root
         return sheet
     }
 
-    /// The menu's actions, by their buttons' order.
-    var menuActions: [UIAction] {
-        get { PerryMenuSheetController.menus[objcObject].actions }
-        set { PerryMenuSheetController.menus[objcObject].actions = newValue }
-    }
     static let menus = StateTable<MenuSheetState>()
 
     @ObjCMethod("dealloc")
@@ -164,12 +192,25 @@ open class PerryMenuSheetController: UIAlertController {
     @ObjCMethod("_perryChoose:")
     override func choose(_ sender: UIButton) {
         let index = sender.state.tag
-        let actions = menuActions
-        dismiss(animated: true, completion: nil)
-        if actions.indices.contains(index) { actions[index].perform() }
+        let state = PerryMenuSheetController.menus[objcObject]
+        guard state.entries.indices.contains(index) else {
+            // Cancel: this sheet closes, back to the one it opened from.
+            dismiss(animated: true, completion: nil)
+            return
+        }
+        switch state.entries[index] {
+        case .action(let action):
+            (state.root.map(UIViewController.wrap) ?? self).dismiss(animated: true, completion: nil)
+            action.perform()
+        case .submenu(let submenu):
+            present(PerryMenuSheetController.sheet(for: submenu, root: state.root ?? objcObject), animated: true, completion: nil)
+        }
     }
 }
 
 final class MenuSheetState: ObjectState {
-    var actions: [UIAction] = []
+    var entries: [MenuEntry] = []
+    /// The sheet the first of these was opened as; not retained, as it
+    /// outlives the sheets it opens.
+    var root: UnsafeMutableRawPointer?
 }

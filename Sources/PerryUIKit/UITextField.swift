@@ -196,6 +196,11 @@ open class UITextField: UIControl {
         if field.clearsOnBeginEditing { field.text = "" }
         field.editing = true
         Keyboard.focus(self)
+        // An input view takes the keyboard's place while the field edits.
+        if let input = field.inputView {
+            input.as(UIDatePicker.self)?.picker.asInput = true
+            InputViews.show(input, accessory: field.inputAccessoryView, withDone: false)
+        }
         if let delegate, delegate.responds(to: "textFieldDidBeginEditing:") { delegate.sendTextFieldDidBeginEditing(self) }
         sendActions(for: 1 << 16)
         Application.post(MoreNotifications.UITextFieldTextDidBeginEditingNotification, object: self)
@@ -213,6 +218,7 @@ open class UITextField: UIControl {
         field.editing = false
         field.allSelected = false
         Keyboard.focus(nil)
+        if field.inputView != nil { InputViews.hide() }
         if let delegate, delegate.responds(to: "textFieldDidEndEditing:") { delegate.sendTextFieldDidEndEditing(self) }
         sendActions(for: 1 << 18)
         Application.post(MoreNotifications.UITextFieldTextDidEndEditingNotification, object: self)
