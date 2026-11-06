@@ -212,7 +212,8 @@ void perry_print_report(perry_loader *loader) {
         printf("base\t%p\n", (void *)image->base);
         printf("platform\t%s\t%s\tsdk %s\n", perry_platform_name(image->platform), minos, sdk);
         printf("encrypted\t%s\n", image->encrypted ? "yes" : "no");
-        printf("fixups\t%s\n", image->chained_fixups ? "chained" : image->dyld_info ? "dyld-info" : "none");
+        printf("fixups\t%s\n", image->chained_fixups ? "chained" : image->dyld_info ? "dyld-info"
+               : image->symtab && image->dysymtab ? "symbol-table" : "none");
         for (uint32_t i = 0; i < image->dep_count; i++) {
             const perry_dependency *dep = &image->deps[i];
             const char *how = dep->provider ? dep->provider->path : dep->image ? dep->image->path
