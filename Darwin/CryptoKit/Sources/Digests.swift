@@ -236,3 +236,106 @@ extension SHA256Digest: Digest {}
 extension SHA384Digest: Digest {}
 @available(iOS 13.0, macOS 10.15, watchOS 6.0, tvOS 13.0, macCatalyst 13.0, *)
 extension SHA512Digest: Digest {}
+
+// MARK: - Insecure
+
+/// Hash functions kept for older protocols, not for security.
+@available(iOS 13.0, macOS 10.15, watchOS 6.0, tvOS 13.0, macCatalyst 13.0, *)
+public enum Insecure: Sendable {
+    /// The SHA-1 hash function.
+    public struct SHA1: HashFunction, Sendable {
+        @available(iOS 13.2, macOS 10.15, watchOS 6.1, tvOS 13.2, macCatalyst 13.2, *)
+        public static let blockByteCount = 64
+        public static let byteCount = 20
+        public typealias Digest = SHA1Digest
+
+        private var context = CC_SHA1_CTX()
+
+        public init() {
+            CC_SHA1_Init(&context)
+        }
+
+        public mutating func update(bufferPointer: UnsafeRawBufferPointer) {
+            CC_SHA1_Update(&context, bufferPointer.baseAddress, CC_LONG(bufferPointer.count))
+        }
+
+        public func finalize() -> SHA1Digest {
+            var copy = context
+            var bytes = [UInt8](repeating: 0, count: Self.byteCount)
+            CC_SHA1_Final(&bytes, &copy)
+            return SHA1Digest(storage: DigestBytes(bytes: bytes))
+        }
+    }
+
+    /// The MD5 hash function.
+    public struct MD5: HashFunction, Sendable {
+        @available(iOS 13.2, macOS 10.15, watchOS 6.1, tvOS 13.2, macCatalyst 13.2, *)
+        public static let blockByteCount = 64
+        public static let byteCount = 16
+        public typealias Digest = MD5Digest
+
+        private var context = CC_MD5_CTX()
+
+        public init() {
+            CC_MD5_Init(&context)
+        }
+
+        public mutating func update(bufferPointer: UnsafeRawBufferPointer) {
+            CC_MD5_Update(&context, bufferPointer.baseAddress, CC_LONG(bufferPointer.count))
+        }
+
+        public func finalize() -> MD5Digest {
+            var copy = context
+            var bytes = [UInt8](repeating: 0, count: Self.byteCount)
+            CC_MD5_Final(&bytes, &copy)
+            return MD5Digest(storage: DigestBytes(bytes: bytes))
+        }
+    }
+
+    /// The output of a SHA-1 hash.
+    public struct SHA1Digest {
+        let storage: DigestBytes
+
+        public static var byteCount: Int { SHA1.byteCount }
+
+        public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+            try storage.bytes.withUnsafeBytes(body)
+        }
+
+        public var description: String {
+            "SHA1 digest: " + storage.bytes.map { String(format: "%02x", $0) }.joined()
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            storage.hash(into: &hasher)
+        }
+
+        public typealias Element = UInt8
+    }
+
+    /// The output of an MD5 hash.
+    public struct MD5Digest {
+        let storage: DigestBytes
+
+        public static var byteCount: Int { MD5.byteCount }
+
+        public func withUnsafeBytes<R>(_ body: (UnsafeRawBufferPointer) throws -> R) rethrows -> R {
+            try storage.bytes.withUnsafeBytes(body)
+        }
+
+        public var description: String {
+            "MD5 digest: " + storage.bytes.map { String(format: "%02x", $0) }.joined()
+        }
+
+        public func hash(into hasher: inout Hasher) {
+            storage.hash(into: &hasher)
+        }
+
+        public typealias Element = UInt8
+    }
+}
+
+@available(iOS 13.0, macOS 10.15, watchOS 6.0, tvOS 13.0, macCatalyst 13.0, *)
+extension Insecure.SHA1Digest: Digest {}
+@available(iOS 13.0, macOS 10.15, watchOS 6.0, tvOS 13.0, macCatalyst 13.0, *)
+extension Insecure.MD5Digest: Digest {}

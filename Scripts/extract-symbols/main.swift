@@ -40,6 +40,60 @@ func symbolNames(in url: URL) -> Set<String> {
     return found
 }
 
+/// Names in arm64 code as Swift writes strings of up to 15 bytes: in the
+/// instructions themselves, moved into a pair of registers 16 bits at a
+/// time (MOVZ, then MOVK), the first 8 bytes in one and the rest in the
+/// other, whose top byte is 0xE0 and the string's length. Such names are
+/// in no string section for the byte scan to find.
+func smallStringNames(in url: URL) -> Set<String> {
+    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe), data.count >= 8,
+          data.prefix(4).elementsEqual([0xCF, 0xFA, 0xED, 0xFE]) else { return [] }
+    var found: Set<String> = []
+    func bytes(_ value: UInt64, count: Int) -> [UInt8] {
+        (0..<count).map { UInt8(truncatingIfNeeded: value >> (8 * UInt64($0))) }
+    }
+    func add(_ text: [UInt8]) {
+        let symbolByte: (UInt8) -> Bool = {
+            (UInt8(ascii: "a")...UInt8(ascii: "z")).contains($0) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0)
+                || $0 == UInt8(ascii: ".")
+        }
+        guard text.count >= 3, text.allSatisfy(symbolByte), text.first != UInt8(ascii: "."), text.last != UInt8(ascii: "."),
+              let name = String(bytes: text, encoding: .ascii) else { return }
+        found.insert(name)
+    }
+    var registers = [UInt64](repeating: 0, count: 32)
+    var written = [Int](repeating: Int.min / 2, count: 32)
+    data.withUnsafeBytes { raw in
+        let words = raw.bindMemory(to: UInt32.self)
+        for index in 0..<words.count {
+            let word = UInt32(littleEndian: words[index])
+            let register = Int(word & 31)
+            let immediate = UInt64((word >> 5) & 0xFFFF), shift = UInt64((word >> 21) & 3) * 16
+            switch word & 0xFF80_0000 {
+            case 0xD280_0000: registers[register] = immediate << shift
+            case 0xF280_0000: registers[register] = (registers[register] & ~(0xFFFF << shift)) | (immediate << shift)
+            default: continue
+            }
+            written[register] = index
+            // A pair's registers are written in either order, a few
+            // instructions apart: the one with the length (top nibble 0xE)
+            // and the one with the first 8 bytes.
+            for other in 0..<32 where other != register && index - written[other] < 8 {
+                let (first, second) = registers[register] >> 60 == 0xE
+                    ? (registers[other], registers[register]) : (registers[register], registers[other])
+                guard second >> 60 == 0xE else { continue }
+                let length = Int((second >> 56) & 0xF)
+                if length <= 8 {
+                    add(bytes(first, count: length))
+                } else {
+                    add(bytes(first, count: 8) + bytes(second, count: length - 8))
+                }
+            }
+        }
+    }
+    return found
+}
+
 /// The files of an app that may name symbols: its code, nibs and data
 /// (property lists, XML, JSON, databases), everything but its media and
 /// asset catalogs.
@@ -86,7 +140,10 @@ var failed = false
 for path in CommandLine.arguments.dropFirst() {
     let app = URL(fileURLWithPath: path)
     var names: Set<String> = []
-    for file in sources(in: app) { names.formUnion(symbolNames(in: file)) }
+    for file in sources(in: app) {
+        names.formUnion(symbolNames(in: file))
+        names.formUnion(smallStringNames(in: file))
+    }
     let output = app.appendingPathComponent("SFSymbols")
     try? FileManager.default.removeItem(at: output)
     var written = 0

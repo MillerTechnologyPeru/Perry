@@ -183,6 +183,7 @@ public final class NSURL: NSObject {
             return Numbers.make(nil, .bool(false))
         }
         if key == URLResourceKeys.NSURLIsHiddenKey { return Numbers.make(nil, .bool(true)) }
+        if let capacity = volumeCapacity(forKey: key, path: filePath) { return capacity }
         var info = stat()
         guard lstat(filePath, &info) == 0 else { return nil }
         let type = info.st_mode & S_IFMT
@@ -206,6 +207,20 @@ public final class NSURL: NSObject {
         case URLResourceKeys.NSURLLinkCountKey: return Numbers.make(nil, .signed(Int64(info.st_nlink)))
         default: return nil
         }
+    }
+
+    /// The size of the file system the file is on, and the room left on
+    /// it, for the volume capacity keys; nil for any other key.
+    private func volumeCapacity(forKey key: String, path: String) -> id? {
+        let keys: Set<String> = [URLResourceKeys.NSURLVolumeTotalCapacityKey, URLResourceKeys.NSURLVolumeAvailableCapacityKey,
+                                 URLResourceKeys.NSURLVolumeAvailableCapacityForImportantUsageKey,
+                                 URLResourceKeys.NSURLVolumeAvailableCapacityForOpportunisticUsageKey]
+        guard keys.contains(key) else { return nil }
+        var info = statvfs()
+        guard statvfs(path, &info) == 0 else { return nil }
+        let block = Int64(info.f_frsize)
+        let bytes = key == URLResourceKeys.NSURLVolumeTotalCapacityKey ? Int64(info.f_blocks) * block : Int64(info.f_bavail) * block
+        return Numbers.make(nil, .signed(bytes))
     }
 
     @ObjCMethod("getResourceValue:forKey:error:")
