@@ -16,9 +16,10 @@
 typedef struct perry_wrapped_library {
     /// A function the library defines, to locate it by.
     const void *anchor;
-    /// Or the library's soname, opened on its own (RTLD_LOCAL): for a
-    /// library that the process may also have a namesake of, as libc++abi's
-    /// __cxa functions are libstdc++'s too, or that it may not have at all.
+    /// Or the library's soname, opened on its own (RTLD_LOCAL, and bound
+    /// to itself before the process's global symbols): for a library that
+    /// the process may also have a namesake of, as libc++abi's __cxa
+    /// functions are libstdc++'s too, or that it may not have at all.
     const char *soname;
     pthread_mutex_t lock;
     int loaded;
