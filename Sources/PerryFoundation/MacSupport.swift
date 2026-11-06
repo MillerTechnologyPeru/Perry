@@ -5,7 +5,7 @@ import PerryObjCInterop
 // Foundation classes macOS apps set up as they start, which on Linux do
 // little: Apple events and script commands (no other app sends them), user
 // notifications (shown nowhere), NSHost, NSAssertionHandler, background
-// activity scheduling, NSProgress and NSByteCountFormatter.
+// activity scheduling and NSByteCountFormatter.
 
 private func named(_ name: String) -> id? { name.withCString { ObjC.getClass($0) }.map { UnsafeMutableRawPointer($0) } }
 
@@ -310,87 +310,6 @@ public final class NSConnection: NSObject {
     @ObjCMethod("setRootObject:") func setRootObject(_ object: UnsafeMutableRawPointer?) {}
     @ObjCMethod("rootProxy") func rootProxy() -> UnsafeMutableRawPointer? { nil }
     @ObjCMethod("invalidate") func invalidate() {}
-}
-
-// MARK: - Progress
-
-/// How much of some work is done, as counts of units; a parent's are the
-/// pending units its children account for.
-@ObjCClass("NSProgress")
-open class NSProgress: NSObject {
-    nonisolated(unsafe) static var currentStack: [id] = []
-    var total: Int64 = 0
-    var completed: Int64 = 0
-    var cancelled = false
-    var paused = false
-    var cancellable = true
-    var pausable = false
-    var description = ""
-    var additionalDescription = ""
-    var cancellationHandler: id?
-
-    @ObjCMethod("init") public required override init() { super.init() }
-
-    @ObjCClassMethod("progressWithTotalUnitCount:")
-    static func progress(_ cls: ObjCClass, totalUnitCount: Int64) -> UnsafeMutableRawPointer? {
-        let progress = makeInstance(cls)
-        if let progress { NSObject(objCReturnValue: progress).as(NSProgress.self)?.total = totalUnitCount }
-        return progress
-    }
-
-    @ObjCClassMethod("discreteProgressWithTotalUnitCount:")
-    static func discreteProgress(_ cls: ObjCClass, totalUnitCount: Int64) -> UnsafeMutableRawPointer? {
-        progress(cls, totalUnitCount: totalUnitCount)
-    }
-
-    @ObjCClassMethod("currentProgress") static func currentProgress() -> UnsafeMutableRawPointer? { currentStack.last }
-
-    @ObjCMethod("initWithParent:userInfo:")
-    func initialize(parent: UnsafeMutableRawPointer?, userInfo: UnsafeMutableRawPointer?) -> Self { self }
-
-    @ObjCMethod("totalUnitCount") func totalUnitCount() -> Int64 { total }
-    @ObjCMethod("setTotalUnitCount:") func setTotalUnitCount(_ value: Int64) { total = value }
-    @ObjCMethod("completedUnitCount") func completedUnitCount() -> Int64 { completed }
-    @ObjCMethod("setCompletedUnitCount:") func setCompletedUnitCount(_ value: Int64) { completed = value }
-    @ObjCMethod("fractionCompleted")
-    func fractionCompleted() -> Double { total > 0 ? min(1, Double(completed) / Double(total)) : 0 }
-    @ObjCMethod("isIndeterminate") func isIndeterminate() -> Bool { total <= 0 }
-    @ObjCMethod("isFinished") func isFinished() -> Bool { total > 0 && completed >= total }
-    @ObjCMethod("isCancelled") func isCancelled() -> Bool { cancelled }
-    @ObjCMethod("isPaused") func isPaused() -> Bool { paused }
-    @ObjCMethod("isCancellable") func isCancellable() -> Bool { cancellable }
-    @ObjCMethod("setCancellable:") func setCancellable(_ value: Bool) { cancellable = value }
-    @ObjCMethod("isPausable") func isPausable() -> Bool { pausable }
-    @ObjCMethod("setPausable:") func setPausable(_ value: Bool) { pausable = value }
-    @ObjCMethod("localizedDescription") func localizedDescription() -> String { description }
-    @ObjCMethod("setLocalizedDescription:") func setLocalizedDescription(_ value: String?) { description = value ?? "" }
-    @ObjCMethod("localizedAdditionalDescription") func localizedAdditionalDescription() -> String { additionalDescription }
-    @ObjCMethod("setLocalizedAdditionalDescription:")
-    func setLocalizedAdditionalDescription(_ value: String?) { additionalDescription = value ?? "" }
-
-    @ObjCMethod("setCancellationHandler:")
-    func setCancellationHandler(_ handler: UnsafeMutableRawPointer?) {
-        if let cancellationHandler { ObjC.release(cancellationHandler) }
-        cancellationHandler = handler.flatMap { ObjC.retainBlock($0) }
-    }
-
-    @ObjCMethod("cancel")
-    func cancel() {
-        guard !cancelled else { return }
-        cancelled = true
-        if let cancellationHandler {
-            typealias Invoke = @convention(c) (id) -> Void
-            Blocks.invoke(cancellationHandler, as: Invoke.self)(cancellationHandler)
-        }
-    }
-
-    @ObjCMethod("pause") func pause() { paused = true }
-    @ObjCMethod("resume") func resume() { paused = false }
-    @ObjCMethod("becomeCurrentWithPendingUnitCount:")
-    func becomeCurrent(pendingUnitCount: Int64) { NSProgress.currentStack.append(objcObject) }
-    @ObjCMethod("resignCurrent") func resignCurrent() { _ = NSProgress.currentStack.popLast() }
-    @ObjCMethod("addChild:withPendingUnitCount:")
-    func addChild(_ child: UnsafeMutableRawPointer?, withPendingUnitCount count: Int64) {}
 }
 
 // MARK: - Byte counts
