@@ -24,6 +24,8 @@ let package = Package(
         // keep pointers in 32 bits; loaded with LD_PRELOAD.
         .library(name: "PerryLowHeap", type: .dynamic, targets: ["PerryLowHeap"]),
         .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
+        // Steamworks' libsteam_api, over the running Linux Steam client.
+        .library(name: "Perrysteam_api", type: .dynamic, targets: ["PerrySteamAPI"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
         .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
@@ -169,6 +171,8 @@ let package = Package(
         .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryStdCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
+        // Steamworks: libsteam_api's part, over steamclient.so, opened at run time.
+        .target(name: "PerrySteamAPI"),
         .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
         .target(name: "PerryExpat", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("expat")]),
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.

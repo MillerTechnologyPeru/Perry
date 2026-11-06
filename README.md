@@ -162,6 +162,13 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   maps here: image sources reading PNG, JPEG (with orientation), GIF, WebP
   and HEIC with their properties and thumbnails, and destinations writing
   PNG, JPEG and animated GIF
+- Steamworks (`libPerrysteam_api`, for the `libsteam_api.dylib` games ship):
+  `SteamAPI_Init` and the interfaces' accessors over the running Linux
+  Steam client's `steamclient.so` (`~/.steam/sdkarm64`, or
+  `$PERRY_STEAMCLIENT`), whose C++ interfaces games call directly;
+  callbacks and call results through `SteamAPI_RunCallbacks`, and manual
+  dispatch. The app ID comes from `SteamAppId` or `steam_appid.txt`.
+  `PERRY_STEAM_TRACE` traces it
 
 Not yet supported: arm64e, thread-local variables (`__thread_vars`),
 `dlopen` from Mach-O code, Objective-C exceptions, most of Foundation
