@@ -140,6 +140,13 @@ open class NSSplitView: NSView {
     /// Not retained.
     var delegateObject: UnsafeMutableRawPointer?
     var dragging: (index: Int, start: CGFloat, position: CGFloat)?
+    /// The thinnest and thickest a pane may be (a split view controller's
+    /// items say), where something limits it.
+    var paneLimits: ((NSView) -> (minimum: CGFloat, maximum: CGFloat))?
+
+    func limits(of pane: NSView) -> (minimum: CGFloat, maximum: CGFloat) {
+        paneLimits?(pane) ?? (0, .greatestFiniteMagnitude)
+    }
 
     @ObjCMethod("init")
     public required init() { super.init() }
@@ -203,7 +210,13 @@ open class NSSplitView: NSView {
         guard !panes.isEmpty else { return }
         let thickness = dividerThickness()
         let total = vertical ? bounds.width : bounds.height
-        var sizes = panes.map { vertical ? $0.frame.width : $0.frame.height }
+        // Laid out once there is room: squeezed into nothing, the panes'
+        // own subviews would lose their layout.
+        guard total > 0 else { return }
+        var sizes = panes.map { pane in
+            let limits = limits(of: pane)
+            return min(max(vertical ? pane.frame.width : pane.frame.height, limits.minimum), limits.maximum)
+        }
         let available = total - thickness * CGFloat(panes.count - 1)
         let extra = available - sizes.reduce(0, +)
         // The pane with the lowest holding priority grows or shrinks: the
@@ -218,7 +231,7 @@ open class NSSplitView: NSView {
                 flexible = index
             }
         }
-        sizes[flexible] = max(0, sizes[flexible] + extra)
+        sizes[flexible] = max(limits(of: panes[flexible]).minimum, sizes[flexible] + extra)
         var offset: CGFloat = 0
         for (pane, size) in zip(panes, sizes) {
             let frame = vertical ? CGRect(x: offset, y: 0, width: size, height: bounds.height) : CGRect(x: 0, y: offset, width: bounds.width, height: size)
@@ -236,7 +249,10 @@ open class NSSplitView: NSView {
         let start = vertical ? first.frame.minX : first.frame.minY
         let end = vertical ? second.frame.maxX : second.frame.maxY
         let thickness = dividerThickness()
-        let clamped = max(start, min(end - thickness, position))
+        let (firstLimits, secondLimits) = (limits(of: first), limits(of: second))
+        let lowest = max(start + firstLimits.minimum, end - thickness - secondLimits.maximum)
+        let highest = min(start + firstLimits.maximum, end - thickness - secondLimits.minimum)
+        let clamped = max(start, min(end - thickness, max(lowest, min(highest, position))))
         if vertical {
             first.setFrame(CGRect(x: start, y: 0, width: clamped - start, height: bounds.height))
             second.setFrame(CGRect(x: clamped + thickness, y: 0, width: end - clamped - thickness, height: bounds.height))
