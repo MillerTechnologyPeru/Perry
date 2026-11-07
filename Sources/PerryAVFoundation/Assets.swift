@@ -151,7 +151,7 @@ open class AVAsset: NSObject {
     @ObjCMethod("naturalSize")
     func naturalSize() -> CGSize {
         let description = load().description
-        return CGSize(width: Double(description?.width ?? 0), height: Double(description?.height ?? 0))
+        return CGSize(width: .init(description?.width ?? 0), height: .init(description?.height ?? 0))
     }
 
     @ObjCMethod("preferredTransform")
@@ -258,7 +258,7 @@ open class AVAssetTrack: NSObject {
     @ObjCMethod("nominalFrameRate") func nominalFrameRate() -> Float { Float(description?.frameRate ?? 0) }
 
     @ObjCMethod("naturalSize")
-    func naturalSize() -> CGSize { CGSize(width: Double(description?.width ?? 0), height: Double(description?.height ?? 0)) }
+    func naturalSize() -> CGSize { CGSize(width: .init(description?.width ?? 0), height: .init(description?.height ?? 0)) }
 
     @ObjCMethod("preferredTransform")
     func preferredTransform() -> CGAffineTransform { CGAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0) }
