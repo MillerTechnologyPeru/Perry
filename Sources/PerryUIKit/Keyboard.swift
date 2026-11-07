@@ -76,6 +76,10 @@ final class KeyCommandState {
     var title: String?
     var discoverabilityTitle: String?
     var wantsPriorityOverSystemBehavior = false
+    var image: NSObject?
+    var propertyList: NSObject?
+    var attributes: UInt = 0
+    var state = 0
 }
 
 /// A key command, kept for the responders that list it; with no hardware
@@ -107,6 +111,8 @@ open class UIKeyCommand: NSObject {
                      propertyList: NSObject?) -> UIKeyCommand {
         let command = make(input: input, modifierFlags: modifierFlags, action: action)
         command.command.title = title
+        command.command.image = image
+        command.command.propertyList = propertyList
         return command
     }
 
@@ -117,6 +123,16 @@ open class UIKeyCommand: NSObject {
     @ObjCMethod("setTitle:") func setTitle(_ title: String?) { command.title = title }
     @ObjCMethod("discoverabilityTitle") func discoverabilityTitle() -> String? { command.discoverabilityTitle }
     @ObjCMethod("setDiscoverabilityTitle:") func setDiscoverabilityTitle(_ title: String?) { command.discoverabilityTitle = title }
+    // UICommand's: an image, attributes (disabled, destructive, hidden) and
+    // a state (off, on, mixed), kept for menus that show the command.
+    @ObjCMethod("image") func image() -> NSObject? { command.image }
+    @ObjCMethod("setImage:") func setImage(_ image: NSObject?) { command.image = image }
+    @ObjCMethod("propertyList") func propertyList() -> NSObject? { command.propertyList }
+    @ObjCMethod("attributes") func attributes() -> UInt { command.attributes }
+    @ObjCMethod("setAttributes:") func setAttributes(_ attributes: UInt) { command.attributes = attributes }
+    @ObjCMethod("state") func state() -> Int { command.state }
+    @ObjCMethod("setState:") func setState(_ state: Int) { command.state = state }
+    @ObjCMethod("alternates") func alternates() -> NSObject { NSMutableArray.empty() }
     @ObjCMethod("wantsPriorityOverSystemBehavior") func wantsPriorityOverSystemBehavior() -> Bool { command.wantsPriorityOverSystemBehavior }
     @ObjCMethod("setWantsPriorityOverSystemBehavior:") func setWantsPriorityOverSystemBehavior(_ wants: Bool) {
         command.wantsPriorityOverSystemBehavior = wants

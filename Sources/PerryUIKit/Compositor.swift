@@ -341,7 +341,9 @@ final class Compositor {
     func draw(_ windows: [UIWindow]) {
         // Layers display first, as an app's OpenGL ES drawing for a layer
         // makes its own context current; then the renderer's is again.
+        let start = Clock.now
         QuartzCore.withRoots(windows) { QuartzCore.displayLayers?($0, $1) }
+        FrameWork.displayed = Clock.now - start
         // GL frames the GPU has finished reading back, to show in this one.
         Renderbuffers.collect()
         rendererContext?.restore()

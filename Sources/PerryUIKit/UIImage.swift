@@ -131,7 +131,9 @@ open class UIImage: NSObject {
     static func image(_ cls: ObjCClass, named name: String, in bundle: NSBundle, catalog: Bool, dark: Bool = false) -> UIImage? {
         let base = name.hasSuffix(".png") || name.hasSuffix(".jpg") ? String(name.dropLast(4)) : name
         let type = name.hasSuffix(".jpg") ? "jpg" : "png"
-        let suffixes = Screen.scale >= 3 ? ["@3x", "@2x", ""] : Screen.scale >= 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
+        // The screen's own scale rounded up first, then larger ones, then
+        // smaller: drawn smaller than it was made rather than larger.
+        let suffixes = Screen.assetScale == 3 ? ["@3x", "@2x", ""] : Screen.assetScale == 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
         for suffix in suffixes {
             if let path = bundle.path(forResource: base + suffix, ofType: type), let image = image(cls, contentsOfFile: path) {
                 return image

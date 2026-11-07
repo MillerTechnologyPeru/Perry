@@ -190,7 +190,15 @@ enum Screen {
     /// else the iPhone's. Apps size what they draw from it (a game its
     /// renderbuffer and its interface), so an iPhone's screen keeps three
     /// whatever the live view's scale.
-    nonisolated(unsafe) static let scale: CGFloat = fixed?.scale ?? (nativeSize != nil ? max(Display.scale, 1) : 3)
+    /// With a live view, the window's pixels a point: the display's scale
+    /// (1.67 on a desktop scaled by 166%), or the fitted one of a fixed-size
+    /// iPhone screen, which layers draw at. Without one, an iPhone's @3x.
+    nonisolated(unsafe) static let scale: CGFloat = fixed?.scale ?? (Display.wanted ? Display.scale : 3)
+
+    /// The scale of the images picked for the screen: its own, rounded up,
+    /// from @1x to @3x, so an image is never shown larger than it was made
+    /// (@2x for a 1.67 screen).
+    nonisolated(unsafe) static let assetScale: Int = max(1, min(3, Int((scale - 0.01).rounded(.up))))
     /// One pixel of what is drawn: of the live view at its scale, else of
     /// the screen. Hairlines are a pixel thick, and layout rounds to
     /// pixels, so lines are not lost between them.

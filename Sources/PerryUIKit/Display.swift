@@ -58,6 +58,9 @@ enum Display {
         // fits the usable area, in quarter steps, however small that makes
         // it: 390 by 844 points is taller than a laptop's display at @3x.
         guard let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" else { return chosen }
+        // A resizable one keeps the display's scale, and is made as tall as
+        // fits instead (see start()).
+        if Screen.isResizable { return chosen }
         let screen = Screen.bounds.size
         let fits = min(pixels.width / screen.width, pixels.height / screen.height)
         return min(chosen, max((fits * 4).rounded(.down) / 4, 0.5))
@@ -107,6 +110,13 @@ enum Display {
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         DesktopEntry.install()
         SDL.prepareEnvironment()
+        // A resizable screen taller or wider than the display's usable area
+        // at its scale is made to fit it, as the desktop would size its window.
+        if Screen.isResizable, Screen.fixed == nil, let usable = SDL.usableDisplaySize() {
+            let fitting = CGSize(width: min(Screen.bounds.width, (usable.width / scale).rounded(.down)),
+                                 height: min(Screen.bounds.height, (usable.height / scale).rounded(.down)))
+            Screen.bounds.size = fitting
+        }
         if !software, SDL.loadOnce(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
             tick()
@@ -183,6 +193,7 @@ enum Display {
     /// redraws when something changed; then again in a sixtieth of a second.
     private static func tick() {
         if let compositor {
+            let start = Clock.now
             if compositor.handleEvents() { Lifecycle.terminate() }
             ObjCRuntime.autoreleasepool {
                 Touches.step()
@@ -197,7 +208,9 @@ enum Display {
                 ObjCRuntime.autoreleasepool {
                     let windows = Windows.visible
                     for window in windows { window.layoutIfNeeded() }
+                    let laidOut = Clock.now
                     compositor.draw(windows)
+                    FrameWork.add(events: now - start, layout: laidOut - now, draw: Clock.now - laidOut)
                 }
             }
         } else if let x, let display {
@@ -369,4 +382,40 @@ enum Animations {
 open class DisplayTicker: NSObject {
     @ObjCMethod("init") public required override init() { super.init() }
     @ObjCMethod("_perryTick:") func tick(_ timer: NSObject?) { Display.timerTick() }
+}
+
+/// With PERRY_UIKIT_FPS set, what drawn frames cost each second, average
+/// and longest, in milliseconds: handling events and scrolling, laying the
+/// windows out, and drawing them.
+enum FrameWork {
+    nonisolated(unsafe) static let on = getenv("PERRY_UIKIT_FPS") != nil
+    nonisolated(unsafe) private static var totals = (events: 0.0, layout: 0.0, draw: 0.0)
+    nonisolated(unsafe) private static var longest = (events: 0.0, layout: 0.0, draw: 0.0)
+    nonisolated(unsafe) private static var frames = 0
+    nonisolated(unsafe) private static var since = 0.0
+    /// Of the drawing, the part spent displaying layers (drawing their
+    /// content) rather than compositing them.
+    nonisolated(unsafe) static var displayed = 0.0
+    /// Update passes (layout and display) run since the last report.
+    nonisolated(unsafe) static var passes = 0
+    nonisolated(unsafe) private static var displaying = (total: 0.0, longest: 0.0)
+
+    static func add(events: Double, layout: Double, draw: Double) {
+        guard on else { return }
+        let now = Clock.now
+        if since == 0 { since = now }
+        frames += 1
+        totals = (totals.events + events, totals.layout + layout, totals.draw + draw)
+        displaying = (displaying.total + displayed, max(displaying.longest, displayed))
+        longest = (max(longest.events, events), max(longest.layout, layout), max(longest.draw, draw))
+        guard now - since >= 1 else { return }
+        func ms(_ total: Double, _ most: Double) -> String {
+            "\(Int((total / Double(frames) * 1000).rounded()))/\(Int((most * 1000).rounded()))"
+        }
+        let line = "perry: UIKit: \(frames) frames, ms average/longest: events \(ms(totals.events, longest.events)), "
+            + "layout \(ms(totals.layout, longest.layout)), draw \(ms(totals.draw, longest.draw)) "
+            + "(displaying layers \(ms(displaying.total, displaying.longest))), \(passes) update passes\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+        (frames, since, totals, longest, displaying, passes) = (0, now, (0, 0, 0), (0, 0, 0), (0, 0), 0)
+    }
 }

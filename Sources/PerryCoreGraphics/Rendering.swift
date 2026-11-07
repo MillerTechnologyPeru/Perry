@@ -200,6 +200,25 @@ final class Canvas {
     /// The image's pixels as an ARGB32 surface: B, G, R, A in memory.
     private static func surface(for image: ImageState) -> Cairo.Surface.Image? {
         if let surface = image.renderCache as? Cairo.Surface.Image { return surface }
+        // Pixels already in the surface's layout are copied a row at a time.
+        if image.isBGRA, let bytes = DataProviders.bytes(image.provider),
+           bytes.count >= image.bytesPerRow * (image.height - 1) + image.width * 4, image.width > 0, image.height > 0,
+           let surface = try? Cairo.Surface.Image(format: .argb32, width: image.width, height: image.height) {
+            let stride = surface.stride, opaque = image.format.alphaInfo == 6
+            bytes.withUnsafeBytes { raw in
+                _ = surface.withUnsafeMutableBytes { destination in
+                    guard let source = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                    for y in 0..<image.height {
+                        let from = source + y * image.bytesPerRow, to = destination + y * stride
+                        to.update(from: from, count: image.width * 4)
+                        if opaque { for x in 0..<image.width { to[x * 4 + 3] = 255 } }
+                    }
+                }
+            }
+            surface.markDirty()
+            image.renderCache = surface
+            return surface
+        }
         let bitmap = image.bitmap
         guard bitmap.width > 0, bitmap.height > 0,
               let surface = try? Cairo.Surface.Image(format: .argb32, width: bitmap.width, height: bitmap.height) else { return nil }

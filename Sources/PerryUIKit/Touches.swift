@@ -208,6 +208,11 @@ enum Touches {
     /// Momentum after a pan: the scroll view and its coasting, in points
     /// per second.
     nonisolated(unsafe) private static var coasting: (view: UIScrollView, deceleration: Deceleration)?
+    /// Where the finger has moved a scroll view's content since the last
+    /// frame: applied once a frame, before it draws, not for each move.
+    nonisolated(unsafe) private static var pendingPan: (view: UIScrollView, offset: CGPoint)?
+    /// Content let go past its edges, springing back along each axis.
+    nonisolated(unsafe) private static var springing: (view: UIScrollView, x: SpringBack, y: SpringBack)?
 
     private static var keyWindow: UIWindow? {
         Windows.key.map { UIWindow(objcObject: $0, ownership: .retain) } ?? Windows.visible.last
@@ -216,6 +221,12 @@ enum Touches {
     static func down(at point: CGPoint) {
         guard let window = keyWindow else { return }
         stopCoasting()
+        // A finger down catches content springing back where it is.
+        flushPan()
+        if let (view, _, _) = springing {
+            springing = nil
+            stopCoasting(view)
+        }
         let hit = window.sendHitTest(point, with: nil)
         trace("down at \(point.x), \(point.y) hits \(hit?.describedByObject() ?? "nothing")")
         let touch = UITouch.objCClass.object.allocated().unsafeCast(to: UITouch.self)
@@ -303,8 +314,8 @@ enum Touches {
                 }
             }
             if panning {
-                pan(scrollView, to: clamped(scrollView, CGPoint(x: startOffset.x - axis(scrollView).x * (point.x - start.x),
-                                                                y: startOffset.y - axis(scrollView).y * (point.y - start.y))))
+                pendingPan = (scrollView, banded(scrollView, CGPoint(x: startOffset.x - axis(scrollView).x * (point.x - start.x),
+                                                                     y: startOffset.y - axis(scrollView).y * (point.y - start.y))))
                 Display.markDirty()
                 return
             }
@@ -337,8 +348,20 @@ enum Touches {
             return
         }
         if let scrollView, panning {
+            flushPan()
             scrollView.scroll.dragging = false
             scrollView.scroll.tracking = false
+            // Let go past an edge, the content springs back instead of coasting.
+            let offset = scrollView.state.bounds.origin, rest = clamped(scrollView, offset)
+            if rest != offset {
+                if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewDidEndDragging:willDecelerate:") {
+                    delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: true)
+                }
+                springing = (scrollView, SpringBack(from: Double(offset.x), to: Double(rest.x), time: Clock.now),
+                             SpringBack(from: Double(offset.y), to: Double(rest.y), time: Clock.now))
+                scrollView.scroll.decelerating = true
+                return
+            }
             let velocity = Touches.velocity(scrollView)
             let deceleration = Deceleration(velocity: (Double(velocity.x), Double(velocity.y)), rate: Double(scrollView.scroll.decelerationRate),
                                             time: Clock.now)
@@ -438,6 +461,18 @@ enum Touches {
     /// Lights up a cell held long enough, and moves momentum scrolling on,
     /// from the live view's tick.
     static func step() {
+        flushPan()
+        if var (view, x, y) = springing {
+            let offset = CGPoint(x: CGFloat(x.step(at: Clock.now)), y: CGFloat(y.step(at: Clock.now)))
+            pan(view, to: offset)
+            Display.markDirty()
+            if x.isFinished && y.isFinished {
+                springing = nil
+                stopCoasting(view)
+            } else {
+                springing = (view, x, y)
+            }
+        }
         if let (cell, since) = pendingHighlight, touch != nil, !panning, Clock.now - since >= highlightDelay {
             pendingHighlight = nil
             highlighted = cell
@@ -460,10 +495,32 @@ enum Touches {
     private static func stopCoasting() {
         guard let (view, _) = coasting else { return }
         coasting = nil
+        stopCoasting(view)
+    }
+
+    private static func stopCoasting(_ view: UIScrollView) {
         view.scroll.decelerating = false
         if let delegate = view.delegate(), delegate.responds(to: "scrollViewDidEndDecelerating:") {
             delegate.sendScrollViewDidEndDecelerating(view)
         }
+    }
+
+    /// Moves the content where the finger took it since the last frame.
+    private static func flushPan() {
+        guard let (view, offset) = pendingPan else { return }
+        pendingPan = nil
+        pan(view, to: offset)
+    }
+
+    /// A dragged offset: within the content, or past its edges by a rubber
+    /// band's stretch where the scroll view bounces.
+    private static func banded(_ view: UIScrollView, _ offset: CGPoint) -> CGPoint {
+        guard view.scroll.bounces else { return clamped(view, offset) }
+        let bounds = view.state.bounds, inset = view.adjustedContentInset(), size = view.scroll.contentSize
+        let maxX = max(-inset.left, size.width + inset.right - bounds.width)
+        let maxY = max(-inset.top, size.height + inset.bottom - bounds.height)
+        return CGPoint(x: CGFloat(rubberBand(Double(offset.x), low: Double(-inset.left), high: Double(maxX), dimension: Double(bounds.width))),
+                       y: CGFloat(rubberBand(Double(offset.y), low: Double(-inset.top), high: Double(maxY), dimension: Double(bounds.height))))
     }
 
     private static func pan(_ view: UIScrollView, to offset: CGPoint) {

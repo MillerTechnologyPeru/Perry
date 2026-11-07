@@ -26,9 +26,15 @@ enum AppKitAssets {
         }
     }
 
-    /// A named image's bitmap at twice its size in points, and that size.
+    /// The scale of the images picked for the display: its own, rounded up,
+    /// from @1x to @3x, so an image is never shown larger than it was made
+    /// (@2x for a desktop scaled by 166%).
+    static var displayScale: Int { max(1, min(3, Int((Screens.display.density - 0.01).rounded(.up)))) }
+
+    /// A named image's bitmap at the display's scale (see displayScale), and
+    /// its size in points.
     static func image(named name: String) -> (image: CGRef, size: CGSize)? {
-        guard CG.ready, let (pixels, scale) = main?.pixels(named: name, dark: Appearances.currentIsDark, screenScale: 2),
+        guard CG.ready, let (pixels, scale) = main?.pixels(named: name, dark: Appearances.currentIsDark, screenScale: displayScale),
               let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
         defer { CG.release(space) }
         var bytes = pixels.bytes
@@ -46,7 +52,7 @@ enum AppKitAssets {
     /// A PNG Scripts/extract-assets.sh decoded on a Mac for a rendition
     /// Perry can't decode (vector and deepmap ones), and its scale.
     static func extractedImage(named name: String) -> (path: String, scale: Int)? {
-        main?.extractedImageFiles(named: name, dark: Appearances.currentIsDark, screenScale: 2)
+        main?.extractedImageFiles(named: name, dark: Appearances.currentIsDark, screenScale: displayScale)
             .first { access($0.path, R_OK) == 0 }
     }
 

@@ -75,3 +75,38 @@ public struct Deceleration {
         return distance
     }
 }
+
+/// Where content dragged past its edge shows: the overshoot shrinks the
+/// further it goes, never reaching `dimension` (the view's length), as
+/// UIScrollView's rubber band does. Within `low` to `high`, `offset`.
+public func rubberBand(_ offset: Double, low: Double, high: Double, dimension: Double) -> Double {
+    guard dimension > 0 else { return min(max(offset, low), high) }
+    func stretch(_ overshoot: Double) -> Double { (1 - 1 / (overshoot * 0.55 / dimension + 1)) * dimension }
+    if offset < low { return low - stretch(low - offset) }
+    if offset > high { return high + stretch(offset - high) }
+    return offset
+}
+
+/// Content let go past its edge, going back to `target` on a critically
+/// damped spring, settling in about a third of a second.
+public struct SpringBack {
+    /// The spring's angular frequency, per second.
+    static let stiffness = 15.0
+    let start: Double
+    let target: Double
+    let time: Double
+    public private(set) var isFinished = false
+
+    public init(from start: Double, to target: Double, time: Double) {
+        (self.start, self.target, self.time) = (start, target, time)
+        isFinished = abs(start - target) < 0.5
+    }
+
+    /// The position at `now`; finished once within half a point.
+    public mutating func step(at now: Double) -> Double {
+        let t = max(0, now - time), x0 = start - target
+        let x = x0 * (1 + Self.stiffness * t) * exp(-Self.stiffness * t)
+        if abs(x) < 0.5 { isFinished = true; return target }
+        return target + x
+    }
+}

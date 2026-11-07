@@ -124,6 +124,7 @@ struct SceneManifest {
         let name: String?
         let delegateClassName: String?
         let sceneClassName: String?
+        let storyboardName: String?
     }
 
     /// Configurations by session role.
@@ -149,7 +150,8 @@ struct SceneManifest {
                 configurations[role] = entries.elements.compactMap { $0.as(NSDictionary.self) }.map { entry in
                     Entry(name: entry.object(forKey: "UISceneConfigurationName")?.stringValue,
                           delegateClassName: entry.object(forKey: "UISceneDelegateClassName")?.stringValue,
-                          sceneClassName: entry.object(forKey: "UISceneClassName")?.stringValue)
+                          sceneClassName: entry.object(forKey: "UISceneClassName")?.stringValue,
+                          storyboardName: entry.object(forKey: "UISceneStoryboardFile")?.stringValue)
                 }
             }
         }
@@ -187,6 +189,9 @@ enum Scenes {
         if configuration.state.sceneClass == nil {
             configuration.state.sceneClass = entry?.sceneClassName.flatMap(Classes.named)
         }
+        if configuration.state.storyboard == nil, let name = entry?.storyboardName {
+            configuration.state.storyboard = UIStoryboard.storyboard(name: name, bundle: NSBundle.main())
+        }
         session.state.configuration = configuration.copied().unsafeCast(to: UISceneConfiguration.self)
         Application.openSessions?.add(session)
 
@@ -199,10 +204,18 @@ enum Scenes {
         Application.connectedScenes?.add(scene)
         Lifecycle.scenes.append(scene)
 
+        // A storyboard's initial controller is the root of a window UIKit
+        // makes for the scene and gives its delegate, before the delegate
+        // hears of the connection, and shows once it has.
+        let storyboardWindow = configuration.state.storyboard?.as(UIStoryboard.self).flatMap { storyboard in
+            storyboardWindow(storyboard, scene: scene)
+        }
+
         let sceneDelegate = scene.state.delegate?.unsafeCast(to: AnyUISceneDelegate.self)
         Application.post(Notifications.UISceneWillConnectNotification, object: scene)
         sceneDelegate?.scene(scene, willConnectTo: session, options: options)
         session.state.scene = scene.objcObject
+        storyboardWindow?.makeKeyAndVisible()
 
         sceneDelegate?.sceneWillEnterForeground(scene)
         Application.post(Notifications.UISceneWillEnterForegroundNotification, object: scene)
@@ -218,5 +231,18 @@ enum Scenes {
             Application.post(Notifications.UIApplicationDidBecomeActiveNotification, object: application)
             Lifecycle.launched = true
         }
+    }
+
+    /// A window in `scene` with the storyboard's initial controller, set as
+    /// the scene delegate's window.
+    private static func storyboardWindow(_ storyboard: UIStoryboard, scene: UIScene) -> UIWindow? {
+        guard let controller = storyboard.instantiateInitialViewController() else { return nil }
+        let window = UIWindow.objCClass.object.allocated().unsafeCast(to: UIWindow.self)
+            .initialize(windowScene: scene.as(UIWindowScene.self)).unsafeCast(to: UIWindow.self)
+        if let delegate = scene.state.delegate, delegate.responds(to: "setWindow:") {
+            Outlets.set(delegate, "window", window)
+        }
+        window.setRootViewController(controller)
+        return window
     }
 }
