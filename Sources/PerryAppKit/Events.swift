@@ -10,6 +10,8 @@ import PerryObjCInterop
 // -terminate:.
 
 enum Events {
+    /// SDL's mice that have scrolled by fractions: touchpads.
+    nonisolated(unsafe) private static var preciseDevices: Set<UInt32> = []
     /// The modifier keys down at the last key event, for flags-changed events.
     nonisolated(unsafe) private static var modifiers: UInt = 0
 
@@ -82,16 +84,31 @@ enum Events {
             ns.clickCount = Int(raw.load(fromByteOffset: 26, as: UInt8.self))
             markTouch(ns)
             enqueue(ns)
-        case 0x403: // wheel: x and y at 24 and 28, direction at 32, mouse at 36 and 40
+        case 0x403: // wheel: mouse at 20, x and y at 24 and 28, direction at 32, mouse at 36 and 40
             let flipped = raw.load(fromByteOffset: 32, as: UInt32.self) == 1
             let sign: CGFloat = flipped ? -1 : 1
+            let x = CGFloat(raw.load(fromByteOffset: 24, as: Float.self)), y = CGFloat(raw.load(fromByteOffset: 28, as: Float.self))
+            // A wheel turns in whole notches, lines; a touchpad scrolls in
+            // fractions of one, tenths of its points (SDL's unit is ten
+            // pixels). A device that has scrolled a fraction is precise.
+            let mouse = raw.load(fromByteOffset: 20, as: UInt32.self)
+            if x != x.rounded() || y != y.rounded() { preciseDevices.insert(mouse) }
+            let precise = preciseDevices.contains(mouse)
             let ns = NSEvent(.scrollWheel, window: window, location: location(36, 40))
-            ns.deltaX = -CGFloat(raw.load(fromByteOffset: 24, as: Float.self)) * sign
-            ns.deltaY = CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) * sign
-            // A wheel's line is about ten points.
-            ns.scrollingDeltaX = ns.deltaX * 10
-            ns.scrollingDeltaY = ns.deltaY * 10
+            ns.deltaX = -x * sign
+            ns.deltaY = y * sign
+            ns.hasPreciseScrollingDeltas = precise
+            ns.scrollingDeltaX = precise ? ns.deltaX * 10 : ns.deltaX
+            ns.scrollingDeltaY = precise ? ns.deltaY * 10 : ns.deltaY
             ns.isDirectionInvertedFromDevice = flipped
+            // Wheel events waiting together are one scroll, as AppKit
+            // coalesces them: a fast spin redraws once.
+            if let last = app.queue.last, last.type == .scrollWheel, last.window === ns.window,
+               last.hasPreciseScrollingDeltas == precise, last.subtype == ns.subtype {
+                (last.deltaX, last.deltaY) = (last.deltaX + ns.deltaX, last.deltaY + ns.deltaY)
+                (last.scrollingDeltaX, last.scrollingDeltaY) = (last.scrollingDeltaX + ns.scrollingDeltaX, last.scrollingDeltaY + ns.scrollingDeltaY)
+                break
+            }
             enqueue(ns)
         case 0x300, 0x301: // key down, up: scancode at 24, keycode at 28, modifiers at 32, repeat at 37
             let scancode = raw.load(fromByteOffset: 24, as: UInt32.self)
