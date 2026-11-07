@@ -105,6 +105,7 @@ enum Display {
         let title = NSBundle.main().infoObject(forKey: "CFBundleDisplayName")?.stringValue
             ?? NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app"
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
+        DesktopEntry.install()
         SDL.prepareEnvironment()
         if !software, SDL.loadOnce(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
