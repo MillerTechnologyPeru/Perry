@@ -101,6 +101,8 @@ let package = Package(
         // Compiled asset catalogs (Assets.car), which UIKit's and AppKit's
         // named images and colors read.
         .target(name: "PerryAssetCatalog"),
+        // Touch scrolling's velocity and deceleration, for UIKit and AppKit.
+        .target(name: "PerryScrollPhysics"),
         .target(
             name: "PerryLoaderCore",
             dependencies: ["PerryInterface"]
@@ -403,14 +405,15 @@ let package = Package(
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
-            dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop",
+                           "PerryScrollPhysics"],
             plugins: ["PerryProviderPlugin"]
         ),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics"],
             plugins: ["PerryProviderPlugin"]
         ),
         // Metal's declarations of metal2vulkan's C ABI, and its loader:

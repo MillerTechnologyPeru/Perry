@@ -493,7 +493,9 @@ open class NSTableView: NSControl {
         for (row, rowView) in rowViews { placeRowView(rowView, row: row) }
     }
 
-    /// The rows the clip view shows have views; the others' are reused.
+    /// The rows the clip view shows have views, made at once; so do those a
+    /// screen above and below, made one at a time while nothing else
+    /// happens, ready to scroll in. The others' are reused.
     func updateRowViews() {
         guard isViewBased, rowCount > 0 else {
             for (_, rowView) in rowViews { recycle(rowView) }
@@ -501,15 +503,49 @@ open class NSTableView: NSControl {
             return
         }
         let shown = visibleRect()
-        var range = rows(in: CGRect(x: 0, y: shown.minY - 100, width: frame.width, height: shown.height + 200))
-        if shown.height <= 0 { range = NSRange(location: 0, length: UInt(min(rowCount, 50))) }
-        let visible = Set(Int(range.location)..<Int(range.location + range.length))
-        for (row, rowView) in rowViews where !visible.contains(row) {
+        let visible: Set<Int>, nearby: Set<Int>
+        if shown.height <= 0 {
+            visible = Set(0..<min(rowCount, 50))
+            nearby = visible
+        } else {
+            func rowSet(_ rect: CGRect) -> Set<Int> {
+                let range = rows(in: rect)
+                return Set(Int(range.location)..<Int(range.location + range.length))
+            }
+            visible = rowSet(CGRect(x: 0, y: shown.minY, width: frame.width, height: shown.height))
+            nearby = rowSet(CGRect(x: 0, y: shown.minY - shown.height, width: frame.width, height: shown.height * 3))
+        }
+        for (row, rowView) in rowViews where !nearby.contains(row) && !visible.contains(row) {
             recycle(rowView)
             rowViews[row] = nil
         }
         for row in visible.sorted() where rowViews[row] == nil {
             _ = makeRowView(row)
+        }
+        if nearby.contains(where: { rowViews[$0] == nil }) { prepareNearbyRows() }
+    }
+
+    private var preparingRows = false
+
+    /// Makes one of the rows near those shown when the app is idle, then
+    /// the next, until each has a view.
+    private func prepareNearbyRows() {
+        guard !preparingRows else { return }
+        preparingRows = true
+        Dispatch.after(nanoseconds: 1_000_000) { [weak self] in
+            guard let self else { return }
+            self.preparingRows = false
+            guard self.loaded, self.isViewBased, self.rowCount > 0 else { return }
+            let shown = self.visibleRect()
+            guard shown.height > 0 else { return }
+            let range = self.rows(in: CGRect(x: 0, y: shown.minY - shown.height, width: self.frame.width, height: shown.height * 3))
+            let middle = shown.midY
+            // The nearest row still without a view.
+            let missing = (Int(range.location)..<Int(range.location + range.length)).filter { self.rowViews[$0] == nil }
+                .min { abs(self.rect(ofRow: $0).midY - middle) < abs(self.rect(ofRow: $1).midY - middle) }
+            guard let row = missing else { return }
+            _ = self.makeRowView(row)
+            self.prepareNearbyRows()
         }
     }
 

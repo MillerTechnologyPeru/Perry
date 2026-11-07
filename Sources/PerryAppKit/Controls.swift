@@ -166,7 +166,11 @@ open class NSControl: NSView {
     @ObjCMethod("font") func controlFont() -> NSObject? { cellObject?.font }
     @ObjCMethod("setFont:")
     func setFont(_ font: NSObject?) {
-        cellObject?.font = font?.as(NSFont.self)
+        // The same font again changes nothing: views that set their fields'
+        // fonts as they lay out would otherwise lay out every frame.
+        let font = font?.as(NSFont.self)
+        if let old = cellObject?.font, let font, old === font || old.isEqual(font) { return }
+        cellObject?.font = font
         valueChanged()
     }
     @ObjCMethod("alignment") func controlAlignment() -> Int { alignment }

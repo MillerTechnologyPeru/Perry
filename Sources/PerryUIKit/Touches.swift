@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import PerryScrollPhysics
 
 // Touches from the live view's pointer. A touch goes to the view hit
 // under it, through -touchesBegan:withEvent: and the rest, which a view
@@ -203,10 +204,10 @@ enum Touches {
 
     /// The touch in progress, for recognizers' locationInView:.
     static var current: UITouch? { touch }
-    nonisolated(unsafe) private static var samples: [(point: CGPoint, time: Double)] = []
-    /// Momentum after a pan: the scroll view and its velocity in points
+    nonisolated(unsafe) private static var samples = VelocityTracker()
+    /// Momentum after a pan: the scroll view and its coasting, in points
     /// per second.
-    nonisolated(unsafe) private static var coasting: (view: UIScrollView, velocity: CGPoint, time: Double)?
+    nonisolated(unsafe) private static var coasting: (view: UIScrollView, deceleration: Deceleration)?
 
     private static var keyWindow: UIWindow? {
         Windows.key.map { UIWindow(objcObject: $0, ownership: .retain) } ?? Windows.visible.last
@@ -227,7 +228,8 @@ enum Touches {
         event.state.timestamp = touch.state.timestamp
         (Touches.touch, Touches.event) = (touch, event)
         markStationary(except: touch)
-        (start, panning, samples) = (point, false, [(point, Clock.now)])
+        (start, panning) = (point, false)
+        samples.reset(x: Double(point.x), y: Double(point.y), time: Clock.now)
         recognizers = []
         viewCancelled = false
         var ancestor = hit
@@ -272,8 +274,7 @@ enum Touches {
         touch.state.location = point
         touch.state.timestamp = Clock.now
         markStationary(except: touch)
-        samples.append((point, Clock.now))
-        samples.removeAll { Clock.now - $0.time > 0.1 }
+        samples.add(x: Double(point.x), y: Double(point.y), time: Clock.now)
         if SwipeActions.dragging {
             SwipeActions.move(dx: point.x - swipeStart.x)
             return
@@ -290,7 +291,7 @@ enum Touches {
                 SwipeActions.move(dx: point.x - swipeStart.x)
                 return
             }
-            if !panning, distance >= 10 {
+            if !panning, distance >= CGFloat(panThreshold) {
                 panning = true
                 unhighlight()
                 if delivered { send(.cancelled) }
@@ -339,12 +340,13 @@ enum Touches {
             scrollView.scroll.dragging = false
             scrollView.scroll.tracking = false
             let velocity = Touches.velocity(scrollView)
-            let decelerates = hypot(velocity.x, velocity.y) > 50
+            let deceleration = Deceleration(velocity: (Double(velocity.x), Double(velocity.y)), rate: Double(scrollView.scroll.decelerationRate),
+                                            time: Clock.now)
             if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewDidEndDragging:willDecelerate:") {
-                delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: decelerates)
+                delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: deceleration != nil)
             }
-            if decelerates {
-                coasting = (scrollView, velocity, Clock.now)
+            if let deceleration {
+                coasting = (scrollView, deceleration)
                 scrollView.scroll.decelerating = true
             }
             return
@@ -442,23 +444,21 @@ enum Touches {
             setHighlighted(cell, true)
             Display.markDirty()
         }
-        guard let (view, velocity, time) = coasting else { return }
-        let now = Clock.now, elapsed = now - time
-        let rate = pow(view.scroll.decelerationRate, CGFloat(elapsed) * 1000)
-        let next = CGPoint(x: velocity.x * rate, y: velocity.y * rate)
+        guard var (view, deceleration) = coasting else { return }
+        let distance = deceleration.step(at: Clock.now)
         let offset = view.state.bounds.origin
-        let target = clamped(view, CGPoint(x: offset.x - velocity.x * CGFloat(elapsed), y: offset.y - velocity.y * CGFloat(elapsed)))
+        let target = clamped(view, CGPoint(x: offset.x - CGFloat(distance.x), y: offset.y - CGFloat(distance.y)))
         pan(view, to: target)
         Display.markDirty()
-        if hypot(next.x, next.y) < 10 || target == offset {
+        if deceleration.isFinished || target == offset {
             stopCoasting()
         } else {
-            coasting = (view, next, now)
+            coasting = (view, deceleration)
         }
     }
 
     private static func stopCoasting() {
-        guard let (view, _, _) = coasting else { return }
+        guard let (view, _) = coasting else { return }
         coasting = nil
         view.scroll.decelerating = false
         if let delegate = view.delegate(), delegate.responds(to: "scrollViewDidEndDecelerating:") {
@@ -489,9 +489,8 @@ enum Touches {
     }
 
     private static func velocity(_ view: UIScrollView) -> CGPoint {
-        guard let first = samples.first, let last = samples.last, last.time > first.time else { return .zero }
-        let axis = axis(view), time = last.time - first.time
-        return CGPoint(x: (last.point.x - first.point.x) / CGFloat(time) * axis.x, y: (last.point.y - first.point.y) / CGFloat(time) * axis.y)
+        let velocity = samples.velocity, axis = axis(view)
+        return CGPoint(x: CGFloat(velocity.x) * axis.x, y: CGFloat(velocity.y) * axis.y)
     }
 
     /// The cell a touch began in, highlighted until it lifts or pans.

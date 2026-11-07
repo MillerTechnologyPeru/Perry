@@ -37,6 +37,7 @@ enum Windows {
     /// Draws the windows when their layers changed or animate, at most a
     /// display refresh apart, and twice a second regardless.
     static func drawIfNeeded() {
+        for window in all { window.touchScrolling.flush() }
         let now = Clock.now
         if QuartzCore.needsDisplay?() == true { dirty = true }
         guard dirty || now - lastDraw > 0.5, now - lastDraw >= 1 / Screens.display.refreshRate * 0.9 else { return }
@@ -94,6 +95,8 @@ open class NSWindow: NSResponder {
     var frameAutosaveName = ""
     var toolbar: NSToolbar?
     var dumpedViews = false
+    /// The background color the root layer has.
+    var drawnBackground: NSColor?
     /// With a toolbar, the view holding it above the content view.
     var frameView: NSView?
     var toolbarView: ToolbarView?
@@ -716,8 +719,12 @@ open class NSWindow: NSResponder {
         root.layoutSubtreeIfNeeded()
         if laidOut, let controller { Send.void(controller.objcObject, "viewDidLayout") }
         // The window's background shows behind its views.
+        // Set only when it changes: a layer change asks for another frame.
         let background = backgroundColor?.as(NSColor.self) ?? NSColor.windowBackgroundColor()
-        CALayer(objcObject: layer.objcObject, ownership: .retain).setBackgroundColor(background.cgColorRef)
+        if !(drawnBackground?.isEqual(background) ?? false) {
+            drawnBackground = background
+            CALayer(objcObject: layer.objcObject, ownership: .retain).setBackgroundColor(background.cgColorRef)
+        }
         QuartzCore.draw(CALayer(objcObject: layer.objcObject, ownership: .retain), renderer: renderer, scale: backingScale)
         if Trace.enabled, !dumpedViews {
             dumpedViews = true
@@ -784,21 +791,32 @@ open class NSWindow: NSResponder {
         return responder == nil
     }
 
+    /// Touch scrolling's state for this window.
+    let touchScrolling = TouchScrolling()
+
+    /// A mouse down to the view under it, which becomes the first
+    /// responder if it takes it.
+    func dispatchMouseDown(_ event: NSEvent) {
+        guard !ignoresMouseEvents else { return }
+        let view = viewAt(event.locationInWindow)
+        mouseDownView = view
+        if event.type == .leftMouseDown, let view, view.objcObject != firstResponderObject,
+           Send.bool(view.objcObject, "acceptsFirstResponder") {
+            _ = makeFirstResponder(view)
+        }
+        let selector = event.type == .leftMouseDown ? "mouseDown:" : event.type == .rightMouseDown ? "rightMouseDown:" : "otherMouseDown:"
+        Send.void(view?.objcObject ?? objcObject, selector, event.objcObject)
+    }
+
     /// Dispatches an event the application sent the window.
     @ObjCMethod("sendEvent:")
     func sendEvent(_ eventObject: NSObject?) {
         guard let event = eventObject?.as(NSEvent.self) else { return }
+        // A touch over a scroll view scrolls it, or waits to be a click.
+        if event.subtype == 3, !ignoresMouseEvents, touchScrolling.handle(event, in: self) { return }
         switch event.type {
         case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            guard !ignoresMouseEvents else { return }
-            let view = viewAt(event.locationInWindow)
-            mouseDownView = view
-            if event.type == .leftMouseDown, let view, view.objcObject != firstResponderObject,
-               Send.bool(view.objcObject, "acceptsFirstResponder") {
-                _ = makeFirstResponder(view)
-            }
-            let selector = event.type == .leftMouseDown ? "mouseDown:" : event.type == .rightMouseDown ? "rightMouseDown:" : "otherMouseDown:"
-            Send.void(view?.objcObject ?? objcObject, selector, event.objcObject)
+            dispatchMouseDown(event)
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
             let view = mouseDownView ?? viewAt(event.locationInWindow)
             if MouseButtons.pressed == 0 { mouseDownView = nil }
