@@ -19,6 +19,9 @@ final class SceneConfigurationState: ObjectState {
     var role = ""
     var delegateClass: ObjCClass?
     var sceneClass: ObjCClass?
+    /// Not retained by the copy's owner: the storyboard the scene's window
+    /// shows the initial controller of.
+    var storyboard: NSObject?
 }
 
 /// The classes a scene of one role is made from.
@@ -53,12 +56,15 @@ open class UISceneConfiguration: NSObject {
     @ObjCMethod("setDelegateClass:") func setDelegateClass(_ cls: ObjCClass?) { state.delegateClass = cls }
     @ObjCMethod("sceneClass") func sceneClass() -> ObjCClass? { state.sceneClass }
     @ObjCMethod("setSceneClass:") func setSceneClass(_ cls: ObjCClass?) { state.sceneClass = cls }
+    @ObjCMethod("storyboard") func storyboard() -> NSObject? { state.storyboard }
+    @ObjCMethod("setStoryboard:") func setStoryboard(_ storyboard: NSObject?) { state.storyboard = storyboard }
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UISceneConfiguration {
         let copy = UISceneConfiguration.make(name: state.name, role: state.role)
         copy.state.delegateClass = state.delegateClass
         copy.state.sceneClass = state.sceneClass
+        copy.state.storyboard = state.storyboard
         return copy
     }
 
