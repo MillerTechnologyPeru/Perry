@@ -358,8 +358,18 @@ extension UIViewController {
             archive = Nibs.load(named: name, in: directory)
             path = directory
             if archive == nil, state.storyboard == nil, let bundle = NSBundle.bundle(path: directory) {
+                // Each preferred localization, then its language alone (en
+                // for en-US), then the development region's, as Darwin
+                // falls back.
+                var localizations: [String] = []
                 for localization in bundle.preferredLocalizations().elements {
-                    let candidate = directory + "/" + String(objCArgument: localization.objcObject) + ".lproj"
+                    let full = String(objCArgument: localization.objcObject)
+                    localizations.append(full)
+                    if let language = full.split(whereSeparator: { $0 == "-" || $0 == "_" }).first { localizations.append(String(language)) }
+                }
+                if let region = bundle.developmentLocalization() { localizations.append(region) }
+                for localization in localizations {
+                    let candidate = directory + "/" + localization + ".lproj"
                     if let found = Nibs.load(named: name, in: candidate) {
                         (archive, path) = (found, candidate)
                         break
