@@ -216,9 +216,10 @@ static void deliver(int linux_signal, siginfo_t *info, void *raw_context) {
 
 // MARK: - Instructions the core lacks
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__arm__)
 // Perry owns SIGILL: an instruction Apple silicon has and this core lacks
-// is rewritten the first time it runs (isa.c), and runs again; every other
+// is rewritten the first time it runs (isa.c), and runs again, and on armv7
+// SWP and SWPB are done in the handler; every other
 // SIGILL goes to the app's handler, or to the handler before Perry's (the
 // crash reporter), or the default.
 int perry_isa_rewrite(void *context);
@@ -229,9 +230,13 @@ static int illegal_kept;
 static void illegal_instruction(int linux_signal, siginfo_t *info, void *raw_context) {
     // PERRY_ISA_TRACE names each instruction rewritten.
     if (getenv("PERRY_ISA_TRACE")) {
+#if defined(__aarch64__)
+        uintptr_t pc = (uintptr_t)((ucontext_t *)raw_context)->uc_mcontext.pc;
+#else
+        uintptr_t pc = (uintptr_t)((ucontext_t *)raw_context)->uc_mcontext.arm_pc;
+#endif
         char line[160];
-        int n = snprintf(line, sizeof(line), "perry: SIGILL at %p: %08x\n", (void *)((ucontext_t *)raw_context)->uc_mcontext.pc,
-                         *(const uint32_t *)((ucontext_t *)raw_context)->uc_mcontext.pc);
+        int n = snprintf(line, sizeof(line), "perry: SIGILL at %p: %08x\n", (void *)pc, *(const uint32_t *)pc);
         write(2, line, (size_t)n);
     }
     if (perry_isa_rewrite(raw_context))
