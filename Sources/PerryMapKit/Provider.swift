@@ -61,6 +61,7 @@ class UIView: NSObject {
     @ObjCMethod("setFrame:") func setFrame(_ frame: CGRect)
     @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: UIColor?)
     @ObjCMethod("setNeedsDisplay") func setNeedsDisplay()
+    @ObjCMethod("setMultipleTouchEnabled:") func setMultipleTouchEnabled(_ enabled: Bool)
     @ObjCMethod("contentScaleFactor") func contentScaleFactor() -> CGFloat
     @ObjCMethod("convertPoint:toView:") func convert(_ point: CGPoint, to view: UIView?) -> CGPoint
     @ObjCMethod("convertPoint:fromView:") func convert(_ point: CGPoint, from view: UIView?) -> CGPoint
