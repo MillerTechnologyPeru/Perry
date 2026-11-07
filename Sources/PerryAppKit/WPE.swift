@@ -61,6 +61,9 @@ final class WPE: @unchecked Sendable {
     let navigationPolicyDecisionGetNavigationAction: @convention(c) (Pointer) -> Pointer?
     let navigationActionGetRequest: @convention(c) (Pointer) -> Pointer?
     let navigationActionGetNavigationType: @convention(c) (Pointer) -> Int32
+    let navigationActionGetModifiers: (@convention(c) (Pointer) -> UInt32)?
+    let navigationActionGetMouseButton: (@convention(c) (Pointer) -> UInt32)?
+    let objectRef: @convention(c) (Pointer) -> Pointer?
     let uriRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
     let policyDecisionUse: @convention(c) (Pointer) -> Void
     let policyDecisionIgnore: @convention(c) (Pointer) -> Void
@@ -196,6 +199,9 @@ final class WPE: @unchecked Sendable {
                                  (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt).self)
         signalHandlerDisconnect = bind(gobject, "g_signal_handler_disconnect", (@convention(c) (Pointer, UInt) -> Void).self)
         objectUnref = bind(gobject, "g_object_unref", (@convention(c) (Pointer) -> Void).self)
+        objectRef = bind(gobject, "g_object_ref", (@convention(c) (Pointer) -> Pointer?).self)
+        navigationActionGetModifiers = dlsym(webkit, "webkit_navigation_action_get_modifiers").map { unsafeBitCast($0, to: (@convention(c) (Pointer) -> UInt32).self) }
+        navigationActionGetMouseButton = dlsym(webkit, "webkit_navigation_action_get_mouse_button").map { unsafeBitCast($0, to: (@convention(c) (Pointer) -> UInt32).self) }
         free = bind(glib, "g_free", (@convention(c) (Pointer?) -> Void).self)
         errorFree = bind(glib, "g_error_free", (@convention(c) (Pointer) -> Void).self)
         quarkToString = bind(glib, "g_quark_to_string", (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
@@ -263,6 +269,11 @@ final class WebPage {
     /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
     /// every navigation go ahead.
     var decideNavigation: ((String, Int32) -> Bool)?
+    /// Asks whether a navigation goes ahead, answered later: its URI,
+    /// WebKitNavigationType, wpe_input_keyboard_modifier flags and mouse
+    /// button (0 for none), and what to call with the answer. Used before
+    /// `decideNavigation`.
+    var decideNavigationLater: ((String, Int32, UInt32, UInt32, @escaping (Bool) -> Void) -> Void)?
 
     /// The pages there are, which the main queue runs GLib's context for.
     nonisolated(unsafe) static var count = 0
@@ -470,6 +481,7 @@ final class WebPage {
     /// something else keeps the page: its frames and events go nowhere.
     func detach() {
         (frame, loadChanged, loadFailed, propertyChanged, decideNavigation, scriptMessage) = (nil, nil, nil, nil, nil, nil)
+        decideNavigationLater = nil
     }
 
     func loadHTML(_ html: String, baseURI: String?) {
@@ -579,6 +591,18 @@ final class WebPage {
         guard let data, let decision, type == 0 else { return 0 }    // WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION
         let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
         let wpe = page.wpe
+        if let later = page.decideNavigationLater, let action = wpe.navigationPolicyDecisionGetNavigationAction(decision) {
+            let uri = wpe.navigationActionGetRequest(action).flatMap(wpe.uriRequestGetURI).map { String(cString: $0) } ?? ""
+            let modifiers = wpe.navigationActionGetModifiers?(action) ?? 0
+            let button = wpe.navigationActionGetMouseButton?(action) ?? 0
+            // Kept until answered: WebKit waits for it.
+            _ = wpe.objectRef(decision)
+            later(uri, wpe.navigationActionGetNavigationType(action), modifiers, button) { allow in
+                if allow { wpe.policyDecisionUse(decision) } else { wpe.policyDecisionIgnore(decision) }
+                wpe.objectUnref(decision)
+            }
+            return 1
+        }
         guard let decide = page.decideNavigation, let action = wpe.navigationPolicyDecisionGetNavigationAction(decision) else { return 0 }
         let uri = wpe.navigationActionGetRequest(action).flatMap(wpe.uriRequestGetURI).map { String(cString: $0) } ?? ""
         if decide(uri, wpe.navigationActionGetNavigationType(action)) {
