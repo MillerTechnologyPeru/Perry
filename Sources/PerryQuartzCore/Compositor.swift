@@ -432,6 +432,12 @@ final class Compositor {
         }
         if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
         let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
+        // A layer showing only what it drew, at the display's scale: its
+        // backing's pixels are the texture's, without drawing them again.
+        if !border, let texture = backingTexture(of: layer, state: state, shape: shape, width: width, height: height) {
+            textures[key] = Entry(texture: texture, signature: signature, used: true)
+            return texture
+        }
         guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else {
             return nil
         }
@@ -457,6 +463,27 @@ final class Compositor {
         _ = SDL.setTextureScaleMode(texture, 1)
         textures[key] = Entry(texture: texture, signature: signature, used: true)
         return texture
+    }
+}
+
+extension Compositor {
+    /// The texture of a layer with nothing but its backing to show, made
+    /// from the backing's pixels when they are the texture's size.
+    fileprivate func backingTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, width: Int32, height: Int32) -> SDL.Pointer? {
+        guard shape == nil, state.contents == nil, state.livePixels == nil, state.sharedFrames == nil, state.backgroundColor == nil,
+              state.cornerRadius == 0, width > 0, height > 0 else { return nil }
+        CALayer.displayIfNeeded(layer)
+        let model = layer.state
+        guard let backing = model.backing, model.backingSize == state.bounds.size,
+              CG.imageGetWidth(backing) == Int(width), CG.imageGetHeight(backing) == Int(height) else { return nil }
+        return CG.withPixels(of: backing) { pixels, bytesPerRow -> SDL.Pointer? in
+            guard bytesPerRow >= Int(width) * 4,
+                  let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return nil }
+            _ = SDL.updateTexture(texture, nil, pixels, Int32(bytesPerRow))
+            _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
+            _ = SDL.setTextureScaleMode(texture, 1)
+            return texture
+        }
     }
 }
 
