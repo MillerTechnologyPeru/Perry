@@ -204,7 +204,7 @@ public func CMVideoFormatDescriptionGetDimensions(_ description: UnsafeMutableRa
 public func CMVideoFormatDescriptionGetPresentationDimensions(_ description: UnsafeMutableRawPointer?, _ usePixelAspectRatio: UInt8,
                                                               _ useCleanAperture: UInt8) -> CGSize {
     let state = FormatDescription.states[description]
-    return CGSize(width: Double(state?.width ?? 0), height: Double(state?.height ?? 0))
+    return CGSize(width: .init(state?.width ?? 0), height: .init(state?.height ?? 0))
 }
 
 /// No extensions are kept (the pixel depth, the color tags…).
