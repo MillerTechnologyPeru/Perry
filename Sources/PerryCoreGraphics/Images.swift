@@ -555,11 +555,56 @@ final class ImageState: @unchecked Sendable {
         ObjCRuntime.release(provider)
     }
 
+    /// Whether the pixels are 8-bit RGB with premultiplied or skipped alpha
+    /// first in 32-bit little-endian words: B, G, R, A in memory, as bitmap
+    /// contexts draw for layers and as Cairo's ARGB32 surfaces keep them.
+    var isBGRA: Bool {
+        format.bitsPerComponent == 8 && format.bitsPerPixel == 32 && format.colorComponents == 3
+            && format.byteOrder == 0x2000 && (format.alphaInfo == 2 || format.alphaInfo == 6)
+    }
+
+    /// Whether the pixels are 8-bit premultiplied (or skipped) RGBA in memory
+    /// order: the bitmap's own layout.
+    var isRGBA: Bool {
+        format.bitsPerComponent == 8 && format.bitsPerPixel == 32 && format.colorComponents == 3
+            && (format.byteOrder == 0 || format.byteOrder == 0x4000) && (format.alphaInfo == 1 || format.alphaInfo == 5)
+    }
+
     /// The pixels as premultiplied RGBA.
     var bitmap: Bitmap {
         if let cached { return cached }
         var bitmap = Bitmap(width: width, height: height)
         let bytes = DataProviders.bytes(provider) ?? []
+        // The common layouts row by row, without reading each pixel's
+        // channels one by one.
+        if (isBGRA || isRGBA), bytes.count >= bytesPerRow * (height - 1) + width * 4 {
+            let opaque = format.alphaInfo == 5 || format.alphaInfo == 6
+            let swap = isBGRA
+            bytes.withUnsafeBytes { raw in
+                bitmap.pixels.withUnsafeMutableBytes { pixels in
+                    guard let source = raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                          let destination = pixels.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                    for y in 0..<height {
+                        let from = source + y * bytesPerRow, to = destination + y * width * 4
+                        if !swap && !opaque {
+                            to.update(from: from, count: width * 4)
+                            continue
+                        }
+                        for x in 0..<width {
+                            let i = x * 4
+                            if swap {
+                                (to[i], to[i + 1], to[i + 2]) = (from[i + 2], from[i + 1], from[i])
+                            } else {
+                                (to[i], to[i + 1], to[i + 2]) = (from[i], from[i + 1], from[i + 2])
+                            }
+                            to[i + 3] = opaque ? 255 : from[i + 3]
+                        }
+                    }
+                }
+            }
+            cached = bitmap
+            return bitmap
+        }
         bytes.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             for y in 0..<height {
