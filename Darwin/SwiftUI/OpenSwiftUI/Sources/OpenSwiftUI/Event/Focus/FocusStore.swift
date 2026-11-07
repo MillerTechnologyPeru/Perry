@@ -22,6 +22,11 @@ class FocusStoreLocation<Value: Hashable>: AnyLocation<Value> {
     var resolvedEntry: FocusStore.Entry<Value>?
     var resolvedSeed: VersionSeed
     var _wasRead: Bool
+    /// Perry: the value last set, kept as the value until set again, as
+    /// the focus system doesn't yet move focus to views; and the signal its
+    /// owner rereads on.
+    var perryValue: Value?
+    var perrySignal: WeakAttribute<Void>?
 
     var id: ObjectIdentifier { ObjectIdentifier(self) }
 
@@ -43,6 +48,10 @@ class FocusStoreLocation<Value: Hashable>: AnyLocation<Value> {
             guard let self else { return }
             deferredUpdate = nil
             if value == resetValue {
+                if perryValue != nil {
+                    perryValue = nil
+                    perrySignal?.attribute?.invalidateValue()
+                }
                 if getValue(forReading: false) != resetValue, let entry = resolvedEntry {
                     Update.enqueueAction(reason: nil) {
                         entry.updateFocus(false)
@@ -54,6 +63,13 @@ class FocusStoreLocation<Value: Hashable>: AnyLocation<Value> {
                 }
             } else {
                 deferUpdate(value)
+            }
+            // Perry: the value holds until set again, as the focus system
+            // doesn't yet move focus to the entry's view (a platform text
+            // field takes it itself).
+            if value != resetValue, perryValue != value {
+                perryValue = value
+                perrySignal?.attribute?.invalidateValue()
             }
         }
     }
@@ -80,7 +96,7 @@ class FocusStoreLocation<Value: Hashable>: AnyLocation<Value> {
             resolvedEntry = findFocusedEntry()
             resolvedSeed = store.seed
         }
-        return resolvedEntry?.value ?? resetValue
+        return resolvedEntry?.value ?? perryValue ?? resetValue
     }
 
     func findFocusedEntry() -> FocusStore.Entry<Value>? {
