@@ -582,6 +582,7 @@ open class UIViewController: UIResponder {
         presenter.state.presented = controller
         controller.state.presenting = presenter.objcObject
         controller.state.beingPresented = true
+        Presentations.trace("present \(controller.describedByObject()) style \(controller.presentationStyle) from \(presenter.describedByObject()), animated \(animated)")
         _ = controller.loadedView
         Updates.transition {
             Presentations.present(controller, from: presenter, animated: animated)
@@ -592,6 +593,7 @@ open class UIViewController: UIResponder {
     /// Dismisses the controller this one presented, or else this one.
     @ObjCMethod("dismissViewControllerAnimated:completion:")
     func dismiss(animated: Bool, completion: ObjCBlock?) {
+        Presentations.trace("dismiss sent to \(describedByObject()), presented \(presentedViewController()?.describedByObject() ?? "none"), animated \(animated)")
         let target: UIViewController
         if let presented = presentedViewController() {
             target = presented
@@ -652,8 +654,17 @@ enum ProgramSDK {
     }()
 }
 
-/// Modal presentation, run in update passes.
+/// Modal presentation, run in update passes. With PERRY_UIKIT_PRESENT_TRACE
+/// set, presentations and dismissals are written to standard error.
 enum Presentations {
+    nonisolated(unsafe) private static let tracing = getenv("PERRY_UIKIT_PRESENT_TRACE") != nil
+
+    static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: UIKit: presentation: \(message())\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+
     static func present(_ controller: UIViewController, from presenter: UIViewController, animated: Bool) {
         guard let presenterView = presenter.state.view, let window = window(for: presenter) else { return }
         let covers = UIViewController.coversPresenter(controller.presentationStyle)
@@ -712,6 +723,7 @@ enum Presentations {
     }
 
     static func dismiss(_ controller: UIViewController, animated: Bool) {
+        trace("dismissing \(controller.describedByObject()), presenter \(controller.state.presenting.map { NSObject($0).describedByObject() } ?? "none")")
         guard let presenterObject = controller.state.presenting else { return }
         let presenter = UIViewController.wrap(presenterObject)
         if let presented = controller.state.presented { dismiss(presented, animated: false) }
