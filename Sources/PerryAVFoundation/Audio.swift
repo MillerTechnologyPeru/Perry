@@ -3,9 +3,10 @@ import PerryObjCInterop
 
 // AVAudioPlayer and AVAudioSession. A player plays its file through
 // GStreamer when it's installed, looping as many times as asked and telling
-// its delegate when it's done; without GStreamer, or for data, it keeps the
-// state an app sets and reads back but is silent. The session accepts every
-// category, mode and activation.
+// its delegate when it's done; a player of data plays it from a temporary
+// file of its own (PERRY_TMP, else /tmp), which goes with the player.
+// Without GStreamer it keeps the state an app sets and reads back but is
+// silent. The session accepts every category, mode and activation.
 
 final class PlayerState {
     var url: NSObject?
@@ -22,6 +23,45 @@ final class PlayerState {
     /// The file's pipeline, made when it's first wanted.
     var pipeline: Pipeline?
     var prepared = false
+    /// The file a player of data plays from.
+    var temporaryPath: String?
+
+    deinit {
+        if let temporaryPath { unlink(temporaryPath) }
+    }
+
+    nonisolated(unsafe) private static var count = 0
+    private static let countLock = Lock()
+
+    /// A file:// URI of the data, written to a temporary file, or nil.
+    func dataURI() -> String? {
+        if let temporaryPath { return "file://" + temporaryPath }
+        guard let data = data?.unsafeCast(to: NSData.self), let bytes = data.bytes() else { return nil }
+        let length = data.length()
+        guard length > 0 else { return nil }
+        let directory = getenv("PERRY_TMP").map { String(cString: $0) } ?? "/tmp"
+        mkdir(directory, 0o755)
+        let number = PlayerState.countLock.withLock { () -> Int in
+            PlayerState.count += 1
+            return PlayerState.count
+        }
+        let path = "\(directory)/perry-audio-\(getpid())-\(number)"
+        guard let file = fopen(path, "wb") else { return nil }
+        let written = fwrite(bytes, 1, length, file)
+        fclose(file)
+        guard written == length else {
+            unlink(path)
+            return nil
+        }
+        temporaryPath = path
+        // Spaces and other characters a URI cannot hold, escaped.
+        let escaped = path.utf8.map { byte -> String in
+            let character = Character(UnicodeScalar(byte))
+            return byte < 0x80 && (character.isLetter || character.isNumber || "/-_.~".contains(character))
+                ? String(character) : "%" + String(byte, radix: 16, uppercase: true).leftPadded(to: 2)
+        }.joined()
+        return "file://" + escaped
+    }
 }
 
 @ObjCClass("AVAudioPlayer")
@@ -68,13 +108,13 @@ open class AVAudioPlayer: NSObject {
     }
 
     /// The file's pipeline, made the first time it's wanted, paused at
-    /// the start; nil without GStreamer, for data, or when it can't play.
+    /// the start; nil without GStreamer or when it can't play.
     var pipeline: Pipeline? {
         let state = player
         if !state.prepared {
             state.prepared = true
             let start = AudioTiming.now()
-            if let gst = GStreamer.shared, let uri = state.url?.unsafeCast(to: NSURL.self).absoluteString(),
+            if let gst = GStreamer.shared, let uri = state.url?.unsafeCast(to: NSURL.self).absoluteString() ?? state.dataURI(),
                let pipeline = Pipeline(uri: uri, gst: gst, video: false) {
                 defer { Players.trace("audio player for \(uri.split(separator: "/").last ?? "") made in \(AudioTiming.since(start)) ms at \(AudioTiming.stamp())") }
                 pipeline.set(volume: Double(state.volume), muted: false)
@@ -353,4 +393,8 @@ enum AudioTiming {
     static func since(_ start: Double) -> Int { Int((now() - start) * 1000) }
     /// Milliseconds on the same clock as the frame hitch log.
     static func stamp() -> Int { Int(now() * 1000) % 1_000_000 }
+}
+
+private extension String {
+    func leftPadded(to width: Int) -> String { count >= width ? self : String(repeating: "0", count: width - count) + self }
 }
