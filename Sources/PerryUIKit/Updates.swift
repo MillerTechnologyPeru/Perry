@@ -61,6 +61,7 @@ enum Updates {
     }
 
     static func run() {
+        FrameWork.passes += 1
         scheduled = false
         ObjCRuntime.autoreleasepool {
             while !transitions.isEmpty || !appearanceEnds.isEmpty {
