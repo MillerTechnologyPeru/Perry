@@ -33,8 +33,12 @@ open class NSView: NSResponder {
     var autoresizesSubviews = true
     var needsDisplay = false
     var needsLayout = false {
-        didSet { if needsLayout { Layout.generation &+= 1 } }
+        didSet { if needsLayout { Layout.changed(self) } }
     }
+    /// When the view last changed in a way layout depends on, and when the
+    /// part of the tree it heads was last solved (see Layout).
+    var layoutStamp = 0
+    var layoutSolvedStamp = 0
     var alphaValue: CGFloat = 1
     var tag = -1
     var trackingAreas: [NSTrackingArea] = []
@@ -145,7 +149,7 @@ open class NSView: NSResponder {
     func setFrameOrigin(_ origin: CGPoint) {
         guard origin != frame.origin else { return }
         frame.origin = origin
-        Layout.generation &+= 1
+        Layout.changed(self)
         updateLayerGeometry()
         postFrameChanged()
     }
@@ -177,7 +181,7 @@ open class NSView: NSResponder {
         guard origin != boundsOrigin else { return }
         boundsOrigin = origin
         for subview in subviews { subview.updateLayerGeometry() }
-        if draws { setNeedsDisplay(true) }
+        if draws && redrawsWhenScrolled { setNeedsDisplay(true) }
         if postsBoundsChangedNotifications { post(Constants.NSViewBoundsDidChangeNotification, object: self) }
     }
     @ObjCMethod("setBoundsSize:") func setBoundsSize(_ size: CGSize) { Send.void(objcObject, "setFrameSize:", size: size) }
@@ -704,6 +708,10 @@ open class NSView: NSResponder {
     }
 
     // MARK: Drawing into the layer
+
+    /// Whether what the view draws moves with its bounds origin, so it is
+    /// drawn again when that scrolls.
+    var redrawsWhenScrolled: Bool { true }
 
     /// Whether the view's class draws: overrides -drawRect:.
     var draws: Bool { Methods.overrides(objcObject, "drawRect:", of: NSView.objCClass.pointer) }
