@@ -71,6 +71,9 @@ enum CG {
 
     nonisolated(unsafe) static var imageGetWidth: (@convention(c) (Ref) -> Int)!
     nonisolated(unsafe) static var imageGetHeight: (@convention(c) (Ref) -> Int)!
+    nonisolated(unsafe) static var imageGetBytesPerRow: (@convention(c) (Ref) -> Int)!
+    nonisolated(unsafe) static var imageGetDataProvider: (@convention(c) (Ref) -> Ref)!
+    nonisolated(unsafe) static var dataProviderCopyData: (@convention(c) (Ref) -> Ref)!
 
     /// Binds the functions through `lookup`; false if one is missing.
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) -> Bool {
@@ -138,7 +141,21 @@ enum CG {
         pathApply = bind("CGPathApply")
         imageGetWidth = bind("CGImageGetWidth")
         imageGetHeight = bind("CGImageGetHeight")
+        imageGetBytesPerRow = bind("CGImageGetBytesPerRow")
+        imageGetDataProvider = bind("CGImageGetDataProvider")
+        dataProviderCopyData = bind("CGDataProviderCopyData")
         return complete
+    }
+
+    /// An image's pixels, with its bytes per row, while `body` runs: a
+    /// copy of its provider's data.
+    static func withPixels<T>(of image: CGRef, _ body: (UnsafeRawPointer, Int) -> T?) -> T? {
+        guard let imageGetDataProvider, let dataProviderCopyData, let imageGetBytesPerRow,
+              let provider = imageGetDataProvider(image), let data = dataProviderCopyData(provider) else { return nil }
+        defer { release(data) }
+        typealias Bytes = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> UnsafeRawPointer?
+        guard let bytes = unsafeBitCast(ObjCRuntime.msgSend, to: Bytes.self)(data, ObjCRuntime.selector("bytes")) else { return nil }
+        return body(bytes, imageGetBytesPerRow(image))
     }
 
     /// Releases a CoreGraphics object, which is an Objective-C object.
