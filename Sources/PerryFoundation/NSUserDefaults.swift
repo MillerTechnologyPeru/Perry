@@ -85,14 +85,14 @@ enum UserDefaults {
 
 /// NSUserDefaults.
 @ObjCClass("NSUserDefaults")
-final class NSUserDefaults: NSObject {
+class NSUserDefaults: NSObject {
     /// Set-up after the class is defined.
     override class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         UserDefaults.defaultsClass = cls.storage
     }
 
-    private var storage: UserDefaultsStorage {
+    fileprivate var storage: UserDefaultsStorage {
         guard let storage = UserDefaults.storage(objcObject) else {
             foundationFatal("message sent to an uninitialized NSUserDefaults")
         }
@@ -300,7 +300,37 @@ final class NSUserDefaults: NSObject {
     func synchronize() -> Bool { storage.save() }
 }
 
+/// iCloud's key-value store, with no iCloud: the values are kept on the
+/// device, in a defaults domain of their own beside the app's, and nothing
+/// ever changes from elsewhere. It takes NSUserDefaults' getters and
+/// setters, which answer as the store's do, and adds its own names.
+@ObjCClass("NSUbiquitousKeyValueStore")
+final class NSUbiquitousKeyValueStore: NSUserDefaults {
+    nonisolated(unsafe) private static var shared: UnsafeMutableRawPointer?
+
+    @ObjCClassMethod("defaultStore")
+    static func defaultStore(_ cls: ObjCClass) -> UnsafeMutableRawPointer? {
+        if let shared { return shared }
+        let suite = (Bundles.storage(Bundles.main)?.identifier ?? Process.name) + ".ubiquitous"
+        let object = Storage.allocate(cls.pointer)
+        if let object { Storage.set(object, UserDefaultsStorage(suite: suite)) }
+        shared = object
+        return object
+    }
+
+    @ObjCMethod("longLongForKey:") func longLong(forKey key: String) -> Int64 { Int64(integer(forKey: key)) }
+    @ObjCMethod("setLongLong:forKey:") func set(longLong: Int64, forKey key: String) { storage.set(.integer(longLong), for: key) }
+    @ObjCMethod("setString:forKey:") func set(string: ObjCObject?, forKey key: String) { set(string, forKey: key) }
+    @ObjCMethod("setData:forKey:") func set(data: ObjCObject?, forKey key: String) { set(data, forKey: key) }
+    @ObjCMethod("setArray:forKey:") func set(array: ObjCObject?, forKey key: String) { set(array, forKey: key) }
+    @ObjCMethod("setDictionary:forKey:") func set(dictionary: ObjCObject?, forKey key: String) { set(dictionary, forKey: key) }
+}
+
 @ObjCConstants
 enum UserDefaultsConstants {
     static let NSUserDefaultsDidChangeNotification = "NSUserDefaultsDidChangeNotification"
+    static let NSUbiquitousKeyValueStoreDidChangeExternallyNotification = "NSUbiquitousKeyValueStoreDidChangeExternallyNotification"
+    static let NSUbiquitousKeyValueStoreChangeReasonKey = "NSUbiquitousKeyValueStoreChangeReasonKey"
+    static let NSUbiquitousKeyValueStoreChangedKeysKey = "NSUbiquitousKeyValueStoreChangedKeysKey"
+    static let NSUbiquityIdentityDidChangeNotification = "NSUbiquityIdentityDidChangeNotification"
 }
