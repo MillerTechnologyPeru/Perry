@@ -364,12 +364,12 @@ enum Bridge {
                           _ arguments: UnsafePointer<JSValueRef?>?, _ exception: UnsafeMutablePointer<JSValueRef?>?) -> JSValueRef? {
         // Block layout: isa, flags, reserved, invoke, descriptor; the
         // descriptor's signature follows its copy and dispose helpers.
-        let flags = block.load(fromByteOffset: 8, as: Int32.self)
-        let entry = block.load(fromByteOffset: 16, as: UnsafeRawPointer.self)
-        let descriptor = block.load(fromByteOffset: 24, as: UnsafeRawPointer.self)
+        let flags = block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: Int32.self)
+        let entry = block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
+        let descriptor = block.load(fromByteOffset: 2 * MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
         var signature = "v8@?0"
         if flags & (1 << 30) != 0 {
-            let offset = flags & (1 << 25) != 0 ? 32 : 16
+            let offset = (flags & (1 << 25) != 0 ? 4 : 2) * MemoryLayout<UnsafeRawPointer>.size
             if let text = descriptor.load(fromByteOffset: offset, as: UnsafePointer<CChar>?.self) { signature = String(cString: text) }
         }
         let types = self.types(signature)
@@ -421,7 +421,7 @@ enum Exports {
         var found: [Ref] = []
         func visit(_ proto: Ref) {
             guard !found.contains(proto), Runtime.conformsToProtocol(proto, jsExport) else { return }
-            let name = String(cString: proto.load(fromByteOffset: 8, as: UnsafePointer<CChar>.self))
+            let name = String(cString: proto.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafePointer<CChar>.self))
             guard name != "JSExport" else { return }
             found.append(proto)
             var count: UInt32 = 0
