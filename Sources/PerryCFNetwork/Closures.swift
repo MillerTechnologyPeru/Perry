@@ -15,30 +15,37 @@ final class ClosureBox {
 }
 
 enum Closures {
-    /// Block_layout with the box after the descriptor: 40 bytes.
-    private static let size = 40
+    /// Block_layout, its members at the word size: isa, flags and reserved
+    /// (32-bit each), invoke, descriptor, then the box. 40 bytes on arm64,
+    /// 24 on armv7.
+    private static let word = MemoryLayout<UnsafeRawPointer>.size
+    private static let invokeOffset = word + 8
+    private static let descriptorOffset = invokeOffset + word
+    private static let boxOffset = descriptorOffset + word
+    private static let size = boxOffset + word
 
     private static let copyHelper: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void = { _, source in
         guard let source else { return }
-        _ = Unmanaged<ClosureBox>.fromOpaque(source.load(fromByteOffset: 32, as: UnsafeRawPointer.self)).retain()
+        _ = Unmanaged<ClosureBox>.fromOpaque(source.load(fromByteOffset: boxOffset, as: UnsafeRawPointer.self)).retain()
     }
 
     private static let disposeHelper: @convention(c) (UnsafeRawPointer?) -> Void = { block in
         guard let block else { return }
-        Unmanaged<ClosureBox>.fromOpaque(block.load(fromByteOffset: 32, as: UnsafeRawPointer.self)).release()
+        Unmanaged<ClosureBox>.fromOpaque(block.load(fromByteOffset: boxOffset, as: UnsafeRawPointer.self)).release()
     }
 
     nonisolated(unsafe) private static let descriptor: UnsafeMutableRawPointer = {
-        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 32, alignment: 8)
+        // reserved, size, copy, dispose: a word each.
+        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 4 * word, alignment: word)
         descriptor.storeBytes(of: 0, as: UInt.self)
-        descriptor.storeBytes(of: UInt(size), toByteOffset: 8, as: UInt.self)
-        descriptor.storeBytes(of: unsafeBitCast(copyHelper, to: UnsafeRawPointer.self), toByteOffset: 16, as: UnsafeRawPointer.self)
-        descriptor.storeBytes(of: unsafeBitCast(disposeHelper, to: UnsafeRawPointer.self), toByteOffset: 24, as: UnsafeRawPointer.self)
+        descriptor.storeBytes(of: UInt(size), toByteOffset: word, as: UInt.self)
+        descriptor.storeBytes(of: unsafeBitCast(copyHelper, to: UnsafeRawPointer.self), toByteOffset: 2 * word, as: UnsafeRawPointer.self)
+        descriptor.storeBytes(of: unsafeBitCast(disposeHelper, to: UnsafeRawPointer.self), toByteOffset: 3 * word, as: UnsafeRawPointer.self)
         return descriptor
     }()
 
     static func box(_ block: UnsafeMutableRawPointer?) -> ClosureBox? {
-        block.map { Unmanaged<ClosureBox>.fromOpaque($0.load(fromByteOffset: 32, as: UnsafeRawPointer.self)).takeUnretainedValue() }
+        block.map { Unmanaged<ClosureBox>.fromOpaque($0.load(fromByteOffset: boxOffset, as: UnsafeRawPointer.self)).takeUnretainedValue() }
     }
 
     /// A heap block (+1) whose invoke function is `invoke`.
@@ -47,11 +54,11 @@ enum Closures {
         guard let block = malloc(size) else { networkFatal("out of memory") }
         block.storeBytes(of: BlocksRuntime.mallocBlockClass, as: UnsafeMutableRawPointer.self)
         // BLOCK_NEEDS_FREE | BLOCK_HAS_COPY_DISPOSE, one reference.
-        block.storeBytes(of: Int32(1 << 24 | 1 << 25 | 2), toByteOffset: 8, as: Int32.self)
-        block.storeBytes(of: Int32(0), toByteOffset: 12, as: Int32.self)
-        block.storeBytes(of: invoke, toByteOffset: 16, as: UnsafeRawPointer.self)
-        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 24, as: UnsafeRawPointer.self)
-        block.storeBytes(of: UnsafeRawPointer(Unmanaged.passRetained(ClosureBox(body)).toOpaque()), toByteOffset: 32,
+        block.storeBytes(of: Int32(1 << 24 | 1 << 25 | 2), toByteOffset: word, as: Int32.self)
+        block.storeBytes(of: Int32(0), toByteOffset: word + 4, as: Int32.self)
+        block.storeBytes(of: invoke, toByteOffset: invokeOffset, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: descriptorOffset, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(Unmanaged.passRetained(ClosureBox(body)).toOpaque()), toByteOffset: boxOffset,
                          as: UnsafeRawPointer.self)
         return block
     }
