@@ -263,12 +263,17 @@ struct MapItemView: View {
     var body: some View {
         switch item {
         case let .annotation(coordinate, anchor, content, label):
-            AnchoredLayout(point: point(coordinate), anchor: anchor) {
-                VStack(spacing: 2) {
-                    content
-                    if let label {
-                        label.font(.caption2).lineLimit(1)
+            // As MapKit draws them: the content with its anchor at the
+            // coordinate, and the title on its own, centered under the
+            // coordinate, in up to two lines haloed in white.
+            let at = point(coordinate)
+            ZStack(alignment: .topLeading) {
+                AnchoredLayout(point: at, anchor: anchor) { content }
+                if let label {
+                    AnchoredLayout(point: CGPoint(x: at.x, y: at.y + 2), anchor: .top) {
+                        MapTitle(label: label)
                     }
+                    .allowsHitTesting(false)
                 }
             }
         case let .userLocation(anchor, content):
@@ -277,6 +282,33 @@ struct MapItemView: View {
             }
         }
     }
+}
+
+/// An annotation's title: semibold caption text in up to two centered
+/// lines in a column 100 points wide, haloed in white so it reads over the map.
+struct MapTitle: View {
+    var label: AnyView
+
+    var body: some View {
+        let text = label
+            .font(.caption.weight(.semibold))
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .frame(width: 100)
+            .fixedSize(horizontal: false, vertical: true)
+        ZStack {
+            ForEach(Self.halo.indices, id: \.self) { index in
+                text.foregroundStyle(Color.white).offset(x: Self.halo[index].x, y: Self.halo[index].y)
+            }
+            text.foregroundStyle(Color.primary)
+        }
+    }
+
+    /// The halo's offsets: the title drawn in white around itself.
+    static let halo: [CGPoint] = [
+        CGPoint(x: -1, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 0, y: -1), CGPoint(x: 0, y: 1),
+        CGPoint(x: -1, y: -1), CGPoint(x: 1, y: 1), CGPoint(x: -1, y: 1), CGPoint(x: 1, y: -1),
+    ]
 }
 
 /// Places its view at its ideal size with its anchor point at a point.

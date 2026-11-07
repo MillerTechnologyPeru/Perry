@@ -266,11 +266,13 @@ public extension CGContext {
 
         let currentPoint = self.currentPoint ?? CGPoint()
 
+        // The cubic with the same curve: its control points two thirds of
+        // the way from each end to the quadratic's control point.
         let first = CGPoint(x: (currentPoint.x / 3.0) + (2.0 * point.x / 3.0),
                             y: (currentPoint.y / 3.0) + (2.0 * point.y / 3.0))
 
-        let second = CGPoint(x: (2.0 * currentPoint.x / 3.0) + (end.x / 3.0),
-                             y: (2.0 * currentPoint.y / 3.0) + (end.y / 3.0))
+        let second = CGPoint(x: (2.0 * point.x / 3.0) + (end.x / 3.0),
+                             y: (2.0 * point.y / 3.0) + (end.y / 3.0))
 
         addCurve(to: end, control1: first, control2: second)
     }
