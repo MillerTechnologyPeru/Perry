@@ -75,6 +75,11 @@ grep -rlE 'import (FoundationEssentials|FoundationInternationalization)$|(Founda
 perl -i -pe 's/^#if FOUNDATION_FRAMEWORK && !NO_FORMATTERS\b/#if (FOUNDATION_FRAMEWORK || FOUNDATION_OBJC_TYPES) && !NO_FORMATTERS/' \
     "$merged/FoundationEssentials/JSON/JSONDecoder.swift" "$merged/FoundationEssentials/JSON/JSONEncoder.swift"
 
+# The property list coders' format is NSPropertyListFormat, as in Apple's
+# Foundation, whose symbols apps bind to (PropertyListEncoder.outputFormat).
+perl -0777 -i -pe 's/^#if FOUNDATION_FRAMEWORK\n(\s*public typealias PropertyListFormat = PropertyListSerialization)/#if FOUNDATION_FRAMEWORK || FOUNDATION_OBJC_TYPES\n$1/m' \
+    "$merged/FoundationEssentials/PropertyList/PlistDecoder.swift"
+
 # The settings swift-foundation's manifest gives its targets.
 settings=()
 for version in 6.0.2 6.1 6.2 6.3; do
