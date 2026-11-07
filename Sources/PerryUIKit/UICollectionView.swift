@@ -914,6 +914,9 @@ open class UICollectionView: UIScrollView {
                 guard contains(path) else { continue }
                 wantedCells.insert(path)
                 var cell = collection.visibleCells[path]
+                // A cell shown already keeps the size it measured; one
+                // dequeued for the item now is measured once.
+                let fresh = cell == nil
                 if cell == nil {
                     guard let made = source?.sendCollectionView(self, cellForItemAt: path.object) else {
                         uikitFatal("the cell returned from -collectionView:cellForItemAtIndexPath: does not have a reuseIdentifier")
@@ -928,13 +931,14 @@ open class UICollectionView: UIScrollView {
                     }
                     cell = made
                 }
-                apply(attributes, to: cell!)
-                measure(cell!, attributes: attributes, at: path)
+                apply(attributes, to: cell!, fresh: fresh)
+                if fresh { measure(cell!, attributes: attributes, at: path) }
             case 1:
                 guard let kind = attributes.attributes.kind else { continue }
                 let key = SupplementaryKey(kind: kind, path: path)
                 wantedViews.insert(key)
                 var view = collection.visibleSupplementary[key]
+                let fresh = view == nil
                 if view == nil {
                     guard let source, source.responds(to: "collectionView:viewForSupplementaryElementOfKind:atIndexPath:"),
                           let made = source.sendCollectionView(self, viewForSupplementaryElementOfKind: kind, at: path.object) else { continue }
@@ -945,7 +949,7 @@ open class UICollectionView: UIScrollView {
                     }
                     view = made
                 }
-                apply(attributes, to: view!)
+                apply(attributes, to: view!, fresh: fresh)
             default:
                 continue
             }
@@ -984,12 +988,16 @@ open class UICollectionView: UIScrollView {
         view.state.hidden = false
     }
 
-    private func apply(_ attributes: UICollectionViewLayoutAttributes, to view: UICollectionReusableView) {
+    /// The attributes' frame, visibility and alpha; the view hears of them
+    /// (-applyLayoutAttributes:) when it is new to its item or moved, not on
+    /// every pass as the collection scrolls.
+    private func apply(_ attributes: UICollectionViewLayoutAttributes, to view: UICollectionReusableView, fresh: Bool) {
         let values = attributes.attributes
-        if view.state.frame != values.frame { view.sendSetFrame(values.frame) }
+        let moved = view.state.frame != values.frame
+        if moved { view.sendSetFrame(values.frame) }
         if view.state.hidden != values.hidden { view.state.hidden = values.hidden }
         if view.state.alpha != values.alpha { view.setAlpha(values.alpha) }
-        view.sendApply(attributes)
+        if fresh || moved { view.sendApply(attributes) }
         view.layoutIfNeeded()
     }
 
