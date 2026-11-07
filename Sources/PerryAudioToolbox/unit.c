@@ -838,9 +838,10 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     case kAudioUnitProperty_SetRenderCallback: {
         if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
         bus *b = &u->inputs[element];
-        if (value && size >= 16) {
+        // AURenderCallbackStruct: the function, then its refcon, a word each.
+        if (value && size >= 2 * sizeof(void *)) {
             memcpy(&b->callback, value, sizeof b->callback);
-            memcpy(&b->refcon, (const uint8_t *)value + 8, sizeof b->refcon);
+            memcpy(&b->refcon, (const uint8_t *)value + sizeof(void *), sizeof b->refcon);
         } else {
             b->callback = NULL;
             b->refcon = NULL;
@@ -851,11 +852,12 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     case kAudioUnitProperty_MakeConnection: {
         if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
         bus *b = &u->inputs[element];
-        if (value && size >= 16) {
+        // AudioUnitConnection: the source unit, a word, then two 32-bit numbers.
+        if (value && size >= sizeof(void *) + 8) {
             void *source;
             memcpy(&source, value, sizeof source);
             b->source = valid(source);
-            memcpy(&b->source_output, (const uint8_t *)value + 8, 4);
+            memcpy(&b->source_output, (const uint8_t *)value + sizeof(void *), 4);
             if (b->source) b->callback = NULL;
         } else {
             b->source = NULL;
