@@ -92,7 +92,7 @@ PASSTHROUGH _pthread_equal, pthread_equal
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
-PASSTHROUGH _access, access
+PASSTHROUGH _access, perry_access
 PASSTHROUGH _mkdir, mkdir
 PASSTHROUGH _symlink, symlink
 PASSTHROUGH _link, link
@@ -149,7 +149,7 @@ PASSTHROUGH _ungetc, ungetc
 PASSTHROUGH _fwrite, fwrite
 PASSTHROUGH _fread, fread
 PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fopen, fopen
+PASSTHROUGH _fopen, perry_fopen
 PASSTHROUGH _fdopen, fdopen
 PASSTHROUGH _fileno, fileno
 PASSTHROUGH _feof, feof
@@ -315,7 +315,7 @@ PASSTHROUGH __Unwind_GetCFA, _Unwind_GetCFA
 PASSTHROUGH __Unwind_GetDataRelBase, _Unwind_GetDataRelBase
 PASSTHROUGH __Unwind_GetTextRelBase, _Unwind_GetTextRelBase
 PASSTHROUGH __Unwind_FindEnclosingFunction, _Unwind_FindEnclosingFunction
-PASSTHROUGH "_fopen$DARWIN_EXTSN", fopen
+PASSTHROUGH "_fopen$DARWIN_EXTSN", perry_fopen
 PASSTHROUGH _acosf, acosf
 PASSTHROUGH _atanf, atanf
 PASSTHROUGH _frexp, frexp

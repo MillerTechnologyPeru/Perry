@@ -133,7 +133,7 @@ PASSTHROUGH _ungetc, ungetc
 PASSTHROUGH _fwrite, fwrite
 PASSTHROUGH _fread, fread
 PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fopen, fopen64
+PASSTHROUGH _fopen, perry_fopen
 PASSTHROUGH _fdopen, fdopen
 PASSTHROUGH _fileno, fileno
 PASSTHROUGH _feof, feof
@@ -311,7 +311,7 @@ PASSTHROUGH _fsync, fsync
 PASSTHROUGH _unlink, unlink
 PASSTHROUGH _rmdir, rmdir
 PASSTHROUGH _isatty, isatty
-PASSTHROUGH _access, access
+PASSTHROUGH _access, perry_access
 PASSTHROUGH _chdir, chdir
 PASSTHROUGH _mkdir, mkdir
 PASSTHROUGH _symlink, symlink
