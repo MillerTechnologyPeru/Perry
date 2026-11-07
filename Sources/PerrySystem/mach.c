@@ -846,8 +846,27 @@ const char *darwin_dlerror(void) {
     return error;
 }
 
+#if defined(__arm__)
+// On armv7 a call from Darwin code that finds its stack misaligned reaches
+// dlsym through perry_align_call (the loader's align_arm.S), which calls it
+// with `blx r12`: the return address is then the trampoline's, and the
+// program's own is the lr the trampoline pushed, above its saved r4, r5
+// and r6, at the stack pointer r4 still holds. thunks_arm.S's _dlsym
+// passes the return address and r4 here.
+void *perry_dlsym_from(void *handle, const char *symbol, void *returned, const uint32_t *trampoline_frame);
+static const void *dlsym_caller(void *returned, const uint32_t *frame) {
+    const uint32_t *call = (const uint32_t *)((uintptr_t)returned & ~(uintptr_t)1) - 1;
+    if (*call == 0xe12fff3c && frame)    // blx r12
+        return (const void *)(uintptr_t)frame[3];
+    return returned;
+}
+#define DLSYM_CALLER dlsym_caller(returned, trampoline_frame)
+void *perry_dlsym_from(void *handle, const char *symbol, void *returned, const uint32_t *trampoline_frame) {
+#else
 void *darwin_dlsym(void *handle, const char *symbol) DARWIN_SYMBOL(dlsym);
+#define DLSYM_CALLER __builtin_return_address(0)
 void *darwin_dlsym(void *handle, const char *symbol) {
+#endif
     if (!symbol || !perry_system_lookup)
         return NULL;
     size_t length = strlen(symbol);
@@ -858,7 +877,7 @@ void *darwin_dlsym(void *handle, const char *symbol) {
     // RTLD_NEXT: what comes after the caller's own image, which may define
     // the symbol itself to wrap the one it is looking for.
     void *address = (intptr_t)handle == DARWIN_RTLD_NEXT && perry_system_lookup_after
-        ? perry_system_lookup_after(__builtin_return_address(0), name) : perry_system_lookup(library, name);
+        ? perry_system_lookup_after(DLSYM_CALLER, name) : perry_system_lookup(library, name);
     // A library's handle also finds what it re-exports and depends on.
     if (!address && library)
         address = perry_system_lookup(NULL, name);
