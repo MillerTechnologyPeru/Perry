@@ -526,7 +526,8 @@ public struct ObjCCategoryMacro: MemberMacro {
             return []
         }
         let typeName = extensionDecl.extendedType.trimmedDescription
-        let access = extensionDecl.modifiers.contains { $0.name.tokenKind == .keyword(.public) } ? "public " : ""
+        // A public extension's members are public already.
+        let access = ""
         var registrations: [String] = []
         for member in extensionDecl.memberBlock.members {
             let decl = member.decl
