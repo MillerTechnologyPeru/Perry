@@ -640,12 +640,22 @@ static const perry_image *loading[64];   // beyond 64 deep, the outermost 64
 static uint32_t loading_count;
 
 // A framework the Swift runtime given holds as Name.framework/Name, for
-// /System/Library/Frameworks/Name.framework/Name.
+// /System/Library/Frameworks/Name.framework/Name, and for a Mac app's
+// Name.framework/Versions/A/Name when the runtime has no versioned copy:
+// iOS's flat frameworks serve Mac apps too.
 static bool swift_runtime_framework(perry_loader *loader, const char *path, char *out, size_t out_size) {
     static const char frameworks[] = "/System/Library/Frameworks/";
     if (!loader->swift_runtime_dir || strncmp(path, frameworks, strlen(frameworks)) != 0)
         return false;
-    snprintf(out, out_size, "%s/%s", loader->swift_runtime_dir, path + strlen(frameworks));
+    const char *relative = path + strlen(frameworks);
+    snprintf(out, out_size, "%s/%s", loader->swift_runtime_dir, relative);
+    if (file_exists(out))
+        return true;
+    const char *versions = strstr(relative, ".framework/Versions/");
+    if (!versions)
+        return false;
+    const char *name = strrchr(relative, '/');
+    snprintf(out, out_size, "%s/%.*s.framework/%s", loader->swift_runtime_dir, (int)(versions - relative), relative, name + 1);
     return file_exists(out);
 }
 

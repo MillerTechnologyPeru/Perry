@@ -159,4 +159,11 @@ const void *swift_unorm2_getNFKDInstance(int32_t *status);
 int32_t swift_unorm2_normalize(const void *normalizer, const uint16_t *source, int32_t length, uint16_t *destination,
                                int32_t capacity, int32_t *status);
 
+// The calling frames' return addresses, by their frame records (arm64
+// only; elsewhere none).
+size_t perry_frame_return_addresses(uintptr_t *addresses, size_t capacity);
+// An address as "0x… library(symbol+0x…)", or bare where dladdr doesn't know
+// it (a Mach-O image's).
+void perry_describe_address(uintptr_t address, char *line, size_t capacity);
+
 #endif

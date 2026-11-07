@@ -4,6 +4,12 @@
 // String's indices and UTF-16 offsets, NSDecimal's Swift members, and
 // localized strings.
 
+// MARK: - Constants
+
+/// NSNotFound, as Darwin's Foundation gives it to Swift: a getter apps call
+/// (Foundation.NSNotFound), NSIntegerMax.
+public var NSNotFound: Int { Int.max }
+
 // MARK: - Fast enumeration
 
 /// An iterator over an object's fast enumeration, a buffer at a time.

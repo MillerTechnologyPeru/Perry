@@ -307,7 +307,12 @@ open class NSCell: NSObject {
     @ObjCMethod("cellSizeForBounds:")
     func cellSize(forBounds rect: CGRect) -> CGSize {
         if type == 2, let image { return image.size }
-        let text = Text.size(textRuns(color: nil), width: wraps ? rect.width - 4 : .infinity, style: textStyle)
+        // As tall as the lines its text field may show: a wrapping label
+        // limited to two lines measures two lines of a long title.
+        var style = textStyle
+        if usesSingleLineMode { style.maximumLines = 1 }
+        if let field = controlView?.as(NSTextField.self), field.maximumNumberOfLines > 0 { style.maximumLines = field.maximumNumberOfLines }
+        let text = Text.size(textRuns(color: nil), width: wraps ? rect.width - 4 : .infinity, style: style)
         let inset: CGFloat = bezeled ? 6 : bordered ? 4 : 4
         return CGSize(width: text.width + inset, height: max(text.height, Text.lineHeight(effectiveFont)) + (bezeled ? 6 : 0))
     }
@@ -507,6 +512,14 @@ open class NSTextFieldCell: NSActionCell {
         let lineHeight = Text.lineHeight(effectiveFont)
         if !wraps || usesSingleLineMode { style.maximumLines = 1 } else if truncatesLastVisibleLine {
             style.maximumLines = max(1, Int((rect.height / lineHeight).rounded(.down)))
+        } else {
+            // Lines past the field's limit, or below its frame, which
+            // AppKit clips away, are left out.
+            let fitting = max(1, Int(((rect.height + 1) / lineHeight).rounded(.down)))
+            style.maximumLines = style.maximumLines > 0 ? min(style.maximumLines, fitting) : fitting
+        }
+        if let field = view?.as(NSTextField.self), field.maximumNumberOfLines > 0, wraps, !usesSingleLineMode {
+            style.maximumLines = style.maximumLines > 0 ? min(style.maximumLines, field.maximumNumberOfLines) : field.maximumNumberOfLines
         }
         var runs = textRuns(color: displayColor(textColor))
         let editing = view?.as(NSTextField.self)?.editing == true
