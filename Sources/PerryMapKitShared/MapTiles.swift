@@ -13,7 +13,8 @@ import PerryObjCInterop
 // PERRY_MAPLIBRE names the library (default libPerryMapLibre.so, found as
 // dlopen finds libraries), PERRY_MAP_STYLE the style (default OpenFreeMap's
 // Liberty, which needs no key). Tiles are cached in PERRY_CACHES.
-// PERRY_MAP_TRACE=1 logs each frame shown: its size and middle pixel.
+// PERRY_MAP_TRACE=1 logs each camera, each frame shown (its size and
+// middle pixel) and where each gesture ends.
 
 enum MapLibre {
     typealias FrameCallback = @convention(c) (UnsafeMutableRawPointer?) -> Void
