@@ -4,8 +4,9 @@ import Glibc
 import PerryObjCInterop
 
 // CoreMedia, for what AVFoundation's players and assets hand out: times
-// and their arithmetic, and the descriptions of a track's format. Sample
-// buffers, which asset readers give, are not made here.
+// and their arithmetic, and the descriptions of a track's format; and the
+// sample buffers and audio format descriptions programs make for an asset
+// writer. Asset readers, which would give sample buffers, are not made.
 
 extension CMTime: ObjCScalar {
     public static var objCTypeEncoding: String { "{?=qiIq}" }
@@ -162,6 +163,16 @@ final class FormatDescriptionState {
     var subType: UInt32 = 0x6176_6331
     var width = 0
     var height = 0
+    /// An audio description's AudioStreamBasicDescription and channel
+    /// layout, as the program gave them, kept for as long as it is.
+    var streamDescription: UnsafeMutableRawPointer?
+    var channelLayout: UnsafeMutableRawPointer?
+    var channelLayoutSize = 0
+
+    deinit {
+        streamDescription?.deallocate()
+        channelLayout?.deallocate()
+    }
 }
 
 /// A CMFormatDescription: an object, as it is retained and released as
@@ -218,15 +229,219 @@ public func CMFormatDescriptionGetExtension(_ description: UnsafeMutableRawPoint
 @c(_CMAudioFormatDescriptionGetRichestDecodableFormat)
 public func CMAudioFormatDescriptionGetRichestDecodableFormat(_ description: UnsafeMutableRawPointer?) -> UnsafeRawPointer? { nil }
 
+/// An audio description made with CMAudioFormatDescriptionCreate gives
+/// back its stream description; a track's audio is not described.
 @c(_CMAudioFormatDescriptionGetStreamBasicDescription)
-public func CMAudioFormatDescriptionGetStreamBasicDescription(_ description: UnsafeMutableRawPointer?) -> UnsafeRawPointer? { nil }
+public func CMAudioFormatDescriptionGetStreamBasicDescription(_ description: UnsafeMutableRawPointer?) -> UnsafeRawPointer? {
+    FormatDescription.states[description]?.streamDescription.map { UnsafeRawPointer($0) }
+}
+
+@c(_CMAudioFormatDescriptionGetChannelLayout)
+public func CMAudioFormatDescriptionGetChannelLayout(_ description: UnsafeMutableRawPointer?,
+                                                     _ size: UnsafeMutablePointer<Int>?) -> UnsafeRawPointer? {
+    let state = FormatDescription.states[description]
+    size?.pointee = state?.channelLayout == nil ? 0 : state?.channelLayoutSize ?? 0
+    return state?.channelLayout.map { UnsafeRawPointer($0) }
+}
+
+/// (allocator, AudioStreamBasicDescription, layout size, layout, cookie
+/// size, cookie, extensions, out): the cookie and extensions are not kept.
+@c(_CMAudioFormatDescriptionCreate)
+public func CMAudioFormatDescriptionCreate(_ allocator: UnsafeRawPointer?, _ stream: UnsafeRawPointer?, _ layoutSize: Int,
+                                           _ layout: UnsafeRawPointer?, _ cookieSize: Int, _ cookie: UnsafeRawPointer?,
+                                           _ extensions: UnsafeRawPointer?, _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let stream, let out else { return -12710 }   // kCMFormatDescriptionError_InvalidParameter
+    let description = NSObject(FormatDescription.objCClass.pointer).newInstance().unsafeCast(to: FormatDescription.self)
+    let state = FormatDescriptionState()
+    state.mediaType = 0x736F_756E   // 'soun'
+    // AudioStreamBasicDescription: a Float64, then the format ID and the
+    // rest, 40 bytes.
+    state.subType = stream.load(fromByteOffset: 8, as: UInt32.self)
+    let copied = UnsafeMutableRawPointer.allocate(byteCount: 40, alignment: 8)
+    copied.copyMemory(from: stream, byteCount: 40)
+    state.streamDescription = copied
+    if let layout, layoutSize > 0 {
+        let layoutCopy = UnsafeMutableRawPointer.allocate(byteCount: layoutSize, alignment: 8)
+        layoutCopy.copyMemory(from: layout, byteCount: layoutSize)
+        (state.channelLayout, state.channelLayoutSize) = (layoutCopy, layoutSize)
+    }
+    FormatDescription.states.set(description.objcObject, state)
+    out.pointee = description.objCOwnedReturnValue()
+    return 0
+}
+
+/// A time as CoreMedia describes it: "{value/timescale = seconds}", or
+/// what it is when it isn't a number.
+private func describe(_ time: CMTime) -> String {
+    if time.flags & CMTime.valid == 0 { return "{INVALID}" }
+    if time.flags & CMTime.indefinite != 0 { return "{INDEFINITE}" }
+    if time.flags & CMTime.positiveInfinity != 0 { return "{+INFINITY}" }
+    if time.flags & CMTime.negativeInfinity != 0 { return "{-INFINITY}" }
+    return "{\(time.value)/\(time.timescale) = \(time.seconds)}"
+}
+
+#if arch(arm)
+/// (allocator, time): 32-bit Darwin passes the time after the allocator in
+/// r1 to r3 and then the stack, where Linux would start a structure of
+/// 64-bit members at r2: its six words are taken one by one.
+@c(_CMTimeCopyDescription)
+public func CMTimeCopyDescription(_ allocator: UnsafeRawPointer?, _ valueLow: UInt32, _ valueHigh: UInt32, _ timescale: Int32,
+                                  _ flags: UInt32, _ epochLow: UInt32, _ epochHigh: UInt32) -> UnsafeMutableRawPointer? {
+    let time = CMTime(value: Int64(bitPattern: UInt64(valueHigh) << 32 | UInt64(valueLow)), timescale: timescale, flags: flags,
+                      epoch: Int64(bitPattern: UInt64(epochHigh) << 32 | UInt64(epochLow)))
+    return ObjCRuntime.retain(describe(time).objCArgument())
+}
+#else
+@c(_CMTimeCopyDescription)
+public func CMTimeCopyDescription(_ allocator: UnsafeRawPointer?, _ time: CMTime) -> UnsafeMutableRawPointer? {
+    ObjCRuntime.retain(describe(time).objCArgument())
+}
+#endif
 
 // MARK: - Sample buffers
 
-@c(_CMSampleBufferGetImageBuffer) public func CMSampleBufferGetImageBuffer(_ buffer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { nil }
+final class SampleBufferState {
+    /// The format description and image buffer, retained.
+    var format: UnsafeMutableRawPointer?
+    var image: UnsafeMutableRawPointer?
+    var count = 0
+    var timings: [CMSampleTimingInfo] = []
+    /// The audio set from an AudioBufferList, its buffers one after another.
+    var data: [UInt8] = []
+    var ready = false
+
+    deinit {
+        if let format { ObjCRuntime.release(format) }
+        if let image { ObjCRuntime.release(image) }
+    }
+}
+
+/// A CMSampleBuffer: an object, retained and released as any CoreFoundation
+/// one. It keeps its format, timing, image buffer and audio; it has no
+/// CMBlockBuffer of its own.
+@ObjCClass("__PerryCMSampleBuffer")
+open class SampleBuffer: NSObject {
+    static let states = StateTable<SampleBufferState>()
+
+    static func make(format: UnsafeMutableRawPointer?, image: UnsafeMutableRawPointer?, count: Int,
+                     timings: [CMSampleTimingInfo]) -> UnsafeMutableRawPointer? {
+        let buffer = NSObject(objCClass.pointer).newInstance().unsafeCast(to: SampleBuffer.self)
+        let state = SampleBufferState()
+        state.format = format.flatMap { ObjCRuntime.retain($0) }
+        state.image = image.flatMap { ObjCRuntime.retain($0) }
+        (state.count, state.timings) = (count, timings)
+        states.set(buffer.objcObject, state)
+        return buffer.objCOwnedReturnValue()
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        SampleBuffer.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: SampleBuffer.objCClass.pointer)
+    }
+}
+
+private func timings(_ count: Int, _ array: UnsafePointer<CMSampleTimingInfo>?) -> [CMSampleTimingInfo] {
+    guard let array, count > 0 else { return [] }
+    return Array(UnsafeBufferPointer(start: array, count: count))
+}
+
+/// (allocator, data buffer, data ready, make-data-ready callback, its
+/// refcon, format description, samples, timing entries, timings, size
+/// entries, sizes, out). A data buffer given is not read.
+@c(_CMSampleBufferCreate)
+public func CMSampleBufferCreate(_ allocator: UnsafeRawPointer?, _ dataBuffer: UnsafeRawPointer?, _ dataReady: UInt8,
+                                 _ makeDataReady: UnsafeRawPointer?, _ refcon: UnsafeRawPointer?, _ format: UnsafeMutableRawPointer?,
+                                 _ samples: Int, _ timingCount: Int, _ timingArray: UnsafePointer<CMSampleTimingInfo>?,
+                                 _ sizeCount: Int, _ sizes: UnsafePointer<Int>?,
+                                 _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let out else { return -12730 }   // kCMSampleBufferError_RequiredParameterMissing
+    out.pointee = SampleBuffer.make(format: format, image: nil, count: samples, timings: timings(timingCount, timingArray))
+    SampleBuffer.states[out.pointee]?.ready = dataReady != 0
+    return 0
+}
+
+/// A copy with other timing, sharing the original's format, image and audio.
+@c(_CMSampleBufferCreateCopyWithNewTiming)
+public func CMSampleBufferCreateCopyWithNewTiming(_ allocator: UnsafeRawPointer?, _ original: UnsafeMutableRawPointer?,
+                                                  _ timingCount: Int, _ timingArray: UnsafePointer<CMSampleTimingInfo>?,
+                                                  _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let out, let state = SampleBuffer.states[original] else { return -12730 }
+    out.pointee = SampleBuffer.make(format: state.format, image: state.image, count: state.count,
+                                    timings: timings(timingCount, timingArray))
+    if let copy = SampleBuffer.states[out.pointee] {
+        (copy.data, copy.ready) = (state.data, state.ready)
+    }
+    return 0
+}
+
+@c(_CMSampleBufferGetFormatDescription)
+public func CMSampleBufferGetFormatDescription(_ buffer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    SampleBuffer.states[buffer]?.format
+}
+
+@c(_CMSampleBufferGetImageBuffer) public func CMSampleBufferGetImageBuffer(_ buffer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    SampleBuffer.states[buffer]?.image
+}
+
+@c(_CMSampleBufferGetNumSamples) public func CMSampleBufferGetNumSamples(_ buffer: UnsafeMutableRawPointer?) -> Int {
+    SampleBuffer.states[buffer]?.count ?? 0
+}
 
 @c(_CMSampleBufferGetPresentationTimeStamp) public func CMSampleBufferGetPresentationTimeStamp(_ buffer: UnsafeMutableRawPointer?) -> CMTime {
-    .invalid
+    SampleBuffer.states[buffer]?.timings.first?.presentationTimeStamp ?? .invalid
+}
+
+@c(_CMSampleBufferGetDuration) public func CMSampleBufferGetDuration(_ buffer: UnsafeMutableRawPointer?) -> CMTime {
+    SampleBuffer.states[buffer]?.timings.first?.duration ?? .invalid
+}
+
+/// One timing entry stands for every sample.
+@c(_CMSampleBufferGetSampleTimingInfo)
+public func CMSampleBufferGetSampleTimingInfo(_ buffer: UnsafeMutableRawPointer?, _ index: Int,
+                                              _ out: UnsafeMutablePointer<CMSampleTimingInfo>?) -> Int32 {
+    guard let state = SampleBuffer.states[buffer], let out else { return -12730 }
+    guard !state.timings.isEmpty, index >= 0, index < max(state.count, state.timings.count) else { return -12736 }   // kCMSampleBufferError_BufferHasNoSampleTimingInfo
+    out.pointee = state.timings[state.timings.count == 1 ? 0 : index]
+    return 0
+}
+
+/// (buffer, structure allocator, memory allocator, flags, AudioBufferList):
+/// the buffers' bytes are copied, and the buffer is ready.
+@c(_CMSampleBufferSetDataBufferFromAudioBufferList)
+public func CMSampleBufferSetDataBufferFromAudioBufferList(_ buffer: UnsafeMutableRawPointer?, _ structureAllocator: UnsafeRawPointer?,
+                                                           _ memoryAllocator: UnsafeRawPointer?, _ flags: UInt32,
+                                                           _ list: UnsafeRawPointer?) -> Int32 {
+    guard let state = SampleBuffer.states[buffer], let list else { return -12730 }
+    // AudioBufferList: a UInt32 count, then AudioBuffers of two UInt32s
+    // (channels, size) and a pointer, aligned to the pointer's size.
+    let word = MemoryLayout<UnsafeRawPointer>.size
+    let count = Int(list.load(as: UInt32.self))
+    let stride = 8 + word
+    var data: [UInt8] = []
+    for index in 0..<count {
+        let entry = list + word + index * stride
+        let size = Int(entry.load(fromByteOffset: 4, as: UInt32.self))
+        if let bytes = entry.load(fromByteOffset: 8, as: UnsafeRawPointer?.self), size > 0 {
+            data.append(contentsOf: UnsafeRawBufferPointer(start: bytes, count: size))
+        }
+    }
+    (state.data, state.ready) = (data, true)
+    return 0
+}
+
+@c(_CMSampleBufferSetDataReady) public func CMSampleBufferSetDataReady(_ buffer: UnsafeMutableRawPointer?) -> Int32 {
+    guard let state = SampleBuffer.states[buffer] else { return -12730 }
+    state.ready = true
+    return 0
+}
+
+@c(_CMSampleBufferDataIsReady) public func CMSampleBufferDataIsReady(_ buffer: UnsafeMutableRawPointer?) -> UInt8 {
+    SampleBuffer.states[buffer]?.ready == true ? 1 : 0
+}
+
+@c(_CMSampleBufferIsValid) public func CMSampleBufferIsValid(_ buffer: UnsafeMutableRawPointer?) -> UInt8 {
+    SampleBuffer.states[buffer] == nil ? 0 : 1
 }
 
 @ObjCConstants
