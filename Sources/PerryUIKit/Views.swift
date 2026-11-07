@@ -293,6 +293,10 @@ open class NSParagraphStyle: NSObject {
     @ObjCMethod("baseWritingDirection") func baseWritingDirection() -> Int { state.baseWritingDirection }
     @ObjCMethod("allowsDefaultTighteningForTruncation") func allowsDefaultTighteningForTruncation() -> Bool { state.allowsDefaultTighteningForTruncation }
     @ObjCMethod("secondaryLineBreakMode") func secondaryLineBreakMode() -> Int { state.secondaryLineBreakMode }
+    /// NSTextHorizontalAlignment (natural 0, left 2, right 3, center 4),
+    /// the visual alignment SwiftUI sets, as NSTextAlignment's.
+    @ObjCMethod("horizontalAlignment")
+    func horizontalAlignment() -> Int { [0: 2, 1: 4, 2: 3, 4: 0][state.alignment] ?? 0 }
     @ObjCMethod("fullyJustified") func fullyJustified() -> Bool { state.fullyJustified }
     @ObjCMethod("spansAllLines") func spansAllLines() -> Bool { state.spansAllLines }
 }
@@ -316,6 +320,10 @@ open class NSMutableParagraphStyle: NSParagraphStyle {
     @ObjCMethod("setAllowsDefaultTighteningForTruncation:")
     func setAllowsDefaultTighteningForTruncation(_ allows: Bool) { state.allowsDefaultTighteningForTruncation = allows }
     @ObjCMethod("setSecondaryLineBreakMode:") func setSecondaryLineBreakMode(_ mode: Int) { state.secondaryLineBreakMode = mode }
+    /// SwiftUI's text alignment: NSTextHorizontalAlignment, as
+    /// NSTextAlignment (left 0, center 1, right 2, natural 4).
+    @ObjCMethod("setHorizontalAlignment:")
+    func setHorizontalAlignment(_ alignment: Int) { state.alignment = [2: 0, 3: 2, 4: 1][alignment] ?? 4 }
     @ObjCMethod("setFullyJustified:") func setFullyJustified(_ justified: Bool) { state.fullyJustified = justified }
     @ObjCMethod("setSpansAllLines:") func setSpansAllLines(_ spans: Bool) { state.spansAllLines = spans }
     @ObjCMethod("defaultTabInterval") func defaultTabInterval() -> CGFloat { state.defaultTabInterval }
