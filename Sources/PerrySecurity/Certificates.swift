@@ -494,7 +494,7 @@ public func SecTrustEvaluateAsyncWithError(_ object: UnsafeMutableRawPointer?, _
         let trusted = SecTrustEvaluateWithError(trust, &error)
         if let block {
             typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer, Bool, UnsafeMutableRawPointer?) -> Void
-            unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)(block, trust, trusted, error)
+            unsafeBitCast(block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self), to: Invoke.self)(block, trust, trusted, error)
             ObjCRuntime.release(block)
         }
         ObjCRuntime.release(error)
