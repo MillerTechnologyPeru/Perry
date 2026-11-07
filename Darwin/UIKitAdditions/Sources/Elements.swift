@@ -27,6 +27,22 @@ extension UIMenu {
   }
 }
 
+@available(iOS 13.0, *)
+@available(tvOS, unavailable)
+@available(watchOS, unavailable)
+extension UIKeyCommand {
+  @_disfavoredOverload @_Concurrency.MainActor @preconcurrency convenience public init(title: Swift.String = "", image: UIImage? = nil, action: ObjectiveC.Selector, input: Swift.String, modifierFlags: UIKeyModifierFlags = [], propertyList: Any? = nil, alternates: [UICommandAlternate] = [], discoverabilityTitle: Swift.String? = nil, attributes: UIMenuElement.Attributes = [], state: UIMenuElement.State = .off) {
+    // The property list and alternates are only kept by iOS's own
+    // initializer; Perry's commands are matched by input and action.
+    self.init(input: input, modifierFlags: modifierFlags, action: action)
+    self.title = title
+    if let image { self.image = image }
+    self.discoverabilityTitle = discoverabilityTitle
+    self.attributes = attributes
+    self.state = state
+  }
+}
+
 // MARK: - Bar button items
 
 @available(iOS 14.0, tvOS 14.0, *)
