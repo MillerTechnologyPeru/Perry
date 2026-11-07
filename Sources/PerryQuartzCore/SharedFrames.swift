@@ -276,9 +276,8 @@ extension Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
-        var target = pixels(toScreen.apply(state.bounds))
         // SDL_FLIP_VERTICAL.
-        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, 0, nil, 2)
+        render(texture, bounds: state.bounds, toScreen: toScreen, flip: 2)
         return true
     }
 }

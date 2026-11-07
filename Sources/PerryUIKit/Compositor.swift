@@ -176,7 +176,9 @@ final class Compositor {
     /// A window `size` points across at `scale` pixels a point, on the GPU
     /// when SDL has a renderer for it. A resizable app's window can be
     /// resized, and its screen takes the window's size.
-    init?(title: String, size: CGSize, scale: CGFloat) {
+    init?(title: String, size screen: CGSize, scale: CGFloat) {
+        // A turned screen's window is turned too.
+        let size = Compositor.displayRotation != 0 ? CGSize(width: screen.height, height: screen.width) : screen
         guard SDL.initialize(0x20) else {
             uikitWarning("SDL could not start its video: \(SDL.lastError)")
             return nil
@@ -225,12 +227,33 @@ final class Compositor {
     private var output = CGSize.zero
     private var origin = CGPoint.zero
 
+    /// PERRY_UIKIT_DISPLAY_ROTATION, 90 or 270: the screen is shown turned a
+    /// quarter clockwise or counterclockwise (QuartzCore's compositor turns
+    /// it), so its viewport has its sides exchanged and touches turn back.
+    /// Only for a fixed screen (PERRY_UIKIT_SCREEN).
+    nonisolated(unsafe) static let displayRotation: Int = {
+        guard Screen.fixed != nil,
+              let setting = getenv("PERRY_UIKIT_DISPLAY_ROTATION").flatMap({ Int(String(cString: $0)) }) else { return 0 }
+        return setting == 90 || setting == 270 || setting == -90 ? (setting + 360) % 360 : 0
+    }()
+
+    /// A point on the turned screen as the display shows it, in the app's.
+    static func unturned(_ point: CGPoint) -> CGPoint {
+        let size = Screen.bounds.size
+        switch displayRotation {
+        case 90: return CGPoint(x: point.y, y: size.height - point.x)
+        case 270: return CGPoint(x: size.width - point.y, y: point.x)
+        default: return point
+        }
+    }
+
     /// Centers the viewport for the window as it is now.
     private func fit() {
         var w: Int32 = 0, h: Int32 = 0
         guard fitted, SDL.outputSize?(renderer, &w, &h) == true, w > 0, h > 0 else { return }
         output = CGSize(width: CGFloat(w), height: CGFloat(h))
-        let size = Screen.bounds.size
+        var size = Screen.bounds.size
+        if Self.displayRotation != 0 { size = CGSize(width: size.height, height: size.width) }
         let width = (size.width * scale).rounded(), height = (size.height * scale).rounded()
         origin = CGPoint(x: ((output.width - width) / 2).rounded(.down), y: ((output.height - height) / 2).rounded(.down))
         var rect = (Int32(origin.x), Int32(origin.y), Int32(width), Int32(height))
@@ -254,8 +277,8 @@ final class Compositor {
                 let type = raw.load(fromByteOffset: 0, as: UInt32.self)
                 /// A mouse event's place, which SDL gives in window coordinates.
                 func point() -> CGPoint {
-                    CGPoint(x: (CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) * density - origin.x) / scale,
-                            y: (CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) * density - origin.y) / scale)
+                    Self.unturned(CGPoint(x: (CGFloat(raw.load(fromByteOffset: 28, as: Float.self)) * density - origin.x) / scale,
+                                          y: (CGFloat(raw.load(fromByteOffset: 32, as: Float.self)) * density - origin.y) / scale))
                 }
                 /// A mouse event SDL made from a finger: SDL_TOUCH_MOUSEID.
                 func fromFinger() -> Bool { raw.load(fromByteOffset: 20, as: UInt32.self) == UInt32.max }
@@ -263,7 +286,7 @@ final class Compositor {
                 func fingerPoint() -> CGPoint {
                     let x = CGFloat(raw.load(fromByteOffset: 32, as: Float.self)), y = CGFloat(raw.load(fromByteOffset: 36, as: Float.self))
                     if fitted, output.width > 0 {
-                        return CGPoint(x: (x * output.width - origin.x) / scale, y: (y * output.height - origin.y) / scale)
+                        return Self.unturned(CGPoint(x: (x * output.width - origin.x) / scale, y: (y * output.height - origin.y) / scale))
                     }
                     let size = Screen.bounds.size
                     return CGPoint(x: x * size.width, y: y * size.height)

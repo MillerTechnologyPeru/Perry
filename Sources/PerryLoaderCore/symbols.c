@@ -257,12 +257,9 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "Foundation");
         return true;
     }
-    // The compiler's runtime, whose arithmetic helpers armv6 code calls, and,
-    // for 32-bit programs, the operators new and delete programs built with
-    // GCC take from libstdc++: both are libSystem's provider's. A 64-bit
-    // program's libstdc++ is the StdCXX provider's, below, over Linux's.
-    if (strncmp(install_name, "/usr/lib/libgcc_s.", 18) == 0 ||
-        (sizeof(void *) == 4 && strncmp(install_name, "/usr/lib/libstdc++.", 19) == 0)) {
+    // The compiler's runtime, whose arithmetic helpers armv6 code calls, is
+    // libSystem's provider's.
+    if (strncmp(install_name, "/usr/lib/libgcc_s.", 18) == 0) {
         snprintf(out, out_size, "System");
         return true;
     }

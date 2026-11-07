@@ -181,6 +181,25 @@ final class Compositor {
         return (0..<count).map { "\((Double(components[$0]) * 100).rounded() / 100)" }.joined(separator: " ")
     }
 
+    /// PERRY_UIKIT_DISPLAY_ROTATION set to 90 or 270 shows the app's screen
+    /// turned a quarter clockwise or counterclockwise on the display, for an
+    /// app that draws a landscape picture into a portrait screen, as a phone
+    /// held sideways shows it. UIKit fits the turned screen to the window and
+    /// turns touches back.
+    nonisolated(unsafe) static let displayRotation: Int = {
+        guard let setting = getenv("PERRY_UIKIT_DISPLAY_ROTATION").flatMap({ Int(String(cString: $0)) }) else { return 0 }
+        return setting == 90 || setting == 270 || setting == -90 ? (setting + 360) % 360 : 0
+    }()
+
+    /// The quarter turn from a screen of `screen` points to the display's.
+    static func displayTurn(screen: CGSize) -> CGAffineTransform? {
+        switch displayRotation {
+        case 90: return CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: screen.height, ty: 0)
+        case 270: return CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: screen.width)
+        default: return nil
+        }
+    }
+
     /// Composites the roots, each placed in the screen by its own transform.
     func draw(_ roots: [CALayer]) {
         tracingFrame = false
@@ -198,7 +217,9 @@ final class Compositor {
         if tracingFrame, !cleared { "perry: QuartzCore: clearing failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
         for root in roots {
             let (state, _) = Presentation.presented(root)
-            composite(root, toScreen: state.toSuperlayer(within: nil), alpha: 1, clip: nil)
+            var toScreen = state.toSuperlayer(within: nil)
+            if let turn = Compositor.displayTurn(screen: state.bounds.size) { toScreen = toScreen.concatenating(turn) }
+            composite(root, toScreen: toScreen, alpha: 1, clip: nil)
         }
         for (key, entry) in textures where !entry.used {
             SDL.destroyTexture(entry.texture)
@@ -331,6 +352,13 @@ final class Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(texture, level)
         _ = SDL.setTextureColorMod(texture, level, level, level)
+        render(texture, bounds: state.bounds, toScreen: toScreen, flip: 0)
+    }
+
+    /// Draws `texture` into `bounds` taken to the screen by `toScreen`:
+    /// scaled, mirrored or turned. `flip` flips the texture first
+    /// (SDL_FLIP_VERTICAL 2 for rows bottom first).
+    func render(_ texture: SDL.Pointer, bounds: CGRect, toScreen: CGAffineTransform, flip extra: Int32) {
         // What rounding leaves of a zero: a float CGFloat's quarter turn has
         // a cosine near 4e-8.
         let small: CGFloat = MemoryLayout<CGFloat>.size == 4 ? 1e-5 : 1e-9
@@ -338,8 +366,8 @@ final class Compositor {
         // display, flipped where a scale is negative (SDL_FLIP_HORIZONTAL
         // 1, SDL_FLIP_VERTICAL 2).
         if abs(toScreen.b) < small, abs(toScreen.c) < small {
-            var target = pixels(toScreen.apply(state.bounds))
-            let flip: Int32 = (toScreen.a < 0 ? 1 : 0) | (toScreen.d < 0 ? 2 : 0)
+            var target = pixels(toScreen.apply(bounds))
+            let flip: Int32 = ((toScreen.a < 0 ? 1 : 0) | (toScreen.d < 0 ? 2 : 0)) ^ extra
             if flip == 0 {
                 _ = SDL.renderTexture(renderer, texture, nil, &target)
             } else {
@@ -353,19 +381,19 @@ final class Compositor {
         // takes the x axis.
         let mirrored = toScreen.a * toScreen.d - toScreen.b * toScreen.c < 0
         let degrees = (mirrored ? atan2(-toScreen.b, -toScreen.a) : atan2(toScreen.b, toScreen.a)) * 180 / .pi
-        let flip: Int32 = mirrored ? 1 : 0
+        let flip: Int32 = (mirrored ? 1 : 0) ^ extra
         // A quarter turn: the layer's box on the display, with its sides
         // exchanged, turned about its center into that box.
         if abs(toScreen.a) < small, abs(toScreen.d) < small {
-            let box = pixels(toScreen.apply(state.bounds))
+            let box = pixels(toScreen.apply(bounds))
             var target = SDL.FRect(x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w)
             _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
             return
         }
         // Any other turn is placed as it falls, not on whole pixels.
-        let center = toScreen.apply(CGPoint(x: state.bounds.midX, y: state.bounds.midY))
-        let width = state.bounds.width * (toScreen.a * toScreen.a + toScreen.b * toScreen.b).squareRoot()
-        let height = state.bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
+        let center = toScreen.apply(CGPoint(x: bounds.midX, y: bounds.midY))
+        let width = bounds.width * (toScreen.a * toScreen.a + toScreen.b * toScreen.b).squareRoot()
+        let height = bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
         var target = SDL.FRect(x: Float((center.x - width / 2) * scale), y: Float((center.y - height / 2) * scale),
                                w: Float(width * scale), h: Float(height * scale))
         _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
@@ -408,9 +436,8 @@ final class Compositor {
         let level = Float(alpha)
         _ = SDL.setTextureAlphaMod(current.texture, level)
         _ = SDL.setTextureColorMod(current.texture, level, level, level)
-        var target = pixels(toScreen.apply(state.bounds))
         // SDL_FLIP_VERTICAL for rows bottom first.
-        _ = SDL.renderTextureRotated(renderer, current.texture, nil, &target, 0, nil, live.topFirst ? 0 : 2)
+        render(current.texture, bounds: state.bounds, toScreen: toScreen, flip: live.topFirst ? 0 : 2)
     }
 
     /// The layer's texture, drawn again when what it shows has changed.
