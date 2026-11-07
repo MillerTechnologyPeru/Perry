@@ -226,7 +226,9 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
             )
             GeometryReader { proxy in
                 if let region = visibleRegion {
-                    ForEach(items.indices, id: \.self) { index in
+                    // The user's location under the annotations, as MapKit
+                    // draws it.
+                    ForEach(Self.drawingOrder(items), id: \.self) { index in
                         MapItemView(item: items[index], region: region, size: proxy.size, userCoordinate: userCoordinate)
                     }
                 }
@@ -239,6 +241,18 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
             }
         }
         .clipped()
+    }
+}
+
+extension MapContentView {
+    /// The items' indices, the user's location first, then the rest in
+    /// their order.
+    static func drawingOrder(_ items: [MapItem]) -> [Int] {
+        func isUser(_ item: MapItem) -> Bool {
+            if case .userLocation = item { return true }
+            return false
+        }
+        return items.indices.filter { isUser(items[$0]) } + items.indices.filter { !isUser(items[$0]) }
     }
 }
 
