@@ -339,6 +339,38 @@ public class NSArray: NSObject {
     @ObjCMethod("sortedArrayWithOptions:usingComparator:")
     func sorted(options: UInt, comparator: ObjCBlock) -> NSArray { sorted(comparator: comparator) }
 
+    /// A binary search of the range, which the comparator keeps sorted:
+    /// with NSBinarySearchingInsertionIndex (1 << 10) where the object
+    /// would go (after any equal ones with NSBinarySearchingLastEqual,
+    /// 1 << 9, else before them), otherwise an equal element's index (the
+    /// first with NSBinarySearchingFirstEqual, 1 << 8, the last with
+    /// LastEqual) or NSNotFound.
+    @ObjCMethod("indexOfObject:inSortedRange:options:usingComparator:")
+    func index(of target: ObjCObject?, inSortedRange range: NSRange, options: UInt, comparator: ObjCBlock) -> UInt {
+        let all = elements
+        let start = min(Int(range.location), all.count)
+        let end = min(all.count, start + Int(range.length))
+        let compare = comparator.function(as: (@convention(c) (id, id?, id?) -> Int).self)
+        let object = target?.id
+        let insertion = options & (1 << 10) != 0, last = options & (1 << 9) != 0
+        // The first element not less than the object, or with `last` the
+        // first greater than it.
+        func bound(upper: Bool) -> Int {
+            var low = start, high = end
+            while low < high {
+                let middle = (low + high) / 2
+                let order = compare(comparator.object, all[middle], object)
+                if order < 0 || (upper && order == 0) { low = middle + 1 } else { high = middle }
+            }
+            return low
+        }
+        if insertion { return UInt(bound(upper: last)) }
+        guard object != nil else { return notFound }
+        let lower = bound(upper: false)
+        guard lower < end, compare(comparator.object, all[lower], object) == 0 else { return notFound }
+        return last ? UInt(bound(upper: true) - 1) : UInt(lower)
+    }
+
     @ObjCMethod("enumerateObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)

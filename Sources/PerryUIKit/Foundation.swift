@@ -66,6 +66,9 @@ class NSBundle: NSObject {
     /// The localizations to use, most preferred first.
     @ObjCMethod("preferredLocalizations")
     func preferredLocalizations() -> NSArray
+
+    @ObjCMethod("developmentLocalization")
+    func developmentLocalization() -> String?
 }
 
 @ObjCWrapper("NSNotificationCenter")

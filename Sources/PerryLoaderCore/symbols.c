@@ -74,9 +74,11 @@ static const uint8_t *trie_find(const uint8_t *start, uint32_t size, const char 
     const uint8_t *p = start;
     for (int depth = 0; p < end && depth < 512; depth++) {
         uint64_t terminal_size = perry_read_uleb(&p, end);
-        if (*name == 0) {
-            if (terminal_size == 0)
-                return NULL;
+        // A name that ends where a longer one goes on can have its terminal
+        // a node further, behind an empty edge, as newer linkers write
+        // ("_XalGetSandbox" beside "_XalGetSandboxSize"): with no terminal
+        // here, the children are searched for one.
+        if (*name == 0 && terminal_size != 0) {
             *terminal_end = p + terminal_size;
             return p;
         }
@@ -437,8 +439,15 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
 
     // Metal is libPerryMetal's, on Vulkan; without it, QuartzCore, which
     // has the layers, answers that there is no device, so apps that can
-    // draw with OpenGL ES do.
+    // draw with OpenGL ES do. PERRY_METAL=0 has it so with libPerryMetal
+    // there too.
     bool metal = strcmp(short_name, "Metal") == 0;
+    const char *metal_setting = getenv("PERRY_METAL");
+    if (metal && metal_setting && (strcmp(metal_setting, "0") == 0 || strcmp(metal_setting, "off") == 0)) {
+        perry_trace(PERRY_TRACE_LOAD, "Metal turned off by PERRY_METAL; QuartzCore answers for it");
+        metal = false;
+        snprintf(short_name, sizeof(short_name), "QuartzCore");
+    }
 retry:
     for (uint32_t i = 0; i < loader->library_dir_count; i++) {
         char path[PATH_MAX];
