@@ -679,7 +679,10 @@ extension UIResponder {
 /// With PERRY_UIKIT_TAPS set to steps separated by semicolons, each is
 /// done in turn, two seconds apart, beginning two seconds after a window
 /// first shows: "195,120" taps a point; "drag:195,600,195,200" swipes
-/// from the first point to the second over a quarter second; "type:Hello" types text, and
+/// from the first point to the second over a quarter second;
+/// "pinch:195,400,100,200" puts two fingers either side of the point, 100
+/// points apart, and spreads them to 200 over a quarter second (closer
+/// pinches in); "doubletap:195,400" taps twice; "type:Hello" types text, and
 /// "key:return", "key:backspace" and "key:escape" press those keys, for
 /// the first responder; "wait" does nothing for its two seconds. To reach
 /// an app's later screens without a display, along with
@@ -689,6 +692,8 @@ enum TapScript {
     enum Step {
         case tap(CGPoint)
         case drag(CGPoint, CGPoint)
+        case pinch(CGPoint, CGFloat, CGFloat)
+        case doubleTap(CGPoint)
         case type(String)
         case key(String)
     }
@@ -705,6 +710,18 @@ enum TapScript {
             if item == "wait" { return .key("wait") }
             if item.hasPrefix("type:") { return .type(String(item.dropFirst(5))) }
             if item.hasPrefix("key:") { return .key(String(item.dropFirst(4))) }
+            if item.hasPrefix("pinch:") {
+                let values: [CGFloat] = item.dropFirst(6).split(separator: ",")
+                    .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
+                guard values.count == 4 else { return nil }
+                return .pinch(CGPoint(x: values[0], y: values[1]), values[2], values[3])
+            }
+            if item.hasPrefix("doubletap:") {
+                let values: [CGFloat] = item.dropFirst(10).split(separator: ",")
+                    .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
+                guard values.count == 2 else { return nil }
+                return .doubleTap(CGPoint(x: values[0], y: values[1]))
+            }
             if item.hasPrefix("drag:") {
                 let values: [CGFloat] = item.dropFirst(5).split(separator: ",")
                     .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
@@ -730,6 +747,20 @@ enum TapScript {
                 Display.dispatchAfter?(Display.dispatchTime!(0, 150_000_000), Updates.mainQueue, nil) { _ in Touches.up(at: TapScript.lastTap) }
             case .drag(let start, let end):
                 TapScript.drag(from: start, to: end)
+            case .pinch(let center, let from, let to):
+                TapScript.pinch(around: center, from: from, to: to)
+            case .doubleTap(let point):
+                TapScript.lastTap = point
+                Touches.down(at: point)
+                Display.dispatchAfter?(Display.dispatchTime!(0, 60_000_000), Updates.mainQueue, nil) { _ in
+                    Touches.up(at: TapScript.lastTap)
+                    Display.dispatchAfter?(Display.dispatchTime!(0, 120_000_000), Updates.mainQueue, nil) { _ in
+                        Touches.down(at: TapScript.lastTap)
+                        Display.dispatchAfter?(Display.dispatchTime!(0, 60_000_000), Updates.mainQueue, nil) { _ in
+                            Touches.up(at: TapScript.lastTap)
+                        }
+                    }
+                }
             case .type(let text):
                 Keyboard.insert(text)
             case .key(let name):
@@ -758,6 +789,40 @@ enum TapScript {
         }
         Touches.down(at: start)
         moveAlongDrag()
+    }
+
+    /// The second finger's number, as the platform's would be.
+    private static let pinchFinger: UInt64 = 0x7E57
+
+    /// The two fingers' points a pinch under way has still to move through.
+    nonisolated(unsafe) private static var pinchPath: [(CGPoint, CGPoint)] = []
+
+    /// Two fingers either side of `center`, `from` points apart, through
+    /// ten moves 25 ms apart to `to` apart, and up.
+    private static func pinch(around center: CGPoint, from: CGFloat, to: CGFloat) {
+        func points(_ distance: CGFloat) -> (CGPoint, CGPoint) {
+            (CGPoint(x: center.x - distance / 2, y: center.y), CGPoint(x: center.x + distance / 2, y: center.y))
+        }
+        let start = points(from)
+        Touches.down(at: start.0)
+        Touches.down(at: start.1, finger: pinchFinger)
+        pinchPath = (1...10).map { points(from + (to - from) * CGFloat($0) / 10) }
+        moveAlongPinch()
+    }
+
+    private static func moveAlongPinch() {
+        Display.dispatchAfter?(Display.dispatchTime!(0, 25_000_000), Updates.mainQueue, nil) { _ in
+            guard !TapScript.pinchPath.isEmpty else { return }
+            let (first, second) = TapScript.pinchPath.removeFirst()
+            Touches.move(to: first)
+            Touches.move(to: second, finger: TapScript.pinchFinger)
+            if TapScript.pinchPath.isEmpty {
+                Touches.up(at: second, finger: TapScript.pinchFinger)
+                Touches.up(at: first)
+            } else {
+                TapScript.moveAlongPinch()
+            }
+        }
     }
 
     private static func moveAlongDrag() {
