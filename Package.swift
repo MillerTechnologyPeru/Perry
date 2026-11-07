@@ -53,6 +53,7 @@ let package = Package(
         // CoreTelephony, on a device without a cellular radio.
         .library(name: "PerryCoreTelephony", type: .dynamic, targets: ["PerryCoreTelephony"]),
         .library(name: "PerryStoreKit", type: .dynamic, targets: ["PerryStoreKit"]),
+        .library(name: "PerryGameKit", type: .dynamic, targets: ["PerryGameKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         // MediaPlayer, with no media library and no movies.
         .library(name: "PerryMediaPlayer", type: .dynamic, targets: ["PerryMediaPlayer"]),
@@ -313,6 +314,12 @@ let package = Package(
         // StoreKit's Objective-C classes, with no App Store.
         .target(
             name: "PerryStoreKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // GameKit's Objective-C classes, with no Game Center account.
+        .target(
+            name: "PerryGameKit",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
