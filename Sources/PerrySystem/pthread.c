@@ -210,6 +210,21 @@ int darwin_pthread_mutexattr_gettype(const darwin_mutexattr *attributes, int *ty
     return result(error);
 }
 
+// The policy (fair share or first fit) is how Darwin's mutexes hand over;
+// glibc's have one way.
+int darwin_pthread_mutexattr_setpolicy_np(darwin_mutexattr *attributes, int policy) DARWIN_SYMBOL(pthread_mutexattr_setpolicy_np);
+int darwin_pthread_mutexattr_setpolicy_np(darwin_mutexattr *attributes, int policy) {
+    (void)attributes;
+    return policy >= 1 && policy <= 3 ? 0 : EINVAL;
+}
+
+int darwin_pthread_mutexattr_getpolicy_np(const darwin_mutexattr *attributes, int *policy) DARWIN_SYMBOL(pthread_mutexattr_getpolicy_np);
+int darwin_pthread_mutexattr_getpolicy_np(const darwin_mutexattr *attributes, int *policy) {
+    (void)attributes;
+    *policy = 1;    // PTHREAD_MUTEX_POLICY_FAIRSHARE_NP
+    return 0;
+}
+
 int darwin_pthread_mutexattr_setpshared(darwin_mutexattr *attributes, int shared) DARWIN_SYMBOL(pthread_mutexattr_setpshared);
 int darwin_pthread_mutexattr_setpshared(darwin_mutexattr *attributes, int shared) {
     return result(pthread_mutexattr_setpshared(&attributes->value,
