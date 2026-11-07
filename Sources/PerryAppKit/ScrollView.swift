@@ -247,7 +247,7 @@ open class NSScrollView: NSView {
             scroller.setHidden(!has || (!scrollable && autohidesScrollers) || !scrollable)
             scroller.knobProportion = total > 0 ? min(1, length / total) : 1
             scroller.value = scrollable ? max(0, min(1, offset / (total - length))) : 0
-            scroller.setNeedsDisplay(true)
+            scroller.knobChanged()
         }
         update(verticalScroller, has: hasVerticalScroller, visible: visible.height, whole: whole.height,
                offset: document.flipped ? visible.minY - whole.minY : whole.maxY - visible.maxY)
@@ -263,17 +263,47 @@ open class NSScrollView: NSView {
         guard let event = eventObject?.as(NSEvent.self), let clip = contentClip, let document = clip.documentView else {
             return super.scrollWheel(eventObject)
         }
+        // Precise deltas are points; a wheel's are lines, each about four
+        // of the view's line scrolls, as a notch scrolls on a Mac.
         let scale = event.hasPreciseScrollingDeltas ? 1 : lineScroll * 4
-        var dx = -event.scrollingDeltaX * scale, dy = -event.scrollingDeltaY * scale
+        let start = Clock.now
+        if !scroll(contentBy: CGPoint(x: event.scrollingDeltaX * scale, y: event.scrollingDeltaY * scale)) {
+            return super.scrollWheel(eventObject)
+        }
+        Trace.log("scroll: wheel \(event.scrollingDeltaY) precise \(event.hasPreciseScrollingDeltas) line \(lineScroll) in \(Int((Clock.now - start) * 1000)) ms")
+    }
+
+    /// Moves the content by `delta` points, as a wheel's scrolling deltas
+    /// or a finger move it (positive y: the content moves down, showing
+    /// what is above); whether it moved.
+    @discardableResult
+    func scroll(contentBy delta: CGPoint) -> Bool {
+        guard let clip = contentClip, let document = clip.documentView else { return false }
+        var dx = -delta.x, dy = -delta.y
         if usesPredominantAxisScrolling { if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 } }
         if !hasHorizontalScroller && document.frame.width <= clip.bounds.width + 0.5 { dx = 0 }
         if !document.flipped { dy = -dy }
-        guard dx != 0 || dy != 0 else { return }
+        guard dx != 0 || dy != 0 else { return false }
         let target = CGRect(origin: CGPoint(x: clip.bounds.minX + dx, y: clip.bounds.minY + dy), size: clip.bounds.size)
         let constrained = clip.constrainBoundsRect(target)
-        guard constrained.origin != clip.bounds.origin else { return super.scrollWheel(eventObject) }
+        guard constrained.origin != clip.bounds.origin else { return false }
         clip.scroll(to: constrained.origin)
+        return true
     }
+
+    /// Whether the content is bigger than the view, so there is somewhere
+    /// to scroll.
+    var canScroll: Bool {
+        guard let clip = contentClip, let document = clip.documentView else { return false }
+        return document.frame.height > clip.bounds.height + 0.5 || document.frame.width > clip.bounds.width + 0.5
+    }
+
+    /// Fingers it takes to scroll by touch; more than one turns off
+    /// one-finger scrolling, leaving a finger's drag to the content.
+    var minimumNumberOfTouchesForScrolling = 1
+    @ObjCMethod("minimumNumberOfTouchesForScrolling") func scrollMinimumNumberOfTouchesForScrolling() -> Int { minimumNumberOfTouchesForScrolling }
+    @ObjCMethod("setMinimumNumberOfTouchesForScrolling:")
+    func setMinimumNumberOfTouchesForScrolling(_ value: Int) { minimumNumberOfTouchesForScrolling = max(1, value) }
 
     /// A scroller's knob moved to `value` (0 to 1).
     func scrollerMoved(_ scroller: NSScroller) {
@@ -409,6 +439,10 @@ open class NSClipView: NSView {
         documentFrameChanged()
     }
 
+    /// The background fills the bounds wherever they are, so scrolling
+    /// doesn't draw it again (unless a subclass draws more).
+    override var redrawsWhenScrolled: Bool { Methods.overrides(objcObject, "drawRect:", of: NSClipView.objCClass.pointer) }
+
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard drawsBackground, let backgroundColor, let context = NSGraphicsContext.currentCG else { return }
@@ -459,15 +493,15 @@ open class NSScroller: NSControl {
     var vertical: Bool { frame.height >= frame.width }
 
     @ObjCMethod("knobProportion") func scrollerKnobProportion() -> CGFloat { knobProportion }
-    @ObjCMethod("setKnobProportion:") func setKnobProportion(_ value: CGFloat) { knobProportion = value; setNeedsDisplay(true) }
+    @ObjCMethod("setKnobProportion:") func setKnobProportion(_ value: CGFloat) { knobProportion = value; knobChanged() }
     @ObjCMethod("doubleValue") func scrollerDoubleValue() -> Double { value }
-    @ObjCMethod("setDoubleValue:") func setScrollerDoubleValue(_ value: Double) { self.value = value; setNeedsDisplay(true) }
+    @ObjCMethod("setDoubleValue:") func setScrollerDoubleValue(_ value: Double) { self.value = value; knobChanged() }
     @ObjCMethod("floatValue") func scrollerFloatValue() -> Float { Float(value) }
     @ObjCMethod("setFloatValue:knobProportion:")
     func setFloatValue(_ value: Float, knobProportion: CGFloat) {
         self.value = CGFloat(value)
         self.knobProportion = knobProportion
-        setNeedsDisplay(true)
+        knobChanged()
     }
     @ObjCMethod("scrollerStyle") func scrollerStyle() -> Int { 1 }
     @ObjCMethod("setScrollerStyle:") func setScrollerStyle(_ value: Int) {}
@@ -488,11 +522,43 @@ open class NSScroller: NSControl {
 
     @ObjCMethod("rectForPart:") func rect(forPart part: UInt) -> CGRect { part == 2 ? knobRect : bounds }
 
-    @ObjCMethod("drawRect:")
-    override func draw(_ rect: CGRect) {
-        guard knobProportion < 1, let context = NSGraphicsContext.currentCG else { return }
-        let knob = knobRect
-        CG.fill(CG.roundedRect(knob, radius: min(knob.width, knob.height) / 2), NSColor(white: 0, alpha: 0.35), in: context)
+    // The knob is a layer of its own, a rounded rectangle the compositor
+    // keeps as a texture, moved as the document scrolls instead of drawn
+    // again (a subclass that draws draws it itself).
+    nonisolated(unsafe) private static let knobColor = NSColor(white: 0, alpha: 0.35)
+    private var knobLayer: CALayer?
+
+    override var draws: Bool { Methods.overrides(objcObject, "drawRect:", of: NSScroller.objCClass.pointer) }
+
+    /// The knob moved or changed size.
+    func knobChanged() {
+        if draws { return setNeedsDisplay(true) }
+        guard let layer else { return }
+        let knob = knobLayer ?? {
+            let made = CALayer.make()
+            CATransaction.withoutActions { CALayer(objcObject: layer.objcObject, ownership: .retain).addSublayer(made) }
+            knobLayer = made
+            return made
+        }()
+        let rect = knobRect
+        CATransaction.withoutActions {
+            knob.setHidden(knobProportion >= 1 || rect.width <= 0 || rect.height <= 0)
+            knob.setFrame(rect)
+            knob.setCornerRadius(min(rect.width, rect.height) / 2)
+            knob.setBackgroundColor(Self.knobColor.cgColorRef)
+        }
+        Windows.layersChanged()
+    }
+
+    override func ensureLayer() {
+        super.ensureLayer()
+        knobChanged()
+    }
+
+    @ObjCMethod("setFrameSize:")
+    override func setFrameSize(_ size: CGSize) {
+        super.setFrameSize(size)
+        knobChanged()
     }
 
     @ObjCMethod("drawKnob") func drawKnob() {}
@@ -527,7 +593,7 @@ open class NSScroller: NSControl {
     @ObjCMethod("mouseUp:") override func mouseUp(_ event: NSObject?) { dragStart = nil }
 
     private func moved() {
-        setNeedsDisplay(true)
+        knobChanged()
         if let scrollView { NSScrollView.objCInstance(scrollView, ownership: .retain).scrollerMoved(self) }
         _ = sendAction(action, to: target.map(NSObject.init))
     }
