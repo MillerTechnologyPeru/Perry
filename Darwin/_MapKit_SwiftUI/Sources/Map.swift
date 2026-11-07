@@ -201,46 +201,58 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
         let items = content.mapItems
         let showsUser = items.contains { if case .userLocation = $0 { return true } else { return false } }
         let target = (position?.wrappedValue ?? initialPosition)
+        // The controls over a transparent view the size of the frame; the
+        // map and its annotations behind it fill that frame up to the top
+        // of the screen, under the status bar and what a top
+        // `safeAreaInset` takes, as MapKit's do, without making the view
+        // larger (which would move what is placed in it); not under a tab
+        // bar, which UIKit views here would cover.
         ZStack(alignment: .topTrailing) {
-            MapViewRepresentable(
-                position: target,
-                followsBinding: position != nil,
-                interactionModes: interactionModes,
-                style: environment.style,
-                showsUserLocation: showsUser,
-                regionChanged: { region, user, finished in
-                    visibleRegion = region
-                    if userCoordinate?.latitude != user?.latitude || userCoordinate?.longitude != user?.longitude {
-                        userCoordinate = user
-                    }
-                    if finished, let position, !position.wrappedValue.isPositionedByUser || position.wrappedValue.resolvedRegion == nil {
-                        var moved = MapCameraPosition.region(region)
-                        moved.isPositionedByUser = true
-                        position.wrappedValue = moved
-                    }
-                    let context = MapCameraUpdateContext(region: region)
-                    for entry in environment.cameraActions where finished || entry.frequency.isContinuous {
-                        entry.action(context)
-                    }
-                }
-            )
-            GeometryReader { proxy in
-                if let region = visibleRegion {
-                    // The user's location under the annotations, as MapKit
-                    // draws it.
-                    ForEach(Self.drawingOrder(items), id: \.self) { index in
-                        MapItemView(item: items[index], region: region, size: proxy.size, userCoordinate: userCoordinate)
-                    }
-                }
-            }
-            .allowsHitTesting(visibleRegion != nil)
+            Color.clear
             if let controls = environment.controls {
                 VStack(spacing: 8) { controls }
                     .padding(8)
                     .environment(\.mapVisibleRegion, visibleRegion)
             }
         }
-        .clipped()
+        .background(alignment: .topLeading) {
+            ZStack(alignment: .topLeading) {
+                MapViewRepresentable(
+                    position: target,
+                    followsBinding: position != nil,
+                    interactionModes: interactionModes,
+                    style: environment.style,
+                    showsUserLocation: showsUser,
+                    regionChanged: { region, user, finished in
+                        visibleRegion = region
+                        if userCoordinate?.latitude != user?.latitude || userCoordinate?.longitude != user?.longitude {
+                            userCoordinate = user
+                        }
+                        if finished, let position, !position.wrappedValue.isPositionedByUser || position.wrappedValue.resolvedRegion == nil {
+                            var moved = MapCameraPosition.region(region)
+                            moved.isPositionedByUser = true
+                            position.wrappedValue = moved
+                        }
+                        let context = MapCameraUpdateContext(region: region)
+                        for entry in environment.cameraActions where finished || entry.frequency.isContinuous {
+                            entry.action(context)
+                        }
+                    }
+                )
+                GeometryReader { proxy in
+                    if let region = visibleRegion {
+                        // The user's location under the annotations, as MapKit
+                        // draws it.
+                        ForEach(Self.drawingOrder(items), id: \.self) { index in
+                            MapItemView(item: items[index], region: region, size: proxy.size, userCoordinate: userCoordinate)
+                        }
+                    }
+                }
+                .allowsHitTesting(visibleRegion != nil)
+            }
+            .clipped()
+            .ignoresSafeArea(edges: .top)
+        }
     }
 }
 
