@@ -574,9 +574,10 @@ public class NSMutableData: NSData {
         storage.replace(location: storage.count, length: 0, with: bytes, count: Int(length))
     }
 
+    /// nil appends nothing, as Darwin's does.
     @ObjCMethod("appendData:")
-    func append(data other: NSData) {
-        other.data.withUnsafeBytes { append(bytes: $0.baseAddress, length: UInt($0.count)) }
+    func append(data other: NSData?) {
+        other?.data.withUnsafeBytes { append(bytes: $0.baseAddress, length: UInt($0.count)) }
     }
 
     @ObjCMethod("replaceBytesInRange:withBytes:")
@@ -592,8 +593,10 @@ public class NSMutableData: NSData {
         storage.replace(location: Int(range.location), length: Int(range.length), with: bytes, count: Int(length))
     }
 
+    /// nil leaves the data empty.
     @ObjCMethod("setData:")
-    func set(data other: NSData) {
+    func set(data other: NSData?) {
+        guard let other else { return storage.replace(location: 0, length: storage.count, with: nil, count: 0) }
         other.data.withUnsafeBytes {
             storage.replace(location: 0, length: storage.count, with: $0.baseAddress, count: $0.count)
         }
