@@ -187,6 +187,7 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
     var interactionModes: MapInteractionModes
     var content: Content
     @State private var visibleRegion: MKCoordinateRegion?
+    @State private var userCoordinate: CLLocationCoordinate2D?
     @Environment(\.mapEnvironment) private var environment
 
     @preconcurrency
@@ -198,6 +199,7 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
     @MainActor @ViewBuilder
     var mapKitBody: some View {
         let items = content.mapItems
+        let showsUser = items.contains { if case .userLocation = $0 { return true } else { return false } }
         let target = (position?.wrappedValue ?? initialPosition)
         ZStack(alignment: .topTrailing) {
             MapViewRepresentable(
@@ -205,8 +207,12 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
                 followsBinding: position != nil,
                 interactionModes: interactionModes,
                 style: environment.style,
-                regionChanged: { region, finished in
+                showsUserLocation: showsUser,
+                regionChanged: { region, user, finished in
                     visibleRegion = region
+                    if userCoordinate?.latitude != user?.latitude || userCoordinate?.longitude != user?.longitude {
+                        userCoordinate = user
+                    }
                     if finished, let position, !position.wrappedValue.isPositionedByUser || position.wrappedValue.resolvedRegion == nil {
                         var moved = MapCameraPosition.region(region)
                         moved.isPositionedByUser = true
@@ -221,7 +227,7 @@ public struct MapContentView<SelectionValue, Content>: View where SelectionValue
             GeometryReader { proxy in
                 if let region = visibleRegion {
                     ForEach(items.indices, id: \.self) { index in
-                        MapItemView(item: items[index], region: region, size: proxy.size)
+                        MapItemView(item: items[index], region: region, size: proxy.size, userCoordinate: userCoordinate)
                     }
                 }
             }
@@ -241,6 +247,8 @@ struct MapItemView: View {
     var item: MapItem
     var region: MKCoordinateRegion
     var size: CGSize
+    /// Where the user is, as the map view knows it; nil if unknown.
+    var userCoordinate: CLLocationCoordinate2D?
 
     /// Where a coordinate falls in the view, on the map's Mercator
     /// projection.
@@ -263,8 +271,10 @@ struct MapItemView: View {
                     }
                 }
             }
-        case .userLocation:
-            EmptyView()
+        case let .userLocation(anchor, content):
+            if let userCoordinate {
+                AnchoredLayout(point: point(userCoordinate), anchor: anchor) { content }
+            }
         }
     }
 }
@@ -296,17 +306,21 @@ struct MapViewRepresentable: UIViewRepresentable {
     var followsBinding: Bool
     var interactionModes: MapInteractionModes
     var style: MapStyle
-    var regionChanged: (MKCoordinateRegion, Bool) -> Void
+    var showsUserLocation: Bool
+    /// The region shown, where the user is if the map shows it, and
+    /// whether the move has finished.
+    var regionChanged: (MKCoordinateRegion, CLLocationCoordinate2D?, Bool) -> Void
 
     func makeUIView(context: Context) -> MKMapView {
         let view = MKMapView()
         view.delegate = context.coordinator
+        view.showsUserLocation = showsUserLocation
         if let region = position.resolvedRegion {
             view.setRegion(region, animated: false)
         }
         context.coordinator.shown = position
         DispatchQueue.main.async { [weak view] in
-            if let view { context.coordinator.regionChanged(view.region, true) }
+            if let view { context.coordinator.report(view, finished: true) }
         }
         return view
     }
@@ -322,6 +336,9 @@ struct MapViewRepresentable: UIViewRepresentable {
             view.mapType = style.mapType
         }
         view.showsTraffic = style.showsTraffic
+        if view.showsUserLocation != showsUserLocation {
+            view.showsUserLocation = showsUserLocation
+        }
         // A position set by the app, not one the map wrote back, moves it.
         if followsBinding, position != coordinator.shown, !position.isPositionedByUser,
            let region = position.resolvedRegion {
@@ -333,19 +350,30 @@ struct MapViewRepresentable: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(regionChanged: regionChanged) }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
-        var regionChanged: (MKCoordinateRegion, Bool) -> Void
+        var regionChanged: (MKCoordinateRegion, CLLocationCoordinate2D?, Bool) -> Void
         var shown: MapCameraPosition?
 
-        init(regionChanged: @escaping (MKCoordinateRegion, Bool) -> Void) {
+        init(regionChanged: @escaping (MKCoordinateRegion, CLLocationCoordinate2D?, Bool) -> Void) {
             self.regionChanged = regionChanged
         }
 
+        /// The region, and the user's location when the map shows it and
+        /// knows it.
+        func report(_ mapView: MKMapView, finished: Bool) {
+            var user: CLLocationCoordinate2D?
+            if mapView.showsUserLocation {
+                let coordinate = mapView.userLocation.coordinate
+                if CLLocationCoordinate2DIsValid(coordinate) { user = coordinate }
+            }
+            regionChanged(mapView.region, user, finished)
+        }
+
         func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-            regionChanged(mapView.region, false)
+            report(mapView, finished: false)
         }
 
         func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            regionChanged(mapView.region, true)
+            report(mapView, finished: true)
         }
     }
 }
