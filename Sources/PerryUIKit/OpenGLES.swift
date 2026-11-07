@@ -202,6 +202,8 @@ enum GLES {
         // The screen drawn at more pixels than the program asks for: what
         // it sets and asks in pixels goes through GLRenderScale.
         if let scaled = GLRenderScale.function(cName) { return perry_gl_entry(scaled) }
+        // OpenGL ES 1's names, on a host whose ES 1 is desktop OpenGL.
+        if let desktop = GLDesktop.function(cName) { return perry_gl_entry(desktop) }
         return perry_gl_entry(host(cName).map { perry_gles_darwin_function(cName, $0) })
     }
 
@@ -274,6 +276,7 @@ final class GLContext {
     deinit {
         if GLTrace.on { GLTrace.say("context \(handle) destroyed") }
         _ = GLES.destroyContext?(GLES.display, handle)
+        GLDesktop.forget(handle)
     }
 }
 
@@ -597,7 +600,19 @@ open class EAGLContext: NSObject {
         let group = sharegroup ?? EAGLSharegroup.objCClass.object.allocated().unsafeCast(to: EAGLSharegroup.self)
         // EGL_CONTEXT_MAJOR_VERSION, then the end of the list.
         let attributes: [Int32] = [0x3098, Int32(api), 0x3038]
-        guard let handle = create(GLES.display, nil, group.state.root?.handle, attributes) else { return nil }
+        let handle: UnsafeMutableRawPointer
+        if api == 1, GLDesktop.isOn {
+            // ES 1 as an OpenGL compatibility context, on a host without it.
+            guard let made = GLDesktop.createContext(sharing: group.state.root?.handle) else { return nil }
+            handle = made
+        } else {
+            // A thread that made a compatibility context current has EGL's
+            // OpenGL API bound.
+            _ = GLES.bindAPI?(GLDesktop.openGLESAPI)
+            guard let made = create(GLES.display, nil, GLDesktop.isDesktop(group.state.root?.handle) ? nil : group.state.root?.handle,
+                                    attributes) else { return nil }
+            handle = made
+        }
         let context = GLContext(handle: handle, api: Int(api))
         if GLTrace.on { GLTrace.say("context \(handle) made, ES \(api), sharing with \(String(describing: group.state.root?.handle))") }
         if group.state.root == nil { group.state.root = context }
