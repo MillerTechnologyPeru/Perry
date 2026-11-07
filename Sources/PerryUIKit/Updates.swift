@@ -147,7 +147,8 @@ enum Snapshot {
     }
 
     /// The view tree beside the image: each view's class, frame, bounds
-    /// origin when scrolled, how its layer clips, and whether it is hidden.
+    /// origin when scrolled, how its layer clips, its alpha when below 1 and
+    /// whether it is hidden.
     private static func describe(_ view: UIView, depth: Int, into tree: inout String) {
         let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
         let frame = view.state.frame
@@ -155,6 +156,7 @@ enum Snapshot {
         let origin = view.state.bounds.origin
         if origin != .zero { tree += " bounds origin (\(origin.x), \(origin.y))" }
         if let geometry = view.state.geometry {
+            if geometry.opacity < 1 { tree += " alpha \(geometry.opacity)" }
             if geometry.masksToBounds { tree += " clips" }
             if geometry.cornerRadius > 0 { tree += " radius \(geometry.cornerRadius)" }
             if geometry.layer.mask() != nil { tree += " masked" }
