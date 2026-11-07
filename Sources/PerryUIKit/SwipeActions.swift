@@ -269,13 +269,13 @@ enum SwipeActions {
             }
             let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
             descriptor.storeBytes(of: 0, as: UInt.self)
-            descriptor.storeBytes(of: 32, toByteOffset: 8, as: UInt.self)
-            let block = UnsafeMutableRawPointer.allocate(byteCount: 32, alignment: 8)
+            descriptor.storeBytes(of: UInt(3 * MemoryLayout<UnsafeRawPointer>.size + 8), toByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UInt.self)
+            let block = UnsafeMutableRawPointer.allocate(byteCount: 3 * MemoryLayout<UnsafeRawPointer>.size + 8, alignment: 8)
             block.storeBytes(of: isa, as: UnsafeMutableRawPointer.self)
-            block.storeBytes(of: Int32(1 << 28), toByteOffset: 8, as: Int32.self)   // BLOCK_IS_GLOBAL
-            block.storeBytes(of: Int32(0), toByteOffset: 12, as: Int32.self)
-            block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: 16, as: UnsafeRawPointer.self)
-            block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 24, as: UnsafeRawPointer.self)
+            block.storeBytes(of: Int32(1 << 28), toByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: Int32.self)   // BLOCK_IS_GLOBAL
+            block.storeBytes(of: Int32(0), toByteOffset: MemoryLayout<UnsafeRawPointer>.size + 4, as: Int32.self)
+            block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
+            block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 2 * MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
             return block
         }()
     }
