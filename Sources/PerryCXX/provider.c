@@ -16,6 +16,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -179,6 +180,258 @@ static const struct { const char *name; void *function; } locks[] = {
       (void *)cond_timed_wait },
 };
 
+// MARK: std::thread's per-thread data
+
+// std::thread's start-up, which Darwin code inlines from <thread>, keeps the
+// new thread's __thread_struct in std::__thread_local_data()'s
+// __thread_specific_ptr: it reads the pointer's key and calls Darwin's
+// pthread_setspecific with it. libperry-c++'s own pointer holds a glibc key
+// (4 bytes, numbered as glibc numbers them), which Darwin's functions read as
+// another Darwin key, one some other library was given: OpenSSL's per-thread
+// random generators ended up overwritten. Darwin code gets a pointer of its
+// own here, with a Darwin key (8 bytes) from libPerrySystem, whose destructor
+// deletes the thread's __thread_struct as libc++'s does.
+
+/// __thread_specific_ptr<__thread_struct> as Darwin lays it out: its key.
+typedef struct { unsigned long key; } darwin_thread_specific_ptr;
+
+static darwin_thread_specific_ptr thread_data;
+static pthread_once_t thread_data_once = PTHREAD_ONCE_INIT;
+static void *(*thread_struct_destroy)(void *);
+static void (*operator_delete)(void *);
+
+/// A thread's __thread_struct, deleted as it exits.
+static void thread_struct_at_exit(void *value) {
+    if (!value) return;
+    thread_struct_destroy(value);
+    operator_delete(value);
+}
+
+static void make_thread_data(void) {
+    int (*key_create)(unsigned long *, void (*)(void *)) =
+        (int (*)(unsigned long *, void (*)(void *)))system_symbol("_pthread_key_create");
+    thread_struct_destroy = (void *(*)(void *))library_symbol("__ZNSt3__115__thread_structD1Ev");
+    operator_delete = (void (*)(void *))library_symbol("__ZdlPv");
+    if (!thread_struct_destroy || !operator_delete || key_create(&thread_data.key, thread_struct_at_exit) != 0) {
+        fprintf(stderr, "perry: libc++: no thread data key for Darwin code\n");
+        abort();
+    }
+}
+
+static darwin_thread_specific_ptr *thread_local_data(void) {
+    pthread_once(&thread_data_once, make_thread_data);
+    return &thread_data;
+}
+
+// MARK: std::future<void>'s shared state
+
+// A promise<void>'s and future<void>'s shared state, __assoc_sub_state, holds
+// a std::mutex and condition_variable: Darwin's sizes in Darwin code, whose
+// inlined <future> reads its state word after them, and glibc's in
+// libperry-c++'s own members, which also lock them with glibc. Darwin code
+// gets these members instead, over Darwin's layout and Perry's Darwin
+// pthread functions; subclasses the code makes itself (std::async's,
+// packaged_task's) are laid out the same way. A promise broken before it
+// is satisfied makes its future ready with no exception, and the misuse
+// libc++ reports as future_error (a value set twice, a future taken twice,
+// no state) ends the process.
+
+/// __assoc_sub_state on arm64 Darwin: __shared_count's vtable and owner
+/// count, then the exception, mutex, condition variable and state bits.
+typedef struct {
+    void **vtable;
+    long shared_owners;     // owners - 1
+    void *exception;        // std::exception_ptr
+    darwin_mutex mutex;
+    darwin_cond cond;
+    unsigned state;
+} assoc_sub_state;
+
+enum { STATE_CONSTRUCTED = 1, STATE_FUTURE_ATTACHED = 2, STATE_READY = 4, STATE_DEFERRED = 8 };
+
+static int (*darwin_cond_init)(darwin_cond *, const void *);
+static void *(*operator_new)(size_t);
+static void (*exception_increment)(void *);
+static void (*exception_decrement)(void *);
+
+static void load_future(void) {
+    static _Bool loaded;
+    if (loaded) return;
+    load_darwin();
+    darwin_cond_init = (int (*)(darwin_cond *, const void *))system_symbol("_pthread_cond_init");
+    operator_new = (void *(*)(size_t))library_symbol("__Znwm");
+    operator_delete = (void (*)(void *))library_symbol("__ZdlPv");
+    exception_increment = (void (*)(void *))library_symbol("___cxa_increment_exception_refcount");
+    exception_decrement = (void (*)(void *))library_symbol("___cxa_decrement_exception_refcount");
+    if (!darwin_cond_init || !operator_new || !operator_delete || !exception_increment || !exception_decrement) {
+        fprintf(stderr, "perry: libc++: std::future's state is missing a function\n");
+        abort();
+    }
+    loaded = 1;
+}
+
+static void future_failed(const char *what) {
+    fprintf(stderr, "perry: libc++: std::future: %s\n", what);
+    abort();
+}
+
+static assoc_sub_state *state_destroy(assoc_sub_state *state) {
+    load_future();
+    darwin.cond_destroy(&state->cond);
+    darwin.mutex_destroy(&state->mutex);
+    if (state->exception) exception_decrement(state->exception);
+    return state;
+}
+
+static void state_delete(assoc_sub_state *state) { operator_delete(state_destroy(state)); }
+
+/// __on_zero_shared: delete this, through the object's own deleting
+/// destructor.
+static void state_on_zero_shared(assoc_sub_state *state) { ((void (*)(void *))state->vtable[1])(state); }
+
+static void state_execute(assoc_sub_state *state) { (void)state; future_failed("no state to run"); }
+
+/// vtable for __assoc_sub_state: offset to top, type info, then the
+/// complete and deleting destructors, __on_zero_shared and __execute.
+static void *state_vtable[6] = {
+    0, 0, (void *)state_destroy, (void *)state_delete, (void *)state_on_zero_shared, (void *)state_execute,
+};
+
+static void *state_vtable_symbol(void) {
+    if (!state_vtable[1]) state_vtable[1] = library_symbol("__ZTINSt3__117__assoc_sub_stateE");
+    return state_vtable;
+}
+
+static void state_add_shared(assoc_sub_state *state) { __atomic_add_fetch(&state->shared_owners, 1, __ATOMIC_RELAXED); }
+
+static void state_release_shared(assoc_sub_state *state) {
+    if (__atomic_add_fetch(&state->shared_owners, -1, __ATOMIC_ACQ_REL) == -1)
+        ((void (*)(void *))state->vtable[2])(state);
+}
+
+static void state_make_ready(assoc_sub_state *state, unsigned bits) {
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    state->state |= bits;
+    darwin.cond_broadcast(&state->cond);
+    darwin.mutex_unlock(&state->mutex);
+}
+
+/// __sub_wait: runs a deferred function, else waits until ready, with the
+/// lock held.
+static void state_sub_wait(assoc_sub_state *state, unique_lock *lock) {
+    load_future();
+    if (state->state & STATE_READY) return;
+    if (state->state & STATE_DEFERRED) {
+        state->state &= ~(unsigned)STATE_DEFERRED;
+        if (lock->owns) { darwin.mutex_unlock(lock->mutex); lock->owns = 0; }
+        ((void (*)(void *))state->vtable[3])(state);
+        return;
+    }
+    while (!(state->state & STATE_READY)) darwin.cond_wait(&state->cond, lock->mutex);
+}
+
+static void state_wait(assoc_sub_state *state) {
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    unique_lock lock = { &state->mutex, 1 };
+    state_sub_wait(state, &lock);
+    if (lock.owns) darwin.mutex_unlock(&state->mutex);
+}
+
+/// set_exception(exception_ptr), which arm64 passes by reference.
+static void state_set_exception(assoc_sub_state *state, void **exception) {
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    if ((state->state & STATE_CONSTRUCTED) || state->exception) future_failed("promise already satisfied");
+    state->exception = *exception;
+    if (state->exception) exception_increment(state->exception);
+    state->state |= STATE_READY;
+    darwin.cond_broadcast(&state->cond);
+    darwin.mutex_unlock(&state->mutex);
+}
+
+/// promise<void>: its state.
+typedef struct { assoc_sub_state *state; } promise_void;
+
+static promise_void *promise_init(promise_void *promise) {
+    load_future();
+    assoc_sub_state *state = operator_new(sizeof(assoc_sub_state));
+    memset(state, 0, sizeof(*state));
+    state->vtable = (void **)state_vtable_symbol() + 2;
+    darwin.mutex_init(&state->mutex, NULL);
+    darwin_cond_init(&state->cond, NULL);
+    promise->state = state;
+    return promise;
+}
+
+static promise_void *promise_destroy(promise_void *promise) {
+    assoc_sub_state *state = promise->state;
+    if (state) {
+        if (!(state->state & STATE_CONSTRUCTED) && !state->exception && state->shared_owners > 0)
+            state_make_ready(state, STATE_READY);
+        state_release_shared(state);
+    }
+    return promise;
+}
+
+static void promise_set_value(promise_void *promise) {
+    assoc_sub_state *state = promise->state;
+    if (!state) future_failed("no state");
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    if ((state->state & STATE_CONSTRUCTED) || state->exception) future_failed("promise already satisfied");
+    state->state |= STATE_CONSTRUCTED | STATE_READY;
+    darwin.cond_broadcast(&state->cond);
+    darwin.mutex_unlock(&state->mutex);
+}
+
+/// get_future(): the future<void>, returned through x8 as a class with a
+/// destructor is.
+__attribute__((used)) static void promise_get_future_into(promise_void *promise, assoc_sub_state **future) {
+    assoc_sub_state *state = promise->state;
+    if (!state) future_failed("no state");
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    if (state->state & STATE_FUTURE_ATTACHED) future_failed("future already retrieved");
+    state_add_shared(state);
+    state->state |= STATE_FUTURE_ATTACHED;
+    darwin.mutex_unlock(&state->mutex);
+    *future = state;
+}
+
+#if defined(__aarch64__)
+__attribute__((naked)) static void promise_get_future(void) {
+    __asm__("mov x1, x8\n\tb promise_get_future_into");
+}
+#endif
+
+/// ~future<void>() and ~shared_future<void>(): the state let go.
+static void *future_destroy(assoc_sub_state **future) {
+    if (*future) state_release_shared(*future);
+    return future;
+}
+
+static const struct { const char *name; void *function; } futures[] = {
+    { "__ZNSt3__117__assoc_sub_state10__sub_waitERNS_11unique_lockINS_5mutexEEE", (void *)state_sub_wait },
+    { "__ZNSt3__117__assoc_sub_state13set_exceptionESt13exception_ptr", (void *)state_set_exception },
+    { "__ZNSt3__117__assoc_sub_state4waitEv", (void *)state_wait },
+    { "__ZNSt3__117__assoc_sub_state9__executeEv", (void *)state_execute },
+    { "__ZNSt3__117__assoc_sub_state16__on_zero_sharedEv", (void *)state_on_zero_shared },
+    { "__ZNSt3__17promiseIvEC1Ev", (void *)promise_init },
+    { "__ZNSt3__17promiseIvEC2Ev", (void *)promise_init },
+    { "__ZNSt3__17promiseIvED1Ev", (void *)promise_destroy },
+    { "__ZNSt3__17promiseIvED2Ev", (void *)promise_destroy },
+    { "__ZNSt3__17promiseIvE9set_valueEv", (void *)promise_set_value },
+#if defined(__aarch64__)
+    { "__ZNSt3__17promiseIvE10get_futureEv", (void *)promise_get_future },
+#endif
+    { "__ZNSt3__16futureIvED1Ev", (void *)future_destroy },
+    { "__ZNSt3__16futureIvED2Ev", (void *)future_destroy },
+    { "__ZNSt3__113shared_futureIvED1Ev", (void *)future_destroy },
+    { "__ZNSt3__113shared_futureIvED2Ev", (void *)future_destroy },
+};
+
 // MARK: ctype<char>'s table
 
 // Darwin code's inlined ctype<char>::is reads its facet's table as Darwin's:
@@ -222,6 +475,11 @@ void *perry_provider_symbol(const char *name) {
     // Before Darwin code reads a locale's ctype<char>.
     if (strstr(name, "5ctypeIc") || strstr(name, "6locale7classic")) use_darwin_ctype_table();
     if (strcmp(name, "__ZNSt3__15ctypeIcE13classic_tableEv") == 0) return (void *)classic_table;
+    if (strcmp(name, "__ZNSt3__119__thread_local_dataEv") == 0) return (void *)thread_local_data;
+    if (strcmp(name, "__ZTVNSt3__117__assoc_sub_stateE") == 0) return state_vtable_symbol();
+    for (size_t i = 0; i < sizeof(futures) / sizeof(futures[0]); i++) {
+        if (strcmp(name, futures[i].name) == 0) return futures[i].function;
+    }
     for (size_t i = 0; i < sizeof(locks) / sizeof(locks[0]); i++) {
         if (strcmp(name, locks[i].name) == 0) return locks[i].function;
     }
