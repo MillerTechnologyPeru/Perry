@@ -681,7 +681,9 @@ open class NSImage: NSObject {
     private func load(named name: String) {
         self.name = name
         let resources = NSBundle.main().bundlePath() + "/Contents/Resources/"
-        for candidate in [name, name + ".png", name + "@2x.png", name + ".jpg", name + ".tiff", name + ".pdf"] {
+        // A @2x PNG first on a display that needs more than one pixel a point.
+        let png = AppKitAssets.displayScale >= 2 ? [name + "@2x.png", name + ".png"] : [name + ".png", name + "@2x.png"]
+        for candidate in [name] + png + [name + ".jpg", name + ".tiff", name + ".pdf"] {
             for directory in [resources, resources + "en.lproj/", resources + "Base.lproj/"] where access(directory + candidate, R_OK) == 0 {
                 path = directory + candidate
                 decodeSize()
