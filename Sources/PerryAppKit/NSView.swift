@@ -662,6 +662,47 @@ open class NSView: NSResponder {
     @ObjCMethod("firstBaselineAnchor") func firstBaselineAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 12) }
     @ObjCMethod("lastBaselineAnchor") func lastBaselineAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 11) }
 
+    // MARK: Layout guides
+
+    /// The guides the view owns. The safe area and the layout margins are
+    /// the view's bounds here: no titlebar or edge covers them.
+    var layoutGuides: [NSLayoutGuide] = []
+    var safeAreaGuide: NSLayoutGuide?
+    var marginsGuide: NSLayoutGuide?
+
+    @ObjCMethod("safeAreaLayoutGuide")
+    func safeAreaLayoutGuide() -> NSLayoutGuide {
+        if let safeAreaGuide { return safeAreaGuide }
+        let guide = NSLayoutGuide()
+        guide.owningViewObject = objcObject
+        safeAreaGuide = guide
+        return guide
+    }
+    @ObjCMethod("layoutMarginsGuide")
+    func layoutMarginsGuide() -> NSLayoutGuide {
+        if let marginsGuide { return marginsGuide }
+        let guide = NSLayoutGuide()
+        guide.owningViewObject = objcObject
+        marginsGuide = guide
+        return guide
+    }
+    @ObjCMethod("safeAreaInsets") func safeAreaInsets() -> NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+    @ObjCMethod("safeAreaRect") func safeAreaRect() -> CGRect { bounds }
+    @ObjCMethod("additionalSafeAreaInsets") func additionalSafeAreaInsets() -> NSEdgeInsets { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+    @ObjCMethod("setAdditionalSafeAreaInsets:") func setAdditionalSafeAreaInsets(_ insets: NSEdgeInsets) {}
+    @ObjCMethod("layoutGuides") func viewLayoutGuides() -> NSObject { NSMutableArray.of(layoutGuides) }
+    @ObjCMethod("addLayoutGuide:")
+    func addLayoutGuide(_ guide: NSLayoutGuide?) {
+        guard let guide, !layoutGuides.contains(where: { $0 === guide }) else { return }
+        guide.owningViewObject = objcObject
+        layoutGuides.append(guide)
+    }
+    @ObjCMethod("removeLayoutGuide:")
+    func removeLayoutGuide(_ guide: NSLayoutGuide?) {
+        layoutGuides.removeAll { $0 === guide }
+        if guide?.owningViewObject == objcObject { guide?.owningViewObject = nil }
+    }
+
     // MARK: Drawing into the layer
 
     /// Whether the view's class draws: overrides -drawRect:.
