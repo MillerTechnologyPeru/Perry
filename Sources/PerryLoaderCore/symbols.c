@@ -175,6 +175,7 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define LIBOBJC "/usr/lib/libobjc.A.dylib"
 #define CFNETWORK "/System/Library/Frameworks/CFNetwork.framework/CFNetwork"
 #define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
+#define MAPKIT "/System/Library/Frameworks/MapKit.framework/MapKit"
 #define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
@@ -190,6 +191,7 @@ static const struct {
     {"Foundation", LIBDISPATCH},
     {"CoreGraphics", COREFOUNDATION},
     {"UIKit", QUARTZCORE},
+    {"MapKitAppKit", MAPKIT},
 };
 
 // Sets up a provider just found under `short_name`: its re-exports and the
@@ -206,6 +208,10 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
         provider->reexports[0] = CFNETWORK;
         provider->reexports[1] = LIBOBJC;
     }
+    // A Mac app's MapKit has its views from AppKit's MapKit provider and the
+    // rest from iOS apps' MapKit provider.
+    if (strcmp(short_name, "MapKitAppKit") == 0)
+        provider->reexports[0] = MAPKIT;
     for (size_t i = 0; i < sizeof(provider_links) / sizeof(provider_links[0]); i++)
         if (strcmp(provider_links[i].short_name, short_name) == 0)
             perry_find_provider(loader, provider_links[i].install_name);
@@ -286,6 +292,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // are NSViews. perry32 runs only iOS apps and has no AppKit.
     if (strstr(install_name, "/WebKit.framework/Versions/")) {
         snprintf(out, out_size, "AppKit");
+        return true;
+    }
+    // A Mac app's MapKit (a versioned framework) has map views that are
+    // NSViews; its provider re-exports iOS apps' for the rest.
+    if (strstr(install_name, "/MapKit.framework/Versions/")) {
+        snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
 #endif
