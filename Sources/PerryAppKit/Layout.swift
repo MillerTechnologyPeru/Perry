@@ -216,16 +216,35 @@ open class NSLayoutYAxisAnchor: NSLayoutAnchor {}
 open class NSLayoutDimension: NSLayoutAnchor {}
 
 /// Lays out a window's view tree with the constraints of every view in it:
-/// one Cassowary solve over the frames of all the views, in which views
-/// that translate their autoresizing masks keep their frames, views placed
-/// by constraints prefer their current frames weakly, and intrinsic sizes
-/// count at each view's hugging and compression resistance priorities. A
-/// tree is solved again only once something changed (a view needs layout).
+/// Cassowary solves over the frames of the views, in which views that
+/// translate their autoresizing masks keep their frames, views placed by
+/// constraints prefer their current frames weakly, and intrinsic sizes
+/// count at each view's hugging and compression resistance priorities.
+///
+/// The tree is solved in parts: a view whose frame its superview sets (it
+/// translates its mask, or nothing constrains it) and that no constraint
+/// links across, from inside it to outside, heads a part solved on its own
+/// with its size fixed, as each of a table's rows is. A part is solved
+/// again only once something in it changed (a view needs layout or moved),
+/// so a new row lays out only itself.
 enum Layout {
-    /// Bumped whenever a view needs layout.
-    nonisolated(unsafe) static var generation = 0
-    nonisolated(unsafe) private static var solvedGeneration: [ObjectIdentifier: Int] = [:]
+    /// Counts changes; each view keeps the count at its last one.
+    nonisolated(unsafe) static var stamp = 0
     nonisolated(unsafe) private static var solving = false
+
+    /// `view` changed in a way its part's layout depends on.
+    static func changed(_ view: NSView) {
+        stamp &+= 1
+        view.layoutStamp = stamp
+    }
+
+    /// What a part's solve needs: the parts inside it it doesn't descend
+    /// into, its constraints, and the views any constraint mentions.
+    private struct Part {
+        var leaves: Set<UnsafeMutableRawPointer> = []
+        var constraints: [NSLayoutConstraint] = []
+        var constrained: Set<UnsafeMutableRawPointer> = []
+    }
 
     /// A view's frame in the tree's top view's coordinates, y downwards.
     private final class Box {
@@ -271,11 +290,12 @@ enum Layout {
     private static func weight(_ priority: Float) -> Double { LayoutSolver.strength(priority) }
 
     /// The tree's boxes, top first, each after its parent.
-    private static func boxes(_ top: NSView, origin: CGRect) -> [Box] {
+    private static func boxes(_ top: NSView, origin: CGRect, leaves: Set<UnsafeMutableRawPointer>) -> [Box] {
         var boxes: [Box] = []
         func visit(_ view: NSView, _ parent: Box?, _ rect: CGRect) {
             let box = Box(view, parent: parent, rect: rect)
             boxes.append(box)
+            if parent != nil, leaves.contains(view.objcObject) { return }
             let flipped = view.flipped
             for subview in view.subviews {
                 let frame = subview.frame
@@ -290,8 +310,8 @@ enum Layout {
 
     /// Solves the tree under `top`: with its size fixed, or for fitting,
     /// as small as its constraints allow.
-    private static func solve(_ top: NSView, fitting: Bool) -> [Box]? {
-        let boxes = boxes(top, origin: CGRect(origin: .zero, size: top.frame.size))
+    private static func solve(_ top: NSView, fitting: Bool, part given: Part? = nil) -> [Box]? {
+        let boxes = boxes(top, origin: CGRect(origin: .zero, size: top.frame.size), leaves: given?.leaves ?? [])
         guard boxes.dropFirst().contains(where: { !$0.view.translatesAutoresizingMask }) || fitting else { return nil }
         var byView: [UnsafeMutableRawPointer: Box] = [:]
         for box in boxes { byView[box.view.objcObject] = box }
@@ -316,17 +336,22 @@ enum Layout {
         // owning view). AppKit's engine leaves the others alone: a view with
         // no constraints keeps the frame its code sets even when it doesn't
         // translate its autoresizing mask, as NetNewsWire's timeline cells do.
-        var constrained: Set<UnsafeMutableRawPointer> = []
-        for box in boxes {
-            for constraint in box.view.constraints {
-                for item in [constraint.firstItem, constraint.secondItem].compactMap({ $0 }) {
-                    constrained.insert(item.objcObject)
-                    if !item.is(NSView.self), item.responds(to: "owningView"), let owner = Send.object(item.objcObject, "owningView") {
-                        constrained.insert(owner)
+        let part = given ?? {
+            var part = Part()
+            for box in boxes {
+                part.constraints += box.view.constraints
+                for constraint in box.view.constraints {
+                    for item in [constraint.firstItem, constraint.secondItem].compactMap({ $0 }) {
+                        part.constrained.insert(item.objcObject)
+                        if !item.is(NSView.self), item.responds(to: "owningView"), let owner = Send.object(item.objcObject, "owningView") {
+                            part.constrained.insert(owner)
+                        }
                     }
                 }
             }
-        }
+            return part
+        }()
+        let constrained = part.constrained
         // Frames that autoresizing places stay, relative to the superview.
         for box in boxes.dropFirst() {
             guard let parent = box.parent else { continue }
@@ -374,8 +399,8 @@ enum Layout {
             }
         }
         // The views' constraints.
-        for box in boxes {
-            for constraint in box.view.constraints {
+        do {
+            for constraint in part.constraints {
                 func expression(_ item: NSObject?, _ attribute: Int) -> LayoutExpression? {
                     guard let item else { return attribute == 0 ? LayoutExpression() : nil }
                     var target = byView[item.objcObject]
@@ -407,28 +432,106 @@ enum Layout {
         return boxes
     }
 
-    /// Lays out the tree `view` is in, unless it is laid out already.
+    /// Lays out the tree `view` is in: the parts of it that changed.
     static func apply(_ view: NSView) {
         guard !solving else { return }
         var top = view
         while let superview = top.superview { top = superview }
-        let key = ObjectIdentifier(top)
-        guard solvedGeneration[key] != generation else { return }
+        guard top.layoutSolvedStamp != stamp || stamp == 0 else { return }
         solving = true
         defer { solving = false }
-        if let boxes = solve(top, fitting: false) {
-            for box in boxes.dropFirst() where !box.view.translatesAutoresizingMask {
-                guard let parent = box.parent else { continue }
-                let superview = parent.view
-                let x = box.left.value - parent.left.value + superview.boundsOrigin.x
-                let down = box.top.value - parent.top.value
-                let height = box.height.value
-                let y = superview.flipped ? down + superview.boundsOrigin.y : parent.height.value - down - height + superview.boundsOrigin.y
-                let frame = CGRect(x: x.rounded(), y: y.rounded(), width: max(0, box.width.value.rounded()), height: max(0, height.rounded()))
-                if frame != box.view.frame { Send.void(box.view.objcObject, "setFrame:", rect: frame) }
+
+        // The views in order, each after its superview, with where its
+        // subviews end.
+        var views: [NSView] = [], parents: [Int] = [], ends: [Int] = []
+        var indexes: [UnsafeMutableRawPointer: Int] = [:]
+        func visit(_ view: NSView, _ parent: Int) {
+            let index = views.count
+            views.append(view)
+            parents.append(parent)
+            ends.append(0)
+            indexes[view.objcObject] = index
+            for subview in view.subviews { visit(subview, index) }
+            ends[index] = views.count
+        }
+        visit(top, -1)
+        let count = views.count
+
+        // The constraints, with the views they mention; a view a
+        // constraint links across can't head a part.
+        var crossed = [Bool](repeating: false, count: count)
+        var constrained: Set<UnsafeMutableRawPointer> = []
+        var links: [(constraint: NSLayoutConstraint, common: Int)] = []
+        for view in views {
+            for constraint in view.constraints {
+                var items: [Int] = []
+                for item in [constraint.firstItem, constraint.secondItem].compactMap({ $0 }) {
+                    var object = item.objcObject
+                    constrained.insert(object)
+                    if indexes[object] == nil, !item.is(NSView.self), item.responds(to: "owningView"), let owner = Send.object(object, "owningView") {
+                        constrained.insert(owner)
+                        object = owner
+                    }
+                    if let index = indexes[object] { items.append(index) }
+                }
+                guard let low = items.min(), let high = items.max() else { continue }
+                var common = low
+                for item in items {
+                    var index = item
+                    while index >= 0, !(index <= low && ends[index] > high) {
+                        crossed[index] = true
+                        index = parents[index]
+                    }
+                    common = index
+                }
+                links.append((constraint, max(common, 0)))
             }
         }
-        solvedGeneration[key] = generation
+
+        // The parts: the top view's, and those of views placed by their
+        // superviews that no constraint crosses; each view in its part.
+        var heads = [Bool](repeating: false, count: count)
+        heads[0] = true
+        for index in 1..<count where !crossed[index] && ends[index] - index > 1 {
+            let view = views[index]
+            if view.translatesAutoresizingMask || !constrained.contains(view.objcObject) { heads[index] = true }
+        }
+        var partOf = [Int](repeating: 0, count: count)
+        var members: [Int: [Int]] = [:]
+        var parts: [Int: Part] = [:]
+        for index in 0..<count {
+            partOf[index] = heads[index] ? index : partOf[parents[index]]
+            members[partOf[index], default: []].append(index)
+            if heads[index] {
+                parts[index] = Part(constrained: constrained)
+                if index > 0 { parts[partOf[parents[index]]]?.leaves.insert(views[index].objcObject) }
+            }
+        }
+        for link in links {
+            let part = heads[link.common] ? link.common : partOf[link.common]
+            parts[part]?.constraints.append(link.constraint)
+        }
+
+        // Outer parts first: their solves place the views heading inner ones.
+        for head in 0..<count where heads[head] {
+            let view = views[head]
+            let changed = members[head]?.contains { views[$0].layoutStamp > view.layoutSolvedStamp } ?? false
+            guard changed || view.layoutSolvedStamp == 0, let part = parts[head] else { continue }
+            if let boxes = solve(view, fitting: false, part: part) {
+                for box in boxes.dropFirst() where !box.view.translatesAutoresizingMask {
+                    guard let parent = box.parent else { continue }
+                    let superview = parent.view
+                    let x = box.left.value - parent.left.value + superview.boundsOrigin.x
+                    let down = box.top.value - parent.top.value
+                    let height = box.height.value
+                    let y = superview.flipped ? down + superview.boundsOrigin.y : parent.height.value - down - height + superview.boundsOrigin.y
+                    let frame = CGRect(x: x.rounded(), y: y.rounded(), width: max(0, box.width.value.rounded()), height: max(0, height.rounded()))
+                    if frame != box.view.frame { Send.void(box.view.objcObject, "setFrame:", rect: frame) }
+                }
+            }
+            view.layoutSolvedStamp = max(stamp, 1)
+        }
+        top.layoutSolvedStamp = stamp
     }
 
     /// The size a view needs: its intrinsic size, or the smallest its
