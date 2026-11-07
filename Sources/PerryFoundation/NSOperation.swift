@@ -462,9 +462,12 @@ final class QueueStorage: @unchecked Sendable {
 
     /// Starts ready operations, highest priority first, up to the limit.
     func schedule() {
+        // Held while they are asked, outside the lock: another thread may
+        // finish one meanwhile, and the queue then lets it go.
         let pending: [id] = monitor.locked {
-            suspended ? [] : operations.filter { !started.contains($0) }
+            suspended ? [] : operations.filter { !started.contains($0) }.map { ObjC.retain($0)! }
         }
+        defer { pending.forEach { ObjC.release($0) } }
         guard !pending.isEmpty else { return }
         // Asked outside the lock: subclasses' -isReady may do anything.
         let ready = pending.enumerated()

@@ -419,7 +419,9 @@ enum DataDetectors {
     static let regularExpression: UInt64 = 1 << 10, phoneNumber: UInt64 = 1 << 11
 
     static let patterns: [(type: UInt64, pattern: String)] = [
-        (link, #"(?i:(?:(?:https?|ftp)://|www\.)[^\s<>"]*[^\s<>".,;:!?)\]']|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"#),
+        // Any scheme's "scheme://…" URL (an app's own, as Apple's detector
+        // finds them), "www." addresses and email addresses.
+        (link, #"(?i:(?:[a-z][a-z0-9+.-]*://|www\.)[^\s<>"]*[^\s<>".,;:!?)\]']|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})"#),
         (phoneNumber, #"(?:\+\d[\d\s().-]{7,}\d|(?<!\d)(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}(?!\d))"#),
     ]
 

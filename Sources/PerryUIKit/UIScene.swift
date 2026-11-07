@@ -114,12 +114,36 @@ open class UISceneSession: NSObject {
 // MARK: - UISceneConnectionOptions
 
 /// Why a scene connected: URLs, activities and the like. Empty for a launch.
-/// A URL a scene is asked to open, and how. Scenes here are opened by no
-/// URL, so these exist for apps' types to refer to.
+/// A URL a scene is asked to open, and how: the app's own URLs, which it
+/// opens itself (IncomingURLs), from no other app.
 @ObjCClass("UIOpenURLContext")
 open class UIOpenURLContext: NSObject {
-    @ObjCMethod("URL") func url() -> NSObject? { nil }
-    @ObjCMethod("options") func options() -> NSObject? { nil }
+    nonisolated(unsafe) static var urls: [UnsafeMutableRawPointer: NSObject] = [:]
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIOpenURLContext.urls[objcObject] = nil
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIOpenURLContext.objCClass.pointer)
+    }
+
+    @ObjCMethod("URL") func url() -> NSObject? { UIOpenURLContext.urls[objcObject] }
+    @ObjCMethod("options") func options() -> NSObject? { UISceneOpenURLOptions.objCClass.object.newInstance() }
+
+    static func make(_ url: NSObject) -> UIOpenURLContext {
+        let context = UIOpenURLContext.objCClass.object.newInstance().unsafeCast(to: UIOpenURLContext.self)
+        urls[context.objcObject] = url
+        return context
+    }
+}
+
+/// How a URL is opened: by the app itself, so from no other application,
+/// with no annotation, never in place.
+@ObjCClass("UISceneOpenURLOptions")
+open class UISceneOpenURLOptions: NSObject {
+    @ObjCMethod("sourceApplication") func sourceApplication() -> String? { nil }
+    @ObjCMethod("annotation") func annotation() -> NSObject? { nil }
+    @ObjCMethod("openInPlace") func openInPlace() -> Bool { false }
+    @ObjCMethod("eventAttribution") func eventAttribution() -> NSObject? { nil }
 }
 
 @ObjCClass("UISceneConnectionOptions")

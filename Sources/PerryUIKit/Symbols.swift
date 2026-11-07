@@ -269,5 +269,25 @@ enum Symbols {
             pen.stroke([(12, 15), (12, 2.5)])
             pen.stroke([(8, 6.5), (12, 2.5), (16, 6.5)])
         },
+        // A padlock: its shackle over a filled body.
+        "lock.fill": { pen in
+            pen.arc(12, 9, 4.5, from: .pi, to: 2 * .pi)
+            pen.stroke([(7.5, 9), (7.5, 11)])
+            pen.stroke([(16.5, 9), (16.5, 11)])
+            pen.fill([(5, 11), (19, 11), (19, 21.5), (5, 21.5)])
+        },
+        // Safari's compass: a ring with its needle.
+        "safari": { pen in
+            pen.circle(12, 12, 10)
+            pen.fill([(16.5, 7.5), (13.4, 13.4), (10.6, 10.6)])
+            pen.stroke([(16.5, 7.5), (7.5, 16.5)])
+        },
+        // A small A and a large A.
+        "textformat.size": { pen in
+            pen.stroke([(2, 20), (6, 10), (10, 20)])
+            pen.stroke([(3.6, 16.5), (8.4, 16.5)])
+            pen.stroke([(10, 20), (16, 4), (22, 20)])
+            pen.stroke([(12.3, 14.5), (19.7, 14.5)])
+        },
     ]
 }

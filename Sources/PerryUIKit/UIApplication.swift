@@ -146,19 +146,21 @@ open class UIApplication: UIResponder {
     @ObjCMethod("keyWindow")
     func keyWindow() -> NSObject? { Windows.key.map(NSObject.init) }
 
-    /// No other app can open URLs here: each request says so.
-    @ObjCMethod("canOpenURL:") func canOpenURL(_ url: NSObject?) -> Bool { false }
+    /// The app opens its own URLs (IncomingURLs); no other app can open
+    /// URLs here.
+    @ObjCMethod("canOpenURL:") func canOpenURL(_ url: NSObject?) -> Bool { IncomingURLs.isOwn(url) }
 
     @ObjCMethod("openURL:")
     func openURL(_ url: NSObject?) -> Bool {
+        if let url, IncomingURLs.isOwn(url) { return IncomingURLs.open(url) }
         uikitWarning("no app to open \(url?.describedByObject() ?? "a URL")")
         return false
     }
 
     @ObjCMethod("openURL:options:completionHandler:")
     func openURL(_ url: NSObject?, options: NSObject?, completionHandler: ObjCBlock?) {
-        _ = openURL(url)
-        completionHandler.map { Blocks.call($0, false) }
+        let opened = openURL(url)
+        completionHandler.map { Blocks.call($0, opened) }
     }
 
     /// Shaking undoes nothing here; what apps set is read back.
