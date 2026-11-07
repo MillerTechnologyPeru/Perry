@@ -68,6 +68,9 @@ final class ConnectionState: @unchecked Sendable {
     var task: Task?
     var started = false
     var cancelled = false
+    /// Whether the connection has let go of itself: once, whether it
+    /// completed, failed or was cancelled first.
+    var finished = false
 
     init(request: Request, delegate: NSObject?, delivery: Delivery) {
         original = request
@@ -237,16 +240,20 @@ enum Connections {
         Thread.detach(pending)
     }
 
-    /// Drops the connection's hold on itself and its delegate.
+    /// Drops the connection's hold on itself and its delegate, the first
+    /// time: a delegate may cancel a connection that has finished.
     static func finish(_ connection: UnsafeMutableRawPointer) {
         guard let state = states.get(connection) else { return }
-        let session = state.lock.withLock { () -> Session? in
+        let (first, session) = state.lock.withLock { () -> (Bool, Session?) in
+            guard !state.finished else { return (false, nil) }
+            state.finished = true
             defer {
                 state.delegate = nil
                 state.session = nil
             }
-            return state.session
+            return (true, state.session)
         }
+        guard first else { return }
         session?.finishTasksAndInvalidate()
         ObjCRuntime.release(connection)
     }
