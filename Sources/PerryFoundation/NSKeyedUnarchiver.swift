@@ -124,6 +124,12 @@ final class UnarchiverStorage {
     /// The archived object whose -initWithCoder: is running, innermost last.
     var stack: [[String: ArchiveValue]] = []
     var requiresSecureCoding = false
+    /// The error decoding failed with, retained: what -failWithError: was
+    /// given.
+    var error: id?
+    /// NSDecodingFailurePolicy: raise an exception 0, set the error and
+    /// return 1, which keyed unarchivers default to.
+    var failurePolicy = 1
     /// setClass:forClassName:'s substitutions for this unarchiver.
     var classes: [String: UnsafeMutableRawPointer] = [:]
 
@@ -143,6 +149,7 @@ final class UnarchiverStorage {
 
     deinit {
         for object in decoded.values { ObjC.release(object) }
+        ObjC.release(error)
     }
 
     /// The current object's (or the top level's) value for a key.
@@ -384,6 +391,18 @@ public class NSKeyedUnarchiver: NSObject {
     @ObjCMethod("requiresSecureCoding") func requiresSecureCoding() -> Bool { storage?.requiresSecureCoding ?? false }
     @ObjCMethod("setRequiresSecureCoding:") func setRequiresSecureCoding(_ value: Bool) { storage?.requiresSecureCoding = value }
     @ObjCMethod("finishDecoding") func finishDecoding() {}
+
+    /// Why decoding failed, if it did: nil until -failWithError: is sent.
+    @ObjCMethod("error") func error() -> id? { storage?.error }
+    @ObjCMethod("failWithError:")
+    func fail(with error: id?) {
+        guard let storage else { return }
+        let previous = storage.error
+        storage.error = ObjC.retain(error)
+        ObjC.release(previous)
+    }
+    @ObjCMethod("decodingFailurePolicy") func decodingFailurePolicy() -> Int { storage?.failurePolicy ?? 1 }
+    @ObjCMethod("setDecodingFailurePolicy:") func setDecodingFailurePolicy(_ policy: Int) { storage?.failurePolicy = policy }
 
     @ObjCMethod("containsValueForKey:")
     func containsValue(forKey key: String) -> Bool { storage?.field(key) != nil }
