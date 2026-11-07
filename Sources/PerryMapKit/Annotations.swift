@@ -56,7 +56,8 @@ open class MKUserLocation: MKShape {
         return self
     }
 
-    @ObjCMethod("coordinate") func coordinate() -> CLLocationCoordinate2D { shape.coordinate }
+    /// Where the device is now, else where it was when this was made.
+    @ObjCMethod("coordinate") func coordinate() -> CLLocationCoordinate2D { DeviceLocation.coordinate ?? shape.coordinate }
     @ObjCMethod("location") func location() -> NSObject? { DeviceLocation.coordinate.map { CLLocation.make($0) } }
     @ObjCMethod("heading") func heading() -> NSObject? { nil }
     @ObjCMethod("isUpdating") func isUpdating() -> Bool { false }
