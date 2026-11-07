@@ -405,26 +405,52 @@ final class Keychain: @unchecked Sendable {
 
 // MARK: - Functions
 
+/// With PERRY_KEYCHAIN_TRACE set, each SecItem call is written to standard
+/// error: the item's class, service, account, access group and tag, and
+/// the status it returns.
+enum KeychainTrace {
+    nonisolated(unsafe) static let enabled = getenv("PERRY_KEYCHAIN_TRACE") != nil
+
+    static func log(_ call: String, _ query: NSDictionary, _ status: Int32) -> Int32 {
+        guard enabled else { return status }
+        func field(_ key: String, _ name: String) -> String? {
+            guard let value = query.object(key) else { return nil }
+            if value.isString { return "\(name) \(value.stringValue)" }
+            if value.isData { return "\(name) \(String(decoding: NSData(value.objcObject).data, as: UTF8.self))" }
+            return "\(name) ?"
+        }
+        let fields = [(ItemKeys.kSecClass, "class"), (ItemKeys.kSecAttrService, "service"), (ItemKeys.kSecAttrAccount, "account"),
+                      (ItemKeys.kSecAttrAccessGroup, "group"), (ItemKeys.kSecAttrApplicationTag, "tag")].compactMap(field)
+        let line = "perry: Security: \(call) \(fields.joined(separator: ", ")): \(status)\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+        return status
+    }
+}
+
 @c(_SecItemAdd)
 public func SecItemAdd(_ attributes: UnsafeMutableRawPointer?, _ result: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
     guard let attributes else { return Status.param }
-    return Keychain.shared.add(NSDictionary(attributes), result: result)
+    let dictionary = NSDictionary(attributes)
+    return KeychainTrace.log("SecItemAdd", dictionary, Keychain.shared.add(dictionary, result: result))
 }
 
 @c(_SecItemCopyMatching)
 public func SecItemCopyMatching(_ query: UnsafeMutableRawPointer?, _ result: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
     guard let query else { return Status.param }
-    return Keychain.shared.copy(NSDictionary(query), result: result)
+    let dictionary = NSDictionary(query)
+    return KeychainTrace.log("SecItemCopyMatching", dictionary, Keychain.shared.copy(dictionary, result: result))
 }
 
 @c(_SecItemUpdate)
 public func SecItemUpdate(_ query: UnsafeMutableRawPointer?, _ attributes: UnsafeMutableRawPointer?) -> Int32 {
     guard let query, let attributes else { return Status.param }
-    return Keychain.shared.update(NSDictionary(query), NSDictionary(attributes))
+    let dictionary = NSDictionary(query)
+    return KeychainTrace.log("SecItemUpdate", dictionary, Keychain.shared.update(dictionary, NSDictionary(attributes)))
 }
 
 @c(_SecItemDelete)
 public func SecItemDelete(_ query: UnsafeMutableRawPointer?) -> Int32 {
     guard let query else { return Status.param }
-    return Keychain.shared.delete(NSDictionary(query))
+    let dictionary = NSDictionary(query)
+    return KeychainTrace.log("SecItemDelete", dictionary, Keychain.shared.delete(dictionary))
 }
