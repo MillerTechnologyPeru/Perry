@@ -251,10 +251,28 @@ open class NSWorkspace: NSObject {
         appKitWarning("NSWorkspace: no app here to open \(what)")
     }
 
+    /// Opens a URL in the desktop's app for it (the browser for web pages)
+    /// through xdg-open.
     @ObjCMethod("openURL:")
     func open(_ url: NSObject?) -> Bool {
-        cannotOpen(url?.as(NSURL.self)?.absoluteString() ?? "a URL")
-        return false
+        guard let string = url?.as(NSURL.self)?.absoluteString(), !string.isEmpty else {
+            cannotOpen("a URL")
+            return false
+        }
+        Trace.log("NSWorkspace: opening \(string) with xdg-open")
+        // From a shell that leaves it running and ends at once, so the
+        // browser outlives no zombie of ours.
+        var pid: pid_t = 0
+        let arguments = ["sh", "-c", "xdg-open \"$1\" >/dev/null 2>&1 &", "sh", string]
+        var argv: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        guard posix_spawnp(&pid, "sh", nil, nil, &argv, environ) == 0 else {
+            cannotOpen(string)
+            return false
+        }
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        return true
     }
 
     @ObjCMethod("openURL:configuration:completionHandler:")
@@ -302,6 +320,8 @@ open class NSWorkspaceOpenConfiguration: NSObject {
     var createsNewApplicationInstance = false
     var arguments: NSObject?
     var promptsUserIfNeeded = true
+    /// No app claims universal links here: web pages go to the browser.
+    var requiresUniversalLinks = false
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -316,6 +336,8 @@ open class NSWorkspaceOpenConfiguration: NSObject {
     @ObjCMethod("setArguments:") func setArguments(_ arguments: NSObject?) { self.arguments = arguments }
     @ObjCMethod("promptsUserIfNeeded") func configurationPromptsUserIfNeeded() -> Bool { promptsUserIfNeeded }
     @ObjCMethod("setPromptsUserIfNeeded:") func setPromptsUserIfNeeded(_ value: Bool) { promptsUserIfNeeded = value }
+    @ObjCMethod("requiresUniversalLinks") func configurationRequiresUniversalLinks() -> Bool { requiresUniversalLinks }
+    @ObjCMethod("setRequiresUniversalLinks:") func setRequiresUniversalLinks(_ value: Bool) { requiresUniversalLinks = value }
     @ObjCMethod("setAddsToRecentItems:") func setAddsToRecentItems(_ value: Bool) {}
     @ObjCMethod("setHides:") func setHides(_ value: Bool) {}
     @ObjCMethod("setEnvironment:") func setEnvironment(_ environment: NSObject?) {}
