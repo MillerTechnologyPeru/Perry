@@ -808,7 +808,9 @@ extension GraphicsContext {
 
     package mutating func translateBy(x: CGFloat, y: CGFloat) {
         guard x != 0 || y != 0 else { return }
-        _openSwiftUIUnimplementedFailure()
+        // Perry: the Core Graphics context's own transform, which what is
+        // drawn next follows.
+        storage.cgContext?.translateBy(x: x, y: y)
     }
 
     // FIXME
@@ -829,7 +831,18 @@ extension GraphicsContext {
 extension GraphicsContext {
     /// Draws `path` filled with `shading`.
     public func fill(_ path: Path, with shading: Shading, style: FillStyle = FillStyle()) {
-        guard let context = storage.cgContext, let color = shading.cgColor(in: storage.environment) else { return }
+        guard let context = storage.cgContext else { return }
+        // A gradient fills what the path covers: the path as the clip, the
+        // gradient drawn over it.
+        if case .gradient = shading.storage {
+            context.saveGState()
+            context.addPath(path.cgPath)
+            context.clip(using: style.isEOFilled ? .evenOdd : .winding)
+            drawGradient(shading, in: context)
+            context.restoreGState()
+            return
+        }
+        guard let color = shading.cgColor(in: storage.environment) else { return }
         context.saveGState()
         context.addPath(path.cgPath)
         context.setFillColor(color)
@@ -855,6 +868,54 @@ extension GraphicsContext {
     /// Draws `path`'s outline with `shading`, `lineWidth` wide.
     public func stroke(_ path: Path, with shading: Shading, lineWidth: CGFloat = 1) {
         stroke(path, with: shading, style: StrokeStyle(lineWidth: lineWidth))
+    }
+
+    /// Draws a linear or radial gradient shading over the clip, extending
+    /// beyond its ends as SwiftUI's do. Other geometries draw nothing.
+    private func drawGradient(_ shading: Shading, in context: CGContext) {
+        guard case let .gradient(gradient, geometry, _) = shading.storage else { return }
+        let stops = gradient.resolve(in: storage.environment).stops
+        guard !stops.isEmpty, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return }
+        let colors = stops.map { $0.color.cgColor } as CFArray
+        var locations = stops.map { CGFloat($0.location) }
+        guard let cgGradient = CGGradient(colorsSpace: space, colors: colors, locations: &locations) else { return }
+        let extend: CGGradientDrawingOptions = [.drawsBeforeStartLocation, .drawsAfterEndLocation]
+        switch geometry {
+        case let .axial(start, end):
+            context.drawLinearGradient(cgGradient, start: start, end: end, options: extend)
+        case let .radial(center, startRadius, endRadius):
+            context.drawRadialGradient(cgGradient, startCenter: center, startRadius: startRadius,
+                                       endCenter: center, endRadius: endRadius, options: extend)
+        case let .radial2(startCenter, startRadius, endCenter, endRadius):
+            context.drawRadialGradient(cgGradient, startCenter: startCenter, startRadius: startRadius,
+                                       endCenter: endCenter, endRadius: endRadius, options: extend)
+        default:
+            break
+        }
+    }
+
+    /// Scales what is drawn next, about the context's origin.
+    public mutating func scaleBy(x: CGFloat, y: CGFloat) {
+        storage.cgContext?.scaleBy(x: x, y: y)
+    }
+
+    /// Limits what is drawn next to the inside of `path`: its fill under
+    /// `style`, or everything outside it with the inverse option.
+    public mutating func clip(
+        to path: Path,
+        style: FillStyle = FillStyle(),
+        options: ClipOptions = ClipOptions()
+    ) {
+        guard let context = storage.cgContext else { return }
+        context.addPath(path.cgPath)
+        if options.contains(.inverse) {
+            // The path's outside: it and a rectangle larger than any
+            // drawing, clipped even-odd.
+            context.addRect(CGRect(x: -1e7, y: -1e7, width: 2e7, height: 2e7))
+            context.clip(using: .evenOdd)
+        } else {
+            context.clip(using: style.isEOFilled ? .evenOdd : .winding)
+        }
     }
 }
 #endif
