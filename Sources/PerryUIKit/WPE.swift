@@ -15,6 +15,10 @@ final class WPE: @unchecked Sendable {
     let viewBackendAddActivityState: @convention(c) (Pointer, UInt32) -> Void
     let viewBackendDispatchSetSize: @convention(c) (Pointer, UInt32, UInt32) -> Void
     let viewBackendDispatchSetDeviceScaleFactor: @convention(c) (Pointer, Float) -> Void
+    let viewBackendDispatchPointerEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
+    let viewBackendDispatchAxisEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
+    let viewBackendDispatchKeyboardEvent: @convention(c) (Pointer, UnsafeMutableRawPointer) -> Void
+    let unicodeToKeyCode: @convention(c) (UInt32) -> UInt32
     let exportableCreate: @convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?
     let exportableDestroy: @convention(c) (Pointer) -> Void
     let exportableGetViewBackend: @convention(c) (Pointer) -> Pointer?
@@ -107,6 +111,13 @@ final class WPE: @unchecked Sendable {
         viewBackendDispatchSetSize = bind(wpe, "wpe_view_backend_dispatch_set_size", (@convention(c) (Pointer, UInt32, UInt32) -> Void).self)
         viewBackendDispatchSetDeviceScaleFactor = bind(wpe, "wpe_view_backend_dispatch_set_device_scale_factor",
                                                        (@convention(c) (Pointer, Float) -> Void).self)
+        viewBackendDispatchPointerEvent = bind(wpe, "wpe_view_backend_dispatch_pointer_event",
+                                               (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
+        viewBackendDispatchAxisEvent = bind(wpe, "wpe_view_backend_dispatch_axis_event",
+                                            (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
+        viewBackendDispatchKeyboardEvent = bind(wpe, "wpe_view_backend_dispatch_keyboard_event",
+                                                (@convention(c) (Pointer, UnsafeMutableRawPointer) -> Void).self)
+        unicodeToKeyCode = bind(wpe, "wpe_unicode_to_key_code", (@convention(c) (UInt32) -> UInt32).self)
         exportableCreate = bind(fdo, "wpe_view_backend_exportable_fdo_create",
                                 (@convention(c) (UnsafeRawPointer, Pointer?, UInt32, UInt32) -> Pointer?).self)
         exportableDestroy = bind(fdo, "wpe_view_backend_exportable_fdo_destroy", (@convention(c) (Pointer) -> Void).self)
@@ -293,6 +304,104 @@ final class WebPage {
     func goForward() { wpe.webViewGoForward(view) }
     func reload() { wpe.webViewReload(view) }
     func stopLoading() { wpe.webViewStopLoading(view) }
+
+    // MARK: Input
+
+    /// libwpe's events (wpe/input.h), laid out as its structures.
+    private struct PointerEvent {
+        var type: Int32         // wpe_input_pointer_event_type: motion 1, button 2
+        var time: UInt32
+        var x: Int32
+        var y: Int32
+        var button: UInt32
+        var state: UInt32
+        var modifiers: UInt32
+    }
+
+    private struct AxisEvent2D {
+        var type: Int32         // wpe_input_axis_event_type: motion smooth 2, with mask 2D 1 << 16
+        var time: UInt32
+        var x: Int32
+        var y: Int32
+        var axis: UInt32
+        var value: Int32
+        var modifiers: UInt32
+        var xAxis: Double
+        var yAxis: Double
+    }
+
+    private struct KeyboardEvent {
+        var time: UInt32
+        var keyCode: UInt32
+        var hardwareKeyCode: UInt32
+        var pressed: Bool
+        var modifiers: UInt32
+    }
+
+    /// Milliseconds, as input events are stamped.
+    private static var now: UInt32 {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return UInt32(truncatingIfNeeded: Int(time.tv_sec) * 1000 + Int(time.tv_nsec) / 1_000_000)
+    }
+
+    /// The first pointer button held: wpe_input_pointer_modifier_button1.
+    private static let button1: UInt32 = 1 << 20
+
+    /// With PERRY_UIKIT_WEB_TRACE set, input sent to pages is written to
+    /// standard error, and after a click, the element the page focused.
+    nonisolated(unsafe) static let tracing = getenv("PERRY_UIKIT_WEB_TRACE") != nil
+
+    static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: UIKit: web: \(message())\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+
+    /// A click of the primary button at a point in the page's pixels: the
+    /// pointer moves there, presses and releases.
+    func click(x: Int32, y: Int32) {
+        WebPage.trace("click at \(x), \(y) of \(size.width)x\(size.height) at scale \(scale)")
+        if WebPage.tracing {
+            evaluate("(() => { const e = document.activeElement; const h = document.elementFromPoint(\(Float(x) / scale), \(Float(y) / scale)); return 'focused ' + (e ? e.tagName + '#' + e.id : 'none') + ', at point ' + (h ? h.tagName + '#' + h.id + '.' + h.className : 'none') })()") { result in
+                if case .success(let text) = result { WebPage.trace(text ?? "") }
+            }
+        }
+        var event = PointerEvent(type: 1, time: WebPage.now, x: x, y: y, button: 0, state: 0, modifiers: 0)
+        wpe.viewBackendDispatchPointerEvent(backend, &event)
+        event = PointerEvent(type: 2, time: WebPage.now, x: x, y: y, button: 1, state: 1, modifiers: WebPage.button1)
+        wpe.viewBackendDispatchPointerEvent(backend, &event)
+        event = PointerEvent(type: 2, time: WebPage.now, x: x, y: y, button: 1, state: 0, modifiers: 0)
+        wpe.viewBackendDispatchPointerEvent(backend, &event)
+    }
+
+    /// Scrolls what is under a point by a distance in pixels, as a
+    /// touchpad's smooth scrolling does: positive is toward the page's end.
+    func scroll(x: Int32, y: Int32, dx: Double, dy: Double) {
+        var event = AxisEvent2D(type: (1 << 16) | 2, time: WebPage.now, x: x, y: y, axis: 0, value: 0, modifiers: 0,
+                                xAxis: dx, yAxis: dy)
+        wpe.viewBackendDispatchAxisEvent(backend, &event)
+    }
+
+    /// Presses and releases a key, by its XKB keysym.
+    func press(keysym: UInt32) {
+        for pressed in [true, false] {
+            var event = KeyboardEvent(time: WebPage.now, keyCode: keysym, hardwareKeyCode: 0, pressed: pressed, modifiers: 0)
+            wpe.viewBackendDispatchKeyboardEvent(backend, &event)
+        }
+    }
+
+    /// Types text, a key for each character; newlines press Return.
+    func type(_ text: String) {
+        WebPage.trace("type \(text.count) characters")
+        for scalar in text.unicodeScalars {
+            press(keysym: scalar == "\n" ? WebPage.returnKey : wpe.unicodeToKeyCode(scalar.value))
+        }
+    }
+
+    /// XKB's keysyms for Return and BackSpace.
+    static let returnKey: UInt32 = 0xFF0D
+    static let backspaceKey: UInt32 = 0xFF08
 
     func setUserAgent(_ agent: String?) {
         guard let settings = wpe.webViewGetSettings(view) else { return }
