@@ -231,7 +231,79 @@ final class WebContent {
         return modifiers
     }
 
+    // MARK: Touch
+
+    /// A finger on the page: it scrolls the page as it moves; held still
+    /// for half a second, it presses the mouse there, so moving selects
+    /// text; lifted before either, it clicks.
+    private enum TouchMode { case pending, scrolling, pressing }
+    private var touch: (start: (Int32, Int32), last: (Int32, Int32), mode: TouchMode, generation: Int)?
+    private var touchGeneration = 0
+    private static let touchSlop: Int32 = 8
+
+    private func touchEvent(_ event: NSEvent, button: UInt32?, pressed: Bool) {
+        guard let page else { return }
+        let here = point(event)
+        if button != nil, pressed {
+            touchGeneration += 1
+            let generation = touchGeneration
+            touch = (here, here, .pending, generation)
+            Dispatch.after(nanoseconds: 500_000_000) { [weak self] in
+                guard let self, let current = self.touch, current.generation == generation, current.mode == .pending else { return }
+                self.touch?.mode = .pressing
+                self.press(page, at: current.start, modifiers: self.modifiers(event))
+            }
+            return
+        }
+        guard var current = touch else { return }
+        if button == nil {
+            // The finger moved.
+            if current.mode == .pending, abs(here.0 - current.start.0) > Self.touchSlop || abs(here.1 - current.start.1) > Self.touchSlop {
+                current.mode = .scrolling
+            }
+            switch current.mode {
+            case .scrolling:
+                // The page follows the finger: moving it down scrolls up.
+                let dx = here.0 - current.last.0, dy = here.1 - current.last.1
+                if dy != 0 { page.axis(x: here.0, y: here.1, horizontal: false, value: dy, modifiers: modifiers(event)) }
+                if dx != 0 { page.axis(x: here.0, y: here.1, horizontal: true, value: dx, modifiers: modifiers(event)) }
+            case .pressing:
+                page.pointer(motion: true, x: here.0, y: here.1, button: 0, pressed: false, modifiers: modifiers(event))
+            case .pending:
+                break
+            }
+            current.last = here
+            touch = current
+            return
+        }
+        // The finger lifted.
+        touch = nil
+        switch current.mode {
+        case .pending:
+            press(page, at: current.start, modifiers: modifiers(event))
+            release(page, at: current.start, modifiers: modifiers(event))
+        case .pressing:
+            release(page, at: here, modifiers: modifiers(event))
+        case .scrolling:
+            break
+        }
+    }
+
+    private func press(_ page: WebPage, at point: (Int32, Int32), modifiers: UInt32) {
+        page.pointer(motion: true, x: point.0, y: point.1, button: 0, pressed: false, modifiers: modifiers)
+        buttons |= 1
+        page.pointer(motion: false, x: point.0, y: point.1, button: 1, pressed: true, modifiers: modifiers | 1 << 20)
+    }
+
+    private func release(_ page: WebPage, at point: (Int32, Int32), modifiers: UInt32) {
+        buttons &= ~1
+        page.pointer(motion: false, x: point.0, y: point.1, button: 1, pressed: false, modifiers: modifiers & ~(1 << 20))
+    }
+
     func mouse(_ event: NSEvent, button: UInt32?, pressed: Bool) {
+        // Touches scroll and press as a finger does; the mouse clicks and
+        // drags (selecting text) as it does on a Mac.
+        if event.subtype == 3, button == nil || button == 1 { return touchEvent(event, button: button, pressed: pressed) }
         guard let page else { return }
         let (x, y) = point(event)
         guard let button else { return page.pointer(motion: true, x: x, y: y, button: 0, pressed: false, modifiers: modifiers(event)) }
