@@ -83,7 +83,7 @@ open class UIToolbar: UIView {
         if item.state.width > 0 { return item.state.width }
         if let view = item.state.customView { return view.state.bounds.width }
         if BarIcons.has(item.state.systemItem) { return 28 }
-        return Text.size(item.displayTitle, font: UIToolbar.font).width
+        return item.barWidth(font: UIToolbar.font)
     }
 
     /// Each item's frame: 16 points in from the edges, 8 between items
@@ -131,8 +131,14 @@ open class UIToolbar: UIView {
             CG.fillRect(context, CGRect(x: 0, y: 0, width: bounds.width, height: Screen.pixel))
         }
         for (item, frame) in itemFrames() where !isSpace(item) && item.state.customView == nil {
-            let color = item.state.tintColor ?? tintColor()
+            let color = item.state.enabled ? (item.state.tintColor ?? tintColor()) : UIColor.systemGray()
             if BarIcons.draw(item.state.systemItem, in: frame, color: color, context: context) { continue }
+            // An image, in the item's tint, as the bar draws it.
+            if let image = item.barImage {
+                let size = item.barImageSize
+                image.withTintColor(color).draw(in: CGRect(x: frame.minX, y: frame.midY - size.height / 2, width: size.width, height: size.height))
+                continue
+            }
             let title = item.displayTitle
             Text.draw(title, at: CGPoint(x: frame.minX, y: frame.midY - Text.size(title, font: UIToolbar.font).height / 2),
                       font: UIToolbar.font, color: color)
@@ -381,6 +387,15 @@ enum TabStops {
 final class WebViewState: ObjectState {
     /// WKWebView's page, over WPE, and its last frame.
     var page: WebPage?
+    /// Called when the page's URL or loading changes: web sheets' bars
+    /// follow it. The sheet's controls, which its bar's buttons target.
+    var navigationChanged: (() -> Void)?
+    var sheetControls: NSObject?
+    /// The touch on the page: where it began and last was, in the view, and
+    /// whether it has moved far enough to scroll rather than tap.
+    var touchStart: CGPoint?
+    var touchLast: CGPoint?
+    var touchDragging = false
     var frameImage: Owned?
     /// The navigation the delegate's calls name, and whether it failed.
     var navigation: NSObject?
@@ -454,6 +469,24 @@ open class UIWebView: UIView {
     @ObjCMethod("reload") func reload() { web.page?.reload() }
     @ObjCMethod("stopLoading") func stopLoading() { web.page?.stopLoading() }
     @ObjCMethod("scrollView") func scrollView() -> NSObject? { nil }
+
+    // MARK: Input: touches as the page's pointer and scrolling, typing as its keys (WebInput)
+
+    @ObjCMethod("touchesBegan:withEvent:") func touchesBegan(_ touches: NSObject, with event: NSObject?) { WebInput.began(self, web, touches) }
+    @ObjCMethod("touchesMoved:withEvent:") func touchesMoved(_ touches: NSObject, with event: NSObject?) { WebInput.moved(self, web, touches) }
+    @ObjCMethod("touchesEnded:withEvent:") func touchesEnded(_ touches: NSObject, with event: NSObject?) { WebInput.ended(self, web, touches) }
+    @ObjCMethod("touchesCancelled:withEvent:") func touchesCancelled(_ touches: NSObject, with event: NSObject?) { WebInput.cancelled(web) }
+    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { web.page != nil }
+    @ObjCMethod("becomeFirstResponder") override func becomeFirstResponder() -> Bool { WebInput.focus(self, web) }
+    @ObjCMethod("resignFirstResponder")
+    override func resignFirstResponder() -> Bool {
+        if Keyboard.isFirstResponder(self) { Keyboard.focus(nil) }
+        return true
+    }
+    @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(self) }
+    @ObjCMethod("insertText:") func insertText(_ text: String) { web.page?.type(text) }
+    @ObjCMethod("deleteBackward") func deleteBackward() { web.page?.press(keysym: WebPage.backspaceKey) }
+    @ObjCMethod("hasText") func hasText() -> Bool { true }
 
     @ObjCMethod("loadHTMLString:baseURL:")
     func loadHTMLString(_ html: String?, baseURL: NSObject?) {
@@ -639,6 +672,24 @@ open class WKWebView: UIView {
     @ObjCMethod("stopLoading") func stopLoading() { web.page?.stopLoading() }
     @ObjCMethod("scrollView") func scrollView() -> NSObject? { nil }
 
+    // MARK: Input: touches as the page's pointer and scrolling, typing as its keys (WebInput)
+
+    @ObjCMethod("touchesBegan:withEvent:") func touchesBegan(_ touches: NSObject, with event: NSObject?) { WebInput.began(self, web, touches) }
+    @ObjCMethod("touchesMoved:withEvent:") func touchesMoved(_ touches: NSObject, with event: NSObject?) { WebInput.moved(self, web, touches) }
+    @ObjCMethod("touchesEnded:withEvent:") func touchesEnded(_ touches: NSObject, with event: NSObject?) { WebInput.ended(self, web, touches) }
+    @ObjCMethod("touchesCancelled:withEvent:") func touchesCancelled(_ touches: NSObject, with event: NSObject?) { WebInput.cancelled(web) }
+    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { web.page != nil }
+    @ObjCMethod("becomeFirstResponder") override func becomeFirstResponder() -> Bool { WebInput.focus(self, web) }
+    @ObjCMethod("resignFirstResponder")
+    override func resignFirstResponder() -> Bool {
+        if Keyboard.isFirstResponder(self) { Keyboard.focus(nil) }
+        return true
+    }
+    @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(self) }
+    @ObjCMethod("insertText:") func insertText(_ text: String) { web.page?.type(text) }
+    @ObjCMethod("deleteBackward") func deleteBackward() { web.page?.press(keysym: WebPage.backspaceKey) }
+    @ObjCMethod("hasText") func hasText() -> Bool { true }
+
     /// The script's value, as WebKit gives it: strings, numbers, Booleans,
     /// arrays and dictionaries as Foundation's, NSNull for null and nil for
     /// undefined.
@@ -707,6 +758,9 @@ open class WKWebView: UIView {
             let view = NSObject(object)
             for key in keys { view.sendWillChangeValue(forKey: key) }
             for key in keys.reversed() { view.sendDidChangeValue(forKey: key) }
+            if property == "uri" || property == "is-loading" {
+                WKWebView(objcObject: object, ownership: .retain).web.navigationChanged?()
+            }
         }
         return page
     }
@@ -952,4 +1006,56 @@ extension NSObject {
     @ObjCMethod("length") func sendLength() -> UInt
     @ObjCMethod("webView:didFailNavigation:withError:")
     func sendDidFailNavigation(_ view: NSObject, _ navigation: NSObject, _ error: NSObject)
+}
+
+/// Web views' input: a touch on the page is a tap, clicking where it lifts
+/// and taking the keyboard, as a field the page focuses would; or a drag,
+/// scrolling the page under it as the finger moves. Points are the page's
+/// pixels at the screen's scale.
+enum WebInput {
+    static func began(_ view: UIView, _ web: WebViewState, _ touches: NSObject) {
+        let point = location(view, touches)
+        WebPage.trace("touch began at \(point.map { "\($0.x), \($0.y)" } ?? "?"), page \(web.page != nil)")
+        guard let point else { return }
+        (web.touchStart, web.touchLast, web.touchDragging) = (point, point, false)
+    }
+
+    static func moved(_ view: UIView, _ web: WebViewState, _ touches: NSObject) {
+        guard let point = location(view, touches), let last = web.touchLast, let start = web.touchStart, let page = web.page else { return }
+        if !web.touchDragging, hypot(point.x - start.x, point.y - start.y) >= 10 { web.touchDragging = true }
+        guard web.touchDragging else { return }
+        let scale = Screen.scale
+        // The finger moving up shows more of the page below.
+        page.scroll(x: Int32(point.x * scale), y: Int32(point.y * scale),
+                    dx: Double((last.x - point.x) * scale), dy: Double((last.y - point.y) * scale))
+        web.touchLast = point
+        Display.markDirty()
+    }
+
+    static func ended(_ view: UIView, _ web: WebViewState, _ touches: NSObject) {
+        defer { (web.touchStart, web.touchLast, web.touchDragging) = (nil, nil, false) }
+        WebPage.trace("touch ended, dragging \(web.touchDragging)")
+        guard !web.touchDragging, let point = location(view, touches) ?? web.touchLast, let page = web.page else { return }
+        let scale = Screen.scale
+        page.click(x: Int32(point.x * scale), y: Int32(point.y * scale))
+        _ = view.sendBecomeFirstResponder()
+        Display.markDirty()
+    }
+
+    static func cancelled(_ web: WebViewState) {
+        (web.touchStart, web.touchLast, web.touchDragging) = (nil, nil, false)
+    }
+
+    /// Typing goes to the page, once it has one.
+    static func focus(_ view: UIView, _ web: WebViewState) -> Bool {
+        guard web.page != nil else { return false }
+        Keyboard.focus(view)
+        return true
+    }
+
+    /// Where the touch is in the view.
+    private static func location(_ view: UIView, _ touches: NSObject) -> CGPoint? {
+        guard let touch = touches.as(NSSet.self)?.anyObject()?.as(UITouch.self) else { return nil }
+        return touch.location(in: view)
+    }
 }
