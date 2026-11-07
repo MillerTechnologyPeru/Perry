@@ -221,10 +221,21 @@ final class Keychain: @unchecked Sendable {
         guard let data = item.data else { return nil }
         switch item.itemClass {
         case ItemKeys.kSecClassKey:
-            guard case .string(let type)? = item.attributes[ItemKeys.kSecAttrKeyType],
-                  case .string(let keyClass)? = item.attributes[ItemKeys.kSecAttrKeyClass],
-                  let state = try? KeyState.make(type: type, isPrivate: keyClass == ItemKeys.kSecAttrKeyClassPrivate, data: data)
-            else { return nil }
+            // An item added with no key class (as the common recipe for a
+            // public key from a server or a license adds one) is whichever
+            // its data reads as: a public key, else a private one.
+            guard case .string(let type)? = item.attributes[ItemKeys.kSecAttrKeyType] else { return nil }
+            let state: KeyState
+            if case .string(let keyClass)? = item.attributes[ItemKeys.kSecAttrKeyClass] {
+                guard let made = try? KeyState.make(type: type, isPrivate: keyClass == ItemKeys.kSecAttrKeyClassPrivate, data: data)
+                else { return nil }
+                state = made
+            } else if let made = (try? KeyState.make(type: type, isPrivate: false, data: data))
+                        ?? (try? KeyState.make(type: type, isPrivate: true, data: data)) {
+                state = made
+            } else {
+                return nil
+            }
             if case .string(let label)? = item.attributes[ItemKeys.kSecAttrLabel] { state.label = label }
             if case .data(let tag)? = item.attributes[ItemKeys.kSecAttrApplicationTag] { state.tag = tag }
             return Keys.object(state)

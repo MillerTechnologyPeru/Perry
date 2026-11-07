@@ -565,6 +565,35 @@ public func CFStreamCreateBoundPair(_ allocator: UnsafeRawPointer?, _ read: Unsa
     write?.pointee = pair?.output
 }
 
+/// A +1 stream of the file a file URL names; nil for another URL.
+private func fileStream(_ url: id?, fallback: Class, _ source: (String) -> StreamStorage.Source) -> id? {
+    guard let path = Streams.path(url), let object = Storage.allocate(UnsafeMutableRawPointer(fallback)) else { return nil }
+    Storage.set(object, StreamStorage(source(path)))
+    return object
+}
+
+@c(_CFReadStreamCreateWithFile)
+public func CFReadStreamCreateWithFile(_ allocator: UnsafeRawPointer?, _ url: id?) -> id? {
+    fileStream(url, fallback: Streams.inputClass) { .file($0) }
+}
+
+/// The file is replaced when the stream opens, as kCFStreamPropertyAppendToFile
+/// is not kept.
+@c(_CFWriteStreamCreateWithFile)
+public func CFWriteStreamCreateWithFile(_ allocator: UnsafeRawPointer?, _ url: id?) -> id? {
+    fileStream(url, fallback: Streams.outputClass) { .fileOutput($0, append: false) }
+}
+
+/// A +1 stream of a copy of the bytes.
+@c(_CFReadStreamCreateWithBytesNoCopy)
+public func CFReadStreamCreateWithBytesNoCopy(_ allocator: UnsafeRawPointer?, _ bytes: UnsafePointer<UInt8>?, _ length: Int,
+                                              _ deallocator: UnsafeRawPointer?) -> id? {
+    let data = bytes.map { Data(bytes: $0, count: max(length, 0)) } ?? Data()
+    guard let object = Storage.allocate(UnsafeMutableRawPointer(Streams.inputClass)) else { return nil }
+    Storage.set(object, StreamStorage(.data(data)))
+    return object
+}
+
 @c(_CFReadStreamOpen) public func CFReadStreamOpen(_ stream: UnsafeMutableRawPointer?) -> Bool {
     send(stream, "open")
     return status(stream) != 7

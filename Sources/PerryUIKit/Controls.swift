@@ -658,6 +658,27 @@ final class TextViewState: ObjectState {
     var textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
     var attributedText: NSObject?
     var dataDetectorTypes: UInt = 0
+    var inputTraits = TextInputTraits()
+}
+
+/// UITextInputTraits, as a text view keeps them: there is no keyboard of
+/// iOS's to apply them to.
+struct TextInputTraits {
+    var keyboardType = 0
+    var keyboardAppearance = 0
+    var returnKeyType = 0
+    /// UITextAutocapitalizationTypeSentences.
+    var autocapitalizationType = 2
+    var autocorrectionType = 0
+    var spellCheckingType = 0
+    var smartQuotesType = 0
+    var smartDashesType = 0
+    var smartInsertDeleteType = 0
+    var secureTextEntry = false
+    var enablesReturnKeyAutomatically = false
+    var textContentType: NSObject?
+    var inputView: UIView?
+    var inputAccessoryView: UIView?
 }
 
 /// Text in a scroll view, wrapped to its width.
@@ -713,6 +734,41 @@ open class UITextView: UIScrollView {
     @ObjCMethod("scrollRangeToVisible:") func scrollRangeToVisible(_ range: PerryRange) {}
     @ObjCMethod("dataDetectorTypes") func dataDetectorTypes() -> UInt { textState.dataDetectorTypes }
     @ObjCMethod("setDataDetectorTypes:") func setDataDetectorTypes(_ types: UInt) { textState.dataDetectorTypes = types }
+
+    // MARK: Text input traits
+
+    @ObjCMethod("keyboardType") func keyboardType() -> Int { textState.inputTraits.keyboardType }
+    @ObjCMethod("setKeyboardType:") func setKeyboardType(_ type: Int) { textState.inputTraits.keyboardType = type }
+    @ObjCMethod("keyboardAppearance") func keyboardAppearance() -> Int { textState.inputTraits.keyboardAppearance }
+    @ObjCMethod("setKeyboardAppearance:") func setKeyboardAppearance(_ appearance: Int) { textState.inputTraits.keyboardAppearance = appearance }
+    @ObjCMethod("returnKeyType") func returnKeyType() -> Int { textState.inputTraits.returnKeyType }
+    @ObjCMethod("setReturnKeyType:") func setReturnKeyType(_ type: Int) { textState.inputTraits.returnKeyType = type }
+    @ObjCMethod("autocapitalizationType") func autocapitalizationType() -> Int { textState.inputTraits.autocapitalizationType }
+    @ObjCMethod("setAutocapitalizationType:") func setAutocapitalizationType(_ type: Int) { textState.inputTraits.autocapitalizationType = type }
+    @ObjCMethod("autocorrectionType") func autocorrectionType() -> Int { textState.inputTraits.autocorrectionType }
+    @ObjCMethod("setAutocorrectionType:") func setAutocorrectionType(_ type: Int) { textState.inputTraits.autocorrectionType = type }
+    @ObjCMethod("spellCheckingType") func spellCheckingType() -> Int { textState.inputTraits.spellCheckingType }
+    @ObjCMethod("setSpellCheckingType:") func setSpellCheckingType(_ type: Int) { textState.inputTraits.spellCheckingType = type }
+    @ObjCMethod("smartQuotesType") func smartQuotesType() -> Int { textState.inputTraits.smartQuotesType }
+    @ObjCMethod("setSmartQuotesType:") func setSmartQuotesType(_ type: Int) { textState.inputTraits.smartQuotesType = type }
+    @ObjCMethod("smartDashesType") func smartDashesType() -> Int { textState.inputTraits.smartDashesType }
+    @ObjCMethod("setSmartDashesType:") func setSmartDashesType(_ type: Int) { textState.inputTraits.smartDashesType = type }
+    @ObjCMethod("smartInsertDeleteType") func smartInsertDeleteType() -> Int { textState.inputTraits.smartInsertDeleteType }
+    @ObjCMethod("setSmartInsertDeleteType:") func setSmartInsertDeleteType(_ type: Int) { textState.inputTraits.smartInsertDeleteType = type }
+    @ObjCMethod("isSecureTextEntry") func isSecureTextEntry() -> Bool { textState.inputTraits.secureTextEntry }
+    @ObjCMethod("setSecureTextEntry:") func setSecureTextEntry(_ secure: Bool) { textState.inputTraits.secureTextEntry = secure }
+    @ObjCMethod("enablesReturnKeyAutomatically") func enablesReturnKeyAutomatically() -> Bool {
+        textState.inputTraits.enablesReturnKeyAutomatically
+    }
+    @ObjCMethod("setEnablesReturnKeyAutomatically:") func setEnablesReturnKeyAutomatically(_ enables: Bool) {
+        textState.inputTraits.enablesReturnKeyAutomatically = enables
+    }
+    @ObjCMethod("textContentType") func textContentType() -> NSObject? { textState.inputTraits.textContentType }
+    @ObjCMethod("setTextContentType:") func setTextContentType(_ type: NSObject?) { textState.inputTraits.textContentType = type }
+    @ObjCMethod("inputView") func inputView() -> UIView? { textState.inputTraits.inputView }
+    @ObjCMethod("setInputView:") func setInputView(_ view: UIView?) { textState.inputTraits.inputView = view }
+    @ObjCMethod("inputAccessoryView") func inputAccessoryView() -> UIView? { textState.inputTraits.inputAccessoryView }
+    @ObjCMethod("setInputAccessoryView:") func setInputAccessoryView(_ view: UIView?) { textState.inputTraits.inputAccessoryView = view }
 
     /// The text is drawn by a view inside, sized to the wrapped text, so
     /// the content scrolls.

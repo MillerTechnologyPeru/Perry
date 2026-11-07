@@ -746,10 +746,88 @@ kern_return_t darwin_thread_info(mach_port_t port, int flavor, int32_t *info, ui
     return KERN_SUCCESS;
 }
 
-// MACH_TASK_BASIC_INFO 20 and TASK_BASIC_INFO_64 5: the memory used.
+// TASK_VM_INFO 22's revisions grow by appending; the newest has 93
+// natural_t's, the first 38 (up to phys_footprint).
+enum { TASK_VM_INFO_FLAVOR = 22, TASK_VM_INFO_REV0_COUNT = 38, TASK_VM_INFO_MAX_COUNT = 93 };
+
+// The process's virtual size, resident size and its peak, in bytes.
+static void process_memory(uint64_t *virtual_size, uint64_t *resident, uint64_t *peak) {
+    long pages = 0, resident_pages = 0;
+    FILE *statm = fopen("/proc/self/statm", "r");
+    if (statm) {
+        if (fscanf(statm, "%ld %ld", &pages, &resident_pages) != 2)
+            pages = resident_pages = 0;
+        fclose(statm);
+    }
+    long page = sysconf(_SC_PAGESIZE);
+    *virtual_size = (uint64_t)(pages * page);
+    *resident = (uint64_t)(resident_pages * page);
+    *peak = *resident;
+    FILE *status = fopen("/proc/self/status", "r");
+    if (status) {
+        char line[256];
+        unsigned long long kilobytes;
+        while (fgets(line, sizeof(line), status))
+            if (sscanf(line, "VmHWM: %llu kB", &kilobytes) == 1)
+                *peak = kilobytes * 1024;
+        fclose(status);
+    }
+}
+
+// TASK_VM_INFO: the sizes, with the resident memory as the physical
+// footprint (internal memory), which is what iOS limits a process by.
+static kern_return_t task_vm_info(int32_t *info, uint32_t *count) {
+    if (*count < TASK_VM_INFO_REV0_COUNT)
+        return KERN_INVALID_ARGUMENT;
+    uint32_t filled = *count < TASK_VM_INFO_MAX_COUNT ? *count : TASK_VM_INFO_MAX_COUNT;
+    memset(info, 0, filled * sizeof(int32_t));
+    uint64_t virtual_size, resident, peak;
+    process_memory(&virtual_size, &resident, &peak);
+    uint8_t *bytes = (uint8_t *)info;
+    int32_t page = (int32_t)sysconf(_SC_PAGESIZE);
+    memcpy(bytes + 0, &virtual_size, 8);        // virtual_size
+    memcpy(bytes + 12, &page, 4);               // page_size
+    memcpy(bytes + 16, &resident, 8);           // resident_size
+    memcpy(bytes + 24, &peak, 8);               // resident_size_peak
+    memcpy(bytes + 48, &resident, 8);           // internal
+    memcpy(bytes + 56, &peak, 8);               // internal_peak
+    memcpy(bytes + 144, &resident, 8);          // phys_footprint
+    if (filled >= 42) {
+        uint64_t min_address = 0x100000000, max_address = 0x1000000000000;
+        memcpy(bytes + 152, &min_address, 8);
+        memcpy(bytes + 160, &max_address, 8);
+    }
+    if (filled >= 44)
+        memcpy(bytes + 168, &peak, 8);          // ledger_phys_footprint_peak
+    *count = filled;
+    return KERN_SUCCESS;
+}
+
+/// What the process may still allocate before the system would end it:
+/// here the memory Linux counts as available.
+size_t darwin_os_proc_available_memory(void) DARWIN_SYMBOL(os_proc_available_memory);
+size_t darwin_os_proc_available_memory(void) {
+    unsigned long long kilobytes = 0;
+    FILE *meminfo = fopen("/proc/meminfo", "r");
+    if (meminfo) {
+        char line[256];
+        while (fgets(line, sizeof(line), meminfo))
+            if (sscanf(line, "MemAvailable: %llu kB", &kilobytes) == 1)
+                break;
+        fclose(meminfo);
+    }
+    return (size_t)(kilobytes * 1024);
+}
+
+// MACH_TASK_BASIC_INFO 20 and TASK_BASIC_INFO_64 5: the memory used. On
+// arm64 TASK_BASIC_INFO_64 is TASK_BASIC_INFO_64_2, 18, laid out as 5.
 kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(task_info);
 kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) {
     (void)task;
+    if (flavor == TASK_VM_INFO_FLAVOR)
+        return task_vm_info(info, count);
+    if (flavor == 18)
+        flavor = 5;
     if ((flavor != 20 && flavor != 5) || *count < 10)
         return KERN_INVALID_ARGUMENT;
     long pages = 0, resident = 0;
