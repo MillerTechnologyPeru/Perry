@@ -43,6 +43,12 @@ typedef struct CATransform3D {
     PERRY_CGFLOAT m41, m42, m43, m44;
 } CATransform3D;
 
+// Metal's clear color, MTLClearColor, as MetalKit's views take it: four
+// doubles on any architecture.
+typedef struct PerryClearColor {
+    double red, green, blue, alpha;
+} PerryClearColor;
+
 // A display link's frame rates: lowest, highest, and preferred; zero for
 // the display's own.
 typedef struct CAFrameRateRange {
