@@ -72,21 +72,29 @@ extension Dictionary: _ObjectiveCBridgeable {
     }
 
     /// Each key and value, bridged by `bridge`; nil if one does not bridge.
+    /// The pairs come from the dictionary's own enumeration, not a lookup of
+    /// each key enumerated, which a key whose hash or equality is not
+    /// consistent would miss.
     private static func _bridgeEntries(
         of source: NSDictionary,
         key bridgeKey: (AnyObject) -> Key?,
         value bridgeValue: (AnyObject) -> Value?
     ) -> Dictionary? {
         var entries = Dictionary(minimumCapacity: source.count)
-        let keys = source.keyEnumerator()
-        while let key = keys.nextObject() {
-            let keyObject = key as AnyObject
-            guard let value = source.object(forKey: key),
-                  let bridgedKey = bridgeKey(keyObject),
-                  let bridgedValue = bridgeValue(value as AnyObject) else { return nil }
-            entries[bridgedKey] = bridgedValue
+        var failed = false
+        withoutActuallyEscaping(bridgeKey) { bridgeKey in
+            withoutActuallyEscaping(bridgeValue) { bridgeValue in
+                source.enumerateKeysAndObjects { key, value, stop in
+                    guard let bridgedKey = bridgeKey(key as AnyObject), let bridgedValue = bridgeValue(value as AnyObject) else {
+                        failed = true
+                        stop.pointee = true
+                        return
+                    }
+                    entries[bridgedKey] = bridgedValue
+                }
+            }
         }
-        return entries
+        return failed ? nil : entries
     }
 
     public static func _forceBridgeFromObjectiveC(_ source: NSDictionary, result: inout Dictionary?) {
