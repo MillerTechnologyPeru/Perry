@@ -222,9 +222,13 @@ public struct FocusState<Value>: DynamicProperty where Value: Hashable {
         fieldOffset: Int,
         inputs: inout _GraphInputs
     ) {
+        // Perry: a signal, as State's, which a value the focus system
+        // doesn't place (FocusStoreLocation.perryValue) invalidates.
+        let signal = Attribute(value: ())
         let box = Box(
             store: .init(inputs.focusStore),
             focusedItem: .init(inputs.focusedItem),
+            signal: WeakAttribute(signal),
             location: nil
         )
         buffer.append(box, fieldOffset: fieldOffset)
@@ -261,6 +265,7 @@ public struct FocusState<Value>: DynamicProperty where Value: Hashable {
     struct Box: DynamicPropertyBox {
         @OptionalAttribute var store: FocusStore?
         @OptionalAttribute var focusedItem: FocusItem??
+        let signal: WeakAttribute<Void>
         var location: FocusStoreLocation<Value>?
 
         mutating func reset() {
@@ -277,6 +282,8 @@ public struct FocusState<Value>: DynamicProperty where Value: Hashable {
                     ?? FocusStoreLocation(host: .currentHost, resetValue: property.resetValue)
                 location = newLocation
             }
+            newLocation.perrySignal = signal
+            let signalChanged = signal.changedValue()?.changed ?? false
             newLocation.store = store ?? FocusStore()
             newLocation.focusSeed = (focusedItem ?? nil)?.seed ?? .empty
             let (value, changed) = newLocation.update()
@@ -291,7 +298,7 @@ public struct FocusState<Value>: DynamicProperty where Value: Hashable {
                 newLocation.performDeferredUpdate()
                 #endif
             }
-            return (changed && newLocation.wasRead) || oldLocation == nil
+            return ((changed || signalChanged) && newLocation.wasRead) || oldLocation == nil
         }
     }
 }
@@ -367,7 +374,10 @@ extension View {
         _ binding: FocusState<Value>.Binding,
         equals value: Value
     ) -> some View where Value: Hashable {
+        // Perry: text fields under the modifier follow the binding
+        // themselves (PlatformTextField), as the focus system doesn't yet.
         modifier(FocusStateBindingModifier(binding: binding, value: value))
+            .environment(\.perryFocusBinding, PerryFocusBinding(binding: binding, value: value))
     }
 
     /// Modifies this view by binding its focus state to the given Boolean state
