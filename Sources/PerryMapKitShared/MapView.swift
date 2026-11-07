@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // What MKMapView does on either platform: the map MapLibre draws
@@ -35,6 +36,8 @@ public final class MapViewState: ObjectState {
     var selected: [NSObject] = []
     var overlays: [NSObject] = []
     var registered: [String: ObjCClass] = [:]
+    /// The size the map was last laid out at, in points.
+    var size = CGSize(width: 0, height: 0)
     /// The map MapLibre draws, made at the first layout; nil without it.
     var tiles: MapTiles?
     var triedTiles = false
@@ -52,6 +55,12 @@ public enum MapViews {
     public static func layOut(_ view: UnsafeMutableRawPointer, size: CGSize, scale: CGFloat) {
         guard size.width >= 1, size.height >= 1 else { return }
         let map = states[view]
+        // A new size shows more or less of the region: the delegate hears
+        // that the visible region changed.
+        if size.width != map.size.width || size.height != map.size.height {
+            map.size = size
+            MapViewObject(view).regionDidChange(animated: false)
+        }
         if map.tiles == nil, !map.triedTiles {
             map.triedTiles = true
             map.tiles = MapTiles(view: view, size: size, scale: Float(scale))
@@ -59,6 +68,29 @@ public enum MapViews {
         }
         map.tiles?.resize(to: size)
         map.tiles?.show(map.region)
+    }
+}
+
+extension MapViewState {
+    /// The region shown: the region set, widened along one axis to the
+    /// view's shape, as MapLibre fits it (MapLibre.zoom) and MapKit reports
+    /// it. The region set until the view has a size.
+    var shownRegion: MKCoordinateRegion {
+        guard size.width >= 1, size.height >= 1 else { return region }
+        let zoom = MapLibre.zoom(for: region, in: size)
+        let worldPoints = 512 * pow(2, zoom)
+        let longitudeDelta = min(360 * Double(size.width) / worldPoints, 360)
+        // Mercator: the height's share of the world's, around the center.
+        func mercator(_ latitude: Double) -> Double {
+            let clamped = min(max(latitude, -85.0511), 85.0511) * .pi / 180
+            return log(tan(.pi / 4 + clamped / 2))
+        }
+        func latitude(_ y: Double) -> Double { (2 * atan(exp(y)) - .pi / 2) * 180 / .pi }
+        let center = mercator(region.center.latitude)
+        let half = Double(size.height) * .pi / worldPoints
+        let latitudeDelta = latitude(center + half) - latitude(center - half)
+        return MKCoordinateRegion(center: region.center,
+                                  span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta))
     }
 }
 
@@ -83,7 +115,8 @@ public extension MapViewObject {
     @ObjCMethod("mapType") func mapType() -> Int { map.mapType }
     @ObjCMethod("setMapType:") func setMapType(_ type: Int) { map.mapType = type }
 
-    @ObjCMethod("region") func region() -> MKCoordinateRegion { map.region }
+    /// The region shown, which the view's shape widens from the one set.
+    @ObjCMethod("region") func region() -> MKCoordinateRegion { map.shownRegion }
     @ObjCMethod("setRegion:") func setRegion(_ region: MKCoordinateRegion) { setRegion(region, animated: false) }
 
     /// The region, its span within the world, as the delegate hears: that
@@ -95,6 +128,12 @@ public extension MapViewObject {
         map.region = MKCoordinateRegion(center: region.center, span: MKCoordinateSpan(
             latitudeDelta: min(max(region.span.latitudeDelta, 0), 180), longitudeDelta: min(max(region.span.longitudeDelta, 0), 360)))
         map.tiles?.show(map.region)
+        regionDidChange(animated: animated)
+    }
+
+    /// Tells the delegate, once the map has moved, that the visible region
+    /// changed.
+    func regionDidChange(animated: Bool) {
         let owner = self
         Dispatch.onMain {
             guard let delegate = owner.delegate() else { return }
@@ -112,7 +151,7 @@ public extension MapViewObject {
         setRegion(MKCoordinateRegion(center: center, span: map.region.span), animated: animated)
     }
 
-    @ObjCMethod("visibleMapRect") func visibleMapRect() -> MKMapRect { MapGeometry.rect(map.region) }
+    @ObjCMethod("visibleMapRect") func visibleMapRect() -> MKMapRect { MapGeometry.rect(map.shownRegion) }
     @ObjCMethod("setVisibleMapRect:") func setVisibleMapRect(_ rect: MKMapRect) { setVisibleMapRect(rect, animated: false) }
     @ObjCMethod("setVisibleMapRect:animated:")
     func setVisibleMapRect(_ rect: MKMapRect, animated: Bool) { setRegion(MapGeometry.region(rect), animated: animated) }
@@ -125,7 +164,7 @@ public extension MapViewObject {
 
     @ObjCMethod("convertCoordinate:toPointToView:")
     func convert(_ coordinate: CLLocationCoordinate2D, toPointTo view: NSObject?) -> CGPoint {
-        let bounds = self.bounds(), region = map.region
+        let bounds = self.bounds(), region = map.shownRegion
         let span = region.span
         let x = span.longitudeDelta > 0 ? (coordinate.longitude - (region.center.longitude - span.longitudeDelta / 2)) / span.longitudeDelta : 0.5
         let y = span.latitudeDelta > 0 ? ((region.center.latitude + span.latitudeDelta / 2) - coordinate.latitude) / span.latitudeDelta : 0.5
@@ -136,7 +175,7 @@ public extension MapViewObject {
     @ObjCMethod("convertPoint:toCoordinateFromView:")
     func convert(_ point: CGPoint, toCoordinateFrom view: NSObject?) -> CLLocationCoordinate2D {
         let local = view.map { convert(point, from: $0) } ?? point
-        let bounds = self.bounds(), region = map.region
+        let bounds = self.bounds(), region = map.shownRegion
         let x = Double(bounds.size.width > 0 ? (local.x - bounds.origin.x) / bounds.size.width : 0.5)
         let y = Double(bounds.size.height > 0 ? (local.y - bounds.origin.y) / bounds.size.height : 0.5)
         return CLLocationCoordinate2D(latitude: region.center.latitude + region.span.latitudeDelta * (0.5 - y),
@@ -191,7 +230,7 @@ public extension MapViewObject {
     @ObjCMethod("isUserLocationVisible")
     func isUserLocationVisible() -> Bool {
         guard map.showsUserLocation, let coordinate = DeviceLocation.coordinate else { return false }
-        return MapGeometry.contains(MapGeometry.rect(map.region), MapGeometry.point(coordinate))
+        return MapGeometry.contains(MapGeometry.rect(map.shownRegion), MapGeometry.point(coordinate))
     }
     /// An MKUserLocation, which PerryMapKit defines for both platforms.
     @ObjCMethod("userLocation")
