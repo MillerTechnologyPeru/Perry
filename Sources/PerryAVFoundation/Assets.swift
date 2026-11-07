@@ -603,13 +603,26 @@ enum Background {
 
 // MARK: - Constants
 
-/// File types, codecs, export presets and the error domain. Programs read
-/// them as they load: Unity's video code keeps AVVideoCodecHEVC, a weak
-/// import it does not check, from a static initializer.
+/// File types (their uniform type identifiers), codecs, export presets
+/// and the error domain. Programs read them as they load: Unity's video
+/// code keeps AVVideoCodecHEVC, a weak import it does not check, from a
+/// static initializer, and Leo's Fortune gives AVFileTypeAppleM4A as a
+/// player's file type hint.
 @ObjCConstants
 enum AssetConstants {
     static let AVVideoCodecHEVC = "hvc1"
     static let AVFileTypeMPEG4 = "public.mpeg-4"
+    static let AVFileTypeAppleM4A = "com.apple.m4a-audio"
+    static let AVFileTypeAppleM4V = "com.apple.m4v-video"
+    static let AVFileTypeQuickTimeMovie = "com.apple.quicktime-movie"
+    static let AVFileTypeMPEGLayer3 = "public.mp3"
+    static let AVFileTypeWAVE = "com.microsoft.waveform-audio"
+    static let AVFileTypeAIFF = "public.aiff-audio"
+    static let AVFileTypeAIFC = "public.aifc-audio"
+    static let AVFileTypeCoreAudioFormat = "com.apple.coreaudio-format"
+    static let AVFileTypeAC3 = "public.ac3-audio"
+    static let AVFileTypeAMR = "org.3gpp.adaptive-multi-rate-audio"
+    static let AVFileType3GPP = "public.3gpp"
     static let AVAssetExportPresetHighestQuality = "AVAssetExportPresetHighestQuality"
     static let AVAssetExportPresetPassthrough = "AVAssetExportPresetPassthrough"
     static let AVFoundationErrorDomain = "AVFoundationErrorDomain"
