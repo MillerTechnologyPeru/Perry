@@ -99,10 +99,14 @@ open class NSApplication: NSResponder {
     /// of the first window shown (from its top left), two seconds apart
     /// starting six seconds after launch, go to the window on top there:
     /// to try menus and controls without a mouse.
-    nonisolated(unsafe) private static var scriptedClicks: [CGPoint]? = getenv("PERRY_APPKIT_CLICKS").map { value in
-        String(cString: value).split(separator: ";").compactMap { pair in
-            let numbers = pair.split(separator: ",").compactMap { Double($0.filter { $0 != " " }) }
-            return numbers.count == 2 ? CGPoint(x: numbers[0], y: numbers[1]) : nil
+    /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
+    /// positive), as a mouse wheel's notches.
+    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
+        String(cString: value).split(separator: ";").compactMap { entry in
+            let scrolls = entry.hasPrefix("s:")
+            let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }) }
+            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2])) : nil }
+            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil) : nil
         }
     }
     nonisolated(unsafe) private static var clickWindow: NSWindow?
@@ -110,13 +114,20 @@ open class NSApplication: NSResponder {
     @ObjCMethod("_perryScriptedClick")
     func scriptedClick() {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
-        let point = clicks.removeFirst()
+        let (point, scroll) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
         if NSApplication.clickWindow == nil { NSApplication.clickWindow = Windows.all.first { $0.visible } }
         if let base = NSApplication.clickWindow {
             let screen = CGPoint(x: base.frame.minX + point.x, y: base.frame.maxY - point.y)
             let target = Windows.all.last { $0.visible && $0.frame.contains(screen) } ?? base
             let local = CGPoint(x: screen.x - target.frame.minX, y: screen.y - target.frame.minY)
+            if let scroll {
+                Trace.log("scripted scroll of \(scroll) at \(point) in window \(target.windowNumber)")
+                let event = NSEvent(.scrollWheel, window: target, location: local)
+                (event.deltaY, event.scrollingDeltaY) = (scroll, scroll)
+                queue.append(event)
+                return
+            }
             Trace.log("scripted click at \(point) in window \(target.windowNumber)")
             for type in [EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent(type, window: target, location: local)
