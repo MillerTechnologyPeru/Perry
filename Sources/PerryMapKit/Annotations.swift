@@ -1,4 +1,5 @@
 import CPerryGeometry
+import PerryMapKitShared
 import PerryObjCInterop
 
 // Annotations and the views for them, placemarks and map items. The views
@@ -63,40 +64,18 @@ open class MKUserLocation: MKShape {
 
 // MARK: - Annotation views
 
-final class AnnotationViewState: ObjectState {
-    var annotation: NSObject?
-    var reuseIdentifier: String?
-    var image: NSObject?
-    var centerOffset = CGPoint(x: 0, y: 0)
-    var calloutOffset = CGPoint(x: 0, y: 0)
-    var canShowCallout = false
-    var enabled = true
-    var highlighted = false
-    var selected = false
-    var draggable = false
-    var dragState = 0
-    var leftCalloutAccessoryView: NSObject?
-    var rightCalloutAccessoryView: NSObject?
-    var detailCalloutAccessoryView: NSObject?
-    var displayPriority: Float = 1000
-    var clusteringIdentifier: String?
-    var collisionMode = 0
-    // MKPinAnnotationView's and MKMarkerAnnotationView's.
-    var pinColor = 0
-    var tintColor: NSObject?
-    var animatesDrop = false
-    var glyphText: String?
-    var glyphImage: NSObject?
-}
+// An iOS app's annotation views, UIViews: their methods are the shared
+// categories' (PerryMapKitShared). A Mac app's are PerryMapKitAppKit's.
 
 @ObjCClass("MKAnnotationView")
 class MKAnnotationView: UIView {
-    static let states = StateTable<AnnotationViewState>()
-    var annotationView: AnnotationViewState { MKAnnotationView.states[objcObject] }
+    override class var objCSuperclassName: String? { UIKitViews.superclassName }
+
+    override class func didDefineObjCClass(_ cls: ObjCClass) { AnnotationViewObject.registerObjCCategoryAnnotationView(cls) }
 
     @ObjCMethod("dealloc")
     func dealloc() {
-        MKAnnotationView.states.remove(objcObject)
+        AnnotationViews.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: MKAnnotationView.objCClass.pointer)
     }
 
@@ -104,95 +83,23 @@ class MKAnnotationView: UIView {
     func initialize(annotation: NSObject?, reuseIdentifier: String?) -> Self {
         Super.initialize(objcObject, frame: CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 0, height: 0)),
                          definedOn: MKAnnotationView.objCClass)
-        annotationView.annotation = annotation
-        annotationView.reuseIdentifier = reuseIdentifier
+        AnnotationViews.initialize(objcObject, annotation: annotation, reuseIdentifier: reuseIdentifier)
         return self
     }
-
-    @ObjCMethod("annotation") func annotation() -> NSObject? { annotationView.annotation }
-    @ObjCMethod("setAnnotation:") func setAnnotation(_ annotation: NSObject?) { annotationView.annotation = annotation }
-    @ObjCMethod("reuseIdentifier") func reuseIdentifier() -> String? { annotationView.reuseIdentifier }
-    @ObjCMethod("prepareForReuse") func prepareForReuse() {}
-    @ObjCMethod("prepareForDisplay") func prepareForDisplay() {}
-
-    /// The view takes its image's size.
-    @ObjCMethod("image") func image() -> NSObject? { annotationView.image }
-    @ObjCMethod("setImage:")
-    func setImage(_ image: NSObject?) {
-        annotationView.image = image
-        guard let image else { return }
-        let size = image.imageSize()
-        let frame = self.frame()
-        setFrame(CGRect(origin: frame.origin, size: size))
-    }
-
-    @ObjCMethod("centerOffset") func centerOffset() -> CGPoint { annotationView.centerOffset }
-    @ObjCMethod("setCenterOffset:") func setCenterOffset(_ offset: CGPoint) { annotationView.centerOffset = offset }
-    @ObjCMethod("calloutOffset") func calloutOffset() -> CGPoint { annotationView.calloutOffset }
-    @ObjCMethod("setCalloutOffset:") func setCalloutOffset(_ offset: CGPoint) { annotationView.calloutOffset = offset }
-    @ObjCMethod("canShowCallout") func canShowCallout() -> Bool { annotationView.canShowCallout }
-    @ObjCMethod("setCanShowCallout:") func setCanShowCallout(_ shows: Bool) { annotationView.canShowCallout = shows }
-    @ObjCMethod("isEnabled") func isEnabled() -> Bool { annotationView.enabled }
-    @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { annotationView.enabled = enabled }
-    @ObjCMethod("isHighlighted") func isHighlighted() -> Bool { annotationView.highlighted }
-    @ObjCMethod("setHighlighted:") func setHighlighted(_ highlighted: Bool) { annotationView.highlighted = highlighted }
-    @ObjCMethod("isSelected") func isSelected() -> Bool { annotationView.selected }
-    @ObjCMethod("setSelected:") func setSelected(_ selected: Bool) { annotationView.selected = selected }
-    @ObjCMethod("setSelected:animated:") func setSelected(_ selected: Bool, animated: Bool) { annotationView.selected = selected }
-    @ObjCMethod("isDraggable") func isDraggable() -> Bool { annotationView.draggable }
-    @ObjCMethod("setDraggable:") func setDraggable(_ draggable: Bool) { annotationView.draggable = draggable }
-    @ObjCMethod("dragState") func dragState() -> Int { annotationView.dragState }
-    @ObjCMethod("setDragState:") func setDragState(_ state: Int) { annotationView.dragState = state }
-    @ObjCMethod("setDragState:animated:") func setDragState(_ state: Int, animated: Bool) { annotationView.dragState = state }
-    @ObjCMethod("leftCalloutAccessoryView") func leftCalloutAccessoryView() -> NSObject? { annotationView.leftCalloutAccessoryView }
-    @ObjCMethod("setLeftCalloutAccessoryView:")
-    func setLeftCalloutAccessoryView(_ view: NSObject?) { annotationView.leftCalloutAccessoryView = view }
-    @ObjCMethod("rightCalloutAccessoryView") func rightCalloutAccessoryView() -> NSObject? { annotationView.rightCalloutAccessoryView }
-    @ObjCMethod("setRightCalloutAccessoryView:")
-    func setRightCalloutAccessoryView(_ view: NSObject?) { annotationView.rightCalloutAccessoryView = view }
-    @ObjCMethod("detailCalloutAccessoryView") func detailCalloutAccessoryView() -> NSObject? { annotationView.detailCalloutAccessoryView }
-    @ObjCMethod("setDetailCalloutAccessoryView:")
-    func setDetailCalloutAccessoryView(_ view: NSObject?) { annotationView.detailCalloutAccessoryView = view }
-    @ObjCMethod("displayPriority") func displayPriority() -> Float { annotationView.displayPriority }
-    @ObjCMethod("setDisplayPriority:") func setDisplayPriority(_ priority: Float) { annotationView.displayPriority = priority }
-    @ObjCMethod("clusteringIdentifier") func clusteringIdentifier() -> String? { annotationView.clusteringIdentifier }
-    @ObjCMethod("setClusteringIdentifier:")
-    func setClusteringIdentifier(_ identifier: String?) { annotationView.clusteringIdentifier = identifier }
-    @ObjCMethod("collisionMode") func collisionMode() -> Int { annotationView.collisionMode }
-    @ObjCMethod("setCollisionMode:") func setCollisionMode(_ mode: Int) { annotationView.collisionMode = mode }
 }
 
-/// A pin: MKPinAnnotationColor red 0, green 1, purple 2.
 @ObjCClass("MKPinAnnotationView")
 class MKPinAnnotationView: MKAnnotationView {
+    override class func didDefineObjCClass(_ cls: ObjCClass) { AnnotationViewObject.registerObjCCategoryPinAnnotationView(cls) }
+
     @ObjCClassMethod("redPinColor") static func redPinColor() -> UIColor { UIColor.make(red: 1, green: 0.23, blue: 0.19, alpha: 1) }
     @ObjCClassMethod("greenPinColor") static func greenPinColor() -> UIColor { UIColor.make(red: 0.2, green: 0.78, blue: 0.35, alpha: 1) }
     @ObjCClassMethod("purplePinColor") static func purplePinColor() -> UIColor { UIColor.make(red: 0.69, green: 0.32, blue: 0.87, alpha: 1) }
-
-    @ObjCMethod("pinColor") func pinColor() -> Int { annotationView.pinColor }
-    @ObjCMethod("setPinColor:") func setPinColor(_ color: Int) { annotationView.pinColor = color }
-    @ObjCMethod("pinTintColor") func pinTintColor() -> NSObject? { annotationView.tintColor }
-    @ObjCMethod("setPinTintColor:") func setPinTintColor(_ color: NSObject?) { annotationView.tintColor = color }
-    @ObjCMethod("animatesDrop") func animatesDrop() -> Bool { annotationView.animatesDrop }
-    @ObjCMethod("setAnimatesDrop:") func setAnimatesDrop(_ animates: Bool) { annotationView.animatesDrop = animates }
 }
 
 @ObjCClass("MKMarkerAnnotationView")
 class MKMarkerAnnotationView: MKAnnotationView {
-    @ObjCMethod("markerTintColor") func markerTintColor() -> NSObject? { annotationView.tintColor }
-    @ObjCMethod("setMarkerTintColor:") func setMarkerTintColor(_ color: NSObject?) { annotationView.tintColor = color }
-    @ObjCMethod("glyphText") func glyphText() -> String? { annotationView.glyphText }
-    @ObjCMethod("setGlyphText:") func setGlyphText(_ text: String?) { annotationView.glyphText = text }
-    @ObjCMethod("glyphImage") func glyphImage() -> NSObject? { annotationView.glyphImage }
-    @ObjCMethod("setGlyphImage:") func setGlyphImage(_ image: NSObject?) { annotationView.glyphImage = image }
-    @ObjCMethod("animatesWhenAdded") func animatesWhenAdded() -> Bool { annotationView.animatesDrop }
-    @ObjCMethod("setAnimatesWhenAdded:") func setAnimatesWhenAdded(_ animates: Bool) { annotationView.animatesDrop = animates }
-}
-
-extension NSObject {
-    @ObjCMethod("size") func imageSize() -> CGSize
-    /// MKAnnotation's coordinate.
-    @ObjCMethod("coordinate") func annotationCoordinate() -> CLLocationCoordinate2D
+    override class func didDefineObjCClass(_ cls: ObjCClass) { AnnotationViewObject.registerObjCCategoryMarkerAnnotationView(cls) }
 }
 
 // MARK: - Placemarks and map items
