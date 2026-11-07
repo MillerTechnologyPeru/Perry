@@ -258,10 +258,14 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // CoreLocation, with location services denied to the app.
+        // CoreLocation, over GeoClue's D-Bus API.
         .target(
             name: "PerryCoreLocation",
-            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            dependencies: [
+                "CPerryGeometry", "PerryInterface", "PerryObjCInterop",
+                .product(name: "DBUS", package: "dbus"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
             plugins: ["PerryProviderPlugin"]
         ),
         // CoreBluetooth: a central over BlueZ's D-Bus API.
