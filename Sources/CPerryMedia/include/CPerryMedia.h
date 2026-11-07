@@ -19,6 +19,13 @@ typedef struct CMTimeRange {
     CMTime duration;
 } CMTimeRange;
 
+// A sample's duration and its presentation and decode times.
+typedef struct CMSampleTimingInfo {
+    CMTime duration;
+    CMTime presentationTimeStamp;
+    CMTime decodeTimeStamp;
+} CMSampleTimingInfo;
+
 typedef struct CMVideoDimensions {
     int32_t width;
     int32_t height;
