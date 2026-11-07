@@ -17,6 +17,11 @@
 //     as FCVTL of the half-precision operands then FMLA or FMLS.
 //   MRS CNTPCT_EL0 / CNTPCTSS_EL0, which Linux traps unless the core has
 //     ECV: MRS CNTVCT_EL0, in place.
+//
+// On armv7, ARMv8 cores run 32-bit code without SWP and SWPB, which iOS 3
+// era code swaps with (ARMv6 had no LDREX for bytes, and GCC's atomics used
+// SWP), and an arm64 kernel emulates them only if built to. Each one that
+// runs is done here, in the handler, as an atomic exchange.
 
 #include "PerrySystem.h"
 
@@ -259,6 +264,62 @@ int perry_isa_rewrite(void *raw_context) {
     }
     __atomic_store_n(&patch_lock, 0, __ATOMIC_RELEASE);
     return handled;
+}
+
+#endif
+
+#if defined(__arm__)
+
+#include <signal.h>
+
+/// Whether an ARM instruction's condition holds for the flags in `cpsr`.
+static int condition_holds(uint32_t condition, uint32_t cpsr) {
+    int n = cpsr >> 31 & 1, z = cpsr >> 30 & 1, c = cpsr >> 29 & 1, v = cpsr >> 28 & 1;
+    switch (condition) {
+    case 0x0: return z;
+    case 0x1: return !z;
+    case 0x2: return c;
+    case 0x3: return !c;
+    case 0x4: return n;
+    case 0x5: return !n;
+    case 0x6: return v;
+    case 0x7: return !v;
+    case 0x8: return c && !z;
+    case 0x9: return !c || z;
+    case 0xa: return n == v;
+    case 0xb: return n != v;
+    case 0xc: return !z && n == v;
+    case 0xd: return z || n != v;
+    default: return 1;
+    }
+}
+
+int perry_isa_rewrite(void *raw_context) {
+    ucontext_t *context = raw_context;
+    struct sigcontext *machine = &context->uc_mcontext;
+    // SWP and SWPB exist only in the ARM instruction set.
+    if (machine->arm_cpsr & (1u << 5))
+        return 0;
+    uint32_t instruction = *(const uint32_t *)machine->arm_pc;
+    // SWP{B}<c> Rt, Rt2, [Rn]: cond 0001 0B00 Rn Rt 0000 1001 Rt2.
+    if ((instruction & 0x0fb00ff0u) != 0x01000090u || instruction >> 28 == 0xf)
+        return 0;
+    unsigned long *registers = &machine->arm_r0;     // r0 to r15, in order
+    unsigned n = instruction >> 16 & 15, t = instruction >> 12 & 15, t2 = instruction & 15;
+    if (n == 15 || t == 15 || t2 == 15)
+        return 0;
+    if (condition_holds(instruction >> 28, (uint32_t)machine->arm_cpsr)) {
+        uint32_t value = (uint32_t)registers[t2];
+        if (instruction & (1u << 22)) {
+            uint8_t *byte = (uint8_t *)registers[n];
+            registers[t] = __atomic_exchange_n(byte, (uint8_t)value, __ATOMIC_SEQ_CST);
+        } else {
+            uint32_t *word = (uint32_t *)registers[n];
+            registers[t] = __atomic_exchange_n(word, value, __ATOMIC_SEQ_CST);
+        }
+    }
+    machine->arm_pc += 4;
+    return 1;
 }
 
 #endif
