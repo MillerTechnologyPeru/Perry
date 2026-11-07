@@ -312,6 +312,8 @@ enum Dispatch {
     nonisolated(unsafe) static var main: UnsafeMutableRawPointer!
     nonisolated(unsafe) static var afterFunction: After?
     nonisolated(unsafe) static var time: Time?
+    /// Global blocks' isa, _NSConcreteGlobalBlock.
+    nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
         guard let async = lookup("_dispatch_async_f"), let main = lookup("__dispatch_main_q") else { return false }
@@ -319,6 +321,7 @@ enum Dispatch {
         self.main = main
         afterFunction = lookup("_dispatch_after_f").map { unsafeBitCast($0, to: After.self) }
         time = lookup("_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
+        globalBlockClass = lookup("__NSConcreteGlobalBlock")
         return true
     }
 
@@ -398,8 +401,36 @@ enum Clock {
     }
 }
 
-/// Calling blocks AppKit is handed.
+/// Calling blocks AppKit is handed, and making the ones it hands out.
 enum Blocks {
+    /// A block of one integer argument, and an object after it, that runs
+    /// `body` the first time it is called: a global block (Block_copy
+    /// leaves it as it is) with `body` in the words after its descriptor.
+    /// Its memory stays, as the code given it may keep it.
+    static func make(_ body: @escaping (Int, UnsafeMutableRawPointer?) -> Void) -> UnsafeMutableRawPointer {
+        final class Body {
+            var run: ((Int, UnsafeMutableRawPointer?) -> Void)?
+            init(_ run: @escaping (Int, UnsafeMutableRawPointer?) -> Void) { self.run = run }
+        }
+        let invoke: @convention(c) (UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void = { block, value, object in
+            let body = Unmanaged<Body>.fromOpaque(block.load(fromByteOffset: 32, as: UnsafeRawPointer.self)).takeUnretainedValue()
+            guard let run = body.run else { return }
+            body.run = nil
+            run(value, object)
+        }
+        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
+        descriptor.storeBytes(of: 0, as: UInt.self)
+        descriptor.storeBytes(of: 40, toByteOffset: 8, as: UInt.self)
+        let block = UnsafeMutableRawPointer.allocate(byteCount: 40, alignment: 8)
+        block.storeBytes(of: Dispatch.globalBlockClass, as: UnsafeMutableRawPointer?.self)
+        block.storeBytes(of: Int32(1 << 28), toByteOffset: 8, as: Int32.self)   // BLOCK_IS_GLOBAL
+        block.storeBytes(of: Int32(0), toByteOffset: 12, as: Int32.self)
+        block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: 16, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 24, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(Unmanaged.passRetained(Body(body)).toOpaque()), toByteOffset: 32, as: UnsafeRawPointer.self)
+        return block
+    }
+
     static func call(_ block: ObjCBlock) {
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer) -> Void
         block.function(as: Invoke.self)(block.object)

@@ -211,11 +211,14 @@ final class WebContent {
 
     // MARK: Input
 
-    /// A mouse event's point in the page: the view's, from the top left.
+    /// A mouse event's point in the page: the view's, from the top left,
+    /// in device pixels, which WPE's backend takes (and scales down by the
+    /// page's scale factor).
     private func point(_ event: NSEvent) -> (Int32, Int32) {
         var point = view.convert(event.locationInWindow, from: nil)
         if !view.flipped { point.y = view.bounds.height - point.y }
-        return (Int32(point.x.rounded(.down)), Int32(point.y.rounded(.down)))
+        let scale = CGFloat(page?.scale ?? 1)
+        return (Int32((point.x * scale).rounded(.down)), Int32((point.y * scale).rounded(.down)))
     }
 
     /// wpe_input_keyboard_modifier: control, shift, alt, meta; and the
@@ -257,14 +260,19 @@ final class WebContent {
         }
         guard var current = touch else { return }
         if button == nil {
-            // The finger moved.
-            if current.mode == .pending, abs(here.0 - current.start.0) > Self.touchSlop || abs(here.1 - current.start.1) > Self.touchSlop {
+            // The finger moved: positions are device pixels, the slop and
+            // scrolling points.
+            let scale = max(page.scale, 1)
+            let slop = Int32((Float(Self.touchSlop) * scale).rounded())
+            if current.mode == .pending, abs(here.0 - current.start.0) > slop || abs(here.1 - current.start.1) > slop {
                 current.mode = .scrolling
             }
             switch current.mode {
             case .scrolling:
                 // The page follows the finger: moving it down scrolls up.
-                let dx = here.0 - current.last.0, dy = here.1 - current.last.1
+                let dx = Int32((Float(here.0 - current.last.0) / scale).rounded())
+                let dy = Int32((Float(here.1 - current.last.1) / scale).rounded())
+                if dy == 0 && dx == 0 { return }
                 if dy != 0 { page.axis(x: here.0, y: here.1, horizontal: false, value: dy, modifiers: modifiers(event)) }
                 if dx != 0 { page.axis(x: here.0, y: here.1, horizontal: true, value: dx, modifiers: modifiers(event)) }
             case .pressing:
@@ -615,6 +623,47 @@ open class WKFrameInfo: NSObject {
     @ObjCMethod("request") func request() -> NSObject? { nil }
 }
 
+/// A navigation the navigation delegate decides on.
+@ObjCClass("WKNavigationAction")
+open class WKNavigationAction: NSObject {
+    /// WKNavigationType: link 0, form 1, back/forward 2, reload 3, form
+    /// resubmitted 4, other -1.
+    var navigationType = -1
+    var request: NSObject?
+    var modifierFlags: UInt = 0
+    var buttonNumber = 0
+    let frame = WKFrameInfo()
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("navigationType") func actionNavigationType() -> Int { navigationType }
+    @ObjCMethod("request") func actionRequest() -> NSObject? { request }
+    @ObjCMethod("modifierFlags") func actionModifierFlags() -> UInt { modifierFlags }
+    @ObjCMethod("buttonNumber") func actionButtonNumber() -> Int { buttonNumber }
+    @ObjCMethod("sourceFrame") func sourceFrame() -> WKFrameInfo { frame }
+    @ObjCMethod("targetFrame") func targetFrame() -> WKFrameInfo? { frame }
+    @ObjCMethod("shouldPerformDownload") func shouldPerformDownload() -> Bool { false }
+}
+
+/// What a page may do, as the navigation delegate leaves it.
+@ObjCClass("WKWebpagePreferences")
+open class WKWebpagePreferences: NSObject {
+    var allowsContentJavaScript = true
+    var preferredContentMode = 0
+    var lockdownModeEnabled = false
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("allowsContentJavaScript") func webpageAllowsContentJavaScript() -> Bool { allowsContentJavaScript }
+    @ObjCMethod("setAllowsContentJavaScript:") func setAllowsContentJavaScript(_ value: Bool) { allowsContentJavaScript = value }
+    @ObjCMethod("preferredContentMode") func webpagePreferredContentMode() -> Int { preferredContentMode }
+    @ObjCMethod("setPreferredContentMode:") func setPreferredContentMode(_ value: Int) { preferredContentMode = value }
+    @ObjCMethod("isLockdownModeEnabled") func isLockdownModeEnabled() -> Bool { lockdownModeEnabled }
+    @ObjCMethod("setLockdownModeEnabled:") func setLockdownModeEnabled(_ value: Bool) { lockdownModeEnabled = value }
+}
+
 @ObjCClass("WKNavigation")
 open class WKNavigation: NSObject {
     @ObjCMethod("init")
@@ -658,6 +707,9 @@ open class WKWebView: NSView {
                 page.setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) \(name)")
             }
             page.scriptMessage = { name, json in WKWebView.deliver(object, name, json) }
+            page.decideNavigationLater = { uri, type, modifiers, button, decide in
+                WKWebView.decide(object, uri: uri, type: type, modifiers: modifiers, button: button, decide)
+            }
             configuration.userContentController.attach(page)
         }
         content.loadChanged = { event in WKWebView.loadChanged(object, event) }
@@ -865,6 +917,49 @@ open class WKWebView: NSView {
         message.body = json.flatMap(Calls.object(json:)).map(NSObject.init)
         message.webViewObject = object
         Send.void(handler.objcObject, "userContentController:didReceiveScriptMessage:", controller.objcObject, message.objcObject)
+    }
+
+    /// Asks the navigation delegate whether a navigation goes ahead, with
+    /// a WKNavigationAction (WebKit's navigation type, modifiers as
+    /// NSEventModifierFlags) and a decision handler; without the delegate
+    /// asking, it does. A delegate that cancels a link to open it in a
+    /// browser, as a reader app's does, gets that here.
+    static func decide(_ object: UnsafeMutableRawPointer, uri: String, type: Int32, modifiers: UInt32, button: UInt32,
+                       _ decide: @escaping (Bool) -> Void) {
+        let view = view(object)
+        Trace.log("web view: navigation to \(uri), type \(type), modifiers \(modifiers), delegate \(view.navigationDelegate == nil ? "none" : "asked")")
+        guard let delegate = view.navigationDelegate else { return decide(true) }
+        let action = WKNavigationAction()
+        // WebKitNavigationType: link 0, form 1, back/forward 2, reload 3,
+        // form resubmitted 4, other 5.
+        action.navigationType = (0...4).contains(type) ? Int(type) : -1
+        action.request = Calls.request(Calls.url(uri)).map(NSObject.init)
+        // wpe_input_keyboard_modifier: control 1, shift 2, alt 4, meta 8.
+        var flags: UInt = 0
+        if modifiers & 1 != 0 { flags |= 1 << 18 }
+        if modifiers & 2 != 0 { flags |= 1 << 17 }
+        if modifiers & 4 != 0 { flags |= 1 << 19 }
+        if modifiers & 8 != 0 { flags |= 1 << 20 }
+        action.modifierFlags = flags
+        action.buttonNumber = button > 0 ? Int(button) - 1 : 0
+        // WKNavigationActionPolicy: cancel 0, allow 1, download 2.
+        let withPreferences = "webView:decidePolicyForNavigationAction:preferences:decisionHandler:"
+        let plain = "webView:decidePolicyForNavigationAction:decisionHandler:"
+        if Send.responds(delegate, withPreferences) {
+            let preferences = WKWebpagePreferences()
+            let handler = Blocks.make { policy, _ in decide(policy == 1) }
+            typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer,
+                                          UnsafeMutableRawPointer, UnsafeMutableRawPointer) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(delegate, ObjCRuntime.selector(withPreferences), object, action.objcObject,
+                                                           preferences.objcObject, handler)
+        } else if Send.responds(delegate, plain) {
+            let handler = Blocks.make { policy, _ in decide(policy == 1) }
+            typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer,
+                                          UnsafeMutableRawPointer) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(delegate, ObjCRuntime.selector(plain), object, action.objcObject, handler)
+        } else {
+            decide(true)
+        }
     }
 
     static func loadChanged(_ object: UnsafeMutableRawPointer, _ event: Int32) {
