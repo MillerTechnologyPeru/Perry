@@ -184,12 +184,12 @@ public func SCNetworkReachabilitySetCallback(_ target: UnsafeMutableRawPointer?,
         state.releaseInfo()
         state.callback = callback.map { unsafeBitCast($0, to: (@convention(c) (UnsafeMutableRawPointer?, UInt32, UnsafeMutableRawPointer?) -> Void).self) }
         guard let context, callback != nil else { return }
-        var info = context.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-        if let retain = context.load(fromByteOffset: 16, as: UnsafeRawPointer?.self) {
+        var info = context.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeMutableRawPointer?.self)
+        if let retain = context.load(fromByteOffset: 2 * MemoryLayout<UnsafeRawPointer>.size, as: UnsafeRawPointer?.self) {
             info = unsafeBitCast(retain, to: Retain.self)(info).map { UnsafeMutableRawPointer(mutating: $0) }
         }
         state.info = info
-        state.release = context.load(fromByteOffset: 24, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: Release.self) }
+        state.release = context.load(fromByteOffset: 3 * MemoryLayout<UnsafeRawPointer>.size, as: UnsafeRawPointer?.self).map { unsafeBitCast($0, to: Release.self) }
     }
     return true
 }
