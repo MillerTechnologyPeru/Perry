@@ -33,9 +33,11 @@ public struct MapCamera: Equatable {
                   heading: camera.heading, pitch: camera.pitch)
     }
 
-    /// The region a camera straight down sees across its distance.
+    /// The region a camera straight down sees from its distance, its
+    /// altitude above the center: as tall as the view, which the map fits
+    /// to its shape.
     var region: MKCoordinateRegion {
-        MapGeometry.region(center: centerCoordinate, meters: distance)
+        MapGeometry.region(center: centerCoordinate, altitude: distance)
     }
 }
 
@@ -47,6 +49,22 @@ enum MapGeometry {
         let latitudeDelta = max(meters / metersPerDegree, 0.0005)
         let longitudeDelta = latitudeDelta / max(cos(center.latitude * .pi / 180), 0.01)
         return MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta))
+    }
+
+    /// MapKit's camera sees 30° from top to bottom of the view: from an
+    /// altitude, the view is 2 · altitude · tan 15° tall.
+    static let heightPerAltitude = 2 * tan(15 * Double.pi / 180)
+
+    /// A region as tall as a camera at `altitude` meters above `center`
+    /// sees the view, and no wider, so the view's height sets the zoom.
+    static func region(center: CLLocationCoordinate2D, altitude: Double) -> MKCoordinateRegion {
+        let latitudeDelta = max(altitude * heightPerAltitude / metersPerDegree, 0.0005)
+        return MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: 0))
+    }
+
+    /// The altitude a camera sees a region's height from.
+    static func altitude(of region: MKCoordinateRegion) -> Double {
+        region.span.latitudeDelta * metersPerDegree / heightPerAltitude
     }
 
     static func meters(of region: MKCoordinateRegion) -> Double {
@@ -236,7 +254,7 @@ public struct MapCameraUpdateContext {
 
     init(region: MKCoordinateRegion) {
         self.region = region
-        self.camera = MapCamera(centerCoordinate: region.center, distance: MapGeometry.meters(of: region))
+        self.camera = MapCamera(centerCoordinate: region.center, distance: MapGeometry.altitude(of: region))
         self.rect = MapGeometry.rect(of: region)
     }
 }
