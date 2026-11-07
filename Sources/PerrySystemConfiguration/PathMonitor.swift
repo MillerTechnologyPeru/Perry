@@ -181,7 +181,7 @@ public func nw_path_enumerate_interfaces(_ path: UnsafeMutableRawPointer?, _ blo
     guard NWPathObject.states[path]?.status == 1, let block else { return }
     let interface = NSObject(NWInterfaceObject.objCClass.pointer).newInstance()
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Bool
-    let invoke = unsafeBitCast(block.load(fromByteOffset: 16, as: UnsafeRawPointer.self), to: Invoke.self)
+    let invoke = unsafeBitCast(block.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self), to: Invoke.self)
     _ = invoke(block, interface.objcObject)
 }
 
