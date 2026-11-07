@@ -224,6 +224,12 @@ open class AVAudioSession: NSObject {
     @ObjCMethod("preferredSampleRate") func preferredSampleRate() -> Double { session.preferredSampleRate }
     @ObjCMethod("setPreferredSampleRate:error:")
     func setPreferredSampleRate(_ rate: Double, error: ErrorOut) -> Bool { session.preferredSampleRate = rate; return true }
+    // iOS 5's names for the same.
+    @ObjCMethod("currentHardwareSampleRate") func currentHardwareSampleRate() -> Double { 44_100 }
+    @ObjCMethod("preferredHardwareSampleRate") func preferredHardwareSampleRate() -> Double { session.preferredSampleRate }
+    @ObjCMethod("setPreferredHardwareSampleRate:error:")
+    func setPreferredHardwareSampleRate(_ rate: Double, error: ErrorOut) -> Bool { session.preferredSampleRate = rate; return true }
+    @ObjCMethod("currentHardwareOutputNumberOfChannels") func currentHardwareOutputNumberOfChannels() -> Int { 2 }
     @ObjCMethod("IOBufferDuration") func ioBufferDuration() -> Double { 0.023 }
     /// Seconds from output to sound and from sound to input: a buffer's
     /// worth, about what Linux's audio servers add.

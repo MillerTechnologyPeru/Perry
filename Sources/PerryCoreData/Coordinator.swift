@@ -125,13 +125,13 @@ enum StoreErrors {
         // Block_descriptor_1: reserved, size. Block_layout: isa, flags,
         // reserved, invoke, descriptor. BLOCK_IS_GLOBAL is 1 << 28.
         let descriptor = UnsafeMutablePointer<UInt>.allocate(capacity: 2)
-        descriptor.initialize(from: [0, 32], count: 2)
-        let block = UnsafeMutableRawPointer.allocate(byteCount: 32, alignment: 8)
+        descriptor.initialize(from: [0, UInt(3 * MemoryLayout<UnsafeRawPointer>.size + 8)], count: 2)
+        let block = UnsafeMutableRawPointer.allocate(byteCount: 3 * MemoryLayout<UnsafeRawPointer>.size + 8, alignment: 8)
         block.storeBytes(of: globalBlockClass, as: UnsafeMutableRawPointer.self)
-        block.storeBytes(of: Int32(1 << 28), toByteOffset: 8, as: Int32.self)
-        block.storeBytes(of: Int32(0), toByteOffset: 12, as: Int32.self)
-        block.storeBytes(of: unsafeBitCast(provide, to: UnsafeRawPointer.self), toByteOffset: 16, as: UnsafeRawPointer.self)
-        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 24, as: UnsafeRawPointer.self)
+        block.storeBytes(of: Int32(1 << 28), toByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: Int32.self)
+        block.storeBytes(of: Int32(0), toByteOffset: MemoryLayout<UnsafeRawPointer>.size + 4, as: Int32.self)
+        block.storeBytes(of: unsafeBitCast(provide, to: UnsafeRawPointer.self), toByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 2 * MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer.self)
         NSError.setUserInfoValueProvider(forDomain: "NSCocoaErrorDomain", provider: NSObject(objcObject: block, ownership: .borrow))
     }
 }

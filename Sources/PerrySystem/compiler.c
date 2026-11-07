@@ -107,6 +107,33 @@ unsigned long long perry_udivdi3(unsigned long long a, unsigned long long b) { r
 unsigned long long perry_umoddi3(unsigned long long a, unsigned long long b) LIBGCC(__umoddi3);
 unsigned long long perry_umoddi3(unsigned long long a, unsigned long long b) { return b ? a % b : a; }
 
+// Division that also gives the remainder, through a pointer.
+int perry_divmodsi4(int a, int b, int *remainder) LIBGCC(__divmodsi4);
+int perry_divmodsi4(int a, int b, int *remainder) {
+    if (remainder)
+        *remainder = perry_modsi3(a, b);
+    return perry_divsi3(a, b);
+}
+unsigned perry_udivmodsi4(unsigned a, unsigned b, unsigned *remainder) LIBGCC(__udivmodsi4);
+unsigned perry_udivmodsi4(unsigned a, unsigned b, unsigned *remainder) {
+    if (remainder)
+        *remainder = perry_umodsi3(a, b);
+    return perry_udivsi3(a, b);
+}
+long long perry_divmoddi4(long long a, long long b, long long *remainder) LIBGCC(__divmoddi4);
+long long perry_divmoddi4(long long a, long long b, long long *remainder) {
+    if (remainder)
+        *remainder = perry_moddi3(a, b);
+    return perry_divdi3(a, b);
+}
+unsigned long long perry_udivmoddi4(unsigned long long a, unsigned long long b, unsigned long long *remainder)
+    LIBGCC(__udivmoddi4);
+unsigned long long perry_udivmoddi4(unsigned long long a, unsigned long long b, unsigned long long *remainder) {
+    if (remainder)
+        *remainder = perry_umoddi3(a, b);
+    return perry_udivdi3(a, b);
+}
+
 // operator new, new[], delete and delete[], mangled with Darwin's 32-bit
 // size_t (unsigned long). A failed allocation ends the program, as an
 // exception nothing catches would.

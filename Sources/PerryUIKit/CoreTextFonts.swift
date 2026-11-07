@@ -252,7 +252,7 @@ public func CTFontManagerRegisterFontDescriptors(_ descriptors: UnsafeMutableRaw
                                                  _ handler: UnsafeMutableRawPointer?) {
     // A block: its invoke function follows its isa, flags and reserved words.
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, Bool) -> Bool
-    guard let handler, let invoke = handler.load(fromByteOffset: 16, as: UnsafeRawPointer?.self) else { return }
+    guard let handler, let invoke = handler.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size + 8, as: UnsafeRawPointer?.self) else { return }
     let errors = NSMutableArray.of([])
     _ = unsafeBitCast(invoke, to: Invoke.self)(handler, errors.objcObject, true)
 }

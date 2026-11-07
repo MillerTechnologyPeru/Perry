@@ -291,6 +291,17 @@ PASSTHROUGH _writev, writev
 PASSTHROUGH _read, read
 PASSTHROUGH _write, write
 PASSTHROUGH _close, close
+
+// dlsym(handle, symbol): its return address and r4 go along, to find the
+// program's own call behind perry_align_call (mach.c).
+    .globl _dlsym
+    .type _dlsym, %function
+    .p2align 2
+_dlsym:
+    mov r2, lr
+    mov r3, r4
+    b perry_dlsym_from
+    .size _dlsym, . - _dlsym
 PASSTHROUGH _closelog, closelog
 PASSTHROUGH _openlog, openlog
 PASSTHROUGH _dup, dup

@@ -206,12 +206,12 @@ struct NetClient {
     init?(callback: UnsafeRawPointer?, context: UnsafeRawPointer?) {
         guard let callback else { return nil }
         self.callback = callback
-        var info = context?.load(fromByteOffset: 8, as: UnsafeMutableRawPointer?.self)
-        if let retain = context?.load(fromByteOffset: 16, as: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?)?.self) {
+        var info = context?.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeMutableRawPointer?.self)
+        if let retain = context?.load(fromByteOffset: 2 * MemoryLayout<UnsafeRawPointer>.size, as: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?)?.self) {
             info = retain(info)
         }
         self.info = info
-        release = context?.load(fromByteOffset: 24, as: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?.self)
+        release = context?.load(fromByteOffset: 3 * MemoryLayout<UnsafeRawPointer>.size, as: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?.self)
     }
 
     func releaseInfo() {
