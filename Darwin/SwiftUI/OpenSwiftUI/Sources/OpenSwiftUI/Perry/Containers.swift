@@ -63,7 +63,9 @@ struct GroupedRows<Content: View>: View {
             _VariadicView.Tree(GroupedRowsRoot(selection: selection, style: style)) { content.buttonStyle(ListRowButtonStyle()) }
                 .padding(.vertical, style.isPlain ? 0 : 16)
         }
-        .background(style.isPlain ? Color.white : Self.background)
+        // A plain list is transparent between and below its rows, which are
+        // white, as iOS's: what is behind it shows.
+        .background(style.isPlain ? Color.clear : Self.background)
     }
 }
 
@@ -214,12 +216,14 @@ struct GroupedRowsLayout: View {
     }
 }
 
-/// A button in a row: the whole row, in the accent color, dimmed while
-/// pressed, as list rows' buttons are.
+/// A button in a row: the whole row, dimmed while pressed, as list rows'
+/// buttons are. Its label is in the accent color for apps built before the
+/// iOS 26 SDK, whose list buttons show their labels as any content, in the
+/// primary color.
 struct ListRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundColor(Color.accentColor)
+            .foregroundColor(isLinkedOnOrAfter(.v7) ? nil : Color.accentColor)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.5 : 1)

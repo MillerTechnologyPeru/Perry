@@ -269,6 +269,23 @@ enum Symbols {
             pen.stroke([(12, 15), (12, 2.5)])
             pen.stroke([(8, 6.5), (12, 2.5), (16, 6.5)])
         },
+        // A map pin: its round head with a dot, tapering to a point.
+        "mappin": { pen in
+            pen.circle(12, 9, 6)
+            pen.stroke([(7.3, 13), (12, 22), (16.7, 13)])
+            pen.circle(12, 9, 2, filled: true)
+        },
+        // A map pin over an ellipse on the ground.
+        "mappin.and.ellipse": { pen in
+            pen.circle(12, 8, 5)
+            pen.stroke([(8, 11.2), (12, 17.5), (16, 11.2)])
+            pen.circle(12, 8, 1.7, filled: true)
+            // The ellipse, as a polygon of 24 points.
+            pen.stroke((0..<24).map { index in
+                let angle = CGFloat(index) / 24 * 2 * .pi
+                return (12 + 9 * cos(angle), 20 + 2.4 * sin(angle))
+            }, closed: true)
+        },
         // A padlock: its shackle over a filled body.
         "lock.fill": { pen in
             pen.arc(12, 9, 4.5, from: .pi, to: 2 * .pi)
