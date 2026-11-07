@@ -296,7 +296,72 @@ final class WebPage {
         }
         WebPage.count += 1
         WebPage.schedule()
+        addColorSchemeScript()
     }
+
+    // MARK: Appearance
+
+    /// Pages see the app's dark appearance as prefers-color-scheme: dark.
+    /// The fdo backend has no color scheme to give WebKit (only WPE
+    /// Platform's displays do), so a script at each document's end applies
+    /// the page's dark rules and drops its light ones, in its style sheets,
+    /// <link>/<style> media and matchMedia, as browsers' forced dark modes
+    /// do; style sheets added later are rewritten as they come.
+    private func addColorSchemeScript() {
+        guard Appearances.currentIsDark,
+              let manager = contentManager,
+              let script = wpe.userScriptNew(WebPage.darkSchemeScript, 0, 1, nil, nil) else { return }
+        wpe.userContentManagerAddScript(manager, script)
+        wpe.userScriptUnref(script)
+    }
+
+    static let darkSchemeScript = #"""
+    (() => {
+      if (window.__perryDarkScheme) return;
+      window.__perryDarkScheme = true;
+      const dark = /\(\s*prefers-color-scheme\s*:\s*dark\s*\)/gi;
+      const light = /\(\s*prefers-color-scheme\s*:\s*light\s*\)/gi;
+      const always = '(min-width: 0px)', never = '(max-width: -1px)';
+      const rewritten = text => text.replace(dark, always).replace(light, never);
+      const rewriteRules = rules => {
+        for (const rule of Array.from(rules || [])) {
+          if (rule.media && rule.cssRules) {
+            const text = rule.media.mediaText, next = rewritten(text);
+            if (next !== text) rule.media.mediaText = next;
+          }
+          if (rule.cssRules) rewriteRules(rule.cssRules);
+        }
+      };
+      const rewriteSheet = sheet => { try { rewriteRules(sheet.cssRules); } catch (e) {} };
+      const rewriteNode = node => {
+        if (!(node instanceof Element)) return;
+        if ((node.localName === 'link' || node.localName === 'style') && node.media) {
+          const next = rewritten(node.media);
+          if (next !== node.media) node.media = next;
+        }
+        if (node.localName === 'link') node.addEventListener('load', () => node.sheet && rewriteSheet(node.sheet));
+        if (node.sheet) rewriteSheet(node.sheet);
+        node.querySelectorAll && node.querySelectorAll('link, style').forEach(rewriteNode);
+      };
+      // A page that supports both schemes (color-scheme: light dark, in
+      // its CSS or a meta tag) is drawn in the dark one: its canvas, text
+      // and controls.
+      const useDarkScheme = () => {
+        const meta = document.querySelector('meta[name="color-scheme"]');
+        if (meta && /\bdark\b/.test(meta.content)) meta.content = 'dark';
+        for (const element of [document.documentElement, document.body]) {
+          if (element && /\bdark\b/.test(getComputedStyle(element).colorScheme || '')) element.style.setProperty('color-scheme', 'dark');
+        }
+      };
+      const matchMedia = window.matchMedia.bind(window);
+      window.matchMedia = query => matchMedia(rewritten(String(query)));
+      rewriteNode(document.documentElement);
+      Array.from(document.styleSheets).forEach(rewriteSheet);
+      useDarkScheme();
+      new MutationObserver(records => { records.forEach(record => record.addedNodes.forEach(rewriteNode)); useDarkScheme(); })
+        .observe(document.documentElement, { childList: true, subtree: true });
+    })();
+    """#
 
     // MARK: Script messages, user scripts and input
 
@@ -332,6 +397,7 @@ final class WebPage {
 
     func removeAllUserScripts() {
         if let manager = contentManager { wpe.userContentManagerRemoveAllScripts(manager) }
+        addColorSchemeScript()
     }
 
     private final class MessageSource {
