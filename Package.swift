@@ -60,6 +60,7 @@ let package = Package(
         // CoreBluetooth, a central over BlueZ.
         .library(name: "PerryCoreBluetooth", type: .dynamic, targets: ["PerryCoreBluetooth"]),
         .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
+        .library(name: "PerryMapKitAppKit", type: .dynamic, targets: ["PerryMapKitAppKit"]),
         .library(name: "PerryCloudKit", type: .dynamic, targets: ["PerryCloudKit"]),
         // Core Data.
         .library(name: "PerryCoreData", type: .dynamic, targets: ["PerryCoreData"]),
@@ -272,10 +273,22 @@ let package = Package(
             ],
             plugins: ["PerryProviderPlugin"]
         ),
-        // MapKit, with no map tiles; its views are UIKit's.
+        // MapKit, its map drawn by MapLibre when libPerryMapLibre.so is
+        // there: an iOS app's, whose views are UIKit's, and a Mac app's map
+        // views, AppKit's, which re-export the rest of it. Both providers'
+        // map views share PerryMapKitShared.
+        .target(
+            name: "PerryMapKitShared",
+            dependencies: ["CPerryGeometry", "PerryObjCInterop"]
+        ),
         .target(
             name: "PerryMapKit",
-            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryMapKitShared", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        .target(
+            name: "PerryMapKitAppKit",
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryMapKitShared", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // GameController, over SDL3's gamepads, and CoreMotion, whose
