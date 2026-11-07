@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -124,11 +125,117 @@ static int lock_on_open(int fd, int flags) {
     return fd;
 }
 
+// MARK: - Names in either case
+
+// Darwin's file systems ignore the case of names, and apps count on it: an
+// iOS game asks for "VOICE01.AFS" where its bundle has "voice01.afs".
+// Linux's do not. A path that is not found is looked for again, each
+// component that is missing matched to an entry of its directory whatever
+// its case; only files that exist are found so, and files made keep the
+// name they are given.
+
+/// The path with its components in the case they have on disk, in `out`;
+/// false when some component is not there in any case.
+static bool path_in_any_case(const char *path, char *out, size_t size) {
+    if (!path || !*path || size < 2)
+        return false;
+    size_t length = 0;
+    out[0] = 0;
+    if (path[0] == '/') {
+        out[0] = '/';
+        out[1] = 0;
+        length = 1;
+    }
+    const char *component = path;
+    while (*component) {
+        while (*component == '/')
+            component++;
+        if (!*component)
+            break;
+        size_t component_length = strcspn(component, "/");
+        char name[NAME_MAX + 1];
+        if (component_length > NAME_MAX)
+            return false;
+        memcpy(name, component, component_length);
+        name[component_length] = 0;
+        component += component_length;
+        bool separator = length > 0 && out[length - 1] != '/';
+        if (length + separator + component_length + 1 > size)
+            return false;
+        char *end = out + length;
+        if (separator)
+            *end++ = '/';
+        memcpy(end, name, component_length + 1);
+        struct stat info;
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0 || lstat(out, &info) == 0) {
+            length = (size_t)(end - out) + component_length;
+            continue;
+        }
+        // Not there as asked: the directory's entry of that name, in any case.
+        *end = 0;
+        DIR *directory = opendir(length ? out : ".");
+        if (!directory)
+            return false;
+        struct dirent *entry;
+        bool found = false;
+        while ((entry = readdir(directory))) {
+            if (strcasecmp(entry->d_name, name) == 0 && strlen(entry->d_name) == component_length) {
+                memcpy(end, entry->d_name, component_length + 1);
+                found = true;
+                break;
+            }
+        }
+        closedir(directory);
+        if (!found)
+            return false;
+        length = (size_t)(end - out) + component_length;
+    }
+    return strcmp(out, path) != 0;
+}
+
+/// Whether a failed lookup of `path` is worth trying again in any case:
+/// it was not found, and another name for it is. errno is kept.
+static bool other_case(const char *path, char *out, size_t size) {
+    if (errno != ENOENT)
+        return false;
+    bool found = path_in_any_case(path, out, size);
+    errno = ENOENT;
+    return found;
+}
+
 // MARK: - open
 
 int perry_vopen(const char *path, int flags, va_list arguments) {
     mode_t mode = (flags & DARWIN_O_CREAT) ? (mode_t)va_arg(arguments, int) : 0;
-    return lock_on_open(open(path, open_flags_to_linux(flags), mode), flags);
+    int fd = open(path, open_flags_to_linux(flags), mode);
+    char found[PATH_MAX];
+    if (fd < 0 && !(flags & DARWIN_O_CREAT) && other_case(path, found, sizeof(found)))
+        fd = open(found, open_flags_to_linux(flags), mode);
+    return lock_on_open(fd, flags);
+}
+
+/// fopen, finding a file to read in any case.
+FILE *perry_fopen(const char *path, const char *mode) {
+#if defined(__arm__)
+    // Large files, as Darwin's fopen opens them.
+    FILE *(*open_file)(const char *, const char *) = fopen64;
+#else
+    FILE *(*open_file)(const char *, const char *) = fopen;
+#endif
+    FILE *file = open_file(path, mode);
+    char found[PATH_MAX];
+    if (!file && mode && mode[0] == 'r' && other_case(path, found, sizeof(found)))
+        file = open_file(found, mode);
+    return file;
+}
+
+/// access, finding the file in any case.
+int perry_access(const char *path, int how) {
+    int result = access(path, how);
+    char found[PATH_MAX];
+    if (result != 0 && other_case(path, found, sizeof(found)))
+        result = access(found, how);
+    return result;
 }
 
 int perry_vopenat(int directory, const char *path, int flags, va_list arguments) {
@@ -317,12 +424,20 @@ static int stat_at(int directory, const char *path, int flags, struct darwin_sta
 
 int darwin_stat(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(stat);
 int darwin_stat(const char *path, struct darwin_stat *out) {
-    return stat_at(AT_FDCWD, path, 0, out);
+    int result = stat_at(AT_FDCWD, path, 0, out);
+    char found[PATH_MAX];
+    if (result != 0 && other_case(path, found, sizeof(found)))
+        result = stat_at(AT_FDCWD, found, 0, out);
+    return result;
 }
 
 int darwin_lstat(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(lstat);
 int darwin_lstat(const char *path, struct darwin_stat *out) {
-    return stat_at(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, out);
+    int result = stat_at(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, out);
+    char found[PATH_MAX];
+    if (result != 0 && other_case(path, found, sizeof(found)))
+        result = stat_at(AT_FDCWD, found, AT_SYMLINK_NOFOLLOW, out);
+    return result;
 }
 
 int darwin_fstat(int fd, struct darwin_stat *out) DARWIN_SYMBOL(fstat);
@@ -643,7 +758,11 @@ static void entry_to_darwin(const struct dirent *entry, struct darwin_dirent *ou
 
 darwin_dir *darwin_opendir(const char *path) DARWIN_SYMBOL(opendir);
 darwin_dir *darwin_opendir(const char *path) {
-    return wrap_dir(opendir(path));
+    DIR *directory = opendir(path);
+    char found[PATH_MAX];
+    if (!directory && other_case(path, found, sizeof(found)))
+        directory = opendir(found);
+    return wrap_dir(directory);
 }
 
 darwin_dir *darwin_fdopendir(int fd) DARWIN_SYMBOL(fdopendir);
