@@ -26,6 +26,11 @@ enum Events {
         let type = raw.load(fromByteOffset: 0, as: UInt32.self)
         let window = Windows.shown(sdl: raw.load(fromByteOffset: 16, as: UInt32.self))
         func enqueue(_ event: NSEvent) { app.queue.append(event) }
+        /// A mouse event SDL made from a touch (its mouse is
+        /// SDL_TOUCH_MOUSEID) is NSEventSubtypeTouch's.
+        func markTouch(_ event: NSEvent) {
+            if raw.load(fromByteOffset: 20, as: UInt32.self) == 0xFFFF_FFFF { event.subtype = 3 }
+        }
         /// A mouse event's place, SDL's top-left window coordinates in the
         /// window's base coordinates.
         func location(_ x: Int, _ y: Int) -> CGPoint {
@@ -52,7 +57,7 @@ enum Events {
             Windows.layersChanged()
         case 0x204: // exposed
             Windows.layersChanged()
-        case 0x400: // mouse motion: buttons at 24, x and y at 28 and 32, relative at 36 and 40
+        case 0x400: // mouse motion: mouse at 20, buttons at 24, x and y at 28 and 32, relative at 36 and 40
             let buttons = raw.load(fromByteOffset: 24, as: UInt32.self)
             let kind: EventType = buttons & 0x1 != 0 ? .leftMouseDragged : buttons & 0x4 != 0 ? .rightMouseDragged
                 : buttons & ~UInt32(0x5) != 0 ? .otherMouseDragged : .mouseMoved
@@ -60,8 +65,9 @@ enum Events {
             ns.deltaX = CGFloat(raw.load(fromByteOffset: 36, as: Float.self))
             ns.deltaY = CGFloat(raw.load(fromByteOffset: 40, as: Float.self))
             ns.buttonNumber = kind == .rightMouseDragged ? 1 : kind == .otherMouseDragged ? 2 : 0
+            markTouch(ns)
             enqueue(ns)
-        case 0x401, 0x402: // button down, up: button at 24, clicks at 26
+        case 0x401, 0x402: // button down, up: mouse at 20, button at 24, clicks at 26
             let down = type == 0x401
             // SDL's buttons: left 1, middle 2, right 3, then X1 and X2;
             // AppKit's numbers: left 0, right 1, middle 2, then 3 and 4.
@@ -74,6 +80,7 @@ enum Events {
             let ns = NSEvent(kind, window: window, location: location(28, 32))
             ns.buttonNumber = number
             ns.clickCount = Int(raw.load(fromByteOffset: 26, as: UInt8.self))
+            markTouch(ns)
             enqueue(ns)
         case 0x403: // wheel: x and y at 24 and 28, direction at 32, mouse at 36 and 40
             let flipped = raw.load(fromByteOffset: 32, as: UInt32.self) == 1
