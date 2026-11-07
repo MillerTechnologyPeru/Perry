@@ -308,13 +308,15 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // MetalKit's views over QuartzCore's Metal layers,
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
-    // controllers, CoreText's text attributes, AVKit's player view
-    // controller and Core Image's images and filters.
+    // controllers, AuthenticationServices' web sign-in sessions, CoreText's
+    // text attributes, AVKit's player view controller and Core Image's
+    // images and filters.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/MetalKit.framework/") ||
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
-        strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/CoreText.framework/") ||
+        strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/AuthenticationServices.framework/") ||
+        strstr(install_name, "/CoreText.framework/") ||
         strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
         strstr(install_name, "/AdSupport.framework/") || strstr(install_name, "/CoreImage.framework/")) {
         snprintf(out, out_size, "UIKit");
