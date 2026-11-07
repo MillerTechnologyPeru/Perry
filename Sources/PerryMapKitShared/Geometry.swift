@@ -125,15 +125,42 @@ public enum MapGeometry {
     }
 }
 
-/// Where the device is, as CoreLocation's provider reports it:
-/// PERRY_LOCATION's "latitude,longitude", Apple Park by default, or none.
+/// Where the device is, as CoreLocation reports it: PERRY_LOCATION's
+/// "latitude,longitude" when set (none if it isn't one), else the location
+/// of a CLLocationManager MapKit keeps updating once the app is allowed the
+/// location, as MapKit does for the user's location; nil until there is one,
+/// and without CoreLocation.
 public enum DeviceLocation {
-    public nonisolated(unsafe) static let coordinate: CLLocationCoordinate2D? = {
-        guard let setting = getenv("PERRY_LOCATION").map({ String(cString: $0) }) else {
-            return CLLocationCoordinate2D(latitude: 37.334_886, longitude: -122.008_988)
-        }
+    nonisolated(unsafe) private static let fixed: CLLocationCoordinate2D?? = {
+        guard let setting = getenv("PERRY_LOCATION").map({ String(cString: $0) }) else { return .none }
         let values = setting.split(separator: ",").compactMap { Double(String($0.filter { $0 != " " })) }
-        guard values.count == 2, abs(values[0]) <= 90, abs(values[1]) <= 180 else { return nil }
-        return CLLocationCoordinate2D(latitude: values[0], longitude: values[1])
+        guard values.count == 2, abs(values[0]) <= 90, abs(values[1]) <= 180 else { return .some(nil) }
+        return .some(CLLocationCoordinate2D(latitude: values[0], longitude: values[1]))
     }()
+
+    /// MapKit's own manager, made once the app is allowed the location.
+    nonisolated(unsafe) private static var manager: NSObject?
+
+    public static var coordinate: CLLocationCoordinate2D? {
+        if let fixed { return fixed }
+        guard let classes = ObjCRuntime.registeredClassPair("CLLocationManager") else { return nil }
+        if manager == nil {
+            // CLAuthorizationStatus: authorized always 3, when in use 4.
+            let status = NSObject(classes.cls).sendAuthorizationStatus()
+            guard status == 3 || status == 4 else { return nil }
+            let made = NSObject(classes.cls).allocated().initialized()
+            made.sendStartUpdatingLocation()
+            manager = made
+        }
+        guard let location = manager?.sendLocation() else { return nil }
+        let coordinate = location.annotationCoordinate()
+        return abs(coordinate.latitude) <= 90 && abs(coordinate.longitude) <= 180 ? coordinate : nil
+    }
+}
+
+/// CLLocationManager's messages, as MapKit sends them.
+extension NSObject {
+    @ObjCMethod("authorizationStatus") func sendAuthorizationStatus() -> Int32
+    @ObjCMethod("startUpdatingLocation") func sendStartUpdatingLocation()
+    @ObjCMethod("location") func sendLocation() -> NSObject?
 }
