@@ -116,6 +116,49 @@ open class NSLayoutConstraint: NSObject {
 }
 
 /// A view's edge, center or size, which makes constraints to another's.
+/// NSLayoutGuide: a rectangle in its owning view that constraints can use
+/// in place of a view. Constraints on a guide stand for its owning view's
+/// here (see Layout), which is what a safe area or layout margins guide
+/// is when nothing covers the view.
+@ObjCClass("NSLayoutGuide")
+open class NSLayoutGuide: NSObject {
+    /// Not retained: the view owns its guides.
+    var owningViewObject: UnsafeMutableRawPointer?
+    var identifier = ""
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init()
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        identifier = decoded.string("NSIdentifier") ?? ""
+        owningViewObject = decoded.object("NSOwningView")?.objcObject
+    }
+
+    var owningView: NSView? { owningViewObject.map(NSView.wrap) }
+
+    @ObjCMethod("owningView") func guideOwningView() -> NSView? { owningView }
+    @ObjCMethod("setOwningView:") func setOwningView(_ view: NSView?) { owningViewObject = view?.objcObject }
+    @ObjCMethod("identifier") func guideIdentifier() -> String { identifier }
+    @ObjCMethod("setIdentifier:") func setIdentifier(_ value: String?) { identifier = value ?? "" }
+    @ObjCMethod("frame") func frame() -> CGRect { owningView?.bounds ?? .zero }
+    @ObjCMethod("hasAmbiguousLayout") func hasAmbiguousLayout() -> Bool { false }
+
+    @ObjCMethod("leadingAnchor") func leadingAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 5) }
+    @ObjCMethod("trailingAnchor") func trailingAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 6) }
+    @ObjCMethod("leftAnchor") func leftAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 1) }
+    @ObjCMethod("rightAnchor") func rightAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 2) }
+    @ObjCMethod("topAnchor") func topAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 3) }
+    @ObjCMethod("bottomAnchor") func bottomAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 4) }
+    @ObjCMethod("widthAnchor") func widthAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 7) }
+    @ObjCMethod("heightAnchor") func heightAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 8) }
+    @ObjCMethod("centerXAnchor") func centerXAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 9) }
+    @ObjCMethod("centerYAnchor") func centerYAnchor() -> NSLayoutAnchor { NSLayoutAnchor.make(self, 10) }
+}
+
 @ObjCClass("NSLayoutAnchor")
 open class NSLayoutAnchor: NSObject {
     var item: NSObject?
