@@ -53,7 +53,7 @@ extension CompiledAssetCatalog {
     /// The named image at the screen's scale (see pixels(named:)), or an
     /// image extracted on a Mac for a rendition Perry can't decode.
     func image(named name: String, dark: Bool = false) -> (image: Owned, scale: CGFloat)? {
-        let screen = Int(Screen.scale.rounded())
+        let screen = Screen.assetScale
         if let (pixels, scale) = pixels(named: name, dark: dark, screenScale: screen), let image = makeImage(pixels) {
             return (image, CGFloat(scale))
         }
