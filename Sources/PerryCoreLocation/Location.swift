@@ -145,6 +145,9 @@ open class CLLocation: NSObject {
     @ObjCMethod("speedAccuracy") func speedAccuracy() -> Double { -1 }
     @ObjCMethod("timestamp") func timestamp() -> NSDate? { location.timestamp }
     @ObjCMethod("floor") func floor() -> NSObject? { nil }
+    /// Where the location came from (iOS 15): nothing to say, so neither
+    /// simulated nor from an accessory.
+    @ObjCMethod("sourceInformation") func sourceInformation() -> NSObject? { nil }
 
     /// Meters along the surface to another location.
     @ObjCMethod("distanceFromLocation:")

@@ -126,9 +126,13 @@ enum SDL {
             return unsafeBitCast(symbol, to: T.self)
         }
         initialize = bind("SDL_Init")
-        if let videoDriver, let setHint = dlsym(library, "SDL_SetHint") {
+        if let setHint = dlsym(library, "SDL_SetHint") {
             typealias SetHint = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Bool
-            _ = unsafeBitCast(setHint, to: SetHint.self)("SDL_VIDEO_DRIVER", videoDriver)
+            let hint = unsafeBitCast(setHint, to: SetHint.self)
+            if let videoDriver { _ = hint("SDL_VIDEO_DRIVER", videoDriver) }
+            // The window's Wayland app ID and X11 class: the app's desktop
+            // entry's ID (DesktopEntry).
+            if let id = DesktopEntry.id { _ = hint("SDL_APP_ID", id) }
         }
         createWindow = bind("SDL_CreateWindow")
         createRenderer = bind("SDL_CreateRenderer")

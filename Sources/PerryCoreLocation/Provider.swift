@@ -124,6 +124,19 @@ class NSDate: NSObject {
     @ObjCClassMethod("date") static func now() -> NSDate
 }
 
+@ObjCWrapper("NSUserDefaults")
+class NSUserDefaults: NSObject {
+    @ObjCClassMethod("standardUserDefaults") static func standard() -> NSUserDefaults
+    @ObjCMethod("integerForKey:") func integer(forKey key: String) -> Int
+    @ObjCMethod("setInteger:forKey:") func set(integer: Int, forKey key: String)
+}
+
+@ObjCWrapper("NSBundle")
+class NSBundle: NSObject {
+    @ObjCClassMethod("mainBundle") static func main() -> NSBundle
+    @ObjCMethod("objectForInfoDictionaryKey:") func infoObject(forKey key: String) -> NSObject?
+}
+
 @ObjCWrapper("NSNumber")
 class NSNumber: NSObject {
     @ObjCClassMethod("numberWithInteger:") static func make(integer: Int) -> NSNumber
