@@ -516,6 +516,36 @@ public func CGDataProviderCreateWithURL(_ url: Ref?) -> Ref? {
     return DataProviders.make(data.array)
 }
 
+/// A provider that reads its bytes in order: CGDataProviderSequentialCallbacks,
+/// a version then four function pointers (the version takes a word's room).
+/// Its bytes are read through at once, so the provider answers like the others;
+/// the release callback runs when the provider goes.
+@c(_CGDataProviderCreateSequential)
+public func CGDataProviderCreateSequential(_ info: UnsafeMutableRawPointer?, _ callbacks: UnsafeRawPointer?) -> Ref? {
+    guard let callbacks else { return nil }
+    typealias GetBytes = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Int) -> Int
+    typealias Rewind = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    typealias ReleaseInfo = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    let word = MemoryLayout<UnsafeRawPointer>.size
+    func function(_ index: Int) -> UnsafeRawPointer? {
+        callbacks.load(fromByteOffset: word * (index + 1), as: UnsafeRawPointer?.self)
+    }
+    guard let getBytesPointer = function(0) else { return nil }
+    let getBytes = unsafeBitCast(getBytesPointer, to: GetBytes.self)
+    let rewind = function(2).map { unsafeBitCast($0, to: Rewind.self) }
+    let releaseInfo = function(3).map { unsafeBitCast($0, to: ReleaseInfo.self) }
+    rewind?(info)
+    var bytes: [UInt8] = []
+    var chunk = [UInt8](repeating: 0, count: 65536)
+    while true {
+        let count = chunk.withUnsafeMutableBytes { getBytes(info, $0.baseAddress, $0.count) }
+        if count <= 0 { break }
+        bytes.append(contentsOf: chunk[0..<min(count, chunk.count)])
+    }
+    nonisolated(unsafe) let info = info
+    return DataProviders.make(bytes, release: releaseInfo.map { callback in { callback(info) } })
+}
+
 @c(_CGDataProviderCopyData)
 public func CGDataProviderCopyData(_ provider: Ref?) -> Ref? {
     DataProviders.bytes(provider).map { NSData.of($0).objCOwnedReturnValue() } ?? nil
