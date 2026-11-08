@@ -200,9 +200,11 @@ enum Display {
                 Animations.step()
             }
             let now = Clock.now
-            // QuartzCore's layers changed, or are animating.
-            if QuartzCore.needsDisplay?() == true { dirty = true }
-            if dirty || now - lastDraw > 0.5 {
+            // QuartzCore's layers changed, or are animating, or a GL frame
+            // is waiting to be taken. A window with none of these draws
+            // nothing, as the window system keeps what it was given.
+            if QuartzCore.needsDisplay?() == true || Renderbuffers.hasPending { dirty = true }
+            if dirty {
                 dirty = false
                 lastDraw = now
                 ObjCRuntime.autoreleasepool {
