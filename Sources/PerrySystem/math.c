@@ -134,6 +134,14 @@ DARWIN_FLOAT_ABI long long darwin_llround(double x) DARWIN_SYMBOL(llround);
 DARWIN_FLOAT_ABI long long darwin_llround(double x) { return llround(x); }
 DARWIN_FLOAT_ABI long darwin_lrint(double x) DARWIN_SYMBOL(lrint);
 DARWIN_FLOAT_ABI long darwin_lrint(double x) { return lrint(x); }
+DARWIN_FLOAT_ABI long darwin_lrintf(float x) DARWIN_SYMBOL(lrintf);
+DARWIN_FLOAT_ABI long darwin_lrintf(float x) { return lrintf(x); }
+DARWIN_FLOAT_ABI long long darwin_llrint(double x) DARWIN_SYMBOL(llrint);
+DARWIN_FLOAT_ABI long long darwin_llrint(double x) { return llrint(x); }
+DARWIN_FLOAT_ABI long long darwin_llrintf(float x) DARWIN_SYMBOL(llrintf);
+DARWIN_FLOAT_ABI long long darwin_llrintf(float x) { return llrintf(x); }
+DARWIN_FLOAT_ABI long long darwin_llroundf(float x) DARWIN_SYMBOL(llroundf);
+DARWIN_FLOAT_ABI long long darwin_llroundf(float x) { return llroundf(x); }
 DARWIN_FLOAT_ABI float darwin_nanf(const char *tag) DARWIN_SYMBOL(nanf);
 DARWIN_FLOAT_ABI float darwin_nanf(const char *tag) { return nanf(tag); }
 DARWIN_FLOAT_ABI double darwin_nan(const char *tag) DARWIN_SYMBOL(nan);
