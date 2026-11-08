@@ -267,6 +267,30 @@ open class NSToolbarFlexibleSpaceItem: NSToolbarItem {
     override var isFlexibleSpace: Bool { true }
 }
 
+/// A group of items shown as one, such as a segmented control's segments:
+/// the group's view is the control, and its subitems are the segments' items.
+@ObjCClass("NSToolbarItemGroup")
+open class NSToolbarItemGroup: NSToolbarItem {
+    var subitems: [NSToolbarItem] = []
+    var selectedIndex = -1
+    var selectionMode = 0
+    var controlRepresentation = 0
+
+    @ObjCMethod("subitems") func groupSubitems() -> NSObject { NSMutableArray.of(subitems.map { NSObject($0.objcObject) }) }
+    @ObjCMethod("setSubitems:") func setSubitems(_ items: NSObject?) {
+        subitems = items?.as(NSArray.self)?.elements.compactMap { $0.as(NSToolbarItem.self) } ?? []
+        changed()
+    }
+    @ObjCMethod("selectedIndex") func groupSelectedIndex() -> Int { selectedIndex }
+    @ObjCMethod("setSelectedIndex:") func setSelectedIndex(_ index: Int) { selectedIndex = index }
+    @ObjCMethod("setSelected:atIndex:") func setSelected(_ selected: Bool, at index: Int) { selectedIndex = selected ? index : -1 }
+    @ObjCMethod("isSelectedAtIndex:") func isSelected(at index: Int) -> Bool { selectedIndex == index }
+    @ObjCMethod("selectionMode") func groupSelectionMode() -> Int { selectionMode }
+    @ObjCMethod("setSelectionMode:") func setSelectionMode(_ mode: Int) { selectionMode = mode }
+    @ObjCMethod("controlRepresentation") func groupControlRepresentation() -> Int { controlRepresentation }
+    @ObjCMethod("setControlRepresentation:") func setControlRepresentation(_ value: Int) { controlRepresentation = value }
+}
+
 @ObjCClass("NSToolbarSpaceItem")
 open class NSToolbarSpaceItem: NSToolbarItem {
     override var isSpace: Bool { true }
