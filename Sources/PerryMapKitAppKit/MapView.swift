@@ -10,11 +10,15 @@ import PerryObjCInterop
 
 @ObjCClass("MKMapView")
 class MKMapView: NSView {
-    override class func didDefineObjCClass(_ cls: ObjCClass) { MapViewObject.registerObjCCategoryMapView(cls) }
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        MapViewObject.registerObjCCategoryMapView(cls)
+        MapViewObject.registerObjCCategoryMapViewMouse(cls)
+    }
 
     @ObjCMethod("dealloc")
     func dealloc() {
         MapViews.states.remove(objcObject)
+        MapViews.removeGestures(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: MKMapView.objCClass.pointer)
     }
 

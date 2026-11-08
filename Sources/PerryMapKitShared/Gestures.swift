@@ -11,8 +11,8 @@ import PerryObjCInterop
 // gesture starts, that the visible region changed with each move, and that
 // the region did change when the fingers lift.
 //
-// Each provider's map view installs the MapViewGestures category: UIKit's
-// MKMapView sends it touches; AppKit's gets none of these messages.
+// UIKit's map view installs the MapViewGestures category and is sent
+// touches; AppKit's gets none of these messages (see MouseGestures).
 
 final class GestureState: ObjectState {
     /// Each finger down, by its UITouch, where it is in the view.
@@ -25,6 +25,8 @@ final class GestureState: ObjectState {
     var travelled: CGFloat = 0
     /// The last tap: when, and where.
     var lastTap: (time: Double, point: CGPoint)?
+    /// Where the mouse is, while it is down.
+    var mouse: CGPoint?
 }
 
 extension MapViews {
@@ -126,7 +128,7 @@ public extension MapViewObject {
     /// `point`, zoomed in by `scale`: the visible map rect, in map points,
     /// kept within the world's height and between the whole world's width
     /// and the closest zoom.
-    private func moveMap(holding held: CGPoint, at point: CGPoint, scale: CGFloat) {
+    func moveMap(holding held: CGPoint, at point: CGPoint, scale: CGFloat) {
         let size = map.size
         guard size.width >= 1, size.height >= 1, scale > 0 else { return }
         let gesture = MapGestures.states[objcObject]
@@ -161,7 +163,7 @@ public extension MapViewObject {
     }
 
     /// The touches in a set of them.
-    private func touchList(_ touches: NSObject?) -> [NSObject] {
+    func touchList(_ touches: NSObject?) -> [NSObject] {
         guard let touches else { return [] }
         return touches.allObjects().elements
     }
