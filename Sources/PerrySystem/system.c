@@ -48,6 +48,10 @@ static int clock_to_linux(int clock) {
     }
 }
 
+/// Processor time used, in microseconds (CLOCKS_PER_SEC is a million on both).
+unsigned long darwin_clock(void) DARWIN_SYMBOL(clock);
+unsigned long darwin_clock(void) { return (unsigned long)clock(); }
+
 int darwin_clock_gettime(int clock, struct timespec *time) DARWIN_SYMBOL(clock_gettime);
 int darwin_clock_gettime(int clock, struct timespec *time) {
     int linux_clock = clock_to_linux(clock);
