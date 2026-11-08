@@ -277,6 +277,9 @@ final class Compositor {
                     Lifecycle.window(visible: false)
                 case 0x202, 0x20B: // window shown, restored
                     Lifecycle.window(visible: true)
+                    Display.markDirty()
+                case 0x204: // window exposed: it is drawn again
+                    Display.markDirty()
                 case 0x700: // finger down: SDL_FingerID at 24
                     let id = raw.load(fromByteOffset: 24, as: UInt64.self)
                     if finger == nil {
@@ -309,6 +312,7 @@ final class Compositor {
                     let size = CGSize(width: CGFloat(raw.load(fromByteOffset: 20, as: Int32.self)) / scale,
                                       height: CGFloat(raw.load(fromByteOffset: 24, as: Int32.self)) / scale)
                     Screen.resize(to: size)
+                    Display.markDirty()
                 case 0x300: // key down: SDL_Keycode at 28
                     switch raw.load(fromByteOffset: 28, as: UInt32.self) {
                     case 0x08: Keyboard.deleteBackward()
