@@ -403,9 +403,11 @@ extension NSWindowController {
         loadingWindow = true
         defer { loadingWindow = false }
         Send.void(objcObject, "windowWillLoad")
+        if let document { Send.void(document.objcObject, "windowControllerWillLoadNib:", objcObject) }
         Send.void(objcObject, "loadWindow")
         if let window { window.windowControllerObject = objcObject }
         Send.void(objcObject, "windowDidLoad")
+        if let document { Send.void(document.objcObject, "windowControllerDidLoadNib:", objcObject) }
         if window == nil { appKitWarning("NSWindowController: nib \(name) has no window outlet") }
     }
 
@@ -416,7 +418,11 @@ extension NSWindowController {
             return
         }
         let owner = windowNibOwner.map(NSObject.init) ?? self
-        Nibs.kept += Nibs.instantiate(found.archive, owner: owner, bundlePath: found.directory)
+        let objects = Nibs.instantiate(found.archive, owner: owner, bundlePath: found.directory)
+        Nibs.kept += objects
+        // A nib owned by a document (or another object) names its window in
+        // that owner's outlet; the controller's window is the nib's.
+        if window == nil { window = objects.compactMap { $0.as(NSWindow.self) }.first }
     }
 }
 
