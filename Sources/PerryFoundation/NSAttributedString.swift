@@ -157,7 +157,7 @@ enum AttributedStrings {
 
     static func check(_ range: NSRange, _ length: Int, _ method: String) {
         guard Int(range.location) + Int(range.length) <= length else {
-            foundationFatal("-[NSAttributedString \(method)]: Range or index out of bounds")
+            foundationFatal("-[NSAttributedString \(method)]: Range or index out of bounds (range {\(range.location), \(range.length)}, length \(length))")
         }
     }
 }
