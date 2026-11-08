@@ -170,6 +170,10 @@ public final class NSDate: NSObject {
     @ObjCMethod("dateByAddingTimeInterval:")
     func adding(_ seconds: Double) -> NSDate { Dates.wrapped(date.addingTimeInterval(seconds)) }
 
+    /// Before iOS 4's -dateByAddingTimeInterval:.
+    @ObjCMethod("addTimeInterval:")
+    func addTimeInterval(_ seconds: Double) -> NSDate { adding(seconds) }
+
     // MARK: Comparing
 
     @ObjCMethod("compare:")
