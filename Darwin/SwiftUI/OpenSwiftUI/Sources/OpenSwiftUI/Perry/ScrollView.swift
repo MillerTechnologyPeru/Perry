@@ -46,6 +46,12 @@ public struct ScrollView<Content>: View where Content: View {
 
 // MARK: - Viewport
 
+/// With PERRY_SWIFTUI_TRACE set, what scroll views do, on standard error.
+func scrollTrace(_ message: @autoclosure () -> String) {
+    guard getenv("PERRY_SWIFTUI_TRACE") != nil else { return }
+    fputs("perry: SwiftUI: scroll: \(message())\n", stderr)
+}
+
 /// The sizes the last layout found: the viewport's and the content's.
 /// Written by the layout as it places the content, for the drag to scroll
 /// within; not state, as a change to it needs no update of its own.
@@ -84,8 +90,6 @@ struct ScrollViewport<Content: View>: View {
     /// animation may still be carrying it from.
     @State private var previousOffset: CGSize = .zero
 
-    /// How much of a drag past the content's end moves it.
-    static var stretch: CGFloat { 0.4 }
     static var indicatorThickness: CGFloat { 3 }
 
     var body: some View {
@@ -165,6 +169,7 @@ struct ScrollViewport<Content: View>: View {
     /// The pan's translation moves the content from where it was as the
     /// pan began, stretching past the ends.
     func panChanged(_ translation: CGSize) {
+        scrollTrace("pan changed \(translation) limit \(metrics.limit(axes)) viewport \(metrics.viewport) content \(metrics.content)")
         if indicatorOpacity != 1 { indicatorOpacity = 1 }
         let origin = dragOrigin ?? offset
         if dragOrigin == nil { dragOrigin = offset }
@@ -191,19 +196,42 @@ struct ScrollViewport<Content: View>: View {
             }
             return
         }
-        let carry = Self.carry
-        let target = clamp(CGSize(width: origin.width - translation.width - velocity.width * carry,
-                                  height: origin.height - translation.height - velocity.height * carry))
         previousOffset = offset
-        withAnimation(.easeOut(duration: 0.5)) {
-            offset = target
+        // Let go past an end, the content springs back; otherwise it
+        // coasts as far as the flick carries it, slowing as UIKit's scroll
+        // views (the shared physics) do, and stops at the content's ends.
+        let limit = metrics.limit(axes)
+        let rest = clamp(offset)
+        if rest != offset {
+            withAnimation(.spring(response: SpringBack.response, dampingFraction: 1)) {
+                offset = rest
+                dragOrigin = nil
+            }
+            showIndicators()
+            return
+        }
+        var target = offset, duration = 0.0
+        for axis in [Axis.horizontal, .vertical] where axes.contains(axis) {
+            let horizontal = axis == .horizontal
+            let speed = Double(horizontal ? velocity.width : velocity.height)
+            // The content moves against the finger.
+            guard let glide = Deceleration.glide(velocity: -speed) else { continue }
+            let from = horizontal ? offset.width : offset.height, end = horizontal ? limit.width : limit.height
+            let to = min(max(from + CGFloat(glide.distance), 0), end)
+            let share = glide.distance == 0 ? 0 : Double((to - from) / CGFloat(glide.distance))
+            duration = max(duration, glide.duration * max(share, 0.2))
+            if horizontal { target.width = to } else { target.height = to }
+        }
+        if duration > 0 {
+            withAnimation(.timingCurve(0.12, 0.5, 0.2, 1, duration: duration)) {
+                offset = target
+                dragOrigin = nil
+            }
+        } else {
             dragOrigin = nil
         }
         showIndicators()
     }
-
-    /// Seconds of release velocity the content glides on for.
-    static var carry: CGFloat { 0.3 }
 
     /// How far past its top the content is pulled to refresh, and where it
     /// holds while refreshing.
@@ -231,14 +259,12 @@ struct ScrollViewport<Content: View>: View {
     /// The offset along the scrolling axes, moving a fraction of the way
     /// past the content's ends.
     func stretched(_ proposed: CGSize) -> CGSize {
-        let limit = metrics.limit(axes)
-        func axis(_ value: CGFloat, _ limit: CGFloat) -> CGFloat {
-            if value < 0 { return value * Self.stretch }
-            if value > limit { return limit + (value - limit) * Self.stretch }
-            return value
+        let limit = metrics.limit(axes), size = metrics.viewport
+        func axis(_ value: CGFloat, _ limit: CGFloat, _ dimension: CGFloat) -> CGFloat {
+            CGFloat(rubberBand(Double(value), low: 0, high: Double(limit), dimension: Double(dimension)))
         }
-        return CGSize(width: axes.contains(.horizontal) ? axis(proposed.width, limit.width) : 0,
-                      height: axes.contains(.vertical) ? axis(proposed.height, limit.height) : 0)
+        return CGSize(width: axes.contains(.horizontal) ? axis(proposed.width, limit.width, size.width) : 0,
+                      height: axes.contains(.vertical) ? axis(proposed.height, limit.height, size.height) : 0)
     }
 
     // MARK: Indicators
@@ -339,6 +365,7 @@ struct ScrollLayout: Layout {
         let size = content.sizeThatFits(contentProposal(bounds.size))
         metrics.viewport = bounds.size
         metrics.content = size
+        scrollTrace("placed viewport \(bounds.size) content \(size) offset \(offset)")
         var offset = offset
         if clamps {
             let limit = metrics.limit(axes)
