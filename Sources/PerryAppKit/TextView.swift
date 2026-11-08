@@ -186,6 +186,27 @@ open class NSLayoutManager: NSObject {
     @ObjCMethod("setUsesFontLeading:") func setUsesFontLeading(_ value: Bool) {}
     @ObjCMethod("defaultLineHeightForFont:") func defaultLineHeight(for font: NSFont?) -> CGFloat { Text.lineHeight(font ?? NSFont.system(size: 12)) }
     @ObjCMethod("glyphRangeForTextContainer:") func glyphRange(for container: NSTextContainer?) -> NSRange { NSRange(location: 0, length: numberOfGlyphs()) }
+
+    // A glyph is a character here. Without a line layout to ask, the glyphs
+    // in a rectangle are all of the text.
+    @ObjCMethod("glyphRangeForBoundingRect:inTextContainer:")
+    func glyphRange(forBoundingRect rect: CGRect, in container: NSTextContainer?) -> NSRange { NSRange(location: 0, length: numberOfGlyphs()) }
+    @ObjCMethod("glyphRangeForBoundingRectWithoutAdditionalLayout:inTextContainer:")
+    func glyphRange(forBoundingRectWithoutAdditionalLayout rect: CGRect, in container: NSTextContainer?) -> NSRange {
+        NSRange(location: 0, length: numberOfGlyphs())
+    }
+    @ObjCMethod("glyphRangeForCharacterRange:actualCharacterRange:")
+    func glyphRange(forCharacterRange range: NSRange, actualCharacterRange actual: UnsafeMutablePointer<NSRange>?) -> NSRange {
+        actual?.pointee = range
+        return range
+    }
+    @ObjCMethod("characterRangeForGlyphRange:actualGlyphRange:")
+    func characterRange(forGlyphRange range: NSRange, actualGlyphRange actual: UnsafeMutablePointer<NSRange>?) -> NSRange {
+        actual?.pointee = range
+        return range
+    }
+    @ObjCMethod("characterIndexForGlyphAtIndex:") func characterIndex(forGlyphAt index: UInt) -> UInt { index }
+    @ObjCMethod("glyphIndexForCharacterAtIndex:") func glyphIndex(forCharacterAt index: UInt) -> UInt { index }
 }
 
 @ObjCClass("NSTextContainer")
@@ -293,6 +314,9 @@ open class NSText: NSView {
 
 @ObjCClass("NSTextView")
 open class NSTextView: NSText {
+    /// The automatic substitution, spelling and the like switches set, by name.
+    var switches: [String: Bool] = [:]
+    var checkingTypes: UInt64 = 0
     var storage: NSTextStorage?
     var container: NSTextContainer?
     var manager: NSLayoutManager?
@@ -472,15 +496,32 @@ open class NSTextView: NSText {
     @ObjCMethod("setUsesFontPanel:") func setUsesFontPanel(_ value: Bool) {}
     @ObjCMethod("setUsesRuler:") func setUsesRuler(_ value: Bool) {}
     @ObjCMethod("setImportsGraphics:") func setImportsGraphics(_ value: Bool) {}
-    @ObjCMethod("setAutomaticQuoteSubstitutionEnabled:") func setAutomaticQuoteSubstitutionEnabled(_ value: Bool) {}
-    @ObjCMethod("setAutomaticDashSubstitutionEnabled:") func setAutomaticDashSubstitutionEnabled(_ value: Bool) {}
-    @ObjCMethod("setAutomaticTextReplacementEnabled:") func setAutomaticTextReplacementEnabled(_ value: Bool) {}
-    @ObjCMethod("setAutomaticSpellingCorrectionEnabled:") func setAutomaticSpellingCorrectionEnabled(_ value: Bool) {}
-    @ObjCMethod("setContinuousSpellCheckingEnabled:") func setContinuousSpellCheckingEnabled(_ value: Bool) {}
-    @ObjCMethod("setGrammarCheckingEnabled:") func setGrammarCheckingEnabled(_ value: Bool) {}
-    @ObjCMethod("setAutomaticLinkDetectionEnabled:") func setAutomaticLinkDetectionEnabled(_ value: Bool) {}
-    @ObjCMethod("setAutomaticDataDetectionEnabled:") func setAutomaticDataDetectionEnabled(_ value: Bool) {}
-    @ObjCMethod("setSmartInsertDeleteEnabled:") func setSmartInsertDeleteEnabled(_ value: Bool) {}
+    @ObjCMethod("setAutomaticQuoteSubstitutionEnabled:") func setAutomaticQuoteSubstitutionEnabled(_ value: Bool) { switches["AutomaticQuoteSubstitution"] = value }
+    @ObjCMethod("isAutomaticQuoteSubstitutionEnabled") func isAutomaticQuoteSubstitutionEnabled() -> Bool { switches["AutomaticQuoteSubstitution"] ?? false }
+    @ObjCMethod("setAutomaticDashSubstitutionEnabled:") func setAutomaticDashSubstitutionEnabled(_ value: Bool) { switches["AutomaticDashSubstitution"] = value }
+    @ObjCMethod("isAutomaticDashSubstitutionEnabled") func isAutomaticDashSubstitutionEnabled() -> Bool { switches["AutomaticDashSubstitution"] ?? false }
+    @ObjCMethod("setAutomaticTextReplacementEnabled:") func setAutomaticTextReplacementEnabled(_ value: Bool) { switches["AutomaticTextReplacement"] = value }
+    @ObjCMethod("isAutomaticTextReplacementEnabled") func isAutomaticTextReplacementEnabled() -> Bool { switches["AutomaticTextReplacement"] ?? false }
+    @ObjCMethod("setAutomaticSpellingCorrectionEnabled:") func setAutomaticSpellingCorrectionEnabled(_ value: Bool) { switches["AutomaticSpellingCorrection"] = value }
+    @ObjCMethod("isAutomaticSpellingCorrectionEnabled") func isAutomaticSpellingCorrectionEnabled() -> Bool { switches["AutomaticSpellingCorrection"] ?? false }
+    @ObjCMethod("setContinuousSpellCheckingEnabled:") func setContinuousSpellCheckingEnabled(_ value: Bool) { switches["ContinuousSpellChecking"] = value }
+    @ObjCMethod("isContinuousSpellCheckingEnabled") func isContinuousSpellCheckingEnabled() -> Bool { switches["ContinuousSpellChecking"] ?? false }
+    @ObjCMethod("setGrammarCheckingEnabled:") func setGrammarCheckingEnabled(_ value: Bool) { switches["GrammarChecking"] = value }
+    @ObjCMethod("isGrammarCheckingEnabled") func isGrammarCheckingEnabled() -> Bool { switches["GrammarChecking"] ?? false }
+    @ObjCMethod("setAutomaticLinkDetectionEnabled:") func setAutomaticLinkDetectionEnabled(_ value: Bool) { switches["AutomaticLinkDetection"] = value }
+    @ObjCMethod("isAutomaticLinkDetectionEnabled") func isAutomaticLinkDetectionEnabled() -> Bool { switches["AutomaticLinkDetection"] ?? false }
+    @ObjCMethod("setAutomaticDataDetectionEnabled:") func setAutomaticDataDetectionEnabled(_ value: Bool) { switches["AutomaticDataDetection"] = value }
+    @ObjCMethod("isAutomaticDataDetectionEnabled") func isAutomaticDataDetectionEnabled() -> Bool { switches["AutomaticDataDetection"] ?? false }
+    @ObjCMethod("enabledTextCheckingTypes") func enabledTextCheckingTypes() -> UInt64 { checkingTypes }
+    @ObjCMethod("setEnabledTextCheckingTypes:") func setEnabledTextCheckingTypes(_ types: UInt64) { checkingTypes = types }
+    /// A text view's many options without an effect here are accepted when
+    /// set by key (nibs and bindings do) and read as nil.
+    @ObjCMethod("setValue:forUndefinedKey:") func setValue(_ value: NSObject?, forUndefinedKey key: String) {
+        appKitWarning("NSTextView: ignoring \(key)")
+    }
+    @ObjCMethod("valueForUndefinedKey:") func value(forUndefinedKey key: String) -> NSObject? { nil }
+    @ObjCMethod("setSmartInsertDeleteEnabled:") func setSmartInsertDeleteEnabled(_ value: Bool) { switches["SmartInsertDelete"] = value }
+    @ObjCMethod("isSmartInsertDeleteEnabled") func isSmartInsertDeleteEnabled() -> Bool { switches["SmartInsertDelete"] ?? true }
     @ObjCMethod("setLinkTextAttributes:") func setLinkTextAttributes(_ value: NSObject?) {}
     @ObjCMethod("setTypingAttributes:") func setTypingAttributes(_ value: NSObject?) {}
     @ObjCMethod("typingAttributes") func typingAttributes() -> NSObject { NSMutableDictionary.empty() }
