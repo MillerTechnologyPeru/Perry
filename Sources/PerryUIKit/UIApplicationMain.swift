@@ -69,6 +69,7 @@ enum Launch {
         // in apps whose Info.plist names none.
         let configuresScenes = Application.delegate?.responds(to: "application:configurationForConnectingSceneSession:options:") ?? false
         let manifest = SceneManifest(info) ?? (configuresScenes ? SceneManifest.empty : nil)
+        if manifest == nil { Scenes.makeImplicitScene() }
         let window = manifest == nil ? mainStoryboardWindow(info) : nil
         _ = delegate?.application(application, willFinishLaunchingWithOptions: nil)
         if delegate?.application(application, didFinishLaunchingWithOptions: nil) == nil {
@@ -167,6 +168,23 @@ struct SceneManifest {
 }
 
 enum Scenes {
+    /// The window scene of an app that has none: the windows it makes are in
+    /// it, and it is active.
+    static func makeImplicitScene() {
+        let role = SessionRoles.UIWindowSceneSessionRoleApplication
+        let configuration = UISceneConfiguration.make(name: "Default Configuration", role: role)
+        let session = UISceneSession.make(role: role, configuration: configuration)
+        let options = UISceneConnectionOptions.objCClass.object.newInstance().unsafeCast(to: UISceneConnectionOptions.self)
+        Application.openSessions?.add(session)
+        let scene = UIWindowScene.objCClass.object.allocated().initializeScene(session: session, options: options)
+            .unsafeCast(to: UIScene.self)
+        scene.state.activationState = .foregroundActive
+        session.state.scene = scene.objcObject
+        Application.connectedScenes?.add(scene)
+        Lifecycle.scenes.append(scene)
+        Lifecycle.implicitScene = scene
+    }
+
     /// Connects the launch scene and brings it to the foreground, as UIKit
     /// does once the app has finished launching.
     static func connectFirstScene(_ application: UIApplication, manifest: SceneManifest) {
