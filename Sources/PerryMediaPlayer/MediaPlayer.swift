@@ -200,6 +200,10 @@ open class MPMoviePlayerViewController: NSObject {
         trace("moviePlayer: \(player.map { "\($0.objcObject)" } ?? "nil")")
         return player
     }
+
+    /// The controller's view, which a view controller has: the player's.
+    @ObjCMethod("view")
+    func view() -> UIView? { player?.view() }
 }
 
 /// The music player, with an empty library: nothing is playing.
