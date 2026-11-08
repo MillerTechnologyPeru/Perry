@@ -76,6 +76,7 @@ open class NSApplication: NSResponder {
         let info = NSMutableDictionary.empty()
         info.set(NSNumber.make(bool: true), forKey: Constants.NSApplicationLaunchIsDefaultLaunchKey)
         notify("applicationDidFinishLaunching:", Constants.NSApplicationDidFinishLaunchingNotification, userInfo: info)
+        NSDocumentController.openAtLaunch(delegate: delegateObject)
         activate(true)
     }
 
