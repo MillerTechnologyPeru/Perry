@@ -6,7 +6,7 @@ FROM swift:6.4-trixie
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends clang-19 lld-19 \
-        libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev \
+        libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev libxar1 \
         libssl-dev openssl-provider-legacy liblzma-dev liblz4-dev libbrotli-dev curl ca-certificates \
         libpng-dev libjpeg62-turbo-dev libgif-dev libwebp-dev libheif-dev \
         libcairo2-dev libfreetype-dev libfontconfig-dev pkgconf fonts-dejavu-core libopenblas-dev \

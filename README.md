@@ -77,7 +77,7 @@ libSystem, libobjc, libdispatch, a first subset of Foundation, CFNetwork's URL l
   Darwin's type IDs
 - C libraries over Linux's builds of the same libraries, with thunks for
   Darwin's variadic ABI: libxml2 (`libPerryxml2`, which KissXML runs on),
-  zlib, bzip2, Expat, iconv, and SQLite 3.54 built with Apple's options
+  zlib, bzip2, Expat, xar, iconv, and SQLite 3.54 built with Apple's options
 - JavaScriptCore (`libPerryJavaScriptCore`): the C API, which is
   WebKitGTK's JavaScriptCore itself; and the Objective-C API on it:
   `JSVirtualMachine`, `JSContext` with exceptions and the exception
@@ -239,7 +239,7 @@ most of UIKit (drawing, events, controls, appearance callbacks), Swift.
 | `Sources/PerryCoreData` | `libPerryCoreData.so`: Core Data over CoreModel and its SQLite store (Swift) |
 | `Sources/PerryUIKit` | `libPerryUIKit.so`: UIKit (Swift) |
 | `Sources/PerryXML2` | `libPerryxml2.so`: libxml2, Linux's with Darwin ABI thunks (C, assembly) |
-| `Sources/PerryZ`, `PerryBZ2`, `PerryExpat`, `PerrySQLite3`, `PerryIconv` | zlib, bzip2, Expat, SQLite and iconv over Linux's (C, assembly) |
+| `Sources/PerryZ`, `PerryBZ2`, `PerryXar`, `PerryExpat`, `PerrySQLite3`, `PerryIconv` | zlib, bzip2, xar, Expat, SQLite and iconv over Linux's (C, assembly) |
 | `Sources/PerryCompression` | `libPerrycompression.so`: libcompression (C) |
 | `Sources/CPerryWrapped` | Symbol lookup and variadic thunk macros the wrapped libraries share |
 | `Sources/PerryCoreGraphics` | `libPerryCoreGraphics.so`: CoreGraphics geometry, images, bitmap contexts and paths, and ImageIO (Swift) |
@@ -382,7 +382,9 @@ elsewhere (SAX handler and validation context fields, the schema and
 Relax-NG error setters) are not bridged yet.
 
 The others work the same way. zlib (`libPerryz`) needs a thunk only for
-`gzprintf`; bzip2 (`libPerrybz2`) and Expat (`libPerryexpat`) none. SQLite
+`gzprintf`; bzip2 (`libPerrybz2`), xar (`libPerryxar`) and Expat
+(`libPerryexpat`) none, though xar's one variadic function binds only on
+x86_64, where Darwin passes variadic arguments as Linux does. SQLite
 (`libPerrysqlite3`) binds to SQLite 3.54.0, the SDK's version, which the
 Docker image builds as `libperry-sqlite3` with the compile options of
 Apple's that change behaviour (`PRAGMA compile_options` on a Mac lists
