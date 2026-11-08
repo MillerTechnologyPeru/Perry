@@ -181,4 +181,16 @@ DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) DARWIN_SYMBOL(
 DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) { return difftime(end, start); }
 DARWIN_FLOAT_ABI double darwin_drand48(void) DARWIN_SYMBOL(drand48);
 DARWIN_FLOAT_ABI double darwin_drand48(void) { return drand48(); }
+// The old conversions of a double to its digits, in a buffer of the C
+// library's that the next call overwrites.
+DARWIN_FLOAT_ABI char *darwin_fcvt(double value, int digits, int *point, int *negative) DARWIN_SYMBOL(fcvt);
+DARWIN_FLOAT_ABI char *darwin_fcvt(double value, int digits, int *point, int *negative) {
+    return fcvt(value, digits, point, negative);
+}
+DARWIN_FLOAT_ABI char *darwin_ecvt(double value, int digits, int *point, int *negative) DARWIN_SYMBOL(ecvt);
+DARWIN_FLOAT_ABI char *darwin_ecvt(double value, int digits, int *point, int *negative) {
+    return ecvt(value, digits, point, negative);
+}
+DARWIN_FLOAT_ABI char *darwin_gcvt(double value, int digits, char *buffer) DARWIN_SYMBOL(gcvt);
+DARWIN_FLOAT_ABI char *darwin_gcvt(double value, int digits, char *buffer) { return gcvt(value, digits, buffer); }
 #endif
