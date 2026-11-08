@@ -83,13 +83,12 @@ final class _PerryBinding: NSObject {
         case "title", "toolTip", "font", "textColor", "image", "contentArray", "content", "contentObject",
              "selectionIndexes", "sortDescriptors", "selectedIndex", "selectedTag", "selectedObject", "selectedValue":
             let setter = "set" + name.prefix(1).uppercased() + name.dropFirst() + ":"
-            if target.responds(to: setter) {
-                if name == "selectedIndex" || name == "selectedTag" {
-                    send(receiver, name == "selectedIndex" ? "selectItemAtIndex:" : "selectItemWithTag:",
-                         int: value.map { integer($0.objcObject) } ?? -1)
-                } else {
-                    Send.void(receiver, setter, value?.objcObject)
-                }
+            // A pop-up button or segmented control selects by index or tag.
+            let selector = name == "selectedIndex" ? "selectItemAtIndex:" : "selectItemWithTag:"
+            if name == "selectedIndex" || name == "selectedTag", target.responds(to: selector) {
+                send(receiver, selector, int: value.map { integer($0.objcObject) } ?? -1)
+            } else if target.responds(to: setter) {
+                Send.void(receiver, setter, value?.objcObject)
             } else {
                 target.sendSetValue(value, forKey: name)
             }
