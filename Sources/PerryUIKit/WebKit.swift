@@ -211,6 +211,13 @@ open class WKUserContentController: NSObject {
     func addScriptMessageHandler(_ handler: NSObject, name: String) { handlers[name] = handler }
     @ObjCMethod("removeScriptMessageHandlerForName:")
     func removeScriptMessageHandler(forName name: String) { handlers[name] = nil }
+
+    var ruleLists: [WKContentRuleList] = []
+    @ObjCMethod("addContentRuleList:")
+    func addContentRuleList(_ list: WKContentRuleList?) { if let list, !ruleLists.contains(where: { $0 === list }) { ruleLists.append(list) } }
+    @ObjCMethod("removeContentRuleList:")
+    func removeContentRuleList(_ list: WKContentRuleList?) { ruleLists.removeAll { $0 === list } }
+    @ObjCMethod("removeAllContentRuleLists") func removeAllContentRuleLists() { ruleLists = [] }
 }
 
 @ObjCClass("WKProcessPool")
