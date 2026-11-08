@@ -15,8 +15,13 @@ enum KeyValueCoding {
         return String(cString: encoding).filter { !$0.isNumber && !"rnNoORV".contains($0) }.map { $0 }
     }
 
+    /// Whether the object's class has an accessor for the selector, once the
+    /// class has had the chance to add it (+resolveInstanceMethod:, as
+    /// dynamic properties' accessors are made).
     static func responds(_ object: id, _ selector: SEL) -> Bool {
-        ObjC.instanceMethod(ObjC.objectGetClass(object), selector) != nil
+        if ObjC.instanceMethod(ObjC.objectGetClass(object), selector) != nil { return true }
+        guard ObjC.sendBool(object, ObjC.selector("respondsToSelector:"), UnsafeMutableRawPointer(mutating: selector)) else { return false }
+        return ObjC.instanceMethod(ObjC.objectGetClass(object), selector) != nil
     }
 
     /// The getter's result, as an object.
