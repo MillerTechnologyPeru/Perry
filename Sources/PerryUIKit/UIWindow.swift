@@ -81,7 +81,11 @@ open class UIWindow: UIView {
     }
 
     @ObjCMethod("windowScene")
-    func windowScene() -> UIWindowScene? { windowState.scene.map { UIWindowScene(objcObject: $0, ownership: .retain) } }
+    func windowScene() -> UIWindowScene? {
+        // A window made without a scene is in the implicit one.
+        if windowState.scene == nil, let scene = Lifecycle.implicitScene?.as(UIWindowScene.self) { setWindowScene(scene) }
+        return windowState.scene.map { UIWindowScene(objcObject: $0, ownership: .retain) }
+    }
 
     /// UIKit's private name for the scene the window shows in.
     @ObjCMethod("_windowHostingScene")
@@ -132,6 +136,7 @@ open class UIWindow: UIView {
     override func setHidden(_ hidden: Bool) {
         state.hidden = hidden
         if !hidden {
+            _ = windowScene()
             installRootView()
             Display.startIfWanted()
             TapScript.startIfRequested()

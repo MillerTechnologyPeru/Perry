@@ -425,9 +425,12 @@ open class UIView: UIResponder, UICoordinateSpace {
         let state = state
         let size = state.bounds.size
         state.frame = frame
-        state.needsLayout = true
         Updates.schedule()
-        if state.bounds.size != size { boundsSizeChanged(from: size) }
+        // As UIKit, only a new size lays the view out again: a view moved,
+        // as a pinned header follows the scrolling, keeps its layout.
+        guard state.bounds.size != size else { return }
+        state.needsLayout = true
+        boundsSizeChanged(from: size)
     }
 
     @ObjCMethod("bounds") func bounds() -> CGRect { state.bounds }
@@ -980,10 +983,24 @@ open class UIView: UIResponder, UICoordinateSpace {
         let state = state
         guard let superviewObject = state.superview, windowObject != nil else { return .zero }
         let superview = UIView.wrap(superviewObject)
-        let safe = superview.state.bounds.inset(by: superview.safeAreaInsets(ignoringController: false))
+        var superInsets = superview.safeAreaInsets(ignoringController: false)
+        // A scroll view's content insets take in its safe area where it
+        // adjusts them, as a list's under a navigation bar: its subviews,
+        // as UIKit's, are not inset again there as they scroll.
+        if let scrollView = superview.as(UIScrollView.self) {
+            let absorbed = scrollView.adjustingSafeArea
+            superInsets = UIEdgeInsets(top: max(0, superInsets.top - absorbed.top), left: max(0, superInsets.left - absorbed.left),
+                                       bottom: max(0, superInsets.bottom - absorbed.bottom), right: max(0, superInsets.right - absorbed.right))
+        }
+        let safe = superview.state.bounds.inset(by: superInsets)
         let frame = convert(state.bounds, to: superview)
-        var insets = UIEdgeInsets(top: max(0, safe.minY - frame.minY), left: max(0, safe.minX - frame.minX),
-                                  bottom: max(0, frame.maxY - safe.maxY), right: max(0, frame.maxX - safe.maxX))
+        // Only the superview's insets are unsafe, not its edges: a side it
+        // has no inset on leaves the view's side safe, though the view
+        // reaches past it, as a cell scrolled partly out of view.
+        var insets = UIEdgeInsets(top: superInsets.top > 0 ? max(0, safe.minY - frame.minY) : 0,
+                                  left: superInsets.left > 0 ? max(0, safe.minX - frame.minX) : 0,
+                                  bottom: superInsets.bottom > 0 ? max(0, frame.maxY - safe.maxY) : 0,
+                                  right: superInsets.right > 0 ? max(0, frame.maxX - safe.maxX) : 0)
         if !ignoringController, let controllerObject = state.viewController {
             let controller = UIViewController.wrap(controllerObject)
             if let parent = controller.state.parent, ObjCRuntime.isKind(parent, of: UINavigationController.objCClass.pointer) {

@@ -144,7 +144,9 @@ open class UIScrollView: UIView {
                             bottom: inset.bottom + safe.bottom, right: inset.right + safe.right)
     }
 
-    private var adjustingSafeArea: UIEdgeInsets {
+    /// The part of the safe area the content insets take in: the content
+    /// does not see it as unsafe again.
+    var adjustingSafeArea: UIEdgeInsets {
         let scroll = scroll
         guard scroll.adjustmentBehavior != 2 else { return .zero }
         let safe = safeAreaInsets()

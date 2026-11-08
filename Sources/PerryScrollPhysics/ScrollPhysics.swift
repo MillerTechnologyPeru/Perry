@@ -76,6 +76,23 @@ public struct Deceleration {
     }
 }
 
+extension Deceleration {
+    /// Coasting from `velocity` (points a second, along one axis) in one go,
+    /// for animations that carry content to where it comes to rest: the
+    /// distance covered and the seconds it takes, or nil when the flick is
+    /// too slow to coast. The speed decays by `rate` each millisecond, so
+    /// the distance is the sum of that series and it stops once the speed
+    /// is below `stopSpeed`.
+    public static func glide(velocity: Double, rate: Double = normalDecelerationRate) -> (distance: Double, duration: Double)? {
+        let speed = abs(velocity)
+        guard speed > startSpeed, rate > 0, rate < 1 else { return nil }
+        let perSecond = -1000 * log(rate)
+        let duration = log(speed / stopSpeed) / perSecond
+        let distance = speed * (1 - exp(-perSecond * duration)) / perSecond
+        return (velocity < 0 ? -distance : distance, duration)
+    }
+}
+
 /// Where content dragged past its edge shows: the overshoot shrinks the
 /// further it goes, never reaching `dimension` (the view's length), as
 /// UIScrollView's rubber band does. Within `low` to `high`, `offset`.
@@ -91,7 +108,10 @@ public func rubberBand(_ offset: Double, low: Double, high: Double, dimension: D
 /// damped spring, settling in about a third of a second.
 public struct SpringBack {
     /// The spring's angular frequency, per second.
-    static let stiffness = 15.0
+    public static let stiffness = 15.0
+    /// A spring animation's response (its period, in seconds) for the same
+    /// spring, critically damped.
+    public static var response: Double { 2 * Double.pi / stiffness }
     let start: Double
     let target: Double
     let time: Double

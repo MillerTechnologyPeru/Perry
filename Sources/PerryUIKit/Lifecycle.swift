@@ -19,6 +19,11 @@ import PerryObjCInterop
 enum Lifecycle {
     /// The scenes connected, in the order they were.
     nonisolated(unsafe) static var scenes: [UIScene] = []
+    /// The scene an app without a scene manifest or scene configuration
+    /// has, as UIKit gives the windows it makes: foreground active from the
+    /// start, with no delegate. SwiftUI updates a hosting view's display
+    /// only while its scene is active.
+    nonisolated(unsafe) static var implicitScene: UIScene?
     nonisolated(unsafe) private static var terminating = false
     /// Whether launch is over, the app first active: the window's focus and
     /// visibility count from then.

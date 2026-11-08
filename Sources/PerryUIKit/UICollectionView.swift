@@ -646,8 +646,16 @@ open class UICollectionView: UIScrollView {
         let decoded = Coder(coder: coder)
         let layout = (decoded.object("UICollectionLayout") ?? decoded.object("UICollectionViewLayout"))?.as(UICollectionViewLayout.self)
         setCollectionViewLayout(layout ?? UICollectionViewFlowLayout.objCClass.object.newInstance().unsafeCast(to: UICollectionViewLayout.self))
-        for (identifier, nib) in decoded.dictionary("UICollectionViewCellPrototypeNibs") {
-            if let nib = nib.as(UINib.self) { collection.cellNibs[identifier] = nib }
+        for key in ["UICollectionViewCellPrototypeNibs", "UICollectionViewCellNibDict"] {
+            for (identifier, nib) in decoded.dictionary(key) {
+                if let nib = nib.as(UINib.self) { collection.cellNibs[identifier] = nib }
+            }
+        }
+        // Supplementary prototypes, named by their kind and reuse identifier
+        // ("UICollectionElementKindSectionHeader/Container").
+        for (name, nib) in decoded.dictionary("UICollectionViewSupplementaryViewNibDict") {
+            guard let nib = nib.as(UINib.self), let slash = name.firstIndex(of: "/") else { continue }
+            collection.supplementaryNibs[Self.supplementaryKey(String(name[..<slash]), String(name[name.index(after: slash)...]))] = nib
         }
         if decoded.has("UIAllowsMultipleSelection") { collection.allowsMultipleSelection = decoded.bool("UIAllowsMultipleSelection") }
         if decoded.has("UIAllowsSelection") { collection.allowsSelection = decoded.bool("UIAllowsSelection") }
@@ -950,6 +958,12 @@ open class UICollectionView: UIScrollView {
                     view = made
                 }
                 apply(attributes, to: view!, fresh: fresh)
+                if fresh, let layout = collection.layout?.as(UICollectionViewCompositionalLayout.self), layout.isEstimated(key) {
+                    let width = attributes.attributes.frame.width
+                    if let height = AutoLayout.fittingHeight(view!, width: width), layout.record(height: height, for: key) {
+                        collection.prepared = false
+                    }
+                }
             default:
                 continue
             }
@@ -1005,6 +1019,20 @@ open class UICollectionView: UIScrollView {
     /// view's constraints giving the height at the estimated width; the
     /// layout is prepared again if that changes it.
     private func measure(_ cell: UICollectionViewCell, attributes: UICollectionViewLayoutAttributes, at path: RowPath) {
+        // A compositional layout's estimated item takes its cell's height at
+        // the width it was given.
+        if let layout = collection.layout?.as(UICollectionViewCompositionalLayout.self) {
+            guard layout.isEstimated(path), let content = cell.collectionCell.contentView else { return }
+            let width = attributes.attributes.frame.width
+            var height = AutoLayout.fittingHeight(content, width: width)
+            if height == nil {
+                let candidate = attributes.copied().unsafeCast(to: UICollectionViewLayoutAttributes.self)
+                let preferred = cell.sendPreferredLayoutAttributes(fitting: candidate)?.as(UICollectionViewLayoutAttributes.self)
+                height = preferred?.attributes.frame.height
+            }
+            if let height, layout.record(height: height, for: path) { collection.prepared = false }
+            return
+        }
         guard let flow = collection.layout?.as(UICollectionViewFlowLayout.self), flow.flow.estimatedItemSize != .zero,
               !(delegate()?.responds(to: "collectionView:layout:sizeForItemAtIndexPath:") ?? false) else { return }
         let candidate = attributes.copied().unsafeCast(to: UICollectionViewLayoutAttributes.self)
