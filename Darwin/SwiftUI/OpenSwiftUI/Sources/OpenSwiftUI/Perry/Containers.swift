@@ -187,7 +187,9 @@ struct GroupedRowsLayout: View {
                     }
                     if !section.rows.isEmpty {
                         let rows = section.rows.map { RowReference(index: $0, id: children[$0].id) }
-                        VStack(alignment: .leading, spacing: 0) {
+                        // Only the rows near the viewport are built, as a
+                        // list's cells are.
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(rows) { row in
                                 ListRow(child: children[row.index], selection: selection, inset: Self.inset)
                                     .background(RowFrameRecorder(frames: frames, index: row.index))
