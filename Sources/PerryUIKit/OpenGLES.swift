@@ -1036,6 +1036,10 @@ enum Renderbuffers {
         bindBuffer(GLES.pixelPackBuffer, UInt32(previousPack))
     }
 
+    /// Whether a frame is still being copied: a draw is needed to take it
+    /// when the GPU is done, though nothing else changed.
+    static var hasPending: Bool { readbacks.values.contains { $0.fence != nil } }
+
     /// Before the compositor draws: the frames the GPU has finished copying
     /// go to their layers, each with its context current for the moment.
     static func collect() {
