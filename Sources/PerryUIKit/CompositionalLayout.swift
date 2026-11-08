@@ -430,7 +430,6 @@ final class CompositionalLayoutState: ObjectState {
     /// Each item's estimated height dimension, which cells are measured for.
     var estimatedItems: Set<RowPath> = []
     var estimatedSupplementary: Set<SupplementaryKey> = []
-    var pinsHeaders = false
 }
 
 @ObjCClass("UICollectionViewCompositionalLayout")
@@ -635,7 +634,6 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
         let inset = collection.adjustedContentInset()
         let width = bounds.width - inset.left - inset.right
         state.preparedWidth = bounds.width
-        state.pinsHeaders = false
 
         let environment = PerryLayoutEnvironment.objCClass.object.newInstance().unsafeCast(to: PerryLayoutEnvironment.self)
         let container = PerryLayoutContainer.objCClass.object.newInstance().unsafeCast(to: PerryLayoutContainer.self)
@@ -660,7 +658,6 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
                 continue
             }
             let placed = layOut(section: section, index: index, collection: collection, width: width, containerHeight: bounds.height, origin: along)
-            if placed.pinnedHeader { state.pinsHeaders = true }
             sections.append(placed)
             along = placed.frame.maxY + spacing
         }
@@ -740,7 +737,9 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
 
     @ObjCMethod("shouldInvalidateLayoutForBoundsChange:")
     override func shouldInvalidateLayout(forBoundsChange bounds: CGRect) -> Bool {
-        compositional.pinsHeaders || bounds.width != compositional.preparedWidth
+        // A pinned header's frame follows the bounds when its attributes are
+        // asked for, so only a change of width lays the sections out again.
+        bounds.width != compositional.preparedWidth
     }
 
     // MARK: Self-sizing
