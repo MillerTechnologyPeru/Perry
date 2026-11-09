@@ -251,12 +251,15 @@ enum RetainCounts {
         let table = Mutex<[UInt: Entry]>([:])
     }
 
-    static let shards: [Shard] = (0..<64).map { _ in Shard() }
+    /// Many, so threads retaining and releasing different objects seldom
+    /// wait on each other: with 64, LightBlue's main thread spent a fifth
+    /// of its time spinning on shards its Bluetooth queues held.
+    static let shards: [Shard] = (0..<1024).map { _ in Shard() }
 
     @inline(__always)
     static func shard(_ object: ObjectPointer) -> Shard {
         let address = UInt(bitPattern: object)
-        return shards[Int((address >> 4) ^ (address >> 10)) & 63]
+        return shards[Int((address >> 4) ^ (address >> 14)) & 1023]
     }
 
     static func retain(_ object: ObjectPointer) {
