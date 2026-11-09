@@ -270,6 +270,7 @@ PASSTHROUGH _lrand48, lrand48
 PASSTHROUGH _mrand48, mrand48
 PASSTHROUGH _wmemchr, wmemchr
 PASSTHROUGH _wmemcpy, wmemcpy
+PASSTHROUGH _wmemmove, wmemmove
 PASSTHROUGH _wmemcmp, wmemcmp
 PASSTHROUGH _wcslen, wcslen
 PASSTHROUGH _wcscpy, wcscpy
@@ -345,7 +346,6 @@ PASSTHROUGH _mktemp, mktemp
 PASSTHROUGH _memccpy, memccpy
 PASSTHROUGH _pthread_atfork, pthread_atfork
 PASSTHROUGH _getprotobyname, getprotobyname
-PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _fork, fork
 // vfork as fork: the child gets its own copy, which is safe for what a
 // vfork child may do (exec or _exit), where vfork itself shares the stack.
@@ -416,6 +416,7 @@ PASSTHROUGH _isspace, isspace
 PASSTHROUGH _fnmatch, fnmatch
 PASSTHROUGH _inet_aton, inet_aton
 PASSTHROUGH _gethostbyname, gethostbyname
+PASSTHROUGH _gethostbyname2, gethostbyname2
 PASSTHROUGH _gethostbyaddr, gethostbyaddr
 PASSTHROUGH _wcstol, wcstol
 PASSTHROUGH _wcstof, wcstof
