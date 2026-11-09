@@ -45,7 +45,9 @@ enum Display {
         if let fixed = Screen.fixed {
             if let setting { return setting }
             guard wanted, let pixels = SDL.usableDisplaySize() else { return fixed.scale }
-            return min(pixels.width / fixed.size.width, pixels.height / fixed.size.height)
+            // A turned screen is fitted as the display shows it.
+            let size = Compositor.displayRotation != 0 ? CGSize(width: fixed.size.height, height: fixed.size.width) : fixed.size
+            return min(pixels.width / size.width, pixels.height / size.height)
         }
         if let setting { return setting }
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
