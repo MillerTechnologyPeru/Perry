@@ -43,6 +43,18 @@ enum {
     TRAMPOLINE_WORD2 = 0xe590f00c,  // ldr pc, [r0, #12]
     TRAMPOLINE_WORD3 = 0xe320f000,  // nop
 };
+#elif defined(__x86_64__)
+// Words of the little-endian bytes of:
+//   mov  rsi, rdi            self becomes the block's first argument
+//   mov  rdi, [rip + 6]      the block, at code + 16
+//   jmp  [rdi + 16]          its invoke function
+//   int3 (padding)
+enum {
+    TRAMPOLINE_WORD0 = 0x48fe8948,
+    TRAMPOLINE_WORD1 = 0x00063d8b,
+    TRAMPOLINE_WORD2 = 0x67ff0000,
+    TRAMPOLINE_WORD3 = 0xcccccc10,
+};
 #else
 #error "no block trampolines for this architecture"
 #endif

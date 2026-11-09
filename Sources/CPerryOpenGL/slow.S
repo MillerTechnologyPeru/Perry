@@ -49,6 +49,53 @@ perry_gl_slow:
     pop {r0-r3, r4, r12, lr}
     b perry_gl_aligned
     .size perry_gl_slow, . - perry_gl_slow
+#elif defined(__x86_64__)
+// x86_64: the function is in r11, the arguments in their registers.
+    .text
+    .globl perry_gl_slow
+    .hidden perry_gl_slow
+    .type perry_gl_slow, @function
+perry_gl_slow:
+    pushq %rbp
+    movq %rsp, %rbp
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %r8
+    pushq %r9
+    pushq %rax
+    pushq %r11
+    subq $128, %rsp
+    movups %xmm0, 0(%rsp)
+    movups %xmm1, 16(%rsp)
+    movups %xmm2, 32(%rsp)
+    movups %xmm3, 48(%rsp)
+    movups %xmm4, 64(%rsp)
+    movups %xmm5, 80(%rsp)
+    movups %xmm6, 96(%rsp)
+    movups %xmm7, 112(%rsp)
+    call perry_gl_call_before
+    movups 112(%rsp), %xmm7
+    movups 96(%rsp), %xmm6
+    movups 80(%rsp), %xmm5
+    movups 64(%rsp), %xmm4
+    movups 48(%rsp), %xmm3
+    movups 32(%rsp), %xmm2
+    movups 16(%rsp), %xmm1
+    movups 0(%rsp), %xmm0
+    addq $128, %rsp
+    popq %r11
+    popq %rax
+    popq %r9
+    popq %r8
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+    popq %rbp
+    jmp *%r11
+    .size perry_gl_slow, .-perry_gl_slow
 #else
     .text
     .globl perry_gl_slow

@@ -1,4 +1,4 @@
-# arm64 Linux environment for building and testing Perry.
+# Linux environment for building and testing Perry, on arm64 or x86_64.
 # Debian's LLVM supplies clang and ld64.lld for the Mach-O test fixtures;
 # the lld bundled with Swift's toolchain cannot link Mach-O. The C libraries
 # are the ones Perry's providers bind Darwin's imports to, or build on.
@@ -25,7 +25,7 @@ ENV PERRY_LLVM_BIN=/usr/lib/llvm-19/bin
 RUN curl -fsSLo /tmp/sqlite.tar.gz https://www.sqlite.org/2026/sqlite-autoconf-3540000.tar.gz \
  && echo "134ec0802dda5795816e25d25872d20b312cb3973438c49b30bc40b7705ea9ed  /tmp/sqlite.tar.gz" | sha256sum -c - \
  && mkdir /tmp/sqlite && tar -xzf /tmp/sqlite.tar.gz -C /tmp/sqlite --strip-components=1 \
- && clang-19 -O2 -fPIC -shared -o /usr/lib/aarch64-linux-gnu/libperry-sqlite3.so -Wl,-soname,libperry-sqlite3.so \
+ && clang-19 -O2 -fPIC -shared -o /usr/lib/$(uname -m)-linux-gnu/libperry-sqlite3.so -Wl,-soname,libperry-sqlite3.so \
         -DSQLITE_THREADSAFE=2 -DSQLITE_USE_URI=1 -DSQLITE_DQS=3 -DSQLITE_TEMP_STORE=1 \
         -DSQLITE_DEFAULT_CACHE_SIZE=2000 -DSQLITE_DEFAULT_FILE_FORMAT=4 \
         -DSQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=32768 -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_DEFAULT_PAGE_SIZE=4096 \
@@ -51,7 +51,7 @@ RUN curl -fsSLo /tmp/lzfse.tar.gz https://github.com/lzfse/lzfse/archive/refs/ta
  && cd /tmp/lzfse/src \
  && for f in lzfse_decode.c lzfse_decode_base.c lzfse_encode.c lzfse_encode_base.c lzfse_fse.c lzvn_decode_base.c lzvn_encode_base.c; do \
         clang-19 -O2 -fPIC -c "$f" || exit 1; done \
- && ar rcs /usr/lib/aarch64-linux-gnu/liblzfse.a *.o && cp lzfse.h /usr/include/ \
+ && ar rcs /usr/lib/$(uname -m)-linux-gnu/liblzfse.a *.o && cp lzfse.h /usr/include/ \
  && cd / && rm -rf /tmp/lzfse /tmp/lzfse.tar.gz \
  && ldconfig
 
@@ -68,12 +68,13 @@ RUN apt-get update \
         gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav \
  && rm -rf /var/lib/apt/lists/*
 
-# LLVM's libc++ and libc++abi as Apple builds them for arm64, which C++ in
-# iOS apps and Swift's runtime were built against: std::string in the
+# LLVM's libc++ and libc++abi as Apple builds them, which C++ in apps and
+# Swift's runtime were built against. For arm64: std::string in the
 # alternate layout (its data pointer first), type_info compared as Apple's
 # arm64 compares it, by name for types marked not unique, and the ARM C++
 # ABI's constructors and destructors that return this, which apps' inlined
-# code uses (and its two-word new[] cookies, as Apple's arm64 has). They
+# code uses (and its two-word new[] cookies, as Apple's arm64 has). x86_64
+# has the defaults, as Apple's does. Both
 # are built with Darwin's mbstate_t, 128 bytes in place of glibc's 8:
 # std::fpos, which holds one, is returned as Darwin code expects, and
 # stream buffers are laid out as it lays them out; glibc reads and writes
@@ -97,17 +98,21 @@ RUN apt-get update \
         '    long long __align;' \
         '} __mbstate_t;' \
         '#endif' > /tmp/llvm/darwin-mbstate.h \
+ && if [ "$(uname -m)" = aarch64 ]; then \
+        cxx_abi="-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm"; \
+        abi_defines=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT; \
+    fi \
  && cmake -G Ninja -S /tmp/llvm/runtimes -B /tmp/llvm-build -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19 \
         "-DCMAKE_C_FLAGS=-include /tmp/llvm/darwin-mbstate.h" \
-        "-DCMAKE_CXX_FLAGS=-D_LIBCPP_TYPEINFO_COMPARISON_IMPLEMENTATION=2 -fc++-abi=arm -include /tmp/llvm/darwin-mbstate.h" \
+        "-DCMAKE_CXX_FLAGS=$cxx_abi -include /tmp/llvm/darwin-mbstate.h" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
-        -DLIBCXX_ABI_DEFINES=_LIBCPP_ABI_ALTERNATE_STRING_LAYOUT \
+        -DLIBCXX_ABI_DEFINES=$abi_defines \
         -DLIBCXX_SHARED_OUTPUT_NAME=perry-c++ -DLIBCXXABI_SHARED_OUTPUT_NAME=perry-c++abi \
         -DLIBCXX_ENABLE_STATIC=OFF -DLIBCXXABI_ENABLE_STATIC=OFF -DLIBCXXABI_USE_LLVM_UNWINDER=OFF \
         -DLIBCXX_INCLUDE_BENCHMARKS=OFF -DLIBCXX_INCLUDE_TESTS=OFF -DLIBCXXABI_INCLUDE_TESTS=OFF \
  && ninja -C /tmp/llvm-build cxx cxxabi \
- && cp -P /tmp/llvm-build/lib/libperry-c++*.so.1* /usr/lib/aarch64-linux-gnu/ \
+ && cp -P /tmp/llvm-build/lib/libperry-c++*.so.1* /usr/lib/$(uname -m)-linux-gnu/ \
  && rm -rf /tmp/llvm /tmp/llvm-build /tmp/llvm.tar.xz \
  && ldconfig
 
@@ -149,8 +154,8 @@ RUN curl -fsSLo /tmp/cmark.tar.gz https://github.com/swiftlang/swift-cmark/archi
  && cmake -G Ninja -S /tmp/cmark -B /tmp/cmark-build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-19 \
         -DBUILD_SHARED_LIBS=OFF -DBUILD_TESTING=OFF \
  && ninja -C /tmp/cmark-build libcmark-gfm libcmark-gfm-extensions \
- && cp /tmp/cmark-build/src/libcmark-gfm.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm.a \
- && cp /tmp/cmark-build/extensions/libcmark-gfm-extensions.a /usr/lib/aarch64-linux-gnu/libperry-cmark-gfm-extensions.a \
+ && cp /tmp/cmark-build/src/libcmark-gfm.a /usr/lib/$(uname -m)-linux-gnu/libperry-cmark-gfm.a \
+ && cp /tmp/cmark-build/extensions/libcmark-gfm-extensions.a /usr/lib/$(uname -m)-linux-gnu/libperry-cmark-gfm-extensions.a \
  && mkdir -p /usr/include/perry-cmark-gfm \
  && cp /tmp/cmark/src/include/*.h /tmp/cmark/extensions/include/*.h /usr/include/perry-cmark-gfm/ \
  && rm -rf /tmp/cmark /tmp/cmark-build /tmp/cmark.tar.gz
@@ -180,7 +185,7 @@ RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vu
         '*/Cargo.toml' '*/rust-toolchain.toml' '*/LICENSE*' \
  && curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.98.1 \
  && cd /tmp/m2v/capi && /root/.cargo/bin/cargo build --release \
- && strip -o /usr/lib/aarch64-linux-gnu/libmetal2vulkan.so target/release/libmetal2vulkan_capi.so \
+ && strip -o /usr/lib/$(uname -m)-linux-gnu/libmetal2vulkan.so target/release/libmetal2vulkan_capi.so \
  && mkdir -p /usr/share/doc/metal2vulkan && cp /tmp/m2v/LICENSE* /usr/share/doc/metal2vulkan/ \
  && cd / && rm -rf /tmp/m2v /tmp/m2v.tar.gz /root/.cargo /root/.rustup
 
