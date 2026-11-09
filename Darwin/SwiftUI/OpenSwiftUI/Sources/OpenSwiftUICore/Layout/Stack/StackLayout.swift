@@ -410,8 +410,8 @@ extension StackLayout {
             guard !childrenPtr.isEmpty else {
                 return nil
             }
-            let alignments = childrenPtr.map {
-                $0.geometry.dimensions[explicit: key]
+            let alignments = childrenPtr.map { child in
+                child.geometry.dimensions[explicit: key].map { $0 + child.geometry.origin[key.axis] }
             }
             return key.id.combineExplicit(alignments)
         }

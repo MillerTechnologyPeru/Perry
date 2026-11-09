@@ -153,6 +153,10 @@ struct SelectionCircle: View {
                 .fill(Color.white)
                 .padding(1.5)
                 .opacity(selected ? 0 : 1)
+        }
+        // An overlay, so that the row's separator doesn't take it for the
+        // row's text.
+        .overlay {
             Text("✓")
                 .font(.system(size: 13, weight: .bold))
                 .foregroundColor(Color.white)
