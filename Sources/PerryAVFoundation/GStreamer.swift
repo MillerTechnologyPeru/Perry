@@ -1,3 +1,4 @@
+import CPerryMedia
 import Glibc
 
 // GStreamer, loaded when a player first needs it: a playbin per item, its
@@ -29,9 +30,9 @@ final class GStreamer: @unchecked Sendable {
     let queryPosition: @convention(c) (Pointer, Int32, UnsafeMutablePointer<Int64>) -> Int32
     let queryDuration: @convention(c) (Pointer, Int32, UnsafeMutablePointer<Int64>) -> Int32
     let seekSimple: @convention(c) (Pointer, Int32, Int32, Int64) -> Int32
-    /// g_object_set with one double property: on Linux's arm64 ABI a
-    /// variadic call passes its arguments as a fixed one would.
-    let setDouble: @convention(c) (Pointer, UnsafePointer<CChar>, Double, Pointer?) -> Void
+    /// g_object_set itself, for a double property, which only a variadic
+    /// call passes right on 32-bit ARM (perry_g_object_set_double).
+    let objectSet: UnsafeMutableRawPointer
     let setBool: @convention(c) (Pointer, UnsafePointer<CChar>, Int32, Pointer?) -> Void
     // For reading what a stream holds before it plays; nil where an older
     // GStreamer lacks them.
@@ -88,7 +89,7 @@ final class GStreamer: @unchecked Sendable {
               let queryDuration = bind(core, "gst_element_query_duration",
                                        (@convention(c) (Pointer, Int32, UnsafeMutablePointer<Int64>) -> Int32).self),
               let seekSimple = bind(core, "gst_element_seek_simple", (@convention(c) (Pointer, Int32, Int32, Int64) -> Int32).self),
-              let setDouble = bind(gobject, "g_object_set", (@convention(c) (Pointer, UnsafePointer<CChar>, Double, Pointer?) -> Void).self),
+              let objectSet = dlsym(gobject, "g_object_set"),
               let setBool = bind(gobject, "g_object_set", (@convention(c) (Pointer, UnsafePointer<CChar>, Int32, Pointer?) -> Void).self)
         else {
             GStreamer.log("GStreamer is incomplete; videos finish without playing")
@@ -106,8 +107,8 @@ final class GStreamer: @unchecked Sendable {
             (objectUnref, miniObjectUnref, pullSample, sampleGetBuffer, sampleGetCaps)
         (self.capsGetStructure, self.structureGetInt, self.bufferMap, self.bufferUnmap) =
             (capsGetStructure, structureGetInt, bufferMap, bufferUnmap)
-        (self.queryPosition, self.queryDuration, self.seekSimple, self.setDouble, self.setBool) =
-            (queryPosition, queryDuration, seekSimple, setDouble, setBool)
+        (self.queryPosition, self.queryDuration, self.seekSimple, self.objectSet, self.setBool) =
+            (queryPosition, queryDuration, seekSimple, objectSet, setBool)
         getState = bind(core, "gst_element_get_state", (@convention(c) (Pointer, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?,
                                                                         UInt64) -> Int32).self)
         pullPreroll = bind(app, "gst_app_sink_try_pull_preroll", (@convention(c) (Pointer, UInt64) -> Pointer?).self)
@@ -173,7 +174,7 @@ final class Pipeline {
     func pause() { _ = gst.setState(element, GStreamer.statePaused) }
 
     func set(volume: Double, muted: Bool) {
-        "volume".withCString { gst.setDouble(element, $0, volume, nil) }
+        "volume".withCString { perry_g_object_set_double(gst.objectSet, element, $0, volume) }
         "mute".withCString { gst.setBool(element, $0, muted ? 1 : 0, nil) }
     }
 
