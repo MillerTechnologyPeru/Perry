@@ -236,7 +236,6 @@ PASSTHROUGH _getppid, getppid
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _getuid, getuid
-PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _inet_addr, inet_addr
 PASSTHROUGH _inet_ntoa, inet_ntoa
 PASSTHROUGH _labs, labs

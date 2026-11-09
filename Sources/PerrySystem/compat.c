@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <locale.h>
+#include <net/if.h>
 #include <pthread.h>
 #include <pwd.h>
 #include <regex.h>
@@ -577,6 +578,63 @@ enum { CTL_KERN = 1, CTL_HW = 6, CTL_USER = 8, USER_CS_PATH = 1, KERN_OSTYPE = 1
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length)
     __asm__("_sysctlbyname");
 
+// Darwin names its network interfaces en0, en1...: apps look for the Wi-Fi
+// one as en0, which here is the first interface that is not the loopback.
+unsigned darwin_if_nametoindex(const char *name) DARWIN_SYMBOL(if_nametoindex);
+unsigned darwin_if_nametoindex(const char *name) {
+    unsigned index = if_nametoindex(name);
+    if (index || !name || strcmp(name, "en0") != 0)
+        return index;
+    struct if_nameindex *all = if_nameindex();
+    if (!all)
+        return 0;
+    for (struct if_nameindex *entry = all; entry->if_index; entry++) {
+        if (strcmp(entry->if_name, "lo") != 0) {
+            index = entry->if_index;
+            break;
+        }
+    }
+    if_freenameindex(all);
+    return index;
+}
+
+// The route table's interface list for one interface (CTL_NET, PF_ROUTE, 0,
+// AF_LINK, NET_RT_IFLIST, index), which apps read a MAC address from: an
+// if_msghdr (112 bytes) and its link-level sockaddr_dl. As on iOS 7 and later
+// the address is always 02:00:00:00:00:00.
+static int interface_list(const int *names, void *old, size_t *old_length) {
+    char name[IF_NAMESIZE];
+    if (!old_length || !if_indextoname((unsigned)names[5], name)) {
+        errno = ENOENT;
+        return -1;
+    }
+    unsigned char message[112 + 20];
+    memset(message, 0, sizeof(message));
+    uint16_t message_length = sizeof(message), index = (uint16_t)names[5];
+    memcpy(message, &message_length, 2);
+    message[2] = 5;   // RTM_VERSION
+    message[3] = 0xe; // RTM_IFINFO
+    int32_t addresses = 0x10; // RTA_IFP
+    memcpy(message + 4, &addresses, 4);
+    memcpy(message + 12, &index, 2);
+    unsigned char *link = message + 112;
+    link[0] = 20;   // sdl_len
+    link[1] = 18;   // AF_LINK
+    memcpy(link + 2, &index, 2);
+    link[4] = 6;    // IFT_ETHER
+    link[5] = 0;    // sdl_nlen
+    link[6] = 6;    // sdl_alen
+    link[8] = 0x02;
+    if (old && *old_length < sizeof(message)) {
+        errno = ENOMEM;
+        return -1;
+    }
+    if (old)
+        memcpy(old, message, sizeof(message));
+    *old_length = sizeof(message);
+    return 0;
+}
+
 // The names sysctlbyname answers, by number, and the standard utilities'
 // path (user.cs_path); a process's information is all zeros (no flags: not
 // being debugged).
@@ -588,6 +646,8 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         return -1;
     }
     const char *name = NULL;
+    if (names[0] == 4 && count == 6 && names[1] == 17 && names[3] == 18 && names[4] == 3)
+        return interface_list(names, old, old_length);
     if (names[0] == CTL_KERN) {
         switch (names[1]) {
         case KERN_OSTYPE: name = "kern.ostype"; break;
