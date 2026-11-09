@@ -22,7 +22,8 @@ for name in (s.strip() for s in symbols.group(1).replace('\n', ' ').split(',') i
     if name.startswith('_') or name == 'dyld_stub_binder':
         lines.append('void sym_%d(void) __asm__("%s"); void sym_%d(void) {}' % (len(lines), name, len(lines)))
 # @try calls setjmp itself on i386.
-for name in ('__setjmp', '__longjmp'):
+for name in ('__setjmp', '__longjmp', '_statfs', '_stat$INODE64', '_lstat$INODE64', '_fstat$INODE64', '_statfs$INODE64',
+             '_readdir$INODE64', '_stat64', '_getenv', '_fflush'):
     if not any('"%s"' % name in line for line in lines):
         lines.append('void sym_%d(void) __asm__("%s"); void sym_%d(void) {}' % (len(lines), name, len(lines)))
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
@@ -39,7 +40,7 @@ for match in re.finditer(r'symbols:\s*\[(.*?)\]', text, re.S):
 names.discard('__objc_empty_cache'); names.discard('__objc_empty_vtable')
 names.update(['_objc_msgSend', '_objc_msgSend_stret', '_objc_msgSend_fpret', '_objc_msgSendSuper', '_objc_msgSendSuper_stret',
               '_objc_exception_try_enter', '_objc_exception_try_exit', '_objc_exception_extract', '_objc_exception_throw',
-              '_objc_exception_match', '_objc_getClass', '_objc_getMetaClass', '_objc_sync_enter', '_objc_sync_exit', '.objc_class_name_NSObject'])
+              '_objc_exception_match', '_objc_getClass', '_objc_getMetaClass', '_class_addMethod', '_imp_implementationWithBlock', '_imp_getBlock', '_imp_removeBlock', '_sel_registerName', '_objc_sync_enter', '_objc_sync_exit', '.objc_class_name_NSObject'])
 lines = ['void sym_%d(void) __asm__("%s"); void sym_%d(void) {}' % (i, n, i) for i, n in enumerate(sorted(names))]
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
 PY
@@ -65,6 +66,7 @@ mkdir -p "$root/.build/perry-fixtures/i386/AppKit"
 for class in NSView NSColor NSApplication NSWindow; do
     printf 'void c_%s(void) __asm__(".objc_class_name_%s"); void c_%s(void) {}\n' "$class" "$class" "$class"
 done > "$root/.build/perry-fixtures/i386/AppKit/stub.c"
+echo 'void NSRectFill(void) {}' >> "$root/.build/perry-fixtures/i386/AppKit/stub.c"
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURES="$fixtures" -v "$root:/perry" -w /perry --entrypoint sh perry-dev -euc '
     ld=/perry/.toolchains/cctools/bin/i386-apple-darwin11-ld out=.build/perry-fixtures/i386
     clang -target i386-apple-macosx$MIN -fno-builtin -w -c $out/libSystem/stub.c -o $out/libSystem/exit-asm.o
@@ -90,7 +92,10 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURE
         grep -q -E "NSString|NSAutoreleasePool|NSInsetRect" Tests/Fixtures/$file && libs="$libs $out/Foundation/Foundation.dylib"
         grep -q NSView Tests/Fixtures/$file && libs="$libs $out/AppKit/AppKit.dylib"
         clang -target i386-apple-macosx$MIN -fno-stack-protector $flags -c Tests/Fixtures/$file -o $out/$name.o -isystem Tests/Fixtures/include
-        $ld -arch i386 -macosx_version_min $MIN -e _main -pagezero_size 0x10000 -o $out/$name $out/$name.o $out/crt.o \
+        # legacy_start links as Mac programs do: at 0x1000, from crt1'"'"'s start.
+        layout="-e _main -pagezero_size 0x10000"
+        [ "$name" = legacy_start ] && layout="-e start -no_pie"
+        $ld -arch i386 -macosx_version_min $MIN $layout -o $out/$name $out/$name.o $out/crt.o \
             $libs 2>&1 | grep -v "directory not found" || true
         echo $out/$name
     done'

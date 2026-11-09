@@ -51,9 +51,23 @@ perry_i386_objc_pc_ebx:
     leave
 .endm
 
+// Jumps to the IMP in eax. A send returning through memory must reach the
+// forwarder that finds the receiver past the result pointer; the runtime has
+// one IMP for "not implemented", so that send swaps it here.
+.macro JUMP_IMP stret
+.if \stret
+    call 6f
+6:  popl %ecx
+    addl $(.Lmsgforward - 6b), %ecx
+    cmpl %ecx, %eax
+    je .Lmsgforward_stret
+.endif
+    jmp *%eax
+.endm
+
 // With the class in ecx, and the receiver and selector at these offsets from
 // esp: jumps to the method.
-.macro LOOKUP receiver, selector
+.macro LOOKUP receiver, selector, stret=0
     movl \selector(%esp), %edx
     pushl %ebx
     movl 8(%ecx), %eax              // class->cache
@@ -73,7 +87,7 @@ perry_i386_objc_pc_ebx:
     testl %eax, %eax
     jz 3f
     popl %ebx
-    jmp *%eax
+    JUMP_IMP \stret
 3:  popl %ebx
     SAVE_FRAME
     movl %ecx, 8(%esp)
@@ -85,7 +99,7 @@ perry_i386_objc_pc_ebx:
     addl $_GLOBAL_OFFSET_TABLE_, %ebx
     call perry_objc_lookup_slow@PLT
     RESTORE_FRAME
-    jmp *%eax
+    JUMP_IMP \stret
 .endm
 
 // id objc_msgSend(id self, SEL _cmd, ...)
@@ -116,7 +130,7 @@ ENTRY _objc_msgSend_stret
     testl %ecx, %ecx
     jz .Lnil_stret
 .Llookup_stret:
-    LOOKUP 8, 12
+    LOOKUP 8, 12, 1
 .Lnil_stret:                        // the result is left alone, as Darwin's is
     movl 4(%esp), %eax
     ret $4
@@ -124,6 +138,7 @@ END _objc_msgSend_stret
 
 // double objc_msgSend_fpret(id self, SEL _cmd, ...)
 ENTRY _objc_msgSend_fpret
+.Lmsgsend_fpret:
     movl 4(%esp), %eax
     testl %eax, %eax
     jz 1f
@@ -202,6 +217,7 @@ ENTRY __objc_msgForward
 END __objc_msgForward
 
 ENTRY __objc_msgForward_stret
+.Lmsgforward_stret:
     FORWARD 8, 12, .Lmsgsend_stret
 END __objc_msgForward_stret
 
@@ -237,6 +253,7 @@ ADDRESS perry_objc_msgSend_address, .Lmsgsend
 ADDRESS perry_objc_msgSendSuper2_address, .Lmsgsend_super2
 ADDRESS perry_objc_msgForward_address, .Lmsgforward
 ADDRESS perry_objc_msgSend_stret_address, .Lmsgsend_stret
+ADDRESS perry_objc_msgSend_fpret_address, .Lmsgsend_fpret
 ADDRESS perry_objc_msgSendSuper2_stret_address, .Lmsgsend_super2_stret
 
 #endif

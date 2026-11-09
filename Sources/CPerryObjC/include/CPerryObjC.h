@@ -208,6 +208,9 @@ const void *perry_objc_msgSendSuper2_address(void);
 // first argument register (r0, rdi: the _stret entry points), which moves
 // self and _cmd up a register.
 const void *perry_objc_msgSend_stret_address(void);
+#if defined(__i386__)
+const void *perry_objc_msgSend_fpret_address(void);
+#endif
 const void *perry_objc_msgSendSuper2_stret_address(void);
 #endif
 const void *perry_objc_msgForward_address(void);

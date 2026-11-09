@@ -55,6 +55,62 @@ struct I386Tests {
         ])
     }
 
+    @Test("Methods added at run time, blocks as methods, and forwarding, for each way of returning",
+          .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_dispatch").path)))
+    func legacyDispatch() throws {
+        let result = try run(I386.perry32, [I386.fixture("legacy_dispatch").path], environment: I386.environment)
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "resolved 42",
+            "forward int 9",
+            "forward double 2.50",
+            "forward large 7 8 9",
+            "block 103",
+            "block double 2.50",
+            "block large 6 12 100",
+            "block kept 1",
+            "removed 1",
+        ])
+    }
+
+    @Test("File metadata in the layouts of programs from before and after 64-bit inodes",
+          .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_files").path)))
+    func legacyFiles() throws {
+        let result = try run(I386.perry32, [I386.fixture("legacy_files").path], environment: I386.environment)
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "old 0 size 12 mode 100640 nlink 1 guard feedface",
+            "new 0 size 12 mode 100640 nlink 1 guard feedface",
+            "same inode 1 mtime 1",
+            "old entry entry type 8 namlen 5",
+            "new entry entry type 8 namlen 5",
+            "statfs 0 hfs positive 1 guard feedface",
+        ])
+    }
+
+    /// Needs the page at 0x1000, which vm.mmap_min_addr usually keeps from programs.
+    @Test("A program entered at crt1's start, linked at the default 0x1000",
+          .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_start").path) && I386.lowPagesMappable))
+    func legacyStart() throws {
+        var environment = I386.environment
+        environment["PERRY_LEGACY_START"] = "1"
+        let result = try run(I386.perry32, [I386.fixture("legacy_start").path, "a", "b"], environment: environment)
+        #expect(result.status == 5, "\(result.stderr)")
+        #expect(result.stdout.lines == ["loaded at 0x1000 aligned 1", "argc 3 last b", "envp 1 getenv 1"])
+    }
+
+    /// DISPLAY is only so AppKit starts SDL; the dummy driver needs no server.
+    @Test("An application's run loop, window and -drawRect:",
+          .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_window").path)))
+    func legacyWindow() throws {
+        var environment = I386.environment
+        environment["SDL_VIDEODRIVER"] = "dummy"
+        environment["DISPLAY"] = ":99"
+        let result = try run(I386.perry32, [I386.fixture("legacy_window").path], environment: environment)
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == ["launched content 200 100", "drew 200 100 in window 1"])
+    }
+
     /// What foundation_abi.m prints with Apple's Foundation on macOS.
     @Test("Foundation's variadic methods, KVC, KVO and floating point pass as on Darwin",
           .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("foundation_abi").path)))
@@ -142,7 +198,14 @@ enum I386 {
     /// Where the SDK's Swift runtime is, for the providers.
     static var environment: [String: String] {
         let sysroot = root.appending(path: ".toolchains/i386-sdk/sysroot/usr/lib").path
-        return ["LD_LIBRARY_PATH": "\(sysroot)/swift/linux:\(sysroot)/i386-linux-gnu"]
+        // libpulse finds its private library by an absolute RUNPATH, outside the sysroot.
+        return ["LD_LIBRARY_PATH": "\(sysroot)/swift/linux:\(sysroot)/i386-linux-gnu:\(sysroot)/i386-linux-gnu/pulseaudio"]
+    }
+
+    static var lowPagesMappable: Bool {
+        guard let text = try? String(contentsOfFile: "/proc/sys/vm/mmap_min_addr", encoding: .utf8),
+              let minimum = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        return minimum <= 4096
     }
 
     static var available: Bool {

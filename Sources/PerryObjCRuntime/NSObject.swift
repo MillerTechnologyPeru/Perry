@@ -60,12 +60,18 @@ public enum RootClasses {
     private static var stretSuperSend: UnsafeRawPointer? { nil }
     #endif
 
+    #if arch(i386)
+    private static var fpretSend: UnsafeRawPointer? { perry_objc_msgSend_fpret_address() }
+    #else
+    private static var fpretSend: UnsafeRawPointer? { nil }
+    #endif
+
     /// Points the interop layer at this runtime's functions.
     private static func installInterop() {
         ObjCRuntime.install(ObjCRuntimeFunctions(
             msgSend: perry_objc_msgSend_address(),
             msgSendSuper2: perry_objc_msgSendSuper2_address(),
-            msgSendStret: stretSend, msgSendSuper2Stret: stretSuperSend,
+            msgSendStret: stretSend, msgSendSuper2Stret: stretSuperSend, msgSendFpret: fpretSend,
             retain: { $0.map(Objects.retain) },
             release: { if let object = $0 { Objects.release(object) } },
             autorelease: { $0.map(Objects.autorelease) },

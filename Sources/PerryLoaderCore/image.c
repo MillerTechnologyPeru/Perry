@@ -539,7 +539,8 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
         reserve = mmap((void *)(uintptr_t)vm_start, span, PROT_NONE,
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (reserve == MAP_FAILED && !pie)
-        perry_fatal("%s: cannot map non-PIE executable at 0x%llx", path, (unsigned long long)vm_start);
+        perry_fatal("%s: cannot map non-PIE executable at 0x%llx%s", path, (unsigned long long)vm_start,
+                    vm_start < 0x10000 ? " (below vm.mmap_min_addr? try: sudo sysctl vm.mmap_min_addr=4096)" : "");
     if (reserve == MAP_FAILED)
         reserve = reserve_low(loader, span);
     if (reserve == MAP_FAILED)

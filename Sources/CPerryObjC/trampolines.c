@@ -23,6 +23,7 @@
 #include "CPerryObjC.h"
 
 #include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -68,6 +69,13 @@ enum {
     TRAMPOLINE_WORD1 = 0x4c8b5800,
     TRAMPOLINE_WORD2 = 0x4c890424,
     TRAMPOLINE_WORD3 = 0x408b0824,
+};
+// A block that returns through memory has the result pointer first, so
+// everything is one word further up.
+enum {
+    TRAMPOLINE_STRET_WORD2 = 0x4c890824,
+    TRAMPOLINE_STRET_WORD3 = 0x408b0c24,
+    BLOCK_USE_STRET = 1 << 29,
 };
 #else
 #error "no block trampolines for this architecture"
@@ -123,8 +131,13 @@ void *perry_objc_trampoline_create(void *block) {
     code[2] = TRAMPOLINE_WORD2;
     code[3] = TRAMPOLINE_WORD3;
 #if defined(__i386__)
+    bool stret = ((const int *)block)[1] & BLOCK_USE_STRET;
+    if (stret) {
+        code[2] = TRAMPOLINE_STRET_WORD2;
+        code[3] = TRAMPOLINE_STRET_WORD3;
+    }
     code[4] = 0x24448917;
-    code[5] = 0x0c60ff04;
+    code[5] = stret ? 0x0c60ff08 : 0x0c60ff04;
     code[6] = 0xcccccccc;
 #endif
     memcpy(&code[TRAMPOLINE_BLOCK_WORD], &block, sizeof(block));
