@@ -182,9 +182,20 @@ static uint8_t *segment_address(perry_image *image, unsigned index, uint64_t off
     return perry_image_vmaddr(image, seg->vmaddr + offset);
 }
 
+// Text relocations, which i386 code can have, are patched like pointers; a
+// relative one moves the other way, its target staying put as the image slides.
+static void rebase_at(perry_image *image, unsigned seg, uint64_t offset, uint8_t type) {
+    slot_t *slot = (slot_t *)segment_address(image, seg, offset);
+    if (type == REBASE_TYPE_TEXT_PCREL32)
+        *slot -= (slot_t)image->slide;
+    else
+        *slot += (slot_t)image->slide;
+}
+
 static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8_t *end) {
     unsigned seg = 0;
     uint64_t offset = 0;
+    uint8_t type = REBASE_TYPE_POINTER;
     while (p < end) {
         uint8_t byte = *p++;
         uint8_t imm = byte & REBASE_IMMEDIATE_MASK;
@@ -192,8 +203,9 @@ static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8
         case REBASE_OPCODE_DONE:
             return;
         case REBASE_OPCODE_SET_TYPE_IMM:
-            if (imm != REBASE_TYPE_POINTER)
+            if (imm != REBASE_TYPE_POINTER && (sizeof(slot_t) != 4 || imm > REBASE_TYPE_TEXT_PCREL32))
                 perry_fatal("%s: unsupported rebase type %u", image->path, imm);
+            type = imm;
             break;
         case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
             seg = imm;
@@ -207,23 +219,23 @@ static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8
             break;
         case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
             for (unsigned i = 0; i < imm; i++, offset += sizeof(slot_t))
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES: {
             uint64_t count = perry_read_uleb(&p, end);
             for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t))
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         }
         case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
-            *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+            rebase_at(image, seg, offset, type);
             offset += sizeof(slot_t) + perry_read_uleb(&p, end);
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB: {
             uint64_t count = perry_read_uleb(&p, end);
             uint64_t skip = perry_read_uleb(&p, end);
             for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t) + skip)
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         }
         default:

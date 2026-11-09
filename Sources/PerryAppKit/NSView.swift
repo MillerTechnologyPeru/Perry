@@ -424,6 +424,23 @@ open class NSView: NSResponder {
 
     @ObjCMethod("viewWillMoveToWindow:") func viewWillMove(toWindow window: NSObject?) {}
     @ObjCMethod("viewDidMoveToWindow") func viewDidMoveToWindow() {}
+
+    private var inFullScreenMode: Bool {
+        get { window?.fullScreenView === self }
+    }
+    @ObjCMethod("enterFullScreenMode:withOptions:")
+    func enterFullScreenMode(_ screen: NSObject?, options: NSObject?) -> Bool {
+        guard let window, let sdlWindow = window.sdlWindow else { return false }
+        window.fullScreenView = self
+        return SDL.setWindowFullscreen(sdlWindow, true)
+    }
+    @ObjCMethod("exitFullScreenModeWithOptions:")
+    func exitFullScreenMode(options: NSObject?) {
+        guard let window, window.fullScreenView === self else { return }
+        window.fullScreenView = nil
+        if let sdlWindow = window.sdlWindow { _ = SDL.setWindowFullscreen(sdlWindow, false) }
+    }
+    @ObjCMethod("isInFullScreenMode") func isInFullScreenMode() -> Bool { inFullScreenMode }
     @ObjCMethod("viewWillMoveToSuperview:") func viewWillMove(toSuperview view: NSObject?) {}
     @ObjCMethod("viewDidMoveToSuperview") func viewDidMoveToSuperview() {}
     @ObjCMethod("viewDidChangeBackingProperties") func viewDidChangeBackingProperties() {}

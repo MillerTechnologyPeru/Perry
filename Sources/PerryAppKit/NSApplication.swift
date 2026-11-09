@@ -15,6 +15,7 @@ open class NSApplication: NSResponder {
     var delegateObject: UnsafeMutableRawPointer?
     var running = false
     var launched = false
+    var activationPending = false
     var active = false
     var hidden = false
     var activationPolicy = 0
@@ -77,7 +78,9 @@ open class NSApplication: NSResponder {
         info.set(NSNumber.make(bool: true), forKey: Constants.NSApplicationLaunchIsDefaultLaunchKey)
         notify("applicationDidFinishLaunching:", Constants.NSApplicationDidFinishLaunchingNotification, userInfo: info)
         NSDocumentController.openAtLaunch(delegate: delegateObject)
-        activate(true)
+        // Activation is an event, delivered when the program next asks for
+        // one: a game with its own loop finishes launching, then sets up.
+        activationPending = true
     }
 
     /// With PERRY_APPKIT_TYPE set, its text is typed into the key window
@@ -203,8 +206,13 @@ open class NSApplication: NSResponder {
     /// until `date` (nil: not at all) while running the run loop and
     /// drawing the windows.
     @ObjCMethod("nextEventMatchingMask:untilDate:inMode:dequeue:")
-    func nextEvent(matching mask: UInt64, until date: NSObject?, inMode mode: NSObject?, dequeue: Bool) -> NSEvent? {
+    func nextEvent(matching wordMask: UInt, until date: NSObject?, inMode mode: NSObject?, dequeue: Bool) -> NSEvent? {
+        let mask = NSEvent.mask(fromWord: wordMask)
         let deadline = date.map { $0.sendTimeIntervalSinceReferenceDate() } ?? -Double.infinity
+        if activationPending {
+            activationPending = false
+            activate(true)
+        }
         while true {
             Events.pump()
             while let index = queue.firstIndex(where: { $0.type.mask & mask != 0 }) {
@@ -228,7 +236,8 @@ open class NSApplication: NSResponder {
     }
 
     @ObjCMethod("discardEventsMatchingMask:beforeEvent:")
-    func discardEvents(matching mask: UInt64, before event: NSEvent?) {
+    func discardEvents(matching wordMask: UInt, before event: NSEvent?) {
+        let mask = NSEvent.mask(fromWord: wordMask)
         Events.pump()
         let limit = event?.eventNumber ?? Int.max
         queue.removeAll { $0.type.mask & mask != 0 && $0.eventNumber < limit }

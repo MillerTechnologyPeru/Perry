@@ -90,9 +90,9 @@ enum Send {
 
     /// -nextEventMatchingMask:untilDate:inMode:dequeue:
     static func nextEvent(_ receiver: Object, mask: UInt64, until date: Object?, mode: Object?, dequeue: Bool) -> Object? {
-        typealias F = @convention(c) (Object, Selector, UInt64, Object?, Object?, Bool) -> Object?
+        typealias F = @convention(c) (Object, Selector, UInt, Object?, Object?, Bool) -> Object?
         return unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(receiver, ObjCRuntime.selector("nextEventMatchingMask:untilDate:inMode:dequeue:"),
-                                                              mask, date, mode, dequeue)
+                                                              UInt(truncatingIfNeeded: mask), date, mode, dequeue)
     }
 
     /// -hitTest: on a view, with a point in its superview's coordinates.

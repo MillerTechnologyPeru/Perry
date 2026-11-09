@@ -9,8 +9,12 @@ import PerryObjCInterop
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
+/// The loader's symbol lookup, for functions other providers define.
+nonisolated(unsafe) var providerSymbolLookup: (@convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?)?
+
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    providerSymbolLookup = lookup
     let loaded = ObjCRuntime.load { name in
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }

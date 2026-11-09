@@ -177,3 +177,17 @@ int perry_gxx_personality_sj0(int version, int actions, unsigned long long excep
 }
 
 #endif
+
+#if defined(__i386__)
+// Darwin's names for 64-bit division, which libgcc on Linux has privately.
+#define I386_LIBGCC(name) __asm__("_" #name) __attribute__((visibility("default"), used))
+
+long long perry_i386_divdi3(long long a, long long b) I386_LIBGCC(__divdi3);
+long long perry_i386_divdi3(long long a, long long b) { return a / b; }
+long long perry_i386_moddi3(long long a, long long b) I386_LIBGCC(__moddi3);
+long long perry_i386_moddi3(long long a, long long b) { return a % b; }
+unsigned long long perry_i386_udivdi3(unsigned long long a, unsigned long long b) I386_LIBGCC(__udivdi3);
+unsigned long long perry_i386_udivdi3(unsigned long long a, unsigned long long b) { return a / b; }
+unsigned long long perry_i386_umoddi3(unsigned long long a, unsigned long long b) I386_LIBGCC(__umoddi3);
+unsigned long long perry_i386_umoddi3(unsigned long long a, unsigned long long b) { return a % b; }
+#endif

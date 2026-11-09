@@ -181,7 +181,6 @@ PASSTHROUGH _getppid, getppid
 PASSTHROUGH _getprotobyname, getprotobyname
 PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _getuid, getuid
-PASSTHROUGH _if_nametoindex, if_nametoindex
 PASSTHROUGH _inet_addr, inet_addr
 PASSTHROUGH _inet_ntoa, inet_ntoa
 PASSTHROUGH _labs, labs
@@ -295,6 +294,20 @@ PASSTHROUGH __Unwind_GetCFA, _Unwind_GetCFA
 PASSTHROUGH __Unwind_GetDataRelBase, _Unwind_GetDataRelBase
 PASSTHROUGH __Unwind_GetTextRelBase, _Unwind_GetTextRelBase
 PASSTHROUGH __Unwind_FindEnclosingFunction, _Unwind_FindEnclosingFunction
+PASSTHROUGH _gmtime, gmtime
+PASSTHROUGH _gmtime_r, gmtime_r
+PASSTHROUGH _mbstowcs, mbstowcs
+PASSTHROUGH _wcstombs, wcstombs
+PASSTHROUGH _wcschr, wcschr
+PASSTHROUGH _wcscmp, wcscmp
+PASSTHROUGH _wcscpy, wcscpy
+PASSTHROUGH _wcsncmp, wcsncmp
+PASSTHROUGH _wcsncpy, wcsncpy
+PASSTHROUGH _fputws, fputws
+PASSTHROUGH _rindex, rindex
+PASSTHROUGH _setlogmask, setlogmask
+PASSTHROUGH _swscanf, swscanf
+PASSTHROUGH _tmpfile, tmpfile
 
 // MARK: - setjmp
 //

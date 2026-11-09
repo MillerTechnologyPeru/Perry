@@ -296,6 +296,8 @@ struct nlist {
 #define N_STAB                  0xe0
 #define N_TYPE                  0x0e
 #define N_EXT                   0x01
+#define N_ABS                   0x2
+#define N_WEAK_DEF              0x0080
 #define N_SECT                  0xe
 #define N_ARM_THUMB_DEF         0x0008  // n_desc: the symbol is Thumb code
 
@@ -377,6 +379,8 @@ typedef struct encryption_info_command encryption_info_command_t;
 // MARK: - Legacy dyld info opcodes
 
 #define REBASE_TYPE_POINTER                         1
+#define REBASE_TYPE_TEXT_ABSOLUTE32                 2
+#define REBASE_TYPE_TEXT_PCREL32                    3
 #define REBASE_OPCODE_MASK                          0xf0
 #define REBASE_IMMEDIATE_MASK                       0x0f
 #define REBASE_OPCODE_DONE                          0x00

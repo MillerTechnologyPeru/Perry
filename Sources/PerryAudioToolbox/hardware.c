@@ -258,3 +258,87 @@ OSStatus darwin_AudioObjectRemovePropertyListenerBlock(AudioObjectID object, con
     (void)object, (void)address, (void)queue, (void)block;
     return 0;
 }
+
+#if !defined(__arm__)
+// The HAL's calls from before audio objects, which older Mac programs make.
+#include <time.h>
+
+#define kAudioObjectPropertyScopeGlobal FOURCC('g', 'l', 'o', 'b')
+#define kAudioDevicePropertyScopeInput FOURCC('i', 'n', 'p', 't')
+#define kAudioDevicePropertyScopeOutput FOURCC('o', 'u', 't', 'p')
+
+static AudioObjectPropertyAddress hardware_address(uint32_t property) {
+    return (AudioObjectPropertyAddress){ property, kAudioObjectPropertyScopeGlobal, 0 };
+}
+
+static AudioObjectPropertyAddress device_address(uint32_t channel, uint8_t is_input, uint32_t property) {
+    return (AudioObjectPropertyAddress){ property,
+        is_input ? kAudioDevicePropertyScopeInput : kAudioDevicePropertyScopeOutput, channel };
+}
+
+OSStatus darwin_AudioHardwareGetPropertyInfo(uint32_t property, uint32_t *size, uint8_t *writable) DARWIN_SYMBOL(AudioHardwareGetPropertyInfo);
+OSStatus darwin_AudioHardwareGetPropertyInfo(uint32_t property, uint32_t *size, uint8_t *writable) {
+    AudioObjectPropertyAddress address = hardware_address(property);
+    if (writable) *writable = 0;
+    uint32_t found = 0;
+    OSStatus status = darwin_AudioObjectGetPropertyDataSize(1, &address, 0, NULL, &found);
+    if (size) *size = found;
+    return status;
+}
+
+OSStatus darwin_AudioHardwareGetProperty(uint32_t property, uint32_t *size, void *data) DARWIN_SYMBOL(AudioHardwareGetProperty);
+OSStatus darwin_AudioHardwareGetProperty(uint32_t property, uint32_t *size, void *data) {
+    AudioObjectPropertyAddress address = hardware_address(property);
+    return darwin_AudioObjectGetPropertyData(1, &address, 0, NULL, size, data);
+}
+
+OSStatus darwin_AudioDeviceGetPropertyInfo(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                           uint32_t *size, uint8_t *writable) DARWIN_SYMBOL(AudioDeviceGetPropertyInfo);
+OSStatus darwin_AudioDeviceGetPropertyInfo(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                           uint32_t *size, uint8_t *writable) {
+    AudioObjectPropertyAddress address = device_address(channel, is_input, property);
+    if (writable) *writable = 0;
+    uint32_t found = 0;
+    OSStatus status = darwin_AudioObjectGetPropertyDataSize(device, &address, 0, NULL, &found);
+    if (size) *size = found;
+    return status;
+}
+
+OSStatus darwin_AudioDeviceGetProperty(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t *size, void *data) DARWIN_SYMBOL(AudioDeviceGetProperty);
+OSStatus darwin_AudioDeviceGetProperty(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t *size, void *data) {
+    AudioObjectPropertyAddress address = device_address(channel, is_input, property);
+    return darwin_AudioObjectGetPropertyData(device, &address, 0, NULL, size, data);
+}
+
+// Nothing about the device changes, so listeners are never called. Its
+// properties can't be set, and programs here play through output units.
+#define NO_LISTENER(name, ...)                              \
+    OSStatus darwin_##name(__VA_ARGS__) DARWIN_SYMBOL(name); \
+    OSStatus darwin_##name(__VA_ARGS__) { return 0; }
+#define NOT_SUPPORTED(name, ...)                            \
+    OSStatus darwin_##name(__VA_ARGS__) DARWIN_SYMBOL(name); \
+    OSStatus darwin_##name(__VA_ARGS__) { return kAudioHardwareIllegalOperationError; }
+
+NO_LISTENER(AudioHardwareAddPropertyListener, uint32_t a, void *b, void *c)
+NO_LISTENER(AudioHardwareRemovePropertyListener, uint32_t a, void *b)
+NO_LISTENER(AudioDeviceAddPropertyListener, uint32_t a, uint32_t b, uint8_t c, uint32_t d, void *e, void *f)
+NO_LISTENER(AudioDeviceRemovePropertyListener, uint32_t a, uint32_t b, uint8_t c, uint32_t d, void *e)
+NOT_SUPPORTED(AudioDeviceSetProperty, uint32_t a, const void *b, uint32_t c, uint8_t d, uint32_t e, uint32_t f, const void *g)
+NOT_SUPPORTED(AudioDeviceAddIOProc, uint32_t a, void *b, void *c)
+NOT_SUPPORTED(AudioDeviceRemoveIOProc, uint32_t a, void *b)
+NOT_SUPPORTED(AudioDeviceStart, uint32_t a, void *b)
+NOT_SUPPORTED(AudioDeviceStop, uint32_t a, void *b)
+NOT_SUPPORTED(AudioDeviceGetCurrentTime, uint32_t a, void *b)
+
+uint64_t darwin_AudioGetCurrentHostTime(void) DARWIN_SYMBOL(AudioGetCurrentHostTime);
+uint64_t darwin_AudioGetCurrentHostTime(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
+}
+
+double darwin_AudioGetHostClockFrequency(void) DARWIN_SYMBOL(AudioGetHostClockFrequency);
+double darwin_AudioGetHostClockFrequency(void) { return 1e9; }
+#endif

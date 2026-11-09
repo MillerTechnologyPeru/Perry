@@ -74,6 +74,7 @@ enum Constants {
     static let NSApplicationDidChangeScreenParametersNotification = "NSApplicationDidChangeScreenParametersNotification"
     static let NSApplicationLaunchUserNotificationKey = "NSApplicationLaunchUserNotificationKey"
     static let NSApplicationLaunchIsDefaultLaunchKey = "NSApplicationLaunchIsDefaultLaunchKey"
+    static let NSFullScreenModeAllScreens = "NSFullScreenModeAllScreens"
     static let NSWindowDidBecomeKeyNotification = "NSWindowDidBecomeKeyNotification"
     // Toolbar items AppKit provides, by identifier: Apple's values.
     static let NSToolbarFlexibleSpaceItemIdentifier = "NSToolbarFlexibleSpaceItem"
