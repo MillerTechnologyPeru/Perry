@@ -39,7 +39,7 @@ class NSDictionary: NSObject {
 /// MPMoviePlayerController, the player of iOS 2 to 8. Its movie is skipped:
 /// it is ready as soon as the player is made, and playing it (by -play, or
 /// by preparing it while it plays by itself, which it does unless told not
-/// to) reports it finished, once, as if the user had tapped through it.
+/// to) reports it finished, once, as if it had played to its end.
 @ObjCClass("MPMoviePlayerController")
 open class MPMoviePlayerController: NSObject {
     var contentURL: NSObject? = nil
@@ -141,6 +141,7 @@ open class MPMoviePlayerController: NSObject {
     @ObjCMethod("setUseApplicationAudioSession:") func setUseApplicationAudioSession(_ uses: Bool) {}
     @ObjCMethod("setMovieSourceType:") func setMovieSourceType(_ type: Int) {}
     @ObjCMethod("setInitialPlaybackTime:") func setInitialPlaybackTime(_ time: Double) {}
+    @ObjCMethod("setEndPlaybackTime:") func setEndPlaybackTime(_ time: Double) {}
     @ObjCMethod("setOrientation:animated:") func setOrientation(_ orientation: Int, animated: Bool) {}
 
     /// Nothing plays: the movie has finished, which the app hears from the
@@ -172,9 +173,10 @@ open class MPMoviePlayerController: NSObject {
         finished = true
         playing = false
         trace("movie finished: playback did finish notification")
-        // MPMovieFinishReasonUserExited.
+        // MPMovieFinishReasonPlaybackEnded: an app may play a movie it does
+        // not let the user skip again when told the user left it.
         let reason = NSDictionary.dictionary(
-            object: NSNumber.number(2), key: MediaPlayerConstants.MPMoviePlayerPlaybackDidFinishReasonUserInfoKey)
+            object: NSNumber.number(0), key: MediaPlayerConstants.MPMoviePlayerPlaybackDidFinishReasonUserInfoKey)
         NSNotificationCenter.defaultCenter().post(name: MediaPlayerConstants.MPMoviePlayerPlaybackDidFinishNotification,
                                                   object: self, userInfo: reason)
     }
@@ -184,6 +186,11 @@ open class MPMoviePlayerController: NSObject {
 @ObjCClass("MPMoviePlayerViewController")
 open class MPMoviePlayerViewController: NSObject {
     var player: MPMoviePlayerController? = nil
+
+    /// Controllers whose view was shown, kept for the rest of the run: the
+    /// screen holds a presented one, and apps release theirs when its
+    /// movie finishes and then take its view off the screen.
+    nonisolated(unsafe) static var shown: [MPMoviePlayerViewController] = []
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -202,8 +209,17 @@ open class MPMoviePlayerViewController: NSObject {
     }
 
     /// The controller's view, which a view controller has: the player's.
+    /// An app asks for it to put it on the screen, where the movie starts
+    /// by itself unless the player is told not to, as it does when the
+    /// controller is presented.
     @ObjCMethod("view")
-    func view() -> UIView? { player?.view() }
+    func view() -> UIView? {
+        trace("movie player view controller's view")
+        guard let player else { return nil }
+        if !MPMoviePlayerViewController.shown.contains(where: { $0 === self }) { MPMoviePlayerViewController.shown.append(self) }
+        if player.autoplays { player.prepareToPlay() }
+        return player.view()
+    }
 }
 
 /// The music player, with an empty library: nothing is playing.
