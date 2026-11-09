@@ -37,7 +37,35 @@ final class ViewState: ObjectState {
     var needsLayout = true
     /// The superview, which retains this view; not retained.
     var superview: UnsafeMutableRawPointer?
-    var subviews: [UIView] = []
+    /// The subviews, back to front. After SwiftUI reorders their layers
+    /// directly, they are put in the layers' order when next asked for.
+    var subviews: [UIView] {
+        get {
+            if subviewOrderStale { putSubviewsInLayerOrder() }
+            return orderedSubviews
+        }
+        set {
+            orderedSubviews = newValue
+            subviewOrderStale = false
+        }
+    }
+    private var orderedSubviews: [UIView] = []
+    /// Whether the layers were reordered since the subviews were.
+    var subviewOrderStale = false
+
+    /// The subviews in their layers' order, each subview's place among the
+    /// layers found once; nothing moves when they are in order already.
+    private func putSubviewsInLayerOrder() {
+        subviewOrderStale = false
+        guard orderedSubviews.count > 1, let sublayers = layer?.sublayers()?.elements else { return }
+        var order: [UnsafeMutableRawPointer: Int] = [:]
+        order.reserveCapacity(sublayers.count)
+        for (index, sublayer) in sublayers.enumerated() { order[sublayer.objcObject] = index }
+        let subviews = orderedSubviews
+        let places = subviews.map { view in view.state.layer.map { order[$0.objcObject] ?? Int.max } ?? Int.max }
+        guard zip(places, places.dropFirst()).contains(where: { $0 > $1 }) else { return }
+        orderedSubviews = places.indices.sorted { (places[$0], $0) < (places[$1], $1) }.map { subviews[$0] }
+    }
     /// Its interactions (pointer, context menu…), which never act here.
     var interactions: [NSObject] = []
     /// The view controller whose view this is; not retained.
@@ -351,17 +379,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// reordered directly (as SwiftUI does, then calls this): UIKit's
     /// subviews follow the layer tree.
     @ObjCMethod("_invalidateSubviewCache")
-    func invalidateSubviewCache() {
-        let state = state
-        guard state.subviews.count > 1, let sublayers = state.layer.sublayers()?.elements else { return }
-        var order: [UnsafeMutableRawPointer: Int] = [:]
-        for (index, sublayer) in sublayers.enumerated() { order[sublayer.objcObject] = index }
-        state.subviews = state.subviews.enumerated().sorted { lhs, rhs in
-            let left = lhs.element.state.layer.map { order[$0.objcObject] ?? Int.max } ?? Int.max
-            let right = rhs.element.state.layer.map { order[$0.objcObject] ?? Int.max } ?? Int.max
-            return (left, lhs.offset) < (right, rhs.offset)
-        }.map(\.element)
-    }
+    func invalidateSubviewCache() { state.subviewOrderStale = true }
     @ObjCMethod("_wantsConstraintBasedLayout") func wantsConstraintBasedLayout() -> Bool { !state.constraints.isEmpty }
     /// Alignment rects are frames: views have no alignment insets.
     @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
