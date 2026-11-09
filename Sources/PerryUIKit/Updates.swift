@@ -62,6 +62,8 @@ enum Updates {
 
     static func run() {
         FrameWork.passes += 1
+        let start = Clock.now
+        defer { FrameWork.passTime += Clock.now - start }
         scheduled = false
         ObjCRuntime.autoreleasepool {
             while !transitions.isEmpty || !appearanceEnds.isEmpty {

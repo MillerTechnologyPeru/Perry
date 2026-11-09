@@ -201,7 +201,7 @@ struct GroupedRowsLayout: View {
                             }
                         }
                         .background(Color.white)
-                        .cornerRadius(style.cornerRadius)
+                        .modifier(CardCorners(radius: style.cornerRadius))
                         .padding(.horizontal, style.cardInset)
                     }
                     if let footer = section.footer {
@@ -214,6 +214,21 @@ struct GroupedRowsLayout: View {
                 }
                 .padding(.bottom, style.isPlain ? 0 : 24)
             }
+        }
+    }
+}
+
+/// An inset grouped list's rounded card. Other lists' rows are not
+/// clipped: a clip, even with no radius, puts each row the lazy stack makes
+/// in a clipping view the length of the whole list.
+struct CardCorners: ViewModifier {
+    var radius: CGFloat
+
+    func body(content: Content) -> some View {
+        if radius > 0 {
+            content.cornerRadius(radius)
+        } else {
+            content
         }
     }
 }

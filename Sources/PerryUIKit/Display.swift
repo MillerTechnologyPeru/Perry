@@ -398,8 +398,10 @@ enum FrameWork {
     /// Of the drawing, the part spent displaying layers (drawing their
     /// content) rather than compositing them.
     nonisolated(unsafe) static var displayed = 0.0
-    /// Update passes (layout and display) run since the last report.
+    /// Update passes (layout and display) run since the last report, and
+    /// the seconds they took: where a SwiftUI hosting view renders.
     nonisolated(unsafe) static var passes = 0
+    nonisolated(unsafe) static var passTime = 0.0
     nonisolated(unsafe) private static var displaying = (total: 0.0, longest: 0.0)
 
     static func add(events: Double, layout: Double, draw: Double) {
@@ -416,8 +418,9 @@ enum FrameWork {
         }
         let line = "perry: UIKit: \(frames) frames, ms average/longest: events \(ms(totals.events, longest.events)), "
             + "layout \(ms(totals.layout, longest.layout)), draw \(ms(totals.draw, longest.draw)) "
-            + "(displaying layers \(ms(displaying.total, displaying.longest))), \(passes) update passes\n"
+            + "(displaying layers \(ms(displaying.total, displaying.longest))), \(passes) update passes "
+            + "taking \(Int((passTime * 1000).rounded())) ms\n"
         _ = line.withCString { write(2, $0, strlen($0)) }
-        (frames, since, totals, longest, displaying, passes) = (0, now, (0, 0, 0), (0, 0, 0), (0, 0), 0)
+        (frames, since, totals, longest, displaying, passes, passTime) = (0, now, (0, 0, 0), (0, 0, 0), (0, 0), 0, 0)
     }
 }
