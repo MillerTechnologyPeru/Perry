@@ -590,6 +590,23 @@ open class UIViewController: UIResponder {
         }
     }
 
+    // MediaPlayer's category on UIViewController.
+    @ObjCMethod("presentMoviePlayerViewControllerAnimated:")
+    func presentMoviePlayerViewController(_ controller: NSObject?) { MoviePresentation.present(controller) }
+    @ObjCMethod("dismissMoviePlayerViewControllerAnimated")
+    func dismissMoviePlayerViewController() { MoviePresentation.dismiss() }
+
+    /// Dismisses what this controller presented, by the name of iOS 2 to 5;
+    /// a movie player view controller is often dismissed so as well.
+    @ObjCMethod("dismissModalViewControllerAnimated:")
+    func dismissModalViewController(animated: Bool) {
+        if MoviePresentation.isShowing {
+            MoviePresentation.dismiss()
+        } else {
+            dismiss(animated: animated, completion: nil)
+        }
+    }
+
     /// Dismisses the controller this one presented, or else this one.
     @ObjCMethod("dismissViewControllerAnimated:completion:")
     func dismiss(animated: Bool, completion: ObjCBlock?) {
