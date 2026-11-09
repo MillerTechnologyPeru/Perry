@@ -36,6 +36,10 @@ open class UICollectionReusableView: UIView {
 
 final class CollectionCellState: ObjectState {
     var contentView: UIView?
+    /// What a list section last styled the cell for, and its separators.
+    var listPlace: ListCellPlace?
+    var topSeparator: UIView?
+    var bottomSeparator: UIView?
     var backgroundView: UIView?
     var selectedBackgroundView: UIView?
     var selected = false
