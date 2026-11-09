@@ -225,7 +225,16 @@ struct GroupedRowsLayout: View {
 struct RowAndSeparator: Layout {
     var inset: CGFloat
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    /// Where the row's text starts at a width. Finding it walks the row's
+    /// views, and a scrolling list places each row every frame.
+    struct Cache {
+        var width = CGFloat.nan
+        var leading: CGFloat?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         var size = subviews[0].sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
         if subviews.count > 1 {
             size.height += subviews[1].sizeThatFits(ProposedViewSize(width: size.width, height: nil)).height
@@ -233,12 +242,15 @@ struct RowAndSeparator: Layout {
         return size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         let across = ProposedViewSize(width: bounds.width, height: nil)
         let row = subviews[0].dimensions(in: across)
         subviews[0].place(at: bounds.origin, proposal: across)
         guard subviews.count > 1 else { return }
-        let leading = row[explicit: HorizontalAlignment.leadingText] ?? inset
+        if cache.width != bounds.width {
+            cache = Cache(width: bounds.width, leading: row[explicit: HorizontalAlignment.leadingText])
+        }
+        let leading = cache.leading ?? inset
         subviews[1].place(
             at: CGPoint(x: bounds.minX + leading, y: bounds.minY + row.height),
             proposal: ProposedViewSize(width: max(bounds.width - leading - ListRowMetrics.separatorTrailingInset, 0), height: nil))
