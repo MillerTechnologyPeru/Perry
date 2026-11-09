@@ -21,6 +21,12 @@ typedef struct MTLSize {
     unsigned long depth;
 } MTLSize;
 
+/// MTLSizeAndAlign, which a device returns for what a heap would need.
+typedef struct MTLSizeAndAlign {
+    unsigned long size;
+    unsigned long align;
+} MTLSizeAndAlign;
+
 /// MTLOrigin, MTLRegion, MTLClearColor, MTLViewport and MTLScissorRect.
 typedef struct MTLOrigin {
     unsigned long x, y, z;

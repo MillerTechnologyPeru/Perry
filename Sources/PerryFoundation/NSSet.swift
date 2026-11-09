@@ -245,6 +245,16 @@ public class NSSet: NSObject {
     @ObjCMethod("description")
     func description() -> String { Describe.object(objcObject, indent: 0) }
 
+    /// The description, whatever the locale: the collection has no
+    /// locale-dependent parts of its own.
+    @ObjCMethod("descriptionWithLocale:")
+    func description(withLocale locale: ObjCObject?) -> String { Describe.object(objcObject, indent: 0) }
+
+    @ObjCMethod("descriptionWithLocale:indent:")
+    func description(withLocale locale: ObjCObject?, indent: UInt) -> String {
+        Describe.object(objcObject, indent: Int(indent))
+    }
+
     @ObjCMethod("enumerateObjectsUsingBlock:")
     func enumerate(block: ObjCBlock) {
         let body = block.function(as: (@convention(c) (id, id?, UnsafeMutablePointer<Bool>) -> Void).self)

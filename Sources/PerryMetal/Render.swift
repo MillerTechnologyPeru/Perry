@@ -37,6 +37,17 @@ open class MTLRenderCommandEncoder: NSObject, MTLRenderCommandEncoderProtocol {
         if let message { metalWarning("-[MTLRenderCommandEncoder \(selector)]: \(message)") }
     }
 
+    /// Store actions set after the pass began, for attachments the pass
+    /// descriptor left as unknown: the pass was begun to store them, which
+    /// is a store action's result for what is used afterwards, and costs
+    /// only memory bandwidth for what is not.
+    @ObjCMethod("setColorStoreAction:atIndex:") func setColorStoreAction(_ action: UInt, index: UInt) {}
+    @ObjCMethod("setDepthStoreAction:") func setDepthStoreAction(_ action: UInt) {}
+    @ObjCMethod("setStencilStoreAction:") func setStencilStoreAction(_ action: UInt) {}
+    @ObjCMethod("setColorStoreActionOptions:atIndex:") func setColorStoreActionOptions(_ options: UInt, index: UInt) {}
+    @ObjCMethod("setDepthStoreActionOptions:") func setDepthStoreActionOptions(_ options: UInt) {}
+    @ObjCMethod("setStencilStoreActionOptions:") func setStencilStoreActionOptions(_ options: UInt) {}
+
     private func keep(_ object: NSObject?) {
         if let object { commandBuffer?.keep(object) }
     }

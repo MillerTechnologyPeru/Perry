@@ -130,6 +130,24 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
 
     @ObjCMethod("newFence") func newFence() -> MTLFence? { MTLFence(device: self) }
 
+    // MARK: Heaps
+
+    @ObjCMethod("newHeapWithDescriptor:") func newHeap(descriptor: MTLHeapDescriptor?) -> MTLHeap? {
+        guard let descriptor else { return nil }
+        return MTLHeap(device: self, descriptor: descriptor)
+    }
+
+    @ObjCMethod("heapBufferSizeAndAlignWithLength:options:")
+    func heapBufferSizeAndAlign(length: UInt, options: UInt) -> MTLSizeAndAlign {
+        MTLSizeAndAlign(size: MTLHeap.aligned(length), align: 256)
+    }
+
+    @ObjCMethod("heapTextureSizeAndAlignWithDescriptor:")
+    func heapTextureSizeAndAlign(descriptor: MTLTextureDescriptor?) -> MTLSizeAndAlign {
+        guard let descriptor else { return MTLSizeAndAlign(size: 0, align: 256) }
+        return MTLHeap.textureSizeAndAlign(descriptor)
+    }
+
     // MARK: Buffers
 
     @ObjCMethod("newBufferWithLength:options:")
