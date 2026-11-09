@@ -231,7 +231,6 @@ PASSTHROUGH _feof, feof
 PASSTHROUGH _ferror, ferror
 PASSTHROUGH _clearerr, clearerr
 PASSTHROUGH _rewind, rewind
-PASSTHROUGH _clock, clock
 PASSTHROUGH _setvbuf, setvbuf
 PASSTHROUGH _getline, getline
 PASSTHROUGH _flockfile, flockfile
