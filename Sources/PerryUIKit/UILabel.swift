@@ -99,6 +99,18 @@ open class UIFont: NSObject {
     @ObjCClassMethod("fontWithName:size:")
     static func font(name: String, size: CGFloat) -> UIFont? { make(name: name, size: size) }
 
+    /// The families an app can name: the ones the system's text is drawn in,
+    /// as Perry draws any name it is given.
+    static let families = ["Helvetica", "Helvetica Neue", "Arial", "Times New Roman", "Courier", "Courier New"]
+
+    @ObjCClassMethod("familyNames")
+    static func familyNames() -> NSArray { NSMutableArray.of(families.map { NSObject.nibString($0, mutable: false) }) }
+
+    @ObjCClassMethod("fontNamesForFamilyName:")
+    static func fontNames(forFamilyName family: String) -> NSArray {
+        NSMutableArray.of(families.contains(family) ? [NSObject.nibString(family, mutable: false)] : [])
+    }
+
     /// Text styles' sizes at the default content size.
     static let textStyleSizes: [String: CGFloat] = [
         "UICTFontTextStyleTitle0": 34, "UICTFontTextStyleTitle1": 28, "UICTFontTextStyleTitle2": 22,
