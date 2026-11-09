@@ -307,6 +307,10 @@ public class NSString: NSObject {
     @ObjCMethod("UTF8String")
     func utf8String() -> UnsafePointer<CChar>? { Strings.utf8(objcObject) }
 
+    /// Before -UTF8String's day; the default C string encoding here is UTF-8.
+    @ObjCMethod("cString")
+    func cString() -> UnsafePointer<CChar>? { Strings.utf8(objcObject) }
+
     @ObjCMethod("description")
     func description() -> NSString { self }
 
