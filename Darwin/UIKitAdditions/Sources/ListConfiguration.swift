@@ -211,6 +211,30 @@ extension UICollectionLayoutListConfiguration {
 
 // MARK: - Layouts and sections
 
+/// The block a list section asks for a row's separators: the top one's
+/// leading and trailing insets as the result's top and left, the bottom's as
+/// its bottom and right, a leading inset of -1 for none.
+private func listSeparators(_ configuration: UICollectionLayoutListConfiguration) -> @convention(block) (Int, Int, Int) -> UIEdgeInsets {
+  { section, item, count in
+    var separators = configuration.separatorConfiguration
+    if let handler = configuration.itemSeparatorHandler {
+      separators = handler(IndexPath(indexes: [section, item]), separators)
+    }
+    let sidebar = configuration.appearance == .sidebar || configuration.appearance == .sidebarPlain
+    func leading(_ visibility: UIListSeparatorConfiguration.Visibility, _ automatic: Bool, _ insets: NSDirectionalEdgeInsets) -> CGFloat {
+      switch visibility {
+      case .hidden: return -1
+      case .automatic where !automatic || !configuration.showsSeparators || sidebar: return -1
+      default: return insets.leading < 0 ? 16 : insets.leading
+      }
+    }
+    let top = separators.topSeparatorInsets, bottom = separators.bottomSeparatorInsets
+    return UIEdgeInsets(
+      top: leading(separators.topSeparatorVisibility, false, top), left: max(top.trailing, 0),
+      bottom: leading(separators.bottomSeparatorVisibility, item < count - 1, bottom), right: max(bottom.trailing, 0))
+  }
+}
+
 @available(iOS 14.0, tvOS 14.0, *)
 @available(watchOS, unavailable)
 extension UICollectionViewCompositionalLayout {
@@ -250,6 +274,8 @@ extension NSCollectionLayoutSection {
         layoutSize: supplementarySize, elementKind: UICollectionView.elementKindSectionFooter, alignment: .bottom))
     }
     section.boundarySupplementaryItems = supplementaries
+    if configuration.appearance == .insetGrouped { section.perform(NSSelectorFromString("_perrySetListRounded")) }
+    section.perform(NSSelectorFromString("_perrySetListSeparators:"), with: unsafeBitCast(listSeparators(configuration), to: AnyObject.self))
     return section
   }
 }
