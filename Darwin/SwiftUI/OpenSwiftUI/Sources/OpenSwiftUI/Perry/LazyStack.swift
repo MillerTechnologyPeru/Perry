@@ -155,6 +155,33 @@ final class LazyStackMeasurements: ScrollTargetSource {
     var onChange: (() -> Void)?
     private var changePending = false
 
+    /// The window, viewport size and pinning of the last plan.
+    var plannedWindow: ClosedRange<CGFloat>?
+    var plannedSize: CGSize?
+    var pinned = false
+
+    /// Plans again when the content has moved halfway through the views
+    /// made beyond what shows, or pinned views have to follow it.
+    func viewportMoved(_ info: ScrollViewportInfo) {
+        if !pinned, info.size == plannedSize, let window = plannedWindow {
+            let (low, high) = axis == .vertical
+                ? (info.visible.minY - origin.y, info.visible.maxY - origin.y)
+                : (info.visible.minX - origin.x, info.visible.maxX - origin.x)
+            let margin = LazyStackBody.overscan / 2
+            guard low < window.lowerBound + margin || high > window.upperBound - margin else { return }
+        }
+        notifyChange()
+    }
+
+    private func notifyChange() {
+        guard !changePending else { return }
+        changePending = true
+        DispatchQueue.main.async { [self] in
+            changePending = false
+            onChange?()
+        }
+    }
+
     /// The length a child not yet measured is taken to have.
     var estimate: CGFloat {
         lengths.isEmpty ? 44 : lengths.values.reduce(0, +) / CGFloat(lengths.count)
@@ -165,12 +192,7 @@ final class LazyStackMeasurements: ScrollTargetSource {
     func record(_ length: CGFloat, for id: AnyHashable) {
         guard lengths[id] != length else { return }
         lengths[id] = length
-        guard !changePending else { return }
-        changePending = true
-        DispatchQueue.main.async { [self] in
-            changePending = false
-            onChange?()
-        }
+        notifyChange()
     }
 }
 
@@ -186,7 +208,7 @@ struct LazyStackBody: View {
     var root: LazyStackRoot
     var children: _VariadicView.Children
 
-    @Environment(\.scrollViewport) private var viewport
+    @Environment(\.scrollViewport) private var source
     @Environment(\.scrollTargetScroller) private var scroller
     @State private var measurements = LazyStackMeasurements()
     @State private var remeasured = 0
@@ -194,6 +216,8 @@ struct LazyStackBody: View {
 
     /// How far beyond what shows children are made.
     static var overscan: CGFloat { 300 }
+
+    private var viewport: ScrollViewportInfo? { source?.info }
 
     var body: some View {
         let _ = remeasured
@@ -215,7 +239,9 @@ struct LazyStackBody: View {
         .onAppear {
             let remeasured = $remeasured
             measurements.onChange = { remeasured.wrappedValue &+= 1 }
+            source?.add(measurements)
         }
+        .onDisappear { source?.remove(measurements) }
     }
 
     /// Keeps where the plan puts children, for scrolling to one.
@@ -224,6 +250,9 @@ struct LazyStackBody: View {
         measurements.starts = plan.starts
         measurements.origin = origin
         measurements.axis = root.axis
+        measurements.plannedWindow = window
+        measurements.plannedSize = viewport?.size
+        measurements.pinned = !root.pinnedViews.isEmpty
         measurements.crossLength = root.axis == .vertical ? (viewport?.size.width ?? 0) : (viewport?.size.height ?? 0)
         scroller?.add(measurements)
     }
