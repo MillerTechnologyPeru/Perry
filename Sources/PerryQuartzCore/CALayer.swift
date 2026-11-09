@@ -531,8 +531,9 @@ open class CALayer: NSObject {
     /// default; nil for none.
     @ObjCMethod("actionForKey:")
     func action(forKey key: String) -> NSObject? {
-        if let delegate = state.delegate.map({ NSObject($0) }), delegate.responds(to: "actionForLayer:forKey:") {
-            if let action = delegate.sendAction(for: self, forKey: key) { return action }
+        if let delegate = state.delegate, ActionKeys.responds(delegate, ActionKeys.actionForLayer),
+           let action = NSObject(delegate).sendAction(for: self, forKeyString: ActionKeys.string(key)) {
+            return action
         }
         if let action = state.actions?.sendObject(forKey: key) { return action }
         if let actions = state.style?.sendObject(forKey: "actions"), let action = actions.sendObject(forKey: key) { return action }
@@ -1095,6 +1096,8 @@ extension NSObject {
     @ObjCMethod("drawInContext:") func sendDraw(in context: UnsafeMutableRawPointer?)
     @ObjCMethod("drawLayer:inContext:") func sendDrawLayer(_ layer: CALayer, in context: UnsafeMutableRawPointer?)
     @ObjCMethod("actionForLayer:forKey:") func sendAction(for layer: CALayer, forKey key: String) -> NSObject?
+    /// The same, with the key an NSString made already.
+    @ObjCMethod("actionForLayer:forKey:") func sendAction(for layer: CALayer, forKeyString key: UnsafeMutableRawPointer?) -> NSObject?
     @ObjCMethod("objectForKey:") func sendObject(forKey key: String) -> NSObject?
     @ObjCMethod("CGImage") func sendCGImage() -> UnsafeMutableRawPointer?
     @ObjCMethod("_perryDrawsLayer:") func sendDraws(_ layer: CALayer) -> Bool
