@@ -889,6 +889,9 @@ open class NSLayoutConstraint: NSObject {
             state.secondAttribute = decoded.integer("NSSecondAttribute")
             state.constant = decoded.double("NSConstant")
         }
+        // Interface Builder's standard spacing is kept by name, with no
+        // constant: 8 points.
+        if state.constant == 0, decoded.string("NSSymbolicConstant") == "NSSpace" { state.constant = 8 }
         state.relation = decoded.integer("NSRelation")
         state.multiplier = decoded.has("NSMultiplier") ? decoded.double("NSMultiplier") : 1
         state.priority = decoded.has("NSPriority") ? Float(decoded.double("NSPriority")) : 1000
