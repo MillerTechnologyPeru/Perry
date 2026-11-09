@@ -140,6 +140,12 @@ final class NSFileManager: NSObject {
 
     // MARK: Creating and reading
 
+    /// Before -createDirectoryAtPath:withIntermediateDirectories:attributes:error:'s day.
+    @ObjCMethod("createDirectoryAtPath:attributes:")
+    func createDirectory(atPath path: String, attributes: ObjCObject?) -> Bool {
+        createDirectory(atPath: path, intermediates: false, attributes: attributes, error: nil)
+    }
+
     @ObjCMethod("createDirectoryAtPath:withIntermediateDirectories:attributes:error:")
     func createDirectory(atPath path: String, intermediates: Bool, attributes: ObjCObject?,
                          error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
