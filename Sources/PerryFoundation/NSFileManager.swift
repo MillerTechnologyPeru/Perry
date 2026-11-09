@@ -261,6 +261,20 @@ final class NSFileManager: NSObject {
         }
     }
 
+    @ObjCMethod("copyItemAtURL:toURL:error:")
+    func copyItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        copyItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+    }
+
+    @ObjCMethod("createSymbolicLinkAtPath:withDestinationPath:error:")
+    func createSymbolicLink(atPath path: String, withDestinationPath destination: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard symlink(destination, path) == 0 else {
+            FileManagers.report(errorPointer, path)
+            return false
+        }
+        return true
+    }
+
     @ObjCMethod("moveItemAtURL:toURL:error:")
     func moveItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
         moveItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)

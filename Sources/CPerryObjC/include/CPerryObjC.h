@@ -171,10 +171,10 @@ static inline void perry_release_fence(void) {
 }
 
 /// The return addresses of the frames that called this function's caller,
-/// nearest first, by the frame records arm64 code keeps (Darwin's and
-/// Swift's alike): for the reference counting trace. None elsewhere.
+/// nearest first, by the frame records arm64 and x86_64 code keeps (Darwin's
+/// and Swift's alike): for the reference counting trace. None elsewhere.
 static inline __attribute__((always_inline)) size_t perry_caller_frames(uintptr_t *out, size_t limit) {
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__x86_64__)
     uintptr_t frame = (uintptr_t)__builtin_frame_address(0), low = frame;
     size_t count = 0;
     while (count < limit && frame && (frame & 7) == 0 && frame >= low && frame - low < (64u << 20)) {

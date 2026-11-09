@@ -469,7 +469,21 @@ open class NSTextView: NSText {
     @ObjCMethod("setString:")
     func setString(_ value: String?) {
         storage?.contents = NSTextStorage.makeContents(value)
+        applyFont(effectiveFont, to: NSRange(location: 0, length: storage?.length() ?? 0))
         textChanged()
+    }
+
+    /// Text in a text view always has a font, as AppKit's storage fixes it,
+    /// and apps read it back from the attributes.
+    private func applyFont(_ font: NSFont, to range: NSRange) {
+        guard range.length > 0, let contents = storage?.contents else { return }
+        typealias Add = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, NSRange) -> Void
+        let key = NSObject(objCReturnValue: "NSFont".objCReturnValue()).objcObject
+        unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(contents.objcObject, ObjCRuntime.selector("addAttribute:value:range:"), key, font.objcObject, range)
+    }
+
+    private var typingFont: NSFont {
+        typingAttributesObject?.as(NSDictionary.self)?.object(forKey: "NSFont")?.as(NSFont.self) ?? effectiveFont
     }
     @ObjCMethod("textStorage") func textStorage() -> NSTextStorage? { storage }
     @ObjCMethod("layoutManager") func layoutManager() -> NSLayoutManager? { manager }
@@ -507,7 +521,12 @@ open class NSTextView: NSText {
         let ask = unsafeBitCast(ObjCRuntime.msgSend, to: Ask.self)
         let replacement = NSObject(objCReturnValue: text.objCReturnValue())
         guard ask(objcObject, ObjCRuntime.selector("shouldChangeTextInRange:replacementString:"), range, replacement.objcObject) else { return }
-        if isString { storage.replaceCharacters(in: range, with: text) } else { storage.replaceCharacters(in: range, withAttributedString: value) }
+        if isString {
+            storage.replaceCharacters(in: range, with: text)
+            applyFont(typingFont, to: NSRange(location: range.location, length: UInt(text.utf16.count)))
+        } else {
+            storage.replaceCharacters(in: range, withAttributedString: value)
+        }
         moveInsertionPoint(to: Int(range.location) + text.utf16.count)
         Send.void(objcObject, "didChangeText")
     }
@@ -734,7 +753,12 @@ open class NSTextView: NSText {
     @ObjCMethod("textColor") func viewTextColor() -> NSColor? { textColor }
     @ObjCMethod("setTextColor:") func setTextColor(_ value: NSColor?) { textColor = value; setNeedsDisplay(true) }
     @ObjCMethod("font") func viewFont() -> NSFont? { font }
-    @ObjCMethod("setFont:") func setFont(_ value: NSFont?) { font = value; textChanged() }
+    @ObjCMethod("setFont:")
+    func setFont(_ value: NSFont?) {
+        font = value
+        if let value { applyFont(value, to: NSRange(location: 0, length: storage?.length() ?? 0)) }
+        textChanged()
+    }
     @ObjCMethod("alignment") func viewAlignment() -> Int { alignment }
     @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = value; setNeedsDisplay(true) }
     @ObjCMethod("delegate") func textDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
@@ -1043,10 +1067,14 @@ extension NSAttributedString {
             let value = read(objcObject, ObjCRuntime.selector("attribute:atIndex:effectiveRange:"), key, index, &run)
             let next = min(end, run.location + max(run.length, 1))
             if let value, let font = NSObject(value).as(NSFont.self) {
-                let bold: Bool? = traits & 2 != 0 ? true : traits & 4 != 0 ? false : nil
-                let italic: Bool? = traits & 1 != 0 ? true : traits & 0x1000000 != 0 ? false : nil
-                write(objcObject, ObjCRuntime.selector("addAttribute:value:range:"), key, font.with(bold: bold, italic: italic).objcObject,
-                      NSRange(location: index, length: next - index))
+                // Removing a trait wins when a mask does both.
+                let bold: Bool? = traits & 4 != 0 ? false : traits & 2 != 0 ? true : nil
+                let italic: Bool? = traits & 0x1000000 != 0 ? false : traits & 1 != 0 ? true : nil
+                let converted = font.with(bold: bold, italic: italic)
+                withExtendedLifetime(converted) {
+                    write(objcObject, ObjCRuntime.selector("addAttribute:value:range:"), key, converted.objcObject,
+                          NSRange(location: index, length: next - index))
+                }
             }
             index = next
         }
