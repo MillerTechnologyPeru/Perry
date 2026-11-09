@@ -245,3 +245,56 @@ class AVPlayerLayer: CALayer {
         Display.markDirty()
     }
 }
+
+// The view MediaPlayer's movie players show their movies in, and the window
+// a movie player view controller is presented in.
+
+@ObjCClass("_PerryMovieView")
+class PerryMovieView: UIView {
+    @ObjCClassMethod("layerClass") static func movieLayerClass() -> ObjCClass { AVPlayerLayer.objCClass }
+
+    @ObjCMethod("setMoviePlayer:")
+    func setMoviePlayer(_ player: NSObject?) {
+        setBackgroundColor(UIColor.gray(0))
+        state.layer.unsafeCast(to: AVPlayerLayer.self).setPlayer(player)
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("view") func sendMoviePlayerView() -> UIView?
+}
+
+enum MoviePresentation {
+    nonisolated(unsafe) private static var shown: UIView?
+    static var isShowing: Bool { shown != nil }
+
+    /// Puts the controller's view over the key window's others, filling the
+    /// screen as the display shows it: a movie is upright on a turned display
+    /// however the app's own screen stands.
+    static func present(_ controller: NSObject?) {
+        guard let key = Windows.key, let view = controller?.sendMoviePlayerView() else { return }
+        dismiss()
+        let bounds = Screen.bounds
+        view.setAutoresizingMask(0)
+        view.setCenter(CGPoint(x: bounds.size.width / 2, y: bounds.size.height / 2))
+        switch Compositor.displayRotation {
+        case 90:
+            view.setBounds(CGRect(origin: .zero, size: CGSize(width: bounds.size.height, height: bounds.size.width)))
+            view.setTransform(CGAffineTransform(a: 0, b: -1, c: 1, d: 0, tx: 0, ty: 0))
+        case 270:
+            view.setBounds(CGRect(origin: .zero, size: CGSize(width: bounds.size.height, height: bounds.size.width)))
+            view.setTransform(CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 0, ty: 0))
+        default:
+            view.setBounds(CGRect(origin: .zero, size: bounds.size))
+        }
+        UIView.wrap(key).addSubview(view)
+        shown = view
+        Display.markDirty()
+    }
+
+    static func dismiss() {
+        shown?.removeFromSuperview()
+        shown = nil
+        Display.markDirty()
+    }
+}
