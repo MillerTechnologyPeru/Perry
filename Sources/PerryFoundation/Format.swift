@@ -4,7 +4,64 @@ import PerryObjCInterop
 /// Variadic arguments as Darwin lays them out, the memory a Darwin va_list
 /// points to. On arm64 each takes an 8-byte stack slot. On armv7 they are
 /// contiguous words, with 64-bit integers and doubles in two words at any
-/// 4-byte boundary.
+/// 4-byte boundary. On x86_64 a va_list is a structure over the saved
+/// registers, one pointer to which is passed, and integers and floating point
+/// are taken from separate registers until those run out.
+#if arch(x86_64)
+struct DarwinArguments {
+    private var gpOffset: UInt32, fpOffset: UInt32
+    private var overflow: UnsafeRawPointer
+    private let registers: UnsafeRawPointer
+    private let startGPOffset: UInt32, startOverflow: UnsafeRawPointer
+
+    init(_ pointer: UnsafeRawPointer) {
+        gpOffset = pointer.load(as: UInt32.self)
+        fpOffset = pointer.load(fromByteOffset: 4, as: UInt32.self)
+        overflow = pointer.load(fromByteOffset: 8, as: UnsafeRawPointer.self)
+        registers = pointer.load(fromByteOffset: 16, as: UnsafeRawPointer.self)
+        startGPOffset = gpOffset
+        startOverflow = overflow
+    }
+
+    /// The arguments from the `position`th, counted from 1. Positions count
+    /// integers and pointers, as a format's positional arguments almost
+    /// always are.
+    func at(_ position: Int) -> DarwinArguments {
+        var arguments = self
+        arguments.gpOffset = startGPOffset
+        arguments.overflow = startOverflow
+        for _ in 1..<max(position, 1) { _ = arguments.next() }
+        return arguments
+    }
+
+    private mutating func nextOverflow() -> UInt64 {
+        let value = overflow.loadUnaligned(as: UInt64.self)
+        overflow += 8
+        return value
+    }
+
+    /// An int or smaller integer (promoted), a long, a pointer.
+    mutating func next() -> UInt64 {
+        guard gpOffset < 48 else { return nextOverflow() }
+        defer { gpOffset += 8 }
+        return (registers + Int(gpOffset)).loadUnaligned(as: UInt64.self)
+    }
+
+    /// A long long.
+    mutating func next64() -> UInt64 { next() }
+
+    /// A double (a float, promoted), as its bits.
+    mutating func nextDouble() -> UInt64 {
+        guard fpOffset < 176 else { return nextOverflow() }
+        defer { fpOffset += 16 }
+        return (registers + Int(fpOffset)).loadUnaligned(as: UInt64.self)
+    }
+
+    mutating func nextPointer() -> UnsafeMutableRawPointer? {
+        UnsafeMutableRawPointer(bitPattern: UInt(next()))
+    }
+}
+#else
 struct DarwinArguments {
     private var cursor: UnsafeRawPointer
     /// The first argument's slot, from which positional arguments (%2$@)
@@ -37,10 +94,14 @@ struct DarwinArguments {
         return value
     }
 
+    /// A double (a float, promoted), as its bits.
+    mutating func nextDouble() -> UInt64 { next64() }
+
     mutating func nextPointer() -> UnsafeMutableRawPointer? {
         UnsafeMutableRawPointer(bitPattern: UInt(next()))
     }
 }
+#endif
 
 /// printf-style formatting with Foundation's %@, which inserts an object's
 /// -description. Other conversions are formatted by glibc one at a time.
@@ -165,7 +226,7 @@ enum Format {
                     output += "0x0"
                 }
             case "f", "F", "e", "E", "g", "G", "a", "A":
-                output += c(spec + String(conversion), Double(bitPattern: arguments.next64()))
+                output += c(spec + String(conversion), Double(bitPattern: arguments.nextDouble()))
             default:
                 // Unknown conversion: keep it as written.
                 output += spec + length + String(conversion)

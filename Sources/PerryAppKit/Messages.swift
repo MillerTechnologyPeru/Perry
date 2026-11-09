@@ -103,7 +103,7 @@ enum Send {
 
     static func rect(_ receiver: Object, _ selector: String) -> CGRect {
         typealias F = @convention(c) (Object, Selector) -> CGRect
-        return unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(receiver, ObjCRuntime.selector(selector))
+        return unsafeBitCast(ObjCRuntime.msgSend(returning: CGRect.self), to: F.self)(receiver, ObjCRuntime.selector(selector))
     }
 
     /// The delegate's -applicationShouldTerminate: and the like, which

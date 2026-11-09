@@ -279,7 +279,11 @@ kern_return_t darwin_clock_sleep(mach_port_t service, int type, mach_timespec ti
 
 // The host's memory is counted in iOS's 16 KB pages, read from Linux's
 // /proc/meminfo, and its processor time from /proc/stat.
+#if defined(__x86_64__)
+enum { HOST_PAGE_SIZE = 0x1000 };     // an Intel Mac's
+#else
 enum { HOST_PAGE_SIZE = 0x4000 };
+#endif
 
 kern_return_t darwin_host_page_size(mach_port_t host, uintptr_t *size) DARWIN_SYMBOL(host_page_size);
 kern_return_t darwin_host_page_size(mach_port_t host, uintptr_t *size) {

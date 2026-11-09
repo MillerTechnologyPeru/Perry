@@ -93,8 +93,13 @@ void perry_kvo_setter(void);
 void perry_foundation_call_getter(void *object, const char *selector, const void *imp, void *indirect,
                                   uint64_t registers[6]);
 
-// arm64 only. Calls a setter with x2, x3 and d0 to d3 from `registers`.
+// arm64 and x86_64. Calls a setter with its argument from `registers`: x2, x3
+// and d0 to d3, or rdx, rcx, xmm0 and xmm1.
 void perry_foundation_call_setter(void *object, const char *selector, const void *imp, const uint64_t registers[6]);
+// x86_64 only. NSInvocation's call: rax, rdx, xmm0 and xmm1 end up in `out`.
+void perry_foundation_invoke(const void *imp, const uint64_t gp[6], const uint64_t fp[8], const uint64_t *stack, size_t words, uint64_t out[4]);
+// x86_64 only. Calls a setter whose argument, over 16 bytes, goes on the stack.
+void perry_foundation_call_setter_memory(void *object, const char *selector, const void *imp, const void *bytes, size_t size);
 
 // -[NSProcessInfo operatingSystemVersion]. Larger than 16 bytes, so it is
 // returned through x8 and passed by reference.

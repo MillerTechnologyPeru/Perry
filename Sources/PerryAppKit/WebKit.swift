@@ -1109,6 +1109,82 @@ open class WebFrame: NSObject {
     @ObjCMethod("DOMDocument") func domDocument() -> NSObject? { nil }
     @ObjCMethod("dataSource") func dataSource() -> NSObject? { nil }
     @ObjCMethod("provisionalDataSource") func provisionalDataSource() -> NSObject? { nil }
+    /// The page runs in another process, so its JavaScript has no context here.
+    @ObjCMethod("javaScriptContext") func javaScriptContext() -> NSObject? { nil }
+    @ObjCMethod("frameView") func frameView() -> WebFrameView { view?.frameView ?? WebFrameView() }
+}
+
+/// What holds a frame's document. The page scrolls itself, in its own
+/// process, so its document view is in no scroll view.
+@ObjCClass("WebFrameView")
+open class WebFrameView: NSView {
+    /// Not retained.
+    var webViewObject: UnsafeMutableRawPointer?
+    lazy var documentViewObject = NSView(frame: .zero)
+
+    public required init() { super.init() }
+    @ObjCMethod("initWithFrame:") public required init(frame: CGRect) { super.init(frame: frame) }
+    @ObjCMethod("initWithCoder:") public required init(coder: NSObject?) { super.init(coder: coder) }
+
+    @ObjCMethod("documentView") func documentView() -> NSObject? { documentViewObject }
+    @ObjCMethod("webFrame") func webFrame() -> NSObject? { webViewObject.flatMap { Send.object($0, "mainFrame") }.map(NSObject.init) }
+    @ObjCMethod("allowsScrolling") func allowsScrolling() -> Bool { true }
+    @ObjCMethod("setAllowsScrolling:") func setAllowsScrolling(_ value: Bool) {}
+}
+
+/// A web view's settings: kept where they are read, otherwise accepted.
+@ObjCClass("WebPreferences")
+open class WebPreferences: NSObject {
+    var identifier: String?
+    var autosaves = false
+    var javaScriptEnabled = true
+    var defaultFontSize = 16
+    var defaultFixedFontSize = 13
+
+    nonisolated(unsafe) static let standard = WebPreferences()
+
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCMethod("initWithCoder:") public required init(coder: NSObject?) { super.init() }
+    @ObjCMethod("initWithIdentifier:")
+    public required init(identifier: String?) {
+        super.init()
+        self.identifier = identifier
+    }
+    @ObjCClassMethod("standardPreferences") static func standardPreferences() -> WebPreferences { standard }
+
+    @ObjCMethod("identifier") func preferencesIdentifier() -> String? { identifier }
+    @ObjCMethod("setAutosaves:") func setAutosaves(_ value: Bool) { autosaves = value }
+    @ObjCMethod("autosaves") func preferencesAutosaves() -> Bool { autosaves }
+    @ObjCMethod("isJavaScriptEnabled") func isJavaScriptEnabled() -> Bool { javaScriptEnabled }
+    @ObjCMethod("setJavaScriptEnabled:") func setJavaScriptEnabled(_ value: Bool) { javaScriptEnabled = value }
+    @ObjCMethod("defaultFontSize") func preferencesDefaultFontSize() -> Int { defaultFontSize }
+    @ObjCMethod("setDefaultFontSize:") func setDefaultFontSize(_ value: Int) { defaultFontSize = value }
+    @ObjCMethod("defaultFixedFontSize") func preferencesDefaultFixedFontSize() -> Int { defaultFixedFontSize }
+    @ObjCMethod("setDefaultFixedFontSize:") func setDefaultFixedFontSize(_ value: Int) { defaultFixedFontSize = value }
+    @ObjCMethod("setJavaEnabled:") func setJavaEnabled(_ value: Bool) {}
+    @ObjCMethod("setPlugInsEnabled:") func setPlugInsEnabled(_ value: Bool) {}
+    @ObjCMethod("setJavaScriptCanOpenWindowsAutomatically:") func setJavaScriptCanOpenWindowsAutomatically(_ value: Bool) {}
+    @ObjCMethod("setLoadsImagesAutomatically:") func setLoadsImagesAutomatically(_ value: Bool) {}
+    @ObjCMethod("setAllowsAnimatedImages:") func setAllowsAnimatedImages(_ value: Bool) {}
+    @ObjCMethod("setStandardFontFamily:") func setStandardFontFamily(_ value: String?) {}
+    @ObjCMethod("setFixedFontFamily:") func setFixedFontFamily(_ value: String?) {}
+    @ObjCMethod("setSansSerifFontFamily:") func setSansSerifFontFamily(_ value: String?) {}
+    @ObjCMethod("setSerifFontFamily:") func setSerifFontFamily(_ value: String?) {}
+    @ObjCMethod("setUsesPageCache:") func setUsesPageCache(_ value: Bool) {}
+    @ObjCMethod("setCacheModel:") func setCacheModel(_ value: Int) {}
+    @ObjCMethod("setPrivateBrowsingEnabled:") func setPrivateBrowsingEnabled(_ value: Bool) {}
+    @ObjCMethod("setShouldPrintBackgrounds:") func setShouldPrintBackgrounds(_ value: Bool) {}
+    @ObjCMethod("setUserStyleSheetEnabled:") func setUserStyleSheetEnabled(_ value: Bool) {}
+    @ObjCMethod("setUserStyleSheetLocation:") func setUserStyleSheetLocation(_ value: NSObject?) {}
+    @ObjCMethod("setMinimumFontSize:") func setMinimumFontSize(_ value: Int) {}
+    @ObjCMethod("setMinimumLogicalFontSize:") func setMinimumLogicalFontSize(_ value: Int) {}
+}
+
+/// The DOM's root class. Pages run in another process, so frames have no
+/// documents here; this is for the categories apps add to it.
+@ObjCClass("DOMNode")
+open class DOMNode: NSObject {
+    @ObjCMethod("init") public required override init() { super.init() }
 }
 
 @ObjCClass("WebView")
@@ -1127,6 +1203,11 @@ open class WebView: NSView {
     lazy var mainFrame: WebFrame = makeFrame()
     lazy var scriptObject: WebScriptObject = makeScriptObject()
     lazy var content: WebContent = makeContent()
+    lazy var frameView: WebFrameView = {
+        let view = WebFrameView()
+        view.webViewObject = objcObject
+        return view
+    }()
 
     @ObjCMethod("initWithFrame:frameName:groupName:")
     public required init(frame: CGRect, frameName: String?, groupName: String?) {
@@ -1254,6 +1335,13 @@ open class WebView: NSView {
     @ObjCMethod("isEditable") func isEditable() -> Bool { false }
     @ObjCMethod("setMediaStyle:") func setMediaStyle(_ style: String?) {}
     @ObjCMethod("setHostWindow:") func setHostWindow(_ window: NSObject?) {}
+    @ObjCMethod("mainFrameDocument") func mainFrameDocument() -> NSObject? { nil }
+    @ObjCMethod("selectedDOMRange") func selectedDOMRange() -> NSObject? { nil }
+    @ObjCMethod("setSelectedDOMRange:affinity:") func setSelectedDOMRange(_ range: NSObject?, affinity: UInt) {}
+    @ObjCMethod("setPageSizeMultiplier:")
+    func setPageSizeMultiplier(_ multiplier: Float) {
+        _ = content.ensurePage()?.evaluateString("document.documentElement.style.zoom = \(multiplier)")
+    }
 
     /// Private settings set by key, kept.
     @ObjCMethod("setValue:forKey:")

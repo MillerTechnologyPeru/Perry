@@ -47,6 +47,12 @@ _Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list l
         aapcs64_va_list tmp_ = { (darwin_ap), NULL, NULL, 0, 0 }; \
         memcpy(&name, &tmp_, sizeof(name)); \
     } while (0)
+#elif defined(__x86_64__)
+// Darwin's x86_64 va_list is Linux's, a one-element array of the same
+// structure, so a parameter of that type points to it.
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name; \
+    memcpy(&name, (darwin_ap), sizeof(name))
 #else
 // A Darwin armv7 va_list is a pointer to the 4-byte slots after the fixed
 // arguments, and glibc armhf's is a struct holding such a pointer. Slots read
@@ -70,8 +76,8 @@ _Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
     memcpy(&name, &repacked_##name, sizeof(name))
 #endif
 
-#if defined(__aarch64__)
-// Arguments need no repacking on arm64.
+#if defined(__aarch64__) || defined(__x86_64__)
+// Arguments need no repacking on arm64 or x86_64.
 #define DARWIN_VA_FORMAT(name, format, darwin_ap) DARWIN_VA(name, darwin_ap)
 #endif
 

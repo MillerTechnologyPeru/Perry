@@ -59,5 +59,51 @@ perry_tlv_get_addr:
     pop {r1-r4, r12, lr}
     bx lr
     .size perry_tlv_get_addr, .-perry_tlv_get_addr
+#elif defined(__x86_64__)
+// The same for x86_64: the descriptor comes in rdi, the address goes out in
+// rax, and every register but those two is preserved.
+    .text
+    .globl perry_tlv_get_addr
+    .type perry_tlv_get_addr, @function
+    .p2align 4
+perry_tlv_get_addr:
+    pushq %rbp
+    movq %rsp, %rbp
+    pushq %rcx
+    pushq %rdx
+    pushq %rsi
+    pushq %r8
+    pushq %r9
+    pushq %r10
+    pushq %r11
+    subq $136, %rsp
+    movups %xmm0, 0(%rsp)
+    movups %xmm1, 16(%rsp)
+    movups %xmm2, 32(%rsp)
+    movups %xmm3, 48(%rsp)
+    movups %xmm4, 64(%rsp)
+    movups %xmm5, 80(%rsp)
+    movups %xmm6, 96(%rsp)
+    movups %xmm7, 112(%rsp)
+    call perry_tlv_address@PLT
+    movups 112(%rsp), %xmm7
+    movups 96(%rsp), %xmm6
+    movups 80(%rsp), %xmm5
+    movups 64(%rsp), %xmm4
+    movups 48(%rsp), %xmm3
+    movups 32(%rsp), %xmm2
+    movups 16(%rsp), %xmm1
+    movups 0(%rsp), %xmm0
+    addq $136, %rsp
+    popq %r11
+    popq %r10
+    popq %r9
+    popq %r8
+    popq %rsi
+    popq %rdx
+    popq %rcx
+    popq %rbp
+    ret
+    .size perry_tlv_get_addr, .-perry_tlv_get_addr
 #endif
     .section .note.GNU-stack,"",%progbits

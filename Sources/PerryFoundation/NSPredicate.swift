@@ -163,7 +163,19 @@ enum PredicateArguments {
         }
     }
 
-    /// An int, long or pointer argument; `wide` for a long long or a double.
+    /// A double argument, as its bits.
+    mutating func double() -> UInt64 {
+        switch self {
+        case .variadic(var arguments):
+            let value = arguments.nextDouble()
+            self = .variadic(arguments)
+            return value
+        case .array:
+            return word(wide: true)
+        }
+    }
+
+    /// An int, long or pointer argument; `wide` for a long long.
     mutating func word(wide: Bool = false) -> UInt64 {
         switch self {
         case .variadic(var arguments):
@@ -425,7 +437,7 @@ struct PredicateParser {
             guard let path = Strings.value(of: arguments.object()) else { fail("%K needs a key path string") }
             return .keyPath(path)
         case "%f", "%lf", "%g", "%e", "%F", "%Lf":
-            return .constant(ObjCObject(Numbers.make(nil, .double(Double(bitPattern: arguments.word(wide: true))))!))
+            return .constant(ObjCObject(Numbers.make(nil, .double(Double(bitPattern: arguments.double())))!))
         case "%u", "%lu", "%llu", "%qu", "%zu", "%x", "%lx", "%llx":
             let raw = arguments.word(wide: ["%llu", "%qu", "%llx"].contains(spec))
             let value = spec == "%u" || spec == "%x" ? UInt64(UInt32(truncatingIfNeeded: raw)) : raw

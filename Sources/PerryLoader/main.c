@@ -201,7 +201,7 @@ static void use_low_addresses(char **argv) {
 static void use_low_addresses(char **argv) { (void)argv; }
 #endif
 
-#if defined(__LP64__)
+#if defined(__aarch64__)
 // A program with no arm64 code but armv7 code is run by perry32, the same
 // loader built as a 32-bit program, which maps armv7 Mach-O beside 32-bit
 // providers: one process cannot hold both. It is found beside this program,
@@ -267,7 +267,7 @@ int main(int argc, char **argv) {
     const char *executable = has_bundle ? bundle.executable_path
                            : (realpath(target, resolved) ? resolved : target);
 
-#if defined(__LP64__)
+#if defined(__aarch64__)
     run_in_32_bit_loader(executable, argv);
 #endif
 

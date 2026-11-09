@@ -151,6 +151,21 @@ INTERNAL void perry_xml_generic_error_v(void *ctx, const char *msg, va_list ap) 
     free(text);
 }
 
+#if defined(__x86_64__)
+// Darwin's x86_64 variadic ABI is Linux's, so these need no assembly, and
+// libxml2's variadic functions bind to Linux's with no thunks.
+INTERNAL void perry_xml_call_darwin_variadic(void *function, void *ctx, const char *format, const char *argument) {
+    ((void (*)(void *, const char *, ...))function)(ctx, format, argument);
+}
+
+INTERNAL void perry_xml_generic_error_darwin(void *ctx, const char *msg, ...) {
+    va_list ap;
+    va_start(ap, msg);
+    perry_xml_generic_error_v(ctx, msg, ap);
+    va_end(ap);
+}
+#endif
+
 void darwin_xmlSetGenericErrorFunc(void *ctx, void *handler) DARWIN_SYMBOL(xmlSetGenericErrorFunc);
 
 void darwin_xmlSetGenericErrorFunc(void *ctx, void *handler) {

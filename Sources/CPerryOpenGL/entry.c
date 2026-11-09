@@ -13,7 +13,7 @@ void perry_gl_set_contended(int contended) { __atomic_store_n(&perry_gl_contende
 void perry_gl_set_before_call(void (*before)(void)) { perry_gl_before_call = before; }
 
 /// slow.S: calls perry_gl_before_call with the arguments kept, then goes on
-/// to the function in x16.
+/// to the function in x16 (r11 on x86_64).
 void perry_gl_slow(void);
 
 #if defined(__arm__)
@@ -54,6 +54,17 @@ void perry_gl_call_before(void) {
 //     ldreq pc, aligned
 //     ldr   pc, slow
 //  contended: .long   function: .long   aligned: .long   slow: .long
+//
+// On x86_64 r10 and r11 are free at a function's entry:
+//
+//     mov  r10, contended
+//     mov  r11, function
+//     cmp  dword ptr [r10], 0
+//     jne  1f
+//     jmp  r11
+//  1: jmp  slow
+//     int3 (padding)
+//  contended: .quad   function: .quad   slow: .quad
 #if defined(__arm__)
 enum { ENTRY_SIZE = 40, ARENA_SIZE = 256 * 1024 };
 #else
@@ -75,6 +86,16 @@ void *perry_gl_entry(void *function) {
         0xe59fc008,     // ldr r12, [pc, #8]
         0x059ff008,     // ldreq pc, [pc, #8]
         0xe59ff008,     // ldr pc, [pc, #8]
+    };
+#elif defined(__x86_64__)
+    static const uint8_t code[32] = {
+        0x4c, 0x8b, 0x15, 0x19, 0x00, 0x00, 0x00,   // mov r10, [rip + 25]
+        0x4c, 0x8b, 0x1d, 0x1a, 0x00, 0x00, 0x00,   // mov r11, [rip + 26]
+        0x41, 0x83, 0x3a, 0x00,                     // cmp dword ptr [r10], 0
+        0x75, 0x03,                                 // jne +3
+        0x41, 0xff, 0xe3,                           // jmp r11
+        0xff, 0x25, 0x13, 0x00, 0x00, 0x00,         // jmp [rip + 19]
+        0xcc, 0xcc, 0xcc,
     };
 #else
     static const uint32_t code[8] = {

@@ -1,6 +1,77 @@
 // Assembly thunks between the Darwin arm64 ABI and glibc.
 
-#if defined(__aarch64__) && defined(__ELF__)
+#if defined(__x86_64__) && defined(__ELF__)
+
+// Darwin's x86_64 ABI is Linux's, variadic arguments and va_list included.
+
+.macro PASSTHROUGH name, target
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    jmp \target@PLT
+    .size \name, . - \name
+.endm
+
+// Puts the address of the va_list at 176(%rsp) in the argument register
+// after the fixed arguments.
+.macro VA_LIST_ARGUMENT nfixed
+    .if \nfixed == 0
+    leaq 176(%rsp), %rdi
+    .elseif \nfixed == 1
+    leaq 176(%rsp), %rsi
+    .elseif \nfixed == 2
+    leaq 176(%rsp), %rdx
+    .elseif \nfixed == 3
+    leaq 176(%rsp), %rcx
+    .elseif \nfixed == 4
+    leaq 176(%rsp), %r8
+    .elseif \nfixed == 5
+    leaq 176(%rsp), %r9
+    .else
+    .error "too many fixed arguments"
+    .endif
+.endm
+
+// VARIADIC darwin_name, va_function, fixed_count
+//
+// Saves the argument registers and builds a va_list over them and the
+// caller's stack, then calls the v* function with it.
+.macro VARIADIC name, target, nfixed
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    pushq %rbp
+    movq %rsp, %rbp
+    subq $208, %rsp
+    movq %rdi, 0(%rsp)
+    movq %rsi, 8(%rsp)
+    movq %rdx, 16(%rsp)
+    movq %rcx, 24(%rsp)
+    movq %r8, 32(%rsp)
+    movq %r9, 40(%rsp)
+    movups %xmm0, 48(%rsp)
+    movups %xmm1, 64(%rsp)
+    movups %xmm2, 80(%rsp)
+    movups %xmm3, 96(%rsp)
+    movups %xmm4, 112(%rsp)
+    movups %xmm5, 128(%rsp)
+    movups %xmm6, 144(%rsp)
+    movups %xmm7, 160(%rsp)
+    movl $(\nfixed * 8), 176(%rsp)      // gp_offset
+    movl $48, 180(%rsp)                 // fp_offset
+    leaq 16(%rbp), %rax
+    movq %rax, 184(%rsp)                // overflow_arg_area
+    movq %rsp, 192(%rsp)                // reg_save_area
+    VA_LIST_ARGUMENT \nfixed
+    call \target@PLT
+    leave
+    ret
+    .size \name, . - \name
+.endm
+
+#elif defined(__aarch64__) && defined(__ELF__)
 
 // PASSTHROUGH darwin_name, glibc_name
 //
@@ -39,6 +110,10 @@
     ret
     .size \name, . - \name
 .endm
+
+#endif
+
+#if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
 
 .text
 
@@ -156,7 +231,6 @@ PASSTHROUGH _feof, feof
 PASSTHROUGH _ferror, ferror
 PASSTHROUGH _clearerr, clearerr
 PASSTHROUGH _rewind, rewind
-PASSTHROUGH _clock, clock
 PASSTHROUGH _setvbuf, setvbuf
 PASSTHROUGH _getline, getline
 PASSTHROUGH _flockfile, flockfile
@@ -444,6 +518,53 @@ PASSTHROUGH ___umodti3, __umodti3
 // would write past the app's buffer: the callee-saved registers, the frame
 // and link registers, sp and d8-d15 are saved here in 168 of Darwin's 192.
 // The signal mask is not saved or restored.
+#if defined(__x86_64__)
+// x86_64's jmp_buf is 148 bytes, glibc's 200: the same reasoning, in 72.
+.macro SETJMP name
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    movq %rbx, 0(%rdi)
+    movq %rbp, 8(%rdi)
+    movq %r12, 16(%rdi)
+    movq %r13, 24(%rdi)
+    movq %r14, 32(%rdi)
+    movq %r15, 40(%rdi)
+    leaq 8(%rsp), %rdx
+    movq %rdx, 48(%rdi)
+    movq (%rsp), %rdx
+    movq %rdx, 56(%rdi)
+    stmxcsr 64(%rdi)
+    fnstcw 68(%rdi)
+    xorl %eax, %eax
+    ret
+    .size \name, . - \name
+.endm
+
+.macro LONGJMP name
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    movq 0(%rdi), %rbx
+    movq 8(%rdi), %rbp
+    movq 16(%rdi), %r12
+    movq 24(%rdi), %r13
+    movq 32(%rdi), %r14
+    movq 40(%rdi), %r15
+    movq 48(%rdi), %rsp
+    movq 56(%rdi), %rdx
+    ldmxcsr 64(%rdi)
+    fldcw 68(%rdi)
+    movl %esi, %eax
+    testl %eax, %eax
+    jnz 1f
+    movl $1, %eax
+1:  jmp *%rdx
+    .size \name, . - \name
+.endm
+#else
 .macro SETJMP name
     .globl \name
     .type \name, %function
@@ -489,6 +610,7 @@ PASSTHROUGH ___umodti3, __umodti3
     ret
     .size \name, . - \name
 .endm
+#endif
 
 SETJMP _setjmp
 SETJMP __setjmp

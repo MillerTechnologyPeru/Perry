@@ -55,7 +55,14 @@ public protocol ObjCValue {
 }
 
 extension ObjCValue {
-    public static var objCReturnsIndirectly: Bool { false }
+    public static var objCReturnsIndirectly: Bool {
+        #if arch(x86_64)
+        // Over 16 bytes, x86_64 returns through a pointer in rdi.
+        MemoryLayout<ObjCResultType>.size > 16
+        #else
+        false
+        #endif
+    }
 }
 
 extension ObjCValue where ObjCResultType == ObjCType {
@@ -94,7 +101,12 @@ extension Int64: ObjCScalar { public static var objCTypeEncoding: String { "q" }
 extension UInt64: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
 extension Double: ObjCScalar { public static var objCTypeEncoding: String { "d" } }
 extension Float: ObjCScalar { public static var objCTypeEncoding: String { "f" } }
+#if arch(x86_64)
+// x86_64 Darwin's BOOL is a signed char.
+extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
+#else
 extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "B" } }
+#endif
 #endif
 extension Int32: ObjCScalar { public static var objCTypeEncoding: String { "i" } }
 extension UInt32: ObjCScalar { public static var objCTypeEncoding: String { "I" } }
@@ -117,6 +129,8 @@ extension ObjCStructure {
     public static var objCReturnsIndirectly: Bool {
         #if _pointerBitWidth(_32)
         MemoryLayout<ObjCResultType>.size > 4
+        #elseif arch(x86_64)
+        MemoryLayout<ObjCResultType>.size > 16
         #else
         false
         #endif

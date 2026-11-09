@@ -443,6 +443,24 @@ enum EAGLContexts {
             default: break
             }
         }
+#elseif arch(x86_64)
+        // x86_64: "syscall" is 0f 05. rax has the call's number when it will
+        // be made again; a call that won't be returned -EINTR there, which
+        // only calls that wait return.
+        let pc = UInt(bitPattern: Int(machine.gregs.16)), result = machine.gregs.13
+        func isCall(_ address: UInt) -> Bool {
+            UnsafeRawPointer(bitPattern: address)?.loadUnaligned(as: UInt16.self) == 0x050f
+        }
+        if pc >= 2 {
+            if isCall(pc) {
+                switch result {
+                case 202, 271, 281, 441, 7, 23, 232, 35, 230, 270, 0, 45, 47, 43, 288: waiting = true
+                default: break
+                }
+            } else if isCall(pc - 2), result == -4 {
+                waiting = true
+            }
+        }
 #else
         let pc = UInt(machine.pc)
         if pc >= 4, UnsafePointer<UInt32>(bitPattern: pc)?.pointee == 0xd400_0001

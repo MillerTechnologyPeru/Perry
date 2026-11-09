@@ -340,8 +340,8 @@ public enum Runtime {
 
     private static func makeRO(flags: UInt32, start: Int, size: Int, name: UnsafePointer<CChar>) -> UnsafeMutablePointer<perry_class_ro> {
         let ro = UnsafeMutablePointer<perry_class_ro>.allocate(capacity: 1)
-        // arm64's class_ro_t pads after instance_size; armv7's does not.
-#if arch(arm64)
+        // A 64-bit class_ro_t pads after instance_size; armv7's does not.
+#if _pointerBitWidth(_64)
         ro.initialize(to: perry_class_ro(
             flags: flags, instance_start: UInt32(start), instance_size: UInt32(size), reserved: 0,
             ivar_layout: nil, name: name, base_methods: nil, base_protocols: nil, ivars: nil,

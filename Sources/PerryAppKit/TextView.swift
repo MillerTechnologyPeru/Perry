@@ -187,26 +187,73 @@ open class NSLayoutManager: NSObject {
     @ObjCMethod("defaultLineHeightForFont:") func defaultLineHeight(for font: NSFont?) -> CGFloat { Text.lineHeight(font ?? NSFont.system(size: 12)) }
     @ObjCMethod("glyphRangeForTextContainer:") func glyphRange(for container: NSTextContainer?) -> NSRange { NSRange(location: 0, length: numberOfGlyphs()) }
 
-    // A glyph is a character here. Without a line layout to ask, the glyphs
-    // in a rectangle are all of the text.
+    // MARK: Geometry
+    //
+    // A glyph is a UTF-16 unit of the text. Rectangles are in the container's
+    // coordinates: the view's, less its text container's origin.
+
+    private var view: NSTextView? { containers.first?.textView }
+
+    private static func store(_ range: NSRange, _ pointer: UnsafeMutableRawPointer?) {
+        pointer?.storeBytes(of: range, as: NSRange.self)
+    }
+
+    private func toContainer(_ rect: CGRect) -> CGRect {
+        guard let view else { return rect }
+        return CGRect(x: rect.minX - view.textContainerInset.width, y: rect.minY - view.textContainerInset.height, width: rect.width, height: rect.height)
+    }
+
     @ObjCMethod("glyphRangeForBoundingRect:inTextContainer:")
-    func glyphRange(forBoundingRect rect: CGRect, in container: NSTextContainer?) -> NSRange { NSRange(location: 0, length: numberOfGlyphs()) }
+    func glyphRange(forBoundingRect rect: CGRect, in container: NSTextContainer?) -> NSRange {
+        guard let view else { return NSRange(location: 0, length: 0) }
+        let seen = view.fragments.filter { toContainer($0.rect).maxY >= rect.minY && toContainer($0.rect).minY <= rect.maxY }
+        guard let first = seen.first, let last = seen.last else { return NSRange(location: 0, length: 0) }
+        return NSRange(location: UInt(first.range.lowerBound), length: UInt(last.range.upperBound - first.range.lowerBound))
+    }
+
     @ObjCMethod("glyphRangeForBoundingRectWithoutAdditionalLayout:inTextContainer:")
-    func glyphRange(forBoundingRectWithoutAdditionalLayout rect: CGRect, in container: NSTextContainer?) -> NSRange {
-        NSRange(location: 0, length: numberOfGlyphs())
-    }
-    @ObjCMethod("glyphRangeForCharacterRange:actualCharacterRange:")
-    func glyphRange(forCharacterRange range: NSRange, actualCharacterRange actual: UnsafeMutablePointer<NSRange>?) -> NSRange {
-        actual?.pointee = range
-        return range
-    }
+    func glyphRangeWithoutLayout(forBoundingRect rect: CGRect, in container: NSTextContainer?) -> NSRange { glyphRange(forBoundingRect: rect, in: container) }
+
     @ObjCMethod("characterRangeForGlyphRange:actualGlyphRange:")
-    func characterRange(forGlyphRange range: NSRange, actualGlyphRange actual: UnsafeMutablePointer<NSRange>?) -> NSRange {
-        actual?.pointee = range
+    func characterRange(forGlyphRange range: NSRange, actual: UnsafeMutableRawPointer?) -> NSRange {
+        NSLayoutManager.store(range, actual)
         return range
     }
+
+    @ObjCMethod("glyphRangeForCharacterRange:actualCharacterRange:")
+    func glyphRange(forCharacterRange range: NSRange, actual: UnsafeMutableRawPointer?) -> NSRange {
+        NSLayoutManager.store(range, actual)
+        return range
+    }
+
     @ObjCMethod("characterIndexForGlyphAtIndex:") func characterIndex(forGlyphAt index: UInt) -> UInt { index }
     @ObjCMethod("glyphIndexForCharacterAtIndex:") func glyphIndex(forCharacterAt index: UInt) -> UInt { index }
+
+    @ObjCMethod("boundingRectForGlyphRange:inTextContainer:")
+    func boundingRect(forGlyphRange range: NSRange, in container: NSTextContainer?) -> CGRect {
+        view.map { toContainer($0.rect(forCharacters: Int(range.location)..<Int(range.location + range.length))) } ?? .zero
+    }
+
+    @ObjCMethod("lineFragmentRectForGlyphAtIndex:effectiveRange:")
+    func lineFragmentRect(forGlyphAt index: UInt, effectiveRange: UnsafeMutableRawPointer?) -> CGRect {
+        guard let view, let fragment = view.fragment(containing: Int(index)) else { return .zero }
+        NSLayoutManager.store(NSRange(location: UInt(fragment.range.lowerBound), length: UInt(fragment.range.count)), effectiveRange)
+        var rect = toContainer(fragment.rect)
+        rect.origin.x = 0
+        rect.size.width = view.frame.width - 2 * view.textContainerInset.width
+        return rect
+    }
+
+    @ObjCMethod("lineFragmentUsedRectForGlyphAtIndex:effectiveRange:")
+    func lineFragmentUsedRect(forGlyphAt index: UInt, effectiveRange: UnsafeMutableRawPointer?) -> CGRect {
+        guard let view, let fragment = view.fragment(containing: Int(index)) else { return .zero }
+        NSLayoutManager.store(NSRange(location: UInt(fragment.range.lowerBound), length: UInt(fragment.range.count)), effectiveRange)
+        return toContainer(fragment.rect)
+    }
+
+    @ObjCMethod("invalidateDisplayForCharacterRange:") func invalidateDisplay(forCharacterRange range: NSRange) { view?.setNeedsDisplay(true) }
+    @ObjCMethod("invalidateLayoutForCharacterRange:actualCharacterRange:")
+    func invalidateLayout(forCharacterRange range: NSRange, actual: UnsafeMutableRawPointer?) { view?.textChanged() }
 }
 
 @ObjCClass("NSTextContainer")
@@ -325,6 +372,21 @@ open class NSTextView: NSText {
     var insertionPointColor: NSColor?
     var allowsUndo = false
     var usesFindBar = false
+    /// Where a selection being extended started.
+    var selectionAnchor = 0
+    var typingAttributesObject: NSObject?
+    var defaultParagraphStyleObject: NSObject?
+    var selectedTextAttributesObject: NSObject?
+    var linkTextAttributesObject: NSObject?
+    var cachedFragments: [Fragment]?
+
+    /// A line of the laid-out text: the characters it holds, with what ends
+    /// it, and where it is in the view.
+    struct Fragment {
+        var range: Range<Int>
+        var rect: CGRect
+        var line: Text.Line
+    }
 
     public required init() {
         super.init()
@@ -427,35 +489,235 @@ open class NSTextView: NSText {
     @ObjCMethod("insertText:")
     func insertText(_ value: NSObject?) {
         guard let value else { return }
-        let end = NSRange(location: storage?.length() ?? 0, length: 0)
-        if value.responds(to: "UTF8String") { storage?.replaceCharacters(in: end, with: value.stringValue) } else {
-            storage?.replaceCharacters(in: end, withAttributedString: value)
-        }
-        didChangeText()
+        insert(value, replacing: selectedRange)
     }
-    @ObjCMethod("insertText:replacementRange:") func insertText(_ value: NSObject?, replacementRange: NSRange) { insertText(value) }
+    @ObjCMethod("insertText:replacementRange:")
+    func insertText(_ value: NSObject?, replacementRange: NSRange) {
+        guard let value else { return }
+        insert(value, replacing: replacementRange.location == UInt(Int.max) ? selectedRange : replacementRange)
+    }
+
+    /// Replaces a range as typing does, asking first and telling after,
+    /// leaving the insertion point after the new text.
+    private func insert(_ value: NSObject, replacing range: NSRange) {
+        guard let storage else { return }
+        let isString = value.responds(to: "UTF8String")
+        let text = isString ? value.stringValue : Send.object(value.objcObject, "string").map { NSObject($0).stringValue } ?? ""
+        typealias Ask = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange, UnsafeMutableRawPointer?) -> Bool
+        let ask = unsafeBitCast(ObjCRuntime.msgSend, to: Ask.self)
+        let replacement = NSObject(objCReturnValue: text.objCReturnValue())
+        guard ask(objcObject, ObjCRuntime.selector("shouldChangeTextInRange:replacementString:"), range, replacement.objcObject) else { return }
+        if isString { storage.replaceCharacters(in: range, with: text) } else { storage.replaceCharacters(in: range, withAttributedString: value) }
+        moveInsertionPoint(to: Int(range.location) + text.utf16.count)
+        Send.void(objcObject, "didChangeText")
+    }
+
+    @ObjCMethod("replaceCharactersInRange:withString:")
+    func replaceCharacters(in range: NSRange, with text: String?) {
+        storage?.replaceCharacters(in: range, with: text ?? "")
+        textChanged()
+    }
+
     @ObjCMethod("didChangeText")
     func didChangeText() {
         let notification = NSNotification.make(name: Constants.NSTextDidChangeNotification, object: self)
         if Send.responds(delegateObject, "textDidChange:") { Send.void(delegateObject, "textDidChange:", notification.objcObject) }
         NSNotificationCenter.defaultCenter().post(notification)
     }
-    @ObjCMethod("shouldChangeTextInRange:replacementString:") func shouldChangeText(in range: NSRange, replacementString: String?) -> Bool { editable }
+    @ObjCMethod("shouldChangeTextInRange:replacementString:")
+    func shouldChangeText(in range: NSRange, replacementString: String?) -> Bool {
+        guard editable else { return false }
+        guard Send.responds(delegateObject, "textView:shouldChangeTextInRange:replacementString:") else { return true }
+        typealias Ask = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, UnsafeMutableRawPointer, NSRange, UnsafeMutableRawPointer?) -> Bool
+        let replacement = replacementString.map { NSObject(objCReturnValue: $0.objCReturnValue()).objcObject }
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Ask.self)(delegateObject, ObjCRuntime.selector("textView:shouldChangeTextInRange:replacementString:"),
+                                                                objcObject, range, replacement)
+    }
     @ObjCMethod("selectedRange") func viewSelectedRange() -> NSRange { selectedRange }
-    @ObjCMethod("setSelectedRange:") func setSelectedRange(_ range: NSRange) { selectedRange = range }
-    @ObjCMethod("selectedRanges") func selectedRanges() -> NSObject { NSMutableArray.empty() }
-    @ObjCMethod("setSelectedRanges:") func setSelectedRanges(_ ranges: NSObject?) {}
+    @ObjCMethod("setSelectedRange:")
+    func setSelectedRange(_ range: NSRange) {
+        let length = storage?.length() ?? 0
+        let location = min(range.location, length)
+        selectedRange = NSRange(location: location, length: min(range.length, length - location))
+        selectionAnchor = Int(selectedRange.location)
+        selectionChanged()
+    }
+    @ObjCMethod("setSelectedRange:affinity:stillSelecting:")
+    func setSelectedRange(_ range: NSRange, affinity: UInt, stillSelecting: Bool) { setSelectedRange(range) }
+    @ObjCMethod("selectedRanges")
+    func selectedRanges() -> NSObject {
+        typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, NSRange) -> UnsafeMutableRawPointer?
+        let value = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(Classes.named("NSValue")?.pointer, ObjCRuntime.selector("valueWithRange:"), selectedRange)
+        let array = NSMutableArray.empty()
+        Send.void(array.objcObject, "addObject:", value)
+        return array
+    }
+    @ObjCMethod("setSelectedRanges:")
+    func setSelectedRanges(_ ranges: NSObject?) {
+        guard let first = ranges.flatMap({ Send.object($0.objcObject, "firstObject") }) else { return }
+        typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> NSRange
+        setSelectedRange(unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(first, ObjCRuntime.selector("rangeValue")))
+    }
     @ObjCMethod("scrollRangeToVisible:")
     func scrollRangeToVisible(_ range: NSRange) {
-        // The end of the text: as apps scroll a log to its last line.
-        _ = scrollRectToVisible(CGRect(x: 0, y: max(0, bounds.height - 1), width: 1, height: 1))
+        _ = scrollRectToVisible(rect(forCharacters: Int(range.location)..<Int(range.location + range.length)))
     }
-    @ObjCMethod("scrollToEndOfDocument:") func scrollToEndOfDocument(_ sender: NSObject?) { scrollRangeToVisible(NSRange(location: 0, length: 0)) }
+    @ObjCMethod("scrollToEndOfDocument:") func scrollToEndOfDocument(_ sender: NSObject?) { _ = scrollRectToVisible(CGRect(x: 0, y: max(0, bounds.height - 1), width: 1, height: 1)) }
     @ObjCMethod("scrollToBeginningOfDocument:") func scrollToBeginningOfDocument(_ sender: NSObject?) { _ = scrollRectToVisible(CGRect(x: 0, y: 0, width: 1, height: 1)) }
-    @ObjCMethod("selectAll:") func selectAll(_ sender: NSObject?) { selectedRange = NSRange(location: 0, length: storage?.length() ?? 0) }
+    @ObjCMethod("selectAll:")
+    func selectAll(_ sender: NSObject?) { setSelectedRange(NSRange(location: 0, length: storage?.length() ?? 0)) }
+
+    private var selectedText: String {
+        let utf16 = Array(string.utf16)
+        let start = Int(selectedRange.location)
+        return String(decoding: utf16[start..<start + Int(selectedRange.length)], as: UTF16.self)
+    }
+
     @ObjCMethod("copy:")
-    func copyText(_ sender: NSObject?) { _ = NSPasteboard.generalPasteboard().setString(string, forType: Constants.NSPasteboardTypeString) }
-    @ObjCMethod("delete:") func deleteText(_ sender: NSObject?) {}
+    func copyText(_ sender: NSObject?) {
+        guard selectedRange.length > 0 else { return }
+        _ = NSPasteboard.generalPasteboard().setString(selectedText, forType: Constants.NSPasteboardTypeString)
+    }
+    @ObjCMethod("cut:")
+    func cut(_ sender: NSObject?) {
+        copyText(sender)
+        deleteText(sender)
+    }
+    @ObjCMethod("paste:")
+    func paste(_ sender: NSObject?) {
+        guard let text = NSPasteboard.generalPasteboard().string(forType: Constants.NSPasteboardTypeString) else { return }
+        typeText(text)
+    }
+    @ObjCMethod("delete:")
+    func deleteText(_ sender: NSObject?) { if selectedRange.length > 0 { typeText("") } }
+
+    private func typeText(_ text: String) {
+        Send.void(objcObject, "insertText:", NSObject(objCReturnValue: text.objCReturnValue()).objcObject)
+    }
+
+    private func deleteTo(_ other: Int) {
+        guard selectedRange.length == 0 else { return deleteText(nil) }
+        let caret = Int(selectedRange.location)
+        guard other != caret else { return }
+        selectedRange = NSRange(location: UInt(min(caret, other)), length: UInt(abs(other - caret)))
+        typeText("")
+    }
+
+    // MARK: Moving the insertion point
+
+    /// Sends the selection's changes to the delegate and observers.
+    private func selectionChanged() {
+        setNeedsDisplay(true)
+        let notification = NSNotification.make(name: "NSTextViewDidChangeSelectionNotification", object: self)
+        if Send.responds(delegateObject, "textViewDidChangeSelection:") { Send.void(delegateObject, "textViewDidChangeSelection:", notification.objcObject) }
+        NSNotificationCenter.defaultCenter().post(notification)
+    }
+
+    private func moveInsertionPoint(to index: Int, extending: Bool = false) {
+        let length = Int(storage?.length() ?? 0)
+        let target = max(0, min(length, index))
+        if !extending { selectionAnchor = target }
+        selectedRange = NSRange(location: UInt(min(selectionAnchor, target)), length: UInt(abs(selectionAnchor - target)))
+        selectionChanged()
+        scrollRangeToVisible(NSRange(location: UInt(target), length: 0))
+    }
+
+    private var movingEnd: Int {
+        let start = Int(selectedRange.location)
+        return selectionAnchor == start ? start + Int(selectedRange.length) : start
+    }
+
+    private func vertical(_ lines: Int) -> Int {
+        let all = fragments
+        guard let current = fragment(containing: movingEnd), let index = all.firstIndex(where: { $0.range == current.range }) else { return movingEnd }
+        let target = index + lines
+        if target < 0 { return 0 }
+        if target >= all.count { return Int(storage?.length() ?? 0) }
+        return characterIndex(at: CGPoint(x: x(of: movingEnd, in: current), y: all[target].rect.midY))
+    }
+
+    private func word(from index: Int, forward: Bool) -> Int {
+        let units = Array(string.utf16)
+        func isWord(_ unit: UInt16) -> Bool { Unicode.Scalar(unit).map { $0.properties.isAlphabetic || $0.properties.numericType != nil } ?? false }
+        var at = index
+        if forward {
+            while at < units.count, !isWord(units[at]) { at += 1 }
+            while at < units.count, isWord(units[at]) { at += 1 }
+        } else {
+            while at > 0, !isWord(units[at - 1]) { at -= 1 }
+            while at > 0, isWord(units[at - 1]) { at -= 1 }
+        }
+        return at
+    }
+
+    private var lineStart: Int { fragment(containing: movingEnd)?.range.lowerBound ?? 0 }
+    private var lineEnd: Int {
+        guard let line = fragment(containing: movingEnd) else { return 0 }
+        return line.range.lowerBound + line.line.text.utf16.count
+    }
+
+    private func moved(left: Bool) -> Int {
+        guard selectedRange.length == 0 else { return Int(selectedRange.location) + (left ? 0 : Int(selectedRange.length)) }
+        let units = Array(string.utf16)
+        var at = movingEnd + (left ? -1 : 1)
+        // Not between the halves of a surrogate pair.
+        if at > 0, at < units.count, UTF16.isTrailSurrogate(units[at]) { at += left ? -1 : 1 }
+        return at
+    }
+
+    private func steppedOneCharacter(left: Bool) -> Int {
+        let units = Array(string.utf16)
+        var at = movingEnd + (left ? -1 : 1)
+        if at > 0, at < units.count, UTF16.isTrailSurrogate(units[at]) { at += left ? -1 : 1 }
+        return at
+    }
+
+    @ObjCMethod("moveLeft:") func moveLeft(_ s: NSObject?) { moveInsertionPoint(to: moved(left: true)) }
+    @ObjCMethod("moveRight:") func moveRight(_ s: NSObject?) { moveInsertionPoint(to: moved(left: false)) }
+    @ObjCMethod("moveBackward:") func moveBackward(_ s: NSObject?) { moveLeft(s) }
+    @ObjCMethod("moveForward:") func moveForward(_ s: NSObject?) { moveRight(s) }
+    @ObjCMethod("moveUp:") func moveUp(_ s: NSObject?) { moveInsertionPoint(to: vertical(-1)) }
+    @ObjCMethod("moveDown:") func moveDown(_ s: NSObject?) { moveInsertionPoint(to: vertical(1)) }
+    @ObjCMethod("pageUp:") func pageUp(_ s: NSObject?) { moveInsertionPoint(to: vertical(-30)) }
+    @ObjCMethod("pageDown:") func pageDown(_ s: NSObject?) { moveInsertionPoint(to: vertical(30)) }
+    @ObjCMethod("moveWordLeft:") func moveWordLeft(_ s: NSObject?) { moveInsertionPoint(to: word(from: movingEnd, forward: false)) }
+    @ObjCMethod("moveWordRight:") func moveWordRight(_ s: NSObject?) { moveInsertionPoint(to: word(from: movingEnd, forward: true)) }
+    @ObjCMethod("moveToLeftEndOfLine:") func moveToLeftEndOfLine(_ s: NSObject?) { moveInsertionPoint(to: lineStart) }
+    @ObjCMethod("moveToRightEndOfLine:") func moveToRightEndOfLine(_ s: NSObject?) { moveInsertionPoint(to: lineEnd) }
+    @ObjCMethod("moveToBeginningOfLine:") func moveToBeginningOfLine(_ s: NSObject?) { moveInsertionPoint(to: lineStart) }
+    @ObjCMethod("moveToEndOfLine:") func moveToEndOfLine(_ s: NSObject?) { moveInsertionPoint(to: lineEnd) }
+    @ObjCMethod("moveToBeginningOfDocument:") func moveToBeginningOfDocument(_ s: NSObject?) { moveInsertionPoint(to: 0) }
+    @ObjCMethod("moveToEndOfDocument:") func moveToEndOfDocument(_ s: NSObject?) { moveInsertionPoint(to: Int.max) }
+    @ObjCMethod("moveLeftAndModifySelection:") func moveLeftExtending(_ s: NSObject?) { moveInsertionPoint(to: steppedOneCharacter(left: true), extending: true) }
+    @ObjCMethod("moveRightAndModifySelection:") func moveRightExtending(_ s: NSObject?) { moveInsertionPoint(to: steppedOneCharacter(left: false), extending: true) }
+    @ObjCMethod("moveUpAndModifySelection:") func moveUpExtending(_ s: NSObject?) { moveInsertionPoint(to: vertical(-1), extending: true) }
+    @ObjCMethod("moveDownAndModifySelection:") func moveDownExtending(_ s: NSObject?) { moveInsertionPoint(to: vertical(1), extending: true) }
+    @ObjCMethod("moveWordLeftAndModifySelection:") func moveWordLeftExtending(_ s: NSObject?) { moveInsertionPoint(to: word(from: movingEnd, forward: false), extending: true) }
+    @ObjCMethod("moveWordRightAndModifySelection:") func moveWordRightExtending(_ s: NSObject?) { moveInsertionPoint(to: word(from: movingEnd, forward: true), extending: true) }
+    @ObjCMethod("moveToLeftEndOfLineAndModifySelection:") func moveToLeftEndExtending(_ s: NSObject?) { moveInsertionPoint(to: lineStart, extending: true) }
+    @ObjCMethod("moveToRightEndOfLineAndModifySelection:") func moveToRightEndExtending(_ s: NSObject?) { moveInsertionPoint(to: lineEnd, extending: true) }
+    @ObjCMethod("moveToBeginningOfDocumentAndModifySelection:") func moveToDocumentStartExtending(_ s: NSObject?) { moveInsertionPoint(to: 0, extending: true) }
+    @ObjCMethod("moveToEndOfDocumentAndModifySelection:") func moveToDocumentEndExtending(_ s: NSObject?) { moveInsertionPoint(to: Int.max, extending: true) }
+
+    @ObjCMethod("deleteBackward:") func deleteBackward(_ s: NSObject?) { deleteTo(steppedOneCharacter(left: true)) }
+    @ObjCMethod("deleteForward:") func deleteForward(_ s: NSObject?) { deleteTo(steppedOneCharacter(left: false)) }
+    @ObjCMethod("deleteWordBackward:") func deleteWordBackward(_ s: NSObject?) { deleteTo(word(from: movingEnd, forward: false)) }
+    @ObjCMethod("deleteWordForward:") func deleteWordForward(_ s: NSObject?) { deleteTo(word(from: movingEnd, forward: true)) }
+    @ObjCMethod("deleteToBeginningOfLine:") func deleteToBeginningOfLine(_ s: NSObject?) { deleteTo(lineStart) }
+    @ObjCMethod("deleteToEndOfLine:") func deleteToEndOfLine(_ s: NSObject?) { deleteTo(lineEnd) }
+    @ObjCMethod("insertNewline:") func insertNewline(_ s: NSObject?) { typeText("\n") }
+    @ObjCMethod("insertTab:") func insertTab(_ s: NSObject?) { typeText("\t") }
+    @ObjCMethod("insertBacktab:") func insertBacktab(_ s: NSObject?) {}
+    @ObjCMethod("insertNewlineIgnoringFieldEditor:") func insertNewlineIgnoringFieldEditor(_ s: NSObject?) { typeText("\n") }
+    @ObjCMethod("insertTabIgnoringFieldEditor:") func insertTabIgnoringFieldEditor(_ s: NSObject?) { typeText("\t") }
+    @ObjCMethod("doCommandBySelector:")
+    func doCommand(by selector: ObjCSelector?) {
+        guard let selector else { return }
+        typealias Run = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Run.self)(objcObject, selector.pointer, objcObject)
+    }
+    @ObjCMethod("hasMarkedText") func hasMarkedText() -> Bool { false }
+    @ObjCMethod("markedRange") func markedRange() -> NSRange { NSRange(location: UInt(Int.max), length: 0) }
 
     // MARK: Settings
 
@@ -522,10 +784,14 @@ open class NSTextView: NSText {
     @ObjCMethod("valueForUndefinedKey:") func value(forUndefinedKey key: String) -> NSObject? { nil }
     @ObjCMethod("setSmartInsertDeleteEnabled:") func setSmartInsertDeleteEnabled(_ value: Bool) { switches["SmartInsertDelete"] = value }
     @ObjCMethod("isSmartInsertDeleteEnabled") func isSmartInsertDeleteEnabled() -> Bool { switches["SmartInsertDelete"] ?? true }
-    @ObjCMethod("setLinkTextAttributes:") func setLinkTextAttributes(_ value: NSObject?) {}
-    @ObjCMethod("setTypingAttributes:") func setTypingAttributes(_ value: NSObject?) {}
-    @ObjCMethod("typingAttributes") func typingAttributes() -> NSObject { NSMutableDictionary.empty() }
-    @ObjCMethod("setDefaultParagraphStyle:") func setDefaultParagraphStyle(_ value: NSObject?) {}
+    @ObjCMethod("linkTextAttributes") func linkTextAttributes() -> NSObject? { linkTextAttributesObject }
+    @ObjCMethod("setLinkTextAttributes:") func setLinkTextAttributes(_ value: NSObject?) { linkTextAttributesObject = value }
+    @ObjCMethod("selectedTextAttributes") func selectedTextAttributes() -> NSObject? { selectedTextAttributesObject }
+    @ObjCMethod("setSelectedTextAttributes:") func setSelectedTextAttributes(_ value: NSObject?) { selectedTextAttributesObject = value; setNeedsDisplay(true) }
+    @ObjCMethod("setTypingAttributes:") func setTypingAttributes(_ value: NSObject?) { typingAttributesObject = value }
+    @ObjCMethod("typingAttributes") func typingAttributes() -> NSObject { typingAttributesObject ?? NSMutableDictionary.empty() }
+    @ObjCMethod("defaultParagraphStyle") func defaultParagraphStyle() -> NSObject? { defaultParagraphStyleObject }
+    @ObjCMethod("setDefaultParagraphStyle:") func setDefaultParagraphStyle(_ value: NSObject?) { defaultParagraphStyleObject = value }
     @ObjCMethod("sizeToFit") func sizeToFit() { textChanged() }
     @ObjCMethod("isFlipped") override func isFlipped() -> Bool { true }
     @ObjCMethod("acceptsFirstResponder") override func acceptsFirstResponder() -> Bool { selectable || editable }
@@ -554,6 +820,7 @@ open class NSTextView: NSText {
     /// The text changed: a vertically resizable view grows to hold it (at
     /// least as tall as its clip view), and draws again.
     func textChanged() {
+        cachedFragments = nil
         if verticallyResizable {
             let height = textSize(width: frame.width).height + 2 * textContainerInset.height
             let clip = superview?.as(NSClipView.self)?.bounds.height ?? 0
@@ -565,6 +832,97 @@ open class NSTextView: NSText {
 
     @ObjCMethod("viewDidMoveToSuperview") override func viewDidMoveToSuperview() { textChanged() }
 
+    @ObjCMethod("setFrameSize:")
+    override func setFrameSize(_ size: CGSize) {
+        if abs(size.width - frame.width) > 0.5 { cachedFragments = nil }
+        super.setFrameSize(size)
+    }
+
+    // MARK: Layout
+
+    /// The text's lines, each with the characters it holds.
+    var fragments: [Fragment] {
+        if let cachedFragments { return cachedFragments }
+        let padding = container?.lineFragmentPadding ?? 5
+        let width = max(1, frame.width - 2 * (textContainerInset.width + padding))
+        let (runs, style) = runs()
+        let units = Array(string.utf16)
+        let minimumHeight = Text.lineHeight(effectiveFont)
+        var made: [Fragment] = []
+        var position = 0
+        var top = textContainerInset.height
+        func add(_ line: Text.Line, upTo end: Int) {
+            let height = max(line.height, minimumHeight)
+            made.append(Fragment(range: position..<end, rect: CGRect(x: textContainerInset.width + padding, y: top, width: line.width, height: height), line: line))
+            top += height + style.lineSpacing
+            position = end
+        }
+        for line in Text.layout(runs, width: width, style: style) {
+            var end = min(units.count, position + line.text.utf16.count)
+            while end < units.count, units[end] == 32 { end += 1 }
+            if end < units.count, units[end] == 10 { end += 1 }
+            add(line, upTo: end)
+        }
+        // After a last newline there is one more, empty line, for the caret.
+        if units.last == 10 { add(Text.Line(), upTo: units.count) }
+        cachedFragments = made
+        return made
+    }
+
+    func fragment(containing index: Int) -> Fragment? {
+        fragments.last { $0.range.lowerBound <= index } ?? fragments.first
+    }
+
+    /// The x of the place before a character in its line.
+    func x(of index: Int, in fragment: Fragment) -> CGFloat {
+        var remaining = index - fragment.range.lowerBound
+        var x = fragment.rect.minX
+        for piece in fragment.line.pieces {
+            let units = Array(piece.run.text.utf16)
+            if remaining < units.count {
+                return x + Text.width(String(decoding: units.prefix(max(0, remaining)), as: UTF16.self), font: piece.run.font)
+            }
+            remaining -= units.count
+            x += piece.width
+        }
+        return x
+    }
+
+    /// The character boundary nearest a point in the view.
+    func characterIndex(at point: CGPoint) -> Int {
+        let all = fragments
+        guard let line = all.first(where: { point.y < $0.rect.maxY }) ?? all.last else { return 0 }
+        var low = line.range.lowerBound
+        var high = low + line.line.text.utf16.count
+        let end = high
+        while low < high {
+            let middle = (low + high) / 2
+            if x(of: middle, in: line) < point.x { low = middle + 1 } else { high = middle }
+        }
+        if low > line.range.lowerBound, low <= end, point.x - x(of: low - 1, in: line) < x(of: low, in: line) - point.x { return low - 1 }
+        return low
+    }
+
+    /// The rectangle around characters, in the view, or an insertion point's.
+    func rect(forCharacters range: Range<Int>) -> CGRect {
+        let touched = fragments.filter { $0.range.overlaps(range) || $0.range.lowerBound == range.lowerBound }
+        guard let first = touched.first ?? fragment(containing: range.lowerBound), let last = touched.last ?? fragment(containing: range.lowerBound) else {
+            return CGRect(x: textContainerInset.width, y: textContainerInset.height, width: 1, height: Text.lineHeight(effectiveFont))
+        }
+        if first.range == last.range {
+            let start = x(of: range.lowerBound, in: first)
+            return CGRect(x: start, y: first.rect.minY, width: max(1, x(of: range.upperBound, in: first) - start), height: first.rect.height)
+        }
+        let left = touched.map(\.rect.minX).min() ?? first.rect.minX
+        let right = touched.map(\.rect.maxX).max() ?? first.rect.maxX
+        return CGRect(x: left, y: first.rect.minY, width: right - left, height: last.rect.maxY - first.rect.minY)
+    }
+
+    private var selectionColor: NSColor {
+        let attributes = selectedTextAttributesObject?.as(NSDictionary.self)
+        return attributes?.object(forKey: "NSBackgroundColor")?.as(NSColor.self) ?? NSColor.selectedTextBackgroundColor()
+    }
+
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard let context = NSGraphicsContext.currentCG else { return }
@@ -574,6 +932,20 @@ open class NSTextView: NSText {
             CG.fillRect(context, bounds)
             CG.restoreGState(context)
         }
+        let selection = Int(selectedRange.location)..<Int(selectedRange.location + selectedRange.length)
+        CG.saveGState(context)
+        if !selection.isEmpty {
+            CG.setFill(context, selectionColor)
+            for line in fragments where line.range.overlaps(selection) {
+                let start = x(of: max(selection.lowerBound, line.range.lowerBound), in: line)
+                let end = selection.upperBound >= line.range.upperBound ? line.rect.maxX + 4 : x(of: selection.upperBound, in: line)
+                CG.fillRect(context, CGRect(x: start, y: line.rect.minY, width: max(1, end - start), height: line.rect.height))
+            }
+        } else if editing, let line = fragment(containing: selection.lowerBound) {
+            CG.setFill(context, insertionPointColor ?? textColor ?? NSColor.textColor())
+            CG.fillRect(context, CGRect(x: x(of: selection.lowerBound, in: line), y: line.rect.minY, width: 1, height: line.rect.height))
+        }
+        CG.restoreGState(context)
         let padding = container?.lineFragmentPadding ?? 5
         let (runs, style) = runs()
         let area = CGRect(x: textContainerInset.width + padding, y: textContainerInset.height,
@@ -581,9 +953,36 @@ open class NSTextView: NSText {
         Text.draw(runs, in: area, style: style)
     }
 
+    // MARK: Mouse
+
+    private func point(of event: NSEvent) -> CGPoint { convert(event.locationInWindow, from: nil) }
+
+    @ObjCMethod("mouseDown:")
+    override func mouseDown(_ eventObject: NSObject?) {
+        guard selectable || editable, let event = eventObject?.as(NSEvent.self) else { return }
+        if let window = Send.object(objcObject, "window") { _ = Send.bool(window, "makeFirstResponder:", objcObject) }
+        let index = characterIndex(at: point(of: event))
+        switch event.clickCount {
+        case 2:
+            let start = word(from: min(index + 1, Int(storage?.length() ?? 0)), forward: false)
+            setSelectedRange(NSRange(location: UInt(start), length: UInt(max(start, word(from: start, forward: true)) - start)))
+        case 3...:
+            if let line = fragment(containing: index) { setSelectedRange(NSRange(location: UInt(line.range.lowerBound), length: UInt(line.range.count))) }
+        default:
+            moveInsertionPoint(to: index)
+        }
+    }
+
+    @ObjCMethod("mouseDragged:")
+    override func mouseDragged(_ eventObject: NSObject?) {
+        guard selectable || editable, let event = eventObject?.as(NSEvent.self) else { return }
+        moveInsertionPoint(to: characterIndex(at: point(of: event)), extending: true)
+    }
+
     @ObjCMethod("becomeFirstResponder")
     override func becomeFirstResponder() -> Bool {
         editing = editable
+        setNeedsDisplay(true)
         return true
     }
 
@@ -595,20 +994,61 @@ open class NSTextView: NSText {
 
     @ObjCMethod("keyDown:")
     override func keyDown(_ eventObject: NSObject?) {
-        guard editing, let event = eventObject?.as(NSEvent.self), let storage else { return super.keyDown(eventObject) }
+        guard editable || selectable, let event = eventObject?.as(NSEvent.self) else { return super.keyDown(eventObject) }
+        let flags = event.modifierFlags
+        let shift = flags & ModifierFlags.shift != 0, command = flags & ModifierFlags.command != 0, option = flags & ModifierFlags.option != 0
         let typed = event.characters
-        let length = storage.length()
-        switch typed {
-        case "\u{7f}", "\u{8}":
-            guard length > 0 else { return }
-            storage.deleteCharacters(in: NSRange(location: length - 1, length: 1))
-        case "\r", "\u{3}":
-            storage.replaceCharacters(in: NSRange(location: length, length: 0), with: "\n")
-        default:
-            guard !typed.isEmpty, event.modifierFlags & ModifierFlags.command == 0,
-                  typed.unicodeScalars.allSatisfy({ $0.value >= 0x20 && !(0xF700...0xF8FF).contains($0.value) }) else { return super.keyDown(eventObject) }
-            storage.replaceCharacters(in: NSRange(location: length, length: 0), with: typed)
+        let suffix = shift ? "AndModifySelection:" : ":"
+        var action: String?
+        switch typed.unicodeScalars.first?.value {
+        case 0xF702: action = (command ? "moveToLeftEndOfLine" : option ? "moveWordLeft" : "moveLeft") + suffix
+        case 0xF703: action = (command ? "moveToRightEndOfLine" : option ? "moveWordRight" : "moveRight") + suffix
+        case 0xF700: action = (command ? "moveToBeginningOfDocument" : "moveUp") + suffix
+        case 0xF701: action = (command ? "moveToEndOfDocument" : "moveDown") + suffix
+        case 0xF729: action = "moveToLeftEndOfLine" + suffix
+        case 0xF72B: action = "moveToRightEndOfLine" + suffix
+        case 0xF72C: action = "pageUp:"
+        case 0xF72D: action = "pageDown:"
+        case 0xF728: action = option ? "deleteWordForward:" : "deleteForward:"
+        case 0x7f, 0x8: action = command ? "deleteToBeginningOfLine:" : option ? "deleteWordBackward:" : "deleteBackward:"
+        case 0xD, 0x3: action = "insertNewline:"
+        case 0x9: action = shift ? "insertBacktab:" : "insertTab:"
+        case 0x19: action = "insertBacktab:"
+        default: break
         }
-        didChangeText()
+        if let action {
+            if Send.responds(objcObject, action) { Send.void(objcObject, action, objcObject) }
+            return
+        }
+        guard editing, !command, !typed.isEmpty,
+              typed.unicodeScalars.allSatisfy({ $0.value >= 0x20 && !(0xF700...0xF8FF).contains($0.value) }) else { return super.keyDown(eventObject) }
+        Send.void(objcObject, "insertText:", NSObject(objCReturnValue: typed.objCReturnValue()).objcObject)
+    }
+}
+
+@ObjCCategory("TextEditing")
+extension NSAttributedString {
+    /// Sets or clears NSBoldFontMask (2), NSItalicFontMask (1), NSUnboldFontMask (4)
+    /// and NSUnitalicFontMask (0x1000000) on the font of each run in a range.
+    @ObjCMethod("applyFontTraits:range:")
+    func applyFontTraits(_ traits: UInt, range: NSRange) {
+        typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        typealias Write = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, NSRange) -> Void
+        let read = unsafeBitCast(ObjCRuntime.msgSend, to: Read.self), write = unsafeBitCast(ObjCRuntime.msgSend, to: Write.self)
+        let key = NSObject(objCReturnValue: "NSFont".objCReturnValue()).objcObject
+        var index = range.location
+        let end = range.location + range.length
+        while index < end {
+            var run = NSRange(location: index, length: 1)
+            let value = read(objcObject, ObjCRuntime.selector("attribute:atIndex:effectiveRange:"), key, index, &run)
+            let next = min(end, run.location + max(run.length, 1))
+            if let value, let font = NSObject(value).as(NSFont.self) {
+                let bold: Bool? = traits & 2 != 0 ? true : traits & 4 != 0 ? false : nil
+                let italic: Bool? = traits & 1 != 0 ? true : traits & 0x1000000 != 0 ? false : nil
+                write(objcObject, ObjCRuntime.selector("addAttribute:value:range:"), key, font.with(bold: bold, italic: italic).objcObject,
+                      NSRange(location: index, length: next - index))
+            }
+            index = next
+        }
     }
 }

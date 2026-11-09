@@ -132,7 +132,10 @@ typedef struct macho_file {
 static uint32_t be32(uint32_t v) { return __builtin_bswap32(v); }
 static uint64_t be64(uint64_t v) { return __builtin_bswap64(v); }
 
-#if defined(__LP64__)
+#if defined(__x86_64__)
+#define NATIVE_CPU_TYPE CPU_TYPE_X86_64
+#define NATIVE_CPU_NAME "x86_64"
+#elif defined(__LP64__)
 #define NATIVE_CPU_TYPE CPU_TYPE_ARM64
 #define NATIVE_CPU_NAME "arm64"
 #else
@@ -147,7 +150,10 @@ static bool cpu_supported(int32_t cputype, int32_t cpusubtype) {
     uint32_t sub = (uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK;
     if (cputype != NATIVE_CPU_TYPE)
         return false;
-#if defined(__LP64__)
+#if defined(__x86_64__)
+    (void)sub;
+    return true;
+#elif defined(__LP64__)
     return sub != CPU_SUBTYPE_ARM64E;
 #else
     return sub == CPU_SUBTYPE_ARM_ALL || sub == CPU_SUBTYPE_ARM_V6 || sub == CPU_SUBTYPE_ARM_V7 ||
@@ -173,7 +179,11 @@ static int cpu_rank(int32_t cpusubtype) {
 }
 
 static void check_cpu(const char *path, int32_t cputype, int32_t cpusubtype) {
-#if defined(__LP64__)
+#if defined(__x86_64__)
+    (void)cpusubtype;
+    if (cputype != CPU_TYPE_X86_64)
+        perry_fatal("%s: not an x86_64 binary (cputype 0x%x)", path, cputype);
+#elif defined(__LP64__)
     if (cputype != CPU_TYPE_ARM64)
         perry_fatal("%s: not an arm64 binary (cputype 0x%x)", path, cputype);
     if (((uint32_t)cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_ARM64E)
@@ -203,6 +213,8 @@ unsigned perry_macho_architectures(const char *path) {
                 archs |= PERRY_ARCH_ARMV7;
             else if (head.mh.cputype == CPU_TYPE_ARM64)
                 archs |= PERRY_ARCH_ARM64;
+            else if (head.mh.cputype == CPU_TYPE_X86_64)
+                archs |= PERRY_ARCH_X86_64;
         } else if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
             bool is64 = magic == be32(FAT_MAGIC_64);
             size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
@@ -214,6 +226,8 @@ unsigned perry_macho_architectures(const char *path) {
                     archs |= PERRY_ARCH_ARMV7;
                 else if (cputype == CPU_TYPE_ARM64)
                     archs |= PERRY_ARCH_ARM64;
+                else if (cputype == CPU_TYPE_X86_64)
+                    archs |= PERRY_ARCH_X86_64;
             }
         }
     }
@@ -555,7 +569,7 @@ static perry_image *map_image(perry_loader *loader, const char *path, const mach
 // on iOS. So the first two instructions become
 //     mrs x9, TPIDR_EL0;    sub x9, x9, #distance
 // in the image's code, before it is made read-only.
-#if defined(__LP64__)
+#if defined(__aarch64__)
 static void use_linux_thread_pointer(perry_image *image, const perry_segment *seg) {
     enum { DARWIN_TSD_OFFSET = 0xe0 };
     long distance = (long)((uintptr_t)__builtin_thread_pointer() - (uintptr_t)pthread_self()) - DARWIN_TSD_OFFSET;

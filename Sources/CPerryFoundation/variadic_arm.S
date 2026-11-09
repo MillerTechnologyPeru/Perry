@@ -81,3 +81,5 @@ VARIADIC perry_imp_raiseFormat, perry_foundation_raiseFormat, 4
     .section .note.GNU-stack, "", %progbits
 
 #endif
+
+.section .note.GNU-stack, "", %progbits

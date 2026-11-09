@@ -76,6 +76,23 @@ static void print_registers(const mcontext_t *machine) {
         crash_print("\n");
     }
 }
+#elif defined(__x86_64__)
+#define FRAME_POINTER(machine) ((uintptr_t)(machine)->gregs[REG_RBP])
+#define FRAME_ALIGNMENT 7
+
+static void print_registers(const mcontext_t *machine) {
+    static const struct { const char *name; int index; } registers[] = {
+        {"rax", REG_RAX}, {"rbx", REG_RBX}, {"rcx", REG_RCX}, {"rdx", REG_RDX},
+        {"rsi", REG_RSI}, {"rdi", REG_RDI}, {"r8", REG_R8}, {"r9", REG_R9},
+        {"r10", REG_R10}, {"r11", REG_R11}, {"r12", REG_R12}, {"r13", REG_R13},
+        {"r14", REG_R14}, {"r15", REG_R15},
+    };
+    describe("rip", (uintptr_t)machine->gregs[REG_RIP]);
+    crash_print("  rsp 0x%016lx rbp 0x%016lx\n", (unsigned long)machine->gregs[REG_RSP], (unsigned long)machine->gregs[REG_RBP]);
+    for (size_t i = 0; i < sizeof(registers) / sizeof(registers[0]); i += 2)
+        crash_print("  %-3s %016lx %-3s %016lx\n", registers[i].name, (unsigned long)machine->gregs[registers[i].index],
+                    registers[i + 1].name, (unsigned long)machine->gregs[registers[i + 1].index]);
+}
 #else
 #define FRAME_POINTER(machine) ((machine)->regs[29])
 #define FRAME_ALIGNMENT 7
@@ -100,6 +117,8 @@ static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
     // Frame records are {previous fp, return address}, ascending the stack.
 #if defined(__arm__)
     uintptr_t fp = FRAME_POINTER(machine), low = machine->arm_sp;
+#elif defined(__x86_64__)
+    uintptr_t fp = FRAME_POINTER(machine), low = (uintptr_t)machine->gregs[REG_RSP];
 #else
     uintptr_t fp = FRAME_POINTER(machine), low = machine->sp;
 #endif

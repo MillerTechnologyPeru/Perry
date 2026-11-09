@@ -5,7 +5,9 @@
 // machine context) and thread_get_state see them, and their conversion from
 // and to a Linux signal context. arm64: x0-x28, fp, lr, sp, pc and cpsr; the
 // NEON registers; the fault address. armv7: r0-r12, sp, lr, pc and cpsr; the
-// VFP registers; the exception, the fault status and address.
+// VFP registers; the exception, the fault status and address. x86_64: the
+// general registers, rip, rflags and segments; the FXSAVE area; the trap,
+// its error code and the fault address.
 
 #include <signal.h>
 #include <stdint.h>
@@ -167,6 +169,58 @@ static inline void perry_context_get_exception(const ucontext_t *context, darwin
     out->exception = (uint32_t)context->uc_mcontext.trap_no;
     out->fsr = (uint32_t)context->uc_mcontext.error_code;
     out->far = (uint32_t)context->uc_mcontext.fault_address;
+}
+
+#elif defined(__x86_64__)
+
+typedef struct {
+    uint64_t rax, rbx, rcx, rdx, rdi, rsi, rbp, rsp, r8, r9, r10, r11, r12, r13, r14, r15, rip, rflags, cs, fs, gs;
+} darwin_thread_state;
+// The FXSAVE area, which is Linux's _libc_fpstate, between Darwin's padding.
+typedef struct { uint32_t reserved[2]; uint8_t fxsave[512]; uint32_t reserved1; } darwin_float_state;
+typedef struct { uint16_t trapno, cpu; uint32_t err; uint64_t faultvaddr; } darwin_exception_state;
+
+// x86_THREAD_STATE64, x86_FLOAT_STATE64 and x86_EXCEPTION_STATE64.
+enum { DARWIN_THREAD_FLAVOR = 4, DARWIN_FLOAT_FLAVOR = 5, DARWIN_EXCEPTION_FLAVOR = 6 };
+
+static inline void perry_context_get_thread(const ucontext_t *context, darwin_thread_state *out) {
+    const greg_t *r = context->uc_mcontext.gregs;
+    *out = (darwin_thread_state){
+        r[REG_RAX], r[REG_RBX], r[REG_RCX], r[REG_RDX], r[REG_RDI], r[REG_RSI], r[REG_RBP], r[REG_RSP],
+        r[REG_R8], r[REG_R9], r[REG_R10], r[REG_R11], r[REG_R12], r[REG_R13], r[REG_R14], r[REG_R15],
+        r[REG_RIP], r[REG_EFL],
+        // REG_CSGSFS holds cs, gs and fs, 16 bits each from the bottom.
+        (uint64_t)r[REG_CSGSFS] & 0xffff, ((uint64_t)r[REG_CSGSFS] >> 32) & 0xffff, ((uint64_t)r[REG_CSGSFS] >> 16) & 0xffff,
+    };
+}
+
+static inline void perry_context_set_thread(ucontext_t *context, const darwin_thread_state *in) {
+    greg_t *r = context->uc_mcontext.gregs;
+    r[REG_RAX] = in->rax; r[REG_RBX] = in->rbx; r[REG_RCX] = in->rcx; r[REG_RDX] = in->rdx;
+    r[REG_RDI] = in->rdi; r[REG_RSI] = in->rsi; r[REG_RBP] = in->rbp; r[REG_RSP] = in->rsp;
+    r[REG_R8] = in->r8; r[REG_R9] = in->r9; r[REG_R10] = in->r10; r[REG_R11] = in->r11;
+    r[REG_R12] = in->r12; r[REG_R13] = in->r13; r[REG_R14] = in->r14; r[REG_R15] = in->r15;
+    r[REG_RIP] = in->rip;
+    r[REG_EFL] = in->rflags;
+}
+
+static inline void perry_context_get_float(ucontext_t *context, darwin_float_state *out) {
+    memset(out, 0, sizeof(*out));
+    if (context->uc_mcontext.fpregs)
+        memcpy(out->fxsave, context->uc_mcontext.fpregs, sizeof(out->fxsave));
+}
+
+static inline void perry_context_set_float(ucontext_t *context, const darwin_float_state *in) {
+    if (context->uc_mcontext.fpregs)
+        memcpy(context->uc_mcontext.fpregs, in->fxsave, sizeof(in->fxsave));
+}
+
+static inline void perry_context_get_exception(const ucontext_t *context, darwin_exception_state *out) {
+    const greg_t *r = context->uc_mcontext.gregs;
+    out->trapno = (uint16_t)r[REG_TRAPNO];
+    out->cpu = 0;
+    out->err = (uint32_t)r[REG_ERR];
+    out->faultvaddr = (uint64_t)r[REG_CR2];
 }
 
 #endif
