@@ -941,6 +941,7 @@ open class UICollectionView: UIScrollView {
                 }
                 apply(attributes, to: cell!, fresh: fresh)
                 if fresh { measure(cell!, attributes: attributes, at: path) }
+                applyListStyle(to: cell!, at: path)
             case 1:
                 guard let kind = attributes.attributes.kind else { continue }
                 let key = SupplementaryKey(kind: kind, path: path)
