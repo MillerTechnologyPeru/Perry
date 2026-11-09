@@ -14,6 +14,7 @@
 #include <sys/utsname.h>
 #include <time.h>
 #include <unistd.h>
+#include <wchar.h>
 
 // MARK: - Clocks
 
@@ -47,6 +48,9 @@ static int clock_to_linux(int clock) {
     default: return -1;
     }
 }
+
+wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) DARWIN_SYMBOL(wmemcpy);
+wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) { return wmemcpy(to, from, count); }
 
 /// Processor time used, in microseconds (CLOCKS_PER_SEC is a million on both).
 unsigned long darwin_clock(void) DARWIN_SYMBOL(clock);
