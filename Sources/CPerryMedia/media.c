@@ -21,3 +21,7 @@ const CMTime darwin_kCMTimeNegativeInfinity = { 0, 0, 1 | 8, 0 };
 const CMTimeRange darwin_kCMTimeRangeZero = { { 0, 1, 1, 0 }, { 0, 1, 1, 0 } };
 const CMTimeRange darwin_kCMTimeRangeInvalid = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
 const CMSampleTimingInfo darwin_kCMTimingInfoInvalid = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
+
+void perry_g_object_set_double(void *object_set, void *object, const char *name, double value) {
+    ((void (*)(void *, const char *, ...))object_set)(object, name, value, (void *)0);
+}

@@ -1,10 +1,10 @@
 import Glibc
 import PerryObjCInterop
 
-// MediaPlayer, with no media library and nothing that plays movies: the
-// names apps pass to the notification center and read from media items, a
-// music player that has no songs, and movie players that skip their movie,
-// so an app waiting for its intro goes on.
+// MediaPlayer, with no media library: the names apps pass to the notification
+// center and read from media items, a music player that has no songs, and
+// movie players. A movie with a view to show in plays through AVFoundation's
+// player; any other is skipped, so an app waiting for its intro goes on.
 
 /// With PERRY_TRACE_MEDIA set, what an app asks of its players is reported.
 private let tracing = getenv("PERRY_TRACE_MEDIA") != nil
@@ -19,11 +19,30 @@ private func trace(_ message: @autoclosure () -> String) {
 class NSNotificationCenter: NSObject {
     @ObjCClassMethod("defaultCenter") static func defaultCenter() -> NSNotificationCenter
     @ObjCMethod("postNotificationName:object:userInfo:") func post(name: String, object: NSObject?, userInfo: NSObject?)
+    @ObjCMethod("addObserver:selector:name:object:") func addObserver(_ observer: NSObject, selector: ObjCSelector, name: String, object: NSObject?)
+    @ObjCMethod("removeObserver:") func removeObserver(_ observer: NSObject)
+}
+
+/// AVFoundation's player, which decodes a movie.
+@ObjCWrapper("AVPlayer")
+class AVPlayer: NSObject {
+    @ObjCClassMethod("playerWithURL:") static func player(url: NSObject?) -> AVPlayer
+    @ObjCMethod("currentItem") func currentItem() -> NSObject?
+    @ObjCMethod("replaceCurrentItemWithPlayerItem:") func replaceCurrentItem(_ item: NSObject?)
+    @ObjCMethod("play") func play()
+    @ObjCMethod("pause") func pause()
 }
 
 @ObjCWrapper("UIView")
 class UIView: NSObject {
     @ObjCClassMethod("new") static func new() -> UIView
+}
+
+/// UIKit's view showing an AVFoundation player's frames.
+@ObjCWrapper("_PerryMovieView")
+class MovieView: NSObject {
+    @ObjCClassMethod("new") static func make() -> MovieView
+    @ObjCMethod("setMoviePlayer:") func setMoviePlayer(_ player: NSObject?)
 }
 
 @ObjCWrapper("NSNumber")
@@ -36,10 +55,11 @@ class NSDictionary: NSObject {
     @ObjCClassMethod("dictionaryWithObject:forKey:") static func dictionary(object: NSObject, key: String) -> NSDictionary
 }
 
-/// MPMoviePlayerController, the player of iOS 2 to 8. Its movie is skipped:
-/// it is ready as soon as the player is made, and playing it (by -play, or
-/// by preparing it while it plays by itself, which it does unless told not
-/// to) reports it finished, once, as if it had played to its end.
+/// MPMoviePlayerController, the player of iOS 2 to 8. It is ready as soon as
+/// it is made. Playing it (by -play, or by preparing it while it plays by
+/// itself, which it does unless told not to) plays the movie if it has a view
+/// to show in and AVFoundation is loaded; otherwise it reports the movie
+/// finished, once, as if it had played to its end.
 @ObjCClass("MPMoviePlayerController")
 open class MPMoviePlayerController: NSObject {
     var contentURL: NSObject? = nil
@@ -49,6 +69,10 @@ open class MPMoviePlayerController: NSObject {
     var playing = false
     var skipped = false
     var finished = false
+    /// Presented by a view controller, which shows the view when it can.
+    var onScreen = false
+    /// The player decoding the movie, while it plays.
+    var movie: AVPlayer? = nil
 
     /// Players that have played, kept for the rest of the run: apps release
     /// theirs when it finishes and may still send it -stop afterwards, which
@@ -82,12 +106,16 @@ open class MPMoviePlayerController: NSObject {
     @ObjCMethod("contentURL") func getContentURL() -> NSObject? { contentURL }
     @ObjCMethod("setContentURL:") func setContentURL(_ url: NSObject?) { contentURL = url }
 
-    /// The view the movie would show in: an empty one, which apps size and
-    /// put in their own.
+    /// Whether movies can be played and shown.
+    private var canPlay: Bool {
+        ObjCRuntime.registeredClassPair("AVPlayer") != nil && ObjCRuntime.registeredClassPair("_PerryMovieView") != nil
+    }
+
+    /// The view the movie shows in, which apps size and put in their own.
     @ObjCMethod("view")
     func view() -> UIView {
         if let playerView { return playerView }
-        let made = UIView.new()
+        let made = canPlay ? MovieView.make().unsafeCast(to: UIView.self) : UIView.new()
         playerView = made
         return made
     }
@@ -110,7 +138,11 @@ open class MPMoviePlayerController: NSObject {
         if autoplay { play() }
     }
 
-    @ObjCMethod("pause") func pause() { trace("pause") }
+    @ObjCMethod("pause")
+    func pause() {
+        trace("pause")
+        movie?.pause()
+    }
 
     @ObjCMethod("stop")
     func stop() {
@@ -144,17 +176,36 @@ open class MPMoviePlayerController: NSObject {
     @ObjCMethod("setEndPlaybackTime:") func setEndPlaybackTime(_ time: Double) {}
     @ObjCMethod("setOrientation:animated:") func setOrientation(_ orientation: Int, animated: Bool) {}
 
-    /// Nothing plays: the movie has finished, which the app hears from the
-    /// main run loop. Each movie is skipped once.
+    /// Plays the movie, or, with nowhere to show it, has it finish, which
+    /// the app hears from the main run loop. Each movie is played or skipped
+    /// once; a paused one goes on.
     @ObjCMethod("play")
     func play() {
         trace("play")
+        if let movie {
+            movie.play()
+            return
+        }
         guard !playing, !skipped else { return }
         playing = true
         skipped = true
         finished = false
         MPMoviePlayerController.played.append(self)
-        later(ObjCSelector("_perryFinished"))
+        if !startMovie() { later(ObjCSelector("_perryFinished")) }
+    }
+
+    /// Starts decoding the movie into the view, if there is a view for it.
+    /// The player says when the movie ends, or that it can't be played.
+    private func startMovie() -> Bool {
+        guard onScreen || playerView != nil, canPlay, let contentURL else { return false }
+        trace("playing the movie")
+        let player = AVPlayer.player(url: contentURL)
+        view().unsafeCast(to: MovieView.self).setMoviePlayer(player)
+        NSNotificationCenter.defaultCenter().addObserver(self, selector: ObjCSelector("_perryFinished"),
+                                                         name: "AVPlayerItemDidPlayToEndTimeNotification", object: player.currentItem())
+        movie = player
+        player.play()
+        return true
     }
 
     /// Sends itself the message from the main run loop, where a real player
@@ -172,6 +223,13 @@ open class MPMoviePlayerController: NSObject {
         guard !finished else { return }
         finished = true
         playing = false
+        if let movie {
+            NSNotificationCenter.defaultCenter().removeObserver(self)
+            movie.pause()
+            view().unsafeCast(to: MovieView.self).setMoviePlayer(nil)
+            movie.replaceCurrentItem(nil)
+            self.movie = nil
+        }
         trace("movie finished: playback did finish notification")
         // MPMovieFinishReasonPlaybackEnded: an app may play a movie it does
         // not let the user skip again when told the user left it.
@@ -200,6 +258,7 @@ open class MPMoviePlayerViewController: NSObject {
         super.init()
         trace("movie player view controller made")
         player = MPMoviePlayerController(contentURL: contentURL)
+        player?.onScreen = true
     }
 
     @ObjCMethod("moviePlayer")

@@ -47,7 +47,7 @@ static float read_sample(const AudioStreamBasicDescription *f, const uint8_t *p,
     }
     int32_t value = (int32_t)(raw << (32 - 8 * size));     // sign-extended at the top of 32 bits
     uint32_t fraction = (f->mFormatFlags & kLinearPCMFormatFlagsSampleFractionMask) >> kLinearPCMFormatFlagsSampleFractionShift;
-    if (fraction) {
+    if (fraction && fraction < 8 * size) {
         // Fixed point (8.24, the old canonical audio unit format): value is
         // shifted up by the container's spare bits; 1.0 is 1 << fraction.
         return (float)((double)value / (double)(1ull << (fraction + 32 - 8 * size)));
@@ -74,7 +74,7 @@ static void write_sample(const AudioStreamBasicDescription *f, uint8_t *p, uint3
         double clamped = v < -1 ? -1 : v > 1 ? 1 : v;
         double maximum = (size == 4) ? 4294967295.0 : (double)((1ull << (8 * size)) - 1);
         raw = (uint32_t)lrint((clamped + 1.0) / 2.0 * maximum);
-    } else if (fraction) {
+    } else if (fraction && fraction < 8 * size) {
         double scaled = (double)v * (double)(1ull << fraction);
         double limit = (double)(1ull << (8 * size - 1));
         if (scaled > limit - 1) scaled = limit - 1;

@@ -40,4 +40,7 @@ typedef struct CVTextureFormatAndType {
     uint32_t type;
 } CVTextureFormatAndType;
 
+/// g_object_set(object, name, value, NULL), called as the variadic function it is.
+void perry_g_object_set_double(void *object_set, void *object, const char *name, double value);
+
 #endif
