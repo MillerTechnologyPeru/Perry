@@ -36,6 +36,8 @@ final class ScrollViewState: ObjectState {
     var keyboardDismissMode = 0
     var delaysContentTouches = true
     var canCancelContentTouches = true
+    /// Whether a pinch or an animated zoom is under way.
+    var zooming = false
     var verticalIndicatorInsets = UIEdgeInsets.zero
     var horizontalIndicatorInsets = UIEdgeInsets.zero
     var automaticallyAdjustsScrollIndicatorInsets = true
@@ -81,6 +83,7 @@ open class UIScrollView: UIView {
 
     @ObjCMethod("dealloc")
     override func dealloc() {
+        removeIndicators()
         UIScrollView.scrollStates.remove(objcObject)
         super.dealloc()
     }
@@ -102,21 +105,37 @@ open class UIScrollView: UIView {
         didScroll()
     }
 
+    /// Animated, the content glides there and the delegate hears when it
+    /// arrives.
     @ObjCMethod("setContentOffset:animated:")
     func setContentOffset(_ offset: CGPoint, animated: Bool) {
-        sendSetContentOffset(offset)
-        if animated, let delegate = delegate(), delegate.responds(to: "scrollViewDidEndScrollingAnimation:") {
-            delegate.sendScrollViewDidEndScrollingAnimation(self)
-        }
+        guard animated else { return sendSetContentOffset(offset) }
+        Touches.animateScroll(self, to: offset)
+    }
+
+    func didEndScrollingAnimation() {
+        guard let delegate = delegate(), delegate.responds(to: "scrollViewDidEndScrollingAnimation:") else { return }
+        delegate.sendScrollViewDidEndScrollingAnimation(self)
     }
 
     func didScroll() {
+        // The indicators show while the user moves the content, and follow
+        // it while they show.
+        let scroll = scroll
+        if scroll.tracking || scroll.dragging || scroll.decelerating || scroll.zooming {
+            showIndicators()
+        } else {
+            layOutIndicators()
+        }
         guard let delegate = delegate(), delegate.responds(to: "scrollViewDidScroll:") else { return }
         delegate.sendScrollViewDidScroll(self)
     }
 
     @ObjCMethod("contentSize") func contentSize() -> CGSize { scroll.contentSize }
-    @ObjCMethod("setContentSize:") func setContentSize(_ size: CGSize) { scroll.contentSize = size }
+    @ObjCMethod("setContentSize:") func setContentSize(_ size: CGSize) {
+        scroll.contentSize = size
+        layOutIndicators()
+    }
 
     @ObjCMethod("contentInset") func contentInset() -> UIEdgeInsets { scroll.contentInset }
 
@@ -200,12 +219,15 @@ open class UIScrollView: UIView {
         setContentOffset(CGPoint(x: x, y: y), animated: animated)
     }
 
-    @ObjCMethod("flashScrollIndicators") func flashScrollIndicators() {}
+    @ObjCMethod("flashScrollIndicators") func flashScrollIndicators() { showIndicators(fadeAfter: 1) }
 
     // MARK: Layout
 
     @ObjCMethod("layoutSubviews")
-    override func layoutSubviews() { applyAdjustedInset() }
+    override func layoutSubviews() {
+        applyAdjustedInset()
+        layOutIndicators()
+    }
 
     // MARK: Properties
 
@@ -236,15 +258,21 @@ open class UIScrollView: UIView {
     @ObjCMethod("decelerationRate") func decelerationRate() -> CGFloat { scroll.decelerationRate }
     @ObjCMethod("setDecelerationRate:") func setDecelerationRate(_ rate: CGFloat) { scroll.decelerationRate = rate }
     @ObjCMethod("zoomScale") func zoomScale() -> CGFloat { scroll.zoomScale }
+    /// Scales the zooming view, about the middle of what shows.
     @ObjCMethod("setZoomScale:") func setZoomScale(_ scale: CGFloat) {
-        scroll.zoomScale = min(max(scale, scroll.minimumZoomScale), scroll.maximumZoomScale)
+        let bounds = state.bounds
+        applyZoom(clampedZoom(scale), keeping: CGPoint(x: bounds.width / 2, y: bounds.height / 2))
     }
-    @ObjCMethod("setZoomScale:animated:") func setZoomScale(_ scale: CGFloat, animated: Bool) { setZoomScale(scale) }
+    @ObjCMethod("setZoomScale:animated:") func setZoomScale(_ scale: CGFloat, animated: Bool) {
+        guard animated else { return setZoomScale(scale) }
+        let bounds = state.bounds
+        animateZoom(to: clampedZoom(scale), keeping: CGPoint(x: bounds.width / 2, y: bounds.height / 2))
+    }
     @ObjCMethod("minimumZoomScale") func minimumZoomScale() -> CGFloat { scroll.minimumZoomScale }
     @ObjCMethod("setMinimumZoomScale:") func setMinimumZoomScale(_ scale: CGFloat) { scroll.minimumZoomScale = scale }
     @ObjCMethod("maximumZoomScale") func maximumZoomScale() -> CGFloat { scroll.maximumZoomScale }
     @ObjCMethod("setMaximumZoomScale:") func setMaximumZoomScale(_ scale: CGFloat) { scroll.maximumZoomScale = scale }
-    @ObjCMethod("isZooming") func isZooming() -> Bool { false }
+    @ObjCMethod("isZooming") func isZooming() -> Bool { scroll.zooming }
     @ObjCMethod("isZoomBouncing") func isZoomBouncing() -> Bool { false }
     @ObjCMethod("keyboardDismissMode") func keyboardDismissMode() -> Int { scroll.keyboardDismissMode }
     @ObjCMethod("setKeyboardDismissMode:") func setKeyboardDismissMode(_ mode: Int) { scroll.keyboardDismissMode = mode }
