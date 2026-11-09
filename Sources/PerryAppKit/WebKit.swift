@@ -270,11 +270,10 @@ final class WebContent {
             switch current.mode {
             case .scrolling:
                 // The page follows the finger: moving it down scrolls up.
-                let dx = Int32((Float(here.0 - current.last.0) / scale).rounded())
-                let dy = Int32((Float(here.1 - current.last.1) / scale).rounded())
+                let dx = Double(here.0 - current.last.0) / Double(scale)
+                let dy = Double(here.1 - current.last.1) / Double(scale)
                 if dy == 0 && dx == 0 { return }
-                if dy != 0 { page.axis(x: here.0, y: here.1, horizontal: false, value: dy, modifiers: modifiers(event)) }
-                if dx != 0 { page.axis(x: here.0, y: here.1, horizontal: true, value: dx, modifiers: modifiers(event)) }
+                page.axis(x: here.0, y: here.1, dx: dx, dy: dy, modifiers: modifiers(event))
             case .pressing:
                 page.pointer(motion: true, x: here.0, y: here.1, button: 0, pressed: false, modifiers: modifiers(event))
             case .pending:
@@ -293,7 +292,7 @@ final class WebContent {
         case .pressing:
             release(page, at: here, modifiers: modifiers(event))
         case .scrolling:
-            break
+            page.axis(x: here.0, y: here.1, dx: 0, dy: 0, modifiers: modifiers(event))
         }
     }
 
@@ -331,8 +330,7 @@ final class WebContent {
         let unit: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 40
         let dy = (event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY) * unit
         let dx = (event.scrollingDeltaX != 0 ? event.scrollingDeltaX : event.deltaX) * unit
-        if dy != 0 { page.axis(x: x, y: y, horizontal: false, value: Int32(dy.rounded()), modifiers: modifiers(event)) }
-        if dx != 0 { page.axis(x: x, y: y, horizontal: true, value: Int32(dx.rounded()), modifiers: modifiers(event)) }
+        if dy != 0 || dx != 0 { page.axis(x: x, y: y, dx: Double(dx), dy: Double(dy), modifiers: modifiers(event)) }
     }
 
     /// Mac virtual key codes WebKit knows by X11 key symbols.
