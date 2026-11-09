@@ -133,10 +133,38 @@ final class Compositor {
         let border: Bool
     }
 
+    /// What a layer's texture was drawn from: compared each frame, so
+    /// values rather than a description of them. Colors, paths, images and
+    /// contents are compared as the objects they are.
+    private struct Signature: Equatable {
+        var size: CGSize
+        var borderWidth: CGFloat = 0
+        var cornerRadius: CGFloat
+        var maskedCorners: UInt
+        var color: CGRef?
+        var backing: CGRef? = nil
+        var backingSize = CGSize.zero
+        var contents: UnsafeMutableRawPointer? = nil
+        var contentsGravity = ""
+        var contentsScale: CGFloat = 0
+        var multiplyColor: CGRef? = nil
+        var contentsSwizzle = ""
+        var shape: ShapeSignature? = nil
+    }
+
+    private struct ShapeSignature: Equatable {
+        var path, fillColor, strokeColor: CGRef?
+        var lineWidth, strokeStart, strokeEnd, lineDashPhase: CGFloat
+        var lineCap, lineJoin: String
+    }
+
     private struct Entry {
         let texture: SDL.Pointer
-        let signature: String
+        /// Nil for a flattened layer's.
+        let signature: Signature?
         var used: Bool
+        /// A flattened layer's: its size and the generation it was drawn at.
+        var flattened: (size: CGSize, generation: UInt)? = nil
     }
 
     private var textures: [Key: Entry] = [:]
@@ -320,6 +348,15 @@ final class Compositor {
 
     private func drawFlattened(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
         let key = Key(layer: layer.objcObject, border: false)
+        // Nothing has changed since it was drawn, and nothing in it moves
+        // without changing: what was drawn still shows.
+        if let entry = textures[key], let flattened = entry.flattened, flattened.size == state.bounds.size,
+           flattened.generation == Compositing.generation, !Compositor.isAnimating(layer) {
+            textures[key]?.used = true
+            place(entry.texture, state: state, toScreen: toScreen, alpha: alpha)
+            return
+        }
+        let generation = Compositing.generation
         if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
         let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
         guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
@@ -336,8 +373,18 @@ final class Compositor {
         _ = SDL.updateTexture(texture, nil, data, width * 4)
         _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
         _ = SDL.setTextureScaleMode(texture, 1)
-        textures[key] = Entry(texture: texture, signature: "", used: true)
+        textures[key] = Entry(texture: texture, signature: nil, used: true, flattened: (state.bounds.size, generation))
         place(texture, state: state, toScreen: toScreen, alpha: alpha)
+    }
+
+    /// Whether the layer, its mask or anything under them has animations,
+    /// which change what shows without changing the layers.
+    private static func isAnimating(_ layer: CALayer) -> Bool {
+        let state = layer.state
+        if !state.animations.isEmpty { return true }
+        if state.livePixels != nil || state.sharedFrames != nil { return true }
+        if let mask = state.mask, isAnimating(mask) { return true }
+        return state.sublayers.contains(where: isAnimating)
     }
 
     /// The texture placed by `toScreen`: as its bounding box when that
@@ -444,14 +491,19 @@ final class Compositor {
     private func texture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool) -> SDL.Pointer? {
         let key = Key(layer: layer.objcObject, border: border)
         let model = layer.state
-        var signature = border
-            ? "\(state.bounds.size) \(state.borderWidth) \(String(describing: state.borderColor)) \(state.cornerRadius) \(state.maskedCorners)"
-            : "\(state.bounds.size) \(String(describing: state.backgroundColor)) \(state.cornerRadius) \(state.maskedCorners) "
-                + "\(String(describing: model.backing)) \(model.backingSize) \(String(describing: state.contents?.objcObject)) "
-                + "\(state.contentsGravity) \(state.contentsScale) \(String(describing: state.contentsMultiplyColor)) \(state.contentsSwizzle)"
-        if let shape, !border {
-            signature += " \(String(describing: shape.path)) \(String(describing: shape.fillColor)) \(String(describing: shape.strokeColor)) "
-                + "\(shape.lineWidth) \(shape.strokeStart) \(shape.strokeEnd) \(shape.lineCap) \(shape.lineJoin) \(shape.lineDashPhase)"
+        var signature = Signature(size: state.bounds.size, cornerRadius: state.cornerRadius, maskedCorners: state.maskedCorners,
+                                  color: border ? state.borderColor : state.backgroundColor)
+        if border {
+            signature.borderWidth = state.borderWidth
+        } else {
+            (signature.backing, signature.backingSize, signature.contents) = (model.backing, model.backingSize, state.contents?.objcObject)
+            (signature.contentsGravity, signature.contentsScale) = (state.contentsGravity, state.contentsScale)
+            (signature.multiplyColor, signature.contentsSwizzle) = (state.contentsMultiplyColor, state.contentsSwizzle)
+            if let shape {
+                signature.shape = ShapeSignature(path: shape.path, fillColor: shape.fillColor, strokeColor: shape.strokeColor,
+                                                 lineWidth: shape.lineWidth, strokeStart: shape.strokeStart, strokeEnd: shape.strokeEnd,
+                                                 lineDashPhase: shape.lineDashPhase, lineCap: shape.lineCap, lineJoin: shape.lineJoin)
+            }
         }
         if let entry = textures[key], entry.signature == signature {
             textures[key]?.used = true

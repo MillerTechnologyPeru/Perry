@@ -96,8 +96,10 @@ void perry_foundation_call_getter(void *object, const char *selector, const void
 // arm64 and x86_64. Calls a setter with its argument from `registers`: x2, x3
 // and d0 to d3, or rdx, rcx, xmm0 and xmm1.
 void perry_foundation_call_setter(void *object, const char *selector, const void *imp, const uint64_t registers[6]);
-// x86_64 only. NSInvocation's call: rax, rdx, xmm0 and xmm1 end up in `out`.
-void perry_foundation_invoke(const void *imp, const uint64_t gp[6], const uint64_t fp[8], const uint64_t *stack, size_t words, uint64_t out[4]);
+// NSInvocation's call. x86_64: six integer registers, and rax, rdx, xmm0 and
+// xmm1 end up in the four words of `out`. arm64: x0-x7 then x8, and x0, x1
+// and d0-d3 end up in the six words of `out`.
+void perry_foundation_invoke(const void *imp, const uint64_t *gp, const uint64_t fp[8], const uint64_t *stack, size_t words, uint64_t *out);
 // x86_64 only. Calls a setter whose argument, over 16 bytes, goes on the stack.
 void perry_foundation_call_setter_memory(void *object, const char *selector, const void *imp, const void *bytes, size_t size);
 

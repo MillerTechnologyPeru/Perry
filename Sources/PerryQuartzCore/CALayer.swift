@@ -806,11 +806,11 @@ open class CALayer: NSObject {
     /// Whether the layer draws its own content: a subclass's
     /// -drawInContext:, or a delegate that draws.
     var draws: Bool {
-        if Methods.overrides(objcObject, "drawInContext:", of: CALayer.objCClass.pointer) { return true }
-        guard let delegate = state.delegate.map({ NSObject($0) }) else { return false }
-        if delegate.responds(to: "displayLayer:") { return true }
-        if delegate.responds(to: "_perryDrawsLayer:") { return delegate.sendDraws(self) }
-        return delegate.responds(to: "drawLayer:inContext:")
+        if ActionKeys.overridesDrawInContext(objcObject) { return true }
+        guard let delegate = state.delegate else { return false }
+        if ActionKeys.responds(delegate, ActionKeys.displayLayer) { return true }
+        if ActionKeys.responds(delegate, ActionKeys.drawsLayer) { return NSObject(delegate).sendDraws(self) }
+        return ActionKeys.responds(delegate, ActionKeys.drawLayerInContext)
     }
 
     /// Draws the layer and its sublayers into `context`, in the layer's
@@ -933,8 +933,7 @@ extension CALayer {
     /// Displays a layer that draws when it needs to.
     static func displayIfNeeded(_ layer: CALayer) {
         let state = layer.state
-        let delegate = state.delegate.map { NSObject($0) }
-        let redraws = delegate.map { $0.responds(to: "_perryLayerContentChanged:") && $0.sendContentChanged(layer) } ?? false
+        let redraws = state.delegate.map { ActionKeys.responds($0, ActionKeys.contentChanged) && NSObject($0).sendContentChanged(layer) } ?? false
         let undrawn = state.backing == nil && !state.displayedByDelegate
         if layer.draws, redraws || state.needsDisplay || undrawn || state.backingSize != state.bounds.size {
             layer.sendDisplay()

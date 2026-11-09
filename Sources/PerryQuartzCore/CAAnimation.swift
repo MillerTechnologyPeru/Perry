@@ -20,6 +20,8 @@ final class AnimationState {
     var autoreverses = false
     var beginTime: Double = 0
     var timeOffset: Double = 0
+    /// A discrete animation's value when a frame last showed it.
+    var lastDiscreteStep: Int?
     var speed: Float = 1
     var additive = false
     var cumulative = false
