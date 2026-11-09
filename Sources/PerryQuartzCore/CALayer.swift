@@ -106,7 +106,11 @@ final class LayerState {
     var isOpaque = false
     var needsDisplayOnBoundsChange = false
     var allowsGroupOpacity = true
-    var sublayers: [CALayer] = []
+    var sublayers: [CALayer] = [] { didSet { sublayersArray = nil } }
+    /// The array -sublayers returned, kept until the sublayers change: a
+    /// caller asking for each child in turn, as SwiftUI does as it places
+    /// them, then gets it at once.
+    var sublayersArray: NSObject?
     /// The superlayer, which retains this layer; not retained.
     var superlayer: UnsafeMutableRawPointer?
     /// Not retained.
@@ -601,7 +605,23 @@ open class CALayer: NSObject {
 
     /// nil when there are none, as Core Animation's.
     @ObjCMethod("sublayers")
-    func sublayers() -> NSObject? { state.sublayers.isEmpty ? nil : NSMutableArray.of(state.sublayers) }
+    func sublayers() -> NSObject? {
+        let state = state
+        guard !state.sublayers.isEmpty else { return nil }
+        if let array = state.sublayersArray { return array }
+        let array = NSMutableArray.of(state.sublayers)
+        state.sublayersArray = array
+        return array
+    }
+
+    /// How many sublayers there are, and one of them, without making the
+    /// array: SwiftUI's subview placement asks these for each child.
+    @ObjCMethod("_perrySublayerCount") func perrySublayerCount() -> Int { state.sublayers.count }
+    @ObjCMethod("_perrySublayerAtIndex:")
+    func perrySublayer(at index: Int) -> CALayer? {
+        let sublayers = state.sublayers
+        return sublayers.indices.contains(index) ? sublayers[index] : nil
+    }
 
     @ObjCMethod("setSublayers:")
     func setSublayers(_ sublayers: NSArray?) {
