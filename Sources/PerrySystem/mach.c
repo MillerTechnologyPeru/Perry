@@ -635,11 +635,27 @@ static int is_thread_flavor(int flavor) {
     return flavor == DARWIN_THREAD_FLAVOR || (sizeof(void *) == 4 && flavor == 9);
 }
 
+static kern_return_t get_stopped_state(mach_port_t port, ucontext_t *context, int flavor, uint32_t *state, uint32_t *count);
+
+// A thread that isn't suspended is stopped for the moment the registers are
+// read, as Darwin does, which a collector that asks for the state of a
+// thread it has not suspended counts on.
 kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) DARWIN_SYMBOL(thread_get_state);
 kern_return_t darwin_thread_get_state(mach_port_t port, int flavor, uint32_t *state, uint32_t *count) {
     ucontext_t *context = stopped_context(port);
-    if (!context)
+    if (context)
+        return get_stopped_state(port, context, flavor, state, count);
+    if (darwin_thread_suspend(port) != KERN_SUCCESS)
         return KERN_FAILURE;
+    kern_return_t result = KERN_FAILURE;
+    if ((context = stopped_context(port)))
+        result = get_stopped_state(port, context, flavor, state, count);
+    darwin_thread_resume(port);
+    return result;
+}
+
+static kern_return_t get_stopped_state(mach_port_t port, ucontext_t *context, int flavor, uint32_t *state, uint32_t *count) {
+    (void)port;
     if (is_thread_flavor(flavor) && *count >= DARWIN_THREAD_COUNT) {
         perry_context_get_thread(context, (darwin_thread_state *)state);
         *count = DARWIN_THREAD_COUNT;
