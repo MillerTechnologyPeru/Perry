@@ -22,8 +22,34 @@ enum Presentation {
 
     static func forget(_ layer: UnsafeMutableRawPointer) { layers.removeAll { $0 == layer } }
 
-    /// Whether anything is animating: frames must keep coming.
-    static var animating: Bool { layers.contains { !CALayer.state(of: $0).animations.isEmpty } }
+    /// Whether anything animating has changed: frames must keep coming,
+    /// except that a discrete animation, like an activity indicator's
+    /// steps, needs one only when it reaches its next value.
+    static var animating: Bool {
+        let now = Clock.now
+        var changed = false
+        for layer in layers {
+            for entry in CALayer.state(of: layer).animations {
+                guard let step = discreteStep(of: entry.animation, at: now) else { return true }
+                if entry.animation.state.lastDiscreteStep != step {
+                    entry.animation.state.lastDiscreteStep = step
+                    changed = true
+                }
+            }
+        }
+        return changed
+    }
+
+    /// Which value a discrete keyframe animation of evenly spaced values
+    /// has reached, counted from its start; nil for any other animation.
+    private static func discreteStep(of animation: CAAnimation, at now: Double) -> Int? {
+        guard animation.is(CAKeyframeAnimation.self), animation.calculationMode() == "discrete", animation.path() == nil,
+              animation.keyTimes() == nil, let count = animation.values()?.as(NSArray.self)?.elements.count, count > 0 else { return nil }
+        let state = animation.state
+        guard state.duration > 0 else { return nil }
+        let elapsed = (now - state.beginTime) * Double(state.speed) + state.timeOffset
+        return Int((elapsed / state.duration * Double(count)).rounded(.down))
+    }
 
     /// The layer as it presents now.
     static func state(of layer: CALayer) -> LayerState { presented(layer).state }
@@ -296,9 +322,13 @@ enum Compositing {
     nonisolated(unsafe) static var dirty = true
     nonisolated(unsafe) static var handler: (@convention(c) () -> Void)?
     nonisolated(unsafe) private static var pending = false
+    /// Bumped by each change to any layer: what was drawn at the same
+    /// generation still shows the same thing.
+    nonisolated(unsafe) static var generation: UInt = 0
 
     static func changed() {
         dirty = true
+        generation &+= 1
         guard let handler, !pending else { return }
         pending = true
         Dispatch.onMain {
@@ -372,8 +402,15 @@ enum ActionKeys {
     nonisolated(unsafe) static let actionForKey = ObjCRuntime.selector("actionForKey:")
     /// Each key's NSString, kept for good.
     private static let strings = Mutex<[String: UInt]>([:])
+    nonisolated(unsafe) static let drawInContext = ObjCRuntime.selector("drawInContext:")
+    nonisolated(unsafe) static let displayLayer = ObjCRuntime.selector("displayLayer:")
+    nonisolated(unsafe) static let drawsLayer = ObjCRuntime.selector("_perryDrawsLayer:")
+    nonisolated(unsafe) static let drawLayerInContext = ObjCRuntime.selector("drawLayer:inContext:")
+    nonisolated(unsafe) static let contentChanged = ObjCRuntime.selector("_perryLayerContentChanged:")
     /// Whether each layer class overrides -actionForKey:.
     private static let overriding = Mutex<[UInt: Bool]>([:])
+    /// Whether each layer class overrides -drawInContext:.
+    private static let drawing = Mutex<[UInt: Bool]>([:])
 
     /// Whether `object` responds to `selector`, without wrapping it.
     static func responds(_ object: UnsafeMutableRawPointer, _ selector: UnsafeRawPointer?) -> Bool {
@@ -395,6 +432,15 @@ enum ActionKeys {
         }
         if stored != address { ObjCRuntime.release(made) }
         return UnsafeMutableRawPointer(bitPattern: stored)
+    }
+
+    static func overridesDrawInContext(_ layer: UnsafeMutableRawPointer) -> Bool {
+        guard let cls = ObjCRuntime.objectClass(layer) else { return true }
+        let key = UInt(bitPattern: cls)
+        if let known = drawing.withLock({ $0[key] }) { return known }
+        let overrides = Methods.implementation(cls, drawInContext) != Methods.implementation(CALayer.objCClass.pointer, drawInContext)
+        drawing.withLock { $0[key] = overrides }
+        return overrides
     }
 
     static func overridesActionForKey(_ layer: UnsafeMutableRawPointer) -> Bool {
