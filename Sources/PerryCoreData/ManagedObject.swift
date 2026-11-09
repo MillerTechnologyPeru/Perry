@@ -55,6 +55,10 @@ enum ManagedObjects {
         return Classes.named(entity.state.className) ?? NSManagedObject.objCClass
     }
 
+    private static let answerManagedObject: @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer? = { _, _ in
+        NSManagedObject.objCClass.pointer
+    }
+
     /// NSManagedObject_<Entity>_, with object-valued accessors for the
     /// entity's properties.
     private static func genericClass(_ entity: NSEntityDescription) -> ObjCClass? {
@@ -69,6 +73,11 @@ enum ManagedObjects {
         else { return nil }
         ObjCRuntime.functions.registerClassPair(created)
         let cls = ObjCClass(created)
+        // Its objects and the class itself answer -class with
+        // NSManagedObject, as Core Data's do.
+        let answer = unsafeBitCast(answerManagedObject, to: UnsafeRawPointer.self)
+        add(cls, "class", "#16@0:8", answer)
+        add(ObjCClass(ObjCRuntime.functions.objectGetClass(created)!), "class", "#16@0:8", answer)
         genericClasses[name] = cls
         entitiesByClass[className] = entity
         return cls

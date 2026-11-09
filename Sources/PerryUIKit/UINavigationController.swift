@@ -19,8 +19,8 @@ final class NavigationState: ObjectState {
     var animating = false
 }
 
-/// The navigation bar's height on an iPhone.
-private let barHeight: CGFloat = 44
+/// The navigation bar's height on an iPhone, in either orientation.
+private let barHeight: CGFloat = ProgramSDK.iOS26Design ? 54 : 44
 private let searchBarHeight: CGFloat = 56
 
 @ObjCClass("UINavigationController")
