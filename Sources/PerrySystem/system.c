@@ -49,8 +49,11 @@ static int clock_to_linux(int clock) {
 }
 
 /// Processor time used, in microseconds (CLOCKS_PER_SEC is a million on both).
+/// armv7's alone: arm64's passes straight through to glibc's (thunks.S).
+#if defined(__arm__)
 unsigned long darwin_clock(void) DARWIN_SYMBOL(clock);
 unsigned long darwin_clock(void) { return (unsigned long)clock(); }
+#endif
 
 int darwin_clock_gettime(int clock, struct timespec *time) DARWIN_SYMBOL(clock_gettime);
 int darwin_clock_gettime(int clock, struct timespec *time) {

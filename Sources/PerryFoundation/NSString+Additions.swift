@@ -373,11 +373,16 @@ extension NSString {
 
     @ObjCMethod("getCharacters:range:")
     func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>?, range: NSRange) {
-        let units = Array(value.utf16), location = Int(range.location), length = Int(range.length)
-        guard let buffer, location + length <= units.count else {
+        let units = value.utf16, location = Int(range.location), length = Int(range.length)
+        guard let buffer, location >= 0, length >= 0, location + length <= units.count else {
             foundationFatal("-[NSString getCharacters:range:]: Range \(location),\(length) out of bounds")
         }
-        for index in 0..<length { buffer[index] = units[location + index] }
+        // Along the string from the start of the range, not a copy of it.
+        var index = units.index(units.startIndex, offsetBy: location)
+        for offset in 0..<length {
+            buffer[offset] = units[index]
+            index = units.index(after: index)
+        }
     }
 
     // MARK: Lines and paragraphs
@@ -567,10 +572,11 @@ extension NSString {
     @ObjCMethod("fastestEncoding")
     func fastestEncoding() -> UInt { StringEncoding.unicode }
 
-    /// Pointers straight to the contents, which Swift tries before copying
-    /// them out. Strings here keep neither form, so there are none.
+    /// A pointer straight to the contents, which Swift tries before reading
+    /// them a character at a time: an immutable string's own NUL-terminated
+    /// bytes when it is all ASCII, kept as long as it is.
     @ObjCMethod("_fastCStringContents:")
-    func fastCStringContents(_ nullTerminated: Bool) -> UnsafePointer<CChar>? { nil }
+    func fastCStringContents(_ nullTerminated: Bool) -> UnsafePointer<CChar>? { Strings.asciiPointer(objcObject) }
 
     @ObjCMethod("_fastCharacterContents")
     func fastCharacterContents() -> UnsafePointer<UInt16>? { nil }

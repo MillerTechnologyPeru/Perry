@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import Synchronization
 
 // The animation engine: a layer as it presents is its model with each of
 // its animations' values at the current media time applied, in the order
@@ -266,14 +267,17 @@ enum Actions {
     static func wanted(for layer: CALayer) -> Bool {
         guard !CATransaction.disableActions() else { return false }
         let state = layer.state
-        if let delegate = state.delegate { return NSObject(delegate).responds(to: "actionForLayer:forKey:") }
+        if let delegate = state.delegate { return ActionKeys.responds(delegate, ActionKeys.actionForLayer) }
         return state.rendered && state.superlayer != nil
     }
 
     /// Asks the layer for the action for `key` and runs it: an animation
     /// with no values of its own animates from the old value.
     static func run(for layer: CALayer, key: String, from old: AnimatedValue) {
-        guard let action = layer.sendActionForKey(key), !action.is(NSNull.self) else { return }
+        // A layer of a class that keeps CALayer's -actionForKey: is asked
+        // directly, without making the key an NSString and back.
+        let overridden = ActionKeys.overridesActionForKey(layer.objcObject)
+        guard let action = overridden ? layer.sendActionForKey(key) : layer.action(forKey: key), !action.is(NSNull.self) else { return }
         if let animation = action.as(CAAnimation.self) {
             let values = animation.state.values
             if values["fromValue"] == nil, values["toValue"] == nil, values["byValue"] == nil {
@@ -357,4 +361,48 @@ extension NSObject {
     @ObjCMethod("actionForKey:") func sendActionForKey(_ key: String) -> NSObject?
     @ObjCMethod("animationDidStart:") func sendAnimationDidStart(_ animation: CAAnimation)
     @ObjCMethod("animationDidStop:finished:") func sendAnimationDidStop(_ animation: CAAnimation, finished: Bool)
+}
+
+/// What asking layers and their delegates for actions needs, made once:
+/// the selectors, and an NSString for each key, as a layer's properties
+/// change many times a frame.
+enum ActionKeys {
+    nonisolated(unsafe) static let respondsToSelector = ObjCRuntime.selector("respondsToSelector:")
+    nonisolated(unsafe) static let actionForLayer = ObjCRuntime.selector("actionForLayer:forKey:")
+    nonisolated(unsafe) static let actionForKey = ObjCRuntime.selector("actionForKey:")
+    /// Each key's NSString, kept for good.
+    private static let strings = Mutex<[String: UInt]>([:])
+    /// Whether each layer class overrides -actionForKey:.
+    private static let overriding = Mutex<[UInt: Bool]>([:])
+
+    /// Whether `object` responds to `selector`, without wrapping it.
+    static func responds(_ object: UnsafeMutableRawPointer, _ selector: UnsafeRawPointer?) -> Bool {
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(object, respondsToSelector, selector)
+    }
+
+    /// The key as an NSString that lives as long as the program.
+    static func string(_ key: String) -> UnsafeMutableRawPointer? {
+        let found = strings.withLock { $0[key] }
+        if let found { return UnsafeMutableRawPointer(bitPattern: found) }
+        guard let made = key.objCOwnedReturnValue() else { return nil }
+        let address = UInt(bitPattern: made)
+        // Another thread may have made one first: theirs is kept.
+        let stored = strings.withLock { table -> UInt in
+            if let existing = table[key] { return existing }
+            table[key] = address
+            return address
+        }
+        if stored != address { ObjCRuntime.release(made) }
+        return UnsafeMutableRawPointer(bitPattern: stored)
+    }
+
+    static func overridesActionForKey(_ layer: UnsafeMutableRawPointer) -> Bool {
+        guard let cls = ObjCRuntime.objectClass(layer) else { return true }
+        let key = UInt(bitPattern: cls)
+        if let known = overriding.withLock({ $0[key] }) { return known }
+        let overrides = Methods.implementation(cls, actionForKey) != Methods.implementation(CALayer.objCClass.pointer, actionForKey)
+        overriding.withLock { $0[key] = overrides }
+        return overrides
+    }
 }

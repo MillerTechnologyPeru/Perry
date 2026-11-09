@@ -253,12 +253,20 @@ public func CFStringGetCStringPtr(_ string: id?, _ encoding: UInt32) -> UnsafePo
 }
 
 @c(_CFStringGetCharacterAtIndex)
-public func CFStringGetCharacterAtIndex(_ string: id?, _ index: Int) -> UInt16 { CFStrings.units(string)[index] }
+public func CFStringGetCharacterAtIndex(_ string: id?, _ index: Int) -> UInt16 {
+    let units = CFStrings.value(string).utf16
+    return units[units.index(units.startIndex, offsetBy: index)]
+}
 
 @c(_CFStringGetCharacters)
 public func CFStringGetCharacters(_ string: id?, _ range: CFRange, _ buffer: UnsafeMutablePointer<UInt16>?) {
-    let units = CFStrings.units(string)
-    for (offset, index) in CFArrays.range(range).enumerated() { buffer?[offset] = units[index] }
+    let units = CFStrings.value(string).utf16
+    guard let buffer, range.length > 0 else { return }
+    var index = units.index(units.startIndex, offsetBy: range.location)
+    for offset in 0..<range.length {
+        buffer[offset] = units[index]
+        index = units.index(after: index)
+    }
 }
 
 @c(_CFStringGetCharactersPtr) public func CFStringGetCharactersPtr(_ string: id?) -> UnsafePointer<UInt16>? { nil }

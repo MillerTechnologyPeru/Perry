@@ -18,8 +18,12 @@ final class StringStorage {
             if let attributed { attributed.replaceChanged(with: Array(newValue.utf16)) } else { stored = newValue }
             free(cString)
             cString = nil
+            asciiChecked = false
         }
     }
+    /// Whether the string has been looked at for being all ASCII, and was.
+    private var asciiChecked = false
+    private var isASCII = false
     private var cString: UnsafeMutablePointer<CChar>?
     /// What cString was made from, for a string changed behind its back.
     private var cStringSource: String?
@@ -30,6 +34,25 @@ final class StringStorage {
 
     deinit {
         free(cString)
+    }
+
+    /// The UTF8String, when it is the whole string in ASCII: no other
+    /// characters and no NUL. Swift reads such a string's bytes straight
+    /// from it rather than a character at a time.
+    var asciiPointer: UnsafePointer<CChar>? {
+        guard attributed == nil else { return nil }
+        if !asciiChecked {
+            isASCII = stored.utf8.allSatisfy { $0 != 0 && $0 < 0x80 }
+            asciiChecked = true
+        }
+        return isASCII ? utf8 : nil
+    }
+
+    /// The UTF-16 code unit at `offset`, without copying the string's.
+    func utf16Unit(at offset: Int) -> UInt16? {
+        let units = value.utf16
+        guard offset >= 0, offset < units.count else { return nil }
+        return units[units.index(units.startIndex, offsetBy: offset)]
     }
 
     /// UTF8String: valid as long as the string.
@@ -102,6 +125,20 @@ enum Strings {
     /// UTF-16 literals have no C string; keep one per literal, made by
     /// whichever thread asks first.
     private static let literalUTF8 = Mutex<[UInt: StringStorage]>([:])
+
+    /// The string's own bytes when they are all ASCII without NUL, valid as
+    /// long as it is and unchanging: a literal's ASCII characters, or an
+    /// immutable string's UTF8String. Nil for mutable strings.
+    static func asciiPointer(_ object: id) -> UnsafePointer<CChar>? {
+        let cls = ObjC.objectGetClass(object)
+        if cls == constantClass {
+            let flags = object.load(fromByteOffset: DarwinLayout.stringFlags, as: UInt.self)
+            guard flags & 0x10 == 0 else { return nil }
+            return object.load(fromByteOffset: DarwinLayout.stringCharacters, as: UnsafePointer<CChar>?.self)
+        }
+        guard cls == stringClass else { return nil }
+        return Storage.get(object, as: StringStorage.self)?.asciiPointer
+    }
 
     static func utf8(_ object: id) -> UnsafePointer<CChar>? {
         if ObjC.objectGetClass(object) == constantClass {
@@ -297,11 +334,11 @@ public class NSString: NSObject {
 
     @ObjCMethod("characterAtIndex:")
     func character(at index: UInt) -> UInt16 {
-        let units = Array(value.utf16)
+        let units = value.utf16
         guard Int(index) < units.count else {
             foundationFatal("-[NSString characterAtIndex:]: Range or index out of bounds")
         }
-        return units[Int(index)]
+        return units[units.index(units.startIndex, offsetBy: Int(index))]
     }
 
     @ObjCMethod("UTF8String")
