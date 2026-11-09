@@ -155,20 +155,23 @@ final class LazyStackMeasurements: ScrollTargetSource {
     var onChange: (() -> Void)?
     private var changePending = false
 
-    /// The window, viewport size and pinning of the last plan.
-    var plannedWindow: ClosedRange<CGFloat>?
+    /// The children the last plan made, what they cover along the stack
+    /// (without limit at an end of the stack that has been reached), and
+    /// the viewport's size and the pinning it was made with.
+    var made: Set<AnyHashable> = []
+    var madeExtent: ClosedRange<CGFloat>?
     var plannedSize: CGSize?
     var pinned = false
 
-    /// Plans again when the content has moved halfway through the views
-    /// made beyond what shows, or pinned views have to follow it.
+    /// Plans again when what shows has come within half the overscan of
+    /// the end of the views made, or pinned views have to follow it.
     func viewportMoved(_ info: ScrollViewportInfo) {
-        if !pinned, info.size == plannedSize, let window = plannedWindow {
+        if !pinned, info.size == plannedSize, let extent = madeExtent {
             let (low, high) = axis == .vertical
                 ? (info.visible.minY - origin.y, info.visible.maxY - origin.y)
                 : (info.visible.minX - origin.x, info.visible.maxX - origin.x)
             let margin = LazyStackBody.overscan / 2
-            guard low < window.lowerBound + margin || high > window.upperBound - margin else { return }
+            guard low - margin < extent.lowerBound || high + margin > extent.upperBound else { return }
         }
         notifyChange()
     }
@@ -214,8 +217,11 @@ struct LazyStackBody: View {
     @State private var remeasured = 0
     @State private var origin: CGPoint = .zero
 
-    /// How far beyond what shows children are made.
+    /// How far beyond what shows children are made, and how much further
+    /// those made are kept, so content moving back and forth doesn't make
+    /// the same views again.
     static var overscan: CGFloat { 300 }
+    static var keepDistance: CGFloat { 600 }
 
     private var viewport: ScrollViewportInfo? { source?.info }
 
@@ -250,7 +256,8 @@ struct LazyStackBody: View {
         measurements.starts = plan.starts
         measurements.origin = origin
         measurements.axis = root.axis
-        measurements.plannedWindow = window
+        measurements.made = Set(plan.shown.map(\.id))
+        measurements.madeExtent = plan.extent
         measurements.plannedSize = viewport?.size
         measurements.pinned = !root.pinnedViews.isEmpty
         measurements.crossLength = root.axis == .vertical ? (viewport?.size.width ?? 0) : (viewport?.size.height ?? 0)
@@ -286,6 +293,9 @@ struct LazyStackPlan {
     /// Every child, and where each starts along the stack.
     var all: [_VariadicView.Children.Element] = []
     var starts: [CGFloat] = []
+    /// What the children made cover along the stack, without limit at an
+    /// end of the stack they reach; nil when there's no window.
+    var extent: ClosedRange<CGFloat>?
 
     init(root: LazyStackRoot, children: _VariadicView.Children, measurements: LazyStackMeasurements,
          window: ClosedRange<CGFloat>?, edge: ClosedRange<CGFloat>?) {
@@ -307,9 +317,22 @@ struct LazyStackPlan {
         all = elements
         self.starts = starts
 
+        func overlaps(_ index: Int, _ range: ClosedRange<CGFloat>) -> Bool {
+            starts[index] + lengths[index] >= range.lowerBound && starts[index] <= range.upperBound
+        }
         var visible: [Int] = []
-        for index in 0..<count where window.map({ starts[index] + lengths[index] >= $0.lowerBound && starts[index] <= $0.upperBound }) ?? true {
-            visible.append(index)
+        let kept = window.map { ($0.lowerBound - LazyStackBody.keepDistance)...($0.upperBound + LazyStackBody.keepDistance) }
+        for index in 0..<count {
+            guard let window, let kept else {
+                visible.append(index)
+                continue
+            }
+            if overlaps(index, window) || (overlaps(index, kept) && measurements.made.contains(elements[index].id)) {
+                visible.append(index)
+            }
+        }
+        if window != nil, let first = visible.first, let last = visible.last {
+            extent = (first == 0 ? -CGFloat.infinity : starts[first])...(last == count - 1 ? CGFloat.infinity : starts[last] + lengths[last])
         }
         var placed = visible.map { starts[$0] }
 
