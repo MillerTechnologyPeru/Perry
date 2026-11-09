@@ -4,7 +4,7 @@ import PerryObjCInterop
 
 // NSInvocation: a message as a value, with its arguments in the shape its
 // method signature gives them. -invoke places them as x86_64's calling
-// convention does; other architectures don't have the call yet.
+// convention does, or Darwin's arm64 one; armv7 doesn't have the call yet.
 
 final class InvocationStorage {
     let signature: id
@@ -35,6 +35,124 @@ final class InvocationStorage {
 enum Invocations {
     nonisolated(unsafe) static var invocationClass: Class!
     static func storage(_ object: id?) -> InvocationStorage? { Storage.get(object, as: InvocationStorage.self) }
+
+    #if arch(arm64)
+    /// A type's alignment as an argument on the stack: a scalar's size, or
+    /// a structure's largest member's.
+    private static func alignment(of type: String, size: Int) -> Int {
+        guard type.contains("{") || type.contains("[") else { return max(min(size, 8), 1) }
+        var inName = false, largest = 1
+        for character in type {
+            switch character {
+            case "{": inName = true
+            case "=": inName = false
+            case "}", "[", "]": break
+            default:
+                guard !inName else { continue }
+                switch character {
+                case "q", "Q", "d", "@", "#", ":", "^", "*", "l", "L": largest = 8
+                case "i", "I", "f": largest = max(largest, 4)
+                case "s", "S": largest = max(largest, 2)
+                default: break
+                }
+            }
+        }
+        return largest
+    }
+
+    /// Calls `imp` as Darwin's arm64 convention has it: integers and small
+    /// structures in x0-x7, floating point and structures of up to four of
+    /// one floating type in d0-d7, a result over 16 bytes through x8. A
+    /// structure over 16 bytes goes as a pointer to the invocation's own
+    /// bytes, so a change the method makes shows in the argument, as on
+    /// Darwin, whose small integers likewise arrive zero-extended. What
+    /// doesn't fit goes on the stack, packed at each type's own alignment,
+    /// which is where Darwin differs from the standard convention.
+    static func invokeARM64(_ imp: UnsafeRawPointer, _ storage: InvocationStorage, _ details: MethodSignatureStorage) {
+        var general = [UInt64](), vector = [UInt64](), stack = [UInt8]()
+
+        func push(_ bytes: UnsafeRawBufferPointer, alignment: Int) {
+            while stack.count % alignment != 0 { stack.append(0) }
+            stack.append(contentsOf: bytes)
+        }
+
+        for index in storage.arguments.indices {
+            let type = String(cString: details.parts[index + 1]), size = details.sizes[index + 1]
+            storage.arguments[index].withUnsafeMutableBytes { mutable in
+                let bytes = UnsafeRawBufferPointer(mutable)
+                if let (kind, count) = Structures.floatingMembers(type) {
+                    let member = kind == "d" ? 8 : 4
+                    if vector.count + count <= 8 {
+                        for position in 0..<count {
+                            var word: UInt64 = 0
+                            withUnsafeMutableBytes(of: &word) {
+                                $0.copyMemory(from: UnsafeRawBufferPointer(rebasing: bytes[position * member..<(position + 1) * member]))
+                            }
+                            vector.append(word)
+                        }
+                    } else {
+                        // Vector registers are done with for later arguments too.
+                        vector += [UInt64](repeating: 0, count: 8 - vector.count)
+                        push(UnsafeRawBufferPointer(rebasing: bytes[0..<size]), alignment: member)
+                    }
+                    return
+                }
+                if size > 16 {
+                    if general.count < 8 {
+                        general.append(UInt64(UInt(bitPattern: bytes.baseAddress)))
+                    } else {
+                        var pointer = UInt(bitPattern: bytes.baseAddress)
+                        withUnsafeBytes(of: &pointer) { push($0, alignment: 8) }
+                    }
+                    return
+                }
+                let words = (max(size, 1) + 7) / 8
+                if general.count + words <= 8 {
+                    for word in 0..<words {
+                        var value: UInt64 = 0
+                        let count = min(8, size - word * 8)
+                        if count > 0 {
+                            withUnsafeMutableBytes(of: &value) {
+                                $0.copyMemory(from: UnsafeRawBufferPointer(rebasing: bytes[word * 8..<word * 8 + count]))
+                            }
+                        }
+                        general.append(value)
+                    }
+                } else {
+                    general += [UInt64](repeating: 0, count: 8 - general.count)
+                    push(UnsafeRawBufferPointer(rebasing: bytes[0..<size]), alignment: alignment(of: type, size: size))
+                }
+            }
+        }
+
+        let returnSize = details.sizes[0], returnType = String(cString: details.parts[0])
+        let floating = Structures.floatingMembers(returnType)
+        var out = [UInt64](repeating: 0, count: 6)
+        while stack.count % 8 != 0 { stack.append(0) }
+        let words = stack.withUnsafeBytes { bytes in (0..<bytes.count / 8).map { bytes.loadUnaligned(fromByteOffset: $0 * 8, as: UInt64.self) } }
+        storage.result.withUnsafeMutableBytes { result in
+            general += [UInt64](repeating: 0, count: 8 - general.count)
+            // x8: where a result too big for registers goes.
+            general.append(UInt64(UInt(bitPattern: result.baseAddress)))
+            vector += [UInt64](repeating: 0, count: 8 - vector.count)
+            perry_foundation_invoke(imp, general, vector, words, words.count, &out)
+            guard returnSize > 0 else { return }
+            if let (kind, count) = floating {
+                let member = kind == "d" ? 8 : 4
+                for position in 0..<count {
+                    withUnsafeBytes(of: out[2 + position]) { source in
+                        UnsafeMutableRawBufferPointer(rebasing: result[position * member..<(position + 1) * member])
+                            .copyMemory(from: UnsafeRawBufferPointer(rebasing: source[0..<member]))
+                    }
+                }
+            } else if returnSize <= 16 {
+                withUnsafeBytes(of: (out[0], out[1])) { source in
+                    result.copyMemory(from: UnsafeRawBufferPointer(rebasing: source[0..<returnSize]))
+                }
+            }
+        }
+    }
+    #endif
 }
 
 @ObjCClass("NSInvocation")
@@ -197,8 +315,10 @@ public final class NSInvocation: NSObject {
                 result.copyMemory(from: UnsafeRawBufferPointer(rebasing: source[0..<min(returnSize, 16)]))
             }
         }
+        #elseif arch(arm64)
+        Invocations.invokeARM64(imp, storage, details)
         #else
-        foundationFatal("-[NSInvocation invoke] is available on x86_64 only")
+        foundationFatal("-[NSInvocation invoke] is available on x86_64 and arm64 only")
         #endif
     }
 }
