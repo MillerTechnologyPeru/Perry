@@ -74,7 +74,7 @@ final class _PerryBinding: NSObject {
             if target.responds(to: "setObjectValue:") {
                 Send.void(receiver, "setObjectValue:", value?.objcObject)
             } else {
-                target.sendSetValue(value, forKey: "value")
+                assign(target, value)
             }
         case "hidden", "enabled", "editable", "selectable":
             let on = value.map { Send.bool($0.objcObject, "boolValue") } ?? false
@@ -90,10 +90,22 @@ final class _PerryBinding: NSObject {
             } else if target.responds(to: setter) {
                 Send.void(receiver, setter, value?.objcObject)
             } else {
-                target.sendSetValue(value, forKey: name)
+                assign(target, value)
             }
         default:
-            target.sendSetValue(value, forKey: name)
+            assign(target, value)
+        }
+    }
+
+    /// Sets the bound value through the receiver's setter for the binding's
+    /// name; a receiver with none (a menu item's "value", say) keeps what it
+    /// has, as AppKit's binders do for names they don't apply.
+    private func assign(_ target: NSObject, _ value: NSObject?) {
+        let setter = "set" + name.prefix(1).uppercased() + name.dropFirst() + ":"
+        if target.responds(to: setter) {
+            Send.void(target.objcObject, setter, value?.objcObject)
+        } else {
+            appKitWarning("binding \(name) of \(target.objCClass.pointer) has no setter; skipped")
         }
     }
 
