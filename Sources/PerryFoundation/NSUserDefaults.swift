@@ -290,8 +290,9 @@ class NSUserDefaults: NSObject {
     }
 
     @ObjCMethod("registerDefaults:")
-    func register(_ defaults: ObjCObject) {
-        guard case .dictionary(let values)? = PropertyValue(object: defaults.id) else { return }
+    func register(_ defaults: ObjCObject?) {
+        // Nil, as from a plist that isn't there, registers nothing.
+        guard let defaults, case .dictionary(let values)? = PropertyValue(object: defaults.id) else { return }
         storage.register(values)
     }
 
