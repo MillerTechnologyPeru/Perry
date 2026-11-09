@@ -67,13 +67,14 @@ final class MenuView: NSView {
     static func keyEquivalentText(_ item: NSMenuItem) -> String {
         guard !item.keyEquivalent.isEmpty else { return "" }
         let mask = item.keyEquivalentModifierMask
+        // As Linux's menus show them: Command is Control here.
         var text = ""
-        if mask & ModifierFlags.control != 0 { text += "⌃" }
-        if mask & ModifierFlags.option != 0 { text += "⌥" }
+        if mask & ModifierFlags.control != 0 && mask & ModifierFlags.command == 0 { text += "Ctrl+" }
+        if mask & ModifierFlags.command != 0 { text += "Ctrl+" }
+        if mask & ModifierFlags.option != 0 { text += "Alt+" }
         var key = item.keyEquivalent
         // An uppercase letter is typed with shift.
-        if mask & ModifierFlags.shift != 0 || (key.count == 1 && key.uppercased() == key && key.lowercased() != key) { text += "⇧" }
-        if mask & ModifierFlags.command != 0 { text += "⌘" }
+        if mask & ModifierFlags.shift != 0 || (key.count == 1 && key.uppercased() == key && key.lowercased() != key) { text += "Shift+" }
         let names: [String: String] = ["\r": "↩", "\u{1b}": "⎋", "\t": "⇥", "\u{8}": "⌫", "\u{7f}": "⌫", " ": "Space",
                                        "\u{F700}": "↑", "\u{F701}": "↓", "\u{F702}": "←", "\u{F703}": "→"]
         key = names[key] ?? key.uppercased()
