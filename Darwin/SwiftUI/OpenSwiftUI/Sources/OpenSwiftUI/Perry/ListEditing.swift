@@ -86,6 +86,16 @@ extension List {
 
 /// A row of a list: its child, with the controls edit mode puts before it,
 /// highlighted when selected, and swiped to delete.
+/// A row's spacing, as iOS's lists have it for apps built with the iOS 26
+/// SDK and before it.
+enum ListRowMetrics {
+    /// Above and below a row's content.
+    static var verticalInset: CGFloat { isLinkedOnOrAfter(.v7) ? 15 : 11 }
+    static var minimumHeight: CGFloat { isLinkedOnOrAfter(.v7) ? 52 : 44 }
+    /// After a separator: it stops short of the edge from iOS 26's SDK on.
+    static var separatorTrailingInset: CGFloat { isLinkedOnOrAfter(.v7) ? 16 : 0 }
+}
+
 struct ListRow: View {
     var child: _VariadicView.Children.Element
     var selection: ListSelection?
@@ -107,7 +117,8 @@ struct ListRow: View {
             }
             child
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, ListRowMetrics.verticalInset)
+        .frame(maxWidth: .infinity, minHeight: ListRowMetrics.minimumHeight, alignment: .leading)
         .padding(.horizontal, inset)
         .background(selected && selection?.multiple == false ? Color(white: 0.82) : Color.clear)
         .modifier(RowChoosing(action: choosing ? { if let value { selection?.choose(value) } } : nil))

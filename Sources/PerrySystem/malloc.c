@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <malloc.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -155,9 +156,31 @@ int darwin_malloc_type_posix_memalign(void **ptr, size_t alignment, size_t size,
 // gives must be a block's, the block after it must say this one is in use,
 // and what an arena's or a mapping's own records say must agree.
 
+/// Pages a read has found, so asking the kernel is not needed again: Swift's
+/// arrays ask for their blocks' sizes each time they grow. A page unmapped
+/// since would fault, for a pointer into it, which no live block is.
+enum { KNOWN_PAGES = 1024, KNOWN_PAGE_SHIFT = 12 };
+static _Atomic uintptr_t known_pages[KNOWN_PAGES];
+
+static bool read_from_kernel(uintptr_t address, void *out, size_t count);
+
 /// Reads `count` bytes at `address`, if they are there to read: a pointer
 /// that is not a block's may have anything around it, or nothing.
 static bool read_memory(uintptr_t address, void *out, size_t count) {
+    uintptr_t page = address >> KNOWN_PAGE_SHIFT;
+    bool one_page = page == (address + count - 1) >> KNOWN_PAGE_SHIFT;
+    // Stored one more than the page, so an empty slot is no page.
+    _Atomic uintptr_t *known = &known_pages[page % KNOWN_PAGES];
+    if (one_page && atomic_load_explicit(known, memory_order_relaxed) == page + 1) {
+        memcpy(out, (const void *)address, count);
+        return true;
+    }
+    if (!read_from_kernel(address, out, count)) return false;
+    if (one_page) atomic_store_explicit(known, page + 1, memory_order_relaxed);
+    return true;
+}
+
+static bool read_from_kernel(uintptr_t address, void *out, size_t count) {
     static int cannot_read_self;
     if (!__atomic_load_n(&cannot_read_self, __ATOMIC_RELAXED)) {
         struct iovec local = { out, count }, remote = { (void *)address, count };

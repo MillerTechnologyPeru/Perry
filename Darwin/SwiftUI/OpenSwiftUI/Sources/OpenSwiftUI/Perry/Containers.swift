@@ -196,7 +196,9 @@ struct GroupedRowsLayout: View {
                                 ListRow(child: children[row.index], selection: selection, inset: Self.inset)
                                     .background(RowFrameRecorder(frames: frames, index: row.index))
                                 if style.isPlain || row.index != section.rows.last {
-                                    Divider().padding(.leading, Self.inset)
+                                    Divider()
+                                        .padding(.leading, Self.inset)
+                                        .padding(.trailing, ListRowMetrics.separatorTrailingInset)
                                 }
                             }
                         }
@@ -241,8 +243,11 @@ struct ListRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundColor(isLinkedOnOrAfter(.v7) ? nil : Color.accentColor)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The whole row is tapped, the spacing around the label too.
+            .padding(.vertical, ListRowMetrics.verticalInset)
             .contentShape(Rectangle())
+            .padding(.vertical, -ListRowMetrics.verticalInset)
             .opacity(configuration.isPressed ? 0.5 : 1)
     }
 }
