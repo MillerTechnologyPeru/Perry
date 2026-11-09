@@ -23,7 +23,7 @@ for name in (s.strip() for s in symbols.group(1).replace('\n', ' ').split(',') i
         lines.append('void sym_%d(void) __asm__("%s"); void sym_%d(void) {}' % (len(lines), name, len(lines)))
 # @try calls setjmp itself on i386.
 for name in ('__setjmp', '__longjmp', '_statfs', '_stat$INODE64', '_lstat$INODE64', '_fstat$INODE64', '_statfs$INODE64',
-             '_readdir$INODE64', '_stat64', '_getenv', '_fflush'):
+             '_readdir$INODE64', '_stat64', '_getenv', '_fflush', '_usleep'):
     if not any('"%s"' % name in line for line in lines):
         lines.append('void sym_%d(void) __asm__("%s"); void sym_%d(void) {}' % (len(lines), name, len(lines)))
 open(sys.argv[2], 'w').write('\n'.join(lines) + '\n')
@@ -81,6 +81,18 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURE
     clang -target i386-apple-macosx$MIN -fno-builtin -w -c $out/AppKit/stub.c -o $out/AppKit/exit-asm.o
     $ld -arch i386 -dylib -install_name /System/Library/Frameworks/AppKit.framework/Versions/C/AppKit -macosx_version_min $MIN \
         -o $out/AppKit/AppKit.dylib $out/AppKit/exit-asm.o $out/libSystem/libSystem.dylib 2>&1 | grep -v "directory not found" || true
+    # CoreAudio: the calls legacy_audio makes.
+    mkdir -p $out/CoreAudio
+    i=0
+    for name in AudioHardwareGetProperty AudioDeviceAddIOProc AudioDeviceRemoveIOProc AudioDeviceStart AudioDeviceStop \
+        AudioDeviceGetCurrentTime AudioComponentFindNext AudioComponentInstanceNew AudioUnitInitialize AudioUnitSetProperty \
+        AudioUnitSetParameter AudioUnitGetParameter AudioUnitRender; do
+        echo "void sym_$i(void) __asm__(\"_$name\"); void sym_$i(void) {}"
+        i=$((i + 1))
+    done > $out/CoreAudio/stub.c
+    clang -target i386-apple-macosx$MIN -fno-builtin -w -c $out/CoreAudio/stub.c -o $out/CoreAudio/exit-asm.o
+    $ld -arch i386 -dylib -install_name /System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio -macosx_version_min $MIN \
+        -o $out/CoreAudio/CoreAudio.dylib $out/CoreAudio/exit-asm.o $out/libSystem/libSystem.dylib 2>&1 | grep -v "directory not found" || true
     # What crt1.o has for images from before 10.6, which name it in their stubs.
     echo "void helper(void) __asm__(\"dyld_stub_binding_helper\"); void helper(void) {}" > $out/crt.c
     clang -target i386-apple-macosx$MIN -w -c $out/crt.c -o $out/crt.o
@@ -91,6 +103,7 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e MIN="$min" -e FIXTURE
         case $file in *.m) libs="$libs $out/libobjc/libobjc.dylib" flags="-fobjc-exceptions -fblocks" ;; esac
         grep -q -E "NSString|NSAutoreleasePool|NSInsetRect" Tests/Fixtures/$file && libs="$libs $out/Foundation/Foundation.dylib"
         grep -q NSView Tests/Fixtures/$file && libs="$libs $out/AppKit/AppKit.dylib"
+        grep -q AudioDeviceAddIOProc Tests/Fixtures/$file && libs="$libs $out/CoreAudio/CoreAudio.dylib"
         clang -target i386-apple-macosx$MIN -fno-stack-protector $flags -c Tests/Fixtures/$file -o $out/$name.o -isystem Tests/Fixtures/include
         # legacy_start links as Mac programs do: at 0x1000, from crt1'"'"'s start.
         layout="-e _main -pagezero_size 0x10000"

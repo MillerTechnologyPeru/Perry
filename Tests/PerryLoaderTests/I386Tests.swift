@@ -99,6 +99,23 @@ struct I386Tests {
         #expect(result.stdout.lines == ["loaded at 0x1000 aligned 1", "argc 3 last b", "envp 1 getenv 1"])
     }
 
+    @Test("Sound through the HAL's I/O procs, the stereo mixer and the varispeed",
+          .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_audio").path)))
+    func legacyAudio() throws {
+        let result = try run(I386.perry32, [I386.fixture("legacy_audio").path], environment: I386.environment)
+        #expect(result.status == 0, "\(result.stderr)")
+        #expect(result.stdout.lines == [
+            "device 2",
+            "before start 1",
+            "playing 1 buffers 1 channels 2 bytes 4096 input 0 client 1",
+            "time 0",
+            "stopped 1",
+            "removed 0",
+            "varispeed cents 1200 pulled 512 out 0.50 0.50",
+            "mixer panned left 1.00 0.00",
+        ])
+    }
+
     /// DISPLAY is only so AppKit starts SDL; the dummy driver needs no server.
     @Test("An application's run loop, window and -drawRect:",
           .enabled(if: FileManager.default.fileExists(atPath: I386.fixture("legacy_window").path)))

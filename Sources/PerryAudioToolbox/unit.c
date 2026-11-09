@@ -1,5 +1,6 @@
 // Audio units: RemoteIO (and the other output units) played through
-// GStreamer, the multichannel mixer, the 3D mixer, and the format converter.
+// GStreamer, the multichannel, stereo and 3D mixers, the format converter and
+// the varispeed.
 //
 // An output unit that has started has a thread that renders its input bus,
 // from the bus's render callback or the unit connected to it, and pushes the
@@ -25,7 +26,7 @@ typedef struct AudioComponentDescription {
     uint32_t componentType, componentSubType, componentManufacturer, componentFlags, componentFlagsMask;
 } AudioComponentDescription;
 
-enum kind { OUTPUT, MULTICHANNEL_MIXER, MIXER_3D, CONVERTER };
+enum kind { OUTPUT, MULTICHANNEL_MIXER, STEREO_MIXER, MIXER_3D, CONVERTER, VARISPEED };
 
 typedef struct component {
     AudioComponentDescription description;
@@ -43,9 +44,11 @@ static const component components[] = {
     { { FOURCC('a', 'u', 'o', 'u'), FOURCC('a', 'h', 'a', 'l'), APPLE, 0, 0 }, OUTPUT, "AUHAL" },
     { { FOURCC('a', 'u', 'o', 'u'), FOURCC('s', 'y', 's', ' '), APPLE, 0, 0 }, OUTPUT, "AUSystemOutput" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('m', 'c', 'm', 'x'), APPLE, 0, 0 }, MULTICHANNEL_MIXER, "AUMultiChannelMixer" },
+    { { FOURCC('a', 'u', 'm', 'x'), FOURCC('s', 'm', 'x', 'r'), APPLE, 0, 0 }, STEREO_MIXER, "AUMixer" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('3', 'd', 'e', 'm'), APPLE, 0, 0 }, MIXER_3D, "AU3DMixerEmbedded" },
     { { FOURCC('a', 'u', 'm', 'x'), FOURCC('3', 'd', 'm', 'x'), APPLE, 0, 0 }, MIXER_3D, "AU3DMixer" },
     { { FOURCC('a', 'u', 'f', 'c'), FOURCC('c', 'o', 'n', 'v'), APPLE, 0, 0 }, CONVERTER, "AUConverter" },
+    { { FOURCC('a', 'u', 'f', 'c'), FOURCC('v', 'a', 'r', 'i'), APPLE, 0, 0 }, VARISPEED, "AUVarispeed" },
 };
 #define COMPONENT_COUNT (sizeof components / sizeof *components)
 
@@ -69,6 +72,10 @@ static const component components[] = {
 #define kMultiChannelMixerParam_Volume 0
 #define kMultiChannelMixerParam_Enable 1
 #define kMultiChannelMixerParam_Pan 2
+#define kStereoMixerParam_Volume 0
+#define kStereoMixerParam_Pan 1
+#define kVarispeedParam_PlaybackRate 0
+#define kVarispeedParam_PlaybackCents 1
 #define k3DMixerParam_Azimuth 0
 #define k3DMixerParam_Gain 3
 #define k3DMixerParam_PlaybackRate 4
@@ -155,6 +162,10 @@ static void bus_defaults(unit *u, bus *b) {
         b->parameters[kMultiChannelMixerParam_Volume] = 1;
         b->parameters[kMultiChannelMixerParam_Enable] = 1;
         break;
+    case STEREO_MIXER:
+        b->parameters[kStereoMixerParam_Volume] = 1;
+        b->parameters[kStereoMixerParam_Pan] = 0.5f;
+        break;
     case MIXER_3D:
         b->parameters[k3DMixerParam_PlaybackRate] = 1;
         break;
@@ -240,7 +251,9 @@ OSStatus darwin_AudioComponentInstanceNew(const void *c, void **out) {
     u->enable_io[1] = 1;
     switch (found->kind) {
     case MULTICHANNEL_MIXER: u->output_parameters[kMultiChannelMixerParam_Volume] = 1; set_input_count(u, 8); break;
+    case STEREO_MIXER: u->output_parameters[kStereoMixerParam_Volume] = 1; set_input_count(u, 8); break;
     case MIXER_3D: set_input_count(u, 8); break;
+    case VARISPEED: u->global_parameters[kVarispeedParam_PlaybackRate] = 1; set_input_count(u, 1); break;
     default: set_input_count(u, 1); break;
     }
     perry_audio_trace("%s %p", found->name, (void *)u);
@@ -399,6 +412,13 @@ static OSStatus mix(unit *u, const AudioTimeStamp *time, uint32_t frames, AudioB
             volume = b->parameters[kMultiChannelMixerParam_Volume];
             enabled = b->parameters[kMultiChannelMixerParam_Enable] != 0;
             pan = b->parameters[kMultiChannelMixerParam_Pan];
+        } else if (kind == STEREO_MIXER) {
+            // Pan runs from 0 to 1 here, not -1 to 1.
+            volume = b->parameters[kStereoMixerParam_Volume];
+            pan = b->parameters[kStereoMixerParam_Pan] * 2 - 1;
+        } else if (kind == VARISPEED) {
+            rate = u->global_parameters[kVarispeedParam_PlaybackRate];
+            if (rate <= 0) rate = 1;
         } else if (kind == MIXER_3D) {
             volume = powf(10, b->parameters[k3DMixerParam_Gain] / 20);
             pan = sinf(b->parameters[k3DMixerParam_Azimuth] * (float)M_PI / 180);
@@ -459,6 +479,7 @@ static OSStatus mix(unit *u, const AudioTimeStamp *time, uint32_t frames, AudioB
     }
     float master = 1;
     if (kind == MULTICHANNEL_MIXER) master = u->output_parameters[kMultiChannelMixerParam_Volume];
+    else if (kind == STEREO_MIXER) master = u->output_parameters[kStereoMixerParam_Volume];
     else if (kind == MIXER_3D) master = powf(10, u->output_parameters[k3DMixerParam_Gain] / 20);
     if (master != 1) for (size_t i = 0; i < (size_t)frames * out.mChannelsPerFrame; i++) sum[i] *= master;
     perry_pcm_write(&out, io, 0, frames, sum);
@@ -721,14 +742,14 @@ static bool property(unit *u, uint32_t id, uint32_t scope, uint32_t element, voi
         if (element >= u->input_count) { *error = kAudioUnitErr_InvalidElement; return false; }
         v.callback.proc = u->inputs[element].callback;
         v.callback.refcon = u->inputs[element].refcon;
-        length = 16;
+        length = sizeof v.callback;
         break;
     case kAudioUnitProperty_MakeConnection:
         if (element >= u->input_count) { *error = kAudioUnitErr_InvalidElement; return false; }
         v.connection.source = u->inputs[element].source;
         v.connection.output = u->inputs[element].source_output;
         v.connection.input = element;
-        length = 16;
+        length = sizeof v.connection;
         break;
     default: {
         stored_property *stored = find_stored(u, id, scope, element);
@@ -936,6 +957,11 @@ DARWIN_FLOAT_ABI OSStatus darwin_AudioUnitSetParameter(void *handle, uint32_t id
     pthread_mutex_lock(&u->lock);
     float *p = parameter(u, id, scope, element);
     if (p) *p = value;
+    // A varispeed's rate and its pitch in cents are one setting.
+    if (p && u->component->kind == VARISPEED && scope == kAudioUnitScope_Global) {
+        if (id == kVarispeedParam_PlaybackRate && value > 0) u->global_parameters[kVarispeedParam_PlaybackCents] = 1200 * log2f(value);
+        else if (id == kVarispeedParam_PlaybackCents) u->global_parameters[kVarispeedParam_PlaybackRate] = powf(2, value / 1200);
+    }
     pthread_mutex_unlock(&u->lock);
     if (!p) perry_audio_trace("%s: no parameter %u (scope %u, element %u)", u->component->name, id, scope, element);
     return p ? 0 : kAudioUnitErr_InvalidParameter;

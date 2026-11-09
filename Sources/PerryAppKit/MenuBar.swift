@@ -23,10 +23,10 @@ enum MenuBar {
     static var mainMenu: NSMenu? { App.shared?.mainMenu.map { NSMenu.objCInstance($0.objcObject, ownership: .retain) } }
 
     /// Whether a window shows the menu: the titled windows of an app that
-    /// has one, not its panels.
+    /// has one, not its panels. An OpenGL window has no renderer to draw it.
     static func shows(in window: NSWindow) -> Bool {
         enabled && mainMenu != nil && window.styleMask & StyleMask.titled != 0 && !(window is NSPanel)
-            && window.styleMask & StyleMask.fullScreen == 0
+            && window.styleMask & StyleMask.fullScreen == 0 && window.openGLView == nil
     }
 
     private static func title(of item: NSMenuItem) -> String {
