@@ -641,17 +641,26 @@ open class UIViewController: UIResponder {
     }
 }
 
-/// Whether the app was built with an SDK at least iOS 13's, which brought
-/// sheets as the default presentation; true when that can't be told.
+/// What the SDK an app was built with brought.
 enum ProgramSDK {
-    nonisolated(unsafe) static let iOS13: Bool = {
+    /// Sheets as the default presentation; true when the SDK can't be told.
+    nonisolated(unsafe) static let iOS13 = atLeast(major: 13) ?? true
+
+    /// The design of iOS 26, which an app can decline in its Info.plist;
+    /// false when the SDK can't be told.
+    nonisolated(unsafe) static let iOS26Design: Bool = {
+        guard atLeast(major: 26) ?? false else { return false }
+        return NSBundle.main().infoObject(forKey: "UIDesignRequiresCompatibility")?.sendBoolValue() != true
+    }()
+
+    private static func atLeast(major: UInt64) -> Bool? {
         // dyld_program_sdk_at_least takes a dyld_build_version_t, a platform
-        // (iOS 2) and a version (13.0.0), in one register.
+        // (iOS 2) and a version (major.0.0), in one register.
         typealias AtLeast = @convention(c) (UInt64) -> Bool
         let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD)
-        guard let atLeast = dlsym(system, "_dyld_program_sdk_at_least") else { return true }
-        return unsafeBitCast(atLeast, to: AtLeast.self)(UInt64(2) | UInt64(0x000D_0000) << 32)
-    }()
+        guard let atLeast = dlsym(system, "_dyld_program_sdk_at_least") else { return nil }
+        return unsafeBitCast(atLeast, to: AtLeast.self)(UInt64(2) | (major << 16) << 32)
+    }
 }
 
 /// Modal presentation, run in update passes. With PERRY_UIKIT_PRESENT_TRACE
@@ -753,8 +762,9 @@ enum Presentations {
         // Unlinked first: the presenter's -viewDidAppear: may present again.
         presenter.state.presented = nil
         controller.state.presenting = nil
-        controller.finishAppearance()
+        // The presenter has appeared by the time the controller has gone.
         if covers { presenter.finishAppearance() }
+        controller.finishAppearance()
     }
 
     /// A page sheet: below the top safe area, inset a little.
