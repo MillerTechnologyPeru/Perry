@@ -100,10 +100,15 @@ open class NSWindow: NSResponder {
     /// With a toolbar, the view holding it above the content view.
     var frameView: NSView?
     var toolbarView: ToolbarView?
+    /// With the main menu shown in the window: the strip over the toolbar's.
+    var menuBarView: MenuBarView?
+    /// The height of the strips above the content view: the window is that
+    /// much taller than the content view, which keeps its size.
+    var appliedChrome: CGFloat = 0
 
     /// The view at the root of the window's views.
     var rootView: NSView? { frameView ?? contentView }
-    var toolbarHeight: CGFloat { toolbarView.map { $0.hidden ? 0 : ToolbarView.height } ?? 0 }
+    var toolbarHeight: CGFloat { appliedChrome }
 
     @ObjCMethod("init")
     public required init() {
@@ -209,13 +214,15 @@ open class NSWindow: NSResponder {
     @ObjCMethod("toolbarStyle") func toolbarStyle() -> Int { 0 }
     @ObjCMethod("setToolbarStyle:") func setToolbarStyle(_ style: Int) {}
 
-    /// The toolbar shows above the content view, which keeps its size: the
-    /// window grows by the toolbar's height.
-    func toolbarChanged() {
-        let shows = toolbar?.visible == true
-        if shows, frameView == nil, let content = contentView {
-            let height = ToolbarView.height
-            let root = NSView(frame: CGRect(x: 0, y: 0, width: frame.width, height: frame.height + height))
+    func toolbarChanged() { chromeChanged() }
+
+    /// The menu bar and the toolbar show above the content view, which keeps
+    /// its size: the window grows by their heights, the menu bar on top.
+    func chromeChanged() {
+        let wantsMenu = MenuBar.shows(in: self)
+        let wantsToolbar = toolbar?.visible == true
+        if (wantsMenu || wantsToolbar), frameView == nil, let content = contentView {
+            let root = NSView(frame: CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
             root.autoresizingMask = 2 | 16
             // The content view leaves the root for the frame view.
             content.layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).removeFromSuperlayer() }
@@ -225,28 +232,42 @@ open class NSWindow: NSResponder {
             root.setWindowTree(objcObject)
             root.ensureLayer()
             root.updateLayerGeometry()
-            let bar = ToolbarView(frame: CGRect(x: 0, y: frame.height, width: frame.width, height: height))
-            bar.autoresizingMask = 2 | 8
-            bar.toolbarObject = toolbar?.objcObject
-            toolbarView = bar
-            root.addSubview(bar)
             root.addSubview(content, positioned: -1, relativeTo: nil)
             content.autoresizingMask = 2 | 16
             content.setFrame(CGRect(x: 0, y: 0, width: frame.width, height: frame.height))
             content.nextResponderObject = objcObject
-            frame = CGRect(x: frame.minX, y: frame.minY - height, width: frame.width, height: frame.height + height)
-            if let sdlWindow { _ = SDL.setWindowSize(sdlWindow, Int32(frame.width.rounded()), Int32(frame.height.rounded())) }
             root.didMoveToWindowTree()
-        } else if let bar = toolbarView, bar.hidden == shows, let root = frameView {
-            // Shown or hidden again: the window grows or shrinks by it.
-            bar.setHidden(!shows)
-            let delta = shows ? ToolbarView.height : -ToolbarView.height
-            place(CGRect(x: frame.minX, y: frame.minY - delta, width: frame.width, height: frame.height + delta))
-            contentView?.setFrame(CGRect(x: 0, y: 0, width: frame.width, height: frame.height - toolbarHeight))
-            root.setNeedsDisplay(true)
         }
+        guard let root = frameView else { return }
+        if wantsToolbar, toolbarView == nil {
+            let bar = ToolbarView(frame: CGRect(x: 0, y: frame.height, width: frame.width, height: ToolbarView.height))
+            bar.autoresizingMask = 2 | 8
+            toolbarView = bar
+            root.addSubview(bar)
+        }
+        if wantsMenu, menuBarView == nil {
+            let bar = MenuBarView(frame: CGRect(x: 0, y: frame.height, width: frame.width, height: MenuBarView.height))
+            bar.autoresizingMask = 2 | 8
+            menuBarView = bar
+            root.addSubview(bar)
+        }
+        toolbarView?.setHidden(!wantsToolbar)
+        menuBarView?.setHidden(!wantsMenu)
+        let toolbarStrip = wantsToolbar ? ToolbarView.height : 0
+        let menuStrip = wantsMenu ? MenuBarView.height : 0
+        let delta = toolbarStrip + menuStrip - appliedChrome
+        if delta != 0 {
+            appliedChrome += delta
+            place(CGRect(x: frame.minX, y: frame.minY - delta, width: frame.width, height: frame.height + delta))
+        }
+        let contentHeight = frame.height - appliedChrome
+        contentView?.setFrame(CGRect(x: 0, y: 0, width: frame.width, height: contentHeight))
+        toolbarView?.setFrame(CGRect(x: 0, y: contentHeight, width: frame.width, height: ToolbarView.height))
+        menuBarView?.setFrame(CGRect(x: 0, y: contentHeight + toolbarStrip, width: frame.width, height: MenuBarView.height))
         toolbarView?.toolbarObject = toolbar?.objcObject
         toolbarView?.arrange()
+        menuBarView?.setNeedsDisplay(true)
+        root.setNeedsDisplay(true)
         Windows.layersChanged()
     }
 
@@ -525,6 +546,7 @@ open class NSWindow: NSResponder {
             let controller = contentViewControllerObject
             if let controller { Send.void(controller.objcObject, "viewWillAppear") }
             visible = true
+            chromeChanged()
             show()
             if let controller { Send.void(controller.objcObject, "viewDidAppear") }
         } else if let sdlWindow {
@@ -842,6 +864,7 @@ open class NSWindow: NSResponder {
             let responder = firstResponderObject ?? objcObject
             if event.modifierFlags & ModifierFlags.command != 0,
                contentView.map({ Send.bool($0.objcObject, "performKeyEquivalent:", event.objcObject) }) == true { return }
+            if event.modifierFlags & (ModifierFlags.command | ModifierFlags.control) != 0, MenuBar.performKeyEquivalent(event) { return }
             Send.void(responder, "keyDown:", event.objcObject)
         case .keyUp:
             Send.void(firstResponderObject ?? objcObject, "keyUp:", event.objcObject)

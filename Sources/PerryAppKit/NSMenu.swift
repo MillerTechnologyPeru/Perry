@@ -43,7 +43,7 @@ open class NSMenu: NSObject {
             item.menu = objcObject
         }
         switch decoded.string("NSName") {
-        case "_NSMainMenu": App.shared?.mainMenu = self
+        case "_NSMainMenu": App.shared?.setMainMenu(self)
         case "_NSServicesMenu": App.shared?.servicesMenu = self
         case "_NSHelpMenu": App.shared?.helpMenu = self
         case "_NSWindowsMenu": App.shared?.windowsMenu = self

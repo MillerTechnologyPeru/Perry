@@ -421,7 +421,10 @@ open class NSApplication: NSResponder {
     // MARK: Menus, icon and appearance
 
     @ObjCMethod("mainMenu") func appMainMenu() -> NSObject? { mainMenu }
-    @ObjCMethod("setMainMenu:") func setMainMenu(_ menu: NSObject?) { mainMenu = menu }
+    @ObjCMethod("setMainMenu:") func setMainMenu(_ menu: NSObject?) {
+        mainMenu = menu
+        for window in Windows.all where window.visible { window.chromeChanged() }
+    }
     @ObjCMethod("windowsMenu") func appWindowsMenu() -> NSObject? { windowsMenu }
     @ObjCMethod("setWindowsMenu:") func setWindowsMenu(_ menu: NSObject?) { windowsMenu = menu }
     @ObjCMethod("servicesMenu") func appServicesMenu() -> NSObject? { servicesMenu }
