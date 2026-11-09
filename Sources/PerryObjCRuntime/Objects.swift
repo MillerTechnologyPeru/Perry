@@ -248,7 +248,122 @@ enum RetainCounts {
     }
 
     final class Shard: Sendable {
-        let table = Mutex<[UInt: Entry]>([:])
+        let table = Mutex(EntryTable())
+    }
+
+    /// A shard's entries by object address: open addressing with linear
+    /// probing, as a Dictionary is, but hashed with one multiply rather than
+    /// SipHash, and kept in buffers of its own. It is non-copyable, so it
+    /// lives only in its Mutex and its buffers need no copy-on-write checks.
+    struct EntryTable: ~Copyable {
+        private var keys: UnsafeMutablePointer<UInt>
+        private var values: UnsafeMutablePointer<Entry>
+        private var capacity: Int
+        private var count = 0
+
+        init() {
+            capacity = 16
+            keys = .allocate(capacity: capacity)
+            keys.initialize(repeating: 0, count: capacity)
+            values = .allocate(capacity: capacity)
+        }
+
+        deinit {
+            for index in 0..<capacity where keys[index] != 0 { (values + index).deinitialize(count: 1) }
+            keys.deallocate()
+            values.deallocate()
+        }
+
+        /// Where `key` belongs: a multiplicative hash of the address, past
+        /// its alignment bits.
+        @inline(__always)
+        private func home(_ key: UInt) -> Int { Int(truncatingIfNeeded: (key >> 4) &* 0x9E37_79B9_7F4A_7C15) & (capacity - 1) }
+
+        /// The slot holding `key`, or the empty slot where it would go.
+        @inline(__always)
+        private func slot(_ key: UInt) -> (index: Int, found: Bool) {
+            var index = home(key)
+            while true {
+                let stored = keys[index]
+                if stored == key { return (index, true) }
+                if stored == 0 { return (index, false) }
+                index = (index + 1) & (capacity - 1)
+            }
+        }
+
+        subscript(key: UInt) -> Entry? {
+            get {
+                let (index, found) = slot(key)
+                return found ? values[index] : nil
+            }
+            set {
+                if let newValue {
+                    insert(key, newValue)
+                } else {
+                    _ = removeValue(forKey: key)
+                }
+            }
+        }
+
+        subscript(key: UInt, default value: @autoclosure () -> Entry) -> Entry {
+            get { self[key] ?? value() }
+            set { insert(key, newValue) }
+        }
+
+        private mutating func insert(_ key: UInt, _ value: Entry) {
+            let (index, found) = slot(key)
+            if found {
+                values[index] = value
+                return
+            }
+            if (count + 1) * 2 > capacity {
+                grow()
+                return insert(key, value)
+            }
+            keys[index] = key
+            (values + index).initialize(to: value)
+            count += 1
+        }
+
+        /// Removes `key`, moving back the entries after it that probed past
+        /// its slot, so lookups never need tombstones.
+        mutating func removeValue(forKey key: UInt) -> Entry? {
+            let (found, present) = slot(key)
+            guard present else { return nil }
+            let removed = (values + found).move()
+            keys[found] = 0
+            count -= 1
+            var hole = found, index = (found + 1) & (capacity - 1)
+            while keys[index] != 0 {
+                let home = home(keys[index])
+                // Whether the entry's home is cyclically outside (hole, index]:
+                // then it may move back into the hole.
+                let between = hole <= index ? (hole < home && home <= index) : (hole < home || home <= index)
+                if !between {
+                    keys[hole] = keys[index]
+                    (values + hole).moveInitialize(from: values + index, count: 1)
+                    keys[index] = 0
+                    hole = index
+                }
+                index = (index + 1) & (capacity - 1)
+            }
+            return removed
+        }
+
+        private mutating func grow() {
+            let (oldKeys, oldValues, oldCapacity) = (keys, values, capacity)
+            capacity *= 2
+            keys = .allocate(capacity: capacity)
+            keys.initialize(repeating: 0, count: capacity)
+            values = .allocate(capacity: capacity)
+            for index in 0..<oldCapacity where oldKeys[index] != 0 {
+                let (slot, _) = slot(oldKeys[index])
+                keys[slot] = oldKeys[index]
+                (values + slot).moveInitialize(from: oldValues + index, count: 1)
+            }
+            oldKeys.deallocate()
+            oldValues.deallocate()
+        }
     }
 
     /// Many, so threads retaining and releasing different objects seldom
