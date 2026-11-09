@@ -266,6 +266,10 @@ final class LayoutSectionState: ObjectState {
     var supplementariesFollowContentInsets = true
     var orthogonalScrollingBehavior = 0
     var contentInsetsReference = 0
+    /// A list section's: whether its rows make a rounded card, and a block
+    /// giving a row's separators (see applyListStyle).
+    var listRounded = false
+    var listSeparators: ObjCBlock?
 }
 
 @ObjCClass("NSCollectionLayoutSection")
@@ -302,6 +306,8 @@ open class NSCollectionLayoutSection: NSObject {
     }
     @ObjCMethod("contentInsetsReference") func contentInsetsReference() -> Int { section.contentInsetsReference }
     @ObjCMethod("setContentInsetsReference:") func setContentInsetsReference(_ reference: Int) { section.contentInsetsReference = reference }
+    @ObjCMethod("_perrySetListRounded") func setListRounded() { section.listRounded = true }
+    @ObjCMethod("_perrySetListSeparators:") func setListSeparators(_ separators: ObjCBlock?) { section.listSeparators = separators }
     @ObjCMethod("visibleItemsInvalidationHandler") func visibleItemsInvalidationHandler() -> NSObject? { nil }
     @ObjCMethod("setVisibleItemsInvalidationHandler:") func setVisibleItemsInvalidationHandler(_ handler: ObjCBlock?) {}
     @ObjCMethod("decorationItems") func decorationItems() -> NSObject { NSMutableArray.empty() }
@@ -407,6 +413,8 @@ open class UICollectionViewCompositionalLayoutConfiguration: NSObject {
 
 /// A section of the layout as placed.
 struct CompositionalSection {
+    /// The section's description, when it is a list's.
+    var list: LayoutSectionState?
     var header: CGRect?
     var footer: CGRect?
     var items: [CGRect]
@@ -510,6 +518,7 @@ open class UICollectionViewCompositionalLayout: UICollectionViewLayout {
         var along = origin + insets.top
         var header: CGRect?, footer: CGRect?
         var result = CompositionalSection(items: [], frame: .zero)
+        if section.section.listRounded || section.section.listSeparators != nil { result.list = section.section }
 
         func boundary(_ item: NSCollectionLayoutBoundarySupplementaryItem, at y: CGFloat) -> (CGRect, kind: String) {
             let state = item.item
