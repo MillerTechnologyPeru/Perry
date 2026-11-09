@@ -191,6 +191,18 @@ enum GLES {
             default: return perry_gl_entry(unsafeBitCast(PVRTC.tracedTexParameterx, to: UnsafeMutableRawPointer.self))
             }
         }
+        // Shaders are made fit for the host's compiler, and one it refuses
+        // is reported.
+        if name == "_glShaderSource" || name == "_glCompileShader" || name == "_glLinkProgram" {
+            GLShaders.bind(host)
+            let function: UnsafeMutableRawPointer
+            switch name {
+            case "_glShaderSource": function = unsafeBitCast(GLShaders.setSource, to: UnsafeMutableRawPointer.self)
+            case "_glCompileShader": function = unsafeBitCast(GLShaders.compileShader, to: UnsafeMutableRawPointer.self)
+            default: function = unsafeBitCast(GLShaders.linkProgram, to: UnsafeMutableRawPointer.self)
+            }
+            return perry_gl_entry(function)
+        }
         // Apple's multisampling is made of OpenGL ES 3's.
         if name == "_glRenderbufferStorageMultisampleAPPLE" || name == "_glResolveMultisampleFramebufferAPPLE" {
             guard GLMultisample.bind(host) else { return nil }
@@ -1161,4 +1173,111 @@ enum GLConstants {
     static let kEAGLColorFormatRGBA8 = "EAGLColorFormat8888"
     static let kEAGLColorFormatRGB565 = "EAGLColorFormat565"
     static let kEAGLColorFormatSRGBA8 = "EAGLColorFormatSRGBA8"
+}
+
+/// Shaders are written for iOS's compiler, which lets pass what Mesa's does
+/// not: anything after #endif or #else on its line (Asphalt 6's engine has
+/// "#endif]"). Those are cut off first. One the host's compiler refuses still
+/// leaves a program to fall back on whatever it does then, in silence: the
+/// host's log and the start of the shader go to standard error.
+enum GLShaders {
+    typealias Source = @convention(c) (UInt32, Int32, UnsafePointer<UnsafePointer<CChar>?>?, UnsafePointer<Int32>?) -> Void
+    nonisolated(unsafe) private static var source: Source?
+    typealias Object = @convention(c) (UInt32) -> Void
+    typealias Query = @convention(c) (UInt32, UInt32, UnsafeMutablePointer<Int32>?) -> Void
+    typealias Text = @convention(c) (UInt32, Int32, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<CChar>?) -> Void
+
+    nonisolated(unsafe) private static var compile: Object?
+    nonisolated(unsafe) private static var link: Object?
+    nonisolated(unsafe) private static var shaderiv: Query?
+    nonisolated(unsafe) private static var programiv: Query?
+    nonisolated(unsafe) private static var shaderLog: Text?
+    nonisolated(unsafe) private static var programLog: Text?
+    nonisolated(unsafe) private static var shaderSource: Text?
+
+    static func bind(_ host: (String) -> UnsafeMutableRawPointer?) {
+        source = host("glShaderSource").map { unsafeBitCast($0, to: Source.self) }
+        compile = host("glCompileShader").map { unsafeBitCast($0, to: Object.self) }
+        link = host("glLinkProgram").map { unsafeBitCast($0, to: Object.self) }
+        shaderiv = host("glGetShaderiv").map { unsafeBitCast($0, to: Query.self) }
+        programiv = host("glGetProgramiv").map { unsafeBitCast($0, to: Query.self) }
+        shaderLog = host("glGetShaderInfoLog").map { unsafeBitCast($0, to: Text.self) }
+        programLog = host("glGetProgramInfoLog").map { unsafeBitCast($0, to: Text.self) }
+        shaderSource = host("glGetShaderSource").map { unsafeBitCast($0, to: Text.self) }
+    }
+
+    private static func text(_ object: UInt32, _ function: Text?, limit: Int32 = 2048) -> String {
+        var buffer = [CChar](repeating: 0, count: Int(limit))
+        function?(object, limit, nil, &buffer)
+        return String(cString: buffer)
+    }
+
+    /// `line` without what follows an #endif or #else on it, but for a
+    /// comment; nil when there is nothing to cut.
+    private static func cut(_ line: ArraySlice<UInt8>) -> ArraySlice<UInt8>? {
+        let blank: (UInt8) -> Bool = { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }
+        guard let hash = line.firstIndex(where: { !blank($0) }), line[hash] == UInt8(ascii: "#"),
+              let word = line[(hash + 1)...].firstIndex(where: { !blank($0) }) else { return nil }
+        var end = word
+        for directive in ["endif", "else"] where line[word...].starts(with: directive.utf8) { end = word + directive.utf8.count }
+        guard end != word, let next = line[end...].firstIndex(where: { !blank($0) }) else { return nil }
+        if line[next] == UInt8(ascii: "/"), next + 1 < line.endIndex, line[next + 1] == UInt8(ascii: "/") || line[next + 1] == UInt8(ascii: "*") {
+            return nil
+        }
+        return line[..<end]
+    }
+
+    /// glShaderSource, of the strings as one, with each line made fit.
+    static let setSource: Source = { shader, count, strings, lengths in
+        guard let strings, count > 0 else {
+            source?(shader, count, strings, lengths)
+            return
+        }
+        var bytes: [UInt8] = []
+        for index in 0..<Int(count) {
+            guard let string = strings[index] else { continue }
+            let length = lengths.map { Int($0[index]) } ?? -1
+            let size = length >= 0 ? length : strlen(string)
+            bytes.append(contentsOf: UnsafeRawBufferPointer(start: string, count: size))
+        }
+        var fixed: [UInt8] = []
+        fixed.reserveCapacity(bytes.count)
+        var changed = false
+        for line in bytes.split(separator: 0x0A, omittingEmptySubsequences: false) {
+            if !fixed.isEmpty || line.startIndex != 0 { fixed.append(0x0A) }
+            if let shorter = cut(line) {
+                fixed.append(contentsOf: shorter)
+                changed = true
+            } else {
+                fixed.append(contentsOf: line)
+            }
+        }
+        guard changed else {
+            source?(shader, count, strings, lengths)
+            return
+        }
+        fixed.append(0)
+        fixed.withUnsafeBufferPointer { buffer in
+            buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { text in
+                var pointer: UnsafePointer<CChar>? = text
+                source?(shader, 1, &pointer, nil)
+            }
+        }
+    }
+
+    static let compileShader: Object = { shader in
+        compile?(shader)
+        var status: Int32 = 1
+        shaderiv?(shader, 0x8B81, &status) // GL_COMPILE_STATUS
+        guard status == 0 else { return }
+        uikitWarning("OpenGL ES: shader \(shader) did not compile: \(text(shader, shaderLog))\n--- its source begins:\n\(text(shader, shaderSource, limit: 600))\n---")
+    }
+
+    static let linkProgram: Object = { program in
+        link?(program)
+        var status: Int32 = 1
+        programiv?(program, 0x8B82, &status) // GL_LINK_STATUS
+        guard status == 0 else { return }
+        uikitWarning("OpenGL ES: program \(program) did not link: \(text(program, programLog))")
+    }
 }
