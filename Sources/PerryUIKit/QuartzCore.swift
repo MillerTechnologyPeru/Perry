@@ -28,6 +28,7 @@ class CALayer: NSObject {
     @ObjCMethod("setOpacity:") func setOpacity(_ opacity: Float)
     @ObjCMethod("masksToBounds") func masksToBounds() -> Bool
     @ObjCMethod("setMasksToBounds:") func setMasksToBounds(_ masks: Bool)
+    @ObjCMethod("setMaskedCorners:") func setMaskedCorners(_ corners: UInt)
     @ObjCMethod("cornerRadius") func cornerRadius() -> CGFloat
     @ObjCMethod("mask") func mask() -> NSObject?
     @ObjCMethod("presentationLayer") func presentationLayer() -> CALayer?
