@@ -97,11 +97,13 @@ open class UIApplication: UIResponder {
     @ObjCMethod("preferredContentSizeCategory") func preferredContentSizeCategory() -> String { "UICTContentSizeCategoryL" }
 
     /// A finger another provider puts on the screen, at a point in the
-    /// screen's coordinates (GameController's, for a gamepad's button that
-    /// stands for a touch): phase 0 is down, 1 moved, 2 up.
+    /// screen's coordinates as the display shows it (GameController's, for
+    /// a gamepad's button that stands for a touch; turned back, as a real
+    /// finger is, when PERRY_UIKIT_DISPLAY_ROTATION turns the screen):
+    /// phase 0 is down, 1 moved, 2 up.
     @ObjCMethod("_perryFinger:phase:x:y:")
     func finger(_ finger: UInt, phase: Int, x: Double, y: Double) {
-        let point = CGPoint(x: CGFloat(x), y: CGFloat(y))
+        let point = Compositor.unturned(CGPoint(x: CGFloat(x), y: CGFloat(y)))
         switch phase {
         case 0: Touches.down(at: point, finger: UInt64(finger))
         case 1: Touches.move(to: point, finger: UInt64(finger))
