@@ -361,6 +361,16 @@ public class NSDictionary: NSObject {
     @ObjCMethod("description")
     func description() -> String { Describe.object(objcObject, indent: 0) }
 
+    /// The description, whatever the locale: the collection has no
+    /// locale-dependent parts of its own.
+    @ObjCMethod("descriptionWithLocale:")
+    func description(withLocale locale: ObjCObject?) -> String { Describe.object(objcObject, indent: 0) }
+
+    @ObjCMethod("descriptionWithLocale:indent:")
+    func description(withLocale locale: ObjCObject?, indent: UInt) -> String {
+        Describe.object(objcObject, indent: Int(indent))
+    }
+
     /// The keys whose values are equal to `object`.
     @ObjCMethod("allKeysForObject:")
     func allKeys(for object: ObjCObject?) -> NSArray {
