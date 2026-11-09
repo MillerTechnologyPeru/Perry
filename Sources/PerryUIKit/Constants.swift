@@ -227,6 +227,7 @@ enum CoreTextFontKeys {
     static let kCTFontDescriptorLanguageAttribute = "NSCTFontDescriptorLanguageAttribute"
     static let kCTFontLegibilityWeightAttribute = "NSCTFontLegibilityWeightAttribute"
     static let kCTFontLanguageAwareLineHeightRatioAttribute = "NSCTFontLanguageAwareLineHeightRatioAttribute"
+    static let kCTFontSymbolicTrait = "NSCTFontSymbolicTrait"
     static let kCTFontWeightTrait = "NSCTFontWeightTrait"
     static let kCTFontWidthTrait = "NSCTFontProportionTrait"
     static let kCTFontGradeTrait = "NSCTFontGradeTrait"
