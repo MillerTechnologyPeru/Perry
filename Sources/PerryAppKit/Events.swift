@@ -134,8 +134,9 @@ enum Events {
             ns.charactersIgnoringModifiers = characters.plain
             ns.isARepeat = raw.load(fromByteOffset: 37, as: Bool.self)
             enqueue(ns)
-        case 0x303: // text input: UTF-8 at 24
-            guard let text = raw.load(fromByteOffset: 24, as: UnsafePointer<CChar>?.self).map({ String(cString: $0) }), !text.isEmpty,
+        case 0x303: // text input: UTF-8 after the window ID and, with 64-bit pointers, padding
+            let textOffset = MemoryLayout<UInt>.size == 8 ? 24 : 20
+            guard let text = raw.load(fromByteOffset: textOffset, as: UnsafePointer<CChar>?.self).map({ String(cString: $0) }), !text.isEmpty,
                   let last = app.queue.last(where: { $0.type == .keyDown }), !last.typedText else { break }
             last.characters = text
             last.typedText = true
