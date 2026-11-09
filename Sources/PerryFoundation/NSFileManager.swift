@@ -169,6 +169,10 @@ final class NSFileManager: NSObject {
         files.contents(atPath: path).map { DataObjects.owned(DataStorage($0)) }
     }
 
+    /// Before -contentsOfDirectoryAtPath:error:'s day.
+    @ObjCMethod("directoryContentsAtPath:")
+    func directoryContents(atPath path: String) -> NSArray? { contentsOfDirectory(atPath: path, error: nil) }
+
     @ObjCMethod("contentsOfDirectoryAtPath:error:")
     func contentsOfDirectory(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
         do {
