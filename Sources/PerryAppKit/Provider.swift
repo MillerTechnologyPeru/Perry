@@ -74,6 +74,7 @@ enum Constants {
     static let NSApplicationDidChangeScreenParametersNotification = "NSApplicationDidChangeScreenParametersNotification"
     static let NSApplicationLaunchUserNotificationKey = "NSApplicationLaunchUserNotificationKey"
     static let NSApplicationLaunchIsDefaultLaunchKey = "NSApplicationLaunchIsDefaultLaunchKey"
+    static let NSFullScreenModeAllScreens = "NSFullScreenModeAllScreens"
     static let NSWindowDidBecomeKeyNotification = "NSWindowDidBecomeKeyNotification"
     // Toolbar items AppKit provides, by identifier: Apple's values.
     static let NSToolbarFlexibleSpaceItemIdentifier = "NSToolbarFlexibleSpaceItem"
@@ -454,7 +455,11 @@ enum Blocks {
 
 // MARK: - Foundation, as this provider calls it
 
+#if _pointerBitWidth(_32)
+public typealias CGFloat = Float
+#else
 public typealias CGFloat = Double
+#endif
 
 extension NSObject {
     @ObjCMethod("new") func newInstance() -> NSObject

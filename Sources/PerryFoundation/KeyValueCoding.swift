@@ -254,6 +254,29 @@ enum Structures {
         guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
         else { return nil }
         var bytes = [UInt8](repeating: 0, count: max(size, 4))
+        #if arch(i386)
+        // Floating point comes back on the x87 stack, structures of 1, 2, 4
+        // or 8 bytes in eax:edx, and the rest through a pointer.
+        if type.hasPrefix("d") {
+            let value = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> Double).self)(object, selector)
+            withUnsafeBytes(of: value) { value in bytes.withUnsafeMutableBytes { $0.copyMemory(from: value) } }
+        } else if type.hasPrefix("f") {
+            let value = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> Float).self)(object, selector)
+            withUnsafeBytes(of: value) { value in bytes.withUnsafeMutableBytes { $0.copyMemory(from: value) } }
+        } else if size <= 4 {
+            let value = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> UInt32).self)(object, selector)
+            withUnsafeBytes(of: value) { value in bytes.withUnsafeMutableBytes { $0.copyMemory(from: value) } }
+        } else if size == 8 {
+            let value = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> UInt64).self)(object, selector)
+            withUnsafeBytes(of: value) { value in bytes.withUnsafeMutableBytes { $0.copyMemory(from: value) } }
+        } else {
+            guard size <= argumentWords * 4 else { return nil }
+            let value = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> perry_words16).self)(object, selector)
+            withUnsafeBytes(of: value) { value in
+                bytes.withUnsafeMutableBytes { $0.copyMemory(from: UnsafeRawBufferPointer(rebasing: value[0..<size])) }
+            }
+        }
+        #else
         if size <= 4 {
             var word = unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> UInt32).self)(object, selector)
             withUnsafeBytes(of: &word) { word in bytes.withUnsafeMutableBytes { $0.copyMemory(from: word) } }
@@ -261,6 +284,7 @@ enum Structures {
             let getter = unsafeBitCast(imp, to: (@convention(c) (UnsafeMutableRawPointer, id, SEL) -> Void).self)
             bytes.withUnsafeMutableBytes { getter($0.baseAddress!, object, selector) }
         }
+        #endif
         return bytes.prefix(size).withUnsafeBytes {
             ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: $0.baseAddress, type: type))
         }

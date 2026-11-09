@@ -729,7 +729,7 @@ open class NSProgressIndicator: NSView {
         CG.fill(CG.roundedRect(track, radius: 3), NSColor(white: 0, alpha: 0.1), in: context)
         let fraction = indeterminate ? (animating ? 0.35 : 0) : max(0, min(1, (value - minValue) / max(maxValue - minValue, .ulpOfOne)))
         guard fraction > 0 else { return }
-        CG.fill(CG.roundedRect(CGRect(x: track.minX, y: track.minY, width: track.width * fraction, height: track.height), radius: 3),
+        CG.fill(CG.roundedRect(CGRect(x: track.minX, y: track.minY, width: track.width * CGFloat(fraction), height: track.height), radius: 3),
                 NSColor.controlAccentColor(), in: context)
     }
 }

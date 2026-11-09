@@ -100,6 +100,11 @@ void perry_foundation_call_setter(void *object, const char *selector, const void
 // xmm1 end up in the four words of `out`. arm64: x0-x7 then x8, and x0, x1
 // and d0-d3 end up in the six words of `out`.
 void perry_foundation_invoke(const void *imp, const uint64_t *gp, const uint64_t fp[8], const uint64_t *stack, size_t words, uint64_t *out);
+#if defined(__i386__)
+// Calls imp with those stack words, and keeps eax and edx in `out` and, when
+// the result is floating point, the x87 result in `floating`.
+void perry_foundation_invoke_i386(const void *imp, const uint32_t *stack, size_t words, uint32_t out[2], double *floating);
+#endif
 // x86_64 only. Calls a setter whose argument, over 16 bytes, goes on the stack.
 void perry_foundation_call_setter_memory(void *object, const char *selector, const void *imp, const void *bytes, size_t size);
 

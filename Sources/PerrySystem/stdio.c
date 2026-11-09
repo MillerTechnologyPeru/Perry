@@ -53,6 +53,11 @@ _Static_assert(sizeof(aapcs64_va_list) == sizeof(va_list), "unexpected va_list l
 #define DARWIN_VA(name, darwin_ap) \
     va_list name; \
     memcpy(&name, (darwin_ap), sizeof(name))
+#elif defined(__i386__)
+// A Darwin i386 va_list and Linux's are both a pointer to the words after the
+// fixed arguments, and read them alike.
+#define DARWIN_VA(name, darwin_ap) \
+    va_list name = (va_list)(darwin_ap)
 #else
 // A Darwin armv7 va_list is a pointer to the 4-byte slots after the fixed
 // arguments, and glibc armhf's is a struct holding such a pointer. Slots read
@@ -76,8 +81,8 @@ _Static_assert(sizeof(void *) == sizeof(va_list), "unexpected va_list layout");
     memcpy(&name, &repacked_##name, sizeof(name))
 #endif
 
-#if defined(__aarch64__) || defined(__x86_64__)
-// Arguments need no repacking on arm64 or x86_64.
+#if defined(__aarch64__) || defined(__x86_64__) || defined(__i386__)
+// Arguments need no repacking but on armv7.
 #define DARWIN_VA_FORMAT(name, format, darwin_ap) DARWIN_VA(name, darwin_ap)
 #endif
 
@@ -253,7 +258,7 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 // The same, and asl_log's, for armv7's variadic thunks, which pass a Darwin
 // va_list that the format's arguments are repacked from.
 int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {

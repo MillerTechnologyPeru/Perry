@@ -128,6 +128,40 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
     return false;
 }
 
+#if defined(__i386__)
+// Images linked before export tries list their exports in the symbol table,
+// sorted by name.
+static bool symbol_table_lookup(perry_image *image, const char *name, perry_symbol *out) {
+    const struct symtab_command *st = image->symtab;
+    const struct dysymtab_command *dst = image->dysymtab;
+    const struct nlist *symbols = perry_image_fileoff(image, st->symoff);
+    const char *strings = perry_image_fileoff(image, st->stroff);
+    if (dst->iextdefsym + dst->nextdefsym > st->nsyms)
+        return false;
+    const struct nlist *low = symbols + dst->iextdefsym;
+    size_t count = dst->nextdefsym;
+    while (count) {
+        const struct nlist *middle = low + count / 2;
+        int order = strcmp(name, strings + middle->n_strx);
+        if (order == 0) {
+            out->found = true;
+            out->weak_def = middle->n_desc & N_WEAK_DEF;
+            out->address = (middle->n_type & N_TYPE) == N_ABS
+                ? (void *)(uintptr_t)middle->n_value
+                : perry_image_vmaddr(image, middle->n_value);
+            return true;
+        }
+        if (order > 0) {
+            low = middle + 1;
+            count -= count / 2 + 1;
+        } else {
+            count /= 2;
+        }
+    }
+    return false;
+}
+#endif
+
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth) {
     if (depth > 32)
         return false;
@@ -164,6 +198,10 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
             return true;
         }
     }
+#if defined(__i386__)
+    if (!image->exports_trie && image->symtab && image->dysymtab && symbol_table_lookup(image, name, out))
+        return true;
+#endif
     // Symbols of re-exported libraries are visible through this image.
     for (uint32_t i = 0; i < image->dep_count; i++)
         if (image->deps[i].reexport && lookup_in_dependency(loader, &image->deps[i], name, out, depth))
@@ -263,8 +301,14 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "System");
         return true;
     }
+#if defined(__i386__) || defined(__x86_64__)
+    if (strstr(install_name, "/ApplicationServices.framework/")) {
+        snprintf(out, out_size, "CoreGraphics");
+        return true;
+    }
+#endif
     // CoreAudio has the types AudioToolbox's functions take.
-    if (strstr(install_name, "/CoreAudio.framework/")) {
+    if (strstr(install_name, "/CoreAudio.framework/") || strstr(install_name, "/AudioUnit.framework/")) {
         snprintf(out, out_size, "AudioToolbox");
         return true;
     }
@@ -524,7 +568,23 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
         perry_provider *reexported = perry_find_provider(loader, provider->reexports[i]);
         if (reexported && provider_lookup(loader, reexported, name, out)) return true;
     }
-#if defined(__x86_64__)
+#if defined(__i386__)
+    // size_t is unsigned long on i386 Darwin and unsigned int on Linux, which
+    // C++ mangles differently: an 'm' parameter here is a 'j' in libstdc++.
+    if (!sym && strncmp(name, "__Z", 3) == 0 && strchr(name, 'm')) {
+        char linux_name[1024];
+        snprintf(linux_name, sizeof(linux_name), "%s", name);
+        char *parameters = strrchr(linux_name, 'E');
+        if (!parameters && (strncmp(name, "__Zna", 5) == 0 || strncmp(name, "__Znw", 5) == 0))
+            parameters = linux_name + 5;
+        bool changed = false;
+        for (char *c = parameters; c && *c; c++)
+            if (*c == 'm') { *c = 'j'; changed = true; }
+        if (changed)
+            return provider_lookup(loader, provider, linux_name, out);
+    }
+#endif
+#if defined(__x86_64__) || defined(__i386__)
     // x86_64's libc names variants of functions after their ABI ($INODE64,
     // $DARWIN_EXTSN, $UNIX2003, $1050, $NOCANCEL). Providers have the
     // current ABI, under the plain name.
@@ -613,7 +673,18 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     uint32_t *code = (uint32_t *)(current_page.base + current_page.used);
     current_page.used += STUB_SIZE;
 
-#if defined(__x86_64__)
+#if defined(__i386__)
+    // The handler is cdecl: its description goes on the stack, and the return
+    // address stays where the handler finds it.
+    uint8_t *bytes = (uint8_t *)code;
+    bytes[0] = 0x68;                                    // push description
+    *(uint32_t *)(bytes + 1) = (uint32_t)(uintptr_t)strdup(description);
+    bytes[5] = 0xb8;                                    // mov eax, handler
+    *(uint32_t *)(bytes + 6) = (uint32_t)(uintptr_t)&perry_unimplemented;
+    bytes[10] = 0xff; bytes[11] = 0xd0;                 // call eax
+    bytes[12] = 0x83; bytes[13] = 0xc4; bytes[14] = 0x04;   // add esp, 4
+    bytes[15] = 0xc3;                                   // ret
+#elif defined(__x86_64__)
     code[0] = 0x093d8b48;   // mov rdi, [rip + 9]    (description)
     code[1] = 0xff000000;   // jmp [rip + 11]        (handler)
     code[2] = 0x00000b25;

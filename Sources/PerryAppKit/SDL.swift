@@ -13,6 +13,12 @@ enum SDL {
     nonisolated(unsafe) static var initialize: (@convention(c) (UInt32) -> Bool)!
     nonisolated(unsafe) static var createWindow: (@convention(c) (UnsafePointer<CChar>?, Int32, Int32, UInt64) -> Window?)!
     nonisolated(unsafe) static var destroyWindow: (@convention(c) (Window?) -> Void)!
+    nonisolated(unsafe) static var glSetAttribute: (@convention(c) (Int32, Int32) -> Bool)!
+    nonisolated(unsafe) static var glCreateContext: (@convention(c) (Window?) -> Pointer?)!
+    nonisolated(unsafe) static var glDestroyContext: (@convention(c) (Pointer?) -> Bool)!
+    nonisolated(unsafe) static var glMakeCurrent: (@convention(c) (Window?, Pointer?) -> Bool)!
+    nonisolated(unsafe) static var glSwapWindow: (@convention(c) (Window?) -> Bool)!
+    nonisolated(unsafe) static var glSetSwapInterval: (@convention(c) (Int32) -> Bool)!
     nonisolated(unsafe) static var createRenderer: (@convention(c) (Window?, UnsafePointer<CChar>?) -> Pointer?)!
     nonisolated(unsafe) static var destroyRenderer: (@convention(c) (Pointer?) -> Void)!
     nonisolated(unsafe) static var rendererName: (@convention(c) (Pointer?) -> UnsafePointer<CChar>?)!
@@ -58,6 +64,19 @@ enum SDL {
 
     // SDL_WindowFlags.
     static let windowFullscreen: UInt64 = 0x1
+    static let windowOpenGL: UInt64 = 0x2
+    // SDL_GLAttr.
+    static let glAlphaSize: Int32 = 3
+    static let glDoubleBuffer: Int32 = 5
+    static let glDepthSize: Int32 = 6
+    static let glStencilSize: Int32 = 7
+    static let glMultisampleBuffers: Int32 = 13
+    static let glMultisampleSamples: Int32 = 14
+    static let glContextMajorVersion: Int32 = 17
+    static let glContextMinorVersion: Int32 = 18
+    static let glContextProfileMask: Int32 = 20
+    static let glShareWithCurrentContext: Int32 = 21
+    static let glProfileCompatibility: Int32 = 2
     static let windowHidden: UInt64 = 0x8
     static let windowBorderless: UInt64 = 0x10
     static let windowResizable: UInt64 = 0x20
@@ -125,6 +144,12 @@ enum SDL {
         initialize = bind("SDL_Init")
         createWindow = bind("SDL_CreateWindow")
         destroyWindow = bind("SDL_DestroyWindow")
+        glSetAttribute = bind("SDL_GL_SetAttribute")
+        glCreateContext = bind("SDL_GL_CreateContext")
+        glDestroyContext = bind("SDL_GL_DestroyContext")
+        glMakeCurrent = bind("SDL_GL_MakeCurrent")
+        glSwapWindow = bind("SDL_GL_SwapWindow")
+        glSetSwapInterval = bind("SDL_GL_SetSwapInterval")
         createRenderer = bind("SDL_CreateRenderer")
         destroyRenderer = bind("SDL_DestroyRenderer")
         rendererName = bind("SDL_GetRendererName")

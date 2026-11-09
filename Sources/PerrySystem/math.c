@@ -77,7 +77,7 @@ DARWIN_FLOAT_ABI struct darwin_double2 darwin___sincospi_stret(double x) {
     return result;
 }
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 // MARK: - libm and the rest of libc's floating point on armv7
 
 #define F1(name, type)                                                       \

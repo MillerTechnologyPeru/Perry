@@ -277,7 +277,7 @@ enum RetainCounts {
         /// Where `key` belongs: a multiplicative hash of the address, past
         /// its alignment bits.
         @inline(__always)
-        private func home(_ key: UInt) -> Int { Int(truncatingIfNeeded: (key >> 4) &* 0x9E37_79B9_7F4A_7C15) & (capacity - 1) }
+        private func home(_ key: UInt) -> Int { Int(truncatingIfNeeded: (key >> 4) &* UInt(truncatingIfNeeded: 0x9E37_79B9_7F4A_7C15 as UInt64)) & (capacity - 1) }
 
         /// The slot holding `key`, or the empty slot where it would go.
         @inline(__always)

@@ -494,8 +494,8 @@ open class NSScroller: NSControl {
 
     @ObjCMethod("knobProportion") func scrollerKnobProportion() -> CGFloat { knobProportion }
     @ObjCMethod("setKnobProportion:") func setKnobProportion(_ value: CGFloat) { knobProportion = value; knobChanged() }
-    @ObjCMethod("doubleValue") func scrollerDoubleValue() -> Double { value }
-    @ObjCMethod("setDoubleValue:") func setScrollerDoubleValue(_ value: Double) { self.value = value; knobChanged() }
+    @ObjCMethod("doubleValue") func scrollerDoubleValue() -> Double { Double(value) }
+    @ObjCMethod("setDoubleValue:") func setScrollerDoubleValue(_ value: Double) { self.value = CGFloat(value); knobChanged() }
     @ObjCMethod("floatValue") func scrollerFloatValue() -> Float { Float(value) }
     @ObjCMethod("setFloatValue:knobProportion:")
     func setFloatValue(_ value: Float, knobProportion: CGFloat) {

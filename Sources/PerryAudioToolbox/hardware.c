@@ -258,3 +258,264 @@ OSStatus darwin_AudioObjectRemovePropertyListenerBlock(AudioObjectID object, con
     (void)object, (void)address, (void)queue, (void)block;
     return 0;
 }
+
+#if !defined(__arm__)
+// The HAL's calls from before audio objects, which older Mac programs make.
+#include <pthread.h>
+#include <stdbool.h>
+#include <time.h>
+
+#define kAudioObjectPropertyScopeGlobal FOURCC('g', 'l', 'o', 'b')
+#define kAudioDevicePropertyScopeInput FOURCC('i', 'n', 'p', 't')
+#define kAudioDevicePropertyScopeOutput FOURCC('o', 'u', 't', 'p')
+
+static AudioObjectPropertyAddress hardware_address(uint32_t property) {
+    return (AudioObjectPropertyAddress){ property, kAudioObjectPropertyScopeGlobal, 0 };
+}
+
+static AudioObjectPropertyAddress device_address(uint32_t channel, uint8_t is_input, uint32_t property) {
+    return (AudioObjectPropertyAddress){ property,
+        is_input ? kAudioDevicePropertyScopeInput : kAudioDevicePropertyScopeOutput, channel };
+}
+
+OSStatus darwin_AudioHardwareGetPropertyInfo(uint32_t property, uint32_t *size, uint8_t *writable) DARWIN_SYMBOL(AudioHardwareGetPropertyInfo);
+OSStatus darwin_AudioHardwareGetPropertyInfo(uint32_t property, uint32_t *size, uint8_t *writable) {
+    AudioObjectPropertyAddress address = hardware_address(property);
+    if (writable) *writable = 0;
+    uint32_t found = 0;
+    OSStatus status = darwin_AudioObjectGetPropertyDataSize(1, &address, 0, NULL, &found);
+    if (size) *size = found;
+    return status;
+}
+
+OSStatus darwin_AudioHardwareGetProperty(uint32_t property, uint32_t *size, void *data) DARWIN_SYMBOL(AudioHardwareGetProperty);
+OSStatus darwin_AudioHardwareGetProperty(uint32_t property, uint32_t *size, void *data) {
+    AudioObjectPropertyAddress address = hardware_address(property);
+    return darwin_AudioObjectGetPropertyData(1, &address, 0, NULL, size, data);
+}
+
+OSStatus darwin_AudioDeviceGetPropertyInfo(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                           uint32_t *size, uint8_t *writable) DARWIN_SYMBOL(AudioDeviceGetPropertyInfo);
+OSStatus darwin_AudioDeviceGetPropertyInfo(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                           uint32_t *size, uint8_t *writable) {
+    AudioObjectPropertyAddress address = device_address(channel, is_input, property);
+    if (writable) *writable = 0;
+    uint32_t found = 0;
+    OSStatus status = darwin_AudioObjectGetPropertyDataSize(device, &address, 0, NULL, &found);
+    if (size) *size = found;
+    return status;
+}
+
+OSStatus darwin_AudioDeviceGetProperty(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t *size, void *data) DARWIN_SYMBOL(AudioDeviceGetProperty);
+OSStatus darwin_AudioDeviceGetProperty(uint32_t device, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t *size, void *data) {
+    AudioObjectPropertyAddress address = device_address(channel, is_input, property);
+    return darwin_AudioObjectGetPropertyData(device, &address, 0, NULL, size, data);
+}
+
+// Nothing about the device changes, so listeners are never called.
+#define NO_LISTENER(name, ...)                              \
+    OSStatus darwin_##name(__VA_ARGS__) DARWIN_SYMBOL(name); \
+    OSStatus darwin_##name(__VA_ARGS__) { return 0; }
+
+NO_LISTENER(AudioHardwareAddPropertyListener, uint32_t a, void *b, void *c)
+NO_LISTENER(AudioHardwareRemovePropertyListener, uint32_t a, void *b)
+NO_LISTENER(AudioDeviceAddPropertyListener, uint32_t a, uint32_t b, uint8_t c, uint32_t d, void *e, void *f)
+NO_LISTENER(AudioDeviceRemovePropertyListener, uint32_t a, uint32_t b, uint8_t c, uint32_t d, void *e)
+
+OSStatus darwin_AudioDeviceSetProperty(uint32_t device, const void *when, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t size, const void *data) DARWIN_SYMBOL(AudioDeviceSetProperty);
+OSStatus darwin_AudioDeviceSetProperty(uint32_t device, const void *when, uint32_t channel, uint8_t is_input, uint32_t property,
+                                       uint32_t size, const void *data) {
+    (void)when;
+    AudioObjectPropertyAddress address = device_address(channel, is_input, property);
+    return darwin_AudioObjectSetPropertyData(device, &address, 0, NULL, size, data);
+}
+
+uint64_t darwin_AudioGetCurrentHostTime(void) DARWIN_SYMBOL(AudioGetCurrentHostTime);
+uint64_t darwin_AudioGetCurrentHostTime(void) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (uint64_t)now.tv_sec * 1000000000u + (uint64_t)now.tv_nsec;
+}
+
+double darwin_AudioGetHostClockFrequency(void) DARWIN_SYMBOL(AudioGetHostClockFrequency);
+double darwin_AudioGetHostClockFrequency(void) { return 1e9; }
+
+// MARK: - I/O procs
+//
+// A program playing straight to the device registers I/O procs, which the
+// device's thread calls for each buffer. Here that thread is an output
+// unit's, rendering in the device's format, and its render callback calls
+// them; each one's audio is summed, as the HAL does.
+
+typedef struct {
+    uint32_t type, subtype, manufacturer, flags, mask;
+} component_description;
+
+void *darwin_AudioComponentFindNext(const void *after, const component_description *description) DARWIN_SYMBOL(AudioComponentFindNext);
+OSStatus darwin_AudioComponentInstanceNew(const void *component, void **out) DARWIN_SYMBOL(AudioComponentInstanceNew);
+OSStatus darwin_AudioUnitSetProperty(void *unit, uint32_t id, uint32_t scope, uint32_t element, const void *value, uint32_t size)
+    DARWIN_SYMBOL(AudioUnitSetProperty);
+OSStatus darwin_AudioUnitInitialize(void *unit) DARWIN_SYMBOL(AudioUnitInitialize);
+OSStatus darwin_AudioOutputUnitStart(void *unit) DARWIN_SYMBOL(AudioOutputUnitStart);
+OSStatus darwin_AudioOutputUnitStop(void *unit) DARWIN_SYMBOL(AudioOutputUnitStop);
+
+#define kAudioHardwareBadDeviceError FOURCC('!', 'd', 'e', 'v')
+#define kAudioHardwareNotRunningError FOURCC('s', 't', 'o', 'p')
+#define kAudioTimeStampRateScalarValid (1u << 2)
+
+typedef OSStatus (*io_proc)(AudioObjectID device, const AudioTimeStamp *now, const AudioBufferList *input,
+                            const AudioTimeStamp *input_time, AudioBufferList *output, const AudioTimeStamp *output_time, void *client);
+
+typedef struct {
+    io_proc proc;
+    void *client;
+    bool started;
+} io_client;
+
+enum { IO_CLIENTS = 8 };
+
+// The lock is never held across the output unit's start or stop, which
+// wait for a render that takes it.
+static pthread_mutex_t io_lock = PTHREAD_MUTEX_INITIALIZER;
+static io_client io_clients[IO_CLIENTS];
+static void *io_unit;
+static bool io_running;
+static AudioTimeStamp io_time;
+
+/// Lock held.
+static io_client *io_find(io_proc proc) {
+    for (int i = 0; i < IO_CLIENTS; i++) if (io_clients[i].proc == proc) return &io_clients[i];
+    return NULL;
+}
+
+/// Lock held.
+static bool io_any_started(void) {
+    for (int i = 0; i < IO_CLIENTS; i++) if (io_clients[i].proc && io_clients[i].started) return true;
+    return false;
+}
+
+static OSStatus io_render(void *refcon, uint32_t *flags, const AudioTimeStamp *time, uint32_t bus, uint32_t frames,
+                          AudioBufferList *data) {
+    (void)refcon, (void)flags, (void)bus;
+    io_client clients[IO_CLIENTS];
+    pthread_mutex_lock(&io_lock);
+    memcpy(clients, io_clients, sizeof clients);
+    io_time = *time;
+    pthread_mutex_unlock(&io_lock);
+    if (frames > FRAMES) return kAudio_ParamError;
+    const AudioBufferList input = { 0 };
+    bool first = true;
+    float more[FRAMES * CHANNELS];
+    for (int i = 0; i < IO_CLIENTS; i++) {
+        if (!clients[i].proc || !clients[i].started) continue;
+        if (first) {
+            clients[i].proc(DEVICE, time, &input, time, data, time, clients[i].client);
+            first = false;
+            continue;
+        }
+        memset(more, 0, sizeof more);
+        struct { uint32_t count; AudioBuffer buffer; } list = { 1, { CHANNELS, frames * CHANNELS * sizeof(float), more } };
+        clients[i].proc(DEVICE, time, &input, time, (AudioBufferList *)&list, time, clients[i].client);
+        float *sum = data->mBuffers[0].mData;
+        for (uint32_t k = 0; k < frames * CHANNELS; k++) sum[k] += more[k];
+    }
+    return 0;
+}
+
+/// The output unit, made the first time it's needed. Lock held.
+static bool io_open(void) {
+    if (io_unit) return true;
+    const component_description description = { FOURCC('a', 'u', 'o', 'u'), FOURCC('d', 'e', 'f', ' '), FOURCC('a', 'p', 'p', 'l'), 0, 0 };
+    void *unit = NULL;
+    void *component = darwin_AudioComponentFindNext(NULL, &description);
+    if (!component || darwin_AudioComponentInstanceNew(component, &unit) != 0) return false;
+    AudioStreamBasicDescription device_format = format();
+    struct { void *proc; void *refcon; } callback = { (void *)io_render, NULL };
+    darwin_AudioUnitSetProperty(unit, 8, 1, 0, &device_format, sizeof device_format);      // the input's stream format
+    darwin_AudioUnitSetProperty(unit, 23, 1, 0, &callback, sizeof callback);               // its render callback
+    darwin_AudioUnitInitialize(unit);
+    io_unit = unit;
+    return true;
+}
+
+OSStatus darwin_AudioDeviceAddIOProc(uint32_t device, io_proc proc, void *client) DARWIN_SYMBOL(AudioDeviceAddIOProc);
+OSStatus darwin_AudioDeviceAddIOProc(uint32_t device, io_proc proc, void *client) {
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    if (!proc) return kAudioHardwareIllegalOperationError;
+    pthread_mutex_lock(&io_lock);
+    io_client *slot = io_find(proc);
+    if (!slot) slot = io_find(NULL);
+    if (slot) *slot = (io_client){ proc, client, slot->proc == proc && slot->started };
+    pthread_mutex_unlock(&io_lock);
+    return slot ? 0 : kAudioHardwareIllegalOperationError;
+}
+
+OSStatus darwin_AudioDeviceStart(uint32_t device, io_proc proc) DARWIN_SYMBOL(AudioDeviceStart);
+OSStatus darwin_AudioDeviceStart(uint32_t device, io_proc proc) {
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    pthread_mutex_lock(&io_lock);
+    io_client *slot = proc ? io_find(proc) : NULL;
+    if (proc && !slot) {
+        pthread_mutex_unlock(&io_lock);
+        return kAudioHardwareIllegalOperationError;
+    }
+    if (slot) slot->started = true;
+    bool start = !io_running && io_any_started() && io_open();
+    if (start) io_running = true;
+    void *unit = io_unit;
+    pthread_mutex_unlock(&io_lock);
+    return start ? darwin_AudioOutputUnitStart(unit) : 0;
+}
+
+/// Stops the proc, and the device with its last one. A proc may stop itself.
+static OSStatus io_stop(io_proc proc, bool remove) {
+    pthread_mutex_lock(&io_lock);
+    io_client *slot = proc ? io_find(proc) : NULL;
+    if (proc && !slot) {
+        pthread_mutex_unlock(&io_lock);
+        return kAudioHardwareIllegalOperationError;
+    }
+    if (slot) {
+        slot->started = false;
+        if (remove) *slot = (io_client){ NULL, NULL, false };
+    }
+    bool stop = io_running && !io_any_started();
+    if (stop) io_running = false;
+    void *unit = io_unit;
+    pthread_mutex_unlock(&io_lock);
+    return stop ? darwin_AudioOutputUnitStop(unit) : 0;
+}
+
+OSStatus darwin_AudioDeviceStop(uint32_t device, io_proc proc) DARWIN_SYMBOL(AudioDeviceStop);
+OSStatus darwin_AudioDeviceStop(uint32_t device, io_proc proc) {
+    return device == DEVICE ? io_stop(proc, false) : kAudioHardwareBadDeviceError;
+}
+
+OSStatus darwin_AudioDeviceRemoveIOProc(uint32_t device, io_proc proc) DARWIN_SYMBOL(AudioDeviceRemoveIOProc);
+OSStatus darwin_AudioDeviceRemoveIOProc(uint32_t device, io_proc proc) {
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    return proc ? io_stop(proc, true) : kAudioHardwareIllegalOperationError;
+}
+
+/// The last buffer's time, carried forward to now by the clock.
+OSStatus darwin_AudioDeviceGetCurrentTime(uint32_t device, AudioTimeStamp *out) DARWIN_SYMBOL(AudioDeviceGetCurrentTime);
+OSStatus darwin_AudioDeviceGetCurrentTime(uint32_t device, AudioTimeStamp *out) {
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    if (!out) return kAudioHardwareIllegalOperationError;
+    pthread_mutex_lock(&io_lock);
+    bool running = io_running;
+    AudioTimeStamp last = io_time;
+    pthread_mutex_unlock(&io_lock);
+    if (!running) return kAudioHardwareNotRunningError;
+    uint64_t now = darwin_AudioGetCurrentHostTime();
+    memset(out, 0, sizeof *out);
+    out->mSampleTime = last.mHostTime ? last.mSampleTime + (double)(now - last.mHostTime) * RATE / 1e9 : 0;
+    out->mHostTime = now;
+    out->mRateScalar = 1;
+    out->mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid | kAudioTimeStampRateScalarValid;
+    return 0;
+}
+#endif

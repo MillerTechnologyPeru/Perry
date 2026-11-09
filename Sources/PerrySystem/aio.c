@@ -14,7 +14,7 @@
 
 /// Darwin's struct aiocb, as far as the fields used here. Its 64-bit offset
 /// is aligned to 4 bytes on armv7, which puts the buffer at 12.
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(push, 4)
 #endif
 struct darwin_aiocb {
@@ -25,7 +25,7 @@ struct darwin_aiocb {
     int aio_reqprio;
     // struct sigevent aio_sigevent and int aio_lio_opcode follow.
 };
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(pop)
 _Static_assert(offsetof(struct darwin_aiocb, aio_buf) == 12, "aio_buf is at 12 on Darwin armv7");
 #endif

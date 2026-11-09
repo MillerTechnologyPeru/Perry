@@ -18,7 +18,8 @@
 #define CPU_ARCH_ABI64          0x01000000
 #define CPU_TYPE_ARM            12
 #define CPU_TYPE_ARM64          (CPU_TYPE_ARM | CPU_ARCH_ABI64)
-#define CPU_TYPE_X86_64         (7 | CPU_ARCH_ABI64)
+#define CPU_TYPE_I386           7
+#define CPU_TYPE_X86_64         (CPU_TYPE_I386 | CPU_ARCH_ABI64)
 #define CPU_SUBTYPE_MASK        0xff000000u
 #define CPU_SUBTYPE_ARM64_ALL   0
 #define CPU_SUBTYPE_ARM64_V8    1
@@ -125,6 +126,8 @@ struct thread_command {
 
 #define ARM_THREAD_STATE        1
 #define ARM_THREAD_STATE_PC     15      // r15, in the 17 words of r0-r12, sp, lr, pc, cpsr
+#define X86_THREAD_STATE32      1
+#define X86_THREAD_STATE32_EIP  10      // of eax ebx ecx edx edi esi ebp esp ss eflags eip cs ds es fs gs
 
 #define SG_READ_ONLY 0x10
 
@@ -160,6 +163,8 @@ struct segment_command_64 {
 #define S_ZEROFILL                  0x1
 #define S_NON_LAZY_SYMBOL_POINTERS  0x6
 #define S_LAZY_SYMBOL_POINTERS      0x7
+#define S_SYMBOL_STUBS              0x8
+#define S_ATTR_SELF_MODIFYING_CODE  0x04000000u
 #define S_MOD_INIT_FUNC_POINTERS    0x9
 #define S_THREAD_LOCAL_REGULAR      0x11
 #define S_THREAD_LOCAL_ZEROFILL     0x12
@@ -291,6 +296,8 @@ struct nlist {
 #define N_STAB                  0xe0
 #define N_TYPE                  0x0e
 #define N_EXT                   0x01
+#define N_ABS                   0x2
+#define N_WEAK_DEF              0x0080
 #define N_SECT                  0xe
 #define N_ARM_THUMB_DEF         0x0008  // n_desc: the symbol is Thumb code
 
@@ -372,6 +379,8 @@ typedef struct encryption_info_command encryption_info_command_t;
 // MARK: - Legacy dyld info opcodes
 
 #define REBASE_TYPE_POINTER                         1
+#define REBASE_TYPE_TEXT_ABSOLUTE32                 2
+#define REBASE_TYPE_TEXT_PCREL32                    3
 #define REBASE_OPCODE_MASK                          0xf0
 #define REBASE_IMMEDIATE_MASK                       0x0f
 #define REBASE_OPCODE_DONE                          0x00

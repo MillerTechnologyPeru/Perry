@@ -16,6 +16,28 @@ struct MachOImage {
     private static let sectionAddress = 32
     private static let sectionBytes = Layout.is64 ? 40 : 36
 
+    /// A section's bytes, in the segment named exactly.
+    func section(segment: String, name: String) -> UnsafeMutableRawBufferPointer? {
+        let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
+        var command = header + Self.headerSize
+        for _ in 0..<count {
+            let size = Int(command.load(fromByteOffset: 4, as: UInt32.self))
+            if command.load(as: UInt32.self) == Self.segmentCommand,
+               segment.withCString({ strncmp(command.assumingMemoryBound(to: CChar.self) + 8, $0, 16) == 0 }) {
+                for index in 0..<Int(command.load(fromByteOffset: Self.segmentSectionCount, as: UInt32.self)) {
+                    let section = command + Self.firstSection + index * Self.sectionSize
+                    if name.withCString({ strncmp(section.assumingMemoryBound(to: CChar.self), $0, 16) == 0 }) {
+                        return UnsafeMutableRawBufferPointer(
+                            start: UnsafeMutableRawPointer(bitPattern: Int(section.loadWord(at: Self.sectionAddress)) + slide),
+                            count: Int(section.loadWord(at: Self.sectionBytes)))
+                    }
+                }
+            }
+            command += size
+        }
+        return nil
+    }
+
     /// A section in a __DATA* segment, as an array of pointer-sized slots.
     func pointers(_ name: String) -> UnsafeMutableBufferPointer<UnsafeMutableRawPointer?>? {
         let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
@@ -127,6 +149,10 @@ extension Runtime {
                     }
                 }
             }
+
+            #if arch(i386)
+            mapLegacyMetadata(image, classNames: &classNames, loadClasses: &loadClasses, loadCategories: &loadCategories)
+            #endif
 
             for slot in image.pointers("__objc_classlist") ?? .init(start: nil, count: 0) {
                 if let cls = slot?.assumingMemoryBound(to: perry_objc_class.self), let info = Runtime.info(cls) {
@@ -284,6 +310,10 @@ extension Protocols {
 
     /// A protocol's method descriptions of one kind: selectors and types.
     public static func methods(_ proto: UnsafePointer<perry_protocol>, required: Bool, instance: Bool) -> [(SEL, UnsafePointer<CChar>?)] {
+        #if arch(i386)
+        // Code's own address for a protocol is only its first five words.
+        let proto = proto.pointee.name.flatMap(lookUp).map { UnsafePointer($0) } ?? proto
+        #endif
         let list: UnsafeRawPointer? = switch (required, instance) {
         case (true, true): proto.pointee.instance_methods
         case (true, false): proto.pointee.class_methods
@@ -298,6 +328,9 @@ extension Protocols {
 
     /// A protocol's instance properties (property_t: name, attributes).
     public static func properties(_ proto: UnsafePointer<perry_protocol>) -> [UnsafeRawPointer] {
+        #if arch(i386)
+        let proto = proto.pointee.name.flatMap(lookUp).map { UnsafePointer($0) } ?? proto
+        #endif
         guard let list = proto.pointee.instance_properties else { return [] }
         let entsize = Int(list.load(as: UInt32.self))
         let count = Int(list.load(fromByteOffset: 4, as: UInt32.self))

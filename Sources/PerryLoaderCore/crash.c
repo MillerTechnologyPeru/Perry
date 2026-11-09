@@ -76,6 +76,19 @@ static void print_registers(const mcontext_t *machine) {
         crash_print("\n");
     }
 }
+#elif defined(__i386__)
+#define FRAME_POINTER(machine) ((uintptr_t)(machine)->gregs[REG_EBP])
+#define FRAME_ALIGNMENT 3
+
+static void print_registers(const mcontext_t *machine) {
+    describe("eip", (uintptr_t)machine->gregs[REG_EIP]);
+    crash_print("  esp %08lx ebp %08lx eflags %08lx\n", (unsigned long)machine->gregs[REG_ESP],
+                (unsigned long)machine->gregs[REG_EBP], (unsigned long)machine->gregs[REG_EFL]);
+    crash_print("  eax %08lx ebx %08lx ecx %08lx edx %08lx\n", (unsigned long)machine->gregs[REG_EAX],
+                (unsigned long)machine->gregs[REG_EBX], (unsigned long)machine->gregs[REG_ECX],
+                (unsigned long)machine->gregs[REG_EDX]);
+    crash_print("  esi %08lx edi %08lx\n", (unsigned long)machine->gregs[REG_ESI], (unsigned long)machine->gregs[REG_EDI]);
+}
 #elif defined(__x86_64__)
 #define FRAME_POINTER(machine) ((uintptr_t)(machine)->gregs[REG_RBP])
 #define FRAME_ALIGNMENT 7
@@ -117,6 +130,8 @@ static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
     // Frame records are {previous fp, return address}, ascending the stack.
 #if defined(__arm__)
     uintptr_t fp = FRAME_POINTER(machine), low = machine->arm_sp;
+#elif defined(__i386__)
+    uintptr_t fp = FRAME_POINTER(machine), low = (uintptr_t)machine->gregs[REG_ESP];
 #elif defined(__x86_64__)
     uintptr_t fp = FRAME_POINTER(machine), low = (uintptr_t)machine->gregs[REG_RSP];
 #else

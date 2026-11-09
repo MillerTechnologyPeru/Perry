@@ -1093,7 +1093,7 @@ public func perry_objc_uncaught_exception(_ exception: UnsafeMutableRawPointer?)
     objcFatal("terminating with uncaught exception of type NSException")
 }
 
-#if !arch(arm)
+#if !arch(arm) && !arch(i386)
 /// Throws an exception. Perry cannot unwind arm64 Mach-O frames to a
 /// @catch, so every exception is uncaught. On armv7, exceptions_arm.c
 /// throws and catches them.

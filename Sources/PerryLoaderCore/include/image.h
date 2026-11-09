@@ -130,6 +130,7 @@ _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc
 #define PERRY_ARCH_ARM64    1u
 #define PERRY_ARCH_ARMV7    2u
 #define PERRY_ARCH_X86_64   4u
+#define PERRY_ARCH_I386     8u
 unsigned perry_macho_architectures(const char *path);
 
 // Address helpers

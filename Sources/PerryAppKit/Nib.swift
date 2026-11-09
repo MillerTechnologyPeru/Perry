@@ -820,17 +820,17 @@ open class NSNibDecoder: NSObject {
     @ObjCMethod("decodePointForKey:")
     func decodePoint(forKey key: String) -> CGPoint {
         let v = doubles(key)
-        return v.count >= 2 ? CGPoint(x: v[0], y: v[1]) : .zero
+        return v.count >= 2 ? CGPoint(x: CGFloat(v[0]), y: CGFloat(v[1])) : .zero
     }
     @ObjCMethod("decodeSizeForKey:")
     func decodeSize(forKey key: String) -> CGSize {
         let v = doubles(key)
-        return v.count >= 2 ? CGSize(width: v[0], height: v[1]) : .zero
+        return v.count >= 2 ? CGSize(width: CGFloat(v[0]), height: CGFloat(v[1])) : .zero
     }
     @ObjCMethod("decodeRectForKey:")
     func decodeRect(forKey key: String) -> CGRect {
         let v = doubles(key)
-        return v.count >= 4 ? CGRect(x: v[0], y: v[1], width: v[2], height: v[3]) : .zero
+        return v.count >= 4 ? CGRect(x: CGFloat(v[0]), y: CGFloat(v[1]), width: CGFloat(v[2]), height: CGFloat(v[3])) : .zero
     }
     @ObjCMethod("decodeCGPointForKey:") func decodeCGPoint(forKey key: String) -> CGPoint { decodePoint(forKey: key) }
     @ObjCMethod("decodeCGSizeForKey:") func decodeCGSize(forKey key: String) -> CGSize { decodeSize(forKey: key) }

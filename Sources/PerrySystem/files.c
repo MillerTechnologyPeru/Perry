@@ -216,7 +216,7 @@ int perry_vopen(const char *path, int flags, va_list arguments) {
 
 /// fopen, finding a file to read in any case.
 FILE *perry_fopen(const char *path, const char *mode) {
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
     // Large files, as Darwin's fopen opens them.
     FILE *(*open_file)(const char *, const char *) = fopen64;
 #else
@@ -356,9 +356,18 @@ int perry_vfcntl(int fd, int command, va_list arguments) {
 
 // MARK: - stat
 
+// On i386, programs for 10.6 and later call the 64-bit-inode functions by a
+// suffixed name; the plain names have the layouts programs for earlier
+// systems were built with, at the end of this file.
+#if defined(__i386__)
+#define INODE64_SYMBOL(name) __asm__("_" #name "$INODE64") __attribute__((visibility("default"), used))
+#else
+#define INODE64_SYMBOL(name) DARWIN_SYMBOL(name)
+#endif
+
 // Darwin's armv7 aligns 64-bit members to 4 bytes, so st_size is at offset 60
 // and the structure is 108 bytes; arm64's is 144.
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(push, 4)
 #endif
 struct darwin_stat {
@@ -381,7 +390,7 @@ struct darwin_stat {
     int32_t st_lspare;
     int64_t st_qspare[2];
 };
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(pop)
 _Static_assert(sizeof(struct darwin_stat) == 108, "struct stat is 108 bytes on Darwin armv7");
 _Static_assert(offsetof(struct darwin_stat, st_size) == 60, "st_size is at 60 on Darwin armv7");
@@ -422,7 +431,7 @@ static int stat_at(int directory, const char *path, int flags, struct darwin_sta
     return 0;
 }
 
-int darwin_stat(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(stat);
+int darwin_stat(const char *path, struct darwin_stat *out) INODE64_SYMBOL(stat);
 int darwin_stat(const char *path, struct darwin_stat *out) {
     int result = stat_at(AT_FDCWD, path, 0, out);
     char found[PATH_MAX];
@@ -431,7 +440,7 @@ int darwin_stat(const char *path, struct darwin_stat *out) {
     return result;
 }
 
-int darwin_lstat(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(lstat);
+int darwin_lstat(const char *path, struct darwin_stat *out) INODE64_SYMBOL(lstat);
 int darwin_lstat(const char *path, struct darwin_stat *out) {
     int result = stat_at(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, out);
     char found[PATH_MAX];
@@ -440,7 +449,7 @@ int darwin_lstat(const char *path, struct darwin_stat *out) {
     return result;
 }
 
-int darwin_fstat(int fd, struct darwin_stat *out) DARWIN_SYMBOL(fstat);
+int darwin_fstat(int fd, struct darwin_stat *out) INODE64_SYMBOL(fstat);
 int darwin_fstat(int fd, struct darwin_stat *out) {
     return stat_at(fd, "", AT_EMPTY_PATH, out);
 }
@@ -452,7 +461,7 @@ int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int
 
 // MARK: - File systems
 
-#if !defined(__arm__)
+#if !(defined(__arm__) || defined(__i386__))
 // Darwin's struct statvfs: its block and file counts are 32-bit
 // (fsblkcnt_t, fsfilcnt_t), so a large file system's are given in larger
 // fragments, as Darwin's libc scales them.
@@ -557,7 +566,7 @@ static void statfs_to_darwin(const struct statfs *info, struct darwin_statfs *ou
     strcpy(out->f_mntfromname, "/dev/disk1s1");
 }
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 // struct statvfs on 32-bit Darwin: eleven 32-bit words, where glibc's
 // has 64-bit counts.
 struct darwin_statvfs {
@@ -599,7 +608,7 @@ int darwin_fstatvfs(int fd, struct darwin_statvfs *out) {
 }
 #endif
 
-int darwin_statfs_path(const char *path, struct darwin_statfs *out) DARWIN_SYMBOL(statfs);
+int darwin_statfs_path(const char *path, struct darwin_statfs *out) INODE64_SYMBOL(statfs);
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     struct statfs info;
     if (statfs(path, &info) != 0) return -1;
@@ -607,7 +616,7 @@ int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     return 0;
 }
 
-int darwin_fstatfs(int fd, struct darwin_statfs *out) DARWIN_SYMBOL(fstatfs);
+int darwin_fstatfs(int fd, struct darwin_statfs *out) INODE64_SYMBOL(fstatfs);
 int darwin_fstatfs(int fd, struct darwin_statfs *out) {
     struct statfs info;
     if (fstatfs(fd, &info) != 0) return -1;
@@ -617,9 +626,9 @@ int darwin_fstatfs(int fd, struct darwin_statfs *out) {
 
 // MARK: - Times and file system control
 
-// Darwin's struct timeval: a 32-bit tv_usec, then padding.
+// Darwin's struct timeval: a long tv_sec and a 32-bit tv_usec.
 struct darwin_file_timeval {
-    int64_t tv_sec;
+    long tv_sec;
     int32_t tv_usec;
 };
 
@@ -725,10 +734,25 @@ struct darwin_dirent {
 
 _Static_assert(offsetof(struct darwin_dirent, d_name) == 21, "d_name is at 21 on Darwin");
 
+#if defined(__i386__)
+// struct dirent before 64-bit inodes.
+struct darwin_dirent32 {
+    uint32_t d_ino;
+    uint16_t d_reclen;
+    uint8_t d_type;
+    uint8_t d_namlen;
+    char d_name[256];
+};
+_Static_assert(sizeof(struct darwin_dirent32) == 264, "struct dirent is 264 bytes before 64-bit inodes");
+#endif
+
 // A Darwin DIR: glibc's stream and the entry readdir returns.
 typedef struct darwin_dir {
     DIR *dir;
     struct darwin_dirent entry;
+#if defined(__i386__)
+    struct darwin_dirent32 entry32;
+#endif
 } darwin_dir;
 
 static darwin_dir *wrap_dir(DIR *dir) {
@@ -770,7 +794,7 @@ darwin_dir *darwin_fdopendir(int fd) {
     return wrap_dir(fdopendir(fd));
 }
 
-struct darwin_dirent *darwin_readdir(darwin_dir *dir) DARWIN_SYMBOL(readdir);
+struct darwin_dirent *darwin_readdir(darwin_dir *dir) INODE64_SYMBOL(readdir);
 struct darwin_dirent *darwin_readdir(darwin_dir *dir) {
     struct dirent *entry = readdir(dir->dir);
     if (!entry)
@@ -779,7 +803,7 @@ struct darwin_dirent *darwin_readdir(darwin_dir *dir) {
     return &dir->entry;
 }
 
-int darwin_readdir_r(darwin_dir *dir, struct darwin_dirent *entry, struct darwin_dirent **result) DARWIN_SYMBOL(readdir_r);
+int darwin_readdir_r(darwin_dir *dir, struct darwin_dirent *entry, struct darwin_dirent **result) INODE64_SYMBOL(readdir_r);
 int darwin_readdir_r(darwin_dir *dir, struct darwin_dirent *entry, struct darwin_dirent **result) {
     int saved = errno;
     errno = 0;
@@ -798,7 +822,7 @@ int darwin_readdir_r(darwin_dir *dir, struct darwin_dirent *entry, struct darwin
 // A directory's entries, those `select` takes, each allocated on its own
 // and sorted with `compare`, in an array the caller frees with them.
 int darwin_scandir(const char *path, struct darwin_dirent ***list, int (*select)(const struct darwin_dirent *),
-                   int (*compare)(const struct darwin_dirent **, const struct darwin_dirent **)) DARWIN_SYMBOL(scandir);
+                   int (*compare)(const struct darwin_dirent **, const struct darwin_dirent **)) INODE64_SYMBOL(scandir);
 int darwin_scandir(const char *path, struct darwin_dirent ***list, int (*select)(const struct darwin_dirent *),
                    int (*compare)(const struct darwin_dirent **, const struct darwin_dirent **)) {
     DIR *dir = opendir(path);
@@ -842,7 +866,7 @@ failed:
     return -1;
 }
 
-int darwin_alphasort(const struct darwin_dirent **a, const struct darwin_dirent **b) DARWIN_SYMBOL(alphasort);
+int darwin_alphasort(const struct darwin_dirent **a, const struct darwin_dirent **b) INODE64_SYMBOL(alphasort);
 int darwin_alphasort(const struct darwin_dirent **a, const struct darwin_dirent **b) {
     return strcoll((*a)->d_name, (*b)->d_name);
 }
@@ -947,3 +971,230 @@ int darwin_copyfile(const char *from, const char *to, void *state, uint32_t flag
     errno = saved;
     return result;
 }
+
+// MARK: - i386's layouts from before 64-bit inodes
+
+#if defined(__i386__)
+struct darwin_stat32 {
+    int32_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    int32_t st_rdev;
+    struct timespec st_atimespec;
+    struct timespec st_mtimespec;
+    struct timespec st_ctimespec;
+    int64_t st_size;
+    int64_t st_blocks;
+    int32_t st_blksize;
+    uint32_t st_flags;
+    uint32_t st_gen;
+    int32_t st_lspare;
+    int64_t st_qspare[2];
+};
+_Static_assert(sizeof(struct darwin_stat32) == 96, "struct stat is 96 bytes before 64-bit inodes");
+_Static_assert(offsetof(struct darwin_stat32, st_size) == 48, "st_size is at 48 before 64-bit inodes");
+
+static int stat_to_32(int result, const struct darwin_stat *in, struct darwin_stat32 *out) {
+    if (result != 0)
+        return result;
+    memset(out, 0, sizeof(*out));
+    out->st_dev = in->st_dev;
+    out->st_ino = (uint32_t)in->st_ino;
+    out->st_mode = in->st_mode;
+    out->st_nlink = in->st_nlink;
+    out->st_uid = in->st_uid;
+    out->st_gid = in->st_gid;
+    out->st_rdev = in->st_rdev;
+    out->st_atimespec = in->st_atimespec;
+    out->st_mtimespec = in->st_mtimespec;
+    out->st_ctimespec = in->st_ctimespec;
+    out->st_size = in->st_size;
+    out->st_blocks = in->st_blocks;
+    out->st_blksize = in->st_blksize;
+    return 0;
+}
+
+int darwin_stat32(const char *path, struct darwin_stat32 *out) DARWIN_SYMBOL(stat);
+int darwin_stat32(const char *path, struct darwin_stat32 *out) {
+    struct darwin_stat info;
+    return stat_to_32(darwin_stat(path, &info), &info, out);
+}
+
+int darwin_lstat32(const char *path, struct darwin_stat32 *out) DARWIN_SYMBOL(lstat);
+int darwin_lstat32(const char *path, struct darwin_stat32 *out) {
+    struct darwin_stat info;
+    return stat_to_32(darwin_lstat(path, &info), &info, out);
+}
+
+int darwin_fstat32(int fd, struct darwin_stat32 *out) DARWIN_SYMBOL(fstat);
+int darwin_fstat32(int fd, struct darwin_stat32 *out) {
+    struct darwin_stat info;
+    return stat_to_32(darwin_fstat(fd, &info), &info, out);
+}
+
+// The transitional names, with the layout of $INODE64.
+int darwin_stat64(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(stat64);
+int darwin_stat64(const char *path, struct darwin_stat *out) { return darwin_stat(path, out); }
+int darwin_lstat64(const char *path, struct darwin_stat *out) DARWIN_SYMBOL(lstat64);
+int darwin_lstat64(const char *path, struct darwin_stat *out) { return darwin_lstat(path, out); }
+int darwin_fstat64(int fd, struct darwin_stat *out) DARWIN_SYMBOL(fstat64);
+int darwin_fstat64(int fd, struct darwin_stat *out) { return darwin_fstat(fd, out); }
+int darwin_statfs64(const char *path, struct darwin_statfs *out) DARWIN_SYMBOL(statfs64);
+int darwin_statfs64(const char *path, struct darwin_statfs *out) { return darwin_statfs_path(path, out); }
+int darwin_fstatfs64(int fd, struct darwin_statfs *out) DARWIN_SYMBOL(fstatfs64);
+int darwin_fstatfs64(int fd, struct darwin_statfs *out) { return darwin_fstatfs(fd, out); }
+
+struct darwin_statfs32 {
+    int16_t f_otype;
+    int16_t f_oflags;
+    int32_t f_bsize;
+    int32_t f_iosize;
+    int32_t f_blocks;
+    int32_t f_bfree;
+    int32_t f_bavail;
+    int32_t f_files;
+    int32_t f_ffree;
+    int32_t f_fsid[2];
+    uint32_t f_owner;
+    int16_t f_reserved1;
+    int16_t f_type;
+    int32_t f_flags;
+    int32_t f_reserved2[2];
+    char f_fstypename[15];
+    char f_mntonname[90];
+    char f_mntfromname[90];
+    char f_reserved3;
+    int32_t f_reserved4[4];
+};
+_Static_assert(sizeof(struct darwin_statfs32) == 272, "struct statfs is 272 bytes before 64-bit inodes");
+
+// A count too large for a long is scaled by a larger block size, so that
+// free space still reads correctly; these programs expect a local HFS volume.
+static int statfs_to_32(int result, const struct darwin_statfs *in, struct darwin_statfs32 *out) {
+    if (result != 0)
+        return result;
+    memset(out, 0, sizeof(*out));
+    uint64_t blocks = in->f_blocks, free_blocks = in->f_bfree, available = in->f_bavail;
+    uint32_t block_size = in->f_bsize;
+    while (blocks > INT32_MAX && block_size < 0x40000000u) {
+        blocks /= 2; free_blocks /= 2; available /= 2; block_size *= 2;
+    }
+    out->f_bsize = (int32_t)block_size;
+    out->f_iosize = in->f_iosize;
+    out->f_blocks = blocks > INT32_MAX ? INT32_MAX : (int32_t)blocks;
+    out->f_bfree = free_blocks > INT32_MAX ? INT32_MAX : (int32_t)free_blocks;
+    out->f_bavail = available > INT32_MAX ? INT32_MAX : (int32_t)available;
+    out->f_files = in->f_files > INT32_MAX ? INT32_MAX : (int32_t)in->f_files;
+    out->f_ffree = in->f_ffree > INT32_MAX ? INT32_MAX : (int32_t)in->f_ffree;
+    out->f_fsid[0] = in->f_fsid[0];
+    out->f_fsid[1] = in->f_fsid[1];
+    out->f_type = 17;
+    out->f_flags = (int32_t)in->f_flags;
+    strcpy(out->f_fstypename, "hfs");
+    strcpy(out->f_mntonname, in->f_mntonname);
+    strcpy(out->f_mntfromname, in->f_mntfromname);
+    return 0;
+}
+
+int darwin_statfs32_path(const char *path, struct darwin_statfs32 *out) DARWIN_SYMBOL(statfs);
+int darwin_statfs32_path(const char *path, struct darwin_statfs32 *out) {
+    struct darwin_statfs info;
+    return statfs_to_32(darwin_statfs_path(path, &info), &info, out);
+}
+
+int darwin_fstatfs32(int fd, struct darwin_statfs32 *out) DARWIN_SYMBOL(fstatfs);
+int darwin_fstatfs32(int fd, struct darwin_statfs32 *out) {
+    struct darwin_statfs info;
+    return statfs_to_32(darwin_fstatfs(fd, &info), &info, out);
+}
+
+// Names longer than the old d_name are cut short; Linux allows 255 bytes, as
+// the old layout does, so none are.
+static void entry_to_32(const struct dirent *entry, struct darwin_dirent32 *out) {
+    size_t length = strnlen(entry->d_name, sizeof(out->d_name) - 1);
+    out->d_ino = (uint32_t)entry->d_ino;
+    out->d_type = entry->d_type;
+    out->d_namlen = (uint8_t)length;
+    memcpy(out->d_name, entry->d_name, length);
+    out->d_name[length] = 0;
+    out->d_reclen = (uint16_t)((offsetof(struct darwin_dirent32, d_name) + length + 1 + 3) & ~3u);
+}
+
+struct darwin_dirent32 *darwin_readdir32(darwin_dir *dir) DARWIN_SYMBOL(readdir);
+struct darwin_dirent32 *darwin_readdir32(darwin_dir *dir) {
+    struct dirent *entry = readdir(dir->dir);
+    if (!entry)
+        return NULL;
+    entry_to_32(entry, &dir->entry32);
+    return &dir->entry32;
+}
+
+int darwin_readdir32_r(darwin_dir *dir, struct darwin_dirent32 *entry, struct darwin_dirent32 **result) DARWIN_SYMBOL(readdir_r);
+int darwin_readdir32_r(darwin_dir *dir, struct darwin_dirent32 *entry, struct darwin_dirent32 **result) {
+    int saved = errno;
+    errno = 0;
+    struct dirent *found = readdir(dir->dir);
+    int error = errno;
+    errno = saved;
+    if (!found) {
+        *result = NULL;
+        return perry_darwin_errno_from_linux(error);
+    }
+    entry_to_32(found, entry);
+    *result = entry;
+    return 0;
+}
+
+int darwin_scandir32(const char *path, struct darwin_dirent32 ***list, int (*select)(const struct darwin_dirent32 *),
+                     int (*compare)(const struct darwin_dirent32 **, const struct darwin_dirent32 **)) DARWIN_SYMBOL(scandir);
+int darwin_scandir32(const char *path, struct darwin_dirent32 ***list, int (*select)(const struct darwin_dirent32 *),
+                     int (*compare)(const struct darwin_dirent32 **, const struct darwin_dirent32 **)) {
+    DIR *dir = opendir(path);
+    if (!dir)
+        return -1;
+    struct darwin_dirent32 **entries = NULL;
+    size_t count = 0, capacity = 0;
+    struct dirent *found;
+    while ((found = readdir(dir))) {
+        struct darwin_dirent32 *entry = malloc(sizeof(*entry));
+        if (!entry)
+            goto failed;
+        entry_to_32(found, entry);
+        if (select && !select(entry)) {
+            free(entry);
+            continue;
+        }
+        if (count == capacity) {
+            capacity = capacity ? capacity * 2 : 16;
+            struct darwin_dirent32 **grown = realloc(entries, capacity * sizeof(*entries));
+            if (!grown) {
+                free(entry);
+                goto failed;
+            }
+            entries = grown;
+        }
+        entries[count++] = entry;
+    }
+    closedir(dir);
+    if (compare && count > 1)
+        qsort(entries, count, sizeof(*entries), (int (*)(const void *, const void *))compare);
+    *list = entries;
+    return (int)count;
+
+failed:
+    for (size_t i = 0; i < count; i++)
+        free(entries[i]);
+    free(entries);
+    closedir(dir);
+    errno = ENOMEM;
+    return -1;
+}
+
+int darwin_alphasort32(const struct darwin_dirent32 **a, const struct darwin_dirent32 **b) DARWIN_SYMBOL(alphasort);
+int darwin_alphasort32(const struct darwin_dirent32 **a, const struct darwin_dirent32 **b) {
+    return strcoll((*a)->d_name, (*b)->d_name);
+}
+#endif

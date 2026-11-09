@@ -106,6 +106,8 @@ open class NSWindow: NSResponder {
     /// The height of the strips above the content view: the window is that
     /// much taller than the content view, which keeps its size.
     var appliedChrome: CGFloat = 0
+    /// The view -enterFullScreenMode:withOptions: put in full screen.
+    var fullScreenView: NSView?
 
     /// The view at the root of the window's views.
     var rootView: NSView? { frameView ?? contentView }
@@ -694,8 +696,26 @@ open class NSWindow: NSResponder {
             _ = SDL.showWindow(sdlWindow)
             return
         }
+        makeSDLWindow(hidden: false)
+    }
+
+    /// The window's NSOpenGLView, if it shows one.
+    var openGLView: NSOpenGLView? { rootView?.allViews.lazy.compactMap { $0 as? NSOpenGLView }.first }
+
+    /// Makes the SDL window able to take an OpenGL context: without a
+    /// renderer, and made again if it has one already.
+    func prepareForOpenGL(_ format: NSOpenGLPixelFormat?) {
+        if sdlWindow != nil && renderer == nil { return }
+        destroySDLWindow()
+        format?.applyToSDL()
+        makeSDLWindow(hidden: !visible)
+    }
+
+    private func makeSDLWindow(hidden: Bool) {
         guard SDL.start() else { return }
-        var flags = SDL.windowHighPixelDensity
+        let usesOpenGL = openGLView != nil
+        var flags = usesOpenGL ? SDL.windowOpenGL : SDL.windowHighPixelDensity
+        if hidden { flags |= SDL.windowHidden }
         if styleMask & StyleMask.resizable != 0 { flags |= SDL.windowResizable }
         if styleMask == 0 { flags |= SDL.windowBorderless }
         if styleMask & StyleMask.fullScreen != 0 { flags |= SDL.windowFullscreen }
@@ -716,6 +736,12 @@ open class NSWindow: NSResponder {
         // Typed text for key events: SDL types only while text input is on.
         _ = SDL.startTextInput(window)
         if minSize.width > 0 || minSize.height > 0 { _ = SDL.setWindowMinimumSize(window, Int32(minSize.width), Int32(minSize.height)) }
+        if usesOpenGL {
+            // The program's OpenGL drawing is the window's picture.
+            renderer = nil
+            updateBackingScale()
+            return
+        }
         renderer = "opengles2".withCString { SDL.createRenderer(window, $0) } ?? SDL.createRenderer(window, nil)
         if let renderer {
             Trace.log("window \(windowNumber) shown with SDL's \(SDL.rendererName(renderer).map { String(cString: $0) } ?? "?") renderer")
@@ -750,6 +776,10 @@ open class NSWindow: NSResponder {
 
     /// Composites the content view's layers into the window.
     func draw() {
+        if let openGLView {
+            openGLView.displayOpenGL()
+            return
+        }
         guard let renderer, let contentView, let root = rootView, let layer = root.layer else { return }
         let controller = contentViewControllerObject
         Send.void(root.objcObject, "updateConstraintsForSubtreeIfNeeded")

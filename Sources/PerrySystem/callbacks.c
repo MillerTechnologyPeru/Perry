@@ -6,7 +6,7 @@
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 
 #include <errno.h>
 #include <pthread.h>

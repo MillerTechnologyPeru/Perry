@@ -174,10 +174,10 @@ static inline void perry_release_fence(void) {
 /// nearest first, by the frame records arm64 and x86_64 code keeps (Darwin's
 /// and Swift's alike): for the reference counting trace. None elsewhere.
 static inline __attribute__((always_inline)) size_t perry_caller_frames(uintptr_t *out, size_t limit) {
-#if defined(__aarch64__) || defined(__x86_64__)
+#if defined(__aarch64__) || defined(__x86_64__) || defined(__i386__)
     uintptr_t frame = (uintptr_t)__builtin_frame_address(0), low = frame;
     size_t count = 0;
-    while (count < limit && frame && (frame & 7) == 0 && frame >= low && frame - low < (64u << 20)) {
+    while (count < limit && frame && (frame & (sizeof(uintptr_t) - 1)) == 0 && frame >= low && frame - low < (64u << 20)) {
         const uintptr_t *record = (const uintptr_t *)frame;
         if (!record[1]) break;
         out[count++] = record[1];
@@ -203,11 +203,14 @@ perry_objc_class *perry_objc_protocol_metaclass(void);
 // Addresses of the assembly entry points, to call through a typed pointer.
 const void *perry_objc_msgSend_address(void);
 const void *perry_objc_msgSendSuper2_address(void);
-#if defined(__arm__) || defined(__x86_64__)
+#if defined(__arm__) || defined(__x86_64__) || defined(__i386__)
 // The sends of methods whose structures come back through a pointer in the
 // first argument register (r0, rdi: the _stret entry points), which moves
 // self and _cmd up a register.
 const void *perry_objc_msgSend_stret_address(void);
+#if defined(__i386__)
+const void *perry_objc_msgSend_fpret_address(void);
+#endif
 const void *perry_objc_msgSendSuper2_stret_address(void);
 #endif
 const void *perry_objc_msgForward_address(void);

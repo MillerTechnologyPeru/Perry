@@ -52,6 +52,14 @@
 #define PERRY_CPU_FREQUENCY 800000000u
 #define PERRY_PAGE_SIZE 4096
 #define PERRY_KINFO_PROC_SIZE 492
+#elif defined(__i386__)
+#define PERRY_HW_MACHINE "i386"
+#define PERRY_HW_MODEL "MacBook5,1"
+#define PERRY_CPU_TYPE 7                // CPU_TYPE_I386
+#define PERRY_CPU_SUBTYPE 3             // CPU_SUBTYPE_I386_ALL
+#define PERRY_CPU_FREQUENCY 2000000000u
+#define PERRY_PAGE_SIZE 4096
+#define PERRY_KINFO_PROC_SIZE 492
 #elif defined(__x86_64__)
 #define PERRY_HW_MACHINE "x86_64"
 #define PERRY_HW_MODEL "Macmini8,1"

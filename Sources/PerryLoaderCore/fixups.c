@@ -182,9 +182,20 @@ static uint8_t *segment_address(perry_image *image, unsigned index, uint64_t off
     return perry_image_vmaddr(image, seg->vmaddr + offset);
 }
 
+// Text relocations, which i386 code can have, are patched like pointers; a
+// relative one moves the other way, its target staying put as the image slides.
+static void rebase_at(perry_image *image, unsigned seg, uint64_t offset, uint8_t type) {
+    slot_t *slot = (slot_t *)segment_address(image, seg, offset);
+    if (type == REBASE_TYPE_TEXT_PCREL32)
+        *slot -= (slot_t)image->slide;
+    else
+        *slot += (slot_t)image->slide;
+}
+
 static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8_t *end) {
     unsigned seg = 0;
     uint64_t offset = 0;
+    uint8_t type = REBASE_TYPE_POINTER;
     while (p < end) {
         uint8_t byte = *p++;
         uint8_t imm = byte & REBASE_IMMEDIATE_MASK;
@@ -192,8 +203,9 @@ static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8
         case REBASE_OPCODE_DONE:
             return;
         case REBASE_OPCODE_SET_TYPE_IMM:
-            if (imm != REBASE_TYPE_POINTER)
+            if (imm != REBASE_TYPE_POINTER && (sizeof(slot_t) != 4 || imm > REBASE_TYPE_TEXT_PCREL32))
                 perry_fatal("%s: unsupported rebase type %u", image->path, imm);
+            type = imm;
             break;
         case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
             seg = imm;
@@ -207,23 +219,23 @@ static void run_rebase_opcodes(perry_image *image, const uint8_t *p, const uint8
             break;
         case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
             for (unsigned i = 0; i < imm; i++, offset += sizeof(slot_t))
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES: {
             uint64_t count = perry_read_uleb(&p, end);
             for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t))
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         }
         case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
-            *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+            rebase_at(image, seg, offset, type);
             offset += sizeof(slot_t) + perry_read_uleb(&p, end);
             break;
         case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB: {
             uint64_t count = perry_read_uleb(&p, end);
             uint64_t skip = perry_read_uleb(&p, end);
             for (uint64_t i = 0; i < count; i++, offset += sizeof(slot_t) + skip)
-                *(slot_t *)segment_address(image, seg, offset) += (slot_t)image->slide;
+                rebase_at(image, seg, offset, type);
             break;
         }
         default:
@@ -358,6 +370,36 @@ typedef struct classic_symbols {
     uint32_t strings_size;
 } classic_symbols;
 
+#if defined(__i386__)
+// What `__dyld_func_lookup` gives crt1 of programs from before Mac OS X 10.5,
+// for the startup functions it looks up and calls with no arguments: there
+// is nothing left for them to do.
+static void dyld_nothing(void) {}
+
+static int dyld_func_lookup(const char *name, void **address) {
+    (void)name;
+    *address = (void *)dyld_nothing;
+    return 1;
+}
+
+// __DATA,__dyld holds what crt1 calls dyld through, which dyld fills in: the
+// lazy binder, unused since imports are bound at load, and the function
+// lookup.
+static void fill_dyld_section(perry_image *image) {
+    for (uint32_t s = 0; s < image->segment_count; s++) {
+        const perry_segment *segment = &image->segments[s];
+        for (uint32_t i = 0; segment->mapped && i < segment->nsects; i++) {
+            const section_t *section = &segment->sections[i];
+            if (strncmp(section->sectname, "__dyld", 16) != 0 || section->size < 2 * sizeof(slot_t))
+                continue;
+            slot_t *slots = perry_image_vmaddr(image, section->addr);
+            slots[0] = (slot_t)(uintptr_t)dyld_nothing;
+            slots[1] = (slot_t)(uintptr_t)dyld_func_lookup;
+        }
+    }
+}
+#endif
+
 static uint32_t classic_symbol_value(perry_loader *loader, perry_image *image, const classic_symbols *table,
                                      uint32_t index, const char **name_out) {
     if (index >= table->count)
@@ -370,10 +412,18 @@ static uint32_t classic_symbol_value(perry_loader *loader, perry_image *image, c
         // 0xfe and 0xff are the dynamic lookup and the executable.
         if (ordinal >= 0xfe)
             ordinal = (int)(int8_t)ordinal;
+        // An image with a flat namespace, as before Mac OS X 10.1, names no
+        // library for its symbols.
+        if (!(image->header->flags & MH_TWOLEVEL))
+            ordinal = -2;
         return (uint32_t)bind_target(loader, image, ordinal, name, (symbol->n_desc & N_WEAK_REF) != 0);
     }
+#if defined(__arm__)
     uint32_t address = (uint32_t)(uintptr_t)perry_image_vmaddr(image, symbol->n_value & ~1u);
     return address | ((symbol->n_desc & N_ARM_THUMB_DEF) || (symbol->n_value & 1) ? 1 : 0);
+#else
+    return (uint32_t)(uintptr_t)perry_image_vmaddr(image, symbol->n_value);
+#endif
 }
 
 static void apply_symbol_table(perry_loader *loader, perry_image *image) {
@@ -391,6 +441,29 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
         for (uint32_t i = 0; segment->mapped && i < segment->nsects; i++) {
             const section_t *section = &segment->sections[i];
             uint32_t type = section->flags & SECTION_TYPE;
+#if defined(__i386__)
+            // __IMPORT,__jump_table, of images linked before Mac OS X 10.6:
+            // stubs of five bytes (reserved2), each a jump dyld writes.
+            if (type == S_SYMBOL_STUBS && (section->flags & S_ATTR_SELF_MODIFYING_CODE) && section->reserved2 == 5) {
+                uint8_t *stubs = perry_image_vmaddr(image, section->addr);
+                uint32_t stub_count = (uint32_t)(section->size / 5);
+                if (!indirect || section->reserved1 + stub_count > dst->nindirectsyms)
+                    perry_fatal("%s: %.16s has no indirect symbols", image->path, section->sectname);
+                for (uint32_t n = 0; n < stub_count; n++) {
+                    uint32_t index = indirect[section->reserved1 + n];
+                    if (index & (INDIRECT_SYMBOL_ABS | INDIRECT_SYMBOL_LOCAL))
+                        continue;
+                    const char *name;
+                    uint32_t value = classic_symbol_value(loader, image, &table, index, &name);
+                    uint8_t *stub = stubs + n * 5;
+                    stub[0] = 0xe9;     // jmp rel32
+                    uint32_t displacement = value - (uint32_t)(uintptr_t)(stub + 5);
+                    memcpy(stub + 1, &displacement, 4);
+                    perry_trace(PERRY_TRACE_BIND, "jump %p = 0x%x %s", (void *)stub, value, name);
+                }
+                continue;
+            }
+#endif
             if (type != S_NON_LAZY_SYMBOL_POINTERS && type != S_LAZY_SYMBOL_POINTERS)
                 continue;
             slot_t *slots = perry_image_vmaddr(image, section->addr);
@@ -434,10 +507,21 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
     const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
     for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
         const struct relocation_info *relocation = &local[i];
+#if defined(__i386__)
+        // On i386 scattered entries are also pointers to a local symbol with
+        // an offset: r_address is their low 24 bits, then r_type and r_length.
+        if ((uint32_t)relocation->r_address & R_SCATTERED) {
+            uint32_t bits = (uint32_t)relocation->r_address;
+            if (((bits >> 24) & 0xf) == GENERIC_RELOC_VANILLA && ((bits >> 28) & 3) == 2 && !((bits >> 30) & 1))
+                *(slot_t *)(relocation_base + (bits & 0xffffff)) += (slot_t)image->slide;
+            continue;
+        }
+#else
         // Scattered entries are parts of instructions' immediates, which are
         // not slid; the rest are pointers.
         if ((uint32_t)relocation->r_address & R_SCATTERED)
             continue;
+#endif
         if (relocation->r_length != 2 || relocation->r_type != GENERIC_RELOC_VANILLA)
             perry_fatal("%s: unsupported local relocation %u", image->path, i);
         *(slot_t *)(relocation_base + relocation->r_address) += (slot_t)image->slide;
@@ -459,4 +543,7 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
 #endif
     else if (image->slide != 0 && image->header->filetype != MH_EXECUTE)
         perry_warn("%s: no fixup information; image may not work when slid", image->path);
+#if defined(__i386__)
+    fill_dyld_section(image);
+#endif
 }

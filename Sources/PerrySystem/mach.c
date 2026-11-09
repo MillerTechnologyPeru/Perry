@@ -279,7 +279,7 @@ kern_return_t darwin_clock_sleep(mach_port_t service, int type, mach_timespec ti
 
 // The host's memory is counted in iOS's 16 KB pages, read from Linux's
 // /proc/meminfo, and its processor time from /proc/stat.
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
 enum { HOST_PAGE_SIZE = 0x1000 };     // an Intel Mac's
 #else
 enum { HOST_PAGE_SIZE = 0x4000 };
@@ -1123,6 +1123,8 @@ pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
 typedef struct { const char *name; int cputype; int cpusubtype; int byteorder; const char *description; } darwin_arch_info;
 #if defined(__arm__)
 static const darwin_arch_info local_arch_info = { "armv7", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "arm v7" };
+#elif defined(__i386__)
+static const darwin_arch_info local_arch_info = { "i386", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "Intel 80x86" };
 #else
 static const darwin_arch_info local_arch_info = { "arm64", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "ARM64" };
 #endif

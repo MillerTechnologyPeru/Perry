@@ -112,4 +112,125 @@ extension NSObject {
     @ObjCMethod("description") func describedByObject() -> String
 }
 
+// Multiprocessing Services' locks, over pthreads.
+private typealias MPLock = UnsafeMutablePointer<pthread_mutex_t>
+
+@c(_MPCreateCriticalRegion)
+public func MPCreateCriticalRegion(_ region: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    let lock = MPLock.allocate(capacity: 1)
+    var attributes = pthread_mutexattr_t()
+    pthread_mutexattr_init(&attributes)
+    pthread_mutexattr_settype(&attributes, Int32(PTHREAD_MUTEX_RECURSIVE))
+    pthread_mutex_init(lock, &attributes)
+    pthread_mutexattr_destroy(&attributes)
+    region?.pointee = UnsafeMutableRawPointer(lock)
+    return 0
+}
+
+@c(_MPDeleteCriticalRegion)
+public func MPDeleteCriticalRegion(_ region: UnsafeMutableRawPointer?) -> Int32 {
+    guard let region else { return 0 }
+    let lock = region.assumingMemoryBound(to: pthread_mutex_t.self)
+    pthread_mutex_destroy(lock)
+    lock.deallocate()
+    return 0
+}
+
+@c(_MPEnterCriticalRegion)
+public func MPEnterCriticalRegion(_ region: UnsafeMutableRawPointer?, _ timeout: Int32) -> Int32 {
+    guard let region else { return -50 }
+    return pthread_mutex_lock(region.assumingMemoryBound(to: pthread_mutex_t.self)) == 0 ? 0 : -50
+}
+
+@c(_MPExitCriticalRegion)
+public func MPExitCriticalRegion(_ region: UnsafeMutableRawPointer?) -> Int32 {
+    guard let region else { return -50 }
+    return pthread_mutex_unlock(region.assumingMemoryBound(to: pthread_mutex_t.self)) == 0 ? 0 : -50
+}
+
+@c(_MPCreateSemaphore)
+public func MPCreateSemaphore(_ maximum: UInt32, _ initial: UInt32,
+                              _ semaphore: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    let storage = UnsafeMutablePointer<sem_t>.allocate(capacity: 1)
+    sem_init(storage, 0, initial)
+    semaphore?.pointee = UnsafeMutableRawPointer(storage)
+    return 0
+}
+
+@c(_MPDeleteSemaphore)
+public func MPDeleteSemaphore(_ semaphore: UnsafeMutableRawPointer?) -> Int32 {
+    guard let semaphore else { return 0 }
+    let storage = semaphore.assumingMemoryBound(to: sem_t.self)
+    sem_destroy(storage)
+    storage.deallocate()
+    return 0
+}
+
+@c(_MPSignalSemaphore)
+public func MPSignalSemaphore(_ semaphore: UnsafeMutableRawPointer?) -> Int32 {
+    guard let semaphore else { return -50 }
+    return sem_post(semaphore.assumingMemoryBound(to: sem_t.self)) == 0 ? 0 : -50
+}
+
+/// The timeout is in milliseconds, with -1 for forever and 0 for not waiting.
+@c(_MPWaitOnSemaphore)
+public func MPWaitOnSemaphore(_ semaphore: UnsafeMutableRawPointer?, _ timeout: Int32) -> Int32 {
+    guard let semaphore else { return -50 }
+    let storage = semaphore.assumingMemoryBound(to: sem_t.self)
+    if timeout == 0 { return sem_trywait(storage) == 0 ? 0 : -29296 }
+    if timeout < 0 {
+        while sem_wait(storage) != 0 { if errno != EINTR { return -50 } }
+        return 0
+    }
+    var deadline = timespec()
+    clock_gettime(CLOCK_REALTIME, &deadline)
+    deadline.tv_sec += Int(timeout / 1000)
+    deadline.tv_nsec += Int(timeout % 1000) * 1_000_000
+    if deadline.tv_nsec >= 1_000_000_000 {
+        deadline.tv_sec += 1
+        deadline.tv_nsec -= 1_000_000_000
+    }
+    while sem_timedwait(storage, &deadline) != 0 {
+        if errno != EINTR { return -29296 }
+    }
+    return 0
+}
+
+// The Component Manager, as programs from before AudioComponent find their
+// audio units: the same descriptions and instances, under older names.
+private let audioToolbox = "/System/Library/Frameworks/AudioToolbox.framework/AudioToolbox"
+
+private func audioFunction<T>(_ name: String, as type: T.Type) -> T? {
+    guard let lookup = providerSymbolLookup,
+          let symbol = audioToolbox.withCString({ library in name.withCString { lookup(library, $0) } }) else { return nil }
+    return unsafeBitCast(symbol, to: type)
+}
+
+@c(_FindNextComponent)
+public func FindNextComponent(_ component: UnsafeMutableRawPointer?, _ description: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {
+    typealias F = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+    return audioFunction("_AudioComponentFindNext", as: F.self)?(component, description)
+}
+
+@c(_OpenAComponent)
+public func OpenAComponent(_ component: UnsafeMutableRawPointer?, _ instance: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    typealias F = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32
+    return audioFunction("_AudioComponentInstanceNew", as: F.self)?(component, instance) ?? -192
+}
+
+@c(_OpenComponent)
+public func OpenComponent(_ component: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    var instance: UnsafeMutableRawPointer?
+    return OpenAComponent(component, &instance) == 0 ? instance : nil
+}
+
+@c(_CloseComponent)
+public func CloseComponent(_ instance: UnsafeMutableRawPointer?) -> Int32 {
+    typealias F = @convention(c) (UnsafeMutableRawPointer?) -> Int32
+    return audioFunction("_AudioComponentInstanceDispose", as: F.self)?(instance) ?? -192
+}
+
+@c(_CallComponentVersion)
+public func CallComponentVersion(_ instance: UnsafeMutableRawPointer?) -> Int32 { 0x0001_0000 }
+
 #endif

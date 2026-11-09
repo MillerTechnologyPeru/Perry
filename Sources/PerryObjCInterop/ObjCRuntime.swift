@@ -14,6 +14,9 @@ public struct ObjCRuntimeFunctions {
     /// which has none, objc_msgSend and objc_msgSendSuper2.
     public var msgSendStret: UnsafeRawPointer
     public var msgSendSuper2Stret: UnsafeRawPointer
+    /// objc_msgSend_fpret, which i386 needs for floating-point results: nil
+    /// must still leave one value on the x87 stack.
+    public var msgSendFpret: UnsafeRawPointer
     public var retain: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
     public var release: @convention(c) (UnsafeMutableRawPointer?) -> Void
     public var autorelease: @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
@@ -32,6 +35,7 @@ public struct ObjCRuntimeFunctions {
 
     public init(msgSend: UnsafeRawPointer, msgSendSuper2: UnsafeRawPointer,
                 msgSendStret: UnsafeRawPointer? = nil, msgSendSuper2Stret: UnsafeRawPointer? = nil,
+                msgSendFpret: UnsafeRawPointer? = nil,
                 retain: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
                 release: @escaping @convention(c) (UnsafeMutableRawPointer?) -> Void,
                 autorelease: @escaping @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?,
@@ -48,6 +52,7 @@ public struct ObjCRuntimeFunctions {
         self.msgSendSuper2 = msgSendSuper2
         self.msgSendStret = msgSendStret ?? msgSend
         self.msgSendSuper2Stret = msgSendSuper2Stret ?? msgSendSuper2
+        self.msgSendFpret = msgSendFpret ?? msgSend
         self.retain = retain
         self.release = release
         self.autorelease = autorelease
@@ -107,6 +112,7 @@ public enum ObjCRuntime {
             msgSend: UnsafeRawPointer(msgSend), msgSendSuper2: UnsafeRawPointer(msgSendSuper2),
             msgSendStret: lookup("_objc_msgSend_stret").map(UnsafeRawPointer.init),
             msgSendSuper2Stret: lookup("_objc_msgSendSuper2_stret").map(UnsafeRawPointer.init),
+            msgSendFpret: lookup("_objc_msgSend_fpret").map(UnsafeRawPointer.init),
             retain: retain, release: release, autorelease: autorelease, retainBlock: retainBlock,
             getClass: getClass, objectGetClass: objectGetClass, registerSelector: registerSelector,
             addMethod: addMethod, replaceMethod: replaceMethod, initializeClassPair: initializeClassPair,
@@ -151,7 +157,12 @@ public enum ObjCRuntime {
     /// 32-bit Darwin returns it through memory, else objc_msgSend.
     @inline(__always)
     public static func msgSend<Result: ObjCValue>(returning type: Result.Type) -> UnsafeRawPointer {
-        Result.objCReturnsIndirectly ? functions.msgSendStret : functions.msgSend
+        #if arch(i386)
+        if Result.ObjCResultType.self == Double.self || Result.ObjCResultType.self == Float.self {
+            return functions.msgSendFpret
+        }
+        #endif
+        return Result.objCReturnsIndirectly ? functions.msgSendStret : functions.msgSend
     }
 
     @inline(__always)

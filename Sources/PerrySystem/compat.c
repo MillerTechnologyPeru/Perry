@@ -1550,3 +1550,39 @@ void darwin_tzset(void) {
     darwin_timezone = timezone;
     darwin_daylight = daylight;
 }
+
+#if defined(__i386__)
+#include <fnmatch.h>
+
+// Darwin's FNM_NOESCAPE and FNM_PATHNAME are the other way round from glibc's.
+int darwin_fnmatch(const char *pattern, const char *string, int flags) __asm__("_fnmatch$UNIX2003")
+    __attribute__((visibility("default"), used));
+int darwin_fnmatch(const char *pattern, const char *string, int flags) {
+    int linux_flags = flags & ~3;
+    if (flags & 1) linux_flags |= FNM_NOESCAPE;
+    if (flags & 2) linux_flags |= FNM_PATHNAME;
+    return fnmatch(pattern, string, linux_flags);
+}
+
+// launchd and its bootstrap namespace, which crash reporters ask for their
+// services: no service is ever registered here.
+unsigned darwin_bootstrap_port DARWIN_SYMBOL(bootstrap_port) = 0;
+
+int darwin_bootstrap_look_up(unsigned port, const char *name, unsigned *service) DARWIN_SYMBOL(bootstrap_look_up);
+int darwin_bootstrap_look_up(unsigned port, const char *name, unsigned *service) {
+    (void)port; (void)name;
+    if (service) *service = 0;
+    return 1102; // BOOTSTRAP_UNKNOWN_SERVICE
+}
+
+void *darwin_launch_data_alloc(int type) DARWIN_SYMBOL(launch_data_alloc);
+void *darwin_launch_data_alloc(int type) { (void)type; return NULL; }
+void *darwin_launch_data_new_string(const char *value) DARWIN_SYMBOL(launch_data_new_string);
+void *darwin_launch_data_new_string(const char *value) { (void)value; return NULL; }
+bool darwin_launch_data_dict_insert(void *dict, void *value, const char *key) DARWIN_SYMBOL(launch_data_dict_insert);
+bool darwin_launch_data_dict_insert(void *dict, void *value, const char *key) { (void)dict; (void)value; (void)key; return false; }
+void darwin_launch_data_free(void *data) DARWIN_SYMBOL(launch_data_free);
+void darwin_launch_data_free(void *data) { (void)data; }
+void *darwin_launch_msg(void *message) DARWIN_SYMBOL(launch_msg);
+void *darwin_launch_msg(void *message) { (void)message; return NULL; }
+#endif

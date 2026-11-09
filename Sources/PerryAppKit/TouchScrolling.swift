@@ -107,7 +107,7 @@ final class TouchScrolling {
             guard let self, let scrollView, self.generation == generation else { return }
             var deceleration = deceleration
             let distance = deceleration.step(at: Clock.now)
-            let moved = scrollView.scroll(contentBy: CGPoint(x: distance.x, y: distance.y))
+            let moved = scrollView.scroll(contentBy: CGPoint(x: CGFloat(distance.x), y: CGFloat(distance.y)))
             if moved || distance == (0, 0), !deceleration.isFinished { self.coast(scrollView, deceleration, generation: generation) }
         }
     }

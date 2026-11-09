@@ -119,6 +119,12 @@ enum MouseButtons {
     nonisolated(unsafe) static var pressed: UInt = 0
 }
 
+extension NSEvent {
+    /// An event mask as an NSUInteger, which is 32 bits in 32-bit programs:
+    /// all ones there is NSEventMaskAny.
+    static func mask(fromWord word: UInt) -> UInt64 { word == .max ? .max : UInt64(word) }
+}
+
 @ObjCClass("NSEvent")
 open class NSEvent: NSObject {
     var type: EventType = .applicationDefined
@@ -281,7 +287,8 @@ open class NSEvent: NSObject {
     /// Local monitors see each event before it is sent, and may change or
     /// drop it; the returned token removes one.
     @ObjCClassMethod("addLocalMonitorForEventsMatchingMask:handler:")
-    static func addLocalMonitor(mask: UInt64, handler: ObjCBlock) -> NSObject? {
+    static func addLocalMonitor(mask wordMask: UInt, handler: ObjCBlock) -> NSObject? {
+        let mask = NSEvent.mask(fromWord: wordMask)
         let monitor = EventMonitor(mask: mask, handler: handler)
         Monitors.local.append(monitor)
         return monitor
@@ -289,8 +296,9 @@ open class NSEvent: NSObject {
 
     /// Global monitors see other apps' events: there are none here.
     @ObjCClassMethod("addGlobalMonitorForEventsMatchingMask:handler:")
-    static func addGlobalMonitor(mask: UInt64, handler: ObjCBlock) -> NSObject? {
-        EventMonitor(mask: mask, handler: handler)
+    static func addGlobalMonitor(mask wordMask: UInt, handler: ObjCBlock) -> NSObject? {
+        let mask = NSEvent.mask(fromWord: wordMask)
+        return EventMonitor(mask: mask, handler: handler)
     }
 
     @ObjCClassMethod("removeMonitor:")
