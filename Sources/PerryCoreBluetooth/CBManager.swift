@@ -27,6 +27,10 @@ final class CentralState: ObjectState {
     var scanServices: [BluetoothUUID] = []
     /// Devices reported in this scan.
     var reported: Set<String> = []
+    /// The latest of each device's repeat sightings since they were last
+    /// reported, and whether reporting them is scheduled.
+    var repeats: [String: [String: DBusValue]] = [:]
+    var repeatsScheduled = false
     var observer: Int?
     /// The last command sent to BlueZ: each waits for the one before, as
     /// BlueZ aborts a connection that starts while discovery is stopping.
@@ -141,6 +145,7 @@ open class CBCentralManager: CBManager {
         let state = central
         state.scanning = true
         state.reported = []
+        state.repeats = [:]
         state.allowDuplicates = options?.option(Constants.CBCentralManagerScanOptionAllowDuplicatesKey)?
             .unsafeCast(to: NSNumber.self).boolValue() ?? false
         state.scanServices = services?.uuids ?? []
@@ -175,8 +180,39 @@ open class CBCentralManager: CBManager {
               state.allowDuplicates || !state.reported.contains(path) else { return }
         let services = device["UUIDs"]?.stringArray.compactMap(BluetoothUUID.init(string:)) ?? []
         guard state.scanServices.isEmpty || services.contains(where: state.scanServices.contains) else { return }
-        state.reported.insert(path)
+        guard state.reported.insert(path).inserted else { return scheduleRepeat(path, device) }
+        report(path, device, rssi: rssi, services: services)
+    }
 
+    /// Keeps a device's repeat sighting to report with the others, together
+    /// once a second: BlueZ passes on each advertisement it hears, dozens a
+    /// second with many devices nearby, and each report may redraw the app.
+    private func scheduleRepeat(_ path: String, _ device: [String: DBusValue]) {
+        let state = central
+        state.repeats[path] = device
+        guard !state.repeatsScheduled else { return }
+        state.repeatsScheduled = true
+        let owner = Unchecked(objcObject)
+        Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let manager = Centrals.alive(owner.value) else { return }
+            Dispatch.on(manager.central.queue) { manager.reportRepeats() }
+        }
+    }
+
+    private func reportRepeats() {
+        let state = central
+        state.repeatsScheduled = false
+        let repeats = state.repeats
+        state.repeats = [:]
+        guard state.scanning else { return }
+        for (path, device) in repeats {
+            guard let rssi = device["RSSI"]?.intValue else { continue }
+            report(path, device, rssi: rssi, services: device["UUIDs"]?.stringArray.compactMap(BluetoothUUID.init(string:)) ?? [])
+        }
+    }
+
+    private func report(_ path: String, _ device: [String: DBusValue], rssi: Int, services: [BluetoothUUID]) {
         let peripheral = Registry.peripheral(path: path, manager: objcObject)
         let peer = peripheral.peripheral
         peer.address = device["Address"]?.stringValue
