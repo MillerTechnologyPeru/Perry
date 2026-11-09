@@ -72,9 +72,9 @@ struct ScrollViewport<Content: View>: View {
     var content: Content
 
     /// How far the content is scrolled: the viewport's origin in it.
-    @State private var offset: CGSize = .zero
-    /// The offset when the drag under way began.
-    @State private var dragOrigin: CGSize?
+    @State private var position = ScrollPosition()
+    /// How far the content is pulled past its top.
+    @State private var pulled: CGFloat = 0
     @State private var metrics = ScrollMetrics()
     /// Whether the refresh action a pull started is running.
     @State private var refreshing = false
@@ -82,18 +82,12 @@ struct ScrollViewport<Content: View>: View {
     /// The reader the scroll view is in, and its way to scroll for it.
     @Environment(\.scrollRegistry) private var registry
     @State private var scroller = ScrollTargetScroller()
-    /// The indicators' opacity: shown while scrolling, then faded out.
-    @State private var indicatorOpacity: Double = 0
     /// Counts scrolls, so an indicator fade only follows the last one.
     @State private var scrollCount = 0
-    /// Where the content was before it last moved to `offset`, which an
-    /// animation may still be carrying it from.
-    @State private var previousOffset: CGSize = .zero
-
-    static var indicatorThickness: CGFloat { 3 }
+    @State private var viewport = ScrollViewportSource()
 
     var body: some View {
-        ScrollLayout(axes: axes, offset: offset, clamps: dragOrigin == nil && !refreshing, metrics: metrics) {
+        ScrollLayout(axes: axes, metrics: metrics) {
             Group {
                 if axes == .horizontal {
                     HStack { content }
@@ -102,11 +96,16 @@ struct ScrollViewport<Content: View>: View {
                 }
             }
             .coordinateSpace(name: ScrollViewportInfo.contentSpace)
+            .modifier(ScrollOffsetModifier(axes: axes, position: position, refreshing: refreshing, metrics: metrics, viewport: viewport))
         }
-        .environment(\.scrollViewport, viewportInfo)
+        .environment(\.scrollViewport, viewport)
         .environment(\.scrollTargetScroller, prepareScroller())
         .overlay(alignment: .top) { refreshIndicator }
-        .overlay(alignment: .topLeading) { indicators }
+        .overlay(alignment: .topLeading) {
+            if showsIndicators {
+                ScrollIndicators(axes: axes, metrics: metrics, position: position)
+            }
+        }
         .clipped()
         .background(
             ScrollPanRecognizer(
@@ -117,37 +116,17 @@ struct ScrollViewport<Content: View>: View {
         )
     }
 
-    /// The part of the content that shows, or may while an animation moves
-    /// it: from where it was to where it is going, and while a drag is under
-    /// way, where it was as the drag began.
-    var viewportInfo: ScrollViewportInfo {
-        var size = metrics.viewport
-        if size == .zero { size = ScrollViewportInfo.fallbackSize }
-        // While a drag is under way, also what showed as it began: a lazy
-        // stack keeps the views the touch began on.
-        let offsets = [previousOffset, offset] + (dragOrigin.map { [$0] } ?? [])
-        let low = CGSize(width: offsets.map(\.width).min()!, height: offsets.map(\.height).min()!)
-        let high = CGSize(width: offsets.map(\.width).max()!, height: offsets.map(\.height).max()!)
-        return ScrollViewportInfo(
-            visible: CGRect(x: low.width, y: low.height,
-                            width: high.width - low.width + size.width, height: high.height - low.height + size.height),
-            offset: offset,
-            size: size
-        )
-    }
-
     // MARK: Scrolling
 
     /// The scroller targets are found through, kept up to date with the
     /// viewport, and in the reader the scroll view is in.
     func prepareScroller() -> ScrollTargetScroller {
         let scroller = scroller
-        let offset = $offset, previous = $previousOffset, metrics = metrics
+        let position = position, metrics = metrics
         scroller.axes = axes
-        scroller.current = { (metrics.viewport, offset.wrappedValue) }
+        scroller.current = { (metrics.viewport, position.offset) }
         scroller.move = { target in
-            previous.wrappedValue = offset.wrappedValue
-            offset.wrappedValue = clamp(target)
+            position.offset = clamp(target)
             showIndicators()
         }
         registry?.register(scroller)
@@ -156,47 +135,51 @@ struct ScrollViewport<Content: View>: View {
 
     /// Shows the indicators, and fades them out once scrolling stops.
     func showIndicators() {
-        indicatorOpacity = 1
+        position.indicatorOpacity = 1
         scrollCount &+= 1
-        let count = scrollCount, current = $scrollCount, opacity = $indicatorOpacity
+        let count = scrollCount, current = $scrollCount, position = position
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard current.wrappedValue == count else { return }
-            withAnimation(.easeOut(duration: 0.3)) { opacity.wrappedValue = 0 }
+            withAnimation(.easeOut(duration: 0.3)) { position.indicatorOpacity = 0 }
         }
+    }
+
+    /// Moves the content, and what shows how far it's pulled past its top.
+    func move(to offset: CGSize) {
+        position.offset = offset
+        let pull = max(-offset.height, 0)
+        if pulled != pull { pulled = pull }
     }
 
     /// The pan's translation moves the content from where it was as the
     /// pan began, stretching past the ends.
     func panChanged(_ translation: CGSize) {
         scrollTrace("pan changed \(translation) limit \(metrics.limit(axes)) viewport \(metrics.viewport) content \(metrics.content)")
-        if indicatorOpacity != 1 { indicatorOpacity = 1 }
-        let origin = dragOrigin ?? offset
-        if dragOrigin == nil { dragOrigin = offset }
-        previousOffset = offset
-        offset = stretched(CGSize(width: origin.width - translation.width, height: origin.height - translation.height))
+        position.indicatorOpacity = 1
+        let origin = position.dragOrigin ?? position.offset
+        position.dragOrigin = origin
+        move(to: stretched(CGSize(width: origin.width - translation.width, height: origin.height - translation.height)))
     }
 
     /// On release the content glides as far as the pan's velocity carries
     /// it, within the content; pulled down far enough, in a scroll view
     /// with a refresh action, it holds below its top while the action runs.
     func panEnded(_ translation: CGSize, velocity: CGSize) {
-        let origin = dragOrigin ?? offset
+        let offset = position.offset
         if let refresh, axes.contains(.vertical), !refreshing, offset.height <= -Self.refreshPull {
             refreshing = true
-            previousOffset = offset
             withAnimation(.easeOut(duration: 0.25)) {
-                offset = CGSize(width: 0, height: -Self.refreshHold)
-                dragOrigin = nil
+                move(to: CGSize(width: 0, height: -Self.refreshHold))
+                position.dragOrigin = nil
             }
             Task { @MainActor in
                 await refresh()
                 refreshing = false
-                withAnimation(.easeOut(duration: 0.3)) { offset = .zero }
+                withAnimation(.easeOut(duration: 0.3)) { move(to: .zero) }
             }
             return
         }
-        previousOffset = offset
         // Let go past an end, the content springs back; otherwise it
         // coasts as far as the flick carries it, slowing as UIKit's scroll
         // views (the shared physics) do, and stops at the content's ends.
@@ -204,8 +187,8 @@ struct ScrollViewport<Content: View>: View {
         let rest = clamp(offset)
         if rest != offset {
             withAnimation(.spring(response: SpringBack.response, dampingFraction: 1)) {
-                offset = rest
-                dragOrigin = nil
+                move(to: rest)
+                position.dragOrigin = nil
             }
             showIndicators()
             return
@@ -224,11 +207,11 @@ struct ScrollViewport<Content: View>: View {
         }
         if duration > 0 {
             withAnimation(.timingCurve(0.12, 0.5, 0.2, 1, duration: duration)) {
-                offset = target
-                dragOrigin = nil
+                move(to: target)
+                position.dragOrigin = nil
             }
         } else {
-            dragOrigin = nil
+            position.dragOrigin = nil
         }
         showIndicators()
     }
@@ -241,10 +224,10 @@ struct ScrollViewport<Content: View>: View {
     /// A spinner above the content while it's pulled down or refreshing.
     @ViewBuilder
     var refreshIndicator: some View {
-        if refresh != nil, axes.contains(.vertical), refreshing || offset.height < 0 {
+        if refresh != nil, axes.contains(.vertical), refreshing || pulled > 0 {
             ProgressView()
-                .frame(height: max(-offset.height, 0))
-                .opacity(refreshing ? 1 : min(Double(-offset.height / Self.refreshPull), 1))
+                .frame(height: pulled)
+                .opacity(refreshing ? 1 : min(Double(pulled / Self.refreshPull), 1))
                 .allowsHitTesting(false)
         }
     }
@@ -267,36 +250,122 @@ struct ScrollViewport<Content: View>: View {
                       height: axes.contains(.vertical) ? axis(proposed.height, limit.height, size.height) : 0)
     }
 
-    // MARK: Indicators
+}
 
-    /// While scrolling, a bar along each scrolling axis whose length and
-    /// place show the viewport's in the content; they fade once it stops.
-    @ViewBuilder
-    var indicators: some View {
-        if showsIndicators {
-            let size = metrics.viewport, content = metrics.content, limit = metrics.limit(axes)
-            ZStack(alignment: .topLeading) {
-                if axes.contains(.vertical), content.height > size.height {
-                    let length = max(size.height * size.height / content.height, 24)
-                    let position = (size.height - length) * min(max(offset.height / max(limit.height, 1), 0), 1)
-                    Capsule()
-                        .fill(Color.gray.opacity(0.6))
-                        .frame(width: Self.indicatorThickness, height: length)
-                        .modifier(_OffsetEffect(offset: CGSize(width: size.width - Self.indicatorThickness - 3, height: position)))
+// MARK: - What follows the offset
+
+// The offset changes every frame of a drag, and a binding's reader has the
+// view with the state update too. So it's kept in an object, and each view
+// that shows it has its own copy as state: only they update as it moves, and
+// not the scroll view and all it holds.
+
+/// How far a scroll view's content is scrolled, and who follows it.
+final class ScrollPosition {
+    var offset: CGSize = .zero {
+        didSet { if offset != oldValue { notify() } }
+    }
+    /// The scroll bars' opacity: shown while scrolling, then faded out.
+    var indicatorOpacity: Double = 0 {
+        didSet { if indicatorOpacity != oldValue { notify() } }
+    }
+    /// The offset when the drag under way began.
+    var dragOrigin: CGSize?
+
+    private func notify() {
+        for follower in followers.values { follower(self) }
+    }
+
+    private var followers: [Int: (ScrollPosition) -> Void] = [:]
+    private var nextFollower = 0
+
+    func follow(_ follower: @escaping (ScrollPosition) -> Void) -> Int {
+        nextFollower += 1
+        followers[nextFollower] = follower
+        return nextFollower
+    }
+
+    func unfollow(_ follower: Int?) {
+        if let follower { followers[follower] = nil }
+    }
+}
+
+/// Keeps `offset`, a view's state, with the position while it shows.
+struct ScrollPositionFollower: ViewModifier {
+    var position: ScrollPosition
+    @Binding var offset: CGSize
+    var opacity: Binding<Double>?
+    @State private var follower: Int?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                let offset = $offset, opacity = opacity
+                let follow = { (position: ScrollPosition) in
+                    offset.wrappedValue = position.offset
+                    opacity?.wrappedValue = position.indicatorOpacity
                 }
-                if axes.contains(.horizontal), content.width > size.width {
-                    let length = max(size.width * size.width / content.width, 24)
-                    let position = (size.width - length) * min(max(offset.width / max(limit.width, 1), 0), 1)
-                    Capsule()
-                        .fill(Color.gray.opacity(0.6))
-                        .frame(width: length, height: Self.indicatorThickness)
-                        .modifier(_OffsetEffect(offset: CGSize(width: position, height: size.height - Self.indicatorThickness - 3)))
-                }
+                follower = position.follow(follow)
+                follow(position)
             }
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
-            .opacity(indicatorOpacity)
-            .allowsHitTesting(false)
+            .onDisappear {
+                position.unfollow(follower)
+                follower = nil
+            }
+    }
+}
+
+/// Moves the content by the offset.
+struct ScrollOffsetModifier: ViewModifier {
+    var axes: Axis.Set
+    var position: ScrollPosition
+    var refreshing: Bool
+    var metrics: ScrollMetrics
+    var viewport: ScrollViewportSource
+    @State private var offset: CGSize = .zero
+
+    func body(content: Content) -> some View {
+        let effect = ScrollOffsetEffect(axes: axes, offset: offset, position: position, refreshing: refreshing, metrics: metrics, viewport: viewport)
+        // Lazy stacks need to know what shows before the first layout.
+        let _ = viewport.begin(effect.info(at: effect.offset))
+        content.modifier(effect).modifier(ScrollPositionFollower(position: position, offset: $offset))
+    }
+}
+
+/// While scrolling, a bar along each scrolling axis whose length and place
+/// show the viewport's in the content; they fade once it stops.
+struct ScrollIndicators: View {
+    var axes: Axis.Set
+    var metrics: ScrollMetrics
+    var position: ScrollPosition
+    @State private var offset: CGSize = .zero
+    @State private var opacity: Double = 0
+
+    static var thickness: CGFloat { 3 }
+
+    var body: some View {
+        let size = metrics.viewport, content = metrics.content, limit = metrics.limit(axes)
+        ZStack(alignment: .topLeading) {
+            if axes.contains(.vertical), content.height > size.height {
+                let length = max(size.height * size.height / content.height, 24)
+                let position = (size.height - length) * min(max(offset.height / max(limit.height, 1), 0), 1)
+                Capsule()
+                    .fill(Color.gray.opacity(0.6))
+                    .frame(width: Self.thickness, height: length)
+                    .modifier(_OffsetEffect(offset: CGSize(width: size.width - Self.thickness - 3, height: position)))
+            }
+            if axes.contains(.horizontal), content.width > size.width {
+                let length = max(size.width * size.width / content.width, 24)
+                let position = (size.width - length) * min(max(offset.width / max(limit.width, 1), 0), 1)
+                Capsule()
+                    .fill(Color.gray.opacity(0.6))
+                    .frame(width: length, height: Self.thickness)
+                    .modifier(_OffsetEffect(offset: CGSize(width: position, height: size.height - Self.thickness - 3)))
+            }
         }
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+        .opacity(opacity)
+        .allowsHitTesting(false)
+        .modifier(ScrollPositionFollower(position: position, offset: $offset, opacity: $opacity))
     }
 }
 
@@ -310,7 +379,7 @@ struct ScrollViewportInfo: Equatable {
     /// An iPhone's screen, until the viewport is first laid out.
     static let fallbackSize = CGSize(width: 390, height: 844)
 
-    /// The region that shows, or will while the content moves.
+    /// The region that shows, and what showed as a drag under way began.
     var visible: CGRect
     /// How far the content is scrolled.
     var offset: CGSize
@@ -318,12 +387,34 @@ struct ScrollViewportInfo: Equatable {
     var size: CGSize
 }
 
+/// Where a scroll view's viewport is, for lazy stacks. It is one object
+/// through the scroll view's life, as a value that changed with each scrolled
+/// frame would change the environment of every view in the content.
+final class ScrollViewportSource {
+    private(set) var info: ScrollViewportInfo?
+    private var stacks: [ObjectIdentifier: LazyStackMeasurements] = [:]
+
+    /// The first report, before anything is laid out.
+    func begin(_ info: ScrollViewportInfo) {
+        if self.info == nil { self.info = info }
+    }
+
+    func update(_ info: ScrollViewportInfo) {
+        guard info != self.info else { return }
+        self.info = info
+        for stack in stacks.values { stack.viewportMoved(info) }
+    }
+
+    func add(_ stack: LazyStackMeasurements) { stacks[ObjectIdentifier(stack)] = stack }
+    func remove(_ stack: LazyStackMeasurements) { stacks[ObjectIdentifier(stack)] = nil }
+}
+
 struct ScrollViewportKey: EnvironmentKey {
-    static let defaultValue: ScrollViewportInfo? = nil
+    static let defaultValue: ScrollViewportSource? = nil
 }
 
 extension EnvironmentValues {
-    var scrollViewport: ScrollViewportInfo? {
+    var scrollViewport: ScrollViewportSource? {
         get { self[ScrollViewportKey.self] }
         set { self[ScrollViewportKey.self] = newValue }
     }
@@ -331,21 +422,58 @@ extension EnvironmentValues {
 
 // MARK: - Layout
 
-/// Takes the space offered, and places its content — sized to the space
-/// across the scrolling axes and ideally along them — moved back by the
-/// offset; centered across a vertical scroll when narrower than it.
-struct ScrollLayout: Layout {
+/// Moves the content back by the offset. An effect, not part of the
+/// layout, as an offset that changed the layout would have every view above
+/// the scroll view laid out again, and the content measured, each frame. It
+/// is worked out each frame an animation moves the content, so lazy stacks
+/// hear from it where the content really is.
+struct ScrollOffsetEffect: GeometryEffect {
     var axes: Axis.Set
     var offset: CGSize
-    /// Whether to keep the offset within the content, as when no drag is
-    /// stretching it past the ends.
-    var clamps: Bool
+    var position: ScrollPosition
+    var refreshing: Bool
     var metrics: ScrollMetrics
+    var viewport: ScrollViewportSource
 
     var animatableData: CGSize.AnimatableData {
         get { offset.animatableData }
         set { offset.animatableData = newValue }
     }
+
+    func info(at offset: CGSize) -> ScrollViewportInfo {
+        var size = metrics.viewport
+        if size == .zero { size = ScrollViewportInfo.fallbackSize }
+        // Also what showed as a drag under way began: a lazy stack keeps
+        // the views the touch began on.
+        let offsets = [offset] + (position.dragOrigin.map { [$0] } ?? [])
+        let low = CGSize(width: offsets.map(\.width).min()!, height: offsets.map(\.height).min()!)
+        let high = CGSize(width: offsets.map(\.width).max()!, height: offsets.map(\.height).max()!)
+        return ScrollViewportInfo(
+            visible: CGRect(x: low.width, y: low.height,
+                            width: high.width - low.width + size.width, height: high.height - low.height + size.height),
+            offset: offset,
+            size: size
+        )
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        var offset = offset
+        // A drag or a refresh may hold it past the ends.
+        if position.dragOrigin == nil, !refreshing {
+            let limit = metrics.limit(axes)
+            offset = CGSize(width: min(max(offset.width, 0), limit.width), height: min(max(offset.height, 0), limit.height))
+        }
+        viewport.update(info(at: offset))
+        return ProjectionTransform(CGAffineTransform(translationX: -offset.width, y: -offset.height))
+    }
+}
+
+/// Takes the space offered, and places its content, sized to the space
+/// across the scrolling axes and ideally along them; centered across a
+/// vertical scroll when narrower than it.
+struct ScrollLayout: Layout {
+    var axes: Axis.Set
+    var metrics: ScrollMetrics
 
     func contentProposal(_ viewport: CGSize) -> ProposedViewSize {
         ProposedViewSize(width: axes.contains(.horizontal) ? nil : viewport.width,
@@ -360,18 +488,19 @@ struct ScrollLayout: Layout {
         return CGSize(width: proposal.width ?? ideal.width, height: proposal.height ?? ideal.height)
     }
 
+    // The content's alignment guides stay in the scroll view, as they move
+    // with it. Answering would place it for each query, at sizes that aren't
+    // the viewport's.
+    func explicitAlignment(of guide: HorizontalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGFloat? { nil }
+    func explicitAlignment(of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGFloat? { nil }
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard let content = subviews.first else { return }
         let size = content.sizeThatFits(contentProposal(bounds.size))
         metrics.viewport = bounds.size
         metrics.content = size
-        scrollTrace("placed viewport \(bounds.size) content \(size) offset \(offset)")
-        var offset = offset
-        if clamps {
-            let limit = metrics.limit(axes)
-            offset = CGSize(width: min(max(offset.width, 0), limit.width), height: min(max(offset.height, 0), limit.height))
-        }
-        var origin = CGPoint(x: bounds.minX - offset.width, y: bounds.minY - offset.height)
+        scrollTrace("placed viewport \(bounds.size) content \(size)")
+        var origin = bounds.origin
         if !axes.contains(.horizontal), size.width < bounds.width {
             origin.x += (bounds.width - size.width) / 2
         }
