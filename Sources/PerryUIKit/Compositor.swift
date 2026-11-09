@@ -360,6 +360,7 @@ final class Compositor {
                 }
             }
         }
+        GamepadTouch.poll()
         return closed
     }
 
