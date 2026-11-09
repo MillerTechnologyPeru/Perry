@@ -193,12 +193,12 @@ struct GroupedRowsLayout: View {
                         // list's cells are.
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(rows) { row in
-                                ListRow(child: children[row.index], selection: selection, inset: Self.inset)
-                                    .background(RowFrameRecorder(frames: frames, index: row.index))
-                                if style.isPlain || row.index != section.rows.last {
-                                    Divider()
-                                        .padding(.leading, Self.inset)
-                                        .padding(.trailing, ListRowMetrics.separatorTrailingInset)
+                                RowAndSeparator(inset: Self.inset) {
+                                    ListRow(child: children[row.index], selection: selection, inset: Self.inset)
+                                        .background(RowFrameRecorder(frames: frames, index: row.index))
+                                    if style.isPlain || row.index != section.rows.last {
+                                        Divider()
+                                    }
                                 }
                             }
                         }
@@ -217,6 +217,31 @@ struct GroupedRowsLayout: View {
                 .padding(.bottom, style.isPlain ? 0 : 24)
             }
         }
+    }
+}
+
+/// A row and the separator below it, which starts under the row's first
+/// text, or at the row's inset when it has none.
+struct RowAndSeparator: Layout {
+    var inset: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        var size = subviews[0].sizeThatFits(ProposedViewSize(width: proposal.width, height: nil))
+        if subviews.count > 1 {
+            size.height += subviews[1].sizeThatFits(ProposedViewSize(width: size.width, height: nil)).height
+        }
+        return size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let across = ProposedViewSize(width: bounds.width, height: nil)
+        let row = subviews[0].dimensions(in: across)
+        subviews[0].place(at: bounds.origin, proposal: across)
+        guard subviews.count > 1 else { return }
+        let leading = row[explicit: HorizontalAlignment.leadingText] ?? inset
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX + leading, y: bounds.minY + row.height),
+            proposal: ProposedViewSize(width: max(bounds.width - leading - ListRowMetrics.separatorTrailingInset, 0), height: nil))
     }
 }
 
