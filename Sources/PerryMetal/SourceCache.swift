@@ -9,6 +9,11 @@ import PerryObjCInterop
 // <key>.metallib once Scripts/compile-metal-sources.sh has built that on a
 // Mac. The directory is PERRY_METAL_SOURCES, else metal-sources beside the
 // app's bundle.
+//
+// With PERRY_METAL_WAIT set to a number of seconds, a source not compiled
+// yet is waited for that long, as a Mac running
+// Scripts/watch-metal-sources.sh compiles it as soon as it is written, and
+// the app gets its library instead of a failure.
 
 enum SourceCache {
     enum Result {
@@ -24,6 +29,9 @@ enum SourceCache {
         return (parent.isEmpty ? "." : parent) + "/metal-sources"
     }()
 
+    /// How long a source not compiled yet is waited for, in seconds.
+    static let wait: Double = getenv("PERRY_METAL_WAIT").flatMap { Double(String(cString: $0)) } ?? 0
+
     static func key(_ source: [UInt8]) -> String {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in source { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
@@ -38,9 +46,20 @@ enum SourceCache {
         let path = base + ".metal"
         if access(path, F_OK) != 0 {
             mkdir(directory, 0o755)
-            if let file = fopen(path, "wb") {
+            // Written whole and renamed, so a watcher never reads half a source.
+            let partial = path + ".partial"
+            if let file = fopen(partial, "wb") {
                 _ = bytes.withUnsafeBytes { fwrite($0.baseAddress, 1, $0.count, file) }
                 fclose(file)
+                rename(partial, path)
+            }
+        }
+        if wait > 0 {
+            var waited = 0.0
+            while waited < wait {
+                usleep(50_000)
+                waited += 0.05
+                if let library = readFile(base + ".metallib") { return .compiled(library) }
             }
         }
         return .missing(path)

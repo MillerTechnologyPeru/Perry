@@ -239,6 +239,14 @@ public func CTFontDescriptorCreateCopyWithFeature(_ original: UnsafeMutableRawPo
     UIFontDescriptor.make { state in UIFontDescriptor.state(original).map(state.copy(from:)) }
 }
 
+/// The font a descriptor matches: any name is drawn in the system's fonts,
+/// so the descriptor matches as it is, whatever attributes are mandatory.
+@c(_CTFontDescriptorCreateMatchingFontDescriptor)
+public func CTFontDescriptorCreateMatchingFontDescriptor(_ descriptor: UnsafeMutableRawPointer?, _ mandatory: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let state = UIFontDescriptor.state(descriptor) else { return nil }
+    return UIFontDescriptor.make { $0.copy(from: state) }
+}
+
 @c(_CTFontDescriptorCreateCopyWithSymbolicTraits)
 public func CTFontDescriptorCreateCopyWithSymbolicTraits(_ original: UnsafeMutableRawPointer?, _ value: UInt32, _ mask: UInt32) -> UnsafeMutableRawPointer? {
     UIFontDescriptor.make { state in
