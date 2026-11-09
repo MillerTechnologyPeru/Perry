@@ -45,6 +45,8 @@ enum ExceptionConstants {
     static let NSPortReceiveException = "NSPortReceiveException"
     static let NSCharacterConversionException = "NSCharacterConversionException"
     static let NSFileHandleOperationException = "NSFileHandleOperationException"
+    static let NSFileHandleNotificationDataItem = "NSFileHandleNotificationDataItem"
+    static let NSFileHandleReadToEndOfFileCompletionNotification = "NSFileHandleReadToEndOfFileCompletionNotification"
     static let NSUndefinedKeyException = "NSUnknownKeyException"
 }
 

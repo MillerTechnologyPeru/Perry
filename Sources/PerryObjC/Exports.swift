@@ -449,7 +449,10 @@ public func class_getMethodImplementation(_ cls: Class?, _ sel: UnsafePointer<CC
 @c(_class_getInstanceMethod)
 public func class_getInstanceMethod(_ cls: Class?, _ sel: UnsafePointer<CChar>?) -> Method? {
     guard let cls, let sel, let info = Runtime.info(cls) else { return nil }
-    return Runtime.findMethod(info, sel)
+    // As Darwin's, a method the class doesn't have yet is given a chance to
+    // appear through +resolveInstanceMethod:.
+    if let method = Runtime.findMethod(info, sel) { return method }
+    return Runtime.responds(info, sel) ? Runtime.findMethod(info, sel) : nil
 }
 
 @c(_class_getClassMethod)
@@ -1194,3 +1197,7 @@ public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMut
 @c(_objc_end_catch)
 public func objc_end_catch() {}
 #endif
+
+/// Weak and strong ivar layouts only describe what the collector scanned.
+@c(_class_getIvarLayout)
+public func class_getIvarLayout(_ cls: Class?) -> UnsafePointer<UInt8>? { nil }

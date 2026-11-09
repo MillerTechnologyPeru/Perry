@@ -55,7 +55,14 @@ public protocol ObjCValue {
 }
 
 extension ObjCValue {
-    public static var objCReturnsIndirectly: Bool { false }
+    public static var objCReturnsIndirectly: Bool {
+        #if arch(x86_64)
+        // Over 16 bytes, x86_64 returns through a pointer in rdi.
+        MemoryLayout<ObjCResultType>.size > 16
+        #else
+        false
+        #endif
+    }
 }
 
 extension ObjCValue where ObjCResultType == ObjCType {
