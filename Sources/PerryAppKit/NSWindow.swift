@@ -70,6 +70,7 @@ open class NSWindow: NSResponder {
     /// Not retained.
     var firstResponderObject: UnsafeMutableRawPointer?
     var initialFirstResponder: NSObject?
+    var flushDisabled = 0
     var acceptsMouseMovedEvents = false
     var ignoresMouseEvents = false
     var collectionBehavior: UInt = 0
@@ -590,9 +591,25 @@ open class NSWindow: NSResponder {
 
     @ObjCMethod("becomeKeyWindow")
     func becomeKeyWindow() {
-        if firstResponderObject == objcObject, let initialFirstResponder { _ = makeFirstResponder(initialFirstResponder) }
+        if firstResponderObject == objcObject {
+            // With no initial responder, as AppKit's first key view: the
+            // text view a window opens to edit in.
+            if let responder = initialFirstResponder ?? rootView.flatMap(NSWindow.firstTextView) { _ = makeFirstResponder(responder) }
+        }
         notify("windowDidBecomeKey:", Constants.NSWindowDidBecomeKeyNotification)
     }
+
+    private static func firstTextView(in view: NSView) -> NSObject? {
+        if view.as(NSTextView.self) != nil, Send.bool(view.objcObject, "acceptsFirstResponder") { return view }
+        for subview in view.subviews {
+            if let found = firstTextView(in: subview) { return found }
+        }
+        return nil
+    }
+
+    @ObjCMethod("disableFlushWindow") func disableFlushWindow() { flushDisabled += 1 }
+    @ObjCMethod("enableFlushWindow") func enableFlushWindow() { flushDisabled = max(0, flushDisabled - 1) }
+    @ObjCMethod("isFlushWindowDisabled") func isFlushWindowDisabled() -> Bool { flushDisabled > 0 }
 
     @ObjCMethod("resignKeyWindow")
     func resignKeyWindow() {

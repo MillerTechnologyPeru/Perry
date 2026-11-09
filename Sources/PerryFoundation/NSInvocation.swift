@@ -203,6 +203,16 @@ public final class NSInvocation: NSObject {
     }
 }
 
+@ObjCCategory("ScriptingComparisons")
+extension NSObject {
+    /// NSComparisonMethods' equality, which is -isEqual:'s.
+    @ObjCMethod("isEqualTo:")
+    func isEqualTo(_ other: UnsafeMutableRawPointer?) -> Bool {
+        typealias Same = @convention(c) (id, SEL, id?) -> Bool
+        return unsafeBitCast(ObjC.msgSend, to: Same.self)(objcObject, ObjC.selector("isEqual:"), other)
+    }
+}
+
 /// Zones are gone from Darwin too: every allocation comes from the one heap.
 @c(_NSDefaultMallocZone)
 public func NSDefaultMallocZone() -> UnsafeMutableRawPointer? { nil }

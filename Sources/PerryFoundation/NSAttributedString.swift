@@ -314,9 +314,13 @@ public class NSAttributedString: NSObject {
         var pieces: [(AttributeRun, NSRange)] = []
         var start = Int(range.location)
         for run in storage.runs(in: range) {
+            // A block may change the attributes as it goes, which replaces
+            // these dictionaries.
+            _ = ObjC.retain(run.attributes)
             pieces.append((run, NSRange(location: UInt(start), length: UInt(run.length))))
             start += run.length
         }
+        defer { pieces.forEach { ObjC.release($0.0.attributes) } }
         if options & 2 != 0 { pieces.reverse() }
         for (run, range) in pieces where !body(run, range) { return }
     }
@@ -343,10 +347,11 @@ public class NSAttributedString: NSObject {
             if let last = groups.last, last.0 == nil ? value == nil : value.map({ AttributedStorage.equal($0, last.0!) }) ?? false {
                 groups[groups.count - 1].1.length += range.length
             } else {
-                groups.append((value, range))
+                groups.append((value.flatMap { ObjC.retain($0) }, range))
             }
             return true
         }
+        defer { groups.forEach { if let value = $0.0 { ObjC.release(value) } } }
         if options & 2 != 0 { groups.reverse() }
         for (value, range) in groups {
             var stop = false

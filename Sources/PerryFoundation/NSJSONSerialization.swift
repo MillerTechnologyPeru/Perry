@@ -36,11 +36,28 @@ enum JSON {
 public final class NSJSONSerialization: NSObject {
     @ObjCClassMethod("JSONObjectWithData:options:error:")
     static func object(data: NSData?, options: UInt, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        parse(data?.data, options: options, error: error)
+    }
+
+    /// The JSON in what remains of an open stream.
+    @ObjCClassMethod("JSONObjectWithStream:options:error:")
+    static func object(stream: UnsafeMutableRawPointer?, options: UInt, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        var contents = Data()
+        var buffer = [UInt8](repeating: 0, count: 16384)
+        while true {
+            let count = CFReadStreamRead(stream, &buffer, buffer.count)
+            if count <= 0 { break }
+            contents.append(contentsOf: buffer[..<count])
+        }
+        return parse(contents, options: options, error: error)
+    }
+
+    private static func parse(_ data: Data?, options: UInt, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
         let decoder = JSONDecoder()
         // No data is an exception on Darwin, which the callers that pass
         // none catch (AppLovin's quality service, for a file it has not
         // written yet); here it is the error unreadable data gives.
-        guard let data, let value = try? decoder.decode(PropertyValue.self, from: data.data) else {
+        guard let data, let value = try? decoder.decode(PropertyValue.self, from: data) else {
             JSON.report(error, code: 3840, description: "The data couldn’t be read because it isn’t in the correct format.")
             return nil
         }

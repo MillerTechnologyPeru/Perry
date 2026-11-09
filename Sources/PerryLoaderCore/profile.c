@@ -104,6 +104,9 @@ static void profile_handler(int signal, siginfo_t *info, void *raw_context) {
 #if defined(__arm__)
     uintptr_t pc = machine->arm_pc, fp = machine->arm_r7, low = machine->arm_sp;
     const uintptr_t alignment = 3;
+#elif defined(__x86_64__)
+    uintptr_t pc = (uintptr_t)machine->gregs[REG_RIP], fp = (uintptr_t)machine->gregs[REG_RBP], low = (uintptr_t)machine->gregs[REG_RSP];
+    const uintptr_t alignment = 7;
 #else
     uintptr_t pc = machine->pc, fp = machine->regs[29], low = machine->sp;
     const uintptr_t alignment = 7;

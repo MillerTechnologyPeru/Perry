@@ -575,8 +575,9 @@ open class NSFontManager: NSObject {
     @ObjCMethod("convertFont:toHaveTrait:")
     func convert(_ font: NSFont?, toHaveTrait trait: UInt) -> NSFont? {
         guard let font else { return nil }
-        return font.with(bold: trait & 2 != 0 ? true : trait & 4 != 0 ? false : nil,
-                         italic: trait & 1 != 0 ? true : trait & 0x100_0000 != 0 ? false : nil)
+        // Removing a trait wins when a mask does both.
+        return font.with(bold: trait & 4 != 0 ? false : trait & 2 != 0 ? true : nil,
+                         italic: trait & 0x100_0000 != 0 ? false : trait & 1 != 0 ? true : nil)
     }
     @ObjCMethod("convertFont:toNotHaveTrait:")
     func convert(_ font: NSFont?, toNotHaveTrait trait: UInt) -> NSFont? {
@@ -585,6 +586,11 @@ open class NSFontManager: NSObject {
     }
     @ObjCMethod("convertFont:toSize:") func convert(_ font: NSFont?, toSize size: CGFloat) -> NSFont? { font?.with(size: size) }
     @ObjCMethod("convertFont:toFamily:") func convert(_ font: NSFont?, toFamily family: String?) -> NSFont? { font }
+    @ObjCMethod("convertFont:toFace:")
+    func convert(_ font: NSFont?, toFace face: String?) -> NSFont? {
+        guard let font, let face else { return font }
+        return NSFont(name: face, size: font.size)
+    }
     @ObjCMethod("convertWeight:ofFont:") func convertWeight(_ heavier: Bool, of font: NSFont?) -> NSFont? { font?.with(bold: heavier) }
     @ObjCMethod("traitsOfFont:") func traits(of font: NSFont?) -> UInt { (font?.bold == true ? 2 : 0) | (font?.italic == true ? 1 : 0) }
     @ObjCMethod("weightOfFont:") func weight(of font: NSFont?) -> Int { font?.bold == true ? 9 : 5 }
