@@ -51,8 +51,9 @@ final class GStreamer: @unchecked Sendable {
     static let formatTime: Int32 = 3
     static let seekFlush: Int32 = 1 << 0, seekKeyUnit: Int32 = 1 << 2
     static let mapRead: Int32 = 1
-    /// GstMapInfo's size, and where its data and size are.
-    static let mapInfoSize = 104, mapInfoData = 16, mapInfoLength = 24
+    /// GstMapInfo's largest size, and where its data and size are: after
+    /// its memory and flags, each a pointer's width with padding.
+    static let mapInfoSize = 104, mapInfoData = 2 * MemoryLayout<Int>.size, mapInfoLength = 3 * MemoryLayout<Int>.size
 
     /// GStreamer, initialized; nil when it isn't installed.
     nonisolated(unsafe) static let shared: GStreamer? = GStreamer()
@@ -154,6 +155,13 @@ final class Pipeline {
         var error: GStreamer.Pointer?
         guard let element = description.withCString({ gst.parseLaunch($0, &error) }) else {
             GStreamer.log("can't make a pipeline for \(uri)")
+            return nil
+        }
+        // A plugin the video sink needs is missing: playbin is made without
+        // that sink, and would play the movie with nothing to show it.
+        if video, error != nil {
+            GStreamer.log("can't make a video sink for \(uri): a plugin is missing")
+            gst.objectUnref(element)
             return nil
         }
         self.gst = gst
