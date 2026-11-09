@@ -137,6 +137,9 @@ extension NSObject {
     @ObjCMethod("scrollViewWillBeginDragging:") func sendScrollViewWillBeginDragging(_ scrollView: UIScrollView)
     @ObjCMethod("scrollViewDidEndDragging:willDecelerate:") func sendScrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool)
     @ObjCMethod("scrollViewDidEndDecelerating:") func sendScrollViewDidEndDecelerating(_ scrollView: UIScrollView)
+    /// The target is a CGPoint the delegate may change.
+    @ObjCMethod("scrollViewWillEndDragging:withVelocity:targetContentOffset:")
+    func sendScrollViewWillEndDragging(_ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset target: UnsafeMutableRawPointer)
 }
 
 enum Touches {
@@ -147,6 +150,9 @@ enum Touches {
     nonisolated(unsafe) private static var start = CGPoint.zero
     nonisolated(unsafe) private static var startOffset = CGPoint.zero
     nonisolated(unsafe) private static var panning = false
+    /// The one axis a pan moves along, with directional lock: x (1, 0) or
+    /// y (0, 1); nil while it moves along both.
+    nonisolated(unsafe) private static var lockedAxis: CGPoint?
     /// Where a swipe across a table row began moving it.
     nonisolated(unsafe) private static var swipeStart = CGPoint.zero
     /// The touch closed a row's swipe actions, and does nothing else.
@@ -213,6 +219,33 @@ enum Touches {
     nonisolated(unsafe) private static var pendingPan: (view: UIScrollView, offset: CGPoint)?
     /// Content let go past its edges, springing back along each axis.
     nonisolated(unsafe) private static var springing: (view: UIScrollView, x: SpringBack, y: SpringBack)?
+    /// Content carried to an offset chosen ahead: a page, the delegate's
+    /// target, or -setContentOffset:animated:'s.
+    nonisolated(unsafe) private static var gliding: Glide?
+    /// Two fingers zooming a scroll view: the second finger and where it
+    /// is, the midpoint they had last, and the distance and scale the
+    /// pinch began at.
+    nonisolated(unsafe) private static var pinch: Pinch?
+    /// Whether the touch under way zoomed: it taps nothing when it lifts.
+    nonisolated(unsafe) private static var pinched = false
+
+    struct Pinch {
+        var view: UIScrollView
+        var finger: UInt64
+        var second: CGPoint
+        var midpoint: CGPoint
+        var startDistance: CGFloat
+        var startScale: CGFloat
+    }
+
+    struct Glide {
+        var view: UIScrollView
+        var from: CGPoint, to: CGPoint
+        var start: Double, duration: Double
+        /// Whether it ends as an animated -setContentOffset: does, rather
+        /// than as deceleration.
+        var animation: Bool
+    }
 
     private static var keyWindow: UIWindow? {
         Windows.key.map { UIWindow(objcObject: $0, ownership: .retain) } ?? Windows.visible.last
@@ -221,6 +254,7 @@ enum Touches {
     static func down(at point: CGPoint) {
         guard let window = keyWindow else { return }
         stopCoasting()
+        stopGliding()
         // A finger down catches content springing back where it is.
         flushPan()
         if let (view, _, _) = springing {
@@ -239,7 +273,7 @@ enum Touches {
         event.state.timestamp = touch.state.timestamp
         (Touches.touch, Touches.event) = (touch, event)
         markStationary(except: touch)
-        (start, panning) = (point, false)
+        (start, panning, lockedAxis, pinched) = (point, false, nil, false)
         samples.reset(x: Double(point.x), y: Double(point.y), time: Clock.now)
         recognizers = []
         viewCancelled = false
@@ -286,6 +320,10 @@ enum Touches {
         touch.state.timestamp = Clock.now
         markStationary(except: touch)
         samples.add(x: Double(point.x), y: Double(point.y), time: Clock.now)
+        if pinch != nil {
+            updatePinch()
+            return
+        }
         if SwipeActions.dragging {
             SwipeActions.move(dx: point.x - swipeStart.x)
             return
@@ -303,19 +341,29 @@ enum Touches {
                 return
             }
             if !panning, distance >= CGFloat(panThreshold) {
+                let moved = CGPoint(x: abs(point.x - start.x), y: abs(point.y - start.y))
                 panning = true
                 unhighlight()
                 if delivered { send(.cancelled) }
                 start = point
                 startOffset = scrollView.state.bounds.origin
                 scrollView.scroll.dragging = true
+                // With directional lock, a pan more along one axis than the
+                // other moves along that one alone.
+                let axes = axis(scrollView)
+                if scrollView.scroll.directionalLockEnabled, axes.x > 0, axes.y > 0, moved.x != moved.y {
+                    lockedAxis = moved.x > moved.y ? CGPoint(x: 1, y: 0) : CGPoint(x: 0, y: 1)
+                }
+                // UIScrollViewKeyboardDismissModeOnDrag and Interactive.
+                if scrollView.scroll.keyboardDismissMode != 0 { _ = keyWindow?.endEditing(true) }
                 if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewWillBeginDragging:") {
                     delegate.sendScrollViewWillBeginDragging(scrollView)
                 }
             }
             if panning {
-                pendingPan = (scrollView, banded(scrollView, CGPoint(x: startOffset.x - axis(scrollView).x * (point.x - start.x),
-                                                                     y: startOffset.y - axis(scrollView).y * (point.y - start.y))))
+                let axes = dragAxis(scrollView)
+                pendingPan = (scrollView, banded(scrollView, CGPoint(x: startOffset.x - axes.x * (point.x - start.x),
+                                                                     y: startOffset.y - axes.y * (point.y - start.y))))
                 Display.markDirty()
                 return
             }
@@ -338,6 +386,15 @@ enum Touches {
             (Touches.touch, scrollView) = (nil, nil)
             Display.markDirty()
         }
+        if pinch != nil {
+            endPinch()
+            scrollView?.scroll.tracking = false
+            return
+        }
+        if pinched, !panning {
+            scrollView?.scroll.tracking = false
+            return
+        }
         if SwipeActions.dragging {
             scrollView?.scroll.tracking = false
             SwipeActions.end()
@@ -351,27 +408,7 @@ enum Touches {
             flushPan()
             scrollView.scroll.dragging = false
             scrollView.scroll.tracking = false
-            // Let go past an edge, the content springs back instead of coasting.
-            let offset = scrollView.state.bounds.origin, rest = clamped(scrollView, offset)
-            if rest != offset {
-                if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewDidEndDragging:willDecelerate:") {
-                    delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: true)
-                }
-                springing = (scrollView, SpringBack(from: Double(offset.x), to: Double(rest.x), time: Clock.now),
-                             SpringBack(from: Double(offset.y), to: Double(rest.y), time: Clock.now))
-                scrollView.scroll.decelerating = true
-                return
-            }
-            let velocity = Touches.velocity(scrollView)
-            let deceleration = Deceleration(velocity: (Double(velocity.x), Double(velocity.y)), rate: Double(scrollView.scroll.decelerationRate),
-                                            time: Clock.now)
-            if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewDidEndDragging:willDecelerate:") {
-                delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: deceleration != nil)
-            }
-            if let deceleration {
-                coasting = (scrollView, deceleration)
-                scrollView.scroll.decelerating = true
-            }
+            release(scrollView)
             return
         }
         scrollView?.scroll.tracking = false
@@ -399,6 +436,10 @@ enum Touches {
     /// Another finger down at `point`. As UIKit, a view hears of a second
     /// touch only when it's multiple-touch enabled.
     static func down(at point: CGPoint, finger: UInt64) {
+        // A second finger on a scroll view that zooms pinches it.
+        if pinch == nil, let touch, let scrollView, !SwipeActions.dragging, scrollView.canZoom {
+            return beginPinch(scrollView, finger: finger, at: point, first: touch.state.location)
+        }
         guard others[finger] == nil, let window = keyWindow, let hit = window.sendHitTest(point, with: nil) else { return }
         let down = ([touch].compactMap { $0 } + others.values).contains { $0.state.view?.objcObject == hit.objcObject }
         guard !down || hit.state.multipleTouchEnabled else { return }
@@ -416,6 +457,10 @@ enum Touches {
     }
 
     static func move(to point: CGPoint, finger: UInt64) {
+        if pinch?.finger == finger {
+            pinch?.second = point
+            return updatePinch()
+        }
         guard let moved = others[finger], let event else { return }
         moved.state.previous = moved.state.location
         (moved.state.location, moved.state.timestamp, moved.state.phase) = (point, Clock.now, 1)
@@ -426,6 +471,14 @@ enum Touches {
     }
 
     static func up(at point: CGPoint, finger: UInt64, cancelled: Bool = false) {
+        if pinch?.finger == finger {
+            endPinch()
+            // The finger left down pans on from where the content is now.
+            if let touch, let scrollView {
+                (start, startOffset, panning) = (touch.state.location, scrollView.state.bounds.origin, false)
+            }
+            return
+        }
         guard let lifted = others.removeValue(forKey: finger), let event else { return }
         (lifted.state.location, lifted.state.timestamp, lifted.state.phase) = (point, Clock.now, cancelled ? 4 : 3)
         event.state.timestamp = lifted.state.timestamp
@@ -462,6 +515,7 @@ enum Touches {
     /// from the live view's tick.
     static func step() {
         flushPan()
+        stepGlide()
         if var (view, x, y) = springing {
             let offset = CGPoint(x: CGFloat(x.step(at: Clock.now)), y: CGFloat(y.step(at: Clock.now)))
             pan(view, to: offset)
@@ -490,6 +544,167 @@ enum Touches {
         } else {
             coasting = (view, deceleration)
         }
+    }
+
+    /// A pan let go: the delegate hears where the content would come to
+    /// rest and may move it; a paging scroll view's rests on a page. The
+    /// content glides there, coasts, or springs back from past an edge.
+    private static func release(_ scrollView: UIScrollView) {
+        let offset = scrollView.state.bounds.origin, rest = clamped(scrollView, offset)
+        let velocity = Touches.velocity(scrollView), rate = Double(scrollView.scroll.decelerationRate)
+        var target = rest
+        if rest == offset {
+            let gx = Deceleration.glide(velocity: Double(velocity.x), rate: rate)?.distance ?? 0
+            let gy = Deceleration.glide(velocity: Double(velocity.y), rate: rate)?.distance ?? 0
+            target = clamped(scrollView, CGPoint(x: offset.x - CGFloat(gx), y: offset.y - CGFloat(gy)))
+        }
+        let paging = scrollView.scroll.pagingEnabled
+        if paging { target = page(scrollView, from: offset, velocity: velocity) }
+        var chosen = target
+        if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewWillEndDragging:withVelocity:targetContentOffset:") {
+            // The content's velocity, in points a millisecond.
+            let contentVelocity = CGPoint(x: -velocity.x / 1000, y: -velocity.y / 1000)
+            withUnsafeMutablePointer(to: &chosen) { pointer in
+                delegate.sendScrollViewWillEndDragging(scrollView, withVelocity: contentVelocity, targetContentOffset: UnsafeMutableRawPointer(pointer))
+            }
+            chosen = clamped(scrollView, chosen)
+        }
+        let moves = chosen != offset
+        if let delegate = scrollView.delegate(), delegate.responds(to: "scrollViewDidEndDragging:willDecelerate:") {
+            delegate.sendScrollViewDidEndDragging(scrollView, willDecelerate: moves)
+        }
+        guard moves else { return }
+        scrollView.scroll.decelerating = true
+        if paging || chosen != target {
+            // Carried to a place chosen ahead, in about the time a flick
+            // that far would take.
+            let distance = hypot(chosen.x - offset.x, chosen.y - offset.y)
+            let speed = max(hypot(velocity.x, velocity.y), 1)
+            let duration = paging ? 0.3 : min(max(Double(distance / speed) * 3, 0.25), 1)
+            gliding = Glide(view: scrollView, from: offset, to: chosen, start: Clock.now, duration: duration, animation: false)
+        } else if rest != offset {
+            // Let go past an edge, the content springs back instead of coasting.
+            springing = (scrollView, SpringBack(from: Double(offset.x), to: Double(rest.x), time: Clock.now),
+                         SpringBack(from: Double(offset.y), to: Double(rest.y), time: Clock.now))
+        } else if let deceleration = Deceleration(velocity: (Double(velocity.x), Double(velocity.y)), rate: rate, time: Clock.now) {
+            coasting = (scrollView, deceleration)
+        } else {
+            scrollView.scroll.decelerating = false
+        }
+        Display.markDirty()
+    }
+
+    /// The page a paging scroll view comes to rest on: the next one the
+    /// flick points to, else the nearest; one page at most from where the
+    /// pan began. Pages are the bounds' size.
+    private static func page(_ view: UIScrollView, from offset: CGPoint, velocity: CGPoint) -> CGPoint {
+        let size = view.state.bounds.size
+        func axis(_ offset: CGFloat, _ began: CGFloat, _ velocity: CGFloat, _ length: CGFloat) -> CGFloat {
+            guard length > 0 else { return offset }
+            let position = offset / length, from = (began / length).rounded()
+            // The content moves against the finger.
+            var page = velocity < -200 ? position.rounded(.up) : velocity > 200 ? position.rounded(.down) : position.rounded()
+            page = min(max(page, from - 1), from + 1)
+            return page * length
+        }
+        return clamped(view, CGPoint(x: axis(offset.x, startOffset.x, velocity.x, size.width),
+                                     y: axis(offset.y, startOffset.y, velocity.y, size.height)))
+    }
+
+    /// Carries `view`'s content to `offset` over `duration` seconds, as an
+    /// animated -setContentOffset: does; at once without a live view.
+    static func animateScroll(_ view: UIScrollView, to offset: CGPoint, duration: Double = 0.3) {
+        stopGliding()
+        let from = view.state.bounds.origin
+        guard Animations.live, from != offset else {
+            view.sendSetContentOffset(offset)
+            view.didEndScrollingAnimation()
+            return
+        }
+        gliding = Glide(view: view, from: from, to: offset, start: Clock.now, duration: duration, animation: true)
+        Display.markDirty()
+    }
+
+    /// Moves a glide on, eased out as a flick slows.
+    private static func stepGlide() {
+        guard let glide = gliding else { return }
+        let t = min(max((Clock.now - glide.start) / glide.duration, 0), 1)
+        let eased = CGFloat(1 - pow(1 - t, 3))
+        pan(glide.view, to: CGPoint(x: glide.from.x + (glide.to.x - glide.from.x) * eased,
+                                    y: glide.from.y + (glide.to.y - glide.from.y) * eased))
+        Display.markDirty()
+        if t >= 1 { stopGliding() }
+    }
+
+    private static func stopGliding() {
+        guard let glide = gliding else { return }
+        gliding = nil
+        if glide.animation { glide.view.didEndScrollingAnimation() } else { stopCoasting(glide.view) }
+    }
+
+    /// The axes a pan moves the content along: the scroll view's, or the
+    /// one directional lock chose.
+    private static func dragAxis(_ view: UIScrollView) -> CGPoint {
+        let axes = axis(view)
+        guard let lockedAxis else { return axes }
+        return CGPoint(x: axes.x * lockedAxis.x, y: axes.y * lockedAxis.y)
+    }
+
+    // MARK: Pinching
+
+    private static func beginPinch(_ view: UIScrollView, finger: UInt64, at point: CGPoint, first: CGPoint) {
+        flushPan()
+        stopCoasting()
+        stopGliding()
+        unhighlight()
+        if delivered { send(.cancelled) }
+        delivered = true
+        if panning {
+            panning = false
+            view.scroll.dragging = false
+        }
+        pinched = true
+        let distance = max(hypot(point.x - first.x, point.y - first.y), 1)
+        let midpoint = CGPoint(x: (point.x + first.x) / 2, y: (point.y + first.y) / 2)
+        pinch = Pinch(view: view, finger: finger, second: point, midpoint: midpoint, startDistance: distance, startScale: view.scroll.zoomScale)
+        view.willBeginZooming()
+        Display.markDirty()
+    }
+
+    /// Zooms by how far apart the fingers are, about where they were, and
+    /// moves the content with their midpoint.
+    private static func updatePinch() {
+        guard let pinch, let touch else { return }
+        let first = touch.state.location, view = pinch.view
+        let distance = max(hypot(pinch.second.x - first.x, pinch.second.y - first.y), 1)
+        let midpoint = CGPoint(x: (pinch.second.x + first.x) / 2, y: (pinch.second.y + first.y) / 2)
+        let scale = view.bandedZoom(pinch.startScale * distance / pinch.startDistance)
+        view.applyZoom(scale, keeping: visible(pinch.midpoint, in: view))
+        let offset = view.state.bounds.origin
+        view.sendSetContentOffset(CGPoint(x: offset.x - (midpoint.x - pinch.midpoint.x), y: offset.y - (midpoint.y - pinch.midpoint.y)))
+        Touches.pinch?.midpoint = midpoint
+        Display.markDirty()
+    }
+
+    /// A finger lifted: the scale springs back within the limits, the
+    /// content within its edges, and the delegate hears zooming ended.
+    private static func endPinch() {
+        guard let pinch else { return }
+        Touches.pinch = nil
+        let view = pinch.view, scale = view.scroll.zoomScale, target = view.clampedZoom(scale)
+        let anchor = visible(pinch.midpoint, in: view)
+        view.animateZoom(to: target, keeping: anchor) {
+            view.didEndZooming()
+        }
+        Display.markDirty()
+    }
+
+    /// A window point in a scroll view's visible part: its frame's
+    /// coordinates, not its content's.
+    private static func visible(_ point: CGPoint, in view: UIScrollView) -> CGPoint {
+        let local = view.convert(point, from: touch?.state.window)
+        let origin = view.state.bounds.origin
+        return CGPoint(x: local.x - origin.x, y: local.y - origin.y)
     }
 
     private static func stopCoasting() {
@@ -546,7 +761,7 @@ enum Touches {
     }
 
     private static func velocity(_ view: UIScrollView) -> CGPoint {
-        let velocity = samples.velocity, axis = axis(view)
+        let velocity = samples.velocity, axis = dragAxis(view)
         return CGPoint(x: CGFloat(velocity.x) * axis.x, y: CGFloat(velocity.y) * axis.y)
     }
 
