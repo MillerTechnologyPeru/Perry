@@ -49,6 +49,11 @@ static int clock_to_linux(int clock) {
     }
 }
 
+div_t darwin_div(int numerator, int denominator) DARWIN_SYMBOL(div);
+div_t darwin_div(int numerator, int denominator) { return div(numerator, denominator); }
+ldiv_t darwin_ldiv(long numerator, long denominator) DARWIN_SYMBOL(ldiv);
+ldiv_t darwin_ldiv(long numerator, long denominator) { return ldiv(numerator, denominator); }
+
 wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) DARWIN_SYMBOL(wmemcpy);
 wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) { return wmemcpy(to, from, count); }
 
