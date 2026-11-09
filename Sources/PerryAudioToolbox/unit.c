@@ -822,9 +822,17 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
                 if (u->inputs[i].rate_follows_output) u->inputs[i].format.mSampleRate = u->output.mSampleRate;
             }
             // A program that gives an output unit's element 0 a format and
-            // no input format renders in that one (Resident Evil 4).
+            // no input format renders in that one (Resident Evil 4). Its
+            // 16-bit samples with the fixed-point flags of 8.24 are written
+            // interleaved, however the flags read.
             if (u->component->kind == OUTPUT && element == 0 && u->input_count > 0 && !u->inputs[0].format_set) {
-                u->inputs[0].format = u->output;
+                AudioStreamBasicDescription input = u->output;
+                bool fixed = input.mFormatFlags & kLinearPCMFormatFlagsSampleFractionMask;
+                if (fixed && input.mBitsPerChannel == 16 && (input.mFormatFlags & kAudioFormatFlagIsNonInterleaved)) {
+                    input.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+                    input.mBytesPerFrame = input.mBytesPerPacket = 2 * input.mChannelsPerFrame;
+                }
+                u->inputs[0].format = input;
             }
         }
         perry_audio_trace("%s: element %u %s format %u Hz, %u channels, flags %#x, %u bits", u->component->name, element,
