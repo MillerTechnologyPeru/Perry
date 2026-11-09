@@ -443,11 +443,13 @@ final class WebPage {
         withUnsafeBytes(of: &event) { wpe.viewBackendDispatchPointerEvent(backend, $0.baseAddress!) }
     }
 
-    /// wpe_input_axis_event: a wheel's motion (1) along the vertical (0) or
-    /// horizontal (1) axis.
-    func axis(x: Int32, y: Int32, horizontal: Bool, value: Int32, modifiers: UInt32) {
-        var event: (UInt32, UInt32, Int32, Int32, UInt32, Int32, UInt32) =
-            (1, WebPage.milliseconds, x, y, horizontal ? 1 : 0, value, modifiers)
+    /// wpe_input_axis_2d_event: a smooth scroll (2, with the 2D flag) by
+    /// `dx` and `dy` points, which WebKit takes in device pixels. Of a plain
+    /// motion event (1) it reads only the sign, and scrolls a whole line.
+    /// Both zero ends the gesture.
+    func axis(x: Int32, y: Int32, dx: Double, dy: Double, modifiers: UInt32) {
+        var event: (UInt32, UInt32, Int32, Int32, UInt32, Int32, UInt32, Double, Double) =
+            (2 | 1 << 16, WebPage.milliseconds, x, y, 0, 0, modifiers, dx * Double(scale), dy * Double(scale))
         withUnsafeBytes(of: &event) { wpe.viewBackendDispatchAxisEvent(backend, $0.baseAddress!) }
     }
 
