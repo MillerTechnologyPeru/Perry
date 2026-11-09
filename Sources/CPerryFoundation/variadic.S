@@ -70,9 +70,48 @@
     .size \name, . - \name
 .endm
 
+#elif defined(__i386__) && defined(__ELF__)
+
+// On i386 the arguments are on the stack in words, and a Darwin va_list is a
+// pointer to the first variadic one: each entry point calls Swift with the
+// fixed arguments again and that pointer after them. A fixed double takes two
+// words.
+    .hidden perry_i386_foundation_pc_ebx
+    .type perry_i386_foundation_pc_ebx, @function
+perry_i386_foundation_pc_ebx:
+    movl (%esp), %ebx
+    ret
+
+.macro VARIADIC name, target, nfixed, nfloat=0
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    pushl %ebp
+    movl %esp, %ebp
+    pushl %ebx
+    subl $(4 * (\nfixed + 2 * \nfloat + 1) + 28), %esp
+    andl $-16, %esp
+    .set index, 0
+    .rept \nfixed + 2 * \nfloat
+    movl (8 + 4 * index)(%ebp), %eax
+    movl %eax, (4 * index)(%esp)
+    .set index, index + 1
+    .endr
+    leal (8 + 4 * (\nfixed + 2 * \nfloat))(%ebp), %eax
+    movl %eax, (4 * (\nfixed + 2 * \nfloat))(%esp)
+    call perry_i386_foundation_pc_ebx
+    addl $_GLOBAL_OFFSET_TABLE_, %ebx
+    call \target@PLT
+    movl -4(%ebp), %ebx
+    leave
+    ret
+    .size \name, . - \name
+.endm
+
 #endif
 
-#if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
+#if (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__)) && defined(__ELF__)
 
     .text
 

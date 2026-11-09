@@ -177,7 +177,7 @@ open class NSColor: NSObject {
         if Appearances.currentIsDark, let value = darkSystemColors[name] {
             return NSColor(named: name, red: value.0, green: value.1, blue: value.2, alpha: value.3)
         }
-        let accent = (0.0, 0.48, 1.0)
+        let accent: (CGFloat, CGFloat, CGFloat) = (0.0, 0.48, 1.0)
         let values: [String: (CGFloat, CGFloat, CGFloat, CGFloat)] = [
             "clearColor": (0, 0, 0, 0), "blackColor": (0, 0, 0, 1), "whiteColor": (1, 1, 1, 1),
             "grayColor": (0.5, 0.5, 0.5, 1), "lightGrayColor": (2.0 / 3, 2.0 / 3, 2.0 / 3, 1), "darkGrayColor": (1.0 / 3, 1.0 / 3, 1.0 / 3, 1),

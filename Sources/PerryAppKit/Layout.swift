@@ -329,8 +329,8 @@ enum Layout {
             add(root.w, .equal, weight(50))
             add(root.h, .equal, weight(50))
         } else {
-            add(root.w + -Double(root.rect.width), .equal, LayoutSolver.required)
-            add(root.h + -Double(root.rect.height), .equal, LayoutSolver.required)
+            add(root.w + -LayoutScalar(root.rect.width), .equal, LayoutSolver.required)
+            add(root.h + -LayoutScalar(root.rect.height), .equal, LayoutSolver.required)
         }
         // The views constraints mention (a layout guide stands for its
         // owning view). AppKit's engine leaves the others alone: a view with
@@ -372,9 +372,9 @@ enum Layout {
                         guard parts[index].0 else { return 0 }
                         return total > 0 ? max(0, parts[index].1) / total : 1 / CGFloat(count)
                     }
-                    let delta = parentSize + -Double(parentLength)
-                    add(low - parentLow - delta * Double(share(0)) + -Double(offset), .equal, LayoutSolver.required)
-                    add(size - delta * Double(share(1)) + -Double(length), .equal, LayoutSolver.required)
+                    let delta = parentSize + -LayoutScalar(parentLength)
+                    add(low - parentLow - delta * LayoutScalar(share(0)) + -LayoutScalar(offset), .equal, LayoutSolver.required)
+                    add(size - delta * LayoutScalar(share(1)) + -LayoutScalar(length), .equal, LayoutSolver.required)
                 }
                 axis(box.l, box.w, parent.l, parent.w, offset: box.rect.minX - parent.rect.minX, length: box.rect.width,
                      parentLength: parent.rect.width, flexible: (mask & 1 != 0, mask & 2 != 0, mask & 4 != 0))
@@ -390,12 +390,12 @@ enum Layout {
             let intrinsic = Send.size(view.objcObject, "intrinsicContentSize")
             if Trace.enabled { Trace.log("layout: \(view.describedByObject() ?? "?") intrinsic \(intrinsic.width)×\(intrinsic.height)") }
             if intrinsic.width >= 0 {
-                add(box.w + -Double(intrinsic.width), .greaterOrEqual, weight(view.compressionResistance[0]))
-                add(box.w + -Double(intrinsic.width), .lessOrEqual, weight(view.hugging[0]))
+                add(box.w + -LayoutScalar(intrinsic.width), .greaterOrEqual, weight(view.compressionResistance[0]))
+                add(box.w + -LayoutScalar(intrinsic.width), .lessOrEqual, weight(view.hugging[0]))
             }
             if intrinsic.height >= 0 {
-                add(box.h + -Double(intrinsic.height), .greaterOrEqual, weight(view.compressionResistance[1]))
-                add(box.h + -Double(intrinsic.height), .lessOrEqual, weight(view.hugging[1]))
+                add(box.h + -LayoutScalar(intrinsic.height), .greaterOrEqual, weight(view.compressionResistance[1]))
+                add(box.h + -LayoutScalar(intrinsic.height), .lessOrEqual, weight(view.hugging[1]))
             }
         }
         // The views' constraints.
@@ -417,15 +417,15 @@ enum Layout {
                     Trace.log("layout: \(constraint.firstItem?.describedByObject() ?? "nil").\(constraint.firstAttribute) \(constraint.relation) "
                               + "\(constraint.secondItem?.describedByObject() ?? "nil").\(constraint.secondAttribute) × \(constraint.multiplier) + \(constraint.constant) @\(constraint.priority)")
                 }
-                add(first - (second * Double(constraint.multiplier) + Double(constraint.constant)), relation, weight(constraint.priority))
+                add(first - (second * LayoutScalar(constraint.multiplier) + LayoutScalar(constraint.constant)), relation, weight(constraint.priority))
             }
         }
         // Where nothing else decides, frames stay as they are.
         for box in boxes.dropFirst() where !box.view.translatesAutoresizingMask {
-            add(box.l + -Double(box.rect.minX), .equal, 1)
-            add(box.t + -Double(box.rect.minY), .equal, 1)
-            add(box.w + -Double(box.rect.width), .equal, 1)
-            add(box.h + -Double(box.rect.height), .equal, 1)
+            add(box.l + -LayoutScalar(box.rect.minX), .equal, 1)
+            add(box.t + -LayoutScalar(box.rect.minY), .equal, 1)
+            add(box.w + -LayoutScalar(box.rect.width), .equal, 1)
+            add(box.h + -LayoutScalar(box.rect.height), .equal, 1)
         }
         if refused > 0 { Trace.log("layout: \(refused) constraints of \(top.describedByObject() ?? "a view") can't be satisfied") }
         solver.updateVariables()

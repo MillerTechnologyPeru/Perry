@@ -120,6 +120,9 @@ extern NSString *const NSKeyValueChangeOldKey;
 typedef struct { double x, y; } Pair;
 
 @interface Item : NSObject
+#if defined(__i386__) && !__OBJC2__
+{ int count; double weight; float ratio; BOOL flag; long long big; NSRange range; Pair pair; }
+#endif
 @property (nonatomic) int count;
 @property (nonatomic) double weight;
 @property (nonatomic) float ratio;
@@ -129,6 +132,10 @@ typedef struct { double x, y; } Pair;
 @property (nonatomic) Pair pair;
 @end
 @implementation Item
+#if defined(__i386__) && !__OBJC2__
+// The old ABI synthesizes nothing by itself, and needs the variables declared.
+@synthesize count, weight, ratio, flag, big, range, pair;
+#endif
 @end
 
 static void show(NSString *string) { printf("%s\n", [string UTF8String]); }

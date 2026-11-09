@@ -9,6 +9,13 @@ import PerryObjCInterop
 
 #if !arch(arm)
 
+/// What a CGFloat is: 32-bit Mac programs' is a float.
+#if arch(i386)
+public typealias GeometryValue = Float
+#else
+public typealias GeometryValue = Double
+#endif
+
 private func normalized(_ rect: CGRect) -> CGRect {
     var rect = rect
     if rect.size.width < 0 { rect.origin.x += rect.size.width; rect.size.width = -rect.size.width }
@@ -16,14 +23,14 @@ private func normalized(_ rect: CGRect) -> CGRect {
     return rect
 }
 
-private func make(_ x: Double, _ y: Double, _ width: Double, _ height: Double) -> CGRect {
+private func make(_ x: GeometryValue, _ y: GeometryValue, _ width: GeometryValue, _ height: GeometryValue) -> CGRect {
     CGRect(origin: CGPoint(x: x, y: y), size: CGSize(width: width, height: height))
 }
 
-private func minX(_ r: CGRect) -> Double { r.origin.x }
-private func minY(_ r: CGRect) -> Double { r.origin.y }
-private func maxX(_ r: CGRect) -> Double { r.origin.x + r.size.width }
-private func maxY(_ r: CGRect) -> Double { r.origin.y + r.size.height }
+private func minX(_ r: CGRect) -> GeometryValue { r.origin.x }
+private func minY(_ r: CGRect) -> GeometryValue { r.origin.y }
+private func maxX(_ r: CGRect) -> GeometryValue { r.origin.x + r.size.width }
+private func maxY(_ r: CGRect) -> GeometryValue { r.origin.y + r.size.height }
 private func isEmpty(_ r: CGRect) -> Bool { !(r.size.width > 0 && r.size.height > 0) }
 
 @c(_NSEqualPoints)
@@ -39,12 +46,12 @@ public func NSEqualRects(_ a: CGRect, _ b: CGRect) -> Bool { NSEqualPoints(a.ori
 public func NSIsEmptyRect(_ rect: CGRect) -> Bool { isEmpty(rect) }
 
 @c(_NSInsetRect)
-public func NSInsetRect(_ rect: CGRect, _ dx: Double, _ dy: Double) -> CGRect {
+public func NSInsetRect(_ rect: CGRect, _ dx: GeometryValue, _ dy: GeometryValue) -> CGRect {
     make(rect.origin.x + dx, rect.origin.y + dy, rect.size.width - 2 * dx, rect.size.height - 2 * dy)
 }
 
 @c(_NSOffsetRect)
-public func NSOffsetRect(_ rect: CGRect, _ dx: Double, _ dy: Double) -> CGRect {
+public func NSOffsetRect(_ rect: CGRect, _ dx: GeometryValue, _ dy: GeometryValue) -> CGRect {
     make(rect.origin.x + dx, rect.origin.y + dy, rect.size.width, rect.size.height)
 }
 
@@ -62,7 +69,7 @@ public func NSIntegralRect(_ rect: CGRect) -> CGRect {
 /// as the options' outward and nearest bits ask, inward otherwise.
 @c(_NSIntegralRectWithOptions)
 public func NSIntegralRectWithOptions(_ rect: CGRect, _ options: UInt64) -> CGRect {
-    func round(_ value: Double, inward: UInt64, outward: UInt64, nearest: UInt64, up: Bool) -> Double {
+    func round(_ value: GeometryValue, inward: UInt64, outward: UInt64, nearest: UInt64, up: Bool) -> GeometryValue {
         if options & nearest != 0 { return value.rounded() }
         if options & outward != 0 { return up ? value.rounded(.up) : value.rounded(.down) }
         if options & inward != 0 { return up ? value.rounded(.down) : value.rounded(.up) }
@@ -114,7 +121,7 @@ public func NSMouseInRect(_ point: CGPoint, _ rect: CGRect, _ flipped: Bool) -> 
 /// max x 2, max y 3) into `slice`, the rest into `remainder`.
 @c(_NSDivideRect)
 public func NSDivideRect(_ rect: CGRect, _ slice: UnsafeMutablePointer<CGRect>?, _ remainder: UnsafeMutablePointer<CGRect>?,
-                         _ amount: Double, _ edge: UInt32) {
+                         _ amount: GeometryValue, _ edge: UInt32) {
     let r = normalized(rect)
     let horizontal = edge == 0 || edge == 2
     let cut = max(0, min(amount, horizontal ? r.size.width : r.size.height))
@@ -131,21 +138,21 @@ public func NSDivideRect(_ rect: CGRect, _ slice: UnsafeMutablePointer<CGRect>?,
 
 // MARK: - Strings
 
-private func number(_ value: Double) -> String {
+private func number(_ value: GeometryValue) -> String {
     value == value.rounded() && abs(value) < 1e15 ? String(Int64(value)) : String(value)
 }
 
 /// The numbers in a string, in order, as "{x, y}" and "{{x, y}, {w, h}}"
 /// write them; missing ones are 0.
-private func numbers(_ string: id?, count: Int) -> [Double] {
+private func numbers(_ string: id?, count: Int) -> [GeometryValue] {
     let text = Strings.value(of: string) ?? ""
-    var values: [Double] = []
+    var values: [GeometryValue] = []
     var current = ""
     for character in text + "," {
         if character.isNumber || "+-.eE".contains(character) {
             current.append(character)
         } else if !current.isEmpty {
-            values.append(strtod(current, nil))
+            values.append(GeometryValue(strtod(current, nil)))
             current = ""
         }
     }

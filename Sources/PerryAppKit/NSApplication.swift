@@ -105,7 +105,7 @@ open class NSApplication: NSResponder {
     nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
         String(cString: value).split(separator: ";").compactMap { entry in
             let scrolls = entry.hasPrefix("s:")
-            let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }) }
+            let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }).map { CGFloat($0) } }
             if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2])) : nil }
             return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil) : nil
         }

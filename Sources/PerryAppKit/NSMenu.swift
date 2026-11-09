@@ -147,8 +147,8 @@ open class NSMenu: NSObject {
     }
     @ObjCMethod("cancelTracking") func cancelTracking() {}
     @ObjCMethod("setShowsStateColumn:") func setShowsStateColumn(_ value: Bool) {}
-    @ObjCMethod("setMinimumWidth:") func setMinimumWidth(_ width: Double) { minimumWidth = width }
-    @ObjCMethod("minimumWidth") func menuMinimumWidth() -> Double { minimumWidth }
+    @ObjCMethod("setMinimumWidth:") func setMinimumWidth(_ width: CGFloat) { minimumWidth = width }
+    @ObjCMethod("minimumWidth") func menuMinimumWidth() -> CGFloat { minimumWidth }
     @ObjCClassMethod("setMenuBarVisible:") static func setMenuBarVisible(_ visible: Bool) {}
     @ObjCClassMethod("menuBarVisible") static func menuBarVisible() -> Bool { false }
 }

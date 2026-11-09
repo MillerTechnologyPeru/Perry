@@ -325,7 +325,7 @@ enum Text {
         guard let paragraph else { return }
         style.alignment = Send.integer(paragraph.objcObject, "alignment")
         style.lineBreakMode = Send.integer(paragraph.objcObject, "lineBreakMode")
-        style.lineSpacing = Send.double(paragraph.objcObject, "lineSpacing")
+        style.lineSpacing = CGFloat(Send.double(paragraph.objcObject, "lineSpacing"))
     }
 
     /// The runs and style of a string with attributes.

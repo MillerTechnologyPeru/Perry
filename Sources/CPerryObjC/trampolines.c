@@ -55,8 +55,29 @@ enum {
     TRAMPOLINE_WORD2 = 0x67ff0000,
     TRAMPOLINE_WORD3 = 0xcccccc10,
 };
+#elif defined(__i386__)
+// Words of the little-endian bytes of:
+//   call +0; pop eax         eax is this address, code + 5
+//   mov  ecx, [esp + 4]
+//   mov  [esp + 8], ecx      self becomes the block's first argument
+//   mov  eax, [eax + 23]     the block, at code + 28
+//   mov  [esp + 4], eax
+//   jmp  [eax + 12]          its invoke function
+enum {
+    TRAMPOLINE_WORD0 = 0x000000e8,
+    TRAMPOLINE_WORD1 = 0x4c8b5800,
+    TRAMPOLINE_WORD2 = 0x4c890424,
+    TRAMPOLINE_WORD3 = 0x408b0824,
+};
 #else
 #error "no block trampolines for this architecture"
+#endif
+
+// Which word the block is in.
+#if defined(__i386__)
+enum { TRAMPOLINE_BLOCK_WORD = 7 };
+#else
+enum { TRAMPOLINE_BLOCK_WORD = 4 };
 #endif
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -101,7 +122,12 @@ void *perry_objc_trampoline_create(void *block) {
     code[1] = TRAMPOLINE_WORD1;
     code[2] = TRAMPOLINE_WORD2;
     code[3] = TRAMPOLINE_WORD3;
-    memcpy(&code[4], &block, sizeof(block));
+#if defined(__i386__)
+    code[4] = 0x24448917;
+    code[5] = 0x0c60ff04;
+    code[6] = 0xcccccccc;
+#endif
+    memcpy(&code[TRAMPOLINE_BLOCK_WORD], &block, sizeof(block));
     __builtin___clear_cache((char *)code, (char *)code + TRAMPOLINE_SIZE);
     make_executable((uint8_t *)code);
     pthread_mutex_unlock(&lock);
@@ -113,7 +139,7 @@ void *perry_objc_trampoline_block(const void *imp) {
     if (!code || code[0] != TRAMPOLINE_WORD0 || code[1] != TRAMPOLINE_WORD1)
         return NULL;
     void *block;
-    memcpy(&block, &code[4], sizeof(block));
+    memcpy(&block, &code[TRAMPOLINE_BLOCK_WORD], sizeof(block));
     return block;
 }
 

@@ -20,8 +20,8 @@ enum AppKitAssets {
     static func color(named name: String) -> NSColor? {
         guard let components = main?.color(named: name, dark: Appearances.currentIsDark) else { return nil }
         switch components.count {
-        case 2: return NSColor(white: components[0], alpha: components[1])
-        case 4...: return NSColor(red: components[0], green: components[1], blue: components[2], alpha: components[3])
+        case 2: return NSColor(white: CGFloat(components[0]), alpha: CGFloat(components[1]))
+        case 4...: return NSColor(red: CGFloat(components[0]), green: CGFloat(components[1]), blue: CGFloat(components[2]), alpha: CGFloat(components[3]))
         default: return nil
         }
     }
@@ -46,7 +46,7 @@ enum AppKitAssets {
             return CG.bitmapContextCreateImage(context)
         }
         guard let image else { return nil }
-        return (image, CGSize(width: CGFloat(pixels.width) / scale, height: CGFloat(pixels.height) / scale))
+        return (image, CGSize(width: CGFloat(pixels.width) / CGFloat(scale), height: CGFloat(pixels.height) / CGFloat(scale)))
     }
 
     /// A PNG Scripts/extract-assets.sh decoded on a Mac for a rendition

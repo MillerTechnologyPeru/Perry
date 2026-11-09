@@ -317,8 +317,40 @@ public final class NSInvocation: NSObject {
         }
         #elseif arch(arm64)
         Invocations.invokeARM64(imp, storage, details)
+        #elseif arch(i386)
+        // Every argument is in the stack's words, in order, and a structure
+        // that does not fit eax:edx comes back through a pointer before them.
+        let returnSize = details.sizes[0]
+        let returnType = String(cString: details.parts[0])
+        let isFloating = returnType.hasPrefix("f") || returnType.hasPrefix("d")
+        let indirect = returnType.hasPrefix("{") && ![1, 2, 4, 8].contains(returnSize)
+        var words = [UInt32]()
+        for (index, bytes) in storage.arguments.enumerated() {
+            let size = details.sizes[index + 1]
+            var argument = [UInt32](repeating: 0, count: (max(size, 1) + 3) / 4)
+            argument.withUnsafeMutableBytes { target in
+                bytes.withUnsafeBytes { target.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(size, $0.count)])) }
+            }
+            words += argument
+        }
+        storage.result.withUnsafeMutableBytes { result in
+            if indirect { words.insert(UInt32(UInt(bitPattern: result.baseAddress)), at: 0) }
+            var out = [UInt32](repeating: 0, count: 2)
+            var floating = 0.0
+            withUnsafeMutablePointer(to: &floating) { pointer in
+                perry_foundation_invoke_i386(imp, words, words.count, &out, isFloating ? pointer : nil)
+            }
+            guard !indirect, returnSize > 0 else { return }
+            if returnType.hasPrefix("d") {
+                withUnsafeBytes(of: floating) { result.copyMemory(from: $0) }
+            } else if returnType.hasPrefix("f") {
+                withUnsafeBytes(of: Float(floating)) { result.copyMemory(from: $0) }
+            } else {
+                out.withUnsafeBytes { result.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(returnSize, 8)])) }
+            }
+        }
         #else
-        foundationFatal("-[NSInvocation invoke] is available on x86_64 and arm64 only")
+        foundationFatal("-[NSInvocation invoke] is available on x86_64, arm64 and i386 only")
         #endif
     }
 }
