@@ -122,6 +122,9 @@ static void usage(FILE *out) {
           "\n"
           "environment:\n"
           "  PERRY_TRACE         comma-separated: load, bind, init, all\n"
+          "  PERRY_PROFILE       a path: sample the main thread's stacks there\n"
+          "                      (PERRY_PROFILE_HZ a second of its CPU time, 250 by\n"
+          "                      default; Scripts/perry-profile.py reports them)\n"
           "  PERRY_CRASH_REPORT  1: on a fatal signal, print registers and frames\n"
           "                      (with PERRY_KEEP_CRASH_HANDLERS=1, so an app's crash\n"
           "                      reporter doesn't take the signal first)\n"
@@ -299,6 +302,7 @@ int main(int argc, char **argv) {
     char *apple[] = { apple_exe, NULL };
 
     perry_install_crash_reporter(&loader);
+    perry_install_profiler(&loader);
     perry_run_initializers(&loader, image, app_argc, app_argv, environ, apple);
     perry_run_main(&loader, image, app_argc, app_argv, environ, apple);
 }
