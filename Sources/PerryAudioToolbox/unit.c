@@ -78,6 +78,8 @@ static const component components[] = {
 
 typedef struct bus {
     AudioStreamBasicDescription format;
+    bool format_set;                        // by the program, on the input scope
+    bool rate_follows_output;               // set with a sample rate of 0
     render_callback callback;
     void *refcon;
     struct unit *source;
@@ -803,12 +805,27 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     case kAudioUnitProperty_StreamFormat: {
         if (!value || size < sizeof(AudioStreamBasicDescription)) { status = kAudio_ParamError; break; }
         const AudioStreamBasicDescription *f = value;
-        if (!perry_pcm_supported(f) || f->mSampleRate <= 0) { status = kAudioUnitErr_FormatNotSupported; break; }
+        if (!perry_pcm_supported(f) || f->mSampleRate < 0) { status = kAudioUnitErr_FormatNotSupported; break; }
+        // A sample rate of 0 leaves it to the unit: an input takes the
+        // output's, now or when the output's is set.
         if (scope == kAudioUnitScope_Input) {
             if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
             u->inputs[element].format = *f;
+            u->inputs[element].format_set = true;
+            u->inputs[element].rate_follows_output = f->mSampleRate == 0;
+            if (f->mSampleRate == 0) u->inputs[element].format.mSampleRate = u->output.mSampleRate;
         } else {
+            double kept = u->output.mSampleRate;
             u->output = *f;
+            if (f->mSampleRate == 0) u->output.mSampleRate = kept;
+            for (uint32_t i = 0; i < u->input_count; i++) {
+                if (u->inputs[i].rate_follows_output) u->inputs[i].format.mSampleRate = u->output.mSampleRate;
+            }
+            // A program that gives an output unit's element 0 a format and
+            // no input format renders in that one (Resident Evil 4).
+            if (u->component->kind == OUTPUT && element == 0 && u->input_count > 0 && !u->inputs[0].format_set) {
+                u->inputs[0].format = u->output;
+            }
         }
         perry_audio_trace("%s: element %u %s format %u Hz, %u channels, flags %#x, %u bits", u->component->name, element,
                           scope == kAudioUnitScope_Input ? "input" : "output", (unsigned)f->mSampleRate, f->mChannelsPerFrame,
