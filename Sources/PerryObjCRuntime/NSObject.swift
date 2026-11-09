@@ -52,7 +52,7 @@ public enum RootClasses {
         _ = MethodTable(proto, NSObject.registerObjCCategoryImmortal)
     }()
 
-    #if arch(arm)
+    #if arch(arm) || arch(x86_64)
     private static var stretSend: UnsafeRawPointer? { perry_objc_msgSend_stret_address() }
     private static var stretSuperSend: UnsafeRawPointer? { perry_objc_msgSendSuper2_stret_address() }
     #else

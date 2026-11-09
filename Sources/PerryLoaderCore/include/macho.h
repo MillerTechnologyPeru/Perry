@@ -18,6 +18,7 @@
 #define CPU_ARCH_ABI64          0x01000000
 #define CPU_TYPE_ARM            12
 #define CPU_TYPE_ARM64          (CPU_TYPE_ARM | CPU_ARCH_ABI64)
+#define CPU_TYPE_X86_64         (7 | CPU_ARCH_ABI64)
 #define CPU_SUBTYPE_MASK        0xff000000u
 #define CPU_SUBTYPE_ARM64_ALL   0
 #define CPU_SUBTYPE_ARM64_V8    1

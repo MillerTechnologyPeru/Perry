@@ -54,3 +54,5 @@ perry_kvo_setter:
     .section .note.GNU-stack, "", %progbits
 
 #endif
+
+.section .note.GNU-stack, "", %progbits

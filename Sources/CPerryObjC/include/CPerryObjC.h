@@ -203,9 +203,10 @@ perry_objc_class *perry_objc_protocol_metaclass(void);
 // Addresses of the assembly entry points, to call through a typed pointer.
 const void *perry_objc_msgSend_address(void);
 const void *perry_objc_msgSendSuper2_address(void);
-#if defined(__arm__)
-// The sends of methods whose structures come back through a pointer in r0
-// (armv7's _stret entry points), which moves self and _cmd up a register.
+#if defined(__arm__) || defined(__x86_64__)
+// The sends of methods whose structures come back through a pointer in the
+// first argument register (r0, rdi: the _stret entry points), which moves
+// self and _cmd up a register.
 const void *perry_objc_msgSend_stret_address(void);
 const void *perry_objc_msgSendSuper2_stret_address(void);
 #endif

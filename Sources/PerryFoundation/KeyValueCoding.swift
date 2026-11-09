@@ -285,6 +285,19 @@ enum Structures {
         else { return nil }
         var indirect = [UInt8](repeating: 0, count: max(size, 1))
         var registers = [UInt64](repeating: 0, count: 6)
+        #if arch(x86_64)
+        // Over 16 bytes returns through a pointer; to 16, each eight bytes
+        // come back in xmm registers if floating point, or else rax and rdx.
+        var bytes: [UInt8]
+        if size > 16 {
+            perry_foundation_call_getter(object, selector, imp, &indirect, &registers)
+            bytes = indirect
+        } else {
+            perry_foundation_call_getter(object, selector, imp, nil, &registers)
+            let first = floatingMembers(type) != nil ? 2 : 0
+            bytes = Array(withUnsafeBytes(of: (registers[first], registers[first + 1])) { Array($0) }.prefix(size))
+        }
+        #else
         perry_foundation_call_getter(object, selector, imp, &indirect, &registers)
         var bytes: [UInt8]
         if let (member, count) = floatingMembers(type) {
@@ -297,6 +310,7 @@ enum Structures {
         } else {
             bytes = indirect
         }
+        #endif
         return bytes.withUnsafeBytes { ObjC.autorelease(Values.make(UnsafeMutableRawPointer(Values.valueClass), bytes: $0.baseAddress, type: type)) }
     }
 
@@ -305,6 +319,19 @@ enum Structures {
         else { return }
         var bytes = storage.bytes
         var registers = [UInt64](repeating: 0, count: 6)
+        #if arch(x86_64)
+        if bytes.count > 16 {
+            bytes.withUnsafeBytes { perry_foundation_call_setter_memory(object, selector, imp, $0.baseAddress, $0.count) }
+        } else {
+            let padded = bytes + [UInt8](repeating: 0, count: 16 - bytes.count)
+            let first = floatingMembers(storage.type) != nil ? 2 : 0
+            padded.withUnsafeBytes {
+                registers[first] = $0.load(as: UInt64.self)
+                registers[first + 1] = $0.load(fromByteOffset: 8, as: UInt64.self)
+            }
+            perry_foundation_call_setter(object, selector, imp, registers)
+        }
+        #else
         if let (member, count) = floatingMembers(storage.type) {
             let width = member == "d" ? 8 : 4
             for index in 0..<count where (index + 1) * width <= bytes.count {
@@ -323,6 +350,7 @@ enum Structures {
                 perry_foundation_call_setter(object, selector, imp, registers)
             }
         }
+        #endif
     }    #endif
 }
 

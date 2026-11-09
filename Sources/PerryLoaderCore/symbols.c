@@ -524,6 +524,22 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
         perry_provider *reexported = perry_find_provider(loader, provider->reexports[i]);
         if (reexported && provider_lookup(loader, reexported, name, out)) return true;
     }
+#if defined(__x86_64__)
+    // x86_64's libc names variants of functions after their ABI ($INODE64,
+    // $DARWIN_EXTSN, $UNIX2003, $1050, $NOCANCEL). Providers have the
+    // current ABI, under the plain name.
+    const char *variant = sym ? NULL : strchr(name, '$');
+    if (variant) {
+        static const char *const suffixes[] = { "$INODE64", "$DARWIN_EXTSN", "$UNIX2003", "$1050", "$NOCANCEL" };
+        for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+            if (strncmp(variant, suffixes[i], strlen(suffixes[i])) != 0)
+                continue;
+            char plain[256];
+            snprintf(plain, sizeof(plain), "%.*s", (int)(variant - name), name);
+            return provider_lookup(loader, provider, plain, out);
+        }
+    }
+#endif
     if (!sym)
         return false;
     out->address = sym;
@@ -597,7 +613,14 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     uint32_t *code = (uint32_t *)(current_page.base + current_page.used);
     current_page.used += STUB_SIZE;
 
-#if defined(__LP64__)
+#if defined(__x86_64__)
+    code[0] = 0x093d8b48;   // mov rdi, [rip + 9]    (description)
+    code[1] = 0xff000000;   // jmp [rip + 11]        (handler)
+    code[2] = 0x00000b25;
+    code[3] = 0xcccccc00;   // int3 (padding)
+    *(uint64_t *)&code[4] = (uint64_t)(uintptr_t)strdup(description);
+    *(uint64_t *)&code[6] = (uint64_t)(uintptr_t)&perry_unimplemented;
+#elif defined(__LP64__)
     code[0] = 0x58000080;   // ldr x0, #16    (description)
     code[1] = 0x580000b0;   // ldr x16, #20   (handler)
     code[2] = 0xd61f0200;   // br x16

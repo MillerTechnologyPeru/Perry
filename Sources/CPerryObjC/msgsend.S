@@ -203,3 +203,5 @@ perry_objc_msgForward_address:
     .section .note.GNU-stack, "", %progbits
 
 #endif
+
+.section .note.GNU-stack, "", %progbits

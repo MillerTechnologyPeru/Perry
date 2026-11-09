@@ -4,9 +4,63 @@
 // starting at the caller's sp, which is a Darwin va_list. Each entry point
 // passes that pointer after its fixed arguments and branches to Swift.
 
-#if defined(__aarch64__) && defined(__ELF__)
+#if defined(__x86_64__) && defined(__ELF__)
 
-.macro VARIADIC name, target, nfixed
+// On x86_64 the arguments are in registers, then on the stack: each entry
+// point saves the registers and passes a pointer to a va_list over them,
+// as a Darwin va_list is there. `nfloat` counts fixed floating-point
+// arguments.
+.macro VA_LIST_ARGUMENT nfixed
+    .if \nfixed == 1
+    leaq 176(%rsp), %rsi
+    .elseif \nfixed == 2
+    leaq 176(%rsp), %rdx
+    .elseif \nfixed == 3
+    leaq 176(%rsp), %rcx
+    .elseif \nfixed == 4
+    leaq 176(%rsp), %r8
+    .else
+    .error "unexpected number of fixed arguments"
+    .endif
+.endm
+
+.macro VARIADIC name, target, nfixed, nfloat=0
+    .globl \name
+    .type \name, @function
+    .p2align 4
+\name:
+    pushq %rbp
+    movq %rsp, %rbp
+    subq $208, %rsp
+    movq %rdi, 0(%rsp)
+    movq %rsi, 8(%rsp)
+    movq %rdx, 16(%rsp)
+    movq %rcx, 24(%rsp)
+    movq %r8, 32(%rsp)
+    movq %r9, 40(%rsp)
+    movups %xmm0, 48(%rsp)
+    movups %xmm1, 64(%rsp)
+    movups %xmm2, 80(%rsp)
+    movups %xmm3, 96(%rsp)
+    movups %xmm4, 112(%rsp)
+    movups %xmm5, 128(%rsp)
+    movups %xmm6, 144(%rsp)
+    movups %xmm7, 160(%rsp)
+    movl $(\nfixed * 8), 176(%rsp)      // gp_offset
+    movl $(48 + \nfloat * 16), 180(%rsp) // fp_offset
+    leaq 16(%rbp), %rax
+    movq %rax, 184(%rsp)                // overflow_arg_area
+    movq %rsp, 192(%rsp)                // reg_save_area
+    VA_LIST_ARGUMENT \nfixed
+    call \target@PLT
+    leave
+    ret
+    .size \name, . - \name
+.endm
+
+#elif defined(__aarch64__) && defined(__ELF__)
+
+.macro VARIADIC name, target, nfixed, nfloat=0
     .globl \name
     .type \name, %function
     .p2align 2
@@ -15,6 +69,10 @@
     b \target
     .size \name, . - \name
 .endm
+
+#endif
+
+#if (defined(__aarch64__) || defined(__x86_64__)) && defined(__ELF__)
 
     .text
 
@@ -28,7 +86,7 @@ VARIADIC _CFStringAppendFormat, perry_foundation_cf_append_format, 3
 
 // Boolean CFCalendarDecomposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime, const char *, ...):
 // the time is in d0, so two fixed arguments are in x registers.
-VARIADIC _CFCalendarDecomposeAbsoluteTime, perry_foundation_cf_calendar_decompose, 2
+VARIADIC _CFCalendarDecomposeAbsoluteTime, perry_foundation_cf_calendar_decompose, 2, 1
 // Boolean CFCalendarComposeAbsoluteTime(CFCalendarRef, CFAbsoluteTime *, const char *, ...)
 VARIADIC _CFCalendarComposeAbsoluteTime, perry_foundation_cf_calendar_compose, 3
 
@@ -69,3 +127,5 @@ VARIADIC perry_imp_raiseFormat, perry_foundation_raiseFormat, 4
     .section .note.GNU-stack, "", %progbits
 
 #endif
+
+.section .note.GNU-stack, "", %progbits

@@ -126,11 +126,17 @@ static void write_fde(buffer *b, size_t cie, bool has_personality, uintptr_t sta
     finish(b, start);
 }
 
-// MARK: - Compact encodings (arm64)
+// MARK: - Compact encodings
 
 enum {
     UNWIND_HAS_LSDA = 0x40000000,
     UNWIND_PERSONALITY_SHIFT = 28,
+    UNWIND_MODE_MASK = 0x0f000000,
+#if defined(__x86_64__)
+    UNWIND_MODE_DWARF = 0x04000000,
+#else
+    UNWIND_MODE_DWARF = 0x03000000,
+#endif
     UNWIND_ARM64_MODE_MASK = 0x0f000000,
     UNWIND_ARM64_MODE_FRAMELESS = 0x02000000,
     UNWIND_ARM64_MODE_DWARF = 0x03000000,
@@ -165,6 +171,87 @@ static size_t frame_instructions(uint32_t encoding, uint8_t *out) {
     }
     return n;
 }
+
+#if defined(__x86_64__)
+enum { UNWIND_X86_64_MODE_RBP_FRAME = 0x01000000, UNWIND_X86_64_MODE_STACK_IMMD = 0x02000000, UNWIND_X86_64_MODE_STACK_IND = 0x03000000 };
+
+/// DWARF's number for a register in a compact encoding: rbx, r12 to r15, rbp.
+static const uint8_t x86_64_registers[7] = { 0, 3, 12, 13, 14, 15, 6 };
+
+/// Saves `reg` at `slots` words below the CFA.
+static size_t saved_register(uint8_t *out, uint8_t reg, unsigned slots) {
+    out[0] = 0x80 | reg;                // DW_CFA_offset, factored by -8
+    out[1] = (uint8_t)slots;
+    return 2;
+}
+
+/// A frame with rbp pushed and pointing at it: the CFA is rbp + 16, and the
+/// registers the encoding lists are at the offset it gives below rbp.
+static size_t rbp_frame_instructions(uint32_t encoding, uint8_t *out) {
+    size_t n = 0;
+    out[n++] = 0x0c; out[n++] = 6; out[n++] = 16;       // DW_CFA_def_cfa rbp, 16
+    n += saved_register(out + n, 6, 2);
+    unsigned offset = (encoding >> 16) & 0xff, registers = encoding & 0x7fff;
+    for (unsigned i = 0; i < 5; i++, registers >>= 3) {
+        if ((registers & 7) && (registers & 7) < 6 && 2 + offset >= i)
+            n += saved_register(out + n, x86_64_registers[registers & 7], 2 + offset - i);
+    }
+    return n;
+}
+
+/// A frame only rsp moved for: `size` bytes with the return address, the
+/// registers in the order the permutation gives pushed just under it. An
+/// indirect size is the immediate of the function's subq, at the encoding's
+/// offset into it.
+static size_t frameless_instructions(uint32_t encoding, const uint8_t *function, uint8_t *out) {
+    uint32_t size = (encoding >> 16) & 0xff;
+    uint32_t count = (encoding >> 10) & 7, permutation = encoding & 0x3ff;
+    if ((encoding & UNWIND_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND) {
+        uint32_t immediate;
+        memcpy(&immediate, function + size, 4);
+        size = immediate + 8 * ((encoding >> 13) & 7);
+    } else {
+        size *= 8;
+    }
+    if (count > 6)
+        count = 6;
+    static const uint32_t divisors[7][5] = {
+        { 0 }, { 0 }, { 5 }, { 20, 4 }, { 60, 12, 3 }, { 120, 24, 6, 2 }, { 120, 24, 6, 2 },
+    };
+    uint32_t numbers[6] = { 0 };
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t divisor = i < 5 ? divisors[count][i] : 0;
+        numbers[i] = divisor ? permutation / divisor : permutation;
+        if (divisor)
+            permutation -= numbers[i] * divisor;
+        else
+            permutation = 0;
+    }
+    size_t n = 0;
+    out[n++] = 0x0e;                    // DW_CFA_def_cfa_offset
+    for (uint32_t rest = size;;) {
+        uint8_t byte = rest & 0x7f;
+        rest >>= 7;
+        out[n++] = rest ? byte | 0x80 : byte;
+        if (!rest)
+            break;
+    }
+    bool used[7] = { false };
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t remaining = numbers[i];
+        for (uint32_t reg = 1; reg < 7; reg++) {
+            if (used[reg])
+                continue;
+            if (remaining--)
+                continue;
+            used[reg] = true;
+            n += saved_register(out + n, x86_64_registers[reg], 1 + count - i);
+            break;
+        }
+    }
+    return n;
+}
+#endif
 
 // MARK: - DWARF entries
 
@@ -394,8 +481,15 @@ void perry_register_unwind_info(perry_image *image) {
 
     buffer out = { 0 };
     // CIEs for the frames made from compact encodings, one per personality:
-    // the CFA starts as sp, the return address is x30's.
+    // the CFA starts as sp, the return address is x30's (on x86_64, the
+    // return address is at the top of the stack on entry).
+#if defined(__x86_64__)
+    static const uint8_t compact_initial[] = { 0x0c, 7, 8, 0x80 | 16, 1 };
+    enum { COMPACT_RETURN_REGISTER = 16 };
+#else
     static const uint8_t compact_initial[] = { 0x0c, 31, 0 };
+    enum { COMPACT_RETURN_REGISTER = 30 };
+#endif
     size_t compact_cies[4];
     bool compact_made[4] = { false };
     // CIEs for FDEs carried over, by the CIE they had and their personality.
@@ -420,7 +514,16 @@ void perry_register_unwind_info(perry_image *image) {
         uintptr_t start = (uintptr_t)image->base + offset;
         uint8_t made[64];
         size_t made_size = 0;
-        switch (encoding & UNWIND_ARM64_MODE_MASK) {
+        switch (encoding & UNWIND_MODE_MASK) {
+#if defined(__x86_64__)
+        case UNWIND_X86_64_MODE_RBP_FRAME:
+            made_size = rbp_frame_instructions(encoding, made);
+            break;
+        case UNWIND_X86_64_MODE_STACK_IMMD:
+        case UNWIND_X86_64_MODE_STACK_IND:
+            made_size = frameless_instructions(encoding, (const uint8_t *)start, made);
+            break;
+#else
         case UNWIND_ARM64_MODE_FRAME:
             made_size = frame_instructions(encoding, made);
             break;
@@ -439,7 +542,8 @@ void perry_register_unwind_info(perry_image *image) {
             }
             break;
         }
-        case UNWIND_ARM64_MODE_DWARF: {
+#endif
+        case UNWIND_MODE_DWARF: {
             source_cie cie;
             const uint8_t *instructions;
             size_t instructions_size;
@@ -473,7 +577,7 @@ void perry_register_unwind_info(perry_image *image) {
             continue;
         }
         if (!compact_made[which]) {
-            compact_cies[which] = write_cie(&out, 1, -8, 30, personality, compact_initial, sizeof(compact_initial));
+            compact_cies[which] = write_cie(&out, 1, -8, COMPACT_RETURN_REGISTER, personality, compact_initial, sizeof(compact_initial));
             compact_made[which] = true;
         }
         write_fde(&out, compact_cies[which], personality != 0, start, next - offset, lsda, made, made_size);

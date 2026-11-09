@@ -127,6 +127,7 @@ _Noreturn void perry_run_main(perry_loader *loader, perry_image *image, int argc
 // one, or each slice of a universal file. Zero when the file is not Mach-O.
 #define PERRY_ARCH_ARM64    1u
 #define PERRY_ARCH_ARMV7    2u
+#define PERRY_ARCH_X86_64   4u
 unsigned perry_macho_architectures(const char *path);
 
 // Address helpers
