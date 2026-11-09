@@ -105,5 +105,49 @@ perry_tlv_get_addr:
     popq %rbp
     ret
     .size perry_tlv_get_addr, .-perry_tlv_get_addr
+#elif defined(__i386__)
+// The same for i386: the descriptor comes in eax, the address goes out in eax,
+// and every other register is preserved. Darwin keeps the stack 16-byte
+// aligned at calls, as this frame does.
+    .text
+    .globl perry_tlv_get_addr
+    .type perry_tlv_get_addr, @function
+    .p2align 4
+perry_tlv_get_addr:
+    pushl %ebp
+    movl %esp, %ebp
+    pushl %ecx
+    pushl %edx
+    pushl %ebx
+    andl $-16, %esp
+    subl $144, %esp
+    movups %xmm0, 16(%esp)
+    movups %xmm1, 32(%esp)
+    movups %xmm2, 48(%esp)
+    movups %xmm3, 64(%esp)
+    movups %xmm4, 80(%esp)
+    movups %xmm5, 96(%esp)
+    movups %xmm6, 112(%esp)
+    movups %xmm7, 128(%esp)
+    movl %eax, (%esp)
+    call 1f
+1:  popl %ebx
+    addl $_GLOBAL_OFFSET_TABLE_+(.-1b), %ebx
+    call perry_tlv_address@PLT
+    movups 128(%esp), %xmm7
+    movups 112(%esp), %xmm6
+    movups 96(%esp), %xmm5
+    movups 80(%esp), %xmm4
+    movups 64(%esp), %xmm3
+    movups 48(%esp), %xmm2
+    movups 32(%esp), %xmm1
+    movups 16(%esp), %xmm0
+    leal -12(%ebp), %esp
+    popl %ebx
+    popl %edx
+    popl %ecx
+    popl %ebp
+    ret
+    .size perry_tlv_get_addr, .-perry_tlv_get_addr
 #endif
     .section .note.GNU-stack,"",%progbits

@@ -171,6 +171,52 @@ static inline void perry_context_get_exception(const ucontext_t *context, darwin
     out->far = (uint32_t)context->uc_mcontext.fault_address;
 }
 
+#elif defined(__i386__)
+
+typedef struct {
+    uint32_t eax, ebx, ecx, edx, edi, esi, ebp, esp, ss, eflags, eip, cs, ds, es, fs, gs;
+} darwin_thread_state;
+// The FXSAVE area between Darwin's padding, which Linux's context does not
+// hold in that form on i386: signal handlers read zeros, and writes are lost.
+typedef struct { uint32_t reserved[2]; uint8_t fxsave[512]; uint32_t reserved1; } darwin_float_state;
+typedef struct { uint16_t trapno, cpu; uint32_t err, faultvaddr; } darwin_exception_state;
+
+// x86_THREAD_STATE32, x86_FLOAT_STATE32 and x86_EXCEPTION_STATE32.
+enum { DARWIN_THREAD_FLAVOR = 1, DARWIN_FLOAT_FLAVOR = 2, DARWIN_EXCEPTION_FLAVOR = 3 };
+
+static inline void perry_context_get_thread(const ucontext_t *context, darwin_thread_state *out) {
+    const greg_t *r = context->uc_mcontext.gregs;
+    *out = (darwin_thread_state){
+        r[REG_EAX], r[REG_EBX], r[REG_ECX], r[REG_EDX], r[REG_EDI], r[REG_ESI], r[REG_EBP], r[REG_ESP],
+        r[REG_SS], r[REG_EFL], r[REG_EIP], r[REG_CS], r[REG_DS], r[REG_ES], r[REG_FS], r[REG_GS],
+    };
+}
+
+static inline void perry_context_set_thread(ucontext_t *context, const darwin_thread_state *in) {
+    greg_t *r = context->uc_mcontext.gregs;
+    r[REG_EAX] = in->eax; r[REG_EBX] = in->ebx; r[REG_ECX] = in->ecx; r[REG_EDX] = in->edx;
+    r[REG_EDI] = in->edi; r[REG_ESI] = in->esi; r[REG_EBP] = in->ebp; r[REG_ESP] = in->esp;
+    r[REG_EIP] = in->eip; r[REG_EFL] = in->eflags;
+}
+
+static inline void perry_context_get_float(ucontext_t *context, darwin_float_state *out) {
+    (void)context;
+    memset(out, 0, sizeof(*out));
+}
+
+static inline void perry_context_set_float(ucontext_t *context, const darwin_float_state *in) {
+    (void)context;
+    (void)in;
+}
+
+static inline void perry_context_get_exception(const ucontext_t *context, darwin_exception_state *out) {
+    const greg_t *r = context->uc_mcontext.gregs;
+    out->trapno = (uint16_t)r[REG_TRAPNO];
+    out->cpu = 0;
+    out->err = (uint32_t)r[REG_ERR];
+    out->faultvaddr = (uint32_t)context->uc_mcontext.cr2;
+}
+
 #elif defined(__x86_64__)
 
 typedef struct {

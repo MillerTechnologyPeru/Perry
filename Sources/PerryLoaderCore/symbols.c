@@ -524,7 +524,7 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
         perry_provider *reexported = perry_find_provider(loader, provider->reexports[i]);
         if (reexported && provider_lookup(loader, reexported, name, out)) return true;
     }
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
     // x86_64's libc names variants of functions after their ABI ($INODE64,
     // $DARWIN_EXTSN, $UNIX2003, $1050, $NOCANCEL). Providers have the
     // current ABI, under the plain name.
@@ -613,7 +613,18 @@ void *perry_unresolved_stub(const char *library, const char *name) {
     uint32_t *code = (uint32_t *)(current_page.base + current_page.used);
     current_page.used += STUB_SIZE;
 
-#if defined(__x86_64__)
+#if defined(__i386__)
+    // The handler is cdecl: its description goes on the stack, and the return
+    // address stays where the handler finds it.
+    uint8_t *bytes = (uint8_t *)code;
+    bytes[0] = 0x68;                                    // push description
+    *(uint32_t *)(bytes + 1) = (uint32_t)(uintptr_t)strdup(description);
+    bytes[5] = 0xb8;                                    // mov eax, handler
+    *(uint32_t *)(bytes + 6) = (uint32_t)(uintptr_t)&perry_unimplemented;
+    bytes[10] = 0xff; bytes[11] = 0xd0;                 // call eax
+    bytes[12] = 0x83; bytes[13] = 0xc4; bytes[14] = 0x04;   // add esp, 4
+    bytes[15] = 0xc3;                                   // ret
+#elif defined(__x86_64__)
     code[0] = 0x093d8b48;   // mov rdi, [rip + 9]    (description)
     code[1] = 0xff000000;   // jmp [rip + 11]        (handler)
     code[2] = 0x00000b25;

@@ -201,15 +201,23 @@ static void use_low_addresses(char **argv) {
 static void use_low_addresses(char **argv) { (void)argv; }
 #endif
 
-#if defined(__aarch64__)
-// A program with no arm64 code but armv7 code is run by perry32, the same
-// loader built as a 32-bit program, which maps armv7 Mach-O beside 32-bit
+#if defined(__aarch64__) || defined(__x86_64__)
+// A program with no code for this machine's 64-bit architecture but code for
+// its 32-bit one (armv7 under arm64, i386 under x86_64) is run by perry32, the
+// same loader built as a 32-bit program, which maps that Mach-O beside 32-bit
 // providers: one process cannot hold both. It is found beside this program,
 // or at PERRY32.
 static void run_in_32_bit_loader(const char *executable, char **argv) {
     unsigned archs = perry_macho_architectures(executable);
+#if defined(__aarch64__)
     if (!(archs & PERRY_ARCH_ARMV7) || (archs & PERRY_ARCH_ARM64))
         return;
+    const char *architecture = "armv7";
+#else
+    if (!(archs & PERRY_ARCH_I386) || (archs & PERRY_ARCH_X86_64))
+        return;
+    const char *architecture = "i386";
+#endif
     const char *named = getenv("PERRY32");
     char self[PATH_MAX], sibling[PATH_MAX + 16];
     const char *path = named;
@@ -225,7 +233,7 @@ static void run_in_32_bit_loader(const char *executable, char **argv) {
         }
     }
     if (!path || access(path, X_OK) != 0)
-        perry_fatal("%s is an armv7 program, which perry32 runs, and it was not found%s", executable,
+        perry_fatal("%s is an %s program, which perry32 runs, and it was not found%s", executable, architecture,
                     path ? "" : " (set PERRY32)");
     execv(path, argv);
     perry_fatal("cannot run %s: %s", path, strerror(errno));
@@ -267,7 +275,7 @@ int main(int argc, char **argv) {
     const char *executable = has_bundle ? bundle.executable_path
                            : (realpath(target, resolved) ? resolved : target);
 
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__x86_64__)
     run_in_32_bit_loader(executable, argv);
 #endif
 

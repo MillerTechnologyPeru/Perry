@@ -216,7 +216,7 @@ int perry_vopen(const char *path, int flags, va_list arguments) {
 
 /// fopen, finding a file to read in any case.
 FILE *perry_fopen(const char *path, const char *mode) {
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
     // Large files, as Darwin's fopen opens them.
     FILE *(*open_file)(const char *, const char *) = fopen64;
 #else
@@ -358,7 +358,7 @@ int perry_vfcntl(int fd, int command, va_list arguments) {
 
 // Darwin's armv7 aligns 64-bit members to 4 bytes, so st_size is at offset 60
 // and the structure is 108 bytes; arm64's is 144.
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(push, 4)
 #endif
 struct darwin_stat {
@@ -381,7 +381,7 @@ struct darwin_stat {
     int32_t st_lspare;
     int64_t st_qspare[2];
 };
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 #pragma pack(pop)
 _Static_assert(sizeof(struct darwin_stat) == 108, "struct stat is 108 bytes on Darwin armv7");
 _Static_assert(offsetof(struct darwin_stat, st_size) == 60, "st_size is at 60 on Darwin armv7");
@@ -452,7 +452,7 @@ int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int
 
 // MARK: - File systems
 
-#if !defined(__arm__)
+#if !(defined(__arm__) || defined(__i386__))
 // Darwin's struct statvfs: its block and file counts are 32-bit
 // (fsblkcnt_t, fsfilcnt_t), so a large file system's are given in larger
 // fragments, as Darwin's libc scales them.
@@ -557,7 +557,7 @@ static void statfs_to_darwin(const struct statfs *info, struct darwin_statfs *ou
     strcpy(out->f_mntfromname, "/dev/disk1s1");
 }
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 // struct statvfs on 32-bit Darwin: eleven 32-bit words, where glibc's
 // has 64-bit counts.
 struct darwin_statvfs {
