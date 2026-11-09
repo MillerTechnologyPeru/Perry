@@ -7,13 +7,15 @@ import PerryObjCInterop
 // whose layer shows its image.
 
 final class FontState: ObjectState {
-    var name = "Helvetica"
+    var name = "Helvetica" { didSet { drawingName = nil } }
     var pointSize: CGFloat = 17
-    var weight: CGFloat = 0
+    var weight: CGFloat = 0 { didSet { drawingName = nil } }
     /// CTFontSymbolicTraits: italic, bold, monospace…
-    var traits: UInt32 = 0
+    var traits: UInt32 = 0 { didSet { drawingName = nil } }
     /// A system font's design: "NSCTFontUIFontDesignMonospaced" and the like.
-    var design: String?
+    var design: String? { didSet { drawingName = nil } }
+    /// The font CoreGraphics draws with, once worked out.
+    var drawingName: String?
 }
 
 @ObjCClass("UIFont")
@@ -191,10 +193,18 @@ open class UIFont: NSObject {
     /// Sans or Sans Mono, bold and oblique as the font is; other fonts by
     /// their names.
     var drawingName: String {
-        guard state.name.hasPrefix(".") || isMonospaced else { return state.name }
-        let family = isMonospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
-        let style = (isBold ? "Bold" : "") + (isItalic ? "Oblique" : "")
-        return style.isEmpty ? family : family + "-" + style
+        let state = state
+        if let name = state.drawingName { return name }
+        let name: String
+        if state.name.hasPrefix(".") || isMonospaced {
+            let family = isMonospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
+            let style = (isBold ? "Bold" : "") + (isItalic ? "Oblique" : "")
+            name = style.isEmpty ? family : family + "-" + style
+        } else {
+            name = state.name
+        }
+        state.drawingName = name
+        return name
     }
 }
 
@@ -204,12 +214,18 @@ enum Text {
     /// A context to measure text in.
     nonisolated(unsafe) private static var scratch: CGRef?
 
+    private struct WidthKey: Hashable {
+        var font: String
+        var pointSize: CGFloat
+        var text: String
+    }
+
     /// Widths measured, by font and text.
-    nonisolated(unsafe) private static var widths: [String: CGFloat] = [:]
+    nonisolated(unsafe) private static var widths: [WidthKey: CGFloat] = [:]
 
     /// The width of `text` in `font`, on one line.
     static func width(_ text: String, font: UIFont) -> CGFloat {
-        let key = "\(font.drawingName)|\(font.state.pointSize)|\(text)"
+        let key = WidthKey(font: font.drawingName, pointSize: font.state.pointSize, text: text)
         if let width = widths[key] { return width }
         let width = measure(text, font: font)
         if widths.count > 4096 { widths = [:] }
