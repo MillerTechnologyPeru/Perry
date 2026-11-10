@@ -110,6 +110,37 @@ unsigned long darwin_clock(void) {
     return (unsigned long)clock();
 }
 
+// Locale strings by Darwin's item numbers, in the C locale's English with
+// UTF-8 as the character set. Items it has no string for are empty.
+const char *darwin_nl_langinfo(int item) DARWIN_SYMBOL(nl_langinfo);
+const char *darwin_nl_langinfo(int item) {
+    static const char *const days[] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday" };
+    static const char *const short_days[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    static const char *const months[] = { "January", "February", "March", "April", "May", "June", "July",
+                                          "August", "September", "October", "November", "December" };
+    static const char *const short_months[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+                                                "Oct", "Nov", "Dec" };
+    switch (item) {
+    case 0: return "UTF-8";                      // CODESET
+    case 1: return "%a %b %e %H:%M:%S %Y";       // D_T_FMT
+    case 2: return "%m/%d/%y";                   // D_FMT
+    case 3: return "%H:%M:%S";                   // T_FMT
+    case 4: return "%I:%M:%S %p";                // T_FMT_AMPM
+    case 5: return "AM";
+    case 6: return "PM";
+    case 50: return ".";                         // RADIXCHAR
+    case 51: return "";                          // THOUSEP
+    case 52: return "^[yY]";                     // YESEXPR
+    case 53: return "^[nN]";                     // NOEXPR
+    default: break;
+    }
+    if (item >= 7 && item <= 13) return days[item - 7];
+    if (item >= 14 && item <= 20) return short_days[item - 14];
+    if (item >= 21 && item <= 32) return months[item - 21];
+    if (item >= 33 && item <= 44) return short_months[item - 33];
+    return "";
+}
+
 // MARK: - Mach time
 
 // Mach time ticks as on Apple silicon, 24 MHz: a timebase of 125/3 (a
