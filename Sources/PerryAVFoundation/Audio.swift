@@ -39,6 +39,39 @@ final class PlayerState {
         guard let data = data?.unsafeCast(to: NSData.self), let bytes = data.bytes() else { return nil }
         let length = data.length()
         guard length > 0 else { return nil }
+        if let wave = CoreAudioFormat.wave(from: UnsafeRawBufferPointer(start: bytes, count: length)) {
+            return wave.withUnsafeBytes { writeTemporary($0) }
+        }
+        return writeTemporary(UnsafeRawBufferPointer(start: bytes, count: length))
+    }
+
+    /// A file:// URI for a file URL's file as GStreamer can play it: itself,
+    /// or, for a Core Audio file, a WAVE copy; nil when it needs no change.
+    func convertedURI(of url: String) -> String? {
+        if let temporaryPath { return "file://" + temporaryPath }
+        guard url.hasPrefix("file://") else { return nil }
+        var path = String(url.dropFirst(7))
+        path = path.removingPercentEncodingPath()
+        guard let file = fopen(path, "rb") else { return nil }
+        defer { fclose(file) }
+        var header = [UInt8](repeating: 0, count: 4)
+        guard fread(&header, 1, 4, file) == 4, header == Array("caff".utf8) else { return nil }
+        fseek(file, 0, SEEK_END)
+        let size = ftell(file)
+        guard size > 0 else { return nil }
+        fseek(file, 0, SEEK_SET)
+        var contents = [UInt8](repeating: 0, count: size)
+        guard fread(&contents, 1, size, file) == size else { return nil }
+        let wave = contents.withUnsafeBytes { CoreAudioFormat.wave(from: $0) }
+        guard let wave else { return nil }
+        return wave.withUnsafeBytes { writeTemporary($0) }
+    }
+
+    /// Writes bytes to a temporary file of this player's and gives its URI.
+    private func writeTemporary(_ bytes: UnsafeRawBufferPointer) -> String? {
+        let length = bytes.count
+        guard let base = bytes.baseAddress else { return nil }
+        let bytes = base
         let directory = getenv("PERRY_TMP").map { String(cString: $0) } ?? "/tmp"
         mkdir(directory, 0o755)
         let number = PlayerState.countLock.withLock { () -> Int in
@@ -114,7 +147,7 @@ open class AVAudioPlayer: NSObject {
         if !state.prepared {
             state.prepared = true
             let start = AudioTiming.now()
-            if let gst = GStreamer.shared, let uri = state.url?.unsafeCast(to: NSURL.self).absoluteString() ?? state.dataURI(),
+            if let gst = GStreamer.shared, let uri = state.url.flatMap({ url in url.unsafeCast(to: NSURL.self).absoluteString().map { state.convertedURI(of: $0) ?? $0 } }) ?? state.dataURI(),
                let pipeline = Pipeline(uri: uri, gst: gst, video: false) {
                 defer { Players.trace("audio player for \(uri.split(separator: "/").last ?? "") made in \(AudioTiming.since(start)) ms at \(AudioTiming.stamp())") }
                 pipeline.set(volume: Double(state.volume), muted: false)
@@ -407,4 +440,86 @@ enum AudioTiming {
 
 private extension String {
     func leftPadded(to width: Int) -> String { count >= width ? self : String(repeating: "0", count: width - count) + self }
+}
+
+extension String {
+    /// A file path with its %XX escapes decoded.
+    fileprivate func removingPercentEncodingPath() -> String {
+        var bytes: [UInt8] = []
+        let input = Array(utf8)
+        var index = 0
+        while index < input.count {
+            if input[index] == 0x25, index + 2 < input.count,
+               let value = UInt8(String(decoding: input[(index + 1)...(index + 2)], as: UTF8.self), radix: 16) {
+                bytes.append(value)
+                index += 3
+            } else {
+                bytes.append(input[index])
+                index += 1
+            }
+        }
+        return String(decoding: bytes, as: UTF8.self)
+    }
+}
+
+/// Core Audio Format files holding linear PCM, which GStreamer has no
+/// parser for, as WAVE files it plays.
+enum CoreAudioFormat {
+    static func wave(from file: UnsafeRawBufferPointer) -> [UInt8]? { convert(file) }
+
+    private static func be32(_ file: UnsafeRawBufferPointer, _ at: Int) -> UInt32 {
+        (UInt32(file[at]) << 24) | (UInt32(file[at + 1]) << 16) | (UInt32(file[at + 2]) << 8) | UInt32(file[at + 3])
+    }
+
+    private static func be64(_ file: UnsafeRawBufferPointer, _ at: Int) -> UInt64 {
+        (UInt64(be32(file, at)) << 32) | UInt64(be32(file, at + 4))
+    }
+
+    private static func convert(_ file: UnsafeRawBufferPointer) -> [UInt8]? {
+        guard file.count >= 8, file[0] == 0x63, file[1] == 0x61, file[2] == 0x66, file[3] == 0x66 else { return nil }   // "caff"
+        var offset = 8
+        var rate = 0.0, flags: UInt32 = 0, channels = 0, bits = 0, bytesPerPacket = 0
+        var linear = false
+        var payload: Range<Int>?
+        while offset + 12 <= file.count {
+            let type = be32(file, offset)
+            let declared = Int64(bitPattern: be64(file, offset + 4))
+            let start = offset + 12
+            let size = declared < 0 ? file.count - start : min(Int(declared), file.count - start)
+            if type == 0x64657363, size >= 32 {   // "desc"
+                rate = Double(bitPattern: be64(file, start))
+                linear = be32(file, start + 8) == 0x6c70636d   // "lpcm"
+                flags = be32(file, start + 12)
+                bytesPerPacket = Int(be32(file, start + 16))
+                channels = Int(be32(file, start + 24))
+                bits = Int(be32(file, start + 28))
+            } else if type == 0x64617461, size > 4 {   // "data": an edit count, then the audio
+                payload = (start + 4)..<(start + size)
+            }
+            offset = start + size
+        }
+        guard linear, let payload, channels > 0, bits > 0, bytesPerPacket > 0, rate > 0 else { return nil }
+        let isFloat = flags & 1 != 0, littleEndian = flags & 2 != 0
+        let width = bits / 8
+        guard width * channels == bytesPerPacket || bytesPerPacket % channels == 0, [1, 2, 3, 4, 8].contains(width) else { return nil }
+        let frameBytes = bytesPerPacket
+        let count = (payload.count / frameBytes) * frameBytes
+        var samples = [UInt8](repeating: 0, count: count)
+        for index in 0..<count {
+            let sample = index / width, inside = index % width
+            let source = payload.lowerBound + sample * width + (littleEndian ? inside : width - 1 - inside)
+            samples[index] = file[source]
+        }
+        // CAF's 8-bit samples are signed, WAVE's unsigned.
+        if width == 1 && !isFloat { for index in 0..<count { samples[index] = samples[index] &+ 128 } }
+        var wave: [UInt8] = []
+        func put32(_ value: Int) { for shift in stride(from: 0, to: 32, by: 8) { wave.append(UInt8((value >> shift) & 0xff)) } }
+        func put16(_ value: Int) { wave.append(UInt8(value & 0xff)); wave.append(UInt8((value >> 8) & 0xff)) }
+        wave += Array("RIFF".utf8); put32(36 + count); wave += Array("WAVE".utf8)
+        wave += Array("fmt ".utf8); put32(16)
+        put16(isFloat ? 3 : 1); put16(channels); put32(Int(rate)); put32(Int(rate) * frameBytes); put16(frameBytes); put16(bits)
+        wave += Array("data".utf8); put32(count)
+        wave += samples
+        return wave
+    }
 }
