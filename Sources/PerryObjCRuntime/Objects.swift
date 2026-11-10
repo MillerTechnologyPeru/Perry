@@ -37,6 +37,7 @@ public enum Objects {
             return nil
         }
         object.storeBytes(of: cls, as: ClassPointer.self)
+        if Zombies.tracing { Zombies.trace(object, "alloc") }
         return constructInstance(object, info)
     }
 
