@@ -1051,6 +1051,9 @@ extension NSArray {
     @ObjCMethod("filterUsingPredicate:")
     func filter(using predicate: NSPredicate) {
         let kept = Arrays.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }
+        // The array may hold the only reference: keep the elements across the removal.
+        for element in kept { ObjC.retain(element) }
+        defer { for element in kept { ObjC.release(element) } }
         _ = ObjC.send(objcObject, ObjC.selector("removeAllObjects"))
         for element in kept { _ = ObjC.send(objcObject, ObjC.selector("addObject:"), element) }
     }
