@@ -135,7 +135,7 @@ enum Fetching {
                                             ascending: descriptor.unsafeCast(to: NSSortDescriptor.self).ascending())
             }
         }
-        let limit = Int(requestState.fetchLimit), offset = Int(requestState.fetchOffset)
+        let limit = Int(clamping: requestState.fetchLimit), offset = Int(clamping: requestState.fetchOffset)
         let contextState = context.state
         let pending = requestState.includesPendingChanges
             ? (contextState.inserted + contextState.updated + contextState.deleted).filter { $0.state.entityName == entity.state.name }
