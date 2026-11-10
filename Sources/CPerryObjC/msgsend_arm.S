@@ -31,11 +31,11 @@
     .size \name, . - \name
 .endm
 
-// LOOKUP self, sel, stret
+// LOOKUP self, sel, label, slow
 //
 // r12 = the class to search. Probes its cache for the selector in \sel and
 // jumps to the IMP, with r0-r3 and lr as the caller had them.
-.macro LOOKUP selfreg, selreg, label
+.macro LOOKUP selfreg, selreg, label, slow=perry_objc_lookup_slow
     push {r4-r7}
     mov r4, r12                     // the class, for the slow path
     ldr r5, [r4, #8]                // class->cache
@@ -68,7 +68,7 @@
     mov r0, \selfreg
     mov r1, \selreg
     mov r2, r4
-    bl perry_objc_lookup_slow
+    bl \slow
     mov r12, r0
     mov sp, r5
     pop {r0-r3, lr}
@@ -99,7 +99,7 @@ ENTRY _objc_msgSend_stret
     ldr r12, [r1]
     cmp r12, #0
     beq .Lnil_stret
-    LOOKUP r1, r2, stret
+    LOOKUP r1, r2, stret, perry_objc_lookup_slow_stret
 .Lnil_stret:
     bx lr
 END _objc_msgSend_stret
@@ -125,7 +125,7 @@ END _objc_msgSendSuper2
 ENTRY _objc_msgSendSuper_stret
     ldr r12, [r1, #4]
     ldr r1, [r1]
-    LOOKUP r1, r2, super_stret
+    LOOKUP r1, r2, super_stret, perry_objc_lookup_slow_stret
 END _objc_msgSendSuper_stret
 
 ENTRY _objc_msgSendSuper2_stret
@@ -133,7 +133,7 @@ ENTRY _objc_msgSendSuper2_stret
     ldr r12, [r1, #4]
     ldr r12, [r12, #4]
     ldr r1, [r1]
-    LOOKUP r1, r2, super2_stret
+    LOOKUP r1, r2, super2_stret, perry_objc_lookup_slow_stret
 END _objc_msgSendSuper2_stret
 
 // The IMP for selectors a class does not implement. Asks the runtime for a
@@ -162,6 +162,30 @@ ENTRY __objc_msgForward
     pop {r0-r3, r4, lr}
     bx r12
 END __objc_msgForward
+
+// The same for a message that returns a structure through a pointer in r0:
+// the receiver is in r1 and the selector in r2, as perry_objc_forward takes
+// them after its result pointer.
+ENTRY __objc_msgForward_stret
+.Lmsgforward_stret:
+    push {r0-r3, r4, lr}            // 24 bytes
+    mov r4, sp
+    sub sp, sp, #8                  // the result
+    bic sp, sp, #7
+    mov r0, sp
+    bl perry_objc_forward
+    ldr r12, [sp]                   // target
+    ldr lr, [sp, #4]                // handler
+    mov sp, r4
+    cmp r12, #0
+    beq 1f
+    pop {r0-r3, r4, lr}
+    mov r1, r12                     // resend to the new target
+    b .Lmsgsend_stret
+1:  mov r12, lr
+    pop {r0-r3, r4, lr}
+    bx r12
+END __objc_msgForward_stret
 
     .globl perry_objc_msgSend_address
     .type perry_objc_msgSend_address, %function
@@ -202,6 +226,14 @@ perry_objc_msgForward_address:
     adr r0, .Lmsgforward
     bx lr
     .size perry_objc_msgForward_address, . - perry_objc_msgForward_address
+
+    .globl perry_objc_msgForward_stret_address
+    .type perry_objc_msgForward_stret_address, %function
+    .p2align 2
+perry_objc_msgForward_stret_address:
+    adr r0, .Lmsgforward_stret
+    bx lr
+    .size perry_objc_msgForward_stret_address, . - perry_objc_msgForward_stret_address
 
 #endif
 
