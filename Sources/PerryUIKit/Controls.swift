@@ -257,6 +257,10 @@ open class UIButton: UIControl {
         return label
     }
 
+    /// iOS 2's: the title label's line break mode.
+    @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { titleLabel().lineBreakMode() }
+    @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { titleLabel().setLineBreakMode(mode) }
+
     /// iOS 2's: the title label's font.
     @ObjCMethod("font") func font() -> UIFont { titleLabel().fontObject() }
     @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { titleLabel().setFont(font) }
