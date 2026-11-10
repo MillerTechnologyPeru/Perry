@@ -71,6 +71,7 @@ enum CG {
     nonisolated(unsafe) static var pathAddPath: (@convention(c) (Ref, Transform, Ref) -> Void)!
     nonisolated(unsafe) static var pathIsEmpty: (@convention(c) (Ref) -> Bool)!
     nonisolated(unsafe) static var pathGetCurrentPoint: (@convention(c) (Ref) -> CGPoint)!
+    nonisolated(unsafe) static var pathApply: (@convention(c) (Ref, UnsafeMutableRawPointer?, (@convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void)?) -> Void)!
     nonisolated(unsafe) static var pathGetBoundingBox: (@convention(c) (Ref) -> CGRect)!
     nonisolated(unsafe) static var pathContainsPoint: (@convention(c) (Ref, Transform, CGPoint, Bool) -> Bool)!
 
@@ -156,6 +157,7 @@ enum CG {
         pathAddPath = bind("CGPathAddPath")
         pathIsEmpty = bind("CGPathIsEmpty")
         pathGetCurrentPoint = bind("CGPathGetCurrentPoint")
+        pathApply = bind("CGPathApply")
         pathGetBoundingBox = bind("CGPathGetPathBoundingBox")
         pathContainsPoint = bind("CGPathContainsPoint")
         imageGetWidth = bind("CGImageGetWidth")
