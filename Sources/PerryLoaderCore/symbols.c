@@ -273,6 +273,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   …/MetalKit.framework/MetalKit                       -> UIKit
+//   …/SpriteKit.framework/SpriteKit                     -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
@@ -348,14 +349,15 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     }
 #endif
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
-    // MetalKit's views over QuartzCore's Metal layers,
+    // MetalKit's views over QuartzCore's Metal layers, SpriteKit's scenes
+    // drawn by its layers,
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
     // controllers, AuthenticationServices' web sign-in sessions, CoreText's
     // text attributes, AVKit's player view controller and Core Image's
     // images and filters.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
-        strstr(install_name, "/MetalKit.framework/") ||
+        strstr(install_name, "/MetalKit.framework/") || strstr(install_name, "/SpriteKit.framework/") ||
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/AuthenticationServices.framework/") ||
