@@ -120,7 +120,15 @@ enum Fetching {
             throw error(134060, "This NSPersistentStoreCoordinator has no persistent stores.")
         }
         let entityName = EntityName(rawValue: entity.state.name)
-        let predicate = try Predicates.convert(requestState.predicate, entity)
+        // A predicate the store cannot express (arithmetic, bitwise operators)
+        // is run here instead, over the objects the store gives without it.
+        var predicate: FetchRequest.Predicate?
+        var filtersHere = false
+        do {
+            predicate = try Predicates.convert(requestState.predicate, entity)
+        } catch is UnsupportedPredicate {
+            filtersHere = true
+        }
         let sorts = (requestState.sortDescriptors?.unsafeCast(to: NSArray.self).elements ?? []).compactMap { descriptor in
             descriptor.unsafeCast(to: NSSortDescriptor.self).key().map {
                 FetchRequest.SortDescriptor(property: PropertyKey(stored: $0),
@@ -132,8 +140,9 @@ enum Fetching {
         let pending = requestState.includesPendingChanges
             ? (contextState.inserted + contextState.updated + contextState.deleted).filter { $0.state.entityName == entity.state.name }
             : []
+        let paged = pending.isEmpty && !filtersHere
         let storeRequest = FetchRequest(entity: entityName, sortDescriptors: sorts, predicate: predicate,
-                                        fetchLimit: pending.isEmpty ? limit : 0, fetchOffset: pending.isEmpty ? offset : 0)
+                                        fetchLimit: paged ? limit : 0, fetchOffset: paged ? offset : 0)
         var results: [ModelData]
         do {
             results = try backend.fetch(storeRequest)
@@ -150,7 +159,12 @@ enum Fetching {
             results = FetchRequest(entity: entityName, sortDescriptors: sorts, predicate: nil,
                                    fetchLimit: limit, fetchOffset: offset).evaluate(results)
         }
-        return results.map { context.materialize(entity, $0) }
+        var objects = results.map { context.materialize(entity, $0) }
+        if filtersHere, let node = requestState.predicate {
+            objects = objects.filter { node.sendEvaluate(withObject: $0) }
+            if pending.isEmpty { objects = Array(objects.dropFirst(offset)); if limit > 0 { objects = Array(objects.prefix(limit)) } }
+        }
+        return objects
     }
 
     static func execute(_ request: NSFetchRequest, in context: NSManagedObjectContext) throws -> NSObject {
@@ -226,9 +240,7 @@ enum Predicates {
         if operation == 100, let members, members.count == 2 {
             return .compound(.and([compare(.greaterThanOrEqualTo, members[0]), compare(.lessThanOrEqualTo, members[1])]))
         }
-        guard let type = operators[operation] else {
-            throw CoreDataError(error: StoreErrors.make(134060, "Unsupported predicate \(predicate.predicateFormat())"))
-        }
+        guard let type = operators[operation] else { throw UnsupportedPredicate() }
         return compare(type, try expression(rightExpression, kind: kind))
     }
 
@@ -250,7 +262,7 @@ enum Predicates {
         case 3: return .keyPath(PredicateKeyPath(rawValue: PropertyKey.storedKeyPath(expression.keyPath())))
         case 0: return constant(expression.constantValue(), kind: kind)
         default:
-            throw CoreDataError(error: StoreErrors.make(134060, "Unsupported expression type \(expression.expressionType())"))
+            throw UnsupportedPredicate()
         }
     }
 
@@ -273,4 +285,11 @@ enum Predicates {
         if value.is(NSDate.self) { return .attribute(ManagedObjects.value(value, kind: AttributeKind.date)) }
         return .attribute(.string(value.stringValue))
     }
+}
+
+/// A predicate the store cannot express, which the context evaluates itself.
+struct UnsupportedPredicate: Error {}
+
+extension NSObject {
+    @ObjCMethod("evaluateWithObject:") func sendEvaluate(withObject object: NSObject?) -> Bool
 }
