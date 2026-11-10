@@ -317,6 +317,7 @@ public final class CGColorObject: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         CGColorObject.states.remove(objcObject)
+        ComponentBuffers.remove(for: objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: CGColorObject.objCClass.pointer)
     }
 
@@ -441,6 +442,13 @@ enum ComponentBuffers {
             buffers[color] = buffer
             return UnsafePointer(buffer)
         }
+    }
+
+    /// Frees a color's buffer as the color goes, so a new color at its
+    /// address has its own components.
+    static func remove(for color: Ref) {
+        let buffer = lock.withLock { buffers.removeValue(forKey: color) }
+        buffer?.deallocate()
     }
 }
 
