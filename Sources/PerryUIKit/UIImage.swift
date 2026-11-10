@@ -1,3 +1,4 @@
+import Glibc
 import CPerryGeometry
 import PerryObjCInterop
 
@@ -15,8 +16,14 @@ final class ImageState: ObjectState {
     /// The SF Symbol this image draws (Symbols), and its configuration.
     var symbolName: String?
     var configuration: UIImageConfiguration?
+    /// The frames of an animated image, retained, and the seconds they take.
+    var frames: [UnsafeMutableRawPointer] = []
+    var duration: Double = 0
 
-    deinit { if let cgImage { CG.release(cgImage) } }
+    deinit {
+        if let cgImage { CG.release(cgImage) }
+        for frame in frames { ObjCRuntime.release(frame) }
+    }
 
     func set(_ image: CGRef?, scale: CGFloat, orientation: Int) {
         if let cgImage { CG.release(cgImage) }
@@ -86,6 +93,23 @@ open class UIImage: NSObject {
         if let image { state.set(image.state.cgImage, scale: image.state.scale, orientation: 0) }
         return self
     }
+
+    /// An animated image: it draws as its first frame, and keeps the frames
+    /// and the time they take for `images` and `duration`.
+    @ObjCClassMethod("animatedImageWithImages:duration:")
+    static func animated(_ cls: ObjCClass, images: NSArray?, duration: Double) -> UIImage? {
+        let frames = images?.elements.compactMap { $0.as(UIImage.self) } ?? []
+        guard let first = frames.first else { return nil }
+        let image = make(cls, cgImage: first.state.cgImage, scale: first.state.scale, orientation: first.state.orientation)
+        image.state.frames = frames.compactMap { ObjCRuntime.retain($0.objcObject) }
+        image.state.duration = duration
+        return image
+    }
+
+    @ObjCMethod("images") func images() -> NSObject? {
+        state.frames.isEmpty ? nil : NSMutableArray.of(state.frames.map { NSObject($0) })
+    }
+    @ObjCMethod("duration") func duration() -> Double { state.duration }
 
     @ObjCClassMethod("imageWithData:")
     static func image(_ cls: ObjCClass, data: NSObject?) -> UIImage? { image(cls, data: data, scale: 1) }
