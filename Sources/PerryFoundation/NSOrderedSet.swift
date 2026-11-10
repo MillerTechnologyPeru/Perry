@@ -120,17 +120,20 @@ public class NSOrderedSet: NSObject {
     @ObjCClassMethod("orderedSetWithObject:")
     static func make(_ cls: ObjCClass, object: ObjCObject) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, [object.id]) }
 
+    /// Like the other collections' constructors, these take nil for no members.
     @ObjCClassMethod("orderedSetWithArray:")
-    static func make(_ cls: ObjCClass, array: ObjCObject) -> UnsafeMutableRawPointer? {
-        OrderedSets.make(cls.pointer, Arrays.elements(array.id))
+    static func make(_ cls: ObjCClass, array: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, Arrays.elements(array?.id))
     }
 
     @ObjCClassMethod("orderedSetWithSet:")
-    static func make(_ cls: ObjCClass, set: ObjCObject) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, Sets.elements(set.id)) }
+    static func make(_ cls: ObjCClass, set: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, set.map { Sets.elements($0.id) } ?? [])
+    }
 
     @ObjCClassMethod("orderedSetWithOrderedSet:")
-    static func make(_ cls: ObjCClass, orderedSet: ObjCObject) -> UnsafeMutableRawPointer? {
-        OrderedSets.make(cls.pointer, OrderedSets.storage(orderedSet.id).members)
+    static func make(_ cls: ObjCClass, orderedSet: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, OrderedSets.storage(orderedSet?.id).members)
     }
 
     /// The members in a range of another ordered set. `copyItems` shares the
