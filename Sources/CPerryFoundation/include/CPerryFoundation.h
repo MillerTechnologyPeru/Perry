@@ -105,6 +105,10 @@ void perry_foundation_invoke(const void *imp, const uint64_t *gp, const uint64_t
 // the result is floating point, the x87 result in `floating`.
 void perry_foundation_invoke_i386(const void *imp, const uint32_t *stack, size_t words, uint32_t out[2], double *floating);
 #endif
+#if defined(__arm__)
+// Calls an IMP with Darwin's armv7 argument words (at least four): r0-r3, then the stack.
+void perry_foundation_invoke_armv7(const void *imp, const uint32_t *words, size_t count, uint32_t out[2]);
+#endif
 // x86_64 only. Calls a setter whose argument, over 16 bytes, goes on the stack.
 void perry_foundation_call_setter_memory(void *object, const char *selector, const void *imp, const void *bytes, size_t size);
 
