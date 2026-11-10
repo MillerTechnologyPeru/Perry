@@ -841,9 +841,10 @@ static void *string_constant(perry_loader *loader, const char *name) {
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], "___CFConstantStringClassReference", &isa);
     if (!isa.found) return NULL;
-    // { isa, flags, bytes, length }, as clang emits for @"…"; then the
-    // variable holding it, which the import names.
-    struct { void *isa; uint64_t flags; const char *bytes; uint64_t length; } *string = calloc(1, sizeof *string);
+    // { isa, flags, bytes, length }, as clang emits for @"…", each a word
+    // wide (the flags are 32 bits in a 64-bit program, padded to a word);
+    // then the variable holding it, which the import names.
+    struct { void *isa; uintptr_t flags; const char *bytes; uintptr_t length; } *string = calloc(1, sizeof *string);
     void **variable = calloc(1, sizeof *variable);
     if (!string || !variable) return NULL;
     char *bytes = strdup(name + 1);
