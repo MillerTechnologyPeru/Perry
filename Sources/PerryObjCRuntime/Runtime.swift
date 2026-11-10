@@ -111,8 +111,17 @@ public enum Runtime {
         guard !info.isMeta, let superInfo = info.superInfo, Int(ro.pointee.instance_start) < superInfo.instanceSize else {
             return
         }
-        let delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
+        var delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
+        // The ivars keep their alignment, as the compiler laid them out: a
+        // slide that is not a multiple of the largest breaks the atomic
+        // 64-bit accesses of a 32-bit program, which fault when misaligned.
         if let ivars = ro.pointee.ivars {
+            var alignment = 1
+            IvarList.forEach(ivars) { ivar in
+                let raw = ivar.pointee.alignment_raw
+                alignment = max(alignment, raw == UInt32.max ? Layout.word : 1 << Int(min(raw, 6)))
+            }
+            delta = (delta + alignment - 1) & ~(alignment - 1)
             IvarList.forEach(ivars) { ivar in
                 ivar.pointee.offset?.pointee += Int32(delta)
             }
