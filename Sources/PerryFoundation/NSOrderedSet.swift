@@ -251,6 +251,9 @@ public final class NSMutableOrderedSet: NSOrderedSet {
         OrderedSets.mutableClass = cls.storage
     }
 
+    @ObjCClassMethod("orderedSetWithCapacity:")
+    static func make(_ cls: ObjCClass, capacity: UInt) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, []) }
+
     @ObjCMethod("addObject:") func add(_ object: ObjCObject) { storage.append(object.id) }
 
     @ObjCMethod("addObjectsFromArray:")
