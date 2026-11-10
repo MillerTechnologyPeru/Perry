@@ -152,6 +152,13 @@ public enum Objects {
         }
     }
 
+    /// With PERRY_OBJC_ZOMBIES set, reports `object` if it was deallocated,
+    /// as the use `what` names, by a C function that takes an object with no
+    /// message to it; whether it was.
+    public static func isDeallocated(_ object: ObjectPointer, using what: String) -> Bool {
+        Zombies.enabled && Zombies.report(object, what)
+    }
+
     public static func autorelease(_ object: ObjectPointer) -> ObjectPointer {
         if Zombies.enabled, Zombies.report(object, "autorelease") { return object }
         guard let info = Runtime.info(classOf(object)) else { return object }
