@@ -36,12 +36,20 @@ enum Arrays {
             return Array(UnsafeBufferPointer(start: objects, count: count))
         }
         if let storage = storage(object) {
-            return storage.objects
+            // A subclass that keeps its elements itself, such as a protocol buffer's proxy for a field's array, has
+            // an empty storage and answers count and objectAtIndex: from its own: those are the array.
+            guard storage.objects.isEmpty, !overriding else { return storage.objects }
         }
         // Another library's array, such as Swift's: its count and elements.
         guard ObjC.overrides(object, Selectors.count, of: arrayClass) else { return [] }
+        overriding = true
+        defer { overriding = false }
         return (0..<ObjC.sendUInt(object, Selectors.count)).compactMap { ObjC.sendIndex(object, Selectors.objectAtIndex, $0) }
     }
+
+    /// Set while a subclass's count and objectAtIndex: are being asked for, so that their calls to super's
+    /// do not ask again.
+    nonisolated(unsafe) private static var overriding = false
 
     /// Fills `object` with `elements`, retaining each.
     static func initialize(_ object: id?, _ elements: [id]) -> id? {
