@@ -71,8 +71,19 @@ __attribute__((constructor)) static void keep_blocks_in_heap(void) {
 /// since iOS 16.1, so what malloc gives is zero in practice, and programs
 /// lean on that too without knowing. (Nanosaur 2 releases the object a
 /// structure straight from malloc points to before it first sets it.)
+/// A zeroed block aligned to 16 bytes, as Darwin's blocks are. glibc's are
+/// to 8 in a 32-bit program, where compiled code stores a 128-bit vector
+/// to a structure it takes to be aligned to 16 (and faults when it is not).
+static void *zeroed_block(size_t room) {
+    if (sizeof(void *) == 8) return calloc(1, room);
+    void *block = NULL;
+    if (posix_memalign(&block, 16, room) != 0) return NULL;
+    memset(block, 0, room);
+    return block;
+}
+
 void *darwin_malloc(size_t size) DARWIN_SYMBOL(malloc);
-void *darwin_malloc(size_t size) { return calloc(1, block_size(size)); }
+void *darwin_malloc(size_t size) { return zeroed_block(block_size(size)); }
 
 /// Clears a block that glibc gave with what was there before.
 static void *cleared(void *ptr) {
@@ -84,7 +95,7 @@ void *darwin_calloc(size_t count, size_t size) DARWIN_SYMBOL(calloc);
 void *darwin_calloc(size_t count, size_t size) {
     size_t total;
     if (__builtin_mul_overflow(count, size, &total)) return calloc(count, size);
-    return calloc(1, block_size(total));
+    return zeroed_block(block_size(total));
 }
 
 /// A size of zero gives a block of the least size, as Darwin's does, where
@@ -103,7 +114,18 @@ void *darwin_realloc(void *ptr, size_t size) DARWIN_SYMBOL(realloc);
 /// The room a block gains is cleared, as it is on Darwin.
 void *darwin_realloc(void *ptr, size_t size) {
     size_t before = ptr ? malloc_usable_size(ptr) : 0;
-    void *resized = realloc(ptr, block_size(size));
+    size_t room = block_size(size);
+    void *resized = realloc(ptr, room);
+    if (resized && sizeof(void *) == 4 && ((uintptr_t)resized & 15) != 0) {
+        // The block moved to an address aligned to 8: move it to 16.
+        void *moved = NULL;
+        if (posix_memalign(&moved, 16, room) == 0) {
+            size_t kept = malloc_usable_size(resized);
+            memcpy(moved, resized, kept < room ? kept : room);
+            free(resized);
+            resized = moved;
+        }
+    }
     if (resized) {
         size_t after = malloc_usable_size(resized);
         if (after > before) memset((char *)resized + before, 0, after - before);

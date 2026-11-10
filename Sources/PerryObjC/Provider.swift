@@ -70,6 +70,15 @@ public func perry_objc_lookup_slow(_ receiver: UnsafeMutableRawPointer?, _ sel: 
     return Runtime.lookUpIMP(receiver: receiver, selector: sel.assumingMemoryBound(to: CChar.self), cls: cls)
 }
 
+#if arch(arm)
+@c @implementation
+public func perry_objc_lookup_slow_stret(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?,
+                                         _ cls: UnsafeMutablePointer<perry_objc_class>?) -> UnsafeMutableRawPointer? {
+    guard let sel, let cls else { return Runtime.msgForwardStret }
+    return Runtime.lookUpIMP(receiver: receiver, selector: sel.assumingMemoryBound(to: CChar.self), cls: cls, stret: true)
+}
+#endif
+
 @c @implementation
 public func perry_objc_forward(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?) -> perry_forward_result {
     guard let sel else { return perry_forward_result(target: nil, handler: nil) }

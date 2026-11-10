@@ -100,6 +100,10 @@ enum KeyValueCoding {
         if ObjC.isKind(object, of: Arrays.arrayClass) {
             return Arrays.autoreleased(Arrays.elements(object).map { value($0, key) ?? Nulls.null })
         }
+        // A set's values of the key, as a set: a member with none adds nothing.
+        if ObjC.isKind(object, of: Sets.setClass) {
+            return Sets.autoreleased(Sets.elements(object).compactMap { value($0, key) })
+        }
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
         for name in [key, "is" + capitalized, "get" + capitalized] {
             let selector = ObjC.selector(name)

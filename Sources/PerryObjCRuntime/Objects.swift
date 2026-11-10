@@ -19,13 +19,25 @@ public enum Objects {
         return (size + 16383) & ~16383
     }
 
+    /// A zeroed block aligned to 16 bytes, as Darwin's are: glibc's are to 8
+    /// in a 32-bit program, and compiled code stores 128-bit vectors to an
+    /// object it takes to be aligned to 16.
+    static func zeroedBlock(_ size: Int) -> UnsafeMutableRawPointer? {
+        guard Layout.word == 4 else { return calloc(1, size) }
+        var block: UnsafeMutableRawPointer?
+        guard posix_memalign(&block, 16, size) == 0, let block else { return nil }
+        memset(block, 0, size)
+        return block
+    }
+
     public static func createInstance(_ cls: ClassPointer, extraBytes: Int = 0) -> ObjectPointer? {
         guard let found = Runtime.info(cls) else { return nil }
         Runtime.runSwiftInitializers(found)
-        guard let info = Runtime.info(cls), let object = calloc(1, blockSize(info.instanceSize + extraBytes)) else {
+        guard let info = Runtime.info(cls), let object = zeroedBlock(blockSize(info.instanceSize + extraBytes)) else {
             return nil
         }
         object.storeBytes(of: cls, as: ClassPointer.self)
+        if Zombies.tracing { Zombies.trace(object, "alloc") }
         return constructInstance(object, info)
     }
 

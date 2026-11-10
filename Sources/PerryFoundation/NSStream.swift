@@ -427,27 +427,28 @@ public class NSInputStream: NSStream {
         return Streams.make(cls.pointer, fallback: Streams.inputClass, .file(path))
     }
 
+    /// The initializers return Self: an -init method is passed its receiver
+    /// owned, which the wrapper releases, and the result must be owned.
     @ObjCMethod("initWithData:")
-    func initialize(data: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-        Streams.initialize(objcObject, .data(DataObjects.data(data)))
+    func initialize(data: UnsafeMutableRawPointer?) -> Self {
+        _ = Streams.initialize(objcObject, .data(DataObjects.data(data)))
+        return self
     }
 
     @ObjCMethod("initWithFileAtPath:")
-    func initialize(fileAtPath path: String?) -> UnsafeMutableRawPointer? {
-        guard let path else {
-            ObjC.release(objcObject)
-            return nil
-        }
-        return Streams.initialize(objcObject, .file(path))
+    func initialize(fileAtPath path: String?) -> Self? {
+        guard let path else { return nil }
+        _ = Streams.initialize(objcObject, .file(path))
+        return self
     }
 
+    /// A URL that is not a file's gives a stream that fails when opened, as
+    /// Foundation's does: programs go on with the object they allocated.
     @ObjCMethod("initWithURL:")
-    func initialize(url: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-        guard let path = Streams.path(url) else {
-            ObjC.release(objcObject)
-            return nil
-        }
-        return Streams.initialize(objcObject, .file(path))
+    func initialize(url: UnsafeMutableRawPointer?) -> Self? {
+        guard url != nil else { return nil }
+        _ = Streams.initialize(objcObject, .file(Streams.path(url) ?? ""))
+        return self
     }
 
     @ObjCMethod("read:maxLength:")
@@ -492,33 +493,30 @@ public class NSOutputStream: NSStream {
     }
 
     @ObjCMethod("initToMemory")
-    func initializeToMemory() -> UnsafeMutableRawPointer? { Streams.initialize(objcObject, .memory) }
+    func initializeToMemory() -> Self {
+        _ = Streams.initialize(objcObject, .memory)
+        return self
+    }
 
     @ObjCMethod("initToBuffer:capacity:")
-    func initialize(toBuffer buffer: UnsafeMutablePointer<UInt8>?, capacity: UInt) -> UnsafeMutableRawPointer? {
-        guard let buffer else {
-            ObjC.release(objcObject)
-            return nil
-        }
-        return Streams.initialize(objcObject, .buffer(buffer, Int(min(capacity, UInt(Int.max)))))
+    func initialize(toBuffer buffer: UnsafeMutablePointer<UInt8>?, capacity: UInt) -> Self? {
+        guard let buffer else { return nil }
+        _ = Streams.initialize(objcObject, .buffer(buffer, Int(min(capacity, UInt(Int.max)))))
+        return self
     }
 
     @ObjCMethod("initToFileAtPath:append:")
-    func initialize(toFileAtPath path: String?, append: Bool) -> UnsafeMutableRawPointer? {
-        guard let path else {
-            ObjC.release(objcObject)
-            return nil
-        }
-        return Streams.initialize(objcObject, .fileOutput(path, append: append))
+    func initialize(toFileAtPath path: String?, append: Bool) -> Self? {
+        guard let path else { return nil }
+        _ = Streams.initialize(objcObject, .fileOutput(path, append: append))
+        return self
     }
 
     @ObjCMethod("initWithURL:append:")
-    func initialize(url: UnsafeMutableRawPointer?, append: Bool) -> UnsafeMutableRawPointer? {
-        guard let path = Streams.path(url) else {
-            ObjC.release(objcObject)
-            return nil
-        }
-        return Streams.initialize(objcObject, .fileOutput(path, append: append))
+    func initialize(url: UnsafeMutableRawPointer?, append: Bool) -> Self? {
+        guard let path = Streams.path(url) else { return nil }
+        _ = Streams.initialize(objcObject, .fileOutput(path, append: append))
+        return self
     }
 
     @ObjCMethod("write:maxLength:")

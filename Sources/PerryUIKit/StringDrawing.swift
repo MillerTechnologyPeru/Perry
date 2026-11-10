@@ -16,7 +16,10 @@ private func truncates(_ mode: Int) -> Bool { (3...5).contains(mode) }
 /// (0 for any number), the last cut short if text was left out.
 private func layOut(_ text: String, font: UIFont, size: CGSize, lineBreakMode: Int = 0) -> (lines: [String], size: CGSize) {
     let lineHeight = Text.lineHeight(font)
-    let limit = size.height > 0 ? max(1, Int((size.height / lineHeight).rounded(.down))) : 0
+    // A height too large to count lines in (CGFLOAT_MAX, as programs ask
+    // for any height) is no limit.
+    let rows = (size.height / lineHeight).rounded(.down)
+    let limit = size.height > 0 && rows < 1_000_000 ? max(1, Int(rows)) : 0
     var lines = Text.lines(text, font: font, width: size.width > 0 ? size.width : .greatestFiniteMagnitude, limit: limit)
     if truncates(lineBreakMode), size.width > 0 { lines = lines.map { Text.truncated($0, font: font, width: size.width) } }
     let width = lines.map { Text.size($0, font: font).width }.max() ?? 0

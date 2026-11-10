@@ -19,6 +19,13 @@ public enum Runtime {
     nonisolated(unsafe) static let emptyCache = perry_objc_empty_cache()!
     nonisolated(unsafe) static let emptyTable = perry_objc_empty_cache_table()!
     nonisolated(unsafe) public static let msgForward = IMP(mutating: perry_objc_msgForward_address()!)
+    /// The forwarder for a message that returns a structure through a
+    /// pointer: its own on armv7, where the pointer takes the first register.
+    #if arch(arm)
+    nonisolated(unsafe) public static let msgForwardStret = IMP(mutating: perry_objc_msgForward_stret_address()!)
+    #else
+    nonisolated(unsafe) public static let msgForwardStret = msgForward
+    #endif
 
     // MARK: - Realization
 
@@ -111,8 +118,17 @@ public enum Runtime {
         guard !info.isMeta, let superInfo = info.superInfo, Int(ro.pointee.instance_start) < superInfo.instanceSize else {
             return
         }
-        let delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
+        var delta = superInfo.instanceSize - Int(ro.pointee.instance_start)
+        // The ivars keep their alignment, as the compiler laid them out: a
+        // slide that is not a multiple of the largest breaks the atomic
+        // 64-bit accesses of a 32-bit program, which fault when misaligned.
         if let ivars = ro.pointee.ivars {
+            var alignment = 1
+            IvarList.forEach(ivars) { ivar in
+                let raw = ivar.pointee.alignment_raw
+                alignment = max(alignment, raw == UInt32.max ? Layout.word : 1 << Int(min(raw, 6)))
+            }
+            delta = (delta + alignment - 1) & ~(alignment - 1)
             IvarList.forEach(ivars) { ivar in
                 ivar.pointee.offset?.pointee += Int32(delta)
             }
@@ -179,7 +195,7 @@ public enum Runtime {
     /// objc_msgSend's slow path: the IMP for `selector` sent to `receiver`
     /// starting at `cls`. Runs +initialize first, tries +resolve…Method:,
     /// and falls back to _objc_msgForward.
-    public static func lookUpIMP(receiver: ObjectPointer?, selector: SEL, cls: ClassPointer) -> IMP {
+    public static func lookUpIMP(receiver: ObjectPointer?, selector: SEL, cls: ClassPointer, stret: Bool = false) -> IMP {
         if Zombies.enabled, let receiver, Zombies.report(receiver, String(cString: selector)) {
             objcFatal("message \(String(cString: selector)) sent to a deallocated object")
         }
@@ -198,6 +214,7 @@ public enum Runtime {
             imp = findMethod(info, selector)?.pointee.imp
         }
         let result = imp ?? msgForward
+        if stret, imp == nil { return msgForwardStret }
         // Until +initialize finishes, every send takes the slow path, so
         // other threads still wait for it.
         lock.withLock {
