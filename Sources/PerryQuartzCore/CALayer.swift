@@ -215,6 +215,7 @@ final class LayerState {
         LayerState.setColor(&copy.backing, backing)
         (copy.shadowOpacity, copy.shadowOffset, copy.shadowRadius) = (shadowOpacity, shadowOffset, shadowRadius)
         (copy.contents, copy.contentsScale, copy.contentsGravity) = (contents, contentsScale, contentsGravity)
+        copy.contentsRect = contentsRect
         LayerState.setColor(&copy.contentsMultiplyColor, contentsMultiplyColor)
         copy.contentsSwizzle = contentsSwizzle
         copy.livePixels = livePixels
