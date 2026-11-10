@@ -836,6 +836,8 @@ int darwin_pthread_setname_np(const char *name) {
 
 int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) DARWIN_SYMBOL(pthread_getname_np);
 int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) {
+    // Darwin answers a null thread with ESRCH; glibc would dereference it.
+    if (!thread) return ESRCH;
     char buffer[16] = {0};
     int error = pthread_getname_np(thread, buffer, sizeof(buffer));
     if (!error && size) {
