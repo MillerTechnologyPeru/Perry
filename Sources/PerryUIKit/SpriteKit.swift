@@ -33,6 +33,11 @@ extension NSObject {
     @ObjCMethod("CGImage") func skCGImage() -> UnsafeMutableRawPointer?
     @ObjCMethod("imageNamed:") func skImageNamed(_ name: String) -> NSObject?
 
+    // CATransaction's, to change layers with no animation.
+    @ObjCMethod("begin") func skBeginTransaction()
+    @ObjCMethod("commit") func skCommitTransaction()
+    @ObjCMethod("setDisableActions:") func skSetDisableActions(_ disable: Bool)
+
     // The scene's and the view's, sent so overrides run.
     @ObjCMethod("update:") func skSendUpdate(_ time: Double)
     @ObjCMethod("didEvaluateActions") func skSendDidEvaluateActions()
@@ -783,6 +788,11 @@ open class SKView: UIView {
     }
 
     private func render(_ scene: SKScene) {
+        // The layers take their new places and pictures at once, as nodes do.
+        let transaction = ObjCClass(named: "CATransaction").object
+        transaction.skBeginTransaction()
+        transaction.skSetDisableActions(true)
+        defer { transaction.skCommitTransaction() }
         let viewTransform = scene.sceneToView(bounds: state.bounds.size)
         var visible: [Visible] = []
         collect(scene, parent: viewTransform, alpha: 1, z: 0, into: &visible, isScene: true)
