@@ -349,8 +349,32 @@ public final class NSInvocation: NSObject {
                 out.withUnsafeBytes { result.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(returnSize, 8)])) }
             }
         }
+        #elseif arch(arm)
+        // Every argument is in the words, in order: the first four go in r0-r3,
+        // the rest on the stack, and Darwin does not pad 8-byte arguments. A
+        // result of more than four bytes, except a long long or a double
+        // (r0 and r1), comes back through a pointer before the arguments.
+        let returnSize = details.sizes[0]
+        let indirect = String(cString: details.parts[0]).hasPrefix("{") && returnSize > 4
+        var words = [UInt32]()
+        for (index, bytes) in storage.arguments.enumerated() {
+            let size = details.sizes[index + 1]
+            var argument = [UInt32](repeating: 0, count: (max(size, 1) + 3) / 4)
+            argument.withUnsafeMutableBytes { target in
+                bytes.withUnsafeBytes { target.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(size, $0.count)])) }
+            }
+            words += argument
+        }
+        storage.result.withUnsafeMutableBytes { result in
+            if indirect { words.insert(UInt32(UInt(bitPattern: result.baseAddress)), at: 0) }
+            if words.count < 4 { words += [UInt32](repeating: 0, count: 4 - words.count) }
+            var out = [UInt32](repeating: 0, count: 2)
+            perry_foundation_invoke_armv7(imp, words, words.count, &out)
+            guard !indirect, returnSize > 0 else { return }
+            out.withUnsafeBytes { result.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(returnSize, 8)])) }
+        }
         #else
-        foundationFatal("-[NSInvocation invoke] is available on x86_64, arm64 and i386 only")
+        foundationFatal("-[NSInvocation invoke] is available on x86_64, arm64, i386 and armv7 only")
         #endif
     }
 }
