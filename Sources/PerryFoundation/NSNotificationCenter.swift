@@ -29,7 +29,7 @@ final class NotificationCenterStorage {
         /// itself is passed over, as Foundation has done since iOS 9.
         var weakObserver: WeakObject? = nil
         let selector: SEL?
-        /// Block observers: the block and the token returned for removing it, both retained.
+        /// Block observers: the block, copied to the heap as a block that outlives the call must be, and the token returned for removing it, both retained.
         let block: id?
         let token: id?
         let name: String?
@@ -201,7 +201,7 @@ public final class NSNotificationCenter: NSObject {
     @ObjCMethod("addObserverForName:object:queue:usingBlock:")
     func add(name: String?, object: ObjCObject?, queue: ObjCObject?, block: ObjCBlock) -> ObjCObject {
         let token = ObjCObject.new()
-        observers.observers.append(.init(observer: nil, selector: nil, block: ObjC.retain(block.object),
+        observers.observers.append(.init(observer: nil, selector: nil, block: ObjC.retainBlock(block.object),
                                          token: ObjC.retain(token.id), name: name, object: object?.id))
         return token
     }
