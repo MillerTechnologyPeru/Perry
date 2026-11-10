@@ -1311,7 +1311,13 @@ static bool load_library(const char *path) {
     // program links, even when the app ships its own: libsteam_api.dylib's
     // is libPerrysteam_api.so, over the Linux Steam client. dlsym then finds
     // the provider's symbols by the same name.
-    if (!image && perry_find_provider(loader, path)) {
+    // Only a library by its name: Mono's probe for "System.Core.dll.dylib"
+    // beside an assembly is not libSystem's.
+    const char *base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    bool library_name = strncmp(path, "/System/", 8) == 0 || strncmp(path, "/usr/", 5) == 0 ||
+                        strncmp(base, "lib", 3) == 0;
+    if (!image && library_name && perry_find_provider(loader, path)) {
         perry_trace(PERRY_TRACE_LOAD, "%s -> provider %s", path, perry_find_provider(loader, path)->path);
         pthread_mutex_unlock(&lock);
         return true;

@@ -14,6 +14,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <linux/futex.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -919,8 +920,18 @@ void *darwin_dlopen(const char *path, int mode) {
         handle->name = strdup(path);
         // A Mach-O library of the app's own that isn't loaded yet is, with
         // what it links. Anything else is one of the system's, by name.
-        if (path[0] == '/' && perry_system_load_library)
-            perry_system_load_library(path);
+        if (path[0] == '/' && perry_system_load_library && !perry_system_load_library(path) &&
+            strncmp(path, "/System/", 8) != 0 && strncmp(path, "/usr/", 5) != 0 &&
+            strncmp(path, "/Library/", 9) != 0 && access(path, F_OK) != 0) {
+            // A file of the app's that isn't there fails, as Mono's probing
+            // for "<assembly>.dylib" ahead-of-time code expects.
+            static __thread char message[PATH_MAX + 64];
+            snprintf(message, sizeof(message), "dlopen(%s, 0x%04x): tried: '%s' (no such file)", path, mode, path);
+            dl_error = message;
+            free(handle->name);
+            free(handle);
+            return NULL;
+        }
     }
     return handle;
 }
