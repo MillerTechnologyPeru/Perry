@@ -100,6 +100,9 @@ enum Notifications {
             } else if let callback = observer.callback {
                 callback(centerObject, observer.observer, storage.name, storage.object, storage.userInfo)
             } else if let block = observer.block {
+                // The block may remove its own observer, which releases it: hold it until it returns.
+                ObjC.retain(block)
+                defer { ObjC.release(block) }
                 Blocks.invoke(block, as: (@convention(c) (id, id?) -> Void).self)(block, notification)
             } else if let selector = observer.selector {
                 _ = ObjC.send(observer.observer, selector, notification)
