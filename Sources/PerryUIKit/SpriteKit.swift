@@ -2,41 +2,21 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
-// SpriteKit's scene graph, drawn by QuartzCore's layers. A scene's nodes
-// are kept as nodes (position, rotation, scale, alpha, z position, and for
-// sprites and shapes what they show); a view presenting a scene runs its
-// frames — the scene's -update:, then the evaluate, simulate and finish
-// steps — and then gives each visible sprite and shape a layer, flat under
-// the view's own, placed by the node's transform through the scene's scale
-// mode and ordered by z position. There are no actions, physics, effects,
-// text, video or particles.
+// SpriteKit's scene graph. A scene's nodes are kept as nodes (position,
+// rotation, scale, alpha, z position, and for sprites and shapes what they
+// show); a view presenting a scene runs its frames — the scene's -update:,
+// then the evaluate, simulate and finish steps — and then draws the scene
+// itself with OpenGL ES (SpriteKitRenderer.swift), showing the frame in its
+// own layer: nodes are not QuartzCore layers. There are no actions,
+// physics, effects, text, video or particles.
 
 // MARK: - Messages
 
-@ObjCWrapper("CAShapeLayer")
-class CAShapeLayer: CALayer {
-    @ObjCClassMethod("layer") static func makeShape() -> CAShapeLayer
-    @ObjCMethod("setPath:") func setPath(_ path: UnsafeMutableRawPointer?)
-    @ObjCMethod("setFillColor:") func setFillColor(_ color: UnsafeMutableRawPointer?)
-    @ObjCMethod("setStrokeColor:") func setStrokeColor(_ color: UnsafeMutableRawPointer?)
-    @ObjCMethod("setLineWidth:") func setLineWidth(_ width: CGFloat)
-}
-
 extension NSObject {
-    // The layers, as SpriteKit sets them.
-    @ObjCMethod("setAnchorPoint:") func skSetAnchorPoint(_ point: CGPoint)
-    @ObjCMethod("setContentsRect:") func skSetContentsRect(_ rect: CGRect)
-    @ObjCMethod("setMagnificationFilter:") func skSetMagnificationFilter(_ filter: String)
-    @ObjCMethod("setMinificationFilter:") func skSetMinificationFilter(_ filter: String)
-    @ObjCMethod("setContentsMultiplyColor:") func skSetContentsMultiplyColor(_ color: UnsafeMutableRawPointer?)
+    // Colours' and images'.
     @ObjCMethod("CGColor") func skCGColor() -> UnsafeMutableRawPointer?
     @ObjCMethod("CGImage") func skCGImage() -> UnsafeMutableRawPointer?
     @ObjCMethod("imageNamed:") func skImageNamed(_ name: String) -> NSObject?
-
-    // CATransaction's, to change layers with no animation.
-    @ObjCMethod("begin") func skBeginTransaction()
-    @ObjCMethod("commit") func skCommitTransaction()
-    @ObjCMethod("setDisableActions:") func skSetDisableActions(_ disable: Bool)
 
     // The scene's and the view's, sent so overrides run.
     @ObjCMethod("update:") func skSendUpdate(_ time: Double)
@@ -52,26 +32,13 @@ extension NSObject {
 
 enum SKSupport {
     nonisolated(unsafe) static var white: CGRef?
-    nonisolated(unsafe) static var clear: CGRef?
     nonisolated(unsafe) static var black: CGRef?
-    nonisolated(unsafe) static var gray: CGRef?
 
     /// The CGColor of a UIColor-like object, white without one.
     static func cgColor(_ color: UnsafeMutableRawPointer?) -> CGRef? {
         if let color { return NSObject(color).skCGColor() }
         if white == nil { white = CG.colorCreateSRGB(1, 1, 1, 1) }
         return white
-    }
-
-    static var clearColor: CGRef? {
-        if clear == nil { clear = CG.colorCreateSRGB(0, 0, 0, 0) }
-        return clear
-    }
-
-    /// A scene's background when it has none.
-    static var grayColor: CGRef? {
-        if gray == nil { gray = CG.colorCreateSRGB(0.15, 0.15, 0.15, 1) }
-        return gray
     }
 
     static var blackColor: CGRef? {
@@ -627,10 +594,8 @@ final class SKViewState: ObjectState {
     var running = false
     var showsFPS = false, showsNodeCount = false, showsDrawCount = false, showsPhysics = false
     var allowsTransparency = false
-    /// The background, drawn over the scene's rectangle, and the layer of
-    /// each node shown last frame.
-    var background: CALayer?
-    var layers: [UnsafeMutableRawPointer: (layer: CALayer, shape: Bool)] = [:]
+    /// The view's drawing, made at its first frame.
+    var renderer: SKRenderer?
 }
 
 @ObjCClass("SKView")
@@ -698,7 +663,6 @@ open class SKView: UIView {
             old.skSendWillMove(from: self)
             old.node.view = nil
         }
-        removeLayers()
         sk.scene = scene
         guard let scene else {
             stopFrames()
@@ -750,7 +714,7 @@ open class SKView: UIView {
         Frames.remove(sk)
     }
 
-    /// One frame: the scene's steps, then the layers.
+    /// One frame: the scene's steps, then its drawing.
     func runFrame() {
         guard let scene = sk.scene, !sk.paused, !scene.node.paused else { return }
         if scene.node.scaleMode == 3 { scene.setSize(state.bounds.size) }
@@ -758,131 +722,8 @@ open class SKView: UIView {
         scene.skSendDidEvaluateActions()
         scene.skSendDidSimulatePhysics()
         scene.skSendDidFinishUpdate()
-        render(scene)
-    }
-
-    // MARK: Layers
-
-    private func removeLayers() {
-        for entry in sk.layers.values { entry.layer.removeFromSuperlayer() }
-        sk.layers = [:]
-        sk.background?.removeFromSuperlayer()
-        sk.background = nil
-    }
-
-    private struct Visible {
-        let node: SKNode
-        let matrix: CGAffineTransform
-        let alpha: CGFloat
-        let z: CGFloat
-    }
-
-    private func collect(_ node: SKNode, parent: CGAffineTransform, alpha: CGFloat, z: CGFloat, into list: inout [Visible], isScene: Bool) {
-        let state = node.node
-        guard !state.hidden, state.alpha > 0 else { return }
-        let matrix = isScene ? parent : SKSupport.rotationScale(state).concatenating(parent)
-        let alpha = alpha * (isScene ? 1 : state.alpha)
-        let z = z + (isScene ? 0 : state.zPosition)
-        if node.is(SKSpriteNode.self) || node.is(SKShapeNode.self) { list.append(Visible(node: node, matrix: matrix, alpha: alpha, z: z)) }
-        for child in state.children { collect(child.unsafeCast(to: SKNode.self), parent: matrix, alpha: alpha, z: z, into: &list, isScene: false) }
-    }
-
-    private func render(_ scene: SKScene) {
-        // The layers take their new places and pictures at once, as nodes do.
-        let transaction = ObjCClass(named: "CATransaction").object
-        transaction.skBeginTransaction()
-        transaction.skSetDisableActions(true)
-        defer { transaction.skCommitTransaction() }
-        let viewTransform = scene.sceneToView(bounds: state.bounds.size)
-        var visible: [Visible] = []
-        collect(scene, parent: viewTransform, alpha: 1, z: 0, into: &visible, isScene: true)
-        // Back to front; nodes at the same depth keep the tree's order.
-        let ordered = visible.enumerated().sorted { ($0.element.z, $0.offset) < ($1.element.z, $1.offset) }.map(\.element)
-
-        updateBackground(scene, viewTransform)
-        var seen = Set<UnsafeMutableRawPointer>()
-        for (index, item) in ordered.enumerated() {
-            let object = item.node.objcObject
-            let shape = item.node.is(SKShapeNode.self)
-            seen.insert(object)
-            var entry = sk.layers[object]
-            if entry == nil || entry!.shape != shape {
-                entry?.layer.removeFromSuperlayer()
-                let layer: CALayer = shape ? CAShapeLayer.makeShape() : CALayer.make()
-                if shape { layer.skSetAnchorPoint(.zero) }
-                state.layer.addSublayer(layer)
-                entry = (layer, shape)
-                sk.layers[object] = entry
-            }
-            let layer = entry!.layer
-            layer.setZPosition(CGFloat(index + 1))
-            layer.setOpacity(Float(item.alpha))
-            if shape {
-                update(shape: item.node.node, layer: layer.unsafeCast(to: CAShapeLayer.self), matrix: item.matrix)
-            } else {
-                update(sprite: item.node.node, layer: layer, matrix: item.matrix)
-            }
-        }
-        for (object, entry) in sk.layers where !seen.contains(object) {
-            entry.layer.removeFromSuperlayer()
-            sk.layers[object] = nil
-        }
-    }
-
-    private func updateBackground(_ scene: SKScene, _ viewTransform: CGAffineTransform) {
-        if sk.background == nil {
-            let layer = CALayer.make()
-            layer.setZPosition(0)
-            state.layer.addSublayer(layer)
-            sk.background = layer
-        }
-        let size = scene.node.sceneSize, anchor = scene.node.sceneAnchor
-        let rect = viewTransform.apply(CGRect(x: -anchor.x * size.width, y: -anchor.y * size.height, width: size.width, height: size.height))
-        let layer = sk.background!
-        layer.setBounds(CGRect(origin: .zero, size: rect.size))
-        layer.setPosition(CGPoint(x: rect.midX, y: rect.midY))
-        // A scene with no background color is gray, as SpriteKit's is.
-        layer.setBackgroundColor(scene.node.backgroundColor.map { SKSupport.cgColor($0) } ?? SKSupport.grayColor)
-    }
-
-    /// A sprite: its layer is as big as the sprite and centered on its
-    /// middle, turned and scaled by the node's matrix with the vertical flip
-    /// between SpriteKit's up and the layer's down.
-    private func update(sprite node: SKNodeState, layer: CALayer, matrix: CGAffineTransform) {
-        let size = node.size
-        let center = matrix.apply(CGPoint(x: (0.5 - node.anchor.x) * size.width, y: (0.5 - node.anchor.y) * size.height))
-        layer.setBounds(CGRect(origin: .zero, size: size))
-        layer.setPosition(center)
-        let linear = CGAffineTransform(a: matrix.a, b: matrix.b, c: matrix.c, d: matrix.d, tx: 0, ty: 0)
-        layer.setAffineTransform(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0).concatenating(linear))
-        if let texture = node.texture, let image = texture.state.image {
-            let rect = texture.state.rect
-            layer.setContents(NSObject(image))
-            // The texture's rectangle starts at the bottom left; the layer's at the top left.
-            layer.skSetContentsRect(CGRect(x: rect.minX, y: 1 - rect.minY - rect.height, width: rect.width, height: rect.height))
-            let filter = texture.state.filtering == 0 ? "nearest" : "linear"
-            layer.skSetMagnificationFilter(filter)
-            layer.skSetMinificationFilter(filter)
-            layer.setBackgroundColor(nil)
-            layer.skSetContentsMultiplyColor(node.colorBlendFactor > 0 ? SKSupport.cgColor(node.color) : nil)
-        } else {
-            layer.setContents(nil)
-            layer.skSetContentsMultiplyColor(nil)
-            layer.setBackgroundColor(SKSupport.cgColor(node.color))
-        }
-    }
-
-    /// A shape: the path is in the node's own Y-up coordinates and the layer
-    /// is at the node's origin, turned and scaled by the matrix.
-    private func update(shape node: SKNodeState, layer: CAShapeLayer, matrix: CGAffineTransform) {
-        layer.setBounds(CGRect(x: 0, y: 0, width: 1, height: 1))
-        layer.setPosition(matrix.apply(.zero))
-        // The path is already in the node's up-pointing coordinates, which the matrix takes down.
-        layer.setAffineTransform(CGAffineTransform(a: matrix.a, b: matrix.b, c: matrix.c, d: matrix.d, tx: 0, ty: 0))
-        layer.setPath(node.path)
-        layer.setFillColor(node.fillColor.map { SKSupport.cgColor($0) } ?? SKSupport.clearColor)
-        layer.setStrokeColor(node.strokeColor.map { SKSupport.cgColor($0) } ?? SKSupport.cgColor(nil))
-        layer.setLineWidth(node.lineWidth)
+        if sk.renderer == nil { sk.renderer = SKRenderer() }
+        sk.renderer?.draw(scene, in: self, scale: state.geometry.contentsScale, layer: state.layer, opaque: !sk.allowsTransparency)
     }
 }
 
