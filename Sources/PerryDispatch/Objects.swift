@@ -215,7 +215,23 @@ open class OSDispatchSource: OSDispatchObject, OSDispatchSourceProtocol {
 }
 
 @ObjCClass("OS_dispatch_data")
-open class OSDispatchData: OSDispatchObject, OSDispatchDataProtocol {}
+open class OSDispatchData: OSDispatchObject, OSDispatchDataProtocol {
+    /// Dispatch data stands in for NSData where a program hands it to
+    /// Foundation, as NSUserDefaults' property list check does on Darwin.
+    @ObjCMethod("length")
+    func length() -> UInt { UInt(dispatch_data_get_size(objcObject)) }
+
+    /// The bytes, contiguous, for as long as the autorelease pool the
+    /// message was sent in.
+    @ObjCMethod("bytes")
+    func bytes() -> UnsafeRawPointer? {
+        var buffer: UnsafeRawPointer?
+        var size = 0
+        guard let mapped = dispatch_data_create_map(objcObject, &buffer, &size) else { return nil }
+        _ = ObjCRuntime.autorelease(mapped)
+        return buffer
+    }
+}
 
 @ObjCClass("OS_dispatch_io")
 open class OSDispatchIO: OSDispatchObject, OSDispatchIOProtocol {}
