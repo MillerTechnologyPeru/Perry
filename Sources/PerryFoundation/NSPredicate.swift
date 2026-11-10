@@ -15,6 +15,11 @@ indirect enum ExpressionNode {
     case aggregate([ExpressionNode])
     /// A function by name ("count:", "max:") of argument expressions.
     case function(String, [ExpressionNode])
+    /// A substitution variable ("$p"), bound by a subquery.
+    case variable(String)
+    /// SUBQUERY(collection, $variable, predicate): the members of the
+    /// collection the predicate holds for.
+    case subquery(ExpressionNode, String, PredicateNode)
 
     /// NSExpressionType.
     var type: UInt {
@@ -24,6 +29,8 @@ indirect enum ExpressionNode {
         case .keyPath: return 3
         case .aggregate: return 14
         case .function: return 4
+        case .variable: return 2
+        case .subquery: return 13
         }
     }
 }
@@ -132,6 +139,9 @@ enum PredicateFormat {
         case .evaluatedObject: return "SELF"
         case .aggregate(let elements): return "{" + elements.map(expression).joined(separator: ", ") + "}"
         case .constant(let value): return constant(value?.objcObject)
+        case .variable(let name): return "$" + name
+        case .subquery(let collection, let variable, let predicate):
+            return "SUBQUERY(" + expression(collection) + ", $" + variable + ", " + PredicateFormat.predicate(predicate) + ")"
         case .function(let name, let arguments):
             if let symbol = PredicateArithmetic.symbols[name], arguments.count == 2 {
                 return "(" + expression(arguments[0]) + " \(symbol) " + expression(arguments[1]) + ")"
@@ -501,7 +511,10 @@ struct PredicateParser {
             case "NO", "FALSE": return .constant(ObjCObject(perry_foundation_boolean(0)))
             case "NIL", "NULL": return .constant(nil)
             case "SELF": return .evaluatedObject
-            default: return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
+            default:
+                if word.uppercased() == "SUBQUERY", isSymbol("(") { return subquery() }
+                if word.hasPrefix("$"), word.count > 1 { return .variable(String(word.dropFirst())) }
+                return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
             }
         case .symbol("{"):
             var elements: [ExpressionNode] = []
@@ -516,6 +529,31 @@ struct PredicateParser {
         default:
             fail("unexpected \(token)")
         }
+    }
+
+    /// SUBQUERY(collection, $variable, predicate), and an aggregate key after
+    /// it (".@count").
+    private mutating func subquery() -> ExpressionNode {
+        advance()
+        let collection = parseExpression()
+        guard isSymbol(",") else { fail("missing ,") }
+        advance()
+        guard case .word(let variable) = current, variable.hasPrefix("$") else { fail("SUBQUERY needs a variable") }
+        advance()
+        guard isSymbol(",") else { fail("missing ,") }
+        advance()
+        let predicate = parseOr()
+        guard isSymbol(")") else { fail("missing )") }
+        advance()
+        var node = ExpressionNode.subquery(collection, String(variable.dropFirst()), predicate)
+        if isSymbol("."), case .word(let key) = tokens[min(position + 1, tokens.count - 1)], key.hasPrefix("@") {
+            let functions = ["@count": "count:", "@sum": "sum:", "@avg": "average:", "@max": "max:", "@min": "min:"]
+            guard let function = functions[key] else { fail("unknown operator \(key)") }
+            advance()
+            advance()
+            node = .function(function, [node])
+        }
+        return node
     }
 
     private mutating func substitution(_ spec: String) -> ExpressionNode {
@@ -582,8 +620,20 @@ enum PredicateEvaluation {
         case .evaluatedObject: return object
         case .aggregate(let elements): return Arrays.autoreleased(elements.compactMap { value($0, object) })
         case .function(let name, let arguments): return function(name, arguments.map { value($0, object) })
+        case .variable(let name): return variables[name]
+        case .subquery(let collection, let name, let predicate):
+            let items = elements(value(collection, object)) ?? []
+            let saved = variables[name]
+            defer { variables[name] = saved }
+            return Arrays.autoreleased(items.filter { item in
+                variables[name] = item
+                return evaluate(predicate, object)
+            })
         }
     }
+
+    /// The variables subqueries have bound, while they evaluate.
+    nonisolated(unsafe) static var variables: [String: id] = [:]
 
     /// The aggregate functions over an argument's collection, and the case
     /// changes over a string.
