@@ -165,13 +165,13 @@ open class UINavigationController: UIViewController {
         return NSMutableArray.of(popped)
     }
 
-    @ObjCMethod("setViewControllers:") func setViewControllers(_ controllers: NSArray) { setViewControllers(controllers, animated: false) }
+    @ObjCMethod("setViewControllers:") func setViewControllers(_ controllers: NSArray?) { setViewControllers(controllers, animated: false) }
 
     /// Controllers that leave are released, those that come are adopted;
     /// all but the new top finish moving at once.
     @ObjCMethod("setViewControllers:animated:")
-    func setViewControllers(_ controllers: NSArray, animated: Bool) {
-        let new = controllers.elements.map { $0.unsafeCast(to: UIViewController.self) }
+    func setViewControllers(_ controllers: NSArray?, animated: Bool) {
+        let new = (controllers?.elements ?? []).map { $0.unsafeCast(to: UIViewController.self) }
         let old = navigation.viewControllers
         let oldTop = old.last
         for controller in old where !new.contains(where: { $0.objcObject == controller.objcObject }) {
