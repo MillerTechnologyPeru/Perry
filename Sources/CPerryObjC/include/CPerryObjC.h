@@ -214,10 +214,14 @@ const void *perry_objc_msgSend_fpret_address(void);
 const void *perry_objc_msgSendSuper2_stret_address(void);
 #endif
 const void *perry_objc_msgForward_address(void);
+/// The forwarder for messages that return a structure through a pointer (armv7).
+const void *perry_objc_msgForward_stret_address(void);
 
 // objc_msgSend's slow path, implemented in Swift: the IMP for `sel` sent to
 // `receiver`, whose class (or, for super sends, the starting class) is `cls`.
 void *perry_objc_lookup_slow(void *receiver, const void *sel, perry_objc_class *cls);
+/// For a message whose result is returned through a pointer in r0 (armv7).
+void *perry_objc_lookup_slow_stret(void *receiver, const void *sel, perry_objc_class *cls);
 
 // _objc_msgForward's decision, implemented in Swift: send to `target`
 // instead, or jump to `handler` with the original arguments.
