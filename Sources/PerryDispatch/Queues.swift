@@ -1,5 +1,66 @@
 import CPerryDispatch
 import PerryObjCInterop
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
+
+/// The autorelease pool of the blocks a worker thread runs. Darwin's
+/// libdispatch keeps one pool across a drain of a queue, so an autoreleased
+/// object one block made lives into the blocks after it, and programs rely on
+/// that (a string one block formats and the next uses without a retain). A
+/// pool per block frees it between them. This keeps the thread's pool across
+/// blocks and pops it when the blocks that follow arrive after a gap or it has
+/// held objects for a while, which is where a drain would have ended.
+enum DrainPool {
+    private final class State {
+        var pool: UnsafeMutableRawPointer?
+        var touched: UInt64 = 0
+        var born: UInt64 = 0
+    }
+
+    /// How long a pool may sit unused before the next block starts a new one,
+    /// and the longest it is kept at all, in nanoseconds.
+    private static let gap: UInt64 = 5_000_000
+    private static let limit: UInt64 = 100_000_000
+
+    private static let key: pthread_key_t = {
+        var key = pthread_key_t()
+        pthread_key_create(&key) { raw in
+            if let raw { Unmanaged<State>.fromOpaque(UnsafeRawPointer(raw)).release() }
+        }
+        return key
+    }()
+
+    private static func now() -> UInt64 {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return UInt64(time.tv_sec) * 1_000_000_000 + UInt64(time.tv_nsec)
+    }
+
+    private static func state() -> State {
+        if let raw = pthread_getspecific(key) { return Unmanaged<State>.fromOpaque(raw).takeUnretainedValue() }
+        let state = State()
+        pthread_setspecific(key, Unmanaged.passRetained(state).toOpaque())
+        return state
+    }
+
+    static func run<Result>(_ body: () -> Result) -> Result {
+        let state = state()
+        let start = now()
+        if state.pool != nil, start - state.touched > gap || start - state.born > limit {
+            ObjCRuntime.poolFunctions.pop(state.pool)
+            state.pool = nil
+        }
+        if state.pool == nil {
+            state.pool = ObjCRuntime.poolFunctions.push()
+            state.born = start
+        }
+        defer { state.touched = now() }
+        return body()
+    }
+}
 
 // Queues: each Darwin queue stands for a Linux queue, which does the work.
 // Blocks are copied with Darwin's _Block_copy and run by the _f variants
@@ -27,7 +88,7 @@ enum Blocks {
     static let runOnce: Function = { block in
         guard let block else { return }
         keepingLinuxRegisters {
-            ObjCRuntime.autoreleasepool { Blocks.invoke(block) }
+            DrainPool.run { Blocks.invoke(block) }
             Runtime.blockRelease(block)
         }
     }
@@ -49,7 +110,7 @@ enum Blocks {
         guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, Function).self) else { return }
         let (context, work) = call.pointee
         call.deallocate()
-        keepingLinuxRegisters { ObjCRuntime.autoreleasepool { work(context) } }
+        keepingLinuxRegisters { DrainPool.run { work(context) } }
     }
 
     /// For the synchronous _f calls, which libdispatch runs before they
