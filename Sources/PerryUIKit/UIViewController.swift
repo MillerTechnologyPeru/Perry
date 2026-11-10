@@ -49,6 +49,8 @@ final class ViewControllerState: ObjectState {
     /// UIModalPresentationStyle: automatic -2.
     var modalPresentationStyle = -2
     var modalTransitionStyle = 0
+    /// Assigned, not retained, as UIKit's is.
+    var transitioningDelegate: UnsafeMutableRawPointer?
     var definesPresentationContext = false
     var providesPresentationContextTransitionStyle = false
     var modalInPresentation = false
@@ -258,6 +260,8 @@ open class UIViewController: UIResponder {
     @ObjCMethod("setModalPresentationStyle:") func setModalPresentationStyle(_ style: Int) { state.modalPresentationStyle = style }
     @ObjCMethod("modalTransitionStyle") func modalTransitionStyle() -> Int { state.modalTransitionStyle }
     @ObjCMethod("setModalTransitionStyle:") func setModalTransitionStyle(_ style: Int) { state.modalTransitionStyle = style }
+    @ObjCMethod("transitioningDelegate") func transitioningDelegate() -> UnsafeMutableRawPointer? { state.transitioningDelegate }
+    @ObjCMethod("setTransitioningDelegate:") func setTransitioningDelegate(_ delegate: UnsafeMutableRawPointer?) { state.transitioningDelegate = delegate }
     @ObjCMethod("isModalInPresentation") func isModalInPresentation() -> Bool { state.modalInPresentation }
     @ObjCMethod("setModalInPresentation:") func setModalInPresentation(_ modal: Bool) { state.modalInPresentation = modal }
     /// Whether a presented controller sets the status bar: the status bar

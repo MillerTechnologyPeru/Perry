@@ -114,6 +114,12 @@ enum PropertyValue: Codable, Equatable {
             self = .dictionary(values)
         } else if Nulls.isNull(object) {
             self = .null
+        } else if ObjC.className(object).hasPrefix("OS_dispatch_data") {
+            // Dispatch data is accepted as data, as Darwin's property list
+            // check does.
+            let length = Int(ObjC.sendUInt(object, ObjC.selector("length")))
+            let bytes = length > 0 ? ObjC.sendPointer(object, ObjC.selector("bytes")) : nil
+            self = .data(bytes.map { Data(bytes: $0, count: length) } ?? Data())
         } else {
             PropertyValue.rejected = ObjC.className(object)
             return nil

@@ -133,6 +133,17 @@ public class NSOrderedSet: NSObject {
         OrderedSets.make(cls.pointer, OrderedSets.storage(orderedSet.id).members)
     }
 
+    /// The members in a range of another ordered set. `copyItems` shares the
+    /// members: they are not copied.
+    @ObjCClassMethod("orderedSetWithOrderedSet:range:copyItems:")
+    static func make(_ cls: ObjCClass, orderedSet: ObjCObject, range: NSRange, copyItems: Bool) -> UnsafeMutableRawPointer? {
+        let members = OrderedSets.storage(orderedSet.id).members
+        guard Int(range.location + range.length) <= members.count else {
+            foundationFatal("+[NSOrderedSet orderedSetWithOrderedSet:range:copyItems:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(members.count - 1)]")
+        }
+        return OrderedSets.make(cls.pointer, Array(members[Int(range.location)..<Int(range.location + range.length)]))
+    }
+
     @ObjCMethod("init")
     func initialize() -> Self {
         Storage.set(objcObject, OrderedSetStorage())
@@ -239,6 +250,9 @@ public final class NSMutableOrderedSet: NSOrderedSet {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         OrderedSets.mutableClass = cls.storage
     }
+
+    @ObjCClassMethod("orderedSetWithCapacity:")
+    static func make(_ cls: ObjCClass, capacity: UInt) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, []) }
 
     @ObjCMethod("addObject:") func add(_ object: ObjCObject) { storage.append(object.id) }
 

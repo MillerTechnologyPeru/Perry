@@ -115,6 +115,7 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("allowsExpensiveNetworkAccess") func allowsExpensiveNetworkAccess() -> Bool { true }
     @ObjCMethod("allowsConstrainedNetworkAccess") func allowsConstrainedNetworkAccess() -> Bool { true }
     @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(request.networkServiceType) }
+    @ObjCMethod("assumesHTTP3Capable") func assumesHTTP3Capable() -> Bool { false }
 
     /// A copy is of the request's own class, as CFNetwork's is: a mutable
     /// request's copy is mutable, which Swift's URLRequest relies on.
@@ -212,6 +213,12 @@ open class NSMutableURLRequest: NSURLRequest {
     @ObjCMethod("setMainDocumentURL:") func setMainDocumentURL(_ url: NSURL?) { request.mainDocumentURL = url?.url }
     @ObjCMethod("setAllowsCellularAccess:") func setAllowsCellularAccess(_ value: Bool) { request.allowsCellularAccess = value }
     @ObjCMethod("setNetworkServiceType:") func setNetworkServiceType(_ value: UInt) { request.networkServiceType = Int(value) }
+
+    /// Hints about the network that the loader has no use for: the getters
+    /// answer what it does, so a program setting them is not refused.
+    @ObjCMethod("setAllowsExpensiveNetworkAccess:") func setAllowsExpensiveNetworkAccess(_ value: Bool) {}
+    @ObjCMethod("setAllowsConstrainedNetworkAccess:") func setAllowsConstrainedNetworkAccess(_ value: Bool) {}
+    @ObjCMethod("setAssumesHTTP3Capable:") func setAssumesHTTP3Capable(_ value: Bool) {}
 }
 
 /// NSCoder's keyed messages.

@@ -381,6 +381,10 @@ enum SessionConstants {
     static let AVAudioSessionPortHDMI = "HDMIOutput"
     static let AVAudioSessionPortHeadphones = "Headphones"
     static let AVAudioSessionPortLineOut = "LineOut"
+    static let AVAudioSessionPortCarAudio = "CarAudio"
+    static let AVAudioSessionPortHeadsetMic = "MicrophoneWired"
+    static let AVAudioSessionPortUSBAudio = "USBAudio"
+    static let AVAudioSessionInterruptionWasSuspendedKey = "AVAudioSessionInterruptionWasSuspendedKey"
 }
 
 /// AVAudioPlayerDelegate's message.

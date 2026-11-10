@@ -257,6 +257,10 @@ open class UIButton: UIControl {
         return label
     }
 
+    /// iOS 2's: the title label's line break mode.
+    @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { titleLabel().lineBreakMode() }
+    @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { titleLabel().setLineBreakMode(mode) }
+
     /// iOS 2's: the title label's font.
     @ObjCMethod("font") func font() -> UIFont { titleLabel().fontObject() }
     @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { titleLabel().setFont(font) }
@@ -297,6 +301,10 @@ open class UIButton: UIControl {
     @ObjCMethod("currentImage") func currentImage() -> UIImage? { current(button.images) }
     @ObjCMethod("showsTouchWhenHighlighted") func showsTouchWhenHighlighted() -> Bool { false }
     @ObjCMethod("setShowsTouchWhenHighlighted:") func setShowsTouchWhenHighlighted(_ shows: Bool) {}
+    @ObjCMethod("adjustsImageWhenHighlighted") func adjustsImageWhenHighlighted() -> Bool { true }
+    @ObjCMethod("setAdjustsImageWhenHighlighted:") func setAdjustsImageWhenHighlighted(_ adjusts: Bool) {}
+    @ObjCMethod("adjustsImageWhenDisabled") func adjustsImageWhenDisabled() -> Bool { true }
+    @ObjCMethod("setAdjustsImageWhenDisabled:") func setAdjustsImageWhenDisabled(_ adjusts: Bool) {}
     @ObjCMethod("contentEdgeInsets") func contentEdgeInsets() -> UIEdgeInsets { button.contentEdgeInsets }
     @ObjCMethod("setContentEdgeInsets:") func setContentEdgeInsets(_ insets: UIEdgeInsets) { button.contentEdgeInsets = insets; setNeedsLayout() }
     @ObjCMethod("titleEdgeInsets") func titleEdgeInsets() -> UIEdgeInsets { button.titleEdgeInsets }

@@ -163,6 +163,68 @@ extension NSNotificationCenter.Publisher: Equatable {
     }
 }
 
+@available(*, unavailable)
+extension NSNotificationCenter {
+    /// The notifications named, as an asynchronous sequence: each posted
+    /// while the sequence is being iterated, and no end to it.
+    @preconcurrency
+    public func notifications(named name: Notification.Name, object: (AnyObject & Sendable)? = nil) -> NSNotificationCenter.Notifications {
+        Notifications(center: self, name: name, object: object)
+    }
+
+    final public class Notifications: AsyncSequence, @unchecked Sendable {
+        public typealias Element = Notification
+
+        private let stream: AsyncStream<Notification>
+
+        init(center: NSNotificationCenter, name: Notification.Name, object: AnyObject?) {
+            var continuation: AsyncStream<Notification>.Continuation!
+            stream = AsyncStream { continuation = $0 }
+            let yielding = continuation!
+            let observer = center.addObserver(forName: name, object: object, queue: nil) { yielding.yield($0) }
+            let token = ObserverToken(center: center, observer: observer)
+            yielding.onTermination = { _ in token.remove() }
+        }
+
+        public struct Iterator: AsyncIteratorProtocol {
+            fileprivate let box: IteratorBox
+
+            public func next() async -> Notification? { await box.next() }
+        }
+
+        final public __consuming func makeAsyncIterator() -> NSNotificationCenter.Notifications.Iterator {
+            Iterator(box: IteratorBox(stream.makeAsyncIterator()))
+        }
+    }
+}
+
+@available(*, unavailable)
+private final class IteratorBox: @unchecked Sendable {
+    private var iterator: AsyncStream<Notification>.Iterator
+
+    init(_ iterator: AsyncStream<Notification>.Iterator) { self.iterator = iterator }
+
+    func next() async -> Notification? {
+        var local = iterator
+        let notification = await local.next()
+        iterator = local
+        return notification
+    }
+}
+
+@available(*, unavailable)
+private final class ObserverToken: @unchecked Sendable {
+    private let center: NSNotificationCenter
+    private let observer: NSObjectProtocol
+
+    init(center: NSNotificationCenter, observer: NSObjectProtocol) {
+        self.center = center
+        self.observer = observer
+    }
+
+    func remove() { center.removeObserver(observer) }
+}
+
 /// Observes the center while its subscriber wants notifications, and sends
 /// them as long as it asks for more.
 @available(*, unavailable)

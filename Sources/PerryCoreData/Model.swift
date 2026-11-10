@@ -174,7 +174,25 @@ open class NSManagedObjectModel: NSObject {
 
     /// The model for CoreModel's stores.
     var coreModel: Model {
-        Model(entities: state.entities.map(\.coreModelEntity))
+        var entities = state.entities.map(\.coreModelEntity)
+        // CoreModel's stores keep a relationship in the table of the side
+        // that is to-one, or in a join table, and need the other side to say
+        // which: a relationship with no inverse gets one made for it, to many,
+        // that no property of the entity's objects names.
+        for index in entities.indices {
+            for position in entities[index].relationships.indices {
+                var relationship = entities[index].relationships[position]
+                guard let destination = entities.firstIndex(where: { $0.id == relationship.destinationEntity }),
+                      !entities[destination].relationships.contains(where: { $0.id == relationship.inverseRelationship })
+                else { continue }
+                let synthetic = PropertyKey(rawValue: PropertyKey.inversePrefix + entities[index].id.rawValue + "_" + relationship.id.rawValue)
+                entities[destination].relationships.append(
+                    Relationship(id: synthetic, type: .toMany, destinationEntity: entities[index].id, inverseRelationship: relationship.id))
+                relationship.inverseRelationship = synthetic
+                entities[index].relationships[position] = relationship
+            }
+        }
+        return Model(entities: entities)
     }
 }
 
@@ -431,22 +449,30 @@ open class NSRelationshipDescription: NSPropertyDescription {
 // MARK: - Stored names
 
 /// A property's key in CoreModel's stores. CoreModel-SQLite names each
-/// table's primary key column "id", so a property of that name is stored as
+/// table's primary key column "id", and SQLite's column names do not tell
+/// "id" from "ID" or "Id", so a property of any such name is stored under
 /// another, and named back when read.
 extension PropertyKey {
-    static let reservedName = "id"
-    static let renamed = "_perry_id"
+    static let prefix = "_perry_"
+    /// The start of the name of an inverse made for a relationship that has none.
+    static let inversePrefix = "_perry_inverse_"
+
+    /// Whether SQLite would take `name` for the primary key's column.
+    static func isReserved(_ name: String) -> Bool { name.lowercased() == "id" }
 
     init(stored name: String) {
-        self.init(rawValue: name == PropertyKey.reservedName ? PropertyKey.renamed : name)
+        self.init(rawValue: PropertyKey.isReserved(name) ? PropertyKey.prefix + name : name)
     }
 
     /// The property this key stores.
-    var propertyName: String { rawValue == PropertyKey.renamed ? PropertyKey.reservedName : rawValue }
+    var propertyName: String {
+        rawValue.hasPrefix(PropertyKey.prefix) && PropertyKey.isReserved(String(rawValue.dropFirst(PropertyKey.prefix.count)))
+            ? String(rawValue.dropFirst(PropertyKey.prefix.count)) : rawValue
+    }
 
     /// A predicate's key path in stored names, component by component.
     static func storedKeyPath(_ keyPath: String) -> String {
         keyPath.split(separator: ".", omittingEmptySubsequences: false)
-            .map { $0 == reservedName ? renamed : String($0) }.joined(separator: ".")
+            .map { isReserved(String($0)) ? prefix + $0 : String($0) }.joined(separator: ".")
     }
 }

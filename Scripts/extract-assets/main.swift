@@ -94,6 +94,8 @@ for path in CommandLine.arguments.dropFirst() {
         }
         for (slot, entry) in chosen {
             let file = output.appendingPathComponent("\(name)\(slot.dark ? "~dark" : "")@\(slot.scale)x.png")
+            // A name in a namespaced folder ("youtube_outline/chromecast") is a path.
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             guard let destination = CGImageDestinationCreateWithURL(file as CFURL, UTType.png.identifier as CFString, 1, nil) else {
                 continue
             }

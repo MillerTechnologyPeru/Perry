@@ -104,6 +104,10 @@ enum KeyValueCoding {
         if ObjC.isKind(object, of: Sets.setClass) {
             return Sets.autoreleased(Sets.elements(object).compactMap { value($0, key) })
         }
+        // An ordered set's, as an ordered set, by the same rule.
+        if ObjC.isKind(object, of: OrderedSets.setClass) {
+            return OrderedSets.make(OrderedSets.setClass, OrderedSets.storage(object).members.compactMap { value($0, key) })
+        }
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
         for name in [key, "is" + capitalized, "get" + capitalized] {
             let selector = ObjC.selector(name)
