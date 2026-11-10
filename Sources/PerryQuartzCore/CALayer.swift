@@ -1028,7 +1028,18 @@ extension CALayer {
         guard let image else { return }
         let size = CGSize(width: CGFloat(CG.imageGetWidth(image)) / state.contentsScale,
                           height: CGFloat(CG.imageGetHeight(image)) / state.contentsScale)
-        let rect = place(size, in: state.bounds, gravity: state.contentsGravity)
+        var rect = place(size, in: state.bounds, gravity: state.contentsGravity)
+        // contentsRect, a part of the image from its top left, fills the place:
+        // the whole image is drawn larger, clipped to the place.
+        let part = state.contentsRect
+        let partial = part != CGRect(x: 0, y: 0, width: 1, height: 1) && part.width > 0 && part.height > 0
+        CG.saveGState(context)
+        if partial {
+            CG.clipToRect(context, rect)
+            rect = CGRect(x: rect.minX - part.minX / part.width * rect.width, y: rect.minY - part.minY / part.height * rect.height,
+                          width: rect.width / part.width, height: rect.height / part.height)
+        }
+        defer { CG.restoreGState(context) }
         guard let color = state.contentsMultiplyColor ?? (state.contentsSwizzle == "AAAA" ? whiteColor : nil) else {
             CG.drawFlipped(image, in: rect, context: context)
             return
