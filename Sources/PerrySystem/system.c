@@ -103,6 +103,13 @@ uint64_t darwin_clock_gettime_nsec_np(int clock) {
     return nanoseconds(linux_clock);
 }
 
+// The processor time used, in millionths of a second on both systems. The
+// clock_t is as wide as a long: a word.
+unsigned long darwin_clock(void) DARWIN_SYMBOL(clock);
+unsigned long darwin_clock(void) {
+    return (unsigned long)clock();
+}
+
 // MARK: - Mach time
 
 // Mach time ticks as on Apple silicon, 24 MHz: a timebase of 125/3 (a
