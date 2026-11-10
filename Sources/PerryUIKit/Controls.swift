@@ -297,6 +297,10 @@ open class UIButton: UIControl {
     @ObjCMethod("currentImage") func currentImage() -> UIImage? { current(button.images) }
     @ObjCMethod("showsTouchWhenHighlighted") func showsTouchWhenHighlighted() -> Bool { false }
     @ObjCMethod("setShowsTouchWhenHighlighted:") func setShowsTouchWhenHighlighted(_ shows: Bool) {}
+    @ObjCMethod("adjustsImageWhenHighlighted") func adjustsImageWhenHighlighted() -> Bool { true }
+    @ObjCMethod("setAdjustsImageWhenHighlighted:") func setAdjustsImageWhenHighlighted(_ adjusts: Bool) {}
+    @ObjCMethod("adjustsImageWhenDisabled") func adjustsImageWhenDisabled() -> Bool { true }
+    @ObjCMethod("setAdjustsImageWhenDisabled:") func setAdjustsImageWhenDisabled(_ adjusts: Bool) {}
     @ObjCMethod("contentEdgeInsets") func contentEdgeInsets() -> UIEdgeInsets { button.contentEdgeInsets }
     @ObjCMethod("setContentEdgeInsets:") func setContentEdgeInsets(_ insets: UIEdgeInsets) { button.contentEdgeInsets = insets; setNeedsLayout() }
     @ObjCMethod("titleEdgeInsets") func titleEdgeInsets() -> UIEdgeInsets { button.titleEdgeInsets }
