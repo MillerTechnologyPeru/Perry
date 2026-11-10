@@ -847,6 +847,18 @@ int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) {
     return result(error);
 }
 
+// Apple silicon makes JIT memory writable or executable per thread. Linux
+// maps it both at once, so there is nothing to switch, and none supported.
+int darwin_pthread_jit_write_protect_supported_np(void) DARWIN_SYMBOL(pthread_jit_write_protect_supported_np);
+int darwin_pthread_jit_write_protect_supported_np(void) {
+    return 0;
+}
+
+void darwin_pthread_jit_write_protect_np(int enabled) DARWIN_SYMBOL(pthread_jit_write_protect_np);
+void darwin_pthread_jit_write_protect_np(int enabled) {
+    (void)enabled;
+}
+
 // The main thread is the one whose thread ID is the process ID.
 int darwin_pthread_main_np(void) DARWIN_SYMBOL(pthread_main_np);
 int darwin_pthread_main_np(void) {
