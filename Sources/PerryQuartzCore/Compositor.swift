@@ -147,6 +147,7 @@ final class Compositor {
         var contents: UnsafeMutableRawPointer? = nil
         var contentsGravity = ""
         var contentsScale: CGFloat = 0
+        var contentsRect = CGRect(x: 0, y: 0, width: 1, height: 1)
         var multiplyColor: CGRef? = nil
         var contentsSwizzle = ""
         var shape: ShapeSignature? = nil
@@ -498,6 +499,7 @@ final class Compositor {
         } else {
             (signature.backing, signature.backingSize, signature.contents) = (model.backing, model.backingSize, state.contents?.objcObject)
             (signature.contentsGravity, signature.contentsScale) = (state.contentsGravity, state.contentsScale)
+            signature.contentsRect = state.contentsRect
             (signature.multiplyColor, signature.contentsSwizzle) = (state.contentsMultiplyColor, state.contentsSwizzle)
             if let shape {
                 signature.shape = ShapeSignature(path: shape.path, fillColor: shape.fillColor, strokeColor: shape.strokeColor,
