@@ -228,7 +228,7 @@ enum GamepadTouch {
                         stick.position = center
                         stick.finger = touchDown(at: center)
                     }
-                    let step = stick.speed * size.height * elapsed
+                    let step = stick.speed * size.height * CGFloat(elapsed)
                     stick.position = CGPoint(x: stick.position.x + px * step, y: stick.position.y + py * step)
                     if let finger = stick.finger {
                         let dx = stick.position.x - center.x, dy = stick.position.y - center.y
