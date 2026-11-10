@@ -5,6 +5,7 @@
 // so apps built against Apple's bind to them by the same symbols.
 
 public import Foundation
+import UIKit
 
 // MARK: - Verification
 
@@ -212,4 +213,60 @@ extension Storefront {
     }
 
     public static var updates: Storefronts { Storefronts() }
+}
+
+// MARK: - Subscriptions and representations
+
+@available(iOS 15.0, *)
+extension Transaction {
+    public var jsonRepresentation: Data { Data() }
+}
+
+@available(iOS 15.0, *)
+extension VerificationResult where SignedType == Transaction {
+    public var jwsRepresentation: String { "" }
+}
+
+@available(iOS 15.0, *)
+extension Product.PurchaseOption {
+    public static func custom(key: String, value: Data) -> Product.PurchaseOption { Product.PurchaseOption(key: key) }
+}
+
+@available(iOS 15.0, *)
+extension Product {
+    /// What a subscription renews to: no subscription is held, so no
+    /// renewal is known.
+    public struct SubscriptionInfo {
+        public let subscriptionGroupID: String
+
+        public struct RenewalInfo {
+            public var currentProductID: String { "" }
+            public var jsonRepresentation: Data { Data() }
+        }
+
+        public struct Status {
+            public let transaction: VerificationResult<Transaction>
+            public let renewalInfo: VerificationResult<RenewalInfo>
+
+            /// The changes to subscriptions' statuses: none.
+            public struct Statuses: AsyncSequence {
+                public typealias Element = Status
+
+                public struct AsyncIterator: AsyncIteratorProtocol {
+                    public mutating func next() async -> Status? { nil }
+                    public typealias Element = Status
+                }
+
+                public func makeAsyncIterator() -> AsyncIterator { AsyncIterator() }
+            }
+
+            public static var updates: Statuses { Statuses() }
+        }
+    }
+}
+
+@available(iOS 15.0, *)
+extension AppStore {
+    /// Asks for a review: there is no App Store to review in.
+    @MainActor public static func requestReview(in scene: UIWindowScene) {}
 }
