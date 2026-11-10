@@ -584,13 +584,18 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
             return provider_lookup(loader, provider, linux_name, out);
     }
 #endif
-#if defined(__x86_64__) || defined(__i386__)
-    // x86_64's libc names variants of functions after their ABI ($INODE64,
-    // $DARWIN_EXTSN, $UNIX2003, $1050, $NOCANCEL). Providers have the
-    // current ABI, under the plain name.
+    // Darwin's libc names variants of functions after their ABI ($INODE64,
+    // $DARWIN_EXTSN, $UNIX2003, $1050) on x86, and the cancellation-free
+    // ones ($NOCANCEL) everywhere. Providers have the current ABI, under the
+    // plain name.
     const char *variant = sym ? NULL : strchr(name, '$');
     if (variant) {
-        static const char *const suffixes[] = { "$INODE64", "$DARWIN_EXTSN", "$UNIX2003", "$1050", "$NOCANCEL" };
+        static const char *const suffixes[] = {
+#if defined(__x86_64__) || defined(__i386__)
+            "$INODE64", "$DARWIN_EXTSN", "$UNIX2003", "$1050",
+#endif
+            "$NOCANCEL"
+        };
         for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
             if (strncmp(variant, suffixes[i], strlen(suffixes[i])) != 0)
                 continue;
@@ -599,7 +604,6 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
             return provider_lookup(loader, provider, plain, out);
         }
     }
-#endif
     if (!sym)
         return false;
     out->address = sym;
