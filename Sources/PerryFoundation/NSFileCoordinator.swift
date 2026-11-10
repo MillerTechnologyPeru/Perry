@@ -7,37 +7,58 @@ import PerryObjCInterop
 // calls its accessor later, on a global queue, as the real one does on its
 // queue's operations. File presenters are not told of anything.
 
-/// One file's access, to read or to write, which a coordinator grants.
-@ObjCClass("NSFileAccessIntent")
-open class NSFileAccessIntent: NSObject {
-    /// The file, retained.
+/// The file an intent is for and how it is used, kept in the object's storage.
+final class IntentStorage {
+    /// The file's URL, retained.
     var file: id?
     var options: UInt = 0
     var writes = false
 
-    @ObjCMethod("init")
-    public required override init() { super.init() }
-
     deinit {
         if let file { ObjC.release(file) }
     }
+}
 
-    private static func make(_ url: ObjCObject, _ options: UInt, writes: Bool) -> NSFileAccessIntent {
-        let intent = NSFileAccessIntent()
-        intent.file = ObjC.retain(url.id)
-        intent.options = options
-        intent.writes = writes
-        return intent
+/// One file's access, to read or to write, which a coordinator grants.
+@ObjCClass("NSFileAccessIntent")
+public class NSFileAccessIntent: NSObject {
+    nonisolated(unsafe) static var intentClass: Class!
+
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        intentClass = cls.storage
+    }
+
+    var storage: IntentStorage? { Storage.get(objcObject, as: IntentStorage.self) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: NSFileAccessIntent.intentClass)
+    }
+
+    private static func make(_ cls: ObjCClass, _ url: ObjCObject, _ options: UInt, writes: Bool) -> UnsafeMutableRawPointer? {
+        guard let object = Storage.allocate(cls.pointer) else { return nil }
+        let storage = IntentStorage()
+        storage.file = ObjC.retain(url.id)
+        storage.options = options
+        storage.writes = writes
+        Storage.set(object, storage)
+        return ObjC.autorelease(object)
     }
 
     @ObjCClassMethod("readingIntentWithURL:options:")
-    static func reading(url: ObjCObject, options: UInt) -> NSFileAccessIntent { make(url, options, writes: false) }
+    static func reading(_ cls: ObjCClass, url: ObjCObject, options: UInt) -> UnsafeMutableRawPointer? {
+        make(cls, url, options, writes: false)
+    }
 
     @ObjCClassMethod("writingIntentWithURL:options:")
-    static func writing(url: ObjCObject, options: UInt) -> NSFileAccessIntent { make(url, options, writes: true) }
+    static func writing(_ cls: ObjCClass, url: ObjCObject, options: UInt) -> UnsafeMutableRawPointer? {
+        make(cls, url, options, writes: true)
+    }
 
     @ObjCMethod("URL")
-    func url() -> ObjCObject? { file.map { ObjCObject($0) } }
+    func url() -> ObjCObject? { storage?.file.map { ObjCObject($0) } }
 }
 
 /// The accessor of an intent-based request, which runs on a queue.
