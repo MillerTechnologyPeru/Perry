@@ -975,7 +975,9 @@ open class UIView: UIResponder, UICoordinateSpace {
     }
 
     @ObjCMethod("addGestureRecognizer:")
-    func addGestureRecognizer(_ recognizer: UIGestureRecognizer) {
+    func addGestureRecognizer(_ recognizer: UIGestureRecognizer?) {
+        // A program that could not make its recognizer passes nil, which UIKit ignores.
+        guard let recognizer else { return }
         if let old = recognizer.state.view, old != objcObject { UIView.wrap(old).removeGestureRecognizer(recognizer) }
         guard !state.gestureRecognizers.contains(where: { $0.objcObject == recognizer.objcObject }) else { return }
         state.gestureRecognizers.append(recognizer)
@@ -983,7 +985,8 @@ open class UIView: UIResponder, UICoordinateSpace {
     }
 
     @ObjCMethod("removeGestureRecognizer:")
-    func removeGestureRecognizer(_ recognizer: UIGestureRecognizer) {
+    func removeGestureRecognizer(_ recognizer: UIGestureRecognizer?) {
+        guard let recognizer else { return }
         state.gestureRecognizers.removeAll { $0.objcObject == recognizer.objcObject }
         if recognizer.state.view == objcObject { recognizer.state.view = nil }
     }
