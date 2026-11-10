@@ -867,15 +867,36 @@ open class UIView: UIResponder, UICoordinateSpace {
         return CGPoint(x: point.x - origin.x, y: point.y - origin.y)
     }
 
+    /// A point of this view's bounds in the bounds of a view it's the
+    /// superview of or a subview of, which is a shift by where the subview
+    /// sits; nil for any other view. A hit test converts to each subview
+    /// down the tree, and going up to the window from both ends for each
+    /// would cost the tree's depth every time.
+    private func convertToNeighbor(_ point: CGPoint, _ view: UIView) -> CGPoint? {
+        let child = view.state
+        if child.superview == objcObject {
+            let frame = child.frame
+            return CGPoint(x: point.x - frame.origin.x + child.bounds.origin.x, y: point.y - frame.origin.y + child.bounds.origin.y)
+        }
+        let state = state
+        if state.superview == view.objcObject {
+            let frame = state.frame
+            return CGPoint(x: point.x - state.bounds.origin.x + frame.origin.x, y: point.y - state.bounds.origin.y + frame.origin.y)
+        }
+        return nil
+    }
+
     @ObjCMethod("convertPoint:toView:")
     func convert(_ point: CGPoint, to view: UIView?) -> CGPoint {
+        if let view, let converted = convertToNeighbor(point, view) { return converted }
         let base = toBase(point)
         return view?.fromBase(base) ?? base
     }
 
     @ObjCMethod("convertPoint:fromView:")
     func convert(_ point: CGPoint, from view: UIView?) -> CGPoint {
-        fromBase(view?.toBase(point) ?? point)
+        if let view, let converted = view.convertToNeighbor(point, self) { return converted }
+        return fromBase(view?.toBase(point) ?? point)
     }
 
     @ObjCMethod("convertRect:toView:")
