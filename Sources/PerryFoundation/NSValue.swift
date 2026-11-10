@@ -43,7 +43,7 @@ enum Values {
 }
 
 /// Sizes of Objective-C type encodings, laid out as C lays out the types on
-/// arm64: "i" is 4 bytes, "{_NSRange=QQ}" 16, "[4c]" 4.
+/// arm64 (pointers are a word in a 32-bit program): "i" is 4 bytes, "{_NSRange=QQ}" 16, "[4c]" 4.
 enum TypeEncoding {
     static func size(of encoding: String) -> Int? {
         var parser = Parser(bytes: Array(encoding.utf8))
@@ -54,6 +54,9 @@ enum TypeEncoding {
     struct Parser {
         let bytes: [UInt8]
         var index = 0
+
+        /// What an object, a class, a selector or a pointer takes.
+        static let word = MemoryLayout<UnsafeRawPointer>.size
 
         private var current: Character? { index < bytes.count ? Character(UnicodeScalar(bytes[index])) : nil }
 
@@ -81,7 +84,7 @@ enum TypeEncoding {
             case "s", "S": return (2, 2)
             case "i", "I", "l", "L", "f": return (4, 4)
             case "q", "Q", "d", "D": return (8, 8)
-            case "*", "#", ":": return (8, 8)
+            case "*", "#", ":": return (Self.word, Self.word)
             case "v": return (0, 1)
             case "@":
                 if current == "?" {
@@ -91,12 +94,12 @@ enum TypeEncoding {
                     while let c = current, c != "\"" { index += 1 }
                     index += 1
                 }
-                return (8, 8)
+                return (Self.word, Self.word)
             case "^":
                 // A pointer to any type; only the pointee needs skipping.
                 guard type() != nil || current == "?" else { return nil }
                 if current == "?" { index += 1 }
-                return (8, 8)
+                return (Self.word, Self.word)
             case "?":
                 return (0, 1)
             case "[":
