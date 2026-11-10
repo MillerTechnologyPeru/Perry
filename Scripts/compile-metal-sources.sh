@@ -6,17 +6,20 @@
 # reads compiled libraries only. Sources already compiled are skipped.
 # <metal_stdlib> is included first, as Metal's run-time compiler includes
 # it: some apps' sources use its types without including it.
-# Usage: Scripts/compile-metal-sources.sh <directory> [iOS deployment target]
+# A Mac app's are compiled for macOS: name the SDK, macosx, and its version.
+# Usage: Scripts/compile-metal-sources.sh <directory> [deployment target] [iphoneos|macosx]
 set -eu
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
-dir=${1:?usage: $0 <directory> [iOS version]}
+dir=${1:?usage: $0 <directory> [version] [sdk]}
 min=${2:-16.0}
+sdk=${3:-iphoneos}
+case $sdk in macosx) flag=-mmacosx-version-min ;; *) flag=-mios-version-min ;; esac
 compiled=0 failed=0
 for source in "$dir"/*.metal; do
     [ -e "$source" ] || continue
     library="${source%.metal}.metallib"
     [ -e "$library" ] && continue
-    if xcrun -sdk iphoneos metal -mios-version-min="$min" -include metal_stdlib -w -o "$library" "$source" 2>"${source%.metal}.log"; then
+    if xcrun -sdk "$sdk" metal "$flag=$min" -include metal_stdlib -w -o "$library" "$source" 2>"${source%.metal}.log"; then
         rm -f "${source%.metal}.log"
         compiled=$((compiled + 1))
     else
