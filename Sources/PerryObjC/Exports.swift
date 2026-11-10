@@ -430,7 +430,8 @@ public func class_getInstanceSize(_ cls: Class?) -> Int {
 
 @c(_object_getIndexedIvars)
 public func object_getIndexedIvars(_ object: id?) -> UnsafeMutableRawPointer? {
-    guard let object, let info = Runtime.info(classOf(object)) else { return nil }
+    guard let object, !Objects.isDeallocated(object, using: "object_getIndexedIvars"),
+          let info = Runtime.info(classOf(object)) else { return nil }
     return object + info.instanceSize
 }
 
