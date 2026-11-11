@@ -60,13 +60,6 @@ wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) DARWIN_S
 wchar_t *darwin_wmemcpy(wchar_t *to, const wchar_t *from, size_t count) { return wmemcpy(to, from, count); }
 #endif
 
-/// Processor time used, in microseconds (CLOCKS_PER_SEC is a million on both).
-/// armv7's alone: arm64's passes straight through to glibc's (thunks.S).
-#if defined(__arm__) || defined(__i386__)
-unsigned long darwin_clock(void) DARWIN_SYMBOL(clock);
-unsigned long darwin_clock(void) { return (unsigned long)clock(); }
-#endif
-
 int darwin_clock_gettime(int clock, struct timespec *time) DARWIN_SYMBOL(clock_gettime);
 int darwin_clock_gettime(int clock, struct timespec *time) {
     int linux_clock = clock_to_linux(clock);

@@ -26,10 +26,14 @@ let package = Package(
         .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
         // OpenGL.framework: a Mac program's desktop OpenGL, over libGL.
         .library(name: "PerryOpenGL", type: .dynamic, targets: ["PerryOpenGL"]),
+        // OpenCL.framework, with no devices.
+        .library(name: "PerryOpenCL", type: .dynamic, targets: ["PerryOpenCL"]),
         // Steamworks' libsteam_api, over the running Linux Steam client.
         .library(name: "Perrysteam_api", type: .dynamic, targets: ["PerrySteamAPI"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
         .library(name: "Perryxar", type: .dynamic, targets: ["PerryXar"]),
+        // libcurl, Linux's, opened at run time.
+        .library(name: "Perrycurl", type: .dynamic, targets: ["PerryCurl"]),
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
         .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
         .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
@@ -192,12 +196,15 @@ let package = Package(
         .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryStdCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
-        .target(name: "PerryOpenGL", dependencies: ["CPerryWrapped"]),
+        .target(name: "PerryOpenGL", dependencies: ["CPerryWrapped", "PerryInterface"]),
+        .target(name: "PerryOpenCL"),
         // Steamworks: libsteam_api's part, over steamclient.so, opened at run time.
         .target(name: "PerrySteamAPI"),
         .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
         // libxar, Linux's, opened at run time.
         .target(name: "PerryXar", dependencies: ["CPerryWrapped"]),
+        // libcurl, Linux's, opened at run time.
+        .target(name: "PerryCurl", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryExpat", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("expat")]),
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),

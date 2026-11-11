@@ -59,6 +59,10 @@ enum FileAttributes {
     static let NSFileSize = "NSFileSize"
     static let NSFileModificationDate = "NSFileModificationDate"
     static let NSFilePosixPermissions = "NSFilePosixPermissions"
+    /// HFS type and creator codes, which Linux's files have no place for:
+    /// setting them changes nothing, and they read as 0.
+    static let NSFileHFSTypeCode = "NSFileHFSTypeCode"
+    static let NSFileHFSCreatorCode = "NSFileHFSCreatorCode"
     static let NSFileImmutable = "NSFileImmutable"
     static let NSFileSystemSize = "NSFileSystemSize"
     static let NSFileSystemFreeSize = "NSFileSystemFreeSize"

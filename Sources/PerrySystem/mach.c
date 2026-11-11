@@ -955,6 +955,34 @@ const char *darwin_dlerror(void) {
     return error;
 }
 
+// Whether an address is in the main executable's segments. A library's
+// handle doesn't find the program's own symbols on Darwin: the program is
+// none of the library's dependencies. (A game that exports its own
+// SteamAPI_Init to wrap libsteam_api's would otherwise find itself.)
+const void *darwin_NSGetMachExecuteHeader(void) DARWIN_SYMBOL(_NSGetMachExecuteHeader);
+static bool in_main_executable(const void *address) {
+    const void *header = darwin_NSGetMachExecuteHeader();
+    if (!header || !address)
+        return false;
+    intptr_t slide = 0;
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment segment;
+        if (perry_macho_segment_at(command, &segment) && strncmp(segment.name, "__TEXT", 16) == 0)
+            slide = (intptr_t)header - (intptr_t)segment.vmaddr;
+    }
+    command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment segment;
+        if (!perry_macho_segment_at(command, &segment) || segment.vmsize == 0 || strncmp(segment.name, "__PAGEZERO", 16) == 0)
+            continue;
+        uintptr_t start = (uintptr_t)(segment.vmaddr + slide);
+        if ((uintptr_t)address >= start && (uintptr_t)address < start + segment.vmsize)
+            return true;
+    }
+    return false;
+}
+
 #if defined(__arm__)
 // On armv7 a call from Darwin code that finds its stack misaligned reaches
 // dlsym through perry_align_call (the loader's align_arm.S), which calls it
@@ -987,9 +1015,13 @@ void *darwin_dlsym(void *handle, const char *symbol) {
     // the symbol itself to wrap the one it is looking for.
     void *address = (intptr_t)handle == DARWIN_RTLD_NEXT && perry_system_lookup_after
         ? perry_system_lookup_after(DLSYM_CALLER, name) : perry_system_lookup(library, name);
-    // A library's handle also finds what it re-exports and depends on.
-    if (!address && library)
+    // A library's handle also finds what it re-exports and depends on, but
+    // not the program's own symbols.
+    if (!address && library) {
         address = perry_system_lookup(NULL, name);
+        if (in_main_executable(address))
+            address = NULL;
+    }
     free(name);
     if (!address) {
         static __thread char message[256];

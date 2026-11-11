@@ -132,6 +132,10 @@ open class NSOpenGLContext: NSObject {
         current = nil
     }
 
+    /// The CGL context: this context itself, which OpenGL's provider's CGL
+    /// functions send their messages to.
+    @ObjCMethod("CGLContextObj") func cglContextObj() -> UnsafeMutableRawPointer? { objcObject }
+
     @ObjCMethod("view") func view() -> NSView? { viewObject.map(NSView.wrap) }
     @ObjCMethod("setView:") func setView(_ view: NSView?) { viewObject = view?.objcObject }
     @ObjCMethod("clearDrawable") func clearDrawable() { viewObject = nil }

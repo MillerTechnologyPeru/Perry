@@ -55,5 +55,10 @@ docker run --rm --platform linux/386 -e OWNER="$(id -u):$(id -g)" -v "$root:/per
         target=$(readlink "$link")
         case $target in /*) ln -sfnr "/out$target" "$link" ;; esac
     done
+    # update-alternatives links OpenBLAS into the library directory through
+    # /etc/alternatives, which is not copied: link it directly.
+    for name in libopenblas.so libopenblas.so.0 libopenblas.a libblas.so libblas.so.3 libblas.a liblapack.so liblapack.so.3 liblapack.a; do
+        [ -e /out$lib/openblas-pthread/$name ] && ln -sfn openblas-pthread/$name /out$lib/$name
+    done
     chown -R "$OWNER" /out
     echo done'

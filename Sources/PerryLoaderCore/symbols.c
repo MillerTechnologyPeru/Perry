@@ -248,6 +248,14 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
         provider->reexports[0] = CFNETWORK;
         provider->reexports[1] = LIBOBJC;
     }
+    // CoreServices re-exports CFNetwork, which is one of its subframeworks:
+    // programs linked against older SDKs bind CFHTTPMessage, CFReadStream
+    // for HTTP and CFNetService to CoreServices. CFNetwork's socket streams'
+    // SSL settings keys are Foundation's here, with its streams.
+    if (strcmp(short_name, "UniformTypeIdentifiers") == 0) {
+        provider->reexports[0] = CFNETWORK;
+        provider->reexports[1] = COREFOUNDATION;
+    }
     // A Mac app's MapKit has its views from AppKit's MapKit provider and the
     // rest from iOS apps' MapKit provider.
     if (strcmp(short_name, "MapKitAppKit") == 0)
