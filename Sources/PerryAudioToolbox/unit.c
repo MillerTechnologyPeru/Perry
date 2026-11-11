@@ -558,7 +558,8 @@ static void *output_run(void *argument) {
     unit *u = argument;
     const perry_gst *g = perry_gst_get();
     uint32_t frames = u->max_frames < 512 ? u->max_frames : 512;
-    uint64_t pushed = 0;
+    uint64_t pushed = 0, renders = 0;
+    float loudest = 0;
     AudioStreamBasicDescription built = canonical();
     for (;;) {
         pthread_mutex_lock(&u->lock);
@@ -590,6 +591,15 @@ static void *output_run(void *argument) {
                 render(u, &flags, &time, frames, io.list);
                 u->sample_time += frames;
                 perry_pcm_read(&format, io.list, 0, frames, samples);
+                for (size_t i = 0; i < (size_t)frames * channels; i++) {
+                    float magnitude = samples[i] < 0 ? -samples[i] : samples[i];
+                    if (magnitude > loudest) loudest = magnitude;
+                }
+                if (++renders % 200 == 0) {
+                    perry_audio_trace("%s: %llu renders, peak %f (%u Hz, flags %#x)", u->component->name, (unsigned long long)renders, loudest,
+                                      (unsigned)format.mSampleRate, format.mFormatFlags);
+                    loudest = 0;
+                }
                 release(&io);
             }
         }

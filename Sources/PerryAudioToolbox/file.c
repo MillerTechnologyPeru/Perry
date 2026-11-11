@@ -570,6 +570,7 @@ OSStatus darwin_AudioFileOpenWithCallbacks(void *data, read_proc read, void *wri
                                            uint32_t hint, void **out) {
     if (!out || !read || !get_size) return kAudio_ParamError;
     *out = NULL;
+    perry_audio_trace("opening a file through callbacks, hint '%.4s'", (const char *)&hint);
     int64_t size = get_size(data);
     if (size < 0) return kAudioFileInvalidFileError;
     uint8_t *bytes = malloc(size ? (size_t)size : 1);
@@ -583,6 +584,7 @@ OSStatus darwin_AudioFileOpenWithCallbacks(void *data, read_proc read, void *wri
         done += got;
     }
     OSStatus status = open_bytes(bytes, (size_t)done, hint, (audio_file **)out);
+    if (status) perry_audio_trace("can't open the file (%d, %lld bytes)", (int)status, (long long)done);
     if (!status) {
         audio_file *file = *out;
         file->read = read;
