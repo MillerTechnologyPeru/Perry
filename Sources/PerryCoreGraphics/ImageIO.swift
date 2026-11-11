@@ -305,7 +305,7 @@ public func CGImageSourceUpdateData(_ source: Ref?, _ data: Ref?, _ final: Bool)
 
 @c(_CGImageSourceGetType)
 public func CGImageSourceGetType(_ source: Ref?) -> Ref? {
-    Sources.state(source)?.type.flatMap { NSObject.string($0).objCReturnValue() }
+    Sources.state(source)?.type.map { ConstantStrings.make($0) }
 }
 
 @c(_CGImageSourceGetCount)
