@@ -404,8 +404,10 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         return -1;
     }
     perry_macos_release mac = perry_system_macos_release();
-    if (strcmp(name, "hw.machine") == 0)
-        return sysctl_string(old, old_length, mac.darwin ? "arm64" : PERRY_HW_MACHINE);
+    if (strcmp(name, "hw.machine") == 0) {
+        const char *model = getenv("PERRY_DEVICE_MODEL");
+        return sysctl_string(old, old_length, mac.darwin ? "arm64" : model && *model ? model : PERRY_HW_MACHINE);
+    }
     if (strcmp(name, "hw.model") == 0)
         return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : PERRY_HW_MODEL);
     if (strcmp(name, "kern.ostype") == 0)
