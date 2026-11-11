@@ -110,6 +110,7 @@ VARIADIC _asprintf, _vasprintf, 2
 VARIADIC _scanf, vscanf, 1
 VARIADIC _fscanf, vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
+VARIADIC _swscanf, vswscanf, 2
 VARIADIC _syslog, _vsyslog, 2
 VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC_STACK _snprintf_l, perry_darwin_vsnprintf_l, 4
@@ -243,6 +244,9 @@ PASSTHROUGH _listen, listen
 PASSTHROUGH _llabs, llabs
 PASSTHROUGH _localtime, localtime
 PASSTHROUGH _localtime_r, localtime_r
+PASSTHROUGH _gmtime, gmtime
+PASSTHROUGH _gmtime_r, gmtime_r
+PASSTHROUGH _strsignal, strsignal
 PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
@@ -275,6 +279,14 @@ PASSTHROUGH _waitpid, waitpid
 PASSTHROUGH _wmemchr, wmemchr
 PASSTHROUGH _wmemcmp, wmemcmp
 PASSTHROUGH _wcslen, wcslen
+PASSTHROUGH _wcscat, wcscat
+PASSTHROUGH _wcschr, wcschr
+PASSTHROUGH _wcscmp, wcscmp
+PASSTHROUGH _wcscpy, wcscpy
+PASSTHROUGH _wcsncmp, wcsncmp
+PASSTHROUGH _wcsncpy, wcsncpy
+PASSTHROUGH _wcsrchr, wcsrchr
+PASSTHROUGH _wcsstr, wcsstr
 PASSTHROUGH _wcstol, wcstol
 PASSTHROUGH _wcstoul, wcstoul
 PASSTHROUGH _wcstoll, wcstoll
