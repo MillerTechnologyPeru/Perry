@@ -75,6 +75,19 @@ enum NumberTypes {
     nonisolated(unsafe) static let bool = UnsafePointer(strdup("c")!)
 }
 
+/// CoreFoundation's constant numbers (kCFNumberNaN and the infinities), kept
+/// alive for the process.
+@ObjCConstants
+enum NumberConstants {
+    nonisolated(unsafe) static let kCFNumberNaN: UnsafeMutableRawPointer? = constant(.nan)
+    nonisolated(unsafe) static let kCFNumberPositiveInfinity: UnsafeMutableRawPointer? = constant(.infinity)
+    nonisolated(unsafe) static let kCFNumberNegativeInfinity: UnsafeMutableRawPointer? = constant(-.infinity)
+
+    private static func constant(_ value: Double) -> UnsafeMutableRawPointer? {
+        ObjC.retain(Numbers.make(nil, .double(value)))
+    }
+}
+
 enum Numbers {
     nonisolated(unsafe) static var numberClass: Class!
     nonisolated(unsafe) static var constantIntegerClass: Class!
