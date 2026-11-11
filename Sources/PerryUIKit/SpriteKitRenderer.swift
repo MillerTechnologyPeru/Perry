@@ -11,11 +11,11 @@ import PerryObjCInterop
 // shape's path is filled as triangle fans of its subpaths and stroked as a
 // quad a segment, which suits the rectangles and polygons games draw.
 
-private typealias GLuint = UInt32
-private typealias GLenum = UInt32
+typealias GLuint = UInt32
+typealias GLenum = UInt32
 
-/// The OpenGL ES functions the renderer calls, the host's.
-private enum SKGL {
+/// The OpenGL ES functions the renderers call, the host's.
+enum SKGL {
     nonisolated(unsafe) static var loaded = false
     nonisolated(unsafe) static var createShader: (@convention(c) (GLenum) -> GLuint)!
     nonisolated(unsafe) static var shaderSource: (@convention(c) (GLuint, Int32, UnsafePointer<UnsafePointer<CChar>?>?, UnsafePointer<Int32>?) -> Void)!
