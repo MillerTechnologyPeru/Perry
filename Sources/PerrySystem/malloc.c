@@ -231,7 +231,12 @@ static size_t block_room(const void *ptr) {
     // An arena that is not the main one is made of heaps this large at
     // most, each starting where its size divides the address: the arena,
     // the heap before, then the heap's size and how much of it is in use.
-    const uintptr_t heap_span = (uintptr_t)64 << 20;
+    // Twice the largest mmap threshold: 64 MB with 64-bit words, 32 MB with
+    // 32-bit ones.
+    const uintptr_t heap_span = (uintptr_t)(8 * sizeof(long)) << 20;
+    // No block or offset is larger: 64 TB with 64-bit words, half the
+    // address space with 32-bit ones.
+    const size_t largest = (size_t)1 << (sizeof(size_t) == 8 ? 46 : 31);
     uintptr_t address = (uintptr_t)ptr;
     if (!address || (address & (HEADER - 1))) return 0;
     int saved = errno;
@@ -239,12 +244,12 @@ static size_t block_room(const void *ptr) {
     uintptr_t chunk = address - HEADER;
     if (!read_memory(chunk, head, sizeof head)) goto done;
     size_t size = head[1] & ~(size_t)FLAGS;
-    if (size < 2 * HEADER || (size & (HEADER - 1)) || size > ((size_t)1 << 46)) goto done;
+    if (size < 2 * HEADER || (size & (HEADER - 1)) || size > largest) goto done;
     if (head[1] & MAPPED) {
         // A mapping of its own: whole pages, the block some way into them.
         size_t page = (size_t)sysconf(_SC_PAGESIZE), total = head[0] + size;
         uint8_t last;
-        if ((head[1] & (PREVIOUS_IN_USE | OTHER_ARENA)) || head[0] > ((size_t)1 << 46) || ((chunk - head[0]) | total) & (page - 1))
+        if ((head[1] & (PREVIOUS_IN_USE | OTHER_ARENA)) || head[0] > largest || ((chunk - head[0]) | total) & (page - 1))
             goto done;
         if (!read_memory(chunk - head[0] + total - 1, &last, 1)) goto done;
     } else {
@@ -253,7 +258,7 @@ static size_t block_room(const void *ptr) {
         if (!read_memory(chunk + size, next, sizeof next)) goto done;
         size_t next_size = next[1] & ~(size_t)FLAGS;
         if (!(next[1] & PREVIOUS_IN_USE) || (next[1] & MAPPED) || next_size < HEADER || (next_size & (HEADER - 1))
-            || next_size > ((size_t)1 << 46))
+            || next_size > largest)
             goto done;
         if (!(head[1] & PREVIOUS_IN_USE)) {
             size_t before[2];

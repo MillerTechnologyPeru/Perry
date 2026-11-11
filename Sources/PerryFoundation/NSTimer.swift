@@ -20,6 +20,10 @@ final class TimerStorage {
     var callout: Callout?
     var info: UnsafeMutableRawPointer?
     var releaseInfo: Release?
+    /// The context's retain and copyDescription callbacks, given back by
+    /// CFRunLoopTimerGetContext.
+    var retainInfo: UnsafeRawPointer?
+    var copyDescription: UnsafeRawPointer?
     /// For performSelector:withObject:afterDelay:, which sends the argument
     /// rather than the timer.
     private(set) var argument: id?

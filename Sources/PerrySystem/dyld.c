@@ -138,6 +138,64 @@ uint8_t *darwin_getsectiondata(const void *header, const char *segment, const ch
     return NULL;
 }
 
+// libmacho's older lookups, in the executable or a given header: a segment's
+// load command, and a section's address as linked (not slid, as Darwin's
+// own return it) and size. The _64 forms are a 64-bit image's.
+static const uint8_t *segment_command(const void *header, const char *segment, perry_macho_segment *found) {
+    if (!header)
+        return NULL;
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command))
+        if (perry_macho_segment_at(command, found) && strncmp(found->name, segment, 16) == 0)
+            return command;
+    return NULL;
+}
+
+static char *section_data(const void *header, const char *segment, const char *section, unsigned long *size) {
+    perry_macho_segment found;
+    *size = 0;
+    if (!segment_command(header, segment, &found))
+        return NULL;
+    for (uint32_t j = 0; j < found.section_count; j++) {
+        uint64_t addr, length;
+        const uint8_t *entry = perry_macho_section(&found, j, &addr, &length);
+        if (strncmp((const char *)entry, section, 16) == 0) {
+            *size = (unsigned long)length;
+            return (char *)(uintptr_t)addr;
+        }
+    }
+    return NULL;
+}
+
+const void *darwin_getsegbyname(const char *segment) DARWIN_SYMBOL(getsegbyname);
+const void *darwin_getsegbyname(const char *segment) {
+    perry_macho_segment found;
+    return segment_command(darwin_NSGetMachExecuteHeader(), segment, &found);
+}
+
+char *darwin_getsectdata(const char *segment, const char *section, unsigned long *size) DARWIN_SYMBOL(getsectdata);
+char *darwin_getsectdata(const char *segment, const char *section, unsigned long *size) {
+    return section_data(darwin_NSGetMachExecuteHeader(), segment, section, size);
+}
+
+char *darwin_getsectdatafromheader(const void *header, const char *segment, const char *section, uint32_t *size)
+    DARWIN_SYMBOL(getsectdatafromheader);
+char *darwin_getsectdatafromheader(const void *header, const char *segment, const char *section, uint32_t *size) {
+    unsigned long length;
+    char *data = header && !perry_macho_is64(header) ? section_data(header, segment, section, &length) : NULL;
+    *size = data ? (uint32_t)length : 0;
+    return data;
+}
+
+char *darwin_getsectdatafromheader_64(const void *header, const char *segment, const char *section, uint64_t *size)
+    DARWIN_SYMBOL(getsectdatafromheader_64);
+char *darwin_getsectdatafromheader_64(const void *header, const char *segment, const char *section, uint64_t *size) {
+    unsigned long length;
+    char *data = header && perry_macho_is64(header) ? section_data(header, segment, section, &length) : NULL;
+    *size = data ? length : 0;
+    return data;
+}
+
 // The Swift runtime's sections, which dyld finds for it by kind.
 struct section_info { const void *buffer; size_t size; };
 

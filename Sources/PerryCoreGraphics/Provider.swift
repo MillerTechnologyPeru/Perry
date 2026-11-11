@@ -12,8 +12,17 @@ import PerryObjCInterop
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
+/// The loader's symbol lookup, for functions other providers define, and
+/// the program's bundle, which the Process Manager answers with.
+nonisolated(unsafe) var providerSymbolLookup: (@convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?)?
+nonisolated(unsafe) var programBundlePath: String?
+nonisolated(unsafe) var programExecutablePath: String?
+
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    providerSymbolLookup = lookup
+    programBundlePath = info.bundle_path.map { String(cString: $0) }
+    programExecutablePath = info.executable_path.map { String(cString: $0) }
     let loaded = ObjCRuntime.load { name in
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }

@@ -213,6 +213,7 @@ open class NSApplication: NSResponder {
             activationPending = false
             activate(true)
         }
+        var ranLoop = false
         while true {
             Events.pump()
             while let index = queue.firstIndex(where: { $0.type.mask & mask != 0 }) {
@@ -226,7 +227,17 @@ open class NSApplication: NSResponder {
             }
             Windows.drawIfNeeded()
             let remaining = deadline - Clock.absolute
-            guard remaining > 0 else { return nil }
+            guard remaining > 0 else {
+                // A date already past (programs that poll pass distantPast)
+                // still has the run loop run once without waiting, as it is
+                // on a Mac: timers due, sources ready and blocks queued are
+                // handled, then events looked for again.
+                if ranLoop { return nil }
+                ranLoop = true
+                RunLoop.run(for: 0)
+                continue
+            }
+            ranLoop = true
             // Timers and the main queue, for a little while; a run loop with
             // nothing to run returns at once, so the wait is a short sleep.
             let start = Clock.now
@@ -469,6 +480,14 @@ open class NSApplication: NSResponder {
             if stop { break }
         }
     }
+}
+
+/// BOOL NSApplicationLoad(void): AppKit made ready for a program that
+/// runs its own event loop (Carbon's): the shared application, made.
+@c(_NSApplicationLoad)
+public func NSApplicationLoad() -> Bool {
+    if let cls = Classes.named("NSApplication") { _ = Send.object(cls.pointer, "sharedApplication") }
+    return true
 }
 
 /// int NSApplicationMain(int argc, const char *argv[]): the principal

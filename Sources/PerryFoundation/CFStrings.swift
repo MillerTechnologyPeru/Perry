@@ -134,6 +134,12 @@ public func CFStringCreateWithCString(_ allocator: UnsafeRawPointer?, _ cString:
     return CFStringEncodings.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding).map(Strings.make)
 }
 
+/// A path's string from its file system representation: UTF-8 here.
+@c(_CFStringCreateWithFileSystemRepresentation)
+public func CFStringCreateWithFileSystemRepresentation(_ allocator: UnsafeRawPointer?, _ buffer: UnsafePointer<CChar>?) -> id? {
+    CFStringCreateWithCString(allocator, buffer, CFStringEncodings.utf8)
+}
+
 /// A string from a Pascal string: a length byte, then that many bytes.
 @c(_CFStringCreateWithPascalString)
 public func CFStringCreateWithPascalString(_ allocator: UnsafeRawPointer?, _ pascal: UnsafePointer<UInt8>?, _ encoding: UInt32) -> id? {
@@ -376,6 +382,23 @@ public func CFStringConvertIANACharSetNameToEncoding(_ name: id?) -> UInt32 {
     case "utf-16le": return CFStringEncodings.utf16LE
     default: return 0xFFFF_FFFF
     }
+}
+
+/// The encodings of the Windows code pages there are encodings for here:
+/// 1252 (Western), 65001 (UTF-8), 1200 and 1201 (UTF-16, little- and
+/// big-endian), 20127 (US-ASCII), 28591 (Latin-1) and 10000 (Mac Roman).
+private let windowsCodepages: [UInt32: UInt32] = [
+    1252: CFStringEncodings.windowsLatin1, 65001: CFStringEncodings.utf8, 1200: CFStringEncodings.utf16LE,
+    1201: CFStringEncodings.utf16BE, 20127: CFStringEncodings.ascii, 28591: CFStringEncodings.isoLatin1,
+    10000: CFStringEncodings.macRoman,
+]
+
+@c(_CFStringConvertWindowsCodepageToEncoding)
+public func CFStringConvertWindowsCodepageToEncoding(_ codepage: UInt32) -> UInt32 { windowsCodepages[codepage] ?? 0xFFFF_FFFF }
+
+@c(_CFStringConvertEncodingToWindowsCodepage)
+public func CFStringConvertEncodingToWindowsCodepage(_ encoding: UInt32) -> UInt32 {
+    windowsCodepages.first { $0.value == encoding }?.key ?? 0xFFFF_FFFF
 }
 
 // MARK: Comparing and searching

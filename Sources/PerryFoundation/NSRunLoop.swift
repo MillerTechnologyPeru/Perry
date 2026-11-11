@@ -496,7 +496,26 @@ public func CFRunLoopTimerCreate(_ allocator: UnsafeMutableRawPointer?, _ fireDa
     storage.callout = callout
     storage.info = info
     storage.releaseInfo = context?.load(fromByteOffset: DarwinLayout.contextRelease, as: TimerStorage.Release?.self)
+    storage.retainInfo = context?.load(fromByteOffset: DarwinLayout.contextRetain, as: UnsafeRawPointer?.self)
+    storage.copyDescription = context?.load(fromByteOffset: DarwinLayout.contextRelease + MemoryLayout<UnsafeRawPointer>.size,
+                                            as: UnsafeRawPointer?.self)
     return Timers.make(storage)
+}
+
+/// void CFRunLoopTimerGetContext(timer, CFRunLoopTimerContext *): the
+/// context the timer was made with, version 0; all zero for a timer made
+/// without one.
+@c(_CFRunLoopTimerGetContext)
+public func CFRunLoopTimerGetContext(_ timer: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) {
+    guard let context else { return }
+    let word = MemoryLayout<UnsafeRawPointer>.size
+    context.initializeMemory(as: UInt8.self, repeating: 0, count: word * 5)
+    guard let storage = Timers.storage(timer) else { return }
+    context.storeBytes(of: storage.info, toByteOffset: DarwinLayout.contextInfo, as: UnsafeMutableRawPointer?.self)
+    context.storeBytes(of: storage.retainInfo, toByteOffset: DarwinLayout.contextRetain, as: UnsafeRawPointer?.self)
+    context.storeBytes(of: storage.releaseInfo.map { unsafeBitCast($0, to: UnsafeRawPointer.self) },
+                       toByteOffset: DarwinLayout.contextRelease, as: UnsafeRawPointer?.self)
+    context.storeBytes(of: storage.copyDescription, toByteOffset: DarwinLayout.contextRelease + word, as: UnsafeRawPointer?.self)
 }
 
 /// The block is called with the timer.

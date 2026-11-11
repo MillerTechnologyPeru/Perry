@@ -348,6 +348,36 @@ public func CFURLGetFileSystemRepresentation(_ url: id?, _ resolveAgainstBase: B
     return true
 }
 
+/// The File Manager's FSRefs are CoreServices' provider's, which names
+/// each by a path: these ask it.
+private func coreServicesFunction(_ name: String) -> UnsafeMutableRawPointer? {
+    guard let lookup = BundleLoading.lookupSymbol else { return nil }
+    return "/System/Library/Frameworks/CoreServices.framework/Versions/A/CoreServices".withCString { library in
+        name.withCString { lookup(library, $0) }
+    }
+}
+
+/// CFURLRef CFURLCreateFromFSRef(CFAllocatorRef, const FSRef *).
+@c(_CFURLCreateFromFSRef)
+public func CFURLCreateFromFSRef(_ allocator: UnsafeRawPointer?, _ ref: UnsafeRawPointer?) -> id? {
+    typealias MakePath = @convention(c) (UnsafeRawPointer?, UnsafeMutablePointer<CChar>?, UInt32) -> Int32
+    guard let ref, let function = coreServicesFunction("_FSRefMakePath") else { return nil }
+    var path = [CChar](repeating: 0, count: 4096)
+    guard unsafeBitCast(function, to: MakePath.self)(ref, &path, UInt32(path.count)) == 0 else { return nil }
+    let string = String(cString: path)
+    var info = stat()
+    return CFURLs.make(URLs.fileURL(string, isDirectory: stat(string, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR))
+}
+
+/// Boolean CFURLGetFSRef(CFURLRef, FSRef *): false for an item that is not
+/// there, as an FSRef names only items that are.
+@c(_CFURLGetFSRef)
+public func CFURLGetFSRef(_ url: id?, _ ref: UnsafeMutableRawPointer?) -> Bool {
+    typealias MakeRef = @convention(c) (UnsafePointer<CChar>?, UnsafeMutableRawPointer?, UnsafeMutablePointer<UInt8>?) -> Int32
+    guard let ref, let url = CFURLs.url(url), url.isFileURL, let function = coreServicesFunction("_FSPathMakeRef") else { return false }
+    return url.path(percentEncoded: false).withCString { unsafeBitCast(function, to: MakeRef.self)($0, ref, nil) } == 0
+}
+
 @c(_CFURLCopyLastPathComponent)
 public func CFURLCopyLastPathComponent(_ url: id?) -> id? { ObjC.retain(ObjC.send(url, ObjC.selector("lastPathComponent"))) }
 
@@ -832,4 +862,97 @@ public func CFPreferencesRemoveSuitePreferencesFromApp(_ application: id?, _ sui
 @c(_CFPreferencesCopyKeyList)
 public func CFPreferencesCopyKeyList(_ application: id?, _ user: id?, _ host: id?) -> id? {
     ObjC.retain(ObjC.send(ObjC.send(Preferences.defaults, ObjC.selector("dictionaryRepresentation")), ObjC.selector("allKeys")))
+}
+
+// MARK: - Older CoreFoundation calls
+
+/// CFPropertyListRef CFPropertyListCreateFromXMLData(allocator, data,
+/// mutabilityOption, CFStringRef *errorString): the older form of
+/// CFPropertyListCreateWithData, which reads binary property lists too and
+/// reports an error as a string, +1.
+@c(_CFPropertyListCreateFromXMLData)
+public func CFPropertyListCreateFromXMLData(_ allocator: id?, _ data: id?, _ options: UInt,
+                                            _ errorString: UnsafeMutablePointer<id?>?) -> id? {
+    var error: id?
+    let made = CFPropertyListCreateWithData(allocator, data, options, nil, &error)
+    if let errorString {
+        errorString.pointee = error.flatMap { ObjC.retain(ObjC.send($0, ObjC.selector("localizedDescription"))) }
+    }
+    ObjC.release(error)
+    return made
+}
+
+/// A path's URL relative to a base URL, as a relative path is.
+@c(_CFURLCreateWithFileSystemPathRelativeToBase)
+public func CFURLCreateWithFileSystemPathRelativeToBase(_ allocator: UnsafeRawPointer?, _ path: id?, _ style: Int,
+                                                        _ isDirectory: Bool, _ base: id?) -> id? {
+    guard let path = Strings.value(of: path) else { return nil }
+    if path.hasPrefix("/") { return CFURLs.make(URLs.fileURL(path, isDirectory: isDirectory)) }
+    return CFURLs.make(URL(filePath: path, directoryHint: isDirectory ? .isDirectory : .notDirectory, relativeTo: CFURLs.url(base)))
+}
+
+/// Constant UUIDs: one object for each value, never released.
+nonisolated(unsafe) private var constantUUIDs: [UUID: id] = [:]
+private let constantUUIDLock = Monitor()
+
+@c(_CFUUIDGetConstantUUIDWithBytes)
+public func CFUUIDGetConstantUUIDWithBytes(_ allocator: UnsafeRawPointer?, _ b0: UInt8, _ b1: UInt8, _ b2: UInt8, _ b3: UInt8,
+                                           _ b4: UInt8, _ b5: UInt8, _ b6: UInt8, _ b7: UInt8, _ b8: UInt8, _ b9: UInt8,
+                                           _ b10: UInt8, _ b11: UInt8, _ b12: UInt8, _ b13: UInt8, _ b14: UInt8, _ b15: UInt8) -> id? {
+    let uuid = UUID(uuid: (b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15))
+    return constantUUIDLock.locked {
+        if let made = constantUUIDs[uuid] { return made }
+        let made = NSCFUUID.make(uuid)
+        constantUUIDs[uuid] = made
+        return made
+    }
+}
+
+/// Whether a bundle's code is loaded, and loading it: NSBundle's.
+@c(_CFBundleIsExecutableLoaded)
+public func CFBundleIsExecutableLoaded(_ bundle: id?) -> Bool { ObjC.sendBool(bundle, ObjC.selector("isLoaded"), nil) }
+
+@c(_CFBundleLoadExecutable)
+public func CFBundleLoadExecutable(_ bundle: id?) -> Bool { ObjC.sendBool(bundle, ObjC.selector("load"), nil) }
+
+/// Boolean CFURLCreateDataAndPropertiesFromResource(allocator, url, CFDataRef
+/// *data, CFDictionaryRef *properties, CFArrayRef desired, SInt32 *error):
+/// a file URL's contents, +1; no properties. The error is
+/// kCFURLResourceNotFoundError (-12) when the file can't be read.
+@c(_CFURLCreateDataAndPropertiesFromResource)
+public func CFURLCreateDataAndPropertiesFromResource(_ allocator: UnsafeRawPointer?, _ url: id?, _ data: UnsafeMutablePointer<id?>?,
+                                                      _ properties: UnsafeMutablePointer<id?>?, _ desired: id?,
+                                                      _ error: UnsafeMutablePointer<Int32>?) -> Bool {
+    properties?.pointee = nil
+    data?.pointee = nil
+    error?.pointee = 0
+    guard let url = CFURLs.url(url), url.isFileURL else {
+        error?.pointee = -11                            // kCFURLUnknownSchemeError
+        return false
+    }
+    guard let file = fopen(url.path(percentEncoded: false), "rb") else {
+        error?.pointee = -12                            // kCFURLResourceNotFoundError
+        return false
+    }
+    defer { fclose(file) }
+    var bytes = Data()
+    var buffer = [UInt8](repeating: 0, count: 65536)
+    while true {
+        let count = fread(&buffer, 1, buffer.count, file)
+        if count <= 0 { break }
+        bytes.append(contentsOf: buffer[0..<count])
+    }
+    data?.pointee = ObjC.retain(DataObjects.autoreleased(bytes))
+    return true
+}
+
+/// CFNumberFormatter's property keys, with Darwin's values.
+@ObjCConstants
+enum NumberFormatterKeys {
+    static let kCFNumberFormatterCurrencyCode = "kCFNumberFormatterCurrencyCodeKey"
+    static let kCFNumberFormatterMaxFractionDigits = "kCFNumberFormatterMaxFractionDigitsKey"
+    static let kCFNumberFormatterMinFractionDigits = "kCFNumberFormatterMinFractionDigitsKey"
+    static let kCFNumberFormatterCurrencySymbol = "kCFNumberFormatterCurrencySymbolKey"
+    static let kCFNumberFormatterDecimalSeparator = "kCFNumberFormatterDecimalSeparatorKey"
+    static let kCFNumberFormatterGroupingSeparator = "kCFNumberFormatterGroupingSeparatorKey"
 }

@@ -177,6 +177,20 @@ public func CGDisplayScreenSize(_ display: UInt32) -> CGSize {
 @c(_CGDisplaySerialNumber) public func CGDisplaySerialNumber(_ display: UInt32) -> UInt32 { 0 }
 @c(_CGDisplayRotation) public func CGDisplayRotation(_ display: UInt32) -> Double { 0 }
 
+/// The OpenGL display mask of a display: the one display is the first bit.
+@c(_CGDisplayIDToOpenGLDisplayMask)
+public func CGDisplayIDToOpenGLDisplayMask(_ display: UInt32) -> UInt32 { display == mainDisplay ? 1 : 0 }
+
+@c(_CGOpenGLDisplayMaskToDisplayID)
+public func CGOpenGLDisplayMaskToDisplayID(_ mask: UInt32) -> UInt32 { mask & 1 != 0 ? mainDisplay : 0 }
+
+/// The display's IOKit service: there is no IOKit registry entry for it here.
+@c(_CGDisplayIOServicePort) public func CGDisplayIOServicePort(_ display: UInt32) -> UInt32 { 0 }
+
+/// How long local events are held back after the cursor is moved by the
+/// program: they never are here.
+@c(_CGSetLocalEventsSuppressionInterval) public func CGSetLocalEventsSuppressionInterval(_ seconds: Double) -> Int32 { 0 }
+
 /// Displays aren't reconfigured here: the callback is never called.
 @c(_CGDisplayRegisterReconfigurationCallback)
 public func CGDisplayRegisterReconfigurationCallback(_ callback: UnsafeRawPointer?, _ info: UnsafeMutableRawPointer?) -> Int32 { success }
@@ -221,6 +235,14 @@ private func mode(_ object: Ref?) -> DisplayModeState? { CGDisplayModeObject.sta
 @c(_CGDisplayModeRetain) public func CGDisplayModeRetain(_ object: Ref?) -> Ref? { ObjCRuntime.retain(object) }
 @c(_CGDisplayModeRelease) public func CGDisplayModeRelease(_ object: Ref?) { ObjCRuntime.release(object) }
 @c(_CGDisplayModeGetTypeID) public func CGDisplayModeGetTypeID() -> UInt { 0x10a }
+
+/// A mode's pixel encoding, IOKit's string for 32-bit pixels (IO32BitDirectPixels),
+/// as every mode here is.
+@c(_CGDisplayModeCopyPixelEncoding)
+public func CGDisplayModeCopyPixelEncoding(_ object: Ref?) -> Ref? {
+    guard mode(object) != nil else { return nil }
+    return NSObject.string("--------RRRRRRRRGGGGGGGGBBBBBBBB").objCOwnedReturnValue()
+}
 
 // MARK: - Gamma
 

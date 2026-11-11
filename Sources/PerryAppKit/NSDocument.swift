@@ -253,15 +253,18 @@ open class NSDocument: NSObject {
 }
 
 enum Documents {
-    /// The Info.plist's document types.
+    /// The Info.plist's document types that name a document class: a type
+    /// without one (a game's data files, opened by the app itself) is not
+    /// the document controller's, and makes no app document-based.
     nonisolated(unsafe) static var declared: [DocumentType] = {
         guard let types = NSBundle.main().infoObject(forKey: "CFBundleDocumentTypes")?.as(NSArray.self) else { return [] }
         return types.elements.compactMap { entry in
             guard let entry = entry.as(NSDictionary.self) else { return nil }
             func string(_ key: String) -> String? { entry.object(forKeyObject: key.objCObject)?.stringValue }
+            guard let className = string("NSDocumentClass"), !className.isEmpty else { return nil }
             let extensions = (entry.object(forKeyObject: "CFBundleTypeExtensions".objCObject)?.as(NSArray.self)?.elements ?? []).map(\.stringValue)
             return DocumentType(name: string("CFBundleTypeName") ?? "", extensions: extensions,
-                                className: string("NSDocumentClass") ?? "", role: string("CFBundleTypeRole") ?? "")
+                                className: className, role: string("CFBundleTypeRole") ?? "")
         }
     }()
 

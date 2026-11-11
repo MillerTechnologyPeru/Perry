@@ -30,6 +30,7 @@ final class StreamStorage {
         case fileOutput(String, append: Bool)
         case pipeInput(StreamPipe)                      // a bound pair's ends
         case pipeOutput(StreamPipe)
+        case unreachable                                // an HTTP request's, with no network to send it on
     }
 
     let source: Source
@@ -39,6 +40,9 @@ final class StreamStorage {
     var delegate: id?
     var properties: [String: id] = [:]
     var runLoops: [RunLoopState] = []
+    /// A CFReadStream's or CFWriteStream's client: the events it asked for,
+    /// its callback and its context's info, which its release lets go of.
+    var client: StreamClient?
 
     var offset = 0              // into data, or into the caller's buffer
     var descriptor: Int32 = -1
@@ -47,10 +51,31 @@ final class StreamStorage {
     init(_ source: Source) { self.source = source }
 
     deinit {
+        client?.releaseInfo()
         if descriptor >= 0 { close(descriptor) }
         ObjC.release(error)
         for value in properties.values { ObjC.release(value) }
     }
+}
+
+/// CFStreamClientContext's callbacks: void (*)(stream, CFStreamEventType,
+/// void *info), and the context's retain and release of its info.
+final class StreamClient {
+    typealias Callback = @convention(c) (id?, UInt, UnsafeMutableRawPointer?) -> Void
+    typealias Release = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    let events: UInt
+    let callback: Callback
+    let info: UnsafeMutableRawPointer?
+    let release: Release?
+
+    init(events: UInt, callback: Callback, info: UnsafeMutableRawPointer?, release: Release?) {
+        self.events = events
+        self.callback = callback
+        self.info = info
+        self.release = release
+    }
+
+    func releaseInfo() { release?(info) }
 }
 
 /// A bound pair's buffer: what the output stream writes, the input stream
@@ -114,6 +139,7 @@ enum Streams {
             runLoop.perform {
                 defer { ObjC.release(object) }
                 guard storage.status != StreamStatus.closed, storage.status != StreamStatus.notOpen || event == StreamEvent.errorOccurred else { return }
+                if let client = storage.client, client.events & event != 0 { client.callback(object, event, client.info) }
                 let delegate = storage.delegate ?? object
                 typealias Responds = @convention(c) (id, SEL, SEL) -> Bool
                 typealias Handle = @convention(c) (id, SEL, id, UInt) -> Void
@@ -139,6 +165,23 @@ enum Streams {
         switch storage.source {
         case .file, .fileOutput:
             if storage.descriptor < 0 { return fail(object, storage, code: errno) }
+        case .unreachable:
+            // Opening succeeds, as an HTTP stream's does while it connects;
+            // the failure (ENETUNREACH, Darwin's number) comes on the run
+            // loop's next pass, or at once for a stream on none.
+            storage.status = StreamStatus.opening
+            guard !storage.runLoops.isEmpty else {
+                storage.status = StreamStatus.error
+                ObjC.release(storage.error)
+                storage.error = ObjC.retain(Errors.autoreleased(domain: ErrorConstants.NSPOSIXErrorDomainObject, code: 51, description: nil))
+                return
+            }
+            _ = ObjC.retain(object)
+            storage.runLoops[0].perform {
+                defer { ObjC.release(object) }
+                if storage.status == StreamStatus.opening { fail(object, storage, code: 51) }
+            }
+            return
         default:
             break
         }
@@ -590,6 +633,53 @@ public func CFReadStreamCreateWithBytesNoCopy(_ allocator: UnsafeRawPointer?, _ 
     guard let object = Storage.allocate(UnsafeMutableRawPointer(Streams.inputClass)) else { return nil }
     Storage.set(object, StreamStorage(.data(data)))
     return object
+}
+
+/// An HTTP request's stream when there is no network to send it on: it
+/// fails as it opens, telling its client and delegate. +1. For CFNetwork's
+/// CFReadStreamCreateForHTTPRequest.
+@c(_perry_CFReadStreamCreateUnreachable)
+public func perryCFReadStreamCreateUnreachable() -> id? {
+    guard let object = Storage.allocate(UnsafeMutableRawPointer(Streams.inputClass)) else { return nil }
+    Storage.set(object, StreamStorage(.unreachable))
+    return object
+}
+
+/// CFStreamClientContext: version, info, then retain, release and
+/// copyDescription for the info.
+private struct StreamClientContext {
+    var version: Int
+    var info: UnsafeMutableRawPointer?
+    var retain: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?)?
+    var release: StreamClient.Release?
+    var copyDescription: UnsafeRawPointer?
+}
+
+/// Boolean CFReadStreamSetClient(stream, CFOptionFlags events, callback,
+/// CFStreamClientContext *): the client told of those events on the run
+/// loops the stream is scheduled on; a NULL callback removes it.
+private func setClient(_ stream: id?, _ events: UInt, _ callback: StreamClient.Callback?, _ context: UnsafeRawPointer?) -> Bool {
+    guard let stream else { return false }
+    let storage = Streams.storage(stream)
+    storage.client?.releaseInfo()
+    storage.client = nil
+    guard let callback, events != 0 else { return true }
+    let parts = context?.loadUnaligned(as: StreamClientContext.self)
+    let info = parts.flatMap { parts in parts.retain.map { $0(parts.info) } ?? parts.info }
+    storage.client = StreamClient(events: events, callback: callback, info: info, release: parts?.release)
+    return true
+}
+@c(_CFReadStreamSetClient)
+public func CFReadStreamSetClient(_ stream: UnsafeMutableRawPointer?, _ events: UInt,
+                                  _ callback: (@convention(c) (UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> Void)?,
+                                  _ context: UnsafeRawPointer?) -> Bool {
+    setClient(stream, events, callback, context)
+}
+@c(_CFWriteStreamSetClient)
+public func CFWriteStreamSetClient(_ stream: UnsafeMutableRawPointer?, _ events: UInt,
+                                  _ callback: (@convention(c) (UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> Void)?,
+                                   _ context: UnsafeRawPointer?) -> Bool {
+    setClient(stream, events, callback, context)
 }
 
 @c(_CFReadStreamOpen) public func CFReadStreamOpen(_ stream: UnsafeMutableRawPointer?) -> Bool {
