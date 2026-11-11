@@ -13,6 +13,8 @@ import PerryObjCInterop
 // MARK: - Messages
 
 extension NSObject {
+    @ObjCMethod("path") func scnPath() -> String?
+
     // The delegate's, sent when it answers them.
     @ObjCMethod("renderer:updateAtTime:") func scnSendRenderer(_ renderer: NSObject, updateAtTime time: Double)
     @ObjCMethod("renderer:didApplyAnimationsAtTime:") func scnSendRenderer(_ renderer: NSObject, didApplyAnimationsAtTime time: Double)
@@ -135,6 +137,8 @@ final class SCNCameraState: ObjectState {
     var zFar = 100.0
     var orthographic = false
     var orthographicScale = 1.0
+    /// SCNCameraProjectionDirection: vertical 0, horizontal 1.
+    var horizontal = false
 }
 
 @ObjCClass("SCNCamera")
@@ -159,6 +163,8 @@ open class SCNCamera: NSObject {
     @ObjCMethod("setZFar:") func setZFar(_ distance: Double) { camera.zFar = distance }
     @ObjCMethod("usesOrthographicProjection") func usesOrthographicProjection() -> Bool { camera.orthographic }
     @ObjCMethod("setUsesOrthographicProjection:") func setUsesOrthographicProjection(_ uses: Bool) { camera.orthographic = uses }
+    @ObjCMethod("projectionDirection") func projectionDirection() -> Int { camera.horizontal ? 1 : 0 }
+    @ObjCMethod("setProjectionDirection:") func setProjectionDirection(_ direction: Int) { camera.horizontal = direction == 1 }
     @ObjCMethod("orthographicScale") func orthographicScale() -> Double { camera.orthographicScale }
     @ObjCMethod("setOrthographicScale:") func setOrthographicScale(_ scale: Double) { camera.orthographicScale = scale }
 }
@@ -173,11 +179,13 @@ struct SCNMesh {
 }
 
 final class SCNGeometryState: ObjectState {
-    enum Kind { case box, sphere, plane, cylinder, cone }
+    enum Kind { case box, sphere, plane, cylinder, cone, custom }
     var kind = Kind.box
     var width: CGFloat = 1, height: CGFloat = 1, length: CGFloat = 1
     var radius: CGFloat = 0.5, topRadius: CGFloat = 0, bottomRadius: CGFloat = 0.5
     var segments = 48
+    /// A geometry read from a scene file: its own triangles.
+    var custom = SCNMesh()
     var materials: [NSObject] = []
     var name: String?
     /// Counts changes, for what the renderer keeps of the mesh; the
@@ -191,6 +199,7 @@ final class SCNGeometryState: ObjectState {
     private var cached: (revision: Int, mesh: SCNMesh)?
 
     var mesh: SCNMesh {
+        if kind == .custom { return custom }
         if let cached, cached.revision == revision { return cached.mesh }
         let made = SCNMeshes.make(self)
         cached = (revision, made)
@@ -540,6 +549,19 @@ open class SCNScene: NSObject {
 
     @ObjCClassMethod("scene") static func make(_ cls: ObjCClass) -> SCNScene { cls.object.allocated().unsafeCast(to: SCNScene.self) }
     @ObjCMethod("init") func initialize() -> Self { self }
+
+    @ObjCClassMethod("sceneNamed:")
+    static func scene(_ cls: ObjCClass, named name: String) -> SCNScene? { SCNFile.scene(named: name, inDirectory: nil) }
+
+    @ObjCClassMethod("sceneNamed:inDirectory:options:")
+    static func scene(_ cls: ObjCClass, named name: String, inDirectory directory: String?, options: NSObject?) -> SCNScene? {
+        SCNFile.scene(named: name, inDirectory: directory)
+    }
+
+    @ObjCClassMethod("sceneWithURL:options:error:")
+    static func scene(_ cls: ObjCClass, url: NSObject, options: NSObject?, error: UnsafeMutableRawPointer?) -> SCNScene? {
+        url.scnPath().flatMap { SCNFile.scene(atPath: $0) }
+    }
 
     @ObjCMethod("rootNode")
     func rootNode() -> SCNNode {
