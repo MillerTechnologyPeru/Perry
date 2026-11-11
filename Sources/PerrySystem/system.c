@@ -172,6 +172,18 @@ uint64_t darwin_mach_continuous_approximate_time(void) {
     return ticks(CLOCK_BOOTTIME);
 }
 
+int darwin_mach_wait_until(uint64_t deadline) DARWIN_SYMBOL(mach_wait_until);
+int darwin_mach_wait_until(uint64_t deadline) {
+    uint64_t now = ticks(CLOCK_MONOTONIC);
+    if (deadline > now) {
+        // n * 125 / 3 nanoseconds, as ticks() does the other way.
+        uint64_t left = deadline - now, n = left / 3 * 125 + left % 3 * 125 / 3;
+        struct timespec wait = { .tv_sec = n / 1000000000, .tv_nsec = n % 1000000000 };
+        while (nanosleep(&wait, &wait) != 0 && errno == EINTR) {}
+    }
+    return 0;   // KERN_SUCCESS
+}
+
 int darwin_mach_timebase_info(darwin_timebase_info *info) DARWIN_SYMBOL(mach_timebase_info);
 int darwin_mach_timebase_info(darwin_timebase_info *info) {
     info->numer = 125;

@@ -1105,7 +1105,17 @@ open class UIScreen: NSObject {
 
     @ObjCClassMethod("screens") static func screens() -> NSObject { NSMutableArray.of([mainScreen()]) }
 
-    @ObjCMethod("bounds") func bounds() -> CGRect { Screen.bounds }
+    /// PERRY_UIKIT_SCREEN_BOUNDS_PORTRAIT: bounds are reported upright, as
+    /// iOS did before version 8, for a landscape app that exchanges their
+    /// sides itself.
+    private static let reportsPortrait = getenv("PERRY_UIKIT_SCREEN_BOUNDS_PORTRAIT") != nil
+
+    @ObjCMethod("bounds")
+    func bounds() -> CGRect {
+        guard UIScreen.reportsPortrait else { return Screen.bounds }
+        let size = Screen.bounds.size
+        return CGRect(x: 0, y: 0, width: min(size.width, size.height), height: max(size.width, size.height))
+    }
     /// The panel's pixels, which stay in portrait as the interface turns.
     @ObjCMethod("nativeBounds") func nativeBounds() -> CGRect {
         let size = Screen.bounds.size
