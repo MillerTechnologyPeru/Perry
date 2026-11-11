@@ -17,6 +17,7 @@ enum SCNMeshes {
         case .plane: plane(&mesh, Float(state.width), Float(state.height))
         case .cylinder: cone(&mesh, top: Float(state.radius), bottom: Float(state.radius), height: Float(state.height), segments: state.segments)
         case .cone: cone(&mesh, top: Float(state.topRadius), bottom: Float(state.bottomRadius), height: Float(state.height), segments: state.segments)
+        case .custom: break
         }
         return mesh
     }
