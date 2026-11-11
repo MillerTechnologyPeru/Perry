@@ -15,6 +15,7 @@ enum Notifications {
     static let UIApplicationWillTerminateNotification = "UIApplicationWillTerminateNotification"
     static let UIApplicationDidReceiveMemoryWarningNotification = "UIApplicationDidReceiveMemoryWarningNotification"
     static let UIApplicationSignificantTimeChangeNotification = "UIApplicationSignificantTimeChangeNotification"
+    static let UIApplicationUserDidTakeScreenshotNotification = "UIApplicationUserDidTakeScreenshotNotification"
     static let UIApplicationProtectedDataWillBecomeUnavailable = "UIApplicationProtectedDataWillBecomeUnavailable"
     static let UIApplicationProtectedDataDidBecomeAvailable = "UIApplicationProtectedDataDidBecomeAvailable"
     static let UIApplicationDidChangeStatusBarOrientationNotification = "UIApplicationDidChangeStatusBarOrientationNotification"
