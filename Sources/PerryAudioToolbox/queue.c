@@ -683,6 +683,7 @@ OSStatus darwin_AudioQueueSetOfflineRenderFormat(void *queue, const void *format
     DARWIN_SYMBOL(AudioQueueSetOfflineRenderFormat);
 OSStatus darwin_AudioQueueSetOfflineRenderFormat(void *queue, const void *format, const void *layout) {
     (void)queue, (void)format, (void)layout;
+    perry_audio_trace("audio queue %p: offline render format refused", queue);
     return -66626;
 }
 
@@ -690,5 +691,6 @@ OSStatus darwin_AudioQueueOfflineRender(void *queue, const void *time, void *buf
     DARWIN_SYMBOL(AudioQueueOfflineRender);
 OSStatus darwin_AudioQueueOfflineRender(void *queue, const void *time, void *buffer, uint32_t frames) {
     (void)queue, (void)time, (void)buffer, (void)frames;
+    perry_audio_trace("audio queue %p: offline render refused", queue);
     return -66626;
 }
