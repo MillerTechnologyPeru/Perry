@@ -65,6 +65,18 @@ typedef struct GLKMatrix2 { float m[4]; } GLKMatrix2;
 typedef struct GLKMatrix3 { float m[9]; } GLKMatrix3;
 typedef struct GLKMatrix4 { float m[16]; } GLKMatrix4;
 
+// SceneKit's vectors and matrices, floats on iOS. A matrix's sixteen
+// floats lie in the order OpenGL reads them (the translation in m41, m42
+// and m43), so a matrix is passed to a shader as it is.
+typedef struct SCNVector3 { float x, y, z; } SCNVector3;
+typedef struct SCNVector4 { float x, y, z, w; } SCNVector4;
+typedef struct SCNMatrix4 {
+    float m11, m12, m13, m14;
+    float m21, m22, m23, m24;
+    float m31, m32, m33, m34;
+    float m41, m42, m43, m44;
+} SCNMatrix4;
+
 // Core Location's coordinates and MapKit's regions and map geometry: all
 // doubles, so they pass in floating-point registers as on Darwin.
 typedef struct CLLocationCoordinate2D {
