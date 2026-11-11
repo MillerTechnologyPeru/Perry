@@ -253,7 +253,12 @@ final class SCNRenderer {
         if let camera, camera.orthographic {
             return SCNMath.orthographic(scale: Float(camera.orthographicScale), aspect: aspect, near: near, far: far)
         }
-        return SCNMath.perspective(fieldOfView: Float(camera?.fieldOfView ?? 60), aspect: aspect, near: near, far: far)
+        var fieldOfView = Float(camera?.fieldOfView ?? 60)
+        if let camera, camera.horizontal {
+            // The angle is the horizontal one; the projection wants the vertical.
+            fieldOfView = 2 * atanf(tanf(fieldOfView * .pi / 360) / aspect) * 180 / .pi
+        }
+        return SCNMath.perspective(fieldOfView: fieldOfView, aspect: aspect, near: near, far: far)
     }
 
     private func collect(_ node: SCNNode, parent: Matrix, opacity: Float, into items: inout [Item]) {
