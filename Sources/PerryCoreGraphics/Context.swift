@@ -842,6 +842,47 @@ public func CGPathAddArc(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _
     Paths.append(path, t, Paths.arc(Double(x), Double(y), Double(radius), Double(start), Double(end), clockwise: clockwise, hasCurrentPoint: hasCurrent))
 }
 
+/// An arc of `radius` tangent to the line from the current point to
+/// (x1, y1) and to the line from there to (x2, y2), with a line to its
+/// start, as CGContextAddArcToPoint draws. In the path's coordinates
+/// before `t`: the current point is taken back through it.
+@DarwinC("_CGPathAddArcToPoint")
+public func CGPathAddArcToPoint(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x1: CGFloat, _ y1: CGFloat,
+                                _ x2: CGFloat, _ y2: CGFloat, _ radius: CGFloat) {
+    guard let state = Paths.state(path) else { return }
+    guard let stored = state.current else {
+        Paths.append(path, t, [.move(Double(x1), Double(y1))])
+        return
+    }
+    var current = CGPoint(x: CGFloat(stored.0), y: CGFloat(stored.1))
+    if let t { current = CGPointApplyAffineTransform(current, CGAffineTransformInvert(t.pointee)) }
+    let (p0x, p0y) = (Double(current.x), Double(current.y))
+    let (p1x, p1y, p2x, p2y, r) = (Double(x1), Double(y1), Double(x2), Double(y2), Double(radius))
+    // Unit vectors from the corner along each line.
+    let (ax, ay) = (p0x - p1x, p0y - p1y), (bx, by) = (p2x - p1x, p2y - p1y)
+    let la = (ax * ax + ay * ay).squareRoot(), lb = (bx * bx + by * by).squareRoot()
+    let cross = ax * by - ay * bx
+    guard r > 0, la > 0, lb > 0, abs(cross) > 1e-9 * la * lb else {
+        Paths.append(path, t, [.line(p1x, p1y)])
+        return
+    }
+    let (ux, uy, vx, vy) = (ax / la, ay / la, bx / lb, by / lb)
+    let angle = acos(max(-1, min(1, ux * vx + uy * vy)))
+    let along = r / tan(angle / 2)
+    let (t1x, t1y, t2x, t2y) = (p1x + ux * along, p1y + uy * along, p1x + vx * along, p1y + vy * along)
+    let (bisectX, bisectY) = (ux + vx, uy + vy)
+    let lbisect = (bisectX * bisectX + bisectY * bisectY).squareRoot()
+    let distance = r / sin(angle / 2)
+    let (cx, cy) = (p1x + bisectX / lbisect * distance, p1y + bisectY / lbisect * distance)
+    let start = atan2(t1y - cy, t1x - cx), end = atan2(t2y - cy, t2x - cx)
+    // Turning toward the corner's other side: the short way round.
+    let clockwise = cross > 0
+    Paths.append(path, t, [.line(t1x, t1y)] + Paths.arc(cx, cy, r, start, end, clockwise: clockwise, hasCurrentPoint: true).filter {
+        if case .move = $0 { return false }
+        return true
+    })
+}
+
 @DarwinC("_CGPathAddRelativeArc")
 public func CGPathAddRelativeArc(_ path: Ref?, _ t: UnsafePointer<CGAffineTransform>?, _ x: CGFloat, _ y: CGFloat, _ radius: CGFloat,
                                  _ start: CGFloat, _ delta: CGFloat) {
