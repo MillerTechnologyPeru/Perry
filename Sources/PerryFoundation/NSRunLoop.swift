@@ -468,6 +468,14 @@ public func CFRunLoopAddTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: Unsa
     Timers.add(timer, to: state)
 }
 
+/// When the run loop's next timer fires; 0 when it has none. Every mode is
+/// the same run loop here.
+@DarwinC("_CFRunLoopGetNextTimerFireDate")
+public func CFRunLoopGetNextTimerFireDate(_ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) -> Double {
+    guard let state = RunLoops.state(runLoop) else { return 0 }
+    return state.snapshotTimers().filter { Timers.isValid($0) }.map(Timers.fireDate).min() ?? 0
+}
+
 @c(_CFRunLoopRemoveTimer)
 public func CFRunLoopRemoveTimer(_ runLoop: UnsafeMutableRawPointer?, _ timer: UnsafeMutableRawPointer?,
                                  _ mode: UnsafeMutableRawPointer?) {
