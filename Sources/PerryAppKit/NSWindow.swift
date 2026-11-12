@@ -699,21 +699,32 @@ open class NSWindow: NSResponder {
         makeSDLWindow(hidden: false)
     }
 
+    /// Whether an NSOpenGLContext draws to one of the window's views.
+    private var drawsWithOpenGL = false
+
     /// The window's NSOpenGLView, if it shows one.
     var openGLView: NSOpenGLView? { rootView?.allViews.lazy.compactMap { $0 as? NSOpenGLView }.first }
 
     /// Makes the SDL window able to take an OpenGL context: without a
     /// renderer, and made again if it has one already.
     func prepareForOpenGL(_ format: NSOpenGLPixelFormat?) {
+        // A context drawing to any of its views, not only an NSOpenGLView.
+        drawsWithOpenGL = true
         if sdlWindow != nil && renderer == nil { return }
         destroySDLWindow()
         format?.applyToSDL()
         makeSDLWindow(hidden: !visible)
     }
 
+    /// SDL's X11 windows wait for their map events, which only the main
+    /// thread's event pump sees: windows are made and destroyed there.
     private func makeSDLWindow(hidden: Bool) {
+        Dispatch.onMainAndWait { self.makeSDLWindowOnMain(hidden: hidden) }
+    }
+
+    private func makeSDLWindowOnMain(hidden: Bool) {
         guard SDL.start() else { return }
-        let usesOpenGL = openGLView != nil
+        let usesOpenGL = drawsWithOpenGL || openGLView != nil
         var flags = usesOpenGL ? SDL.windowOpenGL : SDL.windowHighPixelDensity
         if hidden { flags |= SDL.windowHidden }
         if styleMask & StyleMask.resizable != 0 { flags |= SDL.windowResizable }
@@ -767,6 +778,10 @@ open class NSWindow: NSResponder {
     }
 
     private func destroySDLWindow() {
+        Dispatch.onMainAndWait { self.destroySDLWindowOnMain() }
+    }
+
+    private func destroySDLWindowOnMain() {
         if let renderer { SDL.destroyRenderer(renderer) }
         if let sdlWindow { SDL.destroyWindow(sdlWindow) }
         renderer = nil
