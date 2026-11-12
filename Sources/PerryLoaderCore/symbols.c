@@ -369,8 +369,9 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     }
 #if !defined(__arm__)
     // A Mac app's WebKit (a versioned framework) is AppKit's: its web views
-    // are NSViews. perry32 runs only iOS apps and has no AppKit.
-    if (strstr(install_name, "/WebKit.framework/Versions/")) {
+    // are NSViews. So is its Core Text, whose fonts are NSFonts. The armv7
+    // loader runs only iOS apps and has no AppKit.
+    if (strstr(install_name, "/WebKit.framework/Versions/") || strstr(install_name, "/CoreText.framework/Versions/")) {
         snprintf(out, out_size, "AppKit");
         return true;
     }
@@ -380,6 +381,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
+    // A Mac app's Core Image has no provider: Core Image is UIKit's, whose
+    // classes AppKit's would collide with, so a Mac app finds it missing,
+    // as one that links it weakly can.
+    if (strstr(install_name, "/CoreImage.framework/Versions/"))
+        return false;
 #endif
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
     // MetalKit's views over QuartzCore's Metal layers, SpriteKit's scenes
