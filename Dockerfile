@@ -178,8 +178,8 @@ RUN apt-get update \
 # Metal API on Vulkan, through the C ABI crate on MillerTechnologyPeru's
 # fork: libmetal2vulkan.so, a separate library Metal's provider opens at run
 # time. Built with the Rust its toolchain file pins, which is removed after.
-RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vulkan/archive/75cbc84889a978390f6cb7eae0cb9539be744fee.tar.gz \
- && echo "fbdf067784cfd7c5ec4741c228588df52db18683c36061c3c33c56b4abf57404  /tmp/m2v.tar.gz" | sha256sum -c - \
+RUN curl -fsSLo /tmp/m2v.tar.gz https://github.com/MillerTechnologyPeru/metal2vulkan/archive/01bd4c610748a2a9bcf2b1db3a059da41f086fa5.tar.gz \
+ && echo "f16fa652633b2e990509b071ee1d5a4d018d73b6affaf58dad2bd27776d700d1  /tmp/m2v.tar.gz" | sha256sum -c - \
  && mkdir /tmp/m2v && tar -xzf /tmp/m2v.tar.gz -C /tmp/m2v --strip-components=1 \
         --wildcards '*/capi' '*/crates/metal2vulkan' '*/crates/metal2vulkan-air' '*/crates/metal2vulkan-runtime' \
         '*/Cargo.toml' '*/rust-toolchain.toml' '*/LICENSE*' \
