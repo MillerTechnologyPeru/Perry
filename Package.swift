@@ -28,6 +28,8 @@ let package = Package(
         .library(name: "PerryOpenGL", type: .dynamic, targets: ["PerryOpenGL"]),
         // OpenCL.framework, with no devices.
         .library(name: "PerryOpenCL", type: .dynamic, targets: ["PerryOpenCL"]),
+        // WPE WebKit's web process extension for AppKit's web views' scripting.
+        .library(name: "PerryWebExtension", type: .dynamic, targets: ["PerryWebExtension"]),
         // Steamworks' libsteam_api, over the running Linux Steam client.
         .library(name: "Perrysteam_api", type: .dynamic, targets: ["PerrySteamAPI"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
@@ -198,8 +200,9 @@ let package = Package(
         .target(name: "PerryOpenAL", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryOpenGL", dependencies: ["CPerryWrapped", "PerryInterface"]),
         .target(name: "PerryOpenCL"),
+        .target(name: "PerryWebExtension"),
         // Steamworks: libsteam_api's part, over steamclient.so, opened at run time.
-        .target(name: "PerrySteamAPI"),
+        .target(name: "PerrySteamAPI", dependencies: ["PerryInterface"]),
         .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
         // libxar, Linux's, opened at run time.
         .target(name: "PerryXar", dependencies: ["CPerryWrapped"]),
