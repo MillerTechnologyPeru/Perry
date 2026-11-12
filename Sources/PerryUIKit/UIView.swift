@@ -564,6 +564,10 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setContentScaleFactor:")
     func setContentScaleFactor(_ scale: CGFloat) {
+        // A scale that is not positive leaves the view's as it is: a game
+        // that passes zero for "the screen's" (BioShock) would otherwise
+        // have a layer with no pixels.
+        guard scale > 0 else { return }
         state.geometry.contentsScale = scale
         state.geometry.needsDisplay = true
     }

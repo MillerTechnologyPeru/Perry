@@ -669,13 +669,19 @@ open class EAGLContext: NSObject {
     @ObjCMethod("renderbufferStorage:fromDrawable:")
     func renderbufferStorage(_ target: UInt, fromDrawable drawable: NSObject?) -> Bool {
         EAGLContexts.beforeDrawing()
-        guard let layer = drawable?.as(CAEAGLLayer.self) else { return false }
+        guard let layer = drawable?.as(CAEAGLLayer.self) else {
+            if GLTrace.on { GLTrace.say("no storage: the drawable \(String(describing: drawable?.objcObject)) is not a CAEAGLLayer") }
+            return false
+        }
         let bounds = layer.bounds(), scale = layer.contentsScale()
         let width = Int32((bounds.width * scale).rounded())
         let height = Int32((bounds.height * scale).rounded())
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
-        guard name != 0, width > 0, height > 0 else { return false }
+        guard name != 0, width > 0, height > 0 else {
+            if GLTrace.on { GLTrace.say("no storage: renderbuffer \(name), layer \(bounds.width) by \(bounds.height) at \(scale)") }
+            return false
+        }
         let pixels = GLRenderScale.drawable(renderbuffer: UInt32(name), width: width, height: height, layerScale: scale)
         GLES.renderbufferStorage(UInt32(target), layer.colorFormat, pixels.0, pixels.1)
         if GLTrace.on {
