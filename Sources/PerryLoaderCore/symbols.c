@@ -217,6 +217,7 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
 #define MAPKIT "/System/Library/Frameworks/MapKit.framework/MapKit"
 #define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+#define APPKIT "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
@@ -233,6 +234,30 @@ static const struct {
     {"UIKit", QUARTZCORE},
     {"MapKitAppKit", MAPKIT},
 };
+
+// Re-exports a provider has for the install name it was found under, where
+// it shares its library with others. ApplicationServices is CoreGraphics'
+// here, and Core Text, one of its subframeworks, AppKit's: Mac apps bind
+// CTFont and CTLine to ApplicationServices.
+static void reexport_for_install_name(perry_provider *provider, const char *install_name) {
+#if defined(__i386__) || defined(__x86_64__)
+    bool application_services = strstr(install_name, "/ApplicationServices.framework/") != NULL;
+    size_t count = sizeof(provider->reexports) / sizeof(provider->reexports[0]);
+    // Another install name of the library, which copied this one's, has
+    // only the library's own.
+    for (size_t i = 0; i < count; i++)
+        if (provider->reexports[i] && strcmp(provider->reexports[i], APPKIT) == 0)
+            provider->reexports[i] = NULL;
+    for (size_t i = 0; application_services && i < count; i++)
+        if (!provider->reexports[i]) {
+            provider->reexports[i] = APPKIT;
+            break;
+        }
+#else
+    (void)provider;
+    (void)install_name;
+#endif
+}
 
 // Sets up a provider just found under `short_name`: its re-exports and the
 // libraries it needs.
@@ -488,6 +513,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
             provider->base = other->base;
             provider->symbol = other->symbol;
             memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
+            reexport_for_install_name(provider, install_name);
             return provider;
         }
     }
@@ -519,6 +545,7 @@ retry:
                 provider->base = other->base;
                 provider->symbol = other->symbol;
                 memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
+                reexport_for_install_name(provider, install_name);
                 return provider;
             }
         }
@@ -546,6 +573,7 @@ retry:
             provider->symbol = (void *(*)(const char *))hook;
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
         link_provider(loader, provider, short_name);
+        reexport_for_install_name(provider, install_name);
         // One loaded while the program runs (dlsym on a library's handle)
         // starts as those loaded before it did.
         perry_start_late_providers(loader);
