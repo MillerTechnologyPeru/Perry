@@ -5,10 +5,11 @@ import PerryObjCInterop
 // libPerryIOKit: the provider for IOKit.framework, for Mac apps. Its
 // registry has the root and the platform expert device, whose UUID and
 // serial number come from this machine's /etc/machine-id; matching finds
-// those and no other services. HID managers find no devices (games read
-// controllers through GameController), and there are no power sources
-// or sleep notifications. PerryProviderPlugin generates the entry points;
-// this file binds libobjc first.
+// those and no other services. HID managers find SDL3's gamepads, as Xbox
+// 360 controllers, and there are no power sources or sleep notifications.
+// PerryProviderPlugin generates the entry points; this file binds libobjc
+// first, and libdispatch and mach_absolute_time, which the gamepads are
+// read with.
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
@@ -20,7 +21,26 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         line.withCString { _ = write(2, $0, strlen($0)) }
         abort()
     }
+    func symbol(_ library: String, _ name: String) -> UnsafeMutableRawPointer? {
+        library.withCString { library in name.withCString { lookup(library, $0) } }
+    }
+    let dispatch = "/usr/lib/system/libdispatch.dylib"
+    Dispatch.after = symbol(dispatch, "_dispatch_after_f").map { unsafeBitCast($0, to: Dispatch.After.self) }
+    Dispatch.time = symbol(dispatch, "_dispatch_time").map { unsafeBitCast($0, to: Dispatch.Time.self) }
+    Dispatch.mainQueue = symbol(dispatch, "__dispatch_main_q")
+    Clock.machAbsoluteTime = symbol("/usr/lib/libSystem.B.dylib", "_mach_absolute_time")
+        .map { unsafeBitCast($0, to: (@convention(c) () -> UInt64).self) }
     return true
+}
+
+/// libdispatch's, for work on the main queue later.
+enum Dispatch {
+    typealias After = @convention(c) (UInt64, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                      @convention(c) (UnsafeMutableRawPointer?) -> Void) -> Void
+    typealias Time = @convention(c) (UInt64, Int64) -> UInt64
+    nonisolated(unsafe) static var after: After?
+    nonisolated(unsafe) static var time: Time?
+    nonisolated(unsafe) static var mainQueue: UnsafeMutableRawPointer?
 }
 
 /// kIOMainPortDefault and kIOMasterPortDefault: mach_port_t 0, the default.
@@ -65,6 +85,8 @@ final class Lock: @unchecked Sendable {
 extension NSObject {
     @ObjCMethod("new") func newInstance() -> NSObject
     @ObjCMethod("isKindOfClass:") func isKind(of cls: ObjCClass) -> Bool
+    @ObjCMethod("isEqual:") func isEqual(_ other: NSObject) -> Bool
+    @ObjCMethod("longLongValue") func longLongValue() -> Int64
     var stringValue: String { String(objCArgument: objcObject) }
     var isString: Bool { isKind(of: ObjCClass(named: "NSString")) }
 
@@ -95,18 +117,38 @@ class NSData: NSObject {
 }
 
 @ObjCWrapper("NSArray")
-class NSArray: NSObject {}
+class NSArray: NSObject {
+    @ObjCMethod("count") func count() -> UInt
+    @ObjCMethod("objectAtIndex:") func object(at index: UInt) -> NSObject
+
+    func objects() -> [NSObject] { (0..<count()).map { object(at: $0) } }
+}
 
 @ObjCWrapper("NSMutableArray")
 class NSMutableArray: NSArray {
     @ObjCClassMethod("array") static func empty() -> NSMutableArray
+    @ObjCMethod("addObject:") func add(_ object: NSObject)
+
+    static func of(_ objects: [NSObject]) -> NSMutableArray {
+        let array = empty()
+        for object in objects { array.add(object) }
+        return array
+    }
+}
+
+@ObjCWrapper("NSSet")
+class NSSet: NSObject {
+    @ObjCClassMethod("setWithArray:") static func make(_ array: NSArray) -> NSSet
 }
 
 @ObjCWrapper("NSDictionary")
 class NSDictionary: NSObject {
     @ObjCMethod("objectForKey:") func object(forKey key: NSObject) -> NSObject?
+    @ObjCMethod("allKeys") func allKeys() -> NSArray
 
     func object(_ key: String) -> NSObject? { object(forKey: NSObject.string(key)) }
+    /// The keys that are strings.
+    func keys() -> [String] { allKeys().objects().filter(\.isString).map(\.stringValue) }
 }
 
 @ObjCWrapper("NSMutableDictionary")
