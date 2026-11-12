@@ -1,3 +1,4 @@
+import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 
@@ -24,6 +25,17 @@ private enum CarbonTargets {
 @c(_GetEventDispatcherTarget) public func GetEventDispatcherTarget() -> UnsafeMutableRawPointer? { pointer(&CarbonTargets.dispatcher) }
 
 private func pointer(_ token: UnsafeMutablePointer<UInt8>) -> UnsafeMutableRawPointer { UnsafeMutableRawPointer(token) }
+
+/// OSStatus HIGetMousePosition(HICoordinateSpace, void *object, HIPoint *):
+/// where the mouse is, in global coordinates (the origin at the top left of
+/// the main screen) whatever space is asked for: with one screen at one
+/// pixel per point, they are the screen's pixels too.
+@c(_HIGetMousePosition)
+public func HIGetMousePosition(_ space: UInt32, _ object: UnsafeMutableRawPointer?, _ point: UnsafeMutablePointer<CGPoint>?) -> Int32 {
+    let location = NSEvent.mouseLocation()
+    point?.pointee = CGPoint(x: location.x, y: Screens.height - location.y)
+    return 0
+}
 
 /// An installed handler's reference: its record, until it is removed.
 private final class CarbonHandler {
