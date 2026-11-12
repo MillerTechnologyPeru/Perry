@@ -219,7 +219,8 @@ public func FSGetVolumeInfo(_ volume: Int16, _ index: Int, _ actual: UnsafeMutab
 /// FSCatalogInfo *, HFSUniStr255 *outName, FSSpec *, FSRef *parentRef):
 /// the item's flags, dates, sizes and count of items in a folder, its name
 /// and its folder. FSCatalogInfo (2-byte packed, 144 bytes): nodeFlags at
-/// 0, five UTCDateTimes from 16, the data fork's sizes at 104 and 112, the
+/// 0, the volume (the one, -100) at 2, the parent's and the item's IDs (their
+/// inodes, as 32 bits) at 4 and 8, five UTCDateTimes from 16, the data fork's sizes at 104 and 112, the
 /// resource fork's (none) at 120 and 128, valence at 136.
 @c(_FSGetCatalogInfo)
 public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalog: UnsafeMutableRawPointer?,
@@ -234,6 +235,13 @@ public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalo
         var flags: UInt16 = directory ? 0x0010 : 0          // kFSNodeIsDirectoryMask
         if access(path, W_OK) != 0 { flags |= 0x0001 }      // kFSNodeLockedMask
         catalog.storeBytes(of: flags, as: UInt16.self)
+        catalog.storeBytes(of: Int16(-100), toByteOffset: 2, as: Int16.self)
+        var parentInfo = stat()
+        let parentPath = path == "/" ? "/" : "/" + path.split(separator: "/").dropLast().joined(separator: "/")
+        if stat(parentPath, &parentInfo) == 0 {
+            catalog.storeBytes(of: UInt32(truncatingIfNeeded: parentInfo.st_ino), toByteOffset: 4, as: UInt32.self)
+        }
+        catalog.storeBytes(of: UInt32(truncatingIfNeeded: info.st_ino), toByteOffset: 8, as: UInt32.self)
         // UTCDateTime: seconds since 1904 in a 48-bit count, then a fraction.
         // In 64 bits: since 1904 passes a 32-bit Int's largest.
         func store(_ seconds: Int64, at offset: Int) {
