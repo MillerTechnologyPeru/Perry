@@ -13,6 +13,10 @@
 // instructions of its own FDE, with the personality routine and LSDA the
 // unwind info names. Pointers are written absolute, as the image is where
 // it will stay.
+//
+// i386's FDEs number esp and ebp the other way round from the host's
+// unwinder (Darwin's eh_frame has ebp as 4 and esp as 5), so those carried
+// over are renumbered.
 
 #define _GNU_SOURCE
 #include "image.h"
@@ -20,7 +24,7 @@
 
 // armv7's code has no unwind tables: it unwinds with setjmp and longjmp,
 // through contexts it registers with libSystem as it runs.
-#if !defined(__LP64__)
+#if defined(__arm__)
 void perry_register_unwind_info(perry_image *image) { (void)image; }
 #else
 
@@ -49,7 +53,7 @@ static void put(buffer *b, const void *data, size_t count) {
 
 static void put8(buffer *b, uint8_t value) { put(b, &value, 1); }
 static void put32(buffer *b, uint32_t value) { put(b, &value, 4); }
-static void put64(buffer *b, uint64_t value) { put(b, &value, 8); }
+static void put_pointer(buffer *b, uintptr_t value) { put(b, &value, sizeof(value)); }
 
 static void put_uleb(buffer *b, uint64_t value) {
     do {
@@ -95,9 +99,9 @@ static size_t write_cie(buffer *b, uint64_t code_align, int64_t data_align, uint
     put_sleb(b, data_align);
     put8(b, return_register);
     if (personality) {
-        put_uleb(b, 11);
+        put_uleb(b, 3 + sizeof(uintptr_t));
         put8(b, 0x00);          // P: DW_EH_PE_absptr
-        put64(b, personality);
+        put_pointer(b, personality);
         put8(b, 0x00);          // L: DW_EH_PE_absptr
         put8(b, 0x00);          // R: DW_EH_PE_absptr
     } else {
@@ -114,11 +118,11 @@ static void write_fde(buffer *b, size_t cie, bool has_personality, uintptr_t sta
     size_t start = b->size;
     put32(b, 0);
     put32(b, (uint32_t)(b->size - cie));    // back from this field to the CIE
-    put64(b, start_address);
-    put64(b, size);
+    put_pointer(b, start_address);
+    put_pointer(b, size);
     if (has_personality) {
-        put_uleb(b, 8);
-        put64(b, lsda);
+        put_uleb(b, sizeof(uintptr_t));
+        put_pointer(b, lsda);
     } else {
         put_uleb(b, 0);
     }
@@ -132,7 +136,7 @@ enum {
     UNWIND_HAS_LSDA = 0x40000000,
     UNWIND_PERSONALITY_SHIFT = 28,
     UNWIND_MODE_MASK = 0x0f000000,
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
     UNWIND_MODE_DWARF = 0x04000000,
 #else
     UNWIND_MODE_DWARF = 0x03000000,
@@ -143,6 +147,7 @@ enum {
     UNWIND_ARM64_MODE_FRAME = 0x04000000,
 };
 
+#if defined(__aarch64__)
 /// A frame with x29 and x30 pushed and x29 pointing at them: the CFA is
 /// x29 + 16, and the pairs of callee-saved registers the encoding lists
 /// are below x29, in its order.
@@ -171,26 +176,35 @@ static size_t frame_instructions(uint32_t encoding, uint8_t *out) {
     }
     return n;
 }
+#endif
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
 enum { UNWIND_X86_64_MODE_RBP_FRAME = 0x01000000, UNWIND_X86_64_MODE_STACK_IMMD = 0x02000000, UNWIND_X86_64_MODE_STACK_IND = 0x03000000 };
 
+#if defined(__x86_64__)
 /// DWARF's number for a register in a compact encoding: rbx, r12 to r15, rbp.
 static const uint8_t x86_64_registers[7] = { 0, 3, 12, 13, 14, 15, 6 };
+enum { WORD = 8, FRAME_REGISTER = 6 };
+#else
+/// DWARF's number for a register in a compact encoding: ebx, ecx, edx, edi,
+/// esi, ebp.
+static const uint8_t x86_64_registers[7] = { 0, 3, 1, 2, 7, 6, 5 };
+enum { WORD = 4, FRAME_REGISTER = 5 };
+#endif
 
 /// Saves `reg` at `slots` words below the CFA.
 static size_t saved_register(uint8_t *out, uint8_t reg, unsigned slots) {
-    out[0] = 0x80 | reg;                // DW_CFA_offset, factored by -8
+    out[0] = 0x80 | reg;                // DW_CFA_offset, factored by -WORD
     out[1] = (uint8_t)slots;
     return 2;
 }
 
-/// A frame with rbp pushed and pointing at it: the CFA is rbp + 16, and the
-/// registers the encoding lists are at the offset it gives below rbp.
+/// A frame with rbp pushed and pointing at it: the CFA is rbp + 2 words,
+/// and the registers the encoding lists are at the offset it gives below rbp.
 static size_t rbp_frame_instructions(uint32_t encoding, uint8_t *out) {
     size_t n = 0;
-    out[n++] = 0x0c; out[n++] = 6; out[n++] = 16;       // DW_CFA_def_cfa rbp, 16
-    n += saved_register(out + n, 6, 2);
+    out[n++] = 0x0c; out[n++] = FRAME_REGISTER; out[n++] = 2 * WORD;    // DW_CFA_def_cfa rbp, 2 words
+    n += saved_register(out + n, FRAME_REGISTER, 2);
     unsigned offset = (encoding >> 16) & 0xff, registers = encoding & 0x7fff;
     for (unsigned i = 0; i < 5; i++, registers >>= 3) {
         if ((registers & 7) && (registers & 7) < 6 && 2 + offset >= i)
@@ -209,9 +223,9 @@ static size_t frameless_instructions(uint32_t encoding, const uint8_t *function,
     if ((encoding & UNWIND_MODE_MASK) == UNWIND_X86_64_MODE_STACK_IND) {
         uint32_t immediate;
         memcpy(&immediate, function + size, 4);
-        size = immediate + 8 * ((encoding >> 13) & 7);
+        size = immediate + WORD * ((encoding >> 13) & 7);
     } else {
-        size *= 8;
+        size *= WORD;
     }
     if (count > 6)
         count = 6;
@@ -287,7 +301,8 @@ static int64_t read_sleb(const uint8_t **p, const uint8_t *end) {
 /// The bytes a pointer of that encoding takes; 0 for one of no fixed size.
 static size_t encoded_size(uint8_t encoding) {
     switch (encoding & 0x0f) {
-    case 0x00: case 0x04: case 0x0c: return 8;
+    case 0x00: return sizeof(uintptr_t);
+    case 0x04: case 0x0c: return 8;
     case 0x03: case 0x0b: return 4;
     case 0x02: case 0x0a: return 2;
     default: return 0;
@@ -382,6 +397,52 @@ static bool parse_fde(const uint8_t *fde, const uint8_t *section, const uint8_t 
     return true;
 }
 
+#if defined(__i386__)
+/// Darwin's number for an i386 register in eh_frame, as the host's unwinder
+/// numbers it: esp and ebp swapped.
+static uint64_t host_register(uint64_t reg) { return reg == 4 ? 5 : reg == 5 ? 4 : reg; }
+
+/// Copies call frame instructions to `out`, the same length, with their
+/// registers renumbered. False for those it can't: an address in
+/// DW_CFA_set_loc, or a DWARF expression, which may name registers too.
+static bool renumber(const uint8_t *in, size_t size, uint8_t *out) {
+    const uint8_t *p = in, *end = in + size;
+    memcpy(out, in, size);
+    // Rewrites the ULEB register at p, which has a single byte for these.
+    #define REGISTER() do { \
+        if (p >= end) return false; \
+        if (!(*p & 0x80)) out[p - in] = (uint8_t)host_register(*p); \
+        (void)read_uleb(&p, end); \
+    } while (0)
+    while (p < end) {
+        uint8_t op = *p++;
+        switch (op & 0xc0) {
+        case 0x40: continue;                                            // DW_CFA_advance_loc
+        case 0x80: out[p - 1 - in] = (uint8_t)(0x80 | host_register(op & 0x3f)); (void)read_uleb(&p, end); continue;
+        case 0xc0: out[p - 1 - in] = (uint8_t)(0xc0 | host_register(op & 0x3f)); continue;
+        }
+        switch (op) {
+        case 0x00: case 0x0a: case 0x0b: break;                         // nop, remember and restore_state
+        case 0x02: p += 1; break;                                       // advance_loc1
+        case 0x03: p += 2; break;                                       // advance_loc2
+        case 0x04: p += 4; break;                                       // advance_loc4
+        case 0x05: case 0x0c: case 0x14: case 0x2f:                     // offset_extended, def_cfa, val_offset, GNU_negative_offset_extended
+            REGISTER(); (void)read_uleb(&p, end); break;
+        case 0x11: case 0x12: case 0x15:                                // offset_extended_sf, def_cfa_sf, val_offset_sf
+            REGISTER(); (void)read_sleb(&p, end); break;
+        case 0x06: case 0x07: case 0x08: case 0x0d:                     // restore_extended, undefined, same_value, def_cfa_register
+            REGISTER(); break;
+        case 0x09: REGISTER(); REGISTER(); break;                       // register
+        case 0x0e: case 0x2e: (void)read_uleb(&p, end); break;          // def_cfa_offset, GNU_args_size
+        case 0x13: (void)read_sleb(&p, end); break;                     // def_cfa_offset_sf
+        default: return false;
+        }
+    }
+    #undef REGISTER
+    return p == end;
+}
+#endif
+
 // MARK: - An image's unwind info
 
 typedef struct { uint32_t offset, encoding; } function_entry;
@@ -409,7 +470,7 @@ void perry_register_unwind_info(perry_image *image) {
             register_frame = (void (*)(void *))dlsym(unwinder, "__register_frame");
         looked = true;
     }
-    const struct section_64 *section = perry_image_section(image, "__TEXT", "__unwind_info");
+    const section_t *section = perry_image_section(image, "__TEXT", "__unwind_info");
     if (!register_frame || !section || section->size < 28)
         return;
     const uint8_t *info = perry_image_vmaddr(image, section->addr);
@@ -466,7 +527,7 @@ void perry_register_unwind_info(perry_image *image) {
     if (lsda_end > info_size || lsda_at > lsda_end)
         lsda_at = lsda_end = 0;
 
-    const struct section_64 *frames_section = perry_image_section(image, "__TEXT", "__eh_frame");
+    const section_t *frames_section = perry_image_section(image, "__TEXT", "__eh_frame");
     const uint8_t *frames = frames_section ? perry_image_vmaddr(image, frames_section->addr) : NULL;
     const uint8_t *frames_limit = frames ? frames + frames_section->size : NULL;
 
@@ -475,7 +536,7 @@ void perry_register_unwind_info(perry_image *image) {
     uintptr_t personalities[4] = { 0 };
     for (uint32_t i = 0; i < personality_count && i < 3; i++) {
         uint32_t at = word(info, personality_offset + 4 * i);
-        if ((uint64_t)at + 8 <= image->vm_size)
+        if ((uint64_t)at + sizeof(uintptr_t) <= image->vm_size)
             memcpy(&personalities[i + 1], image->base + at, sizeof(uintptr_t));
     }
 
@@ -486,6 +547,9 @@ void perry_register_unwind_info(perry_image *image) {
 #if defined(__x86_64__)
     static const uint8_t compact_initial[] = { 0x0c, 7, 8, 0x80 | 16, 1 };
     enum { COMPACT_RETURN_REGISTER = 16 };
+#elif defined(__i386__)
+    static const uint8_t compact_initial[] = { 0x0c, 4, 4, 0x80 | 8, 1 };
+    enum { COMPACT_RETURN_REGISTER = 8 };
 #else
     static const uint8_t compact_initial[] = { 0x0c, 31, 0 };
     enum { COMPACT_RETURN_REGISTER = 30 };
@@ -515,7 +579,7 @@ void perry_register_unwind_info(perry_image *image) {
         uint8_t made[64];
         size_t made_size = 0;
         switch (encoding & UNWIND_MODE_MASK) {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
         case UNWIND_X86_64_MODE_RBP_FRAME:
             made_size = rbp_frame_instructions(encoding, made);
             break;
@@ -551,6 +615,19 @@ void perry_register_unwind_info(perry_image *image) {
                 without++;
                 continue;
             }
+#if defined(__i386__)
+            uint8_t *renumbered = malloc(instructions_size + cie.initial_size + 1);
+            if (!renumbered)
+                perry_fatal("out of memory for unwind information");
+            uint8_t *initial = renumbered + instructions_size;
+            if (!renumber(instructions, instructions_size, renumbered) || !renumber(cie.initial, cie.initial_size, initial)) {
+                free(renumbered);
+                without++;
+                continue;
+            }
+            instructions = renumbered;
+            cie.initial = initial;
+#endif
             size_t found = carried_count;
             for (size_t k = 0; k < carried_count; k++)
                 if (carried[k].source == cie.at && carried[k].personality == which)
@@ -568,6 +645,9 @@ void perry_register_unwind_info(perry_image *image) {
                                                   cie.initial, cie.initial_size);
             }
             write_fde(&out, carried[found].offset, personality != 0, start, next - offset, lsda, instructions, instructions_size);
+#if defined(__i386__)
+            free(renumbered);
+#endif
             dwarf++;
             continue;
         }
@@ -577,7 +657,7 @@ void perry_register_unwind_info(perry_image *image) {
             continue;
         }
         if (!compact_made[which]) {
-            compact_cies[which] = write_cie(&out, 1, -8, COMPACT_RETURN_REGISTER, personality, compact_initial, sizeof(compact_initial));
+            compact_cies[which] = write_cie(&out, 1, -(int64_t)sizeof(uintptr_t), COMPACT_RETURN_REGISTER, personality, compact_initial, sizeof(compact_initial));
             compact_made[which] = true;
         }
         write_fde(&out, compact_cies[which], personality != 0, start, next - offset, lsda, made, made_size);
