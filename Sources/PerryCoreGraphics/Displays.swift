@@ -177,6 +177,20 @@ public func CGDisplayScreenSize(_ display: UInt32) -> CGSize {
 @c(_CGDisplaySerialNumber) public func CGDisplaySerialNumber(_ display: UInt32) -> UInt32 { 0 }
 @c(_CGDisplayRotation) public func CGDisplayRotation(_ display: UInt32) -> Double { 0 }
 
+/// CGWindowLevel CGWindowLevelForKey(CGWindowLevelKey): the levels of
+/// windows, as macOS has them, by key (kCGBaseWindowLevelKey 0 to
+/// kCGAssistiveTechHighWindowLevelKey 20).
+private let windowLevels: [Int32] = [
+    Int32.min, Int32.min + 1, Int32.min + 20, -20, 0, 3, 3, 20, 24, 25, 8, 101, 500, 1000,
+    Int32.max - 16, 102, 200, 19, Int32.min + 40, Int32.max - 17, 1500,
+]
+
+@c(_CGWindowLevelForKey)
+public func CGWindowLevelForKey(_ key: Int32) -> Int32 { key >= 0 && Int(key) < windowLevels.count ? windowLevels[Int(key)] : 0 }
+
+/// The level shielding windows (a captured display's) are at.
+@c(_CGShieldingWindowLevel) public func CGShieldingWindowLevel() -> Int32 { Int32.max - 1 - 16 }
+
 /// The OpenGL display mask of a display: the one display is the first bit.
 @c(_CGDisplayIDToOpenGLDisplayMask)
 public func CGDisplayIDToOpenGLDisplayMask(_ display: UInt32) -> UInt32 { display == mainDisplay ? 1 : 0 }
