@@ -870,8 +870,10 @@ open class NSWindow: NSResponder {
         guard new != objcObject else { return true }
         if Send.bool(new, "acceptsFirstResponder"), Send.bool(new, "becomeFirstResponder") {
             firstResponderObject = new
+            Trace.log("window \(windowNumber): first responder \(NSObject(new).describedByObject() ?? "?")")
             return true
         }
+        Trace.log("window \(windowNumber): \(NSObject(new).describedByObject() ?? "?") refused to be first responder")
         return responder == nil
     }
 
@@ -924,6 +926,7 @@ open class NSWindow: NSResponder {
             Send.void(viewAt(event.locationInWindow)?.objcObject ?? objcObject, "scrollWheel:", event.objcObject)
         case .keyDown:
             let responder = firstResponderObject ?? objcObject
+            Trace.log("window \(windowNumber): key \(event.keyCode) down to \(NSObject(responder).describedByObject() ?? "?")")
             if event.modifierFlags & ModifierFlags.command != 0,
                contentView.map({ Send.bool($0.objcObject, "performKeyEquivalent:", event.objcObject) }) == true { return }
             if event.modifierFlags & (ModifierFlags.command | ModifierFlags.control) != 0, MenuBar.performKeyEquivalent(event) { return }
