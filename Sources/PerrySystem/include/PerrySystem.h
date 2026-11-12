@@ -89,6 +89,20 @@ int *darwin_error(void) DARWIN_SYMBOL(__error);
 // Linux's number for a Darwin signal, or -1 where Linux has none.
 int perry_signal_to_linux(int signal);
 
+// A thread's pthread_t as Darwin code has it, and glibc's for one Darwin code
+// gives. On x86 they differ: Darwin's pthread_cleanup_push and _pop are
+// macros compiled into apps, which link their handlers through the word
+// after `sig` in Darwin's struct _opaque_pthread_t, and that word of glibc's
+// pthread_t is its thread's DTV there. Elsewhere they are the same.
+#include <pthread.h>
+#if defined(__i386__) || defined(__x86_64__)
+pthread_t perry_pthread_to_darwin(pthread_t thread);
+pthread_t perry_pthread_to_linux(pthread_t thread);
+#else
+static inline pthread_t perry_pthread_to_darwin(pthread_t thread) { return thread; }
+static inline pthread_t perry_pthread_to_linux(pthread_t thread) { return thread; }
+#endif
+
 // A section's header in a Mach-O image's load commands (section_64).
 struct darwin_section_64 {
     char sectname[16], segname[16];
