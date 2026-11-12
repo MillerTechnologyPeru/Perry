@@ -699,21 +699,32 @@ open class NSWindow: NSResponder {
         makeSDLWindow(hidden: false)
     }
 
+    /// Whether an NSOpenGLContext draws to one of the window's views.
+    private var drawsWithOpenGL = false
+
     /// The window's NSOpenGLView, if it shows one.
     var openGLView: NSOpenGLView? { rootView?.allViews.lazy.compactMap { $0 as? NSOpenGLView }.first }
 
     /// Makes the SDL window able to take an OpenGL context: without a
     /// renderer, and made again if it has one already.
     func prepareForOpenGL(_ format: NSOpenGLPixelFormat?) {
+        // A context drawing to any of its views, not only an NSOpenGLView.
+        drawsWithOpenGL = true
         if sdlWindow != nil && renderer == nil { return }
         destroySDLWindow()
         format?.applyToSDL()
         makeSDLWindow(hidden: !visible)
     }
 
+    /// SDL's X11 windows wait for their map events, which only the main
+    /// thread's event pump sees: windows are made and destroyed there.
     private func makeSDLWindow(hidden: Bool) {
+        Dispatch.onMainAndWait { self.makeSDLWindowOnMain(hidden: hidden) }
+    }
+
+    private func makeSDLWindowOnMain(hidden: Bool) {
         guard SDL.start() else { return }
-        let usesOpenGL = openGLView != nil
+        let usesOpenGL = drawsWithOpenGL || openGLView != nil
         var flags = usesOpenGL ? SDL.windowOpenGL : SDL.windowHighPixelDensity
         if hidden { flags |= SDL.windowHidden }
         if styleMask & StyleMask.resizable != 0 { flags |= SDL.windowResizable }
@@ -767,6 +778,10 @@ open class NSWindow: NSResponder {
     }
 
     private func destroySDLWindow() {
+        Dispatch.onMainAndWait { self.destroySDLWindowOnMain() }
+    }
+
+    private func destroySDLWindowOnMain() {
         if let renderer { SDL.destroyRenderer(renderer) }
         if let sdlWindow { SDL.destroyWindow(sdlWindow) }
         renderer = nil
@@ -855,8 +870,10 @@ open class NSWindow: NSResponder {
         guard new != objcObject else { return true }
         if Send.bool(new, "acceptsFirstResponder"), Send.bool(new, "becomeFirstResponder") {
             firstResponderObject = new
+            Trace.log("window \(windowNumber): first responder \(NSObject(new).describedByObject() ?? "?")")
             return true
         }
+        Trace.log("window \(windowNumber): \(NSObject(new).describedByObject() ?? "?") refused to be first responder")
         return responder == nil
     }
 
@@ -909,6 +926,7 @@ open class NSWindow: NSResponder {
             Send.void(viewAt(event.locationInWindow)?.objcObject ?? objcObject, "scrollWheel:", event.objcObject)
         case .keyDown:
             let responder = firstResponderObject ?? objcObject
+            Trace.log("window \(windowNumber): key \(event.keyCode) down to \(NSObject(responder).describedByObject() ?? "?")")
             if event.modifierFlags & ModifierFlags.command != 0,
                contentView.map({ Send.bool($0.objcObject, "performKeyEquivalent:", event.objcObject) }) == true { return }
             if event.modifierFlags & (ModifierFlags.command | ModifierFlags.control) != 0, MenuBar.performKeyEquivalent(event) { return }

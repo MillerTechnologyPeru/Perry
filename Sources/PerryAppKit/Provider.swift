@@ -312,6 +312,9 @@ enum Dispatch {
     nonisolated(unsafe) static var async: Async!
     nonisolated(unsafe) static var main: UnsafeMutableRawPointer!
     nonisolated(unsafe) static var afterFunction: After?
+    nonisolated(unsafe) static var sync: Async?
+    /// The main thread, which loads AppKit before the app's code runs.
+    nonisolated(unsafe) static var mainThread = pthread_self()
     nonisolated(unsafe) static var time: Time?
     /// Global blocks' isa, _NSConcreteGlobalBlock.
     nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer?
@@ -321,6 +324,8 @@ enum Dispatch {
         self.async = unsafeBitCast(async, to: Async.self)
         self.main = main
         afterFunction = lookup("_dispatch_after_f").map { unsafeBitCast($0, to: After.self) }
+        sync = lookup("_dispatch_sync_f").map { unsafeBitCast($0, to: Async.self) }
+        mainThread = pthread_self()
         time = lookup("_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
         globalBlockClass = lookup("__NSConcreteGlobalBlock")
         return true
@@ -344,6 +349,16 @@ enum Dispatch {
     }
 
     static func onMain(_ body: @escaping () -> Void) { async(main, Unmanaged.passRetained(Work(body)).toOpaque(), run) }
+
+    /// Whether this is the process's main thread.
+    static var isMainThread: Bool { pthread_equal(pthread_self(), mainThread) != 0 }
+
+    /// Runs `body` on the main thread and waits for it: at once on the
+    /// main thread, else on the main queue.
+    static func onMainAndWait(_ body: @escaping () -> Void) {
+        guard !isMainThread, let sync else { return body() }
+        sync(main, Unmanaged.passRetained(Work(body)).toOpaque(), run)
+    }
 }
 
 /// The main run loop, which AppKit runs between events: timers, the main

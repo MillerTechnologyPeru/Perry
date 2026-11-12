@@ -194,6 +194,12 @@ int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) {
     return vsscanf(str, fmt, va);
 }
 
+int darwin_vswscanf(const wchar_t *str, const wchar_t *fmt, darwin_va_list ap) DARWIN_SYMBOL(vswscanf);
+int darwin_vswscanf(const wchar_t *str, const wchar_t *fmt, darwin_va_list ap) {
+    DARWIN_VA(va, ap);
+    return vswscanf(str, fmt, va);
+}
+
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsyslog);
 void darwin_vsyslog(int priority, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
