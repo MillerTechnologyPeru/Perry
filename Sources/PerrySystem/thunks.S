@@ -159,11 +159,14 @@ PASSTHROUGH _shutdown, shutdown
 PASSTHROUGH _inet_addr, inet_addr
 PASSTHROUGH _inet_ntoa, inet_ntoa
 PASSTHROUGH _sched_yield, sched_yield
+#if defined(__aarch64__)
+// x86_64's are in pthread.c: its pthread_t differs from Darwin's.
 PASSTHROUGH _pthread_create, pthread_create
 PASSTHROUGH _pthread_join, pthread_join
 PASSTHROUGH _pthread_detach, pthread_detach
 PASSTHROUGH _pthread_self, pthread_self
 PASSTHROUGH _pthread_equal, pthread_equal
+#endif
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
@@ -424,7 +427,9 @@ PASSTHROUGH _wcstombs, wcstombs
 PASSTHROUGH _mbstowcs, mbstowcs
 PASSTHROUGH _ecvt, ecvt
 PASSTHROUGH _fcvt, fcvt
+#if defined(__aarch64__)
 PASSTHROUGH _pthread_cancel, pthread_cancel
+#endif
 
 // MARK: - unistd
 
