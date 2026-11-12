@@ -530,6 +530,14 @@ public func NSApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
 @c(_NSBeep)
 public func NSBeep() {}
 
+/// NSDisableScreenUpdates and NSEnableScreenUpdates: windows draw to the
+/// screen as each frame is done, so there are no updates to hold back.
+@c(_NSDisableScreenUpdates)
+public func NSDisableScreenUpdates() {}
+
+@c(_NSEnableScreenUpdates)
+public func NSEnableScreenUpdates() {}
+
 /// SIGTERM, SIGINT and SIGHUP end the app through -terminate:, as quitting
 /// does, on the main queue; a second one exits at once.
 enum Signals {
