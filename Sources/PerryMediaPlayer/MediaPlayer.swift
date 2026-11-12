@@ -117,6 +117,9 @@ open class MPMoviePlayerController: NSObject {
         if let playerView { return playerView }
         let made = canPlay ? MovieView.make().unsafeCast(to: UIView.self) : UIView.new()
         playerView = made
+        // An app that plays a movie and then asks for the view to put in its
+        // window, as iOS 7 apps do, has the movie start in it.
+        if playing, movie == nil, !finished { _ = startMovie() }
         return made
     }
 
@@ -191,7 +194,14 @@ open class MPMoviePlayerController: NSObject {
         skipped = true
         finished = false
         MPMoviePlayerController.played.append(self)
-        if !startMovie() { later(ObjCSelector("_perryFinished")) }
+        if !startMovie() { later(ObjCSelector("_perryNoView")) }
+    }
+
+    /// The movie had no view to show in when played, and the app has had
+    /// until now to ask for one.
+    @ObjCMethod("_perryNoView")
+    func finishWithoutView() {
+        if movie == nil { finish() }
     }
 
     /// Starts decoding the movie into the view, if there is a view for it.
