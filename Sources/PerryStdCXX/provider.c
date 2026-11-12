@@ -8,8 +8,8 @@
 // do operator new and delete, the __cxa functions and the type_info
 // vtables. The process already has the library: Swift's runtime links it.
 //
-// On armv7 Darwin's size_t is unsigned long ("m") and Linux's unsigned int
-// ("j"), both 32 bits: a name not found as it is is looked up again with
+// On armv7 and i386 Darwin's size_t is unsigned long ("m") and Linux's
+// unsigned int ("j"), both 32 bits: a name not found as it is is looked up again with
 // its "m" types as "j" ("__Znwm" is "_Znwj").
 
 #include "PerryStdCXX.h"
@@ -20,7 +20,7 @@
 
 static perry_wrapped_library stdcxx = PERRY_WRAPPED_SONAME("libstdc++.so.6");
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
 /// `name` with each unsigned long type ("m") as unsigned int ("j"), skipping
 /// identifiers, which a length leads ("6assign"). False if it has none.
 static int as_unsigned_int(const char *name, char *out, size_t size) {
@@ -129,7 +129,7 @@ void *perry_provider_symbol(const char *name) {
             return iterator_returns[i].thunk;
 #endif
     void *symbol = perry_wrapped_symbol(&stdcxx, name, NULL);
-#if defined(__arm__)
+#if defined(__arm__) || defined(__i386__)
     char other[512];
     if (!symbol && name && as_unsigned_int(name, other, sizeof other))
         symbol = perry_wrapped_symbol(&stdcxx, other, NULL);
