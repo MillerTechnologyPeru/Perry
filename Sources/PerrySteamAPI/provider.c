@@ -3,8 +3,11 @@
 // Mac Steam client through a Mach service and loads its steamclient.dylib;
 // this one loads the running Linux Steam client's steamclient.so for the
 // same architecture (~/.steam/sdkarm64, as Valve's arm64 client installs
-// it, or PERRY_STEAMCLIENT) and implements libsteam_api's own part over it:
-// starting up, the interfaces' accessors and running callbacks.
+// it, sdk32 or sdk64, or PERRY_STEAMCLIENT) and implements libsteam_api's
+// own part over it: starting up, the interfaces' accessors and running
+// callbacks. On i386 the interfaces with methods that return a CSteamID are
+// handed out as proxies (abi_i386.S), as Darwin and Linux return it
+// differently there.
 //
 // The interfaces themselves are steamclient's C++ objects, which games call
 // through their vtables. arm64 Darwin and Linux share the Itanium C++ ABI
@@ -18,6 +21,7 @@
 
 #define _GNU_SOURCE
 #include "PerrySteamAPI.h"
+#include "perry_interface.h"
 
 #include <dlfcn.h>
 #include <pwd.h>
@@ -108,8 +112,13 @@ void *perry_steam_trace_leave(uint64_t result, uint64_t second) {
     return frame.return_address;
 }
 
-/// The traced object for one of the client's, made once for each.
+/// The traced object for one of the client's, made once for each. Its
+/// stubs (trace.S) are arm64's.
 static void *traced(void *object, const char *version) {
+#if !defined(__aarch64__)
+    (void)version;
+    return object;
+#else
     static void *stubs[TRACE_SLOTS];
     static traced_interface interfaces[TRACED_INTERFACES];
     static unsigned count;
@@ -132,6 +141,7 @@ static void *traced(void *object, const char *version) {
     }
     pthread_mutex_unlock(&lock);
     return found ? (void *)found : object;
+#endif
 }
 
 // MARK: - steamclient
@@ -210,7 +220,13 @@ static void client_path(char *path, size_t size) {
     if (setting && *setting)
         snprintf(path, size, "%s", setting);
     else
+#if defined(__aarch64__)
         snprintf(path, size, "%s/.steam/sdkarm64/steamclient.so", home_directory());
+#elif defined(__i386__)
+        snprintf(path, size, "%s/.steam/sdk32/steamclient.so", home_directory());
+#else
+        snprintf(path, size, "%s/.steam/sdk64/steamclient.so", home_directory());
+#endif
 }
 
 static bool load_client_library(void) {
@@ -418,10 +434,145 @@ void darwin_SteamAPI_UseBreakpadCrashHandler(const char *version, const char *da
 void darwin_SteamAPI_SetTryCatchCallbacks(bool on) EXPORT(SteamAPI_SetTryCatchCallbacks);
 void darwin_SteamAPI_SetTryCatchCallbacks(bool on) { (void)on; }
 
+// MARK: - Darwin's i386 calls
+
+#if defined(__i386__)
+// i386 Darwin returns an 8-byte struct (a CSteamID) in eax:edx; Linux's
+// steamclient.so returns one through a hidden pointer, which the method
+// pops. The interfaces that have such methods are handed out as proxies,
+// { vtable, object }, whose vtable is abi_i386.S's stubs: each goes on to
+// the client's method in its slot, those that return a CSteamID by way of
+// a result of their own. The slots are the client's, found by the methods
+// that return with `ret $4`, for the versions games ask for.
+extern char perry_steam_forward_stubs[], perry_steam_sret_stubs[];
+enum { PROXY_SLOTS = 128, FORWARD_STUB_SIZE = 32, SRET_STUB_SIZE = 64, PROXIES = 64 };
+
+static const struct {
+    const char *version;
+    int slots[8];
+} struct_returns[] = {
+    { "SteamUser018", { 2, -1 } },                                         // GetSteamID
+    { "SteamFriends015", { 4, 19, 25, 39, 41, 51, 57, -1 } },              // GetFriendByIndex, GetClanByIndex…
+    { "STEAMAPPS_INTERFACE_VERSION007", { 20, -1 } },                      // GetAppOwner
+    { "SteamMatchMaking009", { 12, 18, 35, -1 } },                         // GetLobbyByIndex, GetLobbyMemberByIndex, GetLobbyOwner
+};
+
+typedef struct {
+    void **vtable;
+    void *object;
+} proxy;
+
+static void **proxy_vtable(const int *returns) {
+    void **table = malloc(PROXY_SLOTS * sizeof(*table));
+    if (!table)
+        return NULL;
+    for (int slot = 0; slot < PROXY_SLOTS; slot++)
+        table[slot] = perry_steam_forward_stubs + slot * FORWARD_STUB_SIZE;
+    for (const int *slot = returns; slot && *slot >= 0; slot++)
+        table[*slot] = perry_steam_sret_stubs + *slot * SRET_STUB_SIZE;
+    return table;
+}
+
+/// The proxy for one of the client's objects, made once for each, with
+/// `table` as its vtable.
+static void *proxy_for(void *object, void **table) {
+    static proxy proxies[PROXIES];
+    static unsigned count;
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    if (!object || !table)
+        return object;
+    pthread_mutex_lock(&lock);
+    proxy *found = NULL;
+    for (unsigned i = 0; i < count && !found; i++)
+        if (proxies[i].object == object && proxies[i].vtable == table)
+            found = &proxies[i];
+    if (!found && count < PROXIES) {
+        found = &proxies[count++];
+        found->vtable = table;
+        found->object = object;
+    }
+    pthread_mutex_unlock(&lock);
+    return found ? (void *)found : object;
+}
+
+/// The interface as the game gets it: a proxy if its version has methods
+/// that return a CSteamID.
+static void *handed_out(void *object, const char *version) {
+    static void **tables[sizeof(struct_returns) / sizeof(*struct_returns)];
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    if (!object || !version)
+        return object;
+    for (size_t i = 0; i < sizeof(struct_returns) / sizeof(*struct_returns); i++) {
+        if (strcmp(version, struct_returns[i].version) != 0)
+            continue;
+        pthread_mutex_lock(&lock);
+        if (!tables[i])
+            tables[i] = proxy_vtable(struct_returns[i].slots);
+        void **table = tables[i];
+        pthread_mutex_unlock(&lock);
+        return proxy_for(object, table);
+    }
+    return object;
+}
+
+// SteamClient017's getters of user interfaces, which hand out proxies too.
+typedef void *(*user_getter)(void *client, HSteamUser user, HSteamPipe pipe, const char *version);
+
+static void *client_getter(int slot, proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    user_getter get = (user_getter)(*(void ***)self->object)[slot];
+    return handed_out(get(self->object, user, pipe, version), version);
+}
+
+static void *client_get_user(proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    return client_getter(5, self, user, pipe, version);
+}
+static void *client_get_friends(proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    return client_getter(8, self, user, pipe, version);
+}
+static void *client_get_matchmaking(proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    return client_getter(10, self, user, pipe, version);
+}
+static void *client_get_generic(proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    return client_getter(12, self, user, pipe, version);
+}
+static void *client_get_apps(proxy *self, HSteamUser user, HSteamPipe pipe, const char *version) {
+    return client_getter(15, self, user, pipe, version);
+}
+
+/// A client of the version the game asks for, as a proxy where its getters'
+/// places are known (SteamClient017's).
+static void *handed_out_client(void *client, const char *version) {
+    static void **table;
+    if (!client || !version || strcmp(version, "SteamClient017") != 0)
+        return client;
+    pthread_mutex_lock(&state_lock);
+    if (!table && (table = proxy_vtable(NULL))) {
+        table[5] = (void *)client_get_user;
+        table[8] = (void *)client_get_friends;
+        table[10] = (void *)client_get_matchmaking;
+        table[12] = (void *)client_get_generic;
+        table[15] = (void *)client_get_apps;
+    }
+    pthread_mutex_unlock(&state_lock);
+    return proxy_for(client, table);
+}
+#else
+static void *handed_out(void *object, const char *version) { return traced(object, version); }
+static void *handed_out_client(void *client, const char *version) { (void)version; return client; }
+#endif
+
 // MARK: - Interfaces
 
+/// The version of the client the app's own libsteam_api asks for, or none.
+static const char *bundled_version(const char *prefix);
+
 void *darwin_SteamClient(void) EXPORT(SteamClient);
-void *darwin_SteamClient(void) { return steam_client; }
+void *darwin_SteamClient(void) {
+    const char *version = bundled_version("SteamClient0");
+    if (!version || !client_library.library || !steam_client)
+        return steam_client;
+    return handed_out_client(client_library.create_interface(version, NULL), version);
+}
 
 /// The client itself by its version, or another interface of the user.
 void *darwin_SteamInternal_CreateInterface(const char *version) EXPORT(SteamInternal_CreateInterface);
@@ -432,7 +583,7 @@ void *darwin_SteamInternal_CreateInterface(const char *version) {
                       : steam_client                           ? client_generic_interface(steam_user, steam_pipe, version)
                                                                : NULL;
     TRACE("SteamInternal_CreateInterface(%s) = %p", version, interface);
-    return strncmp(version, "SteamClient", 11) == 0 ? interface : traced(interface, version);
+    return strncmp(version, "SteamClient", 11) == 0 ? handed_out_client(interface, version) : handed_out(interface, version);
 }
 
 void *darwin_SteamInternal_FindOrCreateUserInterface(HSteamUser user, const char *version)
@@ -442,7 +593,7 @@ void *darwin_SteamInternal_FindOrCreateUserInterface(HSteamUser user, const char
         return NULL;
     void *interface = client_generic_interface(user, steam_pipe, version);
     TRACE("SteamInternal_FindOrCreateUserInterface(%d, %s) = %p", user, version, interface);
-    return traced(interface, version);
+    return handed_out(interface, version);
 }
 
 /// There is no game server here.
@@ -467,6 +618,152 @@ void *darwin_SteamInternal_ContextInit(void *data) {
     }
     pthread_mutex_unlock(&state_lock);
     return &storage[2];
+}
+
+// MARK: - The SDK's older accessors
+
+// SteamUser(), SteamFriends()… from SDKs before 1.37, whose libsteam_api
+// asks the client for the versions it was built with. Those are the
+// strings in the app's own libsteam_api.dylib, beside its executable;
+// without one, the current versions are asked for.
+
+static char bundled_library[4096];
+
+/// The app's bundle, from the loader: where its libsteam_api.dylib is.
+__attribute__((visibility("default")))
+void perry_provider_startup(const perry_startup_info *info) {
+    if (info && info->bundle_path)
+        snprintf(bundled_library, sizeof(bundled_library), "%s/Contents/Frameworks/libsteam_api.dylib", info->bundle_path);
+    else if (info && info->executable_path) {
+        snprintf(bundled_library, sizeof(bundled_library), "%s", info->executable_path);
+        char *slash = strrchr(bundled_library, '/');
+        if (slash)
+            snprintf(slash + 1, sizeof(bundled_library) - (size_t)(slash + 1 - bundled_library), "libsteam_api.dylib");
+    }
+}
+
+static const char *bundled_version(const char *prefix) {
+    static char *contents;
+    static size_t length;
+    static bool read;
+    static char found[48][64];
+    static unsigned found_count;
+    pthread_mutex_lock(&state_lock);
+    if (!read) {
+        read = true;
+        FILE *file = bundled_library[0] ? fopen(bundled_library, "rb") : NULL;
+        if (file) {
+            fseek(file, 0, SEEK_END);
+            long size = ftell(file);
+            fseek(file, 0, SEEK_SET);
+            contents = size > 0 ? malloc((size_t)size) : NULL;
+            if (contents && fread(contents, 1, (size_t)size, file) == (size_t)size)
+                length = (size_t)size;
+            fclose(file);
+        }
+    }
+    const char *result = NULL;
+    for (unsigned i = 0; i < found_count && !result; i++)
+        if (strncmp(found[i], prefix, strlen(prefix)) == 0)
+            result = found[i];
+    size_t prefix_length = strlen(prefix);
+    for (size_t at = 0; !result && contents && at + prefix_length < length; at++) {
+        char *match = memmem(contents + at, length - at, prefix, prefix_length);
+        if (!match)
+            break;
+        at = (size_t)(match - contents);
+        // A whole string: the prefix, then digits to its end.
+        if (at > 0 && match[-1] != 0)
+            continue;
+        size_t end = prefix_length;
+        while (at + end < length && match[end] >= '0' && match[end] <= '9')
+            end++;
+        if (end == prefix_length || at + end >= length || match[end] != 0 || end >= sizeof(found[0]) || found_count == 48)
+            continue;
+        memcpy(found[found_count], match, end);
+        found[found_count][end] = 0;
+        result = found[found_count++];
+    }
+    pthread_mutex_unlock(&state_lock);
+    return result;
+}
+
+/// An older accessor's interface, fetched again after each SteamAPI_Init.
+typedef struct {
+    const char *prefix;     // of the version's string in libsteam_api
+    const char *current;    // the version asked for without one
+    void *interface;
+    uintptr_t generation;
+} accessor;
+
+static void *accessed(accessor *entry) {
+    pthread_mutex_lock(&state_lock);
+    if (!steam_client) {
+        pthread_mutex_unlock(&state_lock);
+        return NULL;
+    }
+    if (entry->generation != context_generation || !entry->interface) {
+        const char *version = bundled_version(entry->prefix);
+        if (!version)
+            version = entry->current;
+        entry->interface = handed_out(client_generic_interface(steam_user, steam_pipe, version), version);
+        entry->generation = context_generation;
+        TRACE("%s… accessor: %s = %p", entry->prefix, version, entry->interface);
+    }
+    void *interface = entry->interface;
+    pthread_mutex_unlock(&state_lock);
+    return interface;
+}
+
+#define ACCESSOR(name, prefix, current)                         \
+    void *darwin_##name(void) EXPORT(name);                     \
+    void *darwin_##name(void) {                                 \
+        static accessor entry = { prefix, current, NULL, 0 };   \
+        return accessed(&entry);                                \
+    }
+
+ACCESSOR(SteamUser, "SteamUser0", "SteamUser023")
+ACCESSOR(SteamFriends, "SteamFriends0", "SteamFriends017")
+ACCESSOR(SteamUtils, "SteamUtils0", "SteamUtils010")
+ACCESSOR(SteamMatchmaking, "SteamMatchMaking0", "SteamMatchMaking009")
+ACCESSOR(SteamMatchmakingServers, "SteamMatchMakingServers0", "SteamMatchMakingServers002")
+ACCESSOR(SteamUserStats, "STEAMUSERSTATS_INTERFACE_VERSION", "STEAMUSERSTATS_INTERFACE_VERSION012")
+ACCESSOR(SteamApps, "STEAMAPPS_INTERFACE_VERSION", "STEAMAPPS_INTERFACE_VERSION008")
+ACCESSOR(SteamNetworking, "SteamNetworking0", "SteamNetworking006")
+ACCESSOR(SteamRemoteStorage, "STEAMREMOTESTORAGE_INTERFACE_VERSION", "STEAMREMOTESTORAGE_INTERFACE_VERSION016")
+ACCESSOR(SteamScreenshots, "STEAMSCREENSHOTS_INTERFACE_VERSION", "STEAMSCREENSHOTS_INTERFACE_VERSION003")
+ACCESSOR(SteamHTTP, "STEAMHTTP_INTERFACE_VERSION", "STEAMHTTP_INTERFACE_VERSION003")
+ACCESSOR(SteamUGC, "STEAMUGC_INTERFACE_VERSION", "STEAMUGC_INTERFACE_VERSION017")
+ACCESSOR(SteamAppList, "STEAMAPPLIST_INTERFACE_VERSION", "STEAMAPPLIST_INTERFACE_VERSION001")
+ACCESSOR(SteamMusic, "STEAMMUSIC_INTERFACE_VERSION", "STEAMMUSIC_INTERFACE_VERSION001")
+ACCESSOR(SteamMusicRemote, "STEAMMUSICREMOTE_INTERFACE_VERSION", "STEAMMUSICREMOTE_INTERFACE_VERSION001")
+ACCESSOR(SteamHTMLSurface, "STEAMHTMLSURFACE_INTERFACE_VERSION_", "STEAMHTMLSURFACE_INTERFACE_VERSION_005")
+ACCESSOR(SteamInventory, "STEAMINVENTORY_INTERFACE_V", "STEAMINVENTORY_INTERFACE_V003")
+ACCESSOR(SteamVideo, "STEAMVIDEO_INTERFACE_V", "STEAMVIDEO_INTERFACE_V002")
+ACCESSOR(SteamController, "SteamController0", "SteamController008")
+ACCESSOR(SteamUnifiedMessages, "STEAMUNIFIEDMESSAGES_INTERFACE_VERSION", "STEAMUNIFIEDMESSAGES_INTERFACE_VERSION001")
+
+// The game server's accessors: there is no game server here.
+#define NO_SERVER_ACCESSOR(name)                \
+    void *darwin_##name(void) EXPORT(name);     \
+    void *darwin_##name(void) { return NULL; }
+
+NO_SERVER_ACCESSOR(SteamGameServer)
+NO_SERVER_ACCESSOR(SteamGameServerUtils)
+NO_SERVER_ACCESSOR(SteamGameServerNetworking)
+NO_SERVER_ACCESSOR(SteamGameServerStats)
+NO_SERVER_ACCESSOR(SteamGameServerHTTP)
+NO_SERVER_ACCESSOR(SteamGameServerInventory)
+NO_SERVER_ACCESSOR(SteamGameServerUGC)
+NO_SERVER_ACCESSOR(SteamGameServerApps)
+
+/// SDKs before 1.37 start a game server with this; there is none here.
+bool darwin_SteamGameServer_Init(uint32_t ip, uint16_t steam_port, uint16_t game_port, uint16_t query_port, int mode,
+                                 const char *version) EXPORT(SteamGameServer_Init);
+bool darwin_SteamGameServer_Init(uint32_t ip, uint16_t steam_port, uint16_t game_port, uint16_t query_port, int mode,
+                                 const char *version) {
+    (void)ip, (void)steam_port, (void)game_port, (void)query_port, (void)mode, (void)version;
+    return false;
 }
 
 // MARK: - Game servers: none
