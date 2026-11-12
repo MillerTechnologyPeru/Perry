@@ -83,6 +83,13 @@ typedef struct {
     uint8_t byte8, byte9, byte10, byte11, byte12, byte13, byte14, byte15;
 } CFUUIDBytes;
 
+/// CFGregorianDate: 16 bytes, the seconds at 8, on every architecture.
+typedef struct {
+    int32_t year;
+    int8_t month, day, hour, minute;
+    double second;
+} CFGregorianDate;
+
 // Key-value observing's setter for any argument type (kvo.S, kvo_arm.S): it calls
 // perry_foundation_kvo_will, which returns the setter it replaces, then
 // perry_foundation_kvo_did.
