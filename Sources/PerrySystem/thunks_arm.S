@@ -291,6 +291,11 @@ PASSTHROUGH _wcstol, wcstol
 PASSTHROUGH _wcstoul, wcstoul
 PASSTHROUGH _wcstoll, wcstoll
 PASSTHROUGH _wcstoull, wcstoull
+PASSTHROUGH _wcstombs, wcstombs
+PASSTHROUGH _mbstowcs, mbstowcs
+PASSTHROUGH _wcspbrk, wcspbrk
+PASSTHROUGH _wcsspn, wcsspn
+PASSTHROUGH _wcscspn, wcscspn
 PASSTHROUGH _fputwc, fputwc
 PASSTHROUGH _getwc, getwc
 PASSTHROUGH _ungetwc, ungetwc
