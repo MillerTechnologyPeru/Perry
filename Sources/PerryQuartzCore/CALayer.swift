@@ -833,9 +833,14 @@ extension CALayer {
         let (state, shape) = Presentation.presented(layer)
         layer.state.rendered = true
         guard !state.hidden, state.opacity > 0 else { return }
+        let toSuperlayer = state.toSuperlayer(within: parent)
+        // A layer scaled to nothing (or to a number that is not one) shows
+        // nothing, and cairo cannot start a group under a matrix with no
+        // inverse.
+        if !root, !(abs(toSuperlayer.a * toSuperlayer.d - toSuperlayer.b * toSuperlayer.c) > 1e-9) { return }
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
-        if !root { CG.concatCTM(context, state.toSuperlayer(within: parent)) }
+        if !root { CG.concatCTM(context, toSuperlayer) }
         let group = state.opacity < 1
         if group {
             CG.setAlpha(context, CGFloat(state.opacity))

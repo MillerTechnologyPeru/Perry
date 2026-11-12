@@ -73,6 +73,9 @@ open class MPMoviePlayerController: NSObject {
     var onScreen = false
     /// The player decoding the movie, while it plays.
     var movie: AVPlayer? = nil
+    /// When the movie was started, by now().
+    var startedAt = 0.0
+    var repeatMode = 0
 
     /// Players that have played, kept for the rest of the run: apps release
     /// theirs when it finishes and may still send it -stop afterwards, which
@@ -86,7 +89,7 @@ open class MPMoviePlayerController: NSObject {
     public required init(contentURL: NSObject?) {
         super.init()
         self.contentURL = contentURL
-        trace("movie player made")
+        trace("movie player made \(objcObject) \(contentURL.map { "\($0)" } ?? "nil")")
         // iOS 2 and 3.0 load a movie as soon as its player is made, and say
         // when it is ready.
         later(ObjCSelector("_perryLoaded"))
@@ -117,6 +120,9 @@ open class MPMoviePlayerController: NSObject {
         if let playerView { return playerView }
         let made = canPlay ? MovieView.make().unsafeCast(to: UIView.self) : UIView.new()
         playerView = made
+        // An app that plays a movie and then asks for the view to put in its
+        // window, as iOS 7 apps do, has the movie start in it.
+        if playing, movie == nil, !finished { _ = startMovie() }
         return made
     }
 
@@ -144,10 +150,38 @@ open class MPMoviePlayerController: NSObject {
         movie?.pause()
     }
 
+    /// Stops the movie. An app that sets a player up with -stop and -play
+    /// right after it has started (as an iOS 7 game does for its menu's
+    /// background movie) is not told the movie finished, which a real player
+    /// does not do for a movie not yet shown: the movie halts, and plays
+    /// again with -play.
     @ObjCMethod("stop")
     func stop() {
-        trace("stop")
+        trace("stop \(objcObject) playing=\(playing) movie=\(movie != nil) finished=\(finished)")
+        if movie != nil, now() - startedAt < 1 {
+            halt()
+            return
+        }
         finish()
+    }
+
+    /// Takes the movie off its view and lets it be played again.
+    private func halt() {
+        NSNotificationCenter.defaultCenter().removeObserver(self)
+        movie?.pause()
+        view().unsafeCast(to: MovieView.self).setMoviePlayer(nil)
+        movie?.replaceCurrentItem(nil)
+        movie = nil
+        playing = false
+        skipped = false
+        finished = false
+    }
+
+    /// Seconds on a clock that only goes forward.
+    private func now() -> Double {
+        var time = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &time)
+        return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
     }
 
     /// MPMoviePlaybackStatePlaying while it "plays"; always
@@ -165,7 +199,9 @@ open class MPMoviePlayerController: NSObject {
     @ObjCMethod("setControlStyle:") func setControlStyle(_ style: Int) { trace("setControlStyle: \(style)") }
     @ObjCMethod("setMovieControlMode:") func setMovieControlMode(_ mode: Int) {}
     @ObjCMethod("setScalingMode:") func setScalingMode(_ mode: Int) { trace("setScalingMode: \(mode)") }
-    @ObjCMethod("setRepeatMode:") func setRepeatMode(_ mode: Int) {}
+    /// MPMovieRepeatModeOne plays the movie again when it ends.
+    @ObjCMethod("setRepeatMode:") func setRepeatMode(_ mode: Int) { repeatMode = mode }
+    @ObjCMethod("repeatMode") func getRepeatMode() -> Int { repeatMode }
     @ObjCMethod("setFullscreen:") func setFullscreen(_ fullscreen: Bool) {}
     @ObjCMethod("setFullscreen:animated:") func setFullscreen(_ fullscreen: Bool, animated: Bool) {}
     @ObjCMethod("isFullscreen") func isFullscreen() -> Bool { false }
@@ -181,7 +217,7 @@ open class MPMoviePlayerController: NSObject {
     /// once; a paused one goes on.
     @ObjCMethod("play")
     func play() {
-        trace("play")
+        trace("play \(objcObject) playing=\(playing) skipped=\(skipped) view=\(playerView != nil)")
         if let movie {
             movie.play()
             return
@@ -191,7 +227,14 @@ open class MPMoviePlayerController: NSObject {
         skipped = true
         finished = false
         MPMoviePlayerController.played.append(self)
-        if !startMovie() { later(ObjCSelector("_perryFinished")) }
+        if !startMovie() { later(ObjCSelector("_perryNoView")) }
+    }
+
+    /// The movie had no view to show in when played, and the app has had
+    /// until now to ask for one.
+    @ObjCMethod("_perryNoView")
+    func finishWithoutView() {
+        if movie == nil { finish() }
     }
 
     /// Starts decoding the movie into the view, if there is a view for it.
@@ -201,9 +244,10 @@ open class MPMoviePlayerController: NSObject {
         trace("playing the movie")
         let player = AVPlayer.player(url: contentURL)
         view().unsafeCast(to: MovieView.self).setMoviePlayer(player)
-        NSNotificationCenter.defaultCenter().addObserver(self, selector: ObjCSelector("_perryFinished"),
+        NSNotificationCenter.defaultCenter().addObserver(self, selector: ObjCSelector("_perryEnded"),
                                                          name: "AVPlayerItemDidPlayToEndTimeNotification", object: player.currentItem())
         movie = player
+        startedAt = now()
         player.play()
         return true
     }
@@ -218,6 +262,16 @@ open class MPMoviePlayerController: NSObject {
     @ObjCMethod("performSelectorOnMainThread:withObject:waitUntilDone:")
     func performSelectorOnMainThread(_ selector: ObjCSelector, with object: NSObject?, waitUntilDone wait: Bool)
 
+    /// The movie played to its end: again, if the app asked for that.
+    @ObjCMethod("_perryEnded")
+    func movieEnded() {
+        guard repeatMode != 0, movie != nil else { finish(); return }
+        halt()
+        playing = true
+        skipped = true
+        if !startMovie() { finish() }
+    }
+
     @ObjCMethod("_perryFinished")
     func finish() {
         guard !finished else { return }
@@ -230,7 +284,7 @@ open class MPMoviePlayerController: NSObject {
             movie.replaceCurrentItem(nil)
             self.movie = nil
         }
-        trace("movie finished: playback did finish notification")
+        trace("movie finished: playback did finish notification \(objcObject)")
         // MPMovieFinishReasonPlaybackEnded: an app may play a movie it does
         // not let the user skip again when told the user left it.
         let reason = NSDictionary.dictionary(

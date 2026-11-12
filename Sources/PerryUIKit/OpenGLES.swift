@@ -1267,8 +1267,22 @@ enum GLShaders {
         var fixed: [UInt8] = []
         fixed.reserveCapacity(bytes.count)
         var changed = false
+        // Mesa wants #extension before any code, and the game's prefix puts
+        // it after some. Each is moved to the top, still only where the
+        // extension is there (its name is then a macro).
+        var hoisted: [UInt8] = []
         for line in bytes.split(separator: 0x0A, omittingEmptySubsequences: false) {
             if !fixed.isEmpty || line.startIndex != 0 { fixed.append(0x0A) }
+            let text = String(decoding: line, as: UTF8.self)
+            let trimmed = text.drop(while: { $0 == " " || $0 == "\t" })
+            if trimmed.hasPrefix("#extension"), let colon = trimmed.firstIndex(of: ":") {
+                let name = trimmed.dropFirst(10)[..<colon].filter { $0 != " " && $0 != "\t" }
+                if !name.isEmpty, name != "all" {
+                    hoisted.append(contentsOf: Array("#ifdef \(name)\n\(trimmed)\n#endif\n".utf8))
+                    changed = true
+                    continue
+                }
+            }
             if let shorter = cut(line) {
                 fixed.append(contentsOf: shorter)
                 changed = true
@@ -1279,6 +1293,11 @@ enum GLShaders {
         guard changed else {
             source?(shader, count, strings, lengths)
             return
+        }
+        if !hoisted.isEmpty {
+            var at = 0
+            if fixed.starts(with: "#version".utf8), let end = fixed.firstIndex(of: 0x0A) { at = end + 1 }
+            fixed.insert(contentsOf: hoisted, at: at)
         }
         fixed.append(0)
         fixed.withUnsafeBufferPointer { buffer in
