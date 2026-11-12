@@ -360,8 +360,10 @@ open class UIButton: UIControl {
         let title = current(button.titles).map { Text.size($0, font: titleLabel().font) } ?? .zero
         let image = current(button.images)?.state.size ?? .zero
         let insets = button.contentEdgeInsets
-        return CGSize(width: title.width + image.width + insets.left + insets.right + (button.type == 1 ? 0 : 0),
-                      height: max(title.height, image.height, 30) + insets.top + insets.bottom)
+        // A background image makes the button at least as large as itself.
+        let background = current(button.backgroundImages)?.state.size ?? .zero
+        return CGSize(width: max(title.width + image.width + insets.left + insets.right + (button.type == 1 ? 0 : 0), background.width),
+                      height: max(max(title.height, image.height, 30) + insets.top + insets.bottom, background.height))
     }
 
     @ObjCMethod("intrinsicContentSize") func intrinsicButtonSize() -> CGSize { sizeThatFits(.zero) }
