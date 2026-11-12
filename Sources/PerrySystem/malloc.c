@@ -231,9 +231,9 @@ static size_t block_room(const void *ptr) {
     // An arena that is not the main one is made of heaps this large at
     // most, each starting where its size divides the address: the arena,
     // the heap before, then the heap's size and how much of it is in use.
-    // Twice the largest mmap threshold: 64 MB with 64-bit words, 32 MB with
-    // 32-bit ones.
-    const uintptr_t heap_span = (uintptr_t)(8 * sizeof(long)) << 20;
+    // Twice the largest mmap threshold: 64 MB with 64-bit words, and 1 MB
+    // with 32-bit ones, whose largest threshold is 512 KB.
+    const uintptr_t heap_span = sizeof(long) == 8 ? (uintptr_t)64 << 20 : (uintptr_t)1 << 20;
     // No block or offset is larger: 64 TB with 64-bit words, half the
     // address space with 32-bit ones.
     const size_t largest = (size_t)1 << (sizeof(size_t) == 8 ? 46 : 31);

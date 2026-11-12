@@ -1206,6 +1206,11 @@ static void start_providers(perry_loader *loader, perry_image *image) {
     }
 }
 
+void perry_start_late_providers(perry_loader *loader) {
+    if (startup_loader == loader && loader->main_image)
+        start_providers(loader, loader->main_image);
+}
+
 void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp,
                             char **apple) {
     program_argc = argc;

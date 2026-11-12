@@ -291,11 +291,67 @@ public func CFURLCreateWithBytes(_ allocator: UnsafeRawPointer?, _ bytes: Unsafe
     return CFURLs.make(URL(string: text, relativeTo: CFURLs.url(base)))
 }
 
-/// kCFURLPOSIXPathStyle 0 is the style there is.
+/// Paths in CFURL's other styles: kCFURLHFSPathStyle (1), Carbon's
+/// "Macintosh HD:Users:me:file", whose first name is a volume's and whose
+/// leading colon makes it relative; and kCFURLWindowsPathStyle (2), with
+/// backslashes. The startup volume is "Macintosh HD", as FSGetVolumeInfo
+/// names it; others are those under /Volumes.
+enum PathStyles {
+    static let hfs = 1
+    static let windows = 2
+    static let startupVolume = "Macintosh HD"
+
+    /// A path in a style as a POSIX one, relative if it was.
+    static func posix(_ path: String, style: Int) -> String {
+        switch style {
+        case hfs:
+            var components = path.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            if components.last == "" { components.removeLast() }
+            // Slashes in names are colons in POSIX paths.
+            func names(_ list: ArraySlice<String>) -> [String] {
+                list.map { $0.isEmpty ? ".." : String($0.map { $0 == "/" ? ":" : $0 }) }
+            }
+            if path.hasPrefix(":") {
+                return names(components.dropFirst()).joined(separator: "/")
+            }
+            guard let volume = components.first else { return path }
+            let rest = names(components.dropFirst())
+            let root = volume == startupVolume ? "" : "/Volumes/" + volume
+            return rest.isEmpty ? (root.isEmpty ? "/" : root) : root + "/" + rest.joined(separator: "/")
+        case windows:
+            return String(path.map { $0 == "\\" ? "/" : $0 })
+        default:
+            return path
+        }
+    }
+
+    /// A POSIX path in a style.
+    static func styled(_ path: String, style: Int, isDirectory: Bool) -> String {
+        switch style {
+        case hfs:
+            var components = path.split(separator: "/").map { String($0.map { $0 == ":" ? "/" : $0 }) }
+            guard path.hasPrefix("/") else {
+                return ":" + components.joined(separator: ":") + (isDirectory ? ":" : "")
+            }
+            var volume = startupVolume
+            if components.count >= 2, components[0] == "Volumes" {
+                volume = components[1]
+                components.removeFirst(2)
+            }
+            let joined = ([volume] + components).joined(separator: ":")
+            return components.isEmpty || isDirectory ? joined + ":" : joined
+        case windows:
+            return String(path.map { $0 == "/" ? "\\" : $0 })
+        default:
+            return path
+        }
+    }
+}
+
 @c(_CFURLCreateWithFileSystemPath)
 public func CFURLCreateWithFileSystemPath(_ allocator: UnsafeRawPointer?, _ path: id?, _ style: Int, _ isDirectory: Bool) -> id? {
     guard let path = Strings.value(of: path) else { return nil }
-    return CFURLs.make(URLs.fileURL(path, isDirectory: isDirectory))
+    return CFURLs.make(URLs.fileURL(PathStyles.posix(path, style: style), isDirectory: isDirectory))
 }
 
 @c(_CFURLCreateFromFileSystemRepresentation)
@@ -332,8 +388,9 @@ public func CFURLCopyFragment(_ url: id?, _ escapes: id?) -> id? { CFURLs.string
 public func CFURLCopyFileSystemPath(_ url: id?, _ style: Int) -> id? {
     guard let url = CFURLs.url(url) else { return nil }
     var path = url.path(percentEncoded: false)
-    if path.count > 1, path.hasSuffix("/") { path.removeLast() }
-    return Strings.make(path)
+    let isDirectory = path.count > 1 && path.hasSuffix("/")
+    if isDirectory { path.removeLast() }
+    return Strings.make(PathStyles.styled(path, style: style, isDirectory: isDirectory))
 }
 
 @c(_CFURLGetFileSystemRepresentation)
@@ -886,7 +943,8 @@ public func CFPropertyListCreateFromXMLData(_ allocator: id?, _ data: id?, _ opt
 @c(_CFURLCreateWithFileSystemPathRelativeToBase)
 public func CFURLCreateWithFileSystemPathRelativeToBase(_ allocator: UnsafeRawPointer?, _ path: id?, _ style: Int,
                                                         _ isDirectory: Bool, _ base: id?) -> id? {
-    guard let path = Strings.value(of: path) else { return nil }
+    guard let styled = Strings.value(of: path) else { return nil }
+    let path = PathStyles.posix(styled, style: style)
     if path.hasPrefix("/") { return CFURLs.make(URLs.fileURL(path, isDirectory: isDirectory)) }
     return CFURLs.make(URL(filePath: path, directoryHint: isDirectory ? .isDirectory : .notDirectory, relativeTo: CFURLs.url(base)))
 }
@@ -955,4 +1013,70 @@ enum NumberFormatterKeys {
     static let kCFNumberFormatterCurrencySymbol = "kCFNumberFormatterCurrencySymbolKey"
     static let kCFNumberFormatterDecimalSeparator = "kCFNumberFormatterDecimalSeparatorKey"
     static let kCFNumberFormatterGroupingSeparator = "kCFNumberFormatterGroupingSeparatorKey"
+}
+
+// MARK: - Gregorian dates and more of CFBundle and CFTimeZone
+
+/// A time's Gregorian date in a time zone, GMT when NULL, as CFCalendar's
+/// Gregorian calendar has it.
+private func gregorianCalendar(_ zone: id?) -> Calendar {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZones.zone(zone) ?? TimeZone(secondsFromGMT: 0)!
+    return calendar
+}
+
+@c(_CFAbsoluteTimeGetGregorianDate)
+public func CFAbsoluteTimeGetGregorianDate(_ time: Double.ObjCType, _ zone: id?) -> CFGregorianDate {
+    let seconds = Double(objCArgument: time)
+    let date = Date(timeIntervalSinceReferenceDate: seconds)
+    let parts = gregorianCalendar(zone).dateComponents([.year, .month, .day, .hour, .minute, .second, .nanosecond], from: date)
+    let second = Double(parts.second ?? 0) + Double(parts.nanosecond ?? 0) / 1e9
+    return CFGregorianDate(year: Int32(parts.year ?? 2001), month: Int8(parts.month ?? 1), day: Int8(parts.day ?? 1),
+                           hour: Int8(parts.hour ?? 0), minute: Int8(parts.minute ?? 0), second: second)
+}
+
+@c(_CFGregorianDateGetAbsoluteTime)
+public func CFGregorianDateGetAbsoluteTime(_ gregorian: CFGregorianDate, _ zone: id?) -> Double.ObjCResultType {
+    var parts = DateComponents()
+    parts.year = Int(gregorian.year)
+    parts.month = Int(gregorian.month)
+    parts.day = Int(gregorian.day)
+    parts.hour = Int(gregorian.hour)
+    parts.minute = Int(gregorian.minute)
+    let whole = gregorian.second.rounded(.down)
+    parts.second = Int(whole)
+    let date = gregorianCalendar(zone).date(from: parts).map { $0.timeIntervalSinceReferenceDate + (gregorian.second - whole) } ?? 0
+    return darwinResult(date)
+}
+
+/// 1 for Monday to 7 for Sunday.
+@c(_CFAbsoluteTimeGetDayOfWeek)
+public func CFAbsoluteTimeGetDayOfWeek(_ time: Double.ObjCType, _ zone: id?) -> Int32 {
+    let date = Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))
+    let weekday = gregorianCalendar(zone).component(.weekday, from: date)    // 1 is Sunday
+    return Int32(weekday == 1 ? 7 : weekday - 1)
+}
+
+@c(_CFBundleCopyPrivateFrameworksURL)
+public func CFBundleCopyPrivateFrameworksURL(_ bundle: id?) -> id? { ObjC.retain(ObjC.send(bundle, ObjC.selector("privateFrameworksURL"))) }
+
+/// The URLs of a bundle's resources with an extension (NULL: any), in a
+/// subdirectory of its resources or not, +1.
+@c(_CFBundleCopyResourceURLsOfType)
+public func CFBundleCopyResourceURLsOfType(_ bundle: id?, _ type: id?, _ subdirectory: id?) -> id? {
+    ObjC.retain(ObjC.send(bundle, ObjC.selector("URLsForResourcesWithExtension:subdirectory:"), type, subdirectory))
+}
+
+@c(_CFTimeZoneGetDaylightSavingTimeOffset)
+public func CFTimeZoneGetDaylightSavingTimeOffset(_ zone: id?, _ time: Double.ObjCType) -> Double.ObjCResultType {
+    let date = Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))
+    return darwinResult(TimeZones.zone(zone)?.daylightSavingTimeOffset(for: date) ?? 0)
+}
+
+/// The next change to or from daylight saving time after a time; 0 for a
+/// zone without one.
+@c(_CFTimeZoneGetNextDaylightSavingTimeTransition)
+public func CFTimeZoneGetNextDaylightSavingTimeTransition(_ zone: id?, _ time: Double.ObjCType) -> Double.ObjCResultType {
+    let date = Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))
+    return darwinResult(TimeZones.zone(zone)?.nextDaylightSavingTimeTransition(after: date)?.timeIntervalSinceReferenceDate ?? 0)
 }

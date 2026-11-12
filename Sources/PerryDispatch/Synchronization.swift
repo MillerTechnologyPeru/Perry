@@ -86,7 +86,8 @@ public func dispatch_time(_ when: UInt64.ObjCType, _ delta: Int64.ObjCType) -> U
 /// are uptimes. Darwin keeps uptime and monotonic times in mach ticks,
 /// Apple silicon's 125/3 nanoseconds (libPerrySystem's mach_timebase_info),
 /// and Swift's concurrency runtime makes its deadlines in them itself;
-/// Linux keeps them in nanoseconds.
+/// Linux keeps them in nanoseconds. On x86 a tick is a nanosecond, as on
+/// Intel Macs, and times are the same on both.
 enum DarwinTime {
     static let monotonic: UInt64 = 1 << 63
     static let clocks: UInt64 = 3 << 62
@@ -94,15 +95,23 @@ enum DarwinTime {
     static let maximum: UInt64 = (1 << 62) - 1
 
     static func linux(_ time: UInt64) -> UInt64 {
+        #if arch(i386) || arch(x86_64)
+        return time
+        #else
         convert(time) { ticks in
             let (high, low) = ticks.multipliedFullWidth(by: 125)
             let (quotient, _) = (3 as UInt64).dividingFullWidth((high, low))
             return high >= 3 ? maximum : quotient
         }
+        #endif
     }
 
     static func darwin(_ time: UInt64) -> UInt64 {
+        #if arch(i386) || arch(x86_64)
+        return time
+        #else
         convert(time) { nanoseconds in nanoseconds / 125 * 3 + nanoseconds % 125 * 3 / 125 }
+        #endif
     }
 
     /// An uptime or monotonic time's value converted, its clock kept; a time

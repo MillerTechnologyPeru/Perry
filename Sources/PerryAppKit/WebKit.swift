@@ -141,6 +141,8 @@ final class WebContent {
     var prepare: ((WebPage) -> Void)?
     var loadChanged: ((Int32) -> Void)?
     var loadFailed: ((Bool, String, Int, String) -> Void)?
+    /// A message from the web process extension, answered with JSON.
+    var extensionMessage: ((String, String) -> String?)?
 
     init(_ view: NSView) { self.view = view }
 
@@ -168,6 +170,7 @@ final class WebContent {
             self.loadChanged?(event)
         }
         page.loadFailed = { [unowned self] committed, domain, code, message in self.loadFailed?(committed, domain, code, message) }
+        page.extensionMessage = { [unowned self] name, json in self.extensionMessage?(name, json) }
         prepare?(page)
         return page
     }
@@ -1019,6 +1022,9 @@ open class WebScriptObject: NSObject {
     /// Not retained.
     var viewObject: UnsafeMutableRawPointer?
     var values: [String: NSObject] = [:]
+    /// The methods scripts may call on each object in `values`, by key and
+    /// script name.
+    var methods: [String: [String: WebScripting.Method]] = [:]
     nonisolated(unsafe) static var warned = false
 
     @ObjCMethod("init")
@@ -1032,7 +1038,7 @@ open class WebScriptObject: NSObject {
     func setValue(_ value: NSObject?, forKey key: String?) {
         guard let key else { return }
         values[key] = value
-        if !WebScriptObject.warned {
+        if !WebScriptObject.warned, !WPE.hasWebExtension {
             WebScriptObject.warned = true
             WPE.log("the page can't call \(key) and other Objective-C objects a WebView's window script object is given")
         }
@@ -1247,6 +1253,7 @@ open class WebView: NSView {
         content.loadFailed = { committed, domain, code, message in
             WebView.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
         }
+        content.extensionMessage = { name, json in WebView.extensionMessage(object, name, json) }
         return content
     }
 
@@ -1373,8 +1380,10 @@ open class WebView: NSView {
             tell("webView:didStartProvisionalLoadForFrame:")
         case WPE.loadCommitted:
             tell("webView:didCommitLoadForFrame:")
-            // The window object is new with each page.
-            if Send.responds(delegate, "webView:didClearWindowObject:forFrame:") {
+            // The window object is new with each page; with the web process
+            // extension, the delegate hears of it as the page's own scripts
+            // are about to run instead (scriptMessage).
+            if !WPE.hasWebExtension, Send.responds(delegate, "webView:didClearWindowObject:forFrame:") {
                 Calls.void(delegate, "webView:didClearWindowObject:forFrame:", object, view.scriptObject.objcObject, frame)
             }
         case WPE.loadFinished:
@@ -1384,6 +1393,49 @@ open class WebView: NSView {
             tell("webView:didFinishLoadForFrame:")
         default:
             break
+        }
+    }
+
+    /// The web process extension's messages: the window object cleared, so
+    /// the delegate sets its objects and the reply names them and their
+    /// methods ({ key: [method…] }, or { key: { "value": … } } for a value
+    /// that isn't an object); and a call of one of their methods
+    /// ({ key, method, arguments }), answered with its result.
+    static func extensionMessage(_ object: UnsafeMutableRawPointer, _ name: String, _ json: String) -> String? {
+        let view = WebView.objCInstance(object, ownership: .retain)
+        let script = view.scriptObject
+        switch name {
+        case "perry.cleared":
+            script.values = [:]
+            script.methods = [:]
+            if let delegate = view.frameLoadDelegate, Send.responds(delegate, "webView:didClearWindowObject:forFrame:") {
+                Calls.void(delegate, "webView:didClearWindowObject:forFrame:", object, script.objcObject, view.mainFrame.objcObject)
+            }
+            var entries: [String] = []
+            for (key, value) in script.values {
+                let quoted = WebScriptObject.quoted(key)
+                let plain = ["NSString", "NSNumber", "NSNull", "NSArray", "NSDictionary"].contains {
+                    ObjCRuntime.isKind(value.objcObject, of: ObjCRuntime.classObject($0))
+                }
+                if plain {
+                    entries.append("\(quoted):{\"value\":\(WebScripting.json(value.objcObject))}")
+                    continue
+                }
+                let methods = WebScripting.methods(of: value.objcObject)
+                script.methods[key] = methods
+                entries.append("\(quoted):[\(methods.keys.sorted().map(WebScriptObject.quoted).joined(separator: ","))]")
+            }
+            Trace.log("web view: window objects \(script.values.keys.sorted())")
+            return "{\(entries.joined(separator: ","))}"
+        case "perry.call":
+            guard let call = WebScripting.parse(json),
+                  let key = Send.object(call, "objectForKey:", "key".objCArgument()).map({ String(objCArgument: $0) }),
+                  let methodName = Send.object(call, "objectForKey:", "method".objCArgument()).map({ String(objCArgument: $0) }),
+                  let target = script.values[key], let method = script.methods[key]?[methodName] else { return "null" }
+            let arguments = Send.object(call, "objectForKey:", "arguments".objCArgument())
+            return WebScripting.call(target.objcObject, method, arguments)
+        default:
+            return nil
         }
     }
 

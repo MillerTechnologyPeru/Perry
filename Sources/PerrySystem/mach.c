@@ -62,7 +62,7 @@ mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) DARWIN_SYMBOL(pthrea
 mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) {
     // glibc keeps the kernel thread ID in its thread descriptor; only the
     // calling thread's is asked for in practice.
-    return pthread_equal(thread, pthread_self()) ? (mach_port_t)thread_id() : 0;
+    return pthread_equal(perry_pthread_to_linux(thread), pthread_self()) ? (mach_port_t)thread_id() : 0;
 }
 
 kern_return_t darwin_mach_port_deallocate(mach_port_t task, mach_port_t port) DARWIN_SYMBOL(mach_port_deallocate);
@@ -229,6 +229,72 @@ kern_return_t darwin_vm_region_64(mach_port_t task, uintptr_t *address, size_t *
     }
     fclose(maps);
     return result;
+}
+
+// vm_region_submap_info_64, packed to 4 bytes as Darwin's: 16 words in its
+// first form, 17 with pages_reusable, 19 with object_id_full.
+#pragma pack(push, 4)
+typedef struct {
+    int protection;
+    int max_protection;
+    unsigned inheritance;
+    uint64_t offset;
+    unsigned user_tag;
+    unsigned pages_resident;
+    unsigned pages_shared_now_private;
+    unsigned pages_swapped_out;
+    unsigned pages_dirtied;
+    unsigned ref_count;
+    unsigned short shadow_depth;
+    unsigned char external_pager;
+    unsigned char share_mode;
+    unsigned is_submap;
+    int behavior;
+    unsigned object_id;
+    unsigned short user_wired_count;
+    unsigned pages_reusable;
+    uint64_t object_id_full;
+} darwin_vm_region_submap_info_64;
+#pragma pack(pop)
+
+enum {
+    VM_REGION_SUBMAP_INFO_V0_COUNT_64 = 16,
+    VM_REGION_SUBMAP_INFO_COUNT_64 = sizeof(darwin_vm_region_submap_info_64) / sizeof(int),
+    SM_PRIVATE = 2,
+    SM_SHARED = 3,
+};
+_Static_assert(VM_REGION_SUBMAP_INFO_COUNT_64 == 19, "vm_region_submap_info_64 is 19 words");
+
+// The region that holds *address, or else the first one above it, as
+// vm_region_64 finds it, described as a region of the task's own map: no
+// region is a submap, so the depth asked for is 0 whatever it was.
+kern_return_t darwin_vm_region_recurse_64(mach_port_t task, uintptr_t *address, size_t *size, uint32_t *depth, int *info,
+                                          uint32_t *count) DARWIN_SYMBOL(vm_region_recurse_64);
+kern_return_t darwin_vm_region_recurse_64(mach_port_t task, uintptr_t *address, size_t *size, uint32_t *depth, int *info,
+                                          uint32_t *count) {
+    if (!address || !size || !info || !count || *count < VM_REGION_SUBMAP_INFO_V0_COUNT_64)
+        return KERN_INVALID_ARGUMENT;
+    darwin_vm_region_basic_info_64 basic;
+    uint32_t basic_count = VM_REGION_BASIC_INFO_COUNT_64;
+    kern_return_t result = darwin_vm_region_64(task, address, size, VM_REGION_BASIC_INFO_64, (int *)&basic, &basic_count, NULL);
+    if (result != KERN_SUCCESS)
+        return result;
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    darwin_vm_region_submap_info_64 submap = {
+        .protection = basic.protection,
+        .max_protection = basic.max_protection,
+        .inheritance = basic.inheritance,
+        .offset = basic.offset,
+        .pages_resident = basic.protection ? (unsigned)(*size / page) : 0,
+        .ref_count = 1,
+        .share_mode = basic.shared ? SM_SHARED : SM_PRIVATE,
+    };
+    uint32_t words = *count < VM_REGION_SUBMAP_INFO_COUNT_64 ? *count : VM_REGION_SUBMAP_INFO_COUNT_64;
+    memcpy(info, &submap, words * sizeof(int));
+    *count = words;
+    if (depth)
+        *depth = 0;
+    return KERN_SUCCESS;
 }
 
 // mach_vm_address_t and mach_vm_size_t are 64 bits, as vm_address_t is on arm64.
@@ -1159,7 +1225,7 @@ kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address,
 // The pthread for a thread port; only the calling thread's is known.
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) DARWIN_SYMBOL(pthread_from_mach_thread_np);
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
-    return port == (mach_port_t)thread_id() ? pthread_self() : 0;
+    return port == (mach_port_t)thread_id() ? perry_pthread_to_darwin(pthread_self()) : 0;
 }
 
 // The architecture, as NXGetLocalArchInfo describes it.

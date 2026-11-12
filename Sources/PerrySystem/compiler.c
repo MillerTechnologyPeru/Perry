@@ -190,4 +190,33 @@ unsigned long long perry_i386_udivdi3(unsigned long long a, unsigned long long b
 unsigned long long perry_i386_udivdi3(unsigned long long a, unsigned long long b) { return a / b; }
 unsigned long long perry_i386_umoddi3(unsigned long long a, unsigned long long b) I386_LIBGCC(__umoddi3);
 unsigned long long perry_i386_umoddi3(unsigned long long a, unsigned long long b) { return a % b; }
+
+// And for conversions between 64-bit integers and floating point, which
+// i386 has no instructions for when unsigned. Both systems pass these on
+// the stack and return them in edx:eax or st(0); each conversion here is
+// compiled to a call to libgcc's own.
+long long perry_i386_fixdfdi(double a) I386_LIBGCC(__fixdfdi);
+long long perry_i386_fixdfdi(double a) { return (long long)a; }
+long long perry_i386_fixsfdi(float a) I386_LIBGCC(__fixsfdi);
+long long perry_i386_fixsfdi(float a) { return (long long)a; }
+long long perry_i386_fixxfdi(long double a) I386_LIBGCC(__fixxfdi);
+long long perry_i386_fixxfdi(long double a) { return (long long)a; }
+unsigned long long perry_i386_fixunsdfdi(double a) I386_LIBGCC(__fixunsdfdi);
+unsigned long long perry_i386_fixunsdfdi(double a) { return (unsigned long long)a; }
+unsigned long long perry_i386_fixunssfdi(float a) I386_LIBGCC(__fixunssfdi);
+unsigned long long perry_i386_fixunssfdi(float a) { return (unsigned long long)a; }
+unsigned long long perry_i386_fixunsxfdi(long double a) I386_LIBGCC(__fixunsxfdi);
+unsigned long long perry_i386_fixunsxfdi(long double a) { return (unsigned long long)a; }
+double perry_i386_floatdidf(long long a) I386_LIBGCC(__floatdidf);
+double perry_i386_floatdidf(long long a) { return (double)a; }
+float perry_i386_floatdisf(long long a) I386_LIBGCC(__floatdisf);
+float perry_i386_floatdisf(long long a) { return (float)a; }
+long double perry_i386_floatdixf(long long a) I386_LIBGCC(__floatdixf);
+long double perry_i386_floatdixf(long long a) { return (long double)a; }
+double perry_i386_floatundidf(unsigned long long a) I386_LIBGCC(__floatundidf);
+double perry_i386_floatundidf(unsigned long long a) { return (double)a; }
+float perry_i386_floatundisf(unsigned long long a) I386_LIBGCC(__floatundisf);
+float perry_i386_floatundisf(unsigned long long a) { return (float)a; }
+long double perry_i386_floatundixf(unsigned long long a) I386_LIBGCC(__floatundixf);
+long double perry_i386_floatundixf(unsigned long long a) { return (long double)a; }
 #endif

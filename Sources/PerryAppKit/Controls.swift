@@ -797,7 +797,11 @@ open class NSAlert: NSObject {
     @ObjCMethod("layout") func layout() {}
     @ObjCMethod("window") func window() -> NSObject? { nil }
 
-    /// Shows the message and answers with the first button.
+    /// Shows the message with the alert's buttons, the first one the default
+    /// (Return) and a Cancel one Escape's, and answers with the one chosen:
+    /// NSAlertFirstButtonReturn (1000) and on. With no display, or one
+    /// button and PERRY_APPKIT_QUIET_ALERTS, it is only logged and the first
+    /// button answers.
     @ObjCMethod("runModal")
     func runModal() -> Int {
         let titles = buttons.map(\.title)
@@ -806,14 +810,56 @@ open class NSAlert: NSObject {
         // PERRY_APPKIT_QUIET_ALERTS: an alert with no choice to make (one
         // button or none) is only logged, so a game showing one runs on.
         let quiet = getenv("PERRY_APPKIT_QUIET_ALERTS") != nil && titles.count <= 1
-        if !quiet, SDL.start() {
-            // SDL_MESSAGEBOX_ERROR 0x10, WARNING 0x20, INFORMATION 0x40.
-            let flags: UInt32 = style == 2 ? 0x10 : style == 1 ? 0x40 : 0x20
+        guard !quiet, SDL.start() else { return 1000 }
+        // SDL_MESSAGEBOX_ERROR 0x10, WARNING 0x20, INFORMATION 0x40.
+        let flags: UInt32 = style == 2 ? 0x10 : style == 1 ? 0x40 : 0x20
+        let message = Self.wrapped(informativeText)
+        guard let show = SDL.showMessageBox, !titles.isEmpty else {
             _ = messageText.withCString { title in
-                informativeText.withCString { SDL.showSimpleMessageBox(flags, title, $0, Windows.key?.sdlWindow) }
+                message.withCString { SDL.showSimpleMessageBox(flags, title, $0, Windows.key?.sdlWindow) }
+            }
+            return 1000
+        }
+        let texts = titles.map { strdup($0) }
+        defer { texts.forEach { Glibc.free($0) } }
+        let cancel = titles.firstIndex { $0 == "Cancel" }
+        let choices = texts.enumerated().map { index, text in
+            SDL.MessageBoxButton(flags: (index == 0 ? 1 : 0) | (index == cancel ? 2 : 0), buttonID: Int32(index),
+                                 text: UnsafePointer(text))
+        }
+        var chosen: Int32 = 0
+        let shown = messageText.withCString { title in
+            message.withCString { text in
+                choices.withUnsafeBufferPointer { buttons in
+                    var data = SDL.MessageBoxData(flags: flags | 0x80, window: Windows.key?.sdlWindow, title: title, message: text,
+                                                  buttonCount: Int32(buttons.count), buttons: buttons.baseAddress, colorScheme: nil)
+                    return withUnsafePointer(to: &data) { show(UnsafeRawPointer($0), &chosen) }
+                }
             }
         }
-        return 1000
+        // Closing the box (-1) answers as Escape would: with Cancel, if
+        // there is one, else the first button.
+        let index = shown && chosen >= 0 ? Int(chosen) : (cancel ?? 0)
+        return 1000 + index
+    }
+
+    /// Text broken into lines of at most about 80 characters at spaces, as
+    /// SDL's boxes don't wrap it.
+    static func wrapped(_ text: String, width: Int = 80) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false).map { paragraph -> String in
+            var lines: [String] = []
+            var line = ""
+            for word in paragraph.split(separator: " ", omittingEmptySubsequences: false) {
+                if !line.isEmpty, line.count + 1 + word.count > width {
+                    lines.append(line)
+                    line = String(word)
+                } else {
+                    line += line.isEmpty ? String(word) : " " + word
+                }
+            }
+            lines.append(line)
+            return lines.joined(separator: "\n")
+        }.joined(separator: "\n")
     }
 
     @ObjCMethod("beginSheetModalForWindow:completionHandler:")

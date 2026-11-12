@@ -126,7 +126,7 @@ int darwin_kill(pid_t pid, int signal) {
 int darwin_pthread_kill(pthread_t thread, int signal) DARWIN_SYMBOL(pthread_kill);
 int darwin_pthread_kill(pthread_t thread, int signal) {
     int linux_signal = perry_signal_to_linux(signal);
-    return linux_signal < 0 ? EINVAL : pthread_kill(thread, linux_signal);
+    return linux_signal < 0 ? EINVAL : pthread_kill(perry_pthread_to_linux(thread), linux_signal);
 }
 
 // MARK: - Threads
@@ -137,7 +137,7 @@ void *darwin_pthread_get_stackaddr_np(pthread_t thread) {
     pthread_attr_t attributes;
     void *bottom = NULL;
     size_t size = 0;
-    if (pthread_getattr_np(thread, &attributes) == 0) {
+    if (pthread_getattr_np(perry_pthread_to_linux(thread), &attributes) == 0) {
         pthread_attr_getstack(&attributes, &bottom, &size);
         pthread_attr_destroy(&attributes);
     }
@@ -149,7 +149,7 @@ size_t darwin_pthread_get_stacksize_np(pthread_t thread) {
     pthread_attr_t attributes;
     void *bottom = NULL;
     size_t size = 0;
-    if (pthread_getattr_np(thread, &attributes) == 0) {
+    if (pthread_getattr_np(perry_pthread_to_linux(thread), &attributes) == 0) {
         pthread_attr_getstack(&attributes, &bottom, &size);
         pthread_attr_destroy(&attributes);
     }

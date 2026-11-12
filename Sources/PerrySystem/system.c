@@ -141,16 +141,40 @@ const char *darwin_nl_langinfo(int item) {
 // granted: Swift's concurrency runtime makes dispatch deadlines in these
 // ticks without asking mach_timebase_info. libPerrydispatch converts
 // dispatch_time_t values between these ticks and Linux's nanoseconds.
+//
+// Intel Macs tick in nanoseconds, a timebase of 1/1, and their programs
+// count on that as much: Batman: Arkham Asylum turns the timebase into
+// seconds upside down, which only 1/1 survives. So on x86 a tick is a
+// nanosecond.
 typedef struct {
     uint32_t numer;
     uint32_t denom;
 } darwin_timebase_info;
+
+#if defined(__i386__) || defined(__x86_64__)
+enum { TIMEBASE_NUMER = 1, TIMEBASE_DENOM = 1 };
+
+static uint64_t ticks(int linux_clock) {
+    return nanoseconds(linux_clock);
+}
+
+static uint64_t ticks_to_nanoseconds(uint64_t ticks) {
+    return ticks;
+}
+#else
+enum { TIMEBASE_NUMER = 125, TIMEBASE_DENOM = 3 };
 
 static uint64_t ticks(int linux_clock) {
     // n * 3 / 125 without overflow, or the 128-bit arithmetic armv7 lacks.
     uint64_t n = nanoseconds(linux_clock);
     return n / 125 * 3 + n % 125 * 3 / 125;
 }
+
+static uint64_t ticks_to_nanoseconds(uint64_t ticks) {
+    // n * 125 / 3, as ticks() does the other way.
+    return ticks / 3 * 125 + ticks % 3 * 125 / 3;
+}
+#endif
 
 uint64_t darwin_mach_absolute_time(void) DARWIN_SYMBOL(mach_absolute_time);
 uint64_t darwin_mach_absolute_time(void) {
@@ -176,8 +200,7 @@ int darwin_mach_wait_until(uint64_t deadline) DARWIN_SYMBOL(mach_wait_until);
 int darwin_mach_wait_until(uint64_t deadline) {
     uint64_t now = ticks(CLOCK_MONOTONIC);
     if (deadline > now) {
-        // n * 125 / 3 nanoseconds, as ticks() does the other way.
-        uint64_t left = deadline - now, n = left / 3 * 125 + left % 3 * 125 / 3;
+        uint64_t n = ticks_to_nanoseconds(deadline - now);
         struct timespec wait = { .tv_sec = n / 1000000000, .tv_nsec = n % 1000000000 };
         while (nanosleep(&wait, &wait) != 0 && errno == EINTR) {}
     }
@@ -186,8 +209,8 @@ int darwin_mach_wait_until(uint64_t deadline) {
 
 int darwin_mach_timebase_info(darwin_timebase_info *info) DARWIN_SYMBOL(mach_timebase_info);
 int darwin_mach_timebase_info(darwin_timebase_info *info) {
-    info->numer = 125;
-    info->denom = 3;
+    info->numer = TIMEBASE_NUMER;
+    info->denom = TIMEBASE_DENOM;
     return 0;   // KERN_SUCCESS
 }
 
@@ -329,6 +352,26 @@ int darwin_msync(void *address, size_t length, int flags) {
     if (!(linux_flags & (MS_SYNC | MS_ASYNC)))
         linux_flags |= MS_ASYNC;
     return msync(address, length, linux_flags);
+}
+
+// The data segment's break: Darwin's is a small emulated region that
+// allocators fall back from, and the host's belongs to its malloc, so there
+// is none to grow. sbrk(0) gives a break that never moves; growing it fails
+// with ENOMEM, as an allocator such as tcmalloc expects and goes to mmap.
+void *darwin_sbrk(intptr_t increment) DARWIN_SYMBOL(sbrk);
+void *darwin_sbrk(intptr_t increment) {
+    static char empty;
+    if (increment == 0)
+        return &empty;
+    errno = ENOMEM;
+    return (void *)-1;
+}
+
+int darwin_brk(const void *address) DARWIN_SYMBOL(brk);
+int darwin_brk(const void *address) {
+    (void)address;
+    errno = ENOMEM;
+    return -1;
 }
 
 int darwin_madvise(void *address, size_t length, int advice) DARWIN_SYMBOL(madvise);
