@@ -10,6 +10,23 @@ enum SDL {
     typealias Pointer = UnsafeMutableRawPointer
     typealias Window = UnsafeMutableRawPointer
 
+    /// SDL_MessageBoxButtonData and SDL_MessageBoxData, laid out as SDL3's.
+    struct MessageBoxButton {
+        var flags: UInt32           // RETURNKEY_DEFAULT 1, ESCAPEKEY_DEFAULT 2
+        var buttonID: Int32
+        var text: UnsafePointer<CChar>?
+    }
+
+    struct MessageBoxData {
+        var flags: UInt32           // ERROR 0x10, WARNING 0x20, INFORMATION 0x40, BUTTONS_LEFT_TO_RIGHT 0x80
+        var window: Window?
+        var title: UnsafePointer<CChar>?
+        var message: UnsafePointer<CChar>?
+        var buttonCount: Int32
+        var buttons: UnsafePointer<MessageBoxButton>?
+        var colorScheme: UnsafeRawPointer?
+    }
+
     nonisolated(unsafe) static var initialize: (@convention(c) (UInt32) -> Bool)!
     nonisolated(unsafe) static var createWindow: (@convention(c) (UnsafePointer<CChar>?, Int32, Int32, UInt64) -> Window?)!
     nonisolated(unsafe) static var destroyWindow: (@convention(c) (Window?) -> Void)!
@@ -56,6 +73,7 @@ enum SDL {
     nonisolated(unsafe) static var startTextInput: (@convention(c) (Window?) -> Bool)!
     nonisolated(unsafe) static var stopTextInput: (@convention(c) (Window?) -> Bool)!
     nonisolated(unsafe) static var showSimpleMessageBox: (@convention(c) (UInt32, UnsafePointer<CChar>?, UnsafePointer<CChar>?, Window?) -> Bool)!
+    nonisolated(unsafe) static var showMessageBox: (@convention(c) (UnsafeRawPointer?, UnsafeMutablePointer<Int32>?) -> Bool)!
     nonisolated(unsafe) static var setClipboardText: (@convention(c) (UnsafePointer<CChar>?) -> Bool)!
     nonisolated(unsafe) static var getClipboardText: (@convention(c) () -> UnsafeMutablePointer<CChar>?)!
     nonisolated(unsafe) static var free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)!
@@ -184,6 +202,7 @@ enum SDL {
         startTextInput = bind("SDL_StartTextInput")
         stopTextInput = bind("SDL_StopTextInput")
         showSimpleMessageBox = bind("SDL_ShowSimpleMessageBox")
+        showMessageBox = bind("SDL_ShowMessageBox")
         setClipboardText = bind("SDL_SetClipboardText")
         getClipboardText = bind("SDL_GetClipboardText")
         free = bind("SDL_free")
