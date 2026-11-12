@@ -349,6 +349,15 @@ public class NSArray: NSObject {
     @ObjCMethod("sortedArrayWithOptions:usingComparator:")
     func sorted(options: UInt, comparator: ObjCBlock) -> NSArray { sorted(comparator: comparator) }
 
+    /// NSInteger (*)(id, id, void *): NSComparisonResult, ascending -1
+    /// first.
+    @ObjCMethod("sortedArrayUsingFunction:context:")
+    func sorted(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) -> NSArray {
+        guard let function else { return Arrays.owned(elements) }
+        let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
+        return Arrays.owned(elements.sorted { compare($0, $1, context) < 0 })
+    }
+
     /// A binary search of the range, which the comparator keeps sorted:
     /// with NSBinarySearchingInsertionIndex (1 << 10) where the object
     /// would go (after any equal ones with NSBinarySearchingLastEqual,
