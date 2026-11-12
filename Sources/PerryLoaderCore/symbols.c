@@ -546,6 +546,9 @@ retry:
             provider->symbol = (void *(*)(const char *))hook;
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
         link_provider(loader, provider, short_name);
+        // One loaded while the program runs (dlsym on a library's handle)
+        // starts as those loaded before it did.
+        perry_start_late_providers(loader);
         return provider;
     }
     if (metal) {
