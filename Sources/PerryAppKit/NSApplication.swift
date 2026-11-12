@@ -157,11 +157,13 @@ open class NSApplication: NSResponder {
                                                            ObjCRuntime.selector("_perryTypeScriptedText"), nil, 4)
         }
         running = true
-        let mode = "kCFRunLoopDefaultMode".objCArgument()
+        // Held for the loop: an autoreleased string would go with whichever
+        // pool outside it is drained first.
+        let mode = NSObject.string("kCFRunLoopDefaultMode")
         let future = NSDate.distantFuture()
         while running {
             ObjCRuntime.autoreleasepool {
-                if let event = Send.nextEvent(objcObject, mask: UInt64.max, until: future.objcObject, mode: mode, dequeue: true) {
+                if let event = Send.nextEvent(objcObject, mask: UInt64.max, until: future.objcObject, mode: mode.objcObject, dequeue: true) {
                     Send.void(objcObject, "sendEvent:", event)
                 }
                 Send.void(objcObject, "updateWindows")
