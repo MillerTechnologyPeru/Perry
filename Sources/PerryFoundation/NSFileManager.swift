@@ -165,7 +165,7 @@ final class NSFileManager: NSObject {
     @ObjCMethod("createDirectoryAtURL:withIntermediateDirectories:attributes:error:")
     func createDirectory(at url: ObjCObject, intermediates: Bool, attributes: ObjCObject?,
                          error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        createDirectory(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", intermediates: intermediates,
+        createDirectory(atPath: FileManagers.path(URLs.url(url.id)), intermediates: intermediates,
                         attributes: attributes, error: errorPointer)
     }
 
@@ -199,7 +199,7 @@ final class NSFileManager: NSObject {
     @ObjCMethod("contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:")
     func contentsOfDirectory(at url: ObjCObject, keys: ObjCObject?, options: UInt,
                              error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
-        let path = URLs.url(url.id)?.path(percentEncoded: false) ?? ""
+        let path = FileManagers.path(URLs.url(url.id))
         do {
             let names = try files.contentsOfDirectory(atPath: path).filter { options & 4 == 0 || !$0.hasPrefix(".") }
             return Arrays.owned(names.compactMap { URLs.autoreleased(URLs.fileURL(Paths.appending(path, $0), isDirectory: nil)) })
@@ -261,7 +261,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("removeItemAtURL:error:")
     func removeItem(at url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        removeItem(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", error: errorPointer)
+        removeItem(atPath: FileManagers.path(URLs.url(url.id)), error: errorPointer)
     }
 
     @ObjCMethod("copyItemAtPath:toPath:error:")
@@ -277,7 +277,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("copyItemAtURL:toURL:error:")
     func copyItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        copyItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+        copyItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
     }
 
     @ObjCMethod("createSymbolicLinkAtPath:withDestinationPath:error:")
@@ -291,7 +291,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("moveItemAtURL:toURL:error:")
     func moveItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        moveItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+        moveItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
     }
 
     @ObjCMethod("destinationOfSymbolicLinkAtPath:error:")
@@ -445,6 +445,14 @@ final class NSFileManager: NSObject {
 }
 
 extension FileManagers {
+    /// A URL's file path as -path gives it: without the trailing slash of a
+    /// directory URL, which would make a file's path a directory's.
+    static func path(_ url: URL?) -> String {
+        var path = url?.path(percentEncoded: false) ?? ""
+        if path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+        return path
+    }
+
     /// Reports a failure as Foundation does: an NSError in the Cocoa domain.
     static func report(_ error: UnsafeMutablePointer<id?>?, _ path: String) {
         error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4,
