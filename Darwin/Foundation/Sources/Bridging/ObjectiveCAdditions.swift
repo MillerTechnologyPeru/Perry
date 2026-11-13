@@ -18,6 +18,18 @@ extension NSString: ExpressibleByStringLiteral {
     }
 }
 
+/// Apple's overlay declares NSString.init(string:) over the Objective-C
+/// one, which Swift cannot do here without the two being ambiguous: the
+/// symbol programs built against Apple's Foundation bind to is made under
+/// its name, calling the Objective-C initializer.
+@_silgen_name("$sSo8NSStringC10FoundationE6stringA2Bh_tcfC")
+public func _nsStringInitString(_ string: String, _ type: NSString.Type) -> NSString {
+    // The receiver's class decides what is made: NSMutableString inherits
+    // this initializer.
+    if type is NSMutableString.Type { return NSMutableString(string: string) }
+    return NSString(string: string)
+}
+
 @available(*, unavailable)
 extension NSDecimal: ExpressibleByIntegerLiteral {
     public init(integerLiteral value: Int) {
