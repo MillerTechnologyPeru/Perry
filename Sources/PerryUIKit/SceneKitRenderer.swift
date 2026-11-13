@@ -23,6 +23,7 @@ enum SCNGL {
     nonisolated(unsafe) static var uniform3fv: (@convention(c) (Int32, Int32, UnsafePointer<Float>?) -> Void)!
     nonisolated(unsafe) static var uniform4fv: (@convention(c) (Int32, Int32, UnsafePointer<Float>?) -> Void)!
     nonisolated(unsafe) static var generateMipmap: (@convention(c) (GLenum) -> Void)!
+    nonisolated(unsafe) static var disableVertexAttribArray: (@convention(c) (GLuint) -> Void)!
 
     static func load() -> Bool {
         if loaded { return true }
@@ -38,8 +39,9 @@ enum SCNGL {
         uniform3fv = bind("glUniform3fv")
         uniform4fv = bind("glUniform4fv")
         generateMipmap = bind("glGenerateMipmap")
+        disableVertexAttribArray = bind("glDisableVertexAttribArray")
         loaded = uniform1f != nil && uniform3f != nil && uniform4f != nil && uniformMatrix3fv != nil && uniformMatrix4fv != nil
-            && depthMask != nil && cullFace != nil && uniform3fv != nil && uniform4fv != nil && generateMipmap != nil
+            && depthMask != nil && cullFace != nil && uniform3fv != nil && uniform4fv != nil && generateMipmap != nil && disableVertexAttribArray != nil
         return loaded
     }
 
@@ -60,6 +62,7 @@ final class SCNRenderer {
         var mvp: Int32 = -1, model: Int32 = -1, normalMatrix: Int32 = -1
         var diffuse: Int32 = -1, emission: Int32 = -1, lightPosition: Int32 = -1, lightColor: Int32 = -1, ambient: Int32 = -1
         var diffuseMap: Int32 = -1, emissionMap: Int32 = -1
+        var skyColor: Int32 = -1, groundColor: Int32 = -1, environment: Int32 = -1
     }
     private var uniforms = Uniforms()
     /// Each geometry's vertices' buffer, by its identifier.
@@ -71,6 +74,8 @@ final class SCNRenderer {
     private var white: GLuint = 0
     /// The vertices of skinned geometry, made again for each draw.
     private var skinBuffer: GLuint = 0
+    private var quadBuffer: GLuint = 0
+    private var skyProgram: GLuint = 0
 
     init?() {
         guard SCNGL.load(), let made = EAGLContext.objCClass.object.allocated().unsafeCast(to: EAGLContext.self).initialize(api: 2)
@@ -91,6 +96,7 @@ final class SCNRenderer {
         }
         if white != 0 { GLES.deleteTextures?(1, &white) }
         if skinBuffer != 0 { SKGL.deleteBuffers(1, &skinBuffer) }
+        if quadBuffer != 0 { SKGL.deleteBuffers(1, &quadBuffer) }
         if depth != 0 { GLES.deleteRenderbuffers(1, &depth) }
         if color != 0 { GLES.deleteRenderbuffers(1, &color) }
         if framebuffer != 0 { GLES.deleteFramebuffers(1, &framebuffer) }
@@ -113,7 +119,8 @@ final class SCNRenderer {
                                 diffuse: uniform("diffuse"), emission: uniform("emission"),
                                 lightPosition: max(uniform("lightPosition"), uniform("lightPosition[0]")),
                                 lightColor: max(uniform("lightColor"), uniform("lightColor[0]")), ambient: uniform("ambient"),
-                                diffuseMap: uniform("diffuseMap"), emissionMap: uniform("emissionMap"))
+                                diffuseMap: uniform("diffuseMap"), emissionMap: uniform("emissionMap"),
+                                skyColor: uniform("skyColor"), groundColor: uniform("groundColor"), environment: uniform("environment"))
             white = makeTexture(pixels: [255, 255, 255, 255], width: 1, height: 1, mipmaps: false)
         }
         guard framebuffer == 0 || size != (width, height) else { return true }
@@ -159,6 +166,9 @@ final class SCNRenderer {
             uniform vec4 lightPosition[4];
             uniform vec3 lightColor[4];
             uniform vec3 ambient;
+            uniform vec3 skyColor;
+            uniform vec3 groundColor;
+            uniform float environment;
             uniform sampler2D diffuseMap;
             uniform sampler2D emissionMap;
             varying vec3 v_normal;
@@ -168,7 +178,8 @@ final class SCNRenderer {
                 vec3 n = normalize(v_normal);
                 if (!gl_FrontFacing) { n = -n; }
                 vec4 base = diffuse * texture2D(diffuseMap, v_coordinate);
-                vec3 light = ambient;
+                // The environment lights a surface by where it faces: the sky from above, the ground's glow from below.
+                vec3 light = ambient + mix(groundColor, skyColor, n.y * 0.5 + 0.5) * environment;
                 for (int i = 0; i < 4; i++) {
                     // w is 0 for a direction toward the light, 1 for a position.
                     vec3 toLight = lightPosition[i].w > 0.5 ? normalize(lightPosition[i].xyz - v_position) : lightPosition[i].xyz;
@@ -285,7 +296,8 @@ final class SCNRenderer {
         GLES.bindFramebuffer(GLES.framebuffer, framebuffer)
         GLES.viewport(0, 0, Int32(width), Int32(height))
         SKGL.disable(SKGL.scissorTest)
-        let background = backgroundColor(of: scene, in: view)
+        let backgroundImage = scene.scene.background?.property.contents.flatMap { NSObject($0).responds(to: "CGImage") ? $0 : nil }
+        let background = backgroundImage == nil ? backgroundColor(of: scene, in: view) : (0, 0, 0)
         SKGL.clearColor(background.0, background.1, background.2, 1)
         SCNGL.depthMask(1)
         SKGL.clear(SKGL.colorBufferBit | SCNGL.depthBufferBit)
@@ -302,7 +314,18 @@ final class SCNRenderer {
         let projection = SCNRenderer.projection(camera?.node.camera?.camera, aspect: Float(width) / Float(height))
         let viewProjection = SCNMath.multiply(projection, viewMatrix)
         SKGL.uniform1i(uniforms.diffuseMap, 0)
+        SCNGL.uniform3f(uniforms.skyColor, 0.38, 0.46, 0.62)
+        SCNGL.uniform3f(uniforms.groundColor, 0.30, 0.20, 0.13)
         SKGL.uniform1i(uniforms.emissionMap, 1)
+
+        if let backgroundImage {
+            if let image = NSObject(backgroundImage).skCGImage(), CG.imageGetWidth(image) == CG.imageGetHeight(image) * 6 {
+                drawSkybox(backgroundImage, projection: projection, cameraWorld: cameraWorld)
+            } else {
+                drawBackground(backgroundImage, aspect: Float(width) / Float(height))
+            }
+            SKGL.useProgram(program)
+        }
 
         var items: [Item] = []
         var lights: [(light: SCNLight, world: Matrix)] = []
@@ -330,6 +353,137 @@ final class SCNRenderer {
         evictTextures()
 
         if Renderbuffers.show(color, context: context.state.context, layer: layer, opaque: true) { Display.markDirty() }
+    }
+
+    /// A cube map's six faces in a row (+x, -x, +y, -y, +z, -z), drawn as the sky: each pixel looks along its ray from the camera.
+    private func drawSkybox(_ contents: UnsafeMutableRawPointer, projection: Matrix, cameraWorld: Matrix) {
+        if skyProgram == 0 {
+            let vertex = """
+                attribute vec2 position;
+                varying vec2 v_ndc;
+                void main() {
+                    v_ndc = position;
+                    gl_Position = vec4(position, 0.999, 1.0);
+                }
+                """
+            let fragment = """
+                precision highp float;
+                uniform mat4 inverseProjection;
+                uniform mat3 cameraRotation;
+                uniform sampler2D strip;
+                varying vec2 v_ndc;
+                void main() {
+                    vec4 p = inverseProjection * vec4(v_ndc, 1.0, 1.0);
+                    vec3 d = cameraRotation * normalize(p.xyz / p.w);
+                    vec3 a = abs(d);
+                    float face; float s; float t; float m;
+                    if (a.x >= a.y && a.x >= a.z) {
+                        m = a.x;
+                        if (d.x > 0.0) { face = 0.0; s = -d.z; } else { face = 1.0; s = d.z; }
+                        t = -d.y;
+                    } else if (a.y >= a.z) {
+                        m = a.y;
+                        if (d.y > 0.0) { face = 2.0; t = d.z; } else { face = 3.0; t = -d.z; }
+                        s = d.x;
+                    } else {
+                        m = a.z;
+                        if (d.z > 0.0) { face = 4.0; s = d.x; } else { face = 5.0; s = -d.x; }
+                        t = -d.y;
+                    }
+                    vec2 uv = clamp(vec2(s, t) / m * 0.5 + 0.5, 0.002, 0.998);
+                    gl_FragColor = vec4(texture2D(strip, vec2((face + uv.x) / 6.0, uv.y)).rgb, 1.0);
+                }
+                """
+            func compile(_ type: GLenum, _ source: String) -> GLuint {
+                let shader = SKGL.createShader(type)
+                source.withCString { text in
+                    var pointer: UnsafePointer<CChar>? = text
+                    SKGL.shaderSource(shader, 1, &pointer, nil)
+                }
+                SKGL.compileShader(shader)
+                return shader
+            }
+            let made = SKGL.createProgram()
+            SKGL.attachShader(made, compile(SKGL.vertexShader, vertex))
+            SKGL.attachShader(made, compile(SKGL.fragmentShader, fragment))
+            SKGL.bindAttribLocation(made, 0, "position")
+            SKGL.linkProgram(made)
+            skyProgram = made
+        }
+        SKGL.useProgram(skyProgram)
+        let positions: [Float] = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1]
+        if quadBuffer == 0 { SKGL.genBuffers(1, &quadBuffer) }
+        SKGL.bindBuffer(SKGL.arrayBuffer, quadBuffer)
+        positions.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+        SKGL.enableVertexAttribArray(0)
+        SKGL.vertexAttribPointer(0, 2, SKGL.float, 0, 8, UnsafeRawPointer(bitPattern: 0))
+        SCNGL.disableVertexAttribArray(1)
+        SCNGL.disableVertexAttribArray(2)
+        let inverse = SCNMath.inverse(projection)
+        inverse.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(SKGL.getUniformLocation(skyProgram, "inverseProjection"), 1, 0, $0.baseAddress) }
+        // The camera's turn, without its place or scale.
+        func column(_ i: Int) -> [Float] {
+            let v = [cameraWorld[i * 4], cameraWorld[i * 4 + 1], cameraWorld[i * 4 + 2]]
+            let length = max((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).squareRoot(), 1e-9)
+            return v.map { $0 / length }
+        }
+        (column(0) + column(1) + column(2)).withUnsafeBufferPointer { SCNGL.uniformMatrix3fv(SKGL.getUniformLocation(skyProgram, "cameraRotation"), 1, 0, $0.baseAddress) }
+        SKGL.uniform1i(SKGL.getUniformLocation(skyProgram, "strip"), 0)
+        SKGL.activeTexture(SKGL.texture0)
+        GLES.bindTexture?(SKGL.texture2D, texture(of: contents))
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SKGL.clampToEdge)
+        SKGL.disable(SKGL.depthTest)
+        SKGL.disable(SKGL.cullFace)
+        SKGL.drawArrays(SKGL.triangles, 0, 6)
+        SKGL.enable(SKGL.depthTest)
+        SKGL.enable(SKGL.cullFace)
+        SCNGL.disableVertexAttribArray(0)
+    }
+
+    /// A picture over the whole view, behind everything: the scene's background, scaled to fill.
+    private func drawBackground(_ contents: UnsafeMutableRawPointer, aspect: Float) {
+        guard let image = NSObject(contents).skCGImage() else { return }
+        let w = Float(CG.imageGetWidth(image)), h = Float(CG.imageGetHeight(image))
+        guard w > 0, h > 0 else { return }
+        // The part of the picture that fills the view.
+        let pictureAspect = w / h
+        let (uSpan, vSpan): (Float, Float) = aspect > pictureAspect ? (1, pictureAspect / aspect) : (aspect / pictureAspect, 1)
+        let u0 = (1 - uSpan) / 2, v0 = (1 - vSpan) / 2
+        // Clip-space corners with positions, normal, and coordinates (the program flips the second one).
+        func corner(_ x: Float, _ y: Float, _ u: Float, _ v: Float) -> [Float] { [x, y, 0.999, 0, 0, 1, u0 + u * uSpan, 1 - (v0 + v * vSpan)] }
+        let vertices = corner(-1, -1, 0, 1) + corner(1, -1, 1, 1) + corner(1, 1, 1, 0) + corner(-1, -1, 0, 1) + corner(1, 1, 1, 0) + corner(-1, 1, 0, 0)
+        if quadBuffer == 0 { SKGL.genBuffers(1, &quadBuffer) }
+        SKGL.bindBuffer(SKGL.arrayBuffer, quadBuffer)
+        vertices.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+        let stride: Int32 = 32
+        SKGL.enableVertexAttribArray(attributes.0)
+        SKGL.vertexAttribPointer(attributes.0, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 0))
+        SKGL.enableVertexAttribArray(attributes.1)
+        SKGL.vertexAttribPointer(attributes.1, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 12))
+        SKGL.enableVertexAttribArray(attributes.2)
+        SKGL.vertexAttribPointer(attributes.2, 2, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 24))
+        SCNMath.identity.withUnsafeBufferPointer {
+            SCNGL.uniformMatrix4fv(uniforms.mvp, 1, 0, $0.baseAddress)
+            SCNGL.uniformMatrix4fv(uniforms.model, 1, 0, $0.baseAddress)
+        }
+        [Float(1), 0, 0, 0, 1, 0, 0, 0, 1].withUnsafeBufferPointer { SCNGL.uniformMatrix3fv(uniforms.normalMatrix, 1, 0, $0.baseAddress) }
+        SCNGL.uniform4f(uniforms.diffuse, 1, 1, 1, 1)
+        SCNGL.uniform3f(uniforms.emission, 0, 0, 0)
+        SCNGL.uniform3f(uniforms.ambient, 1, 1, 1)
+        SCNGL.uniform1f(uniforms.environment, 0)
+        SCNGL.uniform3fv(uniforms.lightColor, 4, [Float](repeating: 0, count: 12))
+        SKGL.activeTexture(SKGL.texture0)
+        GLES.bindTexture?(SKGL.texture2D, texture(of: contents))
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SKGL.clampToEdge)
+        SKGL.activeTexture(SCNGL.texture1)
+        GLES.bindTexture?(SKGL.texture2D, white)
+        SKGL.disable(SKGL.depthTest)
+        SKGL.disable(SKGL.cullFace)
+        SKGL.drawArrays(SKGL.triangles, 0, 6)
+        SKGL.enable(SKGL.depthTest)
+        SKGL.enable(SKGL.cullFace)
     }
 
     private func backgroundColor(of scene: SCNScene, in view: SCNView) -> (Float, Float, Float) {
@@ -510,12 +664,12 @@ final class SCNRenderer {
             if material.lightingModel == "SCNLightingModelConstant" {
                 SCNGL.uniform3f(uniforms.ambient, 1, 1, 1)
                 SCNGL.uniform3fv(uniforms.lightColor, 4, [Float](repeating: 0, count: 12))
+                SCNGL.uniform1f(uniforms.environment, 0)
             } else {
-                // A physically based material is lit by its scene's environment too, which
-                // is not read yet: a plain ambient light stands in for it.
-                let environment: Float = material.lightingModel == "SCNLightingModelPhysicallyBased" ? 0.4 : 0
-                SCNGL.uniform3f(uniforms.ambient, frameLights.ambient[0] + environment, frameLights.ambient[1] + environment,
-                                frameLights.ambient[2] + environment)
+                // A physically based material is lit by its scene's environment too, which is not read: a sky
+                // above and a ground glow below stand in for it.
+                SCNGL.uniform3f(uniforms.ambient, frameLights.ambient[0], frameLights.ambient[1], frameLights.ambient[2])
+                SCNGL.uniform1f(uniforms.environment, material.lightingModel == "SCNLightingModelPhysicallyBased" ? 1 : 0)
                 SCNGL.uniform3fv(uniforms.lightColor, 4, frameLights.colors)
             }
             SCNGL.uniform4fv(uniforms.lightPosition, 4, frameLights.positions)
