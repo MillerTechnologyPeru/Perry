@@ -215,6 +215,9 @@ final class SCNSceneBuilder {
     private let depth: Int
     private var materials: [Int: SCNMaterial] = [:]
     private var geometries: [Int: SCNGeometry] = [:]
+    /// Nodes by their place in the archive, which a skinner's bones are named by, and the skinners to give theirs.
+    private var nodes: [Int: SCNNode] = [:]
+    private var skinners: [(node: SCNNode, described: [String: SCNArchive.Plist])] = []
     /// What the file has that is not built yet, by kind.
     private var skipped: [String: Int] = [:]
 
@@ -227,6 +230,8 @@ final class SCNSceneBuilder {
         guard let described = archive.dictionary(archive.top["root"]), archive.className(archive.top["root"]) == "SCNScene" else { return nil }
         let scene = SCNScene.make(SCNScene.objCClass)
         if let root = node(described["rootNode"]) { scene.scene.root = root }
+        // The bones are in the tree now.
+        for (node, skinner) in skinners { attachSkinner(skinner, to: node) }
         if let contents = propertyContents(described["background"]) {
             withExtendedLifetime(contents) { SKSupport.replace(&scene.background().property.contents, with: contents.objcObject) }
         }
@@ -245,6 +250,7 @@ final class SCNSceneBuilder {
     private func node(_ reference: SCNArchive.Plist?) -> SCNNode? {
         guard let described = archive.dictionary(reference), depth < 16 else { return nil }
         let made = SCNNode.make(SCNNode.objCClass)
+        if let key = archive.identifier(reference) { nodes[key] = made }
         let state = made.node
         state.name = archive.string(described["name"])
         state.hidden = archive.bool(described["hidden"]) ?? false
@@ -287,7 +293,8 @@ final class SCNSceneBuilder {
                 state.running.append(SCNRunning(key: index < keys.count ? keys[index] : nil, action: built, completion: nil))
             }
         }
-        for key in ["physicsBody", "physicsField", "skinner", "morpher", "constraints"]
+        if let skinner = archive.dictionary(described["skinner"]) { skinners.append((made, skinner)) }
+        for key in ["physicsBody", "physicsField", "morpher", "constraints"]
         where archive.has(described[key]) { skip(key) }
 
         for child in archive.list(described["childNodes"]) {
@@ -328,6 +335,35 @@ final class SCNSceneBuilder {
         made.system.values["emissionDuration"] = archive.double(described["emissionDuration"]) ?? 1
         made.system.values["loops"] = (archive.bool(described["loops"]) ?? true) ? 1 : 0
         return made
+    }
+
+    /// Gives `node` the skinner a file describes: its bones, found among the nodes, with their weights.
+    private func attachSkinner(_ described: [String: SCNArchive.Plist], to node: SCNNode) {
+        let made = SCNSkinner.objCClass.object.allocated().unsafeCast(to: SCNSkinner.self)
+        let state = made.skinner
+        let boneReferences = archive.list(described["bones"])
+        state.bones = boneReferences.compactMap { archive.identifier($0).flatMap { nodes[$0] } }
+        guard state.bones.count == boneReferences.count else { skip("skinner with bones elsewhere"); return }
+        // A bone's inverse bind transform is named by its place, the first with none.
+        state.inverseBind = (0..<state.bones.count).map { index in
+            let floats = archive.floats(described[index == 0 ? "baseGeometryBindTransform" : "baseGeometryBindTransform-\(index)"])
+            return floats.count == 16 ? floats : SCNMath.identity
+        }
+        if let key = archive.identifier(described["skeleton"]) { state.skeleton = nodes[key] }
+        if let weights = source(described["boneWeights"]), let indices = source(described["boneIndices"]) {
+            let n = weights.components
+            state.influences = n
+            state.weights = (0..<weights.count * n).map { weights.value($0 / n, $0 % n) }
+            // Indices are whole numbers, not the fractions a normalised source reads as.
+            state.indices = (0..<indices.count * n).map { i in
+                let at = indices.offset + (i / n) * indices.stride + (i % n) * indices.bytesPerComponent
+                guard at + indices.bytesPerComponent <= indices.data.count else { return 0 }
+                return indices.data.withUnsafeBytes { bytes in
+                    indices.bytesPerComponent == 1 ? UInt16(bytes[at]) : bytes.loadUnaligned(fromByteOffset: at, as: UInt16.self)
+                }
+            }
+        }
+        node.node.skinner = made
     }
 
     private func action(_ reference: SCNArchive.Plist?) -> SCNAction? {
@@ -521,6 +557,7 @@ final class SCNSceneBuilder {
                         let n = normals.map { ($0.value(index, 0), $0.value(index, 1), $0.value(index, 2)) } ?? face
                         let t = coordinates.map { ($0.value(index, 0), $0.value(index, 1)) } ?? (0, 0)
                         mesh.vertices.append(contentsOf: [p[corner].0, p[corner].1, p[corner].2, n.0, n.1, n.2, t.0, t.1])
+                        mesh.sources.append(Int32(index))
                     }
                 }
                 switch archive.int(element["primitiveType"]) ?? 0 {
