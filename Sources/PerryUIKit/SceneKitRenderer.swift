@@ -291,10 +291,10 @@ final class SCNRenderer {
         SKGL.bindBuffer(SKGL.arrayBuffer, 0)
 
         let root = scene.rootNode()
-        let camera = pointOfView ?? findCamera(in: root)
+        let camera = pointOfView ?? SCNRenderer.findCamera(in: root)
         let cameraWorld = camera?.world ?? SCNMath.identity
         let viewMatrix = SCNMath.inverse(cameraWorld)
-        let projection = self.projection(camera?.node.camera?.camera, aspect: Float(width) / Float(height))
+        let projection = SCNRenderer.projection(camera?.node.camera?.camera, aspect: Float(width) / Float(height))
         let viewProjection = SCNMath.multiply(projection, viewMatrix)
         SKGL.uniform1i(uniforms.diffuseMap, 0)
         SKGL.uniform1i(uniforms.emissionMap, 1)
@@ -303,6 +303,11 @@ final class SCNRenderer {
         var lights: [(light: SCNLight, world: Matrix)] = []
         collect(root, parent: SCNMath.identity, opacity: 1, into: &items, lights: &lights)
         frameLights = shading(lights, cameraWorld: cameraWorld, defaultLighting: defaultLighting)
+        if frame == 5 || frame == 120, getenv("PERRY_SCENEKIT_TRACE") != nil {
+            // PERRY_SCENEKIT_TRACE: what the view is drawing, twice.
+            let line = "perry: SceneKit: frame \(frame): \(items.count) items, \(lights.count) lights, camera \(camera?.node.name ?? "none") at (\(cameraWorld[12]), \(cameraWorld[13]), \(cameraWorld[14])) front (\(-cameraWorld[8]), \(-cameraWorld[9]), \(-cameraWorld[10])), \(camera?.node.constraints.count ?? -1) constraints, root has \(root.node.children.count) children: \(root.node.children.prefix(12).map { $0.unsafeCast(to: SCNNode.self).node.name ?? "-" })\n"
+            line.withCString { _ = write(2, $0, strlen($0)) }
+        }
         for index in items.indices {
             let p = SCNMath.multiply(viewMatrix, items[index].model)
             items[index].depth = p[14]
@@ -335,15 +340,15 @@ final class SCNRenderer {
     }
 
     /// The first node, in tree order, that has a camera.
-    private func findCamera(in node: SCNNode) -> SCNNode? {
+    static func findCamera(in node: SCNNode) -> SCNNode? {
         if node.node.camera != nil { return node }
         for child in node.node.children {
-            if let found = findCamera(in: child.unsafeCast(to: SCNNode.self)) { return found }
+            if let found = SCNRenderer.findCamera(in: child.unsafeCast(to: SCNNode.self)) { return found }
         }
         return nil
     }
 
-    private func projection(_ camera: SCNCameraState?, aspect: Float) -> Matrix {
+    static func projection(_ camera: SCNCameraState?, aspect: Float) -> Matrix {
         let near = Float(camera?.zNear ?? 1), far = Float(camera?.zFar ?? 100)
         if let camera, camera.orthographic {
             return SCNMath.orthographic(scale: Float(camera.orthographicScale), aspect: aspect, near: near, far: far)
