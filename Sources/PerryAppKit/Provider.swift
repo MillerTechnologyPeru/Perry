@@ -32,6 +32,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         appKitFatal("AppKit needs libdispatch's main queue")
     }
     guard RunLoop.load({ symbol(coreFoundation, $0) }) else { appKitFatal("AppKit needs CoreFoundation's run loop") }
+    BlockingRelease.load { symbol("/usr/lib/libSystem.B.dylib", $0) }
     guard QuartzCore.load({ symbol(quartzCore, $0) }) else {
         appKitFatal("AppKit needs libPerryQuartzCore, which is missing or incomplete")
     }
