@@ -181,7 +181,7 @@ enum ManagedObjects {
         }
         if let relationship = property.as(NSRelationshipDescription.self) {
             if relationship.isToMany {
-                let wanted = value?.unsafeCast(to: NSSet.self).allObjects().elements.map { $0.unsafeCast(to: NSManagedObject.self) } ?? []
+                let wanted = (value?.collectionMembers ?? []).map { $0.unsafeCast(to: NSManagedObject.self) }
                 let current = related(object, relationship)
                 for old in current where !wanted.contains(where: { $0.objcObject == old.objcObject }) {
                     unlink(object, relationship, old)
