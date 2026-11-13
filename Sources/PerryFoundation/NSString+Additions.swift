@@ -326,9 +326,10 @@ extension NSString {
     }
 
     @ObjCClassMethod("stringWithCString:encoding:")
-    static func string(cString: UnsafePointer<CChar>?, encoding: UInt) -> String? {
-        guard let cString else { return nil }
-        return StringEncoding.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding)
+    static func string(_ cls: ObjCClass, cString: UnsafePointer<CChar>?, encoding: UInt) -> ObjCObject? {
+        guard let cString,
+              let decoded = StringEncoding.decode(UnsafeRawBufferPointer(start: cString, count: strlen(cString)), encoding) else { return nil }
+        return ObjCObject(Strings.autoreleased(decoded, of: cls.pointer))
     }
 
     @ObjCMethod("initWithCString:encoding:")
@@ -348,7 +349,9 @@ extension NSString {
     }
 
     @ObjCClassMethod("stringWithCString:")
-    static func string(cString: UnsafePointer<CChar>?) -> String? { cString.map(decodeDefault) }
+    static func string(_ cls: ObjCClass, cString: UnsafePointer<CChar>?) -> ObjCObject? {
+        cString.map { ObjCObject(Strings.autoreleased(decodeDefault($0), of: cls.pointer)) }
+    }
 
     @ObjCMethod("initWithCString:")
     func initialize(cString: UnsafePointer<CChar>?) -> Self? {
@@ -360,14 +363,15 @@ extension NSString {
     @ObjCClassMethod("defaultCStringEncoding") static func defaultCStringEncoding() -> UInt { 4 }
 
     @ObjCClassMethod("stringWithCharacters:length:")
-    static func string(characters: UnsafePointer<UInt16>?, length: UInt) -> String {
-        guard let characters else { return "" }
-        return String(decoding: UnsafeBufferPointer(start: characters, count: Int(length)), as: UTF16.self)
+    static func string(_ cls: ObjCClass, characters: UnsafePointer<UInt16>?, length: UInt) -> ObjCObject {
+        let text = characters.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(length)), as: UTF16.self) } ?? ""
+        return ObjCObject(Strings.autoreleased(text, of: cls.pointer))
     }
 
     @ObjCMethod("initWithCharacters:length:")
     func initialize(characters: UnsafePointer<UInt16>?, length: UInt) -> Self {
-        Storage.set(objcObject, StringStorage(NSString.string(characters: characters, length: length)))
+        let text = characters.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(length)), as: UTF16.self) } ?? ""
+        Storage.set(objcObject, StringStorage(text))
         return self
     }
 
