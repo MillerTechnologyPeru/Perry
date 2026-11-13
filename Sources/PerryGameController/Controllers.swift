@@ -1,5 +1,6 @@
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // GameController over SDL3's gamepads. Each gamepad SDL finds is a
 // GCController with the extended gamepad profile (and the older gamepad and
@@ -299,7 +300,7 @@ open class GCExtendedGamepad: GCPhysicalInputProfile {
 // MARK: - GCController
 
 final class ControllerState {
-    let gamepad: SDL.Pointer
+    let gamepad: SDLGamepad
     let id: UInt32
     let name: String
     let profile = ProfileState()
@@ -312,7 +313,7 @@ final class ControllerState {
     /// SDL's buttons held at the last read, for tracing.
     var held: [Int] = []
 
-    init(gamepad: SDL.Pointer, id: UInt32, name: String) {
+    init(gamepad: SDLGamepad, id: UInt32, name: String) {
         (self.gamepad, self.id, self.name) = (gamepad, id, name)
         extended = Profiles.make(GCExtendedGamepad.self, profile)
         micro = Profiles.make(GCMicroGamepad.self, profile)
@@ -451,7 +452,7 @@ enum Controllers {
     nonisolated(unsafe) static var states: [UnsafeMutableRawPointer: ControllerState] = [:]
     nonisolated(unsafe) static var connected: [GCController] = []
     /// The first connected controller's gamepad, for readers on any thread.
-    nonisolated(unsafe) private static var firstGamepad: SDL.Pointer?
+    nonisolated(unsafe) private static var firstGamepad: SDLGamepad?
     nonisolated(unsafe) private static var started = false
     nonisolated(unsafe) private static var ticks = 0
 
@@ -487,7 +488,7 @@ enum Controllers {
     static func start() {
         guard !started else { return }
         started = true
-        guard SDL.load() else {
+        guard startGamepads() else {
             trace("SDL3's gamepads aren't available; no controllers")
             return
         }
@@ -504,7 +505,7 @@ enum Controllers {
     }
 
     private static func tick() {
-        SDL.updateGamepads()
+        SDLGamepad.update()
         ticks &+= 1
         // Gamepads coming and going, twice a second.
         if ticks % 30 == 0 { scan() }
@@ -513,21 +514,17 @@ enum Controllers {
 
     /// Connects the gamepads that came, disconnects those that went.
     private static func scan() {
-        var count: Int32 = 0
-        guard let ids = SDL.getGamepads(&count) else { return }
-        let present = Set((0..<Int(count)).map { ids[$0] })
-        SDL.free(ids)
+        let present = Set(SDLGamepad.connected.map(\.rawValue))
         for controller in connected where !present.contains(controller.controller.id) {
             trace("disconnected \(controller.controller.name)")
-            SDL.closeGamepad(controller.controller.gamepad)
             connected.removeAll { $0.objcObject == controller.objcObject }
             firstGamepad = connected.first?.controller.gamepad
             NSNotificationCenter.defaultCenter().post(name: ControllerConstants.GCControllerDidDisconnectNotification, object: controller, userInfo: nil)
         }
         let known = Set(connected.map(\.controller.id))
         for id in present.sorted() where !known.contains(id) {
-            guard let gamepad = SDL.openGamepad(id) else { continue }
-            let name = SDL.getGamepadName(gamepad).map { String(cString: $0) } ?? "Gamepad"
+            guard let gamepad = try? SDLGamepad(joystickID: JoystickID(rawValue: id)) else { continue }
+            let name = gamepad.name ?? "Gamepad"
             let controller = NSObject(GCController.objCClass.pointer).newInstance().unsafeCast(to: GCController.self)
             let state = ControllerState(gamepad: gamepad, id: id, name: name)
             state.profile.controller = controller.objcObject
@@ -550,20 +547,20 @@ enum Controllers {
         let state = controller.controller
         let profile = state.profile
         let gamepad = state.gamepad
-        func button(_ button: Button) -> Float { SDL.getGamepadButton(gamepad, button.rawValue) ? 1 : 0 }
+        func button(_ button: Button) -> Float { gamepad.pressed(button.rawValue) ? 1 : 0 }
         if tracing {
-            let held = (0..<26).filter { SDL.getGamepadButton(gamepad, Int32($0)) }
+            let held = (0..<26).filter { gamepad.pressed(Int32($0)) }
             if held != state.held {
                 state.held = held
                 trace("SDL buttons held: \(held)")
             }
         }
-        for combination in quitButtons where !combination.isEmpty && combination.allSatisfy({ SDL.getGamepadButton(gamepad, $0.rawValue) }) {
+        for combination in quitButtons where !combination.isEmpty && combination.allSatisfy({ gamepad.pressed($0.rawValue) }) {
             Quit.now()
         }
         if !touchButtons.isEmpty, controller.objcObject == connected.first?.objcObject { touch(with: gamepad) }
         if !touchSticks.isEmpty, controller.objcObject == connected.first?.objcObject { slide(with: gamepad) }
-        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
+        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(gamepad.value(axis.rawValue)) / 32767)) }
         /// A trigger, from rest at zero.
         func trigger(_ trigger: Axis) -> Float {
             let value = max(0, axis(trigger))
@@ -639,19 +636,19 @@ enum Controllers {
     }()
 
     /// Whether the button a setting names is held.
-    private static func held(_ name: String, on gamepad: SDL.Pointer) -> Bool {
+    private static func held(_ name: String, on gamepad: SDLGamepad) -> Bool {
         if !pretended.isEmpty {
             let time = now()
             if pretended.contains(where: { $0.names.contains(name) && time >= $0.from && time < $0.until }) { return true }
         }
         switch name {
-        case "l2": return SDL.getGamepadAxis(gamepad, Axis.leftTrigger.rawValue) > 16000
-        case "r2": return SDL.getGamepadAxis(gamepad, Axis.rightTrigger.rawValue) > 16000
-        case "up": return SDL.getGamepadButton(gamepad, Button.up.rawValue)
-        case "down": return SDL.getGamepadButton(gamepad, Button.down.rawValue)
-        case "left": return SDL.getGamepadButton(gamepad, Button.left.rawValue)
-        case "right": return SDL.getGamepadButton(gamepad, Button.right.rawValue)
-        default: return buttonNames[name].map { SDL.getGamepadButton(gamepad, $0.rawValue) } ?? false
+        case "l2": return gamepad.value(Axis.leftTrigger.rawValue) > 16000
+        case "r2": return gamepad.value(Axis.rightTrigger.rawValue) > 16000
+        case "up": return gamepad.pressed(Button.up.rawValue)
+        case "down": return gamepad.pressed(Button.down.rawValue)
+        case "left": return gamepad.pressed(Button.left.rawValue)
+        case "right": return gamepad.pressed(Button.right.rawValue)
+        default: return buttonNames[name].map { gamepad.pressed($0.rawValue) } ?? false
         }
     }
 
@@ -667,7 +664,7 @@ enum Controllers {
 
     /// Puts down and lifts the fingers of the touch buttons that changed,
     /// and moves those that drag.
-    private static func touch(with gamepad: SDL.Pointer) {
+    private static func touch(with gamepad: SDLGamepad) {
         for (index, button) in touchButtons.enumerated() {
             let isHeld = held(button.name, on: gamepad)
             func point(_ reads: Int) -> (x: Double, y: Double) {
@@ -718,8 +715,8 @@ enum Controllers {
     private static let firstStickFinger = 64
 
     /// Puts down, moves and lifts the fingers that follow sticks.
-    private static func slide(with gamepad: SDL.Pointer) {
-        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
+    private static func slide(with gamepad: SDLGamepad) {
+        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(gamepad.value(axis.rawValue)) / 32767)) }
         for (index, pad) in touchSticks.enumerated() {
             let value = pad.right ? stick(axis(.rightX), -axis(.rightY)) : stick(axis(.leftX), -axis(.leftY))
             let at = (x: pad.x + Double(value.x) * pad.across, y: pad.y - Double(value.y) * pad.down)
@@ -800,7 +797,7 @@ enum Controllers {
     /// without a gamepad. For CoreMotion, which takes it for a tilt.
     static func leftStick() -> (x: Float, y: Float) {
         guard let gamepad = firstGamepad else { return (0, 0) }
-        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(SDL.getGamepadAxis(gamepad, axis.rawValue)) / 32767)) }
+        func axis(_ axis: Axis) -> Float { max(-1, min(1, Float(gamepad.value(axis.rawValue)) / 32767)) }
         return stick(axis(.leftX), -axis(.leftY))
     }
 
@@ -870,40 +867,19 @@ enum Controllers {
 
 // MARK: - SDL3
 
-enum SDL {
-    typealias Pointer = UnsafeMutableRawPointer
-    nonisolated(unsafe) static var updateGamepads: (@convention(c) () -> Void)!
-    nonisolated(unsafe) static var getGamepads: (@convention(c) (UnsafeMutablePointer<Int32>) -> UnsafeMutablePointer<UInt32>?)!
-    nonisolated(unsafe) static var openGamepad: (@convention(c) (UInt32) -> Pointer?)!
-    nonisolated(unsafe) static var closeGamepad: (@convention(c) (Pointer) -> Void)!
-    nonisolated(unsafe) static var getGamepadName: (@convention(c) (Pointer) -> UnsafePointer<CChar>?)!
-    nonisolated(unsafe) static var getGamepadButton: (@convention(c) (Pointer, Int32) -> Bool)!
-    nonisolated(unsafe) static var getGamepadAxis: (@convention(c) (Pointer, Int32) -> Int16)!
-    nonisolated(unsafe) static var free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)!
+/// SDL3's gamepad subsystem, started; false without it.
+private func startGamepads() -> Bool {
+    // Read while the window isn't focused, too, as a game's controller is.
+    SDL.setHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+    // The gamepad subsystem, which brings the joystick subsystem.
+    return (try? SDL.initialize(subSystem: .gamepad)) != nil
+}
 
-    /// SDL3, with its gamepad subsystem started; false without it.
-    static func load() -> Bool {
-        guard let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return false }
-        func bind<T>(_ name: String, _: T.Type) -> T? { dlsym(library, name).map { unsafeBitCast($0, to: T.self) } }
-        typealias SetHint = @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>) -> Bool
-        typealias InitSubSystem = @convention(c) (UInt32) -> Bool
-        guard let setHint = bind("SDL_SetHint", SetHint.self), let initSubSystem = bind("SDL_InitSubSystem", InitSubSystem.self),
-              let updateGamepads = bind("SDL_UpdateGamepads", (@convention(c) () -> Void).self),
-              let getGamepads = bind("SDL_GetGamepads", (@convention(c) (UnsafeMutablePointer<Int32>) -> UnsafeMutablePointer<UInt32>?).self),
-              let openGamepad = bind("SDL_OpenGamepad", (@convention(c) (UInt32) -> Pointer?).self),
-              let closeGamepad = bind("SDL_CloseGamepad", (@convention(c) (Pointer) -> Void).self),
-              let getGamepadName = bind("SDL_GetGamepadName", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self),
-              let getGamepadButton = bind("SDL_GetGamepadButton", (@convention(c) (Pointer, Int32) -> Bool).self),
-              let getGamepadAxis = bind("SDL_GetGamepadAxis", (@convention(c) (Pointer, Int32) -> Int16).self),
-              let free = bind("SDL_free", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self) else { return false }
-        // Read while the window isn't focused, too, as a game's controller is.
-        _ = setHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
-        // SDL_INIT_GAMEPAD, which brings the joystick subsystem.
-        guard initSubSystem(0x2000) else { return false }
-        (SDL.updateGamepads, SDL.getGamepads, SDL.openGamepad, SDL.closeGamepad) = (updateGamepads, getGamepads, openGamepad, closeGamepad)
-        (SDL.getGamepadName, SDL.getGamepadButton, SDL.getGamepadAxis, SDL.free) = (getGamepadName, getGamepadButton, getGamepadAxis, free)
-        return true
-    }
+extension SDLGamepad {
+    /// Whether SDL's button with this raw value is held.
+    fileprivate func pressed(_ button: Int32) -> Bool { isPressed(Button(rawValue: button)) }
+    /// SDL's axis with this raw value, from -32768 to 32767.
+    fileprivate func value(_ axis: Int32) -> Int16 { self.axis(Axis(rawValue: axis)) }
 }
 
 // MARK: - Quitting
