@@ -47,7 +47,7 @@ enum SCNGL {
 
     static let depthBufferBit: UInt32 = 0x100, back: GLenum = 0x0405, front: GLenum = 0x0404
     static let repeatWrap: Int32 = 0x2901, mirroredRepeat: Int32 = 0x8370, linearMipmapLinear: Int32 = 0x2703
-    static let texture1: GLenum = 0x84C1
+    static let texture1: GLenum = 0x84C1, texture2: GLenum = 0x84C2, texture3: GLenum = 0x84C3
     static let maxLights = 4
 }
 
@@ -57,12 +57,13 @@ final class SCNRenderer {
     private var framebuffer: GLuint = 0, color: GLuint = 0, depth: GLuint = 0
     private var size = (width: 0, height: 0)
     private var program: GLuint = 0
-    private var attributes: (GLuint, GLuint, GLuint) = (0, 1, 2)
+    private var attributes: (GLuint, GLuint, GLuint, GLuint) = (0, 1, 2, 3)
     private struct Uniforms {
         var mvp: Int32 = -1, model: Int32 = -1, normalMatrix: Int32 = -1
         var diffuse: Int32 = -1, emission: Int32 = -1, lightPosition: Int32 = -1, lightColor: Int32 = -1, ambient: Int32 = -1
         var diffuseMap: Int32 = -1, emissionMap: Int32 = -1
         var skyColor: Int32 = -1, groundColor: Int32 = -1, environment: Int32 = -1
+        var lightMap: Int32 = -1, occlusionMap: Int32 = -1, maps: Int32 = -1
     }
     private var uniforms = Uniforms()
     /// Each geometry's vertices' buffer, by its identifier.
@@ -75,6 +76,9 @@ final class SCNRenderer {
     /// The vertices of skinned geometry, made again for each draw.
     private var skinBuffer: GLuint = 0
     private var quadBuffer: GLuint = 0
+    private var lavaProgram: GLuint = 0
+    /// Seconds since the view began, which shaders that animate read.
+    var time: Float = 0
     private var skyProgram: GLuint = 0
 
     init?() {
@@ -114,13 +118,14 @@ final class SCNRenderer {
                 return found >= 0 ? GLuint(found) : asked
             }
             func uniform(_ name: String) -> Int32 { SKGL.getUniformLocation(made, name) }
-            attributes = (attribute("position", 0), attribute("normal", 1), attribute("coordinate", 2))
+            attributes = (attribute("position", 0), attribute("normal", 1), attribute("coordinate", 2), attribute("coordinate2", 3))
             uniforms = Uniforms(mvp: uniform("mvp"), model: uniform("model"), normalMatrix: uniform("normalMatrix"),
                                 diffuse: uniform("diffuse"), emission: uniform("emission"),
                                 lightPosition: max(uniform("lightPosition"), uniform("lightPosition[0]")),
                                 lightColor: max(uniform("lightColor"), uniform("lightColor[0]")), ambient: uniform("ambient"),
                                 diffuseMap: uniform("diffuseMap"), emissionMap: uniform("emissionMap"),
-                                skyColor: uniform("skyColor"), groundColor: uniform("groundColor"), environment: uniform("environment"))
+                                skyColor: uniform("skyColor"), groundColor: uniform("groundColor"), environment: uniform("environment"),
+                                lightMap: uniform("lightMap"), occlusionMap: uniform("occlusionMap"), maps: uniform("maps"))
             white = makeTexture(pixels: [255, 255, 255, 255], width: 1, height: 1, mipmaps: false)
         }
         guard framebuffer == 0 || size != (width, height) else { return true }
@@ -146,16 +151,19 @@ final class SCNRenderer {
             attribute vec3 position;
             attribute vec3 normal;
             attribute vec2 coordinate;
+            attribute vec2 coordinate2;
             uniform mat4 mvp;
             uniform mat4 model;
             uniform mat3 normalMatrix;
             varying vec3 v_normal;
             varying vec3 v_position;
             varying vec2 v_coordinate;
+            varying vec2 v_coordinate2;
             void main() {
                 v_normal = normalMatrix * normal;
                 v_position = (model * vec4(position, 1.0)).xyz;
                 v_coordinate = vec2(coordinate.x, 1.0 - coordinate.y);
+                v_coordinate2 = vec2(coordinate2.x, coordinate2.y);
                 gl_Position = mvp * vec4(position, 1.0);
             }
             """
@@ -171,21 +179,30 @@ final class SCNRenderer {
             uniform float environment;
             uniform sampler2D diffuseMap;
             uniform sampler2D emissionMap;
+            uniform sampler2D lightMap;
+            uniform sampler2D occlusionMap;
+            uniform vec4 maps;
             varying vec3 v_normal;
             varying vec3 v_position;
             varying vec2 v_coordinate;
+            varying vec2 v_coordinate2;
             void main() {
                 vec3 n = normalize(v_normal);
                 if (!gl_FrontFacing) { n = -n; }
                 vec4 base = diffuse * texture2D(diffuseMap, v_coordinate);
                 // The environment lights a surface by where it faces: the sky from above, the ground's glow from below.
-                vec3 light = ambient + mix(groundColor, skyColor, n.y * 0.5 + 0.5) * environment;
+                // maps: x is 1 with a light map, y is 1 with an occlusion map, and z and w are 1 where either is laid out by the second coordinates.
+                vec3 indirect = ambient + mix(groundColor, skyColor, n.y * 0.5 + 0.5) * environment;
+                vec3 occlusion = maps.y > 0.5 ? texture2D(occlusionMap, maps.w > 0.5 ? v_coordinate2 : v_coordinate).rgb : vec3(1.0);
+                vec3 light = indirect * occlusion;
                 for (int i = 0; i < 4; i++) {
                     // w is 0 for a direction toward the light, 1 for a position.
                     vec3 toLight = lightPosition[i].w > 0.5 ? normalize(lightPosition[i].xyz - v_position) : lightPosition[i].xyz;
                     light += lightColor[i] * max(dot(n, toLight), 0.0);
                 }
                 vec3 rgb = base.rgb * light + emission * texture2D(emissionMap, v_coordinate).rgb;
+                // A baked light map: the light that fell on the surface, as it was when it was made.
+                if (maps.x > 0.5) { rgb += base.rgb * texture2D(lightMap, maps.z > 0.5 ? v_coordinate2 : v_coordinate).rgb; }
                 gl_FragColor = vec4(rgb * base.a, base.a);
             }
             """
@@ -205,6 +222,7 @@ final class SCNRenderer {
         SKGL.bindAttribLocation(program, 0, "position")
         SKGL.bindAttribLocation(program, 1, "normal")
         SKGL.bindAttribLocation(program, 2, "coordinate")
+        SKGL.bindAttribLocation(program, 3, "coordinate2")
         SKGL.linkProgram(program)
         return program
     }
@@ -314,6 +332,8 @@ final class SCNRenderer {
         let projection = SCNRenderer.projection(camera?.node.camera?.camera, aspect: Float(width) / Float(height))
         let viewProjection = SCNMath.multiply(projection, viewMatrix)
         SKGL.uniform1i(uniforms.diffuseMap, 0)
+        SKGL.uniform1i(uniforms.lightMap, 2)
+        SKGL.uniform1i(uniforms.occlusionMap, 3)
         SCNGL.uniform3f(uniforms.skyColor, 0.38, 0.46, 0.62)
         SCNGL.uniform3f(uniforms.groundColor, 0.30, 0.20, 0.13)
         SKGL.uniform1i(uniforms.emissionMap, 1)
@@ -463,6 +483,7 @@ final class SCNRenderer {
         SKGL.vertexAttribPointer(attributes.1, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 12))
         SKGL.enableVertexAttribArray(attributes.2)
         SKGL.vertexAttribPointer(attributes.2, 2, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 24))
+        SCNGL.disableVertexAttribArray(attributes.3)
         SCNMath.identity.withUnsafeBufferPointer {
             SCNGL.uniformMatrix4fv(uniforms.mvp, 1, 0, $0.baseAddress)
             SCNGL.uniformMatrix4fv(uniforms.model, 1, 0, $0.baseAddress)
@@ -594,7 +615,7 @@ final class SCNRenderer {
         if var entry = buffers[state.identifier] {
             if entry.revision != state.revision {
                 SKGL.bindBuffer(SKGL.arrayBuffer, entry.buffer)
-                mesh.vertices.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+                SCNRenderer.interleaved(mesh.vertices, mesh.uv2).withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
                 entry.revision = state.revision
             }
             entry.used = frame
@@ -604,9 +625,22 @@ final class SCNRenderer {
         var name: GLuint = 0
         SKGL.genBuffers(1, &name)
         SKGL.bindBuffer(SKGL.arrayBuffer, name)
-        mesh.vertices.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+        SCNRenderer.interleaved(mesh.vertices, mesh.uv2).withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
         buffers[state.identifier] = (state.revision, name, frame)
         return name
+    }
+
+    /// The vertices with their second texture coordinates (the first's again where there are none): ten floats each.
+    static func interleaved(_ vertices: [Float], _ uv2: [Float]) -> [Float] {
+        let count = vertices.count / 8
+        var out = [Float](repeating: 0, count: count * 10)
+        let second = uv2.count == count * 2
+        for v in 0..<count {
+            for k in 0..<8 { out[v * 10 + k] = vertices[v * 8 + k] }
+            out[v * 10 + 8] = second ? uv2[v * 2] : vertices[v * 8 + 6]
+            out[v * 10 + 9] = second ? uv2[v * 2 + 1] : vertices[v * 8 + 7]
+        }
+        return out
     }
 
     private func evictBuffers() {
@@ -615,6 +649,102 @@ final class SCNRenderer {
             SKGL.deleteBuffers(1, &name)
             buffers[key] = nil
         }
+    }
+
+    private func hasLightMap(_ material: SCNMaterial) -> Bool {
+        material.selfIllumination().property.contents.map { NSObject($0).responds(to: "CGImage") } ?? false
+    }
+
+    /// The five pictures of the lava shader (flow, noise, cold, medium, hot), if the material has them.
+    private func lavaSlots(of material: SCNMaterial) -> [UnsafeMutableRawPointer?]? {
+        guard let objects = SCNExtras.materials.existing(material.objcObject)?.objects else { return nil }
+        let slots = (0..<5).map { objects["Property\($0)"]?.unsafeCast(to: SCNMaterialProperty.self).property.contents }
+        return slots.allSatisfy({ $0 != nil }) ? slots : nil
+    }
+
+    /// Flowing lava, as the scene's shader modifier makes it: two copies of the hot, medium and cold pictures slide
+    /// along the flow map's directions and fade into one another, and the speed of the flow says which picture shows.
+    private func drawLava(_ slots: [UnsafeMutableRawPointer?], element: (first: Int, count: Int), mvp: Matrix, model: Matrix) {
+        if lavaProgram == 0 {
+            let vertex = """
+                attribute vec3 position;
+                attribute vec3 normal;
+                attribute vec2 coordinate;
+                attribute vec2 coordinate2;
+                uniform mat4 mvp;
+                varying vec2 v_coordinate;
+                void main() {
+                    v_coordinate = vec2(coordinate.x, 1.0 - coordinate.y);
+                    gl_Position = mvp * vec4(position, 1.0);
+                }
+                """
+            let fragment = """
+                precision highp float;
+                uniform sampler2D flow;
+                uniform sampler2D noise;
+                uniform sampler2D cold;
+                uniform sampler2D medium;
+                uniform sampler2D hot;
+                uniform float time;
+                varying vec2 v_coordinate;
+                void main() {
+                    float tiling = 2.5;
+                    // A noise map offsets the time, to hide where one loop fades to the next.
+                    float cycleOffset = texture2D(noise, v_coordinate * 0.4).r;
+                    float time0 = (2.0 * fract(time * 0.5) * 0.5) + cycleOffset;
+                    float time1 = fract(time0 * 0.5);
+                    float time2 = fract(time0 * 0.5 + 0.5);
+                    vec2 direction = texture2D(flow, v_coordinate).rg * 2.0 - 1.0;
+                    direction.r = -direction.r;
+                    direction.g = -direction.g;
+                    float strength = length(direction);
+                    direction *= 0.12;
+                    vec2 uv1 = fract((v_coordinate - direction / 2.0 + time1 * direction + 0.5 * direction) * tiling);
+                    vec2 uv2 = fract((v_coordinate - direction / 2.0 + time2 * direction + 0.5 * direction) * tiling);
+                    float blend = abs(0.5 - time1) / 0.5;
+                    vec3 hotColor = mix(texture2D(hot, uv1).rgb, texture2D(hot, uv2).rgb, blend) * 1.3;
+                    vec3 mediumColor = mix(texture2D(medium, uv1).rgb, texture2D(medium, uv2).rgb, blend) * 1.3;
+                    vec3 coldColor = mix(texture2D(cold, uv1).rgb, texture2D(cold, uv2).rgb, blend);
+                    strength = pow(strength * 2.5, 0.6);
+                    vec3 result = mix(mediumColor, hotColor, clamp((strength - 0.5) * 2.0, 0.0, 1.0));
+                    strength = (pow(strength, 0.5) - 0.5) * 2.2 + 0.5;
+                    result = mix(result, coldColor, clamp(1.0 - strength, 0.0, 1.0));
+                    gl_FragColor = vec4(result, 1.0);
+                }
+                """
+            func compile(_ type: GLenum, _ source: String) -> GLuint {
+                let shader = SKGL.createShader(type)
+                source.withCString { text in
+                    var pointer: UnsafePointer<CChar>? = text
+                    SKGL.shaderSource(shader, 1, &pointer, nil)
+                }
+                SKGL.compileShader(shader)
+                return shader
+            }
+            let made = SKGL.createProgram()
+            SKGL.attachShader(made, compile(SKGL.vertexShader, vertex))
+            SKGL.attachShader(made, compile(SKGL.fragmentShader, fragment))
+            SKGL.bindAttribLocation(made, 0, "position")
+            SKGL.bindAttribLocation(made, 1, "normal")
+            SKGL.bindAttribLocation(made, 2, "coordinate")
+            SKGL.bindAttribLocation(made, 3, "coordinate2")
+            SKGL.linkProgram(made)
+            lavaProgram = made
+        }
+        SKGL.useProgram(lavaProgram)
+        mvp.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(SKGL.getUniformLocation(lavaProgram, "mvp"), 1, 0, $0.baseAddress) }
+        SCNGL.uniform1f(SKGL.getUniformLocation(lavaProgram, "time"), time)
+        let units: [(String, GLenum)] = [("flow", SKGL.texture0), ("noise", SCNGL.texture1), ("cold", SCNGL.texture2), ("medium", SCNGL.texture3), ("hot", 0x84C4)]
+        for (index, (name, unit)) in units.enumerated() {
+            SKGL.uniform1i(SKGL.getUniformLocation(lavaProgram, name), Int32(index))
+            SKGL.activeTexture(unit)
+            GLES.bindTexture?(SKGL.texture2D, texture(of: slots[index]))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SKGL.clampToEdge)
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SKGL.clampToEdge)
+        }
+        SKGL.drawArrays(SKGL.triangles, Int32(element.first), Int32(element.count))
+        SKGL.useProgram(program)
+        SKGL.activeTexture(SKGL.texture0)
     }
 
     private func draw(_ item: Item, viewProjection: Matrix, translucent: Bool, defaultLighting: Bool) {
@@ -637,18 +767,20 @@ final class SCNRenderer {
             let skinned = SCNSkinning.skin(mesh, with: skinner)
             if skinBuffer == 0 { SKGL.genBuffers(1, &skinBuffer) }
             SKGL.bindBuffer(SKGL.arrayBuffer, skinBuffer)
-            skinned.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+            SCNRenderer.interleaved(skinned, mesh.uv2).withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
             model = SCNMath.identity
         } else {
             SKGL.bindBuffer(SKGL.arrayBuffer, buffer(for: item.geometry, mesh: mesh))
         }
-        let stride: Int32 = 32
+        let stride: Int32 = 40
         SKGL.enableVertexAttribArray(attributes.0)
         SKGL.vertexAttribPointer(attributes.0, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 0))
         SKGL.enableVertexAttribArray(attributes.1)
         SKGL.vertexAttribPointer(attributes.1, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 12))
         SKGL.enableVertexAttribArray(attributes.2)
         SKGL.vertexAttribPointer(attributes.2, 2, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 24))
+        SKGL.enableVertexAttribArray(attributes.3)
+        SKGL.vertexAttribPointer(attributes.3, 2, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 32))
 
         let mvp = SCNMath.multiply(viewProjection, model)
         mvp.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(uniforms.mvp, 1, 0, $0.baseAddress) }
@@ -669,7 +801,8 @@ final class SCNRenderer {
                 // A physically based material is lit by its scene's environment too, which is not read: a sky
                 // above and a ground glow below stand in for it.
                 SCNGL.uniform3f(uniforms.ambient, frameLights.ambient[0], frameLights.ambient[1], frameLights.ambient[2])
-                SCNGL.uniform1f(uniforms.environment, material.lightingModel == "SCNLightingModelPhysicallyBased" ? 1 : 0)
+                // A baked light map has the sky's light in it already.
+                SCNGL.uniform1f(uniforms.environment, material.lightingModel == "SCNLightingModelPhysicallyBased" ? (hasLightMap(entry.material) ? 0.12 : 1) : 0)
                 SCNGL.uniform3fv(uniforms.lightColor, 4, frameLights.colors)
             }
             SCNGL.uniform4fv(uniforms.lightPosition, 4, frameLights.positions)
@@ -678,6 +811,18 @@ final class SCNRenderer {
             GLES.bindTexture?(SKGL.texture2D, texture(of: diffuseProperty.contents))
             GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(diffuseProperty.wrapS))
             GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(diffuseProperty.wrapT))
+            let lightProperty = entry.material.selfIllumination().property, occlusionProperty = entry.material.ambientOcclusion().property
+            let hasLight = lightProperty.contents.map { NSObject($0).responds(to: "CGImage") } ?? false
+            let hasOcclusion = occlusionProperty.contents.map { NSObject($0).responds(to: "CGImage") } ?? false
+            SCNGL.uniform4f(uniforms.maps, hasLight ? 1 : 0, hasOcclusion ? 1 : 0, lightProperty.mappingChannel == 1 ? 1 : 0, occlusionProperty.mappingChannel == 1 ? 1 : 0)
+            SKGL.activeTexture(SCNGL.texture2)
+            GLES.bindTexture?(SKGL.texture2D, texture(of: lightProperty.contents))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(lightProperty.wrapS))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(lightProperty.wrapT))
+            SKGL.activeTexture(SCNGL.texture3)
+            GLES.bindTexture?(SKGL.texture2D, texture(of: occlusionProperty.contents))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(occlusionProperty.wrapS))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(occlusionProperty.wrapT))
             SKGL.activeTexture(SCNGL.texture1)
             GLES.bindTexture?(SKGL.texture2D, texture(of: emissionProperty.contents))
             GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(emissionProperty.wrapS))
@@ -688,7 +833,11 @@ final class SCNRenderer {
                 SKGL.enable(SKGL.cullFace)
                 SCNGL.cullFace(material.cullMode == 1 ? SCNGL.front : SCNGL.back)
             }
-            SKGL.drawArrays(SKGL.triangles, Int32(entry.element.first), Int32(entry.element.count))
+            if let slots = lavaSlots(of: entry.material) {
+                drawLava(slots, element: entry.element, mvp: mvp, model: model)
+            } else {
+                SKGL.drawArrays(SKGL.triangles, Int32(entry.element.first), Int32(entry.element.count))
+            }
         }
     }
 }
