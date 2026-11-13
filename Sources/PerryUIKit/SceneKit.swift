@@ -832,6 +832,7 @@ open class SCNView: UIView {
         send("renderer:didApplyAnimationsAtTime:") { $0.scnSendRenderer(self, didApplyAnimationsAtTime: time) }
         send("renderer:didSimulatePhysicsAtTime:") { $0.scnSendRenderer(self, didSimulatePhysicsAtTime: time) }
         let camera = scn.pointOfView?.world
+        SCNCollision.step(scene)
         SCNConstraints.apply(scene.rootNode(), elapsed: elapsed, cameraPosition: camera.map { SCNVector3(x: $0[12], y: $0[13], z: $0[14]) })
         if let delegate, delegate.responds(to: "renderer:willRenderScene:atTime:") {
             delegate.scnSendRenderer(self, willRenderScene: scene, atTime: time)
