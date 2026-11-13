@@ -47,7 +47,7 @@ public final class PassthroughSubject<Output, Failure: Error>: Subject {
         }
     }
 
-    public func receive<Downstream: Subscriber>(subscriber: Downstream)
+    public func receive<Downstream: Subscriber>(subscriber: __owned Downstream)
         where Output == Downstream.Input, Failure == Downstream.Failure
     {
         lock.lock()

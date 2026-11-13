@@ -126,6 +126,7 @@ END _objc_msgSendSuper2
 ENTRY __objc_msgForward
 .Lmsgforward:
     SAVE_ARGUMENTS
+    mov x2, x30                     // where the message was sent from, for reports
     bl perry_objc_forward           // x0 = target, x1 = handler
     mov x16, x0
     mov x17, x1

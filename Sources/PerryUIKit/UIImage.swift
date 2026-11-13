@@ -174,6 +174,10 @@ open class UIImage: NSObject {
                 ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
             if let found { return make(cls, cgImage: found.image.object, scale: found.scale) }
         }
+        if getenv("PERRY_UIKIT_IMAGE_TRACE") != nil {
+            let line = "perry: UIImage: no image named \(name) in \(bundle.bundlePath())\n"
+            _ = line.withCString { write(2, $0, strlen($0)) }
+        }
         return nil
     }
 

@@ -13,6 +13,10 @@
 
 static uint64_t bind_target(perry_loader *loader, perry_image *image, int ordinal, const char *name,
                             bool weak_import) {
+    // An app extension, loaded into its host's process, ends its work with
+    // exit, which must not end the host's.
+    if (image->header->filetype == MH_EXECUTE && image != loader->main_image && strcmp(name, "_exit") == 0)
+        return (uint64_t)(uintptr_t)perry_extension_exit;
     perry_symbol sym = perry_resolve(loader, image, ordinal, name, weak_import);
     return (uint64_t)(uintptr_t)sym.address;
 }

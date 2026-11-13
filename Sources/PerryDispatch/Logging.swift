@@ -408,8 +408,11 @@ public func os_signpost_id_make_with_pointer(_ log: Object?, _ pointer: UnsafeRa
     UInt64(UInt(bitPattern: pointer))
 }
 
+/// Never enabled: signposts mark intervals for Instruments, which Linux
+/// lacks, and a caller that finds them enabled goes on to build a buffer
+/// with _os_signpost_pack_fill.
 @c(_os_signpost_enabled)
-public func os_signpost_enabled(_ log: Object?) -> Bool { !(Logging.state(log)?.disabled ?? true) }
+public func os_signpost_enabled(_ log: Object?) -> Bool { false }
 
 /// Signposts mark intervals for Instruments, which Linux lacks.
 @c(__os_signpost_emit_with_name_impl)

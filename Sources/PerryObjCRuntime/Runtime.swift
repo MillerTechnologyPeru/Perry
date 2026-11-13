@@ -302,6 +302,10 @@ public enum Runtime {
     /// With PERRY_OBJC_UNRECOGNIZED=continue, for finding what a program
     /// needs: an unrecognized message is reported, once for each class and
     /// selector, and returns zero instead of aborting.
+    /// The address a message to be forwarded was sent from, on arm64: set by
+    /// the forwarder for the report of an unrecognized selector.
+    nonisolated(unsafe) public static var forwardCaller: UnsafeRawPointer?
+
     enum Unrecognized {
         static let continues = getenv("PERRY_OBJC_UNRECOGNIZED").map { String(cString: $0) == "continue" } ?? false
 
@@ -318,7 +322,16 @@ public enum Runtime {
             let message = "\(isClass ? "+" : "-")[\(name) \(String(cString: selector))]"
             let first = lock.withLock { reported.insert(message).inserted }
             if first {
+                if getenv("PERRY_OBJC_CALLER") != nil, let caller = Runtime.forwardCaller {
+                    objcWarning("\(message): sent from \(caller)")
+                }
                 objcWarning("\(message): unrecognized selector, returning 0")
+                // PERRY_OBJC_TRAP=<text> stops in the crash reporter, with
+                // PERRY_CRASH_REPORT=1 showing where it was sent from, at the
+                // first unrecognized message that contains the text.
+                if let trap = getenv("PERRY_OBJC_TRAP"), message.contains(String(cString: trap)) {
+                    raise(SIGTRAP)
+                }
             }
         }
     }

@@ -154,8 +154,19 @@ enum Strings {
                 return storage.utf8
             }
         }
-        return (Storage.get(object, as: StringStorage.self) ?? StringStorage("")).utf8
+        if let storage = Storage.get(object, as: StringStorage.self) { return storage.utf8 }
+        // A string Swift made, which keeps its own characters: its C string
+        // lives a while, as an autoreleased one does.
+        let text = value(of: object) ?? ""
+        return recentUTF8.withLock { recent in
+            let storage = StringStorage(text)
+            recent.append(storage)
+            if recent.count > 1024 { recent.removeFirst(256) }
+            return storage.utf8
+        }
     }
+
+    private static let recentUTF8 = Mutex<[StringStorage]>([])
 
     /// A new NSString, retained (+1).
     static func make(_ value: String) -> id {
@@ -286,8 +297,16 @@ public class NSString: NSObject {
     @ObjCMethod("init")
     func initialize() -> Self { setValue("") }
 
+    /// The contents of `other`; an object that is not one of this library's
+    /// strings, such as a string Swift made, is read through its UTF-8.
     @ObjCMethod("initWithString:")
-    func initialize(string other: String) -> Self { setValue(other) }
+    func initialize(string other: UnsafeMutableRawPointer?) -> Self {
+        if let value = Strings.value(of: other) { return setValue(value) }
+        if let other, let bytes = ObjC.sendPointer(other, ObjC.selector("UTF8String")) {
+            return setValue(String(cString: bytes.assumingMemoryBound(to: CChar.self)))
+        }
+        return setValue("")
+    }
 
     @ObjCMethod("initWithUTF8String:")
     func initialize(utf8 bytes: UnsafePointer<CChar>?) -> Self? { bytes.map { setValue(String(cString: $0)) } }

@@ -230,7 +230,7 @@ typedef struct perry_forward_result {
     void *handler;
 } perry_forward_result;
 
-perry_forward_result perry_objc_forward(void *receiver, const void *sel);
+perry_forward_result perry_objc_forward(void *receiver, const void *sel, const void *caller);
 
 // MARK: - Blocks runtime
 

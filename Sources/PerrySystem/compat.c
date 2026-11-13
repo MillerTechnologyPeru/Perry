@@ -1606,3 +1606,26 @@ void darwin_launch_data_free(void *data) { (void)data; }
 void *darwin_launch_msg(void *message) DARWIN_SYMBOL(launch_msg);
 void *darwin_launch_msg(void *message) { (void)message; return NULL; }
 #endif
+
+// MARK: - Sandbox extensions
+
+// A program asks the sandbox for a token that lets another process open a
+// file (Swift Playgrounds' PGNSandboxExtension), and names the kind with
+// these strings. There is no sandbox here to ask: the token is a made-up one,
+// the consuming of it succeeds, and nothing is released. The kinds are
+// pointers to their names, as libsystem_sandbox's are.
+const char *darwin_APP_SANDBOX_READ DARWIN_SYMBOL(APP_SANDBOX_READ) = "com.apple.app-sandbox.read";
+const char *darwin_APP_SANDBOX_READ_WRITE DARWIN_SYMBOL(APP_SANDBOX_READ_WRITE) = "com.apple.app-sandbox.read-write";
+
+char *darwin_sandbox_extension_issue_file(const char *extension_class, const char *path, uint32_t flags)
+    DARWIN_SYMBOL(sandbox_extension_issue_file);
+char *darwin_sandbox_extension_issue_file(const char *extension_class, const char *path, uint32_t flags) {
+    (void)extension_class; (void)path; (void)flags;
+    return strdup("perry-sandbox-extension");
+}
+
+int64_t darwin_sandbox_extension_consume(const char *token) DARWIN_SYMBOL(sandbox_extension_consume);
+int64_t darwin_sandbox_extension_consume(const char *token) { (void)token; return 1; }
+
+int darwin_sandbox_extension_release(int64_t handle) DARWIN_SYMBOL(sandbox_extension_release);
+int darwin_sandbox_extension_release(int64_t handle) { (void)handle; return 0; }

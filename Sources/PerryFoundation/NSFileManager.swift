@@ -165,7 +165,7 @@ final class NSFileManager: NSObject {
     @ObjCMethod("createDirectoryAtURL:withIntermediateDirectories:attributes:error:")
     func createDirectory(at url: ObjCObject, intermediates: Bool, attributes: ObjCObject?,
                          error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        createDirectory(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", intermediates: intermediates,
+        createDirectory(atPath: FileManagers.path(URLs.url(url.id)), intermediates: intermediates,
                         attributes: attributes, error: errorPointer)
     }
 
@@ -199,7 +199,7 @@ final class NSFileManager: NSObject {
     @ObjCMethod("contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:")
     func contentsOfDirectory(at url: ObjCObject, keys: ObjCObject?, options: UInt,
                              error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
-        let path = URLs.url(url.id)?.path(percentEncoded: false) ?? ""
+        let path = FileManagers.path(URLs.url(url.id))
         do {
             let names = try files.contentsOfDirectory(atPath: path).filter { options & 4 == 0 || !$0.hasPrefix(".") }
             return Arrays.owned(names.compactMap { URLs.autoreleased(URLs.fileURL(Paths.appending(path, $0), isDirectory: nil)) })
@@ -227,7 +227,7 @@ final class NSFileManager: NSObject {
     /// missing. -skipDescendants and the attributes aren't supported.
     @ObjCMethod("enumeratorAtPath:")
     func enumerator(atPath path: String) -> ObjCObject {
-        Enumerators.make(((try? files.subpathsOfDirectory(atPath: path)) ?? []).sorted().map { Strings.autoreleased($0) })
+        NSDirectoryEnumerator.make(((try? files.subpathsOfDirectory(atPath: path)) ?? []).sorted().map { Strings.autoreleased($0) })
     }
 
     /// The directory's contents as URLs, as they are when it is made, by
@@ -243,7 +243,7 @@ final class NSFileManager: NSObject {
             : (try? files.subpathsOfDirectory(atPath: root)) ?? []
         let visible = options & 4 != 0 ? paths.filter { !$0.split(separator: "/").contains { $0.hasPrefix(".") } } : paths
         let base = root.hasSuffix("/") ? root : root + "/"
-        return Enumerators.make(visible.sorted().compactMap { URLs.wrapped(URL(filePath: base + $0))?.objcObject })
+        return NSDirectoryEnumerator.make(visible.sorted().compactMap { URLs.wrapped(URL(filePath: base + $0))?.objcObject })
     }
 
     // MARK: Changing
@@ -261,7 +261,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("removeItemAtURL:error:")
     func removeItem(at url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        removeItem(atPath: URLs.url(url.id)?.path(percentEncoded: false) ?? "", error: errorPointer)
+        removeItem(atPath: FileManagers.path(URLs.url(url.id)), error: errorPointer)
     }
 
     @ObjCMethod("copyItemAtPath:toPath:error:")
@@ -277,7 +277,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("copyItemAtURL:toURL:error:")
     func copyItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        copyItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+        copyItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
     }
 
     @ObjCMethod("createSymbolicLinkAtPath:withDestinationPath:error:")
@@ -291,7 +291,7 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("moveItemAtURL:toURL:error:")
     func moveItem(at source: NSURL, to destination: NSURL, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
-        moveItem(atPath: source.url.path(percentEncoded: false), toPath: destination.url.path(percentEncoded: false), error: errorPointer)
+        moveItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
     }
 
     @ObjCMethod("destinationOfSymbolicLinkAtPath:error:")
@@ -423,6 +423,39 @@ final class NSFileManager: NSObject {
         return Arrays.owned(found.map { [$0] } ?? [])
     }
 
+    /// How the item is placed against a directory: 0 inside it, 1 the
+    /// directory itself, 2 elsewhere. Paths are compared with their links
+    /// resolved.
+    private func relationship(ofDirectory directory: String, to item: String) -> Int {
+        func resolved(_ path: String) -> String {
+            guard let real = realpath(path, nil) else { return path }
+            defer { free(real) }
+            return String(cString: real)
+        }
+        let directory = resolved(directory), item = resolved(item)
+        if directory == item { return 1 }
+        return item.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/") ? 0 : 2
+    }
+
+    @ObjCMethod("getRelationship:ofDirectory:inDomain:toItemAtURL:error:")
+    func getRelationship(_ relationship: UnsafeMutablePointer<Int>?, ofDirectory directory: UInt, inDomain domain: UInt,
+                         toItemAt url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path = FileManagers.directory(directory) else {
+            FileManagers.report(errorPointer, "directory \(directory)")
+            return false
+        }
+        relationship?.pointee = self.relationship(ofDirectory: path, to: FileManagers.path(URLs.url(url.id)))
+        return true
+    }
+
+    @ObjCMethod("getRelationship:ofDirectoryAtURL:toItemAtURL:error:")
+    func getRelationship(_ relationship: UnsafeMutablePointer<Int>?, ofDirectoryAt directory: ObjCObject,
+                         toItemAt url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        relationship?.pointee = self.relationship(ofDirectory: FileManagers.path(URLs.url(directory.id)),
+                                                  to: FileManagers.path(URLs.url(url.id)))
+        return true
+    }
+
     /// The directory, made if asked; the item replacement directory is a
     /// new temporary one.
     @ObjCMethod("URLForDirectory:inDomain:appropriateForURL:create:error:")
@@ -445,6 +478,14 @@ final class NSFileManager: NSObject {
 }
 
 extension FileManagers {
+    /// A URL's file path as -path gives it: without the trailing slash of a
+    /// directory URL, which would make a file's path a directory's.
+    static func path(_ url: URL?) -> String {
+        var path = url?.path(percentEncoded: false) ?? ""
+        if path.count > 1 && path.hasSuffix("/") { path.removeLast() }
+        return path
+    }
+
     /// Reports a failure as Foundation does: an NSError in the Cocoa domain.
     static func report(_ error: UnsafeMutablePointer<id?>?, _ path: String) {
         error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4,

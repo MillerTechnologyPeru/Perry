@@ -991,9 +991,13 @@ extension Path {
         }
     }
 
+    // Perry: the boolean operations are approximations: no geometry library
+    // is here to clip one path by another, so a normalized path, an
+    // intersection, a subtraction and the line operations are the path
+    // itself, and a union or symmetric difference draws both.
     @available(OpenSwiftUI_v5_0, *)
     public func normalized(eoFill: Bool = true) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        self
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1001,7 +1005,7 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        self
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1009,7 +1013,9 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        var path = self
+        path.addPath(other)
+        return path
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1017,7 +1023,7 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        self
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1025,7 +1031,9 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        var path = self
+        path.addPath(other)
+        return path
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1033,7 +1041,7 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        self
     }
 
     @available(OpenSwiftUI_v5_0, *)
@@ -1041,7 +1049,7 @@ extension Path {
         _ other: Path,
         eoFill: Bool = false
     ) -> Path {
-        _openSwiftUIUnimplementedFailure()
+        self
     }
 
     package mutating func formTrivialUnion(_ path: Path) {

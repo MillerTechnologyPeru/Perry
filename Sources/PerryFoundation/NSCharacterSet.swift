@@ -170,6 +170,12 @@ public class NSCharacterSet: NSObject {
         return set(cls) { members.contains($0.value) }
     }
 
+    @ObjCClassMethod("characterSetWithBitmapRepresentation:")
+    static func bitmap(_ cls: ObjCClass, _ data: UnsafeMutableRawPointer?) -> NSCharacterSet? {
+        let members = CharacterSets.members(fromBitmap: DataObjects.data(data))
+        return set(cls) { members.contains($0.value) }
+    }
+
     @ObjCClassMethod("characterSetWithRange:")
     static func range(_ cls: ObjCClass, _ range: NSRange) -> NSCharacterSet? {
         let start = UInt32(range.location), end = UInt32(range.location + range.length)

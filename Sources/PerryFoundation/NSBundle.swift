@@ -21,9 +21,12 @@ final class BundleStorage {
     init(path: String, executable: String? = nil) {
         self.path = Paths.normalized(path)
         let macOS = FileManager.default.fileExists(atPath: self.path + "/Contents/Info.plist")
+        // A Mac framework is versioned: its Info.plist and resources are in
+        // Resources, a link to Versions/Current/Resources.
+        let versioned = !macOS && FileManager.default.fileExists(atPath: self.path + "/Resources/Info.plist")
         contentsPath = macOS ? self.path + "/Contents" : self.path
-        resourcePath = macOS ? contentsPath + "/Resources" : self.path
-        let plist = (try? Data(contentsOf: URL(filePath: contentsPath + "/Info.plist")))
+        resourcePath = macOS ? contentsPath + "/Resources" : versioned ? self.path + "/Resources" : self.path
+        let plist = (try? Data(contentsOf: URL(filePath: (versioned ? resourcePath : contentsPath) + "/Info.plist")))
             .flatMap { try? PropertyListDecoder().decode(PropertyValue.self, from: $0) }
         if case .dictionary(let values) = plist {
             info = values

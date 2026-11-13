@@ -34,6 +34,20 @@ extension NSManagedObjectContext {
   }
 }
 
+@available(macOS 12.0, iOS 15.0, tvOS 15.0, watchOS 8.0, *)
+extension NSManagedObjectContext {
+  /// Runs `block` on the context's queue, waiting for it, and returns its
+  /// result. The SDK declares this rethrows, which is throws to its ABI.
+  @preconcurrency public func performAndWait<T>(_ block: @Sendable () throws -> T) throws -> T {
+    var result: Result<T, any Error>?
+    withoutActuallyEscaping(block) { block in
+      let body: () -> Void = { result = Result { try block() } }
+      performAndWait(body)
+    }
+    return try result!.get()
+  }
+}
+
 /// A value carried across a Sendable boundary that the caller makes safe.
 private struct UnsafeSendable<Value>: @unchecked Sendable {
   let value: Value

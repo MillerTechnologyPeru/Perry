@@ -80,7 +80,9 @@ public func perry_objc_lookup_slow_stret(_ receiver: UnsafeMutableRawPointer?, _
 #endif
 
 @c @implementation
-public func perry_objc_forward(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?) -> perry_forward_result {
+public func perry_objc_forward(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?,
+                               _ caller: UnsafeRawPointer?) -> perry_forward_result {
+    Runtime.forwardCaller = caller
     guard let sel else { return perry_forward_result(target: nil, handler: nil) }
     let result = Runtime.forward(receiver: receiver, selector: sel.assumingMemoryBound(to: CChar.self))
     if result.target == nil && result.handler == nil {

@@ -1,7 +1,10 @@
 import CPerryFoundation
+import Synchronization
 import PerryObjCInterop
 
 // Foundation's categories on NSObject.
+
+private let classVersions = Mutex<[UInt: Int]>([:])
 
 /// Foundation's additions to NSObject. libobjc's -description returns nil.
 @ObjCCategory("Foundation")
@@ -12,6 +15,17 @@ extension NSObject {
     /// A class describes itself by its name.
     @ObjCClassMethod("description")
     static func classDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
+
+    /// The class version, which nothing here archives by: kept as it is set.
+    @ObjCClassMethod("setVersion:")
+    static func setClassVersion(_ cls: ObjCClass, _ version: Int) {
+        classVersions.withLock { $0[UInt(bitPattern: cls.pointer)] = version }
+    }
+
+    @ObjCClassMethod("version")
+    static func classVersion(_ cls: ObjCClass) -> Int {
+        classVersions.withLock { $0[UInt(bitPattern: cls.pointer)] ?? 0 }
+    }
 
     @ObjCClassMethod("debugDescription")
     static func classDebugDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }

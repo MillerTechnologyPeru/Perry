@@ -345,6 +345,8 @@ PASSTHROUGH _getrusage, getrusage
 PASSTHROUGH _utime, utime
 PASSTHROUGH _utimes, utimes
 PASSTHROUGH _mkstemp, mkstemp
+PASSTHROUGH _mkdtemp, mkdtemp
+PASSTHROUGH _mkstemps, mkstemps
 PASSTHROUGH _mktemp, mktemp
 PASSTHROUGH _memccpy, memccpy
 PASSTHROUGH _pthread_atfork, pthread_atfork

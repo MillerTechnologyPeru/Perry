@@ -33,6 +33,7 @@ let package = Package(
         // Steamworks' libsteam_api, over the running Linux Steam client.
         .library(name: "Perrysteam_api", type: .dynamic, targets: ["PerrySteamAPI"]),
         .library(name: "Perrybz2", type: .dynamic, targets: ["PerryBZ2"]),
+        .library(name: "PerryBom", type: .dynamic, targets: ["PerryBom"]),
         .library(name: "Perryxar", type: .dynamic, targets: ["PerryXar"]),
         // libcurl, Linux's, opened at run time.
         .library(name: "Perrycurl", type: .dynamic, targets: ["PerryCurl"]),
@@ -209,6 +210,8 @@ let package = Package(
         // Steamworks: libsteam_api's part, over steamclient.so, opened at run time.
         .target(name: "PerrySteamAPI", dependencies: ["PerryInterface"]),
         .target(name: "PerryBZ2", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("bz2")]),
+        // Bom's copier: unpacks zip archives and copies directories.
+        .target(name: "PerryBom", linkerSettings: [.linkedLibrary("z")]),
         // libxar, Linux's, opened at run time.
         .target(name: "PerryXar", dependencies: ["CPerryWrapped"]),
         // libcurl, Linux's, opened at run time.

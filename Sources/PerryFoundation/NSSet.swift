@@ -52,7 +52,10 @@ enum Sets {
 
     static func elements(_ object: id?) -> [id] {
         guard let object else { return [] }
-        if let storage = storage(object) {
+        // A subclass that keeps its own members has this library's storage
+        // too, from -[NSSet init], but empty: its own count says what it holds.
+        if let storage = storage(object),
+           !(storage.members.isEmpty && ObjC.overrides(object, Selectors.count, of: setClass)) {
             return storage.members
         }
         // Another library's set, such as Swift's: what it enumerates.

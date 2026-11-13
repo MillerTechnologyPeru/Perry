@@ -115,6 +115,17 @@ static char *dirname_of(const char *path) {
     return strndup(path, (size_t)(slash - path));
 }
 
+// The directory of an image's file with symbolic links resolved, as dyld
+// takes @loader_path: a library reached through a link (Swift Playgrounds'
+// host/lib_InternalSwiftScan.dylib, a link to compiler/lib_InternalSwiftScan.dylib)
+// finds the libraries beside the file itself.
+static char *real_dirname_of(const char *path) {
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved))
+        return dirname_of(resolved);
+    return dirname_of(path);
+}
+
 static bool file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
@@ -722,7 +733,7 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@loader_path/", 13) == 0) {
-        char *dir = dirname_of(image->path);
+        char *dir = real_dirname_of(image->path);
         snprintf(buf, sizeof(buf), "%s/%s", dir, name + 13);
         free(dir);
         return file_exists(buf) ? strdup(buf) : NULL;
@@ -753,7 +764,7 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
                     snprintf(base, sizeof(base), "%s%s", dir, rpath + 16);
                     free(dir);
                 } else if (strncmp(rpath, "@loader_path", 12) == 0) {
-                    char *dir = dirname_of(src->path);
+                    char *dir = real_dirname_of(src->path);
                     snprintf(base, sizeof(base), "%s%s", dir, rpath + 12);
                     free(dir);
                 } else {
@@ -853,10 +864,49 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
     }
 }
 
+// A Mac Catalyst image's libraries are iOS apps' own here. Darwin keeps
+// its iOS ones under /System/iOSSupport, and all of its frameworks are
+// versioned: /System/iOSSupport/System/Library/Frameworks/UIKit.framework/Versions/A/UIKit
+// is /System/Library/Frameworks/UIKit.framework/UIKit, CoreText's
+// Versions/A/CoreText is iOS's CoreText (UIKit's, not a Mac app's AppKit's),
+// and /System/iOSSupport/usr/lib/swift/X is /usr/lib/swift/X.
+static bool catalyst_install_name(const char *name, char *out, size_t out_size) {
+    static const char prefix[] = "/System/iOSSupport/";
+    const char *rest = name;
+    if (strncmp(name, prefix, strlen(prefix)) == 0)
+        rest = name + strlen(prefix) - 1;
+    else if (strncmp(name, "/System/Library/", 16) != 0 || !strstr(name, ".framework/Versions/"))
+        return false;
+    const char *versions = strstr(rest, ".framework/Versions/");
+    if (versions) {
+        const char *leaf = strrchr(rest, '/');
+        snprintf(out, out_size, "%.*s.framework/%s", (int)(versions - rest), rest, leaf + 1);
+    } else {
+        snprintf(out, out_size, "%s", rest);
+    }
+    return true;
+}
+
 static void load_dependencies(perry_loader *loader, perry_image *image) {
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
         const char *name = dep->install_name;
+
+        // Mac Catalyst code is iOS code: its UIKit is iOS apps' provider. Its
+        // AppKit, which such an app links for a few Mac touches, gets none,
+        // as AppKit's provider defines classes UIKit's does (NSLayoutConstraint)
+        // and one process can hold only one of each.
+        char catalyst_name[PATH_MAX];
+        if (image->platform == PLATFORM_MACCATALYST) {
+            if (strstr(name, "/AppKit.framework/")) {
+                perry_trace(PERRY_TRACE_LOAD, "%s: no AppKit for a Mac Catalyst image", name);
+                continue;
+            }
+            if (catalyst_install_name(name, catalyst_name, sizeof(catalyst_name))) {
+                perry_trace(PERRY_TRACE_LOAD, "%s -> %s", name, catalyst_name);
+                name = catalyst_name;
+            }
+        }
 
         // Swift's libraries, from the Darwin runtime given, when it has them,
         // and frameworks written in Swift that it holds (Combine).
@@ -927,6 +977,12 @@ static perry_image *load_image(perry_loader *loader, const char *path) {
     perry_trace(PERRY_TRACE_LOAD, "loading %s", path);
     perry_image *image = map_image(loader, path, &file);
     munmap(file.map, file.map_size);
+    {
+        const char *name = strrchr(path, '/');
+        perry_trace(PERRY_TRACE_LOAD, "image %s at %p", name != NULL ? name + 1 : path, (void *)image->base);
+    }
+    if (!loader->report)
+        perry_make_calls_once(image);
 
     if (image->encrypted && !loader->report)
         perry_fatal("%s: binary is encrypted (cryptid %u); only decrypted binaries can be loaded",
