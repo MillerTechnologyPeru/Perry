@@ -22,12 +22,24 @@ enum SDLSetup {
     static func prepareEnvironment() {
         setenv("SDL_VIDEO_FORCE_EGL", "1", 0)
         _ = videoDriver
+    }
+
+    /// The hints SDL starts with, given once and before it starts, which is
+    /// after the Objective-C runtime is there to name the app.
+    private static func applyHints() {
         guard !prepared else { return }
         prepared = true
         if let videoDriver { SDL.setHint("SDL_VIDEO_DRIVER", videoDriver) }
         // The window's Wayland app ID and X11 class: the app's desktop
         // entry's ID (DesktopEntry).
         if let id = DesktopEntry.id { SDL.setHint("SDL_APP_ID", id) }
+    }
+
+    /// SDL's video started, with its hints; false without a display.
+    static func startVideo() -> Bool {
+        prepareEnvironment()
+        applyHints()
+        return (try? SDL.initialize(subSystems: [.video])) != nil
     }
 
     /// The video driver the environment names for Perry's SDL (PortMaster
@@ -72,8 +84,7 @@ enum SDLSetup {
     }
 
     private static func primaryDisplayStarted() -> SDLVideoDisplay? {
-        prepareEnvironment()
-        guard (try? SDL.initialize(subSystems: [.video])) != nil else { return nil }
+        guard startVideo() else { return nil }
         let display = SDLVideoDisplay.primary
         return display.rawValue != 0 ? display : nil
     }
@@ -106,9 +117,8 @@ final class Compositor {
     init?(title: String, size screen: CGSize, scale: CGFloat) {
         // A turned screen's window is turned too.
         let size = Compositor.displayRotation != 0 ? CGSize(width: screen.height, height: screen.width) : screen
-        SDLSetup.prepareEnvironment()
-        do { try SDL.initialize(subSystems: [.video]) } catch {
-            uikitWarning("SDL could not start its video: \(error)")
+        guard SDLSetup.startVideo() else {
+            uikitWarning("SDL could not start its video")
             return nil
         }
         // The window is made in window coordinates, the display's pixels
