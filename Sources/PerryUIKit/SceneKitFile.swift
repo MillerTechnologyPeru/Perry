@@ -287,10 +287,11 @@ final class SCNSceneBuilder {
         let rotation = archive.floats(described["rotation"])
         if orientation.count >= 4, orientation.contains(where: { $0 != 0 }) {
             state.rotation = SCNMath.normalized((orientation[0], orientation[1], orientation[2], orientation[3]))
+        } else if rotation.count >= 4, rotation[0] != 0 || rotation[1] != 0 || rotation[2] != 0 {
+            // An axis and angle is exact; the Euler angles beside it name an order of turns that is easily got wrong.
+            state.rotation = SCNMath.quaternion(axis: SCNVector3(x: rotation[0], y: rotation[1], z: rotation[2]), angle: rotation[3])
         } else if euler.count >= 3 {
             state.rotation = SCNMath.quaternion(euler: SCNVector3(x: euler[0], y: euler[1], z: euler[2]))
-        } else if rotation.count >= 4 {
-            state.rotation = SCNMath.quaternion(axis: SCNVector3(x: rotation[0], y: rotation[1], z: rotation[2]), angle: rotation[3])
         }
         let pivot = archive.floats(described["pivot"])
         if pivot.count == 16 { state.pivot = pivot }
@@ -418,7 +419,7 @@ final class SCNSceneBuilder {
             return floats.count == 16 ? floats : SCNMath.identity
         }
         if let key = archive.identifier(described["skeleton"]) { state.skeleton = nodes[key] }
-        if let weights = source(described["boneWeights"]), let indices = source(described["boneIndices"]) {
+        if let weights = source(described["boneWeights"], single: true), let indices = source(described["boneIndices"], single: true) {
             let n = weights.components
             state.influences = n
             state.weights = (0..<weights.count * n).map { weights.value($0 / n, $0 % n) }
@@ -631,8 +632,9 @@ final class SCNSceneBuilder {
         }
     }
 
-    private func source(_ reference: SCNArchive.Plist?, at position: Int = 0) -> Source? {
-        let list = archive.list(reference)
+    /// The source a geometry lists under a semantic, or (for a skinner's weights and indices) the one a key holds itself.
+    private func source(_ reference: SCNArchive.Plist?, at position: Int = 0, single: Bool = false) -> Source? {
+        let list = single ? [reference].compactMap { $0 } : archive.list(reference)
         guard list.indices.contains(position), let first = Optional(list[position]), let described = archive.dictionary(first), let data = archive.bytes(described["data"]) else { return nil }
         let components = archive.int(described["componentsPerVector"]) ?? 3, bytes = archive.int(described["bytesPerComponent"]) ?? 4
         return Source(data: data, stride: archive.int(described["dataStride"]) ?? components * bytes, offset: archive.int(described["dataOffset"]) ?? 0,
