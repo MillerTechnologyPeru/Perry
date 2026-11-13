@@ -319,6 +319,12 @@ public enum Runtime {
             let first = lock.withLock { reported.insert(message).inserted }
             if first {
                 objcWarning("\(message): unrecognized selector, returning 0")
+                // PERRY_OBJC_TRAP=<text> stops in the crash reporter, with
+                // PERRY_CRASH_REPORT=1 showing where it was sent from, at the
+                // first unrecognized message that contains the text.
+                if let trap = getenv("PERRY_OBJC_TRAP"), message.contains(String(cString: trap)) {
+                    raise(SIGTRAP)
+                }
             }
         }
     }
