@@ -231,7 +231,15 @@ final class SCNSceneBuilder {
         if archive.has(described["geometry"]) { state.geometry = geometry(described["geometry"]) }
         if archive.has(described["camera"]) { state.camera = camera(described["camera"]) }
         if archive.has(described["light"]) { state.light = light(described["light"]) }
-        for key in ["particleSystem", "physicsBody", "physicsField", "actions", "animations", "skinner", "morpher", "constraints"]
+        if archive.has(described["actions"]) {
+            // A node's actions start running when it is loaded.
+            let keys = archive.list(described["action-keys"]).map { archive.string($0) }
+            for (index, item) in archive.list(described["actions"]).enumerated() {
+                guard let built = action(item) else { continue }
+                state.running.append(SCNRunning(key: index < keys.count ? keys[index] : nil, action: built, completion: nil))
+            }
+        }
+        for key in ["particleSystem", "physicsBody", "physicsField", "animations", "skinner", "morpher", "constraints"]
         where archive.has(described[key]) { skip(key) }
 
         for child in archive.list(described["childNodes"]) {
@@ -262,6 +270,36 @@ final class SCNSceneBuilder {
         state.orthographic = archive.bool(described["usesOrthographicProjection"]) ?? false
         state.orthographicScale = archive.double(described["orthographicScale"]) ?? 1
         state.horizontal = archive.int(described["projectionDirection"]) == 1
+        return made
+    }
+
+    private func action(_ reference: SCNArchive.Plist?) -> SCNAction? {
+        guard let described = archive.dictionary(reference), let kind = archive.className(reference) else { return nil }
+        let duration = archive.double(described["_duration"]) ?? 0
+        let made: SCNAction
+        switch kind {
+        case "SCNActionGroup": made = SCNAction.make(.group(archive.list(described["_actions"]).compactMap { action($0) }))
+        case "SCNActionSequence": made = SCNAction.make(.sequence(archive.list(described["_actions"]).compactMap { action($0) }))
+        case "SCNActionWait": made = SCNAction.make(.wait, duration: duration)
+        case "SCNActionRepeat":
+            guard let inner = action(described["_repeatedAction"]) else { return nil }
+            made = SCNAction.make(archive.bool(described["_forever"]) == true ? .forever(inner) : .repeatCount(inner, archive.int(described["_timesToRepeat"]) ?? 1))
+        case "SCNActionRotate":
+            let relative = archive.bool(described["_isRelative"]) ?? true
+            if archive.bool(described["_isAxisAngle"]) == true {
+                let axis = archive.floats(described["_axisRot"])
+                guard axis.count >= 4 else { return nil }
+                made = SCNAction.make(.rotateAxis(axis: SCNVector3(x: axis[0], y: axis[1], z: axis[2]), angle: axis[3], by: relative), duration: duration)
+            } else {
+                let angles = SCNVector3(x: Float(archive.double(described["_rotX"]) ?? 0), y: Float(archive.double(described["_rotY"]) ?? 0),
+                                        z: Float(archive.double(described["_rotZ"]) ?? 0))
+                made = SCNAction.make(.rotateEuler(angles, by: relative, shortest: archive.bool(described["_isUnitArc"]) ?? false), duration: duration)
+            }
+        default:
+            skip(kind)
+            return nil
+        }
+        made.action.timing = archive.int(described["_timingMode"]) ?? 0
         return made
     }
 
