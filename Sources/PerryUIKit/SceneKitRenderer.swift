@@ -162,8 +162,9 @@ final class SCNRenderer {
             void main() {
                 v_normal = normalMatrix * normal;
                 v_position = (model * vec4(position, 1.0)).xyz;
-                v_coordinate = vec2(coordinate.x, 1.0 - coordinate.y);
-                v_coordinate2 = vec2(coordinate2.x, coordinate2.y);
+                // Coordinates run down the picture from its top row, which is the first uploaded.
+                v_coordinate = coordinate;
+                v_coordinate2 = coordinate2;
                 gl_Position = mvp * vec4(position, 1.0);
             }
             """
@@ -470,8 +471,8 @@ final class SCNRenderer {
         let pictureAspect = w / h
         let (uSpan, vSpan): (Float, Float) = aspect > pictureAspect ? (1, pictureAspect / aspect) : (aspect / pictureAspect, 1)
         let u0 = (1 - uSpan) / 2, v0 = (1 - vSpan) / 2
-        // Clip-space corners with positions, normal, and coordinates (the program flips the second one).
-        func corner(_ x: Float, _ y: Float, _ u: Float, _ v: Float) -> [Float] { [x, y, 0.999, 0, 0, 1, u0 + u * uSpan, 1 - (v0 + v * vSpan)] }
+        // Clip-space corners with positions, normal, and coordinates.
+        func corner(_ x: Float, _ y: Float, _ u: Float, _ v: Float) -> [Float] { [x, y, 0.999, 0, 0, 1, u0 + u * uSpan, v0 + v * vSpan] }
         let vertices = corner(-1, -1, 0, 1) + corner(1, -1, 1, 1) + corner(1, 1, 1, 0) + corner(-1, -1, 0, 1) + corner(1, 1, 1, 0) + corner(-1, 1, 0, 0)
         if quadBuffer == 0 { SKGL.genBuffers(1, &quadBuffer) }
         SKGL.bindBuffer(SKGL.arrayBuffer, quadBuffer)
@@ -674,7 +675,7 @@ final class SCNRenderer {
                 uniform mat4 mvp;
                 varying vec2 v_coordinate;
                 void main() {
-                    v_coordinate = vec2(coordinate.x, 1.0 - coordinate.y);
+                    v_coordinate = coordinate;
                     gl_Position = mvp * vec4(position, 1.0);
                 }
                 """
@@ -696,7 +697,6 @@ final class SCNRenderer {
                     float time2 = fract(time0 * 0.5 + 0.5);
                     vec2 direction = texture2D(flow, v_coordinate).rg * 2.0 - 1.0;
                     direction.r = -direction.r;
-                    direction.g = -direction.g;
                     float strength = length(direction);
                     direction *= 0.12;
                     vec2 uv1 = fract((v_coordinate - direction / 2.0 + time1 * direction + 0.5 * direction) * tiling);
