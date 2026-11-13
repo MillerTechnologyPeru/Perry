@@ -5,6 +5,7 @@
 // so apps built against Apple's bind to them by the same symbols.
 
 public import Foundation
+import UIKit
 
 // MARK: - Verification
 
@@ -145,4 +146,127 @@ public enum AppStore {
 
     /// Brings the transactions up to date with the App Store: there are none.
     public static func sync() async throws {}
+}
+
+// MARK: - Errors
+
+public struct InvalidRequestError: Error {
+    public let code: Int64
+    public let message: String
+}
+
+public enum StoreKitError: Error {
+    case unknown
+    case userCancelled
+    case networkError(URLError)
+    case systemError(any Error)
+    case notAvailableInStorefront
+    case notEntitled
+    case unsupported
+    case invalidPresentationContext
+}
+
+extension StoreKitError: Sendable {}
+
+extension StoreKitError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .unknown: return "An unknown error occurred."
+        case .userCancelled: return "The user cancelled the request."
+        case .networkError: return "A network error occurred."
+        case .systemError: return "A system error occurred."
+        case .notAvailableInStorefront: return "The item is not available in the storefront."
+        case .notEntitled: return "The user is not entitled to the item."
+        case .unsupported: return "The request is not supported."
+        case .invalidPresentationContext: return "The presentation context is not valid."
+        }
+    }
+
+    public var failureReason: String? { errorDescription }
+    public var recoverySuggestion: String? { nil }
+}
+
+// MARK: - Storefront
+
+/// The App Store's storefront: none is known, as there is no App Store.
+public struct Storefront: Identifiable, Sendable {
+    public let countryCode: String
+    public let id: String
+
+    public static var current: Storefront? {
+        get async { nil }
+    }
+
+    public typealias ID = String
+}
+
+extension Storefront {
+    public struct Storefronts: AsyncSequence, Sendable {
+        public typealias Element = Storefront
+
+        public struct AsyncIterator: AsyncIteratorProtocol {
+            public mutating func next() async -> Storefront? { nil }
+            public typealias Element = Storefront
+        }
+
+        public func makeAsyncIterator() -> AsyncIterator { AsyncIterator() }
+    }
+
+    public static var updates: Storefronts { Storefronts() }
+}
+
+// MARK: - Subscriptions and representations
+
+@available(iOS 15.0, *)
+extension Transaction {
+    public var jsonRepresentation: Data { Data() }
+}
+
+@available(iOS 15.0, *)
+extension VerificationResult where SignedType == Transaction {
+    public var jwsRepresentation: String { "" }
+}
+
+@available(iOS 15.0, *)
+extension Product.PurchaseOption {
+    public static func custom(key: String, value: Data) -> Product.PurchaseOption { Product.PurchaseOption(key: key) }
+}
+
+@available(iOS 15.0, *)
+extension Product {
+    /// What a subscription renews to: no subscription is held, so no
+    /// renewal is known.
+    public struct SubscriptionInfo {
+        public let subscriptionGroupID: String
+
+        public struct RenewalInfo {
+            public var currentProductID: String { "" }
+            public var jsonRepresentation: Data { Data() }
+        }
+
+        public struct Status {
+            public let transaction: VerificationResult<Transaction>
+            public let renewalInfo: VerificationResult<RenewalInfo>
+
+            /// The changes to subscriptions' statuses: none.
+            public struct Statuses: AsyncSequence {
+                public typealias Element = Status
+
+                public struct AsyncIterator: AsyncIteratorProtocol {
+                    public mutating func next() async -> Status? { nil }
+                    public typealias Element = Status
+                }
+
+                public func makeAsyncIterator() -> AsyncIterator { AsyncIterator() }
+            }
+
+            public static var updates: Statuses { Statuses() }
+        }
+    }
+}
+
+@available(iOS 15.0, *)
+extension AppStore {
+    /// Asks for a review: there is no App Store to review in.
+    @MainActor public static func requestReview(in scene: UIWindowScene) {}
 }

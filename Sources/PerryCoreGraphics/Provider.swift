@@ -156,6 +156,31 @@ class NSMutableDictionary: NSDictionary {
     }
 }
 
+/// The strings Get functions return are constants on Darwin, literals that
+/// retains and releases leave alone, and programs depend on it: YouTube
+/// hands CGImageSourceGetType's result on as if it were owned, which only
+/// works because that string is never freed. These are literals made the
+/// same way, one for each value, kept for good. ASCII, as the names and type
+/// identifiers they stand for are.
+enum ConstantStrings {
+    nonisolated(unsafe) private static var table: [String: UnsafeMutableRawPointer] = [:]
+    private static let lock = Lock()
+
+    static func make(_ value: String) -> UnsafeMutableRawPointer {
+        lock.withLock {
+            if let known = table[value] { return known }
+            let word = MemoryLayout<UInt>.size
+            let literal = UnsafeMutableRawPointer.allocate(byteCount: 4 * word, alignment: word)
+            literal.storeBytes(of: ObjCRuntime.classObject("__NSCFConstantString"), as: UnsafeMutableRawPointer.self)
+            literal.storeBytes(of: 0x7c8, toByteOffset: word, as: UInt.self)
+            literal.storeBytes(of: UnsafeRawPointer(strdup(value)!), toByteOffset: 2 * word, as: UnsafeRawPointer.self)
+            literal.storeBytes(of: value.utf8.count, toByteOffset: 3 * word, as: Int.self)
+            table[value] = literal
+            return literal
+        }
+    }
+}
+
 @ObjCWrapper("NSURL")
 class NSURL: NSObject {
     @ObjCMethod("path") func path() -> String?

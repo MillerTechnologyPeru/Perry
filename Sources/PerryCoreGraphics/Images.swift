@@ -279,7 +279,7 @@ public func CGColorSpaceCopyName(_ space: Ref?) -> Ref? { ColorSpaces.state(spac
 
 @c(_CGColorSpaceGetName)
 public func CGColorSpaceGetName(_ space: Ref?) -> Ref? {
-    ColorSpaces.state(space)?.name.flatMap { NSObject.string($0).objCReturnValue() }
+    ColorSpaces.state(space)?.name.map { ConstantStrings.make($0) }
 }
 
 @c(_CGColorSpaceRetain) public func CGColorSpaceRetain(_ space: Ref?) -> Ref? { ObjCRuntime.retain(space) }
@@ -768,7 +768,7 @@ public func CGImageCreateWithImageInRect(_ image: Ref?, _ rect: CGRect) -> Ref? 
 
 @c(_CGImageGetUTType)
 public func CGImageGetUTType(_ image: Ref?) -> Ref? {
-    Images.state(image)?.typeIdentifier.flatMap { NSObject.string($0).objCReturnValue() }
+    Images.state(image)?.typeIdentifier.map { ConstantStrings.make($0) }
 }
 
 @c(_CGImageRetain) public func CGImageRetain(_ image: Ref?) -> Ref? { ObjCRuntime.retain(image) }

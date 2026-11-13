@@ -5,6 +5,10 @@
 // hasn't documented). CoreUI is private: it is loaded at run time and
 // reached through the Objective-C runtime, with no headers.
 //
+// The catalog's data sets (what NSDataAsset reads) are written as they are to
+// <catalog>.images/data/<name>, found by trying the names in the file with
+// CoreUI's -dataWithName:, as it can't list them.
+//
 // Usage: extract-assets <Assets.car>...
 import AppKit
 import Foundation
@@ -103,7 +107,28 @@ for path in CommandLine.arguments.dropFirst() {
             if CGImageDestinationFinalize(destination) { written += 1 }
         }
     }
+    // Data sets: every printable run in the catalog tried as a name.
+    var dataSets = 0
+    if let bytes = try? Data(contentsOf: url) {
+        var candidates = Set<String>()
+        var run: [UInt8] = []
+        for byte in bytes + [0] {
+            if byte >= 0x20 && byte < 0x7F {
+                run.append(byte)
+            } else {
+                if run.count >= 3, let text = String(bytes: run, encoding: .utf8) { candidates.insert(text) }
+                run.removeAll(keepingCapacity: true)
+            }
+        }
+        for name in candidates.sorted() where !name.hasPrefix("/") && !name.hasSuffix("/") && !name.contains("..") {
+            guard let named = catalog.perform(NSSelectorFromString("dataWithName:"), with: name)?.takeUnretainedValue(),
+                  let data = named.perform(NSSelectorFromString("data"))?.takeUnretainedValue() as? Data else { continue }
+            let file = output.appendingPathComponent("data").appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? data.write(to: file)) != nil { dataSets += 1 }
+        }
+    }
     try Data(templates.sorted().map { $0 + "\n" }.joined().utf8).write(to: output.appendingPathComponent("templates.txt"))
-    print("\(output.path): \(written) images of \(names.count) names, \(templates.count) templates")
+    print("\(output.path): \(written) images of \(names.count) names, \(templates.count) templates, \(dataSets) data sets")
 }
 exit(failed ? 1 : 0)

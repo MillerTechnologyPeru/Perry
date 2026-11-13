@@ -174,6 +174,9 @@ open class UIApplication: UIResponder {
     @ObjCMethod("isIdleTimerDisabled") func isIdleTimerDisabled() -> Bool { false }
     /// UIBackgroundRefreshStatus: denied 1. Apps are never woken in the
     /// background here.
+    /// UIUserInterfaceLayoutDirection: left to right 0, right to left 1; the app's is left to right.
+    @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
+    @ObjCMethod("isProtectedDataAvailable") func isProtectedDataAvailable() -> Bool { true }
     @ObjCMethod("backgroundRefreshStatus") func backgroundRefreshStatus() -> Int { 1 }
     @ObjCMethod("setMinimumBackgroundFetchInterval:") func setMinimumBackgroundFetchInterval(_ interval: Double) {}
     @ObjCMethod("setIdleTimerDisabled:") func setIdleTimerDisabled(_ disabled: Bool) {}
