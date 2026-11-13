@@ -278,11 +278,20 @@ final class SCNSceneBuilder {
             for item in archive.list(described["particleSystem"]) { if let system = particleSystem(item) { state.particleSystems.append(system) } }
         }
         if archive.has(described["animation-players"]) {
-            // The animations are not played; the players are there under their keys.
+            // Each player has the animation under the key of the same place, and starts playing.
             let keys = archive.list(described["animation-keys"]).map { archive.string($0) }
-            for (index, _) in archive.list(described["animation-players"]).enumerated() where index < keys.count {
+            let animations = archive.entries(described["animations"])
+            for (index, item) in archive.list(described["animation-players"]).enumerated() where index < keys.count {
                 guard let key = keys[index] else { continue }
-                made.addAnimationPlayer(SCNAnimationPlayer.objCClass.object.allocated().unsafeCast(to: SCNAnimationPlayer.self), forKey: key)
+                let player = SCNAnimationPlayer.objCClass.object.allocated().unsafeCast(to: SCNAnimationPlayer.self)
+                if let found = animations.first(where: { $0.key == key }), let animation = animation(found.value) { player.player.animation = animation }
+                if let details = archive.dictionary(item) {
+                    player.player.speed = CGFloat(archive.double(details["speed"]) ?? 1)
+                    player.player.blendFactor = CGFloat(archive.double(details["weight"]) ?? 1)
+                    player.player.paused = archive.bool(details["paused"]) ?? false
+                }
+                player.player.playing = true
+                made.addAnimationPlayer(player, forKey: key)
             }
         }
         if archive.has(described["actions"]) {
@@ -325,6 +334,40 @@ final class SCNSceneBuilder {
         state.orthographic = archive.bool(described["usesOrthographicProjection"]) ?? false
         state.orthographicScale = archive.double(described["orthographicScale"]) ?? 1
         state.horizontal = archive.int(described["projectionDirection"]) == 1
+        return made
+    }
+
+    /// An animation a file keeps: a group of keyframed channels, each a transform over time for a node below the player's.
+    private func animation(_ reference: SCNArchive.Plist?) -> SCNAnimation? {
+        let wrapper = Dictionary(archive.entries(reference).map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+        guard archive.string(wrapper["class"]) == "group" else { skip("animation of another kind"); return nil }
+        let group = Dictionary(archive.entries(wrapper["animation"]).map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+        let made = SCNAnimation.objCClass.object.allocated().unsafeCast(to: SCNAnimation.self)
+        let state = made.animation
+        state.duration = archive.double(group["duration"]) ?? 0
+        state.repeatCount = CGFloat(archive.double(group["repeatCount"]) ?? 0)
+        state.removedOnCompletion = archive.bool(group["removeOnCompletion"]) ?? true
+        state.fadeIn = archive.double(group["fadeInDuration"]) ?? 0
+        state.fadeOut = archive.double(group["fadeOutDuration"]) ?? 0
+        state.autoreverses = archive.bool(group["autoreverses"]) ?? false
+        for item in archive.list(group["channels"]) {
+            let channel = Dictionary(archive.entries(item).map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+            let target = archive.list(channel["targetPath"])
+            guard target.count == 2, let path = archive.string(target[0]), archive.string(target[1]) == "transform" else { skip("animated property"); continue }
+            let animated = Dictionary(archive.entries(channel["animation"]).map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+            let controller = Dictionary(archive.entries(animated["keyframeController"]).map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+            guard let timeBytes = archive.bytes(controller["keytimes-data"]), let valueBytes = archive.bytes(controller["values-data"]) else { continue }
+            // Times are big-endian doubles, values big-endian floats: a matrix to a time.
+            let count = timeBytes.count / 8
+            guard count > 0, valueBytes.count >= count * 64 else { continue }
+            func double(_ at: Int) -> Double { Double(bitPattern: timeBytes.withUnsafeBytes { UInt64(bigEndian: $0.loadUnaligned(fromByteOffset: at, as: UInt64.self)) }) }
+            func float(_ at: Int) -> Float { Float(bitPattern: valueBytes.withUnsafeBytes { UInt32(bigEndian: $0.loadUnaligned(fromByteOffset: at, as: UInt32.self)) }) }
+            let times = (0..<count).map { double($0 * 8) }
+            let keys = (0..<count).map { key in SCNMath.decompose((0..<16).map { float(key * 64 + $0 * 4) }) }
+            let names = path.split(separator: "/").map(String.init)
+            state.channels.append(SCNChannel(path: names, times: times, keys: keys))
+            if state.duration <= 0 { state.duration = times.last ?? 0 }
+        }
         return made
     }
 
