@@ -853,10 +853,49 @@ static void attach_swift_overlays(perry_loader *loader, perry_image *image) {
     }
 }
 
+// A Mac Catalyst image's libraries are iOS apps' own here. Darwin keeps
+// its iOS ones under /System/iOSSupport, and all of its frameworks are
+// versioned: /System/iOSSupport/System/Library/Frameworks/UIKit.framework/Versions/A/UIKit
+// is /System/Library/Frameworks/UIKit.framework/UIKit, CoreText's
+// Versions/A/CoreText is iOS's CoreText (UIKit's, not a Mac app's AppKit's),
+// and /System/iOSSupport/usr/lib/swift/X is /usr/lib/swift/X.
+static bool catalyst_install_name(const char *name, char *out, size_t out_size) {
+    static const char prefix[] = "/System/iOSSupport/";
+    const char *rest = name;
+    if (strncmp(name, prefix, strlen(prefix)) == 0)
+        rest = name + strlen(prefix) - 1;
+    else if (strncmp(name, "/System/Library/", 16) != 0 || !strstr(name, ".framework/Versions/"))
+        return false;
+    const char *versions = strstr(rest, ".framework/Versions/");
+    if (versions) {
+        const char *leaf = strrchr(rest, '/');
+        snprintf(out, out_size, "%.*s.framework/%s", (int)(versions - rest), rest, leaf + 1);
+    } else {
+        snprintf(out, out_size, "%s", rest);
+    }
+    return true;
+}
+
 static void load_dependencies(perry_loader *loader, perry_image *image) {
     for (uint32_t i = 0; i < image->dep_count; i++) {
         perry_dependency *dep = &image->deps[i];
         const char *name = dep->install_name;
+
+        // Mac Catalyst code is iOS code: its UIKit is iOS apps' provider. Its
+        // AppKit, which such an app links for a few Mac touches, gets none,
+        // as AppKit's provider defines classes UIKit's does (NSLayoutConstraint)
+        // and one process can hold only one of each.
+        char catalyst_name[PATH_MAX];
+        if (image->platform == PLATFORM_MACCATALYST) {
+            if (strstr(name, "/AppKit.framework/")) {
+                perry_trace(PERRY_TRACE_LOAD, "%s: no AppKit for a Mac Catalyst image", name);
+                continue;
+            }
+            if (catalyst_install_name(name, catalyst_name, sizeof(catalyst_name))) {
+                perry_trace(PERRY_TRACE_LOAD, "%s -> %s", name, catalyst_name);
+                name = catalyst_name;
+            }
+        }
 
         // Swift's libraries, from the Darwin runtime given, when it has them,
         // and frameworks written in Swift that it holds (Combine).
