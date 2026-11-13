@@ -243,6 +243,8 @@ open class SCNCamera: NSObject {
 /// texture coordinates), in runs, one for each material the geometry names.
 struct SCNMesh {
     var vertices: [Float] = []
+    /// For a mesh read from a file, the index in the file's sources of each vertex, which a skinner's weights are by.
+    var sources: [Int32] = []
     var elements: [(first: Int, count: Int)] = []
 }
 
@@ -453,6 +455,7 @@ final class SCNNodeState: ObjectState {
     var constraints: [NSObject] = []
     var categoryBitMask = 1
     var physicsBody: NSObject?
+    var skinner: SCNSkinner?
     var particleSystems: [NSObject] = []
     var audioPlayers: [NSObject] = []
     /// Animation players by key, with the keys in the order they were added.
