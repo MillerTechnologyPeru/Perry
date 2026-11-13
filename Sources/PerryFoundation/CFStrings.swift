@@ -104,21 +104,31 @@ enum CFStrings {
     static func mutate(_ string: id?, _ change: (inout String) -> Void) {
         var text = value(string)
         change(&text)
-        _ = ObjC.send(string, ObjC.selector("setString:"), Strings.autoreleased(text))
+        set(string, text)
+    }
+
+    /// Sets a mutable string's text. CF's functions leave nothing in the
+    /// caller's autorelease pool, as Darwin's never autorelease: a program
+    /// calling them from a thread of its own may have no pool that is ever
+    /// drained, so each makes and drains its own.
+    static func set(_ string: id?, _ text: String) {
+        ObjC.autoreleasepool { _ = ObjC.send(string, ObjC.selector("setString:"), Strings.autoreleased(text)) }
     }
 
     /// CFStringCompareFlags: case insensitive 1, backwards 4, anchored 8,
     /// nonliteral 16, localized 32, numerically 64.
     static func compare(_ a: String, _ b: String, _ flags: UInt) -> Int {
         let options = UInt(flags & ~(4 | 8))
-        return unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, UInt) -> Int).self)(
-            Strings.autoreleased(a), ObjC.selector("compare:options:"), Strings.autoreleased(b), options)
+        return ObjC.autoreleasepool {
+            unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, UInt) -> Int).self)(
+                Strings.autoreleased(a), ObjC.selector("compare:options:"), Strings.autoreleased(b), options)
+        }
     }
 
     static func find(_ string: id?, _ target: id?, _ range: CFRange, _ flags: UInt) -> CFRange {
-        let found = unsafeBitCast(ObjCRuntime.msgSend(returning: NSRange.self), to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)(
+        let found = ObjC.autoreleasepool { unsafeBitCast(ObjCRuntime.msgSend(returning: NSRange.self), to: (@convention(c) (id?, SEL, id?, UInt, NSRange) -> NSRange).self)(
             string, ObjC.selector("rangeOfString:options:range:"), target, flags & (1 | 4 | 8 | 64),
-            NSRange(location: UInt(range.location), length: UInt(range.length)))
+            NSRange(location: UInt(range.location), length: UInt(range.length))) }
         return found.location == UInt(Int.max) ? CFRange(location: -1, length: 0)
                                                : CFRange(location: Int(found.location), length: Int(found.length))
     }
@@ -483,25 +493,31 @@ public func CFStringAppendCharacters(_ string: id?, _ characters: UnsafePointer<
 public func CFStringReplace(_ string: id?, _ range: CFRange, _ replacement: id?) {
     var units = CFStrings.units(string)
     units.replaceSubrange(CFArrays.range(range), with: CFStrings.units(replacement))
-    _ = ObjC.send(string, ObjC.selector("setString:"), Strings.autoreleased(CFStrings.string(units)))
+    CFStrings.set(string, CFStrings.string(units))
 }
 
 @c(_CFStringInsert)
 public func CFStringInsert(_ string: id?, _ index: Int, _ inserted: id?) { CFStringReplace(string, CFRange(location: index, length: 0), inserted) }
 
 @c(_CFStringDelete)
-public func CFStringDelete(_ string: id?, _ range: CFRange) { CFStringReplace(string, range, Strings.autoreleased("")) }
+public func CFStringDelete(_ string: id?, _ range: CFRange) {
+    var units = CFStrings.units(string)
+    units.removeSubrange(CFArrays.range(range))
+    CFStrings.set(string, CFStrings.string(units))
+}
 
 @c(_CFStringReplaceAll)
 public func CFStringReplaceAll(_ string: id?, _ replacement: id?) {
-    _ = ObjC.send(string, ObjC.selector("setString:"), Strings.autoreleased(CFStrings.value(replacement)))
+    CFStrings.set(string, CFStrings.value(replacement))
 }
 
 @c(_CFStringFindAndReplace)
 public func CFStringFindAndReplace(_ string: id?, _ target: id?, _ replacement: id?, _ range: CFRange, _ flags: UInt) -> Int {
-    Int(unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, id?, UInt, NSRange) -> UInt).self)(
-        string, ObjC.selector("replaceOccurrencesOfString:withString:options:range:"), target, replacement, flags & (1 | 4 | 8 | 64),
-        NSRange(location: UInt(range.location), length: UInt(range.length))))
+    ObjC.autoreleasepool {
+        Int(unsafeBitCast(ObjC.msgSend, to: (@convention(c) (id?, SEL, id?, id?, UInt, NSRange) -> UInt).self)(
+            string, ObjC.selector("replaceOccurrencesOfString:withString:options:range:"), target, replacement, flags & (1 | 4 | 8 | 64),
+            NSRange(location: UInt(range.location), length: UInt(range.length))))
+    }
 }
 
 @c(_CFStringUppercase)
@@ -512,7 +528,7 @@ public func CFStringLowercase(_ string: id?, _ locale: UnsafeRawPointer?) { CFSt
 
 @c(_CFStringCapitalize)
 public func CFStringCapitalize(_ string: id?, _ locale: UnsafeRawPointer?) {
-    let capitalized = Strings.value(of: ObjC.send(string, ObjC.selector("capitalizedString"))) ?? ""
+    let capitalized = ObjC.autoreleasepool { Strings.value(of: ObjC.send(string, ObjC.selector("capitalizedString"))) ?? "" }
     CFStrings.mutate(string) { $0 = capitalized }
 }
 
@@ -536,7 +552,7 @@ public func CFStringPad(_ string: id?, _ pad: id?, _ length: Int, _ index: Int) 
         units.append(padding[offset % padding.count])
         offset += 1
     }
-    _ = ObjC.send(string, ObjC.selector("setString:"), Strings.autoreleased(CFStrings.string(units)))
+    CFStrings.set(string, CFStrings.string(units))
 }
 
 /// Prints the object's description to stderr, as Darwin does.
