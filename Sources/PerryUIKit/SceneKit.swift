@@ -828,6 +828,7 @@ open class SCNView: UIView {
         SCNTimers.process(now: now)
         send("renderer:updateAtTime:") { $0.scnSendRenderer(self, updateAtTime: time) }
         SCNActions.advance(scene.rootNode(), elapsed)
+        SCNAnimations.advance(scene.rootNode(), elapsed)
         send("renderer:didApplyAnimationsAtTime:") { $0.scnSendRenderer(self, didApplyAnimationsAtTime: time) }
         send("renderer:didSimulatePhysicsAtTime:") { $0.scnSendRenderer(self, didSimulatePhysicsAtTime: time) }
         let camera = scn.pointOfView?.world
