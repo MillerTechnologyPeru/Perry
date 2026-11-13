@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSEvent: AppKit's events, made from SDL's as the application asks for
 // them. Keys carry the Mac's virtual key codes (kVK_…) and the characters
@@ -177,7 +178,7 @@ open class NSEvent: NSObject {
     }
 
     /// The modifier keys down now, from SDL.
-    static var currentModifierFlags: UInt { SDL.start() ? ModifierFlags.from(SDL.modState()) : 0 }
+    static var currentModifierFlags: UInt { SDLSession.start() ? ModifierFlags.from(SDL.modifierState.rawValue) : 0 }
 
     @ObjCMethod("type") func eventType() -> UInt { type.rawValue }
     @ObjCMethod("subtype") func eventSubtype() -> Int16 { subtype }
@@ -229,10 +230,9 @@ open class NSEvent: NSObject {
     /// of the main screen.
     @ObjCClassMethod("mouseLocation")
     static func mouseLocation() -> CGPoint {
-        guard SDL.start() else { return .zero }
-        var x: Float = 0, y: Float = 0
-        _ = SDL.globalMouseState(&x, &y)
-        return CGPoint(x: CGFloat(x), y: Screens.height - CGFloat(y))
+        guard SDLSession.start() else { return .zero }
+        let mouse = SDL.globalMouseState
+        return CGPoint(x: CGFloat(mouse.x), y: Screens.height - CGFloat(mouse.y))
     }
 
     @ObjCClassMethod("pressedMouseButtons") static func pressedMouseButtons() -> UInt { MouseButtons.pressed }
