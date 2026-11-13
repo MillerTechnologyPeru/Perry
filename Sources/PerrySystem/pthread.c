@@ -402,11 +402,53 @@ int darwin_pthread_cond_destroy(darwin_cond *cond) {
     return 0;
 }
 
+// MARK: - Letting go before blocking
+
+static void (*release_hook)(void);
+static __thread int release_armed;
+
+void perry_set_release_before_blocking(void (*hook)(void)) { release_hook = hook; }
+void perry_arm_release_before_blocking(int armed) { release_armed = armed; }
+int perry_release_before_blocking_armed(void) { return release_armed && release_hook; }
+
+void perry_release_before_blocking(void) {
+    if (!release_armed || !release_hook)
+        return;
+    release_armed = 0;
+    release_hook();
+}
+
+int perry_release_grace(const struct timespec *deadline, struct timespec *soon) {
+    clock_gettime(CLOCK_REALTIME, soon);
+    soon->tv_nsec += 2000000;
+    if (soon->tv_nsec >= 1000000000) {
+        soon->tv_sec++;
+        soon->tv_nsec -= 1000000000;
+    }
+    if (deadline && (deadline->tv_sec < soon->tv_sec || (deadline->tv_sec == soon->tv_sec && deadline->tv_nsec <= soon->tv_nsec))) {
+        *soon = *deadline;
+        return 1;
+    }
+    return 0;
+}
+
+// MARK: - Waiting
+
 int darwin_pthread_cond_wait(darwin_cond *cond, darwin_mutex *mutex) DARWIN_SYMBOL(pthread_cond_wait);
 int darwin_pthread_cond_wait(darwin_cond *cond, darwin_mutex *mutex) {
     pthread_cond_t *value = cond_value(cond);
     pthread_mutex_t *lock = mutex_value(mutex);
-    return value && lock ? result(pthread_cond_wait(value, lock)) : 22;
+    if (!value || !lock)
+        return 22;
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        perry_release_grace(NULL, &soon);
+        int error = pthread_cond_timedwait(value, lock, &soon);
+        if (error != ETIMEDOUT)
+            return result(error);
+        perry_release_before_blocking();
+    }
+    return result(pthread_cond_wait(value, lock));
 }
 
 int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const struct timespec *deadline)
@@ -414,7 +456,17 @@ int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const 
 int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const struct timespec *deadline) {
     pthread_cond_t *value = cond_value(cond);
     pthread_mutex_t *lock = mutex_value(mutex);
-    return value && lock ? result(pthread_cond_timedwait(value, lock, deadline)) : 22;
+    if (!value || !lock)
+        return 22;
+    if (perry_release_before_blocking_armed() && deadline) {
+        struct timespec soon;
+        int last = perry_release_grace(deadline, &soon);
+        int error = pthread_cond_timedwait(value, lock, &soon);
+        if (error != ETIMEDOUT || last)
+            return result(error);
+        perry_release_before_blocking();
+    }
+    return result(pthread_cond_timedwait(value, lock, deadline));
 }
 
 // Darwin's wait for a time from now, on the condition's realtime clock.
