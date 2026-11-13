@@ -227,7 +227,7 @@ final class NSFileManager: NSObject {
     /// missing. -skipDescendants and the attributes aren't supported.
     @ObjCMethod("enumeratorAtPath:")
     func enumerator(atPath path: String) -> ObjCObject {
-        Enumerators.make(((try? files.subpathsOfDirectory(atPath: path)) ?? []).sorted().map { Strings.autoreleased($0) })
+        NSDirectoryEnumerator.make(((try? files.subpathsOfDirectory(atPath: path)) ?? []).sorted().map { Strings.autoreleased($0) })
     }
 
     /// The directory's contents as URLs, as they are when it is made, by
@@ -243,7 +243,7 @@ final class NSFileManager: NSObject {
             : (try? files.subpathsOfDirectory(atPath: root)) ?? []
         let visible = options & 4 != 0 ? paths.filter { !$0.split(separator: "/").contains { $0.hasPrefix(".") } } : paths
         let base = root.hasSuffix("/") ? root : root + "/"
-        return Enumerators.make(visible.sorted().compactMap { URLs.wrapped(URL(filePath: base + $0))?.objcObject })
+        return NSDirectoryEnumerator.make(visible.sorted().compactMap { URLs.wrapped(URL(filePath: base + $0))?.objcObject })
     }
 
     // MARK: Changing
@@ -421,6 +421,39 @@ final class NSFileManager: NSObject {
             URLs.autoreleased(URL(filePath: $0, directoryHint: .isDirectory))
         }
         return Arrays.owned(found.map { [$0] } ?? [])
+    }
+
+    /// How the item is placed against a directory: 0 inside it, 1 the
+    /// directory itself, 2 elsewhere. Paths are compared with their links
+    /// resolved.
+    private func relationship(ofDirectory directory: String, to item: String) -> Int {
+        func resolved(_ path: String) -> String {
+            guard let real = realpath(path, nil) else { return path }
+            defer { free(real) }
+            return String(cString: real)
+        }
+        let directory = resolved(directory), item = resolved(item)
+        if directory == item { return 1 }
+        return item.hasPrefix(directory.hasSuffix("/") ? directory : directory + "/") ? 0 : 2
+    }
+
+    @ObjCMethod("getRelationship:ofDirectory:inDomain:toItemAtURL:error:")
+    func getRelationship(_ relationship: UnsafeMutablePointer<Int>?, ofDirectory directory: UInt, inDomain domain: UInt,
+                         toItemAt url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path = FileManagers.directory(directory) else {
+            FileManagers.report(errorPointer, "directory \(directory)")
+            return false
+        }
+        relationship?.pointee = self.relationship(ofDirectory: path, to: FileManagers.path(URLs.url(url.id)))
+        return true
+    }
+
+    @ObjCMethod("getRelationship:ofDirectoryAtURL:toItemAtURL:error:")
+    func getRelationship(_ relationship: UnsafeMutablePointer<Int>?, ofDirectoryAt directory: ObjCObject,
+                         toItemAt url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        relationship?.pointee = self.relationship(ofDirectory: FileManagers.path(URLs.url(directory.id)),
+                                                  to: FileManagers.path(URLs.url(url.id)))
+        return true
     }
 
     /// The directory, made if asked; the item replacement directory is a
