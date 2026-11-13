@@ -1,13 +1,13 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // Mac apps' alone: iOS has no display services or CGEvent, so armv7, which
 // runs only iOS apps, has none of this.
 #if !arch(arm)
 // Quartz Display Services and the cursor, as games ask about the screen:
-// one display, the primary one SDL3 reports (loaded at run time, as
-// AppKit's windows do), with its desktop mode and the full-screen modes
+// one display, the primary one SDL3 reports, with its desktop mode and the full-screen modes
 // SDL lists. Points are SDL's window coordinates, global coordinates have
 // their origin at the display's top left, as Quartz's do. Without SDL or a
 // display it is 1920 by 1080 at 60 Hz. Gamma tables are the identity and
@@ -44,72 +44,37 @@ public final class CGDisplayModeObject: NSObject {
 }
 
 enum Displays {
-    private struct SDLFunctions {
-        var initialize: @convention(c) (UInt32) -> Bool
-        var primaryDisplay: @convention(c) () -> UInt32
-        var displayBounds: @convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool
-        var desktopMode: @convention(c) (UInt32) -> UnsafeRawPointer?
-        var fullscreenModes: (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> UnsafeMutablePointer<UnsafeRawPointer?>?)?
-        var free: (@convention(c) (UnsafeMutableRawPointer?) -> Void)?
-        var warpMouseGlobal: (@convention(c) (Float, Float) -> Bool)?
-        var globalMouseState: (@convention(c) (UnsafeMutablePointer<Float>?, UnsafeMutablePointer<Float>?) -> UInt32)?
-    }
-
-    /// SDL3, started for its displays; nil without it or a display.
-    nonisolated(unsafe) private static let sdl: (functions: SDLFunctions, display: UInt32)? = {
-        guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil, let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return nil }
-        func bind<T>(_ name: String, _ type: T.Type) -> T? { dlsym(library, name).map { unsafeBitCast($0, to: T.self) } }
-        guard let initialize = bind("SDL_Init", (@convention(c) (UInt32) -> Bool).self),
-              let primary = bind("SDL_GetPrimaryDisplay", (@convention(c) () -> UInt32).self),
-              let bounds = bind("SDL_GetDisplayBounds", (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> Bool).self),
-              let desktop = bind("SDL_GetDesktopDisplayMode", (@convention(c) (UInt32) -> UnsafeRawPointer?).self) else { return nil }
-        let functions = SDLFunctions(
-            initialize: initialize, primaryDisplay: primary, displayBounds: bounds, desktopMode: desktop,
-            fullscreenModes: bind("SDL_GetFullscreenDisplayModes",
-                                  (@convention(c) (UInt32, UnsafeMutablePointer<Int32>?) -> UnsafeMutablePointer<UnsafeRawPointer?>?).self),
-            free: bind("SDL_free", (@convention(c) (UnsafeMutableRawPointer?) -> Void).self),
-            warpMouseGlobal: bind("SDL_WarpMouseGlobal", (@convention(c) (Float, Float) -> Bool).self),
-            globalMouseState: bind("SDL_GetGlobalMouseState", (@convention(c) (UnsafeMutablePointer<Float>?, UnsafeMutablePointer<Float>?) -> UInt32).self))
-        // SDL_INIT_VIDEO.
-        guard functions.initialize(0x20) else { return nil }
-        let display = functions.primaryDisplay()
-        return display == 0 ? nil : (functions, display)
+    /// SDL3, started for its displays; nil without a display or when SDL can't start.
+    nonisolated(unsafe) private static let display: SDLVideoDisplay? = {
+        guard getenv("DISPLAY") != nil || getenv("WAYLAND_DISPLAY") != nil else { return nil }
+        guard (try? SDL.initialize(subSystems: [.video])) != nil else { return nil }
+        let primary = SDLVideoDisplay.primary
+        return primary.rawValue == 0 ? nil : primary
     }()
 
-    /// An SDL_DisplayMode: w and h at 8 and 12, pixel_density and
-    /// refresh_rate at 16 and 20.
-    private static func mode(_ raw: UnsafeRawPointer) -> DisplayModeState {
-        let density = Double(raw.load(fromByteOffset: 16, as: Float.self)), rate = Double(raw.load(fromByteOffset: 20, as: Float.self))
-        return DisplayModeState(width: Int(raw.load(fromByteOffset: 8, as: Int32.self)), height: Int(raw.load(fromByteOffset: 12, as: Int32.self)),
-                                density: density > 0 ? density : 1, refreshRate: rate > 0 ? rate : 60)
+    private static func mode(_ found: SDLDisplayMode) -> DisplayModeState {
+        let density = found.pixelDensity, rate = found.refreshRate
+        return DisplayModeState(width: found.width, height: found.height, density: density > 0 ? density : 1, refreshRate: rate > 0 ? rate : 60)
     }
 
     static var bounds: CGRect {
-        guard let sdl else { return CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 1920, height: 1080)) }
-        var rect = [Int32](repeating: 0, count: 4)
-        guard sdl.functions.displayBounds(sdl.display, &rect) else { return CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 1920, height: 1080)) }
-        return CGRect(origin: CGPoint(x: CGFloat(rect[0]), y: CGFloat(rect[1])), size: CGSize(width: CGFloat(rect[2]), height: CGFloat(rect[3])))
+        let fallback = CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 1920, height: 1080))
+        guard let display, let rect = try? display.bounds else { return fallback }
+        return CGRect(origin: CGPoint(x: CGFloat(rect.x), y: CGFloat(rect.y)), size: CGSize(width: CGFloat(rect.width), height: CGFloat(rect.height)))
     }
 
     static var current: DisplayModeState {
-        if let sdl, let raw = sdl.functions.desktopMode(sdl.display) { return mode(raw) }
+        if let display, let desktop = try? SDLDisplayMode(display: display) { return mode(desktop) }
         return DisplayModeState(width: Int(bounds.size.width), height: Int(bounds.size.height), density: 1, refreshRate: 60)
     }
 
     /// The full-screen modes, the desktop's first.
     static var all: [DisplayModeState] {
         var modes = [current]
-        if let sdl, let list = sdl.functions.fullscreenModes {
-            var count: Int32 = 0
-            if let array = list(sdl.display, &count) {
-                for index in 0..<Int(count) {
-                    guard let raw = array[index] else { continue }
-                    let found = mode(raw)
-                    if !modes.contains(where: { $0.width == found.width && $0.height == found.height && $0.refreshRate == found.refreshRate }) {
-                        modes.append(found)
-                    }
-                }
-                sdl.functions.free?(array)
+        for found in (try? display?.modes()) ?? [] {
+            let state = mode(found)
+            if !modes.contains(where: { $0.width == state.width && $0.height == state.height && $0.refreshRate == state.refreshRate }) {
+                modes.append(state)
             }
         }
         return modes
@@ -117,12 +82,12 @@ enum Displays {
 
     static func object(_ state: DisplayModeState) -> Ref { makeObject(CGDisplayModeObject.objCClass, CGDisplayModeObject.states, state) }
 
-    static func warp(to point: CGPoint) { _ = sdl?.functions.warpMouseGlobal?(Float(point.x), Float(point.y)) }
+    static func warp(to point: CGPoint) { if display != nil { try? SDL.warpMouse(toGlobal: (Float(point.x), Float(point.y))) } }
 
     static var mouse: CGPoint {
-        var x: Float = 0, y: Float = 0
-        _ = sdl?.functions.globalMouseState?(&x, &y)
-        return CGPoint(x: CGFloat(x), y: CGFloat(y))
+        guard display != nil else { return CGPoint(x: 0, y: 0) }
+        let state = SDL.globalMouseState
+        return CGPoint(x: CGFloat(state.x), y: CGFloat(state.y))
     }
 }
 
