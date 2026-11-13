@@ -47,7 +47,9 @@ enum SCNSkinning {
     static func skin(_ mesh: SCNMesh, with skinner: SCNSkinnerState) -> [Float] {
         let count = skinner.bones.count
         guard count > 0, mesh.sources.count * 8 == mesh.vertices.count else { return mesh.vertices }
-        let matrices = (0..<count).map { SCNMath.multiply(skinner.bones[$0].world, skinner.inverseBind[$0]) }
+        // A bone's turn from its bind pose, as a file's matrices give it, is the inverse of the product of its world
+        // transform with its inverse bind transform: the other way round, the arms come out where they are not.
+        let matrices = (0..<count).map { SCNMath.inverse(SCNMath.multiply(skinner.bones[$0].world, skinner.inverseBind[$0])) }
         let n = skinner.influences
         var out = mesh.vertices
         for vertex in 0..<mesh.sources.count {
