@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSControl and the basic controls: a control keeps its values in its cell
 // (made from +cellClass, or decoded from its nib) and draws it in its
@@ -806,12 +807,9 @@ open class NSAlert: NSObject {
         // PERRY_APPKIT_QUIET_ALERTS: an alert with no choice to make (one
         // button or none) is only logged, so a game showing one runs on.
         let quiet = getenv("PERRY_APPKIT_QUIET_ALERTS") != nil && titles.count <= 1
-        if !quiet, SDL.start() {
-            // SDL_MESSAGEBOX_ERROR 0x10, WARNING 0x20, INFORMATION 0x40.
-            let flags: UInt32 = style == 2 ? 0x10 : style == 1 ? 0x40 : 0x20
-            _ = messageText.withCString { title in
-                informativeText.withCString { SDL.showSimpleMessageBox(flags, title, $0, Windows.key?.sdlWindow) }
-            }
+        if !quiet, SDLSession.start() {
+            let flags: MessageBoxFlags = style == 2 ? .error : style == 1 ? .information : .warning
+            try? SDL.showSimpleMessageBox(flags: flags, title: messageText, message: informativeText, window: Windows.key?.sdlWindow)
         }
         return 1000
     }
