@@ -94,6 +94,8 @@ enum SDL {
     static let glContextMinorVersion: Int32 = 18
     static let glContextProfileMask: Int32 = 20
     static let glShareWithCurrentContext: Int32 = 21
+    static let glContextReleaseBehavior: Int32 = 23
+    static let glReleaseBehaviorNone: Int32 = 0
     static let glProfileCompatibility: Int32 = 2
     static let windowHidden: UInt64 = 0x8
     static let windowBorderless: UInt64 = 0x10
