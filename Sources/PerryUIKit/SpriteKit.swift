@@ -26,6 +26,8 @@ extension NSObject {
     @ObjCMethod("didMoveToView:") func skSendDidMove(to view: SKView)
     @ObjCMethod("willMoveFromView:") func skSendWillMove(from view: SKView)
     @ObjCMethod("didChangeSize:") func skSendDidChangeSize(_ oldSize: CGSize)
+    /// Sent so that a scene which watches its size hears the view change it.
+    @ObjCMethod("setSize:") func skSendSetSize(_ size: CGSize)
 }
 
 // MARK: - Colors and the clock
@@ -741,7 +743,7 @@ open class SKView: UIView {
             return
         }
         scene.node.view = objcObject
-        if scene.node.scaleMode == 3 { scene.setSize(state.bounds.size) }
+        if scene.node.scaleMode == 3, scene.node.sceneSize != state.bounds.size { scene.skSendSetSize(state.bounds.size) }
         scene.skSendDidMove(to: self)
         restartFrames()
     }
@@ -789,7 +791,7 @@ open class SKView: UIView {
     /// One frame: the scene's steps, then its drawing.
     func runFrame() {
         guard let scene = sk.scene, !sk.paused, !scene.node.paused else { return }
-        if scene.node.scaleMode == 3 { scene.setSize(state.bounds.size) }
+        if scene.node.scaleMode == 3, scene.node.sceneSize != state.bounds.size { scene.skSendSetSize(state.bounds.size) }
         let now = SKSupport.now()
         let elapsed = sk.lastFrame == 0 ? 0 : min(max(now - sk.lastFrame, 0), 0.1)
         sk.lastFrame = now
