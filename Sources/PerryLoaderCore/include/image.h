@@ -139,6 +139,12 @@ unsigned perry_macho_architectures(const char *path);
 // Address helpers
 void *perry_image_vmaddr(const perry_image *image, uint64_t unslid);
 
+// Makes the image's set-up functions that are to run once per process do so (once.c).
+void perry_make_calls_once(perry_image *image);
+
+// What an app extension's exit does: ends the thread it is called on (once.c).
+void perry_extension_exit(int status) __attribute__((noreturn));
+
 // Points the image's thread-local variable descriptors at Perry's tlv_get_addr.
 void perry_setup_thread_locals(perry_image *image);
 void *perry_image_fileoff(const perry_image *image, uint64_t fileoff);
