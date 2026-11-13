@@ -75,6 +75,30 @@ enum SCNFile {
         return nil
     }
 
+    /// An OpenEXR picture as an 8-bit one: its values clamped and taken to the display's gamma.
+    static func exrImage(atPath path: String) -> UIImage? {
+        guard let bytes = read(path), let decoded = OpenEXR.decode(bytes) else { return nil }
+        let (width, height, rgba) = decoded
+        if getenv("PERRY_SCENEKIT_TRACE") != nil {
+            let maximum = rgba.max() ?? 0, mean = rgba.reduce(0, +) / Float(max(rgba.count, 1))
+            let line = "perry: SceneKit: \(path): \(width)x\(height) OpenEXR, mean \(mean), largest \(maximum)\n"
+            line.withCString { _ = write(2, $0, strlen($0)) }
+        }
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for i in 0..<width * height {
+            for c in 0..<3 { pixels[i * 4 + c] = UInt8(min(max(powf(max(rgba[i * 4 + c], 0), 1 / 2.2), 0), 1) * 255 + 0.5) }
+        }
+        guard let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
+        defer { CG.release(space) }
+        return pixels.withUnsafeMutableBytes { buffer -> UIImage? in
+            guard let context = CG.bitmapContextCreate(buffer.baseAddress, width, height, 8, width * 4, space, 1 | 0x4000) else { return nil }
+            defer { CG.release(context) }
+            guard let picture = CG.bitmapContextCreateImage(context) else { return nil }
+            defer { CG.release(picture) }
+            return UIImage.make(UIImage.objCClass, cgImage: picture, scale: 1)
+        }
+    }
+
     static func read(_ path: String) -> [UInt8]? {
         guard let file = fopen(path, "rb") else { return nil }
         defer { fclose(file) }
@@ -502,6 +526,20 @@ final class SCNSceneBuilder {
                 property.property.wrapT = archive.int(wrapped["wrapT"]) ?? 1
             }
         }
+        // The light map and occlusion map the renderer uses, with the texture coordinates each is laid out by.
+        for (name, property) in [("selfIllumination", made.selfIllumination()), ("ambientOcclusion", made.ambientOcclusion())] {
+            if let contents = propertyContents(described[name]) {
+                withExtendedLifetime(contents) { SKSupport.replace(&property.property.contents, with: contents.objcObject) }
+            }
+            if let details = archive.dictionary(described[name]) { property.property.mappingChannel = archive.int(details["mappingChannel"]) ?? 0 }
+        }
+        // The pictures a shader modifier reads, which an app names by key (Property0 and so on).
+        for (name, value) in archive.entries(described["valuesForUndefinedKeys"]) {
+            if let contents = propertyContents(value) {
+                let property = SCNMaterialProperty.make(contents: contents.objcObject)
+                SCNExtras.materials[made.objcObject].objects[name] = property
+            }
+        }
         made.material.name = archive.string(described["name"])
         made.material.transparency = CGFloat(archive.double(described["transparency"]) ?? 1)
         made.material.doubleSided = archive.bool(described["doubleSided"]) ?? false
@@ -523,6 +561,10 @@ final class SCNSceneBuilder {
                     path = "\(base)/\(relative)"
                 }
                 if let known = SCNFile.images[path] { return known }
+                if path.hasSuffix(".exr") {
+                    if let image = SCNFile.exrImage(atPath: path) { SCNFile.images[path] = image; return image }
+                    continue
+                }
                 if let image = UIImage.image(UIImage.objCClass, contentsOfFile: path) {
                     SCNFile.images[path] = image
                     return image
@@ -589,8 +631,9 @@ final class SCNSceneBuilder {
         }
     }
 
-    private func source(_ reference: SCNArchive.Plist?) -> Source? {
-        guard let first = archive.list(reference).first, let described = archive.dictionary(first), let data = archive.bytes(described["data"]) else { return nil }
+    private func source(_ reference: SCNArchive.Plist?, at position: Int = 0) -> Source? {
+        let list = archive.list(reference)
+        guard list.indices.contains(position), let first = Optional(list[position]), let described = archive.dictionary(first), let data = archive.bytes(described["data"]) else { return nil }
         let components = archive.int(described["componentsPerVector"]) ?? 3, bytes = archive.int(described["bytesPerComponent"]) ?? 4
         return Source(data: data, stride: archive.int(described["dataStride"]) ?? components * bytes, offset: archive.int(described["dataOffset"]) ?? 0,
                       components: components, bytesPerComponent: bytes, count: archive.int(described["vectorCount"]) ?? 0,
@@ -609,6 +652,7 @@ final class SCNSceneBuilder {
             return mesh
         }
         let normals = source(described["kGeometrySourceSemanticNormal"]), coordinates = source(described["kGeometrySourceSemanticTexcoord"])
+        let second = archive.list(described["kGeometrySourceSemanticTexcoord"]).count > 1 ? source(described["kGeometrySourceSemanticTexcoord"], at: 1) : nil
         for reference in archive.list(described["elements"]) {
             let first = mesh.vertices.count / 8
             if let element = archive.dictionary(reference) {
@@ -626,6 +670,7 @@ final class SCNSceneBuilder {
                         let t = coordinates.map { ($0.value(index, 0), $0.value(index, 1)) } ?? (0, 0)
                         mesh.vertices.append(contentsOf: [p[corner].0, p[corner].1, p[corner].2, n.0, n.1, n.2, t.0, t.1])
                         mesh.sources.append(Int32(index))
+                        if let second { mesh.uv2.append(contentsOf: [second.value(index, 0), second.value(index, 1)]) }
                     }
                 }
                 switch archive.int(element["primitiveType"]) ?? 0 {
