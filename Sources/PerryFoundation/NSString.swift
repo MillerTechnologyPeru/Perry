@@ -154,8 +154,19 @@ enum Strings {
                 return storage.utf8
             }
         }
-        return (Storage.get(object, as: StringStorage.self) ?? StringStorage("")).utf8
+        if let storage = Storage.get(object, as: StringStorage.self) { return storage.utf8 }
+        // A string Swift made, which keeps its own characters: its C string
+        // lives a while, as an autoreleased one does.
+        let text = value(of: object) ?? ""
+        return recentUTF8.withLock { recent in
+            let storage = StringStorage(text)
+            recent.append(storage)
+            if recent.count > 1024 { recent.removeFirst(256) }
+            return storage.utf8
+        }
     }
+
+    private static let recentUTF8 = Mutex<[StringStorage]>([])
 
     /// A new NSString, retained (+1).
     static func make(_ value: String) -> id {
