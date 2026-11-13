@@ -1,5 +1,6 @@
 import CPerryGeometry
 import PerryObjCInterop
+import SDL3Swift
 
 // NSCursor: the cursor's shape is kept but not shown (the desktop's own
 // arrow stays); hiding it hides SDL's cursor, as many times as it was
@@ -59,14 +60,14 @@ open class NSCursor: NSObject {
     @ObjCClassMethod("hide")
     static func hide() {
         hideCount += 1
-        if hideCount == 1, SDL.start() { _ = SDL.hideCursor() }
+        if hideCount == 1, SDLSession.start() { SDL.isCursorVisible = false }
     }
 
     @ObjCClassMethod("unhide")
     static func unhide() {
         guard hideCount > 0 else { return }
         hideCount -= 1
-        if hideCount == 0, SDL.start() { _ = SDL.showCursor() }
+        if hideCount == 0, SDLSession.start() { SDL.isCursorVisible = true }
     }
 
     @ObjCClassMethod("setHiddenUntilMouseMoves:") static func setHiddenUntilMouseMoves(_ hidden: Bool) {}
