@@ -1,5 +1,5 @@
 {
-  "originHash" : "375738581d792fe4cfd5c7627c977c6aad55204cdfb7b2ea33f2d3ffdcc3923c",
+  "originHash" : "61af96631bf43aee229676922206c148f5f9e2f32fc202cd538f90688a87ee21",
   "pins" : [
     {
       "identity" : "cairo",
@@ -43,6 +43,15 @@
       "state" : {
         "branch" : "master",
         "revision" : "02b7b628cfff1406731dde5e912e020f0f6f00c1"
+      }
+    },
+    {
+      "identity" : "sdl",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/PureSwift/SDL.git",
+      "state" : {
+        "branch" : "perry-support",
+        "revision" : "82dacc2edd63a3918807043b49670e01345efee2"
       }
     },
     {

@@ -90,6 +90,9 @@ let package = Package(
         // Cairo and FontConfig, which Silica renders CoreGraphics with.
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
+        // SDL3, which UIKit's and AppKit's windows, QuartzCore's compositor, CoreGraphics' displays and
+        // GameController's gamepads are drawn and read through.
+        .package(url: "https://github.com/PureSwift/SDL.git", branch: "perry-support"),
         // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         // Sockets and their addresses, typed, for CFSocket.
@@ -308,7 +311,7 @@ let package = Package(
         // attitude is a gamepad's stick.
         .target(
             name: "PerryGameController",
-            dependencies: ["CPerryMotion", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryMotion", "PerryInterface", "PerryObjCInterop", .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // SystemConfiguration's network reachability, always offline.
@@ -398,28 +401,29 @@ let package = Package(
         .target(
             name: "PerryCoreGraphics",
             dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop",
-                           "SilicaCairo"],
+                           "SilicaCairo", .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // Core Animation: the layer tree UIKit's views are backed by, drawn
         // through CoreGraphics and composited on the GPU, and its animations.
         .target(
             name: "PerryQuartzCore",
-            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop", .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // UIKit, a client of libobjc's C API and Foundation's classes.
         .target(
             name: "PerryUIKit",
             dependencies: ["CPerryGeometry", "CPerryOpenGL", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop",
-                           "PerryScrollPhysics"],
+                           "PerryScrollPhysics", .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics"],
+            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics",
+                           .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // Metal's declarations of metal2vulkan's C ABI, and its loader:
