@@ -977,6 +977,10 @@ static perry_image *load_image(perry_loader *loader, const char *path) {
     perry_trace(PERRY_TRACE_LOAD, "loading %s", path);
     perry_image *image = map_image(loader, path, &file);
     munmap(file.map, file.map_size);
+    {
+        const char *name = strrchr(path, '/');
+        perry_trace(PERRY_TRACE_LOAD, "image %s at %p", name != NULL ? name + 1 : path, (void *)image->base);
+    }
     if (!loader->report)
         perry_make_calls_once(image);
 
