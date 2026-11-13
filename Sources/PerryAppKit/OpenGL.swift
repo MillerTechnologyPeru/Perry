@@ -73,7 +73,10 @@ open class NSOpenGLContext: NSObject {
         /// None when the context is current without a surface.
         let window: SDL.Window?
     }
-    nonisolated(unsafe) private static var bindings: [pthread_t: Binding] = [:]
+    private static var bindings: [pthread_t: Binding] {
+        unsafeAddress { UnsafePointer(Storage.bindings) }
+        unsafeMutableAddress { Storage.bindings }
+    }
     /// Contexts their threads have let go of that EGL still has bound to
     /// them. Games that make their context current around every batch of
     /// drawing (a Mac's CGLSetCurrentContext is cheap) would otherwise
@@ -86,11 +89,37 @@ open class NSOpenGLContext: NSObject {
     /// (libSystem's and libdispatch's waits run BlockingRelease's hook),
     /// when another thread asks for it, at its next letting go, and when it
     /// ends; the main thread lets go at once.
-    nonisolated(unsafe) private static var parked: [pthread_t: Binding] = [:]
-    nonisolated(unsafe) private static var releaseRequested: Set<pthread_t> = []
+    private static var parked: [pthread_t: Binding] {
+        unsafeAddress { UnsafePointer(Storage.parked) }
+        unsafeMutableAddress { Storage.parked }
+    }
+    private static var releaseRequested: Set<pthread_t> {
+        unsafeAddress { UnsafePointer(Storage.releaseRequested) }
+        unsafeMutableAddress { Storage.releaseRequested }
+    }
     /// Each thread's context last made current, and how many times running
     /// it has been made current again after being let go of.
-    nonisolated(unsafe) private static var streaks: [pthread_t: (context: ObjectIdentifier, count: Int)] = [:]
+    private static var streaks: [pthread_t: (context: ObjectIdentifier, count: Int)] {
+        unsafeAddress { UnsafePointer(Storage.streaks) }
+        unsafeMutableAddress { Storage.streaks }
+    }
+
+    /// The variables above, kept behind pointers and guarded by
+    /// bindingsLock: Swift checks each access to a static variable at run
+    /// time (through a thread-local lookup), which for threads that make a
+    /// context current thousands of times a frame costs more than the rest.
+    private enum Storage {
+        nonisolated(unsafe) static let bindings = make([pthread_t: Binding]())
+        nonisolated(unsafe) static let parked = make([pthread_t: Binding]())
+        nonisolated(unsafe) static let releaseRequested = make(Set<pthread_t>())
+        nonisolated(unsafe) static let streaks = make([pthread_t: (context: ObjectIdentifier, count: Int)]())
+
+        static func make<T>(_ value: T) -> UnsafeMutablePointer<T> {
+            let storage = UnsafeMutablePointer<T>.allocate(capacity: 1)
+            storage.initialize(to: value)
+            return storage
+        }
+    }
     private static let parkingStreak = 64
     nonisolated(unsafe) private static let parkedKey: pthread_key_t = {
         var key = pthread_key_t()
@@ -108,7 +137,7 @@ open class NSOpenGLContext: NSObject {
         }
         return key
     }()
-    nonisolated(unsafe) private static var bindingsLock: UnsafeMutablePointer<pthread_mutex_t> = {
+    nonisolated(unsafe) private static let bindingsLock: UnsafeMutablePointer<pthread_mutex_t> = {
         let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
         pthread_mutex_init(lock, nil)
         return lock
