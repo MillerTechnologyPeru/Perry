@@ -115,6 +115,17 @@ static char *dirname_of(const char *path) {
     return strndup(path, (size_t)(slash - path));
 }
 
+// The directory of an image's file with symbolic links resolved, as dyld
+// takes @loader_path: a library reached through a link (Swift Playgrounds'
+// host/lib_InternalSwiftScan.dylib, a link to compiler/lib_InternalSwiftScan.dylib)
+// finds the libraries beside the file itself.
+static char *real_dirname_of(const char *path) {
+    char resolved[PATH_MAX];
+    if (realpath(path, resolved))
+        return dirname_of(resolved);
+    return dirname_of(path);
+}
+
 static bool file_exists(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && S_ISREG(st.st_mode);
@@ -722,7 +733,7 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
         return file_exists(buf) ? strdup(buf) : NULL;
     }
     if (strncmp(name, "@loader_path/", 13) == 0) {
-        char *dir = dirname_of(image->path);
+        char *dir = real_dirname_of(image->path);
         snprintf(buf, sizeof(buf), "%s/%s", dir, name + 13);
         free(dir);
         return file_exists(buf) ? strdup(buf) : NULL;
@@ -753,7 +764,7 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
                     snprintf(base, sizeof(base), "%s%s", dir, rpath + 16);
                     free(dir);
                 } else if (strncmp(rpath, "@loader_path", 12) == 0) {
-                    char *dir = dirname_of(src->path);
+                    char *dir = real_dirname_of(src->path);
                     snprintf(base, sizeof(base), "%s%s", dir, rpath + 12);
                     free(dir);
                 } else {
