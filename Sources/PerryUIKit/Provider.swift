@@ -130,6 +130,9 @@ enum Constants {
             "_GLKMatrix4Identity": value(GLKMath.identity4),
             "_GLKMatrix3Identity": value(GLKMath.identity3),
             "_GLKQuaternionIdentity": value(GLKQuaternion(q: (0, 0, 0, 1))),
+            "_SCNMatrix4Identity": value(SCNMath.matrix4(SCNMath.identity)),
+            "_SCNVector3Zero": value(SCNVector3(x: 0, y: 0, z: 0)),
+            "_SCNVector4Zero": value(SCNVector4(x: 0, y: 0, z: 0, w: 0)),
         ]
     }()
 }

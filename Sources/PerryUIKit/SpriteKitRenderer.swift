@@ -11,11 +11,11 @@ import PerryObjCInterop
 // shape's path is filled as triangle fans of its subpaths and stroked as a
 // quad a segment, which suits the rectangles and polygons games draw.
 
-private typealias GLuint = UInt32
-private typealias GLenum = UInt32
+typealias GLuint = UInt32
+typealias GLenum = UInt32
 
-/// The OpenGL ES functions the renderer calls, the host's.
-private enum SKGL {
+/// The OpenGL ES functions the renderers call, the host's.
+enum SKGL {
     nonisolated(unsafe) static var loaded = false
     nonisolated(unsafe) static var createShader: (@convention(c) (GLenum) -> GLuint)!
     nonisolated(unsafe) static var shaderSource: (@convention(c) (GLuint, Int32, UnsafePointer<UnsafePointer<CChar>?>?, UnsafePointer<Int32>?) -> Void)!
@@ -239,7 +239,7 @@ final class SKRenderer {
 
     /// Draws the scene's frame at `width` by `height` pixels, the view's
     /// points times `scale`, and shows it in `layer`.
-    func draw(_ scene: SKScene, in view: SKView, scale: CGFloat, layer: CALayer, opaque: Bool) {
+    func draw(_ scene: SKScene, in view: SKView, scale: CGFloat, layer: CALayer, opaque: Bool, background drawsBackground: Bool = true) {
         let bounds = view.state.bounds.size
         let width = Int((bounds.width * scale).rounded()), height = Int((bounds.height * scale).rounded())
         guard width > 0, height > 0 else { return }
@@ -272,9 +272,11 @@ final class SKRenderer {
         // The scene's background over its own rectangle.
         let sceneSize = scene.node.sceneSize, anchor = scene.node.sceneAnchor
         let background = SKRenderer.components(scene.node.backgroundColor) ?? (0.15, 0.15, 0.15, 1)
-        quad(CGRect(x: -anchor.x * sceneSize.width, y: -anchor.y * sceneSize.height, width: sceneSize.width, height: sceneSize.height),
+        if drawsBackground {
+            quad(CGRect(x: -anchor.x * sceneSize.width, y: -anchor.y * sceneSize.height, width: sceneSize.width, height: sceneSize.height),
              matrix: sceneToClip, texture: white, nearest: false, coordinates: CGRect(x: 0, y: 0, width: 1, height: 1),
-             color: SKRenderer.premultiplied(background, alpha: 1))
+                 color: SKRenderer.premultiplied(background, alpha: 1))
+        }
 
         var visible: [(node: SKNode, matrix: CGAffineTransform, alpha: CGFloat, z: CGFloat)] = []
         collect(scene, parent: sceneToClip, alpha: 1, z: 0, isScene: true, into: &visible)
@@ -300,7 +302,7 @@ final class SKRenderer {
         let matrix = isScene ? parent : SKSupport.rotationScale(state).concatenating(parent)
         let alpha = alpha * (isScene ? 1 : state.alpha)
         let z = z + (isScene ? 0 : state.zPosition)
-        if node.is(SKSpriteNode.self) || node.is(SKShapeNode.self) { list.append((node, matrix, alpha, z)) }
+        if node.is(SKSpriteNode.self) || node.is(SKShapeNode.self) || node.is(SKLabelNode.self) { list.append((node, matrix, alpha, z)) }
         for child in state.children {
             collect(child.unsafeCast(to: SKNode.self), parent: matrix, alpha: alpha, z: z, isScene: false, into: &list)
         }

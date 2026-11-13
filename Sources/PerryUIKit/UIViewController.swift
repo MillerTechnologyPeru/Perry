@@ -152,7 +152,10 @@ open class UIViewController: UIResponder {
             } else {
                 sendLoadView()
             }
-            guard state.view != nil else { return nil }
+            guard let loaded = state.view else { return nil }
+            // A root view loaded as it is put in its window already has the window's size, as it has by the time an app
+            // lays out what it sets up in -viewDidLoad.
+            if let bounds = ViewLoading.rootBounds, loaded.state.bounds.size != bounds.size { loaded.setFrame(bounds) }
             performSeguesOnViewLoad()
             sendViewDidLoad()
         }
@@ -809,6 +812,11 @@ enum Blocks {
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Bool) -> Void
         block.function(as: Invoke.self)(block.object, value)
     }
+}
+
+enum ViewLoading {
+    /// The bounds of the window whose root view is being loaded.
+    nonisolated(unsafe) static var rootBounds: CGRect?
 }
 
 /// UIViewController's messages, sent so subclasses' overrides run.
