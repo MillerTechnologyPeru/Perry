@@ -20,6 +20,9 @@ enum SCNGL {
     nonisolated(unsafe) static var uniformMatrix4fv: (@convention(c) (Int32, Int32, UInt8, UnsafePointer<Float>?) -> Void)!
     nonisolated(unsafe) static var depthMask: (@convention(c) (UInt8) -> Void)!
     nonisolated(unsafe) static var cullFace: (@convention(c) (GLenum) -> Void)!
+    nonisolated(unsafe) static var uniform3fv: (@convention(c) (Int32, Int32, UnsafePointer<Float>?) -> Void)!
+    nonisolated(unsafe) static var uniform4fv: (@convention(c) (Int32, Int32, UnsafePointer<Float>?) -> Void)!
+    nonisolated(unsafe) static var generateMipmap: (@convention(c) (GLenum) -> Void)!
 
     static func load() -> Bool {
         if loaded { return true }
@@ -32,12 +35,18 @@ enum SCNGL {
         uniformMatrix4fv = bind("glUniformMatrix4fv")
         depthMask = bind("glDepthMask")
         cullFace = bind("glCullFace")
+        uniform3fv = bind("glUniform3fv")
+        uniform4fv = bind("glUniform4fv")
+        generateMipmap = bind("glGenerateMipmap")
         loaded = uniform1f != nil && uniform3f != nil && uniform4f != nil && uniformMatrix3fv != nil && uniformMatrix4fv != nil
-            && depthMask != nil && cullFace != nil
+            && depthMask != nil && cullFace != nil && uniform3fv != nil && uniform4fv != nil && generateMipmap != nil
         return loaded
     }
 
     static let depthBufferBit: UInt32 = 0x100, back: GLenum = 0x0405, front: GLenum = 0x0404
+    static let repeatWrap: Int32 = 0x2901, mirroredRepeat: Int32 = 0x8370, linearMipmapLinear: Int32 = 0x2703
+    static let texture1: GLenum = 0x84C1
+    static let maxLights = 4
 }
 
 /// One view's drawing: its context, renderbuffers, program and meshes.
@@ -49,12 +58,17 @@ final class SCNRenderer {
     private var attributes: (GLuint, GLuint, GLuint) = (0, 1, 2)
     private struct Uniforms {
         var mvp: Int32 = -1, model: Int32 = -1, normalMatrix: Int32 = -1
-        var diffuse: Int32 = -1, emission: Int32 = -1, light: Int32 = -1, ambient: Int32 = -1, amount: Int32 = -1
+        var diffuse: Int32 = -1, emission: Int32 = -1, lightPosition: Int32 = -1, lightColor: Int32 = -1, ambient: Int32 = -1
+        var diffuseMap: Int32 = -1, emissionMap: Int32 = -1
     }
     private var uniforms = Uniforms()
     /// Each geometry's vertices' buffer, by its identifier.
     private var buffers: [Int: (revision: Int, buffer: GLuint, used: Int)] = [:]
     private var frame = 0
+    /// Textures by picture, with the frame each was last drawn in; the
+    /// picture is retained while its texture is kept.
+    private var textures: [UnsafeMutableRawPointer: (texture: GLuint, used: Int)] = [:]
+    private var white: GLuint = 0
 
     init?() {
         guard SCNGL.load(), let made = EAGLContext.objCClass.object.allocated().unsafeCast(to: EAGLContext.self).initialize(api: 2)
@@ -68,6 +82,12 @@ final class SCNRenderer {
             var name = entry.buffer
             SKGL.deleteBuffers(1, &name)
         }
+        for (image, entry) in textures {
+            var name = entry.texture
+            GLES.deleteTextures?(1, &name)
+            ObjCRuntime.release(image)
+        }
+        if white != 0 { GLES.deleteTextures?(1, &white) }
         if depth != 0 { GLES.deleteRenderbuffers(1, &depth) }
         if color != 0 { GLES.deleteRenderbuffers(1, &color) }
         if framebuffer != 0 { GLES.deleteFramebuffers(1, &framebuffer) }
@@ -87,8 +107,11 @@ final class SCNRenderer {
             func uniform(_ name: String) -> Int32 { SKGL.getUniformLocation(made, name) }
             attributes = (attribute("position", 0), attribute("normal", 1), attribute("coordinate", 2))
             uniforms = Uniforms(mvp: uniform("mvp"), model: uniform("model"), normalMatrix: uniform("normalMatrix"),
-                                diffuse: uniform("diffuse"), emission: uniform("emission"), light: uniform("lightPosition"),
-                                ambient: uniform("ambient"), amount: uniform("amount"))
+                                diffuse: uniform("diffuse"), emission: uniform("emission"),
+                                lightPosition: max(uniform("lightPosition"), uniform("lightPosition[0]")),
+                                lightColor: max(uniform("lightColor"), uniform("lightColor[0]")), ambient: uniform("ambient"),
+                                diffuseMap: uniform("diffuseMap"), emissionMap: uniform("emissionMap"))
+            white = makeTexture(pixels: [255, 255, 255, 255], width: 1, height: 1, mipmaps: false)
         }
         guard framebuffer == 0 || size != (width, height) else { return true }
         if depth != 0 { GLES.deleteRenderbuffers(1, &depth) }
@@ -122,7 +145,7 @@ final class SCNRenderer {
             void main() {
                 v_normal = normalMatrix * normal;
                 v_position = (model * vec4(position, 1.0)).xyz;
-                v_coordinate = coordinate;
+                v_coordinate = vec2(coordinate.x, 1.0 - coordinate.y);
                 gl_Position = mvp * vec4(position, 1.0);
             }
             """
@@ -130,18 +153,26 @@ final class SCNRenderer {
             precision mediump float;
             uniform vec4 diffuse;
             uniform vec3 emission;
-            uniform vec3 lightPosition;
-            uniform float ambient;
-            uniform float amount;
+            uniform vec4 lightPosition[4];
+            uniform vec3 lightColor[4];
+            uniform vec3 ambient;
+            uniform sampler2D diffuseMap;
+            uniform sampler2D emissionMap;
             varying vec3 v_normal;
             varying vec3 v_position;
             varying vec2 v_coordinate;
             void main() {
                 vec3 n = normalize(v_normal);
                 if (!gl_FrontFacing) { n = -n; }
-                float lit = max(dot(n, normalize(lightPosition - v_position)), 0.0);
-                vec3 rgb = diffuse.rgb * (ambient + amount * lit) + emission;
-                gl_FragColor = vec4(rgb * diffuse.a, diffuse.a);
+                vec4 base = diffuse * texture2D(diffuseMap, v_coordinate);
+                vec3 light = ambient;
+                for (int i = 0; i < 4; i++) {
+                    // w is 0 for a direction toward the light, 1 for a position.
+                    vec3 toLight = lightPosition[i].w > 0.5 ? normalize(lightPosition[i].xyz - v_position) : lightPosition[i].xyz;
+                    light += lightColor[i] * max(dot(n, toLight), 0.0);
+                }
+                vec3 rgb = base.rgb * light + emission * texture2D(emissionMap, v_coordinate).rgb;
+                gl_FragColor = vec4(rgb * base.a, base.a);
             }
             """
         func compile(_ type: GLenum, _ source: String) -> GLuint {
@@ -162,6 +193,66 @@ final class SCNRenderer {
         SKGL.bindAttribLocation(program, 2, "coordinate")
         SKGL.linkProgram(program)
         return program
+    }
+
+    private func makeTexture(pixels: UnsafeRawPointer?, width: Int, height: Int, mipmaps: Bool) -> GLuint {
+        var name: GLuint = 0
+        GLES.genTextures?(1, &name)
+        GLES.bindTexture?(SKGL.texture2D, name)
+        SKGL.pixelStorei(SKGL.unpackAlignment, 1)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.magFilter, SKGL.linear)
+        GLES.texImage2D?(SKGL.texture2D, 0, Int32(SKGL.rgba), Int32(width), Int32(height), 0, SKGL.rgba, SKGL.unsignedByte, pixels)
+        // Mipmaps, where the picture's sides are powers of two as OpenGL ES 2 asks.
+        if mipmaps, width & (width - 1) == 0, height & (height - 1) == 0 {
+            SCNGL.generateMipmap(SKGL.texture2D)
+            GLES.texParameteri?(SKGL.texture2D, SKGL.minFilter, SCNGL.linearMipmapLinear)
+        } else {
+            GLES.texParameteri?(SKGL.texture2D, SKGL.minFilter, SKGL.linear)
+        }
+        return name
+    }
+
+    private func makeTexture(pixels: [UInt8], width: Int, height: Int, mipmaps: Bool) -> GLuint {
+        pixels.withUnsafeBytes { makeTexture(pixels: $0.baseAddress, width: width, height: height, mipmaps: mipmaps) }
+    }
+
+    /// The texture of a material property's picture: its pixels drawn once
+    /// into premultiplied RGBA, top row first; white when it has none.
+    private func texture(of contents: UnsafeMutableRawPointer?) -> GLuint {
+        guard let contents, NSObject(contents).responds(to: "CGImage"), let image = NSObject(contents).skCGImage() else { return white }
+        if let entry = textures[image] {
+            textures[image]?.used = frame
+            return entry.texture
+        }
+        let width = CG.imageGetWidth(image), height = CG.imageGetHeight(image)
+        guard width > 0, height > 0, let space = CG.colorSpaceCreateDeviceRGB(),
+              let bitmap = CG.bitmapContextCreate(nil, width, height, 8, width * 4, space, 1 | 0x4000) else { return white }
+        defer { CG.release(bitmap); CG.release(space) }
+        CG.drawImage(bitmap, CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), image)
+        guard let pixels = CG.bitmapContextGetData(bitmap) else { return white }
+        let name = makeTexture(pixels: pixels, width: width, height: height, mipmaps: true)
+        _ = ObjCRuntime.retain(image)
+        textures[image] = (name, frame)
+        return name
+    }
+
+    private func evictTextures() {
+        for (image, entry) in textures where frame - entry.used > 600 {
+            var name = entry.texture
+            GLES.deleteTextures?(1, &name)
+            ObjCRuntime.release(image)
+            textures[image] = nil
+        }
+    }
+
+    private static func wrap(_ mode: Int) -> Int32 {
+        switch mode {
+        case 2: return SCNGL.repeatWrap
+        case 4: return SCNGL.mirroredRepeat
+        default: return SKGL.clampToEdge
+        }
     }
 
     // MARK: Drawing
@@ -205,10 +296,13 @@ final class SCNRenderer {
         let viewMatrix = SCNMath.inverse(cameraWorld)
         let projection = self.projection(camera?.node.camera?.camera, aspect: Float(width) / Float(height))
         let viewProjection = SCNMath.multiply(projection, viewMatrix)
-        SCNGL.uniform3f(uniforms.light, cameraWorld[12], cameraWorld[13], cameraWorld[14])
+        SKGL.uniform1i(uniforms.diffuseMap, 0)
+        SKGL.uniform1i(uniforms.emissionMap, 1)
 
         var items: [Item] = []
-        collect(root, parent: SCNMath.identity, opacity: 1, into: &items)
+        var lights: [(light: SCNLight, world: Matrix)] = []
+        collect(root, parent: SCNMath.identity, opacity: 1, into: &items, lights: &lights)
+        frameLights = shading(lights, cameraWorld: cameraWorld, defaultLighting: defaultLighting)
         for index in items.indices {
             let p = SCNMath.multiply(viewMatrix, items[index].model)
             items[index].depth = p[14]
@@ -223,6 +317,7 @@ final class SCNRenderer {
         SCNGL.depthMask(1)
         SKGL.disable(SKGL.blend)
         evictBuffers()
+        evictTextures()
 
         if Renderbuffers.show(color, context: context.state.context, layer: layer, opaque: true) { Display.markDirty() }
     }
@@ -261,13 +356,60 @@ final class SCNRenderer {
         return SCNMath.perspective(fieldOfView: fieldOfView, aspect: aspect, near: near, far: far)
     }
 
-    private func collect(_ node: SCNNode, parent: Matrix, opacity: Float, into items: inout [Item]) {
+    private func collect(_ node: SCNNode, parent: Matrix, opacity: Float, into items: inout [Item],
+                         lights: inout [(light: SCNLight, world: Matrix)]) {
         let state = node.node
         guard !state.hidden, state.opacity > 0 else { return }
         let model = SCNMath.multiply(parent, state.local)
         let combined = opacity * Float(state.opacity)
         if let geometry = state.geometry { items.append(Item(geometry: geometry, model: model, opacity: combined)) }
-        for child in state.children { collect(child.unsafeCast(to: SCNNode.self), parent: model, opacity: combined, into: &items) }
+        if let light = state.light { lights.append((light, model)) }
+        for child in state.children {
+            collect(child.unsafeCast(to: SCNNode.self), parent: model, opacity: combined, into: &items, lights: &lights)
+        }
+    }
+
+    /// A frame's lights as the program takes them: up to four, each a
+    /// direction toward the light (w 0) or a position (w 1) and a colour
+    /// scaled by the intensity (1000 lumens is full), and the ambient light.
+    private struct Shading {
+        var positions = [Float](repeating: 0, count: 16)
+        var colors = [Float](repeating: 0, count: 12)
+        var ambient: [Float] = [0, 0, 0]
+    }
+    private var frameLights = Shading()
+
+    private func shading(_ lights: [(light: SCNLight, world: Matrix)], cameraWorld: Matrix, defaultLighting: Bool) -> Shading {
+        var result = Shading(), count = 0
+        for (light, world) in lights {
+            let state = light.light
+            let rgb = SCNRenderer.rgb(of: state.color) ?? (1, 1, 1)
+            let scale = Float(state.intensity) / 1000
+            let color = [rgb.0 * scale, rgb.1 * scale, rgb.2 * scale]
+            switch state.kind {
+            case "ambient":
+                for i in 0..<3 { result.ambient[i] += color[i] }
+            case "directional", "omni", "spot":
+                guard count < SCNGL.maxLights else { continue }
+                if state.kind == "directional" {
+                    // A directional light shines along its node's -z.
+                    let z = (world[8], world[9], world[10]), length = max((z.0 * z.0 + z.1 * z.1 + z.2 * z.2).squareRoot(), 1e-6)
+                    result.positions.replaceSubrange(count * 4..<count * 4 + 4, with: [z.0 / length, z.1 / length, z.2 / length, 0])
+                } else {
+                    result.positions.replaceSubrange(count * 4..<count * 4 + 4, with: [world[12], world[13], world[14], 1])
+                }
+                result.colors.replaceSubrange(count * 3..<count * 3 + 3, with: color)
+                count += 1
+            default: break
+            }
+        }
+        // Without lights, the view's default one is at the camera.
+        if lights.isEmpty, defaultLighting {
+            result.ambient = [0.3, 0.3, 0.3]
+            result.positions.replaceSubrange(0..<4, with: [cameraWorld[12], cameraWorld[13], cameraWorld[14], 1])
+            result.colors.replaceSubrange(0..<3, with: [0.9, 0.9, 0.9])
+        }
+        return result
     }
 
     /// A material property's red, green and blue, when it is a colour; white
@@ -346,12 +488,26 @@ final class SCNRenderer {
             SCNGL.uniform4f(uniforms.diffuse, diffuse.0, diffuse.1, diffuse.2, entry.alpha)
             SCNGL.uniform3f(uniforms.emission, emission.0, emission.1, emission.2)
             if material.lightingModel == "SCNLightingModelConstant" {
-                SCNGL.uniform1f(uniforms.ambient, 1)
-                SCNGL.uniform1f(uniforms.amount, 0)
+                SCNGL.uniform3f(uniforms.ambient, 1, 1, 1)
+                SCNGL.uniform3fv(uniforms.lightColor, 4, [Float](repeating: 0, count: 12))
             } else {
-                SCNGL.uniform1f(uniforms.ambient, defaultLighting ? 0.3 : 0)
-                SCNGL.uniform1f(uniforms.amount, defaultLighting ? 0.9 : 0)
+                // A physically based material is lit by its scene's environment too, which
+                // is not read yet: a plain ambient light stands in for it.
+                let environment: Float = material.lightingModel == "SCNLightingModelPhysicallyBased" ? 0.4 : 0
+                SCNGL.uniform3f(uniforms.ambient, frameLights.ambient[0] + environment, frameLights.ambient[1] + environment,
+                                frameLights.ambient[2] + environment)
+                SCNGL.uniform3fv(uniforms.lightColor, 4, frameLights.colors)
             }
+            SCNGL.uniform4fv(uniforms.lightPosition, 4, frameLights.positions)
+            let diffuseProperty = entry.material.diffuse().property, emissionProperty = entry.material.emission().property
+            SKGL.activeTexture(SKGL.texture0)
+            GLES.bindTexture?(SKGL.texture2D, texture(of: diffuseProperty.contents))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(diffuseProperty.wrapS))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(diffuseProperty.wrapT))
+            SKGL.activeTexture(SCNGL.texture1)
+            GLES.bindTexture?(SKGL.texture2D, texture(of: emissionProperty.contents))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(emissionProperty.wrapS))
+            GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(emissionProperty.wrapT))
             if material.doubleSided {
                 SKGL.disable(SKGL.cullFace)
             } else {
