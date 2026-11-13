@@ -241,10 +241,12 @@ open class NSApplication: NSResponder {
             }
             ranLoop = true
             // Timers and the main queue, for a little while; a run loop with
-            // nothing to run returns at once, so the wait is a short sleep.
+            // nothing to run returns at once, so the wait is a short one for
+            // the main queue to have work (threads waiting in dispatch_sync
+            // for the main thread go on as soon as it's run).
             let start = Clock.now
             RunLoop.run(for: min(remaining, 0.004))
-            if Clock.now - start < 0.001 { usleep(UInt32(min(remaining, 0.002) * 1_000_000)) }
+            if Clock.now - start < 0.001 { Dispatch.waitForMainQueue(min(remaining, 0.002)) }
         }
     }
 
