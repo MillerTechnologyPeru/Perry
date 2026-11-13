@@ -14,16 +14,16 @@ extension UIEdgeInsets: ObjCScalar {
 }
 
 enum Screens {
-    nonisolated(unsafe) private static var cached: SDL.Display?
+    nonisolated(unsafe) private static var cached: SDLSession.Display?
     nonisolated(unsafe) private static var fetched = false
 
     /// The display, asked of SDL once; screen changes aren't followed.
-    static var display: SDL.Display {
+    static var display: SDLSession.Display {
         if !fetched {
             fetched = true
-            cached = SDL.primary()
+            cached = SDLSession.primary()
         }
-        return cached ?? SDL.Display(bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+        return cached ?? SDLSession.Display(bounds: CGRect(x: 0, y: 0, width: 1920, height: 1080),
                                      usable: CGRect(x: 0, y: 0, width: 1920, height: 1080), density: 1, refreshRate: 60)
     }
 
