@@ -496,6 +496,119 @@ int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int
     return stat_at(directory_to_linux(directory), path, at_flags_to_linux(flags), out);
 }
 
+// MARK: - Attribute lists
+
+// getattrlist for the attributes programs ask for most: the object's type,
+// name, ids, times, owner, mode, link count and sizes. Attributes come in
+// the order of their bits, after the returned set when it is asked for;
+// those not supported are left out of the set, and where the caller did
+// not ask for the set, they fail the call.
+
+struct darwin_attrlist {
+    uint16_t bitmapcount;
+    uint16_t reserved;
+    uint32_t commonattr, volattr, dirattr, fileattr, forkattr;
+};
+
+enum {
+    ATTRLIST_CMN_NAME = 0x1, ATTRLIST_CMN_DEVID = 0x2, ATTRLIST_CMN_FSID = 0x4, ATTRLIST_CMN_OBJTYPE = 0x8,
+    ATTRLIST_CMN_OBJID = 0x20, ATTRLIST_CMN_CRTIME = 0x200, ATTRLIST_CMN_MODTIME = 0x400, ATTRLIST_CMN_CHGTIME = 0x800,
+    ATTRLIST_CMN_ACCTIME = 0x1000, ATTRLIST_CMN_OWNERID = 0x8000, ATTRLIST_CMN_GRPID = 0x10000,
+    ATTRLIST_CMN_ACCESSMASK = 0x20000, ATTRLIST_CMN_FILEID = 0x02000000, ATTRLIST_CMN_RETURNED_ATTRS = 0x80000000,
+    ATTRLIST_CMN_SUPPORTED = 0x1 | 0x2 | 0x4 | 0x8 | 0x20 | 0x200 | 0x400 | 0x800 | 0x1000 | 0x8000 | 0x10000 | 0x20000 | 0x02000000,
+    ATTRLIST_FILE_LINKCOUNT = 0x1, ATTRLIST_FILE_TOTALSIZE = 0x2, ATTRLIST_FILE_ALLOCSIZE = 0x4, ATTRLIST_FILE_IOBLOCKSIZE = 0x8,
+    ATTRLIST_FILE_DATALENGTH = 0x200, ATTRLIST_FILE_DATAALLOCSIZE = 0x400,
+    ATTRLIST_FILE_SUPPORTED = 0x1 | 0x2 | 0x4 | 0x8 | 0x200 | 0x400,
+    ATTRLIST_DIR_LINKCOUNT = 0x1, ATTRLIST_DIR_ENTRYCOUNT = 0x2,
+    ATTRLIST_DIR_SUPPORTED = 0x1 | 0x2,
+};
+
+static int attribute_list(int directory, const char *path, int flags, struct darwin_attrlist *list, void *buffer, size_t size) {
+    if (list == NULL || buffer == NULL || list->bitmapcount != 5 || list->volattr != 0 || list->forkattr != 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    struct statx info;
+    if (statx(directory, path, flags, STATX_BASIC_STATS | STATX_BTIME, &info) != 0)
+        return -1;
+    uint32_t type = S_ISDIR(info.stx_mode) ? 2 : S_ISLNK(info.stx_mode) ? 5 : S_ISREG(info.stx_mode) ? 1 : 0;
+    int wants_returned = (list->commonattr & ATTRLIST_CMN_RETURNED_ATTRS) != 0;
+    uint32_t common = list->commonattr & ~ATTRLIST_CMN_RETURNED_ATTRS;
+    uint32_t file = type == 2 ? 0 : list->fileattr;
+    uint32_t dir = type == 2 ? list->dirattr : 0;
+    uint32_t got_common = common & ATTRLIST_CMN_SUPPORTED, got_file = file & ATTRLIST_FILE_SUPPORTED, got_dir = dir & ATTRLIST_DIR_SUPPORTED;
+    if (!wants_returned && (got_common != common || got_file != file || got_dir != dir)) {
+        errno = ENOTSUP;
+        return -1;
+    }
+
+    const char *name = strrchr(path, '/');
+    name = name != NULL && name[1] != '\0' ? name + 1 : path;
+    size_t name_size = strlen(name) + 1;
+
+    uint8_t out[1024];
+    size_t at = 4;  // after the length
+    memset(out, 0, sizeof(out));
+#define PUT(type_, value_) do { type_ v_ = (value_); memcpy(out + at, &v_, sizeof(v_)); at += sizeof(v_); } while (0)
+    if (wants_returned) {
+        PUT(uint32_t, got_common); PUT(uint32_t, 0); PUT(uint32_t, got_dir); PUT(uint32_t, got_file); PUT(uint32_t, 0);
+    }
+    size_t reference_at = 0;
+    if (got_common & ATTRLIST_CMN_NAME) {
+        reference_at = at;
+        PUT(int32_t, 0); PUT(uint32_t, (uint32_t)name_size);
+    }
+    if (got_common & ATTRLIST_CMN_DEVID) PUT(uint32_t, device_to_darwin(info.stx_dev_major, info.stx_dev_minor));
+    if (got_common & ATTRLIST_CMN_FSID) { PUT(int32_t, device_to_darwin(info.stx_dev_major, info.stx_dev_minor)); PUT(int32_t, 0); }
+    if (got_common & ATTRLIST_CMN_OBJTYPE) PUT(uint32_t, type);
+    if (got_common & ATTRLIST_CMN_OBJID) { PUT(uint32_t, (uint32_t)info.stx_ino); PUT(uint32_t, (uint32_t)(info.stx_ino >> 32)); }
+    if (got_common & ATTRLIST_CMN_CRTIME) { struct timespec t = timestamp((info.stx_mask & STATX_BTIME) ? info.stx_btime : info.stx_ctime); PUT(struct timespec, t); }
+    if (got_common & ATTRLIST_CMN_MODTIME) { struct timespec t = timestamp(info.stx_mtime); PUT(struct timespec, t); }
+    if (got_common & ATTRLIST_CMN_CHGTIME) { struct timespec t = timestamp(info.stx_ctime); PUT(struct timespec, t); }
+    if (got_common & ATTRLIST_CMN_ACCTIME) { struct timespec t = timestamp(info.stx_atime); PUT(struct timespec, t); }
+    if (got_common & ATTRLIST_CMN_OWNERID) PUT(uint32_t, info.stx_uid);
+    if (got_common & ATTRLIST_CMN_GRPID) PUT(uint32_t, info.stx_gid);
+    if (got_common & ATTRLIST_CMN_ACCESSMASK) PUT(uint32_t, info.stx_mode);
+    if (got_common & ATTRLIST_CMN_FILEID) PUT(uint64_t, info.stx_ino);
+    if (got_dir & ATTRLIST_DIR_LINKCOUNT) PUT(uint32_t, info.stx_nlink);
+    if (got_dir & ATTRLIST_DIR_ENTRYCOUNT) PUT(uint32_t, 0);
+    if (got_file & ATTRLIST_FILE_LINKCOUNT) PUT(uint32_t, info.stx_nlink);
+    if (got_file & ATTRLIST_FILE_TOTALSIZE) PUT(int64_t, (int64_t)info.stx_size);
+    if (got_file & ATTRLIST_FILE_ALLOCSIZE) PUT(int64_t, (int64_t)info.stx_blocks * 512);
+    if (got_file & ATTRLIST_FILE_IOBLOCKSIZE) PUT(uint32_t, info.stx_blksize);
+    if (got_file & ATTRLIST_FILE_DATALENGTH) PUT(int64_t, (int64_t)info.stx_size);
+    if (got_file & ATTRLIST_FILE_DATAALLOCSIZE) PUT(int64_t, (int64_t)info.stx_blocks * 512);
+#undef PUT
+    // The name goes at the end, its reference relative to where the reference is.
+    if (reference_at != 0) {
+        int32_t offset = (int32_t)(at - reference_at);
+        memcpy(out + reference_at, &offset, sizeof(offset));
+        if (at + name_size > sizeof(out)) { errno = ERANGE; return -1; }
+        memcpy(out + at, name, name_size);
+        at += (name_size + 3) & ~(size_t)3;
+    }
+    uint32_t total = (uint32_t)at;
+    memcpy(out, &total, sizeof(total));
+    size_t copy = total < size ? total : size;
+    memcpy(buffer, out, copy);
+    if (total > size && size >= 4) {
+        // As Darwin does: the length says what was needed.
+    }
+    return 0;
+}
+
+int darwin_getattrlist(const char *path, struct darwin_attrlist *list, void *buffer, size_t size, unsigned long options)
+    DARWIN_SYMBOL(getattrlist);
+int darwin_getattrlist(const char *path, struct darwin_attrlist *list, void *buffer, size_t size, unsigned long options) {
+    return attribute_list(AT_FDCWD, path, (options & 1) ? AT_SYMLINK_NOFOLLOW : 0, list, buffer, size);
+}
+
+int darwin_fgetattrlist(int fd, struct darwin_attrlist *list, void *buffer, size_t size, unsigned long options)
+    DARWIN_SYMBOL(fgetattrlist);
+int darwin_fgetattrlist(int fd, struct darwin_attrlist *list, void *buffer, size_t size, unsigned long options) {
+    return attribute_list(fd, "", AT_EMPTY_PATH, list, buffer, size);
+}
+
 // MARK: - File systems
 
 #if !(defined(__arm__) || defined(__i386__))
