@@ -70,6 +70,39 @@ open class NSOpenGLContext: NSObject {
         let window: SDL.Window?
     }
     nonisolated(unsafe) private static var bindings: [pthread_t: Binding] = [:]
+    /// Contexts their threads have let go of that EGL still has bound to
+    /// them. Games that make their context current around every batch of
+    /// drawing (a Mac's CGLSetCurrentContext is cheap) would otherwise
+    /// have Mesa submit what they drew each time it's let go of, many
+    /// hundreds of times a frame; making the same context current again
+    /// takes it back as it was. Only a thread that has made the same
+    /// context current again many times running keeps it so: one that
+    /// does it a few times and then waits for another thread would keep
+    /// the context from it. A thread lets go of it in EGL when another
+    /// thread asks for it, at its next letting go, and when it ends; the
+    /// main thread lets go at once.
+    nonisolated(unsafe) private static var parked: [pthread_t: Binding] = [:]
+    nonisolated(unsafe) private static var releaseRequested: Set<pthread_t> = []
+    /// Each thread's context last made current, and how many times running
+    /// it has been made current again after being let go of.
+    nonisolated(unsafe) private static var streaks: [pthread_t: (context: ObjectIdentifier, count: Int)] = [:]
+    private static let parkingStreak = 64
+    nonisolated(unsafe) private static let parkedKey: pthread_key_t = {
+        var key = pthread_key_t()
+        // The value is only a marker: the thread's own EGL binding is what
+        // goes, at its end, so that no context stays bound to a thread
+        // that's gone.
+        pthread_key_create(&key) { _ in
+            let thread = pthread_self()
+            let wasParked = NSOpenGLContext.withBindings { _ in
+                NSOpenGLContext.releaseRequested.remove(thread)
+                NSOpenGLContext.streaks[thread] = nil
+                return NSOpenGLContext.parked.removeValue(forKey: thread) != nil
+            }
+            if wasParked { _ = SDL.glMakeCurrent(nil, nil) }
+        }
+        return key
+    }()
     nonisolated(unsafe) private static var bindingsLock: UnsafeMutablePointer<pthread_mutex_t> = {
         let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
         pthread_mutex_init(lock, nil)
@@ -89,7 +122,39 @@ open class NSOpenGLContext: NSObject {
     /// their own threads do.
     static func isBoundOnAnotherThread(_ window: SDL.Window) -> Bool {
         let thread = pthread_self()
-        return withBindings { $0.contains { pthread_equal($0.key, thread) == 0 && $0.value.window == window } }
+        return withBindings {
+            $0.contains { pthread_equal($0.key, thread) == 0 && $0.value.window == window }
+                || parked.contains { pthread_equal($0.key, thread) == 0 && $0.value.window == window }
+        }
+    }
+
+    /// Asks the threads that keep `context` (or `window`) bound after
+    /// letting go of them to let go of them in EGL, at their next letting
+    /// go: those threads.
+    @discardableResult
+    private static func requestRelease(of context: SDL.Pointer, _ window: SDL.Window?) -> [pthread_t] {
+        let thread = pthread_self()
+        return withBindings { _ in
+            var threads: [pthread_t] = []
+            for (other, binding) in parked where pthread_equal(other, thread) == 0
+                && (binding.context.context == context || window != nil && binding.window == window) {
+                releaseRequested.insert(other)
+                threads.append(other)
+            }
+            return threads
+        }
+    }
+
+    /// For the main thread, which doesn't wait for windows: a context
+    /// another thread keeps is asked for, and waited for a little (that
+    /// thread lets go of it within a batch of drawing).
+    private static func reclaim(_ context: SDL.Pointer) {
+        let threads = requestRelease(of: context, nil)
+        guard !threads.isEmpty else { return }
+        for _ in 0..<100 {
+            if withBindings({ _ in !threads.contains { releaseRequested.contains($0) } }) { return }
+            usleep(1000)
+        }
     }
     /// For contexts made current before their view has a window.
     nonisolated(unsafe) private static var holdingWindow: SDL.Window?
@@ -133,6 +198,16 @@ open class NSOpenGLContext: NSObject {
     @ObjCMethod("makeCurrentContext")
     func makeCurrentContext() {
         guard let window = drawable() else { return }
+        let thread = pthread_self()
+        // The context this thread let go of last, still bound to the same
+        // window: taken back as it is.
+        let resumed = Self.withBindings {
+            guard let binding = Self.parked.removeValue(forKey: thread) else { return false }
+            guard binding.context === self, binding.window == window else { return false }
+            $0[thread] = binding
+            return true
+        }
+        if resumed { return }
         if context == nil {
             format?.applyToSDL()
             let sharing = shared?.context != nil
@@ -147,7 +222,15 @@ open class NSOpenGLContext: NSObject {
             appKitWarning("SDL could not make the OpenGL context current: \(SDL.lastError)")
             return
         }
-        Self.withBindings { $0[pthread_self()] = Binding(context: self, window: bound) }
+        let identifier = ObjectIdentifier(self)
+        Self.withBindings {
+            $0[thread] = Binding(context: self, window: bound)
+            if let streak = Self.streaks[thread], streak.context == identifier {
+                Self.streaks[thread] = (identifier, streak.count + 1)
+            } else {
+                Self.streaks[thread] = (identifier, 0)
+            }
+        }
     }
 
     /// Makes `context` current on this thread, drawing to `window`; the
@@ -161,10 +244,14 @@ open class NSOpenGLContext: NSObject {
     /// another thread waits for the main thread's brief binding to end.
     private static func bind(_ context: SDL.Pointer, to window: SDL.Window) -> SDL.Window?? {
         let onMain = Dispatch.isMainThread
+        if onMain { reclaim(context) }
         for attempt in 0..<2000 {
             if !(onMain && isBoundOnAnotherThread(window)), SDL.glMakeCurrent(window, context) { return .some(window) }
             if onMain { return SDL.glMakeCurrent(nil, context) ? .some(nil) : nil }
-            if attempt == 0 { Trace.log("OpenGL: waiting for the main thread to let go of window \(window)") }
+            if attempt == 0 {
+                Trace.log("OpenGL: waiting for another thread to let go of window \(window)")
+                requestRelease(of: context, window)
+            }
             usleep(1000)
         }
         return nil
@@ -180,9 +267,25 @@ open class NSOpenGLContext: NSObject {
 
     @ObjCClassMethod("clearCurrentContext")
     static func clearCurrentContext() {
-        guard current != nil else { return }
-        _ = SDL.glMakeCurrent(nil, nil)
-        _ = withBindings { $0.removeValue(forKey: pthread_self()) }
+        let thread = pthread_self()
+        // The main thread's drawing is now and then, and a game's own
+        // thread may be waiting for the window: it lets go at once.
+        let onMain = Dispatch.isMainThread
+        let release = withBindings { bindings -> Bool? in
+            guard let binding = bindings.removeValue(forKey: thread) else { return nil }
+            if releaseRequested.remove(thread) != nil {
+                streaks[thread] = nil
+                return true
+            }
+            if onMain || (streaks[thread]?.count ?? 0) < parkingStreak { return true }
+            parked[thread] = binding
+            return false
+        }
+        switch release {
+        case true?: _ = SDL.glMakeCurrent(nil, nil)
+        case false?: if pthread_getspecific(parkedKey) == nil { pthread_setspecific(parkedKey, UnsafeRawPointer(bitPattern: 1)) }
+        case nil: break
+        }
     }
 
     /// The CGL context: this context itself, which OpenGL's provider's CGL
