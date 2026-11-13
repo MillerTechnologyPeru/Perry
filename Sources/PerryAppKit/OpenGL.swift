@@ -82,9 +82,10 @@ open class NSOpenGLContext: NSObject {
     /// takes it back as it was. Only a thread that has made the same
     /// context current again many times running keeps it so: one that
     /// does it a few times and then waits for another thread would keep
-    /// the context from it. A thread lets go of it in EGL when another
-    /// thread asks for it, at its next letting go, and when it ends; the
-    /// main thread lets go at once.
+    /// the context from it. A thread lets go of it in EGL before it blocks
+    /// (libSystem's and libdispatch's waits run BlockingRelease's hook),
+    /// when another thread asks for it, at its next letting go, and when it
+    /// ends; the main thread lets go at once.
     nonisolated(unsafe) private static var parked: [pthread_t: Binding] = [:]
     nonisolated(unsafe) private static var releaseRequested: Set<pthread_t> = []
     /// Each thread's context last made current, and how many times running
@@ -281,15 +282,28 @@ open class NSOpenGLContext: NSObject {
                 streaks[thread] = nil
                 return true
             }
-            if onMain || (streaks[thread]?.count ?? 0) < parkingStreak { return true }
+            if onMain || BlockingRelease.arm == nil || (streaks[thread]?.count ?? 0) < parkingStreak { return true }
             parked[thread] = binding
             return false
         }
         switch release {
         case true?: _ = SDL.glMakeCurrent(nil, nil)
-        case false?: if pthread_getspecific(parkedKey) == nil { pthread_setspecific(parkedKey, UnsafeRawPointer(bitPattern: 1)) }
+        case false?:
+            if pthread_getspecific(parkedKey) == nil { pthread_setspecific(parkedKey, UnsafeRawPointer(bitPattern: 1)) }
+            BlockingRelease.arm?(1)
         case nil: break
         }
+    }
+
+    /// Lets go in EGL of the context this thread keeps bound, for libSystem
+    /// and libdispatch's waits to run before the thread blocks.
+    static func releaseParked() {
+        let thread = pthread_self()
+        let wasParked = withBindings { _ in
+            releaseRequested.remove(thread)
+            return parked.removeValue(forKey: thread) != nil
+        }
+        if wasParked { _ = SDL.glMakeCurrent(nil, nil) }
     }
 
     /// The CGL context: this context itself, which OpenGL's provider's CGL
@@ -398,5 +412,24 @@ open class NSOpenGLView: NSView {
         needsDisplay = false
         typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("drawRect:"), bounds)
+    }
+}
+
+/// libSystem's hook for what a thread lets go of before it blocks, which
+/// lets AppKit keep a context bound to a thread that has let go of it: a
+/// thread that stops drawing and waits lets go of it in EGL then, so that
+/// the thread it hands the drawing to can have it. Without the hook,
+/// contexts aren't kept.
+enum BlockingRelease {
+    typealias Set = @convention(c) ((@convention(c) () -> Void)?) -> Void
+    typealias Arm = @convention(c) (Int32) -> Void
+    nonisolated(unsafe) static var arm: Arm?
+
+    static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) {
+        guard let set = lookup("perry_set_release_before_blocking"), let arm = lookup("perry_arm_release_before_blocking") else {
+            return
+        }
+        unsafeBitCast(set, to: Set.self)({ NSOpenGLContext.releaseParked() })
+        self.arm = unsafeBitCast(arm, to: Arm.self)
     }
 }
