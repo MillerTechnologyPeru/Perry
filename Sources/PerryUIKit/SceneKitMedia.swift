@@ -91,6 +91,8 @@ final class SCNAnimationState: ObjectState {
     var autoreverses = false
     var fadeIn = 0.0, fadeOut = 0.0
     var usesSceneTimeBase = false
+    /// The keyframed transforms of nodes below the node that plays it.
+    var channels: [SCNChannel] = []
 }
 
 @ObjCClass("SCNAnimation")
@@ -153,6 +155,14 @@ final class SCNAnimationPlayerState: ObjectState {
     var blendFactor: CGFloat = 1
     var paused = false
     var playing = false
+    /// How far into the animation it is, in seconds, and the node it was added to (not retained).
+    var time = 0.0
+    var target: UnsafeMutableRawPointer?
+    /// The bones the channels name, found once.
+    var bones: [Int: SCNNode] = [:]
+    var boneTarget: UnsafeMutableRawPointer?
+    /// How far (0...1) through its duration it was last frame, for events.
+    var lastFraction = -1.0
 }
 
 @ObjCClass("SCNAnimationPlayer")
@@ -186,9 +196,12 @@ open class SCNAnimationPlayer: NSObject {
     @ObjCMethod("setBlendFactor:") func setBlendFactor(_ factor: CGFloat) { player.blendFactor = factor }
     @ObjCMethod("paused") func paused() -> Bool { player.paused }
     @ObjCMethod("setPaused:") func setPaused(_ paused: Bool) { player.paused = paused }
-    @ObjCMethod("play") func play() { player.playing = true }
-    @ObjCMethod("stop") func stop() { player.playing = false }
-    @ObjCMethod("stopWithBlendOutDuration:") func stop(blendOutDuration: Double) { player.playing = false }
+    @ObjCMethod("play") func play() {
+        if !player.playing { player.lastFraction = -1 }
+        player.playing = true
+    }
+    @ObjCMethod("stop") func stop() { player.playing = false; player.time = 0; player.lastFraction = -1 }
+    @ObjCMethod("stopWithBlendOutDuration:") func stop(blendOutDuration: Double) { stop() }
 }
 
 @ObjCCategory("SCNNodeAnimations")
@@ -198,6 +211,7 @@ extension SCNNode {
         let name = key ?? "animation\(node.animationKeys.count)"
         if node.animationPlayers[name] == nil { node.animationKeys.append(name) }
         node.animationPlayers[name] = player
+        player.player.target = objcObject
     }
     @ObjCMethod("animationPlayerForKey:") func animationPlayer(forKey key: String) -> SCNAnimationPlayer? {
         node.animationPlayers[key].flatMap { $0.is(SCNAnimationPlayer.self) ? $0.unsafeCast(to: SCNAnimationPlayer.self) : nil }
@@ -310,6 +324,7 @@ extension SCNAnimation {
         to.autoreverses = from.autoreverses
         to.fadeIn = from.fadeIn
         to.fadeOut = from.fadeOut
+        to.channels = from.channels
         return made
     }
 }
