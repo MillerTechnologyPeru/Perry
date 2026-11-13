@@ -77,6 +77,18 @@ typedef struct SCNMatrix4 {
     float m41, m42, m43, m44;
 } SCNMatrix4;
 
+// simd's float vectors and matrix, wrapped in structures: a structure of
+// vector members passes in vector registers as the vectors themselves do,
+// and Swift can use a structure from C where it cannot use SIMD types in a
+// C function's signature.
+typedef float perry_float2 __attribute__((ext_vector_type(2)));
+typedef float perry_float3 __attribute__((ext_vector_type(3)));
+typedef float perry_float4 __attribute__((ext_vector_type(4)));
+typedef struct PerrySimdFloat2 { perry_float2 v; } PerrySimdFloat2;
+typedef struct PerrySimdFloat3 { perry_float3 v; } PerrySimdFloat3;
+typedef struct PerrySimdFloat4 { perry_float4 v; } PerrySimdFloat4;
+typedef struct PerrySimdFloat4x4 { perry_float4 c0, c1, c2, c3; } PerrySimdFloat4x4;
+
 // Core Location's coordinates and MapKit's regions and map geometry: all
 // doubles, so they pass in floating-point registers as on Darwin.
 typedef struct CLLocationCoordinate2D {
