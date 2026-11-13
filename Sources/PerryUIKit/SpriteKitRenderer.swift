@@ -302,7 +302,7 @@ final class SKRenderer {
         let matrix = isScene ? parent : SKSupport.rotationScale(state).concatenating(parent)
         let alpha = alpha * (isScene ? 1 : state.alpha)
         let z = z + (isScene ? 0 : state.zPosition)
-        if node.is(SKSpriteNode.self) || node.is(SKShapeNode.self) { list.append((node, matrix, alpha, z)) }
+        if node.is(SKSpriteNode.self) || node.is(SKShapeNode.self) || node.is(SKLabelNode.self) { list.append((node, matrix, alpha, z)) }
         for child in state.children {
             collect(child.unsafeCast(to: SKNode.self), parent: matrix, alpha: alpha, z: z, isScene: false, into: &list)
         }
