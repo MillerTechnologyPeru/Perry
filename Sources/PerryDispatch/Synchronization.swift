@@ -27,7 +27,7 @@ public func dispatch_group_leave(_ group: Object?) {
 
 @c(_dispatch_group_wait)
 public func dispatch_group_wait(_ group: Object?, _ timeout: UInt64.ObjCType) -> Int {
-    linux_dispatch_group_wait(Objects.linux(group), DarwinTime.linux(UInt64(objCArgument: timeout)))
+    Blocking.wait(DarwinTime.linux(UInt64(objCArgument: timeout))) { linux_dispatch_group_wait(Objects.linux(group), $0) }
 }
 
 @c(_dispatch_group_async)
@@ -65,7 +65,24 @@ public func dispatch_semaphore_create(_ value: Int) -> Object? {
 
 @c(_dispatch_semaphore_wait)
 public func dispatch_semaphore_wait(_ semaphore: Object?, _ timeout: UInt64.ObjCType) -> Int {
-    linux_dispatch_semaphore_wait(Objects.linux(semaphore), DarwinTime.linux(UInt64(objCArgument: timeout)))
+    Blocking.wait(DarwinTime.linux(UInt64(objCArgument: timeout))) { linux_dispatch_semaphore_wait(Objects.linux(semaphore), $0) }
+}
+
+/// What a thread lets go of before it blocks (libSystem's hook, for an
+/// OpenGL context AppKit keeps bound to it).
+enum Blocking {
+    /// Before a wait that blocks until it's done.
+    static func willBlock() { Runtime.releaseBeforeBlocking?() }
+
+    /// A wait until `timeout` (a Linux dispatch time), which lets go of
+    /// what the thread keeps once a wait of 2 ms has shown it would block:
+    /// its result, 0 when done.
+    static func wait(_ timeout: UInt64, _ body: (UInt64) -> Int) -> Int {
+        guard timeout != 0, let armed = Runtime.releaseBeforeBlockingArmed, armed() != 0 else { return body(timeout) }
+        if body(linux_dispatch_time(0, 2_000_000)) == 0 { return 0 }
+        willBlock()
+        return body(timeout)
+    }
 }
 
 @c(_dispatch_semaphore_signal)

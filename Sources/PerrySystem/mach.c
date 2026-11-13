@@ -500,6 +500,13 @@ kern_return_t darwin_semaphore_wait(mach_port_t port) {
     sem_t *target = semaphore(port);
     if (!target)
         return KERN_INVALID_ARGUMENT;
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        perry_release_grace(NULL, &soon);
+        if (sem_timedwait(target, &soon) == 0)
+            return KERN_SUCCESS;
+        perry_release_before_blocking();
+    }
     return sem_wait(target) == 0 ? KERN_SUCCESS : KERN_ABORTED;
 }
 
@@ -516,6 +523,15 @@ kern_return_t darwin_semaphore_timedwait(mach_port_t port, mach_timespec wait) {
     if (deadline.tv_nsec >= 1000000000) {
         deadline.tv_sec++;
         deadline.tv_nsec -= 1000000000;
+    }
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        int last = perry_release_grace(&deadline, &soon);
+        if (sem_timedwait(target, &soon) == 0)
+            return KERN_SUCCESS;
+        if (last)
+            return errno == ETIMEDOUT ? KERN_OPERATION_TIMED_OUT : KERN_ABORTED;
+        perry_release_before_blocking();
     }
     if (sem_timedwait(target, &deadline) == 0)
         return KERN_SUCCESS;

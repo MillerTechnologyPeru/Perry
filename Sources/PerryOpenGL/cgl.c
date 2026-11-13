@@ -39,11 +39,20 @@ void perry_provider_startup(const perry_startup_info *info) {
     get_class = (id (*)(const char *))info->lookup_symbol(objc, "_objc_getClass");
 }
 
-static id send(id object, const char *selector) {
-    return object && msg_send && sel_register ? msg_send(object, sel_register(selector)) : NULL;
+// Selectors and the class, looked up once: games call CGLSetCurrentContext
+// thousands of times a frame.
+#define SELECTOR(name) ({ static SEL selector_; if (!selector_ && sel_register) selector_ = sel_register(name); selector_; })
+#define send(object, name) send_selector(object, SELECTOR(name))
+
+static id send_selector(id object, SEL selector) {
+    return object && msg_send && selector ? msg_send(object, selector) : NULL;
 }
 
-static id context_class(void) { return get_class ? get_class("NSOpenGLContext") : NULL; }
+static id context_class(void) {
+    static id class;
+    if (!class && get_class) class = get_class("NSOpenGLContext");
+    return class;
+}
 
 // MARK: - Current context
 
@@ -125,7 +134,7 @@ CGLError perry_CGLUnlockContext(id context) {
 CGLError perry_CGLSetParameter(id context, int parameter, const int *values) CGL_SYMBOL(CGLSetParameter);
 CGLError perry_CGLSetParameter(id context, int parameter, const int *values) {
     if (!context) return kCGLBadContext;
-    if (msg_send && sel_register) msg_send(context, sel_register("setValues:forParameter:"), values, (intptr_t)parameter);
+    if (msg_send && sel_register) msg_send(context, SELECTOR("setValues:forParameter:"), values, (intptr_t)parameter);
     return kCGLNoError;
 }
 
@@ -133,7 +142,7 @@ CGLError perry_CGLGetParameter(id context, int parameter, int *values) CGL_SYMBO
 CGLError perry_CGLGetParameter(id context, int parameter, int *values) {
     if (!context) return kCGLBadContext;
     if (values) *values = 0;
-    if (msg_send && sel_register) msg_send(context, sel_register("getValues:forParameter:"), values, (intptr_t)parameter);
+    if (msg_send && sel_register) msg_send(context, SELECTOR("getValues:forParameter:"), values, (intptr_t)parameter);
     return kCGLNoError;
 }
 
@@ -156,6 +165,20 @@ CGLError perry_CGLIsEnabled(id context, int option, int *enabled) {
 // context stands for it.
 id perry_CGLGetShareGroup(id context) CGL_SYMBOL(CGLGetShareGroup);
 id perry_CGLGetShareGroup(id context) { return context; }
+
+// MARK: - The current context's profile
+
+int perry_cgl_current_is_core(void) {
+    if (!msg_send || !sel_register) return 0;
+    id format = send(send(context_class(), "currentContext"), "pixelFormat");
+    if (!format) return 0;
+    // NSOpenGLPFAOpenGLProfile (99): NSOpenGLProfileVersionLegacy (0x1000),
+    // or 3.2 Core (0x3200) and 4.1 Core (0x4100).
+    int profile = 0;
+    ((void (*)(id, SEL, int *, uint32_t, int))msg_send)(format, SELECTOR("getValues:forAttribute:forVirtualScreen:"),
+                                                        &profile, 99, 0);
+    return profile >= 0x3200;
+}
 
 // MARK: - Renderers
 

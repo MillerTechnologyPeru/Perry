@@ -32,6 +32,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         appKitFatal("AppKit needs libdispatch's main queue")
     }
     guard RunLoop.load({ symbol(coreFoundation, $0) }) else { appKitFatal("AppKit needs CoreFoundation's run loop") }
+    BlockingRelease.load { symbol("/usr/lib/libSystem.B.dylib", $0) }
     guard QuartzCore.load({ symbol(quartzCore, $0) }) else {
         appKitFatal("AppKit needs libPerryQuartzCore, which is missing or incomplete")
     }
@@ -318,6 +319,9 @@ enum Dispatch {
     nonisolated(unsafe) static var time: Time?
     /// Global blocks' isa, _NSConcreteGlobalBlock.
     nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer?
+    /// libdispatch's _dispatch_get_main_queue_port_4CF: the descriptor that
+    /// becomes readable when the main queue has work.
+    nonisolated(unsafe) static var mainQueuePort: (@convention(c) () -> Int32)?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
         guard let async = lookup("_dispatch_async_f"), let main = lookup("__dispatch_main_q") else { return false }
@@ -328,7 +332,20 @@ enum Dispatch {
         mainThread = pthread_self()
         time = lookup("_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
         globalBlockClass = lookup("__NSConcreteGlobalBlock")
+        mainQueuePort = lookup("__dispatch_get_main_queue_port_4CF").map { unsafeBitCast($0, to: (@convention(c) () -> Int32).self) }
         return true
+    }
+
+    /// Waits up to `seconds` for the main queue to have work, or sleeps
+    /// that long without its port: so that a block another thread waits
+    /// for with dispatch_sync runs as soon as it's queued.
+    static func waitForMainQueue(_ seconds: Double) {
+        guard let port = mainQueuePort?(), port >= 0 else {
+            usleep(UInt32(seconds * 1_000_000))
+            return
+        }
+        var poller = pollfd(fd: port, events: Int16(POLLIN), revents: 0)
+        _ = poll(&poller, 1, Int32(max(1, (seconds * 1000).rounded())))
     }
 
     /// Runs `body` on the main queue `nanoseconds` from now; at once, on

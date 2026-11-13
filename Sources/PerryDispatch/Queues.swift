@@ -333,6 +333,7 @@ public func dispatch_async_f(_ queue: Object?, _ context: UnsafeMutableRawPointe
 
 @c(_dispatch_sync)
 public func dispatch_sync(_ queue: Object?, _ block: UnsafeMutableRawPointer?) {
+    Blocking.willBlock()
     if let block, DispatchBlocks.isBarrier(block) {
         linux_dispatch_barrier_sync_f(Objects.linux(queue), block, Blocks.run)
     } else {
@@ -342,16 +343,19 @@ public func dispatch_sync(_ queue: Object?, _ block: UnsafeMutableRawPointer?) {
 
 @c(_dispatch_sync_f)
 public func dispatch_sync_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
+    Blocking.willBlock()
     Blocks.synchronous(context, work) { linux_dispatch_sync_f(Objects.linux(queue), $0, $1) }
 }
 
 @c(_dispatch_async_and_wait)
 public func dispatch_async_and_wait(_ queue: Object?, _ block: UnsafeMutableRawPointer?) {
+    Blocking.willBlock()
     linux_dispatch_async_and_wait_f(Objects.linux(queue), block, Blocks.run)
 }
 
 @c(_dispatch_async_and_wait_f)
 public func dispatch_async_and_wait_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
+    Blocking.willBlock()
     Blocks.synchronous(context, work) { linux_dispatch_async_and_wait_f(Objects.linux(queue), $0, $1) }
 }
 
@@ -369,11 +373,13 @@ public func dispatch_barrier_async_f(_ queue: Object?, _ context: UnsafeMutableR
 
 @c(_dispatch_barrier_sync)
 public func dispatch_barrier_sync(_ queue: Object?, _ block: UnsafeMutableRawPointer?) {
+    Blocking.willBlock()
     linux_dispatch_barrier_sync_f(Objects.linux(queue), block, Blocks.run)
 }
 
 @c(_dispatch_barrier_sync_f)
 public func dispatch_barrier_sync_f(_ queue: Object?, _ context: UnsafeMutableRawPointer?, _ work: Function?) {
+    Blocking.willBlock()
     Blocks.synchronous(context, work) { linux_dispatch_barrier_sync_f(Objects.linux(queue), $0, $1) }
 }
 
