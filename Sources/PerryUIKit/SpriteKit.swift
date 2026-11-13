@@ -180,6 +180,16 @@ final class SKNodeState: ObjectState {
     var colorBlendFactor: CGFloat = 0
     var blendMode = 0
 
+    var running: [SKRunning] = []
+
+    // A label's.
+    var text: String?
+    var fontName: String?
+    var fontSize: CGFloat = 32
+    var fontColor: UnsafeMutableRawPointer?
+    var horizontalAlignment = 0   // SKLabelHorizontalAlignmentMode: center 0, left 1, right 2
+    var verticalAlignment = 0     // SKLabelVerticalAlignmentMode: baseline 0, center 1, top 2, bottom 3
+
     // A shape's.
     var path: CGRef?
     var fillColor: UnsafeMutableRawPointer?
@@ -198,6 +208,7 @@ final class SKNodeState: ObjectState {
         ObjCRuntime.release(color)
         ObjCRuntime.release(fillColor)
         ObjCRuntime.release(strokeColor)
+        ObjCRuntime.release(fontColor)
         ObjCRuntime.release(backgroundColor)
         if let path { CG.release(path) }
     }
@@ -309,14 +320,6 @@ open class SKNode: UIResponder {
         return false
     }
 
-    // Actions are not run: nothing is ever running, so nodes report none.
-    @ObjCMethod("runAction:") func runAction(_ action: NSObject?) {}
-    @ObjCMethod("runAction:withKey:") func runAction(_ action: NSObject?, withKey key: String?) {}
-    @ObjCMethod("runAction:completion:") func runAction(_ action: NSObject?, completion: ObjCBlock?) {}
-    @ObjCMethod("removeAllActions") func removeAllActions() {}
-    @ObjCMethod("removeActionForKey:") func removeAction(forKey key: String) {}
-    @ObjCMethod("hasActions") func hasActions() -> Bool { false }
-    @ObjCMethod("actionForKey:") func action(forKey key: String) -> NSObject? { nil }
 
     // MARK: Coordinates
 
@@ -440,6 +443,72 @@ open class SKSpriteNode: SKNode {
     @ObjCMethod("setColorBlendFactor:") func setColorBlendFactor(_ factor: CGFloat) { node.colorBlendFactor = factor }
     @ObjCMethod("blendMode") func blendMode() -> Int { node.blendMode }
     @ObjCMethod("setBlendMode:") func setBlendMode(_ mode: Int) { node.blendMode = mode }
+}
+
+// MARK: - SKLabelNode
+
+/// A line of text, drawn once into a picture and then as a sprite is: the
+/// picture is made again when the text, font or colour changes.
+@ObjCClass("SKLabelNode")
+open class SKLabelNode: SKNode {
+    @ObjCClassMethod("labelNodeWithText:")
+    static func label(_ cls: ObjCClass, text: String?) -> SKLabelNode {
+        let made = cls.object.allocated().unsafeCast(to: SKLabelNode.self)
+        made.node.text = text
+        made.refresh()
+        return made
+    }
+    @ObjCClassMethod("labelNodeWithFontNamed:")
+    static func label(_ cls: ObjCClass, fontNamed name: String?) -> SKLabelNode {
+        let made = cls.object.allocated().unsafeCast(to: SKLabelNode.self)
+        made.node.fontName = name
+        return made
+    }
+
+    @ObjCMethod("initWithFontNamed:") func initialize(fontNamed name: String?) -> Self { node.fontName = name; return self }
+    @ObjCMethod("init") override func initialize() -> Self { self }
+
+    /// Draws the text into the node's picture, sized as the text is, and
+    /// puts the node's anchor where the alignment modes say.
+    private func refresh() {
+        let state = node
+        guard let text = state.text, !text.isEmpty else {
+            state.texture = nil
+            state.size = .zero
+            return
+        }
+        let font = UIFont.make(name: state.fontName ?? "Helvetica", size: state.fontSize)
+        let size = Text.size(text, font: font)
+        let scale = max(Screen.scale, 1)
+        guard size.width > 0, size.height > 0, let context = CG.makeContext(size: size, scale: scale, opaque: false) else { return }
+        defer { CG.release(context) }
+        let color = state.fontColor.map { UIColor(objcObject: $0, ownership: .retain) } ?? UIColor.gray(1)
+        Graphics.drawing(in: context) { Text.draw(text, at: .zero, font: font, color: color) }
+        guard let picture = CG.bitmapContextCreateImage(context) else { return }
+        state.texture = SKTexture.make(SKTexture.objCClass, image: picture)
+        CG.release(picture)
+        state.size = size
+        let horizontal: [CGFloat] = [0.5, 0, 1]
+        let vertical: [CGFloat] = [0.2, 0.5, 1, 0]
+        state.anchor = CGPoint(x: horizontal[min(max(state.horizontalAlignment, 0), 2)], y: vertical[min(max(state.verticalAlignment, 0), 3)])
+    }
+
+    @ObjCMethod("text") func text() -> String? { node.text }
+    @ObjCMethod("setText:") func setText(_ text: String?) { node.text = text; refresh() }
+    @ObjCMethod("fontName") func fontName() -> String? { node.fontName }
+    @ObjCMethod("setFontName:") func setFontName(_ name: String?) { node.fontName = name; refresh() }
+    @ObjCMethod("fontSize") func fontSize() -> CGFloat { node.fontSize }
+    @ObjCMethod("setFontSize:") func setFontSize(_ size: CGFloat) { node.fontSize = size; refresh() }
+    @ObjCMethod("fontColor") func fontColor() -> NSObject? { node.fontColor.map { NSObject($0) } }
+    @ObjCMethod("setFontColor:") func setFontColor(_ color: NSObject?) { SKSupport.replace(&node.fontColor, with: color?.objcObject); refresh() }
+    @ObjCMethod("horizontalAlignmentMode") func horizontalAlignmentMode() -> Int { node.horizontalAlignment }
+    @ObjCMethod("setHorizontalAlignmentMode:") func setHorizontalAlignmentMode(_ mode: Int) { node.horizontalAlignment = mode; refresh() }
+    @ObjCMethod("verticalAlignmentMode") func verticalAlignmentMode() -> Int { node.verticalAlignment }
+    @ObjCMethod("setVerticalAlignmentMode:") func setVerticalAlignmentMode(_ mode: Int) { node.verticalAlignment = mode; refresh() }
+    @ObjCMethod("color") func labelColor() -> NSObject? { node.color.map { NSObject($0) } }
+    @ObjCMethod("setColor:") func setLabelColor(_ color: NSObject?) { SKSupport.replace(&node.color, with: color?.objcObject) }
+    @ObjCMethod("colorBlendFactor") func labelColorBlendFactor() -> CGFloat { node.colorBlendFactor }
+    @ObjCMethod("setColorBlendFactor:") func setLabelColorBlendFactor(_ factor: CGFloat) { node.colorBlendFactor = factor }
 }
 
 // MARK: - SKShapeNode
@@ -592,8 +661,11 @@ final class SKViewState: ObjectState {
     var paused = false
     var framesPerSecond = 60
     var running = false
+    var lastFrame = 0.0
     var showsFPS = false, showsNodeCount = false, showsDrawCount = false, showsPhysics = false
     var allowsTransparency = false
+    /// A scene shown over a SceneKit view: its background is not drawn.
+    var isOverlay = false
     /// The view's drawing, made at its first frame.
     var renderer: SKRenderer?
 }
@@ -718,12 +790,16 @@ open class SKView: UIView {
     func runFrame() {
         guard let scene = sk.scene, !sk.paused, !scene.node.paused else { return }
         if scene.node.scaleMode == 3 { scene.setSize(state.bounds.size) }
-        scene.skSendUpdate(SKSupport.now())
+        let now = SKSupport.now()
+        let elapsed = sk.lastFrame == 0 ? 0 : min(max(now - sk.lastFrame, 0), 0.1)
+        sk.lastFrame = now
+        scene.skSendUpdate(now)
+        SKActions.advance(scene, elapsed)
         scene.skSendDidEvaluateActions()
         scene.skSendDidSimulatePhysics()
         scene.skSendDidFinishUpdate()
         if sk.renderer == nil { sk.renderer = SKRenderer() }
-        sk.renderer?.draw(scene, in: self, scale: state.geometry.contentsScale, layer: state.layer, opaque: !sk.allowsTransparency)
+        sk.renderer?.draw(scene, in: self, scale: state.geometry.contentsScale, layer: state.layer, opaque: !sk.allowsTransparency, background: !sk.isOverlay)
     }
 }
 
