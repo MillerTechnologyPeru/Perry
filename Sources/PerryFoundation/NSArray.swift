@@ -226,6 +226,16 @@ public class NSArray: NSObject {
     @ObjCMethod("count")
     func count() -> UInt { UInt(elements.count) }
 
+    @ObjCMethod("getObjects:range:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, range: NSRange) {
+        let all = elements
+        guard Int(range.location + range.length) <= all.count else {
+            foundationFatal("-[NSArray getObjects:range:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(all.count - 1)]")
+        }
+        guard let buffer else { return }
+        for offset in 0..<Int(range.length) { buffer[offset] = all[Int(range.location) + offset] }
+    }
+
     @ObjCMethod("objectAtIndex:")
     func object(at index: UInt) -> ObjCObject {
         let all = elements
