@@ -31,6 +31,8 @@ final class SCNMaterialPropertyState: ObjectState {
     /// The contents, retained: a colour, a picture or a number.
     var contents: UnsafeMutableRawPointer?
     var intensity: CGFloat = 1
+    /// SCNWrapMode: clamp 1, repeat 2, clamp to border 3, mirror 4.
+    var wrapS = 1, wrapT = 1
     deinit { ObjCRuntime.release(contents) }
 }
 
@@ -56,6 +58,69 @@ open class SCNMaterialProperty: NSObject {
     @ObjCMethod("setContents:") func setContents(_ contents: NSObject?) { SKSupport.replace(&property.contents, with: contents?.objcObject) }
     @ObjCMethod("intensity") func intensity() -> CGFloat { property.intensity }
     @ObjCMethod("setIntensity:") func setIntensity(_ intensity: CGFloat) { property.intensity = intensity }
+    @ObjCMethod("wrapS") func wrapS() -> Int { property.wrapS }
+    @ObjCMethod("setWrapS:") func setWrapS(_ mode: Int) { property.wrapS = mode }
+    @ObjCMethod("wrapT") func wrapT() -> Int { property.wrapT }
+    @ObjCMethod("setWrapT:") func setWrapT(_ mode: Int) { property.wrapT = mode }
+}
+
+// MARK: - Light
+
+final class SCNLightState: ObjectState {
+    /// The type as set: "omni", or SceneKit's constant's own text.
+    var type = "omni"
+    var color: UnsafeMutableRawPointer?
+    var intensity: CGFloat = 1000
+    var temperature: CGFloat = 6500
+    var castsShadow = false
+    var name: String?
+    var attenuationStart: CGFloat = 0, attenuationEnd: CGFloat = 0, attenuationFalloff: CGFloat = 2
+    var spotInner: CGFloat = 0, spotOuter: CGFloat = 45
+    deinit { ObjCRuntime.release(color) }
+
+    /// The type without the constants' prefix, in lower case.
+    var kind: String {
+        let lower = type.lowercased()
+        return lower.hasPrefix("scnlighttype") ? String(lower.dropFirst(12)) : lower
+    }
+}
+
+@ObjCClass("SCNLight")
+open class SCNLight: NSObject {
+    static let states = StateTable<SCNLightState>()
+    var light: SCNLightState { SCNLight.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        SCNLight.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: SCNLight.objCClass.pointer)
+    }
+
+    @ObjCClassMethod("light") static func make(_ cls: ObjCClass) -> SCNLight { cls.object.allocated().unsafeCast(to: SCNLight.self) }
+    @ObjCMethod("init") func initialize() -> Self { self }
+
+    @ObjCMethod("type") func type() -> String { light.type }
+    @ObjCMethod("setType:") func setType(_ type: String) { light.type = type }
+    @ObjCMethod("color") func color() -> NSObject? { light.color.map { NSObject($0) } ?? SKSupport.whiteObject.map { NSObject($0) } }
+    @ObjCMethod("setColor:") func setColor(_ color: NSObject?) { SKSupport.replace(&light.color, with: color?.objcObject) }
+    @ObjCMethod("intensity") func intensity() -> CGFloat { light.intensity }
+    @ObjCMethod("setIntensity:") func setIntensity(_ intensity: CGFloat) { light.intensity = intensity }
+    @ObjCMethod("temperature") func temperature() -> CGFloat { light.temperature }
+    @ObjCMethod("setTemperature:") func setTemperature(_ temperature: CGFloat) { light.temperature = temperature }
+    @ObjCMethod("castsShadow") func castsShadow() -> Bool { light.castsShadow }
+    @ObjCMethod("setCastsShadow:") func setCastsShadow(_ casts: Bool) { light.castsShadow = casts }
+    @ObjCMethod("name") func name() -> String? { light.name }
+    @ObjCMethod("setName:") func setName(_ name: String?) { light.name = name }
+    @ObjCMethod("attenuationStartDistance") func attenuationStartDistance() -> CGFloat { light.attenuationStart }
+    @ObjCMethod("setAttenuationStartDistance:") func setAttenuationStartDistance(_ distance: CGFloat) { light.attenuationStart = distance }
+    @ObjCMethod("attenuationEndDistance") func attenuationEndDistance() -> CGFloat { light.attenuationEnd }
+    @ObjCMethod("setAttenuationEndDistance:") func setAttenuationEndDistance(_ distance: CGFloat) { light.attenuationEnd = distance }
+    @ObjCMethod("attenuationFalloffExponent") func attenuationFalloffExponent() -> CGFloat { light.attenuationFalloff }
+    @ObjCMethod("setAttenuationFalloffExponent:") func setAttenuationFalloffExponent(_ exponent: CGFloat) { light.attenuationFalloff = exponent }
+    @ObjCMethod("spotInnerAngle") func spotInnerAngle() -> CGFloat { light.spotInner }
+    @ObjCMethod("setSpotInnerAngle:") func setSpotInnerAngle(_ angle: CGFloat) { light.spotInner = angle }
+    @ObjCMethod("spotOuterAngle") func spotOuterAngle() -> CGFloat { light.spotOuter }
+    @ObjCMethod("setSpotOuterAngle:") func setSpotOuterAngle(_ angle: CGFloat) { light.spotOuter = angle }
 }
 
 final class SCNMaterialState: ObjectState {
@@ -379,6 +444,7 @@ final class SCNNodeState: ObjectState {
     var children: [NSObject] = []
     var geometry: SCNGeometry?
     var camera: SCNCamera?
+    var light: SCNLight?
 
     /// The node's transform within its parent: translation, rotation and
     /// scale, then the pivot undone.
@@ -418,6 +484,8 @@ open class SCNNode: NSObject {
     @ObjCMethod("setGeometry:") func setGeometry(_ geometry: SCNGeometry?) { node.geometry = geometry }
     @ObjCMethod("camera") func camera() -> SCNCamera? { node.camera }
     @ObjCMethod("setCamera:") func setCamera(_ camera: SCNCamera?) { node.camera = camera }
+    @ObjCMethod("light") func light() -> SCNLight? { node.light }
+    @ObjCMethod("setLight:") func setLight(_ light: SCNLight?) { node.light = light }
     @ObjCMethod("isHidden") func isHidden() -> Bool { node.hidden }
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool) { node.hidden = hidden }
     @ObjCMethod("opacity") func opacity() -> CGFloat { node.opacity }
