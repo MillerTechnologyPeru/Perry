@@ -205,3 +205,45 @@ enum SCNMath {
                    z: m[2] * p.x + m[6] * p.y + m[10] * p.z + m[14])
     }
 }
+
+// MARK: - SceneKit's C functions
+
+// SceneKit's matrices act on row vectors: SCNMatrix4Mult(a, b) applies a first, then b.
+
+private func scnMult(_ a: Matrix, _ b: Matrix) -> Matrix { SCNMath.multiply(b, a) }
+
+@c(_SCNMatrix4Mult) public func SCNMatrix4Mult(_ a: SCNMatrix4, _ b: SCNMatrix4) -> SCNMatrix4 {
+    SCNMath.matrix4(scnMult(SCNMath.matrix(a), SCNMath.matrix(b)))
+}
+
+@c(_SCNMatrix4Invert) public func SCNMatrix4Invert(_ m: SCNMatrix4) -> SCNMatrix4 {
+    SCNMath.matrix4(GLKMath.invert4(SCNMath.matrix(m)) ?? SCNMath.matrix(m))
+}
+
+@c(_SCNMatrix4MakeTranslation) public func SCNMatrix4MakeTranslation(_ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    SCNMath.matrix4(SCNMath.translation(x, y, z))
+}
+
+@c(_SCNMatrix4MakeScale) public func SCNMatrix4MakeScale(_ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    SCNMath.matrix4(SCNMath.scaling(x, y, z))
+}
+
+@c(_SCNMatrix4MakeRotation) public func SCNMatrix4MakeRotation(_ angle: Float, _ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    SCNMath.matrix4(SCNMath.rotation(SCNMath.quaternion(axis: SCNVector3(x: x, y: y, z: z), angle: angle)))
+}
+
+@c(_SCNMatrix4Translate) public func SCNMatrix4Translate(_ m: SCNMatrix4, _ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    SCNMath.matrix4(scnMult(SCNMath.translation(x, y, z), SCNMath.matrix(m)))
+}
+
+@c(_SCNMatrix4Scale) public func SCNMatrix4Scale(_ m: SCNMatrix4, _ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    SCNMath.matrix4(scnMult(SCNMath.scaling(x, y, z), SCNMath.matrix(m)))
+}
+
+@c(_SCNMatrix4Rotate) public func SCNMatrix4Rotate(_ m: SCNMatrix4, _ angle: Float, _ x: Float, _ y: Float, _ z: Float) -> SCNMatrix4 {
+    let r = SCNMath.rotation(SCNMath.quaternion(axis: SCNVector3(x: x, y: y, z: z), angle: angle))
+    return SCNMath.matrix4(scnMult(r, SCNMath.matrix(m)))
+}
+
+@c(_SCNMatrix4EqualToMatrix4) public func SCNMatrix4EqualToMatrix4(_ a: SCNMatrix4, _ b: SCNMatrix4) -> Bool { SCNMath.matrix(a) == SCNMath.matrix(b) }
+@c(_SCNMatrix4IsIdentity) public func SCNMatrix4IsIdentity(_ m: SCNMatrix4) -> Bool { SCNMath.matrix(m) == SCNMath.identity }
