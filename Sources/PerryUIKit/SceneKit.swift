@@ -93,6 +93,7 @@ open class SCNLight: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNLight.states.remove(objcObject)
+        SCNExtras.lights.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNLight.objCClass.pointer)
     }
 
@@ -143,6 +144,7 @@ open class SCNMaterial: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNMaterial.states.remove(objcObject)
+        SCNExtras.materials.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNMaterial.objCClass.pointer)
     }
 
@@ -214,6 +216,7 @@ open class SCNCamera: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNCamera.states.remove(objcObject)
+        SCNExtras.cameras.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNCamera.objCClass.pointer)
     }
 
@@ -448,6 +451,13 @@ final class SCNNodeState: ObjectState {
     /// The actions running on the node, and the constraints it keeps.
     var running: [SCNRunning] = []
     var constraints: [NSObject] = []
+    var categoryBitMask = 1
+    var physicsBody: NSObject?
+    var particleSystems: [NSObject] = []
+    var audioPlayers: [NSObject] = []
+    /// Animation players by key, with the keys in the order they were added.
+    var animationPlayers: [String: NSObject] = [:]
+    var animationKeys: [String] = []
 
     /// The node's transform within its parent: translation, rotation and
     /// scale, then the pivot undone.
@@ -467,6 +477,7 @@ open class SCNNode: NSObject {
     func dealloc() {
         for child in node.children { SCNNode.nodeStates.existing(child.objcObject)?.parent = nil }
         SCNNode.nodeStates.remove(objcObject)
+        SCNExtras.nodes.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNNode.objCClass.pointer)
     }
 
@@ -564,16 +575,29 @@ open class SCNNode: NSObject {
 
     @ObjCMethod("addChildNode:")
     func addChildNode(_ child: SCNNode) {
-        guard child.objcObject != objcObject, child.node.parent == nil else { return }
+        guard child.objcObject != objcObject, !isDescendant(of: child) else { return }
+        // A node has one parent: adding it somewhere else moves it.
+        if child.node.parent != nil { child.removeFromParentNode() }
         child.node.parent = objcObject
         node.children.append(child)
     }
 
     @ObjCMethod("insertChildNode:atIndex:")
     func insertChildNode(_ child: SCNNode, at index: Int) {
-        guard child.objcObject != objcObject, child.node.parent == nil else { return }
+        guard child.objcObject != objcObject, !isDescendant(of: child) else { return }
+        if child.node.parent != nil { child.removeFromParentNode() }
         child.node.parent = objcObject
         node.children.insert(child, at: min(max(index, 0), node.children.count))
+    }
+
+    /// Whether `ancestor` is this node or above it.
+    private func isDescendant(of ancestor: SCNNode) -> Bool {
+        var current: UnsafeMutableRawPointer? = objcObject
+        while let object = current {
+            if object == ancestor.objcObject { return true }
+            current = SCNNode.nodeStates.existing(object)?.parent
+        }
+        return false
     }
 
     @ObjCMethod("removeFromParentNode")
@@ -617,6 +641,7 @@ open class SCNScene: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNScene.states.remove(objcObject)
+        SCNExtras.scenes.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNScene.objCClass.pointer)
     }
 
@@ -670,6 +695,9 @@ final class SCNViewState: ObjectState {
     var running = false
     var start: Double?
     var lastFrame = 0.0
+    /// A SpriteKit scene over the view's drawing, shown by a view of its own.
+    var overlayScene: SKScene?
+    var overlayView: SKView?
     /// The view's drawing, made at its first frame.
     var renderer: SCNRenderer?
 }
@@ -709,6 +737,7 @@ open class SCNView: UIView {
     override func dealloc() {
         Frames.remove(scn)
         SCNView.scnStates.remove(objcObject)
+        SCNExtras.views.remove(objcObject)
         super.dealloc()
     }
 
@@ -739,6 +768,26 @@ open class SCNView: UIView {
         scn.framesPerSecond = min(max(rate, 1), 60)
         restartFrames()
     }
+    @ObjCMethod("overlaySKScene") func overlaySKScene() -> SKScene? { scn.overlayScene }
+    @ObjCMethod("setOverlaySKScene:")
+    func setOverlaySKScene(_ scene: SKScene?) {
+        scn.overlayScene = scene
+        if getenv("PERRY_SCENEKIT_NO_OVERLAY") != nil { return }
+        guard let scene else {
+            scn.overlayView?.removeFromSuperview()
+            scn.overlayView = nil
+            return
+        }
+        if scn.overlayView == nil {
+            let overlay = SKView.objCClass.object.allocated().unsafeCast(to: SKView.self).initialize(frame: state.bounds)
+            overlay.sk.allowsTransparency = true
+            overlay.sk.isOverlay = true
+            overlay.state.geometry.backgroundColor = nil
+            scn.overlayView = overlay
+            addSubview(overlay)
+        }
+        scn.overlayView?.presentScene(scene)
+    }
     @ObjCMethod("sceneTime") func sceneTime() -> Double { scn.start.map { SKSupport.now() - $0 } ?? 0 }
 
     // MARK: Frames
@@ -768,7 +817,7 @@ open class SCNView: UIView {
         let time = now - (scn.start ?? now)
         let delegate = scn.delegate.map { NSObject($0) }
         func send(_ selector: String, _ body: (NSObject) -> Void) {
-            if scn.playing, let delegate, delegate.responds(to: selector) { body(delegate) }
+            if let delegate, delegate.responds(to: selector) { body(delegate) }
         }
         // Actions run with the frame's time, then the delegate hears of them, and constraints settle the nodes.
         let elapsed = min(max(now - scn.lastFrame, 0), 0.1)
@@ -783,6 +832,7 @@ open class SCNView: UIView {
         if let delegate, delegate.responds(to: "renderer:willRenderScene:atTime:") {
             delegate.scnSendRenderer(self, willRenderScene: scene, atTime: time)
         }
+        if let overlay = scn.overlayView, overlay.state.bounds.size != state.bounds.size { overlay.setFrame(state.bounds) }
         if scn.renderer == nil { scn.renderer = SCNRenderer() }
         scn.renderer?.draw(scene, pointOfView: scn.pointOfView, in: self, scale: state.geometry.contentsScale, layer: state.layer,
                            defaultLighting: scn.autoenablesDefaultLighting)
