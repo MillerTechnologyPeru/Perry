@@ -303,7 +303,8 @@ final class SCNSceneBuilder {
             }
         }
         if let skinner = archive.dictionary(described["skinner"]) { skinners.append((made, skinner)) }
-        for key in ["physicsBody", "physicsField", "morpher", "constraints"]
+        if archive.has(described["physicsBody"]) { state.physicsBody = physicsBody(described["physicsBody"]) }
+        for key in ["physicsField", "morpher", "constraints"]
         where archive.has(described[key]) { skip(key) }
 
         for child in archive.list(described["childNodes"]) {
@@ -436,6 +437,30 @@ final class SCNSceneBuilder {
             return nil
         }
         made.action.timing = archive.int(described["_timingMode"]) ?? 0
+        return made
+    }
+
+    /// A body a file gives a node: its masks and surface, and the shape it names if it is not the node's own.
+    private func physicsBody(_ reference: SCNArchive.Plist?) -> SCNPhysicsBody? {
+        guard let described = archive.dictionary(reference) else { return nil }
+        let made = SCNPhysicsBody.objCClass.object.allocated().unsafeCast(to: SCNPhysicsBody.self)
+        let state = made.body
+        state.type = archive.int(described["type"]) ?? 1
+        state.categoryBitMask = archive.int(described["categoryBitMask"]) ?? 1
+        state.collisionBitMask = archive.int(described["collisionBitMask"]) ?? -1
+        state.contactTestBitMask = archive.int(described["contactTestBitMask"]) ?? 0
+        state.mass = CGFloat(archive.double(described["mass"]) ?? 1)
+        state.friction = CGFloat(archive.double(described["friction"]) ?? 0.5)
+        state.restitution = CGFloat(archive.double(described["restitution"]) ?? 0.5)
+        state.damping = CGFloat(archive.double(described["damping"]) ?? 0.1)
+        state.angularDamping = CGFloat(archive.double(described["angularDamping"]) ?? 0.1)
+        state.affectedByGravity = !(archive.bool(described["ignoreGravity"]) ?? false)
+        if archive.bool(described["isDefaultShape"]) != true, let shape = archive.dictionary(described["physicsShape"]),
+           archive.has(shape["referenceObject"]), let geometry = geometry(shape["referenceObject"]) {
+            let made = SCNPhysicsShape.objCClass.object.allocated().unsafeCast(to: SCNPhysicsShape.self)
+            made.shape.source = geometry
+            state.shape = made
+        }
         return made
     }
 
