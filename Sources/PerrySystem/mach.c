@@ -58,11 +58,15 @@ mach_port_t darwin_mach_thread_self(void) { return (mach_port_t)thread_id(); }
 mach_port_t darwin_mach_host_self(void) DARWIN_SYMBOL(mach_host_self);
 mach_port_t darwin_mach_host_self(void) { return HOST_PORT; }
 
+static pid_t created_thread_port(pthread_t thread);
+
 mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) DARWIN_SYMBOL(pthread_mach_thread_np);
 mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) {
-    // glibc keeps the kernel thread ID in its thread descriptor; only the
-    // calling thread's is asked for in practice.
-    return pthread_equal(perry_pthread_to_linux(thread), pthread_self()) ? (mach_port_t)thread_id() : 0;
+    // glibc keeps the kernel thread ID in its thread descriptor, which isn't
+    // read here: the calling thread's is known, and so is the port of each
+    // thread pthread_create_suspended_np made.
+    thread = perry_pthread_to_linux(thread);
+    return pthread_equal(thread, pthread_self()) ? (mach_port_t)thread_id() : (mach_port_t)created_thread_port(thread);
 }
 
 kern_return_t darwin_mach_port_deallocate(mach_port_t task, mach_port_t port) DARWIN_SYMBOL(mach_port_deallocate);
@@ -657,6 +661,88 @@ kern_return_t darwin_thread_suspend(mach_port_t port) {
     }
     return KERN_SUCCESS;
 }
+
+// MARK: Threads made suspended
+
+// The threads pthread_create_suspended_np made, with their ports, for
+// pthread_mach_thread_np. Kept, as a thread's descriptor may be reused.
+struct created_thread {
+    pthread_t thread;
+    pid_t port;
+    struct created_thread *next;
+};
+static struct created_thread *created_threads;
+static pthread_mutex_t created_threads_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static pid_t created_thread_port(pthread_t thread) {
+    pid_t port = 0;
+    pthread_mutex_lock(&created_threads_lock);
+    for (struct created_thread *entry = created_threads; entry; entry = entry->next)
+        if (pthread_equal(entry->thread, thread)) {
+            port = entry->port;
+            break;
+        }
+    pthread_mutex_unlock(&created_threads_lock);
+    return port;
+}
+
+#if defined(__i386__) || defined(__x86_64__)
+int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument)
+    DARWIN_SYMBOL(pthread_create);
+
+struct suspended_start {
+    void *(*function)(void *);
+    void *argument;
+    sem_t started;
+};
+
+// The new thread suspends itself before it runs the function, as if
+// thread_suspend had stopped it once: its port is known to its maker when
+// that returns, and thread_resume lets it go.
+static void *start_suspended(void *pointer) {
+    struct suspended_start *start = pointer;
+    void *(*function)(void *) = start->function;
+    void *argument = start->argument;
+    pid_t self = thread_id();
+    struct created_thread *created = calloc(1, sizeof(*created));
+    if (created) {
+        created->thread = pthread_self();
+        created->port = self;
+        pthread_mutex_lock(&created_threads_lock);
+        created->next = created_threads;
+        created_threads = created;
+        pthread_mutex_unlock(&created_threads_lock);
+    }
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension(self, 1);
+    entry->count = 1;
+    atomic_store(&entry->resume, 0);
+    atomic_store(&entry->inside, 1);
+    pthread_mutex_unlock(&suspension_lock);
+    sem_post(&start->started);                  // `start` is the maker's, gone from here on
+    while (!atomic_load(&entry->resume))
+        syscall(SYS_futex, &entry->resume, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+    atomic_store(&entry->inside, 0);
+    syscall(SYS_futex, &entry->inside, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    return function(argument);
+}
+
+/// int pthread_create_suspended_np(pthread_t *, const pthread_attr_t *,
+/// void *(*)(void *), void *): a thread that waits for thread_resume on its
+/// port, pthread_mach_thread_np's, before it starts.
+int darwin_pthread_create_suspended_np(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+                                       void *argument) DARWIN_SYMBOL(pthread_create_suspended_np);
+int darwin_pthread_create_suspended_np(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+                                       void *argument) {
+    struct suspended_start start = { function, argument };
+    sem_init(&start.started, 0, 0);
+    int error = darwin_pthread_create(thread, attributes, start_suspended, &start);
+    if (!error)
+        while (sem_wait(&start.started) != 0 && errno == EINTR) {}
+    sem_destroy(&start.started);
+    return error;
+}
+#endif
 
 kern_return_t darwin_thread_resume(mach_port_t port) DARWIN_SYMBOL(thread_resume);
 kern_return_t darwin_thread_resume(mach_port_t port) {
