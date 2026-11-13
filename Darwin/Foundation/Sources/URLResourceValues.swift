@@ -72,6 +72,46 @@ public struct URLResourceValues {
     /// The time the resource content was last modified.
     public var contentModificationDate: Date? { value(.contentModificationDateKey) }
 
+    /// True if the resource is a directory the system treats as one item: a
+    /// bundle or a Swift package.
+    public var isPackage: Bool? { value(.isPackageKey) }
+
+    /// True if the resource is an application.
+    public var isApplication: Bool? { value(.isApplicationKey) }
+
+    /// True if the resource is an alias file: never, there are none here.
+    public var isAliasFile: Bool? { value(.isAliasFileKey) }
+
+    /// True if the resource is the root of a volume.
+    public var isVolume: Bool? { value(.isVolumeKey) }
+
+    /// The name shown to users: the file's own.
+    public var localizedName: String? { value(.localizedNameKey) }
+
+    /// The number of hard links to the file.
+    public var linkCount: Int? { value(.linkCountKey) }
+
+    /// The file's type identifier, as a uniform type identifier: a folder, a
+    /// package, or by its extension a few common ones, else plain data.
+    public var typeIdentifier: String? { value(.typeIdentifierKey) }
+
+    /// The date the resource's attributes last changed.
+    public var attributeModificationDate: Date? { value(.attributeModificationDateKey) }
+
+    /// What names the file's content: its inode number.
+    public var fileContentIdentifier: Int64? { value(.fileContentIdentifierKey) }
+
+    /// What names the file on its volume: its inode number.
+    public var fileResourceIdentifier: (any NSCopying & NSSecureCoding & NSObjectProtocol)? {
+        value(.fileResourceIdentifierKey)
+    }
+
+    /// Whether the file's extension is hidden: never.
+    public var hasHiddenExtension: Bool? {
+        get { value(.hasHiddenExtensionKey) }
+        set { set(.hasHiddenExtensionKey, newValue) }
+    }
+
     /// True if the resource should be excluded from backups.
     public var isExcludedFromBackup: Bool? {
         get { value(.isExcludedFromBackupKey) }
@@ -119,6 +159,18 @@ private let excludedFromBackup = LockedState<Set<String>>(initialState: [])
 
 @available(*, unavailable)
 extension URL {
+    fileprivate static let packageExtensions: Set<String> = [
+        "app", "framework", "bundle", "plugin", "appex", "xpc", "swiftpm", "playground", "xcodeproj", "xcworkspace",
+        "xctest", "dSYM".lowercased(), "kext", "rtfd", "pkg",
+    ]
+
+    fileprivate static let typeIdentifiers: [String: String] = [
+        "swift": "public.swift-source", "txt": "public.plain-text", "json": "public.json", "plist": "com.apple.property-list",
+        "png": "public.png", "jpg": "public.jpeg", "jpeg": "public.jpeg", "pdf": "com.adobe.pdf", "md": "net.daringfireball.markdown",
+        "h": "public.c-header", "c": "public.c-source", "m": "public.objective-c-source", "xml": "public.xml",
+        "html": "public.html", "zip": "public.zip-archive", "swiftmodule": "public.data",
+    ]
+
     private func noSuchFile() -> CocoaError {
         CocoaError(.fileReadNoSuchFile, userInfo: [NSURLErrorKey: self, NSFilePathErrorKey: path])
     }
@@ -173,6 +225,21 @@ extension URL {
             case .creationDateKey: values[key] = date(info.st_birthtimespec)
             case .contentAccessDateKey: values[key] = date(info.st_atimespec)
             case .contentModificationDateKey: values[key] = date(info.st_mtimespec)
+            case .isPackageKey: values[key] = type == S_IFDIR && URL.packageExtensions.contains(pathExtension.lowercased())
+            case .isApplicationKey: values[key] = type == S_IFDIR && pathExtension.lowercased() == "app"
+            case .isAliasFileKey: values[key] = false
+            case .isVolumeKey: values[key] = path == "/"
+            case .localizedNameKey: values[key] = lastPathComponent
+            case .linkCountKey: values[key] = Int(info.st_nlink)
+            case .typeIdentifierKey:
+                let ext = pathExtension.lowercased()
+                if isLink { values[key] = "public.symlink" }
+                else if type == S_IFDIR { values[key] = URL.packageExtensions.contains(ext) ? "com.apple.package" : "public.folder" }
+                else { values[key] = URL.typeIdentifiers[ext] ?? "public.data" }
+            case .attributeModificationDateKey: values[key] = date(info.st_ctimespec)
+            case .fileContentIdentifierKey: values[key] = Int64(bitPattern: UInt64(info.st_ino))
+            case .fileResourceIdentifierKey: values[key] = NSNumber(value: UInt64(info.st_ino))
+            case .hasHiddenExtensionKey: values[key] = false
             case .isExcludedFromBackupKey:
                 let key2 = standardizedFileURL.path
                 values[key] = excludedFromBackup.withLock { $0.contains(key2) }
