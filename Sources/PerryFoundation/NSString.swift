@@ -297,8 +297,16 @@ public class NSString: NSObject {
     @ObjCMethod("init")
     func initialize() -> Self { setValue("") }
 
+    /// The contents of `other`; an object that is not one of this library's
+    /// strings, such as a string Swift made, is read through its UTF-8.
     @ObjCMethod("initWithString:")
-    func initialize(string other: String) -> Self { setValue(other) }
+    func initialize(string other: UnsafeMutableRawPointer?) -> Self {
+        if let value = Strings.value(of: other) { return setValue(value) }
+        if let other, let bytes = ObjC.sendPointer(other, ObjC.selector("UTF8String")) {
+            return setValue(String(cString: bytes.assumingMemoryBound(to: CChar.self)))
+        }
+        return setValue("")
+    }
 
     @ObjCMethod("initWithUTF8String:")
     func initialize(utf8 bytes: UnsafePointer<CChar>?) -> Self? { bytes.map { setValue(String(cString: $0)) } }
