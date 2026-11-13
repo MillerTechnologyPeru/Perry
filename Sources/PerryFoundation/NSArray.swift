@@ -496,6 +496,30 @@ public class NSMutableArray: NSArray {
         removed.forEach { ObjC.release($0) }
     }
 
+    /// The range's elements replaced by those of `other` in `otherRange`.
+    @ObjCMethod("replaceObjectsInRange:withObjectsFromArray:range:")
+    func replace(range: NSRange, withObjectsFrom other: UnsafeMutableRawPointer?, otherRange: NSRange) {
+        let count = storage.objects.count
+        if Int(range.location) + Int(range.length) > count {
+            foundationFatal("-[NSMutableArray replaceObjectsInRange:withObjectsFromArray:range:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(count - 1)]")
+        }
+        let source = Arrays.elements(other)
+        let start = Int(otherRange.location), end = min(source.count, start + Int(otherRange.length))
+        let added = start < end ? Array(source[start..<end]) : []
+        let retained = added.compactMap { ObjC.retain($0) }
+        let first = Int(range.location)
+        let removed = Array(storage.objects[first..<(first + Int(range.length))])
+        storage.objects.replaceSubrange(first..<(first + Int(range.length)), with: retained)
+        storage.enumeration.mutated()
+        removed.forEach { ObjC.release($0) }
+    }
+
+    @ObjCMethod("replaceObjectsInRange:withObjectsFromArray:")
+    func replace(range: NSRange, withObjectsFrom other: UnsafeMutableRawPointer?) {
+        let total = Arrays.elements(other).count
+        replace(range: range, withObjectsFrom: other, otherRange: NSRange(location: 0, length: total))
+    }
+
     @ObjCMethod("removeObject:")
     func remove(_ element: ObjCObject?) {
         guard let element else { return }
