@@ -445,6 +445,9 @@ final class SCNNodeState: ObjectState {
     var geometry: SCNGeometry?
     var camera: SCNCamera?
     var light: SCNLight?
+    /// The actions running on the node, and the constraints it keeps.
+    var running: [SCNRunning] = []
+    var constraints: [NSObject] = []
 
     /// The node's transform within its parent: translation, rotation and
     /// scale, then the pivot undone.
@@ -484,6 +487,8 @@ open class SCNNode: NSObject {
     @ObjCMethod("setGeometry:") func setGeometry(_ geometry: SCNGeometry?) { node.geometry = geometry }
     @ObjCMethod("camera") func camera() -> SCNCamera? { node.camera }
     @ObjCMethod("setCamera:") func setCamera(_ camera: SCNCamera?) { node.camera = camera }
+    @ObjCMethod("constraints") func constraints() -> NSObject { NSMutableArray.of(node.constraints) }
+    @ObjCMethod("setConstraints:") func setConstraints(_ constraints: NSArray?) { node.constraints = constraints?.elements ?? [] }
     @ObjCMethod("light") func light() -> SCNLight? { node.light }
     @ObjCMethod("setLight:") func setLight(_ light: SCNLight?) { node.light = light }
     @ObjCMethod("isHidden") func isHidden() -> Bool { node.hidden }
@@ -664,6 +669,7 @@ final class SCNViewState: ObjectState {
     var framesPerSecond = 60
     var running = false
     var start: Double?
+    var lastFrame = 0.0
     /// The view's drawing, made at its first frame.
     var renderer: SCNRenderer?
 }
@@ -758,15 +764,22 @@ open class SCNView: UIView {
     func runFrame() {
         guard let scene = scn.scene else { return }
         let now = SKSupport.now()
-        if scn.start == nil { scn.start = now }
+        if scn.start == nil { scn.start = now; scn.lastFrame = now }
         let time = now - (scn.start ?? now)
         let delegate = scn.delegate.map { NSObject($0) }
         func send(_ selector: String, _ body: (NSObject) -> Void) {
             if scn.playing, let delegate, delegate.responds(to: selector) { body(delegate) }
         }
+        // Actions run with the frame's time, then the delegate hears of them, and constraints settle the nodes.
+        let elapsed = min(max(now - scn.lastFrame, 0), 0.1)
+        scn.lastFrame = now
+        SCNTimers.process(now: now)
         send("renderer:updateAtTime:") { $0.scnSendRenderer(self, updateAtTime: time) }
+        SCNActions.advance(scene.rootNode(), elapsed)
         send("renderer:didApplyAnimationsAtTime:") { $0.scnSendRenderer(self, didApplyAnimationsAtTime: time) }
         send("renderer:didSimulatePhysicsAtTime:") { $0.scnSendRenderer(self, didSimulatePhysicsAtTime: time) }
+        let camera = scn.pointOfView?.world
+        SCNConstraints.apply(scene.rootNode(), elapsed: elapsed, cameraPosition: camera.map { SCNVector3(x: $0[12], y: $0[13], z: $0[14]) })
         if let delegate, delegate.responds(to: "renderer:willRenderScene:atTime:") {
             delegate.scnSendRenderer(self, willRenderScene: scene, atTime: time)
         }
