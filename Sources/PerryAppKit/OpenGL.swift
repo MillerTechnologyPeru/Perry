@@ -56,6 +56,10 @@ open class NSOpenGLPixelFormat: NSObject {
         _ = SDL.glSetAttribute(SDL.glContextMajorVersion, 2)
         _ = SDL.glSetAttribute(SDL.glContextMinorVersion, 1)
         _ = SDL.glSetAttribute(SDL.glContextProfileMask, SDL.glProfileCompatibility)
+        // Letting go of a context doesn't submit what was drawn with it, as
+        // a Mac's doesn't: games that make theirs current around every
+        // batch of drawing would otherwise have each batch submitted alone.
+        _ = SDL.glSetAttribute(SDL.glContextReleaseBehavior, SDL.glReleaseBehaviorNone)
     }
 }
 
