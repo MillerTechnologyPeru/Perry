@@ -157,6 +157,20 @@ CGLError perry_CGLIsEnabled(id context, int option, int *enabled) {
 id perry_CGLGetShareGroup(id context) CGL_SYMBOL(CGLGetShareGroup);
 id perry_CGLGetShareGroup(id context) { return context; }
 
+// MARK: - The current context's profile
+
+int perry_cgl_current_is_core(void) {
+    if (!msg_send || !sel_register) return 0;
+    id format = send(send(context_class(), "currentContext"), "pixelFormat");
+    if (!format) return 0;
+    // NSOpenGLPFAOpenGLProfile (99): NSOpenGLProfileVersionLegacy (0x1000),
+    // or 3.2 Core (0x3200) and 4.1 Core (0x4100).
+    int profile = 0;
+    ((void (*)(id, SEL, int *, uint32_t, int))msg_send)(format, sel_register("getValues:forAttribute:forVirtualScreen:"),
+                                                        &profile, 99, 0);
+    return profile >= 0x3200;
+}
+
 // MARK: - Renderers
 
 static int renderer_info_token;
