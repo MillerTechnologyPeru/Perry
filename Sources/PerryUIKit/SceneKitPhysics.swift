@@ -125,6 +125,8 @@ final class SCNPhysicsContactState: ObjectState {
     var nodeA: SCNNode?, nodeB: SCNNode?
     var point = SCNVector3(x: 0, y: 0, z: 0), normal = SCNVector3(x: 0, y: 0, z: 0)
     var impulse: CGFloat = 0, penetration: CGFloat = 0
+    /// How far along a sweep the shape was when it touched.
+    var fraction: CGFloat = 0
 }
 
 @ObjCClass("SCNPhysicsContact")
@@ -144,7 +146,7 @@ open class SCNPhysicsContact: NSObject {
     @ObjCMethod("contactNormal") func contactNormal() -> SCNVector3 { contact.normal }
     @ObjCMethod("collisionImpulse") func collisionImpulse() -> CGFloat { contact.impulse }
     @ObjCMethod("penetrationDistance") func penetrationDistance() -> CGFloat { contact.penetration }
-    @ObjCMethod("sweepTestFraction") func sweepTestFraction() -> CGFloat { contact.impulse }
+    @ObjCMethod("sweepTestFraction") func sweepTestFraction() -> CGFloat { contact.fraction }
 }
 
 /// What a ray test or hit test found: SCNHitTestResult and SCNPhysicsContact's
@@ -184,6 +186,8 @@ final class SCNPhysicsWorldState: ObjectState {
     var timeStep: CGFloat = 1.0 / 60
     var delegate: UnsafeMutableRawPointer?
     var scene: UnsafeMutableRawPointer?
+    /// The pairs of nodes whose boxes overlapped at the last step.
+    var touching: [SCNCollision.Pair: (SCNNode, SCNNode, SCNVector3)] = [:]
 }
 
 @ObjCClass("SCNPhysicsWorld")
@@ -212,12 +216,25 @@ open class SCNPhysicsWorld: NSObject {
     @ObjCMethod("rayTestWithSegmentFromPoint:toPoint:options:")
     func rayTest(from start: SCNVector3, to end: SCNVector3, options: NSObject?) -> NSObject {
         guard let root else { return NSMutableArray.empty() }
-        return SCNRays.results(SCNRays.cast(root, from: start, to: end, all: true), as: SCNHitTestResult.self)
+        let mask = SCNOptions.number(options, "SCNPhysicsTestCollisionBitMaskKey").map { Int($0) }
+        return SCNRays.results(SCNRays.cast(root, from: start, to: end, all: true, categoryMask: mask, ignoreHidden: false), as: SCNHitTestResult.self)
     }
 
-    /// Sweeps find nothing: shapes are not tested for overlap.
+    /// The first thing the shape touches moving from one transform to the other, as one contact; only the
+    /// shapes' places count, not their turns.
     @ObjCMethod("convexSweepTestWithShape:fromTransform:toTransform:options:")
-    func convexSweepTest(with shape: SCNPhysicsShape, from: SCNMatrix4, to: SCNMatrix4, options: NSObject?) -> NSObject { NSMutableArray.empty() }
+    func convexSweepTest(with shape: SCNPhysicsShape, from: SCNMatrix4, to: SCNMatrix4, options: NSObject?) -> NSObject {
+        guard let root else { return NSMutableArray.empty() }
+        let mask = Int(SCNOptions.number(options, "SCNPhysicsTestCollisionBitMaskKey") ?? -1)
+        guard let hit = SCNCollision.sweep(shape, from: SCNVector3(x: from.m41, y: from.m42, z: from.m43), to: SCNVector3(x: to.m41, y: to.m42, z: to.m43),
+                                           root: root, collisionMask: mask) else { return NSMutableArray.empty() }
+        let contact = SCNPhysicsContact.objCClass.object.allocated().unsafeCast(to: SCNPhysicsContact.self)
+        contact.contact.nodeA = hit.node
+        contact.contact.point = hit.point
+        contact.contact.normal = hit.normal
+        contact.contact.fraction = CGFloat(hit.fraction)
+        return NSMutableArray.of([contact])
+    }
     @ObjCMethod("contactTestBetweenBody:andBody:options:")
     func contactTest(between a: NSObject, and b: NSObject, options: NSObject?) -> NSObject { NSMutableArray.empty() }
     @ObjCMethod("contactTestWithBody:options:") func contactTest(with body: NSObject, options: NSObject?) -> NSObject { NSMutableArray.empty() }
@@ -249,13 +266,13 @@ extension SCNScene {
 
 enum SCNRays {
     /// What a segment from `start` to `end` (in the scene) meets in the geometry below `root`, nearest first.
-    static func cast(_ root: SCNNode, from start: SCNVector3, to end: SCNVector3, all: Bool) -> [SCNHitState] {
+    static func cast(_ root: SCNNode, from start: SCNVector3, to end: SCNVector3, all: Bool, categoryMask: Int? = nil, ignoreHidden: Bool = true) -> [SCNHitState] {
         var found: [SCNHitState] = []
         func visit(_ node: SCNNode, parent: Matrix) {
             let state = node.node
-            guard !state.hidden else { return }
+            guard !state.hidden || !ignoreHidden else { return }
             let model = SCNMath.multiply(parent, state.local)
-            if let geometry = state.geometry {
+            if let geometry = state.geometry, categoryMask.map({ state.categoryBitMask & $0 != 0 }) ?? true {
                 let inverse = SCNMath.inverse(model)
                 let a = SCNMath.transform(inverse, start), b = SCNMath.transform(inverse, end)
                 if let hit = intersect(geometry.geometry, from: a, to: b) {
@@ -345,7 +362,9 @@ extension SCNNode {
         // In this node's space, and below it.
         let toScene = world
         let a = SCNMath.transform(toScene, start), b = SCNMath.transform(toScene, end)
-        return SCNRays.results(SCNRays.cast(self, from: a, to: b, all: true), as: SCNHitTestResult.self)
+        let mask = SCNOptions.number(options, "SCNHitTestCategoryBitMaskKey").map { Int($0) }
+        let hidden = SCNOptions.number(options, "SCNHitTestIgnoreHiddenNodesKey") ?? 1
+        return SCNRays.results(SCNRays.cast(self, from: a, to: b, all: true, categoryMask: mask, ignoreHidden: hidden != 0), as: SCNHitTestResult.self)
     }
 }
 
