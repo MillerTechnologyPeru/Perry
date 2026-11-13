@@ -239,7 +239,7 @@ final class SKRenderer {
 
     /// Draws the scene's frame at `width` by `height` pixels, the view's
     /// points times `scale`, and shows it in `layer`.
-    func draw(_ scene: SKScene, in view: SKView, scale: CGFloat, layer: CALayer, opaque: Bool) {
+    func draw(_ scene: SKScene, in view: SKView, scale: CGFloat, layer: CALayer, opaque: Bool, background drawsBackground: Bool = true) {
         let bounds = view.state.bounds.size
         let width = Int((bounds.width * scale).rounded()), height = Int((bounds.height * scale).rounded())
         guard width > 0, height > 0 else { return }
@@ -272,9 +272,11 @@ final class SKRenderer {
         // The scene's background over its own rectangle.
         let sceneSize = scene.node.sceneSize, anchor = scene.node.sceneAnchor
         let background = SKRenderer.components(scene.node.backgroundColor) ?? (0.15, 0.15, 0.15, 1)
-        quad(CGRect(x: -anchor.x * sceneSize.width, y: -anchor.y * sceneSize.height, width: sceneSize.width, height: sceneSize.height),
+        if drawsBackground {
+            quad(CGRect(x: -anchor.x * sceneSize.width, y: -anchor.y * sceneSize.height, width: sceneSize.width, height: sceneSize.height),
              matrix: sceneToClip, texture: white, nearest: false, coordinates: CGRect(x: 0, y: 0, width: 1, height: 1),
-             color: SKRenderer.premultiplied(background, alpha: 1))
+                 color: SKRenderer.premultiplied(background, alpha: 1))
+        }
 
         var visible: [(node: SKNode, matrix: CGAffineTransform, alpha: CGFloat, z: CGFloat)] = []
         collect(scene, parent: sceneToClip, alpha: 1, z: 0, isScene: true, into: &visible)
