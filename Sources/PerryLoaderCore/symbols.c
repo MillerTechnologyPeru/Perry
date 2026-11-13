@@ -275,6 +275,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MetalKit.framework/MetalKit                       -> UIKit
 //   …/SpriteKit.framework/SpriteKit                     -> UIKit
 //   …/SceneKit.framework/SceneKit                       -> UIKit
+//   …/GameplayKit.framework/GameplayKit                 -> UIKit
 //   /usr/lib/libAccessibility.dylib, …/Accessibility.framework/Accessibility -> UIKit
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
@@ -359,7 +360,7 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // images and filters.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/MetalKit.framework/") || strstr(install_name, "/SpriteKit.framework/") ||
-        strstr(install_name, "/SceneKit.framework/") ||
+        strstr(install_name, "/SceneKit.framework/") || strstr(install_name, "/GameplayKit.framework/") ||
         strstr(install_name, "/WebKit.framework/") || strcmp(install_name, "/usr/lib/libAccessibility.dylib") == 0 ||
         strstr(install_name, "/Accessibility.framework/") || strstr(install_name, "/Social.framework/") ||
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/AuthenticationServices.framework/") ||
@@ -834,7 +835,8 @@ static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
     static const char *const families[] = { "_NSUserActivityType", "_AVCaptureDeviceType", "_AVCaptureSessionPreset",
                                             "_ASAuthorizationScope", "_ASAuthorizationPublicKeyCredential",
-                                            "_SCNLightingModel", "_SCNLightType" };
+                                            "_SCNLightingModel", "_SCNLightType", "_SCNPhysicsTest", "_SCNPhysicsShape",
+                                            "_SCNHitTest", "_SCNShaderModifierEntryPoint", "_SCNSceneSource" };
     bool family = false;
     for (size_t i = 0; i < sizeof(families) / sizeof(families[0]) && !family; i++)
         family = strncmp(name, families[i], strlen(families[i])) == 0;
