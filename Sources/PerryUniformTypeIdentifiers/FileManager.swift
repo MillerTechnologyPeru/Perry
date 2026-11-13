@@ -62,11 +62,13 @@ enum FileRefs {
         return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
     }
 
+    /// A four-character code, as an OSType.
+    static func code(_ text: String) -> UInt32 { text.utf8.reduce(0) { $0 << 8 | UInt32($1) } }
+
     /// The folders FSFindFolder knows, by type, in the user's home as
     /// Foundation's search paths are: every domain's is the home's.
     static func folder(_ type: UInt32) -> String? {
         let home = getenv("HOME").map { String(cString: $0) } ?? "/"
-        func code(_ text: String) -> UInt32 { text.utf8.reduce(0) { $0 << 8 | UInt32($1) } }
         switch type {
         case code("pref"): return home + "/Library/Preferences"
         case code("asup"): return home + "/Library/Application Support"
@@ -77,6 +79,7 @@ enum FileRefs {
         case code("trsh"): return home + "/.Trash"
         case code("apps"): return home + "/Applications"
         case code("fnts"): return home + "/Library/Fonts"
+        case code("fram"): return home + "/Library/Frameworks"
         case code("logs"): return home + "/Library/Logs"
         case code("ssnd"): return home + "/Library/Sounds"
         case code("cusr"): return home
@@ -114,6 +117,15 @@ public func FSRefMakePath(_ ref: UnsafeRawPointer?, _ path: UnsafeMutablePointer
 /// createFolder, FSRef *foundRef): the folder, made first when asked.
 @c(_FSFindFolder)
 public func FSFindFolder(_ volume: Int16, _ type: UInt32, _ create: UInt8, _ ref: UnsafeMutableRawPointer?) -> Int16 {
+    // The system's Frameworks folder (kFrameworksFolderType in the system
+    // domain, on the system disk or on the appropriate disk): its frameworks
+    // are the providers', with no directories here, which CFBundle opens by
+    // path. Programs find System.framework there to look up libSystem's
+    // functions, as Feral's ports do free.
+    if let ref, type == FileRefs.code("fram"), [-32768, -32767, -32766].contains(volume) {
+        FileRefs.store("/System/Library/Frameworks", in: ref)
+        return noErr
+    }
     guard let ref, let folder = FileRefs.folder(type) else { return fnfErr }
     if !FileRefs.isDirectory(folder) {
         guard create != 0 else { return fnfErr }
