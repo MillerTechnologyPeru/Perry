@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // The system around the app: the pasteboard (SDL's clipboard, for text),
 // sounds (silent), the running application, and the workspace, which
@@ -33,7 +34,7 @@ open class NSPasteboard: NSObject {
     @ObjCMethod("clearContents")
     func clearContents() -> Int {
         changeCount += 1
-        if SDL.start() { _ = "".withCString { SDL.setClipboardText($0) } }
+        if SDLSession.start() { SDL.clipboardText = "" }
         return changeCount
     }
 
@@ -43,16 +44,16 @@ open class NSPasteboard: NSObject {
 
     @ObjCMethod("setString:forType:")
     func setString(_ string: String?, forType type: String?) -> Bool {
-        guard SDL.start() else { return false }
+        guard SDLSession.start() else { return false }
         changeCount += 1
-        return (string ?? "").withCString { SDL.setClipboardText($0) }
+        SDL.clipboardText = string ?? ""
+        return true
     }
 
     @ObjCMethod("stringForType:")
     func string(forType type: String?) -> String? {
-        guard SDL.start(), let text = SDL.getClipboardText() else { return nil }
-        defer { SDL.free(text) }
-        let string = String(cString: text)
+        guard SDLSession.start() else { return nil }
+        let string = SDL.clipboardText
         return string.isEmpty ? nil : string
     }
 
