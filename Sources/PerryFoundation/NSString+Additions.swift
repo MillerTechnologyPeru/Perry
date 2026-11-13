@@ -637,6 +637,22 @@ extension NSString {
         return self
     }
 
+    @ObjCClassMethod("stringWithContentsOfURL:usedEncoding:error:")
+    static func string(contentsOfURL url: NSURL?, used encoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
+        guard let url, url.url.isFileURL else {
+            error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 260, description: "The file couldn’t be opened.")
+            return nil
+        }
+        return string(contentsOfFile: FileManagers.path(url.url), usedEncoding: encoding, error: error)
+    }
+
+    @ObjCMethod("initWithContentsOfURL:usedEncoding:error:")
+    func initialize(contentsOfURL url: NSURL?, usedEncoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> Self? {
+        guard let decoded = Self.string(contentsOfURL: url, used: usedEncoding, error: error) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
     @ObjCMethod("initWithContentsOfURL:encoding:error:")
     func initialize(contentsOfURL url: NSURL?, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Self? {
         guard let decoded = Self.string(contentsOfURL: url, encoding: encoding, error: error) else { return nil }
