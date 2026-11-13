@@ -19,13 +19,17 @@ OSStatus darwin_AudioSessionSetActive(uint8_t active) DARWIN_SYMBOL(AudioSession
 OSStatus darwin_AudioSessionSetActive(uint8_t active) { return 0; }
 
 OSStatus darwin_AudioSessionSetProperty(uint32_t property, uint32_t size, const void *value) DARWIN_SYMBOL(AudioSessionSetProperty);
-OSStatus darwin_AudioSessionSetProperty(uint32_t property, uint32_t size, const void *value) { return 0; }
+OSStatus darwin_AudioSessionSetProperty(uint32_t property, uint32_t size, const void *value) {
+    perry_audio_trace("audio session: set '%c%c%c%c' (%u bytes)", property >> 24, property >> 16 & 0xff, property >> 8 & 0xff, property & 0xff, size);
+    return 0;
+}
 
 /// The output's rate and channels, no other audio playing, a short buffer
 /// and the speaker as the route; other properties aren't supported.
 OSStatus darwin_AudioSessionGetProperty(uint32_t property, uint32_t *size, void *value) DARWIN_SYMBOL(AudioSessionGetProperty);
 OSStatus darwin_AudioSessionGetProperty(uint32_t property, uint32_t *size, void *value) {
     if (!size || !value) return -50;
+    perry_audio_trace("audio session: get '%c%c%c%c'", property >> 24, property >> 16 & 0xff, property >> 8 & 0xff, property & 0xff);
     switch (property) {
     case FOURCC('c', 'h', 's', 'r'): {      // CurrentHardwareSampleRate
         double rate = 44100;

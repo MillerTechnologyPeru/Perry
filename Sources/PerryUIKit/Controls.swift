@@ -360,8 +360,10 @@ open class UIButton: UIControl {
         let title = current(button.titles).map { Text.size($0, font: titleLabel().font) } ?? .zero
         let image = current(button.images)?.state.size ?? .zero
         let insets = button.contentEdgeInsets
-        return CGSize(width: title.width + image.width + insets.left + insets.right + (button.type == 1 ? 0 : 0),
-                      height: max(title.height, image.height, 30) + insets.top + insets.bottom)
+        // A background image makes the button at least as large as itself.
+        let background = current(button.backgroundImages)?.state.size ?? .zero
+        return CGSize(width: max(title.width + image.width + insets.left + insets.right + (button.type == 1 ? 0 : 0), background.width),
+                      height: max(max(title.height, image.height, 30) + insets.top + insets.bottom, background.height))
     }
 
     @ObjCMethod("intrinsicContentSize") func intrinsicButtonSize() -> CGSize { sizeThatFits(.zero) }
@@ -1105,7 +1107,17 @@ open class UIScreen: NSObject {
 
     @ObjCClassMethod("screens") static func screens() -> NSObject { NSMutableArray.of([mainScreen()]) }
 
-    @ObjCMethod("bounds") func bounds() -> CGRect { Screen.bounds }
+    /// PERRY_UIKIT_SCREEN_BOUNDS_PORTRAIT: bounds are reported upright, as
+    /// iOS did before version 8, for a landscape app that exchanges their
+    /// sides itself.
+    private static let reportsPortrait = getenv("PERRY_UIKIT_SCREEN_BOUNDS_PORTRAIT") != nil
+
+    @ObjCMethod("bounds")
+    func bounds() -> CGRect {
+        guard UIScreen.reportsPortrait else { return Screen.bounds }
+        let size = Screen.bounds.size
+        return CGRect(x: 0, y: 0, width: min(size.width, size.height), height: max(size.width, size.height))
+    }
     /// The panel's pixels, which stay in portrait as the interface turns.
     @ObjCMethod("nativeBounds") func nativeBounds() -> CGRect {
         let size = Screen.bounds.size

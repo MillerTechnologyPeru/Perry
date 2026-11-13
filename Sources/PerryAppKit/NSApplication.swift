@@ -157,11 +157,13 @@ open class NSApplication: NSResponder {
                                                            ObjCRuntime.selector("_perryTypeScriptedText"), nil, 4)
         }
         running = true
-        let mode = "kCFRunLoopDefaultMode".objCArgument()
+        // Held for the loop: an autoreleased string would go with whichever
+        // pool outside it is drained first.
+        let mode = NSObject.string("kCFRunLoopDefaultMode")
         let future = NSDate.distantFuture()
         while running {
             ObjCRuntime.autoreleasepool {
-                if let event = Send.nextEvent(objcObject, mask: UInt64.max, until: future.objcObject, mode: mode, dequeue: true) {
+                if let event = Send.nextEvent(objcObject, mask: UInt64.max, until: future.objcObject, mode: mode.objcObject, dequeue: true) {
                     Send.void(objcObject, "sendEvent:", event)
                 }
                 Send.void(objcObject, "updateWindows")
@@ -213,6 +215,7 @@ open class NSApplication: NSResponder {
             activationPending = false
             activate(true)
         }
+        var ranLoop = false
         while true {
             Events.pump()
             while let index = queue.firstIndex(where: { $0.type.mask & mask != 0 }) {
@@ -226,12 +229,24 @@ open class NSApplication: NSResponder {
             }
             Windows.drawIfNeeded()
             let remaining = deadline - Clock.absolute
-            guard remaining > 0 else { return nil }
+            guard remaining > 0 else {
+                // A date already past (programs that poll pass distantPast)
+                // still has the run loop run once without waiting, as it is
+                // on a Mac: timers due, sources ready and blocks queued are
+                // handled, then events looked for again.
+                if ranLoop { return nil }
+                ranLoop = true
+                RunLoop.run(for: 0)
+                continue
+            }
+            ranLoop = true
             // Timers and the main queue, for a little while; a run loop with
-            // nothing to run returns at once, so the wait is a short sleep.
+            // nothing to run returns at once, so the wait is a short one for
+            // the main queue to have work (threads waiting in dispatch_sync
+            // for the main thread go on as soon as it's run).
             let start = Clock.now
             RunLoop.run(for: min(remaining, 0.004))
-            if Clock.now - start < 0.001 { usleep(UInt32(min(remaining, 0.002) * 1_000_000)) }
+            if Clock.now - start < 0.001 { Dispatch.waitForMainQueue(min(remaining, 0.002)) }
         }
     }
 
@@ -471,6 +486,14 @@ open class NSApplication: NSResponder {
     }
 }
 
+/// BOOL NSApplicationLoad(void): AppKit made ready for a program that
+/// runs its own event loop (Carbon's): the shared application, made.
+@c(_NSApplicationLoad)
+public func NSApplicationLoad() -> Bool {
+    if let cls = Classes.named("NSApplication") { _ = Send.object(cls.pointer, "sharedApplication") }
+    return true
+}
+
 /// int NSApplicationMain(int argc, const char *argv[]): the principal
 /// class's shared application, with the main nib loaded, run.
 @c(_NSApplicationMain)
@@ -510,6 +533,14 @@ public func NSApplicationMain(_ argc: Int32, _ argv: UnsafeMutablePointer<Unsafe
 /// NSBeep: nothing to hear.
 @c(_NSBeep)
 public func NSBeep() {}
+
+/// NSDisableScreenUpdates and NSEnableScreenUpdates: windows draw to the
+/// screen as each frame is done, so there are no updates to hold back.
+@c(_NSDisableScreenUpdates)
+public func NSDisableScreenUpdates() {}
+
+@c(_NSEnableScreenUpdates)
+public func NSEnableScreenUpdates() {}
 
 /// SIGTERM, SIGINT and SIGHUP end the app through -terminate:, as quitting
 /// does, on the main queue; a second one exits at once.

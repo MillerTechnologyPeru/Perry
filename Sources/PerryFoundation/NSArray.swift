@@ -36,12 +36,20 @@ enum Arrays {
             return Array(UnsafeBufferPointer(start: objects, count: count))
         }
         if let storage = storage(object) {
-            return storage.objects
+            // A subclass that keeps its elements itself, such as a protocol buffer's proxy for a field's array, has
+            // an empty storage and answers count and objectAtIndex: from its own: those are the array.
+            guard storage.objects.isEmpty, !overriding else { return storage.objects }
         }
         // Another library's array, such as Swift's: its count and elements.
         guard ObjC.overrides(object, Selectors.count, of: arrayClass) else { return [] }
+        overriding = true
+        defer { overriding = false }
         return (0..<ObjC.sendUInt(object, Selectors.count)).compactMap { ObjC.sendIndex(object, Selectors.objectAtIndex, $0) }
     }
+
+    /// Set while a subclass's count and objectAtIndex: are being asked for, so that their calls to super's
+    /// do not ask again.
+    nonisolated(unsafe) private static var overriding = false
 
     /// Fills `object` with `elements`, retaining each.
     static func initialize(_ object: id?, _ elements: [id]) -> id? {
@@ -218,6 +226,16 @@ public class NSArray: NSObject {
     @ObjCMethod("count")
     func count() -> UInt { UInt(elements.count) }
 
+    @ObjCMethod("getObjects:range:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, range: NSRange) {
+        let all = elements
+        guard Int(range.location + range.length) <= all.count else {
+            foundationFatal("-[NSArray getObjects:range:]: range {\(range.location), \(range.length)} extends beyond bounds [0 .. \(all.count - 1)]")
+        }
+        guard let buffer else { return }
+        for offset in 0..<Int(range.length) { buffer[offset] = all[Int(range.location) + offset] }
+    }
+
     @ObjCMethod("objectAtIndex:")
     func object(at index: UInt) -> ObjCObject {
         let all = elements
@@ -348,6 +366,15 @@ public class NSArray: NSObject {
 
     @ObjCMethod("sortedArrayWithOptions:usingComparator:")
     func sorted(options: UInt, comparator: ObjCBlock) -> NSArray { sorted(comparator: comparator) }
+
+    /// NSInteger (*)(id, id, void *): NSComparisonResult, ascending -1
+    /// first.
+    @ObjCMethod("sortedArrayUsingFunction:context:")
+    func sorted(function: UnsafeRawPointer?, context: UnsafeMutableRawPointer?) -> NSArray {
+        guard let function else { return Arrays.owned(elements) }
+        let compare = unsafeBitCast(function, to: (@convention(c) (id?, id?, UnsafeMutableRawPointer?) -> Int).self)
+        return Arrays.owned(elements.sorted { compare($0, $1, context) < 0 })
+    }
 
     /// A binary search of the range, which the comparator keeps sorted:
     /// with NSBinarySearchingInsertionIndex (1 << 10) where the object

@@ -29,6 +29,13 @@ enum Runtime {
     /// libSystem's errno conversion, for I/O handlers' errors.
     typealias ErrnoFromLinux = @convention(c) (Int32) -> Int32
     nonisolated(unsafe) static var darwinErrno: ErrnoFromLinux?
+    /// libSystem's perry_release_before_blocking and
+    /// perry_release_before_blocking_armed: what a thread lets go of
+    /// before it waits (an OpenGL context AppKit keeps bound to it).
+    typealias Hook = @convention(c) () -> Void
+    typealias Armed = @convention(c) () -> Int32
+    nonisolated(unsafe) static var releaseBeforeBlocking: Hook?
+    nonisolated(unsafe) static var releaseBeforeBlockingArmed: Armed?
     /// libSystem's dispatch_once and dispatch_once_f, which images that
     /// link libdispatch itself import from it.
     typealias Once = @convention(c) (UnsafeMutablePointer<Int>?, Pointer?) -> Void
@@ -58,6 +65,9 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Runtime.once = unsafeBitCast(once, to: Runtime.Once.self)
     Runtime.onceFunction = unsafeBitCast(onceFunction, to: Runtime.OnceFunction.self)
     Runtime.darwinErrno = symbol(libSystem, "perry_darwin_errno_from_linux").map { unsafeBitCast($0, to: Runtime.ErrnoFromLinux.self) }
+    Runtime.releaseBeforeBlocking = symbol(libSystem, "perry_release_before_blocking").map { unsafeBitCast($0, to: Runtime.Hook.self) }
+    Runtime.releaseBeforeBlockingArmed = symbol(libSystem, "perry_release_before_blocking_armed")
+        .map { unsafeBitCast($0, to: Runtime.Armed.self) }
     if let name = info.progname { Logging.programName = String(cString: name) }
     return true
 }

@@ -120,17 +120,20 @@ public class NSOrderedSet: NSObject {
     @ObjCClassMethod("orderedSetWithObject:")
     static func make(_ cls: ObjCClass, object: ObjCObject) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, [object.id]) }
 
+    /// Like the other collections' constructors, these take nil for no members.
     @ObjCClassMethod("orderedSetWithArray:")
-    static func make(_ cls: ObjCClass, array: ObjCObject) -> UnsafeMutableRawPointer? {
-        OrderedSets.make(cls.pointer, Arrays.elements(array.id))
+    static func make(_ cls: ObjCClass, array: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, Arrays.elements(array?.id))
     }
 
     @ObjCClassMethod("orderedSetWithSet:")
-    static func make(_ cls: ObjCClass, set: ObjCObject) -> UnsafeMutableRawPointer? { OrderedSets.make(cls.pointer, Sets.elements(set.id)) }
+    static func make(_ cls: ObjCClass, set: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, set.map { Sets.elements($0.id) } ?? [])
+    }
 
     @ObjCClassMethod("orderedSetWithOrderedSet:")
-    static func make(_ cls: ObjCClass, orderedSet: ObjCObject) -> UnsafeMutableRawPointer? {
-        OrderedSets.make(cls.pointer, OrderedSets.storage(orderedSet.id).members)
+    static func make(_ cls: ObjCClass, orderedSet: ObjCObject?) -> UnsafeMutableRawPointer? {
+        OrderedSets.make(cls.pointer, OrderedSets.storage(orderedSet?.id).members)
     }
 
     /// The members in a range of another ordered set. `copyItems` shares the
@@ -234,6 +237,56 @@ public class NSOrderedSet: NSObject {
             invoke(block.id, member, UInt(index), &stop)
             if stop { return }
         }
+    }
+
+    @ObjCMethod("isSubsetOfOrderedSet:")
+    func isSubset(ofOrderedSet other: ObjCObject?) -> Bool {
+        guard let other else { return storage.members.isEmpty }
+        let theirs = OrderedSets.storage(other.id)
+        return storage.members.allSatisfy { theirs.index(of: $0) != nil }
+    }
+
+    @ObjCMethod("intersectsOrderedSet:")
+    func intersects(orderedSet other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        let theirs = OrderedSets.storage(other.id)
+        return storage.members.contains { theirs.index(of: $0) != nil }
+    }
+
+    @ObjCMethod("isSubsetOfSet:")
+    func isSubset(ofSet other: ObjCObject?) -> Bool {
+        guard let other else { return storage.members.isEmpty }
+        let contains = ObjC.selector("containsObject:")
+        return storage.members.allSatisfy { ObjC.sendBool(other.id, contains, $0) }
+    }
+
+    @ObjCMethod("intersectsSet:")
+    func intersects(set other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        let contains = ObjC.selector("containsObject:")
+        return storage.members.contains { ObjC.sendBool(other.id, contains, $0) }
+    }
+
+    /// The first index whose member passes, or NSNotFound.
+    @ObjCMethod("indexOfObjectPassingTest:")
+    func index(ofObjectPassingTest block: ObjCObject) -> UInt {
+        index(options: 0, ofObjectPassingTest: block)
+    }
+
+    /// NSEnumerationOptions: reverse 2 searches from the end; concurrent
+    /// searching is done in order.
+    @ObjCMethod("indexOfObjectWithOptions:passingTest:")
+    func index(options: UInt, ofObjectPassingTest block: ObjCObject) -> UInt {
+        typealias Invoke = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let members = storage.members
+        let order = options & 2 != 0 ? Array(members.indices.reversed()) : Array(members.indices)
+        for index in order {
+            var stop = false
+            if invoke(block.id, members[index], UInt(index), &stop) { return UInt(index) }
+            if stop { break }
+        }
+        return notFound
     }
 
     @ObjCMethod("description")

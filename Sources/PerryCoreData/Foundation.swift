@@ -73,6 +73,22 @@ class NSSet: NSObject {
     @ObjCMethod("count") func count() -> UInt
 }
 
+@ObjCWrapper("NSOrderedSet")
+class NSOrderedSet: NSObject {
+    @ObjCMethod("array") func array() -> NSArray
+}
+
+extension NSObject {
+    /// The members of a set, an ordered set (in its order) or an array: what
+    /// a to-many relationship is set to. Nil for anything else.
+    var collectionMembers: [NSObject]? {
+        if self.is(NSSet.self) { return unsafeCast(to: NSSet.self).allObjects().elements }
+        if self.is(NSOrderedSet.self) { return unsafeCast(to: NSOrderedSet.self).array().elements }
+        if self.is(NSArray.self) { return unsafeCast(to: NSArray.self).elements }
+        return nil
+    }
+}
+
 @ObjCWrapper("NSMutableSet")
 class NSMutableSet: NSSet {
     @ObjCClassMethod("set") static func empty() -> Self

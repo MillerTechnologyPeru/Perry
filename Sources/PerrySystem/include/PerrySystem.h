@@ -89,6 +89,42 @@ int *darwin_error(void) DARWIN_SYMBOL(__error);
 // Linux's number for a Darwin signal, or -1 where Linux has none.
 int perry_signal_to_linux(int signal);
 
+// What a thread lets go of before it blocks (pthread.c). AppKit keeps an
+// OpenGL context bound to a thread after the thread lets go of it, for
+// programs that make theirs current around every batch of drawing; another
+// thread can only have it once that one lets go of it in EGL, which it does
+// before it waits: in the pthread conditions' and Mach semaphores' waits
+// here (once a short wait has shown that it would block) and in
+// libdispatch's.
+//
+// perry_set_release_before_blocking: the one hook, run on the blocking
+// thread. perry_arm_release_before_blocking: whether this thread has
+// something to let go of. perry_release_before_blocking: runs the hook if
+// so, once until armed again. perry_release_before_blocking_armed: whether
+// it would.
+void perry_set_release_before_blocking(void (*hook)(void));
+void perry_arm_release_before_blocking(int armed);
+void perry_release_before_blocking(void);
+int perry_release_before_blocking_armed(void);
+
+// The short wait before letting go: 2 ms from now, or `deadline` if sooner,
+// on CLOCK_REALTIME; whether that is `deadline`.
+int perry_release_grace(const struct timespec *deadline, struct timespec *soon);
+
+// A thread's pthread_t as Darwin code has it, and glibc's for one Darwin code
+// gives. On x86 they differ: Darwin's pthread_cleanup_push and _pop are
+// macros compiled into apps, which link their handlers through the word
+// after `sig` in Darwin's struct _opaque_pthread_t, and that word of glibc's
+// pthread_t is its thread's DTV there. Elsewhere they are the same.
+#include <pthread.h>
+#if defined(__i386__) || defined(__x86_64__)
+pthread_t perry_pthread_to_darwin(pthread_t thread);
+pthread_t perry_pthread_to_linux(pthread_t thread);
+#else
+static inline pthread_t perry_pthread_to_darwin(pthread_t thread) { return thread; }
+static inline pthread_t perry_pthread_to_linux(pthread_t thread) { return thread; }
+#endif
+
 // A section's header in a Mach-O image's load commands (section_64).
 struct darwin_section_64 {
     char sectname[16], segname[16];

@@ -126,7 +126,7 @@ int darwin_kill(pid_t pid, int signal) {
 int darwin_pthread_kill(pthread_t thread, int signal) DARWIN_SYMBOL(pthread_kill);
 int darwin_pthread_kill(pthread_t thread, int signal) {
     int linux_signal = perry_signal_to_linux(signal);
-    return linux_signal < 0 ? EINVAL : pthread_kill(thread, linux_signal);
+    return linux_signal < 0 ? EINVAL : pthread_kill(perry_pthread_to_linux(thread), linux_signal);
 }
 
 // MARK: - Threads
@@ -137,7 +137,7 @@ void *darwin_pthread_get_stackaddr_np(pthread_t thread) {
     pthread_attr_t attributes;
     void *bottom = NULL;
     size_t size = 0;
-    if (pthread_getattr_np(thread, &attributes) == 0) {
+    if (pthread_getattr_np(perry_pthread_to_linux(thread), &attributes) == 0) {
         pthread_attr_getstack(&attributes, &bottom, &size);
         pthread_attr_destroy(&attributes);
     }
@@ -149,7 +149,7 @@ size_t darwin_pthread_get_stacksize_np(pthread_t thread) {
     pthread_attr_t attributes;
     void *bottom = NULL;
     size_t size = 0;
-    if (pthread_getattr_np(thread, &attributes) == 0) {
+    if (pthread_getattr_np(perry_pthread_to_linux(thread), &attributes) == 0) {
         pthread_attr_getstack(&attributes, &bottom, &size);
         pthread_attr_destroy(&attributes);
     }
@@ -1509,9 +1509,29 @@ int darwin_fesetenv(const darwin_fenv *environment) {
     return 0;
 }
 
-/// math.h's isfinite of a float, as its macro calls it.
-int darwin_isfinitef(float value) DARWIN_SYMBOL(__isfinitef);
-int darwin_isfinitef(float value) { return __builtin_isfinite(value); }
+// math.h's classification macros, as older SDKs compile them: calls to
+// these for each type. A long double's is the only argument, so the
+// difference between Darwin's i386 long double (16 bytes on the stack) and
+// glibc's (12) doesn't move it.
+#define CLASSIFIER(name, type, test) \
+    DARWIN_FLOAT_ABI int darwin_##name(type value) DARWIN_SYMBOL(name); \
+    int darwin_##name(type value) { return test(value) != 0; }
+CLASSIFIER(__isfinitef, float, __builtin_isfinite)
+CLASSIFIER(__isfinited, double, __builtin_isfinite)
+CLASSIFIER(__isfinitel, long double, __builtin_isfinite)
+CLASSIFIER(__isinff, float, __builtin_isinf)
+CLASSIFIER(__isinfd, double, __builtin_isinf)
+CLASSIFIER(__isinfl, long double, __builtin_isinf)
+CLASSIFIER(__isnanf, float, __builtin_isnan)
+CLASSIFIER(__isnand, double, __builtin_isnan)
+CLASSIFIER(__isnanl, long double, __builtin_isnan)
+CLASSIFIER(__isnormalf, float, __builtin_isnormal)
+CLASSIFIER(__isnormald, double, __builtin_isnormal)
+CLASSIFIER(__isnormall, long double, __builtin_isnormal)
+CLASSIFIER(__signbitf, float, __builtin_signbit)
+CLASSIFIER(__signbitd, double, __builtin_signbit)
+CLASSIFIER(__signbitl, long double, __builtin_signbit)
+#undef CLASSIFIER
 
 // MARK: - System calls by number
 

@@ -15,6 +15,7 @@ enum Notifications {
     static let UIApplicationWillTerminateNotification = "UIApplicationWillTerminateNotification"
     static let UIApplicationDidReceiveMemoryWarningNotification = "UIApplicationDidReceiveMemoryWarningNotification"
     static let UIApplicationSignificantTimeChangeNotification = "UIApplicationSignificantTimeChangeNotification"
+    static let UIApplicationUserDidTakeScreenshotNotification = "UIApplicationUserDidTakeScreenshotNotification"
     static let UIApplicationProtectedDataWillBecomeUnavailable = "UIApplicationProtectedDataWillBecomeUnavailable"
     static let UIApplicationProtectedDataDidBecomeAvailable = "UIApplicationProtectedDataDidBecomeAvailable"
     static let UIApplicationDidChangeStatusBarOrientationNotification = "UIApplicationDidChangeStatusBarOrientationNotification"
@@ -286,4 +287,28 @@ enum StoreKitConstants {
     static let SKAdNetworkCoarseConversionValueHigh = "high"
     static let SKAdNetworkCoarseConversionValueMedium = "medium"
     static let SKAdNetworkCoarseConversionValueLow = "low"
+}
+
+/// UIAccessibility's notification names and the keys and attributes for
+/// announcements.
+@ObjCConstants
+enum AccessibilityConstants {
+    static let UIAccessibilityVoiceOverStatusDidChangeNotification = "UIAccessibilityVoiceOverStatusDidChangeNotification"
+    static let UIAccessibilityVoiceOverStatusChanged = "UIAccessibilityVoiceOverStatusDidChangeNotification"
+    static let UIAccessibilityBoldTextStatusDidChangeNotification = "UIAccessibilityBoldTextStatusDidChangeNotification"
+    static let UIAccessibilityDarkerSystemColorsStatusDidChangeNotification = "UIAccessibilityDarkerSystemColorsStatusDidChangeNotification"
+    static let UIAccessibilityInvertColorsStatusDidChangeNotification = "UIAccessibilityInvertColorsStatusDidChangeNotification"
+    static let UIAccessibilityReduceMotionStatusDidChangeNotification = "UIAccessibilityReduceMotionStatusDidChangeNotification"
+    static let UIAccessibilityReduceTransparencyStatusDidChangeNotification = "UIAccessibilityReduceTransparencyStatusDidChangeNotification"
+    static let UIAccessibilitySwitchControlStatusDidChangeNotification = "UIAccessibilitySwitchControlStatusDidChangeNotification"
+    static let UIAccessibilityElementFocusedNotification = "UIAccessibilityElementFocusedNotification"
+    static let UIAccessibilityAnnouncementDidFinishNotification = "UIAccessibilityAnnouncementDidFinishNotification"
+    static let UIAccessibilityAnnouncementKeyStringValue = "UIAccessibilityAnnouncementKeyStringValue"
+    static let UIAccessibilityNotificationVoiceOverIdentifier = "UIAccessibilityNotificationVoiceOverIdentifier"
+    static let UIAccessibilityPageScrolledNotification = "UIAccessibilityPageScrolledNotification"
+    static let UIAccessibilityPriorityHigh = "UIAccessibilityPriorityHigh"
+    static let UIAccessibilityPriorityLow = "UIAccessibilityPriorityLow"
+    static let UIAccessibilitySpeechAttributeAnnouncementPriority = "UIAccessibilitySpeechAttributeAnnouncementPriority"
+    static let UIAccessibilitySpeechAttributeLanguage = "UIAccessibilitySpeechAttributeLanguage"
+    static let UIAccessibilitySpeechAttributeQueueAnnouncement = "UIAccessibilitySpeechAttributeQueueAnnouncement"
 }

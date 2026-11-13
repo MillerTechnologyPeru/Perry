@@ -80,6 +80,14 @@ final class WPE: @unchecked Sendable {
     let viewBackendDispatchPointerEvent: @convention(c) (Pointer, UnsafeRawPointer) -> Void
     let viewBackendDispatchAxisEvent: @convention(c) (Pointer, UnsafeRawPointer) -> Void
     let viewBackendDispatchKeyboardEvent: @convention(c) (Pointer, UnsafeRawPointer) -> Void
+    // Messages from the web process extension (PerryWebExtension), and
+    // their replies.
+    let userMessageGetName: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let userMessageGetParameters: @convention(c) (Pointer) -> Pointer?
+    let userMessageNew: @convention(c) (UnsafePointer<CChar>, Pointer?) -> Pointer?
+    let userMessageSendReply: @convention(c) (Pointer, Pointer) -> Void
+    let variantNewString: @convention(c) (UnsafePointer<CChar>) -> Pointer?
+    let variantGetString: @convention(c) (Pointer, UnsafeMutablePointer<Int>?) -> UnsafePointer<CChar>?
     // GLib and GObject.
     let mainContextIteration: @convention(c) (Pointer?, Int32) -> Int32
     let signalConnectData: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt
@@ -206,6 +214,15 @@ final class WPE: @unchecked Sendable {
         errorFree = bind(glib, "g_error_free", (@convention(c) (Pointer) -> Void).self)
         quarkToString = bind(glib, "g_quark_to_string", (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
         paramSpecGetName = bind(gobject, "g_param_spec_get_name", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        userMessageGetName = bind(webkit, "webkit_user_message_get_name", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        userMessageGetParameters = bind(webkit, "webkit_user_message_get_parameters", (@convention(c) (Pointer) -> Pointer?).self)
+        userMessageNew = bind(webkit, "webkit_user_message_new", (@convention(c) (UnsafePointer<CChar>, Pointer?) -> Pointer?).self)
+        userMessageSendReply = bind(webkit, "webkit_user_message_send_reply", (@convention(c) (Pointer, Pointer) -> Void).self)
+        variantNewString = bind(glib, "g_variant_new_string", (@convention(c) (UnsafePointer<CChar>) -> Pointer?).self)
+        variantGetString = bind(glib, "g_variant_get_string", (@convention(c) (Pointer, UnsafeMutablePointer<Int>?) -> UnsafePointer<CChar>?).self)
+        let contextGetDefault = bind(webkit, "webkit_web_context_get_default", (@convention(c) () -> Pointer?).self)
+        let setExtensionsDirectory = bind(webkit, "webkit_web_context_set_web_process_extensions_directory",
+                                          (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
         guard missing.isEmpty else {
             WPE.log("WPE WebKit is incomplete (no \(missing.joined(separator: ", "))); web views load nothing")
             return nil
@@ -214,9 +231,35 @@ final class WPE: @unchecked Sendable {
             WPE.log("WPEBackend-fdo did not initialize; web views load nothing")
             return nil
         }
+        // The web process extension, beside AppKit's provider in
+        // webkit-extensions, before the first page's web process starts.
+        if let directory = WPE.extensionsDirectory, let context = contextGetDefault() {
+            directory.withCString { setExtensionsDirectory(context, $0) }
+        }
     }
 
     private static let missingFunction: @convention(c) () -> Void = {}
+
+    /// Whether PerryWebExtension is there for pages to call the app's
+    /// objects through.
+    static var hasWebExtension: Bool { shared != nil && extensionsDirectory != nil }
+
+    /// webkit-extensions beside this provider, if PerryWebExtension is there.
+    private static var extensionsDirectory: String? {
+        // This provider's file, as the process maps it.
+        guard let maps = fopen("/proc/self/maps", "r") else { return nil }
+        defer { fclose(maps) }
+        var line = [CChar](repeating: 0, count: 4096)
+        var path: String?
+        while path == nil, fgets(&line, Int32(line.count), maps) != nil {
+            let text = String(cString: line)
+            guard text.contains("/libPerryAppKit.so"), let start = text.firstIndex(of: "/") else { continue }
+            path = String(text[start...].filter { $0 != "\n" })
+        }
+        guard let path, let slash = path.lastIndex(of: "/") else { return nil }
+        let directory = String(path[..<slash]) + "/webkit-extensions"
+        return access(directory + "/libPerryWebExtension.so", R_OK) == 0 ? directory : nil
+    }
 
     /// Runs what GLib's main context has ready: WPE's replies, signals and
     /// frames.
@@ -265,6 +308,9 @@ final class WebPage {
     /// A property of the page's changed, by WebKit's name: title, uri,
     /// is-loading, estimated-load-progress.
     var propertyChanged: ((String) -> Void)?
+    /// A message from the web process extension, by name with its JSON,
+    /// answered with JSON: a script calling an object of the app's.
+    var extensionMessage: ((String, String) -> String?)?
     /// Whether a navigation to a URI goes ahead, with its
     /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
     /// every navigation go ahead.
@@ -301,6 +347,8 @@ final class WebPage {
         handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "load-failed", unsafeBitCast(WebPage.onLoadFailed, to: UnsafeRawPointer.self), data, nil, 0))
         handlers.append(wpe.signalConnectData(view, "decide-policy", unsafeBitCast(WebPage.onDecidePolicy, to: UnsafeRawPointer.self), data, nil, 0))
+        handlers.append(wpe.signalConnectData(view, "user-message-received", unsafeBitCast(WebPage.onUserMessage, to: UnsafeRawPointer.self),
+                                              data, nil, 0))
         for property in ["title", "uri", "is-loading", "estimated-load-progress"] {
             handlers.append(wpe.signalConnectData(view, "notify::\(property)", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self),
                                                   data, nil, 0))
@@ -483,6 +531,7 @@ final class WebPage {
     /// something else keeps the page: its frames and events go nowhere.
     func detach() {
         (frame, loadChanged, loadFailed, propertyChanged, decideNavigation, scriptMessage) = (nil, nil, nil, nil, nil, nil)
+        extensionMessage = nil
         decideNavigationLater = nil
     }
 
@@ -666,6 +715,23 @@ final class WebPage {
         let stride = Int(wpe.shmBufferGetStride(shm))
         guard width > 0, height > 0, let data = wpe.shmBufferGetData(shm) else { return }
         frame?(data, width, height, stride)
+    }
+
+    /// user-message-received: the view and the message; true when it is
+    /// the extension's and is answered.
+    private static let onUserMessage: @convention(c) (Pointer?, Pointer?, Pointer?) -> Int32 = { _, message, data in
+        guard let data, let message else { return 0 }
+        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
+        let wpe = page.wpe
+        guard let name = wpe.userMessageGetName(message).map({ String(cString: $0) }), name.hasPrefix("perry."),
+              let handle = page.extensionMessage else { return 0 }
+        let json = wpe.userMessageGetParameters(message).flatMap { wpe.variantGetString($0, nil) }.map { String(cString: $0) } ?? "{}"
+        let reply = handle(name, json) ?? "null"
+        if let parameters = reply.withCString({ wpe.variantNewString($0) }),
+           let answer = name.withCString({ wpe.userMessageNew($0, parameters) }) {
+            wpe.userMessageSendReply(message, answer)
+        }
+        return 1
     }
 
     private static let onLoadChanged: @convention(c) (Pointer?, Int32, Pointer?) -> Void = { _, event, data in

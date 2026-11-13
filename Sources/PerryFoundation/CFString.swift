@@ -8,6 +8,7 @@ import PerryObjCInterop
 @ObjCConstants
 enum StringTransforms {
     static let kCFStringTransformToXMLHex = "Any-Hex/XML"
+    static let kCFStringTransformStripDiacritics = "NFD; [:Nonspacing Mark:] Remove; NFC"
 }
 
 /// CFIndex CFStringGetLength(CFStringRef): UTF-16 units, as NSString counts.

@@ -8,9 +8,10 @@ import PerryObjCInterop
 // parsed from bytes as they arrive (CFHTTPMessageAppendBytes, as a server
 // reads a request), and serialized as HTTP/1.1.
 //
-// HTTP read streams (CFReadStreamCreateForHTTPRequest) aren't made yet:
-// creating one fails, as it does without a network, and apps report the
-// request as failed.
+// HTTP read streams (CFReadStreamCreateForHTTPRequest) don't send their
+// requests yet: each is a stream that fails as it opens, as one does
+// without a network, telling its client, and apps report the request as
+// failed.
 
 /// A message's state.
 final class HTTPMessage {
@@ -207,7 +208,7 @@ enum HTTPMessages {
     nonisolated(unsafe) private static var said: Set<String> = []
     static func unsupported(_ function: String) {
         guard said.insert(function).inserted else { return }
-        let line = "perry: CFNetwork: \(function) isn't supported; the request fails\n"
+        let line = "perry: CFNetwork: \(function) don't send requests yet; they fail as with no network\n"
         _ = line.withCString { write(2, $0, strlen($0)) }
     }
 
@@ -381,15 +382,19 @@ public func CFHTTPMessageAddAuthentication(_ request: UnsafeMutableRawPointer?, 
 
 @c(_CFReadStreamCreateForHTTPRequest)
 public func CFReadStreamCreateForHTTPRequest(_ allocator: UnsafeRawPointer?, _ request: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    HTTPMessages.unsupported("CFReadStreamCreateForHTTPRequest")
-    return nil
+    typealias Create = @convention(c) () -> UnsafeMutableRawPointer?
+    HTTPMessages.unsupported("HTTP read streams")
+    guard request != nil, let lookup = providerSymbolLookup,
+          let create = "/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation".withCString({ library in
+              "_perry_CFReadStreamCreateUnreachable".withCString { lookup(library, $0) }
+          }) else { return nil }
+    return unsafeBitCast(create, to: Create.self)()
 }
 
 @c(_CFReadStreamCreateForStreamedHTTPRequest)
 public func CFReadStreamCreateForStreamedHTTPRequest(_ allocator: UnsafeRawPointer?, _ request: UnsafeMutableRawPointer?,
                                                      _ body: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
-    HTTPMessages.unsupported("CFReadStreamCreateForStreamedHTTPRequest")
-    return nil
+    return CFReadStreamCreateForHTTPRequest(allocator, request)
 }
 
 // MARK: - Constants
@@ -411,6 +416,9 @@ enum HTTPStreamProperties {
     static let kCFStreamPropertyHTTPFinalURL = "kCFStreamPropertyHTTPFinalURL"
     static let kCFStreamPropertyHTTPFinalRequest = "kCFStreamPropertyHTTPFinalRequest"
     static let kCFStreamPropertyHTTPProxy = "kCFStreamPropertyHTTPProxy"
+    // kCFNetworkProxiesHTTPProxy and kCFNetworkProxiesHTTPPort, as Darwin has them.
+    static let kCFStreamPropertyHTTPProxyHost = "HTTPProxy"
+    static let kCFStreamPropertyHTTPProxyPort = "HTTPPort"
     static let kCFStreamPropertyHTTPShouldAutoredirect = "kCFStreamPropertyHTTPShouldAutoredirect"
     static let kCFStreamPropertyHTTPAttemptPersistentConnection = "kCFStreamPropertyHTTPAttemptPersistentConnection"
     static let kCFStreamPropertyHTTPRequestBytesWrittenCount = "kCFStreamPropertyHTTPRequestBytesWrittenCount"

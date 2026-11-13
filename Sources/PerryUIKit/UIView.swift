@@ -564,6 +564,10 @@ open class UIView: UIResponder, UICoordinateSpace {
 
     @ObjCMethod("setContentScaleFactor:")
     func setContentScaleFactor(_ scale: CGFloat) {
+        // A scale that is not positive leaves the view's as it is: a game
+        // that passes zero for "the screen's" (BioShock) would otherwise
+        // have a layer with no pixels.
+        guard scale > 0 else { return }
         state.geometry.contentsScale = scale
         state.geometry.needsDisplay = true
     }
@@ -579,6 +583,15 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setContentMode:") func setContentMode(_ mode: Int) { state.contentMode = mode }
     @ObjCMethod("semanticContentAttribute") func semanticContentAttribute() -> Int { state.semanticContentAttribute }
     @ObjCMethod("setSemanticContentAttribute:") func setSemanticContentAttribute(_ attribute: Int) { state.semanticContentAttribute = attribute }
+    /// The direction a semantic content attribute lays out in: only force right to left (4) is right to left, as the system language is left to right.
+    @ObjCClassMethod("userInterfaceLayoutDirectionForSemanticContentAttribute:")
+    static func userInterfaceLayoutDirection(_ cls: ObjCClass, forSemanticContentAttribute attribute: Int) -> Int { attribute == 4 ? 1 : 0 }
+
+    @ObjCClassMethod("userInterfaceLayoutDirectionForSemanticContentAttribute:relativeToLayoutDirection:")
+    static func userInterfaceLayoutDirection(_ cls: ObjCClass, forSemanticContentAttribute attribute: Int, relativeTo direction: Int) -> Int {
+        attribute == 3 ? 0 : attribute == 4 ? 1 : direction
+    }
+
     @ObjCMethod("effectiveUserInterfaceLayoutDirection") func effectiveUserInterfaceLayoutDirection() -> Int { state.semanticContentAttribute == 4 ? 1 : 0 }
     @ObjCMethod("autoresizingMask") func autoresizingMask() -> UInt { state.autoresizingMask }
     @ObjCMethod("setAutoresizingMask:") func setAutoresizingMask(_ mask: UInt) { state.autoresizingMask = mask }

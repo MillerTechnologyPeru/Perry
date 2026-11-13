@@ -198,6 +198,15 @@ public final class CompiledAssetCatalog {
         return (dark ? ["~dark", ""] : [""]).flatMap { variant in scales.map { (extracted + "/\(name)\(variant)@\($0)x.png", $0) } }
     }
 
+    /// The file Scripts/extract-assets.sh wrote for a named data set (what
+    /// NSDataAsset reads), if there is one: data/<name> beside the catalog.
+    public func extractedDataFile(named name: String) -> String? {
+        guard !name.isEmpty, !name.contains(".."), !name.hasPrefix("/") else { return nil }
+        let path = extracted + "/data/" + name
+        var info = stat()
+        return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG ? path : nil
+    }
+
     /// A file's bytes; nil for directories and missing files.
     static func read(_ path: String) -> [UInt8]? {
         var info = stat()

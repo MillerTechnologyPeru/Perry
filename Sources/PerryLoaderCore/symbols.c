@@ -217,6 +217,7 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define QUARTZCORE "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
 #define MAPKIT "/System/Library/Frameworks/MapKit.framework/MapKit"
 #define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+#define APPKIT "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
@@ -234,6 +235,30 @@ static const struct {
     {"MapKitAppKit", MAPKIT},
 };
 
+// Re-exports a provider has for the install name it was found under, where
+// it shares its library with others. ApplicationServices is CoreGraphics'
+// here, and Core Text, one of its subframeworks, AppKit's: Mac apps bind
+// CTFont and CTLine to ApplicationServices.
+static void reexport_for_install_name(perry_provider *provider, const char *install_name) {
+#if defined(__i386__) || defined(__x86_64__)
+    bool application_services = strstr(install_name, "/ApplicationServices.framework/") != NULL;
+    size_t count = sizeof(provider->reexports) / sizeof(provider->reexports[0]);
+    // Another install name of the library, which copied this one's, has
+    // only the library's own.
+    for (size_t i = 0; i < count; i++)
+        if (provider->reexports[i] && strcmp(provider->reexports[i], APPKIT) == 0)
+            provider->reexports[i] = NULL;
+    for (size_t i = 0; application_services && i < count; i++)
+        if (!provider->reexports[i]) {
+            provider->reexports[i] = APPKIT;
+            break;
+        }
+#else
+    (void)provider;
+    (void)install_name;
+#endif
+}
+
 // Sets up a provider just found under `short_name`: its re-exports and the
 // libraries it needs.
 static void link_provider(perry_loader *loader, perry_provider *provider, const char *short_name) {
@@ -247,6 +272,14 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
     if (strcmp(short_name, "Foundation") == 0) {
         provider->reexports[0] = CFNETWORK;
         provider->reexports[1] = LIBOBJC;
+    }
+    // CoreServices re-exports CFNetwork, which is one of its subframeworks:
+    // programs linked against older SDKs bind CFHTTPMessage, CFReadStream
+    // for HTTP and CFNetService to CoreServices. CFNetwork's socket streams'
+    // SSL settings keys are Foundation's here, with its streams.
+    if (strcmp(short_name, "UniformTypeIdentifiers") == 0) {
+        provider->reexports[0] = CFNETWORK;
+        provider->reexports[1] = COREFOUNDATION;
     }
     // A Mac app's MapKit has its views from AppKit's MapKit provider and the
     // rest from iOS apps' MapKit provider.
@@ -338,8 +371,9 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     }
 #if !defined(__arm__)
     // A Mac app's WebKit (a versioned framework) is AppKit's: its web views
-    // are NSViews. perry32 runs only iOS apps and has no AppKit.
-    if (strstr(install_name, "/WebKit.framework/Versions/")) {
+    // are NSViews. So is its Core Text, whose fonts are NSFonts. The armv7
+    // loader runs only iOS apps and has no AppKit.
+    if (strstr(install_name, "/WebKit.framework/Versions/") || strstr(install_name, "/CoreText.framework/Versions/")) {
         snprintf(out, out_size, "AppKit");
         return true;
     }
@@ -349,6 +383,11 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
+    // A Mac app's Core Image has no provider: Core Image is UIKit's, whose
+    // classes AppKit's would collide with, so a Mac app finds it missing,
+    // as one that links it weakly can.
+    if (strstr(install_name, "/CoreImage.framework/Versions/"))
+        return false;
 #endif
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
     // MetalKit's views over QuartzCore's Metal layers, SpriteKit's scenes
@@ -483,6 +522,7 @@ perry_provider *perry_find_provider(perry_loader *loader, const char *install_na
             provider->base = other->base;
             provider->symbol = other->symbol;
             memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
+            reexport_for_install_name(provider, install_name);
             return provider;
         }
     }
@@ -514,6 +554,7 @@ retry:
                 provider->base = other->base;
                 provider->symbol = other->symbol;
                 memcpy(provider->reexports, other->reexports, sizeof(provider->reexports));
+                reexport_for_install_name(provider, install_name);
                 return provider;
             }
         }
@@ -541,6 +582,10 @@ retry:
             provider->symbol = (void *(*)(const char *))hook;
         perry_trace(PERRY_TRACE_LOAD, "provider %s for %s", path, install_name);
         link_provider(loader, provider, short_name);
+        reexport_for_install_name(provider, install_name);
+        // One loaded while the program runs (dlsym on a library's handle)
+        // starts as those loaded before it did.
+        perry_start_late_providers(loader);
         return provider;
     }
     if (metal) {

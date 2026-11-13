@@ -70,6 +70,8 @@ int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, v
     int error = pthread_create(thread, attributes, start, call);
     if (error)
         free(call);
+    else if (thread)
+        *thread = perry_pthread_to_darwin(*thread);
     return perry_darwin_errno_from_linux(error);
 }
 

@@ -144,27 +144,36 @@ enum Format {
             }
             defer { if positional { arguments = sequential } }
 
-            var spec = "%"
-            while index < bytes.count, "-+ #0'".utf8.contains(bytes[index]) {
-                spec.append(Character(UnicodeScalar(bytes[index])))
-                index += 1
-            }
-            func number() {
+            func number(into text: inout String) {
                 if index < bytes.count, bytes[index] == UInt8(ascii: "*") {
-                    spec += String(Int32(truncatingIfNeeded: arguments.next()))
+                    text += String(Int32(truncatingIfNeeded: arguments.next()))
                     index += 1
                     return
                 }
                 while index < bytes.count, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[index]) {
-                    spec.append(Character(UnicodeScalar(bytes[index])))
+                    text.append(Character(UnicodeScalar(bytes[index])))
                     index += 1
                 }
             }
-            number()
+            // Flags may come after the width too, as BSD's printf takes
+            // them ("%10#llx"): gathered, and put first for the C library.
+            var flags = "", width = ""
+            while index < bytes.count {
+                let byte = bytes[index]
+                if "-+ #'".utf8.contains(byte) || (byte == UInt8(ascii: "0") && width.isEmpty) {
+                    flags.append(Character(UnicodeScalar(byte)))
+                    index += 1
+                } else if width.isEmpty, byte == UInt8(ascii: "*") || (UInt8(ascii: "1")...UInt8(ascii: "9")).contains(byte) {
+                    number(into: &width)
+                } else {
+                    break
+                }
+            }
+            var spec = "%" + flags + width
             if index < bytes.count, bytes[index] == UInt8(ascii: ".") {
                 spec += "."
                 index += 1
-                number()
+                number(into: &spec)
             }
             var length = ""
             while index < bytes.count, "hlqLzjt".utf8.contains(bytes[index]) {

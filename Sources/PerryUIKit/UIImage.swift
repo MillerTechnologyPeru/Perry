@@ -106,6 +106,9 @@ open class UIImage: NSObject {
         return image
     }
 
+    /// Images are left to right here, so there is nothing to flip.
+    @ObjCMethod("imageFlippedForRightToLeftLayoutDirection") func imageFlippedForRightToLeftLayoutDirection() -> UIImage { self }
+
     @ObjCMethod("images") func images() -> NSObject? {
         state.frames.isEmpty ? nil : NSMutableArray.of(state.frames.map { NSObject($0) })
     }

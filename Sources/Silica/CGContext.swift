@@ -202,13 +202,15 @@ public extension CGContext {
     // MARK: Saving and Restoring the Graphics State
 
     /// Pushes a copy of the current graphics state onto the graphics state stack for the context.
+    /// A context the backend has put in an error (by a transform that cannot be inverted, say)
+    /// ignores it, as CoreGraphics ignores drawing it cannot do.
     func saveGState() {
-        try! save()
+        try? save()
     }
 
     /// Sets the current graphics state to the state most recently saved.
     func restoreGState() {
-        try! restore()
+        try? restore()
     }
 
     // MARK: Graphics State Attributes

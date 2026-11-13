@@ -58,11 +58,15 @@ mach_port_t darwin_mach_thread_self(void) { return (mach_port_t)thread_id(); }
 mach_port_t darwin_mach_host_self(void) DARWIN_SYMBOL(mach_host_self);
 mach_port_t darwin_mach_host_self(void) { return HOST_PORT; }
 
+static pid_t created_thread_port(pthread_t thread);
+
 mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) DARWIN_SYMBOL(pthread_mach_thread_np);
 mach_port_t darwin_pthread_mach_thread_np(pthread_t thread) {
-    // glibc keeps the kernel thread ID in its thread descriptor; only the
-    // calling thread's is asked for in practice.
-    return pthread_equal(thread, pthread_self()) ? (mach_port_t)thread_id() : 0;
+    // glibc keeps the kernel thread ID in its thread descriptor, which isn't
+    // read here: the calling thread's is known, and so is the port of each
+    // thread pthread_create_suspended_np made.
+    thread = perry_pthread_to_linux(thread);
+    return pthread_equal(thread, pthread_self()) ? (mach_port_t)thread_id() : (mach_port_t)created_thread_port(thread);
 }
 
 kern_return_t darwin_mach_port_deallocate(mach_port_t task, mach_port_t port) DARWIN_SYMBOL(mach_port_deallocate);
@@ -229,6 +233,72 @@ kern_return_t darwin_vm_region_64(mach_port_t task, uintptr_t *address, size_t *
     }
     fclose(maps);
     return result;
+}
+
+// vm_region_submap_info_64, packed to 4 bytes as Darwin's: 16 words in its
+// first form, 17 with pages_reusable, 19 with object_id_full.
+#pragma pack(push, 4)
+typedef struct {
+    int protection;
+    int max_protection;
+    unsigned inheritance;
+    uint64_t offset;
+    unsigned user_tag;
+    unsigned pages_resident;
+    unsigned pages_shared_now_private;
+    unsigned pages_swapped_out;
+    unsigned pages_dirtied;
+    unsigned ref_count;
+    unsigned short shadow_depth;
+    unsigned char external_pager;
+    unsigned char share_mode;
+    unsigned is_submap;
+    int behavior;
+    unsigned object_id;
+    unsigned short user_wired_count;
+    unsigned pages_reusable;
+    uint64_t object_id_full;
+} darwin_vm_region_submap_info_64;
+#pragma pack(pop)
+
+enum {
+    VM_REGION_SUBMAP_INFO_V0_COUNT_64 = 16,
+    VM_REGION_SUBMAP_INFO_COUNT_64 = sizeof(darwin_vm_region_submap_info_64) / sizeof(int),
+    SM_PRIVATE = 2,
+    SM_SHARED = 3,
+};
+_Static_assert(VM_REGION_SUBMAP_INFO_COUNT_64 == 19, "vm_region_submap_info_64 is 19 words");
+
+// The region that holds *address, or else the first one above it, as
+// vm_region_64 finds it, described as a region of the task's own map: no
+// region is a submap, so the depth asked for is 0 whatever it was.
+kern_return_t darwin_vm_region_recurse_64(mach_port_t task, uintptr_t *address, size_t *size, uint32_t *depth, int *info,
+                                          uint32_t *count) DARWIN_SYMBOL(vm_region_recurse_64);
+kern_return_t darwin_vm_region_recurse_64(mach_port_t task, uintptr_t *address, size_t *size, uint32_t *depth, int *info,
+                                          uint32_t *count) {
+    if (!address || !size || !info || !count || *count < VM_REGION_SUBMAP_INFO_V0_COUNT_64)
+        return KERN_INVALID_ARGUMENT;
+    darwin_vm_region_basic_info_64 basic;
+    uint32_t basic_count = VM_REGION_BASIC_INFO_COUNT_64;
+    kern_return_t result = darwin_vm_region_64(task, address, size, VM_REGION_BASIC_INFO_64, (int *)&basic, &basic_count, NULL);
+    if (result != KERN_SUCCESS)
+        return result;
+    uintptr_t page = (uintptr_t)sysconf(_SC_PAGESIZE);
+    darwin_vm_region_submap_info_64 submap = {
+        .protection = basic.protection,
+        .max_protection = basic.max_protection,
+        .inheritance = basic.inheritance,
+        .offset = basic.offset,
+        .pages_resident = basic.protection ? (unsigned)(*size / page) : 0,
+        .ref_count = 1,
+        .share_mode = basic.shared ? SM_SHARED : SM_PRIVATE,
+    };
+    uint32_t words = *count < VM_REGION_SUBMAP_INFO_COUNT_64 ? *count : VM_REGION_SUBMAP_INFO_COUNT_64;
+    memcpy(info, &submap, words * sizeof(int));
+    *count = words;
+    if (depth)
+        *depth = 0;
+    return KERN_SUCCESS;
 }
 
 // mach_vm_address_t and mach_vm_size_t are 64 bits, as vm_address_t is on arm64.
@@ -430,6 +500,13 @@ kern_return_t darwin_semaphore_wait(mach_port_t port) {
     sem_t *target = semaphore(port);
     if (!target)
         return KERN_INVALID_ARGUMENT;
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        perry_release_grace(NULL, &soon);
+        if (sem_timedwait(target, &soon) == 0)
+            return KERN_SUCCESS;
+        perry_release_before_blocking();
+    }
     return sem_wait(target) == 0 ? KERN_SUCCESS : KERN_ABORTED;
 }
 
@@ -446,6 +523,15 @@ kern_return_t darwin_semaphore_timedwait(mach_port_t port, mach_timespec wait) {
     if (deadline.tv_nsec >= 1000000000) {
         deadline.tv_sec++;
         deadline.tv_nsec -= 1000000000;
+    }
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        int last = perry_release_grace(&deadline, &soon);
+        if (sem_timedwait(target, &soon) == 0)
+            return KERN_SUCCESS;
+        if (last)
+            return errno == ETIMEDOUT ? KERN_OPERATION_TIMED_OUT : KERN_ABORTED;
+        perry_release_before_blocking();
     }
     if (sem_timedwait(target, &deadline) == 0)
         return KERN_SUCCESS;
@@ -591,6 +677,88 @@ kern_return_t darwin_thread_suspend(mach_port_t port) {
     }
     return KERN_SUCCESS;
 }
+
+// MARK: Threads made suspended
+
+// The threads pthread_create_suspended_np made, with their ports, for
+// pthread_mach_thread_np. Kept, as a thread's descriptor may be reused.
+struct created_thread {
+    pthread_t thread;
+    pid_t port;
+    struct created_thread *next;
+};
+static struct created_thread *created_threads;
+static pthread_mutex_t created_threads_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static pid_t created_thread_port(pthread_t thread) {
+    pid_t port = 0;
+    pthread_mutex_lock(&created_threads_lock);
+    for (struct created_thread *entry = created_threads; entry; entry = entry->next)
+        if (pthread_equal(entry->thread, thread)) {
+            port = entry->port;
+            break;
+        }
+    pthread_mutex_unlock(&created_threads_lock);
+    return port;
+}
+
+#if defined(__i386__) || defined(__x86_64__)
+int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument)
+    DARWIN_SYMBOL(pthread_create);
+
+struct suspended_start {
+    void *(*function)(void *);
+    void *argument;
+    sem_t started;
+};
+
+// The new thread suspends itself before it runs the function, as if
+// thread_suspend had stopped it once: its port is known to its maker when
+// that returns, and thread_resume lets it go.
+static void *start_suspended(void *pointer) {
+    struct suspended_start *start = pointer;
+    void *(*function)(void *) = start->function;
+    void *argument = start->argument;
+    pid_t self = thread_id();
+    struct created_thread *created = calloc(1, sizeof(*created));
+    if (created) {
+        created->thread = pthread_self();
+        created->port = self;
+        pthread_mutex_lock(&created_threads_lock);
+        created->next = created_threads;
+        created_threads = created;
+        pthread_mutex_unlock(&created_threads_lock);
+    }
+    pthread_mutex_lock(&suspension_lock);
+    suspension *entry = find_suspension(self, 1);
+    entry->count = 1;
+    atomic_store(&entry->resume, 0);
+    atomic_store(&entry->inside, 1);
+    pthread_mutex_unlock(&suspension_lock);
+    sem_post(&start->started);                  // `start` is the maker's, gone from here on
+    while (!atomic_load(&entry->resume))
+        syscall(SYS_futex, &entry->resume, FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0);
+    atomic_store(&entry->inside, 0);
+    syscall(SYS_futex, &entry->inside, FUTEX_WAKE_PRIVATE, 1, NULL, NULL, 0);
+    return function(argument);
+}
+
+/// int pthread_create_suspended_np(pthread_t *, const pthread_attr_t *,
+/// void *(*)(void *), void *): a thread that waits for thread_resume on its
+/// port, pthread_mach_thread_np's, before it starts.
+int darwin_pthread_create_suspended_np(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+                                       void *argument) DARWIN_SYMBOL(pthread_create_suspended_np);
+int darwin_pthread_create_suspended_np(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *),
+                                       void *argument) {
+    struct suspended_start start = { function, argument };
+    sem_init(&start.started, 0, 0);
+    int error = darwin_pthread_create(thread, attributes, start_suspended, &start);
+    if (!error)
+        while (sem_wait(&start.started) != 0 && errno == EINTR) {}
+    sem_destroy(&start.started);
+    return error;
+}
+#endif
 
 kern_return_t darwin_thread_resume(mach_port_t port) DARWIN_SYMBOL(thread_resume);
 kern_return_t darwin_thread_resume(mach_port_t port) {
@@ -955,6 +1123,34 @@ const char *darwin_dlerror(void) {
     return error;
 }
 
+// Whether an address is in the main executable's segments. A library's
+// handle doesn't find the program's own symbols on Darwin: the program is
+// none of the library's dependencies. (A game that exports its own
+// SteamAPI_Init to wrap libsteam_api's would otherwise find itself.)
+const void *darwin_NSGetMachExecuteHeader(void) DARWIN_SYMBOL(_NSGetMachExecuteHeader);
+static bool in_main_executable(const void *address) {
+    const void *header = darwin_NSGetMachExecuteHeader();
+    if (!header || !address)
+        return false;
+    intptr_t slide = 0;
+    const uint8_t *command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment segment;
+        if (perry_macho_segment_at(command, &segment) && strncmp(segment.name, "__TEXT", 16) == 0)
+            slide = (intptr_t)header - (intptr_t)segment.vmaddr;
+    }
+    command = perry_macho_commands(header);
+    for (uint32_t i = 0; i < perry_macho_command_count(header); i++, command = perry_macho_next(command)) {
+        perry_macho_segment segment;
+        if (!perry_macho_segment_at(command, &segment) || segment.vmsize == 0 || strncmp(segment.name, "__PAGEZERO", 16) == 0)
+            continue;
+        uintptr_t start = (uintptr_t)(segment.vmaddr + slide);
+        if ((uintptr_t)address >= start && (uintptr_t)address < start + segment.vmsize)
+            return true;
+    }
+    return false;
+}
+
 #if defined(__arm__)
 // On armv7 a call from Darwin code that finds its stack misaligned reaches
 // dlsym through perry_align_call (the loader's align_arm.S), which calls it
@@ -987,9 +1183,13 @@ void *darwin_dlsym(void *handle, const char *symbol) {
     // the symbol itself to wrap the one it is looking for.
     void *address = (intptr_t)handle == DARWIN_RTLD_NEXT && perry_system_lookup_after
         ? perry_system_lookup_after(DLSYM_CALLER, name) : perry_system_lookup(library, name);
-    // A library's handle also finds what it re-exports and depends on.
-    if (!address && library)
+    // A library's handle also finds what it re-exports and depends on, but
+    // not the program's own symbols.
+    if (!address && library) {
         address = perry_system_lookup(NULL, name);
+        if (in_main_executable(address))
+            address = NULL;
+    }
     free(name);
     if (!address) {
         static __thread char message[256];
@@ -1127,7 +1327,7 @@ kern_return_t darwin_mach_vm_read_overwrite(mach_port_t task, uintptr_t address,
 // The pthread for a thread port; only the calling thread's is known.
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) DARWIN_SYMBOL(pthread_from_mach_thread_np);
 pthread_t darwin_pthread_from_mach_thread_np(mach_port_t port) {
-    return port == (mach_port_t)thread_id() ? pthread_self() : 0;
+    return port == (mach_port_t)thread_id() ? perry_pthread_to_darwin(pthread_self()) : 0;
 }
 
 // The architecture, as NXGetLocalArchInfo describes it.

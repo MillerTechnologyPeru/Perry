@@ -67,6 +67,33 @@ open class NSBitmapImageRep: NSImageRep {
               colorSpaceName: colorSpaceName, bitmapFormat: 0, bytesPerRow: bytesPerRow, bitsPerPixel: bitsPerPixel)
     }
 
+    /// The image's pixels, drawn into a buffer of 8-bit RGBA, premultiplied.
+    @ObjCMethod("initWithCGImage:")
+    public required init(cgImage: UnsafeMutableRawPointer?) {
+        super.init()
+        let width = cgImage.map { CG.ready ? CG.imageGetWidth($0) : 0 } ?? 0
+        let height = cgImage.map { CG.ready ? CG.imageGetHeight($0) : 0 } ?? 0
+        setUp(planes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+              colorSpaceName: "NSDeviceRGBColorSpace", bitmapFormat: 0, bytesPerRow: width * 4, bitsPerPixel: 32)
+        guard let cgImage, width > 0, height > 0, let space = CG.colorSpaceCreateDeviceRGB() else { return }
+        defer { CG.release(space) }
+        // kCGImageAlphaPremultipliedLast.
+        guard let context = CG.bitmapContextCreate(pixels, width, height, 8, width * 4, space, 1) else { return }
+        defer { CG.release(context) }
+        CG.drawImage(context, CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), cgImage)
+    }
+
+    /// An image of the pixels as they are now, +0.
+    @ObjCMethod("CGImage")
+    func cgImage() -> UnsafeMutableRawPointer? {
+        guard CG.ready, let pixels, pixelsWide > 0, pixelsHigh > 0, !planar, bitsPerPixel == 32,
+              let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
+        defer { CG.release(space) }
+        guard let context = CG.bitmapContextCreate(pixels, pixelsWide, pixelsHigh, 8, bytesPerRow, space, hasAlpha ? 1 : 5) else { return nil }
+        defer { CG.release(context) }
+        return CG.bitmapContextCreateImage(context).map { ObjCRuntime.autorelease($0)! }
+    }
+
     private func setUp(planes: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>?, pixelsWide: Int, pixelsHigh: Int,
                        bitsPerSample: Int, samplesPerPixel: Int, hasAlpha: Bool, isPlanar: Bool,
                        colorSpaceName: String?, bitmapFormat: UInt, bytesPerRow: Int, bitsPerPixel: Int) {

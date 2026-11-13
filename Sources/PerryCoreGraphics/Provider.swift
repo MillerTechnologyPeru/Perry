@@ -12,8 +12,17 @@ import PerryObjCInterop
 
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 
+/// The loader's symbol lookup, for functions other providers define, and
+/// the program's bundle, which the Process Manager answers with.
+nonisolated(unsafe) var providerSymbolLookup: (@convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?)?
+nonisolated(unsafe) var programBundlePath: String?
+nonisolated(unsafe) var programExecutablePath: String?
+
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    providerSymbolLookup = lookup
+    programBundlePath = info.bundle_path.map { String(cString: $0) }
+    programExecutablePath = info.executable_path.map { String(cString: $0) }
     let loaded = ObjCRuntime.load { name in
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }
@@ -144,6 +153,31 @@ class NSMutableDictionary: NSDictionary {
         let dictionary = empty()
         for (key, value) in entries { dictionary.set(value, forKey: NSObject.string(key)) }
         return dictionary
+    }
+}
+
+/// The strings Get functions return are constants on Darwin, literals that
+/// retains and releases leave alone, and programs depend on it: YouTube
+/// hands CGImageSourceGetType's result on as if it were owned, which only
+/// works because that string is never freed. These are literals made the
+/// same way, one for each value, kept for good. ASCII, as the names and type
+/// identifiers they stand for are.
+enum ConstantStrings {
+    nonisolated(unsafe) private static var table: [String: UnsafeMutableRawPointer] = [:]
+    private static let lock = Lock()
+
+    static func make(_ value: String) -> UnsafeMutableRawPointer {
+        lock.withLock {
+            if let known = table[value] { return known }
+            let word = MemoryLayout<UInt>.size
+            let literal = UnsafeMutableRawPointer.allocate(byteCount: 4 * word, alignment: word)
+            literal.storeBytes(of: ObjCRuntime.classObject("__NSCFConstantString"), as: UnsafeMutableRawPointer.self)
+            literal.storeBytes(of: 0x7c8, toByteOffset: word, as: UInt.self)
+            literal.storeBytes(of: UnsafeRawPointer(strdup(value)!), toByteOffset: 2 * word, as: UnsafeRawPointer.self)
+            literal.storeBytes(of: value.utf8.count, toByteOffset: 3 * word, as: Int.self)
+            table[value] = literal
+            return literal
+        }
     }
 }
 

@@ -72,15 +72,14 @@ public func perry_foundation_cf_calendar_decompose(_ object: id?, _ units: Unsaf
                                                    _ time: Double) -> Bool {
     guard let calendar = calendar(object), let units, let arguments else { return false }
     let date = Date(timeIntervalSinceReferenceDate: time)
-    var index = 0
+    var darwin = DarwinArguments(arguments)
     var unit = units
     while unit.pointee != 0 {
         guard let component = component(unit.pointee) else { return false }
         let value = calendar.component(component, from: date)
-        if let out = arguments.load(fromByteOffset: index * 8, as: UnsafeMutablePointer<Int32>?.self) {
-            out.pointee = Int32(truncatingIfNeeded: value)
+        if let out = darwin.nextPointer() {
+            out.storeBytes(of: Int32(truncatingIfNeeded: value), as: Int32.self)
         }
-        index += 1
         unit += 1
     }
     return true
@@ -95,12 +94,11 @@ public func perry_foundation_cf_calendar_compose(_ object: id?, _ time: UnsafeMu
     var components = DateComponents()
     components.calendar = calendar
     components.timeZone = calendar.timeZone
-    var index = 0
+    var darwin = DarwinArguments(arguments)
     var unit = units
     while unit.pointee != 0 {
         guard let component = component(unit.pointee) else { return false }
-        components.setValue(Int(arguments.load(fromByteOffset: index * 8, as: Int32.self)), for: component)
-        index += 1
+        components.setValue(Int(Int32(truncatingIfNeeded: darwin.next())), for: component)
         unit += 1
     }
     guard let date = calendar.date(from: components) else { return false }

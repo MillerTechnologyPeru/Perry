@@ -119,6 +119,9 @@ typedef struct perry_loader {
 void perry_loader_init(perry_loader *loader);
 perry_image *perry_load_executable(perry_loader *loader, const char *path);
 void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, char **argv, char **envp, char **apple);
+// Starts providers loaded after the program started (by a symbol lookup
+// that needed a new one), as those at startup were; none before startup.
+void perry_start_late_providers(perry_loader *loader);
 // With PERRY_CRASH_REPORT set, prints registers and frames on a fatal signal.
 void perry_install_crash_reporter(perry_loader *loader);
 // With PERRY_PROFILE set to a path, samples the main thread's stacks there.

@@ -11,9 +11,26 @@ import PerryObjCInterop
 // and a shake's (PERRY_COREMOTION_SHAKE), and no magnetometer; updates'
 // queues are not used, and handlers are called on the main queue.
 
+#if _pointerBitWidth(_32)
+// 32-bit Darwin returns these through memory, where Linux's armhf uses VFP
+// registers. A rotation matrix, of nine doubles, goes through memory on both.
+extension CMAcceleration: ObjCStructure {
+    public typealias ObjCType = ObjCWords6
+    public static var objCTypeEncoding: String { "{?=ddd}" }
+}
+extension CMRotationRate: ObjCStructure {
+    public typealias ObjCType = ObjCWords6
+    public static var objCTypeEncoding: String { "{?=ddd}" }
+}
+extension CMQuaternion: ObjCStructure {
+    public typealias ObjCType = ObjCWords8
+    public static var objCTypeEncoding: String { "{?=dddd}" }
+}
+#else
 extension CMAcceleration: ObjCScalar { public static var objCTypeEncoding: String { "{?=ddd}" } }
 extension CMRotationRate: ObjCScalar { public static var objCTypeEncoding: String { "{?=ddd}" } }
 extension CMQuaternion: ObjCScalar { public static var objCTypeEncoding: String { "{?=dddd}" } }
+#endif
 extension CMRotationMatrix: ObjCScalar { public static var objCTypeEncoding: String { "{?=ddddddddd}" } }
 
 /// A rotation from the device's axes (x right, y to the top, z out of the

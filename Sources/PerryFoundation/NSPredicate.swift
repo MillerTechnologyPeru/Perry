@@ -15,6 +15,11 @@ indirect enum ExpressionNode {
     case aggregate([ExpressionNode])
     /// A function by name ("count:", "max:") of argument expressions.
     case function(String, [ExpressionNode])
+    /// A substitution variable ("$p"), bound by a subquery.
+    case variable(String)
+    /// SUBQUERY(collection, $variable, predicate): the members of the
+    /// collection the predicate holds for.
+    case subquery(ExpressionNode, String, PredicateNode)
 
     /// NSExpressionType.
     var type: UInt {
@@ -24,6 +29,8 @@ indirect enum ExpressionNode {
         case .keyPath: return 3
         case .aggregate: return 14
         case .function: return 4
+        case .variable: return 2
+        case .subquery: return 13
         }
     }
 }
@@ -61,6 +68,51 @@ final class BlockReference {
     }
 }
 
+/// The functions the infix operators of an expression stand for, by their
+/// NSExpression names.
+enum PredicateArithmetic {
+    static let symbols: [String: String] = [
+        "add:to:": "+", "from:subtract:": "-", "multiply:by:": "*", "divide:by:": "/",
+        "bitwiseAnd:with:": "&", "bitwiseOr:with:": "|",
+    ]
+
+    /// An operator's function, and the precedence it binds with: bitwise or,
+    /// bitwise and, sums, then products.
+    static let operators: [String: (function: String, level: Int)] = [
+        "|": ("bitwiseOr:with:", 0), "&": ("bitwiseAnd:with:", 1),
+        "+": ("add:to:", 2), "-": ("from:subtract:", 2), "*": ("multiply:by:", 3), "/": ("divide:by:", 3),
+    ]
+
+    /// The result of a function on two numbers: integers stay integers
+    /// where both operands are, and a division by zero has none.
+    static func apply(_ name: String, _ left: id?, _ right: id?) -> id? {
+        guard let left, let right, ObjC.isKind(left, of: Numbers.numberClass), ObjC.isKind(right, of: Numbers.numberClass) else {
+            return nil
+        }
+        let a = Numbers.storage(left), b = Numbers.storage(right)
+        if name == "bitwiseAnd:with:" { return Numbers.make(nil, .signed(a.int64 & b.int64)) }
+        if name == "bitwiseOr:with:" { return Numbers.make(nil, .signed(a.int64 | b.int64)) }
+        if a.isFloatingPoint || b.isFloatingPoint {
+            let x = a.double, y = b.double
+            switch name {
+            case "add:to:": return Numbers.make(nil, .double(x + y))
+            case "from:subtract:": return Numbers.make(nil, .double(x - y))
+            case "multiply:by:": return Numbers.make(nil, .double(x * y))
+            case "divide:by:": return Numbers.make(nil, .double(x / y))
+            default: return nil
+            }
+        }
+        let x = a.int64, y = b.int64
+        switch name {
+        case "add:to:": return Numbers.make(nil, .signed(x &+ y))
+        case "from:subtract:": return Numbers.make(nil, .signed(x &- y))
+        case "multiply:by:": return Numbers.make(nil, .signed(x &* y))
+        case "divide:by:": return y == 0 ? nil : Numbers.make(nil, .signed(x / y))
+        default: return nil
+        }
+    }
+}
+
 /// NSPredicateOperatorType and the other enums, as Darwin numbers them.
 enum PredicateOperator {
     static let lessThan: UInt = 0, lessThanOrEqualTo: UInt = 1, greaterThan: UInt = 2, greaterThanOrEqualTo: UInt = 3
@@ -87,7 +139,13 @@ enum PredicateFormat {
         case .evaluatedObject: return "SELF"
         case .aggregate(let elements): return "{" + elements.map(expression).joined(separator: ", ") + "}"
         case .constant(let value): return constant(value?.objcObject)
+        case .variable(let name): return "$" + name
+        case .subquery(let collection, let variable, let predicate):
+            return "SUBQUERY(" + expression(collection) + ", $" + variable + ", " + PredicateFormat.predicate(predicate) + ")"
         case .function(let name, let arguments):
+            if let symbol = PredicateArithmetic.symbols[name], arguments.count == 2 {
+                return "(" + expression(arguments[0]) + " \(symbol) " + expression(arguments[1]) + ")"
+            }
             return String(name.prefix { $0 != ":" }) + "(" + arguments.map(expression).joined(separator: ", ") + ")"
         }
     }
@@ -333,8 +391,33 @@ struct PredicateParser {
         return parsePrimary()
     }
 
+    /// Whether the parenthesis the parser is at opens an expression, which a
+    /// comparison follows ("(a & 1) = 0"), rather than a predicate.
+    private func groupIsExpression() -> Bool {
+        var depth = 0, index = position
+        while index < tokens.count {
+            if case .symbol(let s) = tokens[index] {
+                if s == "(" { depth += 1 }
+                if s == ")" {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+            }
+            index += 1
+        }
+        guard index + 1 < tokens.count else { return false }
+        switch tokens[index + 1] {
+        case .symbol(let s):
+            return ["=", "==", "!=", "<>", "<", "<=", "=<", ">", ">=", "=>", "&", "|", "+", "-", "*", "/"].contains(s)
+        case .word(let w):
+            return ["IN", "LIKE", "MATCHES", "BEGINSWITH", "ENDSWITH", "CONTAINS", "BETWEEN"].contains(w.uppercased())
+        default:
+            return false
+        }
+    }
+
     private mutating func parsePrimary() -> PredicateNode {
-        if isSymbol("(") {
+        if isSymbol("("), !groupIsExpression() {
             advance()
             let node = parseOr()
             guard isSymbol(")") else { fail("missing )") }
@@ -398,10 +481,26 @@ struct PredicateParser {
         return negate ? .compound(CompoundType.not, [comparison]) : comparison
     }
 
-    private mutating func parseExpression() -> ExpressionNode {
+    /// An expression with its infix operators, the tighter binding first.
+    private mutating func parseExpression(level: Int = 0) -> ExpressionNode {
+        var left = level == 3 ? parseOperand() : parseExpression(level: level + 1)
+        while case .symbol(let s) = current, let found = PredicateArithmetic.operators[s], found.level == level {
+            advance()
+            let right = level == 3 ? parseOperand() : parseExpression(level: level + 1)
+            left = .function(found.function, [left, right])
+        }
+        return left
+    }
+
+    private mutating func parseOperand() -> ExpressionNode {
         let token = current
         advance()
         switch token {
+        case .symbol("("):
+            let inner = parseExpression()
+            guard isSymbol(")") else { fail("missing )") }
+            advance()
+            return inner
         case .string(let text):
             return .constant(ObjCObject(Strings.autoreleased(text)))
         case .number(let text):
@@ -412,7 +511,10 @@ struct PredicateParser {
             case "NO", "FALSE": return .constant(ObjCObject(perry_foundation_boolean(0)))
             case "NIL", "NULL": return .constant(nil)
             case "SELF": return .evaluatedObject
-            default: return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
+            default:
+                if word.uppercased() == "SUBQUERY", isSymbol("(") { return subquery() }
+                if word.hasPrefix("$"), word.count > 1 { return .variable(String(word.dropFirst())) }
+                return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
             }
         case .symbol("{"):
             var elements: [ExpressionNode] = []
@@ -427,6 +529,31 @@ struct PredicateParser {
         default:
             fail("unexpected \(token)")
         }
+    }
+
+    /// SUBQUERY(collection, $variable, predicate), and an aggregate key after
+    /// it (".@count").
+    private mutating func subquery() -> ExpressionNode {
+        advance()
+        let collection = parseExpression()
+        guard isSymbol(",") else { fail("missing ,") }
+        advance()
+        guard case .word(let variable) = current, variable.hasPrefix("$") else { fail("SUBQUERY needs a variable") }
+        advance()
+        guard isSymbol(",") else { fail("missing ,") }
+        advance()
+        let predicate = parseOr()
+        guard isSymbol(")") else { fail("missing )") }
+        advance()
+        var node = ExpressionNode.subquery(collection, String(variable.dropFirst()), predicate)
+        if isSymbol("."), case .word(let key) = tokens[min(position + 1, tokens.count - 1)], key.hasPrefix("@") {
+            let functions = ["@count": "count:", "@sum": "sum:", "@avg": "average:", "@max": "max:", "@min": "min:"]
+            guard let function = functions[key] else { fail("unknown operator \(key)") }
+            advance()
+            advance()
+            node = .function(function, [node])
+        }
+        return node
     }
 
     private mutating func substitution(_ spec: String) -> ExpressionNode {
@@ -493,8 +620,20 @@ enum PredicateEvaluation {
         case .evaluatedObject: return object
         case .aggregate(let elements): return Arrays.autoreleased(elements.compactMap { value($0, object) })
         case .function(let name, let arguments): return function(name, arguments.map { value($0, object) })
+        case .variable(let name): return variables[name]
+        case .subquery(let collection, let name, let predicate):
+            let items = elements(value(collection, object)) ?? []
+            let saved = variables[name]
+            defer { variables[name] = saved }
+            return Arrays.autoreleased(items.filter { item in
+                variables[name] = item
+                return evaluate(predicate, object)
+            })
         }
     }
+
+    /// The variables subqueries have bound, while they evaluate.
+    nonisolated(unsafe) static var variables: [String: id] = [:]
 
     /// The aggregate functions over an argument's collection, and the case
     /// changes over a string.
@@ -509,6 +648,8 @@ enum PredicateEvaluation {
         case "average:": return Numbers.make(nil, .double(numbers.isEmpty ? 0 : numbers.reduce(0, +) / Double(numbers.count)))
         case "max:": return items.max { ObjC.sendInt($0, ObjC.selector("compare:"), $1) < 0 }
         case "min:": return items.min { ObjC.sendInt($0, ObjC.selector("compare:"), $1) < 0 }
+        case "add:to:", "from:subtract:", "multiply:by:", "divide:by:", "bitwiseAnd:with:", "bitwiseOr:with:":
+            return arguments.count == 2 ? PredicateArithmetic.apply(name, arguments[0], arguments[1]) : nil
         case "lowercase:", "uppercase:":
             guard let text = arguments.first.flatMap({ Strings.value(of: $0) }) else { return nil }
             return Strings.autoreleased(name == "lowercase:" ? text.lowercased() : text.uppercased())
@@ -910,6 +1051,9 @@ extension NSArray {
     @ObjCMethod("filterUsingPredicate:")
     func filter(using predicate: NSPredicate) {
         let kept = Arrays.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }
+        // The array may hold the only reference: keep the elements across the removal.
+        for element in kept { ObjC.retain(element) }
+        defer { for element in kept { ObjC.release(element) } }
         _ = ObjC.send(objcObject, ObjC.selector("removeAllObjects"))
         for element in kept { _ = ObjC.send(objcObject, ObjC.selector("addObject:"), element) }
     }

@@ -192,12 +192,7 @@ PASSTHROUGH _mkstemp, mkstemp
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
 PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
-PASSTHROUGH _pthread_cancel, pthread_cancel
-PASSTHROUGH _pthread_detach, pthread_detach
-PASSTHROUGH _pthread_equal, pthread_equal
 PASSTHROUGH _pthread_exit, pthread_exit
-PASSTHROUGH _pthread_join, pthread_join
-PASSTHROUGH _pthread_self, pthread_self
 PASSTHROUGH _rand, rand
 PASSTHROUGH _random, random
 PASSTHROUGH _setpgid, setpgid

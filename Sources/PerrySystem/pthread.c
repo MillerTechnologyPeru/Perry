@@ -402,11 +402,53 @@ int darwin_pthread_cond_destroy(darwin_cond *cond) {
     return 0;
 }
 
+// MARK: - Letting go before blocking
+
+static void (*release_hook)(void);
+static __thread int release_armed;
+
+void perry_set_release_before_blocking(void (*hook)(void)) { release_hook = hook; }
+void perry_arm_release_before_blocking(int armed) { release_armed = armed; }
+int perry_release_before_blocking_armed(void) { return release_armed && release_hook; }
+
+void perry_release_before_blocking(void) {
+    if (!release_armed || !release_hook)
+        return;
+    release_armed = 0;
+    release_hook();
+}
+
+int perry_release_grace(const struct timespec *deadline, struct timespec *soon) {
+    clock_gettime(CLOCK_REALTIME, soon);
+    soon->tv_nsec += 2000000;
+    if (soon->tv_nsec >= 1000000000) {
+        soon->tv_sec++;
+        soon->tv_nsec -= 1000000000;
+    }
+    if (deadline && (deadline->tv_sec < soon->tv_sec || (deadline->tv_sec == soon->tv_sec && deadline->tv_nsec <= soon->tv_nsec))) {
+        *soon = *deadline;
+        return 1;
+    }
+    return 0;
+}
+
+// MARK: - Waiting
+
 int darwin_pthread_cond_wait(darwin_cond *cond, darwin_mutex *mutex) DARWIN_SYMBOL(pthread_cond_wait);
 int darwin_pthread_cond_wait(darwin_cond *cond, darwin_mutex *mutex) {
     pthread_cond_t *value = cond_value(cond);
     pthread_mutex_t *lock = mutex_value(mutex);
-    return value && lock ? result(pthread_cond_wait(value, lock)) : 22;
+    if (!value || !lock)
+        return 22;
+    if (perry_release_before_blocking_armed()) {
+        struct timespec soon;
+        perry_release_grace(NULL, &soon);
+        int error = pthread_cond_timedwait(value, lock, &soon);
+        if (error != ETIMEDOUT)
+            return result(error);
+        perry_release_before_blocking();
+    }
+    return result(pthread_cond_wait(value, lock));
 }
 
 int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const struct timespec *deadline)
@@ -414,7 +456,17 @@ int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const 
 int darwin_pthread_cond_timedwait(darwin_cond *cond, darwin_mutex *mutex, const struct timespec *deadline) {
     pthread_cond_t *value = cond_value(cond);
     pthread_mutex_t *lock = mutex_value(mutex);
-    return value && lock ? result(pthread_cond_timedwait(value, lock, deadline)) : 22;
+    if (!value || !lock)
+        return 22;
+    if (perry_release_before_blocking_armed() && deadline) {
+        struct timespec soon;
+        int last = perry_release_grace(deadline, &soon);
+        int error = pthread_cond_timedwait(value, lock, &soon);
+        if (error != ETIMEDOUT || last)
+            return result(error);
+        perry_release_before_blocking();
+    }
+    return result(pthread_cond_timedwait(value, lock, deadline));
 }
 
 // Darwin's wait for a time from now, on the condition's realtime clock.
@@ -838,6 +890,7 @@ int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) DARWIN_
 int darwin_pthread_getname_np(pthread_t thread, char *name, size_t size) {
     // Darwin answers a null thread with ESRCH; glibc would dereference it.
     if (!thread) return ESRCH;
+    thread = perry_pthread_to_linux(thread);
     char buffer[16] = {0};
     int error = pthread_getname_np(thread, buffer, sizeof(buffer));
     if (!error && size) {
@@ -875,11 +928,12 @@ static void record_main_thread(void) {
 
 pthread_t darwin_pthread_main_thread_np(void) DARWIN_SYMBOL(pthread_main_thread_np);
 pthread_t darwin_pthread_main_thread_np(void) {
-    return main_thread;
+    return perry_pthread_to_darwin(main_thread);
 }
 
 int darwin_pthread_threadid_np(pthread_t thread, uint64_t *id) DARWIN_SYMBOL(pthread_threadid_np);
 int darwin_pthread_threadid_np(pthread_t thread, uint64_t *id) {
+    thread = perry_pthread_to_linux(thread);
     if (thread && !pthread_equal(thread, pthread_self()))
         *id = (uint64_t)thread;
     else
@@ -939,3 +993,89 @@ int darwin_pthread_attr_set_qos_class_np(pthread_attr_t *attributes, unsigned in
     (void)qos;
     return relative_priority > 0 || relative_priority < -15 ? 22 : 0;
 }
+
+// MARK: - Darwin's pthread_t on x86
+
+#if defined(__i386__) || defined(__x86_64__)
+
+// Darwin code is given a thread of its own shape for each of glibc's: its
+// `sig`, then the cleanup handlers pthread_cleanup_push links there, then
+// glibc's thread. A thread's is made the first time Darwin code is given it,
+// and kept, as glibc keeps a thread's descriptor to reuse for a later one.
+enum { DARWIN_PTHREAD_SIG = 0x54485244 };   // 'THRD', as Darwin's own
+
+struct darwin_thread {
+    long sig;
+    void *cleanup_stack;
+    pthread_t thread;
+    struct darwin_thread *next;
+};
+
+static struct darwin_thread *darwin_threads;
+static pthread_mutex_t darwin_threads_lock = PTHREAD_MUTEX_INITIALIZER;
+static __thread struct darwin_thread *current_darwin_thread;
+
+pthread_t perry_pthread_to_darwin(pthread_t thread) {
+    if (!thread)
+        return 0;
+    pthread_mutex_lock(&darwin_threads_lock);
+    struct darwin_thread *found = darwin_threads;
+    while (found && !pthread_equal(found->thread, thread))
+        found = found->next;
+    if (!found && (found = calloc(1, sizeof(*found)))) {
+        found->sig = DARWIN_PTHREAD_SIG;
+        found->thread = thread;
+        found->next = darwin_threads;
+        darwin_threads = found;
+    }
+    pthread_mutex_unlock(&darwin_threads_lock);
+    return (pthread_t)found;
+}
+
+pthread_t perry_pthread_to_linux(pthread_t thread) {
+    // A glibc pthread_t's first word is its own address, never the sig.
+    const struct darwin_thread *darwin = (const struct darwin_thread *)thread;
+    return darwin && darwin->sig == DARWIN_PTHREAD_SIG ? darwin->thread : thread;
+}
+
+pthread_t darwin_pthread_self(void) DARWIN_SYMBOL(pthread_self);
+pthread_t darwin_pthread_self(void) {
+    if (!current_darwin_thread)
+        current_darwin_thread = (struct darwin_thread *)perry_pthread_to_darwin(pthread_self());
+    return (pthread_t)current_darwin_thread;
+}
+
+int darwin_pthread_equal(pthread_t first, pthread_t second) DARWIN_SYMBOL(pthread_equal);
+int darwin_pthread_equal(pthread_t first, pthread_t second) {
+    return pthread_equal(perry_pthread_to_linux(first), perry_pthread_to_linux(second));
+}
+
+int darwin_pthread_join(pthread_t thread, void **value) DARWIN_SYMBOL(pthread_join);
+int darwin_pthread_join(pthread_t thread, void **value) {
+    return result(pthread_join(perry_pthread_to_linux(thread), value));
+}
+
+int darwin_pthread_detach(pthread_t thread) DARWIN_SYMBOL(pthread_detach);
+int darwin_pthread_detach(pthread_t thread) {
+    return result(pthread_detach(perry_pthread_to_linux(thread)));
+}
+
+int darwin_pthread_cancel(pthread_t thread) DARWIN_SYMBOL(pthread_cancel);
+int darwin_pthread_cancel(pthread_t thread) {
+    return result(pthread_cancel(perry_pthread_to_linux(thread)));
+}
+
+#if defined(__x86_64__)
+// i386's goes through the trampoline armv7's does.
+int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument)
+    DARWIN_SYMBOL(pthread_create);
+int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, void *(*function)(void *), void *argument) {
+    pthread_t made;
+    int error = pthread_create(&made, attributes, function, argument);
+    if (!error && thread)
+        *thread = perry_pthread_to_darwin(made);
+    return result(error);
+}
+#endif
+
+#endif

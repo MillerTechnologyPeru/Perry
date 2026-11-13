@@ -106,6 +106,7 @@ enum Constants {
             "_UIFontWeightHeavy": value(CGFloat(0.56)),
             "_UIFontWeightBlack": value(CGFloat(0.62)),
             // UIAccessibilityTraits.
+            "_UIAccessibilityTraitToggleButton": value(UInt64(1 << 53)),
             "_UIAccessibilityTraitNone": value(UInt64(0)),
             "_UIAccessibilityTraitButton": value(UInt64(1 << 0)),
             "_UIAccessibilityTraitLink": value(UInt64(1 << 1)),
@@ -151,6 +152,23 @@ enum Classes {
 }
 
 /// No assistive settings are on.
+/// The element VoiceOver has focused: none.
+@c(_UIAccessibilityFocusedElement) public func UIAccessibilityFocusedElement(_ assistiveTechnologyIdentifier: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { nil }
+/// Guided Access cannot be started: the request fails.
+@c(_UIAccessibilityRequestGuidedAccessSession)
+public func UIAccessibilityRequestGuidedAccessSession(_ enable: Bool, _ completion: UnsafeMutableRawPointer?) {
+    guard let completion else { return }
+    // A block's invoke function follows its isa, flags and reserved words.
+    let invoke = completion.load(fromByteOffset: MemoryLayout<Int>.size + 8, as: UnsafeRawPointer.self)
+    unsafeBitCast(invoke, to: (@convention(c) (UnsafeMutableRawPointer, Bool) -> Void).self)(completion, false)
+}
+
+/// A frame and a path in screen coordinates: the screen is the window's, so
+/// they are the view's own.
+@DarwinC("_UIAccessibilityConvertFrameToScreenCoordinates")
+public func UIAccessibilityConvertFrameToScreenCoordinates(_ rect: CGRect, _ view: UnsafeMutableRawPointer?) -> CGRect { rect }
+@c(_UIAccessibilityConvertPathToScreenCoordinates)
+public func UIAccessibilityConvertPathToScreenCoordinates(_ path: UnsafeMutableRawPointer?, _ view: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { path }
 @c(_UIAccessibilityIsBoldTextEnabled) public func UIAccessibilityIsBoldTextEnabled() -> Bool { false }
 @c(_UIAccessibilityIsGuidedAccessEnabled) public func UIAccessibilityIsGuidedAccessEnabled() -> Bool { false }
 @c(_UIAccessibilityIsVoiceOverRunning) public func UIAccessibilityIsVoiceOverRunning() -> Bool { false }

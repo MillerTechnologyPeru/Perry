@@ -154,6 +154,8 @@ public final class NSURL: NSObject {
         return String(text[text.index(after: colon)...])
     }
     @ObjCMethod("absoluteURL") func absoluteURL() -> NSURL? { URLs.wrapped(url.absoluteURL) }
+    /// With "." and ".." taken out of its path, as NSURL does.
+    @ObjCMethod("standardizedURL") func standardizedURL() -> NSURL? { URLs.wrapped(url.standardized) }
     @ObjCMethod("baseURL") func baseURL() -> NSURL? { URLs.wrapped(url.baseURL) }
     @ObjCMethod("scheme") func scheme() -> String? { url.scheme }
     @ObjCMethod("host") func host() -> String? { url.host(percentEncoded: false) }
