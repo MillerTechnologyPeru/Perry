@@ -239,6 +239,56 @@ public class NSOrderedSet: NSObject {
         }
     }
 
+    @ObjCMethod("isSubsetOfOrderedSet:")
+    func isSubset(ofOrderedSet other: ObjCObject?) -> Bool {
+        guard let other else { return storage.members.isEmpty }
+        let theirs = OrderedSets.storage(other.id)
+        return storage.members.allSatisfy { theirs.index(of: $0) != nil }
+    }
+
+    @ObjCMethod("intersectsOrderedSet:")
+    func intersects(orderedSet other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        let theirs = OrderedSets.storage(other.id)
+        return storage.members.contains { theirs.index(of: $0) != nil }
+    }
+
+    @ObjCMethod("isSubsetOfSet:")
+    func isSubset(ofSet other: ObjCObject?) -> Bool {
+        guard let other else { return storage.members.isEmpty }
+        let contains = ObjC.selector("containsObject:")
+        return storage.members.allSatisfy { ObjC.sendBool(other.id, contains, $0) }
+    }
+
+    @ObjCMethod("intersectsSet:")
+    func intersects(set other: ObjCObject?) -> Bool {
+        guard let other else { return false }
+        let contains = ObjC.selector("containsObject:")
+        return storage.members.contains { ObjC.sendBool(other.id, contains, $0) }
+    }
+
+    /// The first index whose member passes, or NSNotFound.
+    @ObjCMethod("indexOfObjectPassingTest:")
+    func index(ofObjectPassingTest block: ObjCObject) -> UInt {
+        index(options: 0, ofObjectPassingTest: block)
+    }
+
+    /// NSEnumerationOptions: reverse 2 searches from the end; concurrent
+    /// searching is done in order.
+    @ObjCMethod("indexOfObjectWithOptions:passingTest:")
+    func index(options: UInt, ofObjectPassingTest block: ObjCObject) -> UInt {
+        typealias Invoke = @convention(c) (id, id, UInt, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = Blocks.invoke(block.id, as: Invoke.self)
+        let members = storage.members
+        let order = options & 2 != 0 ? Array(members.indices.reversed()) : Array(members.indices)
+        for index in order {
+            var stop = false
+            if invoke(block.id, members[index], UInt(index), &stop) { return UInt(index) }
+            if stop { break }
+        }
+        return notFound
+    }
+
     @ObjCMethod("description")
     func description() -> String {
         let name = ObjC.isKind(objcObject, of: OrderedSets.mutableClass) ? "NSMutableOrderedSet" : "NSOrderedSet"
