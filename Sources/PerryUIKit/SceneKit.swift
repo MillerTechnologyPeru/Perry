@@ -33,6 +33,8 @@ final class SCNMaterialPropertyState: ObjectState {
     var intensity: CGFloat = 1
     /// SCNWrapMode: clamp 1, repeat 2, clamp to border 3, mirror 4.
     var wrapS = 1, wrapT = 1
+    /// Which set of texture coordinates the picture is laid out by.
+    var mappingChannel = 0
     deinit { ObjCRuntime.release(contents) }
 }
 
@@ -245,6 +247,8 @@ struct SCNMesh {
     var vertices: [Float] = []
     /// For a mesh read from a file, the index in the file's sources of each vertex, which a skinner's weights are by.
     var sources: [Int32] = []
+    /// A second set of texture coordinates (baked light maps use them), two floats a vertex, when the file has them.
+    var uv2: [Float] = []
     var elements: [(first: Int, count: Int)] = []
 }
 
@@ -839,6 +843,7 @@ open class SCNView: UIView {
         }
         if let overlay = scn.overlayView, overlay.state.bounds.size != state.bounds.size { overlay.setFrame(state.bounds) }
         if scn.renderer == nil { scn.renderer = SCNRenderer() }
+        scn.renderer?.time = Float(now - (scn.start ?? now))
         scn.renderer?.draw(scene, pointOfView: scn.pointOfView, in: self, scale: state.geometry.contentsScale, layer: state.layer,
                            defaultLighting: scn.autoenablesDefaultLighting)
         if let delegate, delegate.responds(to: "renderer:didRenderScene:atTime:") {
