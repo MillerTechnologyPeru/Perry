@@ -25,16 +25,34 @@ enum SCNFile {
 
     /// The scene in the main bundle at `name`, in `directory` if given.
     static func scene(named name: String, inDirectory directory: String?) -> SCNScene? {
-        var candidates: [String] = []
-        if name.hasPrefix("/") { candidates.append(name) }
-        if let base = NSBundle.main().resourcePath() {
-            if let directory { candidates.append("\(base)/\(directory)/\(name)") }
-            candidates.append("\(base)/\(name)")
-        }
-        for path in candidates where access(path, R_OK) == 0 {
+        for path in candidates(named: name, inDirectory: directory) where access(path, R_OK) == 0 {
             if let scene = scene(atPath: path) { return scene }
         }
         return nil
+    }
+
+    /// Where a file named `name` in `directory` may be: in the main bundle, or as the path says. A
+    /// directory made absolute by the current folder (as URL(fileURLWithPath:) makes it) is taken
+    /// back to the bundle's.
+    static func candidates(named name: String, inDirectory directory: String?) -> [String] {
+        var list: [String] = []
+        if name.hasPrefix("/") { list.append(name) }
+        var relative = directory
+        if let directory, directory.hasPrefix("/") {
+            list.append("\(directory)/\(name)")
+            var buffer = [CChar](repeating: 0, count: 4096)
+            if getcwd(&buffer, buffer.count) != nil {
+                let current = String(cString: buffer) + "/"
+                relative = directory.hasPrefix(current) ? String(directory.dropFirst(current.count)) : nil
+            } else {
+                relative = nil
+            }
+        }
+        if let base = NSBundle.main().resourcePath() {
+            if let relative { list.append("\(base)/\(relative)/\(name)") }
+            list.append("\(base)/\(name)")
+        }
+        return list
     }
 
     static func scene(atPath path: String) -> SCNScene? {
@@ -47,6 +65,14 @@ enum SCNFile {
         guard let bytes = read(path), let archive = SCNArchive(bytes: bytes, path: path) else { return nil }
         archives[path] = archive
         return archive
+    }
+
+    /// The particle system a .scnp file holds, found in the main bundle.
+    static func particleSystem(named name: String, inDirectory directory: String?) -> SCNParticleSystem? {
+        for path in candidates(named: name, inDirectory: directory) where access(path, R_OK) == 0 {
+            if let archive = archive(atPath: path), let root = archive.top["root"] { return SCNSceneBuilder(archive).particleSystem(root) }
+        }
+        return nil
     }
 
     static func read(_ path: String) -> [UInt8]? {
@@ -129,7 +155,9 @@ final class SCNArchive {
     func bytes(_ plist: Plist?) -> [UInt8]? {
         switch resolve(plist) {
         case .data(let value)?: return value
-        case .dictionary(let value)?: if case .data(let inner)? = resolve(value["NS.bytes"]) { return inner }
+        case .dictionary(let value)?:
+            // A mutable NSData keeps its bytes under NS.bytes, an immutable one (as Xcode's compiled scenes have) under NS.data.
+            for key in ["NS.bytes", "NS.data"] { if case .data(let inner)? = resolve(value[key]) { return inner } }
         default: break
         }
         return nil
@@ -144,14 +172,23 @@ final class SCNArchive {
 
     /// An NSArray's elements, as references.
     func list(_ plist: Plist?) -> [Plist] {
-        if case .dictionary(let value)? = resolve(plist), case .array(let items)? = value["NS.objects"] { return items }
-        return []
+        guard case .dictionary(let value)? = resolve(plist) else { return [] }
+        if case .array(let items)? = value["NS.objects"] { return items }
+        // A short collection keeps its elements under NS.object.0, NS.object.1...
+        var items: [Plist] = []
+        while let item = value["NS.object.\(items.count)"] { items.append(item) }
+        return items
     }
 
     /// An NSDictionary's string keys and values.
     func entries(_ plist: Plist?) -> [(key: String, value: Plist)] {
-        guard let value = dictionary(plist), case .array(let keys)? = value["NS.keys"], case .array(let items)? = value["NS.objects"] else { return [] }
-        return zip(keys, items).compactMap { key, item in string(key).map { ($0, item) } }
+        guard let value = dictionary(plist) else { return [] }
+        if case .array(let keys)? = value["NS.keys"], case .array(let items)? = value["NS.objects"] {
+            return zip(keys, items).compactMap { key, item in string(key).map { ($0, item) } }
+        }
+        var pairs: [(key: String, value: Plist)] = []
+        while let key = value["NS.key.\(pairs.count)"], let item = value["NS.object.\(pairs.count)"], let name = string(key) { pairs.append((name, item)) }
+        return pairs
     }
 
     /// An NSColor's red, green, blue and alpha: its components are text.
@@ -231,6 +268,17 @@ final class SCNSceneBuilder {
         if archive.has(described["geometry"]) { state.geometry = geometry(described["geometry"]) }
         if archive.has(described["camera"]) { state.camera = camera(described["camera"]) }
         if archive.has(described["light"]) { state.light = light(described["light"]) }
+        if archive.has(described["particleSystem"]) {
+            for item in archive.list(described["particleSystem"]) { if let system = particleSystem(item) { state.particleSystems.append(system) } }
+        }
+        if archive.has(described["animation-players"]) {
+            // The animations are not played; the players are there under their keys.
+            let keys = archive.list(described["animation-keys"]).map { archive.string($0) }
+            for (index, _) in archive.list(described["animation-players"]).enumerated() where index < keys.count {
+                guard let key = keys[index] else { continue }
+                made.addAnimationPlayer(SCNAnimationPlayer.objCClass.object.allocated().unsafeCast(to: SCNAnimationPlayer.self), forKey: key)
+            }
+        }
         if archive.has(described["actions"]) {
             // A node's actions start running when it is loaded.
             let keys = archive.list(described["action-keys"]).map { archive.string($0) }
@@ -239,7 +287,7 @@ final class SCNSceneBuilder {
                 state.running.append(SCNRunning(key: index < keys.count ? keys[index] : nil, action: built, completion: nil))
             }
         }
-        for key in ["particleSystem", "physicsBody", "physicsField", "animations", "skinner", "morpher", "constraints"]
+        for key in ["physicsBody", "physicsField", "skinner", "morpher", "constraints"]
         where archive.has(described[key]) { skip(key) }
 
         for child in archive.list(described["childNodes"]) {
@@ -270,6 +318,15 @@ final class SCNSceneBuilder {
         state.orthographic = archive.bool(described["usesOrthographicProjection"]) ?? false
         state.orthographicScale = archive.double(described["orthographicScale"]) ?? 1
         state.horizontal = archive.int(described["projectionDirection"]) == 1
+        return made
+    }
+
+    func particleSystem(_ reference: SCNArchive.Plist?) -> SCNParticleSystem? {
+        guard let described = archive.dictionary(reference), archive.className(reference) == "SCNParticleSystem" else { return nil }
+        let made = SCNParticleSystem.make(SCNParticleSystem.objCClass)
+        made.system.values["birthRate"] = archive.double(described["birthRate"]) ?? 1
+        made.system.values["emissionDuration"] = archive.double(described["emissionDuration"]) ?? 1
+        made.system.values["loops"] = (archive.bool(described["loops"]) ?? true) ? 1 : 0
         return made
     }
 
@@ -356,7 +413,11 @@ final class SCNSceneBuilder {
         if archive.has(described["image"]) {
             for (key, value) in archive.entries(described["image"]) where key == "path" {
                 guard let relative = archive.string(value) else { continue }
-                let path = relative.hasPrefix("/") ? relative : "\(archive.directory)/\(relative)"
+                // A source scene's pictures are beside it; a compiled scene's are named from the bundle.
+                var path = relative.hasPrefix("/") ? relative : "\(archive.directory)/\(relative)"
+                if access(path, R_OK) != 0, let base = NSBundle.main().resourcePath(), access("\(base)/\(relative)", R_OK) == 0 {
+                    path = "\(base)/\(relative)"
+                }
                 if let known = SCNFile.images[path] { return known }
                 if let image = UIImage.image(UIImage.objCClass, contentsOfFile: path) {
                     SCNFile.images[path] = image
@@ -436,7 +497,13 @@ final class SCNSceneBuilder {
     /// not triangles are empty runs, so the materials still line up.
     private func mesh(_ described: [String: SCNArchive.Plist]) -> SCNMesh {
         var mesh = SCNMesh()
-        guard let positions = source(described["kGeometrySourceSemanticVertex"]) else { return mesh }
+        guard let positions = source(described["kGeometrySourceSemanticVertex"]) else {
+            if getenv("PERRY_SCENEKIT_TRACE") != nil {
+                let line = "perry: SceneKit: a geometry has no vertex source: keys \(described.keys.sorted())\n"
+                line.withCString { _ = write(2, $0, strlen($0)) }
+            }
+            return mesh
+        }
         let normals = source(described["kGeometrySourceSemanticNormal"]), coordinates = source(described["kGeometrySourceSemanticTexcoord"])
         for reference in archive.list(described["elements"]) {
             let first = mesh.vertices.count / 8
