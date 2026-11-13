@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSOpenGLPixelFormat, NSOpenGLContext and NSOpenGLView, over SDL's OpenGL
 // contexts. A window showing an NSOpenGLView has no SDL renderer: the
@@ -45,17 +46,17 @@ open class NSOpenGLPixelFormat: NSObject {
     /// SDL's attributes for the next context and window to have this format.
     func applyToSDL() {
         let double: Int32 = attributes[5] != nil ? 1 : 0
-        _ = SDL.glSetAttribute(SDL.glDoubleBuffer, double)
-        _ = SDL.glSetAttribute(SDL.glDepthSize, value(12) ?? 16)
-        _ = SDL.glSetAttribute(SDL.glStencilSize, value(13) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glAlphaSize, value(11) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glMultisampleBuffers, value(55) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glMultisampleSamples, value(56) ?? 0)
+        try? SDL.glSetAttribute(.doubleBuffer, double)
+        try? SDL.glSetAttribute(.depthSize, value(12) ?? 16)
+        try? SDL.glSetAttribute(.stencilSize, value(13) ?? 0)
+        try? SDL.glSetAttribute(.alphaSize, value(11) ?? 0)
+        try? SDL.glSetAttribute(.multisampleBuffers, value(55) ?? 0)
+        try? SDL.glSetAttribute(.multisampleSamples, value(56) ?? 0)
         // Whatever the format asks of the version, these programs draw with
         // the fixed-function pipeline.
-        _ = SDL.glSetAttribute(SDL.glContextMajorVersion, 2)
-        _ = SDL.glSetAttribute(SDL.glContextMinorVersion, 1)
-        _ = SDL.glSetAttribute(SDL.glContextProfileMask, SDL.glProfileCompatibility)
+        try? SDL.glSetAttribute(.contextMajorVersion, 2)
+        try? SDL.glSetAttribute(.contextMinorVersion, 1)
+        try? SDL.glSetAttribute(.contextProfileMask, GLAttribute.Profile.compatibility.rawValue)
     }
 }
 
@@ -63,13 +64,13 @@ open class NSOpenGLPixelFormat: NSObject {
 open class NSOpenGLContext: NSObject {
     nonisolated(unsafe) static var current: NSOpenGLContext?
     /// For contexts made current before their view has a window.
-    nonisolated(unsafe) private static var holdingWindow: SDL.Window?
+    nonisolated(unsafe) private static var holdingWindow: SDLWindow?
 
     var format: NSOpenGLPixelFormat?
     var shared: NSOpenGLContext?
     /// Not retained.
     var viewObject: UnsafeMutableRawPointer?
-    var context: SDL.Pointer?
+    var context: SDLGLContext?
     var swapInterval: Int32 = 0
 
     public required override init() { super.init() }
@@ -81,24 +82,24 @@ open class NSOpenGLContext: NSObject {
         shared = shareContext?.as(NSOpenGLContext.self)
     }
 
-    deinit {
-        if let context { _ = SDL.glDestroyContext(context) }
-    }
-
     /// The SDL window this context draws to: its view's window's, or one
     /// kept hidden until the view has a window.
-    private func drawable() -> SDL.Window? {
-        guard SDL.start() else { return nil }
+    private func drawable() -> SDLWindow? {
+        guard SDLSession.start() else { return nil }
         if let viewObject, let window = NSView.wrap(viewObject).window {
             window.prepareForOpenGL(format)
             if let sdlWindow = window.sdlWindow { return sdlWindow }
         }
         if let window = Self.holdingWindow { return window }
         format?.applyToSDL()
-        let window = "".withCString { SDL.createWindow($0, 16, 16, SDL.windowOpenGL | SDL.windowHidden) }
-        if window == nil { appKitWarning("SDL could not make a window for OpenGL: \(SDL.lastError)") }
-        Self.holdingWindow = window
-        return window
+        do {
+            let window = try SDLWindow(title: "", width: 16, height: 16, options: [.opengl, .hidden])
+            Self.holdingWindow = window
+            return window
+        } catch {
+            appKitWarning("SDL could not make a window for OpenGL: \(error)")
+            return nil
+        }
     }
 
     @ObjCMethod("makeCurrentContext")
@@ -107,28 +108,31 @@ open class NSOpenGLContext: NSObject {
         if context == nil {
             format?.applyToSDL()
             let sharing = shared?.context != nil
-            if sharing, let other = shared?.context { _ = SDL.glMakeCurrent(window, other) }
-            _ = SDL.glSetAttribute(SDL.glShareWithCurrentContext, sharing ? 1 : 0)
-            context = SDL.glCreateContext(window)
-            if context == nil { appKitWarning("SDL could not make an OpenGL context: \(SDL.lastError)") }
-            _ = SDL.glSetSwapInterval(swapInterval)
+            if sharing, let other = shared?.context { try? other.makeCurrent(in: window) }
+            try? SDL.glSetAttribute(.shareWithCurrentContext, sharing ? 1 : 0)
+            do {
+                context = try SDLGLContext(window: window)
+            } catch {
+                appKitWarning("SDL could not make an OpenGL context: \(error)")
+            }
+            try? SDL.glSetSwapInterval(swapInterval)
         }
         guard let context else { return }
-        if !SDL.glMakeCurrent(window, context) { appKitWarning("SDL could not make the OpenGL context current: \(SDL.lastError)") }
+        do { try context.makeCurrent(in: window) } catch { appKitWarning("SDL could not make the OpenGL context current: \(error)") }
         Self.current = self
     }
 
     @ObjCMethod("flushBuffer")
     func flushBuffer() {
         guard let window = drawable() else { return }
-        _ = SDL.glSwapWindow(window)
+        try? window.glSwap()
     }
 
     @ObjCClassMethod("currentContext") static func currentContext() -> NSOpenGLContext? { current }
 
     @ObjCClassMethod("clearCurrentContext")
     static func clearCurrentContext() {
-        if current != nil { _ = SDL.glMakeCurrent(nil, nil) }
+        if current != nil { try? SDLGLContext.clearCurrent() }
         current = nil
     }
 
@@ -144,7 +148,7 @@ open class NSOpenGLContext: NSObject {
     func setValues(_ values: UnsafePointer<Int32>?, parameter: Int) {
         guard parameter == 222, let values else { return }
         swapInterval = values.pointee
-        if context != nil { _ = SDL.glSetSwapInterval(swapInterval) }
+        if context != nil { try? SDL.glSetSwapInterval(swapInterval) }
     }
 
     @ObjCMethod("getValues:forParameter:")
