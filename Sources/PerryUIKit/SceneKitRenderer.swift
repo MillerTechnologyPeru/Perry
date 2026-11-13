@@ -69,6 +69,8 @@ final class SCNRenderer {
     /// picture is retained while its texture is kept.
     private var textures: [UnsafeMutableRawPointer: (texture: GLuint, used: Int)] = [:]
     private var white: GLuint = 0
+    /// The vertices of skinned geometry, made again for each draw.
+    private var skinBuffer: GLuint = 0
 
     init?() {
         guard SCNGL.load(), let made = EAGLContext.objCClass.object.allocated().unsafeCast(to: EAGLContext.self).initialize(api: 2)
@@ -88,6 +90,7 @@ final class SCNRenderer {
             ObjCRuntime.release(image)
         }
         if white != 0 { GLES.deleteTextures?(1, &white) }
+        if skinBuffer != 0 { SKGL.deleteBuffers(1, &skinBuffer) }
         if depth != 0 { GLES.deleteRenderbuffers(1, &depth) }
         if color != 0 { GLES.deleteRenderbuffers(1, &color) }
         if framebuffer != 0 { GLES.deleteFramebuffers(1, &framebuffer) }
@@ -261,6 +264,8 @@ final class SCNRenderer {
         var geometry: SCNGeometry
         var model: Matrix
         var opacity: Float
+        /// The bones that move the geometry's vertices, if it is skinned.
+        var skinner: SCNSkinnerState?
         /// Distance along the view, for the translucent's order.
         var depth: Float = 0
     }
@@ -367,7 +372,7 @@ final class SCNRenderer {
         guard !state.hidden, state.opacity > 0 else { return }
         let model = SCNMath.multiply(parent, state.local)
         let combined = opacity * Float(state.opacity)
-        if let geometry = state.geometry { items.append(Item(geometry: geometry, model: model, opacity: combined)) }
+        if let geometry = state.geometry { items.append(Item(geometry: geometry, model: model, opacity: combined, skinner: state.skinner?.skinner)) }
         if let light = state.light { lights.append((light, model)) }
         for child in state.children {
             collect(child.unsafeCast(to: SCNNode.self), parent: model, opacity: combined, into: &items, lights: &lights)
@@ -472,7 +477,17 @@ final class SCNRenderer {
         }
         guard !drawn.isEmpty else { return }
 
-        SKGL.bindBuffer(SKGL.arrayBuffer, buffer(for: item.geometry, mesh: mesh))
+        // A skinned geometry's vertices are made again each frame, in the scene's space.
+        var model = item.model
+        if let skinner = item.skinner, !skinner.bones.isEmpty {
+            let skinned = SCNSkinning.skin(mesh, with: skinner)
+            if skinBuffer == 0 { SKGL.genBuffers(1, &skinBuffer) }
+            SKGL.bindBuffer(SKGL.arrayBuffer, skinBuffer)
+            skinned.withUnsafeBytes { SKGL.bufferData(SKGL.arrayBuffer, $0.count, $0.baseAddress, SKGL.streamDraw) }
+            model = SCNMath.identity
+        } else {
+            SKGL.bindBuffer(SKGL.arrayBuffer, buffer(for: item.geometry, mesh: mesh))
+        }
         let stride: Int32 = 32
         SKGL.enableVertexAttribArray(attributes.0)
         SKGL.vertexAttribPointer(attributes.0, 3, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 0))
@@ -481,10 +496,10 @@ final class SCNRenderer {
         SKGL.enableVertexAttribArray(attributes.2)
         SKGL.vertexAttribPointer(attributes.2, 2, SKGL.float, 0, stride, UnsafeRawPointer(bitPattern: 24))
 
-        let mvp = SCNMath.multiply(viewProjection, item.model)
+        let mvp = SCNMath.multiply(viewProjection, model)
         mvp.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(uniforms.mvp, 1, 0, $0.baseAddress) }
-        item.model.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(uniforms.model, 1, 0, $0.baseAddress) }
-        SCNMath.normalMatrix(item.model).withUnsafeBufferPointer { SCNGL.uniformMatrix3fv(uniforms.normalMatrix, 1, 0, $0.baseAddress) }
+        model.withUnsafeBufferPointer { SCNGL.uniformMatrix4fv(uniforms.model, 1, 0, $0.baseAddress) }
+        SCNMath.normalMatrix(model).withUnsafeBufferPointer { SCNGL.uniformMatrix3fv(uniforms.normalMatrix, 1, 0, $0.baseAddress) }
 
         for entry in drawn {
             let material = entry.material.material
