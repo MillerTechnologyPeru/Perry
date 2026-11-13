@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSOpenGLPixelFormat, NSOpenGLContext and NSOpenGLView, over SDL's OpenGL
 // contexts. A window showing an NSOpenGLView has no SDL renderer: the
@@ -45,21 +46,21 @@ open class NSOpenGLPixelFormat: NSObject {
     /// SDL's attributes for the next context and window to have this format.
     func applyToSDL() {
         let double: Int32 = attributes[5] != nil ? 1 : 0
-        _ = SDL.glSetAttribute(SDL.glDoubleBuffer, double)
-        _ = SDL.glSetAttribute(SDL.glDepthSize, value(12) ?? 16)
-        _ = SDL.glSetAttribute(SDL.glStencilSize, value(13) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glAlphaSize, value(11) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glMultisampleBuffers, value(55) ?? 0)
-        _ = SDL.glSetAttribute(SDL.glMultisampleSamples, value(56) ?? 0)
+        try? SDL.glSetAttribute(.doubleBuffer, double)
+        try? SDL.glSetAttribute(.depthSize, value(12) ?? 16)
+        try? SDL.glSetAttribute(.stencilSize, value(13) ?? 0)
+        try? SDL.glSetAttribute(.alphaSize, value(11) ?? 0)
+        try? SDL.glSetAttribute(.multisampleBuffers, value(55) ?? 0)
+        try? SDL.glSetAttribute(.multisampleSamples, value(56) ?? 0)
         // Whatever the format asks of the version, these programs draw with
         // the fixed-function pipeline.
-        _ = SDL.glSetAttribute(SDL.glContextMajorVersion, 2)
-        _ = SDL.glSetAttribute(SDL.glContextMinorVersion, 1)
-        _ = SDL.glSetAttribute(SDL.glContextProfileMask, SDL.glProfileCompatibility)
+        try? SDL.glSetAttribute(.contextMajorVersion, 2)
+        try? SDL.glSetAttribute(.contextMinorVersion, 1)
+        try? SDL.glSetAttribute(.contextProfileMask, GLAttribute.Profile.compatibility.rawValue)
         // Letting go of a context doesn't submit what was drawn with it, as
         // a Mac's doesn't: games that make theirs current around every
         // batch of drawing would otherwise have each batch submitted alone.
-        _ = SDL.glSetAttribute(SDL.glContextReleaseBehavior, SDL.glReleaseBehaviorNone)
+        try? SDL.glSetAttribute(.contextReleaseBehavior, GLAttribute.ReleaseBehavior.none.rawValue)
     }
 }
 
@@ -71,7 +72,7 @@ open class NSOpenGLContext: NSObject {
     private struct Binding {
         let context: NSOpenGLContext
         /// None when the context is current without a surface.
-        let window: SDL.Window?
+        let window: OpaquePointer?
     }
     private static var bindings: [pthread_t: Binding] {
         unsafeAddress { UnsafePointer(Storage.bindings) }
@@ -133,7 +134,7 @@ open class NSOpenGLContext: NSObject {
                 NSOpenGLContext.streaks[thread] = nil
                 return NSOpenGLContext.parked.removeValue(forKey: thread) != nil
             }
-            if wasParked { _ = SDL.glMakeCurrent(nil, nil) }
+            if wasParked { try? SDLGLContext.clearCurrent() }
         }
         return key
     }()
@@ -154,7 +155,7 @@ open class NSOpenGLContext: NSObject {
 
     /// Whether another thread draws to `window`, as games that render on
     /// their own threads do.
-    static func isBoundOnAnotherThread(_ window: SDL.Window) -> Bool {
+    static func isBoundOnAnotherThread(_ window: OpaquePointer) -> Bool {
         let thread = pthread_self()
         return withBindings {
             $0.contains { pthread_equal($0.key, thread) == 0 && $0.value.window == window }
@@ -166,12 +167,12 @@ open class NSOpenGLContext: NSObject {
     /// letting go of them to let go of them in EGL, at their next letting
     /// go: those threads.
     @discardableResult
-    private static func requestRelease(of context: SDL.Pointer, _ window: SDL.Window?) -> [pthread_t] {
+    private static func requestRelease(of context: OpaquePointer, _ window: OpaquePointer?) -> [pthread_t] {
         let thread = pthread_self()
         return withBindings { _ in
             var threads: [pthread_t] = []
             for (other, binding) in parked where pthread_equal(other, thread) == 0
-                && (binding.context.context == context || window != nil && binding.window == window) {
+                && (binding.context.context?.unsafePointer == context || window != nil && binding.window == window) {
                 releaseRequested.insert(other)
                 threads.append(other)
             }
@@ -182,7 +183,7 @@ open class NSOpenGLContext: NSObject {
     /// For the main thread, which doesn't wait for windows: a context
     /// another thread keeps is asked for, and waited for a little (that
     /// thread lets go of it within a batch of drawing).
-    private static func reclaim(_ context: SDL.Pointer) {
+    private static func reclaim(_ context: OpaquePointer) {
         let threads = requestRelease(of: context, nil)
         guard !threads.isEmpty else { return }
         for _ in 0..<100 {
@@ -191,13 +192,13 @@ open class NSOpenGLContext: NSObject {
         }
     }
     /// For contexts made current before their view has a window.
-    nonisolated(unsafe) private static var holdingWindow: SDL.Window?
+    nonisolated(unsafe) private static var holdingWindow: SDLWindow?
 
     var format: NSOpenGLPixelFormat?
     var shared: NSOpenGLContext?
     /// Not retained.
     var viewObject: UnsafeMutableRawPointer?
-    var context: SDL.Pointer?
+    var context: SDLGLContext?
     var swapInterval: Int32 = 0
 
     public required override init() { super.init() }
@@ -209,24 +210,24 @@ open class NSOpenGLContext: NSObject {
         shared = shareContext?.as(NSOpenGLContext.self)
     }
 
-    deinit {
-        if let context { _ = SDL.glDestroyContext(context) }
-    }
-
     /// The SDL window this context draws to: its view's window's, or one
     /// kept hidden until the view has a window.
-    private func drawable() -> SDL.Window? {
-        guard SDL.start() else { return nil }
+    private func drawable() -> SDLWindow? {
+        guard SDLSession.start() else { return nil }
         if let viewObject, let window = NSView.wrap(viewObject).window {
             window.prepareForOpenGL(format)
             if let sdlWindow = window.sdlWindow { return sdlWindow }
         }
         if let window = Self.holdingWindow { return window }
         format?.applyToSDL()
-        let window = "".withCString { SDL.createWindow($0, 16, 16, SDL.windowOpenGL | SDL.windowHidden) }
-        if window == nil { appKitWarning("SDL could not make a window for OpenGL: \(SDL.lastError)") }
-        Self.holdingWindow = window
-        return window
+        do {
+            let window = try SDLWindow(title: "", width: 16, height: 16, options: [.opengl, .hidden])
+            Self.holdingWindow = window
+            return window
+        } catch {
+            appKitWarning("SDL could not make a window for OpenGL: \(error)")
+            return nil
+        }
     }
 
     @ObjCMethod("makeCurrentContext")
@@ -237,7 +238,7 @@ open class NSOpenGLContext: NSObject {
         // window: taken back as it is.
         let resumed = Self.withBindings {
             guard let binding = Self.parked.removeValue(forKey: thread) else { return false }
-            guard binding.context === self, binding.window == window else { return false }
+            guard binding.context === self, binding.window == window.unsafePointer else { return false }
             $0[thread] = binding
             return true
         }
@@ -246,14 +247,17 @@ open class NSOpenGLContext: NSObject {
             format?.applyToSDL()
             let sharing = shared?.context != nil
             if sharing, let other = shared?.context { _ = Self.bind(other, to: window) }
-            _ = SDL.glSetAttribute(SDL.glShareWithCurrentContext, sharing ? 1 : 0)
-            context = SDL.glCreateContext(window)
-            if context == nil { appKitWarning("SDL could not make an OpenGL context: \(SDL.lastError)") }
-            _ = SDL.glSetSwapInterval(swapInterval)
+            try? SDL.glSetAttribute(.shareWithCurrentContext, sharing ? 1 : 0)
+            do {
+                context = try SDLGLContext(window: window)
+            } catch {
+                appKitWarning("SDL could not make an OpenGL context: \(error)")
+            }
+            try? SDL.glSetSwapInterval(swapInterval)
         }
         guard let context else { return }
         guard let bound = Self.bind(context, to: window) else {
-            appKitWarning("SDL could not make the OpenGL context current: \(SDL.lastError)")
+            appKitWarning("SDL could not make the OpenGL context current")
             return
         }
         let identifier = ObjectIdentifier(self)
@@ -276,15 +280,17 @@ open class NSOpenGLContext: NSObject {
     /// drawing on its own thread keeps the window: the main thread's
     /// contexts are made current without a surface while it does, and
     /// another thread waits for the main thread's brief binding to end.
-    private static func bind(_ context: SDL.Pointer, to window: SDL.Window) -> SDL.Window?? {
+    private static func bind(_ context: SDLGLContext, to window: SDLWindow) -> OpaquePointer?? {
         let onMain = Dispatch.isMainThread
-        if onMain { reclaim(context) }
+        if onMain { reclaim(context.unsafePointer) }
         for attempt in 0..<2000 {
-            if !(onMain && isBoundOnAnotherThread(window)), SDL.glMakeCurrent(window, context) { return .some(window) }
-            if onMain { return SDL.glMakeCurrent(nil, context) ? .some(nil) : nil }
+            if !(onMain && isBoundOnAnotherThread(window.unsafePointer)), (try? context.makeCurrent(in: window)) != nil {
+                return .some(window.unsafePointer)
+            }
+            if onMain { return (try? context.makeCurrentWithoutSurface()) != nil ? .some(nil) : nil }
             if attempt == 0 {
-                Trace.log("OpenGL: waiting for another thread to let go of window \(window)")
-                requestRelease(of: context, window)
+                Trace.log("OpenGL: waiting for another thread to let go of window \(window.unsafePointer)")
+                requestRelease(of: context.unsafePointer, window.unsafePointer)
             }
             usleep(1000)
         }
@@ -294,7 +300,7 @@ open class NSOpenGLContext: NSObject {
     @ObjCMethod("flushBuffer")
     func flushBuffer() {
         guard let window = drawable() else { return }
-        _ = SDL.glSwapWindow(window)
+        try? window.glSwap()
     }
 
     @ObjCClassMethod("currentContext") static func currentContext() -> NSOpenGLContext? { current }
@@ -316,7 +322,7 @@ open class NSOpenGLContext: NSObject {
             return false
         }
         switch release {
-        case true?: _ = SDL.glMakeCurrent(nil, nil)
+        case true?: try? SDLGLContext.clearCurrent()
         case false?:
             if pthread_getspecific(parkedKey) == nil { pthread_setspecific(parkedKey, UnsafeRawPointer(bitPattern: 1)) }
             BlockingRelease.arm?(1)
@@ -332,7 +338,7 @@ open class NSOpenGLContext: NSObject {
             releaseRequested.remove(thread)
             return parked.removeValue(forKey: thread) != nil
         }
-        if wasParked { _ = SDL.glMakeCurrent(nil, nil) }
+        if wasParked { try? SDLGLContext.clearCurrent() }
     }
 
     /// The CGL context: this context itself, which OpenGL's provider's CGL
@@ -351,7 +357,7 @@ open class NSOpenGLContext: NSObject {
     func setValues(_ values: UnsafePointer<Int32>?, parameter: Int) {
         guard parameter == 222, let values else { return }
         swapInterval = values.pointee
-        if context != nil { _ = SDL.glSetSwapInterval(swapInterval) }
+        if context != nil { try? SDL.glSetSwapInterval(swapInterval) }
     }
 
     @ObjCMethod("getValues:forParameter:")
@@ -418,7 +424,7 @@ open class NSOpenGLView: NSView {
         let current = Send.object(objcObject, "openGLContext").map(NSObject.init)?.as(NSOpenGLContext.self)
         guard let current else { return }
         // The app's own thread draws to the window: it leaves it be.
-        if let sdlWindow = window?.sdlWindow, NSOpenGLContext.isBoundOnAnotherThread(sdlWindow) { return }
+        if let sdlWindow = window?.sdlWindow, NSOpenGLContext.isBoundOnAnotherThread(sdlWindow.unsafePointer) { return }
         // What this drawing makes current, it lets go of after, so that
         // the app's threads can draw to the window.
         let previous = NSOpenGLContext.current

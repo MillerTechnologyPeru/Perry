@@ -1,9 +1,10 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // Compositing layer trees on the GPU, for UIKit's live view, through the
-// SDL3 renderer UIKit's window draws with. Each layer's own content (its
+// SDL3 renderer UIKit's window draws with (SDL3Swift's, over the renderer's pointer). Each layer's own content (its
 // background in the shape of its corners, what it displayed, its contents
 // and a shape layer's path) and its border are textures, drawn with
 // CoreGraphics only when they change; each frame places them as the layers
@@ -12,84 +13,6 @@ import PerryObjCInterop
 // texture. The GPU clips to rectangles, so a layer that clips to rounded
 // corners, or has a mask, is drawn with its sublayers as one texture,
 // through CoreGraphics, each frame.
-
-/// The SDL3 functions compositing calls, from the library UIKit loaded.
-enum SDL {
-    typealias Pointer = UnsafeMutableRawPointer
-
-    struct FRect { var x, y, w, h: Float }
-    struct Rect { var x, y, w, h: Int32 }
-
-    nonisolated(unsafe) static var createTexture: (@convention(c) (Pointer?, UInt32, Int32, Int32, Int32) -> Pointer?)!
-    nonisolated(unsafe) static var updateTexture: (@convention(c) (Pointer?, UnsafeRawPointer?, UnsafeRawPointer?, Int32) -> Bool)!
-    nonisolated(unsafe) static var setTextureBlendMode: (@convention(c) (Pointer?, UInt32) -> Bool)!
-    nonisolated(unsafe) static var setTextureAlphaMod: (@convention(c) (Pointer?, Float) -> Bool)!
-    nonisolated(unsafe) static var setTextureColorMod: (@convention(c) (Pointer?, Float, Float, Float) -> Bool)!
-    nonisolated(unsafe) static var setTextureScaleMode: (@convention(c) (Pointer?, Int32) -> Bool)!
-    nonisolated(unsafe) static var destroyTexture: (@convention(c) (Pointer?) -> Void)!
-    nonisolated(unsafe) static var renderTexture: (@convention(c) (Pointer?, Pointer?, UnsafeRawPointer?, UnsafeRawPointer?) -> Bool)!
-    nonisolated(unsafe) static var renderTextureRotated: (@convention(c) (Pointer?, Pointer?, UnsafeRawPointer?, UnsafeRawPointer?, Double,
-                                                                          UnsafeRawPointer?, Int32) -> Bool)!
-    nonisolated(unsafe) static var setDrawColor: (@convention(c) (Pointer?, Float, Float, Float, Float) -> Bool)!
-    nonisolated(unsafe) static var setDrawBlendMode: (@convention(c) (Pointer?, UInt32) -> Bool)!
-    nonisolated(unsafe) static var fillRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
-    nonisolated(unsafe) static var clear: (@convention(c) (Pointer?) -> Bool)!
-    nonisolated(unsafe) static var present: (@convention(c) (Pointer?) -> Bool)!
-    nonisolated(unsafe) static var getError: (@convention(c) () -> UnsafePointer<CChar>?)?
-    static var lastError: String { getError?().map { String(cString: $0) } ?? "" }
-    nonisolated(unsafe) static var setClipRect: (@convention(c) (Pointer?, UnsafeRawPointer?) -> Bool)!
-    /// SDL 3.2's, for the frame rate overlay; nil before it.
-    nonisolated(unsafe) static var renderDebugText: (@convention(c) (Pointer?, Float, Float, UnsafePointer<CChar>) -> Bool)?
-    nonisolated(unsafe) static var setRenderScale: (@convention(c) (Pointer?, Float, Float) -> Bool)?
-
-    static let pixelFormatARGB8888: UInt32 = 0x1636_2004
-    /// R, G, B, A bytes, as OpenGL reads pixels back.
-    static let pixelFormatABGR8888: UInt32 = 0x1676_2004
-    static let blendNone: UInt32 = 0
-    static let textureAccessStreaming: Int32 = 1
-    static let blendBlend: UInt32 = 0x1
-    static let blendPremultiplied: UInt32 = 0x10
-
-    nonisolated(unsafe) private static var loaded: Bool?
-
-    static func loadOnce() -> Bool {
-        if let loaded { return loaded }
-        let result = load()
-        loaded = result
-        return result
-    }
-
-    private static func load() -> Bool {
-        guard let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return false }
-        var complete = true
-        func bind<T>(_ name: String) -> T? {
-            guard let symbol = dlsym(library, name) else {
-                complete = false
-                return nil
-            }
-            return unsafeBitCast(symbol, to: T.self)
-        }
-        createTexture = bind("SDL_CreateTexture")
-        renderDebugText = dlsym(library, "SDL_RenderDebugText").map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Float, Float, UnsafePointer<CChar>) -> Bool).self) }
-        setRenderScale = dlsym(library, "SDL_SetRenderScale").map { unsafeBitCast($0, to: (@convention(c) (Pointer?, Float, Float) -> Bool).self) }
-        updateTexture = bind("SDL_UpdateTexture")
-        setTextureBlendMode = bind("SDL_SetTextureBlendMode")
-        setTextureAlphaMod = bind("SDL_SetTextureAlphaModFloat")
-        setTextureColorMod = bind("SDL_SetTextureColorModFloat")
-        setTextureScaleMode = bind("SDL_SetTextureScaleMode")
-        destroyTexture = bind("SDL_DestroyTexture")
-        renderTexture = bind("SDL_RenderTexture")
-        renderTextureRotated = bind("SDL_RenderTextureRotated")
-        setDrawColor = bind("SDL_SetRenderDrawColorFloat")
-        setDrawBlendMode = bind("SDL_SetRenderDrawBlendMode")
-        fillRect = bind("SDL_RenderFillRect")
-        clear = bind("SDL_RenderClear")
-        present = bind("SDL_RenderPresent")
-        getError = bind("SDL_GetError")
-        setClipRect = bind("SDL_SetRenderClipRect")
-        return complete
-    }
-}
 
 /// Displays the visible layers in the trees that need it, as an app's
 /// drawing for them happens before compositing.
@@ -103,11 +26,11 @@ public func PerryCADisplayLayers(_ roots: UnsafePointer<UnsafeMutableRawPointer?
 }
 
 /// Composites the layer trees, back to front, with the renderer, at
-/// `scale` pixels a point, and shows the frame; false without SDL.
+/// `scale` pixels a point, and shows the frame; false without a renderer.
 @c(_PerryCAComposite)
 public func PerryCAComposite(_ renderer: UnsafeMutableRawPointer?, _ scale: Double, _ roots: UnsafePointer<UnsafeMutableRawPointer?>?,
                              _ count: Int) -> Bool {
-    guard let renderer, SDL.loadOnce() else { return false }
+    guard let renderer else { return false }
     let compositor = Compositor.shared(renderer, scale: CGFloat(scale))
     let layers = (0..<count).compactMap { roots?[$0] }.map(CALayer.wrap)
     compositor.draw(layers)
@@ -117,14 +40,15 @@ public func PerryCAComposite(_ renderer: UnsafeMutableRawPointer?, _ scale: Doub
 final class Compositor {
     nonisolated(unsafe) private static var current: Compositor?
 
-    static func shared(_ renderer: SDL.Pointer, scale: CGFloat) -> Compositor {
-        if let current, current.renderer == renderer, current.scale == scale { return current }
-        let compositor = Compositor(renderer: renderer, scale: scale)
+    static func shared(_ renderer: UnsafeMutableRawPointer, scale: CGFloat) -> Compositor {
+        let pointer = OpaquePointer(renderer)
+        if let current, current.renderer.unsafePointer == pointer, current.scale == scale { return current }
+        let compositor = Compositor(renderer: SDLRenderer(unownedPointer: pointer), scale: scale)
         current = compositor
         return compositor
     }
 
-    let renderer: SDL.Pointer
+    let renderer: SDLRenderer
     let scale: CGFloat
 
     /// A layer's texture, of its content or its border, and what it shows.
@@ -160,7 +84,7 @@ final class Compositor {
     }
 
     private struct Entry {
-        let texture: SDL.Pointer
+        let texture: SDLTexture
         /// Nil for a flattened layer's.
         let signature: Signature?
         var used: Bool
@@ -170,8 +94,16 @@ final class Compositor {
 
     private var textures: [Key: Entry] = [:]
 
-    init(renderer: SDL.Pointer, scale: CGFloat) {
+    init(renderer: SDLRenderer, scale: CGFloat) {
         (self.renderer, self.scale) = (renderer, scale)
+    }
+
+    /// The renderer that made the textures may be gone by now, and SDL
+    /// freed its textures with it: they are left alone, not destroyed twice.
+    deinit {
+        for entry in textures.values { _ = Unmanaged.passRetained(entry.texture) }
+        for entry in liveTextures.values { _ = Unmanaged.passRetained(entry.texture) }
+        for shared in sharedTextures.values { for case let texture? in shared.textures { _ = Unmanaged.passRetained(texture) } }
     }
 
     /// Displays the visible layers that need it.
@@ -240,31 +172,27 @@ final class Compositor {
         for key in textures.keys { textures[key]?.used = false }
         for key in liveTextures.keys { liveTextures[key]?.used = false }
         for entry in sharedTextures.values { entry.used = false }
-        _ = SDL.setDrawColor(renderer, 0, 0, 0, 1)
-        _ = SDL.setClipRect(renderer, nil)
-        let cleared = SDL.clear(renderer)
-        if tracingFrame, !cleared { "perry: QuartzCore: clearing failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
+        try? renderer.setDrawColorFloat(red: 0, green: 0, blue: 0, alpha: 1)
+        try? renderer.setClipRect(nil)
+        do {
+            try renderer.clear()
+        } catch {
+            if tracingFrame { "perry: QuartzCore: clearing failed: \(error)\n".withCString { _ = write(2, $0, strlen($0)) } }
+        }
         for root in roots {
             let (state, _) = Presentation.presented(root)
             var toScreen = state.toSuperlayer(within: nil)
             if let turn = Compositor.displayTurn(screen: state.bounds.size) { toScreen = toScreen.concatenating(turn) }
             composite(root, toScreen: toScreen, alpha: 1, clip: nil)
         }
-        for (key, entry) in textures where !entry.used {
-            SDL.destroyTexture(entry.texture)
-            textures[key] = nil
-        }
-        for (key, entry) in liveTextures where !entry.used {
-            SDL.destroyTexture(entry.texture)
-            liveTextures[key] = nil
-        }
+        for (key, entry) in textures where !entry.used { textures[key] = nil }
+        for (key, entry) in liveTextures where !entry.used { liveTextures[key] = nil }
         for (key, entry) in sharedTextures where !entry.used {
             entry.destroy()
             sharedTextures[key] = nil
         }
         if FrameRate.on { FrameRate.frame(renderer: renderer) }
-        let presented = SDL.present(renderer)
-        if tracingFrame, !presented { "perry: QuartzCore: presenting failed: \(SDL.lastError)\n".withCString { _ = write(2, $0, strlen($0)) } }
+        renderer.present()
     }
 
     /// A layer, then its sublayers, then its border; `toScreen` takes the
@@ -319,21 +247,20 @@ final class Compositor {
 
     private func setClip(_ clip: CGRect?) {
         guard let clip else {
-            _ = SDL.setClipRect(renderer, nil)
+            try? renderer.setClipRect(nil)
             return
         }
-        var rect = SDL.Rect(x: Int32((clip.minX * scale).rounded(.down)), y: Int32((clip.minY * scale).rounded(.down)),
-                            w: Int32(max((clip.width * scale).rounded(.up), 0)), h: Int32(max((clip.height * scale).rounded(.up), 0)))
-        _ = SDL.setClipRect(renderer, &rect)
+        try? renderer.setClipRect(SDLRect(x: Int32((clip.minX * scale).rounded(.down)), y: Int32((clip.minY * scale).rounded(.down)),
+                                          width: Int32(max((clip.width * scale).rounded(.up), 0)), height: Int32(max((clip.height * scale).rounded(.up), 0))))
     }
 
     /// The rectangle on the display, its edges on whole pixels: layers that
     /// meet at an edge meet at the same pixel, whatever the scale, with no
     /// pixel between them that each covers in part.
-    func pixels(_ rect: CGRect) -> SDL.FRect {
+    func pixels(_ rect: CGRect) -> SDLFRect {
         let left = (rect.minX * scale).rounded(), top = (rect.minY * scale).rounded()
         let right = (rect.maxX * scale).rounded(), bottom = (rect.maxY * scale).rounded()
-        return SDL.FRect(x: Float(left), y: Float(top), w: Float(right - left), h: Float(bottom - top))
+        return SDLFRect(x: Float(left), y: Float(top), width: Float(right - left), height: Float(bottom - top))
     }
 
     private func fill(_ rect: CGRect, with color: CGRef, alpha: CGFloat) {
@@ -341,10 +268,9 @@ final class Compositor {
         let gray = CG.colorGetNumberOfComponents(color) == 2
         let (r, g, b, a) = gray ? (components[0], components[0], components[0], components[1])
             : (components[0], components[1], components[2], components[3])
-        _ = SDL.setDrawBlendMode(renderer, SDL.blendBlend)
-        _ = SDL.setDrawColor(renderer, Float(r), Float(g), Float(b), Float(a * alpha))
-        var target = pixels(rect)
-        _ = SDL.fillRect(renderer, &target)
+        try? renderer.setDrawBlendMode([.alpha])
+        try? renderer.setDrawColorFloat(red: Float(r), green: Float(g), blue: Float(b), alpha: Float(a * alpha))
+        try? renderer.fill(pixels(rect))
     }
 
     private func drawFlattened(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
@@ -358,8 +284,8 @@ final class Compositor {
             return
         }
         let generation = Compositing.generation
-        if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
-        let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
+        textures[key] = nil
+        let width = Int((state.bounds.width * scale).rounded(.up)), height = Int((state.bounds.height * scale).rounded(.up))
         guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
         defer { CG.release(context) }
         if state.mask != nil {
@@ -370,10 +296,7 @@ final class Compositor {
             CALayer.drawTree(of: layer, state: state, shape: shape, in: context)
         }
         guard let data = CG.bitmapContextGetData(context),
-              let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return }
-        _ = SDL.updateTexture(texture, nil, data, width * 4)
-        _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
-        _ = SDL.setTextureScaleMode(texture, 1)
+              let texture = makeTexture(width: width, height: height, pixels: data, pitch: width * 4) else { return }
         textures[key] = Entry(texture: texture, signature: nil, used: true, flattened: (state.bounds.size, generation))
         place(texture, state: state, toScreen: toScreen, alpha: alpha)
     }
@@ -396,17 +319,26 @@ final class Compositor {
         place(texture, state: state, toScreen: toScreen, alpha: alpha)
     }
 
-    private func place(_ texture: SDL.Pointer, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
+    /// A static texture of premultiplied ARGB pixels, scaled linearly.
+    private func makeTexture(width: Int, height: Int, pixels: UnsafeRawPointer, pitch: Int) -> SDLTexture? {
+        guard let texture = try? SDLTexture(renderer: renderer, format: .argb8888, access: .static, width: width, height: height) else { return nil }
+        try? texture.update(pixels: pixels, pitch: pitch)
+        try? texture.setBlendMode([.alphaPremultiplied])
+        try? texture.setScaleMode(.linear)
+        return texture
+    }
+
+    private func place(_ texture: SDLTexture, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
         let level = Float(alpha)
-        _ = SDL.setTextureAlphaMod(texture, level)
-        _ = SDL.setTextureColorMod(texture, level, level, level)
+        try? texture.setAlphaModulation(level)
+        try? texture.setColorModulation(red: level, green: level, blue: level)
         render(texture, bounds: state.bounds, toScreen: toScreen, flip: 0)
     }
 
     /// Draws `texture` into `bounds` taken to the screen by `toScreen`:
     /// scaled, mirrored or turned. `flip` flips the texture first
     /// (SDL_FLIP_VERTICAL 2 for rows bottom first).
-    func render(_ texture: SDL.Pointer, bounds: CGRect, toScreen: CGAffineTransform, flip extra: Int32) {
+    func render(_ texture: SDLTexture, bounds: CGRect, toScreen: CGAffineTransform, flip extra: Int32) {
         // What rounding leaves of a zero: a float CGFloat's quarter turn has
         // a cosine near 4e-8.
         let small: CGFloat = MemoryLayout<CGFloat>.size == 4 ? 1e-5 : 1e-9
@@ -414,12 +346,12 @@ final class Compositor {
         // display, flipped where a scale is negative (SDL_FLIP_HORIZONTAL
         // 1, SDL_FLIP_VERTICAL 2).
         if abs(toScreen.b) < small, abs(toScreen.c) < small {
-            var target = pixels(toScreen.apply(bounds))
+            let target = pixels(toScreen.apply(bounds))
             let flip: Int32 = ((toScreen.a < 0 ? 1 : 0) | (toScreen.d < 0 ? 2 : 0)) ^ extra
             if flip == 0 {
-                _ = SDL.renderTexture(renderer, texture, nil, &target)
+                try? renderer.copy(texture, to: target)
             } else {
-                _ = SDL.renderTextureRotated(renderer, texture, nil, &target, 0, nil, flip)
+                try? renderer.copy(texture, to: target, angle: 0, flip: Self.flips(flip))
             }
             return
         }
@@ -434,17 +366,22 @@ final class Compositor {
         // exchanged, turned about its center into that box.
         if abs(toScreen.a) < small, abs(toScreen.d) < small {
             let box = pixels(toScreen.apply(bounds))
-            var target = SDL.FRect(x: box.x + (box.w - box.h) / 2, y: box.y + (box.h - box.w) / 2, w: box.h, h: box.w)
-            _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
+            let target = SDLFRect(x: box.x + (box.width - box.height) / 2, y: box.y + (box.height - box.width) / 2, width: box.height, height: box.width)
+            try? renderer.copy(texture, to: target, angle: Double(degrees), flip: Self.flips(flip))
             return
         }
         // Any other turn is placed as it falls, not on whole pixels.
         let center = toScreen.apply(CGPoint(x: bounds.midX, y: bounds.midY))
         let width = bounds.width * (toScreen.a * toScreen.a + toScreen.b * toScreen.b).squareRoot()
         let height = bounds.height * (toScreen.c * toScreen.c + toScreen.d * toScreen.d).squareRoot()
-        var target = SDL.FRect(x: Float((center.x - width / 2) * scale), y: Float((center.y - height / 2) * scale),
-                               w: Float(width * scale), h: Float(height * scale))
-        _ = SDL.renderTextureRotated(renderer, texture, nil, &target, Double(degrees), nil, flip)
+        let target = SDLFRect(x: Float((center.x - width / 2) * scale), y: Float((center.y - height / 2) * scale),
+                              width: Float(width * scale), height: Float(height * scale))
+        try? renderer.copy(texture, to: target, angle: Double(degrees), flip: Self.flips(flip))
+    }
+
+    /// SDL_FLIP_HORIZONTAL is 1 and SDL_FLIP_VERTICAL 2.
+    private static func flips(_ flip: Int32) -> BitMaskOptionSet<SDLRenderer.Flip> {
+        BitMaskOptionSet<SDLRenderer.Flip>(rawValue: UInt32(flip))
     }
 
     /// The imported buffers of layers whose GL frames are shared.
@@ -452,7 +389,7 @@ final class Compositor {
 
     /// The persistent streaming textures of layers showing GL frames, and
     /// the generation each last took.
-    private var liveTextures: [UnsafeMutableRawPointer: (texture: SDL.Pointer, width: Int, height: Int, bgra: Bool, generation: Int, used: Bool)] = [:]
+    private var liveTextures: [UnsafeMutableRawPointer: (texture: SDLTexture, width: Int, height: Int, bgra: Bool, generation: Int, used: Bool)] = [:]
 
     /// A GL frame: its texture updated in place when the frame is new, and
     /// drawn flipped upright, as the rows are bottom first. A Metal
@@ -461,35 +398,34 @@ final class Compositor {
         let key = layer.objcObject
         var entry = liveTextures[key]
         if let current = entry, current.width != live.width || current.height != live.height || current.bgra != live.bgra {
-            SDL.destroyTexture(current.texture)
             entry = nil
         }
         if entry == nil {
-            let format = live.bgra ? SDL.pixelFormatARGB8888 : SDL.pixelFormatABGR8888
-            guard let texture = SDL.createTexture(renderer, format, SDL.textureAccessStreaming,
-                                                  Int32(live.width), Int32(live.height)) else { return }
-            _ = SDL.setTextureScaleMode(texture, 1)
+            let format: SDLPixelFormat.Format = live.bgra ? .argb8888 : .abgr8888
+            guard let texture = try? SDLTexture(renderer: renderer, format: format, access: .streaming,
+                                                width: live.width, height: live.height) else { return }
+            try? texture.setScaleMode(.linear)
             entry = (texture, live.width, live.height, live.bgra, live.generation &- 1, true)
         }
         guard var current = entry else { return }
         if current.generation != live.generation {
-            _ = SDL.updateTexture(current.texture, nil, live.data, Int32(live.width * 4))
+            try? current.texture.update(pixels: live.data, pitch: live.width * 4)
             FrameRate.glFrames += max(live.generation &- current.generation, 1)
             current.generation = live.generation
         }
         live.shown = live.generation
         current.used = true
         liveTextures[key] = current
-        _ = SDL.setTextureBlendMode(current.texture, live.opaque && alpha >= 1 ? SDL.blendNone : SDL.blendPremultiplied)
+        try? current.texture.setBlendMode(live.opaque && alpha >= 1 ? [] : [.alphaPremultiplied])
         let level = Float(alpha)
-        _ = SDL.setTextureAlphaMod(current.texture, level)
-        _ = SDL.setTextureColorMod(current.texture, level, level, level)
+        try? current.texture.setAlphaModulation(level)
+        try? current.texture.setColorModulation(red: level, green: level, blue: level)
         // SDL_FLIP_VERTICAL for rows bottom first.
         render(current.texture, bounds: state.bounds, toScreen: toScreen, flip: live.topFirst ? 0 : 2)
     }
 
     /// The layer's texture, drawn again when what it shows has changed.
-    private func texture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool) -> SDL.Pointer? {
+    private func texture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool) -> SDLTexture? {
         let key = Key(layer: layer.objcObject, border: border)
         let model = layer.state
         var signature = Signature(size: state.bounds.size, cornerRadius: state.cornerRadius, maskedCorners: state.maskedCorners,
@@ -511,8 +447,8 @@ final class Compositor {
             textures[key]?.used = true
             return entry.texture
         }
-        if let old = textures.removeValue(forKey: key) { SDL.destroyTexture(old.texture) }
-        let width = Int32((state.bounds.width * scale).rounded(.up)), height = Int32((state.bounds.height * scale).rounded(.up))
+        textures[key] = nil
+        let width = Int((state.bounds.width * scale).rounded(.up)), height = Int((state.bounds.height * scale).rounded(.up))
         // A layer showing only what it drew, at the display's scale: its
         // backing's pixels are the texture's, without drawing them again.
         if !border, let texture = backingTexture(of: layer, state: state, shape: shape, width: width, height: height) {
@@ -538,10 +474,7 @@ final class Compositor {
             CG.restoreGState(context)
         }
         guard let data = CG.bitmapContextGetData(context),
-              let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return nil }
-        _ = SDL.updateTexture(texture, nil, data, width * 4)
-        _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
-        _ = SDL.setTextureScaleMode(texture, 1)
+              let texture = makeTexture(width: width, height: height, pixels: data, pitch: width * 4) else { return nil }
         textures[key] = Entry(texture: texture, signature: signature, used: true)
         return texture
     }
@@ -550,20 +483,16 @@ final class Compositor {
 extension Compositor {
     /// The texture of a layer with nothing but its backing to show, made
     /// from the backing's pixels when they are the texture's size.
-    fileprivate func backingTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, width: Int32, height: Int32) -> SDL.Pointer? {
+    fileprivate func backingTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, width: Int, height: Int) -> SDLTexture? {
         guard shape == nil, state.contents == nil, state.livePixels == nil, state.sharedFrames == nil, state.backgroundColor == nil,
               state.cornerRadius == 0, width > 0, height > 0 else { return nil }
         CALayer.displayIfNeeded(layer)
         let model = layer.state
         guard let backing = model.backing, model.backingSize == state.bounds.size,
-              CG.imageGetWidth(backing) == Int(width), CG.imageGetHeight(backing) == Int(height) else { return nil }
-        return CG.withPixels(of: backing) { pixels, bytesPerRow -> SDL.Pointer? in
-            guard bytesPerRow >= Int(width) * 4,
-                  let texture = SDL.createTexture(renderer, SDL.pixelFormatARGB8888, 0, width, height) else { return nil }
-            _ = SDL.updateTexture(texture, nil, pixels, Int32(bytesPerRow))
-            _ = SDL.setTextureBlendMode(texture, SDL.blendPremultiplied)
-            _ = SDL.setTextureScaleMode(texture, 1)
-            return texture
+              CG.imageGetWidth(backing) == width, CG.imageGetHeight(backing) == height else { return nil }
+        return CG.withPixels(of: backing) { pixels, bytesPerRow -> SDLTexture? in
+            guard bytesPerRow >= width * 4 else { return nil }
+            return makeTexture(width: width, height: height, pixels: pixels, pitch: bytesPerRow)
         }
     }
 }
@@ -586,7 +515,7 @@ enum FrameRate {
 
     nonisolated(unsafe) private static var lastFrame = 0.0
 
-    static func frame(renderer: SDL.Pointer?) {
+    static func frame(renderer: SDLRenderer) {
         frames += 1
         let time = now()
         if lastFrame > 0, time - lastFrame > 0.15 {
@@ -601,15 +530,13 @@ enum FrameRate {
             _ = line.withCString { write(2, $0, strlen($0)) }
             (frames, glFrames, since) = (0, 0, time)
         }
-        guard let draw = SDL.renderDebugText else { return }
-        _ = SDL.setClipRect(renderer, nil)
-        _ = SDL.setRenderScale?(renderer, 2, 2)
-        _ = SDL.setDrawBlendMode(renderer, SDL.blendBlend)
-        _ = SDL.setDrawColor(renderer, 0, 0, 0, 0.6)
-        var back = SDL.FRect(x: 4, y: 4, w: Float(text.utf8.count * 8 + 8), h: 16)
-        _ = SDL.fillRect(renderer, &back)
-        _ = SDL.setDrawColor(renderer, 1, 1, 0.3, 1)
-        _ = text.withCString { draw(renderer, 8, 8, $0) }
-        _ = SDL.setRenderScale?(renderer, 1, 1)
+        try? renderer.setClipRect(nil)
+        try? renderer.setScale(x: 2, y: 2)
+        try? renderer.setDrawBlendMode([.alpha])
+        try? renderer.setDrawColorFloat(red: 0, green: 0, blue: 0, alpha: 0.6)
+        try? renderer.fill(SDLFRect(x: 4, y: 4, width: Float(text.utf8.count * 8 + 8), height: 16))
+        try? renderer.setDrawColorFloat(red: 1, green: 1, blue: 0.3, alpha: 1)
+        try? renderer.debugText(text, x: 8, y: 8)
+        try? renderer.setScale(x: 1, y: 1)
     }
 }

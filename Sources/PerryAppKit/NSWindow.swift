@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSWindow: a window on the screen, shown as an SDL window once it is
 // ordered front, whose content view's layer tree QuartzCore composites
@@ -85,9 +86,9 @@ open class NSWindow: NSResponder {
     var appearance: NSObject?
     /// Not retained.
     var windowControllerObject: UnsafeMutableRawPointer?
-    var sdlWindow: SDL.Window?
+    var sdlWindow: SDLWindow?
     var sdlID: UInt32 = 0
-    var renderer: UnsafeMutableRawPointer?
+    var renderer: SDLRenderer?
     var backingScale: CGFloat = 1
     /// The view that took the last mouse-down, which gets its drags and up.
     var mouseDownView: NSView?
@@ -332,10 +333,10 @@ open class NSWindow: NSResponder {
         let old = frame
         frame = rect
         if let sdlWindow {
-            if rect.size != old.size { _ = SDL.setWindowSize(sdlWindow, Int32(rect.width.rounded()), Int32(rect.height.rounded())) }
+            if rect.size != old.size { sdlWindow.size = (Int(rect.width.rounded()), Int(rect.height.rounded())) }
             if rect.origin != old.origin {
                 let top = Screens.flip(rect)
-                _ = SDL.setWindowPosition(sdlWindow, Int32(top.minX.rounded()), Int32(top.minY.rounded()))
+                try? sdlWindow.setPosition(x: Int32(top.minX.rounded()), y: Int32(top.minY.rounded()))
             }
         }
         if rect.size != old.size { contentResized() }
@@ -355,7 +356,7 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setMaxSize:") func setMaxSize(_ size: CGSize) { maxSize = size }
     @ObjCMethod("setContentMinSize:") func setContentMinSize(_ size: CGSize) {
         minSize = size
-        if let sdlWindow { _ = SDL.setWindowMinimumSize(sdlWindow, Int32(size.width), Int32(size.height)) }
+        if let sdlWindow { sdlWindow.setMinimumSize(width: Int32(size.width), height: Int32(size.height)) }
     }
     @ObjCMethod("setContentMaxSize:") func setContentMaxSize(_ size: CGSize) { maxSize = size }
     @ObjCMethod("contentMinSize") func contentMinSize() -> CGSize { minSize }
@@ -397,14 +398,14 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setTitle:")
     func setTitle(_ title: String?) {
         self.title = title ?? ""
-        if let sdlWindow { _ = self.title.withCString { SDL.setWindowTitle(sdlWindow, $0) } }
+        if let sdlWindow { sdlWindow.title = self.title }
     }
     @ObjCMethod("setTitleWithRepresentedFilename:") func setTitle(representedFilename name: String?) { setTitle(name) }
     @ObjCMethod("styleMask") func windowStyleMask() -> UInt { styleMask }
     @ObjCMethod("setStyleMask:")
     func setStyleMask(_ mask: UInt) {
         styleMask = mask
-        if let sdlWindow { _ = SDL.setWindowResizable(sdlWindow, mask & StyleMask.resizable != 0) }
+        if let sdlWindow { try? sdlWindow.setResizable(mask & StyleMask.resizable != 0) }
     }
     @ObjCMethod("level") func windowLevel() -> Int { level }
     @ObjCMethod("setLevel:") func setLevel(_ level: Int) { self.level = level }
@@ -553,7 +554,7 @@ open class NSWindow: NSResponder {
             show()
             if let controller { Send.void(controller.objcObject, "viewDidAppear") }
         } else if let sdlWindow {
-            _ = SDL.raiseWindow(sdlWindow)
+            sdlWindow.raise()
         }
         if let index = Windows.all.firstIndex(where: { $0 === self }) {
             Windows.all.remove(at: index)
@@ -570,7 +571,7 @@ open class NSWindow: NSResponder {
     func orderOut(_ sender: NSObject?) {
         guard visible else { return }
         visible = false
-        if let sdlWindow { _ = SDL.hideWindow(sdlWindow) }
+        if let sdlWindow { try? sdlWindow.hide() }
         if Windows.key === self { Send.void(objcObject, "resignKeyWindow") }
         if Windows.main === self { Send.void(objcObject, "resignMainWindow") }
     }
@@ -650,7 +651,7 @@ open class NSWindow: NSResponder {
 
     @ObjCMethod("miniaturize:")
     func miniaturize(_ sender: NSObject?) {
-        if let sdlWindow { _ = SDL.minimizeWindow(sdlWindow) }
+        if let sdlWindow { try? sdlWindow.minimize() }
     }
     @ObjCMethod("deminiaturize:") func deminiaturize(_ sender: NSObject?) { orderFront(nil) }
     @ObjCMethod("isMiniaturized") func isMiniaturized() -> Bool { miniaturized }
@@ -668,13 +669,13 @@ open class NSWindow: NSResponder {
         if on {
             notify("windowWillEnterFullScreen:", Constants.NSWindowWillEnterFullScreenNotification)
             styleMask |= StyleMask.fullScreen
-            if let sdlWindow { _ = SDL.setWindowFullscreen(sdlWindow, true) }
+            if let sdlWindow { try? sdlWindow.setFullscreen(true) }
             else { frame = Screens.flip(Screens.display.bounds); contentResized() }
             notify("windowDidEnterFullScreen:", Constants.NSWindowDidEnterFullScreenNotification)
         } else {
             notify("windowWillExitFullScreen:", Constants.NSWindowWillExitFullScreenNotification)
             styleMask &= ~StyleMask.fullScreen
-            if let sdlWindow { _ = SDL.setWindowFullscreen(sdlWindow, false) }
+            if let sdlWindow { try? sdlWindow.setFullscreen(false) }
             notify("windowDidExitFullScreen:", Constants.NSWindowDidExitFullScreenNotification)
         }
     }
@@ -693,7 +694,7 @@ open class NSWindow: NSResponder {
     /// The SDL window and its renderer, made when the window is first shown.
     private func show() {
         if let sdlWindow {
-            _ = SDL.showWindow(sdlWindow)
+            try? sdlWindow.show()
             return
         }
         makeSDLWindow(hidden: false)
@@ -723,41 +724,45 @@ open class NSWindow: NSResponder {
     }
 
     private func makeSDLWindowOnMain(hidden: Bool) {
-        guard SDL.start() else { return }
+        guard SDLSession.start() else { return }
         let usesOpenGL = drawsWithOpenGL || openGLView != nil
-        var flags = usesOpenGL ? SDL.windowOpenGL : SDL.windowHighPixelDensity
-        if hidden { flags |= SDL.windowHidden }
-        if styleMask & StyleMask.resizable != 0 { flags |= SDL.windowResizable }
-        if styleMask == 0 { flags |= SDL.windowBorderless }
-        if styleMask & StyleMask.fullScreen != 0 { flags |= SDL.windowFullscreen }
+        var flags: BitMaskOptionSet<SDLWindow.Option> = usesOpenGL ? [.opengl] : [.highPixelDensity]
+        if hidden { flags.insert(.hidden) }
+        if styleMask & StyleMask.resizable != 0 { flags.insert(.resizable) }
+        if styleMask == 0 { flags.insert(.borderless) }
+        if styleMask & StyleMask.fullScreen != 0 { flags.insert(.fullscreen) }
         let name = title.isEmpty ? (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "") : title
         // A frame an app computed from nothing has no size SDL can make.
         if !frame.width.isFinite || !frame.height.isFinite || frame.width < 1 || frame.height < 1 {
             appKitWarning("window \(windowNumber) has no usable size (\(frame.width)×\(frame.height)); making it 640×480")
             frame.size = CGSize(width: 640, height: 480)
         }
-        guard let window = name.withCString({ SDL.createWindow($0, Int32(frame.width.rounded()), Int32(frame.height.rounded()), flags) }) else {
-            appKitWarning("SDL could not make a window: \(SDL.lastError)")
+        let window: SDLWindow
+        do {
+            window = try SDLWindow(title: name, width: Int(frame.width.rounded()), height: Int(frame.height.rounded()), options: flags)
+        } catch {
+            appKitWarning("SDL could not make a window: \(error)")
             return
         }
         sdlWindow = window
-        sdlID = SDL.windowID(window)
+        sdlID = UInt32(window.id)
         let top = Screens.flip(frame)
-        _ = SDL.setWindowPosition(window, Int32(top.minX.rounded()), Int32(top.minY.rounded()))
+        try? window.setPosition(x: Int32(top.minX.rounded()), y: Int32(top.minY.rounded()))
         // Typed text for key events: SDL types only while text input is on.
-        _ = SDL.startTextInput(window)
-        if minSize.width > 0 || minSize.height > 0 { _ = SDL.setWindowMinimumSize(window, Int32(minSize.width), Int32(minSize.height)) }
+        try? window.startTextInput()
+        if minSize.width > 0 || minSize.height > 0 { window.setMinimumSize(width: Int32(minSize.width), height: Int32(minSize.height)) }
         if usesOpenGL {
             // The program's OpenGL drawing is the window's picture.
             renderer = nil
             updateBackingScale()
             return
         }
-        renderer = "opengles2".withCString { SDL.createRenderer(window, $0) } ?? SDL.createRenderer(window, nil)
-        if let renderer {
-            Trace.log("window \(windowNumber) shown with SDL's \(SDL.rendererName(renderer).map { String(cString: $0) } ?? "?") renderer")
-        } else {
-            appKitWarning("SDL could not make a renderer: \(SDL.lastError)")
+        do {
+            let made = try SDLRenderer(window: window, driver: SDLRenderer.Driver(name: "opengles2") ?? .default)
+            renderer = made
+            Trace.log("window \(windowNumber) shown with SDL's \(made.name) renderer")
+        } catch {
+            appKitWarning("SDL could not make a renderer: \(error)")
         }
         updateBackingScale()
         Windows.layersChanged()
@@ -767,7 +772,7 @@ open class NSWindow: NSResponder {
     /// it changes.
     func updateBackingScale() {
         guard let sdlWindow else { return }
-        let density = CGFloat(SDL.windowPixelDensity(sdlWindow))
+        let density = CGFloat(sdlWindow.pixelDensity)
         guard density > 0, density != backingScale else { return }
         backingScale = density
         for view in rootView?.allViews ?? [] {
@@ -782,8 +787,7 @@ open class NSWindow: NSResponder {
     }
 
     private func destroySDLWindowOnMain() {
-        if let renderer { SDL.destroyRenderer(renderer) }
-        if let sdlWindow { SDL.destroyWindow(sdlWindow) }
+        // The renderer goes before its window.
         renderer = nil
         sdlWindow = nil
         sdlID = 0
@@ -809,7 +813,7 @@ open class NSWindow: NSResponder {
             drawnBackground = background
             CALayer(objcObject: layer.objcObject, ownership: .retain).setBackgroundColor(background.cgColorRef)
         }
-        QuartzCore.draw(CALayer(objcObject: layer.objcObject, ownership: .retain), renderer: renderer, scale: backingScale)
+        QuartzCore.draw(CALayer(objcObject: layer.objcObject, ownership: .retain), renderer: UnsafeMutableRawPointer(renderer.unsafePointer), scale: backingScale)
         if Trace.enabled, !dumpedViews {
             dumpedViews = true
             Trace.log("window \(windowNumber) views:\n" + Trace.describe(root))
@@ -821,10 +825,9 @@ open class NSWindow: NSResponder {
     /// The SDL window moved or was resized by the desktop.
     func sdlWindowChanged() {
         guard let sdlWindow else { return }
-        var x: Int32 = 0, y: Int32 = 0, w: Int32 = 0, h: Int32 = 0
-        guard SDL.getWindowSize(sdlWindow, &w, &h) else { return }
-        _ = SDL.getWindowPosition(sdlWindow, &x, &y)
-        let rect = Screens.flip(CGRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(w), height: CGFloat(h)))
+        let size = sdlWindow.size
+        let (x, y) = (try? sdlWindow.position) ?? (0, 0)
+        let rect = Screens.flip(CGRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(size.width), height: CGFloat(size.height)))
         let old = frame
         frame = rect
         if rect.size != old.size { contentResized() }

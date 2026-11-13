@@ -168,7 +168,7 @@ enum Screen {
     nonisolated(unsafe) static let nativeSize: CGSize? = {
         if let fixed { return fixed.size }
         if let setting = getenv("PERRY_UIKIT_SCREEN"), String(cString: setting) == "iphone" { return nil }
-        guard Display.wanted, let pixels = SDL.usableDisplaySize() else { return nil }
+        guard Display.wanted, let pixels = SDLSetup.usableDisplaySize() else { return nil }
         let scale = max(Display.scale, 1)
         return CGSize(width: (pixels.width / scale).rounded(.down), height: (pixels.height / scale).rounded(.down))
     }()

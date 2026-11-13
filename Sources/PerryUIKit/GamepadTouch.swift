@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 /// A game pad that plays a touch game: PERRY_UIKIT_GAMEPAD_TOUCH names a text
 /// file that says where on the screen each stick and button touches, and
@@ -49,18 +50,7 @@ enum GamepadTouch {
 
     // MARK: SDL's game pads
 
-    private typealias GetGamepads = @convention(c) (UnsafeMutablePointer<Int32>?) -> UnsafeMutablePointer<UInt32>?
-    private typealias OpenGamepad = @convention(c) (UInt32) -> UnsafeMutableRawPointer?
-    private typealias GetAxis = @convention(c) (UnsafeMutableRawPointer?, Int32) -> Int16
-    private typealias GetButton = @convention(c) (UnsafeMutableRawPointer?, Int32) -> Bool
-    private typealias Free = @convention(c) (UnsafeMutableRawPointer?) -> Void
-
-    nonisolated(unsafe) private static var getGamepads: GetGamepads?
-    nonisolated(unsafe) private static var openGamepad: OpenGamepad?
-    nonisolated(unsafe) private static var getAxis: GetAxis?
-    nonisolated(unsafe) private static var getButton: GetButton?
-    nonisolated(unsafe) private static var sdlFree: Free?
-    nonisolated(unsafe) private static var gamepad: UnsafeMutableRawPointer?
+    nonisolated(unsafe) private static var gamepad: SDLGamepad?
 
     // SDL_GamepadAxis and SDL_GamepadButton.
     private static let axes: [String: Int32] = ["l2": 4, "r2": 5]
@@ -71,28 +61,12 @@ enum GamepadTouch {
 
     private static func start() -> Bool {
         started = true
-        guard let path, let library = dlopen("libSDL3.so.0", RTLD_NOW) else { return false }
-        typealias Initialize = @convention(c) (UInt32) -> Bool
-        typealias SetHint = @convention(c) (UnsafePointer<CChar>?, UnsafePointer<CChar>?) -> Bool
-        guard let initialize = dlsym(library, "SDL_InitSubSystem").map({ unsafeBitCast($0, to: Initialize.self) }),
-              let get = dlsym(library, "SDL_GetGamepads"), let open = dlsym(library, "SDL_OpenGamepad"),
-              let axis = dlsym(library, "SDL_GetGamepadAxis"), let button = dlsym(library, "SDL_GetGamepadButton") else {
-            uikitWarning("GamepadTouch: SDL has no game pad functions")
-            return false
-        }
+        guard let path else { return false }
         // The pad is read while another window has the keyboard, as it is
         // when the game's window is behind a front end's.
-        if let hint = dlsym(library, "SDL_SetHint").map({ unsafeBitCast($0, to: SetHint.self) }) {
-            _ = hint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
-        }
-        getGamepads = unsafeBitCast(get, to: GetGamepads.self)
-        openGamepad = unsafeBitCast(open, to: OpenGamepad.self)
-        getAxis = unsafeBitCast(axis, to: GetAxis.self)
-        getButton = unsafeBitCast(button, to: GetButton.self)
-        sdlFree = dlsym(library, "SDL_free").map { unsafeBitCast($0, to: Free.self) }
-        // SDL_INIT_GAMEPAD.
-        guard initialize(0x2000) else {
-            uikitWarning("GamepadTouch: SDL could not start its game pads")
+        SDL.setHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
+        do { try SDL.initialize(subSystem: .gamepad) } catch {
+            uikitWarning("GamepadTouch: SDL could not start its game pads: \(error)")
             return false
         }
         guard parse(path) else {
@@ -183,10 +157,8 @@ enum GamepadTouch {
         let now = Clock.now
         guard gamepad == nil, now - lastSearch >= 1 else { return }
         lastSearch = now
-        var count: Int32 = 0
-        guard let list = getGamepads?(&count), count > 0 else { return }
-        gamepad = openGamepad?(list[0])
-        sdlFree?(UnsafeMutableRawPointer(list))
+        guard let first = SDLGamepad.connected.first else { return }
+        gamepad = try? SDLGamepad(joystickID: first)
     }
 
     /// Reads the pad and moves the fingers; called as the window's events
@@ -196,7 +168,9 @@ enum GamepadTouch {
         if !started, !start() { return }
         if sticks.isEmpty && buttons.isEmpty { return }
         find()
-        guard let pad = gamepad, let getAxis, let getButton else { return }
+        guard let pad = gamepad else { return }
+        func getAxis(_ pad: SDLGamepad, _ axis: Int32) -> Int16 { pad.axis(SDLGamepad.Axis(rawValue: axis)) }
+        func getButton(_ pad: SDLGamepad, _ button: Int32) -> Bool { pad.isPressed(SDLGamepad.Button(rawValue: button)) }
         let now = Clock.now
         let elapsed = lastTime == 0 ? 0 : min(now - lastTime, 0.1)
         lastTime = now

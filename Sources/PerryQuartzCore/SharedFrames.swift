@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // GL frames shared with the compositor as GPU buffers, without passing
 // through the CPU. UIKit copies each presented frame, on the GPU, into one
@@ -137,8 +138,6 @@ enum SharedGL {
     nonisolated(unsafe) static var bindTexture: (@convention(c) (UInt32, UInt32) -> Void)!
     nonisolated(unsafe) static var imageTargetTexture: (@convention(c) (UInt32, Pointer?) -> Void)!
     nonisolated(unsafe) static var getError: (@convention(c) () -> UInt32)!
-    nonisolated(unsafe) static var textureProperties: (@convention(c) (Pointer?) -> UInt32)!
-    nonisolated(unsafe) static var numberProperty: (@convention(c) (UInt32, UnsafePointer<CChar>, Int64) -> Int64)!
 
     /// Binds the functions once; false where the host lacks any.
     static func load() -> Bool {
@@ -151,7 +150,7 @@ enum SharedGL {
             }
             return unsafeBitCast(symbol, to: T.self)
         }
-        let egl = dlopen("libEGL.so.1", RTLD_NOW), gles = dlopen("libGLESv2.so.2", RTLD_NOW), sdl = dlopen("libSDL3.so.0", RTLD_NOW)
+        let egl = dlopen("libEGL.so.1", RTLD_NOW), gles = dlopen("libGLESv2.so.2", RTLD_NOW)
         let procAddress: (@convention(c) (UnsafePointer<CChar>) -> Pointer?)? = bind(egl, "eglGetProcAddress")
         let extension_: (UnsafePointer<CChar>) -> Pointer? = { procAddress?($0) }
         getCurrentDisplay = bind(egl, "eglGetCurrentDisplay")
@@ -161,8 +160,6 @@ enum SharedGL {
         bindTexture = bind(gles, "glBindTexture")
         imageTargetTexture = bind(gles, "glEGLImageTargetTexture2DOES", extension_)
         getError = bind(gles, "glGetError")
-        textureProperties = bind(sdl, "SDL_GetTextureProperties")
-        numberProperty = bind(sdl, "SDL_GetNumberProperty")
         loaded = complete
         return complete
     }
@@ -173,7 +170,7 @@ extension Compositor {
     /// texture is the buffer's EGL image.
     final class SharedTextures {
         let frames: SharedFrames
-        var textures: [SDL.Pointer?]
+        var textures: [SDLTexture?]
         var images: [UnsafeMutableRawPointer?]
         let display: UnsafeMutableRawPointer?
         var used = true
@@ -186,7 +183,6 @@ extension Compositor {
         }
 
         func destroy() {
-            for texture in textures where texture != nil { SDL.destroyTexture(texture) }
             for image in images where image != nil { _ = SharedGL.destroyImage(display, image) }
             textures = []
             images = []
@@ -196,7 +192,7 @@ extension Compositor {
     /// The buffer imported: an EGL image of the dma-buf, bound to the GL
     /// texture of a new SDL texture, in SDL's context, whose bindings are
     /// left as they were. Nil if the host can't.
-    private func importBuffer(_ buffer: SharedFrames.Buffer, display: UnsafeMutableRawPointer?) -> (SDL.Pointer, UnsafeMutableRawPointer)? {
+    private func importBuffer(_ buffer: SharedFrames.Buffer, display: UnsafeMutableRawPointer?) -> (SDLTexture, UnsafeMutableRawPointer)? {
         guard buffer.fd >= 0 else { return nil }
         // EGL_WIDTH, EGL_HEIGHT, EGL_LINUX_DRM_FOURCC_EXT, plane 0's fd,
         // offset and pitch, and its modifier when it has one.
@@ -209,14 +205,14 @@ extension Compositor {
         // EGL_LINUX_DMA_BUF_EXT, with no context and no client buffer.
         guard let image = SharedGL.createImage(display, nil, 0x3270, nil, attributes) else { return nil }
         // SDL_TEXTUREACCESS_STATIC: SDL never writes to it.
-        guard let texture = SDL.createTexture(renderer, SDL.pixelFormatABGR8888, 0, buffer.width, buffer.height) else {
+        guard let texture = try? SDLTexture(renderer: renderer, format: .abgr8888, access: .static,
+                                            width: Int(buffer.width), height: Int(buffer.height)) else {
             _ = SharedGL.destroyImage(display, image)
             return nil
         }
-        _ = SDL.setTextureScaleMode(texture, 1)
-        let name = SharedGL.numberProperty(SharedGL.textureProperties(texture), "SDL.texture.opengles2.texture", 0)
+        try? texture.setScaleMode(.linear)
+        let name = texture.properties.number("SDL.texture.opengles2.texture")
         guard name != 0 else {
-            SDL.destroyTexture(texture)
             _ = SharedGL.destroyImage(display, image)
             return nil
         }
@@ -228,7 +224,6 @@ extension Compositor {
         let error = SharedGL.getError()
         SharedGL.bindTexture(0x0DE1, UInt32(previous))
         guard error == 0 else {
-            SDL.destroyTexture(texture)
             _ = SharedGL.destroyImage(display, image)
             return nil
         }
@@ -264,7 +259,7 @@ extension Compositor {
                 frames.fail()
                 imported.destroy()
                 sharedTextures[key] = nil
-                let line = "perry: QuartzCore: GL frames can't be shared with the compositor (\(SDL.lastError)); reading them back\n"
+                let line = "perry: QuartzCore: GL frames can't be shared with the compositor ; reading them back\n"
                 line.withCString { _ = write(2, $0, strlen($0)) }
                 return false
             }
@@ -272,10 +267,10 @@ extension Compositor {
             imported.images[slot] = image
         }
         guard let texture = imported.textures[slot] else { return true }
-        _ = SDL.setTextureBlendMode(texture, frames.opaque && alpha >= 1 ? SDL.blendNone : SDL.blendPremultiplied)
+        try? texture.setBlendMode(frames.opaque && alpha >= 1 ? [] : [.alphaPremultiplied])
         let level = Float(alpha)
-        _ = SDL.setTextureAlphaMod(texture, level)
-        _ = SDL.setTextureColorMod(texture, level, level, level)
+        try? texture.setAlphaModulation(level)
+        try? texture.setColorModulation(red: level, green: level, blue: level)
         // SDL_FLIP_VERTICAL.
         render(texture, bounds: state.bounds, toScreen: toScreen, flip: 2)
         return true

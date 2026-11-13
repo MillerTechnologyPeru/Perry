@@ -1,6 +1,7 @@
 import CPerryGeometry
 import Glibc
 import PerryObjCInterop
+import SDL3Swift
 
 // NSControl and the basic controls: a control keeps its values in its cell
 // (made from +cellClass, or decoded from its nib) and draws it in its
@@ -810,36 +811,19 @@ open class NSAlert: NSObject {
         // PERRY_APPKIT_QUIET_ALERTS: an alert with no choice to make (one
         // button or none) is only logged, so a game showing one runs on.
         let quiet = getenv("PERRY_APPKIT_QUIET_ALERTS") != nil && titles.count <= 1
-        guard !quiet, SDL.start() else { return 1000 }
-        // SDL_MESSAGEBOX_ERROR 0x10, WARNING 0x20, INFORMATION 0x40.
-        let flags: UInt32 = style == 2 ? 0x10 : style == 1 ? 0x40 : 0x20
+        guard !quiet, SDLSession.start() else { return 1000 }
+        let flags: MessageBoxFlags = style == 2 ? .error : style == 1 ? .information : .warning
         let message = Self.wrapped(informativeText)
-        guard let show = SDL.showMessageBox, !titles.isEmpty else {
-            _ = messageText.withCString { title in
-                message.withCString { SDL.showSimpleMessageBox(flags, title, $0, Windows.key?.sdlWindow) }
-            }
+        guard !titles.isEmpty else {
+            try? SDL.showSimpleMessageBox(flags: flags, title: messageText, message: message, window: Windows.key?.sdlWindow)
             return 1000
         }
-        let texts = titles.map { strdup($0) }
-        defer { texts.forEach { Glibc.free($0) } }
         let cancel = titles.firstIndex { $0 == "Cancel" }
-        let choices = texts.enumerated().map { index, text in
-            SDL.MessageBoxButton(flags: (index == 0 ? 1 : 0) | (index == cancel ? 2 : 0), buttonID: Int32(index),
-                                 text: UnsafePointer(text))
-        }
-        var chosen: Int32 = 0
-        let shown = messageText.withCString { title in
-            message.withCString { text in
-                choices.withUnsafeBufferPointer { buttons in
-                    var data = SDL.MessageBoxData(flags: flags | 0x80, window: Windows.key?.sdlWindow, title: title, message: text,
-                                                  buttonCount: Int32(buttons.count), buttons: buttons.baseAddress, colorScheme: nil)
-                    return withUnsafePointer(to: &data) { show(UnsafeRawPointer($0), &chosen) }
-                }
-            }
-        }
-        // Closing the box (-1) answers as Escape would: with Cancel, if
-        // there is one, else the first button.
-        let index = shown && chosen >= 0 ? Int(chosen) : (cancel ?? 0)
+        let chosen = try? SDL.showMessageBox(flags: flags, title: messageText, message: message, buttons: titles,
+                                             escapeIndex: cancel, window: Windows.key?.sdlWindow)
+        // Closing the box answers as Escape would: with Cancel, if there is
+        // one, else the first button.
+        let index = chosen.flatMap { $0 } ?? (cancel ?? 0)
         return 1000 + index
     }
 

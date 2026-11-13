@@ -22,7 +22,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         library.withCString { library in name.withCString { lookup(library, $0) } }
     }
     // Before the app's code runs, as an app's own SDL reads the environment.
-    SDL.prepareEnvironment()
+    SDLSession.prepareEnvironment()
     guard ObjCRuntime.load({ symbol(libobjc, $0) }), ObjCRuntime.functions.getClass("NSString") != nil else {
         appKitFatal("AppKit needs libPerryobjc and libPerryFoundation, which are missing or incomplete")
     }
