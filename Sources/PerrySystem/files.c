@@ -193,12 +193,49 @@ static bool path_in_any_case(const char *path, char *out, size_t size) {
     return strcmp(out, path) != 0;
 }
 
-/// Whether a failed lookup of `path` is worth trying again in any case:
-/// it was not found, and another name for it is. errno is kept.
+// Darwin's files that describe the system, which a Linux host lacks.
+// Programs read them directly: Swift Playgrounds reads SystemVersion.plist
+// for the macOS version. Each is written once to the temporary directory,
+// and a path that is not found there is answered with it. The version is
+// PERRY_OS_VERSION's, else 26.0.
+static bool darwin_system_file(const char *path, char *out, size_t size) {
+    if (strcmp(path, "/System/Library/CoreServices/SystemVersion.plist") != 0 &&
+        strcmp(path, "/System/Library/CoreServices/SystemVersionCompat.plist") != 0)
+        return false;
+    const char *directory = getenv("PERRY_TMP");
+    snprintf(out, size, "%s/perry-SystemVersion-%u.plist", directory && *directory ? directory : "/tmp", (unsigned)getuid());
+    if (access(out, R_OK) == 0)
+        return true;
+    const char *version = getenv("PERRY_OS_VERSION");
+    if (!version || !*version)
+        version = "26.0";
+    char temporary[PATH_MAX];
+    snprintf(temporary, sizeof(temporary), "%s.%d", out, (int)getpid());
+    FILE *file = fopen(temporary, "w");
+    if (!file)
+        return false;
+    fprintf(file,
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            "<plist version=\"1.0\">\n<dict>\n"
+            "\t<key>ProductBuildVersion</key>\n\t<string>25A354</string>\n"
+            "\t<key>ProductCopyright</key>\n\t<string>1983-2026 Apple Inc.</string>\n"
+            "\t<key>ProductName</key>\n\t<string>macOS</string>\n"
+            "\t<key>ProductUserVisibleVersion</key>\n\t<string>%s</string>\n"
+            "\t<key>ProductVersion</key>\n\t<string>%s</string>\n"
+            "\t<key>iOSSupportVersion</key>\n\t<string>%s</string>\n"
+            "</dict>\n</plist>\n", version, version, version);
+    fclose(file);
+    return rename(temporary, out) == 0;
+}
+
+/// Whether a failed lookup of `path` is worth trying again: it was not
+/// found, and another name for it is, in another case or a system file
+/// made here. errno is kept.
 static bool other_case(const char *path, char *out, size_t size) {
     if (errno != ENOENT)
         return false;
-    bool found = path_in_any_case(path, out, size);
+    bool found = darwin_system_file(path, out, size) || path_in_any_case(path, out, size);
     errno = ENOENT;
     return found;
 }
