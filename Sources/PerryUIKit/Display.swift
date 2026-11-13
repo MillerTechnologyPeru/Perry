@@ -44,7 +44,7 @@ enum Display {
         // scaled.
         if let fixed = Screen.fixed {
             if let setting { return setting }
-            guard wanted, let pixels = SDL.usableDisplaySize() else { return fixed.scale }
+            guard wanted, let pixels = SDLSetup.usableDisplaySize() else { return fixed.scale }
             // A turned screen is fitted as the display shows it.
             let size = Compositor.displayRotation != 0 ? CGSize(width: fixed.size.height, height: fixed.size.width) : fixed.size
             return min(pixels.width / size.width, pixels.height / size.height)
@@ -52,8 +52,8 @@ enum Display {
         if let setting { return setting }
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         guard wanted, !software else { return 1 }
-        let native = SDL.nativeScale() ?? 1
-        guard let pixels = SDL.usableDisplaySize() else { return native }
+        let native = SDLSetup.nativeScale() ?? 1
+        guard let pixels = SDLSetup.usableDisplaySize() else { return native }
         let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
         let chosen = native != 1 ? native : max(fitting, 1)
         // An iPhone's screen (PERRY_UIKIT_SCREEN=iphone) is a window that
@@ -111,15 +111,15 @@ enum Display {
             ?? NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "app"
         let software = getenv("PERRY_UIKIT_RENDERER").map { String(cString: $0) == "software" } ?? false
         DesktopEntry.install()
-        SDL.prepareEnvironment()
+        SDLSetup.prepareEnvironment()
         // A resizable screen taller or wider than the display's usable area
         // at its scale is made to fit it, as the desktop would size its window.
-        if Screen.isResizable, Screen.fixed == nil, let usable = SDL.usableDisplaySize() {
+        if Screen.isResizable, Screen.fixed == nil, let usable = SDLSetup.usableDisplaySize() {
             let fitting = CGSize(width: min(Screen.bounds.width, (usable.width / scale).rounded(.down)),
                                  height: min(Screen.bounds.height, (usable.height / scale).rounded(.down)))
             Screen.bounds.size = fitting
         }
-        if !software, SDL.loadOnce(), let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
+        if !software, let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor
             tick()
             return
