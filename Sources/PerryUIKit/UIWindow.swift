@@ -120,7 +120,9 @@ open class UIWindow: UIView {
             .unsafeCast(to: UIView.self)
         let shadow = UIDropShadowView.objCClass.object.allocated().initializeView(frame: bounds)
             .unsafeCast(to: UIView.self)
+        ViewLoading.rootBounds = bounds
         let root = controller.sendView()
+        ViewLoading.rootBounds = nil
         root.sendSetFrame(bounds)
         // All three follow the window's size, as the screen's can change.
         for view in [transition, shadow, root] { view.setAutoresizingMask(18) }
