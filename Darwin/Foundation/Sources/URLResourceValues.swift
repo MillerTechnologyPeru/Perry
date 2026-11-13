@@ -97,6 +97,9 @@ public struct URLResourceValues {
     /// The resource's path.
     public var path: String? { value(.pathKey) }
 
+    /// The path with every symbolic link resolved.
+    public var canonicalPath: String? { value(.canonicalPathKey) }
+
     /// The bytes free on the volume the file is on.
     public var volumeAvailableCapacity: Int? { value(.volumeAvailableCapacityKey) }
 
@@ -180,6 +183,11 @@ extension URL {
             case .fileAllocatedSizeKey:
                 if type == S_IFREG { values[key] = Int(info.st_blocks) * 512 }
             case .pathKey: values[key] = path
+            case .canonicalPathKey:
+                if let resolved = realpath(path, nil) {
+                    values[key] = String(cString: resolved)
+                    free(resolved)
+                }
             case .volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeTotalCapacityKey:
                 var volume = statfs()
                 guard statfs(path, &volume) == 0 else { break }
