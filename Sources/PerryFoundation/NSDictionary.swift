@@ -74,7 +74,11 @@ enum Dictionaries {
                   let values = object.load(fromByteOffset: DarwinLayout.dictionaryObjects, as: UnsafePointer<id>?.self) else { return [] }
             return (0..<count).map { (keys[$0], values[$0]) }
         }
-        if let storage = storage(object) {
+        // A subclass that keeps its own entries (PlaygroundFoundation's
+        // PGFSortedDictionary) has this library's storage too, from
+        // -[NSDictionary init], but empty: its own count says what it holds.
+        if let storage = storage(object),
+           !(storage.keys.isEmpty && ObjC.overrides(object, Selectors.count, of: dictionaryClass)) {
             return Array(zip(storage.keys, storage.values)).map { (key: $0.0, value: $0.1) }
         }
         // Another library's dictionary, such as Swift's: its keys and
