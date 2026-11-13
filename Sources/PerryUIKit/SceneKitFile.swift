@@ -230,7 +230,8 @@ final class SCNSceneBuilder {
 
         if archive.has(described["geometry"]) { state.geometry = geometry(described["geometry"]) }
         if archive.has(described["camera"]) { state.camera = camera(described["camera"]) }
-        for key in ["light", "particleSystem", "physicsBody", "physicsField", "actions", "animations", "skinner", "morpher", "constraints"]
+        if archive.has(described["light"]) { state.light = light(described["light"]) }
+        for key in ["particleSystem", "physicsBody", "physicsField", "actions", "animations", "skinner", "morpher", "constraints"]
         where archive.has(described[key]) { skip(key) }
 
         for child in archive.list(described["childNodes"]) {
@@ -264,6 +265,28 @@ final class SCNSceneBuilder {
         return made
     }
 
+    private func light(_ reference: SCNArchive.Plist?) -> SCNLight? {
+        guard let described = archive.dictionary(reference) else { return nil }
+        let made = SCNLight.make(SCNLight.objCClass)
+        let state = made.light
+        state.type = archive.string(described["type"]) ?? "omni"
+        state.intensity = CGFloat(archive.double(described["intensity"]) ?? 1000)
+        state.temperature = CGFloat(archive.double(described["temperature"]) ?? 6500)
+        state.castsShadow = archive.bool(described["castsShadow"]) ?? false
+        state.name = archive.string(described["name"])
+        state.attenuationStart = CGFloat(archive.double(described["attenuationStartDistance"]) ?? 0)
+        state.attenuationEnd = CGFloat(archive.double(described["attenuationEndDistance"]) ?? 0)
+        state.attenuationFalloff = CGFloat(archive.double(described["attenuationFalloffExponent"]) ?? 2)
+        state.spotInner = CGFloat(archive.double(described["spotInnerAngle"]) ?? 0)
+        state.spotOuter = CGFloat(archive.double(described["spotOuterAngle"]) ?? 45)
+        // The colour is four floats; a pre-iOS 10 file's is an NSColor.
+        let components = archive.floats(described["scncolor"])
+        let color = components.count >= 3 ? UIColor.rgb(CGFloat(components[0]), CGFloat(components[1]), CGFloat(components[2]), 1)
+            : UIColor.gray(1)
+        withExtendedLifetime(color) { SKSupport.replace(&state.color, with: color.objcObject) }
+        return made
+    }
+
     // MARK: Materials
 
     private func material(_ reference: SCNArchive.Plist) -> SCNMaterial? {
@@ -274,6 +297,10 @@ final class SCNSceneBuilder {
         for (name, property) in [("diffuse", made.diffuse()), ("emission", made.emission()), ("specular", made.specular())] {
             if let contents = propertyContents(described[name]) {
                 withExtendedLifetime(contents) { SKSupport.replace(&property.property.contents, with: contents.objcObject) }
+            }
+            if let wrapped = archive.dictionary(described[name]) {
+                property.property.wrapS = archive.int(wrapped["wrapS"]) ?? 1
+                property.property.wrapT = archive.int(wrapped["wrapT"]) ?? 1
             }
         }
         made.material.name = archive.string(described["name"])
