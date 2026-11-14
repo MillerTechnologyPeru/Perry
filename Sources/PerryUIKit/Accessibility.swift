@@ -19,6 +19,8 @@ enum Accessibility {
     /// One key per property: the address of its byte.
     enum Key: Int, CaseIterable {
         case label, hint, value, language, traits, isElement, elementsHidden, viewIsModal, elements, identifier
+        case attributedLabel, attributedHint, attributedValue, customActions, headerElements, path, userInputLabels,
+             attributedUserInputLabels, groupsChildren, navigationStyle, respondsToUserInteraction
     }
     nonisolated(unsafe) private static let keys = UnsafeMutablePointer<UInt8>.allocate(capacity: Key.allCases.count)
 
@@ -84,6 +86,62 @@ extension NSObject {
     @ObjCMethod("accessibilityElements") func accessibilityElements() -> NSObject? { Accessibility.get(self, .elements) }
     @ObjCMethod("setAccessibilityElements:")
     func setAccessibilityElements(_ elements: NSObject?) { Accessibility.set(self, .elements, elements) }
+
+    // The attributed forms are kept beside the plain ones, as set.
+    @ObjCMethod("accessibilityAttributedLabel") func accessibilityAttributedLabel() -> NSObject? { Accessibility.get(self, .attributedLabel) }
+    @ObjCMethod("setAccessibilityAttributedLabel:")
+    func setAccessibilityAttributedLabel(_ label: NSObject?) { Accessibility.set(self, .attributedLabel, label, copy: true) }
+
+    @ObjCMethod("accessibilityAttributedHint") func accessibilityAttributedHint() -> NSObject? { Accessibility.get(self, .attributedHint) }
+    @ObjCMethod("setAccessibilityAttributedHint:")
+    func setAccessibilityAttributedHint(_ hint: NSObject?) { Accessibility.set(self, .attributedHint, hint, copy: true) }
+
+    @ObjCMethod("accessibilityAttributedValue") func accessibilityAttributedValue() -> NSObject? { Accessibility.get(self, .attributedValue) }
+    @ObjCMethod("setAccessibilityAttributedValue:")
+    func setAccessibilityAttributedValue(_ value: NSObject?) { Accessibility.set(self, .attributedValue, value, copy: true) }
+
+    @ObjCMethod("accessibilityCustomActions") func accessibilityCustomActions() -> NSObject? { Accessibility.get(self, .customActions) }
+    @ObjCMethod("setAccessibilityCustomActions:")
+    func setAccessibilityCustomActions(_ actions: NSObject?) { Accessibility.set(self, .customActions, actions, copy: true) }
+
+    @ObjCMethod("accessibilityHeaderElements") func accessibilityHeaderElements() -> NSObject? { Accessibility.get(self, .headerElements) }
+    @ObjCMethod("setAccessibilityHeaderElements:")
+    func setAccessibilityHeaderElements(_ elements: NSObject?) { Accessibility.set(self, .headerElements, elements, copy: true) }
+
+    @ObjCMethod("accessibilityPath") func accessibilityPath() -> NSObject? { Accessibility.get(self, .path) }
+    @ObjCMethod("setAccessibilityPath:") func setAccessibilityPath(_ path: NSObject?) { Accessibility.set(self, .path, path, copy: true) }
+
+    @ObjCMethod("accessibilityUserInputLabels") func accessibilityUserInputLabels() -> NSObject? { Accessibility.get(self, .userInputLabels) }
+    @ObjCMethod("setAccessibilityUserInputLabels:")
+    func setAccessibilityUserInputLabels(_ labels: NSObject?) { Accessibility.set(self, .userInputLabels, labels, copy: true) }
+
+    @ObjCMethod("accessibilityAttributedUserInputLabels")
+    func accessibilityAttributedUserInputLabels() -> NSObject? { Accessibility.get(self, .attributedUserInputLabels) }
+    @ObjCMethod("setAccessibilityAttributedUserInputLabels:")
+    func setAccessibilityAttributedUserInputLabels(_ labels: NSObject?) { Accessibility.set(self, .attributedUserInputLabels, labels, copy: true) }
+
+    @ObjCMethod("shouldGroupAccessibilityChildren")
+    func shouldGroupAccessibilityChildren() -> Bool { (Accessibility.get(self, .groupsChildren)?.sendIntegerValue() ?? 0) != 0 }
+    @ObjCMethod("setShouldGroupAccessibilityChildren:")
+    func setShouldGroupAccessibilityChildren(_ value: Bool) { Accessibility.set(self, .groupsChildren, NSNumber.make(bool: value)) }
+
+    /// UIAccessibilityNavigationStyle; automatic is 0.
+    @ObjCMethod("accessibilityNavigationStyle")
+    func accessibilityNavigationStyle() -> Int { Accessibility.get(self, .navigationStyle)?.sendIntegerValue() ?? 0 }
+    @ObjCMethod("setAccessibilityNavigationStyle:")
+    func setAccessibilityNavigationStyle(_ style: Int) { Accessibility.set(self, .navigationStyle, NSNumber.make(integer: style)) }
+
+    @ObjCMethod("accessibilityRespondsToUserInteraction")
+    func accessibilityRespondsToUserInteraction() -> Bool {
+        (Accessibility.get(self, .respondsToUserInteraction)?.sendIntegerValue() ?? 0) != 0
+    }
+    @ObjCMethod("setAccessibilityRespondsToUserInteraction:")
+    func setAccessibilityRespondsToUserInteraction(_ value: Bool) {
+        Accessibility.set(self, .respondsToUserInteraction, NSNumber.make(bool: value))
+    }
+
+    @ObjCMethod("accessibilityActivationPoint") func objectAccessibilityActivationPoint() -> CGPoint { .zero }
+    @ObjCMethod("setAccessibilityActivationPoint:") func setObjectAccessibilityActivationPoint(_ point: CGPoint) {}
 
     @ObjCMethod("accessibilityFrame") func accessibilityFrame() -> CGRect { .zero }
     @ObjCMethod("setAccessibilityFrame:") func setAccessibilityFrame(_ frame: CGRect) {}
