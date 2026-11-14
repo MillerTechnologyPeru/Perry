@@ -223,6 +223,43 @@ static darwin_thread_specific_ptr *thread_local_data(void) {
     return &thread_data;
 }
 
+// MARK: std::thread's join and detach
+
+// std::thread's constructor, which Darwin code inlines from <thread>, makes
+// its thread with Darwin's pthread_create and keeps the pthread_t that one
+// returns: on x86 not glibc's, but one of Darwin's layout (libPerrySystem's
+// perry_pthread_to_darwin). libperry-c++'s join and detach would hand that to
+// glibc, which waits on what it finds there for ever (Batman: Arkham City's
+// thread pool, at exit); these hand it to Perry's Darwin pthread_join and
+// pthread_detach. A failure, which libc++ reports as std::system_error,
+// ends the process, as the locks' do.
+
+/// std::thread: its pthread_t, 0 when it isn't joinable.
+typedef struct { pthread_t handle; } darwin_thread;
+
+static int (*darwin_join)(pthread_t, void **);
+static int (*darwin_detach)(pthread_t);
+
+static void load_threads(void) {
+    if (darwin_join) return;
+    darwin_detach = (int (*)(pthread_t))system_symbol("_pthread_detach");
+    darwin_join = (int (*)(pthread_t, void **))system_symbol("_pthread_join");
+}
+
+static void thread_join(darwin_thread *thread) {
+    load_threads();
+    int error = thread->handle ? darwin_join(thread->handle, NULL) : EINVAL;
+    if (error) lock_failed("thread::join", error);
+    thread->handle = 0;
+}
+
+static void thread_detach(darwin_thread *thread) {
+    load_threads();
+    int error = thread->handle ? darwin_detach(thread->handle) : EINVAL;
+    if (error) lock_failed("thread::detach", error);
+    thread->handle = 0;
+}
+
 // MARK: std::future<void>'s shared state
 
 // A promise<void>'s and future<void>'s shared state, __assoc_sub_state, holds
@@ -476,6 +513,8 @@ void *perry_provider_symbol(const char *name) {
     if (strstr(name, "5ctypeIc") || strstr(name, "6locale7classic")) use_darwin_ctype_table();
     if (strcmp(name, "__ZNSt3__15ctypeIcE13classic_tableEv") == 0) return (void *)classic_table;
     if (strcmp(name, "__ZNSt3__119__thread_local_dataEv") == 0) return (void *)thread_local_data;
+    if (strcmp(name, "__ZNSt3__16thread4joinEv") == 0) return (void *)thread_join;
+    if (strcmp(name, "__ZNSt3__16thread6detachEv") == 0) return (void *)thread_detach;
     if (strcmp(name, "__ZTVNSt3__117__assoc_sub_stateE") == 0) return state_vtable_symbol();
     for (size_t i = 0; i < sizeof(futures) / sizeof(futures[0]); i++) {
         if (strcmp(name, futures[i].name) == 0) return futures[i].function;
