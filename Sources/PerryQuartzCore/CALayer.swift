@@ -940,8 +940,10 @@ extension CALayer {
     static func displayIfNeeded(_ layer: CALayer) {
         let state = layer.state
         let redraws = state.delegate.map { ActionKeys.responds($0, ActionKeys.contentChanged) && NSObject($0).sendContentChanged(layer) } ?? false
-        let undrawn = state.backing == nil && !state.displayedByDelegate
+        // An empty layer has nothing to draw, so it is not drawn again each frame.
+        let undrawn = state.backing == nil && !state.displayedByDelegate && state.bounds.width > 0 && state.bounds.height > 0
         if layer.draws, redraws || state.needsDisplay || undrawn || state.backingSize != state.bounds.size {
+            if DisplayTrace.enabled { DisplayTrace.note(layer, redraws, state.needsDisplay, undrawn, state.backingSize, state.bounds.size) }
             layer.sendDisplay()
         }
     }
@@ -1120,4 +1122,24 @@ extension NSObject {
     @ObjCMethod("_perryLayerContentChanged:") func sendContentChanged(_ layer: CALayer) -> Bool
     @ObjCMethod("runActionForKey:object:arguments:")
     func sendRunAction(forKey key: String, object: NSObject, arguments: NSObject?)
+}
+
+/// PERRY_QUARTZ_DISPLAY_TRACE: why layers redraw.
+enum DisplayTrace {
+    static let enabled = getenv("PERRY_QUARTZ_DISPLAY_TRACE") != nil
+    nonisolated(unsafe) static var count = 0
+    static func note(_ layer: CALayer, _ redraws: Bool, _ needs: Bool, _ undrawn: Bool, _ backing: CGSize, _ bounds: CGSize) {
+        count += 1
+        guard count % 500 == 0 else { return }
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let send = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)
+        func className(_ object: UnsafeMutableRawPointer?) -> String {
+            guard let object, let cls = send(object, ObjCRuntime.selector("class")),
+                  let text = send(cls, ObjCRuntime.selector("description")) else { return "nil" }
+            return String(objCArgument: text)
+        }
+        let name = className(layer.objcObject) + "/" + className(send(layer.objcObject, ObjCRuntime.selector("delegate")))
+        let text = "perry: display \(count): \(name) redraws=\(redraws) needs=\(needs) undrawn=\(undrawn) backing=\(backing) bounds=\(bounds)\n"
+        _ = text.withCString { Glibc.write(2, $0, strlen($0)) }
+    }
 }
