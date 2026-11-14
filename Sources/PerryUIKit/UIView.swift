@@ -980,12 +980,28 @@ open class UIView: UIResponder, UICoordinateSpace {
         }
         if state.needsLayout {
             state.needsLayout = false
-            let controller = state.viewController.map { NSObject($0) }
-            controller?.sendViewWillLayoutSubviews()
-            sendLayoutSubviews()
-            controller?.sendViewDidLayoutSubviews()
+            // A layer class with its own -layoutSublayers (Texture's lays
+            // out its node there) is sent it, and reaches the view through
+            // -layoutSublayersOfLayer:, as Core Animation lays a view out.
+            let layer = state.layer
+            if let layer, Methods.overrides(layer.objcObject, "layoutSublayers", of: CALayer.objCClass.pointer) {
+                layer.sendLayoutSublayers()
+            } else {
+                layoutSublayers(of: layer)
+            }
         }
         for subview in state.subviews { subview.layoutIfNeeded() }
+    }
+
+    /// The view's layout, as its layer's delegate: its controller is told
+    /// before and after -layoutSubviews.
+    @ObjCMethod("layoutSublayersOfLayer:")
+    func layoutSublayers(of layer: CALayer?) {
+        guard layer?.objcObject == state.layer?.objcObject else { return }
+        let controller = state.viewController.map { NSObject($0) }
+        controller?.sendViewWillLayoutSubviews()
+        sendLayoutSubviews()
+        controller?.sendViewDidLayoutSubviews()
     }
 
     // MARK: Gesture recognizers
