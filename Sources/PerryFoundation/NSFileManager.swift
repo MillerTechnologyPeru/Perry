@@ -403,6 +403,22 @@ final class NSFileManager: NSObject {
 
     @ObjCMethod("ubiquityIdentityToken") func ubiquityIdentityToken() -> ObjCObject? { nil }
 
+    /// No file is in iCloud: there is none to download or evict, and each
+    /// asks fails with NSUbiquitousFileUnavailableError.
+    @ObjCMethod("isUbiquitousItemAtURL:") func isUbiquitousItem(at url: ObjCObject?) -> Bool { false }
+
+    @ObjCMethod("startDownloadingUbiquitousItemAtURL:error:")
+    func startDownloadingUbiquitousItem(at url: ObjCObject?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        FileManagers.reportNotUbiquitous(errorPointer, url)
+        return false
+    }
+
+    @ObjCMethod("evictUbiquitousItemAtURL:error:")
+    func evictUbiquitousItem(at url: ObjCObject?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        FileManagers.reportNotUbiquitous(errorPointer, url)
+        return false
+    }
+
     /// An app group's shared container: a directory of the group's in the
     /// app's container, made the first time it's asked for, as the app
     /// were the group's only member.
@@ -484,6 +500,13 @@ extension FileManagers {
         var path = url?.path(percentEncoded: false) ?? ""
         if path.count > 1 && path.hasSuffix("/") { path.removeLast() }
         return path
+    }
+
+    /// NSUbiquitousFileUnavailableError, for a file that isn't in iCloud.
+    static func reportNotUbiquitous(_ error: UnsafeMutablePointer<id?>?, _ url: ObjCObject?) {
+        let name = url.map { path(URLs.url($0.id)) } ?? ""
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 4353,
+                                             description: "The file “\(name.split(separator: "/").last.map(String.init) ?? name)” is not available in iCloud.")
     }
 
     /// Reports a failure as Foundation does: an NSError in the Cocoa domain.
