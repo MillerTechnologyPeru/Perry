@@ -18,7 +18,7 @@ packages="libxml2-dev zlib1g-dev libbz2-dev libexpat1-dev libssl-dev openssl-pro
   liblz4-dev libbrotli-dev libpng-dev libjpeg62-turbo-dev libgif-dev libwebp-dev libheif-dev
   libcairo2-dev libfreetype-dev libfontconfig-dev libopenblas-dev libjavascriptcoregtk-4.1-dev
   libopenal1 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 gstreamer1.0-plugins-base
-  gstreamer1.0-plugins-good gstreamer1.0-libav libsdl3-0 libgl1-mesa-dri libegl1 libgles2 libgles1
+  gstreamer1.0-plugins-good gstreamer1.0-libav libsdl3-0 libsdl3-dev libgl1-mesa-dri libegl1 libgles2 libgles1
   libgl1 libglx-mesa0 libegl-mesa0 libgbm1"
 
 docker run --rm --platform linux/arm64 -v "$root:/perry" -e SDK="/perry/.toolchains/$sdk" \
