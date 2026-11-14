@@ -349,6 +349,11 @@ open class NSOpenGLContext: NSObject {
     @ObjCMethod("setView:") func setView(_ view: NSView?) { viewObject = view?.objcObject }
     @ObjCMethod("clearDrawable") func clearDrawable() { viewObject = nil }
     @ObjCMethod("update") func update() {}
+
+    /// One renderer drives every display: virtual screen 0, which can't be
+    /// changed.
+    @ObjCMethod("currentVirtualScreen") func currentVirtualScreen() -> Int32 { 0 }
+    @ObjCMethod("setCurrentVirtualScreen:") func setCurrentVirtualScreen(_ screen: Int32) {}
     @ObjCMethod("pixelFormat") func pixelFormat() -> NSOpenGLPixelFormat? { format }
 
     /// NSOpenGLContextParameter's swap interval, 222; the others have no
