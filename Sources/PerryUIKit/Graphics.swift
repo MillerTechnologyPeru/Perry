@@ -289,6 +289,29 @@ open class UIGraphicsImageRenderer: UIGraphicsRenderer {
         return CG.bitmapContextCreateImage(context).map { (Owned($0), scale) }
     }
 
+    /// UIKit's own entry, which Texture calls: the drawing runs as in
+    /// -imageWithActions:, then `completion` is given the renderer context,
+    /// whose -currentImage is what was drawn.
+    @ObjCMethod("runDrawingActions:completionActions:error:")
+    func run(actions: ObjCBlock, completion: ObjCBlock?, error: UnsafeMutableRawPointer?) -> Bool {
+        let bounds = state.bounds
+        let format = state.format?.state ?? RendererFormatState()
+        let scale = format.scale > 0 ? format.scale : Screen.scale
+        guard let context = CG.makeContext(size: bounds.size, scale: scale, opaque: format.opaque) else { return false }
+        CG.translateCTM(context, -bounds.minX, -bounds.minY)
+        let rendererContext = UIGraphicsImageRendererContext.objCClass.object.allocated()
+            .unsafeCast(to: UIGraphicsImageRendererContext.self)
+        rendererContext.state.context = context
+        rendererContext.state.format = state.format
+        rendererContext.state.scale = scale
+        typealias Actions = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void
+        Graphics.drawing(in: context) {
+            actions.function(as: Actions.self)(actions.object, rendererContext.objcObject)
+        }
+        if let completion { completion.function(as: Actions.self)(completion.object, rendererContext.objcObject) }
+        return true
+    }
+
     @ObjCMethod("imageWithActions:")
     func image(actions: ObjCBlock) -> UIImage? {
         render(actions).map { UIImage.make(cgImage: $0.image.object, scale: $0.scale) }
