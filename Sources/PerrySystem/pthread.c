@@ -662,15 +662,18 @@ void darwin_pthread_testcancel(void) {
     pthread_testcancel();
 }
 
-// Darwin's smallest stack is 16 KB; the host's is larger (128 KB on arm64),
-// and its threads keep their thread-local storage on the stack too. A size
-// Darwin accepts is raised to one the host does.
+// Darwin's smallest stack is 16 KB; the host's is larger (128 KB on arm64).
+// A program sizes its threads' stacks for Apple's libraries, but here a
+// thread's stack also holds glibc's thread-local storage for every library
+// loaded, and the frameworks' calls run Perry's Swift, which takes more of
+// it: each thread gets 256 KB more than it asks for (Batman: Arkham Asylum's
+// 80 KB loading thread overflowed in FSGetCatalogInfo).
 int darwin_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size) DARWIN_SYMBOL(pthread_attr_setstacksize);
 int darwin_pthread_attr_setstacksize(pthread_attr_t *attributes, size_t size) {
     if (size < 16384)
         return 22;
-    size_t minimum = (size_t)sysconf(_SC_THREAD_STACK_MIN) + 65536;
-    return result(pthread_attr_setstacksize(attributes, size < minimum ? minimum : size));
+    size_t minimum = (size_t)sysconf(_SC_THREAD_STACK_MIN);
+    return result(pthread_attr_setstacksize(attributes, (size < minimum ? minimum : size) + 262144));
 }
 
 int darwin_pthread_attr_setstack(pthread_attr_t *attributes, void *stack, size_t size) DARWIN_SYMBOL(pthread_attr_setstack);
