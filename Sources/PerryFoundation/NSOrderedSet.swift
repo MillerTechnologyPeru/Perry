@@ -165,6 +165,13 @@ public class NSOrderedSet: NSObject {
         return self
     }
 
+    /// The set's members, in the order it enumerates them.
+    @ObjCMethod("initWithSet:")
+    func initialize(set: ObjCObject?) -> Self {
+        Storage.set(objcObject, OrderedSetStorage(Sets.elements(set?.id)))
+        return self
+    }
+
     @ObjCMethod("initWithCapacity:")
     func initialize(capacity: UInt) -> Self { initialize() }
 
@@ -367,7 +374,19 @@ public final class NSMutableOrderedSet: NSOrderedSet {
     }
 
     @ObjCMethod("unionOrderedSet:")
-    func union(_ other: ObjCObject) { OrderedSets.storage(other.id).members.forEach { storage.append($0) } }
+    func union(_ other: ObjCObject?) {
+        guard let other else { return }
+        OrderedSets.storage(other.id).members.forEach { storage.append($0) }
+    }
+
+    @ObjCMethod("unionSet:")
+    func union(set other: ObjCObject?) { Sets.elements(other?.id).forEach { storage.append($0) } }
+
+    @ObjCMethod("minusSet:")
+    func minus(set other: ObjCObject?) {
+        guard let other else { return }
+        remove(objectsIn: ObjCObject(Arrays.autoreleased(Sets.elements(other.id))))
+    }
 
     @ObjCMethod("minusOrderedSet:")
     func minus(_ other: ObjCObject) { remove(objectsIn: ObjCObject(Arrays.autoreleased(OrderedSets.storage(other.id).members))) }
