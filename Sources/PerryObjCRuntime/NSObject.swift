@@ -205,7 +205,9 @@ extension NSObject {
     @ObjCMethod("respondsToSelector:")
     func responds(to selector: ObjCSelector?) -> Bool {
         guard let selector, let info = Runtime.info(classOf(objcObject)) else { return false }
-        return Runtime.responds(info, selector.pointer.assumingMemoryBound(to: CChar.self))
+        let answer = Runtime.responds(info, selector.pointer.assumingMemoryBound(to: CChar.self))
+        if Profile.enabled, !answer { Profile.noteDeclined(info, selector.pointer.assumingMemoryBound(to: CChar.self)) }
+        return answer
     }
 
     @ObjCMethod("conformsToProtocol:")
