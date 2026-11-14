@@ -670,6 +670,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard let task = task(dataTask), !task.hold(data) else { return }
         task.count(data.count)
+        URLTrace.body(dataTask.originalRequest?.url, data)
         events?.task(task, didReceive: data)
     }
 
@@ -719,9 +720,22 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
 enum URLTrace {
     static let on = getenv("PERRY_URL_TRACE") != nil
 
+    /// With PERRY_URL_BODY=<directory>, each response's bytes are appended to
+    /// a file there named for the request's last path component.
+    static let bodyDirectory = getenv("PERRY_URL_BODY").map { String(cString: $0) }
+
+    static func body(_ url: URL?, _ data: Data) {
+        guard let directory = bodyDirectory, let url else { return }
+        let name = (url.lastPathComponent.isEmpty ? "root" : url.lastPathComponent).filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" || $0 == "." }
+        let path = directory + "/" + String((url.host ?? "").prefix(8)) + "-" + name + (url.query?.contains("retry") == true ? "-retry" : "")
+        guard let file = fopen(path, "ab") else { return }
+        defer { fclose(file) }
+        data.withUnsafeBytes { _ = fwrite($0.baseAddress, 1, $0.count, file) }
+    }
+
     static func completed(_ url: URL?, _ response: URLResponse?, _ bytes: Int?, _ error: (any Error)?) {
         guard on else { return }
-        var line = "perry: URL: \(url?.absoluteString ?? "?")"
+        var line = "perry: URL[\(time(nil) % 1000)]: \(url?.absoluteString ?? "?")"
         if let http = response as? HTTPURLResponse { line += " status \(http.statusCode)" }
         else if response == nil { line += " no response" }
         if let bytes { line += " \(bytes) bytes" }
