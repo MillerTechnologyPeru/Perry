@@ -293,7 +293,14 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("setTaskDescription:") func setTaskDescription(_ text: String?) { task?.taskDescription = text }
     @ObjCMethod("priority") func priority() -> Float { task?.priority ?? 0.5 }
     @ObjCMethod("setPriority:") func setPriority(_ priority: Float) { task?.priority = priority }
-    @ObjCMethod("resume") func resume() { task?.resume() }
+    @ObjCMethod("resume") func resume() {
+        // PERRY_URL_TRACE: each task as it starts, so ones that never finish show.
+        if getenv("PERRY_URL_TRACE") != nil {
+            let line = "perry: URL[\(time(nil) % 1000)]: start \(task?.originalRequest?.method ?? "GET") \(task?.originalRequest?.url?.absoluteString ?? "?")\n"
+            _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
+        }
+        task?.resume()
+    }
     @ObjCMethod("suspend") func suspend() { task?.suspend() }
     @ObjCMethod("cancel") func cancel() {
         // PERRY_URL_TRACE: who cancels a task, and which.
