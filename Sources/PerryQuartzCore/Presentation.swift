@@ -443,6 +443,20 @@ enum ActionKeys {
         return overrides
     }
 
+    nonisolated(unsafe) static let display = ObjCRuntime.selector("display")
+    private static let displaying = Mutex<[UInt: Bool]>([:])
+
+    /// Whether the layer's class has its own -display, which then shows
+    /// the layer its own way (Texture's layers draw on other threads).
+    static func overridesDisplay(_ layer: UnsafeMutableRawPointer) -> Bool {
+        guard let cls = ObjCRuntime.objectClass(layer) else { return false }
+        let key = UInt(bitPattern: cls)
+        if let known = displaying.withLock({ $0[key] }) { return known }
+        let overrides = Methods.implementation(cls, display) != Methods.implementation(CALayer.objCClass.pointer, display)
+        displaying.withLock { $0[key] = overrides }
+        return overrides
+    }
+
     static func overridesActionForKey(_ layer: UnsafeMutableRawPointer) -> Bool {
         guard let cls = ObjCRuntime.objectClass(layer) else { return true }
         let key = UInt(bitPattern: cls)
