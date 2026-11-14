@@ -117,6 +117,17 @@ open class UICollectionViewLayoutAttributes: NSObject {
     @ObjCMethod("setZIndex:") func setZIndex(_ index: Int) { attributes.zIndex = index }
     @ObjCMethod("transform") func transform() -> CGAffineTransform { attributes.transform }
     @ObjCMethod("setTransform:") func setTransform(_ transform: CGAffineTransform) { attributes.transform = transform }
+    /// The transform in three dimensions: the affine one, as only that is applied.
+    @ObjCMethod("transform3D")
+    func transform3D() -> CATransform3D {
+        let t = attributes.transform
+        return CATransform3D(m11: t.a, m12: t.b, m13: 0, m14: 0, m21: t.c, m22: t.d, m23: 0, m24: 0,
+                             m31: 0, m32: 0, m33: 1, m34: 0, m41: t.tx, m42: t.ty, m43: 0, m44: 1)
+    }
+    @ObjCMethod("setTransform3D:")
+    func setTransform3D(_ t: CATransform3D) {
+        attributes.transform = CGAffineTransform(a: t.m11, b: t.m12, c: t.m21, d: t.m22, tx: t.m41, ty: t.m42)
+    }
 
     @ObjCMethod("isEqual:")
     func isEqual(_ other: NSObject?) -> Bool {
@@ -1435,4 +1446,9 @@ enum CollectionTrace {
         let line = "perry: collection \(String(UInt(bitPattern: view.objcObject), radix: 16)) \(name(view.objcObject)): \(text())\n"
         _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
     }
+}
+
+extension CATransform3D: ObjCStructure {
+    public typealias ObjCType = CATransform3D
+    public static var objCTypeEncoding: String { "{CATransform3D=dddddddddddddddd}" }
 }
