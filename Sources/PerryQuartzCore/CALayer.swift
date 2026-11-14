@@ -939,6 +939,15 @@ extension CALayer {
     /// Displays a layer that draws when it needs to.
     static func displayIfNeeded(_ layer: CALayer) {
         let state = layer.state
+        // A class with its own -display is sent it when the layer was
+        // marked, as Core Animation does; what it shows is its affair.
+        if ActionKeys.overridesDisplay(layer.objcObject) {
+            if state.needsDisplay {
+                state.needsDisplay = false
+                layer.sendDisplay()
+            }
+            return
+        }
         let redraws = state.delegate.map { ActionKeys.responds($0, ActionKeys.contentChanged) && NSObject($0).sendContentChanged(layer) } ?? false
         // An empty layer has nothing to draw, so it is not drawn again each frame.
         let undrawn = state.backing == nil && !state.displayedByDelegate && state.bounds.width > 0 && state.bounds.height > 0
