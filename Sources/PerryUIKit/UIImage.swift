@@ -238,6 +238,15 @@ open class UIImage: NSObject {
 
     @ObjCMethod("size") func size() -> CGSize { state.size }
     @ObjCMethod("scale") func scale() -> CGFloat { state.scale }
+    /// UIImageResizingMode: tile 0, as a resizable image fills here.
+    @ObjCMethod("resizingMode") func resizingMode() -> Int { 0 }
+    /// A renderer format that draws at the image's scale.
+    @ObjCMethod("imageRendererFormat")
+    func imageRendererFormat() -> NSObject {
+        let format = UIGraphicsImageRendererFormat.defaultFormat(UIGraphicsImageRendererFormat.objCClass)
+        format.unsafeCast(to: UIGraphicsImageRendererFormat.self).setScale(state.scale)
+        return format
+    }
     @ObjCMethod("CGImage") func cgImage() -> UnsafeMutableRawPointer? { state.cgImage }
     @ObjCMethod("CIImage") func ciImage() -> NSObject? { nil }
     @ObjCMethod("imageOrientation") func imageOrientation() -> Int { state.orientation }
