@@ -12,6 +12,18 @@ import PerryObjCInterop
 final class TypesetState: ObjectState {
     var string: NSAttributedString?
     var box: CGRect = .zero
+    /// The part of the string a line sets, in UTF-16 units; nil for all.
+    var range: (location: Int, length: Int)?
+    /// A truncated line's token, set after its text.
+    var suffix: NSAttributedString?
+    /// A frame's lines and their origins, a line's runs, and a
+    /// framesetter's typesetter, kept so what the functions return lives
+    /// as long as the object.
+    var lines: NSMutableArray?
+    var origins: [CGPoint] = []
+    var visibleLength = 0
+    var runs: NSMutableArray?
+    var typesetter: NSObject?
     required init() {}
 }
 
@@ -123,7 +135,10 @@ public func CTFramesetterSuggestFrameSizeWithConstraints(_ framesetter: UnsafeMu
 public func CTFramesetterCreateFrame(_ framesetter: UnsafeMutableRawPointer?, _ range: PerryCFRange, _ path: UnsafeMutableRawPointer?,
                                      _ attributes: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     guard let (_, string) = Typesetting.state(framesetter) else { return nil }
-    return Typesetting.make(CTFrame.objCClass, string, box: path.map { CG.pathGetBoundingBox($0) } ?? .zero)
+    let frame = Typesetting.make(CTFrame.objCClass, string, box: path.map { CG.pathGetBoundingBox($0) } ?? .zero)
+    FrameLines.layOut(Typesetting.states[frame], string: string, from: max(range.location, 0),
+                      length: range.length > 0 ? range.length : nil)
+    return frame
 }
 
 /// Draws the frame's lines from the top of its box: in CoreText's
@@ -167,8 +182,13 @@ public func CTFrameGetStringRange(_ frame: UnsafeMutableRawPointer?) -> PerryCFR
     PerryCFRange(location: 0, length: Int(Typesetting.state(frame)?.string.length() ?? 0))
 }
 
+/// What of the string the frame's lines hold: the lines that fit its box.
 @c(_CTFrameGetVisibleStringRange)
-public func CTFrameGetVisibleStringRange(_ frame: UnsafeMutableRawPointer?) -> PerryCFRange { CTFrameGetStringRange(frame) }
+public func CTFrameGetVisibleStringRange(_ frame: UnsafeMutableRawPointer?) -> PerryCFRange {
+    guard let (state, _) = Typesetting.state(frame), let first = state.lines?.elements.first else { return CTFrameGetStringRange(frame) }
+    let start = Typesetting.states[first.objcObject].range?.location ?? 0
+    return PerryCFRange(location: start, length: state.visibleLength)
+}
 
 @c(_CTFramesetterGetTypeID) public func CTFramesetterGetTypeID() -> UInt { 0x50_04 }
 @c(_CTFrameGetTypeID) public func CTFrameGetTypeID() -> UInt { 0x50_05 }
@@ -229,6 +249,10 @@ struct LineSegments {
         var start: Int
         var length: Int
         var isTab: Bool
+        /// The run's attributes, as the string gives them.
+        var attributes: NSDictionary? = nil
+        /// A run delegate's run: space of the delegate's size, with no text.
+        var isDelegate = false
     }
 
     var segments: [Segment] = []
@@ -237,14 +261,28 @@ struct LineSegments {
     var descent: CGFloat = 0
     var leading: CGFloat = 0
 
-    init(_ string: NSAttributedString) {
-        let text = Array(string.string().utf16)
-        var index = 0
+    init(_ string: NSAttributedString, range part: (location: Int, length: Int)? = nil, suffix: NSAttributedString? = nil,
+         text given: [UInt16]? = nil) {
+        let text = given ?? Array(string.string().utf16)
+        var index = min(max(part?.location ?? 0, 0), text.count)
+        let limit = part.map { min(text.count, max($0.location + $0.length, index)) } ?? text.count
         var x: CGFloat = 0
-        while index < text.count {
+        while index < limit {
             var range = PerryRange(location: 0, length: 0)
             let attributes = withUnsafeMutablePointer(to: &range) { string.attributes(at: UInt(index), effectiveRange: UnsafeMutableRawPointer($0)) }
-            let end = max(index + 1, min(text.count, Int(range.location + range.length)))
+            let end = max(index + 1, min(limit, Int(range.location + range.length)))
+            if let delegate = attributes?.object(forKey: "CTRunDelegate"), let metrics = RunDelegates.metrics(delegate) {
+                // Each character is a box of the delegate's size.
+                let font = attributes?.object(forKey: "NSFont")?.as(UIFont.self) ?? UIFont.systemFont(size: 12)
+                ascent = max(ascent, metrics.ascent)
+                descent = max(descent, metrics.descent)
+                let width = metrics.width * CGFloat(end - index)
+                segments.append(Segment(text: "", font: font, color: nil, fromContext: false, x: x, width: width, start: index,
+                                        length: end - index, isTab: false, attributes: attributes, isDelegate: true))
+                x += width
+                index = end
+                continue
+            }
             let font = attributes?.object(forKey: "NSFont")?.as(UIFont.self) ?? UIFont.systemFont(size: 12)
             let (color, fromContext) = LineSegments.color(attributes)
             let tabs = TabStops.of(attributes?.object(forKey: "NSParagraphStyle"))
@@ -258,19 +296,30 @@ struct LineSegments {
                 let piece = String(decoding: text[pieceStart..<pieceEnd], as: UTF16.self)
                 let width = Text.size(piece, font: font).width
                 segments.append(Segment(text: piece, font: font, color: color, fromContext: fromContext, x: x, width: width,
-                                        start: pieceStart, length: pieceEnd - pieceStart, isTab: false))
+                                        start: pieceStart, length: pieceEnd - pieceStart, isTab: false, attributes: attributes))
                 x += width
             }
             for position in index..<end where text[position] == 0x09 {
                 flush(position)
                 let stop = tabs.locations.first { $0 > x + 0.5 } ?? ((x / tabs.interval).rounded(.down) + 1) * tabs.interval
                 segments.append(Segment(text: "", font: font, color: color, fromContext: fromContext, x: x, width: stop - x,
-                                        start: position, length: 1, isTab: true))
+                                        start: position, length: 1, isTab: true, attributes: attributes))
                 x = stop
                 pieceStart = position + 1
             }
             flush(end)
             index = end
+        }
+        if let suffix {
+            // A truncation token follows the text, at the place it stopped.
+            let token = LineSegments(suffix)
+            for var segment in token.segments {
+                segment.x += x
+                (segment.start, segment.length) = (limit, 0)
+                segments.append(segment)
+            }
+            x += token.width
+            (ascent, descent, leading) = (max(ascent, token.ascent), max(descent, token.descent), max(leading, token.leading))
         }
         width = x
         if segments.isEmpty {
@@ -326,8 +375,8 @@ struct LineSegments {
     }
 }
 
-private func lineSegments(_ line: UnsafeMutableRawPointer?) -> LineSegments? {
-    Typesetting.state(line).map { LineSegments($0.string) }
+func lineSegments(_ line: UnsafeMutableRawPointer?) -> LineSegments? {
+    Typesetting.state(line).map { LineSegments($0.string, range: $0.state.range, suffix: $0.state.suffix) }
 }
 
 /// The width, and the fonts' greatest ascent, descent and leading.
@@ -350,12 +399,15 @@ public func CTLineGetImageBounds(_ line: UnsafeMutableRawPointer?, _ context: Un
 
 @c(_CTLineGetStringRange)
 public func CTLineGetStringRange(_ line: UnsafeMutableRawPointer?) -> PerryCFRange {
-    PerryCFRange(location: 0, length: Int(Typesetting.state(line)?.string.length() ?? 0))
+    guard let (state, string) = Typesetting.state(line) else { return PerryCFRange(location: 0, length: 0) }
+    if let range = state.range { return PerryCFRange(location: range.location, length: range.length) }
+    return PerryCFRange(location: 0, length: Int(string.length()))
 }
 
 @c(_CTLineGetGlyphCount)
 public func CTLineGetGlyphCount(_ line: UnsafeMutableRawPointer?) -> Int {
-    Int(Typesetting.state(line)?.string.length() ?? 0)
+    guard let (state, string) = Typesetting.state(line) else { return 0 }
+    return (state.range?.length ?? Int(string.length())) + Int(state.suffix?.length() ?? 0)
 }
 
 /// The x of the caret before the character at `index`.
@@ -399,8 +451,13 @@ public func CTLineDraw(_ line: UnsafeMutableRawPointer?, _ context: UnsafeMutabl
     defer { CG.restoreGState(context) }
     CG.translateCTM(context, position.x, position.y)
     CG.scaleCTM(context, 1, -1)
-    for segment in layout.segments where !segment.isTab && !segment.text.isEmpty {
-        Text.draw(segment.text, at: CGPoint(x: segment.x, y: -segment.font.ascender()), font: segment.font, color: segment.color,
-                  keepingMode: segment.fromContext)
+    for segment in layout.segments { segment.draw() }
+}
+
+extension LineSegments.Segment {
+    /// Draws the run's text from its x, the baseline at y 0, y down.
+    func draw() {
+        guard !isTab, !isDelegate, !text.isEmpty else { return }
+        Text.draw(text, at: CGPoint(x: x, y: -font.ascender()), font: font, color: color, keepingMode: fromContext)
     }
 }
