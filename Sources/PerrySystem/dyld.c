@@ -167,6 +167,27 @@ static char *section_data(const void *header, const char *segment, const char *s
     return NULL;
 }
 
+// A section's entry in an image's load commands (struct section, or
+// section_64 in a 64-bit image), as getsectbyname returns the executable's
+// (mach.c has getsectbynamefromheader and its _64 form).
+static const void *section_entry(const void *header, const char *segment, const char *section) {
+    perry_macho_segment found;
+    if (!segment_command(header, segment, &found))
+        return NULL;
+    for (uint32_t j = 0; j < found.section_count; j++) {
+        uint64_t addr, length;
+        const uint8_t *entry = perry_macho_section(&found, j, &addr, &length);
+        if (strncmp((const char *)entry, section, 16) == 0)
+            return entry;
+    }
+    return NULL;
+}
+
+const void *darwin_getsectbyname(const char *segment, const char *section) DARWIN_SYMBOL(getsectbyname);
+const void *darwin_getsectbyname(const char *segment, const char *section) {
+    return section_entry(darwin_NSGetMachExecuteHeader(), segment, section);
+}
+
 const void *darwin_getsegbyname(const char *segment) DARWIN_SYMBOL(getsegbyname);
 const void *darwin_getsegbyname(const char *segment) {
     perry_macho_segment found;
