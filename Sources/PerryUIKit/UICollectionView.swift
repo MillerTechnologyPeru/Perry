@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UICollectionView, its layouts and its controller. The layout object
@@ -617,6 +618,9 @@ final class CollectionViewState: ObjectState {
     var prepared = false
     var lastBounds: CGRect?
     var laying = false
+    /// The data is to be reloaded at the next layout pass: at first, and
+    /// after the data source changes.
+    var reloadPending = true
 }
 
 @ObjCClass("UICollectionView")
@@ -693,7 +697,9 @@ open class UICollectionView: UIScrollView {
     @ObjCMethod("dataSource") func dataSource() -> NSObject? { collection.dataSource.map { NSObject($0) } }
     @ObjCMethod("setDataSource:") func setDataSource(_ source: NSObject?) {
         collection.dataSource = source?.objcObject
+        CollectionTrace.note(self, "setDataSource \(source == nil ? "nil" : "object")")
         reloadData()
+        collection.reloadPending = true
     }
 
     @ObjCMethod("setDelegate:")
@@ -832,6 +838,7 @@ open class UICollectionView: UIScrollView {
             }
         }
         collection.counts = counts
+        CollectionTrace.note(self, "counts \(counts)")
         return counts
     }
 
@@ -892,6 +899,14 @@ open class UICollectionView: UIScrollView {
     override func layoutSubviews() {
         applyAdjustedInset()
         guard !collection.laying else { return }
+        CollectionTrace.note(self, "layoutSubviews bounds \(state.bounds) window \(windowObject != nil)")
+        // UIKit reloads the data at the first layout pass by sending
+        // -reloadData, which a subclass that loads its own data (as
+        // Texture's does) overrides to start.
+        if collection.reloadPending {
+            collection.reloadPending = false
+            sendReloadData()
+        }
         collection.laying = true
         defer { collection.laying = false }
         let bounds = state.bounds
@@ -1108,6 +1123,8 @@ open class UICollectionView: UIScrollView {
     /// is asked again at the next layout pass.
     @ObjCMethod("reloadData")
     func reloadData() {
+        CollectionTrace.note(self, "reloadData")
+        collection.reloadPending = false
         for (_, cell) in collection.visibleCells { enqueue(cell) }
         collection.visibleCells = [:]
         for (key, view) in collection.visibleSupplementary { enqueue(view, kind: key.kind) }
@@ -1138,6 +1155,7 @@ open class UICollectionView: UIScrollView {
 
     @ObjCMethod("performBatchUpdates:completion:")
     func performBatchUpdates(_ updates: ObjCBlock?, completion: ObjCBlock?) {
+        CollectionTrace.note(self, "performBatchUpdates")
         updates.map(Blocks.call)
         reloadData()
         layoutIfNeeded()
@@ -1268,6 +1286,7 @@ extension NSObject {
     @ObjCMethod("preferredLayoutAttributesFittingAttributes:") func sendPreferredLayoutAttributes(fitting attributes: NSObject) -> NSObject?
     @ObjCMethod("setSelected:") func sendSetSelected(_ selected: Bool)
     @ObjCMethod("setHighlighted:") func sendSetHighlighted(_ highlighted: Bool)
+    @ObjCMethod("reloadData") func sendReloadData()
     @ObjCMethod("numberOfSectionsInCollectionView:") func sendNumberOfSections(in collection: UICollectionView) -> Int
     @ObjCMethod("collectionView:numberOfItemsInSection:")
     func sendCollectionView(_ collection: UICollectionView, numberOfItemsInSection section: Int) -> Int
@@ -1397,5 +1416,23 @@ open class UICollectionViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         guard collectionController.clearsSelectionOnViewWillAppear, let collection = state.view?.as(UICollectionView.self) else { return }
         for path in collection.collection.selected.sorted() { collection.deselectItem(at: path.object, animated: animated) }
+    }
+}
+
+/// PERRY_UIKIT_COLLECTION_TRACE: what collection views are asked and told.
+enum CollectionTrace {
+    static let enabled = getenv("PERRY_UIKIT_COLLECTION_TRACE") != nil
+
+    static func note(_ view: UICollectionView, _ text: @autoclosure () -> String) {
+        guard enabled else { return }
+        typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        let send = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)
+        func name(_ object: UnsafeMutableRawPointer?) -> String {
+            guard let object, let cls = send(object, ObjCRuntime.selector("class")),
+                  let text = send(cls, ObjCRuntime.selector("description")) else { return "nil" }
+            return String(objCArgument: text)
+        }
+        let line = "perry: collection \(String(UInt(bitPattern: view.objcObject), radix: 16)) \(name(view.objcObject)): \(text())\n"
+        _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
     }
 }
