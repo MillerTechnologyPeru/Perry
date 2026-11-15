@@ -296,7 +296,7 @@ static int condition_holds(uint32_t condition, uint32_t cpsr) {
 
 int perry_isa_rewrite(void *raw_context) {
     ucontext_t *context = raw_context;
-    struct sigcontext *machine = &context->uc_mcontext;
+    struct sigcontext *machine = (struct sigcontext *)&context->uc_mcontext;
     // SWP and SWPB exist only in the ARM instruction set.
     if (machine->arm_cpsr & (1u << 5))
         return 0;

@@ -176,6 +176,73 @@ int perry_gxx_personality_sj0(int version, int actions, unsigned long long excep
     return 8;   // _URC_CONTINUE_UNWIND: nothing here catches
 }
 
+
+// The soft-float routines, by their plain names, which code built without
+// the VFP variants calls (Embedded Swift's runtime among it): the same
+// arithmetic, with floats and doubles in core registers.
+#define SOFT2(type, name, expression) \
+    type perry_##name(type a, type b) LIBGCC(__##name); \
+    type perry_##name(type a, type b) { return expression; }
+SOFT2(double, adddf3, a + b)
+SOFT2(double, subdf3, a - b)
+SOFT2(double, muldf3, a * b)
+SOFT2(double, divdf3, a / b)
+SOFT2(float, addsf3, a + b)
+SOFT2(float, subsf3, a - b)
+SOFT2(float, mulsf3, a * b)
+SOFT2(float, divsf3, a / b)
+
+double perry_extendsfdf2(float a) LIBGCC(__extendsfdf2);
+double perry_extendsfdf2(float a) { return a; }
+float perry_truncdfsf2(double a) LIBGCC(__truncdfsf2);
+float perry_truncdfsf2(double a) { return (float)a; }
+int perry_fixdfsi(double a) LIBGCC(__fixdfsi);
+int perry_fixdfsi(double a) { return (int)a; }
+int perry_fixsfsi(float a) LIBGCC(__fixsfsi);
+int perry_fixsfsi(float a) { return (int)a; }
+unsigned perry_fixunsdfsi(double a) LIBGCC(__fixunsdfsi);
+unsigned perry_fixunsdfsi(double a) { return (unsigned)a; }
+unsigned perry_fixunssfsi(float a) LIBGCC(__fixunssfsi);
+unsigned perry_fixunssfsi(float a) { return (unsigned)a; }
+double perry_floatsidf(int a) LIBGCC(__floatsidf);
+double perry_floatsidf(int a) { return a; }
+float perry_floatsisf(int a) LIBGCC(__floatsisf);
+float perry_floatsisf(int a) { return (float)a; }
+double perry_floatunsidf(unsigned a) LIBGCC(__floatunsidf);
+double perry_floatunsidf(unsigned a) { return a; }
+float perry_floatunsisf(unsigned a) LIBGCC(__floatunsisf);
+float perry_floatunsisf(unsigned a) { return (float)a; }
+
+// Comparisons, as libgcc answers them: eq and ne give 0 for equal; lt and
+// le give a negative number, 0 or a positive one, and 1 for unordered; gt
+// and ge the same, and -1 for unordered.
+#define SOFT_COMPARE(type, suffix) \
+    int perry_eq##suffix(type a, type b) LIBGCC(__eq##suffix); \
+    int perry_eq##suffix(type a, type b) { return a == b ? 0 : 1; } \
+    int perry_ne##suffix(type a, type b) LIBGCC(__ne##suffix); \
+    int perry_ne##suffix(type a, type b) { return a == b ? 0 : 1; } \
+    int perry_lt##suffix(type a, type b) LIBGCC(__lt##suffix); \
+    int perry_lt##suffix(type a, type b) { return a < b ? -1 : a == b ? 0 : 1; } \
+    int perry_le##suffix(type a, type b) LIBGCC(__le##suffix); \
+    int perry_le##suffix(type a, type b) { return a < b ? -1 : a == b ? 0 : 1; } \
+    int perry_gt##suffix(type a, type b) LIBGCC(__gt##suffix); \
+    int perry_gt##suffix(type a, type b) { return a > b ? 1 : a == b ? 0 : -1; } \
+    int perry_ge##suffix(type a, type b) LIBGCC(__ge##suffix); \
+    int perry_ge##suffix(type a, type b) { return a > b ? 1 : a == b ? 0 : -1; } \
+    int perry_unord##suffix(type a, type b) LIBGCC(__unord##suffix); \
+    int perry_unord##suffix(type a, type b) { return a != a || b != b; }
+SOFT_COMPARE(double, df2)
+SOFT_COMPARE(float, sf2)
+
+// 64-bit shifts, which armv7 code calls for a count not known when it was
+// compiled.
+long long perry_ashldi3(long long a, int count) LIBGCC(__ashldi3);
+long long perry_ashldi3(long long a, int count) { return (long long)((unsigned long long)a << (count & 63)); }
+long long perry_ashrdi3(long long a, int count) LIBGCC(__ashrdi3);
+long long perry_ashrdi3(long long a, int count) { return a >> (count & 63); }
+unsigned long long perry_lshrdi3(unsigned long long a, int count) LIBGCC(__lshrdi3);
+unsigned long long perry_lshrdi3(unsigned long long a, int count) { return a >> (count & 63); }
+
 #endif
 
 #if defined(__i386__)

@@ -1241,8 +1241,14 @@ static void start_providers(perry_loader *loader, perry_image *image) {
             .lookup_symbol_after = lookup_symbol_after,
         };
     }
+    // A provider that loads another as it starts (QuartzCore loads
+    // CoreGraphics) comes back here: then only the layers up to its own
+    // start, as the layers above need it to have finished starting, and
+    // the pass that is under way starts them after it.
+    static int starting_layer = -1;
+    int last_layer = starting_layer >= 0 ? starting_layer : 6;
     // Several install names may share one provider; start each library once.
-    for (int layer = 0; layer <= 6; layer++)
+    for (int layer = 0; layer <= last_layer; layer++)
     for (uint32_t i = 0; i < loader->provider_count; i++) {
         void *handle = loader->providers[i]->handle;
         bool seen = !handle || loader->providers[i]->started;
@@ -1252,8 +1258,12 @@ static void start_providers(perry_loader *loader, perry_image *image) {
             continue;
         loader->providers[i]->started = true;
         perry_provider_startup_fn fn = (perry_provider_startup_fn)dlsym(handle, PERRY_PROVIDER_STARTUP_SYMBOL);
-        if (fn)
+        if (fn) {
+            int outer_layer = starting_layer;
+            starting_layer = layer;
             fn(&info);
+            starting_layer = outer_layer;
+        }
         perry_provider_image_fn hook = (perry_provider_image_fn)dlsym(handle, PERRY_PROVIDER_IMAGE_INIT_SYMBOL);
         if (hook) {
             image_hooks = realloc(image_hooks, sizeof(*image_hooks) * (image_hook_count + 1));

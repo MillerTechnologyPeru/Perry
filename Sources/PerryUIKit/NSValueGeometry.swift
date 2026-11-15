@@ -10,13 +10,24 @@ class NSValueObject: NSObject {
     @ObjCMethod("getValue:") func getValue(_ buffer: UnsafeMutableRawPointer?)
 }
 
+/// The structures' type encodings: CGFloat is a double where pointers are
+/// 64 bits wide and a float where they are 32.
 private enum Encodings {
+    #if _pointerBitWidth(_32)
+    static let point = "{CGPoint=ff}"
+    static let size = "{CGSize=ff}"
+    static let rect = "{CGRect={CGPoint=ff}{CGSize=ff}}"
+    static let transform = "{CGAffineTransform=ffffff}"
+    static let insets = "{UIEdgeInsets=ffff}"
+    static let vector = "{CGVector=ff}"
+    #else
     static let point = "{CGPoint=dd}"
     static let size = "{CGSize=dd}"
     static let rect = "{CGRect={CGPoint=dd}{CGSize=dd}}"
     static let transform = "{CGAffineTransform=dddddd}"
     static let insets = "{UIEdgeInsets=dddd}"
     static let vector = "{CGVector=dd}"
+    #endif
 }
 
 private func box<T>(_ cls: ObjCClass, _ value: T, _ encoding: String) -> NSObject {
@@ -29,8 +40,15 @@ private func box<T>(_ cls: ObjCClass, _ value: T, _ encoding: String) -> NSObjec
 }
 
 private func unbox<T>(_ object: NSObject, _ empty: T) -> T {
+    // Read into room for the largest of them, as a value boxed as another
+    // structure fills as much as it holds.
     var value = empty
-    withUnsafeMutableBytes(of: &value) { object.unsafeCast(to: NSValueObject.self).getValue($0.baseAddress) }
+    let scratch = UnsafeMutableRawPointer.allocate(byteCount: 256, alignment: 16)
+    defer { scratch.deallocate() }
+    scratch.initializeMemory(as: UInt8.self, repeating: 0, count: 256)
+    withUnsafeBytes(of: &value) { scratch.copyMemory(from: $0.baseAddress!, byteCount: $0.count) }
+    object.unsafeCast(to: NSValueObject.self).getValue(scratch)
+    withUnsafeMutableBytes(of: &value) { $0.baseAddress!.copyMemory(from: scratch, byteCount: $0.count) }
     return value
 }
 
