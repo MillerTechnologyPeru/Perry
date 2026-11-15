@@ -293,13 +293,19 @@ int darwin_dladdr(const void *address, Dl_info *info) {
 
 // MARK: - Versions
 
+// The executable's first load command: after a 64-bit header's 32 bytes,
+// or a 32-bit one's 28.
+static const uint8_t *first_load_command(const uint32_t *mach) {
+    return (const uint8_t *)mach + (mach[0] == 0xfeedfacf ? 32 : 28);
+}
+
 // The executable's SDK, as dyld_get_program_sdk_version gives it: from
 // LC_BUILD_VERSION, or the older LC_VERSION_MIN_IPHONEOS.
 static uint32_t program_sdk(void) {
     const uint32_t *mach = darwin_NSGetMachExecuteHeader();
     if (!mach)
         return 0;
-    const uint8_t *command = (const uint8_t *)mach + 32;
+    const uint8_t *command = first_load_command(mach);
     for (uint32_t i = 0; i < mach[4]; i++) {
         const uint32_t *words = (const uint32_t *)command;
         if (words[0] == 0x32 /* LC_BUILD_VERSION */)
@@ -337,7 +343,7 @@ static uint32_t program_minos(void) {
     const uint32_t *mach = darwin_NSGetMachExecuteHeader();
     if (!mach)
         return 0;
-    const uint8_t *command = (const uint8_t *)mach + 32;
+    const uint8_t *command = first_load_command(mach);
     for (uint32_t i = 0; i < mach[4]; i++) {
         const uint32_t *words = (const uint32_t *)command;
         if (words[0] == 0x32 /* LC_BUILD_VERSION */)
