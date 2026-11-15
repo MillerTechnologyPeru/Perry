@@ -848,7 +848,7 @@ public func class_addProperty(_ cls: Class?, _ name: UnsafePointer<CChar>?, _ at
 
 /// The class's own ivar_t entries, from its class_ro_t.
 private func ivars(of cls: Class) -> [UnsafeMutablePointer<perry_ivar>] {
-    guard let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & Layout.classBitsMask), let list = ro.pointee.ivars else { return [] }
+    guard let ro = Layout.readOnly(cls), let list = ro.pointee.ivars else { return [] }
     var result: [UnsafeMutablePointer<perry_ivar>] = []
     IvarList.forEach(list) { result.append($0) }
     return result
@@ -987,6 +987,14 @@ public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwar
     Runtime.forwardHandler = forward
 }
 
+/// For the forward handler: a message it has no invocation for, or that
+/// -forwardInvocation: did not take, ends as an unrecognized one does.
+@c(_perry_objc_not_forwarded)
+public func perry_objc_not_forwarded(_ receiver: id?, _ selector: UnsafePointer<CChar>?) {
+    guard let receiver, let selector else { return }
+    Runtime.notForwarded(receiver, selector)
+}
+
 // MARK: - Blocks as methods
 
 /// An IMP that calls a copy of `block` with the receiver and the method's
@@ -1094,10 +1102,10 @@ public func perry_objc_uncaught_exception(_ exception: UnsafeMutableRawPointer?)
     objcFatal("terminating with uncaught exception of type NSException")
 }
 
-#if !arch(arm) && !arch(i386)
-/// Throws an exception. Perry cannot unwind arm64 Mach-O frames to a
-/// @catch, so every exception is uncaught. On armv7, exceptions_arm.c
-/// throws and catches them.
+#if !arch(arm) && !arch(i386) && !arch(arm64)
+/// Throws an exception, which on x86_64 nothing catches: every exception
+/// is uncaught. armv7, i386 and arm64 have their own (exceptions_arm.c,
+/// exceptions_i386.c, exceptions_arm64.c).
 @c(_objc_exception_throw)
 public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
     perry_objc_uncaught_exception(exception)
@@ -1114,10 +1122,10 @@ public func objc_terminate() -> Never {
     objcFatal("terminating")
 }
 
-#if !arch(arm)
+#if !arch(arm) && !arch(arm64)
 /// The personality routine Objective-C code's unwind tables name. Code
 /// that only cleans up (ARC, @autoreleasepool) refers to it without
-/// throwing; Perry cannot unwind arm64 Mach-O frames, so reaching it stops.
+/// throwing; where exceptions aren't unwound, reaching it stops.
 @c(___objc_personality_v0)
 public func objc_personality_v0(_ version: Int32, _ actions: Int32, _ exceptionClass: UInt64, _ exception: UnsafeMutableRawPointer?,
                                 _ context: UnsafeMutableRawPointer?) -> Int32 {
@@ -1186,10 +1194,11 @@ public func protocol_copyPropertyList(_ proto: ProtocolPointer?, _ count: Unsafe
 
 // MARK: - Catching
 
-#if !arch(arm)
+#if !arch(arm) && !arch(arm64)
 /// Entering and leaving a @catch. Exceptions are never unwound to one (see
-/// objc_exception_throw), so these are bound but not reached. armv7 unwinds
-/// to them, and has its own (exceptions_arm.c).
+/// objc_exception_throw), so these are bound but not reached. armv7 and
+/// arm64 unwind to them, and have their own (exceptions_arm.c,
+/// exceptions_arm64.c).
 @c(_objc_begin_catch)
 public func objc_begin_catch(_ exception: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     objcFatal("an exception reached a @catch, which Perry cannot unwind to")
