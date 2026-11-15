@@ -277,7 +277,8 @@ public class NSNumber: NSObject {
     /// Equal numbers hash equally whatever their type.
     @ObjCMethod("hash")
     func hash() -> UInt {
-        if number.double == number.double.rounded() { return UInt(bitPattern: Int(number.int64)) }
+        // Truncated, as a 64-bit value does not fit a 32-bit hash.
+        if number.double == number.double.rounded() { return UInt(truncatingIfNeeded: number.int64) }
         return UInt(truncatingIfNeeded: number.double.bitPattern)
     }
 
