@@ -85,6 +85,32 @@ open class UITabBarController: UIViewController {
         return bar
     }
 
+    /// What key-value coding's "tabBar" key sets: apps put a tab bar of
+    /// their own class in the controller's place with it. The new bar
+    /// takes the old one's place, frame and items.
+    @ObjCMethod("setTabBar:")
+    func setTabBar(_ bar: UITabBar?) {
+        guard let bar, bar.objcObject != tabs.tabBar?.objcObject else { return }
+        let old = tabs.tabBar
+        tabs.tabBar = bar
+        bar.bar.controller = objcObject
+        if let old {
+            bar.sendSetFrame(old.state.frame)
+            bar.setAutoresizingMask(10)
+            bar.bar.items = old.bar.items
+            bar.bar.selected = old.bar.selected
+            if let superview = old.state.superview.map({ NSObject($0).unsafeCast(to: UIView.self) }) {
+                superview.insertSubview(bar, above: old)
+                old.removeFromSuperview()
+            }
+        } else {
+            let bounds = Screen.bounds
+            bar.sendSetFrame(CGRect(x: 0, y: bounds.height - tabBarHeight, width: bounds.width, height: tabBarHeight))
+            bar.setAutoresizingMask(10)
+        }
+        bar.setNeedsLayout()
+    }
+
     @ObjCMethod("delegate") func delegate() -> NSObject? { tabs.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { tabs.delegate = delegate?.objcObject }
 
