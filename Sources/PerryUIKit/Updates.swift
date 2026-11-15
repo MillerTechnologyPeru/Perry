@@ -232,12 +232,48 @@ enum Snapshot {
             if view.state.geometry?.contents == nil { tree += " no contents" }
         }
         tree += view.state.hidden ? " hidden\n" : "\n"
+        if constraintsToo {
+            for constraint in view.state.constraints.compactMap({ $0.as(NSLayoutConstraint.self) }) {
+                tree += String(repeating: "  ", count: depth + 1) + "| " + describe(constraint, heldBy: view) + "\n"
+            }
+        }
         for subview in view.state.subviews { describe(subview, depth: depth + 1, into: &tree) }
         // Sublayers of no subview, which SwiftUI draws some content in.
         if let layer = view.state.layer {
             let viewLayers = Set(view.state.subviews.compactMap { $0.state.layer?.objcObject })
             describe(layer: layer, skipping: viewLayers, depth: depth + 1, into: &tree)
         }
+    }
+
+    /// PERRY_UIKIT_SNAPSHOT_CONSTRAINTS: the tree lists the constraints
+    /// each view holds under it.
+    private static let constraintsToo = getenv("PERRY_UIKIT_SNAPSHOT_CONSTRAINTS") != nil
+
+    /// A constraint as "Class.attribute = Class.attribute * multiplier +
+    /// constant @priority", with "self" for the view that holds it.
+    private static func describe(_ constraint: NSLayoutConstraint, heldBy holder: UIView) -> String {
+        let names = ["none", "left", "right", "top", "bottom", "leading", "trailing", "width", "height", "centerX", "centerY",
+                     "lastBaseline", "firstBaseline", "leftMargin", "rightMargin", "topMargin", "bottomMargin", "leadingMargin",
+                     "trailingMargin", "centerXWithinMargins", "centerYWithinMargins"]
+        func side(_ item: UnsafeMutableRawPointer?, _ attribute: Int) -> String {
+            guard let item else { return "" }
+            let name = item == holder.objcObject ? "self"
+                : ObjCRuntime.objectClass(item).flatMap { NSObject($0).describedByObject() } ?? "?"
+            return name + "." + (names.indices.contains(attribute) ? names[attribute] : "\(attribute)")
+        }
+        let state = constraint.state
+        var text = side(state.firstItem, state.firstAttribute) + (state.relation < 0 ? " <= " : state.relation > 0 ? " >= " : " = ")
+        let second = state.secondAttribute == 0 ? "" : side(state.secondItem, state.secondAttribute)
+        if !second.isEmpty {
+            text += second
+            if state.multiplier != 1 { text += " * \(state.multiplier)" }
+            if state.constant != 0 { text += " + \(state.constant)" }
+        } else {
+            text += "\(state.constant)"
+        }
+        if state.priority != 1000 { text += " @\(state.priority)" }
+        if !state.active { text += " inactive" }
+        return text
     }
 
     private static func describe(layer: CALayer, skipping: Set<UnsafeMutableRawPointer>, depth: Int, into tree: inout String) {
