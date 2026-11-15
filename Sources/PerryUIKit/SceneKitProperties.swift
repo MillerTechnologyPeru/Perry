@@ -101,7 +101,7 @@ extension SCNLight {
 extension SCNLight {
     @ObjCMethod("shadowMapSize") func shadowMapSize() -> CGSize {
         let values = SCNExtras.lights[objcObject].values
-        return CGSize(width: values["shadowMapWidth"] ?? 0, height: values["shadowMapHeight"] ?? 0)
+        return CGSize(width: CGFloat(values["shadowMapWidth"] ?? 0), height: CGFloat(values["shadowMapHeight"] ?? 0))
     }
     @ObjCMethod("setShadowMapSize:") func setShadowMapSize(_ size: CGSize) {
         SCNExtras.lights[objcObject].values["shadowMapWidth"] = Double(size.width)
