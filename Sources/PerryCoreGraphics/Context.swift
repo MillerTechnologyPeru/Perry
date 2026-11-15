@@ -570,6 +570,9 @@ public func CGContextClipToRects(_ context: Ref?, _ rects: UnsafePointer<CGRect>
 public func CGContextDrawImage(_ context: Ref?, _ rect: CGRect, _ image: Ref?) {
     guard let image = Images.state(image) else { return }
     let r = CGRectStandardize(rect)
+    // Nothing is drawn into no area, and scaling an image to it would
+    // leave the context with a matrix it cannot draw under again.
+    guard r.size.width > 0, r.size.height > 0 else { return }
     Contexts.paint(context) { $0.draw(image, Double(r.origin.x), Double(r.origin.y), Double(r.size.width), Double(r.size.height)) }
 }
 

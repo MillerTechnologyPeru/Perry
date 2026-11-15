@@ -355,7 +355,7 @@ public class NSString: NSObject {
     func character(at index: UInt) -> UInt16 {
         let units = value.utf16
         guard Int(index) < units.count else {
-            foundationFatal("-[NSString characterAtIndex:]: Range or index out of bounds")
+            Exceptions.raise(name: "NSRangeException", reason: "-[NSString characterAtIndex:]: Range or index out of bounds")
         }
         return units[units.index(units.startIndex, offsetBy: Int(index))]
     }

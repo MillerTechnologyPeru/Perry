@@ -26,6 +26,7 @@ class CALayer: NSObject {
     @ObjCMethod("isHidden") func isHidden() -> Bool
     @ObjCMethod("setHidden:") func setHidden(_ hidden: Bool)
     @ObjCMethod("opacity") func opacity() -> Float
+    @ObjCMethod("zPosition") func zPosition() -> CGFloat
     @ObjCMethod("setOpacity:") func setOpacity(_ opacity: Float)
     @ObjCMethod("masksToBounds") func masksToBounds() -> Bool
     @ObjCMethod("setMasksToBounds:") func setMasksToBounds(_ masks: Bool)

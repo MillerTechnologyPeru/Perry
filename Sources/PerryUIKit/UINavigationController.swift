@@ -343,6 +343,7 @@ open class UINavigationController: UIViewController {
     @ObjCMethod("hidesBarsOnSwipe") func hidesBarsOnSwipe() -> Bool { false }
     @ObjCMethod("setHidesBarsOnSwipe:") func setHidesBarsOnSwipe(_ hides: Bool) {}
     @ObjCMethod("interactivePopGestureRecognizer") func interactivePopGestureRecognizer() -> NSObject? { nil }
+    @ObjCMethod("interactiveContentPopGestureRecognizer") func interactiveContentPopGestureRecognizer() -> NSObject? { nil }
 
     /// Pushes, as -showViewController:sender: does in a navigation
     /// controller.

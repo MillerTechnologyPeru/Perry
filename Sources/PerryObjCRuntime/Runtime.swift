@@ -54,8 +54,7 @@ public enum Runtime {
                let info = header.load(fromByteOffset: Layout.headerInfo, as: UnsafeMutableRawPointer?.self) {
                 return Unmanaged<ClassInfo>.fromOpaque(info).takeUnretainedValue()
             }
-            let bits = UInt(cls.pointee.bits) & Layout.classBitsMask
-            guard let ro = UnsafePointer<perry_class_ro>(bitPattern: bits) else {
+            guard let ro = Layout.readOnly(cls).map({ UnsafePointer($0) }) else {
                 return nil
             }
             // A Swift class compiled to deploy before the stable ABI is
@@ -107,8 +106,46 @@ public enum Runtime {
                     meta.partner = info
                     info.partner = meta
                 }
+                if !awaitsSwiftInitialization(cls) { installReadWrite(cls) }
             }
             return info
+        }
+    }
+
+    /// Whether Swift's runtime has yet to lay the class out: a Swift class
+    /// whose metadata is initialized as the program runs (a resilient
+    /// superclass or fields), which its type descriptor's flags say.
+    /// Swift's runtime writes such a class's class_ro_t through
+    /// objc_class.bits, then calls _objc_realizeClassFromSwift.
+    static func awaitsSwiftInitialization(_ cls: ClassPointer) -> Bool {
+        guard cls.pointee.bits & UInt(PERRY_CLASS_BITS_FLAGS) != 0 else { return false }
+        guard let descriptor = UnsafeRawPointer(cls).load(fromByteOffset: 8 * Layout.word, as: UnsafeRawPointer?.self) else { return true }
+        let kindFlags = descriptor.load(as: UInt32.self) >> 16
+        // The metadata initialization kind, and a resilient superclass.
+        return kindFlags & 3 != 0 || kindFlags & (1 << 13) != 0
+    }
+
+    /// PERRY_OBJC_NO_CLASS_RW leaves classes as their images have them.
+    private static let installsReadWrite = getenv("PERRY_OBJC_NO_CLASS_RW") == nil
+
+    /// Leaves a realized class and its metaclass as Darwin's libobjc does:
+    /// objc_class.bits points at a class_rw_t (flags with RW_REALIZED, a
+    /// witness and an index, then the class_ro_t), which reflection
+    /// libraries that read Darwin's structures follow to the class_ro_t.
+    static func installReadWrite(_ cls: ClassPointer) {
+        guard installsReadWrite else { return }
+        for target in [cls, cls.pointee.isa].compactMap({ $0 }) {
+            let flags = target.pointee.bits & UInt(PERRY_CLASS_BITS_FLAGS)
+            guard let data = UnsafeMutableRawPointer(bitPattern: UInt(target.pointee.bits) & Layout.classBitsMask),
+                  data.load(as: UInt32.self) & Layout.realizedFlag == 0 else { continue }
+            // class_rw_t: flags, witness and index, ro_or_rw_ext, then the
+            // first subclass and the next sibling, which are not kept.
+            let size = 8 + 3 * Layout.word
+            let readWrite = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
+            readWrite.initializeMemory(as: UInt8.self, repeating: 0, count: size)
+            readWrite.storeBytes(of: Layout.realizedFlag, as: UInt32.self)
+            readWrite.storeBytes(of: UInt(bitPattern: data), toByteOffset: 8, as: UInt.self)
+            target.pointee.bits = UInt(bitPattern: readWrite) | flags
         }
     }
 
@@ -290,9 +327,18 @@ public enum Runtime {
         if let forwardHandler {
             return (nil, forwardHandler)
         }
+        notForwarded(receiver, selector)
+        return (nil, Unrecognized.returnZero)
+    }
+
+    /// The end of forwarding, when nothing took the message: the receiver's
+    /// -doesNotRecognizeSelector:, then the report and abort. It returns
+    /// only with PERRY_OBJC_UNRECOGNIZED=continue, for the message to
+    /// answer zero.
+    public static func notForwarded(_ receiver: ObjectPointer, _ selector: SEL) {
         if Unrecognized.continues {
             Unrecognized.report(receiver, selector)
-            return (nil, Unrecognized.returnZero)
+            return
         }
         if let info = Runtime.info(classOf(receiver)), findMethod(info, Sel.doesNotRecognizeSelector) != nil {
             Messages.sendVoid(receiver, Sel.doesNotRecognizeSelector, UnsafeRawPointer(selector))
@@ -431,7 +477,7 @@ extension Runtime {
     public static func addIvar(_ cls: ClassPointer, name: UnsafePointer<CChar>, size: Int, alignment: UInt8,
                                types: UnsafePointer<CChar>?) -> Bool {
         guard let info = Runtime.info(cls), !info.isMeta, size >= 0, alignment < 16,
-              let ro = UnsafeMutablePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & ~7) else { return false }
+              let ro = Layout.readOnly(cls) else { return false }
         return lock.withLock {
             guard classesByName.values.allSatisfy({ $0 != cls }) else { return false }
             var ivars: [perry_ivar] = []

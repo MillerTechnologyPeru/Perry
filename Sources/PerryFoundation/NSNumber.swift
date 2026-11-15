@@ -1,6 +1,7 @@
 import CPerryFoundation
 import Glibc
 import PerryObjCInterop
+import Synchronization
 
 /// An NSNumber's value.
 final class NumberStorage {
@@ -119,7 +120,44 @@ enum Numbers {
         }
     }
 
+    /// The numbers kept for good, by kind and value. Darwin's small numbers
+    /// are tagged pointers, which are never deallocated, and programs count
+    /// on it: one kept with OBJC_ASSOCIATION_ASSIGN is read long after its
+    /// last release. So small whole numbers and booleans are each made
+    /// once and never freed.
+    private struct Kept: Hashable {
+        let kind: UInt8
+        let bits: UInt64
+    }
+    private static let kept = Mutex<[Kept: UInt]>([:])
+
+    static func isKept(_ value: NumberStorage.Value) -> Bool { keptKey(value) != nil }
+
+    private static func keptKey(_ value: NumberStorage.Value) -> Kept? {
+        switch value {
+        case .signed(let number): return (-1024...4096).contains(number) ? Kept(kind: 0, bits: UInt64(bitPattern: number)) : nil
+        case .unsigned(let number): return number <= 4096 ? Kept(kind: 1, bits: number) : nil
+        case .double(let number):
+            return number == number.rounded() && abs(number) <= 4096 ? Kept(kind: 2, bits: number.bitPattern) : nil
+        case .bool(let flag): return Kept(kind: 3, bits: flag ? 1 : 0)
+        }
+    }
+
     static func make(_ cls: id?, _ value: NumberStorage.Value) -> id? {
+        if cls == nil || cls == UnsafeMutableRawPointer(numberClass), let key = keptKey(value) {
+            if let known = kept.withLock({ $0[key] }) { return UnsafeMutableRawPointer(bitPattern: known) }
+            guard let object = Storage.allocate(UnsafeMutableRawPointer(numberClass)) else { return nil }
+            Storage.set(object, NumberStorage(value))
+            // The table's reference is never released; another thread's
+            // number for the same value, made meanwhile, is the one kept.
+            let stored = kept.withLock { table -> UInt in
+                if let existing = table[key] { return existing }
+                table[key] = UInt(bitPattern: object)
+                return UInt(bitPattern: object)
+            }
+            if stored != UInt(bitPattern: object) { ObjC.release(object) }
+            return UnsafeMutableRawPointer(bitPattern: stored)
+        }
         guard let object = Storage.allocate(cls ?? UnsafeMutableRawPointer(numberClass)) else { return nil }
         Storage.set(object, NumberStorage(value))
         return ObjC.autorelease(object)
@@ -138,8 +176,10 @@ enum Numbers {
 }
 
 /// NSNumber.
+/// A number is a value, as on Darwin, where code that takes either asks
+/// whether what it has is an NSValue.
 @ObjCClass("NSNumber")
-public class NSNumber: NSObject {
+public class NSNumber: NSValue {
     /// What the Swift runtime asks to tell Foundation's classes apart.
     @ObjCMethod("isNSNumber__") func isNSNumber__() -> Bool { true }
 
@@ -151,9 +191,16 @@ public class NSNumber: NSObject {
 
     private var number: NumberStorage { Numbers.storage(objcObject) }
 
-    private func setValue(_ value: NumberStorage.Value) -> Self {
+    /// An -init…'s result, +1, as the receiver is released when the method
+    /// returns: the number kept for good for a small value (see
+    /// Numbers.kept), in place of the one allocated, or the receiver.
+    private func setValue(_ value: NumberStorage.Value) -> UnsafeMutableRawPointer? {
+        if ObjC.objectGetClass(objcObject) == Numbers.numberClass, Numbers.isKept(value),
+           let kept = Numbers.make(nil, value) {
+            return ObjC.retain(kept)
+        }
         Storage.set(objcObject, NumberStorage(value))
-        return self
+        return ObjC.retain(objcObject)
     }
 
     // MARK: Creating. Narrow integer arguments are read at their declared
@@ -206,24 +253,24 @@ public class NSNumber: NSObject {
     @ObjCClassMethod("numberWithFloat:")
     static func number(_ cls: ObjCClass, float: Float) -> NSNumber { Numbers.wrapped(cls, .double(Double(float))) }
 
-    @ObjCMethod("initWithInteger:") func initialize(integer: Int) -> Self { setValue(.signed(Int64(integer))) }
-    @ObjCMethod("initWithLongLong:") func initialize(longLong: Int64) -> Self { setValue(.signed(longLong)) }
-    @ObjCMethod("initWithUnsignedInteger:") func initialize(unsignedInteger: UInt) -> Self { setValue(.unsigned(UInt64(unsignedInteger))) }
-    @ObjCMethod("initWithInt:") func initialize(int: Int32) -> Self { setValue(.signed(Int64(int))) }
-    @ObjCMethod("initWithBool:") func initialize(bool: Bool) -> Self { setValue(.bool(bool)) }
-    @ObjCMethod("initWithDouble:") func initialize(double: Double) -> Self { setValue(.double(double)) }
-    @ObjCMethod("initWithFloat:") func initialize(float: Float) -> Self { setValue(.double(Double(float))) }
-    @ObjCMethod("initWithLong:") func initialize(long: Int) -> Self { setValue(.signed(Int64(long))) }
-    @ObjCMethod("initWithUnsignedLong:") func initialize(unsignedLong: UInt) -> Self { setValue(.unsigned(UInt64(unsignedLong))) }
-    @ObjCMethod("initWithUnsignedLongLong:") func initialize(unsignedLongLong: UInt64) -> Self { setValue(.unsigned(unsignedLongLong)) }
-    @ObjCMethod("initWithUnsignedInt:") func initialize(unsignedInt: UInt32) -> Self { setValue(.unsigned(UInt64(unsignedInt))) }
-    @ObjCMethod("initWithShort:") func initialize(short: Int16) -> Self { setValue(.signed(Int64(short))) }
-    @ObjCMethod("initWithUnsignedShort:") func initialize(unsignedShort: UInt16) -> Self { setValue(.unsigned(UInt64(unsignedShort))) }
-    @ObjCMethod("initWithChar:") func initialize(char: Int8) -> Self { setValue(.signed(Int64(char))) }
-    @ObjCMethod("initWithUnsignedChar:") func initialize(unsignedChar: UInt8) -> Self { setValue(.unsigned(UInt64(unsignedChar))) }
+    @ObjCMethod("initWithInteger:") func initialize(integer: Int) -> UnsafeMutableRawPointer? { setValue(.signed(Int64(integer))) }
+    @ObjCMethod("initWithLongLong:") func initialize(longLong: Int64) -> UnsafeMutableRawPointer? { setValue(.signed(longLong)) }
+    @ObjCMethod("initWithUnsignedInteger:") func initialize(unsignedInteger: UInt) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedInteger))) }
+    @ObjCMethod("initWithInt:") func initialize(int: Int32) -> UnsafeMutableRawPointer? { setValue(.signed(Int64(int))) }
+    @ObjCMethod("initWithBool:") func initialize(bool: Bool) -> UnsafeMutableRawPointer? { setValue(.bool(bool)) }
+    @ObjCMethod("initWithDouble:") func initialize(double: Double) -> UnsafeMutableRawPointer? { setValue(.double(double)) }
+    @ObjCMethod("initWithFloat:") func initialize(float: Float) -> UnsafeMutableRawPointer? { setValue(.double(Double(float))) }
+    @ObjCMethod("initWithLong:") func initialize(long: Int) -> UnsafeMutableRawPointer? { setValue(.signed(Int64(long))) }
+    @ObjCMethod("initWithUnsignedLong:") func initialize(unsignedLong: UInt) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedLong))) }
+    @ObjCMethod("initWithUnsignedLongLong:") func initialize(unsignedLongLong: UInt64) -> UnsafeMutableRawPointer? { setValue(.unsigned(unsignedLongLong)) }
+    @ObjCMethod("initWithUnsignedInt:") func initialize(unsignedInt: UInt32) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedInt))) }
+    @ObjCMethod("initWithShort:") func initialize(short: Int16) -> UnsafeMutableRawPointer? { setValue(.signed(Int64(short))) }
+    @ObjCMethod("initWithUnsignedShort:") func initialize(unsignedShort: UInt16) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedShort))) }
+    @ObjCMethod("initWithChar:") func initialize(char: Int8) -> UnsafeMutableRawPointer? { setValue(.signed(Int64(char))) }
+    @ObjCMethod("initWithUnsignedChar:") func initialize(unsignedChar: UInt8) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedChar))) }
 
     @ObjCMethod("dealloc")
-    func dealloc() {
+    override func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: Numbers.numberClass)
     }
@@ -244,10 +291,25 @@ public class NSNumber: NSObject {
     @ObjCMethod("unsignedCharValue") func unsignedCharValue() -> UInt8 { UInt8(truncatingIfNeeded: number.int64) }
     @ObjCMethod("boolValue") func boolValue() -> Bool { number.int64 != 0 || number.double != 0 }
 
+    /// NSValue's: the value as its type encoding has it.
+    @ObjCMethod("getValue:")
+    override func getValue(_ buffer: UnsafeMutableRawPointer?) {
+        guard let buffer else { return }
+        switch number.value {
+        case .signed(let value): buffer.storeBytes(of: value, as: Int64.self)
+        case .unsigned(let value): buffer.storeBytes(of: value, as: UInt64.self)
+        case .double(let value): buffer.storeBytes(of: value, as: Double.self)
+        case .bool(let value): buffer.storeBytes(of: value ? 1 : 0, as: Int8.self)
+        }
+    }
+
+    @ObjCMethod("getValue:size:")
+    override func getValue(_ buffer: UnsafeMutableRawPointer?, size: UInt) { getValue(buffer) }
+
     /// The value's type encoding: "q" and "Q" for integers, "d" for
     /// floating point, "c" for booleans (CFBoolean), as Darwin reports.
     @ObjCMethod("objCType")
-    func objCType() -> UnsafePointer<CChar>? {
+    override func objCType() -> UnsafePointer<CChar>? {
         switch number.value {
         case .signed: return NumberTypes.signed
         case .unsigned: return NumberTypes.unsigned
@@ -258,7 +320,7 @@ public class NSNumber: NSObject {
     @ObjCMethod("doubleValue") func doubleValue() -> Double { number.double }
     @ObjCMethod("floatValue") func floatValue() -> Float { Float(number.double) }
     @ObjCMethod("stringValue") func stringValue() -> String { number.description }
-    @ObjCMethod("description") func description() -> String { number.description }
+    @ObjCMethod("description") override func description() -> String { number.description }
 
     // MARK: Comparing
 
@@ -269,21 +331,21 @@ public class NSNumber: NSObject {
     func isEqual(toNumber other: NSNumber?) -> Bool { other.map { compare($0) == 0 } ?? false }
 
     @ObjCMethod("isEqual:")
-    func isEqual(_ other: ObjCObject?) -> Bool {
+    override func isEqual(_ other: ObjCObject?) -> Bool {
         guard let other, other.is(NSNumber.self) else { return false }
         return compare(other.unsafeCast(to: NSNumber.self)) == 0
     }
 
     /// Equal numbers hash equally whatever their type.
     @ObjCMethod("hash")
-    func hash() -> UInt {
+    override func hash() -> UInt {
         // Truncated, as a 64-bit value does not fit a 32-bit hash.
         if number.double == number.double.rounded() { return UInt(truncatingIfNeeded: number.int64) }
         return UInt(truncatingIfNeeded: number.double.bitPattern)
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
 }
 
 /// @42: { isa, const char *encoding, int64 value }.

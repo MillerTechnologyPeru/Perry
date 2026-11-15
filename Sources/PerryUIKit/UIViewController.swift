@@ -60,6 +60,7 @@ final class ViewControllerState: ObjectState {
     /// UIRectEdge: the edges whose bars the view extends under; all 15.
     var edgesForExtendedLayout = 15
     var extendedLayoutIncludesOpaqueBars = false
+    var automaticallyAdjustsScrollViewInsets = true
     var preferredContentSize = CGSize.zero
     var editing = false
     var restorationIdentifier: String?
@@ -298,6 +299,13 @@ open class UIViewController: UIResponder {
     @ObjCMethod("extendedLayoutIncludesOpaqueBars") func extendedLayoutIncludesOpaqueBars() -> Bool { state.extendedLayoutIncludesOpaqueBars }
     @ObjCMethod("setExtendedLayoutIncludesOpaqueBars:") func setExtendedLayoutIncludesOpaqueBars(_ includes: Bool) {
         state.extendedLayoutIncludesOpaqueBars = includes
+    }
+    /// iOS 7's: whether a scroll view's insets follow the bars. Kept only;
+    /// scroll views take their adjustment from the safe area.
+    @ObjCMethod("automaticallyAdjustsScrollViewInsets")
+    func automaticallyAdjustsScrollViewInsets() -> Bool { state.automaticallyAdjustsScrollViewInsets }
+    @ObjCMethod("setAutomaticallyAdjustsScrollViewInsets:") func setAutomaticallyAdjustsScrollViewInsets(_ adjusts: Bool) {
+        state.automaticallyAdjustsScrollViewInsets = adjusts
     }
     @ObjCMethod("setHidesBottomBarWhenPushed:") func setHidesBottomBarWhenPushed(_ hides: Bool) { state.hidesBottomBarWhenPushed = hides }
     @ObjCMethod("preferredContentSize") func preferredContentSize() -> CGSize { state.preferredContentSize }

@@ -354,14 +354,24 @@ open class UIView: UIResponder, UICoordinateSpace {
     // MARK: Constraints, kept for Auto Layout
 
     @ObjCMethod("constraints") func constraints() -> NSObject { NSMutableArray.of(state.constraints) }
-    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { state.constraints.append(constraint); setNeedsLayout() }
-    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) { state.constraints += constraints.elements; setNeedsLayout() }
-    @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) {
-        state.constraints.removeAll { $0.objcObject == constraint.objcObject }
+    /// A constraint a view is given is active, and one taken from it no
+    /// longer is, as with -setActive:, which these came before.
+    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { addConstraints(NSMutableArray.of([constraint])) }
+    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) {
+        for constraint in constraints.elements where !state.constraints.contains(where: { $0.objcObject == constraint.objcObject }) {
+            state.constraints.append(constraint)
+            constraint.as(NSLayoutConstraint.self)?.state.active = true
+        }
+        setNeedsLayout()
     }
+    @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) { removeConstraints(NSMutableArray.of([constraint])) }
     @ObjCMethod("removeConstraints:") func removeConstraints(_ constraints: NSArray) {
         let removed = Set(constraints.elements.map(\.objcObject))
+        for constraint in state.constraints where removed.contains(constraint.objcObject) {
+            constraint.as(NSLayoutConstraint.self)?.state.active = false
+        }
         state.constraints.removeAll { removed.contains($0.objcObject) }
+        setNeedsLayout()
     }
     @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool {
         state.translatesAutoresizingMaskIntoConstraints
@@ -980,6 +990,7 @@ open class UIView: UIResponder, UICoordinateSpace {
         }
         if state.needsLayout {
             state.needsLayout = false
+            if LayoutTrace.enabled { LayoutTrace.note(self) }
             // A layer class with its own -layoutSublayers (Texture's lays
             // out its node there) is sent it, and reaches the view through
             // -layoutSublayersOfLayer:, as Core Animation lays a view out.
@@ -991,6 +1002,26 @@ open class UIView: UIResponder, UICoordinateSpace {
             }
         }
         for subview in state.subviews { subview.layoutIfNeeded() }
+    }
+
+    /// PERRY_UIKIT_LAYOUT_TRACE: every second in which views were laid
+    /// out, how many times each class's were, the most first, to find a
+    /// layout that keeps asking for another.
+    enum LayoutTrace {
+        static let enabled = getenv("PERRY_UIKIT_LAYOUT_TRACE") != nil
+        nonisolated(unsafe) static var counts: [String: Int] = [:]
+        nonisolated(unsafe) static var since = 0.0
+
+        static func note(_ view: UIView) {
+            let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+            counts[name, default: 0] += 1
+            let now = Clock.now
+            guard now - since >= 1 else { return }
+            since = now
+            let top = counts.sorted { $0.value > $1.value }.prefix(12).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            counts = [:]
+            uikitWarning("layout: \(top)")
+        }
     }
 
     /// The view's layout, as its layer's delegate: its controller is told

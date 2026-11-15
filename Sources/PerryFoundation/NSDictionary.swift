@@ -491,7 +491,11 @@ public class NSMutableDictionary: NSDictionary {
         storage.set(value.id, for: key.id)
     }
 
-    /// dictionary[key] = value; nil removes the key.
+    /// dictionary[key] = value; nil removes the key. Swift's subscript on
+    /// NSMutableDictionary sends the first selector.
+    @ObjCMethod("__swift_setObject:forKeyedSubscript:")
+    func set(_ value: ObjCObject?, swiftSubscript key: ObjCObject?) { set(value, subscript: key) }
+
     @ObjCMethod("setObject:forKeyedSubscript:")
     func set(_ value: ObjCObject?, subscript key: ObjCObject?) {
         guard let key else { foundationFatal("-[NSMutableDictionary setObject:forKeyedSubscript:]: key cannot be nil") }

@@ -41,6 +41,8 @@ enum ObjC {
     nonisolated(unsafe) static var instanceVariable: (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?)?
     nonisolated(unsafe) static var ivarOffset: (@convention(c) (UnsafeMutableRawPointer?) -> Int)?
     nonisolated(unsafe) static var ivarType: (@convention(c) (UnsafeMutableRawPointer?) -> SEL?)?
+    /// How a message ends that forwarding found nothing for.
+    nonisolated(unsafe) static var notForwarded: (@convention(c) (id?, SEL?) -> Void)?
     /// Darwin's dladdr, which knows the Mach-O images: the path of the
     /// image holding an address is its first word.
     nonisolated(unsafe) static var addressInfo: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32)?
@@ -77,6 +79,18 @@ enum ObjC {
         instanceVariable = bind("_class_getInstanceVariable", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
         ivarOffset = bind("_ivar_getOffset", (@convention(c) (UnsafeMutableRawPointer?) -> Int).self)
         ivarType = bind("_ivar_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)
+        if let vtable = lookup("_objc_ehtype_vtable") {
+            perry_foundation_set_exception_type_vtable(vtable + 2 * MemoryLayout<UnsafeRawPointer>.size)
+        }
+        notForwarded = bind("_perry_objc_not_forwarded", (@convention(c) (id?, SEL?) -> Void).self)
+        #if arch(arm64)
+        // Messages no method takes come to Foundation, for -forwardInvocation:.
+        if notForwarded != nil,
+           let install = bind("_objc_setForwardHandler", (@convention(c) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void).self) {
+            let handler = unsafeBitCast(perry_foundation_forward as @convention(c) () -> Void, to: UnsafeRawPointer.self)
+            install(handler, nil)
+        }
+        #endif
         // PerrySystem's, which the loader has open; its lookup is the app's.
         if let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD), let symbol = dlsym(system, "_dladdr") {
             addressInfo = unsafeBitCast(symbol, to: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32).self)
@@ -291,6 +305,12 @@ func foundationFatal(_ message: String) -> Never {
     let line = "perry: Foundation: *** \(message)\n"
     line.withCString { _ = write(2, $0, strlen($0)) }
     abort()
+}
+
+/// Reports something Foundation went on past, where Darwin would raise.
+func foundationWarning(_ message: String) {
+    let line = "perry: Foundation: warning: \(message)\n"
+    line.withCString { _ = write(2, $0, strlen($0)) }
 }
 
 // MARK: - Darwin's calling convention

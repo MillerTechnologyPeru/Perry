@@ -245,6 +245,12 @@ open class UIWindowScene: UIScene {
         return geometry
     }
 
+    /// The scene's status bar, which is the application's.
+    @ObjCMethod("statusBarManager")
+    func statusBarManager() -> UIStatusBarManager {
+        UIStatusBarManager.objCClass.object.newInstance().unsafeCast(to: UIStatusBarManager.self)
+    }
+
     /// Asks for another size or orientation, which the screen doesn't
     /// change to here.
     @ObjCMethod("requestGeometryUpdateWithPreferences:errorHandler:")
@@ -281,6 +287,17 @@ open class UIWindowSceneGeometry: NSObject {
     @ObjCMethod("resizingRestrictions") func resizingRestrictions() -> Int { 0 }
     @ObjCMethod("isInteractivelyResizing") func isInteractivelyResizing() -> Bool { false }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
+}
+
+/// A window scene's status bar: the one the application has.
+@ObjCClass("UIStatusBarManager")
+open class UIStatusBarManager: NSObject {
+    @ObjCMethod("statusBarFrame")
+    func statusBarFrame() -> CGRect {
+        CGRect(x: 0, y: 0, width: Screen.bounds.width, height: Application.statusBarHidden ? 0 : Screen.safeAreaInsets.top)
+    }
+    @ObjCMethod("isStatusBarHidden") func isStatusBarHidden() -> Bool { Application.statusBarHidden }
+    @ObjCMethod("statusBarStyle") func statusBarStyle() -> Int { Application.statusBarStyle }
 }
 
 /// UIScene's initializer as a message, so a subclass's runs.

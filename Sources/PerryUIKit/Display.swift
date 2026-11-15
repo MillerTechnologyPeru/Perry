@@ -117,7 +117,8 @@ enum Display {
         if Screen.isResizable, Screen.fixed == nil, let usable = SDLSetup.usableDisplaySize() {
             let fitting = CGSize(width: min(Screen.bounds.width, (usable.width / scale).rounded(.down)),
                                  height: min(Screen.bounds.height, (usable.height / scale).rounded(.down)))
-            Screen.bounds.size = fitting
+            // Windows the app already made at the screen's size follow it.
+            Screen.resize(to: fitting)
         }
         if !software, let compositor = Compositor(title: title, size: Screen.bounds.size, scale: scale) {
             Display.compositor = compositor

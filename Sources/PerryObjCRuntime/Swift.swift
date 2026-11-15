@@ -33,7 +33,7 @@ extension Runtime {
         lock.withLock {
             let known = perry_load_acquire(cacheSlot(cls)).map { $0 != emptyCache } ?? false
             guard let info = info(cls), known,
-                  let ro = UnsafePointer<perry_class_ro>(bitPattern: UInt(cls.pointee.bits) & Layout.classBitsMask) else { return }
+                  let ro = Layout.readOnly(cls).map({ UnsafePointer($0) }) else { return }
             info.instanceSize = Int(ro.pointee.instance_size)
             // A class whose superclass Swift's runtime makes, a generic
             // class's specialization, gets it as its metadata is first
@@ -45,6 +45,8 @@ extension Runtime {
                 flushCaches()
             }
             slideIvars(info, ro: ro)
+            // Swift's runtime is done with the class_ro_t.
+            installReadWrite(cls)
         }
         return cls
     }

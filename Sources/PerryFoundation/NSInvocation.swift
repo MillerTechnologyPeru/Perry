@@ -39,7 +39,7 @@ enum Invocations {
     #if arch(arm64)
     /// A type's alignment as an argument on the stack: a scalar's size, or
     /// a structure's largest member's.
-    private static func alignment(of type: String, size: Int) -> Int {
+    static func alignment(of type: String, size: Int) -> Int {
         guard type.contains("{") || type.contains("[") else { return max(min(size, 8), 1) }
         var inName = false, largest = 1
         for character in type {
@@ -275,9 +275,19 @@ public final class NSInvocation: NSObject {
     @ObjCMethod("invoke")
     func invoke() {
         guard let storage, let details = MethodSignatures.storage(storage.signature),
-              let target = storage.object(at: 0), let selector = storage.object(at: 1) else { return }
-        let sel = UnsafePointer(selector.assumingMemoryBound(to: CChar.self))
-        guard let imp = ObjC.methodImplementation(ObjC.objectGetClass(target), sel) else { return }
+              let target = storage.object(at: 0) else { return }
+        let imp: UnsafeRawPointer
+        if details.parts.count > 1, String(cString: details.parts[1]).hasPrefix("@?") {
+            // A block's signature: the target is the block, called through
+            // its invoke pointer with the block and then its arguments.
+            guard let invoke = target.load(fromByteOffset: MemoryLayout<Int>.size + 8, as: UnsafeRawPointer?.self) else { return }
+            imp = invoke
+        } else {
+            guard let selector = storage.object(at: 1) else { return }
+            let sel = UnsafePointer(selector.assumingMemoryBound(to: CChar.self))
+            guard let method = ObjC.methodImplementation(ObjC.objectGetClass(target), sel) else { return }
+            imp = method
+        }
         #if arch(x86_64)
         var general = [UInt64](), vector = [UInt64](), stack = [UInt64]()
         let returnSize = details.sizes[0]

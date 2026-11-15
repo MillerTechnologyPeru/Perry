@@ -27,9 +27,12 @@ void *perry_foundation_empty_dictionary(void) { return ns_dictionary0; }
 
 // What @catch (NSException *) names: objc_typeinfo { vtable, name, class }.
 // NSException's class is made at startup, so the record has none, and
-// libobjc's personality routine matches it by name.
+// libobjc matches it by name. The vtable is libobjc's objc_ehtype_vtable
+// from its third word, set at startup where exceptions are C++ ones and
+// the C++ runtime calls through it.
 struct perry_objc_typeinfo { const void *vtable; const char *name; void *cls; };
-const struct perry_objc_typeinfo ns_exception_ehtype DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { NULL, "NSException", NULL };
+struct perry_objc_typeinfo ns_exception_ehtype DARWIN_SYMBOL("_OBJC_EHTYPE_$_NSException") = { NULL, "NSException", NULL };
+void perry_foundation_set_exception_type_vtable(const void *vtable) { ns_exception_ehtype.vtable = vtable; }
 
 perry_class_storage ns_string DARWIN_SYMBOL("_OBJC_CLASS_$_NSString");
 perry_class_storage ns_string_meta DARWIN_SYMBOL("_OBJC_METACLASS_$_NSString");

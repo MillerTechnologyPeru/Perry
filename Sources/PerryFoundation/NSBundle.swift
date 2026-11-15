@@ -65,11 +65,20 @@ final class BundleStorage {
         let suffix = type.map { $0.isEmpty ? "" : "." + $0 } ?? ""
         var directoryPath = resourcePath
         if let directory, !directory.isEmpty { directoryPath = Paths.appending(directoryPath, directory) }
-        for localization in [""] + BundleStorage.localizations {
-            let base = localization.isEmpty ? directoryPath : Paths.appending(directoryPath, localization)
-            for file in [name + "~iphone" + suffix, name + suffix] {
-                let candidate = Paths.appending(base, file)
-                if FileManager.default.fileExists(atPath: candidate) { return candidate }
+        var passes = [[name + "~iphone" + suffix, name + suffix]]
+        // An image asked for without a scale is found at one, as on iOS,
+        // where "icon" and "png" give icon@2x.png when that is the file
+        // there is.
+        if let type, ["png", "jpg", "jpeg", "gif"].contains(type.lowercased()), !name.hasSuffix("@2x"), !name.hasSuffix("@3x") {
+            passes.append(["@2x", "@3x"].flatMap { [name + $0 + "~iphone" + suffix, name + $0 + suffix] })
+        }
+        for files in passes {
+            for localization in [""] + BundleStorage.localizations {
+                let base = localization.isEmpty ? directoryPath : Paths.appending(directoryPath, localization)
+                for file in files {
+                    let candidate = Paths.appending(base, file)
+                    if FileManager.default.fileExists(atPath: candidate) { return candidate }
+                }
             }
         }
         BundleTrace.log("\(Paths.lastComponent(path)): no resource \(name)\(suffix) in \(directory ?? "/")")

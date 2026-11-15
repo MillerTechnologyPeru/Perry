@@ -1,3 +1,4 @@
+import CPerryGeometry
 import FoundationEssentials
 import Glibc
 import PerryObjCInterop
@@ -144,14 +145,49 @@ enum Snapshot {
         guard let image = CG.bitmapContextCreateImage(context) else { return }
         defer { CG.release(image) }
         UIImage.encode(image, type: "public.png")?.sendWrite(toFile: path, atomically: true)
+        writeView(beside: path)
         var tree = ""
         for window in Windows.visible { describe(window, depth: 0, into: &tree) }
         FileManager.default.createFile(atPath: path + ".txt", contents: Data(tree.utf8))
     }
 
+    /// PERRY_UIKIT_SNAPSHOT_VIEW, a class name or part of one: the first
+    /// such view in the windows is also written alone, with its subviews,
+    /// on gray, as "shot-view.png", to see what it draws apart from what
+    /// is around and over it.
+    private static let viewName = getenv("PERRY_UIKIT_SNAPSHOT_VIEW").map { String(cString: $0) }
+
+    private static func writeView(beside path: String) {
+        guard let viewName else { return }
+        func find(_ view: UIView) -> UIView? {
+            let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? ""
+            if name.contains(viewName) { return view }
+            for subview in view.state.subviews { if let found = find(subview) { return found } }
+            return nil
+        }
+        guard let view = Windows.visible.lazy.compactMap({ find($0) }).first else { return }
+        let bounds = view.state.bounds
+        guard bounds.width > 0, bounds.height > 0,
+              let context = CG.makeContext(size: bounds.size, scale: Screen.scale, opaque: true) else { return }
+        defer { CG.release(context) }
+        let gray = UIColor.gray(0.5)
+        withExtendedLifetime(gray) {
+            CG.setFillColorWithColor(context, gray.state.makeCGColor())
+            CG.fillRect(context, CGRect(origin: .zero, size: bounds.size))
+        }
+        CG.translateCTM(context, -bounds.minX, -bounds.minY)
+        view.state.layer.render(in: context)
+        guard let image = CG.bitmapContextCreateImage(context) else { return }
+        defer { CG.release(image) }
+        let stem = path.hasSuffix(".png") ? String(path.dropLast(4)) : path
+        UIImage.encode(image, type: "public.png")?.sendWrite(toFile: stem + "-view.png", atomically: true)
+    }
+
     /// The view tree beside the image: each view's class, frame, bounds
-    /// origin when scrolled, how its layer clips, its alpha when below 1 and
-    /// whether it is hidden.
+    /// origin when scrolled, how its layer clips, its alpha when below 1, a
+    /// transform, its layer's z position, frame where that differs and class
+    /// where it has one of its own, an image view's image and whether it
+    /// is hidden.
     private static func describe(_ view: UIView, depth: Int, into tree: inout String) {
         let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
         let frame = view.state.frame
@@ -167,16 +203,77 @@ enum Snapshot {
                 let model = geometry.layer
                 if presented.frame() != model.frame() { tree += " presented \(presented.frame())" }
                 if presented.bounds() != model.bounds() { tree += " presented bounds \(presented.bounds())" }
+                if presented.opacity() != model.opacity() { tree += " presented alpha \(presented.opacity())" }
                 if presented.masksToBounds() != model.masksToBounds() { tree += " presented clips \(presented.masksToBounds())" }
             }
         }
+        if let t = view.state.geometry?.transform, (t.a, t.b, t.c, t.d, t.tx, t.ty) != (1, 0, 0, 1, 0, 0) {
+            tree += " transform [\(t.a) \(t.b) \(t.c) \(t.d) \(t.tx) \(t.ty)]"
+        }
+        if let layer = view.state.layer {
+            if layer.zPosition() != 0 { tree += " z \(layer.zPosition())" }
+            let actual = layer.frame()
+            if abs(actual.minX - frame.minX) + abs(actual.minY - frame.minY) + abs(actual.width - frame.width)
+                + abs(actual.height - frame.height) > 0.01 {
+                tree += " layer at (\(actual.minX), \(actual.minY), \(actual.width), \(actual.height))"
+            }
+        }
+        if let layer = view.state.layer, ObjCRuntime.objectClass(layer.objcObject) != CALayer.objCClass.pointer {
+            tree += " layer " + (ObjCRuntime.objectClass(layer.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?")
+        }
+        if let imageView = view.as(UIImageView.self) {
+            let size = imageView.imageState.image?.state.size
+            tree += size.map { " image \($0.width)x\($0.height)" } ?? " no image"
+            if let image = imageView.imageState.image {
+                if image.state.cgImage == nil { tree += " without pixels" }
+                if image.state.renderingMode == 2 { tree += " template" }
+                if imageView.imageState.highlighted { tree += " highlighted" }
+            }
+            if view.state.geometry?.contents == nil { tree += " no contents" }
+        }
         tree += view.state.hidden ? " hidden\n" : "\n"
+        if constraintsToo {
+            for constraint in view.state.constraints.compactMap({ $0.as(NSLayoutConstraint.self) }) {
+                tree += String(repeating: "  ", count: depth + 1) + "| " + describe(constraint, heldBy: view) + "\n"
+            }
+        }
         for subview in view.state.subviews { describe(subview, depth: depth + 1, into: &tree) }
         // Sublayers of no subview, which SwiftUI draws some content in.
         if let layer = view.state.layer {
             let viewLayers = Set(view.state.subviews.compactMap { $0.state.layer?.objcObject })
             describe(layer: layer, skipping: viewLayers, depth: depth + 1, into: &tree)
         }
+    }
+
+    /// PERRY_UIKIT_SNAPSHOT_CONSTRAINTS: the tree lists the constraints
+    /// each view holds under it.
+    private static let constraintsToo = getenv("PERRY_UIKIT_SNAPSHOT_CONSTRAINTS") != nil
+
+    /// A constraint as "Class.attribute = Class.attribute * multiplier +
+    /// constant @priority", with "self" for the view that holds it.
+    private static func describe(_ constraint: NSLayoutConstraint, heldBy holder: UIView) -> String {
+        let names = ["none", "left", "right", "top", "bottom", "leading", "trailing", "width", "height", "centerX", "centerY",
+                     "lastBaseline", "firstBaseline", "leftMargin", "rightMargin", "topMargin", "bottomMargin", "leadingMargin",
+                     "trailingMargin", "centerXWithinMargins", "centerYWithinMargins"]
+        func side(_ item: UnsafeMutableRawPointer?, _ attribute: Int) -> String {
+            guard let item else { return "" }
+            let name = item == holder.objcObject ? "self"
+                : ObjCRuntime.objectClass(item).flatMap { NSObject($0).describedByObject() } ?? "?"
+            return name + "." + (names.indices.contains(attribute) ? names[attribute] : "\(attribute)")
+        }
+        let state = constraint.state
+        var text = side(state.firstItem, state.firstAttribute) + (state.relation < 0 ? " <= " : state.relation > 0 ? " >= " : " = ")
+        let second = state.secondAttribute == 0 ? "" : side(state.secondItem, state.secondAttribute)
+        if !second.isEmpty {
+            text += second
+            if state.multiplier != 1 { text += " * \(state.multiplier)" }
+            if state.constant != 0 { text += " + \(state.constant)" }
+        } else {
+            text += "\(state.constant)"
+        }
+        if state.priority != 1000 { text += " @\(state.priority)" }
+        if !state.active { text += " inactive" }
+        return text
     }
 
     private static func describe(layer: CALayer, skipping: Set<UnsafeMutableRawPointer>, depth: Int, into tree: inout String) {

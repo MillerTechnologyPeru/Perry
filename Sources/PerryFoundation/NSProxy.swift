@@ -4,8 +4,9 @@ import PerryObjCInterop
 /// NSProxy: Foundation's other root class, for objects that stand in for
 /// others. It has NSObject's memory management and introspection, taken
 /// from NSObject's own methods; anything else it is sent goes to
-/// forwarding, where a subclass's -forwardingTargetForSelector: answers.
-/// NSInvocation-based forwarding (-forwardInvocation:) is not supported.
+/// forwarding, where a subclass's -forwardingTargetForSelector: answers,
+/// or on arm64 its -methodSignatureForSelector: and -forwardInvocation:
+/// (Forwarding.swift).
 @ObjCClass("NSProxy")
 open class NSProxy: NSObject {
     override public class var objCSuperclassName: String? { nil }

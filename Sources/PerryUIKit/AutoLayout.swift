@@ -226,7 +226,12 @@ enum AutoLayout {
                     frame.origin.y -= origin.y
                 }
                 frame = frame.roundedToScale()
-                if frame != item.view.state.frame { item.view.sendSetFrame(frame) }
+                // Not for a difference below a pixel's hundredth, which
+                // rounding gives and which would lay the view out forever.
+                let current = item.view.state.frame
+                let difference = abs(frame.minX - current.minX) + abs(frame.minY - current.minY)
+                    + abs(frame.width - current.width) + abs(frame.height - current.height)
+                if difference > 0.01 { item.view.sendSetFrame(frame) }
             }
         }
 
