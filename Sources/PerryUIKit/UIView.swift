@@ -354,14 +354,24 @@ open class UIView: UIResponder, UICoordinateSpace {
     // MARK: Constraints, kept for Auto Layout
 
     @ObjCMethod("constraints") func constraints() -> NSObject { NSMutableArray.of(state.constraints) }
-    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { state.constraints.append(constraint); setNeedsLayout() }
-    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) { state.constraints += constraints.elements; setNeedsLayout() }
-    @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) {
-        state.constraints.removeAll { $0.objcObject == constraint.objcObject }
+    /// A constraint a view is given is active, and one taken from it no
+    /// longer is, as with -setActive:, which these came before.
+    @ObjCMethod("addConstraint:") func addConstraint(_ constraint: NSObject) { addConstraints(NSMutableArray.of([constraint])) }
+    @ObjCMethod("addConstraints:") func addConstraints(_ constraints: NSArray) {
+        for constraint in constraints.elements where !state.constraints.contains(where: { $0.objcObject == constraint.objcObject }) {
+            state.constraints.append(constraint)
+            constraint.as(NSLayoutConstraint.self)?.state.active = true
+        }
+        setNeedsLayout()
     }
+    @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) { removeConstraints(NSMutableArray.of([constraint])) }
     @ObjCMethod("removeConstraints:") func removeConstraints(_ constraints: NSArray) {
         let removed = Set(constraints.elements.map(\.objcObject))
+        for constraint in state.constraints where removed.contains(constraint.objcObject) {
+            constraint.as(NSLayoutConstraint.self)?.state.active = false
+        }
         state.constraints.removeAll { removed.contains($0.objcObject) }
+        setNeedsLayout()
     }
     @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool {
         state.translatesAutoresizingMaskIntoConstraints
