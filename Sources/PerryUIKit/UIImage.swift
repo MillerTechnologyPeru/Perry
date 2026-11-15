@@ -162,8 +162,11 @@ open class UIImage: NSObject {
         // smaller: drawn smaller than it was made rather than larger.
         let suffixes = Screen.assetScale == 3 ? ["@3x", "@2x", ""] : Screen.assetScale == 2 ? ["@2x", "@3x", ""] : ["", "@2x", "@3x"]
         for suffix in suffixes {
-            if let path = bundle.path(forResource: base + suffix, ofType: type), let image = image(cls, contentsOfFile: path) {
-                return image
+            guard let path = bundle.path(forResource: base + suffix, ofType: type) else { continue }
+            if let image = image(cls, contentsOfFile: path) { return image }
+            if getenv("PERRY_UIKIT_IMAGE_TRACE") != nil {
+                let line = "perry: UIImage: \(path) could not be read as an image\n"
+                _ = line.withCString { write(2, $0, strlen($0)) }
             }
         }
         guard catalog else { return nil }
@@ -253,6 +256,8 @@ open class UIImage: NSObject {
     @ObjCMethod("renderingMode") func renderingMode() -> Int { state.renderingMode }
     @ObjCMethod("capInsets") func capInsets() -> UIEdgeInsets { state.capInsets }
     @ObjCMethod("isSymbolImage") func isSymbolImage() -> Bool { state.symbolName != nil }
+    /// Images are standard dynamic range here.
+    @ObjCMethod("isHighDynamicRange") func isHighDynamicRange() -> Bool { false }
     /// Perry's images have no image asset of variants by trait.
     @ObjCMethod("_hasImageAsset") func hasImageAsset() -> Bool { false }
     @ObjCMethod("imageAsset") func imageAsset() -> NSObject? { nil }
