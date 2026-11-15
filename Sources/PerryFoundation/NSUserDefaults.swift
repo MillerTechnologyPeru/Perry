@@ -38,13 +38,47 @@ final class UserDefaultsStorage {
 
     func set(_ value: PropertyValue?, for key: String) {
         values[key] = value
-        save()
+        changed()
     }
 
     /// Forgets every value set, as removing the domain does.
     func removeAll() {
         values = [:]
-        save()
+        changed()
+    }
+
+    /// Whether values changed since they were last written, when that
+    /// was, and whether a write waits for the main run loop's next pass.
+    private var dirty = false
+    private var lastSaved = -Double.infinity
+    private var scheduled = false
+
+    /// Writes the values soon rather than at each change: an app that sets
+    /// many in a row, synchronizing after each as some do, would otherwise
+    /// rewrite the file each time. Changes made in one pass of the main
+    /// run loop are written together at the next, and at least once a
+    /// second while a long piece of work keeps the loop from turning.
+    func changed() {
+        dirty = true
+        if absoluteTimeNow() - lastSaved >= 1 {
+            save()
+        } else if !scheduled {
+            scheduled = true
+            RunLoops.mainLoop.perform(work: { [self] in
+                scheduled = false
+                saveIfChanged()
+            })
+        }
+    }
+
+    /// Writes the values if any changed, as -synchronize asks for.
+    @discardableResult
+    func saveIfChanged() -> Bool {
+        guard dirty, absoluteTimeNow() - lastSaved >= 1 else {
+            if dirty, !scheduled { changed() }
+            return true
+        }
+        return save()
     }
 
     /// The values set, without the registered defaults: the domain as it
@@ -54,7 +88,7 @@ final class UserDefaultsStorage {
     /// Replaces every value set, as setting the domain does.
     func replace(_ domain: [String: PropertyValue]) {
         values = domain
-        save()
+        changed()
     }
 
     func register(_ defaults: [String: PropertyValue]) {
@@ -65,6 +99,8 @@ final class UserDefaultsStorage {
 
     @discardableResult
     func save() -> Bool {
+        dirty = false
+        lastSaved = absoluteTimeNow()
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         guard let data = try? encoder.encode(PropertyValue.dictionary(values)) else { return false }
@@ -296,9 +332,10 @@ class NSUserDefaults: NSObject {
         storage.register(values)
     }
 
-    /// Values are saved as they change; this saves again.
+    /// Values are written soon after they change; this writes any not yet
+    /// written, unless they were written within the last second.
     @ObjCMethod("synchronize")
-    func synchronize() -> Bool { storage.save() }
+    func synchronize() -> Bool { storage.saveIfChanged() }
 }
 
 /// iCloud's key-value store, with no iCloud: the values are kept on the
