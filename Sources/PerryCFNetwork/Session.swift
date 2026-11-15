@@ -231,6 +231,10 @@ final class TaskState {
     /// Its own delegate, which hears of it before the session's.
     var delegate: NSObject?
     var metricsDelivered = false
+    /// The NSURLSession, retained until the task completes: a session
+    /// lives as long as its tasks run, whoever else lets go of it, and its
+    /// delegate is handed it with each event.
+    var session: UnsafeMutableRawPointer?
 
     init(_ task: Task) {
         self.task = task
@@ -244,7 +248,7 @@ enum Tasks {
 
     /// The object for a task (+0); the session holds another reference
     /// until the task completes, as Darwin's does.
-    static func object(_ task: Task) -> NSObject {
+    static func object(_ task: Task, session: UnsafeMutableRawPointer? = nil) -> NSObject {
         let cls: ObjCClass
         switch task.kind {
         case .data: cls = NSURLSessionDataTask.objCClass
@@ -252,7 +256,9 @@ enum Tasks {
         case .download: cls = NSURLSessionDownloadTask.objCClass
         }
         let object = cls.autoreleasedInstance()
-        states.set(object.objcObject, TaskState(task))
+        let state = TaskState(task)
+        state.session = session.flatMap { ObjCRuntime.retain($0) }
+        states.set(object.objcObject, state)
         task.owner = ObjCRuntime.retain(object.objcObject)
         return object
     }
@@ -262,6 +268,10 @@ enum Tasks {
         task.markCompleted()
         guard let owner = task.owner else { return }
         task.owner = nil
+        if let state = states.get(owner), let session = state.session {
+            state.session = nil
+            ObjCRuntime.release(session)
+        }
         ObjCRuntime.release(owner)
     }
 }
@@ -593,7 +603,7 @@ open class NSURLSession: NSObject {
         let box = completion?.box
         let task = make(completion?.body)
         box?.task = task
-        return Tasks.object(task)
+        return Tasks.object(task, session: objcObject)
     }
 
     /// A request for the URL; one without a URL for nil, as Apple's
@@ -650,7 +660,7 @@ open class NSURLSession: NSObject {
 
     /// A download's handler runs before the file is removed.
     private func downloadTask(_ request: Request, _ handler: ObjCBlock?) -> NSObject {
-        guard let handler, let state else { return Tasks.object(self.state!.session.downloadTask(request)) }
+        guard let handler, let state else { return Tasks.object(self.state!.session.downloadTask(request), session: objcObject) }
         nonisolated(unsafe) let queue = state.queue
         let box = TaskBox()
         nonisolated(unsafe) let block = handler
@@ -665,7 +675,7 @@ open class NSURLSession: NSObject {
             if let finished = box.task { Tasks.finish(finished) }
         }
         box.task = task
-        return Tasks.object(task)
+        return Tasks.object(task, session: objcObject)
     }
 
     @ObjCMethod("downloadTaskWithURL:") func downloadTask(with url: NSURL?) -> NSObject { downloadTask(request(url), nil) }
