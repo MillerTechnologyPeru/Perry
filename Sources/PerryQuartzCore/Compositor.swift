@@ -21,6 +21,9 @@ public func PerryCADisplayLayers(_ roots: UnsafePointer<UnsafeMutableRawPointer?
     guard let roots else { return }
     for index in 0..<count {
         guard let root = roots[index] else { continue }
+        // Layers marked for layout are laid out first, those with no view
+        // among them, as a Core Animation commit does.
+        CALayer.wrap(root).layoutIfNeeded()
         Compositor.display(CALayer.wrap(root))
     }
 }

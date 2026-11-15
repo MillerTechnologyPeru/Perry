@@ -108,6 +108,11 @@ open class AVPlayerItem: NSObject {
         return self
     }
 
+    @ObjCClassMethod("playerItemWithAsset:automaticallyLoadedAssetKeys:")
+    static func make(_ cls: ObjCClass, asset: AVAsset?, automaticallyLoadedAssetKeys keys: NSObject?) -> AVPlayerItem {
+        make(cls, asset: asset)
+    }
+
     @ObjCMethod("initWithAsset:automaticallyLoadedAssetKeys:")
     func initialize(asset: AVAsset?, automaticallyLoadedAssetKeys keys: NSObject?) -> Self { initialize(asset: asset) }
 
@@ -538,6 +543,16 @@ open class AVPlayer: NSObject {
     @ObjCMethod("error") func error() -> NSObject? { nil }
     @ObjCMethod("allowsExternalPlayback") func allowsExternalPlayback() -> Bool { false }
     @ObjCMethod("setAllowsExternalPlayback:") func setAllowsExternalPlayback(_ allows: Bool) {}
+    // There is no AirPlay here: playback is never on another screen.
+    @ObjCMethod("isExternalPlaybackActive") func isExternalPlaybackActive() -> Bool { false }
+    @ObjCMethod("externalPlaybackActive") func externalPlaybackActive() -> Bool { false }
+    @ObjCMethod("usesExternalPlaybackWhileExternalScreenIsActive") func usesExternalPlaybackWhileExternalScreenIsActive() -> Bool { false }
+    @ObjCMethod("setUsesExternalPlaybackWhileExternalScreenIsActive:") func setUsesExternalPlaybackWhileExternalScreenIsActive(_ uses: Bool) {}
+    @ObjCMethod("externalPlaybackVideoGravity") func externalPlaybackVideoGravity() -> String { "AVLayerVideoGravityResizeAspect" }
+    @ObjCMethod("setExternalPlaybackVideoGravity:") func setExternalPlaybackVideoGravity(_ gravity: NSObject?) {}
+    @ObjCMethod("reasonForWaitingToPlay") func reasonForWaitingToPlay() -> NSObject? { nil }
+    @ObjCMethod("preventsDisplaySleepDuringVideoPlayback") func preventsDisplaySleepDuringVideoPlayback() -> Bool { true }
+    @ObjCMethod("setPreventsDisplaySleepDuringVideoPlayback:") func setPreventsDisplaySleepDuringVideoPlayback(_ prevents: Bool) {}
 
     // MARK: Frames, for the view showing them
 

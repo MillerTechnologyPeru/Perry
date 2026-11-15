@@ -221,6 +221,10 @@ open class OSDispatchData: OSDispatchObject, OSDispatchDataProtocol {
     @ObjCMethod("length")
     func length() -> UInt { UInt(dispatch_data_get_size(objcObject)) }
 
+    /// Dispatch data does not change, so a copy is the same object.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { ObjCRuntime.retain(objcObject) }
+
     /// The bytes, contiguous, for as long as the autorelease pool the
     /// message was sent in.
     @ObjCMethod("bytes")

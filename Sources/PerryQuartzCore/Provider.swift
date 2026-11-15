@@ -23,6 +23,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         quartzFatal("QuartzCore needs libPerryobjc and libPerrySystem, which are missing or incomplete")
     }
     Methods.implementation = symbol(libobjc, "_class_getMethodImplementation").map { unsafeBitCast($0, to: Methods.Implementation.self) }
+    DynamicProperties.load { symbol(libobjc, $0) }
     guard Methods.implementation != nil, CG.load(symbol) else {
         quartzFatal("QuartzCore needs libPerryCoreGraphics, which is missing or incomplete")
     }

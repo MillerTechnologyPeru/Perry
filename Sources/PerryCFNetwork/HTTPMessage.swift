@@ -462,3 +462,13 @@ enum ProxyConstants {
     static let kCFNetworkProxiesHTTPPort = "HTTPPort"
     static let kCFNetworkProxiesProxyAutoConfigEnable = "ProxyAutoConfigEnable"
 }
+
+/// The domain of CFNetwork's own errors, and the key of the URL an error
+/// is about.
+@ObjCConstants
+enum NetworkErrorDomains {
+    static let kCFErrorDomainCFNetwork = "kCFErrorDomainCFNetwork"
+    static let kCFErrorDomainWinSock = "kCFErrorDomainWinSock"
+    static let kCFURLErrorFailingURLErrorKey = "NSErrorFailingURLKey"
+    static let kCFURLErrorFailingURLStringErrorKey = "NSErrorFailingURLStringKey"
+}

@@ -226,12 +226,18 @@ enum Text {
     /// The width of `text` in `font`, on one line.
     static func width(_ text: String, font: UIFont) -> CGFloat {
         let key = WidthKey(font: font.drawingName, pointSize: font.state.pointSize, text: text)
-        if let width = widths[key] { return width }
-        let width = measure(text, font: font)
-        if widths.count > 4096 { widths = [:] }
-        widths[key] = width
-        return width
+        return lock.withLock {
+            if let width = widths[key] { return width }
+            let width = measure(text, font: font)
+            if widths.count > 4096 { widths = [:] }
+            widths[key] = width
+            return width
+        }
     }
+
+    /// Text is measured and drawn by one thread at a time: apps lay text
+    /// out on threads of their own, and the measuring context is shared.
+    static let lock = Lock()
 
     private static func measure(_ text: String, font: UIFont) -> CGFloat {
         if scratch == nil { scratch = CG.makeContext(size: CGSize(width: 1, height: 1), scale: 1, opaque: false) }
@@ -310,8 +316,10 @@ enum Text {
         CG.setTextMatrix(context, CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0))
         CG.setTextPosition(context, point.x, point.y + font.state.pointSize * 0.95)
         var utf8 = Array(text.utf8)
-        utf8.withUnsafeMutableBufferPointer { buffer in
-            buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { CG.showText(context, $0, buffer.count) }
+        lock.withLock {
+            utf8.withUnsafeMutableBufferPointer { buffer in
+                buffer.baseAddress!.withMemoryRebound(to: CChar.self, capacity: buffer.count) { CG.showText(context, $0, buffer.count) }
+            }
         }
     }
 }

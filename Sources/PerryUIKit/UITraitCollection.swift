@@ -72,6 +72,21 @@ open class UITraitCollection: NSObject {
         make(cls) { $0.contentSizeCategory = contentSizeCategory }
     }
 
+    // Traits that are the same on every device here: a collection that
+    // specifies none of the traits kept.
+    @ObjCClassMethod("traitCollectionWithForceTouchCapability:")
+    static func with(_ cls: ObjCClass, forceTouchCapability: Int) -> UITraitCollection { make(cls) { _ in } }
+    @ObjCClassMethod("traitCollectionWithDisplayGamut:")
+    static func with(_ cls: ObjCClass, displayGamut: Int) -> UITraitCollection { make(cls) { _ in } }
+    @ObjCClassMethod("traitCollectionWithAccessibilityContrast:")
+    static func with(_ cls: ObjCClass, accessibilityContrast: Int) -> UITraitCollection { make(cls) { _ in } }
+    @ObjCClassMethod("traitCollectionWithLegibilityWeight:")
+    static func with(_ cls: ObjCClass, legibilityWeight: Int) -> UITraitCollection { make(cls) { _ in } }
+    @ObjCClassMethod("traitCollectionWithUserInterfaceLevel:")
+    static func with(_ cls: ObjCClass, userInterfaceLevel: Int) -> UITraitCollection { make(cls) { _ in } }
+    @ObjCClassMethod("traitCollectionWithActiveAppearance:")
+    static func with(_ cls: ObjCClass, activeAppearance: Int) -> UITraitCollection { make(cls) { _ in } }
+
     /// Each trait from the last collection that specifies it.
     @ObjCClassMethod("traitCollectionWithTraitsFromCollections:")
     static func combining(_ cls: ObjCClass, collections: NSArray) -> UITraitCollection {

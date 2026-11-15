@@ -14,6 +14,7 @@ private let quartzCore = "/System/Library/Frameworks/QuartzCore.framework/Quartz
 @ObjCWrapper("CALayer")
 class CALayer: NSObject {
     @ObjCClassMethod("layer") static func make() -> CALayer
+    @ObjCMethod("layoutSublayers") func sendLayoutSublayers()
     @ObjCMethod("bounds") func bounds() -> CGRect
     @ObjCMethod("setBounds:") func setBounds(_ bounds: CGRect)
     @ObjCMethod("position") func position() -> CGPoint

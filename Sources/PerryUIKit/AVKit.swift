@@ -177,6 +177,30 @@ final class PlayerLayerState: ObjectState {
     var size = CGSize.zero
 }
 
+/// AVSampleBufferDisplayLayer: there are no video decoders here, so the
+/// layer shows nothing, and never says it is ready for more.
+@ObjCClass("AVSampleBufferDisplayLayer")
+class AVSampleBufferDisplayLayer: CALayer {
+    @ObjCMethod("videoGravity") func videoGravity() -> String { "AVLayerVideoGravityResizeAspect" }
+    @ObjCMethod("setVideoGravity:") func setVideoGravity(_ gravity: NSObject?) {}
+    @ObjCMethod("controlTimebase") func controlTimebase() -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("setControlTimebase:") func setControlTimebase(_ timebase: UnsafeMutableRawPointer?) {}
+    /// AVQueuedSampleBufferRenderingStatusUnknown.
+    @ObjCMethod("status") func status() -> Int { 0 }
+    @ObjCMethod("error") func error() -> NSObject? { nil }
+    @ObjCMethod("isReadyForMoreMediaData") func isReadyForMoreMediaData() -> Bool { false }
+    @ObjCMethod("enqueueSampleBuffer:") func enqueue(_ buffer: UnsafeMutableRawPointer?) {}
+    @ObjCMethod("flush") func flush() {}
+    @ObjCMethod("flushAndRemoveImage") func flushAndRemoveImage() {}
+    @ObjCMethod("requestMediaDataWhenReadyOnQueue:usingBlock:")
+    func requestMediaData(on queue: NSObject?, using block: ObjCBlock?) {}
+    @ObjCMethod("stopRequestingMediaData") func stopRequestingMediaData() {}
+    @ObjCMethod("preventsCapture") func preventsCapture() -> Bool { false }
+    @ObjCMethod("setPreventsCapture:") func setPreventsCapture(_ prevents: Bool) {}
+    @ObjCMethod("preventsDisplaySleepDuringVideoPlayback") func preventsDisplaySleep() -> Bool { false }
+    @ObjCMethod("setPreventsDisplaySleepDuringVideoPlayback:") func setPreventsDisplaySleep(_ prevents: Bool) {}
+}
+
 @ObjCClass("AVPlayerLayer")
 class AVPlayerLayer: CALayer {
     static let states = StateTable<PlayerLayerState>()

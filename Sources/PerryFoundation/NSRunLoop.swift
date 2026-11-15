@@ -649,8 +649,25 @@ enum RunLoopObservers {
     static func order(_ observer: id) -> Int { storage(observer)?.order ?? 0 }
     static func repeats(_ observer: id) -> Bool { storage(observer)?.repeats ?? false }
 
+    /// PERRY_RUNLOOP_TRACE: observers created, added and called.
+    static let tracing = getenv("PERRY_RUNLOOP_TRACE") != nil
+    nonisolated(unsafe) static var calls: [UInt: Int] = [:]
+
+    static func trace(_ text: String) {
+        _ = (text + "\n").withCString { Glibc.write(2, $0, strlen($0)) }
+    }
+
     static func call(_ observer: id, _ activity: UInt) {
         guard let storage = storage(observer), storage.valid else { return }
+        if tracing {
+            let key = UInt(bitPattern: observer)
+            let count = (calls[key] ?? 0) + 1
+            calls[key] = count
+            if count <= 3 || count % 1000 == 0 {
+                let target = storage.callout.map { String(UInt(bitPattern: unsafeBitCast($0, to: UnsafeRawPointer.self)), radix: 16) } ?? "block"
+                trace("perry: runloop observer \(String(key, radix: 16)) activity \(activity) order \(storage.order) call #\(count) callout \(target)")
+            }
+        }
         if let block = storage.block {
             Blocks.invoke(block, as: (@convention(c) (id, id?, UInt) -> Void).self)(block, observer, activity)
         } else {
@@ -706,6 +723,10 @@ public func CFRunLoopObserverCreate(_ allocator: UnsafeMutableRawPointer?, _ act
 public func CFRunLoopAddObserver(_ runLoop: UnsafeMutableRawPointer?, _ observer: UnsafeMutableRawPointer?,
                                  _ mode: UnsafeMutableRawPointer?) {
     guard let observer else { return }
+    if RunLoopObservers.tracing {
+        let storage = RunLoopObservers.storage(observer)
+        RunLoopObservers.trace("perry: runloop add observer \(UInt(bitPattern: observer)) activities \(storage?.activities ?? 0) order \(storage?.order ?? 0) on \(runLoop == RunLoops.mainLoop.object ? "main" : "other")")
+    }
     RunLoops.state(runLoop)?.add(observer: observer)
 }
 

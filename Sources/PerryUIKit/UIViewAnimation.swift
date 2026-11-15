@@ -214,6 +214,9 @@ extension UIView {
     }
 
     @ObjCClassMethod("areAnimationsEnabled") static func areAnimationsEnabled() -> Bool { ViewAnimations.enabled }
+    /// The duration of the animation block running, or 0 outside one.
+    @ObjCClassMethod("inheritedAnimationDuration")
+    static func inheritedAnimationDuration() -> Double { ViewAnimations.contexts.last?.duration ?? 0 }
     @ObjCClassMethod("setAnimationsEnabled:") static func setAnimationsEnabled(_ enabled: Bool) { ViewAnimations.enabled = enabled }
 
     // MARK: Begin and commit

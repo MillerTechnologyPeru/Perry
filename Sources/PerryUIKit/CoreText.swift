@@ -100,6 +100,18 @@ open class UIFontDescriptor: NSObject {
         return self
     }
 
+    /// What the descriptor specifies, by attribute.
+    @ObjCMethod("fontAttributes")
+    func fontAttributes() -> NSObject {
+        let state = state
+        let attributes = NSMutableDictionary.empty()
+        if let name = state.name { attributes.set(string: name, forKey: CoreTextKeys.name) }
+        if let family = state.family { attributes.set(string: family, forKey: CoreTextKeys.family) }
+        if state.size > 0 { attributes.set(NSNumber.make(double: Double(state.size)), forKey: CoreTextKeys.size) }
+        if let style = state.textStyle { attributes.set(string: style, forKey: CoreTextKeys.textStyle) }
+        return attributes
+    }
+
     @ObjCClassMethod("fontDescriptorWithFontAttributes:")
     static func descriptor(fontAttributes attributes: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         ObjCRuntime.autorelease(make { $0.apply(attributes) })

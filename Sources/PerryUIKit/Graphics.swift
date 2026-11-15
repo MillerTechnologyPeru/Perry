@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UIKit's graphics contexts: the stack of current contexts that UIColor,
@@ -6,10 +7,39 @@ import PerryObjCInterop
 // renderers built on them. Contexts are bitmaps in UIKit's coordinates.
 
 enum Graphics {
+    /// A thread's contexts: each thread has its own current context, as
+    /// apps that draw on several threads at once count on.
+    final class Stack {
+        var contexts: [CGRef] = []
+        var imageContexts: [(context: CGRef, scale: CGFloat)] = []
+    }
+
+    private static let key: pthread_key_t = {
+        var key = pthread_key_t()
+        pthread_key_create(&key) { raw in
+            guard let raw else { return }
+            Unmanaged<Stack>.fromOpaque(raw).release()
+        }
+        return key
+    }()
+
+    private static var stack: Stack {
+        if let raw = pthread_getspecific(key) { return Unmanaged<Stack>.fromOpaque(raw).takeUnretainedValue() }
+        let stack = Stack()
+        pthread_setspecific(key, Unmanaged.passRetained(stack).toOpaque())
+        return stack
+    }
+
     /// The current contexts, the last on top; each retained.
-    nonisolated(unsafe) static var contexts: [CGRef] = []
+    static var contexts: [CGRef] {
+        get { stack.contexts }
+        set { stack.contexts = newValue }
+    }
     /// The image contexts begun and not ended, with their scales.
-    nonisolated(unsafe) static var imageContexts: [(context: CGRef, scale: CGFloat)] = []
+    static var imageContexts: [(context: CGRef, scale: CGFloat)] {
+        get { stack.imageContexts }
+        set { stack.imageContexts = newValue }
+    }
 
     static var current: CGRef? { contexts.last }
 
@@ -287,6 +317,29 @@ open class UIGraphicsImageRenderer: UIGraphicsRenderer {
             actions.function(as: Actions.self)(actions.object, rendererContext.objcObject)
         }
         return CG.bitmapContextCreateImage(context).map { (Owned($0), scale) }
+    }
+
+    /// UIKit's own entry, which Texture calls: the drawing runs as in
+    /// -imageWithActions:, then `completion` is given the renderer context,
+    /// whose -currentImage is what was drawn.
+    @ObjCMethod("runDrawingActions:completionActions:error:")
+    func run(actions: ObjCBlock, completion: ObjCBlock?, error: UnsafeMutableRawPointer?) -> Bool {
+        let bounds = state.bounds
+        let format = state.format?.state ?? RendererFormatState()
+        let scale = format.scale > 0 ? format.scale : Screen.scale
+        guard let context = CG.makeContext(size: bounds.size, scale: scale, opaque: format.opaque) else { return false }
+        CG.translateCTM(context, -bounds.minX, -bounds.minY)
+        let rendererContext = UIGraphicsImageRendererContext.objCClass.object.allocated()
+            .unsafeCast(to: UIGraphicsImageRendererContext.self)
+        rendererContext.state.context = context
+        rendererContext.state.format = state.format
+        rendererContext.state.scale = scale
+        typealias Actions = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void
+        Graphics.drawing(in: context) {
+            actions.function(as: Actions.self)(actions.object, rendererContext.objcObject)
+        }
+        if let completion { completion.function(as: Actions.self)(completion.object, rendererContext.objcObject) }
+        return true
     }
 
     @ObjCMethod("imageWithActions:")

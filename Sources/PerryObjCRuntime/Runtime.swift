@@ -202,6 +202,7 @@ public enum Runtime {
         guard let info = Runtime.info(cls) else {
             objcFatal("message \(String(cString: selector)) sent to an object whose class is unknown")
         }
+        if Profile.enabled { Profile.record(info, selector) }
         let target = info.isMeta ? info.partner : info
         if let target, !target.isInitialized {
             initialize(target)
