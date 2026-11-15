@@ -176,8 +176,10 @@ enum Numbers {
 }
 
 /// NSNumber.
+/// A number is a value, as on Darwin, where code that takes either asks
+/// whether what it has is an NSValue.
 @ObjCClass("NSNumber")
-public class NSNumber: NSObject {
+public class NSNumber: NSValue {
     /// What the Swift runtime asks to tell Foundation's classes apart.
     @ObjCMethod("isNSNumber__") func isNSNumber__() -> Bool { true }
 
@@ -268,7 +270,7 @@ public class NSNumber: NSObject {
     @ObjCMethod("initWithUnsignedChar:") func initialize(unsignedChar: UInt8) -> UnsafeMutableRawPointer? { setValue(.unsigned(UInt64(unsignedChar))) }
 
     @ObjCMethod("dealloc")
-    func dealloc() {
+    override func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: Numbers.numberClass)
     }
@@ -289,10 +291,25 @@ public class NSNumber: NSObject {
     @ObjCMethod("unsignedCharValue") func unsignedCharValue() -> UInt8 { UInt8(truncatingIfNeeded: number.int64) }
     @ObjCMethod("boolValue") func boolValue() -> Bool { number.int64 != 0 || number.double != 0 }
 
+    /// NSValue's: the value as its type encoding has it.
+    @ObjCMethod("getValue:")
+    override func getValue(_ buffer: UnsafeMutableRawPointer?) {
+        guard let buffer else { return }
+        switch number.value {
+        case .signed(let value): buffer.storeBytes(of: value, as: Int64.self)
+        case .unsigned(let value): buffer.storeBytes(of: value, as: UInt64.self)
+        case .double(let value): buffer.storeBytes(of: value, as: Double.self)
+        case .bool(let value): buffer.storeBytes(of: value ? 1 : 0, as: Int8.self)
+        }
+    }
+
+    @ObjCMethod("getValue:size:")
+    override func getValue(_ buffer: UnsafeMutableRawPointer?, size: UInt) { getValue(buffer) }
+
     /// The value's type encoding: "q" and "Q" for integers, "d" for
     /// floating point, "c" for booleans (CFBoolean), as Darwin reports.
     @ObjCMethod("objCType")
-    func objCType() -> UnsafePointer<CChar>? {
+    override func objCType() -> UnsafePointer<CChar>? {
         switch number.value {
         case .signed: return NumberTypes.signed
         case .unsigned: return NumberTypes.unsigned
@@ -303,7 +320,7 @@ public class NSNumber: NSObject {
     @ObjCMethod("doubleValue") func doubleValue() -> Double { number.double }
     @ObjCMethod("floatValue") func floatValue() -> Float { Float(number.double) }
     @ObjCMethod("stringValue") func stringValue() -> String { number.description }
-    @ObjCMethod("description") func description() -> String { number.description }
+    @ObjCMethod("description") override func description() -> String { number.description }
 
     // MARK: Comparing
 
@@ -314,21 +331,21 @@ public class NSNumber: NSObject {
     func isEqual(toNumber other: NSNumber?) -> Bool { other.map { compare($0) == 0 } ?? false }
 
     @ObjCMethod("isEqual:")
-    func isEqual(_ other: ObjCObject?) -> Bool {
+    override func isEqual(_ other: ObjCObject?) -> Bool {
         guard let other, other.is(NSNumber.self) else { return false }
         return compare(other.unsafeCast(to: NSNumber.self)) == 0
     }
 
     /// Equal numbers hash equally whatever their type.
     @ObjCMethod("hash")
-    func hash() -> UInt {
+    override func hash() -> UInt {
         // Truncated, as a 64-bit value does not fit a 32-bit hash.
         if number.double == number.double.rounded() { return UInt(truncatingIfNeeded: number.int64) }
         return UInt(truncatingIfNeeded: number.double.bitPattern)
     }
 
     @ObjCMethod("copyWithZone:")
-    func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
+    override func copy(zone: UnsafeMutableRawPointer?) -> NSNumber { self }
 }
 
 /// @42: { isa, const char *encoding, int64 value }.
