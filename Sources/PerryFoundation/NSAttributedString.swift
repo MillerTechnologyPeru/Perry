@@ -458,7 +458,14 @@ public final class NSMutableAttributedString: NSAttributedString {
     }
 
     @ObjCMethod("addAttribute:value:range:")
-    func addAttribute(_ name: ObjCObject, value: ObjCObject, range: NSRange) {
+    func addAttribute(_ name: ObjCObject?, value: ObjCObject?, range: NSRange) {
+        // Darwin raises for a nil value; a program that gets here with one
+        // on this system only (a font or an image it could not load) goes
+        // on without the attribute.
+        guard let name, let value else {
+            foundationWarning("-[NSMutableAttributedString addAttribute:value:range:] with nil, ignored")
+            return
+        }
         AttributedStrings.check(range, storage.units.count, "addAttribute:value:range:")
         storage.update(range) { entries in
             entries.filter { !AttributedStorage.equal($0.key, name.id) } + [(key: name.id, value: value.id)]
