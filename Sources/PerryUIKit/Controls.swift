@@ -956,7 +956,10 @@ open class NSLayoutConstraint: NSObject {
     @ObjCMethod("relation") func relation() -> Int { state.relation }
     @ObjCMethod("multiplier") func multiplier() -> CGFloat { state.multiplier }
     @ObjCMethod("constant") func constant() -> CGFloat { state.constant }
+    /// Set to what it is, nothing is laid out again: code sets constants
+    /// from -layoutSubviews, which would otherwise never settle.
     @ObjCMethod("setConstant:") func setConstant(_ constant: CGFloat) {
+        guard state.constant != constant else { return }
         state.constant = constant
         invalidate()
     }
@@ -973,11 +976,14 @@ open class NSLayoutConstraint: NSObject {
     @ObjCMethod("isActive") func isActive() -> Bool { state.active }
     @ObjCMethod("setActive:")
     func setActive(_ active: Bool) {
+        let changed = state.active != active
         state.active = active
+        var added = false
         if active, let holder, !holder.state.constraints.contains(where: { $0.objcObject == objcObject }) {
             holder.state.constraints.append(self)
+            added = true
         }
-        invalidate()
+        if changed || added { invalidate() }
     }
     @ObjCMethod("identifier") func identifier() -> String? { state.identifier }
     @ObjCMethod("setIdentifier:") func setIdentifier(_ identifier: String?) { state.identifier = identifier }
