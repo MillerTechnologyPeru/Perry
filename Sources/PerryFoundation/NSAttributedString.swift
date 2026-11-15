@@ -157,7 +157,7 @@ enum AttributedStrings {
 
     static func check(_ range: NSRange, _ length: Int, _ method: String) {
         guard Int(range.location) + Int(range.length) <= length else {
-            foundationFatal("-[NSAttributedString \(method)]: Range or index out of bounds (range {\(range.location), \(range.length)}, length \(length))")
+            Exceptions.raise(name: "NSRangeException", reason: "-[NSAttributedString \(method)]: Range or index out of bounds (range {\(range.location), \(range.length)}, length \(length))")
         }
     }
 }
@@ -243,7 +243,7 @@ public class NSAttributedString: NSObject {
 
     private func attributes(at index: UInt, effective: UnsafeMutablePointer<NSRange>?, method: String) -> id {
         guard let (position, start) = storage.run(at: Int(index)) else {
-            foundationFatal("-[NSAttributedString \(method)]: Range or index out of bounds")
+            Exceptions.raise(name: "NSRangeException", reason: "-[NSAttributedString \(method)]: Range or index out of bounds")
         }
         let run = storage.runs[position]
         effective?.pointee = NSRange(location: UInt(start), length: UInt(run.length))
@@ -269,7 +269,7 @@ public class NSAttributedString: NSObject {
     @ObjCMethod("attribute:atIndex:effectiveRange:")
     func attribute(_ name: ObjCObject, at index: UInt, effectiveRange: UnsafeMutablePointer<NSRange>?) -> UnsafeMutableRawPointer? {
         guard let (position, _) = storage.run(at: Int(index)) else {
-            foundationFatal("-[NSAttributedString attribute:atIndex:effectiveRange:]: Range or index out of bounds")
+            Exceptions.raise(name: "NSRangeException", reason: "-[NSAttributedString attribute:atIndex:effectiveRange:]: Range or index out of bounds")
         }
         let value = Dictionaries.value(storage.runs[position].attributes, for: name.id)
         if let effectiveRange {
@@ -402,7 +402,7 @@ public class NSAttributedString: NSObject {
 
 /// NSMutableAttributedString.
 @ObjCClass("NSMutableAttributedString")
-public final class NSMutableAttributedString: NSAttributedString {
+public class NSMutableAttributedString: NSAttributedString {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         AttributedStrings.mutableClass = cls.storage
     }
@@ -466,6 +466,9 @@ public final class NSMutableAttributedString: NSAttributedString {
             foundationWarning("-[NSMutableAttributedString addAttribute:value:range:] with nil, ignored")
             return
         }
+        // No characters, nothing to change, wherever the range is: what a
+        // search that found nothing gives ({NSNotFound, 0}) is let by.
+        guard range.length > 0 else { return }
         AttributedStrings.check(range, storage.units.count, "addAttribute:value:range:")
         storage.update(range) { entries in
             entries.filter { !AttributedStorage.equal($0.key, name.id) } + [(key: name.id, value: value.id)]
@@ -474,6 +477,9 @@ public final class NSMutableAttributedString: NSAttributedString {
 
     @ObjCMethod("addAttributes:range:")
     func addAttributes(_ attributes: ObjCObject, range: NSRange) {
+        // No characters, nothing to change, wherever the range is: what a
+        // search that found nothing gives ({NSNotFound, 0}) is let by.
+        guard range.length > 0 else { return }
         AttributedStrings.check(range, storage.units.count, "addAttributes:range:")
         let added = Dictionaries.entries(attributes.id)
         storage.update(range) { entries in
@@ -483,6 +489,9 @@ public final class NSMutableAttributedString: NSAttributedString {
 
     @ObjCMethod("removeAttribute:range:")
     func removeAttribute(_ name: ObjCObject, range: NSRange) {
+        // No characters, nothing to change, wherever the range is: what a
+        // search that found nothing gives ({NSNotFound, 0}) is let by.
+        guard range.length > 0 else { return }
         AttributedStrings.check(range, storage.units.count, "removeAttribute:range:")
         storage.update(range) { entries in entries.filter { !AttributedStorage.equal($0.key, name.id) } }
     }
@@ -590,6 +599,16 @@ public func CFAttributedStringRemoveAttribute(_ string: id?, _ range: PerryCFRan
 public func CFAttributedStringGetLength(_ string: id?) -> Int {
     AttributedStrings.storage(string)?.units.count ?? 0
 }
+
+/// Darwin's concrete classes, which attributed strings are instances of
+/// there. Code that hooks the methods (crash guards do) looks the classes up
+/// by these names and finds the methods they inherit, which are the ones
+/// every attributed string here runs.
+@ObjCClass("NSConcreteAttributedString")
+public final class NSConcreteAttributedString: NSAttributedString {}
+
+@ObjCClass("NSConcreteMutableAttributedString")
+public final class NSConcreteMutableAttributedString: NSMutableAttributedString {}
 
 /// The string, +0, held by an autorelease pool as the attributed string's is.
 @c(_CFAttributedStringGetString)
