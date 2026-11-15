@@ -96,7 +96,10 @@ enum Dispatch {
     static func onMain(_ body: @escaping () -> Void) { async(main, Unmanaged.passRetained(Work(body)).toOpaque(), run) }
 
     static func onMain(after seconds: Double, _ body: @escaping () -> Void) {
-        after(time(0, Int64(max(0, seconds) * 1_000_000_000)), main, Unmanaged.passRetained(Work(body)).toOpaque(), run)
+        // No more than a century: an animation that never ends asks for
+        // a time whose nanoseconds would not fit.
+        let delay = seconds.isNaN ? 0 : min(max(0, seconds), 3_000_000_000)
+        after(time(0, Int64(delay * 1_000_000_000)), main, Unmanaged.passRetained(Work(body)).toOpaque(), run)
     }
 }
 
