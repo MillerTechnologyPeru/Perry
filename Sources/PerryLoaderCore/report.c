@@ -91,6 +91,10 @@ static const uint8_t *class_ro(const perry_image *image, const uint8_t *cls) {
         return NULL;
     uint64_t bits = *(const uintptr_t *)(cls + CLASS_DATA_OFFSET);
     const uint8_t *ro = (const uint8_t *)(uintptr_t)(bits & CLASS_DATA_MASK);
+    // A realized class's bits point at the class_rw_t the runtime made
+    // (RW_REALIZED in its flags), whose second word is the class_ro_t.
+    if (ro && !in_image(image, ro) && (*(const uint32_t *)ro & 0x80000000u))
+        ro = (const uint8_t *)(*(const uintptr_t *)(ro + 8) & ~(uintptr_t)1);
     return in_image(image, ro) ? ro : NULL;
 }
 
