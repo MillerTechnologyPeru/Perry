@@ -107,6 +107,14 @@ void perry_foundation_call_setter(void *object, const char *selector, const void
 // xmm1 end up in the four words of `out`. arm64: x0-x7 then x8, and x0, x1
 // and d0-d3 end up in the six words of `out`.
 void perry_foundation_invoke(const void *imp, const uint64_t *gp, const uint64_t fp[8], const uint64_t *stack, size_t words, uint64_t *out);
+// Sets the vtable of the type @catch (NSException *) names.
+void perry_foundation_set_exception_type_vtable(const void *vtable);
+#if defined(__aarch64__)
+// The forward handler, for objc_setForwardHandler: an unrecognized message's
+// arguments become an NSInvocation for -forwardInvocation:. It is entered as
+// the method would be, and is not for calling from C.
+void perry_foundation_forward(void);
+#endif
 #if defined(__i386__)
 // Calls imp with those stack words, and keeps eax and edx in `out` and, when
 // the result is floating point, the x87 result in `floating`.
