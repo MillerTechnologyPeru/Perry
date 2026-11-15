@@ -117,6 +117,48 @@ perry_foundation_invoke:
     .cfi_endproc
     .size perry_foundation_invoke, . - perry_foundation_invoke
 
+// The forward handler the runtime jumps to with a message no method took,
+// its arguments as sent. Keeps x0-x8 and d0-d7, gives them and the caller's
+// stack to perry_foundation_forward_invocation, which sends
+// -forwardInvocation:, and returns what that left in the last six words:
+// x0, x1 and d0-d3.
+    .globl perry_foundation_forward
+    .hidden perry_foundation_forward
+    .type perry_foundation_forward, @function
+    .p2align 2
+perry_foundation_forward:
+    .cfi_startproc
+    stp x29, x30, [sp, #-208]!
+    .cfi_def_cfa_offset 208
+    .cfi_offset 29, -208
+    .cfi_offset 30, -200
+    mov x29, sp
+    .cfi_def_cfa_register 29
+    stp x0, x1, [sp, #16]
+    stp x2, x3, [sp, #32]
+    stp x4, x5, [sp, #48]
+    stp x6, x7, [sp, #64]
+    str x8, [sp, #80]
+    stp d0, d1, [sp, #96]
+    stp d2, d3, [sp, #112]
+    stp d4, d5, [sp, #128]
+    stp d6, d7, [sp, #144]
+    add x0, sp, #16
+    add x1, sp, #96
+    add x2, sp, #208
+    add x3, sp, #160
+    bl perry_foundation_forward_invocation
+    ldp x0, x1, [sp, #160]
+    ldp d0, d1, [sp, #176]
+    ldp d2, d3, [sp, #192]
+    ldp x29, x30, [sp], #208
+    .cfi_def_cfa 31, 0
+    .cfi_restore 29
+    .cfi_restore 30
+    ret
+    .cfi_endproc
+    .size perry_foundation_forward, . - perry_foundation_forward
+
 #endif
 
 .section .note.GNU-stack, "", %progbits
