@@ -28,6 +28,57 @@ extension NSScanner {
         }
     }
 
+    /// A 32-bit integer at the position; nil when there is none.
+    public func scanInt32(representation: NumberRepresentation = .decimal) -> Int32? {
+        switch representation {
+        case .decimal:
+            var value: Int32 = 0
+            return scanInt32(&value) ? value : nil
+        case .hexadecimal:
+            var value: UInt32 = 0
+            return scanHexInt32(&value) ? Int32(truncatingIfNeeded: value) : nil
+        }
+    }
+
+    /// A 64-bit integer at the position; nil when there is none.
+    public func scanInt64(representation: NumberRepresentation = .decimal) -> Int64? {
+        switch representation {
+        case .decimal:
+            var value: Int64 = 0
+            return scanInt64(&value) ? value : nil
+        case .hexadecimal:
+            var value: UInt64 = 0
+            return scanHexInt64(&value) ? Int64(truncatingIfNeeded: value) : nil
+        }
+    }
+
+    /// An unsigned 64-bit integer at the position; nil when there is none.
+    public func scanUInt64(representation: NumberRepresentation = .decimal) -> UInt64? {
+        var value: UInt64 = 0
+        switch representation {
+        case .decimal: return scanUnsignedLongLong(&value) ? value : nil
+        case .hexadecimal: return scanHexInt64(&value) ? value : nil
+        }
+    }
+
+    /// A float at the position; nil when there is none.
+    public func scanFloat(representation: NumberRepresentation = .decimal) -> Float? {
+        var value: Float = 0
+        switch representation {
+        case .decimal: return scanFloat(&value) ? value : nil
+        case .hexadecimal: return scanHexFloat(&value) ? value : nil
+        }
+    }
+
+    /// A double at the position; nil when there is none.
+    public func scanDouble(representation: NumberRepresentation = .decimal) -> Double? {
+        var value: Double = 0
+        switch representation {
+        case .decimal: return scanDouble(&value) ? value : nil
+        case .hexadecimal: return scanHexDouble(&value) ? value : nil
+        }
+    }
+
     /// The string, if it comes next.
     public func scanString(_ searchString: String) -> String? {
         var found: NSString?
