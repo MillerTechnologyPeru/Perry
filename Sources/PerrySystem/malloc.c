@@ -389,6 +389,29 @@ void *darwin_malloc_zone_memalign(darwin_malloc_zone *zone, size_t alignment, si
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) DARWIN_SYMBOL(malloc_zone_free);
 void darwin_malloc_zone_free(darwin_malloc_zone *zone, void *ptr) { zone->free(zone, ptr); }
 
+/// malloc_statistics_t (malloc/malloc.h).
+typedef struct {
+    unsigned blocks_in_use;
+    size_t size_in_use;
+    size_t max_size_in_use;
+    size_t size_allocated;
+} darwin_malloc_statistics;
+
+/// malloc_zone_statistics(zone, stats): what is in use in `zone`, or in
+/// every zone when NULL. The zones share one heap, so both are the heap's
+/// figures; the high-water mark is not tracked and is the current use.
+void darwin_malloc_zone_statistics(darwin_malloc_zone *zone, darwin_malloc_statistics *stats)
+    DARWIN_SYMBOL(malloc_zone_statistics);
+void darwin_malloc_zone_statistics(darwin_malloc_zone *zone, darwin_malloc_statistics *stats) {
+    (void)zone;
+    if (!stats) return;
+    struct mallinfo2 info = mallinfo2();
+    stats->blocks_in_use = (unsigned)(info.ordblks + info.hblks);
+    stats->size_in_use = info.uordblks + info.hblkhd;
+    stats->max_size_in_use = stats->size_in_use;
+    stats->size_allocated = info.arena + info.hblkhd;
+}
+
 /// malloc_zone_malloc_with_options(zone, alignment, size, options): in
 /// `zone` (the default one when NULL), aligned to `alignment` if more than
 /// a pointer's, and zeroed with MALLOC_ZONE_MALLOC_OPTION_CLEAR (1). Under
