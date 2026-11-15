@@ -25,6 +25,21 @@ public enum Layout {
     /// Clears the Swift flag bits from objc_class.bits.
     public static let classBitsMask = ~UInt(PERRY_CLASS_BITS_FLAGS)
 
+    /// RW_REALIZED, which a class_rw_t's flags carry and a class_ro_t's
+    /// from a compiler never do.
+    public static let realizedFlag: UInt32 = 1 << 31
+
+    /// A class's class_ro_t: what objc_class.bits points at, or, once the
+    /// class is realized as Darwin's libobjc leaves it (see
+    /// Runtime.installReadWrite), what the class_rw_t there points at.
+    public static func readOnly(_ cls: UnsafePointer<perry_objc_class>) -> UnsafeMutablePointer<perry_class_ro>? {
+        guard let data = UnsafeMutableRawPointer(bitPattern: UInt(cls.pointee.bits) & classBitsMask) else { return nil }
+        if data.load(as: UInt32.self) & realizedFlag != 0 {
+            return UnsafeMutablePointer<perry_class_ro>(bitPattern: data.load(fromByteOffset: 8, as: UInt.self) & ~1)
+        }
+        return data.assumingMemoryBound(to: perry_class_ro.self)
+    }
+
     /// A block's invoke pointer, after isa, flags and reserved.
     public static let blockInvoke = word + 8
 
