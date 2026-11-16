@@ -16,8 +16,13 @@ enum ManagerState {
 }
 
 final class CentralState: ObjectState {
-    /// Unretained, as Darwin's is weak.
-    var delegate: UnsafeMutableRawPointer?
+    /// Weak, as Darwin's is: nil once the delegate is deallocated, so an
+    /// event that arrives after that has no one to call.
+    private let delegateReference = WeakObject()
+    var delegate: UnsafeMutableRawPointer? {
+        get { delegateReference.object }
+        set { delegateReference.object = newValue }
+    }
     /// The delegate's queue, retained; nil for the main queue.
     var queue: UnsafeMutableRawPointer?
     var state = ManagerState.unknown
