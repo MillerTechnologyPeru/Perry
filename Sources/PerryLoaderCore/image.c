@@ -1085,6 +1085,22 @@ typedef void (*initializer_fn)(int, char **, char **, char **, const struct prog
 static perry_provider_image_fn *image_hooks;
 static uint32_t image_hook_count;
 
+// Providers' image_map hooks (perry_provider_image_map): told of every
+// image before any initializer runs.
+static perry_provider_image_fn *map_hooks;
+static uint32_t map_hook_count;
+
+static void notify_images_mapped(perry_loader *loader) {
+    for (perry_image *img = loader->images; img; img = img->next) {
+        if (img->map_notified)
+            continue;
+        img->map_notified = true;
+        perry_image_info info = { img->header, img->slide, img->path };
+        for (uint32_t i = 0; i < map_hook_count; i++)
+            map_hooks[i](&info);
+    }
+}
+
 static void notify_image_init(perry_image *image) {
     perry_image_info info = { image->header, image->slide, image->path };
     for (uint32_t i = 0; i < image_hook_count; i++)
@@ -1277,6 +1293,18 @@ static void start_providers(perry_loader *loader, perry_image *image) {
             image_hooks = realloc(image_hooks, sizeof(*image_hooks) * (image_hook_count + 1));
             image_hooks[image_hook_count++] = hook;
         }
+        perry_provider_image_fn map_hook = (perry_provider_image_fn)dlsym(handle, PERRY_PROVIDER_IMAGE_MAP_SYMBOL);
+        if (map_hook) {
+            map_hooks = realloc(map_hooks, sizeof(*map_hooks) * (map_hook_count + 1));
+            map_hooks[map_hook_count++] = map_hook;
+            // The images already announced were announced without it.
+            for (perry_image *img = loader->images; img; img = img->next) {
+                if (!img->map_notified)
+                    continue;
+                perry_image_info info = { img->header, img->slide, img->path };
+                map_hook(&info);
+            }
+        }
     }
 }
 
@@ -1294,6 +1322,7 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     program_name = slash ? slash + 1 : argv[0];
     start_providers(loader, image);
     perry_make_witness_tables(loader);
+    notify_images_mapped(loader);
     // Dependencies first, in load order, then the main executable last.
     for (perry_image *img = loader->images; img; img = img->next)
         if (img != image)
@@ -1422,6 +1451,7 @@ static bool load_library(const char *path) {
         }
         start_providers(loader, loader->main_image);
         perry_make_witness_tables(loader);
+        notify_images_mapped(loader);
         static char *no_apple[] = { NULL };
         for (perry_image *img = last ? last->next : loader->images; img; img = img->next)
             run_image_initializers(loader, img, program_argc, program_argv, program_envp, no_apple);
