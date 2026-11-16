@@ -28,6 +28,10 @@ final class ToolbarState: ObjectState {
     var translucent = true
     var barTintColor: UIColor?
     var delegate: UnsafeMutableRawPointer?
+    var standardAppearance: NSObject?
+    var compactAppearance: NSObject?
+    var scrollEdgeAppearance: NSObject?
+    var compactScrollEdgeAppearance: NSObject?
 }
 
 /// A bar of items along the bottom, in the tint color: titles, or icons
@@ -67,6 +71,15 @@ open class UIToolbar: UIView {
         toolbar.items = items?.elements.compactMap { $0.as(UIBarButtonItem.self) } ?? []
         setNeedsDisplay()
     }
+    // Appearances are kept as set; the bar draws as it does without them.
+    @ObjCMethod("standardAppearance") func standardAppearance() -> NSObject? { toolbar.standardAppearance }
+    @ObjCMethod("setStandardAppearance:") func setStandardAppearance(_ appearance: NSObject?) { toolbar.standardAppearance = appearance }
+    @ObjCMethod("compactAppearance") func compactAppearance() -> NSObject? { toolbar.compactAppearance }
+    @ObjCMethod("setCompactAppearance:") func setCompactAppearance(_ appearance: NSObject?) { toolbar.compactAppearance = appearance }
+    @ObjCMethod("scrollEdgeAppearance") func scrollEdgeAppearance() -> NSObject? { toolbar.scrollEdgeAppearance }
+    @ObjCMethod("setScrollEdgeAppearance:") func setScrollEdgeAppearance(_ appearance: NSObject?) { toolbar.scrollEdgeAppearance = appearance }
+    @ObjCMethod("compactScrollEdgeAppearance") func compactScrollEdgeAppearance() -> NSObject? { toolbar.compactScrollEdgeAppearance }
+    @ObjCMethod("setCompactScrollEdgeAppearance:") func setCompactScrollEdgeAppearance(_ appearance: NSObject?) { toolbar.compactScrollEdgeAppearance = appearance }
     @ObjCMethod("barStyle") func barStyle() -> Int { toolbar.barStyle }
     @ObjCMethod("setBarStyle:") func setBarStyle(_ style: Int) { toolbar.barStyle = style }
     @ObjCMethod("isTranslucent") func isTranslucent() -> Bool { toolbar.translucent }

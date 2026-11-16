@@ -151,6 +151,24 @@ extension NSObject {
         return objcObject
     }
 
+    /// The runtime's private weak reference support, which Kotlin/Native's
+    /// Objective-C interop looks up on NSObject: retaining an object that is
+    /// not being deallocated, which a live one is.
+    @ObjCMethod("_tryRetain")
+    func tryRetain() -> Bool {
+        RetainCounts.retain(objcObject)
+        return true
+    }
+
+    @ObjCMethod("_isDeallocating") func isDeallocating() -> Bool { false }
+    @ObjCMethod("allowsWeakReference") func allowsWeakReference() -> Bool { true }
+
+    @ObjCMethod("retainWeakReference")
+    func retainWeakReference() -> Bool {
+        RetainCounts.retain(objcObject)
+        return true
+    }
+
     @ObjCMethod("release", types: "Vv16@0:8")
     func release() {
         if RetainCounts.release(objcObject) {

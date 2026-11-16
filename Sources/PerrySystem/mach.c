@@ -1024,6 +1024,32 @@ kern_return_t darwin_task_policy_get(mach_port_t task, int flavor, int32_t *poli
     return KERN_SUCCESS;
 }
 
+// TASK_DYLD_INFO (17): where dyld's table of loaded images is. Perry has no
+// dyld: the table is empty, and its dyld image is a Mach-O header with no
+// load commands, which crash reporters walk to look for dyld's symbols and
+// find none.
+static const struct { uint32_t magic, cputype, cpusubtype, filetype, ncmds, sizeofcmds, flags, reserved; } no_dyld_header = {
+    0xfeedfacf, 0x0100000c, 0, 7 /* MH_DYLINKER */, 0, 0, 0, 0
+};
+static struct {
+    uint32_t version, infoArrayCount;
+    const void *infoArray, *notification;
+    uint8_t processDetachedFromSharedRegion, libSystemInitialized;
+    const void *dyldImageLoadAddress;
+    uint8_t rest[216];
+} image_infos = { .version = 1, .libSystemInitialized = 1, .dyldImageLoadAddress = &no_dyld_header };
+
+static kern_return_t task_dyld_info(int32_t *info, uint32_t *count) {
+    if (*count < 5)
+        return KERN_INVALID_ARGUMENT;
+    uint64_t address = (uint64_t)(uintptr_t)&image_infos, size = sizeof(image_infos);
+    memcpy(info, &address, 8);
+    memcpy(info + 2, &size, 8);
+    info[4] = 1; // TASK_DYLD_ALL_IMAGE_INFO_64
+    *count = 5;
+    return KERN_SUCCESS;
+}
+
 // MACH_TASK_BASIC_INFO 20 and TASK_BASIC_INFO_64 5: the memory used. On
 // arm64 TASK_BASIC_INFO_64 is TASK_BASIC_INFO_64_2, 18, laid out as 5.
 kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(task_info);
@@ -1031,6 +1057,8 @@ kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint
     (void)task;
     if (flavor == TASK_VM_INFO_FLAVOR)
         return task_vm_info(info, count);
+    if (flavor == 17)
+        return task_dyld_info(info, count);
     if (flavor == 18)
         flavor = 5;
     if ((flavor != 20 && flavor != 5) || *count < 10)
