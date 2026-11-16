@@ -179,6 +179,41 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCMethod("setHTTPShouldUsePipelining:") func setUsesPipelining(_ value: Bool) { configuration.usesPipelining = value }
 }
 
+/// NSCachedURLResponse: a response and its data, as a cache is given them
+/// to keep and as a session's delegate is asked whether to cache them.
+@ObjCClass("NSCachedURLResponse")
+open class NSCachedURLResponse: NSObject {
+    var cachedResponse: NSObject? = nil
+    var cachedData: NSObject? = nil
+    var cachedUserInfo: NSObject? = nil
+    /// NSURLCacheStoragePolicy: allowed 0, in memory only 1, not allowed 2.
+    var cachedPolicy: UInt = 0
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCMethod("initWithResponse:data:")
+    public required init(response: NSObject?, data: NSObject?) {
+        super.init()
+        cachedResponse = response
+        cachedData = data
+    }
+
+    @ObjCMethod("initWithResponse:data:userInfo:storagePolicy:")
+    public required init(response: NSObject?, data: NSObject?, userInfo: NSObject?, storagePolicy: UInt) {
+        super.init()
+        cachedResponse = response
+        cachedData = data
+        cachedUserInfo = userInfo
+        cachedPolicy = storagePolicy
+    }
+
+    @ObjCMethod("response") func response() -> NSObject? { cachedResponse }
+    @ObjCMethod("data") func data() -> NSObject? { cachedData }
+    @ObjCMethod("userInfo") func userInfo() -> NSObject? { cachedUserInfo }
+    @ObjCMethod("storagePolicy") func storagePolicy() -> UInt { cachedPolicy }
+}
+
 /// NSURLCache: the shared cache's interface. corelibs keeps its own cache;
 /// this one stores nothing.
 @ObjCClass("NSURLCache")

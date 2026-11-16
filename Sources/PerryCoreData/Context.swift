@@ -418,6 +418,19 @@ open class NSManagedObjectContext: NSObject {
         }
     }
 
+    /// A batch update or history request: its result, or nil with the error.
+    @ObjCMethod("executeRequest:error:")
+    func executeRequest(_ request: NSPersistentStoreRequest, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
+        do {
+            return try Requests.execute(request, in: self)
+        } catch let failure as CoreDataError {
+            error?.pointee = failure.error.objCReturnValue()
+            return nil
+        } catch {
+            return nil
+        }
+    }
+
     /// NSNotFound when the request fails.
     @ObjCMethod("countForFetchRequest:error:")
     func count(for request: NSFetchRequest, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int {

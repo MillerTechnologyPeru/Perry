@@ -29,6 +29,12 @@ extension NSDictionary: ExpressibleByDictionaryLiteral {
     }
 }
 
+extension NSOrderedSet: ExpressibleByArrayLiteral {
+    public required convenience init(arrayLiteral elements: Any...) {
+        self.init(array: elements)
+    }
+}
+
 extension NSString: ExpressibleByStringLiteral {
     public required convenience init(stringLiteral value: StaticString) {
         self.init(string: value.description)
@@ -55,6 +61,13 @@ extension NSDecimal: ExpressibleByIntegerLiteral {
 }
 
 @available(*, unavailable)
+extension NSDecimal: ExpressibleByFloatLiteral {
+    public init(floatLiteral value: Double) {
+        self = Decimal(value)._c
+    }
+}
+
+@available(*, unavailable)
 extension NSDecimal: Comparable {
     public static func < (lhs: NSDecimal, rhs: NSDecimal) -> Bool {
         Decimal(lhs) < Decimal(rhs)
@@ -62,6 +75,8 @@ extension NSDecimal: Comparable {
 }
 
 extension NSObject: CustomDebugStringConvertible {}
+
+extension NSObject: CustomStringConvertible {}
 
 // MARK: - Key-value observation by key path
 
