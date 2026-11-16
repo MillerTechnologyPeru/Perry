@@ -159,6 +159,49 @@ extension _KeyValueCodingAndObserving {
     }
 }
 
+extension _KeyValueCodingAndObserving {
+    private var kvcObject: NSObject { self as! NSObject }
+
+    private func kvcKey<Value>(_ keyPath: KeyPath<Self, Value>) -> String {
+        guard let name = keyPath._kvcKeyPathString else {
+            fatalError("Could not extract a String from KeyPath \(keyPath)")
+        }
+        return name
+    }
+
+    /// Tells observers the property is about to change, and that it has,
+    /// by its key path.
+    public func willChangeValue<Value>(for keyPath: __owned KeyPath<Self, Value>) {
+        kvcObject.willChangeValue(forKey: kvcKey(keyPath))
+    }
+
+    public func didChangeValue<Value>(for keyPath: __owned KeyPath<Self, Value>) {
+        kvcObject.didChangeValue(forKey: kvcKey(keyPath))
+    }
+
+    public func willChange<Value>(_ changeKind: NSKeyValueChange, valuesAt indexes: IndexSet,
+                                  for keyPath: __owned KeyPath<Self, Value>) {
+        kvcObject.willChange(changeKind, valuesAt: indexes, forKey: kvcKey(keyPath))
+    }
+
+    public func didChange<Value>(_ changeKind: NSKeyValueChange, valuesAt indexes: IndexSet,
+                                 for keyPath: __owned KeyPath<Self, Value>) {
+        kvcObject.didChange(changeKind, valuesAt: indexes, forKey: kvcKey(keyPath))
+    }
+
+    public func willChangeValue<Value>(for keyPath: __owned KeyPath<Self, Value>,
+                                       withSetMutation mutation: NSKeyValueSetMutationKind,
+                                       using set: Set<Value>) where Value: Hashable {
+        kvcObject.willChangeValue(forKey: kvcKey(keyPath), withSetMutation: mutation, using: set)
+    }
+
+    public func didChangeValue<Value>(for keyPath: __owned KeyPath<Self, Value>,
+                                      withSetMutation mutation: NSKeyValueSetMutationKind,
+                                      using set: Set<Value>) where Value: Hashable {
+        kvcObject.didChangeValue(forKey: kvcKey(keyPath), withSetMutation: mutation, using: set)
+    }
+}
+
 // MARK: - Scanner and strings
 
 extension Scanner {
