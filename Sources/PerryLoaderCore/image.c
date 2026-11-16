@@ -916,6 +916,10 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
             dep->image = find_loaded(loader, swift_path);
             if (!dep->image)
                 dep->image = load_image(loader, swift_path);
+            // A framework with Swift code (StoreKit's) may have Objective-C
+            // classes of a provider too: lookups try the image, then it.
+            if (name[0] == '/')
+                dep->provider = perry_find_provider(loader, name);
             continue;
         }
 
@@ -929,6 +933,10 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
                 dep->image = find_loaded(loader, framework_path);
                 if (!dep->image)
                     dep->image = load_image(loader, framework_path);
+                // A framework with Swift code (StoreKit's) may have Objective-C
+                // classes of a provider too: lookups try the image, then it.
+                if (name[0] == '/')
+                    dep->provider = perry_find_provider(loader, name);
                 continue;
             }
         }
