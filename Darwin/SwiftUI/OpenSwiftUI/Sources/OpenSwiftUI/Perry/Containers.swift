@@ -60,7 +60,7 @@ struct GroupedRows<Content: View>: View {
         ScrollView {
             // The style is set on the content, as the inputs of rows a
             // ForEach makes are its own, not where they are placed.
-            _VariadicView.Tree(GroupedRowsRoot(selection: selection, style: style)) { content.buttonStyle(ListRowButtonStyle()) }
+            _VariadicView.Tree(GroupedRowsRoot(selection: selection, style: style)) { content.buttonStyle(ListRowButtonStyle()).environment(\.isListRow, true) }
                 .padding(.vertical, style.isPlain ? 0 : 16)
         }
         // A plain list is transparent between and below its rows, which are
