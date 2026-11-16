@@ -284,6 +284,26 @@ open class UIImage: NSObject {
     @ObjCMethod("imageByApplyingSymbolConfiguration:")
     func applyingSymbolConfiguration(_ configuration: UIImageConfiguration?) -> UIImage? { withConfiguration(configuration) }
 
+    /// The image decoded ahead of being shown: images are decoded when
+    /// made here, so it is the image itself.
+    @ObjCMethod("imageByPreparingForDisplay") func preparingForDisplay() -> UIImage? { self }
+
+    @ObjCMethod("prepareForDisplayWithCompletionHandler:")
+    func prepareForDisplay(completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        Updates.afterPass { Blocks.call(completionHandler, self) }
+    }
+
+    /// The image at a thumbnail's size; not drawn smaller here, as the
+    /// layer that shows it scales it.
+    @ObjCMethod("imageByPreparingThumbnailOfSize:") func preparingThumbnail(of size: CGSize) -> UIImage? { self }
+
+    @ObjCMethod("prepareThumbnailOfSize:completionHandler:")
+    func prepareThumbnail(of size: CGSize, completionHandler: ObjCBlock?) {
+        guard let completionHandler else { return }
+        Updates.afterPass { Blocks.call(completionHandler, self) }
+    }
+
     /// A copy of the image with another rendering mode.
     @ObjCMethod("imageWithRenderingMode:")
     func withRenderingMode(_ mode: Int) -> UIImage {
