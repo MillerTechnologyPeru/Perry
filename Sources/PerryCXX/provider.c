@@ -449,7 +449,38 @@ static void *future_destroy(assoc_sub_state **future) {
     return future;
 }
 
+/// future<void>::future(__assoc_sub_state *), which packaged_task's and
+/// std::async's inlined code makes its future with: attaches to the state.
+static assoc_sub_state **future_attach(assoc_sub_state **future, assoc_sub_state *state) {
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    if (state->state & STATE_FUTURE_ATTACHED) future_failed("future already retrieved");
+    state_add_shared(state);
+    state->state |= STATE_FUTURE_ATTACHED;
+    darwin.mutex_unlock(&state->mutex);
+    *future = state;
+    return future;
+}
+
+/// __assoc_sub_state::set_value(): ready, with its (void) value.
+static void state_set_value(assoc_sub_state *state) {
+    load_future();
+    darwin.mutex_lock(&state->mutex);
+    if ((state->state & STATE_CONSTRUCTED) || state->exception) future_failed("promise already satisfied");
+    state->state |= STATE_CONSTRUCTED | STATE_READY;
+    darwin.cond_broadcast(&state->cond);
+    darwin.mutex_unlock(&state->mutex);
+}
+
+/// __make_ready(): ready, whatever it holds.
+static void state_ready(assoc_sub_state *state) { state_make_ready(state, STATE_READY); }
+
 static const struct { const char *name; void *function; } futures[] = {
+    { "__ZNSt3__16futureIvEC1EPNS_17__assoc_sub_stateE", (void *)future_attach },
+    { "__ZNSt3__16futureIvEC2EPNS_17__assoc_sub_stateE", (void *)future_attach },
+    { "__ZNSt3__117__assoc_sub_state9set_valueEv", (void *)state_set_value },
+    { "__ZNSt3__117__assoc_sub_state24set_value_at_thread_exitEv", (void *)state_set_value },
+    { "__ZNSt3__117__assoc_sub_state12__make_readyEv", (void *)state_ready },
     { "__ZNSt3__117__assoc_sub_state10__sub_waitERNS_11unique_lockINS_5mutexEEE", (void *)state_sub_wait },
     { "__ZNSt3__117__assoc_sub_state13set_exceptionESt13exception_ptr", (void *)state_set_exception },
     { "__ZNSt3__117__assoc_sub_state4waitEv", (void *)state_wait },
