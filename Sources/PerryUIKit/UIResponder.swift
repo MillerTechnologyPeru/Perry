@@ -12,6 +12,8 @@ open class UIResponder: NSObject {
     @ObjCMethod("canResignFirstResponder") func canResignFirstResponder() -> Bool { true }
     @ObjCMethod("resignFirstResponder") func resignFirstResponder() -> Bool { true }
     @ObjCMethod("isFirstResponder") func isFirstResponder() -> Bool { false }
+    /// The keyboard and its accessory are the system's here, so there is nothing to reload.
+    @ObjCMethod("reloadInputViews") func reloadInputViews() {}
     /// There is no undo here: apps that clear a field's undo stack message nil.
     @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
 
