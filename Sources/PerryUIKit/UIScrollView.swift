@@ -88,6 +88,8 @@ open class UIScrollView: UIView {
         super.dealloc()
     }
 
+    @ObjCMethod("contentLayoutGuide") func contentLayoutGuide() -> UILayoutGuide { scrollLayoutGuide(content: true) }
+    @ObjCMethod("frameLayoutGuide") func frameLayoutGuide() -> UILayoutGuide { scrollLayoutGuide(content: false) }
     @ObjCMethod("delegate") func delegate() -> NSObject? { scroll.delegate.object.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { scroll.delegate.object = delegate?.objcObject }
 
