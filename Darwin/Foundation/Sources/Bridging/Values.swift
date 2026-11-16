@@ -31,6 +31,13 @@ extension Data: _ObjectiveCBridgeable {
         let count = data.length
         self = count == 0 ? Data() : Data(bytes: data.bytes, count: count)
     }
+
+    /// A Data of the object's bytes. Darwin's references them without a
+    /// copy; here they are copied, which differs only for an NSMutableData
+    /// changed afterwards.
+    public init(referencing reference: __shared NSData) {
+        self.init(_bridging: reference)
+    }
 }
 
 // MARK: Date
