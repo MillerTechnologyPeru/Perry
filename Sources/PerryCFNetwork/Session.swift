@@ -123,6 +123,10 @@ open class NSURLSessionConfiguration: NSObject {
     @ObjCMethod("setHTTPCookieStorage:")
     func setCookieStorage(_ storage: NSObject?) { configuration.usesCookieStorage = storage != nil }
 
+    /// The credential storage is the shared one whatever is set.
+    @ObjCMethod("URLCredentialStorage") func credentialStorage() -> NSObject? { NSURLCredentialStorage.sharedCredentialStorage() }
+    @ObjCMethod("setURLCredentialStorage:") func setCredentialStorage(_ storage: NSObject?) {}
+
     @ObjCMethod("URLCache") func urlCache() -> NSObject? { configuration.hasURLCache ? NSURLCache.sharedCache() : nil }
     @ObjCMethod("setURLCache:") func setURLCache(_ cache: NSObject?) {}
 
