@@ -10,12 +10,12 @@ import PerryObjCInterop
 // it ended or failed.
 
 /// NSStreamStatus and NSStreamEvent values.
-private enum StreamStatus {
+enum StreamStatus {
     static let notOpen: UInt = 0, opening: UInt = 1, open: UInt = 2, reading: UInt = 3, writing: UInt = 4
     static let atEnd: UInt = 5, closed: UInt = 6, error: UInt = 7
 }
 
-private enum StreamEvent {
+enum StreamEvent {
     static let openCompleted: UInt = 1, hasBytesAvailable: UInt = 2, hasSpaceAvailable: UInt = 4
     static let errorOccurred: UInt = 8, endEncountered: UInt = 16
 }
@@ -31,6 +31,8 @@ final class StreamStorage {
         case pipeInput(StreamPipe)                      // a bound pair's ends
         case pipeOutput(StreamPipe)
         case unreachable                                // an HTTP request's, with no network to send it on
+        case socketInput(StreamSocket)                  // a connection's two streams (SocketStreams.swift)
+        case socketOutput(StreamSocket)
     }
 
     let source: Source
@@ -52,6 +54,11 @@ final class StreamStorage {
 
     deinit {
         client?.releaseInfo()
+        switch source {
+        case .socketInput(let socket): socket.detach(input: true)
+        case .socketOutput(let socket): socket.detach(input: false)
+        default: break
+        }
         if descriptor >= 0 { close(descriptor) }
         ObjC.release(error)
         for value in properties.values { ObjC.release(value) }
@@ -163,6 +170,12 @@ enum Streams {
             break
         }
         switch storage.source {
+        case .socketInput(let socket):
+            storage.status = StreamStatus.opening
+            return socket.open(object, input: true)
+        case .socketOutput(let socket):
+            storage.status = StreamStatus.opening
+            return socket.open(object, input: false)
         case .file, .fileOutput:
             if storage.descriptor < 0 { return fail(object, storage, code: errno) }
         case .unreachable:
@@ -204,6 +217,10 @@ enum Streams {
         case .pipeInput(let pipe):
             pipe.monitor.locked { pipe.inputClosed = true }
             pipe.monitor.broadcast()
+        case .socketInput(let socket):
+            socket.close(input: true)
+        case .socketOutput(let socket):
+            socket.close(input: false)
         default:
             break
         }
@@ -219,6 +236,7 @@ enum Streams {
         case .data(let data): return storage.offset < data.count
         case .file: return storage.status == StreamStatus.open
         case .pipeInput(let pipe): return pipe.monitor.locked { !pipe.bytes.isEmpty || pipe.outputClosed }
+        case .socketInput(let socket): return socket.hasBytes
         default: return false
         }
     }
@@ -230,6 +248,8 @@ enum Streams {
         }
         var count = 0
         switch storage.source {
+        case .socketInput(let socket):
+            return socket.read(object, storage, buffer, length)
         case .data(let data):
             count = min(length, data.count - storage.offset)
             if count > 0 {
@@ -270,6 +290,8 @@ enum Streams {
         guard let buffer, storage.status == StreamStatus.open else { return -1 }
         var count = 0
         switch storage.source {
+        case .socketOutput(let socket):
+            return socket.write(object, storage, buffer, length)
         case .memory:
             storage.written.append(buffer, count: length)
             count = length
@@ -342,6 +364,12 @@ enum Streams {
         default:
             break
         }
+        switch storage.source {
+        case .socketInput(let socket), .socketOutput(let socket):
+            if let value = socket.property(name) { return value }
+        default:
+            break
+        }
         return storage.properties[name]
     }
 
@@ -363,6 +391,10 @@ enum Streams {
             default:
                 return false
             }
+        }
+        switch storage.source {
+        case .socketInput(let socket), .socketOutput(let socket): socket.setProperty(name, value)
+        default: break
         }
         let old = storage.properties[name]
         storage.properties[name] = ObjC.retain(value)
@@ -415,6 +447,15 @@ public class NSStream: NSObject {
     static func boundStreams(size: UInt, input: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                              output: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
         let pair = Streams.boundPair(size: Int(min(size, UInt(Int.max))))
+        input?.pointee = pair.map { ObjC.autorelease($0.input) } ?? nil
+        output?.pointee = pair.map { ObjC.autorelease($0.output) } ?? nil
+    }
+
+    /// A connection's two streams, autoreleased; it is made when one opens.
+    @ObjCClassMethod("getStreamsToHostWithName:port:inputStream:outputStream:")
+    static func streams(toHost host: UnsafeMutableRawPointer?, port: Int, input: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                        output: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        let pair = Strings.value(of: host).flatMap { StreamSocket.pair(StreamSocket(host: $0, port: port)) }
         input?.pointee = pair.map { ObjC.autorelease($0.input) } ?? nil
         output?.pointee = pair.map { ObjC.autorelease($0.output) } ?? nil
     }

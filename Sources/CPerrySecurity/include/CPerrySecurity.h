@@ -49,4 +49,29 @@ int perry_tls_set_ciphers(perry_tls *tls, const uint16_t *ciphers, size_t count)
 size_t perry_tls_peer_certificates(perry_tls *tls);
 size_t perry_tls_peer_certificate(perry_tls *tls, size_t index, unsigned char *der, size_t capacity);
 
+// PKCS #12 (tls.c): what SecPKCS12Import reads, over OpenSSL.
+
+/// An identity read from PKCS #12 data: the private key as DER (PKCS #1
+/// for RSA, SEC 1 for an elliptic curve key; `key_type` is OpenSSL's
+/// EVP_PKEY number, 6 RSA and 408 EC), and the certificates as DER, the
+/// key's own first.
+typedef struct {
+    unsigned char *key;
+    size_t key_length;
+    int key_type;
+    unsigned char **certificates;
+    size_t *certificate_lengths;
+    size_t count;
+} perry_pkcs12;
+
+/// 0, or 1 when the data can't be read, 2 when the password is wrong and 3
+/// without OpenSSL. `password` may be NULL.
+int perry_pkcs12_parse(const unsigned char *data, size_t length, const char *password, perry_pkcs12 *out);
+void perry_pkcs12_free(perry_pkcs12 *identity);
+
+/// The certificate a connection sends when its peer asks for one, with its
+/// private key and the rest of its chain, all DER. An OSStatus.
+int perry_tls_set_identity(perry_tls *tls, const unsigned char *key, size_t key_length,
+                           const unsigned char *const *certificates, const size_t *lengths, size_t count);
+
 #endif

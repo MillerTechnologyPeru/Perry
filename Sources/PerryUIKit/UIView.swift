@@ -35,6 +35,10 @@ final class ViewState: ObjectState {
     var compressionResistancePriority = (width: Float(750), height: Float(750))
     var accessibilityIdentifier: String?
     var needsLayout = true
+    /// A constraint the view's layout solves has changed: the constraints
+    /// are solved again, and the view laid out only if a frame came out
+    /// different.
+    var constraintsChanged = false
     /// The superview, which retains this view; not retained.
     var superview: UnsafeMutableRawPointer?
     /// The subviews, back to front. After SwiftUI reorders their layers
@@ -362,7 +366,7 @@ open class UIView: UIResponder, UICoordinateSpace {
             state.constraints.append(constraint)
             constraint.as(NSLayoutConstraint.self)?.state.active = true
         }
-        setNeedsLayout()
+        constraintsNeedSolving()
     }
     @ObjCMethod("removeConstraint:") func removeConstraint(_ constraint: NSObject) { removeConstraints(NSMutableArray.of([constraint])) }
     @ObjCMethod("removeConstraints:") func removeConstraints(_ constraints: NSArray) {
@@ -371,7 +375,7 @@ open class UIView: UIResponder, UICoordinateSpace {
             constraint.as(NSLayoutConstraint.self)?.state.active = false
         }
         state.constraints.removeAll { removed.contains($0.objcObject) }
-        setNeedsLayout()
+        constraintsNeedSolving()
     }
     @ObjCMethod("translatesAutoresizingMaskIntoConstraints") func translatesAutoresizingMaskIntoConstraints() -> Bool {
         state.translatesAutoresizingMaskIntoConstraints
@@ -955,18 +959,25 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// from a timer or a message performed on the main thread show too.
     @ObjCMethod("setNeedsLayout")
     func setNeedsLayout() {
+        if LayoutTrace.enabled, !state.needsLayout { LayoutTrace.marked(self) }
         state.needsLayout = true
         Updates.schedule()
     }
 
-    /// A change to the view's intrinsic size: its superview lays it out
-    /// again, and so does each ancestor whose layout solves the view, up
-    /// through those constraints lay out.
-    func superviewNeedsLayout() {
+    /// A change to the view's intrinsic size: the ancestors whose layout
+    /// solves the view solve it again, and are laid out if a frame comes
+    /// out different. A size that changes nothing lays nothing out, so a
+    /// view that sets its labels' text when laid out settles.
+    func superviewNeedsLayout() { constraintsNeedSolving() }
+
+    /// A constraint on the view changed: it and the ancestors whose layout
+    /// solves it solve their constraints again in the next pass.
+    func constraintsNeedSolving() {
         var view = self
+        view.state.constraintsChanged = true
         while let superview = view.state.superview {
             let next = UIView.wrap(superview)
-            next.state.needsLayout = true
+            next.state.constraintsChanged = true
             guard !next.state.translatesAutoresizingMaskIntoConstraints else { break }
             view = next
         }
@@ -988,9 +999,18 @@ open class UIView: UIResponder, UICoordinateSpace {
                 sendSafeAreaInsetsDidChange()
             }
         }
+        // Changed constraints that give the frames there already were lay
+        // nothing out again, as on iOS: code that sets its constraints
+        // anew each time it is laid out would otherwise never settle.
+        if state.constraintsChanged, !state.needsLayout {
+            state.constraintsChanged = false
+            if AutoLayout.layOut(self) { state.needsLayout = true }
+        }
         if state.needsLayout {
             state.needsLayout = false
+            state.constraintsChanged = false
             if LayoutTrace.enabled { LayoutTrace.note(self) }
+            defer { if LayoutTrace.enabled { LayoutTrace.layingOut.removeLast() } }
             // A layer class with its own -layoutSublayers (Texture's lays
             // out its node there) is sent it, and reaches the view through
             // -layoutSublayersOfLayer:, as Core Animation lays a view out.
@@ -1005,22 +1025,51 @@ open class UIView: UIResponder, UICoordinateSpace {
     }
 
     /// PERRY_UIKIT_LAYOUT_TRACE: every second in which views were laid
-    /// out, how many times each class's were, the most first, to find a
-    /// layout that keeps asking for another.
+    /// out, how many times each class's were, the most first, and which
+    /// views were marked as needing layout while which were being laid
+    /// out, to find a layout that keeps asking for another.
     enum LayoutTrace {
         static let enabled = getenv("PERRY_UIKIT_LAYOUT_TRACE") != nil
         nonisolated(unsafe) static var counts: [String: Int] = [:]
+        nonisolated(unsafe) static var marks: [String: Int] = [:]
+        /// The classes of the views being laid out, innermost last.
+        nonisolated(unsafe) static var layingOut: [String] = []
         nonisolated(unsafe) static var since = 0.0
 
+        static func name(_ view: UIView) -> String {
+            ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+        }
+
+        /// A view is about to be laid out.
         static func note(_ view: UIView) {
-            let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+            let name = name(view)
+            layingOut.append(name)
             counts[name, default: 0] += 1
             let now = Clock.now
             guard now - since >= 1 else { return }
             since = now
-            let top = counts.sorted { $0.value > $1.value }.prefix(12).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            func top(_ counts: [String: Int]) -> String {
+                counts.sorted { $0.value > $1.value }.prefix(12).map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            }
+            uikitWarning("layout: \(top(counts))")
+            if !marks.isEmpty { uikitWarning("layout marked: \(top(marks))") }
             counts = [:]
-            uikitWarning("layout: \(top)")
+            marks = [:]
+        }
+
+        nonisolated(unsafe) static var moves = 0
+
+        /// Constraints gave a view another frame: the first forty, and
+        /// every five hundredth after, are written.
+        static func moved(_ view: UIView, from old: CGRect, to new: CGRect) {
+            moves += 1
+            guard moves <= 40 || moves % 500 == 0 else { return }
+            uikitWarning("layout moved \(name(view)) from \(old.minX),\(old.minY) \(old.width)x\(old.height) to \(new.minX),\(new.minY) \(new.width)x\(new.height)")
+        }
+
+        /// A view that didn't need layout was marked as needing it.
+        static func marked(_ view: UIView) {
+            marks["\(name(view)) during \(layingOut.last ?? "no layout")", default: 0] += 1
         }
     }
 

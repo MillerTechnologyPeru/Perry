@@ -95,6 +95,8 @@ enum Numbers {
     nonisolated(unsafe) static var constantDoubleClass: Class!
     nonisolated(unsafe) static var constantFloatClass: Class!
     nonisolated(unsafe) static var booleanClass: Class!
+    /// The class of the small numbers kept for good.
+    nonisolated(unsafe) static var keptClass: Class?
 
     /// A number's value, read from the static layouts of literals and
     /// kCFBooleanTrue/False, or from the storage of allocated numbers.
@@ -146,7 +148,10 @@ enum Numbers {
     static func make(_ cls: id?, _ value: NumberStorage.Value) -> id? {
         if cls == nil || cls == UnsafeMutableRawPointer(numberClass), let key = keptKey(value) {
             if let known = kept.withLock({ $0[key] }) { return UnsafeMutableRawPointer(bitPattern: known) }
-            guard let object = Storage.allocate(UnsafeMutableRawPointer(numberClass)) else { return nil }
+            // An instance of the class whose retain and release do nothing,
+            // as a tagged pointer's do: a release too many, harmless on
+            // Darwin, must not free a number the table still gives out.
+            guard let object = Storage.allocate(UnsafeMutableRawPointer(keptClass ?? numberClass)) else { return nil }
             Storage.set(object, NumberStorage(value))
             // The table's reference is never released; another thread's
             // number for the same value, made meanwhile, is the one kept.
@@ -375,6 +380,19 @@ final class NSConstantFloatNumber: NSNumber {
     override class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryImmortal(cls)
         Numbers.constantFloatClass = cls.markingStatic().storage
+    }
+}
+
+/// The small numbers kept for good (Numbers.kept): numbers like any other,
+/// but never retained, released or freed, as Darwin's tagged pointer
+/// numbers are not.
+@ObjCClass("__NSCFNumber")
+final class NSKeptNumber: NSNumber {
+    /// Set-up after the class is defined.
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        NSObject.registerObjCCategoryImmortal(cls)
+        Numbers.keptClass = cls.storage
     }
 }
 

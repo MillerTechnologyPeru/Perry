@@ -636,7 +636,7 @@ open class WKWebView: UIView {
     @ObjCMethod("customUserAgent") func customUserAgent() -> String? { web.customUserAgent }
     @ObjCMethod("setCustomUserAgent:") func setCustomUserAgent(_ agent: String?) {
         web.customUserAgent = agent
-        web.page?.setUserAgent(agent)
+        web.page?.setUserAgent(agent ?? WebViews.userAgent(for: web))
     }
     @ObjCMethod("allowsBackForwardNavigationGestures") func allowsBackForwardNavigationGestures() -> Bool { false }
     @ObjCMethod("setAllowsBackForwardNavigationGestures:") func setAllowsBackForwardNavigationGestures(_ allows: Bool) {}
@@ -795,11 +795,11 @@ extension UIView {
     /// A page for a web view whose state is `web`, of the view's size,
     /// showing its frames as the view's layer's contents; nil without WPE.
     func makeWebPage(_ web: WebViewState) -> WebPage? {
-        let size = state.bounds.size
-        guard let page = WebPage(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
+        let size = WebViews.pageSize(for: state.bounds.size)
+        guard let page = WebPage(width: UInt32(size.width), height: UInt32(size.height), scale: Float(Screen.scale))
         else { return nil }
         web.page = page
-        if let agent = web.customUserAgent { page.setUserAgent(agent) }
+        page.setUserAgent(web.customUserAgent ?? WebViews.userAgent(for: web))
         let object = objcObject
         WebViews.live.append((object, web))
         WebPage.tick = WebViews.tick
@@ -850,12 +850,35 @@ enum WebViews {
         return navigation
     }
 
+    /// The user agent a web view has without one of the app's: an
+    /// iPhone's, as WKWebView gives it there, with the iOS version the
+    /// device reports and the configuration's application name (Mobile and
+    /// a build by default). Sites choose their phone layout by it; the
+    /// engine's own names a desktop.
+    static func userAgent(for web: WebViewState) -> String {
+        let version = (getenv("PERRY_OS_VERSION").map { String(cString: $0) }
+            ?? NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0")
+            .split(separator: ".").prefix(2).joined(separator: "_")
+        let name = web.configuration?.as(WKWebViewConfiguration.self)?.applicationNameForUserAgent
+        let application = name.flatMap { $0.isEmpty ? nil : $0 } ?? "Mobile/15E148"
+        return "Mozilla/5.0 (iPhone; CPU iPhone OS \(version) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) \(application)"
+    }
+
+    /// The size a page lays out for: its view's, or the screen's while
+    /// the view has none, as on iOS. A page that starts loading before
+    /// its view is laid out measures a window it can use, where one point
+    /// square would have its scripts size everything for that.
+    static func pageSize(for size: CGSize) -> CGSize {
+        guard size.width >= 1, size.height >= 1 else { return Screen.bounds.size }
+        return size
+    }
+
     /// Pages follow their views' sizes.
     static func tick() {
         for (object, web) in live {
             guard let page = web.page else { continue }
-            let size = UIView(objcObject: object, ownership: .retain).state.bounds.size
-            page.resize(width: UInt32(max(size.width, 1)), height: UInt32(max(size.height, 1)), scale: Float(Screen.scale))
+            let size = pageSize(for: UIView(objcObject: object, ownership: .retain).state.bounds.size)
+            page.resize(width: UInt32(size.width), height: UInt32(size.height), scale: Float(Screen.scale))
         }
     }
 

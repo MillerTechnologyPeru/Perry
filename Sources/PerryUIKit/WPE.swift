@@ -418,6 +418,14 @@ final class WebPage {
         guard size != self.size else { return }
         self.size = size
         wpe.viewBackendDispatchSetSize(backend, size.0, size.1)
+        if WebPage.tracing {
+            WebPage.trace("resized to \(size.0)x\(size.1) at scale \(scale)")
+            Deferred.run(after: 3) { [weak self] in
+                self?.evaluate("innerWidth + 'x' + innerHeight + ' at ' + devicePixelRatio + ', document ' + document.documentElement.scrollWidth + ' wide, screen ' + screen.width + 'x' + screen.height + ', root font ' + getComputedStyle(document.documentElement).fontSize + ', body font ' + getComputedStyle(document.body).fontSize + ', visual viewport scale ' + (window.visualViewport ? visualViewport.scale : '?') + ', agent ' + navigator.userAgent") { result in
+                    if case .success(let text) = result { WebPage.trace("three seconds after resizing, page has \(text ?? "nothing")") }
+                }
+            }
+        }
     }
 
     /// Runs `script` in the page; `completion` hears its value as JSON (nil
@@ -562,7 +570,16 @@ final class WebPage {
 
     private static let onLoadChanged: @convention(c) (Pointer?, Int32, Pointer?) -> Void = { _, event, data in
         guard let data else { return }
-        Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue().loadChanged?(event)
+        let page = Unmanaged<WebPage>.fromOpaque(data).takeUnretainedValue()
+        // Traced once loaded (WEBKIT_LOAD_FINISHED 3): the viewport the
+        // page laid out for, beside the size and scale it was given.
+        if WebPage.tracing, event == 3 {
+            let given = "\(page.size.width)x\(page.size.height) at scale \(page.scale)"
+            page.evaluate("innerWidth + 'x' + innerHeight + ' at ' + devicePixelRatio + ', document ' + document.documentElement.scrollWidth + ' wide, viewport ' + (document.querySelector('meta[name=viewport]') || {}).content") { result in
+                if case .success(let text) = result { WebPage.trace("loaded: given \(given), page has \(text ?? "nothing")") }
+            }
+        }
+        page.loadChanged?(event)
     }
 
     /// load-failed: the view, the WebKitLoadEvent it failed at, the URI and

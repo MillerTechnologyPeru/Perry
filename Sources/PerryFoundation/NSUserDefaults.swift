@@ -24,7 +24,11 @@ final class UserDefaultsStorage {
         return URL(filePath: home + "/Library/Preferences/" + suite + ".plist")
     }
 
-    func value(_ key: String) -> PropertyValue? { values[key] ?? registered[key] ?? Self.global[key] }
+    /// Held around every use of the values: defaults are read and set from
+    /// any thread, as NSUserDefaults allows.
+    private let lock = Monitor()
+
+    func value(_ key: String) -> PropertyValue? { lock.locked { values[key] ?? registered[key] } ?? Self.global[key] }
 
     /// NSGlobalDomain's values that apps read as iOS always has them: the
     /// languages, most preferred first, and the locale.
@@ -37,14 +41,18 @@ final class UserDefaultsStorage {
     }()
 
     func set(_ value: PropertyValue?, for key: String) {
-        values[key] = value
-        changed()
+        lock.locked {
+            values[key] = value
+            changed()
+        }
     }
 
     /// Forgets every value set, as removing the domain does.
     func removeAll() {
-        values = [:]
-        changed()
+        lock.locked {
+            values = [:]
+            changed()
+        }
     }
 
     /// Whether values changed since they were last written, when that
@@ -59,48 +67,59 @@ final class UserDefaultsStorage {
     /// run loop are written together at the next, and at least once a
     /// second while a long piece of work keeps the loop from turning.
     func changed() {
-        dirty = true
-        if absoluteTimeNow() - lastSaved >= 1 {
-            save()
-        } else if !scheduled {
-            scheduled = true
-            RunLoops.mainLoop.perform(work: { [self] in
-                scheduled = false
-                saveIfChanged()
-            })
+        lock.locked {
+            dirty = true
+            if absoluteTimeNow() - lastSaved >= 1 {
+                save()
+            } else if !scheduled {
+                scheduled = true
+                RunLoops.mainLoop.perform(work: { [self] in
+                    lock.locked { scheduled = false }
+                    saveIfChanged()
+                })
+            }
         }
     }
 
     /// Writes the values if any changed, as -synchronize asks for.
     @discardableResult
     func saveIfChanged() -> Bool {
-        guard dirty, absoluteTimeNow() - lastSaved >= 1 else {
-            if dirty, !scheduled { changed() }
-            return true
+        lock.locked {
+            guard dirty, absoluteTimeNow() - lastSaved >= 1 else {
+                if dirty, !scheduled { changed() }
+                return true
+            }
+            return save()
         }
-        return save()
     }
 
     /// The values set, without the registered defaults: the domain as it
     /// is kept.
-    var persistent: [String: PropertyValue] { values }
+    var persistent: [String: PropertyValue] { lock.locked { values } }
 
     /// Replaces every value set, as setting the domain does.
     func replace(_ domain: [String: PropertyValue]) {
-        values = domain
-        changed()
+        lock.locked {
+            values = domain
+            changed()
+        }
     }
 
     func register(_ defaults: [String: PropertyValue]) {
-        registered.merge(defaults) { _, new in new }
+        lock.locked { registered.merge(defaults) { _, new in new } }
     }
 
-    var all: [String: PropertyValue] { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+    var all: [String: PropertyValue] {
+        lock.locked { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+    }
 
     @discardableResult
     func save() -> Bool {
-        dirty = false
-        lastSaved = absoluteTimeNow()
+        let values: [String: PropertyValue] = lock.locked {
+            dirty = false
+            lastSaved = absoluteTimeNow()
+            return self.values
+        }
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
         guard let data = try? encoder.encode(PropertyValue.dictionary(values)) else { return false }

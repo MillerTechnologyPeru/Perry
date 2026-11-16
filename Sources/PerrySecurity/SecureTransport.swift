@@ -192,11 +192,34 @@ public func SSLGetSessionOption(_ object: UnsafeMutableRawPointer?, _ option: In
     }
 }
 
-/// A client certificate isn't sent: a server that requires one ends the
-/// handshake.
+/// The certificate the connection sends when its peer asks for one: an
+/// array whose first element is the identity, the rest its chain. The
+/// identity's own chain (what its PKCS #12 data came with) is sent after it.
 @c(_SSLSetCertificate)
 public func SSLSetCertificate(_ object: UnsafeMutableRawPointer?, _ certificates: UnsafeRawPointer?) -> Int32 {
-    with(object) { _ in certificates == nil ? 0 : unimplemented }
+    with(object) { state in
+        guard let certificates else { return 0 }
+        guard let identity = Identities.first(in: UnsafeMutableRawPointer(mutating: certificates)) else { return paramErr }
+        var chain = identity.certificates
+        // Certificates given after the identity, which its own chain may lack.
+        let list = NSObject(UnsafeMutableRawPointer(mutating: certificates))
+        if list.isArray {
+            for element in NSArray(list.objcObject).elements {
+                if let certificate = Certificates.state(element.objcObject), !chain.contains(certificate.der) { chain.append(certificate.der) }
+            }
+        }
+        let pointers = chain.map { der -> UnsafeMutablePointer<UInt8> in
+            let copy = UnsafeMutablePointer<UInt8>.allocate(capacity: max(der.count, 1))
+            der.copyBytes(to: copy, count: der.count)
+            return copy
+        }
+        defer { pointers.forEach { $0.deallocate() } }
+        let constant = pointers.map { UnsafePointer<UInt8>($0) as UnsafePointer<UInt8>? }
+        let lengths = chain.map(\.count)
+        return identity.key.withUnsafeBytes { key in
+            perry_tls_set_identity(state.tls, key.bindMemory(to: UInt8.self).baseAddress, key.count, constant, lengths, chain.count)
+        }
+    }
 }
 
 @c(_SSLSetALPNProtocols)
