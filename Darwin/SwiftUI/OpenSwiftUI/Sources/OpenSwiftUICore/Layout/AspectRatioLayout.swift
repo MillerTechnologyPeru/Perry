@@ -242,14 +242,17 @@ extension CGSize {
         let scaleX = if let targetWidth = target.width, (width != 0 || targetWidth != 0) {
             targetWidth / width
         } else {
-            CGFloat.infinity
+            -CGFloat.infinity
         }
         let scaleY = if let targetHeight = target.height, (height != 0 || targetHeight != 0) {
             targetHeight / height
         } else {
-            CGFloat.infinity
+            -CGFloat.infinity
         }
-        return max(scaleX, scaleY)
+        // Perry: a dimension nothing is proposed for does not count, as
+        // SwiftUI's; an image filling a width alone takes its height from it.
+        let scale = max(scaleX, scaleY)
+        return scale == -.infinity ? .infinity : scale
     }
 
     package func scaledToFit(_ target: _ProposedSize) -> CGSize {
