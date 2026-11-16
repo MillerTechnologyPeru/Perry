@@ -209,6 +209,8 @@ open class UINavigationController: UIViewController {
 
     private func stackChanged(animated: Bool) {
         navigationBar().setItemsFromStack(navigation.viewControllers.map { $0.navigationItem() })
+        // A tab bar controller hides or shows its bar for what is on top.
+        tabBarController()?.state.view?.setNeedsLayout()
         scheduleTransition(animated: animated)
     }
 
