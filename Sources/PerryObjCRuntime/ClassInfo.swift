@@ -38,7 +38,8 @@ public final class ClassInfo {
     var propertyLists: [UnsafeRawPointer] = []
 
     var loadCalled = false
-    var initializing = false
+    /// The thread running the class's +initialize, or 0.
+    var initializingThread: UInt = 0
     let initialized = Atomic<Bool>(false)
 
     /// 0 unknown, 1 uses NSObject's retain/release, 2 overrides them.
