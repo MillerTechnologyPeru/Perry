@@ -47,6 +47,8 @@ final class DateFormatterStorage {
     /// A format set with -setDateFormat:; otherwise the styles' pattern.
     var format: String?
     var lenient = false
+    /// AM and PM symbols set over the locale's, by their index in ICU's list.
+    var amPMSymbols: [Int32: String] = [:]
     private var cached: (key: String, handle: DateHandle)?
 
     deinit {
@@ -106,12 +108,16 @@ final class DateFormatterStorage {
 
     var handle: DateHandle? {
         let pattern = self.pattern
-        let key = "\(pattern)|\(localeID)|\(effectiveTimeZone.identifier)|\(lenient)"
+        let key = "\(pattern)|\(localeID)|\(effectiveTimeZone.identifier)|\(lenient)|\(amPMSymbols)"
         if let cached, cached.key == key { return cached.handle }
         changed()
         guard let handle = Self.open(time: UDAT_PATTERN, date: UDAT_PATTERN, locale: localeID,
                                      zone: effectiveTimeZone.identifier, pattern: pattern) else { return nil }
         swift_udat_setLenient(handle, lenient ? 1 : 0)
+        for (index, symbol) in amPMSymbols {
+            var status = U_ZERO_ERROR
+            ICU.withUChars(symbol) { swift_udat_setSymbols(handle, UDAT_AM_PMS, index, UnsafeMutablePointer(mutating: $0), $1, &status) }
+        }
         cached = (key, handle)
         return handle
     }
@@ -311,8 +317,12 @@ public final class NSDateFormatter: NSFormatter {
     @ObjCMethod("standaloneWeekdaySymbols") func standaloneWeekdaySymbols() -> ObjCObject { symbols(UDAT_STANDALONE_WEEKDAYS) }
     @ObjCMethod("quarterSymbols") func quarterSymbols() -> ObjCObject { symbols(UDAT_QUARTERS) }
     @ObjCMethod("shortQuarterSymbols") func shortQuarterSymbols() -> ObjCObject { symbols(UDAT_SHORT_QUARTERS) }
-    @ObjCMethod("AMSymbol") func amSymbol() -> String { storage.symbols(UDAT_AM_PMS).first ?? "AM" }
-    @ObjCMethod("PMSymbol") func pmSymbol() -> String { storage.symbols(UDAT_AM_PMS).dropFirst().first ?? "PM" }
+    @ObjCMethod("AMSymbol")
+    func amSymbol() -> String { storage.amPMSymbols[0] ?? storage.symbols(UDAT_AM_PMS).first ?? "AM" }
+    @ObjCMethod("PMSymbol")
+    func pmSymbol() -> String { storage.amPMSymbols[1] ?? storage.symbols(UDAT_AM_PMS).dropFirst().first ?? "PM" }
+    @ObjCMethod("setAMSymbol:") func setAMSymbol(_ symbol: String?) { storage.amPMSymbols[0] = symbol }
+    @ObjCMethod("setPMSymbol:") func setPMSymbol(_ symbol: String?) { storage.amPMSymbols[1] = symbol }
 }
 
 /// NSISO8601DateFormatter: a fixed pattern in en_US_POSIX's Gregorian
