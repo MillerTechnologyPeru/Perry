@@ -386,6 +386,22 @@ final class AVPlayerState {
     var frame = VideoFrame()
     /// AVPlayerStatus: unknown 0, ready to play 1, failed 2.
     var status: Int?
+    var observers: [TimeObserver] = []
+}
+
+/// A periodic or boundary time observer: its block is called with the
+/// player's time while the player plays.
+final class TimeObserver {
+    let token: NSObject
+    let block: ObjCBlock
+    /// Seconds between calls of a periodic observer; nil for a boundary one,
+    /// which waits for times a player does not reach here.
+    let interval: Double?
+    var lastCalled = -Double.infinity
+
+    init(token: NSObject, block: ObjCBlock, interval: Double?) {
+        (self.token, self.block, self.interval) = (token, block, interval)
+    }
 }
 
 @ObjCClass("AVPlayer")
@@ -493,6 +509,38 @@ open class AVPlayer: NSObject {
         }
     }
 
+    // MARK: Time observers
+
+    @ObjCMethod("addPeriodicTimeObserverForInterval:queue:usingBlock:")
+    func addPeriodicTimeObserver(interval: CMTime, queue: NSObject?, block: ObjCBlock) -> NSObject {
+        let token = NSObject(ObjCClass(named: "NSObject").pointer).newInstance()
+        let seconds = interval.seconds
+        player.observers.append(TimeObserver(token: token, block: block, interval: seconds.isFinite && seconds > 0 ? seconds : 1))
+        return token
+    }
+
+    @ObjCMethod("addBoundaryTimeObserverForTimes:queue:usingBlock:")
+    func addBoundaryTimeObserver(times: NSObject?, queue: NSObject?, block: ObjCBlock) -> NSObject {
+        let token = NSObject(ObjCClass(named: "NSObject").pointer).newInstance()
+        player.observers.append(TimeObserver(token: token, block: block, interval: nil))
+        return token
+    }
+
+    @ObjCMethod("removeTimeObserver:")
+    func removeTimeObserver(_ token: NSObject?) {
+        player.observers.removeAll { $0.token.objcObject == token?.objcObject }
+    }
+
+    /// Calls the periodic observers whose interval has passed.
+    private func callObservers(_ time: CMTime) {
+        let seconds = time.seconds
+        for observer in player.observers {
+            guard let interval = observer.interval, seconds - observer.lastCalled >= interval || seconds < observer.lastCalled else { continue }
+            observer.lastCalled = seconds
+            observer.block.function(as: (@convention(c) (UnsafeMutableRawPointer?, CMTime) -> Void).self)(observer.block.object, time)
+        }
+    }
+
     @ObjCMethod("playImmediatelyAtRate:") func playImmediately(atRate rate: Float) { setRate(rate) }
     /// AVPlayerTimeControlStatus: paused 0, playing 2.
     @ObjCMethod("timeControlStatus") func timeControlStatus() -> Int { player.rate == 0 ? 0 : 2 }
@@ -586,6 +634,7 @@ open class AVPlayer: NSObject {
             finish(item)
             return player.rate != 0
         }
+        if !state.observers.isEmpty { callObservers(item.currentTime()) }
         return true
     }
 
@@ -594,12 +643,141 @@ open class AVPlayer: NSObject {
     /// seeking when it hears of the end, tells it).
     private func finish(_ item: AVPlayerItem) {
         Players.trace("item finished after \(player.frame.number) frames")
-        if player.actionAtItemEnd != 2 {
+        // A queue goes on to its next item, still playing.
+        let advancing = player.actionAtItemEnd == 0 && AVQueuePlayer.hasNext(objcObject)
+        if player.actionAtItemEnd != 2, !advancing {
             player.rate = 0
             item.pipeline?.pause()
         }
         item.item.finished = true
         NSNotificationCenter.defaultCenter().post(name: PlayerConstants.AVPlayerItemDidPlayToEndTimeNotification, object: item, userInfo: nil)
+        if advancing { AVQueuePlayer.advance(objcObject) }
+    }
+}
+
+// MARK: - AVQueuePlayer
+
+/// The items waiting behind a queue player's current one.
+final class QueuePlayerState {
+    var waiting: [AVPlayerItem] = []
+}
+
+extension NSObject {
+    @ObjCMethod("count") func sendCount() -> UInt
+    @ObjCMethod("objectAtIndex:") func sendObject(at index: UInt) -> NSObject
+}
+
+/// An AVPlayer that plays a list of items one after another: when the
+/// current one ends the next becomes current and plays on.
+@ObjCClass("AVQueuePlayer")
+open class AVQueuePlayer: AVPlayer {
+    static let queues = StateTable<QueuePlayerState>()
+    var queue: QueuePlayerState {
+        if let state = AVQueuePlayer.queues[objcObject] { return state }
+        let state = QueuePlayerState()
+        AVQueuePlayer.queues.set(objcObject, state)
+        return state
+    }
+
+    /// Whether another item waits for the player.
+    static func hasNext(_ player: UnsafeMutableRawPointer) -> Bool {
+        !(AVQueuePlayer.queues[player]?.waiting.isEmpty ?? true)
+    }
+
+    /// Makes the next waiting item current, which plays on if the player is.
+    static func advance(_ player: UnsafeMutableRawPointer) {
+        AVQueuePlayer(objcObject: player, ownership: .retain).advanceToNextItem()
+    }
+
+    private func take(_ items: NSObject?) {
+        queue.waiting = []
+        guard let items else { return }
+        var first = true
+        for index in 0..<items.sendCount() {
+            let item = AVPlayerItem(objcObject: items.sendObject(at: index).objcObject, ownership: .retain)
+            if first { player.item = item; first = false } else { queue.waiting.append(item) }
+        }
+        AVPlayer.ready(player.item)
+    }
+
+    @ObjCMethod("initWithItems:")
+    func initialize(items: NSObject?) -> Self {
+        player.actionAtItemEnd = 0
+        take(items)
+        becomeReadySoon()
+        return self
+    }
+
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        player.actionAtItemEnd = 0
+        becomeReadySoon()
+        return self
+    }
+
+    @ObjCClassMethod("queuePlayerWithItems:")
+    static func make(_ cls: ObjCClass, items: NSObject?) -> AVQueuePlayer {
+        let player = NSObject(cls.pointer).newInstance().unsafeCast(to: AVQueuePlayer.self)
+        return player.initialize(items: items)
+    }
+
+    @ObjCMethod("dealloc")
+    override func dealloc() {
+        AVQueuePlayer.queues.remove(objcObject)
+        super.dealloc()
+    }
+
+    /// The current item and those waiting.
+    @ObjCMethod("items")
+    func items() -> NSObject {
+        Arrays.of(([player.item].compactMap { $0 } + queue.waiting).map { NSObject($0.objcObject) })
+    }
+
+    @ObjCMethod("advanceToNextItem")
+    func advanceToNextItem() {
+        sendWillChangeValue(forKey: "currentItem")
+        let next = queue.waiting.isEmpty ? nil : queue.waiting.removeFirst()
+        replaceCurrentItem(next)
+        sendDidChangeValue(forKey: "currentItem")
+        if next == nil { player.rate = 0 }
+    }
+
+    @ObjCMethod("canInsertItem:afterItem:")
+    func canInsert(_ item: AVPlayerItem?, after afterItem: AVPlayerItem?) -> Bool { item != nil }
+
+    @ObjCMethod("insertItem:afterItem:")
+    func insert(_ item: AVPlayerItem?, after afterItem: AVPlayerItem?) {
+        guard let item else { return }
+        if player.item == nil {
+            replaceCurrentItem(item)
+            return
+        }
+        if let afterItem, afterItem.objcObject != player.item?.objcObject,
+           let index = queue.waiting.firstIndex(where: { $0.objcObject == afterItem.objcObject }) {
+            queue.waiting.insert(item, at: index + 1)
+        } else if let afterItem, afterItem.objcObject == player.item?.objcObject {
+            queue.waiting.insert(item, at: 0)
+        } else {
+            queue.waiting.append(item)
+        }
+    }
+
+    @ObjCMethod("removeItem:")
+    func remove(_ item: AVPlayerItem?) {
+        guard let item else { return }
+        if item.objcObject == player.item?.objcObject {
+            advanceToNextItem()
+        } else {
+            queue.waiting.removeAll { $0.objcObject == item.objcObject }
+        }
+    }
+
+    @ObjCMethod("removeAllItems")
+    func removeAllItems() {
+        queue.waiting = []
+        sendWillChangeValue(forKey: "currentItem")
+        replaceCurrentItem(nil)
+        sendDidChangeValue(forKey: "currentItem")
     }
 }
 
