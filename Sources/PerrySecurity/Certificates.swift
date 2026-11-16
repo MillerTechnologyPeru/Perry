@@ -602,3 +602,16 @@ public func SecTrustCopyAnchorCertificates(_ anchors: UnsafeMutablePointer<Unsaf
     objects.forEach { ObjCRuntime.release($0) }
     return 0
 }
+
+// MARK: - PKCS #12
+
+/// SecPKCS12Import: the identities in PKCS #12 data. Reading them (a
+/// private key and its certificates, for a TLS client's side) is not done
+/// here yet, so the import fails with errSecUnimplemented and gives no
+/// items; a program goes on without the client certificate.
+@c(_SecPKCS12Import)
+public func SecPKCS12Import(_ data: UnsafeMutableRawPointer?, _ options: UnsafeMutableRawPointer?,
+                            _ items: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    items?.pointee = nil
+    return -4
+}
