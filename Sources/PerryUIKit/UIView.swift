@@ -8,7 +8,21 @@ import PerryObjCInterop
 // visibility and opacity are the layer's, and its subviews' layers are
 // the layer's sublayers in the same order.
 
+/// A registration for trait changes (iOS 17): the handler or the target's
+/// action is called when the view's traits change.
+final class TraitObserver {
+    let token: NSObject
+    let block: ObjCBlock?
+    let target: NSObject?
+    let action: ObjCSelector?
+
+    init(token: NSObject, block: ObjCBlock?, target: NSObject?, action: ObjCSelector?) {
+        (self.token, self.block, self.target, self.action) = (token, block, target, action)
+    }
+}
+
 final class ViewState: ObjectState {
+    var traitObservers: [TraitObserver] = []
     /// The view's layer, and its properties.
     var layer: CALayer!
     var geometry: LayerGeometry!
@@ -539,10 +553,54 @@ open class UIView: UIResponder, UICoordinateSpace {
         var pending = [self]
         while let view = pending.popLast() {
             view.sendTraitCollectionDidChange(previous)
+            view.callTraitObservers(previous)
             if let controller = view.state.viewController {
                 NSObject(controller).sendTraitCollectionDidChange(previous)
             }
             pending.append(contentsOf: view.state.subviews)
+        }
+    }
+
+    /// iOS 17's trait overrides: the style set on it is the view's override.
+    @ObjCMethod("traitOverrides")
+    func traitOverrides() -> NSObject {
+        let overrides = UITraitOverrides.objCClass.object.allocated().unsafeCast(to: UITraitOverrides.self)
+        overrides.overrides.viewOwner = self
+        return overrides
+    }
+
+    // MARK: Trait change registrations
+
+    @ObjCMethod("registerForTraitChanges:withHandler:")
+    func registerForTraitChanges(_ traits: NSObject?, withHandler handler: ObjCBlock) -> NSObject {
+        let token = ObjCClass(named: "NSObject").object.newInstance()
+        state.traitObservers.append(TraitObserver(token: token, block: handler, target: nil, action: nil))
+        return token
+    }
+
+    @ObjCMethod("registerForTraitChanges:withTarget:action:")
+    func registerForTraitChanges(_ traits: NSObject?, withTarget target: NSObject?, action: ObjCSelector?) -> NSObject {
+        let token = ObjCClass(named: "NSObject").object.newInstance()
+        state.traitObservers.append(TraitObserver(token: token, block: nil, target: target, action: action))
+        return token
+    }
+
+    @ObjCMethod("unregisterForTraitChanges:")
+    func unregisterForTraitChanges(_ token: NSObject?) {
+        state.traitObservers.removeAll { $0.token.objcObject == token?.objcObject }
+    }
+
+    /// Calls the registrations made for any trait: a change of the traits
+    /// here is of the appearance alone.
+    func callTraitObservers(_ previous: UITraitCollection) {
+        for observer in state.traitObservers {
+            if let block = observer.block {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                    block.object, objcObject, previous.objcObject)
+            } else if let target = observer.target, let action = observer.action {
+                typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+                unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(target.objcObject, action.pointer, objcObject)
+            }
         }
     }
 
