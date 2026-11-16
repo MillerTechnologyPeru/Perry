@@ -65,6 +65,19 @@ extension EnvironmentValues {
     }
 }
 
+/// Whether a view is a row of a list or form: a navigation link draws as a
+/// row there, with a disclosure indicator, and as its label alone elsewhere.
+struct IsListRowKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isListRow: Bool {
+        get { self[IsListRowKey.self] }
+        set { self[IsListRowKey.self] = newValue }
+    }
+}
+
 // MARK: - The styles
 
 /// Generates a style's requirements, which no list calls.
