@@ -829,6 +829,14 @@ int darwin_mkdirat(int directory, const char *path, mode_t mode) {
     return mkdirat(directory_to_linux(directory), path, mode);
 }
 
+int darwin_mkfifoat(int directory, const char *path, mode_t mode) DARWIN_SYMBOL(mkfifoat);
+int darwin_mkfifoat(int directory, const char *path, mode_t mode) {
+    return mkfifoat(directory_to_linux(directory), path, mode);
+}
+
+int darwin_mkfifo(const char *path, mode_t mode) DARWIN_SYMBOL(mkfifo);
+int darwin_mkfifo(const char *path, mode_t mode) { return mkfifo(path, mode); }
+
 int darwin_renameat(int from_directory, const char *from, int to_directory, const char *to) DARWIN_SYMBOL(renameat);
 int darwin_renameat(int from_directory, const char *from, int to_directory, const char *to) {
     return renameat(directory_to_linux(from_directory), from, directory_to_linux(to_directory), to);
