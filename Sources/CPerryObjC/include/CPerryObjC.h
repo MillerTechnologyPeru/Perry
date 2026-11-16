@@ -166,6 +166,30 @@ static inline void *perry_load_acquire(void *const *slot) {
     return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
 }
 
+/// Marks a native Swift object as having weak references or associated
+/// objects: clears its "pure Swift dealloc" bit, the low bit of its
+/// reference count word, which Swift's
+/// swift_deallocClassInstance reads to skip objc_destructInstance. That is
+/// libobjc's job as it registers a weak reference or an association; without
+/// it the weak slots are not cleared as the object is freed.
+static inline void perry_swift_object_gains_objc_state(void *object) {
+#if defined(__LP64__)
+    uint64_t *word = (uint64_t *)((char *)object + 8);
+    uint64_t bits = __atomic_load_n(word, __ATOMIC_RELAXED);
+    // An object with a side table keeps its bits there; one whose word is
+    // not a reference count at all (an instance made from Objective-C
+    // before Swift's runtime sets one) is left as it is.
+    if (bits >> 63)
+        return;
+    while (bits & 1) {
+        if (__atomic_compare_exchange_n(word, &bits, bits & ~(uint64_t)1, 0, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+            break;
+    }
+#else
+    (void)object;
+#endif
+}
+
 static inline void perry_release_fence(void) {
     __atomic_thread_fence(__ATOMIC_RELEASE);
 }
