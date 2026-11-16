@@ -224,6 +224,12 @@ enum Bundles {
         return object
     }
 
+    /// A bundle already made whose identifier is `identifier`, as
+    /// +bundleWithIdentifier: finds bundles the process has opened.
+    static func known(identifier: String) -> id? {
+        byPath.sorted { $0.key < $1.key }.first { storage($0.value)?.identifier == identifier }?.value
+    }
+
     /// The executable's name of a system framework that has no directory
     /// here and that the loader has a provider for
     /// (/System/Library/Frameworks/Metal.framework), or nil. Unity finds
@@ -277,19 +283,20 @@ public final class NSBundle: NSObject {
         return Bundles.bundle(path: String(decoding: bytes[..<(start + marker.count - 1)], as: UTF8.self)) ?? Bundles.main
     }
 
+    /// No path or URL gives no bundle, as on Darwin.
     @ObjCClassMethod("bundleWithPath:")
-    static func bundle(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
+    static func bundle(path: String?) -> UnsafeMutableRawPointer? { path.flatMap { Bundles.bundle(path: $0) } }
 
     @ObjCClassMethod("bundleWithURL:")
-    static func bundle(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
+    static func bundle(url: NSURL?) -> UnsafeMutableRawPointer? { url.flatMap { Bundles.bundle(path: $0.url.path(percentEncoded: false)) } }
 
     /// The bundle at the path, made once: the receiver, newly allocated,
     /// is set aside for it.
     @ObjCMethod("initWithPath:")
-    func initialize(path: String) -> UnsafeMutableRawPointer? { Bundles.bundle(path: path) }
+    func initialize(path: String?) -> UnsafeMutableRawPointer? { path.flatMap { Bundles.bundle(path: $0) } }
 
     @ObjCMethod("initWithURL:")
-    func initialize(url: NSURL) -> UnsafeMutableRawPointer? { Bundles.bundle(path: url.url.path(percentEncoded: false)) }
+    func initialize(url: NSURL?) -> UnsafeMutableRawPointer? { url.flatMap { Bundles.bundle(path: $0.url.path(percentEncoded: false)) } }
 
     /// The app's own frameworks, which Darwin has loaded with it.
     static func frameworkBundles() -> [UnsafeMutableRawPointer] {
@@ -308,9 +315,12 @@ public final class NSBundle: NSObject {
     static func allFrameworks() -> UnsafeMutableRawPointer? { Arrays.autoreleased(frameworkBundles()) }
 
     @ObjCClassMethod("bundleWithIdentifier:")
-    static func bundle(identifier: String) -> UnsafeMutableRawPointer? {
-        guard let main = Bundles.storage(Bundles.main) else { return nil }
+    static func bundle(identifier: String?) -> UnsafeMutableRawPointer? {
+        guard let identifier, let main = Bundles.storage(Bundles.main) else { return nil }
         if main.identifier == identifier { return Bundles.main }
+        // A bundle the program has opened: a resource bundle is found by
+        // its identifier once it has been made from its path.
+        if let known = Bundles.known(identifier: identifier) { return known }
         // The app's own frameworks, which Darwin has loaded with it.
         let frameworks = main.path + "/Frameworks"
         for name in (try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? [] where name.hasSuffix(".framework") {
@@ -510,6 +520,7 @@ public final class NSBundle: NSObject {
         let directories = storage.localizationDirectories(localization, available: storage.localizations,
                                                           development: developmentLocalization() ?? "en")
         if let found = storage.localizedString(key, table: table, directories: directories) { return found }
+        BundleTrace.log("\(bundlePath()): no string \(key) in table \(table ?? "Localizable") of \(directories)")
         guard let value, !value.isEmpty else { return key }
         return value
     }
