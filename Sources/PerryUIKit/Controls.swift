@@ -306,11 +306,23 @@ open class UIButton: UIControl {
     @ObjCMethod("adjustsImageWhenDisabled") func adjustsImageWhenDisabled() -> Bool { true }
     @ObjCMethod("setAdjustsImageWhenDisabled:") func setAdjustsImageWhenDisabled(_ adjusts: Bool) {}
     @ObjCMethod("contentEdgeInsets") func contentEdgeInsets() -> UIEdgeInsets { button.contentEdgeInsets }
-    @ObjCMethod("setContentEdgeInsets:") func setContentEdgeInsets(_ insets: UIEdgeInsets) { button.contentEdgeInsets = insets; setNeedsLayout() }
+    @ObjCMethod("setContentEdgeInsets:") func setContentEdgeInsets(_ insets: UIEdgeInsets) {
+        let old = button.contentEdgeInsets
+        button.contentEdgeInsets = insets
+        if (old.top, old.left, old.bottom, old.right) != (insets.top, insets.left, insets.bottom, insets.right) { setNeedsLayout() }
+    }
     @ObjCMethod("titleEdgeInsets") func titleEdgeInsets() -> UIEdgeInsets { button.titleEdgeInsets }
-    @ObjCMethod("setTitleEdgeInsets:") func setTitleEdgeInsets(_ insets: UIEdgeInsets) { button.titleEdgeInsets = insets; setNeedsLayout() }
+    @ObjCMethod("setTitleEdgeInsets:") func setTitleEdgeInsets(_ insets: UIEdgeInsets) {
+        let old = button.titleEdgeInsets
+        button.titleEdgeInsets = insets
+        if (old.top, old.left, old.bottom, old.right) != (insets.top, insets.left, insets.bottom, insets.right) { setNeedsLayout() }
+    }
     @ObjCMethod("imageEdgeInsets") func imageEdgeInsets() -> UIEdgeInsets { button.imageEdgeInsets }
-    @ObjCMethod("setImageEdgeInsets:") func setImageEdgeInsets(_ insets: UIEdgeInsets) { button.imageEdgeInsets = insets; setNeedsLayout() }
+    @ObjCMethod("setImageEdgeInsets:") func setImageEdgeInsets(_ insets: UIEdgeInsets) {
+        let old = button.imageEdgeInsets
+        button.imageEdgeInsets = insets
+        if (old.top, old.left, old.bottom, old.right) != (insets.top, insets.left, insets.bottom, insets.right) { setNeedsLayout() }
+    }
 
     /// A system button's title is in the tint color, a custom one's white.
     private var defaultTitleColor: UIColor { button.type == 0 ? UIColor.white() : tintColor() }
@@ -333,8 +345,16 @@ open class UIButton: UIControl {
         update()
     }
 
-    /// The title and image for the current state.
+    /// The title and image for the current state. The button is laid out
+    /// again only when one of them is another, so a button whose layout
+    /// sets its state or its title to what it has settles.
     private func update() {
+        let shownTitle = button.titleLabel?.label.text, shownImage = button.imageView?.imageState.image?.objcObject
+        defer {
+            if button.titleLabel?.label.text != shownTitle || button.imageView?.imageState.image?.objcObject != shownImage {
+                setNeedsLayout()
+            }
+        }
         if let title = current(button.titles) {
             let label = titleLabel()
             label.setText(title)
@@ -352,7 +372,6 @@ open class UIButton: UIControl {
         if let background = current(button.backgroundImages) {
             state.geometry.contents = background.state.cgImage.map { NSObject($0) }
         }
-        setNeedsLayout()
     }
 
     @ObjCMethod("sizeThatFits:")
@@ -368,24 +387,52 @@ open class UIButton: UIControl {
 
     @ObjCMethod("intrinsicContentSize") func intrinsicButtonSize() -> CGSize { sizeThatFits(.zero) }
 
-    /// The image then the title, centered together.
-    @ObjCMethod("layoutSubviews")
-    override func layoutSubviews() {
-        let bounds = state.bounds.inset(by: button.contentEdgeInsets)
+    /// Where the content goes in the button: inside the content insets.
+    @ObjCMethod("contentRectForBounds:")
+    func contentRect(forBounds bounds: CGRect) -> CGRect { bounds.inset(by: button.contentEdgeInsets) }
+
+    @ObjCMethod("backgroundRectForBounds:")
+    func backgroundRect(forBounds bounds: CGRect) -> CGRect { bounds }
+
+    /// The image's and the title's places in the content: the image then
+    /// the title, together where the horizontal alignment puts them.
+    private func places(in content: CGRect) -> (image: CGRect, title: CGRect) {
         let imageSize = button.imageView?.imageState.image?.state.size ?? .zero
         let titleSize = button.titleLabel?.label.text.map { Text.size($0, font: titleLabel().font) } ?? .zero
         let total = imageSize.width + titleSize.width
         var x: CGFloat
         switch control.contentHorizontalAlignment {
-        case 1, 4: x = bounds.minX
-        case 2, 5: x = bounds.maxX - total
-        default: x = bounds.midX - total / 2
+        case 1, 4: x = content.minX
+        case 2, 5: x = content.maxX - total
+        default: x = content.midX - total / 2
         }
-        button.imageView?.sendSetFrame(CGRect(x: x, y: bounds.midY - imageSize.height / 2, width: imageSize.width, height: imageSize.height))
+        let image = CGRect(x: x, y: content.midY - imageSize.height / 2, width: imageSize.width, height: imageSize.height)
         x += imageSize.width
-        button.titleLabel?.sendSetFrame(CGRect(x: x, y: bounds.midY - titleSize.height / 2, width: min(titleSize.width, bounds.maxX - x),
-                                               height: titleSize.height))
+        let title = CGRect(x: x, y: content.midY - titleSize.height / 2, width: min(titleSize.width, content.maxX - x),
+                           height: titleSize.height)
+        return (image, title)
     }
+
+    @ObjCMethod("imageRectForContentRect:")
+    func imageRect(forContentRect content: CGRect) -> CGRect { places(in: content).image }
+
+    @ObjCMethod("titleRectForContentRect:")
+    func titleRect(forContentRect content: CGRect) -> CGRect { places(in: content).title }
+
+    /// The image and the title where the button's rect methods put them,
+    /// which a subclass overrides to arrange them its own way.
+    @ObjCMethod("layoutSubviews")
+    override func layoutSubviews() {
+        let content = sendContentRect(forBounds: state.bounds)
+        button.imageView?.sendSetFrame(sendImageRect(forContentRect: content))
+        button.titleLabel?.sendSetFrame(sendTitleRect(forContentRect: content))
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("contentRectForBounds:") func sendContentRect(forBounds bounds: CGRect) -> CGRect
+    @ObjCMethod("imageRectForContentRect:") func sendImageRect(forContentRect content: CGRect) -> CGRect
+    @ObjCMethod("titleRectForContentRect:") func sendTitleRect(forContentRect content: CGRect) -> CGRect
 }
 
 extension NSObject {
@@ -666,9 +713,75 @@ final class TextViewState: ObjectState {
     var selectable = true
     var delegate: UnsafeMutableRawPointer?
     var textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
+    /// The text container's: the space each side of every line.
+    var lineFragmentPadding: CGFloat = 5
+    /// The text container, made when first asked for.
+    var textContainer: NSTextContainer?
+    var linkTextAttributes: NSObject?
+    var typingAttributes: NSObject?
+    var selectedRange = PerryRange(location: 0, length: 0)
+    var allowsEditingTextAttributes = false
+    var clearsOnInsertion = false
+    var usesStandardTextScaling = false
     var attributedText: NSObject?
     var dataDetectorTypes: UInt = 0
     var inputTraits = TextInputTraits()
+}
+
+final class TextContainerState: ObjectState {
+    /// The text view whose container this is; not retained.
+    var textView: UnsafeMutableRawPointer?
+    var size = CGSize(width: 10_000_000, height: 10_000_000)
+    var lineFragmentPadding: CGFloat = 5
+    var maximumNumberOfLines = 0
+    var lineBreakMode = 0
+    var widthTracksTextView = true
+    var heightTracksTextView = false
+    var exclusionPaths: NSObject?
+}
+
+/// The region a text view's text is laid out in. A text view lays its text
+/// out with the padding; the line limit, break mode and exclusion paths are
+/// kept.
+@ObjCClass("NSTextContainer")
+open class NSTextContainer: NSObject {
+    static let states = StateTable<TextContainerState>()
+    var container: TextContainerState { NSTextContainer.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        NSTextContainer.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSTextContainer.objCClass.pointer)
+    }
+
+    @ObjCMethod("initWithSize:")
+    func initialize(size: CGSize) -> Self {
+        container.size = size
+        return self
+    }
+
+    private var view: UITextView? { container.textView.map { UIView.wrap($0) }?.as(UITextView.self) }
+
+    @ObjCMethod("size") func size() -> CGSize { container.size }
+    @ObjCMethod("setSize:") func setSize(_ size: CGSize) { container.size = size }
+    @ObjCMethod("lineFragmentPadding") func lineFragmentPadding() -> CGFloat { container.lineFragmentPadding }
+    @ObjCMethod("setLineFragmentPadding:")
+    func setLineFragmentPadding(_ padding: CGFloat) {
+        container.lineFragmentPadding = padding
+        guard let view else { return }
+        view.textState.lineFragmentPadding = padding
+        view.setNeedsLayout()
+    }
+    @ObjCMethod("maximumNumberOfLines") func maximumNumberOfLines() -> UInt { UInt(container.maximumNumberOfLines) }
+    @ObjCMethod("setMaximumNumberOfLines:") func setMaximumNumberOfLines(_ lines: UInt) { container.maximumNumberOfLines = Int(lines) }
+    @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { container.lineBreakMode }
+    @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { container.lineBreakMode = mode }
+    @ObjCMethod("widthTracksTextView") func widthTracksTextView() -> Bool { container.widthTracksTextView }
+    @ObjCMethod("setWidthTracksTextView:") func setWidthTracksTextView(_ tracks: Bool) { container.widthTracksTextView = tracks }
+    @ObjCMethod("heightTracksTextView") func heightTracksTextView() -> Bool { container.heightTracksTextView }
+    @ObjCMethod("setHeightTracksTextView:") func setHeightTracksTextView(_ tracks: Bool) { container.heightTracksTextView = tracks }
+    @ObjCMethod("exclusionPaths") func exclusionPaths() -> NSObject { container.exclusionPaths ?? NSMutableArray.of([]) }
+    @ObjCMethod("setExclusionPaths:") func setExclusionPaths(_ paths: NSObject?) { container.exclusionPaths = paths }
 }
 
 /// UITextInputTraits, as a text view keeps them: there is no keyboard of
@@ -739,6 +852,33 @@ open class UITextView: UIScrollView {
     @ObjCMethod("isSelectable") func isSelectable() -> Bool { textState.selectable }
     @ObjCMethod("setSelectable:") func setSelectable(_ selectable: Bool) { textState.selectable = selectable }
     @ObjCMethod("textDelegate") func textDelegate() -> NSObject? { textState.delegate.map { NSObject($0) } }
+    /// The region the text is laid out in, which holds the padding beside
+    /// each line.
+    @ObjCMethod("textContainer")
+    func textContainer() -> NSTextContainer {
+        if let container = textState.textContainer { return container }
+        let container = NSTextContainer.objCClass.object.newInstance().unsafeCast(to: NSTextContainer.self)
+        container.container.textView = objcObject
+        textState.textContainer = container
+        return container
+    }
+
+    /// Kept: links are drawn as the rest of the text is.
+    @ObjCMethod("linkTextAttributes") func linkTextAttributes() -> NSObject? { textState.linkTextAttributes }
+    @ObjCMethod("setLinkTextAttributes:") func setLinkTextAttributes(_ attributes: NSObject?) { textState.linkTextAttributes = attributes }
+    @ObjCMethod("typingAttributes") func typingAttributes() -> NSObject? { textState.typingAttributes }
+    @ObjCMethod("setTypingAttributes:") func setTypingAttributes(_ attributes: NSObject?) { textState.typingAttributes = attributes }
+    @ObjCMethod("selectedRange") func selectedRange() -> PerryRange { textState.selectedRange }
+    @ObjCMethod("setSelectedRange:") func setSelectedRange(_ range: PerryRange) { textState.selectedRange = range }
+    @ObjCMethod("allowsEditingTextAttributes") func allowsEditingTextAttributes() -> Bool { textState.allowsEditingTextAttributes }
+    @ObjCMethod("setAllowsEditingTextAttributes:") func setAllowsEditingTextAttributes(_ allows: Bool) {
+        textState.allowsEditingTextAttributes = allows
+    }
+    @ObjCMethod("clearsOnInsertion") func clearsOnInsertion() -> Bool { textState.clearsOnInsertion }
+    @ObjCMethod("setClearsOnInsertion:") func setClearsOnInsertion(_ clears: Bool) { textState.clearsOnInsertion = clears }
+    @ObjCMethod("usesStandardTextScaling") func usesStandardTextScaling() -> Bool { textState.usesStandardTextScaling }
+    @ObjCMethod("setUsesStandardTextScaling:") func setUsesStandardTextScaling(_ uses: Bool) { textState.usesStandardTextScaling = uses }
+
     @ObjCMethod("textContainerInset") func textContainerInset() -> UIEdgeInsets { textState.textContainerInset }
     @ObjCMethod("setTextContainerInset:") func setTextContainerInset(_ inset: UIEdgeInsets) { textState.textContainerInset = inset; textChanged() }
     @ObjCMethod("scrollRangeToVisible:") func scrollRangeToVisible(_ range: PerryRange) {}
@@ -798,7 +938,8 @@ open class UITextView: UIScrollView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let inset = textState.textContainerInset, width = state.bounds.width
-        let lines = TextLayout.lines(textState.text, font: font, width: width - inset.left - inset.right - 10)
+        let padding = textState.lineFragmentPadding
+        let lines = TextLayout.lines(textState.text, font: font, width: width - inset.left - inset.right - 2 * padding)
         let height = CGFloat(lines.count) * font.lineHeight() + inset.top + inset.bottom
         let content = textContent
         content.sendSetFrame(CGRect(x: 0, y: 0, width: width, height: height))
@@ -807,16 +948,16 @@ open class UITextView: UIScrollView {
     }
 
     func drawText(in bounds: CGRect) {
-        let inset = textState.textContainerInset
-        let lines = TextLayout.lines(textState.text, font: font, width: bounds.width - inset.left - inset.right - 10)
+        let inset = textState.textContainerInset, padding = textState.lineFragmentPadding
+        let lines = TextLayout.lines(textState.text, font: font, width: bounds.width - inset.left - inset.right - 2 * padding)
         let color = textState.textColor ?? UIColor.label()
         for (index, line) in lines.enumerated() {
             let width = Text.size(line, font: font).width
             let x: CGFloat
             switch textState.textAlignment {
             case 1: x = bounds.midX - width / 2
-            case 2: x = bounds.maxX - inset.right - 5 - width
-            default: x = inset.left + 5
+            case 2: x = bounds.maxX - inset.right - padding - width
+            default: x = inset.left + padding
             }
             Text.draw(line, at: CGPoint(x: x, y: inset.top + CGFloat(index) * font.lineHeight()), font: font, color: color)
         }
@@ -967,8 +1108,7 @@ open class NSLayoutConstraint: NSObject {
     private func invalidate() {
         for item in [state.firstItem, state.secondItem].compactMap({ $0 }) {
             guard let view = LayoutItems.resolve(item)?.view else { continue }
-            view.setNeedsLayout()
-            view.superviewNeedsLayout()
+            view.constraintsNeedSolving()
         }
     }
     @ObjCMethod("priority") func priority() -> Float { state.priority }
