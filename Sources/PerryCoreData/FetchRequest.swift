@@ -24,6 +24,13 @@ final class FetchRequestState: ObjectState {
     var returnsObjectsAsFaults = true
     var propertiesToFetch: NSObject?
     var propertiesToGroupBy: NSObject?
+    var havingPredicate: NSObject?
+    var relationshipKeyPathsForPrefetching: NSObject?
+    var affectedStores: NSObject?
+    var shouldRefreshRefetchedObjects = false
+    var includesPropertyValues = true
+    var includesSubentities = true
+    var returnsDistinctResults = false
 }
 
 @ObjCClass("NSPersistentStoreRequest")
@@ -81,9 +88,22 @@ open class NSFetchRequest: NSPersistentStoreRequest {
     @ObjCMethod("setPropertiesToFetch:") func setPropertiesToFetch(_ value: NSObject?) { state.propertiesToFetch = value }
     @ObjCMethod("propertiesToGroupBy") func propertiesToGroupBy() -> NSObject? { state.propertiesToGroupBy }
     @ObjCMethod("setPropertiesToGroupBy:") func setPropertiesToGroupBy(_ value: NSObject?) { state.propertiesToGroupBy = value }
-    @ObjCMethod("setRelationshipKeyPathsForPrefetching:") func setRelationshipKeyPathsForPrefetching(_ value: NSObject?) {}
-    @ObjCMethod("setIncludesSubentities:") func setIncludesSubentities(_ value: Bool) {}
-    @ObjCMethod("setReturnsDistinctResults:") func setReturnsDistinctResults(_ value: Bool) {}
+    // Settings kept for the apps that set and read them; a fetch here
+    // always makes the objects it returns, from the context's own store.
+    @ObjCMethod("relationshipKeyPathsForPrefetching") func relationshipKeyPathsForPrefetching() -> NSObject? { state.relationshipKeyPathsForPrefetching }
+    @ObjCMethod("setRelationshipKeyPathsForPrefetching:") func setRelationshipKeyPathsForPrefetching(_ value: NSObject?) { state.relationshipKeyPathsForPrefetching = value }
+    @ObjCMethod("includesSubentities") func includesSubentities() -> Bool { state.includesSubentities }
+    @ObjCMethod("setIncludesSubentities:") func setIncludesSubentities(_ value: Bool) { state.includesSubentities = value }
+    @ObjCMethod("returnsDistinctResults") func returnsDistinctResults() -> Bool { state.returnsDistinctResults }
+    @ObjCMethod("setReturnsDistinctResults:") func setReturnsDistinctResults(_ value: Bool) { state.returnsDistinctResults = value }
+    @ObjCMethod("shouldRefreshRefetchedObjects") func shouldRefreshRefetchedObjects() -> Bool { state.shouldRefreshRefetchedObjects }
+    @ObjCMethod("setShouldRefreshRefetchedObjects:") func setShouldRefreshRefetchedObjects(_ value: Bool) { state.shouldRefreshRefetchedObjects = value }
+    @ObjCMethod("includesPropertyValues") func includesPropertyValues() -> Bool { state.includesPropertyValues }
+    @ObjCMethod("setIncludesPropertyValues:") func setIncludesPropertyValues(_ value: Bool) { state.includesPropertyValues = value }
+    @ObjCMethod("havingPredicate") func havingPredicate() -> NSObject? { state.havingPredicate }
+    @ObjCMethod("setHavingPredicate:") func setHavingPredicate(_ value: NSObject?) { state.havingPredicate = value }
+    @ObjCMethod("affectedStores") func affectedStores() -> NSObject? { state.affectedStores }
+    @ObjCMethod("setAffectedStores:") func setAffectedStores(_ value: NSObject?) { state.affectedStores = value }
 
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> NSFetchRequest {
