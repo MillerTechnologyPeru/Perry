@@ -60,6 +60,10 @@ open class CAAnimation: NSObject {
         return ObjCRuntime.retain(copy.objcObject)
     }
 
+    /// An animation is its own mutable form: -mutableCopy is a copy.
+    @ObjCMethod("mutableCopyWithZone:")
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { copy(zone: zone) }
+
     func copied() -> CAAnimation { CAAnimation.objCInstance(copy(zone: nil)!, ownership: .adopt) }
 
     @ObjCMethod("duration") func duration() -> Double { state.duration }
