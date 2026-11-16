@@ -773,6 +773,40 @@ PASSTHROUGH _csqrtl, csqrt
 PASSTHROUGH _ctanl, ctan
 PASSTHROUGH _ctanhl, ctanh
 PASSTHROUGH _nexttoward, nextafter
+PASSTHROUGH _roundl, round
+PASSTHROUGH _floorl, floor
+PASSTHROUGH _ceill, ceil
+PASSTHROUGH _truncl, trunc
+PASSTHROUGH _rintl, rint
+PASSTHROUGH _nearbyintl, nearbyint
+PASSTHROUGH _fabsl, fabs
+PASSTHROUGH _sqrtl, sqrt
+PASSTHROUGH _sinl, sin
+PASSTHROUGH _cosl, cos
+PASSTHROUGH _tanl, tan
+PASSTHROUGH _asinl, asin
+PASSTHROUGH _acosl, acos
+PASSTHROUGH _atanl, atan
+PASSTHROUGH _atan2l, atan2
+PASSTHROUGH _sinhl, sinh
+PASSTHROUGH _coshl, cosh
+PASSTHROUGH _tanhl, tanh
+PASSTHROUGH _expl, exp
+PASSTHROUGH _exp2l, exp2
+PASSTHROUGH _logl, log
+PASSTHROUGH _log2l, log2
+PASSTHROUGH _log10l, log10
+PASSTHROUGH _powl, pow
+PASSTHROUGH _hypotl, hypot
+PASSTHROUGH _fmaxl, fmax
+PASSTHROUGH _fminl, fmin
+PASSTHROUGH _copysignl, copysign
+PASSTHROUGH _ldexpl, ldexp
+PASSTHROUGH _frexpl, frexp
+PASSTHROUGH _modfl, modf
+PASSTHROUGH _lroundl, lround
+PASSTHROUGH _lrintl, lrint
+PASSTHROUGH _llrintl, llrint
 
 #endif
 
