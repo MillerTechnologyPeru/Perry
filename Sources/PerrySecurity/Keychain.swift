@@ -328,6 +328,7 @@ final class Keychain: @unchecked Sendable {
     func copy(_ query: NSDictionary, result: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
         let itemClass = query.object(ItemKeys.kSecClass).flatMap { $0.isString ? $0.stringValue : nil }
         let persistent = query.object(ItemKeys.kSecValuePersistentRef) != nil
+        if itemClass == ItemKeys.kSecClassIdentity { return copyIdentity(query, result: result) }
         guard itemClass.map(Keychain.classes.contains) ?? persistent else { return Status.param }
         let limit = query.object(ItemKeys.kSecMatchLimit)
         let all = limit.map { $0.isString ? $0.stringValue == ItemKeys.kSecMatchLimitAll : ($0.integer ?? 1) > 1 } ?? false
@@ -342,6 +343,50 @@ final class Keychain: @unchecked Sendable {
             }
         }
         return Status.success
+    }
+
+    /// An identity: a private key the query's attributes match, with the
+    /// certificate in the keychain for its public key. Identities are not
+    /// items of their own, as on Darwin, where one is there once its key
+    /// and its certificate both are.
+    private func copyIdentity(_ query: NSDictionary, result: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+        let (keys, certificates) = withStore { store in
+            (store.items.filter { $0.itemClass == ItemKeys.kSecClassKey },
+             store.items.filter { $0.itemClass == ItemKeys.kSecClassCertificate })
+        }
+        // Each attribute asked for is the key's or the certificate's: a tag
+        // and key type name the key, a label may name either.
+        let wanted = query.entries.filter { !Keychain.isControl($0.0) && $0.0 != ItemKeys.kSecAttrSynchronizable }
+            .compactMap { entry in Value(entry.1).map { (entry.0, $0) } }
+        func matches(_ key: Item, _ certificate: Item) -> Bool {
+            wanted.allSatisfy { name, value in
+                if let present = key.attributes[name] { return present.matches(value) }
+                if let present = certificate.attributes[name] { return present.matches(value) }
+                return false
+            }
+        }
+        for item in keys {
+            if case .string(let keyClass)? = item.attributes[ItemKeys.kSecAttrKeyClass], keyClass != ItemKeys.kSecAttrKeyClassPrivate {
+                continue
+            }
+            guard let data = item.data, case .string(let type)? = item.attributes[ItemKeys.kSecAttrKeyType],
+                  let key = try? KeyState.make(type: type, isPrivate: true, data: data),
+                  let publicKey = try? key.publicKey.external else { continue }
+            for certificate in certificates where matches(item, certificate) {
+                guard let der = certificate.data, let state = CertificateState(der: der), state.key?.external == publicKey
+                else { continue }
+                if let result, wantsResult(query) {
+                    result.pointee = Identities.object(IdentityState(key: data, isRSA: type == ItemKeys.kSecAttrKeyTypeRSA,
+                                                                     certificates: [der]))
+                }
+                return Status.success
+            }
+        }
+        if KeychainTrace.enabled {
+            securityWarning("identity query: none of \(keys.count) keys and \(certificates.count) certificates pair up for "
+                            + wanted.map(\.0).sorted().joined(separator: " "))
+        }
+        return Status.itemNotFound
     }
 
     func update(_ query: NSDictionary, _ changes: NSDictionary) -> Int32 {
