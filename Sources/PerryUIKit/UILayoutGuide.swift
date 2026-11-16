@@ -61,6 +61,9 @@ final class ViewGuides: ObjectState {
     var readable: UILayoutGuide?
     var top: UILayoutGuide?
     var bottom: UILayoutGuide?
+    /// A scroll view's frame and content layout guides.
+    var scrollFrame: UILayoutGuide?
+    var scrollContent: UILayoutGuide?
     var added: [UILayoutGuide] = []
     /// The safe area insets the view was last laid out with.
     var laidOutSafeArea: UIEdgeInsets?
@@ -159,6 +162,18 @@ extension UIView {
         if let guide = guides.readable { return guide }
         let guide = UILayoutGuide.make(.margins, identifier: "UIViewReadableContentGuide", in: self)
         guides.readable = guide
+        return guide
+    }
+
+    /// A scroll view's frame or content layout guide. Both are the scroll
+    /// view's bounds here: constraints to the content guide place the
+    /// content at the frame's size, and don't give the content size.
+    func scrollLayoutGuide(content: Bool) -> UILayoutGuide {
+        let guides = UIView.guides[objcObject]
+        if let guide = content ? guides.scrollContent : guides.scrollFrame { return guide }
+        let guide = UILayoutGuide.make(.custom, identifier: content ? "UIScrollView-contentLayoutGuide" : "UIScrollView-frameLayoutGuide",
+                                       in: self)
+        if content { guides.scrollContent = guide } else { guides.scrollFrame = guide }
         return guide
     }
 
