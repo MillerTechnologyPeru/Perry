@@ -359,7 +359,10 @@ open class UIGestureRecognizer: NSObject {
     }
 
     @ObjCMethod("addTarget:action:")
-    func addTarget(_ target: NSObject, action: ObjCSelector) { state.targets.append((target.objcObject, action.pointer)) }
+    func addTarget(_ target: NSObject?, action: ObjCSelector?) {
+        // A nil target or action adds nothing, as on iOS.
+        if let target, let action { state.targets.append((target.objcObject, action.pointer)) }
+    }
 
     @ObjCMethod("removeTarget:action:")
     func removeTarget(_ target: NSObject?, action: ObjCSelector?) {
