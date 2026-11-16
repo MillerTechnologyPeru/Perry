@@ -16,6 +16,9 @@ final class TabBarControllerState: ObjectState {
     var delegate: UnsafeMutableRawPointer?
     var customizableViewControllers: NSObject?
     var transitionScheduled = false
+    /// The bar is hidden for a pushed controller that asks for that
+    /// (hidesBottomBarWhenPushed), and shown again when it is popped.
+    var hiddenForPush = false
 }
 
 /// The tab bar's height on an iPhone, above the home indicator.
@@ -266,7 +269,16 @@ open class UITabBarController: UIViewController {
         let bounds = view.state.bounds
         let bottom = view.windowObject != nil ? view.safeAreaInsets(ignoringController: true).bottom : 0
         let height = tabBarHeight + bottom
-        tabBar().sendSetFrame(CGRect(x: 0, y: bounds.maxY - height, width: bounds.width, height: height))
+        let bar = tabBar()
+        // A navigation controller's pushed controller may hide the bar:
+        // any above its root that asks for that does, until it is popped.
+        let hides = tabs.displayed?.as(UINavigationController.self)?.navigation.viewControllers.dropFirst()
+            .contains { $0.state.hidesBottomBarWhenPushed } ?? false
+        if hides != tabs.hiddenForPush {
+            tabs.hiddenForPush = hides
+            bar.setHidden(hides)
+        }
+        bar.sendSetFrame(CGRect(x: 0, y: bounds.maxY - height, width: bounds.width, height: height))
         if let displayed = tabs.displayed, let displayedView = displayed.state.view { displayedView.sendSetFrame(contentFrame()) }
     }
 
