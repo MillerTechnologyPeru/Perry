@@ -37,6 +37,7 @@ enum {
     SSL_ERROR_WANT_WRITE = 3,
     SSL_ERROR_ZERO_RETURN = 6,
     SSL_CTRL_SET_TLSEXT_HOSTNAME = 55,
+    SSL_CTRL_CHAIN_CERT = 89,
     SSL_CTRL_SET_MIN_PROTO_VERSION = 123,
     SSL_CTRL_SET_MAX_PROTO_VERSION = 124,
     SSL_VERIFY_NONE = 0,
@@ -532,4 +533,149 @@ size_t perry_tls_peer_certificate(perry_tls *tls, size_t index, unsigned char *d
         ossl.i2d_x509(certificate, &cursor);
     }
     return (size_t)length;
+}
+
+// MARK: - Identities
+
+// What reading PKCS #12 and using an identity need of OpenSSL, looked up
+// when first wanted: connections without client certificates don't need
+// them.
+static struct {
+    void *(*d2i_pkcs12)(void *, const unsigned char **, long);
+    int (*pkcs12_parse)(void *, const char *, void **, void **, void **);
+    int (*pkcs12_verify_mac)(void *, const char *, int);
+    void (*pkcs12_free)(void *);
+    int (*i2d_private_key)(const void *, unsigned char **);
+    int (*pkey_base_id)(const void *);
+    void (*pkey_free)(void *);
+    void (*x509_free)(void *);
+    void *(*d2i_x509)(void *, const unsigned char **, long);
+    void *(*d2i_auto_private_key)(void *, const unsigned char **, long);
+    void (*sk_pop_free)(void *, void (*)(void *));
+    void *(*provider_load)(void *, const char *);
+    int (*use_certificate)(void *, void *);
+    int (*use_private_key)(void *, void *);
+} identity;
+
+static int identity_loaded;
+static pthread_once_t identity_once = PTHREAD_ONCE_INIT;
+
+static void load_identity(void) {
+    void *ssl = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
+    void *crypto = dlopen("libcrypto.so.3", RTLD_NOW | RTLD_LOCAL);
+    if (!ssl || !crypto) return;
+#define C(field, name) if (!(*(void **)&identity.field = dlsym(crypto, name))) return;
+    C(d2i_pkcs12, "d2i_PKCS12")
+    C(pkcs12_parse, "PKCS12_parse")
+    C(pkcs12_verify_mac, "PKCS12_verify_mac")
+    C(pkcs12_free, "PKCS12_free")
+    C(i2d_private_key, "i2d_PrivateKey")
+    C(pkey_base_id, "EVP_PKEY_get_base_id")
+    C(pkey_free, "EVP_PKEY_free")
+    C(x509_free, "X509_free")
+    C(d2i_x509, "d2i_X509")
+    C(d2i_auto_private_key, "d2i_AutoPrivateKey")
+    C(sk_pop_free, "OPENSSL_sk_pop_free")
+    C(provider_load, "OSSL_PROVIDER_load")
+#undef C
+    if (!(*(void **)&identity.use_certificate = dlsym(ssl, "SSL_use_certificate"))) return;
+    if (!(*(void **)&identity.use_private_key = dlsym(ssl, "SSL_use_PrivateKey"))) return;
+    // Files from older tools encrypt with RC2, which is in the legacy
+    // provider; loading one provider by name stops the default one loading
+    // itself, so that is loaded too.
+    identity.provider_load(NULL, "default");
+    identity.provider_load(NULL, "legacy");
+    identity_loaded = 1;
+}
+
+static unsigned char *der_of(int (*encode)(const void *, unsigned char **), const void *object, size_t *length) {
+    int size = encode(object, NULL);
+    if (size <= 0) return NULL;
+    unsigned char *bytes = malloc((size_t)size), *cursor = bytes;
+    if (!bytes) return NULL;
+    encode(object, &cursor);
+    *length = (size_t)size;
+    return bytes;
+}
+
+int perry_pkcs12_parse(const unsigned char *data, size_t length, const char *password, perry_pkcs12 *out) {
+    memset(out, 0, sizeof *out);
+    pthread_once(&load_once, load);
+    pthread_once(&identity_once, load_identity);
+    if (!loaded || !identity_loaded) return 3;
+    const unsigned char *cursor = data;
+    void *p12 = identity.d2i_pkcs12(NULL, &cursor, (long)length);
+    if (!p12) {
+        ossl.clear_error();
+        return 1;
+    }
+    if (!password) password = "";
+    void *key = NULL, *certificate = NULL, *others = NULL;
+    if (!identity.pkcs12_parse(p12, password, &key, &certificate, &others)) {
+        // The password, or something in the file that can't be read.
+        int wrong = !identity.pkcs12_verify_mac(p12, password, -1);
+        identity.pkcs12_free(p12);
+        ossl.clear_error();
+        return wrong ? 2 : 1;
+    }
+    identity.pkcs12_free(p12);
+    int status = 1;
+    size_t extra = others ? (size_t)ossl.sk_num(others) : 0;
+    if (key && certificate) {
+        out->key = der_of(identity.i2d_private_key, key, &out->key_length);
+        out->key_type = identity.pkey_base_id(key);
+        out->certificates = calloc(1 + extra, sizeof *out->certificates);
+        out->certificate_lengths = calloc(1 + extra, sizeof *out->certificate_lengths);
+        if (out->key && out->certificates && out->certificate_lengths) {
+            out->certificates[0] = der_of(ossl.i2d_x509, certificate, &out->certificate_lengths[0]);
+            out->count = out->certificates[0] ? 1 : 0;
+            for (size_t i = 0; i < extra && out->count; i++) {
+                size_t size = 0;
+                unsigned char *bytes = der_of(ossl.i2d_x509, ossl.sk_value(others, (int)i), &size);
+                if (!bytes) continue;
+                out->certificates[out->count] = bytes;
+                out->certificate_lengths[out->count++] = size;
+            }
+            if (out->count) status = 0;
+        }
+    }
+    if (key) identity.pkey_free(key);
+    if (certificate) identity.x509_free(certificate);
+    if (others) identity.sk_pop_free(others, identity.x509_free);
+    if (status) perry_pkcs12_free(out);
+    ossl.clear_error();
+    return status;
+}
+
+void perry_pkcs12_free(perry_pkcs12 *item) {
+    free(item->key);
+    for (size_t i = 0; i < item->count; i++) free(item->certificates[i]);
+    free(item->certificates);
+    free(item->certificate_lengths);
+    memset(item, 0, sizeof *item);
+}
+
+int perry_tls_set_identity(perry_tls *tls, const unsigned char *key, size_t key_length,
+                           const unsigned char *const *certificates, const size_t *lengths, size_t count) {
+    pthread_once(&identity_once, load_identity);
+    if (!identity_loaded || !count) return errSSLInternal;
+    if (tls->state != kSSLIdle) return errSSLProtocol;
+    const unsigned char *cursor = key;
+    void *pkey = identity.d2i_auto_private_key(NULL, &cursor, (long)key_length);
+    cursor = certificates[0];
+    void *leaf = identity.d2i_x509(NULL, &cursor, (long)lengths[0]);
+    int ok = pkey && leaf && identity.use_certificate(tls->ssl, leaf) == 1 && identity.use_private_key(tls->ssl, pkey) == 1;
+    // The rest of the chain, which the connection keeps a reference to
+    // (SSL_add1_chain_cert).
+    for (size_t i = 1; ok && i < count; i++) {
+        cursor = certificates[i];
+        void *link = identity.d2i_x509(NULL, &cursor, (long)lengths[i]);
+        if (!link) continue;
+        ossl.ctrl(tls->ssl, SSL_CTRL_CHAIN_CERT, 1, link);
+        identity.x509_free(link);
+    }
+    if (pkey) identity.pkey_free(pkey);
+    if (leaf) identity.x509_free(leaf);
+    ossl.clear_error();
+    return ok ? 0 : paramErr;
 }
