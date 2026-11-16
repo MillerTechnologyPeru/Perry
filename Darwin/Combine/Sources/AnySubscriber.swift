@@ -160,6 +160,7 @@ internal final class AnySubscriberBox<Base: Subscriber>
     @usableFromInline
     internal let base: Base
 
+    @usableFromInline
     internal init(_ base: Base) {
         self.base = base
     }
