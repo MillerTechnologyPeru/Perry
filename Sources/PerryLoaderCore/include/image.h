@@ -92,6 +92,7 @@ typedef struct perry_image {
     bool fixed_up;
     bool initialized;
     bool initializing;
+    bool map_notified;   // announced to the providers' image_map hooks
 } perry_image;
 
 typedef struct perry_loader {

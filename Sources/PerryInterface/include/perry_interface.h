@@ -59,6 +59,14 @@ typedef struct perry_image_info {
 typedef void (*perry_provider_image_fn)(const perry_image_info *image);
 #define PERRY_PROVIDER_IMAGE_INIT_SYMBOL "perry_provider_image_init"
 
+// Providers may export this function. The loader calls it for every Mach-O
+// image as soon as the images of a load are mapped and bound, before any
+// image's initializers run or any provider's image_init hook is called:
+// where dyld has its list of images complete, which code running as a
+// class loads (+load) reads with _dyld_image_count. A provider that starts
+// later is called for the images already announced.
+#define PERRY_PROVIDER_IMAGE_MAP_SYMBOL "perry_provider_image_map"
+
 // Providers may export this function. The loader calls it, while binding,
 // for a symbol (by Mach-O name, "_NSCocoaErrorDomain") the provider does not
 // define as an ELF symbol; it returns the symbol's address, or NULL. Lets a

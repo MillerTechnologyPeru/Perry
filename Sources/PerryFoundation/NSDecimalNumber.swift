@@ -42,6 +42,25 @@ public class NSDecimalNumber: NSNumber {
         return number(cls, isNegative ? -value : value)
     }
 
+    @ObjCMethod("initWithString:")
+    func initialize(string: String?) -> UnsafeMutableRawPointer? { setValue(NSDecimalNumber.parse(string)) }
+
+    @ObjCMethod("initWithString:locale:")
+    func initialize(string: String?, locale: NSObject?) -> UnsafeMutableRawPointer? { setValue(NSDecimalNumber.parse(string)) }
+
+    @ObjCMethod("initWithMantissa:exponent:isNegative:")
+    func initialize(mantissa: UInt64, exponent: Int16, isNegative: Bool) -> UnsafeMutableRawPointer? {
+        var value = Double(mantissa)
+        for _ in 0 ..< abs(Int(exponent)) { value = exponent > 0 ? value * 10 : value / 10 }
+        return setValue(isNegative ? -value : value)
+    }
+
+    /// An -init…'s result, +1, as the receiver is released when the method
+    /// returns.
+    private func setValue(_ value: Double) -> UnsafeMutableRawPointer? {
+        ObjC.retain(Numbers.initialize(objcObject, .double(value)))
+    }
+
     @ObjCMethod("decimalNumberByAdding:")
     func adding(_ other: NSNumber) -> NSDecimalNumber { number(value + Numbers.storage(other.objcObject).double) }
 
@@ -59,12 +78,110 @@ public class NSDecimalNumber: NSNumber {
         return number(divisor == 0 ? .nan : value / divisor)
     }
 
+    /// The value rounded to `scale` places by an NSRoundingMode: plain 0,
+    /// down 1, up 2, bankers 3; NSDecimalNoScale (Int16.max) leaves it.
+    private func rounded(mode: UInt, scale: Int16) -> NSDecimalNumber {
+        guard scale != Int16.max, value.isFinite else { return number(value) }
+        var factor = 1.0
+        for _ in 0 ..< abs(Int(scale)) { factor *= 10 }
+        let scaled = scale >= 0 ? value * factor : value / factor
+        let whole: Double
+        switch mode {
+        case 1: whole = scaled.rounded(.down)
+        case 2: whole = scaled.rounded(.up)
+        case 3: whole = scaled.rounded(.toNearestOrEven)
+        default: whole = scaled.rounded(.toNearestOrAwayFromZero)
+        }
+        return number(scale >= 0 ? whole / factor : whole * factor)
+    }
+
+    private func rounded(by behavior: NSObject?) -> NSDecimalNumber {
+        guard let behavior else { return self }
+        let object = behavior.unsafeCast(to: DecimalBehaviorObject.self)
+        return rounded(mode: object.roundingMode(), scale: object.scale())
+    }
+
+    @ObjCMethod("decimalNumberByRoundingAccordingToBehavior:")
+    func rounding(accordingTo behavior: NSObject?) -> NSDecimalNumber { rounded(by: behavior) }
+
+    @ObjCMethod("decimalNumberByAdding:withBehavior:")
+    func adding(_ other: NSNumber, withBehavior behavior: NSObject?) -> NSDecimalNumber { adding(other).rounded(by: behavior) }
+
+    @ObjCMethod("decimalNumberBySubtracting:withBehavior:")
+    func subtracting(_ other: NSNumber, withBehavior behavior: NSObject?) -> NSDecimalNumber { subtracting(other).rounded(by: behavior) }
+
+    @ObjCMethod("decimalNumberByMultiplyingBy:withBehavior:")
+    func multiplying(by other: NSNumber, withBehavior behavior: NSObject?) -> NSDecimalNumber { multiplying(by: other).rounded(by: behavior) }
+
+    @ObjCMethod("decimalNumberByDividingBy:withBehavior:")
+    func dividing(by other: NSNumber, withBehavior behavior: NSObject?) -> NSDecimalNumber { dividing(by: other).rounded(by: behavior) }
+
     @ObjCMethod("decimalNumberByMultiplyingByPowerOf10:")
     func multiplying(byPowerOf10 power: Int16) -> NSDecimalNumber {
         var result = value
         for _ in 0 ..< abs(Int(power)) { result = power > 0 ? result * 10 : result / 10 }
         return number(result)
     }
+}
+
+/// What an NSDecimalNumberBehaviors object answers.
+@ObjCWrapper("NSObject")
+final class DecimalBehaviorObject: NSObject {
+    @ObjCMethod("roundingMode") func roundingMode() -> UInt
+    @ObjCMethod("scale") func scale() -> Int16
+}
+
+final class DecimalHandlerStorage {
+    var mode: UInt = 0
+    var scale: Int16 = Int16.max
+}
+
+/// NSDecimalNumberHandler: a rounding mode and a scale, the behavior a
+/// decimal number rounds by. The raise-on flags are kept out: arithmetic
+/// here does not raise.
+@ObjCClass("NSDecimalNumberHandler")
+public final class NSDecimalNumberHandler: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+    }
+
+    private var storage: DecimalHandlerStorage {
+        if let storage = Storage.get(objcObject, as: DecimalHandlerStorage.self) { return storage }
+        let storage = DecimalHandlerStorage()
+        Storage.set(objcObject, storage)
+        return storage
+    }
+
+    private static func make(_ cls: ObjCClass) -> NSDecimalNumberHandler? {
+        Storage.allocate(cls.pointer).map { NSDecimalNumberHandler(objCOwned: $0) }
+    }
+
+    @ObjCClassMethod("defaultDecimalNumberHandler")
+    static func defaultHandler(_ cls: ObjCClass) -> NSDecimalNumberHandler? { make(cls) }
+
+    @ObjCClassMethod("decimalNumberHandlerWithRoundingMode:scale:raiseOnExactness:raiseOnOverflow:raiseOnUnderflow:raiseOnDivideByZero:")
+    static func handler(_ cls: ObjCClass, roundingMode: UInt, scale: Int16, raiseOnExactness: Bool, raiseOnOverflow: Bool,
+                        raiseOnUnderflow: Bool, raiseOnDivideByZero: Bool) -> NSDecimalNumberHandler? {
+        let handler = make(cls)
+        handler?.storage.mode = roundingMode
+        handler?.storage.scale = scale
+        return handler
+    }
+
+    @ObjCMethod("init") func initialize() -> Self { self }
+
+    @ObjCMethod("initWithRoundingMode:scale:raiseOnExactness:raiseOnOverflow:raiseOnUnderflow:raiseOnDivideByZero:")
+    func initialize(roundingMode: UInt, scale: Int16, raiseOnExactness: Bool, raiseOnOverflow: Bool, raiseOnUnderflow: Bool,
+                    raiseOnDivideByZero: Bool) -> Self {
+        storage.mode = roundingMode
+        storage.scale = scale
+        return self
+    }
+
+    @ObjCMethod("roundingMode") func roundingMode() -> UInt { storage.mode }
+    @ObjCMethod("scale") func scale() -> Int16 { storage.scale }
+    @ObjCMethod("exceptionDuringOperation:error:leftOperand:rightOperand:")
+    func exception(_ operation: UnsafeRawPointer?, error: Int, left: NSObject?, right: NSObject?) -> NSObject? { nil }
 }
 
 /// NSDecimalRound: the number rounded to `scale` places after the point
