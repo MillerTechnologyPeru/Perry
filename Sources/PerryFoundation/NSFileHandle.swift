@@ -269,4 +269,8 @@ enum StreamConstants {
     static let kCFStreamSSLPeerName = "kCFStreamSSLPeerName"
     static let kCFStreamSSLValidatesCertificateChain = "kCFStreamSSLValidatesCertificateChain"
     static let kCFStreamSocketSecurityLevelNegotiatedSSL = "kCFStreamSocketSecurityLevelNegotiatedSSL"
+    static let kCFStreamSocketSecurityLevelNone = "kCFStreamSocketSecurityLevelNone"
+    static let kCFStreamSocketSecurityLevelTLSv1 = "kCFStreamSocketSecurityLevelTLSv1"
+    static let kCFStreamPropertyShouldCloseNativeSocket = "kCFStreamPropertyShouldCloseNativeSocket"
+    static let kCFStreamPropertySocketNativeHandle = "kCFStreamPropertySocketNativeHandle"
 }
