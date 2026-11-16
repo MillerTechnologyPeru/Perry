@@ -19,8 +19,13 @@ final class PeerState: ObjectState {
     var rssi: Int?
     var state = PeripheralState.disconnected
     var services: [CBService]?
-    /// Unretained, as Darwin's is weak.
-    var delegate: UnsafeMutableRawPointer?
+    /// Weak, as Darwin's is: nil once the delegate is deallocated, so an
+    /// event that arrives after that has no one to call.
+    private let delegateReference = WeakObject()
+    var delegate: UnsafeMutableRawPointer? {
+        get { delegateReference.object }
+        set { delegateReference.object = newValue }
+    }
     /// The central manager that last found or connected it; unretained.
     var manager: UnsafeMutableRawPointer?
     /// Disconnecting was asked for, so it is no error.
