@@ -229,6 +229,12 @@ open class UINavigationController: UIViewController {
         guard !navigation.animating, let view = state.view, let top = navigation.viewControllers.last else { return }
         let from = navigation.displayed
         guard from?.objcObject != top.objcObject else { return }
+        // One that is in no window and is not on its way to the screen
+        // (never shown, or already replaced) leaves its top controller's
+        // view unloaded, not laid out for nothing, as on iOS; appearing
+        // shows it.
+        if from == nil, top.state.view == nil, view.windowObject == nil,
+           state.appearance == .disappeared || state.appearance == .disappearing { return }
         let onScreen = view.windowObject != nil && (state.appearance == .appeared || state.appearance == .appearing)
         let delegate = navigation.delegate.map { NSObject($0) }
         let topView = top.loadedView
