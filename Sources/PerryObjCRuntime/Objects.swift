@@ -84,6 +84,21 @@ public enum Objects {
         if let peer = entry.peer { Unmanaged<AnyObject>.fromOpaque(peer).release() }
     }
 
+    /// A native Swift object (one of a class whose root is Swift's own, not
+    /// an Objective-C class's subclass) that gains weak references or
+    /// associated objects must go through objc_destructInstance as it is
+    /// freed, which Swift skips for one it believes has none.
+    static func markObjCState(_ object: ObjectPointer) {
+        let cls = classOf(object)
+        // Instances of a Swift subclass of an Objective-C class keep no
+        // reference count word, and Perry's own Swift classes are objects
+        // bound to Objective-C ones, freed through them.
+        guard cls.pointee.bits & 3 != 0, var info = Runtime.info(cls), RetainCounts.peer(object) == nil else { return }
+        while let superInfo = info.superInfo { info = superInfo }
+        guard strcmp(info.name, "_TtCs12_SwiftObject") == 0 else { return }
+        perry_swift_object_gains_objc_state(object)
+    }
+
     // MARK: - Peers
 
     /// Makes `peer` the Swift object that is `object` (RetainCounts).
@@ -564,6 +579,7 @@ public enum WeakReferences {
             }
             slots[UInt(bitPattern: object), default: []].append(slot)
             RetainCounts.update(object) { $0.weaklyReferenced = true }
+            Objects.markObjCState(object)
             slot.pointee = object
             return object
         }
@@ -624,6 +640,7 @@ public enum Associations {
         }
         if stored != nil {
             RetainCounts.update(object) { $0.hasAssociations = true }
+            Objects.markObjCState(object)
         }
         if let old, old.policy & 0xff != 0 {
             Objects.release(old.value)
