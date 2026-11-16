@@ -155,17 +155,18 @@ public final class NSHashTable: NSObject {
     }
 
     @ObjCMethod("count") func count() -> UInt { UInt(state.members.count) }
-    @ObjCMethod("addObject:") func add(_ object: ObjCObject?) { if let object { state.add(object.id) } }
-    @ObjCMethod("removeObject:") func remove(_ object: ObjCObject?) { if let object { state.remove(object.id) } }
+    // Members come as plain pointers: an opaque table's are not objects.
+    @ObjCMethod("addObject:") func add(_ object: UnsafeMutableRawPointer?) { if let object { state.add(object) } }
+    @ObjCMethod("removeObject:") func remove(_ object: UnsafeMutableRawPointer?) { if let object { state.remove(object) } }
     @ObjCMethod("removeAllObjects")
     func removeAll() {
         state.slots.removeAll()
         state.enumeration.mutated()
     }
-    @ObjCMethod("containsObject:") func contains(_ object: ObjCObject?) -> Bool { object.map { state.index(of: $0.id) != nil } ?? false }
+    @ObjCMethod("containsObject:") func contains(_ object: UnsafeMutableRawPointer?) -> Bool { object.map { state.index(of: $0) != nil } ?? false }
     @ObjCMethod("member:")
-    func member(_ object: ObjCObject?) -> UnsafeMutableRawPointer? {
-        guard let object, let index = state.index(of: object.id) else { return nil }
+    func member(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let object, let index = state.index(of: object) else { return nil }
         return state.slots[index].value
     }
     @ObjCMethod("anyObject") func anyObject() -> UnsafeMutableRawPointer? { state.members.first }
@@ -312,13 +313,13 @@ public final class NSMapTable: NSObject {
     }
 
     @ObjCMethod("count") func count() -> UInt { UInt(state.live.count) }
-    @ObjCMethod("objectForKey:") func object(forKey key: ObjCObject?) -> UnsafeMutableRawPointer? { key.flatMap { state.value(for: $0.id) } }
+    @ObjCMethod("objectForKey:") func object(forKey key: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { key.flatMap { state.value(for: $0) } }
     @ObjCMethod("setObject:forKey:")
-    func set(_ value: ObjCObject?, forKey key: ObjCObject?) {
+    func set(_ value: UnsafeMutableRawPointer?, forKey key: UnsafeMutableRawPointer?) {
         guard let key else { return }
-        if let value { state.set(value.id, for: key.id) } else { state.remove(key.id) }
+        if let value { state.set(value, for: key) } else { state.remove(key) }
     }
-    @ObjCMethod("removeObjectForKey:") func remove(forKey key: ObjCObject?) { if let key { state.remove(key.id) } }
+    @ObjCMethod("removeObjectForKey:") func remove(forKey key: UnsafeMutableRawPointer?) { if let key { state.remove(key) } }
     @ObjCMethod("removeAllObjects")
     func removeAll() {
         state.entries.removeAll()
