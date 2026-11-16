@@ -11,7 +11,9 @@ import PerryObjCInterop
 // MARK: - UIControl
 
 final class ControlState: ObjectState {
-    var targets: [(target: UnsafeMutableRawPointer?, action: UnsafeRawPointer, events: UInt)] = []
+    /// Targets are not retained, and an entry whose target is gone sends
+    /// nothing; one added with no target goes up the responder chain.
+    var targets: [(target: WeakObject?, action: UnsafeRawPointer, events: UInt)] = []
     var enabled = true
     var selected = false
     var highlighted = false
@@ -47,20 +49,20 @@ open class UIControl: UIView {
 
     @ObjCMethod("addTarget:action:forControlEvents:")
     func addTarget(_ target: NSObject?, action: ObjCSelector, for events: UInt) {
-        control.targets.append((target?.objcObject, action.pointer, events))
+        control.targets.append((target.map { WeakObject($0.objcObject) }, action.pointer, events))
     }
 
     @ObjCMethod("removeTarget:action:forControlEvents:")
     func removeTarget(_ target: NSObject?, action: ObjCSelector?, for events: UInt) {
         control.targets.removeAll { entry in
-            (target == nil || entry.target == target?.objcObject) && (action == nil || entry.action == action?.pointer) && entry.events & events != 0
+            (target == nil || entry.target?.object == target?.objcObject) && (action == nil || entry.action == action?.pointer) && entry.events & events != 0
         }
     }
 
     @ObjCMethod("allTargets")
     func allTargets() -> NSObject {
         let set = NSMutableSet.empty()
-        for entry in control.targets { if let target = entry.target { set.add(NSObject(target)) } }
+        for entry in control.targets { if let target = entry.target?.object { set.add(NSObject(target)) } }
         return set
     }
 
@@ -71,7 +73,12 @@ open class UIControl: UIView {
     @ObjCMethod("sendActionsForControlEvents:")
     func sendActions(for events: UInt) {
         for entry in control.targets where entry.events & events != 0 {
-            sendAction(ObjCSelector(entry.action), to: entry.target.map { NSObject($0) }, for: nil)
+            if let reference = entry.target {
+                guard let target = reference.object else { continue }
+                sendAction(ObjCSelector(entry.action), to: NSObject(target), for: nil)
+            } else {
+                sendAction(ObjCSelector(entry.action), to: nil, for: nil)
+            }
         }
     }
 
