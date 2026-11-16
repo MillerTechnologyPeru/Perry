@@ -1008,6 +1008,22 @@ size_t darwin_os_proc_available_memory(void) {
     return (size_t)(kilobytes * 1024);
 }
 
+// TASK_CATEGORY_POLICY (1): the task's role, which Perry's one task has as
+// the foreground application (1) that crash reporters ask for. Other
+// flavors, which a task's scheduling policy has, are not kept.
+kern_return_t darwin_task_policy_get(mach_port_t task, int flavor, int32_t *policy, uint32_t *count, int32_t *get_default)
+    DARWIN_SYMBOL(task_policy_get);
+kern_return_t darwin_task_policy_get(mach_port_t task, int flavor, int32_t *policy, uint32_t *count, int32_t *get_default) {
+    (void)task;
+    if (flavor != 1 || !policy || !count || *count < 1)
+        return KERN_INVALID_ARGUMENT;
+    policy[0] = 1;
+    *count = 1;
+    if (get_default)
+        *get_default = 0;
+    return KERN_SUCCESS;
+}
+
 // MACH_TASK_BASIC_INFO 20 and TASK_BASIC_INFO_64 5: the memory used. On
 // arm64 TASK_BASIC_INFO_64 is TASK_BASIC_INFO_64_2, 18, laid out as 5.
 kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint32_t *count) DARWIN_SYMBOL(task_info);
