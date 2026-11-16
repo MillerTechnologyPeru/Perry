@@ -23,7 +23,9 @@ final class TextFieldState: ObjectState {
     var clearButtonMode = 0
     /// The button apps reach by key to restyle; made when first asked for.
     var clearButton: UIButton?
-    var delegate: UnsafeMutableRawPointer?
+    /// Not retained, and nil once the delegate is gone: a field outlives the
+    /// delegate of a screen that was taken away, and still resigns.
+    let delegate = WeakObject()
     var leftView: UIView?
     var rightView: UIView?
     var leftViewMode = 0
@@ -128,8 +130,8 @@ open class UITextField: UIControl {
     }
 
     @ObjCMethod("_clearButton") func privateClearButton() -> UIButton { clearButton() }
-    @ObjCMethod("delegate") func delegate() -> NSObject? { field.delegate.map { NSObject($0) } }
-    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { field.delegate = delegate?.objcObject }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { field.delegate.object.map { NSObject($0) } }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { field.delegate.object = delegate?.objcObject }
     @ObjCMethod("leftView") func leftView() -> UIView? { field.leftView }
     @ObjCMethod("setLeftView:") func setLeftView(_ view: UIView?) {
         field.leftView?.removeFromSuperview()
@@ -192,7 +194,7 @@ open class UITextField: UIControl {
 
     // MARK: Editing
 
-    private var fieldDelegate: NSObject? { field.delegate.map { NSObject($0) } }
+    private var fieldDelegate: NSObject? { field.delegate.object.map { NSObject($0) } }
 
     @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { control.enabled }
     @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(self) }
