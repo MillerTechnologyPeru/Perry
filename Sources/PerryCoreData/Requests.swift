@@ -2,8 +2,8 @@ import PerryObjCInterop
 
 // Requests a context executes besides fetches: batch updates, which change
 // what a predicate matches without the caller fetching it, and history
-// requests. A batch update here is the same changes made to the objects
-// the context finds and saved, since its store is the context's own; there
+// requests. A batch update or delete here is the same changes made to the
+// objects the context finds and saved, since its store is the context's own; there
 // is no history to fetch (the store keeps none), so history requests find
 // nothing and deleting it succeeds.
 
@@ -35,6 +35,28 @@ open class NSBatchUpdateResult: NSPersistentStoreResult {
     func dealloc() {
         NSBatchUpdateResult.states.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: NSBatchUpdateResult.objCClass.pointer)
+    }
+}
+
+@ObjCClass("NSBatchDeleteResult")
+open class NSBatchDeleteResult: NSPersistentStoreResult {
+    static let states = StateTable<RequestResultState>()
+    var state: RequestResultState { NSBatchDeleteResult.states[objcObject] }
+
+    static func make(_ result: NSObject?, type: UInt) -> NSBatchDeleteResult {
+        let object = NSBatchDeleteResult.objCClass.object.newInstance().unsafeCast(to: NSBatchDeleteResult.self)
+        object.state.result = result
+        object.state.resultType = type
+        return object
+    }
+
+    @ObjCMethod("result") func result() -> NSObject? { state.result }
+    @ObjCMethod("resultType") func resultType() -> UInt { state.resultType }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        NSBatchDeleteResult.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSBatchDeleteResult.objCClass.pointer)
     }
 }
 
@@ -119,6 +141,44 @@ open class NSBatchUpdateRequest: NSPersistentStoreRequest {
     }
 }
 
+// MARK: - Batch delete
+
+final class BatchDeleteState: ObjectState {
+    var fetchRequest: NSFetchRequest?
+    var objectIDs: [NSObject] = []
+    /// NSBatchDeleteRequestResultType: status only 0, deleted object IDs 1,
+    /// deleted objects count 2.
+    var resultType: UInt = 0
+}
+
+@ObjCClass("NSBatchDeleteRequest")
+open class NSBatchDeleteRequest: NSPersistentStoreRequest {
+    static let states = StateTable<BatchDeleteState>()
+    var state: BatchDeleteState { NSBatchDeleteRequest.states[objcObject] }
+
+    @ObjCMethod("initWithFetchRequest:")
+    func initialize(fetchRequest: NSFetchRequest) -> Self {
+        state.fetchRequest = fetchRequest
+        return self
+    }
+
+    @ObjCMethod("initWithObjectIDs:")
+    func initialize(objectIDs: NSArray) -> Self {
+        state.objectIDs = objectIDs.elements
+        return self
+    }
+
+    @ObjCMethod("fetchRequest") func fetchRequest() -> NSFetchRequest? { state.fetchRequest }
+    @ObjCMethod("resultType") func resultType() -> UInt { state.resultType }
+    @ObjCMethod("setResultType:") func setResultType(_ type: UInt) { state.resultType = type }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        NSBatchDeleteRequest.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSBatchDeleteRequest.objCClass.pointer)
+    }
+}
+
 // MARK: - History
 
 final class HistoryRequestState: ObjectState {
@@ -181,6 +241,9 @@ enum Requests {
         if object.isKind(of: NSBatchUpdateRequest.objCClass) {
             return try batchUpdate(request.unsafeCast(to: NSBatchUpdateRequest.self), in: context)
         }
+        if object.isKind(of: NSBatchDeleteRequest.objCClass) {
+            return try batchDelete(request.unsafeCast(to: NSBatchDeleteRequest.self), in: context)
+        }
         if object.isKind(of: NSPersistentHistoryChangeRequest.objCClass) {
             let history = request.unsafeCast(to: NSPersistentHistoryChangeRequest.self).state
             let result: NSObject? = history.resultType == 0 ? NSNumber.make(bool: true) : NSMutableArray.empty()
@@ -214,5 +277,31 @@ enum Requests {
         default: NSNumber.make(bool: true)
         }
         return NSBatchUpdateResult.make(result, type: requestState.resultType)
+    }
+
+    private static func batchDelete(_ request: NSBatchDeleteRequest, in context: NSManagedObjectContext) throws -> NSObject {
+        context.processPendingChanges()
+        let requestState = request.state
+        var matches: [NSManagedObject] = []
+        if let fetch = requestState.fetchRequest {
+            matches = try Fetching.matches(fetch, in: context)
+        } else {
+            matches = requestState.objectIDs.compactMap {
+                context.object(with: $0.unsafeCast(to: NSManagedObjectID.self))
+            }
+        }
+        let ids = matches.compactMap { $0.objectID().map { NSObject($0.objcObject) } }
+        for object in matches { context.delete(object) }
+        var failure: UnsafeMutableRawPointer?
+        if !matches.isEmpty, !context.save(&failure) {
+            throw CoreDataError(error: failure.map { NSObject(objcObject: $0, ownership: .retain).unsafeCast(to: NSError.self) }
+                ?? StoreErrors.make(134030, "The batch delete could not be saved."))
+        }
+        let result: NSObject? = switch requestState.resultType {
+        case 1: NSMutableArray.of(ids)
+        case 2: NSNumber.make(int64: Int64(matches.count))
+        default: NSNumber.make(bool: true)
+        }
+        return NSBatchDeleteResult.make(result, type: requestState.resultType)
     }
 }
