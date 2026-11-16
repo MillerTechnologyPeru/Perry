@@ -22,7 +22,9 @@ final class NumberStorage {
         switch value {
         case .signed(let v): return v
         case .unsigned(let v): return Int64(truncatingIfNeeded: v)
-        case .double(let v): return v.isFinite ? Int64(v) : 0
+        // As the processor converts: the nearest integer within range, and
+        // 0 for NaN (Foundation does not trap on a double out of range).
+        case .double(let v): return v.isNaN ? 0 : v >= 9.223372036854775807e18 ? Int64.max : v <= -9.223372036854775808e18 ? Int64.min : Int64(v)
         case .bool(let v): return v ? 1 : 0
         }
     }
