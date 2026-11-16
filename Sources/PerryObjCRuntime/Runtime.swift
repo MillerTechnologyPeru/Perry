@@ -6,9 +6,10 @@ public enum Runtime {
     /// Guards class tables, method tables and cache writes. Recursive,
     /// because realizing a class realizes its superclass and metaclass.
     static let lock = RecursiveLock()
-    /// Held while a class's +initialize runs. Other threads messaging the
-    /// class wait here until it finishes.
-    static let initializeLock = RecursiveLock()
+    /// Guards which thread is running each class's +initialize. It is not
+    /// held while one runs: a +initialize may wait for another thread, and
+    /// that thread may be sending a message to a different class.
+    static let initializeLock = ClassInitializationMonitor()
 
     nonisolated(unsafe) static var classesByName: [CStringKey: ClassPointer] = [:]
     nonisolated(unsafe) static var allClasses: [ClassInfo] = []
@@ -294,17 +295,31 @@ public enum Runtime {
         if let superInfo = info.superInfo {
             initialize(superInfo)
         }
-        initializeLock.withLock {
-            // `initializing` is set when this thread is inside the class's
-            // own +initialize: let its messages through.
-            if info.isInitialized || info.initializing {
+        // The thread inside the class's own +initialize gets its messages
+        // through; any other thread messaging the class waits for it.
+        let thread = UInt(pthread_self())
+        initializeLock.lock()
+        while !info.isInitialized, info.initializingThread != 0 {
+            if info.initializingThread == thread {
+                initializeLock.unlock()
                 return
             }
-            info.initializing = true
-            Messages.sendVoid(ObjectPointer(info.cls), Sel.initialize)
-            info.initializing = false
-            info.initialized.store(true, ordering: .releasing)
+            initializeLock.wait()
         }
+        if info.isInitialized {
+            initializeLock.unlock()
+            return
+        }
+        info.initializingThread = thread
+        initializeLock.unlock()
+
+        Messages.sendVoid(ObjectPointer(info.cls), Sel.initialize)
+
+        initializeLock.lock()
+        info.initializingThread = 0
+        info.initialized.store(true, ordering: .releasing)
+        initializeLock.broadcast()
+        initializeLock.unlock()
     }
 
     // MARK: - Forwarding
