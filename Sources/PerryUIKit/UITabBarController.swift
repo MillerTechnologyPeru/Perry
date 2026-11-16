@@ -267,9 +267,9 @@ open class UITabBarController: UIViewController {
     func layoutContent() {
         guard let view = state.view else { return }
         let bounds = view.state.bounds
-        let bottom = view.windowObject != nil ? view.safeAreaInsets(ignoringController: true).bottom : 0
-        let height = tabBarHeight + bottom
         let bar = tabBar()
+        // The bar says how tall it is: a subclass may ask for more.
+        let height = bar.sendSizeThatFits(bounds.size).height
         // A navigation controller's pushed controller may hide the bar:
         // any above its root that asks for that does, until it is popped.
         let hides = tabs.displayed?.as(UINavigationController.self)?.navigation.viewControllers.dropFirst()
@@ -399,7 +399,11 @@ open class UITabBar: UIView {
     @ObjCMethod("setItemSpacing:") func setItemSpacing(_ spacing: CGFloat) {}
 
     @ObjCMethod("sizeThatFits:")
-    override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width, height: tabBarHeight) }
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        // The bar reaches under the home indicator's area once it is in a window.
+        let bottom = windowObject != nil ? superview()?.safeAreaInsets(ignoringController: true).bottom ?? 0 : 0
+        return CGSize(width: size.width, height: tabBarHeight + bottom)
+    }
 
     nonisolated(unsafe) private static let font = UIFont.systemFont(size: 10)
 
