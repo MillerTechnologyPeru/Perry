@@ -516,6 +516,8 @@ open class UITabBar: UIView {
 
 final class TabBarItemState: ObjectState {
     var selectedImage: UIImage?
+    var standardAppearance: NSObject?
+    var scrollEdgeAppearance: NSObject?
     var badgeValue: String?
     var badgeColor: UIColor?
     /// UITabBarSystemItem, or -1.
@@ -532,6 +534,12 @@ open class UITabBarItem: UIBarItem {
         UITabBarItem.tabStates.remove(objcObject)
         super.dealloc()
     }
+
+    /// Appearances are kept and not drawn.
+    @ObjCMethod("standardAppearance") func standardAppearance() -> NSObject? { tab.standardAppearance }
+    @ObjCMethod("setStandardAppearance:") func setStandardAppearance(_ appearance: NSObject?) { tab.standardAppearance = appearance }
+    @ObjCMethod("scrollEdgeAppearance") func scrollEdgeAppearance() -> NSObject? { tab.scrollEdgeAppearance }
+    @ObjCMethod("setScrollEdgeAppearance:") func setScrollEdgeAppearance(_ appearance: NSObject?) { tab.scrollEdgeAppearance = appearance }
 
     /// UITabBarSystemItem's titles: more 0 through most viewed 11.
     private static let systemTitles = ["More", "Favorites", "Featured", "Top Rated", "Recents", "Contacts", "History",
