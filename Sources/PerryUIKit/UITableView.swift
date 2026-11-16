@@ -334,6 +334,17 @@ open class UITableViewCell: UIView {
             cell.separator = line
             addSubview(line)
         }
+        // The table's style and color: none (0) shows no line.
+        var ancestor = state.superview
+        var owner: UITableView?
+        while let next = ancestor, owner == nil {
+            owner = UIView.wrap(next).as(UITableView.self)
+            ancestor = UIView.states[next].superview
+        }
+        if let owner {
+            cell.separator?.setHidden(owner.table.separatorStyle == 0)
+            if let color = owner.table.separatorColor { cell.separator?.setBackgroundColor(color) }
+        }
         let hairline = Screen.pixel
         cell.separator?.sendSetFrame(CGRect(x: cell.separatorInset.left, y: bounds.height - hairline,
                                             width: max(bounds.width - cell.separatorInset.left - cell.separatorInset.right, 0),
