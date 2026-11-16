@@ -423,6 +423,10 @@ final class NumberFormatterStorage {
     var style = 0
     var locale: Locale?
     var lenient = false
+    /// Kept as set; parsed numbers are NSNumbers either way.
+    var generatesDecimalNumbers = false
+    /// Whether a parsed string may have a fraction.
+    var allowsFloats = true
     var pattern: String?
     var attributes: [UInt32: Int32] = [:]
     var doubleAttributes: [UInt32: Double] = [:]
@@ -552,6 +556,7 @@ final class NumberFormatterStorage {
             var status = U_ZERO_ERROR
             let value = swift_unum_parseDouble(handle, chars, length, &position, &status)
             guard !ICU.failed(status), position == length else { return nil }
+            if !allowsFloats, value != value.rounded() { return nil }
             if value == value.rounded(), abs(value) < 9e15 { return Numbers.make(nil, .signed(Int64(value))) }
             return Numbers.make(nil, .double(value))
         }
@@ -645,6 +650,13 @@ public final class NSNumberFormatter: NSFormatter {
         storage.lenient = lenient
         storage.changed()
     }
+
+    @ObjCMethod("allowsFloats") func allowsFloats() -> Bool { storage.allowsFloats }
+    @ObjCMethod("setAllowsFloats:") func setAllowsFloats(_ allows: Bool) { storage.allowsFloats = allows }
+
+    @ObjCMethod("generatesDecimalNumbers") func generatesDecimalNumbers() -> Bool { storage.generatesDecimalNumbers }
+    @ObjCMethod("setGeneratesDecimalNumbers:")
+    func setGeneratesDecimalNumbers(_ generates: Bool) { storage.generatesDecimalNumbers = generates }
 
     // MARK: Digits and rounding
 
