@@ -62,6 +62,9 @@ final class LayerState {
     var position = CGPoint.zero
     var anchorPoint = CGPoint(x: 0.5, y: 0.5)
     var zPosition: CGFloat = 0
+    var beginTime: Double = 0
+    var timeOffset: Double = 0
+    var speed: Float = 1
     var transform3D = CATransform3D.identity
     var sublayerTransform = CATransform3D.identity
     var hidden = false
@@ -704,6 +707,51 @@ open class CALayer: NSObject {
     @ObjCMethod("convertPoint:fromLayer:")
     func convert(_ point: CGPoint, from layer: CALayer?) -> CGPoint {
         toRoot.inverted.apply(layer.map { $0.toRoot.apply(point) } ?? point)
+    }
+
+    // MARK: Media timing
+
+    @ObjCMethod("beginTime") func beginTime() -> Double { state.beginTime }
+    @ObjCMethod("setBeginTime:") func setBeginTime(_ time: Double) { state.beginTime = time }
+    @ObjCMethod("timeOffset") func timeOffset() -> Double { state.timeOffset }
+    @ObjCMethod("setTimeOffset:") func setTimeOffset(_ offset: Double) { state.timeOffset = offset }
+    @ObjCMethod("speed") func speed() -> Float { state.speed }
+    @ObjCMethod("setSpeed:") func setSpeed(_ speed: Float) { state.speed = speed }
+
+    /// The layers from this one up to the root.
+    private var ancestry: [CALayer] {
+        var layers = [self]
+        while let parent = layers[layers.count - 1].superlayer() { layers.append(parent) }
+        return layers
+    }
+
+    /// A time of the root's time space in this layer's: each layer's local
+    /// time is its parent's from its begin time, at its speed, plus its
+    /// offset.
+    private func localTime(ofRoot time: Double) -> Double {
+        ancestry.reversed().reduce(time) { time, layer in
+            (time - layer.state.beginTime) * Double(layer.state.speed) + layer.state.timeOffset
+        }
+    }
+
+    /// The reverse; a stopped layer (speed 0) has no one answer, and gives
+    /// its begin time.
+    private func rootTime(ofLocal time: Double) -> Double {
+        ancestry.reduce(time) { time, layer in
+            let speed = Double(layer.state.speed)
+            return speed == 0 ? layer.state.beginTime : (time - layer.state.timeOffset) / speed + layer.state.beginTime
+        }
+    }
+
+    @ObjCMethod("convertTime:fromLayer:")
+    func convert(time: Double, from layer: CALayer?) -> Double {
+        localTime(ofRoot: layer.map { $0.rootTime(ofLocal: time) } ?? time)
+    }
+
+    @ObjCMethod("convertTime:toLayer:")
+    func convert(time: Double, to layer: CALayer?) -> Double {
+        let root = rootTime(ofLocal: time)
+        return layer.map { $0.localTime(ofRoot: root) } ?? root
     }
 
     @ObjCMethod("convertRect:toLayer:")
