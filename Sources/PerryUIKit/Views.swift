@@ -53,6 +53,14 @@ open class UIToolbar: UIView {
         return self
     }
 
+    /// Custom bar images are accepted and not drawn.
+    @ObjCMethod("setBackgroundImage:forToolbarPosition:barMetrics:")
+    func setBackgroundImage(_ image: NSObject?, forToolbarPosition position: Int, barMetrics: Int) {}
+    @ObjCMethod("backgroundImageForToolbarPosition:barMetrics:")
+    func backgroundImage(forToolbarPosition position: Int, barMetrics: Int) -> NSObject? { nil }
+    @ObjCMethod("setShadowImage:forToolbarPosition:") func setShadowImage(_ image: NSObject?, forToolbarPosition position: Int) {}
+    @ObjCMethod("shadowImageForToolbarPosition:") func shadowImage(forToolbarPosition position: Int) -> NSObject? { nil }
+
     @ObjCMethod("items") func items() -> NSObject? { toolbar.items.isEmpty ? nil : NSMutableArray.of(toolbar.items) }
     @ObjCMethod("setItems:") func setItems(_ items: NSArray?) { setItems(items, animated: false) }
     @ObjCMethod("setItems:animated:") func setItems(_ items: NSArray?, animated: Bool) {

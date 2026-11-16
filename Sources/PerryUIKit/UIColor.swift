@@ -321,6 +321,7 @@ open class UIColor: NSObject {
     @ObjCClassMethod("secondarySystemBackgroundColor") static func secondarySystemBackground() -> UIColor { systemGray6() }
     @ObjCClassMethod("tertiarySystemBackgroundColor") static func tertiarySystemBackground() -> UIColor { gray(1) }
     @ObjCClassMethod("systemGroupedBackgroundColor") static func systemGroupedBackground() -> UIColor { systemGray6() }
+    @ObjCClassMethod("groupTableViewBackgroundColor") static func groupTableViewBackground() -> UIColor { systemGray6() }
     @ObjCClassMethod("secondarySystemGroupedBackgroundColor") static func secondarySystemGroupedBackground() -> UIColor { gray(1) }
     @ObjCClassMethod("systemFillColor") static func systemFill() -> UIColor { rgb(120.0 / 255, 120.0 / 255, 128.0 / 255, 0.2) }
 

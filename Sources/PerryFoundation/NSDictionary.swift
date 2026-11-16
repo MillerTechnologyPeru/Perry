@@ -144,6 +144,23 @@ enum Dictionaries {
     }
 
 
+    /// For the class constructors: an app's subclass is made with +alloc
+    /// and the init message, so its own -init runs, as on Darwin. nil for
+    /// Foundation's own classes.
+    static func subclassed(_ cls: id?, capacity: UInt? = nil) -> NSDictionary? {
+        guard let cls, cls != UnsafeMutableRawPointer(dictionaryClass), cls != UnsafeMutableRawPointer(mutableClass),
+              cls != UnsafeMutableRawPointer(constantClass) else { return nil }
+        let allocated = ObjC.send(cls, ObjC.selector("alloc"))
+        let made: id?
+        if let capacity {
+            typealias Init = @convention(c) (id?, SEL, UInt) -> id?
+            made = unsafeBitCast(ObjC.msgSend, to: Init.self)(allocated, ObjC.selector("initWithCapacity:"), capacity)
+        } else {
+            made = ObjC.send(allocated, ObjC.selector("init"))
+        }
+        return made.map { NSDictionary(objCOwned: $0) }
+    }
+
     /// A new dictionary wrapped for returning, +1.
     static func owned(_ entries: [(key: id, value: id)], cls: id? = nil) -> NSDictionary {
         NSDictionary(objCOwned: make(entries, cls: cls))
@@ -182,7 +199,7 @@ public class NSDictionary: NSObject {
         guard cls.pointer != UnsafeMutableRawPointer(Dictionaries.dictionaryClass) else {
             return NSDictionary(objCOwned: ObjC.retain(perry_foundation_empty_dictionary())!)
         }
-        return Dictionaries.owned([], cls: cls.pointer)
+        return Dictionaries.subclassed(cls.pointer) ?? Dictionaries.owned([], cls: cls.pointer)
     }
 
     @ObjCClassMethod("dictionaryWithObject:forKey:")
@@ -471,7 +488,9 @@ public class NSMutableDictionary: NSDictionary {
     }
 
     @ObjCClassMethod("dictionaryWithCapacity:")
-    static func dictionary(_ cls: ObjCClass, capacity: UInt) -> NSDictionary { Dictionaries.owned([], cls: cls.pointer) }
+    static func dictionary(_ cls: ObjCClass, capacity: UInt) -> NSDictionary {
+        Dictionaries.subclassed(cls.pointer, capacity: capacity) ?? Dictionaries.owned([], cls: cls.pointer)
+    }
 
     @ObjCMethod("initWithCapacity:")
     func initialize(capacity: UInt) -> Self {

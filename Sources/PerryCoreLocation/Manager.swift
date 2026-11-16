@@ -183,8 +183,13 @@ private enum LocationError {
 }
 
 final class ManagerState: ObjectState {
-    /// Not retained, as Darwin's is weak.
-    var delegate: UnsafeMutableRawPointer?
+    /// Weak, as Darwin's is: nil once the delegate is deallocated, so a
+    /// callback that arrives after that has no one to call.
+    private let delegateReference = WeakObject()
+    var delegate: UnsafeMutableRawPointer? {
+        get { delegateReference.object }
+        set { delegateReference.object = newValue }
+    }
     var desiredAccuracy: Double = -1
     var distanceFilter: Double = -1
     var headingFilter: Double = 1

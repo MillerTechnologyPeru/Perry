@@ -125,6 +125,19 @@ public final class NSURL: NSObject {
     @ObjCMethod("initWithString:relativeToURL:")
     func initialize(string: String?, relativeTo base: NSURL?) -> Self? { setURL(string.flatMap { URL(string: $0, relativeTo: base?.url) }) }
 
+    /// The deprecated initializer: a file URL for the "file" scheme, else
+    /// scheme://host and the path, percent-encoded where it needs it.
+    @ObjCMethod("initWithScheme:host:path:")
+    func initialize(scheme: String?, host: String?, path: String?) -> Self? {
+        guard let scheme, let path else { return setURL(nil) }
+        if scheme.lowercased() == "file", host?.isEmpty ?? true { return setURL(URLs.fileURL(path, isDirectory: nil)) }
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host ?? ""
+        components.path = path.isEmpty || path.hasPrefix("/") ? path : "/" + path
+        return setURL(components.url)
+    }
+
     @ObjCMethod("initFileURLWithPath:")
     func initialize(filePath path: String?) -> Self? { setURL(path.map { URLs.fileURL($0, isDirectory: nil) }) }
 

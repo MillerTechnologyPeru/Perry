@@ -359,6 +359,14 @@ open class UIViewController: UIResponder {
     /// Nothing to do here; subclasses override it.
     @ObjCMethod("traitCollectionDidChange:") func traitCollectionDidChange(_ previous: UITraitCollection?) {}
 
+    /// iOS 17's trait overrides: the style set on it is the controller's override.
+    @ObjCMethod("traitOverrides")
+    func traitOverrides() -> NSObject {
+        let overrides = UITraitOverrides.objCClass.object.allocated().unsafeCast(to: UITraitOverrides.self)
+        overrides.overrides.owner = self
+        return overrides
+    }
+
     @ObjCMethod("overrideUserInterfaceStyle") func overrideUserInterfaceStyle() -> Int { state.userInterfaceStyle }
     @ObjCMethod("setOverrideUserInterfaceStyle:")
     func setOverrideUserInterfaceStyle(_ style: Int) {
@@ -847,4 +855,32 @@ extension NSObject {
     @ObjCMethod("showDetailViewController:sender:") func sendShowDetail(_ controller: UIViewController, sender: NSObject?)
     @ObjCMethod("shouldAutomaticallyForwardAppearanceMethods") func sendShouldAutomaticallyForwardAppearanceMethods() -> Bool
     @ObjCMethod("setEditing:animated:") func sendSetEditing(_ editing: Bool, animated: Bool)
+}
+
+final class TraitOverridesState: ObjectState {
+    var owner: UIViewController?
+}
+
+/// What -traitOverrides answers: the interface style goes to the
+/// controller's override, and the other traits are kept as they are.
+@ObjCClass("_UITraitOverrides")
+open class UITraitOverrides: NSObject {
+    static let states = StateTable<TraitOverridesState>()
+    var overrides: TraitOverridesState { UITraitOverrides.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UITraitOverrides.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UITraitOverrides.objCClass.pointer)
+    }
+
+    @ObjCMethod("userInterfaceStyle") func userInterfaceStyle() -> Int { overrides.owner?.overrideUserInterfaceStyle() ?? 0 }
+    @ObjCMethod("setUserInterfaceStyle:")
+    func setUserInterfaceStyle(_ style: Int) { overrides.owner?.setOverrideUserInterfaceStyle(style) }
+    @ObjCMethod("horizontalSizeClass") func horizontalSizeClass() -> Int { 0 }
+    @ObjCMethod("setHorizontalSizeClass:") func setHorizontalSizeClass(_ sizeClass: Int) {}
+    @ObjCMethod("verticalSizeClass") func verticalSizeClass() -> Int { 0 }
+    @ObjCMethod("setVerticalSizeClass:") func setVerticalSizeClass(_ sizeClass: Int) {}
+    @ObjCMethod("containsTrait:") func containsTrait(_ trait: NSObject?) -> Bool { false }
+    @ObjCMethod("removeTrait:") func removeTrait(_ trait: NSObject?) {}
 }

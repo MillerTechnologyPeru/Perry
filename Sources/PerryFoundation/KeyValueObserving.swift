@@ -104,10 +104,19 @@ enum KeyValueObserving {
     /// Forgets the object's registrations, then deallocates it as its class does.
     static let deallocIMP: @convention(c) (id, SEL) -> Void = { object, selector in
         let cls = original(object)
-        for observance in locked({ observances.removeValue(forKey: object) }) ?? [] { unhook(observance) }
+        let forgotten: [Observance] = locked {
+            deallocating.insert(object)
+            return observances.removeValue(forKey: object) ?? []
+        }
+        for observance in forgotten { unhook(observance) }
         let imp = ObjC.methodImplementation(cls, selector)!
         unsafeBitCast(imp, to: (@convention(c) (id, SEL) -> Void).self)(object, selector)
+        locked { _ = deallocating.remove(object) }
     }
+
+    /// The objects in -dealloc whose registrations were just forgotten: a
+    /// class's own -dealloc may still remove them, which is then nothing.
+    nonisolated(unsafe) static var deallocating: Set<id> = []
 
     static func subclass(of original: Class) -> Class {
         locked {
@@ -320,6 +329,7 @@ extension NSObject {
             }
         }
         guard let found else {
+            if KeyValueObserving.locked({ KeyValueObserving.deallocating.contains(object) }) { return }
             foundationFatal("Cannot remove an observer <\(ObjC.className(observer?.objcObject)) \(observer?.objcObject.debugDescription ?? "nil")> "
                             + "for the key path \"\(keyPath)\" from <\(ObjC.className(UnsafeMutableRawPointer(KeyValueObserving.original(object)))) "
                             + "\(object)> because it is not registered as an observer.")

@@ -77,6 +77,12 @@ open class NSURLSessionTaskTransactionMetrics: NSObject {
     @ObjCMethod("isMultipath") func isMultipath() -> Bool { false }
     @ObjCMethod("domainResolutionStartDate") func domainResolutionStartDate() -> NSDate? { nil }
     @ObjCMethod("domainResolutionEndDate") func domainResolutionEndDate() -> NSDate? { nil }
+    @ObjCMethod("domainLookupStartDate") func domainLookupStartDate() -> NSDate? { nil }
+    @ObjCMethod("domainLookupEndDate") func domainLookupEndDate() -> NSDate? { nil }
+    @ObjCMethod("localAddress") func localAddress() -> String? { nil }
+    @ObjCMethod("localPort") func localPort() -> NSObject? { nil }
+    @ObjCMethod("remoteAddress") func remoteAddress() -> String? { nil }
+    @ObjCMethod("remotePort") func remotePort() -> NSObject? { nil }
     @ObjCMethod("connectStartDate") func connectStartDate() -> NSDate? { nil }
     @ObjCMethod("connectEndDate") func connectEndDate() -> NSDate? { nil }
     @ObjCMethod("secureConnectionStartDate") func secureConnectionStartDate() -> NSDate? { nil }
