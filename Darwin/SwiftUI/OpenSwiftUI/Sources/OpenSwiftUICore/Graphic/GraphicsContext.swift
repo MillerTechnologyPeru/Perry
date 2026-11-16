@@ -813,14 +813,16 @@ extension GraphicsContext {
         storage.cgContext?.translateBy(x: x, y: y)
     }
 
-    // FIXME
+    /// Perry: a context over the Core Graphics one, for the content to draw
+    /// into; the scale is the Core Graphics context's own.
     static func renderingTo(
         cgContext: CGContext,
         environment: EnvironmentValues,
         deviceScale: CGFloat?,
         content: (inout GraphicsContext) -> ()
     ) {
-        _openSwiftUIUnimplementedFailure()
+        var context = GraphicsContext(cgContext: cgContext, environment: environment)
+        content(&context)
     }
 }
 
