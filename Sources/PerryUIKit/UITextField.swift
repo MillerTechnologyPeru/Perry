@@ -21,6 +21,8 @@ final class TextFieldState: ObjectState {
     var background: UIImage?
     var disabledBackground: UIImage?
     var clearButtonMode = 0
+    /// The button apps reach by key to restyle; made when first asked for.
+    var clearButton: UIButton?
     var delegate: UnsafeMutableRawPointer?
     var leftView: UIView?
     var rightView: UIView?
@@ -114,6 +116,18 @@ open class UITextField: UIControl {
     @ObjCMethod("setBorderStyle:") func setBorderStyle(_ style: Int) { field.borderStyle = style; setNeedsDisplay() }
     @ObjCMethod("clearButtonMode") func clearButtonMode() -> Int { field.clearButtonMode }
     @ObjCMethod("setClearButtonMode:") func setClearButtonMode(_ mode: Int) { field.clearButtonMode = mode }
+    /// UIKit's clear button, which apps take with -valueForKey: ("clearButton"
+    /// or "_clearButton") to give it their own image. Perry's fields draw
+    /// none, so it stays out of the field.
+    @ObjCMethod("clearButton")
+    func clearButton() -> UIButton {
+        if let button = field.clearButton { return button }
+        let button = UIButton.button(UIButton.objCClass, type: 0).unsafeCast(to: UIButton.self)
+        field.clearButton = button
+        return button
+    }
+
+    @ObjCMethod("_clearButton") func privateClearButton() -> UIButton { clearButton() }
     @ObjCMethod("delegate") func delegate() -> NSObject? { field.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { field.delegate = delegate?.objcObject }
     @ObjCMethod("leftView") func leftView() -> UIView? { field.leftView }
