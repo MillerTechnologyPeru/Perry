@@ -859,6 +859,7 @@ extension NSObject {
 
 final class TraitOverridesState: ObjectState {
     var owner: UIViewController?
+    var viewOwner: UIView?
 }
 
 /// What -traitOverrides answers: the interface style goes to the
@@ -874,13 +875,25 @@ open class UITraitOverrides: NSObject {
         ObjCRuntime.superDealloc(objcObject, definedOn: UITraitOverrides.objCClass.pointer)
     }
 
-    @ObjCMethod("userInterfaceStyle") func userInterfaceStyle() -> Int { overrides.owner?.overrideUserInterfaceStyle() ?? 0 }
+    @ObjCMethod("userInterfaceStyle")
+    func userInterfaceStyle() -> Int { overrides.owner?.overrideUserInterfaceStyle() ?? overrides.viewOwner?.overrideUserInterfaceStyle() ?? 0 }
     @ObjCMethod("setUserInterfaceStyle:")
-    func setUserInterfaceStyle(_ style: Int) { overrides.owner?.setOverrideUserInterfaceStyle(style) }
+    func setUserInterfaceStyle(_ style: Int) {
+        overrides.owner?.setOverrideUserInterfaceStyle(style)
+        overrides.viewOwner?.setOverrideUserInterfaceStyle(style)
+    }
     @ObjCMethod("horizontalSizeClass") func horizontalSizeClass() -> Int { 0 }
     @ObjCMethod("setHorizontalSizeClass:") func setHorizontalSizeClass(_ sizeClass: Int) {}
     @ObjCMethod("verticalSizeClass") func verticalSizeClass() -> Int { 0 }
     @ObjCMethod("setVerticalSizeClass:") func setVerticalSizeClass(_ sizeClass: Int) {}
+    // Overrides of custom traits are accepted and not applied: the traits
+    // here are the device's, and the interface style.
+    @ObjCMethod("setNSIntegerValue:forTrait:") func setNSIntegerValue(_ value: Int, forTrait trait: NSObject?) {}
+    @ObjCMethod("setCGFloatValue:forTrait:") func setCGFloatValue(_ value: Double, forTrait trait: NSObject?) {}
+    @ObjCMethod("setObject:forTrait:") func setObject(_ value: NSObject?, forTrait trait: NSObject?) {}
+    @ObjCMethod("NSIntegerValueForTrait:") func nsIntegerValue(forTrait trait: NSObject?) -> Int { 0 }
+    @ObjCMethod("CGFloatValueForTrait:") func cgFloatValue(forTrait trait: NSObject?) -> Double { 0 }
+    @ObjCMethod("objectForTrait:") func object(forTrait trait: NSObject?) -> NSObject? { nil }
     @ObjCMethod("containsTrait:") func containsTrait(_ trait: NSObject?) -> Bool { false }
     @ObjCMethod("removeTrait:") func removeTrait(_ trait: NSObject?) {}
 }
