@@ -101,6 +101,18 @@ public final class NSURL: NSObject {
         return URLs.wrapped(URL(string: string, relativeTo: base?.url), cls: cls)
     }
 
+    /// With `encode`, characters a URL cannot hold are percent-encoded
+    /// instead of making the string invalid.
+    @ObjCClassMethod("URLWithString:encodingInvalidCharacters:")
+    static func url(_ cls: ObjCClass, string: String?, encodingInvalidCharacters encode: Bool) -> NSURL? {
+        string.flatMap { URLs.wrapped(URL(string: $0, encodingInvalidCharacters: encode), cls: cls) }
+    }
+
+    @ObjCMethod("initWithString:encodingInvalidCharacters:")
+    func initialize(string: String?, encodingInvalidCharacters encode: Bool) -> Self? {
+        setURL(string.flatMap { URL(string: $0, encodingInvalidCharacters: encode) })
+    }
+
     @ObjCClassMethod("fileURLWithPath:")
     static func fileURL(_ cls: ObjCClass, path: String?) -> NSURL? {
         guard let path else { return nil }
