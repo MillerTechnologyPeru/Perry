@@ -27,7 +27,7 @@ static uint32_t added_count, removed_count;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 __attribute__((visibility("default")))
-void perry_provider_image_init(const perry_image_info *image) {
+void perry_provider_image_map(const perry_image_info *image) {
     pthread_mutex_lock(&lock);
     images = realloc(images, sizeof(*images) * (image_count + 1));
     // The program is image 0, as dyld has it, though the libraries it
