@@ -267,6 +267,7 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
     /// the destination, clearing it pops it.
     var isActive: Binding<Bool>?
     @Environment(\.navigationActions) private var actions
+    @Environment(\.isListRow) private var isListRow
 
     public init(destination: Destination, @ViewBuilder label: () -> Label) {
         self.destination = destination
@@ -295,16 +296,23 @@ public struct NavigationLink<Label, Destination>: View where Label: View, Destin
         }
     }
 
+    /// In a list, a row the list's width with a disclosure indicator;
+    /// anywhere else a button of the label alone, as iOS draws it.
+    @ViewBuilder
     private func linkButton(_ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack {
-                label
-                Spacer(minLength: 0)
-                Text("›").foregroundColor(Color.secondary)
+        if isListRow {
+            Button(action: action) {
+                HStack {
+                    label
+                    Spacer(minLength: 0)
+                    Text("›").foregroundColor(Color.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+        } else {
+            Button(action: action) { label }
         }
-        .buttonStyle(.plain)
     }
 }
 
