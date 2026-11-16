@@ -430,6 +430,17 @@ open class UIButton: UIControl {
 }
 
 extension NSObject {
+    @ObjCMethod("textViewShouldBeginEditing:") func sendTextViewShouldBeginEditing(_ view: UITextView) -> Bool
+    @ObjCMethod("textViewDidBeginEditing:") func sendTextViewDidBeginEditing(_ view: UITextView)
+    @ObjCMethod("textViewShouldEndEditing:") func sendTextViewShouldEndEditing(_ view: UITextView) -> Bool
+    @ObjCMethod("textViewDidEndEditing:") func sendTextViewDidEndEditing(_ view: UITextView)
+    @ObjCMethod("textView:shouldChangeTextInRange:replacementText:")
+    func sendTextView(_ view: UITextView, shouldChangeTextIn range: PerryRange, replacementText text: String) -> Bool
+    @ObjCMethod("textViewDidChange:") func sendTextViewDidChange(_ view: UITextView)
+    @ObjCMethod("textViewDidChangeSelection:") func sendTextViewDidChangeSelection(_ view: UITextView)
+}
+
+extension NSObject {
     @ObjCMethod("contentRectForBounds:") func sendContentRect(forBounds bounds: CGRect) -> CGRect
     @ObjCMethod("imageRectForContentRect:") func sendImageRect(forContentRect content: CGRect) -> CGRect
     @ObjCMethod("titleRectForContentRect:") func sendTitleRect(forContentRect content: CGRect) -> CGRect
@@ -862,6 +873,100 @@ open class UITextView: UIScrollView {
         textState.textContainer = container
         return container
     }
+
+    // MARK: Editing
+
+    /// UITextViewDelegate's methods go to the scroll view's delegate, which
+    /// a text view's is.
+    private var editingDelegate: NSObject? { textState.delegate.map { NSObject($0) } ?? delegate() }
+
+    @ObjCMethod("canBecomeFirstResponder") override func canBecomeFirstResponder() -> Bool { textState.editable }
+    @ObjCMethod("isFirstResponder") override func isFirstResponder() -> Bool { Keyboard.isFirstResponder(self) }
+
+    @ObjCMethod("becomeFirstResponder")
+    override func becomeFirstResponder() -> Bool {
+        if Keyboard.isFirstResponder(self) { return true }
+        guard textState.editable else { return false }
+        let delegate = editingDelegate
+        if let delegate, delegate.responds(to: "textViewShouldBeginEditing:"), !delegate.sendTextViewShouldBeginEditing(self) {
+            return false
+        }
+        // What was editing stops first.
+        if let current = Keyboard.responder, !current.sendResignFirstResponder() { return false }
+        Keyboard.focus(self)
+        if let delegate, delegate.responds(to: "textViewDidBeginEditing:") { delegate.sendTextViewDidBeginEditing(self) }
+        Application.post(Notifications.UITextViewTextDidBeginEditingNotification, object: self)
+        return true
+    }
+
+    @ObjCMethod("resignFirstResponder")
+    override func resignFirstResponder() -> Bool {
+        guard Keyboard.isFirstResponder(self) else { return true }
+        let delegate = editingDelegate
+        if let delegate, delegate.responds(to: "textViewShouldEndEditing:"), !delegate.sendTextViewShouldEndEditing(self) {
+            return false
+        }
+        Keyboard.focus(nil)
+        if let delegate, delegate.responds(to: "textViewDidEndEditing:") { delegate.sendTextViewDidEndEditing(self) }
+        Application.post(Notifications.UITextViewTextDidEndEditingNotification, object: self)
+        return true
+    }
+
+    /// A tap begins editing; the touch goes on up the responder chain as
+    /// a view's does.
+    @ObjCMethod("touchesEnded:withEvent:")
+    func touchesEndedInText(_ touches: NSObject, with event: NSObject?) {
+        sendNextResponder()?.sendTouchesEnded(touches, with: event)
+        if textState.editable { _ = sendBecomeFirstResponder() }
+    }
+
+    /// Replaces `range` (in UTF-16) of the text, if the delegate allows
+    /// it, and puts the insertion point after what went in.
+    private func replace(location: Int, length: Int, with replacement: String) {
+        let delegate = editingDelegate
+        if let delegate, delegate.responds(to: "textView:shouldChangeTextInRange:replacementText:"),
+           !delegate.sendTextView(self, shouldChangeTextIn: PerryRange(location: UInt(location), length: UInt(length)),
+                                  replacementText: replacement) {
+            return
+        }
+        var units = Array(textState.text.utf16)
+        let start = min(location, units.count), end = min(location + length, units.count)
+        units.replaceSubrange(start..<end, with: Array(replacement.utf16))
+        textState.text = String(decoding: units, as: UTF16.self)
+        textState.attributedText = nil
+        textState.selectedRange = PerryRange(location: UInt(start + replacement.utf16.count), length: 0)
+        textChanged()
+        if let delegate, delegate.responds(to: "textViewDidChange:") { delegate.sendTextViewDidChange(self) }
+        Application.post(MoreNotifications.UITextViewTextDidChangeNotification, object: self)
+        if let delegate, delegate.responds(to: "textViewDidChangeSelection:") { delegate.sendTextViewDidChangeSelection(self) }
+    }
+
+    /// UIKeyInput: typing replaces the selection, or goes at the end.
+    @ObjCMethod("insertText:")
+    func insertText(_ text: String) {
+        guard textState.editable, !text.isEmpty else { return }
+        let count = textState.text.utf16.count, selection = textState.selectedRange
+        if selection.length > 0, Int(selection.location + selection.length) <= count {
+            replace(location: Int(selection.location), length: Int(selection.length), with: text)
+        } else {
+            replace(location: count, length: 0, with: text)
+        }
+    }
+
+    /// The selection, or else the last character (all its UTF-16 units).
+    @ObjCMethod("deleteBackward")
+    func deleteBackward() {
+        guard textState.editable else { return }
+        let count = textState.text.utf16.count, selection = textState.selectedRange
+        if selection.length > 0, Int(selection.location + selection.length) <= count {
+            replace(location: Int(selection.location), length: Int(selection.length), with: "")
+        } else if let last = textState.text.last {
+            let length = String(last).utf16.count
+            replace(location: count - length, length: length, with: "")
+        }
+    }
+
+    @ObjCMethod("hasText") func hasText() -> Bool { !textState.text.isEmpty }
 
     /// Kept: links are drawn as the rest of the text is.
     @ObjCMethod("linkTextAttributes") func linkTextAttributes() -> NSObject? { textState.linkTextAttributes }
