@@ -65,6 +65,7 @@ let package = Package(
         .library(name: "PerryStoreKit", type: .dynamic, targets: ["PerryStoreKit"]),
         // VideoToolbox, with no video codecs.
         .library(name: "PerryVideoToolbox", type: .dynamic, targets: ["PerryVideoToolbox"]),
+        .library(name: "PerryCarPlay", type: .dynamic, targets: ["PerryCarPlay"]),
         .library(name: "PerryGameKit", type: .dynamic, targets: ["PerryGameKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         // MediaPlayer, with no media library and no movies.
@@ -347,6 +348,12 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
+        // CarPlay's scene session roles, with no car.
+        .target(
+            name: "PerryCarPlay",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
         // VideoToolbox's functions and keys, with no video codecs.
         .target(
             name: "PerryVideoToolbox",
@@ -368,7 +375,7 @@ let package = Package(
         // MediaPlayer's names, and players with nothing to play.
         .target(
             name: "PerryMediaPlayer",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // AVFoundation's players, assets and video outputs, played through
