@@ -435,6 +435,29 @@ public class NSArray: NSObject {
         }
     }
 
+    /// NSEnumerationReverse (2) runs from the last; concurrent runs in order.
+    @ObjCMethod("enumerateObjectsWithOptions:usingBlock:")
+    func enumerate(options: UInt, block: ObjCBlock) {
+        let all = Array(elements.enumerated())
+        enumerate(all, reverse: options & 2 != 0, block: block)
+    }
+
+    @ObjCMethod("enumerateObjectsAtIndexes:options:usingBlock:")
+    func enumerate(indexes: NSIndexSet, options: UInt, block: ObjCBlock) {
+        let all = Array(elements.enumerated())
+        let chosen = Set(indexes.storage.indexes)
+        enumerate(all.filter { chosen.contains($0.offset) }, reverse: options & 2 != 0, block: block)
+    }
+
+    private func enumerate(_ pairs: [(offset: Int, element: id)], reverse: Bool, block: ObjCBlock) {
+        let body = block.function(as: (@convention(c) (id, id?, UInt, UnsafeMutablePointer<Bool>) -> Void).self)
+        var stop = false
+        for (index, element) in reverse ? pairs.reversed() : pairs {
+            body(block.object, element, UInt(index), &stop)
+            if stop { break }
+        }
+    }
+
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         Arrays.storage(objcObject)?.enumeration.enumerate(elements, state: state, buffer: objects, count: count) ?? 0
