@@ -412,6 +412,28 @@ void darwin_malloc_zone_statistics(darwin_malloc_zone *zone, darwin_malloc_stati
     stats->size_allocated = info.arena + info.hblkhd;
 }
 
+/// struct mstats (malloc/malloc.h), the old whole-heap totals.
+typedef struct {
+    size_t bytes_total;
+    size_t chunks_used;
+    size_t bytes_used;
+    size_t chunks_free;
+    size_t bytes_free;
+} darwin_mstats;
+
+/// mstats(): the heap's totals, from glibc's mallinfo2.
+darwin_mstats darwin_mstats_totals(void) DARWIN_SYMBOL(mstats);
+darwin_mstats darwin_mstats_totals(void) {
+    struct mallinfo2 info = mallinfo2();
+    darwin_mstats totals;
+    totals.bytes_total = info.arena + info.hblkhd;
+    totals.chunks_used = (size_t)info.hblks + (size_t)info.smblks;
+    totals.bytes_used = info.uordblks + info.hblkhd;
+    totals.chunks_free = (size_t)info.ordblks;
+    totals.bytes_free = info.fordblks;
+    return totals;
+}
+
 /// malloc_zone_malloc_with_options(zone, alignment, size, options): in
 /// `zone` (the default one when NULL), aligned to `alignment` if more than
 /// a pointer's, and zeroed with MALLOC_ZONE_MALLOC_OPTION_CLEAR (1). Under
