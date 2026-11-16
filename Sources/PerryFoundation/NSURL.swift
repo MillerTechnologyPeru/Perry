@@ -26,6 +26,15 @@ final class URLStorage {
 enum URLs {
     nonisolated(unsafe) static var urlClass: Class!
 
+    /// +URLWithString:'s URL. Programs linked on or after iOS 17 get what
+    /// Apple's Foundation gives them: a string with characters a URL cannot
+    /// hold is percent-encoded rather than refused.
+    static func parse(_ string: String) -> URL? {
+        if let url = URL(string: string) { return url }
+        guard Process.sdkVersion.majorVersion >= 17 else { return nil }
+        return URL(string: string, encodingInvalidCharacters: true)
+    }
+
     static func url(_ object: id?) -> URL? {
         Storage.get(object, as: URLStorage.self)?.url
     }
@@ -93,7 +102,7 @@ public final class NSURL: NSObject {
     // A nil string makes no URL.
 
     @ObjCClassMethod("URLWithString:")
-    static func url(_ cls: ObjCClass, string: String?) -> NSURL? { string.flatMap { URLs.wrapped(URL(string: $0), cls: cls) } }
+    static func url(_ cls: ObjCClass, string: String?) -> NSURL? { string.flatMap { URLs.wrapped(URLs.parse($0), cls: cls) } }
 
     @ObjCClassMethod("URLWithString:relativeToURL:")
     static func url(_ cls: ObjCClass, string: String?, relativeTo base: NSURL?) -> NSURL? {
@@ -132,7 +141,7 @@ public final class NSURL: NSObject {
     }
 
     @ObjCMethod("initWithString:")
-    func initialize(string: String?) -> Self? { setURL(string.flatMap { URL(string: $0) }) }
+    func initialize(string: String?) -> Self? { setURL(string.flatMap { URLs.parse($0) }) }
 
     @ObjCMethod("initWithString:relativeToURL:")
     func initialize(string: String?, relativeTo base: NSURL?) -> Self? { setURL(string.flatMap { URL(string: $0, relativeTo: base?.url) }) }
