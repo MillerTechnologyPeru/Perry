@@ -136,6 +136,8 @@ open class UIFont: NSObject {
 
     @ObjCClassMethod("systemFontSize") static func systemFontSize() -> CGFloat { 14 }
     @ObjCClassMethod("labelFontSize") static func labelFontSize() -> CGFloat { 17 }
+    @ObjCClassMethod("buttonFontSize") static func buttonFontSize() -> CGFloat { 18 }
+    @ObjCClassMethod("smallSystemFontSize") static func smallSystemFontSize() -> CGFloat { 12 }
 
     @ObjCMethod("fontName") func fontName() -> String { state.name }
     @ObjCMethod("familyName") func familyName() -> String { state.name.hasPrefix(".SFUI") ? ".AppleSystemUIFont" : state.name }
