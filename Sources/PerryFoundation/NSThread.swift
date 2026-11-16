@@ -103,7 +103,9 @@ enum Threads {
             keepingLinuxRegisters {
                 // +exit jumps out of the body, past its frames, to here.
                 let pool = ObjC.poolPush()
-                perry_foundation_thread_run({ thread in Threads.storage(thread)?.main(thread!) }, thread)
+                // -main is sent, so a subclass's runs: NSThread's own runs
+                // the block or the target's selector.
+                perry_foundation_thread_run({ thread in _ = ObjC.send(thread, ObjC.selector("main")) }, thread)
                 ObjC.poolPop(pool)
             }
             if let storage = Threads.storage(thread) {
