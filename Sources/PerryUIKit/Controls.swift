@@ -397,7 +397,12 @@ open class UIButton: UIControl {
     /// The image's and the title's places in the content: the image then
     /// the title, together where the horizontal alignment puts them.
     private func places(in content: CGRect) -> (image: CGRect, title: CGRect) {
-        let imageSize = button.imageView?.imageState.image?.state.size ?? .zero
+        var imageSize = button.imageView?.imageState.image?.state.size ?? .zero
+        // An image larger than the content is shrunk to fit, keeping its shape.
+        if imageSize.width > 0, imageSize.height > 0, content.width > 0, content.height > 0 {
+            let fit = min(content.width / imageSize.width, content.height / imageSize.height)
+            if fit < 1 { imageSize = CGSize(width: imageSize.width * fit, height: imageSize.height * fit) }
+        }
         let titleSize = button.titleLabel?.label.text.map { Text.size($0, font: titleLabel().font) } ?? .zero
         let total = imageSize.width + titleSize.width
         var x: CGFloat
