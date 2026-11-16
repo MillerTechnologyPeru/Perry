@@ -112,8 +112,8 @@ public func perry_foundation_forward_invocation(_ general: UnsafePointer<UInt64>
         ObjC.notForwarded?(receiver, selector)
         return
     }
-    let pool = ObjC.poolPush()
-    defer { ObjC.poolPop(pool) }
+    // No autorelease pool of this function's own: what the method returns
+    // autoreleased has to outlive it, in the caller's pool.
     typealias Make = @convention(c) (id?, SEL, id?) -> id?
     let make = unsafeBitCast(ObjC.msgSend, to: Make.self)
     guard let invocation = make(UnsafeMutableRawPointer(Invocations.invocationClass),
