@@ -210,8 +210,11 @@ enum AutoLayout {
             }
         }
 
-        /// Sets each solved view's frame, outermost first, in its superview's space.
-        func apply() {
+        /// Sets each solved view's frame, outermost first, in its
+        /// superview's space; whether any changed.
+        @discardableResult
+        func apply() -> Bool {
+            var changed = false
             let solved = items.values.filter(\.solved).sorted { depth($0.view) < depth($1.view) }
             for item in solved {
                 guard let superviewObject = item.view.state.superview else { continue }
@@ -231,8 +234,13 @@ enum AutoLayout {
                 let current = item.view.state.frame
                 let difference = abs(frame.minX - current.minX) + abs(frame.minY - current.minY)
                     + abs(frame.width - current.width) + abs(frame.height - current.height)
-                if difference > 0.01 { item.view.sendSetFrame(frame) }
+                if difference > 0.01 {
+                    if UIView.LayoutTrace.enabled { UIView.LayoutTrace.moved(item.view, from: current, to: frame) }
+                    item.view.sendSetFrame(frame)
+                    changed = true
+                }
             }
+            return changed
         }
 
         private func depth(_ view: UIView) -> Int {
@@ -266,15 +274,17 @@ enum AutoLayout {
         return found
     }
 
-    /// Lays out `view`'s subviews from their constraints.
-    static func layOut(_ view: UIView) {
+    /// Lays out `view`'s subviews from their constraints; whether any
+    /// got another frame.
+    @discardableResult
+    static func layOut(_ view: UIView) -> Bool {
         let constraints = constraints(of: view), stacks = stackViews(in: view)
-        guard !constraints.isEmpty || !stacks.isEmpty else { return }
+        guard !constraints.isEmpty || !stacks.isEmpty else { return false }
         let system = System(root: view)
         for constraint in constraints { system.add(constraint) }
         for stack in stacks { system.arrange(stack) }
         system.solve()
-        system.apply()
+        return system.apply()
     }
 
     /// The smallest height the constraints in `view` allow at `width`, as
