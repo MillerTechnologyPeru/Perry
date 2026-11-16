@@ -167,9 +167,11 @@ public final class Request: @unchecked Sendable {
     }
 
     /// The request for corelibs, tagged when it has properties or classes;
-    /// the tag lives as long as the caller keeps it.
+    /// the tag lives as long as the caller keeps it. A request without a URL
+    /// (a task libraries make to find the task classes) is left as it is:
+    /// corelibs traps on changing one.
     func forCorelibs() -> (URLRequest, RequestTag?) {
-        guard !properties.isEmpty || !protocolClasses.isEmpty else { return (value, nil) }
+        guard value.url != nil, !properties.isEmpty || !protocolClasses.isEmpty else { return (value, nil) }
         let tag = RequestTags.register(properties: properties, classes: protocolClasses)
         var tagged = value
         tagged.setValue(String(tag.id), forHTTPHeaderField: RequestTags.header)
