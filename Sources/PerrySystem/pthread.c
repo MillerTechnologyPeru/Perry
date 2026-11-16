@@ -997,6 +997,24 @@ int darwin_pthread_attr_set_qos_class_np(pthread_attr_t *attributes, unsigned in
     return relative_priority > 0 || relative_priority < -15 ? 22 : 0;
 }
 
+/// A thread's class, as nothing sets it: QOS_CLASS_DEFAULT (0x15), the
+/// relative priority 0.
+int darwin_pthread_get_qos_class_np(pthread_t thread, unsigned int *qos, int *relative_priority)
+    DARWIN_SYMBOL(pthread_get_qos_class_np);
+int darwin_pthread_get_qos_class_np(pthread_t thread, unsigned int *qos, int *relative_priority) {
+    (void)thread;
+    if (qos) *qos = 0x15;
+    if (relative_priority) *relative_priority = 0;
+    return 0;
+}
+
+unsigned int darwin_qos_class_self(void) DARWIN_SYMBOL(qos_class_self);
+unsigned int darwin_qos_class_self(void) { return 0x15; }
+
+/// The main thread runs at user interactive priority.
+unsigned int darwin_qos_class_main(void) DARWIN_SYMBOL(qos_class_main);
+unsigned int darwin_qos_class_main(void) { return 0x21; }
+
 // MARK: - Darwin's pthread_t on x86
 
 #if defined(__i386__) || defined(__x86_64__)
