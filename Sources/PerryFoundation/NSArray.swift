@@ -85,6 +85,23 @@ enum Arrays {
     }
 
 
+    /// For the class constructors: an app's subclass is made with +alloc
+    /// and the init message, so its own -init runs, as on Darwin. nil for
+    /// Foundation's own classes.
+    static func subclassed(_ cls: id?, capacity: UInt? = nil) -> NSArray? {
+        guard let cls, cls != UnsafeMutableRawPointer(arrayClass), cls != UnsafeMutableRawPointer(mutableClass),
+              cls != UnsafeMutableRawPointer(constantClass) else { return nil }
+        let allocated = ObjC.send(cls, ObjC.selector("alloc"))
+        let made: id?
+        if let capacity {
+            typealias Init = @convention(c) (id?, SEL, UInt) -> id?
+            made = unsafeBitCast(ObjC.msgSend, to: Init.self)(allocated, ObjC.selector("initWithCapacity:"), capacity)
+        } else {
+            made = ObjC.send(allocated, ObjC.selector("init"))
+        }
+        return made.map { NSArray(objCOwned: $0) }
+    }
+
     /// A new array wrapped for returning, +1.
     static func owned(_ elements: [id], cls: id? = nil) -> NSArray {
         NSArray(objCOwned: make(elements, cls: cls))
@@ -121,7 +138,7 @@ public class NSArray: NSObject {
     // MARK: Creating
 
     @ObjCClassMethod("array")
-    static func array(_ cls: ObjCClass) -> NSArray { Arrays.owned([], cls: cls.pointer) }
+    static func array(_ cls: ObjCClass) -> NSArray { Arrays.subclassed(cls.pointer) ?? Arrays.owned([], cls: cls.pointer) }
 
     @ObjCClassMethod("arrayWithObject:")
     static func array(_ cls: ObjCClass, object: ObjCObject) -> NSArray { Arrays.owned([object.id], cls: cls.pointer) }
@@ -440,7 +457,9 @@ public class NSMutableArray: NSArray {
     }
 
     @ObjCClassMethod("arrayWithCapacity:")
-    static func array(_ cls: ObjCClass, capacity: UInt) -> NSArray { Arrays.owned([], cls: cls.pointer) }
+    static func array(_ cls: ObjCClass, capacity: UInt) -> NSArray {
+        Arrays.subclassed(cls.pointer, capacity: capacity) ?? Arrays.owned([], cls: cls.pointer)
+    }
 
     @ObjCMethod("initWithCapacity:")
     func initialize(capacity: UInt) -> Self {
