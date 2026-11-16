@@ -66,6 +66,111 @@ public struct LazyVGrid<Content>: View where Content: View {
     }
 }
 
+// MARK: - LazyHGrid
+
+/// A container view that arranges its child views in a grid that grows
+/// horizontally.
+@available(OpenSwiftUI_v2_0, *)
+public struct LazyHGrid<Content>: View where Content: View {
+    var rows: [GridItem]
+    var alignment: VerticalAlignment
+    var spacing: CGFloat?
+    var content: Content
+
+    public init(
+        rows: [GridItem],
+        alignment: VerticalAlignment = .center,
+        spacing: CGFloat? = nil,
+        pinnedViews: PinnedScrollableViews = .init(),
+        @ViewBuilder content: () -> Content
+    ) {
+        self.rows = rows
+        self.alignment = alignment
+        self.spacing = spacing
+        self.content = content()
+    }
+
+    public var body: some View {
+        HorizontalGridLayout(rows: rows, columnSpacing: spacing ?? 8) { content }
+    }
+}
+
+/// The children in columns of one child a row, filled top to bottom: each
+/// row as high as its item says, each column as wide as its widest child.
+struct HorizontalGridLayout: Layout {
+    var rows: [GridItem]
+    var columnSpacing: CGFloat
+
+    static var defaultSpacing: CGFloat { 8 }
+
+    /// The rows' heights in a height: fixed ones at theirs, the others
+    /// sharing the rest within their limits.
+    func heights(in height: CGFloat?) -> [CGFloat] {
+        guard !rows.isEmpty else { return [] }
+        let spacings = rows.dropLast().reduce(0) { $0 + ($1.spacing ?? Self.defaultSpacing) }
+        let fixed = rows.reduce(0) { total, item in
+            if case let .fixed(height) = item.size { return total + height }
+            return total
+        }
+        let flexibleCount = rows.filter { if case .fixed = $0.size { false } else { true } }.count
+        let share: CGFloat? = height.map { flexibleCount > 0 ? max(0, ($0 - fixed - spacings) / CGFloat(flexibleCount)) : 0 }
+        return rows.map { item in
+            switch item.size {
+            case let .fixed(height): height
+            case let .flexible(minimum, maximum): min(max(share ?? minimum, minimum), maximum)
+            case let .adaptive(minimum, maximum): min(max(share ?? minimum, minimum), maximum)
+            }
+        }
+    }
+
+    /// Each column's children and width.
+    private func columns(_ subviews: Subviews, heights: [CGFloat]) -> [(range: Range<Int>, width: CGFloat)] {
+        guard !heights.isEmpty else { return [] }
+        var columns: [(Range<Int>, CGFloat)] = []
+        var start = 0
+        while start < subviews.count {
+            let end = min(start + heights.count, subviews.count)
+            var width: CGFloat = 0
+            for index in start ..< end {
+                let size = subviews[index].sizeThatFits(ProposedViewSize(width: nil, height: heights[index - start]))
+                width = max(width, size.width)
+            }
+            columns.append((start ..< end, width))
+            start = end
+        }
+        return columns
+    }
+
+    private func totalHeight(_ heights: [CGFloat]) -> CGFloat {
+        heights.reduce(0, +) + rows.dropLast().reduce(0) { $0 + ($1.spacing ?? Self.defaultSpacing) }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let heights = heights(in: proposal.height)
+        let columns = columns(subviews, heights: heights)
+        let width = columns.reduce(0) { $0 + $1.width } + columnSpacing * CGFloat(max(columns.count - 1, 0))
+        return CGSize(width: width, height: proposal.height ?? totalHeight(heights))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let heights = heights(in: bounds.height)
+        var x = bounds.minX
+        for column in columns(subviews, heights: heights) {
+            var y = bounds.minY
+            for index in column.range {
+                let row = index - column.range.lowerBound
+                subviews[index].place(
+                    at: CGPoint(x: x + column.width / 2, y: y + heights[row] / 2),
+                    anchor: .center,
+                    proposal: ProposedViewSize(width: column.width, height: heights[row])
+                )
+                y += heights[row] + (rows[row].spacing ?? Self.defaultSpacing)
+            }
+            x += column.width + columnSpacing
+        }
+    }
+}
+
 /// One column of the grid as laid out: its width and its item.
 struct GridColumn {
     var width: CGFloat

@@ -235,6 +235,15 @@ public struct _MaskEffect<Mask>: ViewModifier where Mask: View {
     }
 }
 
+@available(OpenSwiftUI_v1_0, *)
+extension View {
+    /// Masks this view using the alpha channel of the given view.
+    @inlinable
+    nonisolated public func mask<Mask>(_ mask: Mask) -> some View where Mask: View {
+        return modifier(_MaskEffect(mask: mask))
+    }
+}
+
 // MARK: - Lists
 
 /// The trait holding a list row's background.

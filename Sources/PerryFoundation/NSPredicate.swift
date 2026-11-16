@@ -736,10 +736,16 @@ enum PredicateEvaluation {
             return wildcard(Array(l), Array(r))
         case PredicateOperator.matches:
             guard let l = text(left, c.options), let r = text(right, c.options) else { return false }
-            var expression = regex_t()
-            guard regcomp(&expression, "^(" + r + ")$", REG_EXTENDED | REG_NOSUB) == 0 else { return false }
-            defer { regfree(&expression) }
-            return regexec(&expression, l, 0, nil, 0) == 0
+            // The whole string, by ICU's regular expressions as Foundation's:
+            // patterns use what POSIX's lack, lookaheads among it.
+            guard let expression = RegexStorage(pattern: "(?:" + r + ")\\z", options: 0) else { return false }
+            let units = Array(l.utf16)
+            var matched = false
+            expression.matches(in: units, range: NSRange(location: 0, length: UInt(units.count)), options: 4) { _ in
+                matched = true
+                return false
+            }
+            return matched
         default:
             return false
         }

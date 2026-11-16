@@ -1,13 +1,11 @@
 //
 //  PositionLayout.swift
-//  OpenSwiftUI
+//  OpenSwiftUICore
 //
 //  Audited for 6.5.4
 //  Status: Complete
 
 public import OpenCoreGraphicsShims
-@_spi(ForOpenSwiftUIOnly)
-public import OpenSwiftUICore
 
 // MARK: - PositionLayout
 

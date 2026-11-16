@@ -1,6 +1,6 @@
 //
 //  AlignmentWritingModifier.swift
-//  OpenSwiftUI
+//  OpenSwiftUICore
 //
 //  Audited for 6.5.4
 //  Status: Complete
@@ -8,8 +8,6 @@
 
 import OpenAttributeGraphShims
 public import OpenCoreGraphicsShims
-@_spi(ForOpenSwiftUIOnly)
-public import OpenSwiftUICore
 
 // MARK: - View + alignmentGuide
 

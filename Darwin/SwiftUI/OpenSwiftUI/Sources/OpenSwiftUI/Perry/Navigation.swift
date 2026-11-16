@@ -137,6 +137,11 @@ public struct NavigationStack<Data, Root>: View where Root: View {
     @State private var titles: [Int: Text] = [:]
     @State private var barHidden: [Int: Bool] = [:]
     @State private var backHidden: [Int: Bool] = [:]
+    /// What the shown page says of the bar and its back button. A change of
+    /// page that leaves a preference as it was reports no change, so the
+    /// page's depth has no entry of its own and takes these.
+    @State private var shownBarHidden: Bool?
+    @State private var shownBackHidden: Bool?
 
     static var barHeight: CGFloat { 44 }
 
@@ -212,12 +217,12 @@ public struct NavigationStack<Data, Root>: View where Root: View {
     public var body: some View {
         let pages = values.map { destinations.view(for: $0) } + viewPages.map(\.view)
         let depth = pages.count
-        let isBarHidden = barHidden[depth] ?? false
+        let isBarHidden = barHidden[depth] ?? shownBarHidden ?? false
         VStack(spacing: 0) {
             if !isBarHidden {
                 NavigationBarRepresentable(
                     titles: (0...depth).map { titles[$0] },
-                    hidesBackButton: backHidden[depth] ?? false,
+                    hidesBackButton: backHidden[depth] ?? shownBackHidden ?? false,
                     onBack: popTop
                 )
                 .frame(height: Self.barHeight)
@@ -238,9 +243,11 @@ public struct NavigationStack<Data, Root>: View where Root: View {
             }
             .onPreferenceChange(StackBarHiddenKey.self) { hidden in
                 barHidden[depth] = hidden
+                shownBarHidden = hidden
             }
             .onPreferenceChange(StackBackButtonHiddenKey.self) { hidden in
                 backHidden[depth] = hidden
+                shownBackHidden = hidden
             }
             .onPreferenceChange(NavigationDestinationsKey.self) { found in
                 var merged = destinations

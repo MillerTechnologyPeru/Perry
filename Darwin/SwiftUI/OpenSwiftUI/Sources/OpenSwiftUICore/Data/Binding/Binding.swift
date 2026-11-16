@@ -326,6 +326,7 @@ public struct Binding<Value> {
     ///     following parameters:
     ///       - newValue: The new value of the binding value.
     ///       - transaction: The transaction to apply when setting a new value.
+    @preconcurrency
     public init(
         @_inheritActorContext get: @escaping @isolated(any) @Sendable () -> Value,
         @_inheritActorContext set: @escaping @isolated(any) @Sendable (Value, Transaction) -> Void

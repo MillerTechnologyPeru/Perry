@@ -21,6 +21,9 @@ final class ColorState: ObjectState {
     /// colorWithDynamicProvider:'s block, which gives the color for a trait
     /// collection; the color's components are its color for the device's.
     var provider: ObjCBlock?
+    /// A color that differs by appearance without a block: an asset
+    /// catalog's, or a system color; red, green, blue and alpha of each.
+    var variants: (light: [CGFloat], dark: [CGFloat])?
 
     deinit { if let cgColor { CG.release(cgColor) } }
 
@@ -61,6 +64,25 @@ open class UIColor: NSObject {
 
     static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, _ alpha: CGFloat = 1) -> UIColor {
         make(objCClass) { $0.set(red: red, green: green, blue: blue, alpha: alpha) }
+    }
+
+    /// A color with a light and a dark appearance (red, green, blue, alpha
+    /// each): its own components are those of the system's appearance.
+    static func dynamic(light: [CGFloat], dark: [CGFloat]) -> UIColor {
+        make(UIDynamicColor.objCClass) { state in
+            let shown = SystemAppearance.style == 2 ? dark : light
+            state.set(red: shown[0], green: shown[1], blue: shown[2], alpha: shown[3])
+            state.variants = (light, dark)
+        }
+    }
+
+    /// A gray that differs by appearance.
+    static func dynamic(lightGray: CGFloat, darkGray: CGFloat) -> UIColor {
+        dynamic(light: [lightGray, lightGray, lightGray, 1], dark: [darkGray, darkGray, darkGray, 1])
+    }
+
+    static func dynamic(_ light: (CGFloat, CGFloat, CGFloat, CGFloat), _ dark: (CGFloat, CGFloat, CGFloat, CGFloat)) -> UIColor {
+        dynamic(light: [light.0 / 255, light.1 / 255, light.2 / 255, light.3], dark: [dark.0 / 255, dark.1 / 255, dark.2 / 255, dark.3])
     }
 
     static func gray(_ white: CGFloat, _ alpha: CGFloat = 1) -> UIColor {
@@ -158,22 +180,48 @@ open class UIColor: NSObject {
         return self
     }
 
-    /// The main bundle's asset catalog's color of that name, in the light
-    /// appearance.
+    /// The main bundle's asset catalog's color of that name: dynamic when
+    /// the catalog has another for the dark appearance.
     @ObjCClassMethod("colorNamed:")
     static func color(_ cls: ObjCClass, named name: String) -> UIColor? {
-        catalogColor(cls, AssetCatalog.color(named: name))
+        catalogColor(cls, AssetCatalog.color(named: name), dark: AssetCatalog.color(named: name, dark: true))
     }
 
     /// A bundle's asset catalog's color of that name, in the traits'
     /// appearance.
     @ObjCClassMethod("colorNamed:inBundle:compatibleWithTraitCollection:")
     static func color(_ cls: ObjCClass, named name: String, in bundle: NSObject?, compatibleWith traits: NSObject?) -> UIColor? {
-        let dark = traits?.as(UITraitCollection.self)?.traits.style == 2
+        // With no traits, the color follows the appearance it is drawn in.
+        guard let style = traits?.as(UITraitCollection.self)?.traits.style, style != 0 else {
+            guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else {
+                return color(cls, named: name)
+            }
+            let catalog = AssetCatalog.catalog(in: bundle)
+            return catalogColor(cls, catalog?.components(named: name, dark: false), dark: catalog?.components(named: name, dark: true))
+        }
+        let dark = style == 2
         guard let bundle = bundle?.as(NSBundle.self), bundle.objcObject != NSBundle.main().objcObject else {
             return catalogColor(cls, AssetCatalog.color(named: name, dark: dark))
         }
         return catalogColor(cls, AssetCatalog.catalog(in: bundle)?.components(named: name, dark: dark))
+    }
+
+    /// Red, green, blue and alpha of a catalog's components.
+    private static func rgba(_ components: [CGFloat]) -> [CGFloat]? {
+        switch components.count {
+        case 1, 2: [components[0], components[0], components[0], components.count > 1 ? components[1] : 1]
+        case 3, 4, 5: [components[0], components[1], components[2], components.count > 3 ? components[3] : 1]
+        default: nil
+        }
+    }
+
+    /// A catalog's color, dynamic when its dark appearance differs.
+    private static func catalogColor(_ cls: ObjCClass, _ components: [CGFloat]?, dark: [CGFloat]?) -> UIColor? {
+        guard let components, let dark, let light = rgba(components), let darker = rgba(dark), light != darker,
+              cls.pointer == UIColor.objCClass.pointer else {
+            return catalogColor(cls, components)
+        }
+        return dynamic(light: light, dark: darker)
     }
 
     /// A color of a catalog's components: white and alpha, or red, green,
@@ -219,7 +267,7 @@ open class UIColor: NSObject {
     @ObjCClassMethod("colorWithDynamicProvider:")
     static func color(_ cls: ObjCClass, dynamicProvider provider: ObjCBlock) -> NSObject? {
         let resolved = resolve(provider, UITraitCollection.current())
-        return make(cls) { state in
+        return make(cls.pointer == UIColor.objCClass.pointer ? UIDynamicColor.objCClass : cls) { state in
             if let resolved {
                 let other = resolved.state
                 (state.red, state.green, state.blue, state.alpha) = (other.red, other.green, other.blue, other.alpha)
@@ -304,26 +352,26 @@ open class UIColor: NSObject {
     @ObjCClassMethod("systemPurpleColor") static func systemPurple() -> UIColor { rgb(175.0 / 255, 82.0 / 255, 222.0 / 255) }
     @ObjCClassMethod("systemPinkColor") static func systemPink() -> UIColor { rgb(1, 45.0 / 255, 85.0 / 255) }
     @ObjCClassMethod("systemGrayColor") static func systemGray() -> UIColor { rgb(142.0 / 255, 142.0 / 255, 147.0 / 255) }
-    @ObjCClassMethod("systemGray2Color") static func systemGray2() -> UIColor { rgb(174.0 / 255, 174.0 / 255, 178.0 / 255) }
-    @ObjCClassMethod("systemGray3Color") static func systemGray3() -> UIColor { rgb(199.0 / 255, 199.0 / 255, 204.0 / 255) }
-    @ObjCClassMethod("systemGray4Color") static func systemGray4() -> UIColor { rgb(209.0 / 255, 209.0 / 255, 214.0 / 255) }
-    @ObjCClassMethod("systemGray5Color") static func systemGray5() -> UIColor { rgb(229.0 / 255, 229.0 / 255, 234.0 / 255) }
-    @ObjCClassMethod("systemGray6Color") static func systemGray6() -> UIColor { rgb(242.0 / 255, 242.0 / 255, 247.0 / 255) }
+    @ObjCClassMethod("systemGray2Color") static func systemGray2() -> UIColor { dynamic((174, 174, 178, 1), (99, 99, 102, 1)) }
+    @ObjCClassMethod("systemGray3Color") static func systemGray3() -> UIColor { dynamic((199, 199, 204, 1), (72, 72, 74, 1)) }
+    @ObjCClassMethod("systemGray4Color") static func systemGray4() -> UIColor { dynamic((209, 209, 214, 1), (58, 58, 60, 1)) }
+    @ObjCClassMethod("systemGray5Color") static func systemGray5() -> UIColor { dynamic((229, 229, 234, 1), (44, 44, 46, 1)) }
+    @ObjCClassMethod("systemGray6Color") static func systemGray6() -> UIColor { dynamic((242, 242, 247, 1), (28, 28, 30, 1)) }
     @ObjCClassMethod("tintColor") static func tint() -> UIColor { systemBlue() }
     @ObjCClassMethod("linkColor") static func link() -> UIColor { systemBlue() }
-    @ObjCClassMethod("labelColor") static func label() -> UIColor { gray(0) }
-    @ObjCClassMethod("secondaryLabelColor") static func secondaryLabel() -> UIColor { rgb(60.0 / 255, 60.0 / 255, 67.0 / 255, 0.6) }
-    @ObjCClassMethod("tertiaryLabelColor") static func tertiaryLabel() -> UIColor { rgb(60.0 / 255, 60.0 / 255, 67.0 / 255, 0.3) }
-    @ObjCClassMethod("placeholderTextColor") static func placeholderText() -> UIColor { rgb(60.0 / 255, 60.0 / 255, 67.0 / 255, 0.3) }
-    @ObjCClassMethod("separatorColor") static func separator() -> UIColor { rgb(60.0 / 255, 60.0 / 255, 67.0 / 255, 0.29) }
-    @ObjCClassMethod("opaqueSeparatorColor") static func opaqueSeparator() -> UIColor { rgb(198.0 / 255, 198.0 / 255, 200.0 / 255) }
-    @ObjCClassMethod("systemBackgroundColor") static func systemBackground() -> UIColor { gray(1) }
-    @ObjCClassMethod("secondarySystemBackgroundColor") static func secondarySystemBackground() -> UIColor { systemGray6() }
-    @ObjCClassMethod("tertiarySystemBackgroundColor") static func tertiarySystemBackground() -> UIColor { gray(1) }
-    @ObjCClassMethod("systemGroupedBackgroundColor") static func systemGroupedBackground() -> UIColor { systemGray6() }
-    @ObjCClassMethod("groupTableViewBackgroundColor") static func groupTableViewBackground() -> UIColor { systemGray6() }
-    @ObjCClassMethod("secondarySystemGroupedBackgroundColor") static func secondarySystemGroupedBackground() -> UIColor { gray(1) }
-    @ObjCClassMethod("systemFillColor") static func systemFill() -> UIColor { rgb(120.0 / 255, 120.0 / 255, 128.0 / 255, 0.2) }
+    @ObjCClassMethod("labelColor") static func label() -> UIColor { dynamic(lightGray: 0, darkGray: 1) }
+    @ObjCClassMethod("secondaryLabelColor") static func secondaryLabel() -> UIColor { dynamic((60, 60, 67, 0.6), (235, 235, 245, 0.6)) }
+    @ObjCClassMethod("tertiaryLabelColor") static func tertiaryLabel() -> UIColor { dynamic((60, 60, 67, 0.3), (235, 235, 245, 0.3)) }
+    @ObjCClassMethod("placeholderTextColor") static func placeholderText() -> UIColor { dynamic((60, 60, 67, 0.3), (235, 235, 245, 0.3)) }
+    @ObjCClassMethod("separatorColor") static func separator() -> UIColor { dynamic((60, 60, 67, 0.29), (84, 84, 88, 0.6)) }
+    @ObjCClassMethod("opaqueSeparatorColor") static func opaqueSeparator() -> UIColor { dynamic((198, 198, 200, 1), (56, 56, 58, 1)) }
+    @ObjCClassMethod("systemBackgroundColor") static func systemBackground() -> UIColor { dynamic(lightGray: 1, darkGray: 0) }
+    @ObjCClassMethod("secondarySystemBackgroundColor") static func secondarySystemBackground() -> UIColor { dynamic((242, 242, 247, 1), (28, 28, 30, 1)) }
+    @ObjCClassMethod("tertiarySystemBackgroundColor") static func tertiarySystemBackground() -> UIColor { dynamic((255, 255, 255, 1), (44, 44, 46, 1)) }
+    @ObjCClassMethod("systemGroupedBackgroundColor") static func systemGroupedBackground() -> UIColor { dynamic((242, 242, 247, 1), (0, 0, 0, 1)) }
+    @ObjCClassMethod("groupTableViewBackgroundColor") static func groupTableViewBackground() -> UIColor { systemGroupedBackground() }
+    @ObjCClassMethod("secondarySystemGroupedBackgroundColor") static func secondarySystemGroupedBackground() -> UIColor { dynamic((255, 255, 255, 1), (28, 28, 30, 1)) }
+    @ObjCClassMethod("systemFillColor") static func systemFill() -> UIColor { dynamic((120, 120, 128, 0.2), (120, 120, 128, 0.36)) }
 
     // MARK: Components
 
@@ -384,8 +432,13 @@ open class UIColor: NSObject {
     /// itself.
     @ObjCMethod("resolvedColorWithTraitCollection:")
     func resolvedColor(with traits: NSObject?) -> UIColor {
-        guard let provider = state.provider else { return self }
         let collection = traits?.as(UITraitCollection.self) ?? UITraitCollection.current()
+        if let variants = state.variants {
+            let style = collection.traits.style == 0 ? SystemAppearance.style : collection.traits.style
+            let shown = style == 2 ? variants.dark : variants.light
+            return UIColor.rgb(shown[0], shown[1], shown[2], shown[3])
+        }
+        guard let provider = state.provider else { return self }
         return UIColor.resolve(provider, collection) ?? self
     }
 
@@ -439,4 +492,18 @@ open class UIColor: NSObject {
 extension NSObject {
     /// A UIColor's CGColor.
     @ObjCMethod("CGColor") func sendCGColor() -> UnsafeMutableRawPointer?
+}
+
+// MARK: - UIDynamicColor
+
+/// A color that differs by appearance: UIKit's dynamic colors are a
+/// subclass with its own -resolvedColorWithTraitCollection:, which is how
+/// SwiftUI tells a color that follows the color scheme from one that is
+/// the same in both.
+@ObjCClass("UIDynamicColor")
+open class UIDynamicColor: UIColor {
+    @ObjCMethod("resolvedColorWithTraitCollection:")
+    override func resolvedColor(with traits: NSObject?) -> UIColor {
+        super.resolvedColor(with: traits)
+    }
 }

@@ -529,7 +529,7 @@ open class UIView: UIResponder, UICoordinateSpace {
             }
             current = view.state.superview.map { UIView.wrap($0) }
         }
-        return 1
+        return SystemAppearance.style
     }
 
     /// Sends -traitCollectionDidChange: to this view, its subviews and their

@@ -733,6 +733,20 @@ enum URLTrace {
         data.withUnsafeBytes { _ = fwrite($0.baseAddress, 1, $0.count, file) }
     }
 
+    /// With PERRY_URL_BLOCK_WRITES=<part>,<part>..., a request other than a
+    /// GET or HEAD whose URL has one of the parts goes nowhere: it is sent
+    /// to a closed local port and fails. For looking at an app signed in to
+    /// an account without it changing what the account's service holds.
+    static let blockedWrites = getenv("PERRY_URL_BLOCK_WRITES").map { String(cString: $0).split(separator: ",").map(String.init) } ?? []
+
+    static func blockWrite(_ request: inout URLRequest) {
+        guard !blockedWrites.isEmpty, let url = request.url?.absoluteString else { return }
+        let method = (request.httpMethod ?? "GET").uppercased()
+        guard method != "GET", method != "HEAD", blockedWrites.contains(where: { url.contains($0) }) else { return }
+        FileHandle.standardError.write(Data("perry: URL: blocked \(method) \(url.prefix(120))\n".utf8))
+        request.url = URL(string: "http://127.0.0.1:9/perry-blocked-write")
+    }
+
     static func completed(_ url: URL?, _ response: URLResponse?, _ bytes: Int?, _ error: (any Error)?) {
         guard on else { return }
         var line = "perry: URL[\(time(nil) % 1000)]: \(url?.absoluteString ?? "?")"
@@ -821,8 +835,9 @@ public final class Session: @unchecked Sendable {
     private func tagged(_ request: Request) -> URLRequest {
         let copy = request.copy()
         copy.protocolClasses = configuration.protocolClasses ?? []
-        let (value, tag) = copy.forCorelibs()
+        var (value, tag) = copy.forCorelibs()
         if let tag { pendingTags.append(tag) }
+        URLTrace.blockWrite(&value)
         return value
     }
 
@@ -836,6 +851,7 @@ public final class Session: @unchecked Sendable {
         -> @Sendable (Data?, URLResponse?, (any Error)?) -> Void {
         { data, response, error in
             URLTrace.completed(url, response, data?.count, error)
+            if let data { URLTrace.body(url, data) }
             completion(data, response.map(Response.init), error.map { Failure($0, url: url) })
         }
     }

@@ -1,6 +1,6 @@
 // Parts of Darwin's Foundation overlay that programs built against it call
 // and swift-foundation leaves to Apple's build: literals for NSArray,
-// NSString and NSDecimal, key-value observation by key path, a scanner's
+// NSDictionary, NSString and NSDecimal, key-value observation by key path, a scanner's
 // and a string's conveniences, and searching a Data.
 
 // MARK: - Literals
@@ -9,6 +9,23 @@ extension NSArray: ExpressibleByArrayLiteral {
     /// An array of the elements, each bridged.
     public required convenience init(arrayLiteral elements: Any...) {
         self.init(array: elements)
+    }
+}
+
+extension NSDictionary: ExpressibleByDictionaryLiteral {
+    /// A dictionary of the pairs, keys and values bridged; of a key given
+    /// twice, the first.
+    public required convenience init(dictionaryLiteral elements: (Any, Any)...) {
+        var keys: [NSCopying] = []
+        var values: [Any] = []
+        var seen = Set<AnyHashable>()
+        for (key, value) in elements {
+            let object = key as AnyObject
+            if let hashable = object as? AnyHashable, !seen.insert(hashable).inserted { continue }
+            keys.append(object as! NSCopying)
+            values.append(value)
+        }
+        self.init(objects: values, forKeys: keys)
     }
 }
 

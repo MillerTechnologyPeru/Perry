@@ -353,7 +353,7 @@ open class UIViewController: UIResponder {
         if state.userInterfaceStyle != 0 { return state.userInterfaceStyle }
         if let view = state.view { return view.interfaceStyle }
         if let parent = state.parent { return UIViewController.wrap(parent).interfaceStyle }
-        return 1
+        return SystemAppearance.style
     }
 
     /// Nothing to do here; subclasses override it.

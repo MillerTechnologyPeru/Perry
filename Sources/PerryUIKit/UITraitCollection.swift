@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // UITraitCollection: the environment views are drawn for. Perry's is a
@@ -21,6 +22,17 @@ final class TraitState: ObjectState {
     var contentSizeCategory = "_UICTContentSizeCategoryUnspecified"
 }
 
+/// The appearance views are drawn in unless they or something above them
+/// override it: light, or dark with PERRY_UIKIT_APPEARANCE=dark, which
+/// whoever starts the app sets from the desktop's preference.
+enum SystemAppearance {
+    /// UIUserInterfaceStyle: light 1, dark 2.
+    static let style: Int = {
+        guard let value = getenv("PERRY_UIKIT_APPEARANCE") else { return 1 }
+        return String(cString: value).lowercased() == "dark" ? 2 : 1
+    }()
+}
+
 @ObjCClass("UITraitCollection")
 open class UITraitCollection: NSObject {
     static let states = StateTable<TraitState>()
@@ -39,7 +51,7 @@ open class UITraitCollection: NSObject {
     }
 
     /// The device's traits, every one specified.
-    static func device(style: Int = 1) -> UITraitCollection {
+    static func device(style: Int = SystemAppearance.style) -> UITraitCollection {
         make { traits in
             let size = Screen.bounds.size
             traits.idiom = 0

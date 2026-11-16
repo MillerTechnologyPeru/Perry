@@ -1,6 +1,6 @@
 //
 //  AllowsHitTestingModifier.swift
-//  OpenSwiftUI
+//  OpenSwiftUICore
 //
 //  Audited for 6.5.4
 //  Status: Complete
@@ -8,8 +8,6 @@
 
 package import Foundation
 import OpenAttributeGraphShims
-@_spi(ForOpenSwiftUIOnly)
-public import OpenSwiftUICore
 
 // MARK: - _AllowsHitTestingModifier
 
@@ -39,11 +37,9 @@ public struct _AllowsHitTestingModifier: _RendererEffect, Equatable {
             )
             outputs[ViewRespondersKey.self] = Attribute(filter)
         }
-        _makeAccessibilityHitTestingModifier(
-            modifier: modifier,
-            inputs: inputs,
-            outputs: &outputs
-        )
+        // Perry: the modifier is SwiftUICore's, so that apps built when it
+        // was SwiftUI's find its ViewModifier witness table; the large
+        // content viewer's part, which is SwiftUI's, is left out.
         return outputs
     }
 
