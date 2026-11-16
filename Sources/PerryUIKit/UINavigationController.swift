@@ -1072,6 +1072,36 @@ open class UIBarButtonItem: UIBarItem {
     @ObjCMethod("setWidth:") func setWidth(_ width: CGFloat) { state.width = width }
     @ObjCMethod("tintColor") func tintColor() -> UIColor? { state.tintColor }
     @ObjCMethod("setTintColor:") func setTintColor(_ color: UIColor?) { state.tintColor = color }
+
+    /// Custom item backgrounds and position adjustments are accepted and not drawn.
+    @ObjCMethod("setBackgroundImage:forState:barMetrics:")
+    func setBackgroundImage(_ image: NSObject?, forState state: UInt, barMetrics: Int) {}
+    @ObjCMethod("backgroundImageForState:barMetrics:")
+    func backgroundImage(forState state: UInt, barMetrics: Int) -> NSObject? { nil }
+    @ObjCMethod("setBackgroundImage:forState:style:barMetrics:")
+    func setBackgroundImage(_ image: NSObject?, forState state: UInt, style: Int, barMetrics: Int) {}
+    @ObjCMethod("backgroundImageForState:style:barMetrics:")
+    func backgroundImage(forState state: UInt, style: Int, barMetrics: Int) -> NSObject? { nil }
+    @ObjCMethod("setBackgroundVerticalPositionAdjustment:forBarMetrics:")
+    func setBackgroundVerticalPositionAdjustment(_ adjustment: CGFloat, forBarMetrics metrics: Int) {}
+    @ObjCMethod("backgroundVerticalPositionAdjustmentForBarMetrics:")
+    func backgroundVerticalPositionAdjustment(forBarMetrics metrics: Int) -> CGFloat { 0 }
+    @ObjCMethod("setTitlePositionAdjustment:forBarMetrics:")
+    func setTitlePositionAdjustment(_ adjustment: CGSize, forBarMetrics metrics: Int) {}
+    @ObjCMethod("titlePositionAdjustmentForBarMetrics:")
+    func titlePositionAdjustment(forBarMetrics metrics: Int) -> CGSize { .zero }
+    @ObjCMethod("setBackButtonBackgroundImage:forState:barMetrics:")
+    func setBackButtonBackgroundImage(_ image: NSObject?, forState state: UInt, barMetrics: Int) {}
+    @ObjCMethod("backButtonBackgroundImageForState:barMetrics:")
+    func backButtonBackgroundImage(forState state: UInt, barMetrics: Int) -> NSObject? { nil }
+    @ObjCMethod("setBackButtonBackgroundVerticalPositionAdjustment:forBarMetrics:")
+    func setBackButtonBackgroundVerticalPositionAdjustment(_ adjustment: CGFloat, forBarMetrics metrics: Int) {}
+    @ObjCMethod("backButtonBackgroundVerticalPositionAdjustmentForBarMetrics:")
+    func backButtonBackgroundVerticalPositionAdjustment(forBarMetrics metrics: Int) -> CGFloat { 0 }
+    @ObjCMethod("setBackButtonTitlePositionAdjustment:forBarMetrics:")
+    func setBackButtonTitlePositionAdjustment(_ adjustment: CGSize, forBarMetrics metrics: Int) {}
+    @ObjCMethod("backButtonTitlePositionAdjustmentForBarMetrics:")
+    func backButtonTitlePositionAdjustment(forBarMetrics metrics: Int) -> CGSize { .zero }
     @ObjCMethod("menu") func menu() -> NSObject? { state.menu }
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) { state.menu = menu }
     @ObjCMethod("isHidden") func isHidden() -> Bool { false }
