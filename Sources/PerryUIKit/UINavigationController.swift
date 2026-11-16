@@ -387,6 +387,8 @@ final class NavigationBarState: ObjectState {
     var compactAppearance: NSObject?
     var compactScrollEdgeAppearance: NSObject?
     var shadowImage: NSObject?
+    var backIndicatorImage: NSObject?
+    var backIndicatorTransitionMaskImage: NSObject?
     /// What the bar last drew, to tell when its items have changed.
     var drawn = ""
     /// The bar's background above it, behind the status bar.
@@ -513,6 +515,13 @@ open class UINavigationBar: UIView {
     }
     @ObjCMethod("shadowImage") func shadowImage() -> NSObject? { barState.shadowImage }
     @ObjCMethod("setShadowImage:") func setShadowImage(_ image: NSObject?) { barState.shadowImage = image }
+
+    /// Kept as set; the back button draws its own chevron.
+    @ObjCMethod("backIndicatorImage") func backIndicatorImage() -> NSObject? { barState.backIndicatorImage }
+    @ObjCMethod("setBackIndicatorImage:") func setBackIndicatorImage(_ image: NSObject?) { barState.backIndicatorImage = image }
+    @ObjCMethod("backIndicatorTransitionMaskImage") func backIndicatorTransitionMaskImage() -> NSObject? { barState.backIndicatorTransitionMaskImage }
+    @ObjCMethod("setBackIndicatorTransitionMaskImage:")
+    func setBackIndicatorTransitionMaskImage(_ image: NSObject?) { barState.backIndicatorTransitionMaskImage = image }
 
     @ObjCMethod("setBackgroundImage:forBarMetrics:") func setBackgroundImage(_ image: NSObject?, for metrics: Int) {}
     @ObjCMethod("backgroundImageForBarMetrics:") func backgroundImage(for metrics: Int) -> NSObject? { nil }

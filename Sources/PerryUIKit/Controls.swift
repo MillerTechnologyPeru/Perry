@@ -304,6 +304,15 @@ open class UIButton: UIControl {
     }
     @ObjCMethod("setAttributedTitle:forState:") func setAttributedTitle(_ title: NSObject?, for state: UInt) { setTitle(title?.sendString(), for: state) }
     @ObjCMethod("currentTitle") func currentTitle() -> String? { current(button.titles) }
+    /// The title as an attributed string, in the current state.
+    @ObjCMethod("currentAttributedTitle")
+    func currentAttributedTitle() -> NSObject? { currentTitle().map(attributed) }
+    @ObjCMethod("attributedTitleForState:")
+    func attributedTitle(for state: UInt) -> NSObject? { (button.titles[state] ?? button.titles[0]).map(attributed) }
+
+    private func attributed(_ title: String) -> NSObject {
+        ObjCClass(named: "NSAttributedString").object.allocated().sendInitialize(string: title, attributes: nil)
+    }
     @ObjCMethod("currentTitleColor") func currentTitleColor() -> UIColor { current(button.titleColors) ?? defaultTitleColor }
     @ObjCMethod("currentImage") func currentImage() -> UIImage? { current(button.images) }
     @ObjCMethod("showsTouchWhenHighlighted") func showsTouchWhenHighlighted() -> Bool { false }

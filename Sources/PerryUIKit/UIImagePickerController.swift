@@ -23,6 +23,7 @@ open class UIImagePickerController: UINavigationController {
 
     @ObjCClassMethod("isSourceTypeAvailable:") static func isSourceTypeAvailable(_ cls: ObjCClass, _ type: Int) -> Bool { false }
     @ObjCClassMethod("isCameraDeviceAvailable:") static func isCameraDeviceAvailable(_ cls: ObjCClass, _ device: Int) -> Bool { false }
+    @ObjCClassMethod("isFlashAvailableForCameraDevice:") static func isFlashAvailable(_ cls: ObjCClass, forCameraDevice device: Int) -> Bool { false }
     @ObjCClassMethod("availableMediaTypesForSourceType:")
     static func availableMediaTypes(_ cls: ObjCClass, forSourceType type: Int) -> NSObject? { nil }
 

@@ -26,6 +26,15 @@ extension String {
         }
         self = string
     }
+
+    /// A string made from the contents of the file at a path, read as UTF-8.
+    public init(contentsOfFile path: __shared String) throws {
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        guard let string = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadInapplicableStringEncoding, userInfo: [NSFilePathErrorKey: path])
+        }
+        self = string
+    }
 }
 
 extension StringProtocol {

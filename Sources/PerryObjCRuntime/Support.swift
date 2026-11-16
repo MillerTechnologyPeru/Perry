@@ -110,6 +110,26 @@ public final class RecursiveLock: @unchecked Sendable {
     }
 }
 
+/// A mutex with a condition, for threads that wait for one another's
+/// +initialize.
+public final class ClassInitializationMonitor: @unchecked Sendable {
+    private let mutex: UnsafeMutablePointer<pthread_mutex_t>
+    private let condition: UnsafeMutablePointer<pthread_cond_t>
+
+    public init() {
+        mutex = .allocate(capacity: 1)
+        condition = .allocate(capacity: 1)
+        pthread_mutex_init(mutex, nil)
+        pthread_cond_init(condition, nil)
+    }
+
+    public func lock() { pthread_mutex_lock(mutex) }
+    public func unlock() { pthread_mutex_unlock(mutex) }
+    /// Waits for a broadcast; the lock is held on entry and on return.
+    public func wait() { pthread_cond_wait(condition, mutex) }
+    public func broadcast() { pthread_cond_broadcast(condition) }
+}
+
 /// A C string compared and hashed by content, for name tables.
 struct CStringKey: Hashable {
     let pointer: UnsafePointer<CChar>
