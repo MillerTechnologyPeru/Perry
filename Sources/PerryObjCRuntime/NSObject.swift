@@ -220,6 +220,10 @@ extension NSObject {
     @ObjCMethod("isMemberOfClass:")
     func isMember(of target: ObjCClass?) -> Bool { objCClass == target }
 
+    /// The class an object archives as: its own.
+    @ObjCMethod("classForCoder") func classForCoder() -> ObjCClass { objCClass }
+    @ObjCMethod("classForKeyedArchiver") func classForKeyedArchiver() -> ObjCClass { objCClass }
+
     @ObjCMethod("respondsToSelector:")
     func responds(to selector: ObjCSelector?) -> Bool {
         guard let selector, let info = Runtime.info(classOf(objcObject)) else { return false }
@@ -301,6 +305,8 @@ extension NSObject {
     }
 
     @ObjCClassMethod("class") static func classSelf(_ cls: ObjCClass) -> ObjCClass { cls }
+    /// The class that unarchives as the class: itself.
+    @ObjCClassMethod("classForKeyedUnarchiver") static func classForKeyedUnarchiver(_ cls: ObjCClass) -> ObjCClass { cls }
     @ObjCClassMethod("superclass") static func classSuperclass(_ cls: ObjCClass) -> ObjCClass? { cls.superclass }
     @ObjCClassMethod("initialize") static func classInitialize() {}
     /// Does nothing, as on Darwin: subclasses' +load call [super load].
