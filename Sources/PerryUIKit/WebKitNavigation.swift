@@ -111,14 +111,15 @@ open class WKUserScript: NSObject {
     @ObjCMethod("init") public required override init() { super.init() }
 
     @ObjCMethod("initWithSource:injectionTime:forMainFrameOnly:")
-    func initialize(source: String?, injectionTime: Int, forMainFrameOnly: Bool) -> Self {
+    public required init(source: String?, injectionTime: Int, forMainFrameOnly: Bool) {
+        super.init()
         (self.source, self.injectionTime, self.forMainFrameOnly) = (source, injectionTime, forMainFrameOnly)
-        return self
     }
 
     @ObjCMethod("initWithSource:injectionTime:forMainFrameOnly:inContentWorld:")
-    func initialize(source: String?, injectionTime: Int, forMainFrameOnly: Bool, world: NSObject?) -> Self {
-        initialize(source: source, injectionTime: injectionTime, forMainFrameOnly: forMainFrameOnly)
+    public required init(source: String?, injectionTime: Int, forMainFrameOnly: Bool, world: NSObject?) {
+        super.init()
+        (self.source, self.injectionTime, self.forMainFrameOnly) = (source, injectionTime, forMainFrameOnly)
     }
 
     @ObjCMethod("source") func sourceValue() -> String? { source }
