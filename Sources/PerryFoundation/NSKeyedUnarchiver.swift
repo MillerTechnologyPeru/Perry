@@ -482,6 +482,16 @@ public class NSKeyedUnarchiver: NSObject {
         return ObjC.send(data, ObjC.selector("bytes")).map { UnsafeRawPointer($0) }
     }
 
+    @ObjCMethod("decodeTopLevelObjectOfClass:forKey:error:")
+    func decodeTopLevelObject(ofClass cls: ObjCClass?, forKey key: String, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
+        decodeObject(forKey: key)
+    }
+
+    @ObjCMethod("decodeTopLevelObjectOfClasses:forKey:error:")
+    func decodeTopLevelObject(ofClasses classes: ObjCObject?, forKey key: String, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
+        decodeObject(forKey: key)
+    }
+
     @ObjCMethod("decodeTopLevelObjectForKey:error:")
     func decodeTopLevelObject(forKey key: String, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> ObjCObject? {
         decodeObject(forKey: key)

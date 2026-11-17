@@ -146,6 +146,9 @@ enum PredicateFormat {
             if let symbol = PredicateArithmetic.symbols[name], arguments.count == 2 {
                 return "(" + expression(arguments[0]) + " \(symbol) " + expression(arguments[1]) + ")"
             }
+            if name.hasPrefix("@send:"), arguments.count == 2 {
+                return expression(arguments[0]) + " " + String(name.dropFirst(6)) + " " + expression(arguments[1])
+            }
             return String(name.prefix { $0 != ":" }) + "(" + arguments.map(expression).joined(separator: ", ") + ")"
         }
     }
@@ -436,6 +439,17 @@ struct PredicateParser {
         else if isKeyword("ALL") { modifier = PredicateModifier.all; advance() }
         else if isKeyword("NONE") { modifier = PredicateModifier.any; negate = true; advance() }
         let left = parseExpression()
+        // "self isKindOfClass: %@": a message to the left value with one
+        // argument, which holds when it answers yes.
+        if case .word(let selector) = current, Self.keyword(selector) == nil, case .symbol(":") = tokens[min(position + 1, tokens.count - 1)] {
+            advance()
+            advance()
+            let argument = parseExpression()
+            let call = PredicateNode.comparison(.init(left: .function("@send:" + selector + ":", [left, argument]),
+                                                      right: .constant(ObjCObject(perry_foundation_boolean(1))),
+                                                      operation: PredicateOperator.equalTo, modifier: modifier, options: 0))
+            return negate ? .compound(CompoundType.not, [call]) : call
+        }
         let operation: UInt
         switch current {
         case .symbol("=="), .symbol("="): operation = PredicateOperator.equalTo
@@ -638,6 +652,10 @@ enum PredicateEvaluation {
     /// The aggregate functions over an argument's collection, and the case
     /// changes over a string.
     static func function(_ name: String, _ arguments: [id?]) -> id? {
+        if name.hasPrefix("@send:") {
+            guard arguments.count == 2, let target = arguments[0] else { return perry_foundation_boolean(0) }
+            return perry_foundation_boolean(ObjC.sendBool(target, ObjC.selector(String(name.dropFirst(6))), arguments[1]) ? 1 : 0)
+        }
         let items = arguments.first.flatMap { elements($0) } ?? []
         typealias DoubleValue = @convention(c) (id?, SEL) -> Double.ObjCResultType
         let doubleValue = unsafeBitCast(ObjC.msgSend, to: DoubleValue.self)

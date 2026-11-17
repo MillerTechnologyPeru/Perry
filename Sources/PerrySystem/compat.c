@@ -781,6 +781,68 @@ bool darwin_OSAtomicTestAndClearBarrier(uint32_t n, volatile void *address) {
     return (__atomic_fetch_and(byte, (uint8_t)~mask, __ATOMIC_SEQ_CST) & mask) != 0;
 }
 
+// The rest of OSAtomic's value operations, all sequentially consistent: those
+// that give the new value, those that give the old (Orig), and the bit
+// operations.
+int32_t darwin_OSAtomicAnd32(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicAnd32);
+int32_t darwin_OSAtomicAnd32(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_and_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicAnd32Orig(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicAnd32Orig);
+int32_t darwin_OSAtomicAnd32Orig(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_and(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicOr32(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32);
+int32_t darwin_OSAtomicOr32(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_or_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicOr32Orig(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32Orig);
+int32_t darwin_OSAtomicOr32Orig(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_or(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicXor32(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicXor32);
+int32_t darwin_OSAtomicXor32(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_xor_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicXor32Orig(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicXor32Orig);
+int32_t darwin_OSAtomicXor32Orig(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_xor(value, mask, __ATOMIC_SEQ_CST); }
+
+bool darwin_OSAtomicTestAndSet(uint32_t n, volatile void *address) DARWIN_SYMBOL(OSAtomicTestAndSet);
+bool darwin_OSAtomicTestAndSet(uint32_t n, volatile void *address) { volatile uint8_t *byte = (volatile uint8_t *)address + (n >> 3); uint8_t mask = (uint8_t)(0x80u >> (n & 7)); return (__atomic_fetch_or(byte, mask, __ATOMIC_SEQ_CST) & mask) != 0; }
+
+bool darwin_OSAtomicTestAndClear(uint32_t n, volatile void *address) DARWIN_SYMBOL(OSAtomicTestAndClear);
+bool darwin_OSAtomicTestAndClear(uint32_t n, volatile void *address) { volatile uint8_t *byte = (volatile uint8_t *)address + (n >> 3); uint8_t mask = (uint8_t)(0x80u >> (n & 7)); return (__atomic_fetch_and(byte, (uint8_t)~mask, __ATOMIC_SEQ_CST) & mask) != 0; }
+
+int64_t darwin_OSAtomicIncrement64(volatile int64_t *value) DARWIN_SYMBOL(OSAtomicIncrement64);
+int64_t darwin_OSAtomicIncrement64(volatile int64_t *value) { return __atomic_add_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+int64_t darwin_OSAtomicDecrement64(volatile int64_t *value) DARWIN_SYMBOL(OSAtomicDecrement64);
+int64_t darwin_OSAtomicDecrement64(volatile int64_t *value) { return __atomic_sub_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicAnd32Barrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicAnd32Barrier);
+int32_t darwin_OSAtomicAnd32Barrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_and_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicAnd32OrigBarrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicAnd32OrigBarrier);
+int32_t darwin_OSAtomicAnd32OrigBarrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_and(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicOr32OrigBarrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32OrigBarrier);
+int32_t darwin_OSAtomicOr32OrigBarrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_or(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicXor32Barrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicXor32Barrier);
+int32_t darwin_OSAtomicXor32Barrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_xor_fetch(value, mask, __ATOMIC_SEQ_CST); }
+
+int32_t darwin_OSAtomicXor32OrigBarrier(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicXor32OrigBarrier);
+int32_t darwin_OSAtomicXor32OrigBarrier(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_xor(value, mask, __ATOMIC_SEQ_CST); }
+
+bool darwin_OSAtomicTestAndSetBarrier(uint32_t n, volatile void *address) DARWIN_SYMBOL(OSAtomicTestAndSetBarrier);
+bool darwin_OSAtomicTestAndSetBarrier(uint32_t n, volatile void *address) { volatile uint8_t *byte = (volatile uint8_t *)address + (n >> 3); uint8_t mask = (uint8_t)(0x80u >> (n & 7)); return (__atomic_fetch_or(byte, mask, __ATOMIC_SEQ_CST) & mask) != 0; }
+
+int64_t darwin_OSAtomicIncrement64Barrier(volatile int64_t *value) DARWIN_SYMBOL(OSAtomicIncrement64Barrier);
+int64_t darwin_OSAtomicIncrement64Barrier(volatile int64_t *value) { return __atomic_add_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+int64_t darwin_OSAtomicDecrement64Barrier(volatile int64_t *value) DARWIN_SYMBOL(OSAtomicDecrement64Barrier);
+int64_t darwin_OSAtomicDecrement64Barrier(volatile int64_t *value) { return __atomic_sub_fetch(value, 1, __ATOMIC_SEQ_CST); }
+
+// Nor a run-time one: libraries here are not versioned, so -1, as for one
+// that is not loaded.
+int32_t darwin_NSVersionOfRunTimeLibrary(const char *name) DARWIN_SYMBOL(NSVersionOfRunTimeLibrary);
+int32_t darwin_NSVersionOfRunTimeLibrary(const char *name) { (void)name; return -1; }
+
 // No library has a link-time version here: -1, as for one not linked.
 int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) DARWIN_SYMBOL(NSVersionOfLinkTimeLibrary);
 int32_t darwin_NSVersionOfLinkTimeLibrary(const char *name) { (void)name; return -1; }

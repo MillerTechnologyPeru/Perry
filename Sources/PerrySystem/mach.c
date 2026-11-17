@@ -1061,6 +1061,9 @@ kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint
         return task_dyld_info(info, count);
     if (flavor == 18)
         flavor = 5;
+    // The words the flavor fills: a caller's count is the room it has, and
+    // may be more than its buffer, as for a flavor it sized wrongly.
+    uint32_t words = flavor == 20 ? 12 : 10;
     if ((flavor != 20 && flavor != 5) || *count < 10)
         return KERN_INVALID_ARGUMENT;
     long pages = 0, resident = 0;
@@ -1071,7 +1074,7 @@ kern_return_t darwin_task_info(mach_port_t task, int flavor, int32_t *info, uint
         fclose(statm);
     }
     long page = sysconf(_SC_PAGESIZE);
-    memset(info, 0, *count * sizeof(int32_t));
+    memset(info, 0, (*count < words ? *count : words) * sizeof(int32_t));
     if (flavor == 20) {
         // virtual_size, resident_size, resident_size_max (64-bit), then times.
         uint64_t values[3] = { (uint64_t)(pages * page), (uint64_t)(resident * page), (uint64_t)(resident * page) };

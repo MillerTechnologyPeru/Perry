@@ -11,6 +11,8 @@ final class NavigationState: ObjectState {
     /// The controller whose view is shown, kept until another replaces it.
     var displayed: UIViewController?
     var navigationBar: UINavigationBar?
+    /// The class of bar to make, when the controller was given one.
+    var navigationBarClass: ObjCClass?
     var barHidden = false
     var toolbarHidden = true
     var delegate: UnsafeMutableRawPointer?
@@ -86,7 +88,8 @@ open class UINavigationController: UIViewController {
 
     @ObjCMethod("initWithNavigationBarClass:toolbarClass:")
     func initialize(navigationBarClass: ObjCClass?, toolbarClass: ObjCClass?) -> NSObject {
-        initialize(nibName: nil, bundle: nil)
+        navigation.navigationBarClass = navigationBarClass
+        return initialize(nibName: nil, bundle: nil)
     }
 
     @ObjCMethod("dealloc")
@@ -107,7 +110,7 @@ open class UINavigationController: UIViewController {
     @ObjCMethod("navigationBar")
     func navigationBar() -> UINavigationBar {
         if let bar = navigation.navigationBar { return bar }
-        let bar = UINavigationBar.objCClass.object.allocated()
+        let bar = (navigation.navigationBarClass ?? UINavigationBar.objCClass).object.allocated()
             .initializeView(frame: CGRect(x: 0, y: 0, width: Screen.bounds.width, height: barHeight)).unsafeCast(to: UINavigationBar.self)
         navigation.navigationBar = bar
         bar.barState.navigationController = objcObject

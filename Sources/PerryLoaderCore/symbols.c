@@ -110,6 +110,21 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
 static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, const char *name,
                                  perry_symbol *out, int depth) {
     if (dep->image) {
+        // CGFloat has been in CoreFoundation since iOS 18. The CoreGraphics
+        // overlay here is Xcode's back-deployment copy, which defines a type
+        // of its own, one Foundation's bridging conformance (for
+        // CoreFoundation's) does not fit: a cast of an NSNumber to the
+        // CGFloat of a library built for iOS before 16 fails. Such a library
+        // gets CoreFoundation's, as it would on a system that has moved it.
+        static const char cgfloat[] = "_$s12CoreGraphics7CGFloatV";
+        if (strncmp(name, cgfloat, sizeof(cgfloat) - 1) == 0 && dep->image->install_name &&
+            strstr(dep->image->install_name, "libswiftCoreGraphics.dylib")) {
+            for (perry_image *each = loader->images; each; each = each->next) {
+                if (each != dep->image && each->install_name && strstr(each->install_name, "libswiftCoreFoundation.dylib") &&
+                    perry_exports_lookup(loader, each, name, out, depth + 1))
+                    return true;
+            }
+        }
         if (perry_exports_lookup(loader, dep->image, name, out, depth + 1))
             return true;
         // A Swift overlay's API newer than the overlay, which Perry adds.

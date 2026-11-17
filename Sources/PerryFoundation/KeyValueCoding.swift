@@ -447,6 +447,10 @@ extension NSObject {
     /// class overrides these.
     @ObjCMethod("valueForUndefinedKey:")
     func value(forUndefinedKey key: String) -> ObjCObject? {
+        // JSON's null, asked for a key: Darwin raises, which a program that
+        // reads a configuration this way catches. An exception cannot be
+        // caught here, so it is nothing, as for a message to nil.
+        if ObjC.className(objcObject) == "NSNull" { return nil }
         foundationFatal("[<\(ObjC.className(objcObject)) \(objcObject)> valueForUndefinedKey:]: this class is not key value coding-compliant for the key \(key).")
     }
 

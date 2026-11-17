@@ -282,6 +282,12 @@ open class AVAudioSession: NSObject {
         (session.category, session.mode, session.options) = (category, mode, options)
         return true
     }
+    /// The route sharing policy, which only says how AirPlay routes are shared: kept by nothing.
+    @ObjCMethod("setCategory:mode:routeSharingPolicy:options:error:")
+    func setCategory(_ category: NSObject?, mode: NSObject?, routeSharingPolicy: UInt, options: UInt, error: ErrorOut) -> Bool {
+        (session.category, session.mode, session.options) = (category, mode, options)
+        return true
+    }
     @ObjCMethod("mode") func mode() -> NSObject? { session.mode }
     @ObjCMethod("setMode:error:") func setMode(_ mode: NSObject?, error: ErrorOut) -> Bool { session.mode = mode; return true }
     @ObjCMethod("setActive:error:") func setActive(_ active: Bool, error: ErrorOut) -> Bool { session.active = active; return true }
