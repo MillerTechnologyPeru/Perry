@@ -29,6 +29,23 @@ static const unsigned char *perry_glGetString(unsigned int name) {
     return get_string ? get_string(name) : NULL;
 }
 
+/// gluCheckExtension: whether a name is one of a list's, which spaces part.
+/// OpenGL.framework has GLU's functions with its own.
+__attribute__((visibility("default"), used))
+unsigned char perry_gluCheckExtension(const unsigned char *name, const unsigned char *list) __asm__("_gluCheckExtension");
+unsigned char perry_gluCheckExtension(const unsigned char *name, const unsigned char *list) {
+    if (!name || !list) return 0;
+    size_t length = strlen((const char *)name);
+    if (length == 0) return 0;
+    for (const char *cursor = (const char *)list; *cursor;) {
+        while (*cursor == ' ') cursor++;
+        size_t word = strcspn(cursor, " ");
+        if (word == length && strncmp(cursor, (const char *)name, length) == 0) return 1;
+        cursor += word;
+    }
+    return 0;
+}
+
 __attribute__((visibility("default")))
 void *perry_provider_symbol(const char *name) {
     if (strcmp(name, "_glGetString") == 0) return (void *)perry_glGetString;
