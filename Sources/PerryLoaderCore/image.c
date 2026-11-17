@@ -959,6 +959,16 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
             continue;
         }
 
+        // A library the app ships that a provider stands in for by its name,
+        // as for one it opens while it runs: libsteam_api.dylib's is
+        // libPerrysteam_api.so, over the Linux Steam client.
+        const char *base = strrchr(name, '/');
+        base = base ? base + 1 : name;
+        if (name[0] == '@' && strncmp(base, "lib", 3) == 0 && (dep->provider = perry_find_provider(loader, base))) {
+            perry_trace(PERRY_TRACE_LOAD, "%s -> provider %s", name, dep->provider->path);
+            continue;
+        }
+
         // Libraries shipped inside the app are loaded as Mach-O.
         char *path = name[0] == '@' ? expand_install_name(loader, image, name)
                                     : (file_exists(name) ? strdup(name) : NULL);
