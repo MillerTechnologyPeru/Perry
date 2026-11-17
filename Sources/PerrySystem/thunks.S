@@ -246,6 +246,9 @@ PASSTHROUGH _strcmp, strcmp
 PASSTHROUGH _strncmp, strncmp
 PASSTHROUGH _strcasecmp, strcasecmp
 PASSTHROUGH _strncasecmp, strncasecmp
+// The C locale's; the locale argument is ignored.
+PASSTHROUGH _strcasecmp_l, strcasecmp
+PASSTHROUGH _strncasecmp_l, strncasecmp
 PASSTHROUGH _strcpy, strcpy
 PASSTHROUGH _strncpy, strncpy
 PASSTHROUGH _strcat, strcat
