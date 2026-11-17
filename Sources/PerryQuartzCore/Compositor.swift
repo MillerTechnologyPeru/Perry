@@ -122,7 +122,7 @@ final class Compositor {
     /// it is hidden, its animations and what it is drawn with.
     nonisolated(unsafe) static let tracing = getenv("PERRY_UIKIT_COMPOSITE_TRACE") != nil
     nonisolated(unsafe) private static var lastTrace: Double = 0
-    private var tracingFrame = false
+    var tracingFrame = false
 
     private func trace(_ layer: CALayer, state: LayerState, frame: CGRect, depth: Int, how: String) {
         typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
@@ -195,6 +195,7 @@ final class Compositor {
             sharedTextures[key] = nil
         }
         if FrameRate.on { FrameRate.frame(renderer: renderer) }
+        dumpFrame()
         renderer.present()
     }
 
@@ -213,9 +214,17 @@ final class Compositor {
         let alpha = alpha * CGFloat(state.opacity)
         let frame = toScreen.apply(state.bounds)
         setClip(clip)
+        // A backdrop shows what is behind it, blurred, before its own fill.
+        if layer.state.filters != nil, let backdrop = layer.as(CABackdropLayer.self) {
+            drawBackdrop(backdrop, state: state, toScreen: toScreen, alpha: alpha, clip: clip)
+            setClip(clip)
+        }
         // A masked layer, or one clipping to rounded corners, and its
         // sublayers are one texture, drawn again each frame.
         if state.mask != nil || (state.masksToBounds && state.cornerRadius > 0) {
+            // Backdrops in it are drawn before it, as it is one texture.
+            drawNestedBackdrops(in: layer, state: state, toScreen: toScreen, alpha: alpha, clip: clip, rounding: rounding(of: state, toScreen: toScreen))
+            setClip(clip)
             drawFlattened(layer, state: state, shape: shape, toScreen: toScreen, alpha: alpha)
             return
         }
