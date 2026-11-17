@@ -40,7 +40,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     // names of its own. armv7 runs only iOS apps.
     if isMacApp(info.main_header) {
         let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
-                             "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration",
+                             "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration", "WKScriptMessage",
                              "WKWebpagePreferences", "WKWebsiteDataStore",
                              "NSLayoutConstraint", "NSLayoutAnchor", "NSLayoutXAxisAnchor", "NSLayoutYAxisAnchor", "NSLayoutDimension",
                              "NSParagraphStyle", "NSMutableParagraphStyle"]
