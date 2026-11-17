@@ -99,17 +99,25 @@ static uint32_t directory_id(const char *path) {
 
 /// The folder an ID is, of those seen: the root's, the program's working
 /// folder's, its bundle's and their parents' are seen from the start.
-static const char *directory_path(uint32_t id) {
-    if (id == ROOT_DIRECTORY || id == 1) return "/";
-    if (directory_count == 0) {
+static const char *directory_path(uint32_t identifier) {
+    if (identifier == ROOT_DIRECTORY || identifier == 1) return "/";
+    static bool seeded;
+    if (!seeded) {
+        seeded = true;
         char here[PATH_MAX];
         if (getcwd(here, sizeof here))
+            for (char *slash; (directory_id(here), (slash = strrchr(here, '/'))) && slash != here;) *slash = 0;
+        // The bundle's: programs find their data beside it by its parent's
+        // ID, from GetProcessBundleLocation and FSGetCatalogInfo.
+        id bundle_path = SEND(SEND(CLASS("NSBundle"), "mainBundle"), "bundlePath");
+        const char *bundle = bundle_path ? ((const char *(*)(id, SEL))objc_send)(bundle_path, SELECTOR("UTF8String")) : NULL;
+        if (bundle && snprintf(here, sizeof here, "%s", bundle) < (int)sizeof here)
             for (char *slash; (directory_id(here), (slash = strrchr(here, '/'))) && slash != here;) *slash = 0;
         const char *home = getenv("HOME");
         if (home) directory_id(home);
     }
     for (size_t index = 0; index < directory_count; index++)
-        if (directories[index].id == id) return directories[index].path;
+        if (directories[index].id == identifier) return directories[index].path;
     return NULL;
 }
 

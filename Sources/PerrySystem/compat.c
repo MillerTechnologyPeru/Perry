@@ -1691,3 +1691,33 @@ int64_t darwin_sandbox_extension_consume(const char *token) { (void)token; retur
 
 int darwin_sandbox_extension_release(int64_t handle) DARWIN_SYMBOL(sandbox_extension_release);
 int darwin_sandbox_extension_release(int64_t handle) { (void)handle; return 0; }
+
+// getopt: glibc's, in POSIX's order (Darwin's doesn't move the operands
+// to the end), with Darwin's own optind, optarg, opterr, optopt and
+// optreset kept in step with glibc's around each call.
+#include <getopt.h>
+
+int darwin_optind DARWIN_SYMBOL(optind) = 1;
+int darwin_opterr DARWIN_SYMBOL(opterr) = 1;
+int darwin_optopt DARWIN_SYMBOL(optopt);
+int darwin_optreset DARWIN_SYMBOL(optreset);
+char *darwin_optarg DARWIN_SYMBOL(optarg);
+
+int darwin_getopt(int argc, char *const argv[], const char *options) DARWIN_SYMBOL(getopt);
+int darwin_getopt(int argc, char *const argv[], const char *options) {
+    char posix[256];
+    snprintf(posix, sizeof posix, "+%s", options ? options : "");
+    // optreset, or optind set back to 0, starts over (glibc's way is 0).
+    optind = darwin_optreset || darwin_optind == 0 ? 0 : darwin_optind;
+    darwin_optreset = 0;
+    opterr = darwin_opterr;
+    int result = getopt(argc, argv, posix);
+    darwin_optind = optind;
+    darwin_optarg = optarg;
+    darwin_optopt = optopt;
+    return result;
+}
+
+int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) __asm__("_getopt$UNIX2003")
+    __attribute__((visibility("default"), used));
+int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) { return darwin_getopt(argc, argv, options); }

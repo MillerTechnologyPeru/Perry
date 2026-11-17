@@ -172,6 +172,19 @@ OSStatus carbon_CreateNewMenu(int16_t identifier, uint32_t attributes, MenuRef *
     return *out ? noErr : memFullErr;
 }
 
+/// The original way to make a menu, with a Pascal string for its title;
+/// the Apple menu's (the apple, character 0x14) is AppKit's application
+/// menu's here, so it is left untitled.
+MenuRef carbon_NewMenu(int16_t identifier, ConstStr255Param title) CARBON_SYMBOL(NewMenu);
+MenuRef carbon_NewMenu(int16_t identifier, ConstStr255Param title) {
+    char text[256] = "";
+    if (title && !(title[0] == 1 && title[1] == 0x14)) {
+        memcpy(text, title + 1, title[0]);
+        text[title[0]] = 0;
+    }
+    return carbon_menu_new(identifier, carbon_string(text));
+}
+
 OSStatus carbon_SetMenuTitleWithCFString(MenuRef menu, id title) CARBON_SYMBOL(SetMenuTitleWithCFString);
 OSStatus carbon_SetMenuTitleWithCFString(MenuRef menu, id title) {
     if (!(menu = menu_from(menu))) return paramErr;

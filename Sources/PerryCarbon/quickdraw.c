@@ -218,6 +218,19 @@ GDHandle carbon_GetDeviceList(void) { return carbon_main_device(); }
 GDHandle carbon_GetNextDevice(GDHandle device) CARBON_SYMBOL(GetNextDevice);
 GDHandle carbon_GetNextDevice(GDHandle device) { (void)device; return NULL; }
 
+/// The Display Manager's screens: the one display's device.
+GDHandle carbon_DMGetFirstScreenDevice(Boolean activeOnly) CARBON_SYMBOL(DMGetFirstScreenDevice);
+GDHandle carbon_DMGetFirstScreenDevice(Boolean activeOnly) {
+    (void)activeOnly;
+    return carbon_main_device();
+}
+
+GDHandle carbon_DMGetNextScreenDevice(GDHandle device, Boolean activeOnly) CARBON_SYMBOL(DMGetNextScreenDevice);
+GDHandle carbon_DMGetNextScreenDevice(GDHandle device, Boolean activeOnly) {
+    (void)device, (void)activeOnly;
+    return NULL;
+}
+
 // MARK: - Ports
 
 CGrafPtr carbon_port_new(int width, int height, int depth, void *pixels, long rowBytes) {

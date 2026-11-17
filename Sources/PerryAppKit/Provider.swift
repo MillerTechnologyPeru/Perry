@@ -625,6 +625,11 @@ extension CGSize: ObjCScalar {
 
 extension CGRect: ObjCScalar {
     public static var objCTypeEncoding: String { "{CGRect={CGPoint=dd}{CGSize=dd}}" }
+    #if arch(i386)
+    /// 32-bit Intel returns a rectangle through memory, so its sends are
+    /// objc_msgSend_stret's.
+    public static var objCReturnsIndirectly: Bool { true }
+    #endif
     static let zero = CGRect(origin: .zero, size: .zero)
 
     init(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) {

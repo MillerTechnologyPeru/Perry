@@ -235,6 +235,8 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define APPKIT "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"
 #define CORESERVICES "/System/Library/Frameworks/CoreServices.framework/CoreServices"
 #define APPLICATIONSERVICES "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+#define CARBON "/System/Library/Frameworks/Carbon.framework/Versions/A/Carbon"
+#define QUICKTIME "/System/Library/Frameworks/QuickTime.framework/Versions/A/QuickTime"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
@@ -259,10 +261,14 @@ static const struct {
 // provider (its Carbon events and text input sources for Cocoa apps),
 // CoreServices and ApplicationServices, as Darwin's umbrella does the last
 // two: a Carbon app binds CoreFoundation's and the File Manager's functions
-// to Carbon.
+// to Carbon, and programs linked against older SDKs QuickTime's image
+// compression. The other way round, the File Manager's parameter-block
+// calls (CarbonCore's) and QuickDraw's are the Carbon provider's here, which
+// older programs bind to CoreServices and ApplicationServices.
 static void reexport_for_install_name(perry_provider *provider, const char *install_name) {
 #if defined(__i386__) || defined(__x86_64__)
     bool application_services = strstr(install_name, "/ApplicationServices.framework/") != NULL;
+    bool core_services = strstr(install_name, "/CoreServices.framework/") != NULL;
     bool carbon = strstr(install_name, "/Carbon.framework/") != NULL;
     size_t count = sizeof(provider->reexports) / sizeof(provider->reexports[0]);
     // Another install name of the library, which copied this one's, has
@@ -270,16 +276,23 @@ static void reexport_for_install_name(perry_provider *provider, const char *inst
     for (size_t i = 0; i < count; i++)
         if (provider->reexports[i] && (strcmp(provider->reexports[i], APPKIT) == 0 ||
                                        strcmp(provider->reexports[i], CORESERVICES) == 0 ||
-                                       strcmp(provider->reexports[i], APPLICATIONSERVICES) == 0))
+                                       strcmp(provider->reexports[i], APPLICATIONSERVICES) == 0 ||
+                                       strcmp(provider->reexports[i], CARBON) == 0 ||
+                                       strcmp(provider->reexports[i], QUICKTIME) == 0))
             provider->reexports[i] = NULL;
-    const char *added[3] = {NULL, NULL, NULL};
-    if (application_services) added[0] = APPKIT;
+    const char *added[4] = {NULL, NULL, NULL, NULL};
+    if (application_services) {
+        added[0] = APPKIT;
+        added[1] = CARBON;
+    }
+    if (core_services) added[0] = CARBON;
     if (carbon) {
         added[0] = APPKIT;
         added[1] = CORESERVICES;
         added[2] = APPLICATIONSERVICES;
+        added[3] = QUICKTIME;
     }
-    for (size_t a = 0; a < 3; a++)
+    for (size_t a = 0; a < 4; a++)
         for (size_t i = 0; added[a] && i < count; i++)
             if (!provider->reexports[i]) {
                 provider->reexports[i] = added[a];
@@ -652,11 +665,18 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
     // Symbols the provider defines at run time, such as Swift constants.
     if (!sym && provider->symbol)
         sym = provider->symbol(name);
+    // Re-exports can go round (Carbon's CoreServices re-exports Carbon):
+    // a provider being searched already is not searched again.
+    provider->searching = true;
     for (size_t i = 0; !sym && i < sizeof(provider->reexports) / sizeof(provider->reexports[0]); i++) {
         if (!provider->reexports[i]) continue;
         perry_provider *reexported = perry_find_provider(loader, provider->reexports[i]);
-        if (reexported && provider_lookup(loader, reexported, name, out)) return true;
+        if (reexported && !reexported->searching && provider_lookup(loader, reexported, name, out)) {
+            provider->searching = false;
+            return true;
+        }
     }
+    provider->searching = false;
 #if defined(__i386__)
     // size_t is unsigned long on i386 Darwin and unsigned int on Linux, which
     // C++ mangles differently: an 'm' parameter here is a 'j' in libstdc++.

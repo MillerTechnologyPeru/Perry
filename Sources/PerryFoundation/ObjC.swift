@@ -46,6 +46,9 @@ enum ObjC {
     /// Darwin's dladdr, which knows the Mach-O images: the path of the
     /// image holding an address is its first word.
     nonisolated(unsafe) static var addressInfo: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32)?
+    /// class_getImageName: for classes the runtime keeps apart from their
+    /// image (Objective-C 1's, on i386), which addressInfo can't place.
+    nonisolated(unsafe) static var imageName: (@convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<CChar>?)?
 
     /// Binds every function; false if libobjc is missing one.
     static func load(_ lookup: Lookup) -> Bool {
@@ -91,6 +94,7 @@ enum ObjC {
             install(handler, nil)
         }
         #endif
+        imageName = bind("_class_getImageName", (@convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<CChar>?).self)
         // PerrySystem's, which the loader has open; its lookup is the app's.
         if let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD), let symbol = dlsym(system, "_dladdr") {
             addressInfo = unsafeBitCast(symbol, to: (@convention(c) (UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Int32).self)

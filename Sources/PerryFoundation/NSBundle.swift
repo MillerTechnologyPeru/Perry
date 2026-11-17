@@ -272,8 +272,15 @@ public final class NSBundle: NSObject {
     @ObjCClassMethod("bundleForClass:")
     static func bundle(for cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         var info: (UnsafePointer<CChar>?, UnsafeRawPointer?, UnsafePointer<CChar>?, UnsafeRawPointer?) = (nil, nil, nil, nil)
-        guard let cls, let addressInfo = ObjC.addressInfo,
-              withUnsafeMutableBytes(of: &info, { addressInfo(cls, $0.baseAddress) }) != 0, let name = info.0 else { return Bundles.main }
+        guard let cls else { return Bundles.main }
+        // The image the runtime registered the class from (Objective-C 1's
+        // classes, on i386, it keeps apart from their image), else the one
+        // the class is in.
+        var image = ObjC.imageName?(cls)
+        if image == nil, let addressInfo = ObjC.addressInfo, withUnsafeMutableBytes(of: &info, { addressInfo(cls, $0.baseAddress) }) != 0 {
+            image = info.0
+        }
+        guard let name = image else { return Bundles.main }
         let path = String(cString: name)
         // …/Name.framework/Name: the framework's directory.
         let bytes = Array(path.utf8), marker = Array(".framework/".utf8)

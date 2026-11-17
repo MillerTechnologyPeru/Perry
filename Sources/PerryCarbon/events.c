@@ -864,6 +864,17 @@ Boolean carbon_WaitNextEvent(uint16_t mask, EventRecord *record, uint32_t sleep,
     return 0;
 }
 
+/// Whether an event of those in the mask is waiting, without taking it.
+/// AppKit's queue can't be looked into without taking from it, so none is:
+/// the record is a null event's with the mouse and the modifier keys, which
+/// is what programs asking with a mask of 0 at startup (is Option down?) want.
+Boolean carbon_EventAvail(uint16_t mask, EventRecord *record) CARBON_SYMBOL(EventAvail);
+Boolean carbon_EventAvail(uint16_t mask, EventRecord *record) {
+    (void)mask;
+    if (record) fill_record(record, nullEvent, 0);
+    return 0;
+}
+
 Boolean carbon_GetNextEvent(uint16_t mask, EventRecord *record) CARBON_SYMBOL(GetNextEvent);
 Boolean carbon_GetNextEvent(uint16_t mask, EventRecord *record) { return carbon_WaitNextEvent(mask, record, 0, NULL); }
 
@@ -877,6 +888,14 @@ void carbon_FlushEvents(uint16_t mask, uint16_t stop) {
         if (type != NSKeyDown && type != NSKeyUp && type != NSLeftMouseDown && type != NSLeftMouseUp)
             ((void (*)(id, SEL, id))objc_send)(carbon_application(), SELECTOR("sendEvent:"), event);
     }
+}
+
+/// Drops the events waiting in the queue, as FlushEvents does all of them.
+OSStatus carbon_FlushEventQueue(void *queue) CARBON_SYMBOL(FlushEventQueue);
+OSStatus carbon_FlushEventQueue(void *queue) {
+    (void)queue;
+    carbon_FlushEvents(0xffff, 0);
+    return noErr;
 }
 
 /// An event as the original Event Manager's record.

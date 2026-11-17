@@ -73,6 +73,7 @@ enum CG {
     nonisolated(unsafe) static var imageGetHeight: (@convention(c) (Ref) -> Int)!
     nonisolated(unsafe) static var imageSourceCreateWithData: (@convention(c) (Ref, Ref) -> Ref)!
     nonisolated(unsafe) static var imageSourceCreateImageAtIndex: (@convention(c) (Ref, Int, Ref) -> Ref)!
+    nonisolated(unsafe) static var imageSourceCopyPropertiesAtIndex: (@convention(c) (Ref, Int, Ref) -> Ref)!
 
     nonisolated(unsafe) private static var state: Bool?
 
@@ -153,6 +154,7 @@ enum CG {
         imageGetHeight = bind("CGImageGetHeight")
         imageSourceCreateWithData = bind("CGImageSourceCreateWithData")
         imageSourceCreateImageAtIndex = bind("CGImageSourceCreateImageAtIndex")
+        imageSourceCopyPropertiesAtIndex = bind("CGImageSourceCopyPropertiesAtIndex")
         return complete
     }
 

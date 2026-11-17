@@ -305,7 +305,15 @@ CGLError perry_CGLDescribeRenderer(void *info, int index, int property, int *val
     case 108: *value = 1; return kCGLNoError;                     // kCGLRPMaxSampleBuffers
     case 109: *value = 8; return kCGLNoError;                     // kCGLRPMaxSamples
     case 107: *value = 0; return kCGLNoError;                     // kCGLRPMaxAuxBuffers
-    case 53: case 54: case 81: case 75: case 130: *value = 0; return kCGLNoError;
+    // Full screen, as the renderers of Mac OS X before 10.7 said: AGL's
+    // full-screen contexts draw in a window covering the screen here.
+    case 54: *value = 1; return kCGLNoError;                      // kCGLRPFullScreen
+    case 100: *value = 0x4 | 0x8; return kCGLNoError;             // kCGLRPBufferModes: single and double buffered
+    case 103: *value = 0x4000 | 0x8000; return kCGLNoError;       // kCGLRPColorModes: RGB888 and ARGB8888
+    case 104: *value = 0; return kCGLNoError;                     // kCGLRPAccumModes: none
+    case 105: *value = 0x1 | 0x400 | 0x800 | 0x1000; return kCGLNoError;   // kCGLRPDepthModes: 0, 16, 24 and 32 bits
+    case 106: *value = 0x1 | 0x80; return kCGLNoError;            // kCGLRPStencilModes: 0 and 8 bits
+    case 53: case 81: case 75: case 130: *value = 0; return kCGLNoError;
     default: *value = 0; return kCGLBadProperty;
     }
 }

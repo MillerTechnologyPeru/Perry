@@ -20,6 +20,7 @@ typedef struct perry_provider {
     void *(*symbol)(const char *name);  // perry_provider_symbol, if the provider has one
     const char *reexports[4];   // install names of libraries whose symbols it re-exports, as libSystem does libdispatch's
     bool started;               // its startup function has been called
+    bool searching;             // a symbol is being looked up in it and its re-exports
 } perry_provider;
 
 typedef struct perry_dependency {
