@@ -49,6 +49,8 @@ final class WPE: @unchecked Sendable {
     let webViewStopLoading: @convention(c) (Pointer) -> Void
     let webViewGetSettings: @convention(c) (Pointer) -> Pointer?
     let settingsSetUserAgent: @convention(c) (Pointer, UnsafePointer<CChar>?) -> Void
+    /// With PERRY_UIKIT_WEB_CONSOLE set: pages' console messages go to the web process's standard output.
+    let settingsSetWriteConsoleToStdout: (@convention(c) (Pointer, Int32) -> Void)?
     let webViewEvaluateJavaScript: @convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
                                                    UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void
     let webViewCallAsyncJavaScriptFunction: @convention(c) (Pointer, UnsafePointer<CChar>, Int, Pointer?, UnsafePointer<CChar>?,
@@ -68,6 +70,33 @@ final class WPE: @unchecked Sendable {
     let policyDecisionUse: @convention(c) (Pointer) -> Void
     let policyDecisionIgnore: @convention(c) (Pointer) -> Void
     let valueToJSON: @convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?
+    // Scripts, script messages and the schemes an app serves itself.
+    let webViewGetUserContentManager: @convention(c) (Pointer) -> Pointer?
+    let registerScriptMessageHandler: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32
+    let unregisterScriptMessageHandler: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void
+    let userScriptNew: @convention(c) (UnsafePointer<CChar>, Int32, Int32, UnsafeRawPointer?, UnsafeRawPointer?) -> Pointer?
+    let userScriptUnref: @convention(c) (Pointer) -> Void
+    let userContentManagerAddScript: @convention(c) (Pointer, Pointer) -> Void
+    let userContentManagerRemoveAllScripts: @convention(c) (Pointer) -> Void
+    let contextGetDefault: @convention(c) () -> Pointer?
+    let contextRegisterURIScheme: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void
+    let contextGetSecurityManager: @convention(c) (Pointer) -> Pointer?
+    let securityManagerRegisterSecure: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let securityManagerRegisterCORSEnabled: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let uriSchemeRequestGetURI: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let uriSchemeRequestGetHTTPMethod: @convention(c) (Pointer) -> UnsafePointer<CChar>?
+    let uriSchemeRequestFinishWithResponse: @convention(c) (Pointer, Pointer) -> Void
+    let uriSchemeRequestFinishError: @convention(c) (Pointer, Pointer) -> Void
+    let uriSchemeResponseNew: @convention(c) (Pointer, Int64) -> Pointer?
+    let uriSchemeResponseSetStatus: @convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void
+    let uriSchemeResponseSetContentType: @convention(c) (Pointer, UnsafePointer<CChar>) -> Void
+    let bytesNew: @convention(c) (UnsafeRawPointer?, Int) -> Pointer?
+    let bytesUnref: @convention(c) (Pointer) -> Void
+    let memoryInputStreamNewFromBytes: @convention(c) (Pointer) -> Pointer?
+    let idleAdd: @convention(c) (UnsafeRawPointer, Pointer?) -> UInt32
+    let errorNewLiteral: @convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?
+    let quarkFromString: @convention(c) (UnsafePointer<CChar>) -> UInt32
+    let objectRef: @convention(c) (Pointer) -> Pointer?
     // GLib and GObject.
     let mainContextIteration: @convention(c) (Pointer?, Int32) -> Int32
     let signalConnectData: @convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt
@@ -88,12 +117,12 @@ final class WPE: @unchecked Sendable {
 
     private init?() {
         let names = ["libwpe-1.0.so.1", "libWPEBackend-fdo-1.0.so.1", "libwayland-server.so.0", "libWPEWebKit-2.0.so.1",
-                     "libglib-2.0.so.0", "libgobject-2.0.so.0"]
+                     "libglib-2.0.so.0", "libgobject-2.0.so.0", "libgio-2.0.so.0"]
         // Local, so WPE's JavaScriptCore never stands in for the one
         // JavaScriptCore.framework is over.
         let libraries = names.map { dlopen($0, RTLD_NOW | RTLD_LOCAL) }
         guard let wpe = libraries[0], let fdo = libraries[1], let wayland = libraries[2], let webkit = libraries[3],
-              let glib = libraries[4], let gobject = libraries[5] else {
+              let glib = libraries[4], let gobject = libraries[5], let gio = libraries[6] else {
             WPE.log("WPE WebKit is not installed; web views load nothing")
             return nil
         }
@@ -149,6 +178,8 @@ final class WPE: @unchecked Sendable {
         webViewStopLoading = bind(webkit, "webkit_web_view_stop_loading", (@convention(c) (Pointer) -> Void).self)
         webViewGetSettings = bind(webkit, "webkit_web_view_get_settings", (@convention(c) (Pointer) -> Pointer?).self)
         settingsSetUserAgent = bind(webkit, "webkit_settings_set_user_agent", (@convention(c) (Pointer, UnsafePointer<CChar>?) -> Void).self)
+        settingsSetWriteConsoleToStdout = dlsym(webkit, "webkit_settings_set_enable_write_console_messages_to_stdout")
+            .map { unsafeBitCast($0, to: (@convention(c) (Pointer, Int32) -> Void).self) }
         webViewEvaluateJavaScript = bind(webkit, "webkit_web_view_evaluate_javascript",
                                          (@convention(c) (Pointer, UnsafePointer<CChar>, Int, UnsafePointer<CChar>?,
                                                           UnsafePointer<CChar>?, Pointer?, Pointer?, Pointer?) -> Void).self)
@@ -173,6 +204,43 @@ final class WPE: @unchecked Sendable {
         policyDecisionUse = bind(webkit, "webkit_policy_decision_use", (@convention(c) (Pointer) -> Void).self)
         policyDecisionIgnore = bind(webkit, "webkit_policy_decision_ignore", (@convention(c) (Pointer) -> Void).self)
         valueToJSON = bind(webkit, "jsc_value_to_json", (@convention(c) (Pointer, UInt32) -> UnsafeMutablePointer<CChar>?).self)
+        webViewGetUserContentManager = bind(webkit, "webkit_web_view_get_user_content_manager", (@convention(c) (Pointer) -> Pointer?).self)
+        registerScriptMessageHandler = bind(webkit, "webkit_user_content_manager_register_script_message_handler",
+                                            (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Int32).self)
+        unregisterScriptMessageHandler = bind(webkit, "webkit_user_content_manager_unregister_script_message_handler",
+                                              (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafePointer<CChar>?) -> Void).self)
+        userScriptNew = bind(webkit, "webkit_user_script_new",
+                             (@convention(c) (UnsafePointer<CChar>, Int32, Int32, UnsafeRawPointer?, UnsafeRawPointer?) -> Pointer?).self)
+        userScriptUnref = bind(webkit, "webkit_user_script_unref", (@convention(c) (Pointer) -> Void).self)
+        userContentManagerAddScript = bind(webkit, "webkit_user_content_manager_add_script", (@convention(c) (Pointer, Pointer) -> Void).self)
+        userContentManagerRemoveAllScripts = bind(webkit, "webkit_user_content_manager_remove_all_scripts",
+                                                  (@convention(c) (Pointer) -> Void).self)
+        contextGetDefault = bind(webkit, "webkit_web_context_get_default", (@convention(c) () -> Pointer?).self)
+        contextRegisterURIScheme = bind(webkit, "webkit_web_context_register_uri_scheme",
+                                        (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?) -> Void).self)
+        contextGetSecurityManager = bind(webkit, "webkit_web_context_get_security_manager", (@convention(c) (Pointer) -> Pointer?).self)
+        securityManagerRegisterSecure = bind(webkit, "webkit_security_manager_register_uri_scheme_as_secure",
+                                             (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        securityManagerRegisterCORSEnabled = bind(webkit, "webkit_security_manager_register_uri_scheme_as_cors_enabled",
+                                                  (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        uriSchemeRequestGetURI = bind(webkit, "webkit_uri_scheme_request_get_uri", (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        uriSchemeRequestGetHTTPMethod = bind(webkit, "webkit_uri_scheme_request_get_http_method",
+                                             (@convention(c) (Pointer) -> UnsafePointer<CChar>?).self)
+        uriSchemeRequestFinishWithResponse = bind(webkit, "webkit_uri_scheme_request_finish_with_response",
+                                                  (@convention(c) (Pointer, Pointer) -> Void).self)
+        uriSchemeRequestFinishError = bind(webkit, "webkit_uri_scheme_request_finish_error", (@convention(c) (Pointer, Pointer) -> Void).self)
+        uriSchemeResponseNew = bind(webkit, "webkit_uri_scheme_response_new", (@convention(c) (Pointer, Int64) -> Pointer?).self)
+        uriSchemeResponseSetStatus = bind(webkit, "webkit_uri_scheme_response_set_status",
+                                          (@convention(c) (Pointer, UInt32, UnsafePointer<CChar>?) -> Void).self)
+        uriSchemeResponseSetContentType = bind(webkit, "webkit_uri_scheme_response_set_content_type",
+                                               (@convention(c) (Pointer, UnsafePointer<CChar>) -> Void).self)
+        bytesNew = bind(glib, "g_bytes_new", (@convention(c) (UnsafeRawPointer?, Int) -> Pointer?).self)
+        bytesUnref = bind(glib, "g_bytes_unref", (@convention(c) (Pointer) -> Void).self)
+        memoryInputStreamNewFromBytes = bind(gio, "g_memory_input_stream_new_from_bytes", (@convention(c) (Pointer) -> Pointer?).self)
+        idleAdd = bind(glib, "g_idle_add", (@convention(c) (UnsafeRawPointer, Pointer?) -> UInt32).self)
+        errorNewLiteral = bind(glib, "g_error_new_literal", (@convention(c) (UInt32, Int32, UnsafePointer<CChar>) -> Pointer?).self)
+        quarkFromString = bind(glib, "g_quark_from_string", (@convention(c) (UnsafePointer<CChar>) -> UInt32).self)
+        objectRef = bind(gobject, "g_object_ref", (@convention(c) (Pointer) -> Pointer?).self)
         mainContextIteration = bind(glib, "g_main_context_iteration", (@convention(c) (Pointer?, Int32) -> Int32).self)
         signalConnectData = bind(gobject, "g_signal_connect_data",
                                  (@convention(c) (Pointer, UnsafePointer<CChar>, UnsafeRawPointer, Pointer?, Pointer?, Int32) -> UInt).self)
@@ -245,6 +313,10 @@ final class WebPage {
     /// WebKitNavigationType (UIWebViewNavigationType's values); nil lets
     /// every navigation go ahead.
     var decideNavigation: ((String, Int32) -> Bool)?
+    /// A script message: the handler's name and the message's body as JSON
+    /// (nil for undefined).
+    var scriptMessage: ((String, String?) -> Void)?
+    private var messageHandlers: [String: UInt] = [:]
 
     /// The pages there are, which the main queue runs GLib's context for.
     nonisolated(unsafe) static var count = 0
@@ -276,11 +348,63 @@ final class WebPage {
             handlers.append(wpe.signalConnectData(view, "notify::\(property)", unsafeBitCast(WebPage.onNotify, to: UnsafeRawPointer.self),
                                                   data, nil, 0))
         }
+        if getenv("PERRY_UIKIT_WEB_CONSOLE") != nil, let settings = wpe.webViewGetSettings(view) {
+            wpe.settingsSetWriteConsoleToStdout?(settings, 1)
+        }
         WebPage.count += 1
         WebPage.schedule()
     }
 
+    private var contentManager: Pointer? { wpe.webViewGetUserContentManager(view) }
+
+    /// Makes window.webkit.messageHandlers[name] post to `scriptMessage`.
+    func addMessageHandler(_ name: String) {
+        guard messageHandlers[name] == nil, let manager = contentManager, wpe.registerScriptMessageHandler(manager, name, nil) != 0 else { return }
+        let box = Unmanaged.passRetained(MessageSource(page: self, name: name)).toOpaque()
+        messageHandlers[name] = wpe.signalConnectData(manager, "script-message-received::\(name)",
+                                                      unsafeBitCast(WebPage.onScriptMessage, to: UnsafeRawPointer.self), box,
+                                                      unsafeBitCast(WebPage.onMessageSourceDestroyed, to: Pointer.self), 0)
+    }
+
+    /// A script the page runs on each load, at its start or end.
+    func addUserScript(_ source: String, atStart: Bool, mainFrameOnly: Bool) {
+        guard let manager = contentManager,
+              let script = wpe.userScriptNew(source, mainFrameOnly ? 1 : 0, atStart ? 0 : 1, nil, nil) else { return }
+        wpe.userContentManagerAddScript(manager, script)
+        wpe.userScriptUnref(script)
+    }
+
+    private final class MessageSource {
+        unowned let page: WebPage
+        let name: String
+        init(page: WebPage, name: String) { (self.page, self.name) = (page, name) }
+    }
+
+    /// script-message-received: the content manager, the message's JSCValue
+    /// and the source.
+    private static let onScriptMessage: @convention(c) (Pointer?, Pointer?, Pointer?) -> Void = { _, value, data in
+        guard let data else { return }
+        let source = Unmanaged<MessageSource>.fromOpaque(data).takeUnretainedValue()
+        let wpe = source.page.wpe
+        var json: String?
+        if let value, wpe.valueIsUndefined(value) == 0, let text = wpe.valueToJSON(value, 0) {
+            json = String(cString: text)
+            wpe.free(text)
+        }
+        source.page.scriptMessage?(source.name, json)
+    }
+
+    private static let onMessageSourceDestroyed: @convention(c) (Pointer?, Pointer?) -> Void = { data, _ in
+        if let data { Unmanaged<MessageSource>.fromOpaque(data).release() }
+    }
+
     deinit {
+        if let manager = contentManager {
+            for (name, handler) in messageHandlers {
+                wpe.signalHandlerDisconnect(manager, handler)
+                wpe.unregisterScriptMessageHandler(manager, name, nil)
+            }
+        }
         for handler in handlers { wpe.signalHandlerDisconnect(view, handler) }
         // The slot stays, empty, for any frame still on its way.
         slot.pointee = nil
