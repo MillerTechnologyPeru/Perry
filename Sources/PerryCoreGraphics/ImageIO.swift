@@ -2,15 +2,15 @@ import CPerryImageIO
 import Glibc
 import PerryObjCInterop
 
-// ImageIO: image sources read PNG, JPEG, GIF, WebP and HEIF through the
+// ImageIO: image sources read PNG, JPEG, GIF, WebP, HEIF and TIFF through the
 // codecs in CPerryImageIO; image destinations write PNG, JPEG and GIF.
 // Sources decode when first asked about an image; images with alpha come
 // out premultiplied (RGBA), opaque JPEGs as RGBX, as on iOS.
 
 enum ImageTypes {
     static let png = "public.png", jpeg = "public.jpeg", gif = "com.compuserve.gif", webp = "org.webmproject.webp"
-    static let heic = "public.heic", heif = "public.heif"
-    static let readable = [jpeg, png, gif, heic, heif, webp]
+    static let heic = "public.heic", heif = "public.heif", tiff = "public.tiff"
+    static let readable = [jpeg, png, gif, heic, heif, webp, tiff]
     static let writable = [jpeg, png, gif]
 
     /// The type the bytes start like.
@@ -18,6 +18,7 @@ enum ImageTypes {
         if bytes.starts(with: [0x89, 0x50, 0x4e, 0x47]) { return png }
         if bytes.starts(with: [0xff, 0xd8, 0xff]) { return jpeg }
         if bytes.starts(with: Array("GIF8".utf8)) { return gif }
+        if bytes.starts(with: [0x49, 0x49, 0x2a, 0x00]) || bytes.starts(with: [0x4d, 0x4d, 0x00, 0x2a]) { return tiff }
         if bytes.count >= 12, bytes.starts(with: Array("RIFF".utf8)), Array(bytes[8..<12]) == Array("WEBP".utf8) { return webp }
         if bytes.count >= 12, Array(bytes[4..<8]) == Array("ftyp".utf8) {
             let brand = String(decoding: bytes[8..<12], as: UTF8.self)
@@ -176,6 +177,7 @@ final class SourceState: @unchecked Sendable {
             case ImageTypes.jpeg: return perry_jpeg_decode(base, buffer.count, &info)
             case ImageTypes.gif: return perry_gif_decode(base, buffer.count, &info)
             case ImageTypes.webp: return perry_webp_decode(base, buffer.count, &info)
+            case ImageTypes.tiff: return perry_tiff_decode(base, buffer.count, &info)
             default: return perry_heif_decode(base, buffer.count, &info)
             }
         }
