@@ -91,6 +91,12 @@ extension Runtime {
     public static func classNames(forImage path: UnsafePointer<CChar>) -> [UnsafePointer<CChar>] {
         lock.withLock { imageClassNames.first { strcmp($0.path, path) == 0 }?.classes ?? [] }
     }
+    /// class_getImageName: the path of the image that defines a class, by
+    /// its name; nil for classes made at run time or by providers.
+    public static func imageName(forClassNamed name: UnsafePointer<CChar>) -> UnsafePointer<CChar>? {
+        lock.withLock { imageClassNames.first { $0.classes.contains { strcmp($0, name) == 0 } }?.path }
+    }
+
     nonisolated(unsafe) static var loadImageFunctions: [LoadImageFunction] = []
 
     /// objc_addLoadImageFunc: calls `function` for every image mapped so
