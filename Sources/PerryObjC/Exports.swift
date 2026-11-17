@@ -351,19 +351,29 @@ public func objc_copyCppObjectAtomic(_ destination: UnsafeMutableRawPointer?, _ 
 
 // MARK: - Classes
 
+/// A class found by name, realized as libobjc does: a Swift class whose
+/// metadata is built at run time has it initialized first, so the Swift
+/// runtime, to which the class is handed as a bare pointer (a cast of
+/// NSClassFromString's result), finds it complete.
+private func realizedClass(_ name: UnsafePointer<CChar>?) -> Class? {
+    guard let cls = name.flatMap(Runtime.lookUpClass) else { return nil }
+    if let info = Runtime.info(cls) { Runtime.runSwiftInitializers(info) }
+    return cls
+}
+
 @c(_objc_getClass)
 public func objc_getClass(_ name: UnsafePointer<CChar>?) -> Class? {
-    name.flatMap(Runtime.lookUpClass)
+    realizedClass(name)
 }
 
 @c(_objc_lookUpClass)
 public func objc_lookUpClass(_ name: UnsafePointer<CChar>?) -> Class? {
-    name.flatMap(Runtime.lookUpClass)
+    realizedClass(name)
 }
 
 @c(_objc_getRequiredClass)
 public func objc_getRequiredClass(_ name: UnsafePointer<CChar>?) -> Class? {
-    guard let cls = name.flatMap(Runtime.lookUpClass) else {
+    guard let cls = realizedClass(name) else {
         objcFatal("link error: class '\(name.map { String(cString: $0) } ?? "")' not found")
     }
     return cls
