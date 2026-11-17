@@ -67,6 +67,8 @@ class CALayer: NSObject {
     @ObjCMethod("removeFromSuperlayer") func removeFromSuperlayer()
     @ObjCMethod("renderInContext:") func render(in context: UnsafeMutableRawPointer?)
     @ObjCMethod("_perryTransformToSuperlayer") func transformToSuperlayer() -> CGAffineTransform
+    /// A backdrop layer's blur, in points, and saturation; others ignore it.
+    @ObjCMethod("_perrySetBlurRadius:saturation:") func setBlur(radius: CGFloat, saturation: CGFloat)
     @ObjCMethod("addAnimation:forKey:") func addAnimation(_ animation: NSObject, forKey key: String?)
     @ObjCMethod("removeAnimationForKey:") func removeAnimation(forKey key: String)
 

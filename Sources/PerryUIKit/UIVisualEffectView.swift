@@ -1,11 +1,14 @@
+import Glibc
 import CPerryGeometry
 import PerryObjCInterop
 
-// UIVisualEffectView and its effects. There is no blur: a blur effect
-// shows as its material's tint, a translucent fill as thick as the style
-// says, light or dark, behind the content view. A vibrancy effect shows its
-// content as it is. The fill follows the view's corners, so a rounded
-// panel stays rounded wherever it is drawn.
+// UIVisualEffectView and its effects. A blur effect blurs what is behind
+// the view, as far as the style says, under the material's tint, light or
+// dark, behind the content view: the blur is a backdrop layer's, which the
+// GPU compositor draws (PERRY_UIKIT_NO_BLUR shows the tint alone, as thick
+// as the style says). A vibrancy effect shows its content as it is. The
+// fill follows the view's corners, so a rounded panel stays rounded
+// wherever it is drawn.
 
 final class EffectState: ObjectState {
     /// UIBlurEffectStyle, or -1 for a vibrancy effect.
@@ -34,6 +37,20 @@ open class UIVisualEffect: NSObject {
         return self
     }
 
+    nonisolated(unsafe) static let blurs = getenv("PERRY_UIKIT_NO_BLUR") == nil
+
+    /// How far the effect blurs, in points, and how much it saturates what
+    /// is behind.
+    var blur: (radius: CGFloat, saturation: CGFloat)? {
+        guard !effect.vibrancy, UIVisualEffect.blurs else { return nil }
+        switch effect.style {
+        case 6, 11, 16: return (10, 1.6)
+        case 7, 12, 17: return (15, 1.6)
+        case 9, 14, 19: return (30, 1.8)
+        default: return (22, 1.8)
+        }
+    }
+
     /// The fill the effect shows: gray level and opacity.
     var tint: (white: CGFloat, alpha: CGFloat)? {
         guard !effect.vibrancy else { return nil }
@@ -50,9 +67,9 @@ open class UIVisualEffect: NSObject {
         case 10, 15, 20: thickness = 0.85
         default: thickness = 0.8
         }
-        // A blur hides what is behind it, so a tint stands in more opaque
-        // than the material's own.
-        let opacity = 0.6 + thickness * 0.4
+        // With no blur the tint stands in for it, more opaque than the
+        // material's own.
+        let opacity = UIVisualEffect.blurs ? 0.3 + thickness * 0.4 : 0.6 + thickness * 0.4
         if style == 0 { return (0.98, 0.92) }
         if style == 3 { return (0.05, 0.92) }
         return dark ? (0.12, opacity) : (0.96, opacity)
@@ -82,6 +99,13 @@ open class UIVibrancyEffect: UIVisualEffect {
 
     @ObjCClassMethod("effectForBlurEffect:style:")
     static func effect(_ cls: ObjCClass, blurEffect: UIBlurEffect?, style: Int) -> UIVibrancyEffect { effect(cls, blurEffect: blurEffect) }
+}
+
+/// The view that blurs what is behind a visual effect view: its layer is a
+/// backdrop's.
+@ObjCClass("_UIVisualEffectBackdropView")
+open class _UIVisualEffectBackdropView: UIView {
+    @ObjCClassMethod("layerClass") static func backdropLayerClass() -> ObjCClass { ObjCClass(named: "CABackdropLayer") }
 }
 
 final class VisualEffectViewState: ObjectState {
@@ -136,7 +160,7 @@ open class UIVisualEffectView: UIView {
     private func makeSubviews(contentView: UIView?) {
         let effectView = effectView
         guard effectView.contentView == nil else { return }
-        let backdrop = UIView.objCClass.object.allocated().initializeView(frame: state.bounds).unsafeCast(to: UIView.self)
+        let backdrop = _UIVisualEffectBackdropView.objCClass.object.allocated().initializeView(frame: state.bounds).unsafeCast(to: UIView.self)
         backdrop.state.userInteractionEnabled = false
         backdrop.setAutoresizingMask(18)
         insertSubview(backdrop, at: 0)
@@ -155,6 +179,11 @@ open class UIVisualEffectView: UIView {
         effectView.effect = effect
         let tint = effect?.tint
         effectView.backdrop?.setBackgroundColor(tint.map { UIColor.gray($0.white, $0.alpha) })
+        if let backdrop = effectView.backdrop {
+            // The blur, or none for no effect or a vibrancy's.
+            let blur = effect?.blur ?? (radius: 0, saturation: 1)
+            backdrop.state.layer.setBlur(radius: blur.radius, saturation: blur.saturation)
+        }
     }
 
     /// The fill takes the view's corners.
