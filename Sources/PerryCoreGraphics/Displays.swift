@@ -223,6 +223,75 @@ public func CGDisplayModeCopyPixelEncoding(_ object: Ref?) -> Ref? {
     return NSObject.string("--------RRRRRRRRGGGGGGGGBBBBBBBB").objCOwnedReturnValue()
 }
 
+// MARK: - Display modes as dictionaries
+
+/// The display modes of Mac OS X before 10.6: dictionaries with their size,
+/// depth and refresh rate, each mode at 32 bits a pixel. They are made once
+/// and kept, as Quartz's were: the program doesn't own them.
+enum DictionaryModes {
+    nonisolated(unsafe) static let all: [NSObject] = Displays.all.enumerated().map { index, state in
+        dictionary(state, number: index)
+    }
+    nonisolated(unsafe) static let array: NSObject = NSMutableArray.of(all)
+
+    private static func dictionary(_ state: DisplayModeState, number: Int) -> NSObject {
+        NSMutableDictionary.of([
+            ("Width", .number(state.width)), ("Height", .number(state.height)),
+            ("Mode", .number(number)), ("RefreshRate", .number(state.refreshRate)),
+            ("BitsPerPixel", .number(32)), ("BitsPerSample", .number(8)), ("SamplesPerPixel", .number(3)),
+            ("kCGDisplayBytesPerRow", .number(state.pixelWidth * 4)),
+            ("IOFlags", .number(0x7)), ("UsableForDesktopGUI", NSNumber.make(bool: true)),
+            ("kCGDisplayModeIsSafeForHardware", NSNumber.make(bool: true)),
+            ("kCGDisplayModeIsStretched", NSNumber.make(bool: false)),
+            ("kCGDisplayModeIsInterlaced", NSNumber.make(bool: false)),
+            ("kCGDisplayModeIsTelevisionOutput", NSNumber.make(bool: false)),
+        ])
+    }
+
+    /// The mode closest in size to the one asked for (the smallest that
+    /// holds it, else the largest), and whether it is that size and depth.
+    static func best(width: Int, height: Int, depth: Int, refreshRate: Double?) -> (Ref, Bool) {
+        let states = Displays.all
+        let exact = states.indices.filter { states[$0].width == width && states[$0].height == height }
+        let holding = states.indices.filter { states[$0].width >= width && states[$0].height >= height }
+            .sorted { states[$0].width * states[$0].height < states[$1].width * states[$1].height }
+        let largest = states.indices.max { states[$0].width * states[$0].height < states[$1].width * states[$1].height } ?? 0
+        let candidates = exact.isEmpty ? (holding.isEmpty ? [largest] : [holding[0]]) : exact
+        let chosen = refreshRate.flatMap { rate in candidates.min { abs(states[$0].refreshRate - rate) < abs(states[$1].refreshRate - rate) } }
+            ?? candidates[0]
+        return (all[chosen].objcObject, !exact.isEmpty && depth == 32)
+    }
+}
+
+@c(_CGDisplayAvailableModes) public func CGDisplayAvailableModes(_ display: UInt32) -> Ref? { DictionaryModes.array.objcObject }
+
+/// The mode the display is in: the desktop's, which is always first.
+@c(_CGDisplayCurrentMode) public func CGDisplayCurrentMode(_ display: UInt32) -> Ref? { DictionaryModes.all.first?.objcObject }
+
+@c(_CGDisplayBestModeForParameters)
+public func CGDisplayBestModeForParameters(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int,
+                                           _ exactMatch: UnsafeMutablePointer<UInt32>?) -> Ref? {
+    let (mode, exact) = DictionaryModes.best(width: width, height: height, depth: depth, refreshRate: nil)
+    exactMatch?.pointee = exact ? 1 : 0
+    return mode
+}
+
+@c(_CGDisplayBestModeForParametersAndRefreshRate)
+public func CGDisplayBestModeForParametersAndRefreshRate(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int, _ refreshRate: Double,
+                                                         _ exactMatch: UnsafeMutablePointer<UInt32>?) -> Ref? {
+    let (mode, exact) = DictionaryModes.best(width: width, height: height, depth: depth, refreshRate: refreshRate)
+    exactMatch?.pointee = exact ? 1 : 0
+    return mode
+}
+
+/// Modes can't be changed: the current one stays, as CGDisplaySetDisplayMode's.
+@c(_CGDisplaySwitchToMode) public func CGDisplaySwitchToMode(_ display: UInt32, _ mode: Ref?) -> Int32 { success }
+
+@c(_CGDisplayBitsPerPixel) public func CGDisplayBitsPerPixel(_ display: UInt32) -> Int { 32 }
+@c(_CGDisplayBitsPerSample) public func CGDisplayBitsPerSample(_ display: UInt32) -> Int { 8 }
+@c(_CGDisplaySamplesPerPixel) public func CGDisplaySamplesPerPixel(_ display: UInt32) -> Int { 3 }
+@c(_CGDisplayBytesPerRow) public func CGDisplayBytesPerRow(_ display: UInt32) -> Int { Displays.current.pixelWidth * 4 }
+
 // MARK: - Gamma
 
 @c(_CGDisplayGammaTableCapacity) public func CGDisplayGammaTableCapacity(_ display: UInt32) -> UInt32 { 256 }
