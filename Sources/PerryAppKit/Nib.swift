@@ -434,7 +434,7 @@ final class NibUnarchiving {
             // An image (or a color) of the app's, by name.
             guard let name = string("NSResourceName", of: entry) else { return nil }
             if string("NSClassName", of: entry) == "NSColor" { return keep(NSColor.color(named: name) ?? NSColor.blackColor()) }
-            return keep(NSImage.image(named: name))
+            return keep(NSImage.image(named: name, nibDirectory: bundlePath))
         case "NSClassSwapper":
             // An object of a class the app names, decoded as the class it
             // stands in for.
