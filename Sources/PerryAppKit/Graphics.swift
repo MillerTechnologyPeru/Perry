@@ -618,6 +618,8 @@ open class NSImage: NSObject {
     /// The decoded bitmap: retained; nil until it is first drawn.
     var cgImage: CGRef?
     private var decoded = false
+    /// Pixels a point in the decoded file, from its resolution.
+    private var pixelsPerPoint: CGFloat = 1
     /// An image drawn by code: an app's block, or a system image's drawing.
     var drawingHandler: ObjCBlock?
     var drawing: ((CGRect) -> Void)?
@@ -684,17 +686,38 @@ open class NSImage: NSObject {
     deinit { if let cgImage { CG.release(cgImage) } }
 
     /// The image's file in the main bundle's resources, by name.
-    private func load(named name: String) {
-        self.name = name
-        let resources = NSBundle.main().bundlePath() + "/Contents/Resources/"
+    /// The file for a named image in a bundle's resources.
+    static func file(named name: String, resources: String) -> String? {
         // A @2x PNG first on a display that needs more than one pixel a point.
         let png = AppKitAssets.displayScale >= 2 ? [name + "@2x.png", name + ".png"] : [name + ".png", name + "@2x.png"]
-        for candidate in [name] + png + [name + ".jpg", name + ".tiff", name + ".pdf"] {
+        for candidate in [name] + png + [name + ".jpg", name + ".tiff", name + ".tif", name + ".pdf"] {
             for directory in [resources, resources + "en.lproj/", resources + "Base.lproj/"] where access(directory + candidate, R_OK) == 0 {
-                path = directory + candidate
-                decodeSize()
-                return
+                return directory + candidate
             }
+        }
+        return nil
+    }
+
+    /// An image a nib names, from the resources of the bundle the nib is in
+    /// (a framework's, say), else the app's.
+    static func image(named name: String, nibDirectory: String?) -> NSImage? {
+        guard var resources = nibDirectory else { return image(named: name) }
+        if resources.hasSuffix(".lproj") { resources = String(resources[..<(resources.lastIndex(of: "/") ?? resources.endIndex)]) }
+        let main = NSBundle.main().bundlePath() + "/Contents/Resources"
+        guard resources != main, let file = file(named: name, resources: resources + "/") else { return image(named: name) }
+        let image = NSImage(size: .zero)
+        image.name = name
+        image.path = file
+        image.decodeSize()
+        return image
+    }
+
+    private func load(named name: String) {
+        self.name = name
+        if let file = Self.file(named: name, resources: NSBundle.main().bundlePath() + "/Contents/Resources/") {
+            path = file
+            decodeSize()
+            return
         }
         // The app's asset catalog's.
         if let (image, imageSize) = AppKitAssets.image(named: name) {
@@ -727,7 +750,9 @@ open class NSImage: NSObject {
     /// Decodes the bitmap now, for its size.
     func decodeSize() {
         guard let image = bitmap() else { return }
-        if size == .zero { size = CGSize(width: CGFloat(CG.imageGetWidth(image)), height: CGFloat(CG.imageGetHeight(image))) }
+        if size == .zero {
+            size = CGSize(width: CGFloat(CG.imageGetWidth(image)) / pixelsPerPoint, height: CGFloat(CG.imageGetHeight(image)) / pixelsPerPoint)
+        }
     }
 
     /// The bitmap ImageIO decodes from the file or data, or that a drawing
@@ -745,6 +770,13 @@ open class NSImage: NSObject {
         guard let source, let imageSource = CG.imageSourceCreateWithData(source.objcObject, nil) else { return nil }
         defer { CG.release(imageSource) }
         cgImage = CG.imageSourceCreateImageAtIndex(imageSource, 0, nil)
+        // A file's resolution sizes it in points: a 144-dpi TIFF is twice
+        // as many pixels as points.
+        if let properties = CG.imageSourceCopyPropertiesAtIndex(imageSource, 0, nil) {
+            defer { CG.release(properties) }
+            let dpi = Send.object(properties, "objectForKey:", "DPIWidth".objCArgument()).map { Send.double($0, "doubleValue") } ?? 0
+            if dpi > 72 { pixelsPerPoint = CGFloat(dpi / 72) }
+        }
         return cgImage
     }
 
