@@ -222,6 +222,12 @@ enum Touches {
     /// Content carried to an offset chosen ahead: a page, the delegate's
     /// target, or -setContentOffset:animated:'s.
     nonisolated(unsafe) private static var gliding: Glide?
+    /// A wheel's scroll under way: the scroll view and the offset the wheel
+    /// has asked for, which the content eases to over the next frames.
+    nonisolated(unsafe) private static var wheelScroll: (view: UIScrollView, target: CGPoint, last: Double)?
+    /// How long the content takes to cover most of the way to a wheel's
+    /// offset, in seconds.
+    private static let wheelEase = 0.07
     /// Two fingers zooming a scroll view: the second finger and where it
     /// is, the midpoint they had last, and the distance and scale the
     /// pinch began at.
@@ -255,6 +261,7 @@ enum Touches {
         guard let window = keyWindow else { return }
         stopCoasting()
         stopGliding()
+        wheelScroll = nil
         // A finger down catches content springing back where it is.
         flushPan()
         if let (view, _, _) = springing {
@@ -503,12 +510,35 @@ enum Touches {
         }
     }
 
-    /// The mouse wheel scrolls the scroll view under the pointer.
+    /// The mouse wheel scrolls the scroll view under the pointer: each step
+    /// moves the offset the content eases to, so notches and a trackpad's
+    /// small steps alike glide instead of jumping.
     static func wheel(at point: CGPoint, by distance: CGFloat) {
         guard let window = keyWindow, let hit = window.sendHitTest(point, with: nil), let scrollView = scrollingAncestor(of: hit) else { return }
         stopCoasting()
-        let offset = scrollView.state.bounds.origin
-        pan(scrollView, to: clamped(scrollView, CGPoint(x: offset.x, y: offset.y + distance * axis(scrollView).y)))
+        stopGliding()
+        var base = scrollView.state.bounds.origin
+        var last = Clock.now
+        if let pending = wheelScroll, pending.view.objcObject == scrollView.objcObject {
+            (base, last) = (pending.target, pending.last)
+        }
+        wheelScroll = (scrollView, clamped(scrollView, CGPoint(x: base.x, y: base.y + distance * axis(scrollView).y)), last)
+        Display.markDirty()
+    }
+
+    /// Eases the content toward the wheel's offset by a share of what is
+    /// left that grows with the time since the last frame.
+    private static func stepWheel() {
+        guard let (view, target, last) = wheelScroll else { return }
+        let now = Clock.now
+        let share = CGFloat(1 - exp(-max(now - last, 1.0 / 240) / wheelEase))
+        let offset = view.state.bounds.origin
+        var next = CGPoint(x: offset.x + (target.x - offset.x) * share, y: offset.y + (target.y - offset.y) * share)
+        let done = abs(target.x - next.x) < 0.25 && abs(target.y - next.y) < 0.25
+        if done { next = target }
+        wheelScroll = done ? nil : (view, target, now)
+        pan(view, to: next)
+        Display.markDirty()
     }
 
     /// Lights up a cell held long enough, and moves momentum scrolling on,
@@ -516,6 +546,7 @@ enum Touches {
     static func step() {
         flushPan()
         stepGlide()
+        stepWheel()
         if var (view, x, y) = springing {
             let offset = CGPoint(x: CGFloat(x.step(at: Clock.now)), y: CGFloat(y.step(at: Clock.now)))
             pan(view, to: offset)
@@ -656,6 +687,7 @@ enum Touches {
         flushPan()
         stopCoasting()
         stopGliding()
+        wheelScroll = nil
         unhighlight()
         if delivered { send(.cancelled) }
         delivered = true
@@ -953,7 +985,8 @@ extension UIResponder {
 /// from the first point to the second over a quarter second;
 /// "pinch:195,400,100,200" puts two fingers either side of the point, 100
 /// points apart, and spreads them to 200 over a quarter second (closer
-/// pinches in); "doubletap:195,400" taps twice; "type:Hello" types text, and
+/// pinches in); "wheel:195,400,300" turns the wheel there by 300 points
+/// (negative scrolls up); "doubletap:195,400" taps twice; "type:Hello" types text, and
 /// "key:return", "key:backspace" and "key:escape" press those keys, for
 /// the first responder; "wait" does nothing for its two seconds. To reach
 /// an app's later screens without a display, along with
@@ -964,6 +997,7 @@ enum TapScript {
         case tap(CGPoint)
         case drag(CGPoint, CGPoint)
         case pinch(CGPoint, CGFloat, CGFloat)
+        case wheel(CGPoint, CGFloat)
         case doubleTap(CGPoint)
         case type(String)
         case key(String)
@@ -986,6 +1020,12 @@ enum TapScript {
                     .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
                 guard values.count == 4 else { return nil }
                 return .pinch(CGPoint(x: values[0], y: values[1]), values[2], values[3])
+            }
+            if item.hasPrefix("wheel:") {
+                let values: [CGFloat] = item.dropFirst(6).split(separator: ",")
+                    .compactMap { Double(String($0.filter { $0 != " " })) }.map { CGFloat($0) }
+                guard values.count == 3 else { return nil }
+                return .wheel(CGPoint(x: values[0], y: values[1]), values[2])
             }
             if item.hasPrefix("doubletap:") {
                 let values: [CGFloat] = item.dropFirst(10).split(separator: ",")
@@ -1020,6 +1060,8 @@ enum TapScript {
                 TapScript.drag(from: start, to: end)
             case .pinch(let center, let from, let to):
                 TapScript.pinch(around: center, from: from, to: to)
+            case .wheel(let point, let distance):
+                Touches.wheel(at: point, by: distance)
             case .doubleTap(let point):
                 TapScript.lastTap = point
                 Touches.down(at: point)
