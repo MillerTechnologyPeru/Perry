@@ -1,8 +1,8 @@
 #ifndef CPERRY_IMAGEIO_H
 #define CPERRY_IMAGEIO_H
 
-// ImageIO's codecs over Linux's libpng, libjpeg-turbo, giflib, libwebp and
-// libheif. Images cross as straight (not premultiplied) RGBA, 8 bits per
+// ImageIO's codecs over Linux's libpng, libjpeg-turbo, giflib, libwebp,
+// libheif and libtiff. Images cross as straight (not premultiplied) RGBA, 8 bits per
 // component, rows packed; buffers the codecs return are malloc'd and the
 // caller frees them with free().
 
@@ -37,6 +37,8 @@ int perry_jpeg_decode(const uint8_t *data, size_t size, perry_decoded *out);
 int perry_gif_decode(const uint8_t *data, size_t size, perry_decoded *out);
 int perry_webp_decode(const uint8_t *data, size_t size, perry_decoded *out);
 int perry_heif_decode(const uint8_t *data, size_t size, perry_decoded *out);
+/// TIFF, through libtiff when the system has it: one frame a directory.
+int perry_tiff_decode(const uint8_t *data, size_t size, perry_decoded *out);
 void perry_decoded_free(perry_decoded *decoded);
 
 int perry_png_encode(const uint8_t *rgba, int width, int height, int has_alpha, uint8_t **out, size_t *out_size);
