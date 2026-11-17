@@ -270,3 +270,76 @@ extension AppStore {
     /// Asks for a review: there is no App Store to review in.
     @MainActor public static func requestReview(in scene: UIWindowScene) {}
 }
+
+// MARK: - The app's own transaction
+
+@available(iOS 16.0, *)
+extension AppStore {
+    /// Where the app was bought: nowhere here, so production.
+    public struct Environment: RawRepresentable, Equatable, Hashable, Sendable {
+        public let rawValue: String
+        public init(rawValue: String) { self.rawValue = rawValue }
+        public static let production = Environment(rawValue: "Production")
+        public static let sandbox = Environment(rawValue: "Sandbox")
+        public static let xcode = Environment(rawValue: "Xcode")
+    }
+}
+
+@available(iOS 16.0, *)
+extension Transaction {
+    public var environment: AppStore.Environment { .production }
+}
+
+/// The record of the app's purchase. There is no App Store here to sign
+/// one, so asking for it fails, as it does with no network.
+@available(iOS 16.0, *)
+public struct AppTransaction: Sendable {
+    public var jsonRepresentation: Data { Data() }
+    public let appID: UInt64?
+    public let appVersion: String
+    public let appVersionID: UInt64?
+    public let bundleID: String
+    public let environment: AppStore.Environment
+    public let originalAppVersion: String
+    public let originalPurchaseDate: Date
+    public let preorderDate: Date?
+    public let deviceVerification: Data
+    public let deviceVerificationNonce: UUID
+    public let signedDate: Date
+
+    public static var shared: VerificationResult<AppTransaction> {
+        get async throws { throw StoreKitError.notAvailableInStorefront }
+    }
+
+    public static func refresh() async throws -> VerificationResult<AppTransaction> {
+        throw StoreKitError.notAvailableInStorefront
+    }
+}
+
+@available(iOS 16.0, *)
+extension AppTransaction: Equatable {
+    public static func == (lhs: AppTransaction, rhs: AppTransaction) -> Bool {
+        lhs.bundleID == rhs.bundleID && lhs.appVersion == rhs.appVersion && lhs.signedDate == rhs.signedDate
+    }
+}
+
+@available(iOS 16.0, *)
+extension AppTransaction: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(bundleID)
+        hasher.combine(appVersion)
+        hasher.combine(signedDate)
+    }
+}
+
+@available(iOS 16.0, *)
+extension AppTransaction: CustomDebugStringConvertible {
+    public var debugDescription: String { "AppTransaction(\(bundleID) \(appVersion))" }
+}
+
+@available(iOS 16.0, *)
+extension VerificationResult where SignedType == AppTransaction {
+    public var jwsRepresentation: String { "" }
+    public var headerData: Data { Data() }
+    public var payloadData: Data { Data() }
+}
