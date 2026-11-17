@@ -923,6 +923,12 @@ public func objc_copyImageNames(_ count: UnsafeMutablePointer<UInt32>?) -> Unsaf
     copyNames(Runtime.imageNames(), count)
 }
 
+/// The path of the image that defines a class.
+@c(_class_getImageName)
+public func class_getImageName(_ cls: Class?) -> UnsafePointer<CChar>? {
+    class_getName(cls).flatMap(Runtime.imageName(forClassNamed:))
+}
+
 /// The names of the classes an image, named by path, defines.
 @c(_objc_copyClassNamesForImage)
 public func objc_copyClassNamesForImage(_ image: UnsafePointer<CChar>?, _ count: UnsafeMutablePointer<UInt32>?)
