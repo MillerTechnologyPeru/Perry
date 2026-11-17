@@ -1,4 +1,5 @@
 import CPerryFoundation
+import Glibc
 import FoundationEssentials
 import PerryObjCInterop
 
@@ -53,6 +54,11 @@ public final class NSJSONSerialization: NSObject {
     }
 
     private static func parse(_ data: Data?, options: UInt, error: UnsafeMutablePointer<id?>?) -> ObjCObject? {
+        if getenv("PERRY_JSON_TRACE") != nil {
+            let head = data.map { String(decoding: $0.prefix(120), as: UTF8.self) } ?? "nil"
+            let line = "perry: json: \(data?.count ?? -1) bytes \(head.map { $0 == "\n" ? " " : $0 }.reduce(into: "") { $0.append($1) })\n"
+            line.withCString { _ = write(2, $0, strlen($0)) }
+        }
         let decoder = JSONDecoder()
         // No data is an exception on Darwin, which the callers that pass
         // none catch (AppLovin's quality service, for a file it has not
