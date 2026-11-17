@@ -147,6 +147,7 @@ final class LayerState {
 
     deinit {
         for color in [backgroundColor, borderColor, shadowColor, backing, contentsMultiplyColor] { if let color { CG.release(color) } }
+        for filters in [filters, backgroundFilters] { if let filters { ObjCRuntime.release(filters.objcObject) } }
     }
 
     var transform: CGAffineTransform {
@@ -474,9 +475,21 @@ open class CALayer: NSObject {
     @ObjCMethod("compositingFilter") func compositingFilter() -> NSObject? { state.compositingFilter }
     @ObjCMethod("setCompositingFilter:") func setCompositingFilter(_ filter: NSObject?) { state.compositingFilter = filter }
     @ObjCMethod("filters") func filters() -> NSObject? { state.filters }
-    @ObjCMethod("setFilters:") func setFilters(_ filters: NSObject?) { state.filters = filters }
+    @ObjCMethod("setFilters:")
+    func setFilters(_ filters: NSObject?) {
+        let retained = ObjCRuntime.retain(filters?.objcObject)
+        if let old = state.filters { ObjCRuntime.release(old.objcObject) }
+        state.filters = retained.map { NSObject($0) }
+        Compositing.changed()
+    }
     @ObjCMethod("backgroundFilters") func backgroundFilters() -> NSObject? { state.backgroundFilters }
-    @ObjCMethod("setBackgroundFilters:") func setBackgroundFilters(_ filters: NSObject?) { state.backgroundFilters = filters }
+    @ObjCMethod("setBackgroundFilters:")
+    func setBackgroundFilters(_ filters: NSObject?) {
+        let retained = ObjCRuntime.retain(filters?.objcObject)
+        if let old = state.backgroundFilters { ObjCRuntime.release(old.objcObject) }
+        state.backgroundFilters = retained.map { NSObject($0) }
+        Compositing.changed()
+    }
     @ObjCMethod("style") func style() -> NSObject? { state.style }
     @ObjCMethod("setStyle:") func setStyle(_ style: NSObject?) { state.style = style }
 
