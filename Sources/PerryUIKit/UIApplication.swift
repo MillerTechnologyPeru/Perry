@@ -180,6 +180,9 @@ open class UIApplication: UIResponder {
     @ObjCMethod("backgroundRefreshStatus") func backgroundRefreshStatus() -> Int { 1 }
     @ObjCMethod("setMinimumBackgroundFetchInterval:") func setMinimumBackgroundFetchInterval(_ interval: Double) {}
     @ObjCMethod("setIdleTimerDisabled:") func setIdleTimerDisabled(_ disabled: Bool) {}
+    /// Remote control events, from headphones and the lock screen, which never come.
+    @ObjCMethod("beginReceivingRemoteControlEvents") func beginReceivingRemoteControlEvents() {}
+    @ObjCMethod("endReceivingRemoteControlEvents") func endReceivingRemoteControlEvents() {}
     @ObjCMethod("isNetworkActivityIndicatorVisible") func isNetworkActivityIndicatorVisible() -> Bool { false }
     @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
     @ObjCMethod("applicationIconBadgeNumber") func applicationIconBadgeNumber() -> Int { 0 }
