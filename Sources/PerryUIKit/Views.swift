@@ -763,6 +763,7 @@ open class WKWebView: UIView {
         if let page = web.page { return page }
         guard let page = makeWebPage(web) else { return nil }
         let object = objcObject
+        attachContent(page, web)
         page.loadChanged = { event in WebViews.loadChanged(object, event) }
         page.loadFailed = { committed, domain, code, message in
             WebViews.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
