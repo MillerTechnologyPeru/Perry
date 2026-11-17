@@ -29,14 +29,28 @@ typedef void *SEL;
 static id (*msg_send)(id, SEL, ...);
 static SEL (*sel_register)(const char *);
 static id (*get_class)(const char *);
+static void *(*lookup_symbol)(const char *, const char *);
 
 __attribute__((visibility("default")))
 void perry_provider_startup(const perry_startup_info *info) {
     if (info->version < 2 || !info->lookup_symbol) return;
+    lookup_symbol = info->lookup_symbol;
     const char *objc = "/usr/lib/libobjc.A.dylib";
     msg_send = (id (*)(id, SEL, ...))info->lookup_symbol(objc, "_objc_msgSend");
     sel_register = (SEL (*)(const char *))info->lookup_symbol(objc, "_sel_registerName");
     get_class = (id (*)(const char *))info->lookup_symbol(objc, "_objc_getClass");
+}
+
+// The runtime's functions and the loader's lookup, for AGL's contexts
+// (agl.c), which are these.
+void *perry_opengl_lookup(const char *library, const char *name) {
+    return lookup_symbol ? lookup_symbol(library, name) : NULL;
+}
+
+void perry_opengl_objc(id (**send)(id, SEL, ...), SEL (**selector)(const char *), id (**class)(const char *)) {
+    *send = msg_send;
+    *selector = sel_register;
+    *class = get_class;
 }
 
 // Selectors and the class, looked up once: games call CGLSetCurrentContext
@@ -86,6 +100,83 @@ CGLError perry_CGLUpdateContext(id context) {
     send(context, "update");
     return kCGLNoError;
 }
+
+// MARK: - Pixel formats and contexts
+
+// CGL's own: a pixel format is an NSOpenGLPixelFormat, whose attributes
+// CGL's are, and a context an NSOpenGLContext, which draws once it has a
+// drawable (CGLSetFullScreen, or a view given it by AppKit or AGL).
+
+CGLError perry_CGLChoosePixelFormat(const int *attributes, id *format, int *count) CGL_SYMBOL(CGLChoosePixelFormat);
+CGLError perry_CGLChoosePixelFormat(const int *attributes, id *format, int *count) {
+    if (!format) return kCGLBadAttribute;
+    *format = NULL;
+    if (count) *count = 0;
+    if (!msg_send || !get_class) return kCGLBadAttribute;
+    // The list is NSOpenGLPixelFormat's, 32-bit unsigned ints with 0 at the end.
+    size_t length = 0;
+    while (attributes && attributes[length]) length++;
+    uint32_t *converted = calloc(length + 1, sizeof *converted);
+    if (!converted) return kCGLBadAttribute;
+    for (size_t index = 0; index < length; index++) converted[index] = (uint32_t)attributes[index];
+    id pixel_format = msg_send(get_class("NSOpenGLPixelFormat"), SELECTOR("alloc"));
+    pixel_format = ((id (*)(id, SEL, const uint32_t *))msg_send)(pixel_format, SELECTOR("initWithAttributes:"), converted);
+    free(converted);
+    if (!pixel_format) return kCGLNoError;   // none matches: NULL, and no error
+    *format = pixel_format;
+    if (count) *count = 1;
+    return kCGLNoError;
+}
+
+CGLError perry_CGLDestroyPixelFormat(id format) CGL_SYMBOL(CGLDestroyPixelFormat);
+CGLError perry_CGLDestroyPixelFormat(id format) {
+    if (format) send(format, "release");
+    return kCGLNoError;
+}
+
+CGLError perry_CGLReleasePixelFormat(id format) CGL_SYMBOL(CGLReleasePixelFormat);
+CGLError perry_CGLReleasePixelFormat(id format) { return perry_CGLDestroyPixelFormat(format); }
+
+id perry_CGLRetainPixelFormat(id format) CGL_SYMBOL(CGLRetainPixelFormat);
+id perry_CGLRetainPixelFormat(id format) { return format ? send(format, "retain") : NULL; }
+
+CGLError perry_CGLDescribePixelFormat(id format, int screen, int attribute, int *value) CGL_SYMBOL(CGLDescribePixelFormat);
+CGLError perry_CGLDescribePixelFormat(id format, int screen, int attribute, int *value) {
+    if (!format || !value) return kCGLBadAttribute;
+    ((void (*)(id, SEL, int *, uint32_t, int))msg_send)(format, SELECTOR("getValues:forAttribute:forVirtualScreen:"),
+                                                        value, (uint32_t)attribute, screen);
+    return kCGLNoError;
+}
+
+CGLError perry_CGLCreateContext(id format, id share, id *context) CGL_SYMBOL(CGLCreateContext);
+CGLError perry_CGLCreateContext(id format, id share, id *context) {
+    if (!context) return kCGLBadContext;
+    *context = NULL;
+    if (!format || !msg_send) return kCGLBadAttribute;
+    id made = msg_send(context_class(), SELECTOR("alloc"));
+    made = ((id (*)(id, SEL, id, id))msg_send)(made, SELECTOR("initWithFormat:shareContext:"), format, share);
+    if (!made) return 10011;   // kCGLBadMatch
+    *context = made;
+    return kCGLNoError;
+}
+
+CGLError perry_CGLDestroyContext(id context) CGL_SYMBOL(CGLDestroyContext);
+CGLError perry_CGLDestroyContext(id context) {
+    if (!context) return kCGLBadContext;
+    if (send(context_class(), "currentContext") == context) send(context_class(), "clearCurrentContext");
+    send(context, "clearDrawable");
+    send(context, "release");
+    return kCGLNoError;
+}
+
+CGLError perry_CGLReleaseContext(id context) CGL_SYMBOL(CGLReleaseContext);
+CGLError perry_CGLReleaseContext(id context) { return perry_CGLDestroyContext(context); }
+
+id perry_CGLRetainContext(id context) CGL_SYMBOL(CGLRetainContext);
+id perry_CGLRetainContext(id context) { return context ? send(context, "retain") : NULL; }
+
+id perry_CGLGetPixelFormat(id context) CGL_SYMBOL(CGLGetPixelFormat);
+id perry_CGLGetPixelFormat(id context) { return context ? send(context, "pixelFormat") : NULL; }
 
 // MARK: - Locks
 
