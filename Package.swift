@@ -66,6 +66,8 @@ let package = Package(
         // VideoToolbox, with no video codecs.
         .library(name: "PerryVideoToolbox", type: .dynamic, targets: ["PerryVideoToolbox"]),
         .library(name: "PerryCarPlay", type: .dynamic, targets: ["PerryCarPlay"]),
+        // CoreSpotlight, which takes an app's searchable items and forgets them.
+        .library(name: "PerryCoreSpotlight", type: .dynamic, targets: ["PerryCoreSpotlight"]),
         .library(name: "PerryGameKit", type: .dynamic, targets: ["PerryGameKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
         // MediaPlayer, with no media library and no movies.
@@ -351,6 +353,12 @@ let package = Package(
         // CarPlay's scene session roles, with no car.
         .target(
             name: "PerryCarPlay",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CoreSpotlight's Objective-C classes, with no Spotlight.
+        .target(
+            name: "PerryCoreSpotlight",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
