@@ -12,7 +12,7 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /pe
     cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -freg-struct-return -ISources/PerrySystem/include -ISources/PerryInterface/include"
     objects=""
     for name in thunks_i386.S stdio.c vaformat.c runtime.c errno.c system.c files.c blocks.c malloc.c ctype.c \
-        pthread.c process.c mach.c sockets.c math.c dyld.c compat.c callbacks.c compiler.c stdcxx.c aio.c dispatch.c commoncryptor.c commondigest.c; do
+        pthread.c process.c mach.c sockets.c math.c dyld.c compat.c callbacks.c compiler.c stdcxx.c aio.c dispatch.c commoncryptor.c commondigest.c keymgr.c; do
         object=$out/obj/system-$name.o
         clang $cflags -c "Sources/PerrySystem/$name" -o "$object" || failed=1
         objects="$objects $object"

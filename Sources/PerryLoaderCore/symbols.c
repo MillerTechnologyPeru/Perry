@@ -233,6 +233,8 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
 #define MAPKIT "/System/Library/Frameworks/MapKit.framework/MapKit"
 #define COREFOUNDATION "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 #define APPKIT "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit"
+#define CORESERVICES "/System/Library/Frameworks/CoreServices.framework/CoreServices"
+#define APPLICATIONSERVICES "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
 
 // Libraries a provider needs loaded with it, as Darwin's link: libdispatch's
 // objects are Objective-C objects, Foundation's run loop drains the main
@@ -253,21 +255,36 @@ static const struct {
 // Re-exports a provider has for the install name it was found under, where
 // it shares its library with others. ApplicationServices is CoreGraphics'
 // here, and Core Text, one of its subframeworks, AppKit's: Mac apps bind
-// CTFont and CTLine to ApplicationServices.
+// CTFont and CTLine to ApplicationServices. Carbon re-exports AppKit's
+// provider (its Carbon events and text input sources for Cocoa apps),
+// CoreServices and ApplicationServices, as Darwin's umbrella does the last
+// two: a Carbon app binds CoreFoundation's and the File Manager's functions
+// to Carbon.
 static void reexport_for_install_name(perry_provider *provider, const char *install_name) {
 #if defined(__i386__) || defined(__x86_64__)
     bool application_services = strstr(install_name, "/ApplicationServices.framework/") != NULL;
+    bool carbon = strstr(install_name, "/Carbon.framework/") != NULL;
     size_t count = sizeof(provider->reexports) / sizeof(provider->reexports[0]);
     // Another install name of the library, which copied this one's, has
     // only the library's own.
     for (size_t i = 0; i < count; i++)
-        if (provider->reexports[i] && strcmp(provider->reexports[i], APPKIT) == 0)
+        if (provider->reexports[i] && (strcmp(provider->reexports[i], APPKIT) == 0 ||
+                                       strcmp(provider->reexports[i], CORESERVICES) == 0 ||
+                                       strcmp(provider->reexports[i], APPLICATIONSERVICES) == 0))
             provider->reexports[i] = NULL;
-    for (size_t i = 0; application_services && i < count; i++)
-        if (!provider->reexports[i]) {
-            provider->reexports[i] = APPKIT;
-            break;
-        }
+    const char *added[3] = {NULL, NULL, NULL};
+    if (application_services) added[0] = APPKIT;
+    if (carbon) {
+        added[0] = APPKIT;
+        added[1] = CORESERVICES;
+        added[2] = APPLICATIONSERVICES;
+    }
+    for (size_t a = 0; a < 3; a++)
+        for (size_t i = 0; added[a] && i < count; i++)
+            if (!provider->reexports[i]) {
+                provider->reexports[i] = added[a];
+                break;
+            }
 #else
     (void)provider;
     (void)install_name;
@@ -425,10 +442,17 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         return true;
     }
 #if !defined(__arm__)
-    // Carbon's (HIToolbox's) text input sources are AppKit's: the keyboard
-    // layouts AppKit's key events are typed with.
+    // AGL's contexts are OpenGL's provider's, beside CGL's: both are
+    // NSOpenGLContexts.
+    if (strstr(install_name, "/AGL.framework/")) {
+        snprintf(out, out_size, "OpenGL");
+        return true;
+    }
+    // Carbon (HIToolbox, QuickDraw) is Carbon's provider, over AppKit's
+    // windows and events; it re-exports AppKit's, whose text input sources
+    // are the keyboard layouts AppKit's key events are typed with.
     if (strstr(install_name, "/Carbon.framework/") || strstr(install_name, "/HIToolbox.framework/")) {
-        snprintf(out, out_size, "AppKit");
+        snprintf(out, out_size, "Carbon");
         return true;
     }
 #endif

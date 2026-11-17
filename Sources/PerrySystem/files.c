@@ -758,6 +758,27 @@ int darwin_fstatvfs(int fd, struct darwin_statvfs *out) {
 }
 #endif
 
+// getmntinfo: the file systems mounted, as an array the library keeps and
+// the next call reuses. There is the one volume, at /, as statfs reports
+// every file system, with the sizes of the one the program's home is on:
+// where it keeps what it writes.
+static int mounted(struct darwin_statfs *out) {
+    struct statfs info;
+    const char *home = getenv("HOME");
+    if (statfs(home ? home : "/", &info) != 0 && statfs("/", &info) != 0) return -1;
+    statfs_to_darwin(&info, out);
+    return 0;
+}
+
+int darwin_getmntinfo(struct darwin_statfs **out, int flags) INODE64_SYMBOL(getmntinfo);
+int darwin_getmntinfo(struct darwin_statfs **out, int flags) {
+    (void)flags;
+    static struct darwin_statfs volume;
+    if (!out || mounted(&volume) != 0) return 0;
+    *out = &volume;
+    return 1;
+}
+
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) INODE64_SYMBOL(statfs);
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     struct statfs info;
@@ -1267,6 +1288,16 @@ int darwin_fstatfs32(int fd, struct darwin_statfs32 *out) DARWIN_SYMBOL(fstatfs)
 int darwin_fstatfs32(int fd, struct darwin_statfs32 *out) {
     struct darwin_statfs info;
     return statfs_to_32(darwin_fstatfs(fd, &info), &info, out);
+}
+
+int darwin_getmntinfo32(struct darwin_statfs32 **out, int flags) DARWIN_SYMBOL(getmntinfo);
+int darwin_getmntinfo32(struct darwin_statfs32 **out, int flags) {
+    (void)flags;
+    static struct darwin_statfs32 volume;
+    struct darwin_statfs info;
+    if (!out || statfs_to_32(mounted(&info), &info, &volume) != 0) return 0;
+    *out = &volume;
+    return 1;
 }
 
 // Names longer than the old d_name are cut short; Linux allows 255 bytes, as

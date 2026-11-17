@@ -14,6 +14,7 @@ import PerryObjCInterop
 private let libobjc = "/usr/lib/libobjc.A.dylib"
 private let libdispatch = "/usr/lib/system/libdispatch.dylib"
 private let coreFoundation = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+private let foundation = "/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation"
 let quartzCore = "/System/Library/Frameworks/QuartzCore.framework/QuartzCore"
 
 func providerWillStart(_ info: perry_startup_info) -> Bool {
@@ -23,6 +24,9 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     }
     // Before the app's code runs, as an app's own SDL reads the environment.
     SDLSession.prepareEnvironment()
+    // Foundation's classes, which a Carbon app that links neither Cocoa
+    // nor Foundation has no other reason to load.
+    _ = symbol(foundation, "_NSLog")
     guard ObjCRuntime.load({ symbol(libobjc, $0) }), ObjCRuntime.functions.getClass("NSString") != nil else {
         appKitFatal("AppKit needs libPerryobjc and libPerryFoundation, which are missing or incomplete")
     }

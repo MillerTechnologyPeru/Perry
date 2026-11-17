@@ -210,6 +210,26 @@ public func CFStringCreateWithSubstring(_ allocator: UnsafeRawPointer?, _ string
 @c(_CFStringCreateMutable)
 public func CFStringCreateMutable(_ allocator: UnsafeRawPointer?, _ capacity: Int) -> id? { MutableStrings.make("") }
 
+/// The string's characters are the program's buffer: it starts with the
+/// buffer's `count`, and each change is written back, up to `capacity`.
+@c(_CFStringCreateMutableWithExternalCharactersNoCopy)
+public func CFStringCreateMutableWithExternalCharactersNoCopy(_ allocator: UnsafeRawPointer?, _ characters: UnsafeMutablePointer<UInt16>?,
+                                                              _ count: Int, _ capacity: Int, _ deallocator: UnsafeRawPointer?) -> id? {
+    let string = MutableStrings.make("")
+    CFStringSetExternalCharactersNoCopy(string, characters, count, capacity)
+    return string
+}
+
+/// Puts the mutable string over another buffer of the program's, whose
+/// first `count` units it now is.
+@c(_CFStringSetExternalCharactersNoCopy)
+public func CFStringSetExternalCharactersNoCopy(_ string: id?, _ characters: UnsafeMutablePointer<UInt16>?, _ count: Int, _ capacity: Int) {
+    let storage = MutableStrings.storage(string)
+    storage.external = nil
+    storage.value = characters.map { CFStrings.string(UnsafeBufferPointer(start: $0, count: count)) } ?? ""
+    storage.external = characters.map { ExternalCharacters(characters: $0, capacity: max(capacity, count)) }
+}
+
 @c(_CFStringCreateMutableCopy)
 public func CFStringCreateMutableCopy(_ allocator: UnsafeRawPointer?, _ capacity: Int, _ string: id?) -> id? {
     MutableStrings.make(CFStrings.value(string))

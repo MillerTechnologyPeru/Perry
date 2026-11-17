@@ -229,8 +229,8 @@ public func FSGetVolumeInfo(_ volume: Int16, _ index: Int, _ actual: UnsafeMutab
 
 /// OSErr FSGetCatalogInfo(const FSRef *, FSCatalogInfoBitmap whichInfo,
 /// FSCatalogInfo *, HFSUniStr255 *outName, FSSpec *, FSRef *parentRef):
-/// the item's flags, dates, sizes and count of items in a folder, its name
-/// and its folder. FSCatalogInfo (2-byte packed, 144 bytes): nodeFlags at
+/// the item's flags, dates, sizes and count of items in a folder, its name,
+/// its FSSpec and its folder. FSCatalogInfo (2-byte packed, 144 bytes): nodeFlags at
 /// 0, the volume (the one, -100) at 2, the parent's and the item's IDs (their
 /// inodes, as 32 bits) at 4 and 8, five UTCDateTimes from 16, the data fork's sizes at 104 and 112, the
 /// resource fork's (none) at 120 and 128, valence at 136.
@@ -287,7 +287,22 @@ public func FSGetCatalogInfo(_ ref: UnsafeRawPointer?, _ which: UInt32, _ catalo
         let folder = path.split(separator: "/").dropLast().joined(separator: "/")
         FileRefs.store("/" + folder, in: parent)
     }
-    _ = spec
+    // FSSpec (2-byte packed, 70 bytes): the volume at 0, the folder's ID (its
+    // inode, as parID is above; 1 for the root's parent) at 2, and the name as
+    // a Pascal string of at most 63 bytes at 6, ':' in it as '/' (HFS parts a
+    // path with ':').
+    if let spec {
+        spec.initializeMemory(as: UInt8.self, repeating: 0, count: 70)
+        spec.storeBytes(of: Int16(-100), as: Int16.self)
+        var parentInfo = stat()
+        let parentPath = "/" + path.split(separator: "/").dropLast().joined(separator: "/")
+        let parentID: UInt32 = path == "/" ? 1 : stat(parentPath, &parentInfo) == 0 ? UInt32(truncatingIfNeeded: parentInfo.st_ino) : 1
+        spec.storeBytes(of: parentID, toByteOffset: 2, as: UInt32.self)
+        let leaf = path == "/" ? "Macintosh HD" : String(path.split(separator: "/").last ?? "")
+        let bytes = Array(leaf.utf8.map { $0 == UInt8(ascii: ":") ? UInt8(ascii: "/") : $0 }.prefix(63))
+        spec.storeBytes(of: UInt8(bytes.count), toByteOffset: 6, as: UInt8.self)
+        for (index, byte) in bytes.enumerated() { spec.storeBytes(of: byte, toByteOffset: 7 + index, as: UInt8.self) }
+    }
     return noErr
 }
 #endif

@@ -6,6 +6,16 @@ import Synchronization
 /// An NSString's contents: its own, or for an NSMutableAttributedString's
 /// -mutableString, the attributed string's characters, read and changed in
 /// place.
+/// A program's buffer that a mutable CFString keeps its characters in.
+struct ExternalCharacters {
+    var characters: UnsafeMutablePointer<UInt16>
+    var capacity: Int
+
+    func copy(_ value: String) {
+        for (index, unit) in value.utf16.prefix(capacity).enumerated() { characters[index] = unit }
+    }
+}
+
 final class StringStorage {
     private var stored: String
     /// The attributed string this string is the characters of.
@@ -16,11 +26,16 @@ final class StringStorage {
         get { attributed?.string ?? stored }
         set {
             if let attributed { attributed.replaceChanged(with: Array(newValue.utf16)) } else { stored = newValue }
+            external?.copy(newValue)
             free(cString)
             cString = nil
             asciiChecked = false
         }
     }
+    /// The program's own buffer of UTF-16 units, for a mutable string made
+    /// over it (CFStringCreateMutableWithExternalCharactersNoCopy): each
+    /// change is written there, as much as fits.
+    var external: ExternalCharacters?
     /// Whether the string has been looked at for being all ASCII, and was.
     private var asciiChecked = false
     private var isASCII = false

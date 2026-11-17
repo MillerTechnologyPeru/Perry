@@ -587,6 +587,17 @@ enum NumberFormatters {
     }
 }
 
+/// CFNumberFormatterCreate: an NSNumberFormatter, whose styles are
+/// CFNumberFormatterStyle's numbers, in the locale given.
+@c(_CFNumberFormatterCreate)
+public func CFNumberFormatterCreate(_ allocator: UnsafeRawPointer?, _ locale: id?, _ style: Int) -> id? {
+    guard let object = Storage.allocate(UnsafeMutableRawPointer(NumberFormatters.formatterClass)) else { return nil }
+    let storage = NumberFormatters.storage(object)
+    storage.locale = locale.map { Locales.locale($0) }
+    storage.setStyle(style)
+    return object
+}
+
 /// NSNumberFormatter.
 @ObjCClass("NSNumberFormatter")
 public final class NSNumberFormatter: NSFormatter {
