@@ -20,6 +20,8 @@ struct PlatformTextField: UIViewRepresentable {
     var placeholder: Text?
     var onEditingChanged: (Bool) -> Void = { _ in }
     var onCommit: () -> Void = {}
+    /// Whether the field hides what is typed, as a secure field does.
+    var isSecure = false
     @Environment(\.self) private var environment
 
     func makeUIView(context: Context) -> UITextField {
@@ -61,6 +63,9 @@ struct PlatformTextField: UIViewRepresentable {
         }
         if field.keyboardType != environment.keyboardType {
             field.keyboardType = environment.keyboardType
+        }
+        if field.isSecureTextEntry != isSecure {
+            field.isSecureTextEntry = isSecure
         }
     }
 
