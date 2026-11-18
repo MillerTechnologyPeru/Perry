@@ -248,6 +248,48 @@ open class NSWorkspace: NSObject {
         return notificationCenter
     }
 
+    // MARK: Types
+
+    private static func typesFunction(_ name: String) -> UnsafeMutableRawPointer? {
+        guard let library = dlopen("libPerryUniformTypeIdentifiers.so", RTLD_NOW | RTLD_NOLOAD) else { return nil }
+        return dlsym(library, name)
+    }
+
+    /// A file's type identifier: a folder's by its extension when it is a
+    /// package (an app, a framework), else public.folder; a file's by its
+    /// extension, else public.data.
+    @ObjCMethod("typeOfFile:error:")
+    func type(ofFile path: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> String? {
+        guard let path else { return nil }
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        let isFolder = info.st_mode & S_IFMT == S_IFDIR
+        let name = path.split(separator: "/").last.map(String.init) ?? path
+        let dot = name.lastIndex(of: ".")
+        let pathExtension = dot.map { String(name[name.index(after: $0)...]) } ?? ""
+        if !pathExtension.isEmpty, let symbol = Self.typesFunction("_UTTypeCreatePreferredIdentifierForTag") {
+            typealias Preferred = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+            let preferred = unsafeBitCast(symbol, to: Preferred.self)
+            let found = preferred("public.filename-extension".objCArgument(), pathExtension.objCArgument(),
+                                  (isFolder ? "public.directory" : "public.data").objCArgument())
+            if let found {
+                defer { ObjCRuntime.release(found) }
+                let identifier = String(objCArgument: found)
+                if !identifier.hasPrefix("dyn.") { return identifier }
+            }
+        }
+        return isFolder ? "public.folder" : "public.data"
+    }
+
+    @ObjCMethod("type:conformsToType:")
+    func type(_ type: String?, conformsTo other: String?) -> Bool {
+        guard let type, let other else { return false }
+        if type == other { return true }
+        guard let symbol = Self.typesFunction("_UTTypeConformsTo") else { return false }
+        typealias Conforms = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
+        return unsafeBitCast(symbol, to: Conforms.self)(type.objCArgument(), other.objCArgument())
+    }
+
     private func cannotOpen(_ what: String) {
         appKitWarning("NSWorkspace: no app here to open \(what)")
     }
