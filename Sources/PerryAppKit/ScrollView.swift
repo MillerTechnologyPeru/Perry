@@ -521,6 +521,8 @@ open class NSScroller: NSControl {
     @ObjCMethod("setKnobStyle:") func setKnobStyle(_ value: Int) {}
     @ObjCMethod("hitPart") func hitPart() -> UInt { 2 }
     @ObjCMethod("usableParts") func usableParts() -> UInt { 2 }
+    /// Works out which parts fit, which -usableParts answers from here.
+    @ObjCMethod("checkSpaceForParts") func checkSpaceForParts() {}
     @ObjCMethod("isFlipped") override func isFlipped() -> Bool { true }
 
     /// The knob's rectangle in the scroller.
