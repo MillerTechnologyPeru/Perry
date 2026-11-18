@@ -150,6 +150,8 @@ VARIADIC perry_imp_orderedSetWithObjects, perry_foundation_orderedSetWithObjects
 VARIADIC perry_imp_initOrderedSetWithObjects, perry_foundation_initOrderedSetWithObjects, 3
     .hidden perry_imp_predicateWithFormat
 VARIADIC perry_imp_predicateWithFormat, perry_foundation_predicateWithFormat, 3
+    .hidden perry_imp_expressionWithFormat
+VARIADIC perry_imp_expressionWithFormat, perry_foundation_expressionWithFormat, 3
     .hidden perry_imp_dictionaryWithObjectsAndKeys
 VARIADIC perry_imp_dictionaryWithObjectsAndKeys, perry_foundation_dictionaryWithObjectsAndKeys, 3
     .hidden perry_imp_appendFormat

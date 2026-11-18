@@ -70,6 +70,12 @@ grep -rlE 'import (FoundationEssentials|FoundationInternationalization)$|(Founda
         perl -i -pe 's/^\s*(?:(?:internal|package|public|\@_exported|\@preconcurrency|\@_implementationOnly)\s+)*import (?:FoundationEssentials|FoundationInternationalization)\s*$/\n/; s/\b(FoundationEssentials|FoundationInternationalization)\./Foundation./g' "$file"
     done
 
+# Measurement, Dimension and UnitDuration: swift-foundation stubs them for
+# its format styles; they are Darwin/Foundation's Measurement and the SDK's
+# NSDimension and NSUnitDuration.
+perl -i -ne 'print unless /^public struct Measurement<UnitType> \{\}$|^public class Dimension \{\}$|^public class UnitDuration: Dimension \{\}$/' \
+    "$merged/FoundationInternationalization/Formatting/Measurement+FormatStyle+Stub.swift"
+
 # The JSON coders' dates formatted by a DateFormatter, which swift-foundation
 # keeps for Apple's build: NSDateFormatter is here as there.
 perl -i -pe 's/^#if FOUNDATION_FRAMEWORK && !NO_FORMATTERS\b/#if (FOUNDATION_FRAMEWORK || FOUNDATION_OBJC_TYPES) && !NO_FORMATTERS/' \

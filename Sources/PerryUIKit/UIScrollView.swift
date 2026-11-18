@@ -384,7 +384,7 @@ open class UIGestureRecognizer: NSObject {
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
     @ObjCMethod("numberOfTouches") func numberOfTouches() -> UInt { Touches.current == nil ? 0 : 1 }
-    @ObjCMethod("requireGestureRecognizerToFail:") func requireToFail(_ other: UIGestureRecognizer) {}
+    @ObjCMethod("requireGestureRecognizerToFail:") func requireToFail(_ other: UIGestureRecognizer?) {}
 
     /// Where the touch is, in `view` (the window if nil).
     @ObjCMethod("locationInView:")

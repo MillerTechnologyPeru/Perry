@@ -224,6 +224,14 @@ enum Bundles {
         return object
     }
 
+    /// The identifiers of system frameworks, and their names.
+    static let systemFrameworks: [String: String] = [
+        "com.apple.opengles": "OpenGLES", "com.apple.GLKit": "GLKit", "com.apple.Metal": "Metal",
+        "com.apple.MetalKit": "MetalKit", "com.apple.AVFoundation": "AVFoundation",
+        "com.apple.CoreLocation": "CoreLocation", "com.apple.CoreGraphics": "CoreGraphics",
+        "com.apple.QuartzCore": "QuartzCore", "com.apple.UIKit": "UIKit", "com.apple.CFNetwork": "CFNetwork",
+    ]
+
     /// A bundle already made whose identifier is `identifier`, as
     /// +bundleWithIdentifier: finds bundles the process has opened.
     static func known(identifier: String) -> id? {
@@ -334,6 +342,11 @@ public final class NSBundle: NSObject {
             if let bundle = Bundles.bundle(path: frameworks + "/" + name), Bundles.storage(bundle)?.identifier == identifier {
                 return bundle
             }
+        }
+        // A system framework a provider stands in for, by its identifier:
+        // Mapbox GL finds OpenGLES this way, to look the GL functions up in.
+        if let name = Bundles.systemFrameworks[identifier], let bundle = Bundles.bundle(path: "/System/Library/Frameworks/" + name + ".framework") {
+            return bundle
         }
         return nil
     }

@@ -64,6 +64,8 @@ final class ViewControllerState: ObjectState {
     var preferredContentSize = CGSize.zero
     var editing = false
     var restorationIdentifier: String?
+    /// The trait collection a parent overrides for each child, by the child's address.
+    var childTraitOverrides: [UInt: NSObject] = [:]
     /// From a storyboard: the storyboard, its identifier for the
     /// controller, the segues from it, and the objects its view nib's
     /// placeholders stand for.
@@ -312,6 +314,15 @@ open class UIViewController: UIResponder {
     @ObjCMethod("setPreferredContentSize:") func setPreferredContentSize(_ size: CGSize) { state.preferredContentSize = size }
     @ObjCMethod("restorationIdentifier") func restorationIdentifier() -> String? { state.restorationIdentifier }
     @ObjCMethod("setRestorationIdentifier:") func setRestorationIdentifier(_ identifier: String?) { state.restorationIdentifier = identifier }
+
+    @ObjCMethod("setOverrideTraitCollection:forChildViewController:")
+    func setOverrideTraitCollection(_ collection: NSObject?, forChild child: NSObject) {
+        state.childTraitOverrides[UInt(bitPattern: child.objcObject)] = collection
+    }
+    @ObjCMethod("overrideTraitCollectionForChildViewController:")
+    func overrideTraitCollection(forChild child: NSObject) -> NSObject? {
+        state.childTraitOverrides[UInt(bitPattern: child.objcObject)]
+    }
 
     // The status bar and the home indicator, which are not drawn.
     @ObjCMethod("preferredStatusBarStyle") func preferredStatusBarStyle() -> Int { 0 }

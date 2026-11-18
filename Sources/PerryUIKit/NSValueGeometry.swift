@@ -65,6 +65,13 @@ extension NSValueObject {
     @ObjCClassMethod("valueWithUIEdgeInsets:")
     static func value(_ cls: ObjCClass, insets: UIEdgeInsets) -> NSObject { box(cls, insets, Encodings.insets) }
 
+    // A CGVector is two CGFloats, as a CGPoint is: it travels as one. (The
+    // macro does not see members under #if, so the 64-bit encodings are used on
+    // 32-bit too, where the runtime does not read their offsets.)
+    @ObjCClassMethod("valueWithCGVector:", types: "@32@0:8{CGVector=dd}16")
+    static func value(_ cls: ObjCClass, vector: CGPoint) -> NSObject { box(cls, vector, Encodings.vector) }
+    @ObjCMethod("CGVectorValue", types: "{CGVector=dd}16@0:8") func vectorValue() -> CGPoint { unbox(self, CGPoint(x: 0, y: 0)) }
+
     @ObjCMethod("CGPointValue") func pointValue() -> CGPoint { unbox(self, CGPoint(x: 0, y: 0)) }
     @ObjCMethod("CGSizeValue") func sizeValue() -> CGSize { unbox(self, CGSize(width: 0, height: 0)) }
     @ObjCMethod("CGRectValue") func rectValue() -> CGRect { unbox(self, CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 0, height: 0))) }

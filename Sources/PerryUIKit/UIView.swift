@@ -48,7 +48,10 @@ final class ViewState: ObjectState {
     var contentHuggingPriority = (width: Float(250), height: Float(250))
     var compressionResistancePriority = (width: Float(750), height: Float(750))
     var accessibilityIdentifier: String?
+    var restorationIdentifier: String?
     var needsLayout = true
+    /// Inside -layoutSubviews, where another -layoutIfNeeded finds the view mid-layout.
+    var layingOut = false
     /// A constraint the view's layout solves has changed: the constraints
     /// are solved again, and the view laid out only if a frame came out
     /// different.
@@ -709,6 +712,10 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("setAccessibilityIdentifier:") func setAccessibilityIdentifier(_ identifier: String?) {
         state.accessibilityIdentifier = identifier
     }
+    @ObjCMethod("restorationIdentifier") func restorationIdentifier() -> String? { state.restorationIdentifier }
+    @ObjCMethod("setRestorationIdentifier:") func setRestorationIdentifier(_ identifier: String?) {
+        state.restorationIdentifier = identifier
+    }
 
     // MARK: Hierarchy
 
@@ -1047,6 +1054,10 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// -viewWillLayoutSubviews and -viewDidLayoutSubviews.
     @ObjCMethod("layoutIfNeeded")
     func layoutIfNeeded() {
+        // As Core Animation, a view laying itself out is not laid out again
+        // from inside: a controller that sets frames and asks for layout in
+        // -viewDidLayoutSubviews would otherwise recurse until the stack ends.
+        if state.layingOut { return }
         // A view whose constraints may use its safe area is laid out again
         // when the area changes, as when its screen slides into place.
         if let guides = UIView.guides.existing(objcObject), guides.safeArea != nil {
@@ -1073,6 +1084,8 @@ open class UIView: UIResponder, UICoordinateSpace {
             // out its node there) is sent it, and reaches the view through
             // -layoutSublayersOfLayer:, as Core Animation lays a view out.
             let layer = state.layer
+            state.layingOut = true
+            defer { state.layingOut = false }
             if let layer, Methods.overrides(layer.objcObject, "layoutSublayers", of: CALayer.objCClass.pointer) {
                 layer.sendLayoutSublayers()
             } else {

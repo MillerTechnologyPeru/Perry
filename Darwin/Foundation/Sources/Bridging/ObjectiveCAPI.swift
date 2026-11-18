@@ -223,6 +223,14 @@ extension NSPredicate {
     }
 }
 
+@available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
+extension NSExpression {
+    /// An expression from a format string and its arguments.
+    public convenience init(format expressionFormat: __shared String, _ args: any CVarArg...) {
+        self.init(format: expressionFormat, arguments: getVaList(args))
+    }
+}
+
 // MARK: - Logging
 
 /// Logs a formatted message, as the Objective-C NSLog does.

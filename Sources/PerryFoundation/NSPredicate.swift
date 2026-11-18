@@ -20,6 +20,11 @@ indirect enum ExpressionNode {
     /// SUBQUERY(collection, $variable, predicate): the members of the
     /// collection the predicate holds for.
     case subquery(ExpressionNode, String, PredicateNode)
+    /// TERNARY(predicate, whenTrue, whenFalse).
+    case conditional(PredicateNode, ExpressionNode, ExpressionNode)
+    /// FUNCTION(operand, 'selector:', arguments...): the selector sent to
+    /// the operand's value.
+    case method(ExpressionNode, String, [ExpressionNode])
 
     /// NSExpressionType.
     var type: UInt {
@@ -28,9 +33,10 @@ indirect enum ExpressionNode {
         case .evaluatedObject: return 1
         case .keyPath: return 3
         case .aggregate: return 14
-        case .function: return 4
+        case .function, .method: return 4
         case .variable: return 2
         case .subquery: return 13
+        case .conditional: return 20
         }
     }
 }
@@ -140,6 +146,10 @@ enum PredicateFormat {
         case .aggregate(let elements): return "{" + elements.map(expression).joined(separator: ", ") + "}"
         case .constant(let value): return constant(value?.objcObject)
         case .variable(let name): return "$" + name
+        case .method(let operand, let name, let arguments):
+            return "FUNCTION(" + ([expression(operand), "\"" + name + "\""] + arguments.map(expression)).joined(separator: ", ") + ")"
+        case .conditional(let predicate, let whenTrue, let whenFalse):
+            return "TERNARY(" + PredicateFormat.predicate(predicate) + ", " + expression(whenTrue) + ", " + expression(whenFalse) + ")"
         case .subquery(let collection, let variable, let predicate):
             return "SUBQUERY(" + expression(collection) + ", $" + variable + ", " + PredicateFormat.predicate(predicate) + ")"
         case .function(let name, let arguments):
@@ -362,6 +372,13 @@ struct PredicateParser {
         return false
     }
 
+    /// A format that is an expression alone.
+    mutating func parseStandaloneExpression() -> ExpressionNode {
+        let node = parseExpression()
+        guard current == .end else { fail("unexpected \(current)") }
+        return node
+    }
+
     mutating func parse() -> PredicateNode {
         let node = parseOr()
         guard current == .end else { fail("unexpected \(current)") }
@@ -528,6 +545,55 @@ struct PredicateParser {
             default:
                 if word.uppercased() == "SUBQUERY", isSymbol("(") { return subquery() }
                 if word.hasPrefix("$"), word.count > 1 { return .variable(String(word.dropFirst())) }
+                if word == "FUNCTION", isSymbol("(") {
+                    advance()
+                    var arguments: [ExpressionNode] = []
+                    while !isSymbol(")") {
+                        arguments.append(parseExpression())
+                        if isSymbol(",") { advance() } else if !isSymbol(")") { fail("missing )") }
+                    }
+                    advance()
+                    guard arguments.count >= 2, case .constant(let selector) = arguments[1],
+                          let name = Strings.value(of: selector?.objcObject) else { fail("FUNCTION needs an operand and a selector") }
+                    return .method(arguments[0], name, Array(arguments.dropFirst(2)))
+                }
+                // A selector of several parts then its arguments: "mgl_step:from:stops:(a, b, c)".
+                if isSymbol(":") {
+                    var index = position, name = word
+                    while case .symbol(":") = tokens[index] {
+                        name += ":"
+                        index += 1
+                        if case .word(let part) = tokens[index], case .symbol(":") = tokens[index + 1] {
+                            name += part
+                            index += 1
+                        } else {
+                            break
+                        }
+                    }
+                    if case .symbol("(") = tokens[index] {
+                        position = index + 1
+                        var arguments: [ExpressionNode] = []
+                        while !isSymbol(")") {
+                            arguments.append(parseExpression())
+                            if isSymbol(",") { advance() } else if !isSymbol(")") { fail("missing )") }
+                        }
+                        advance()
+                        return .method(.evaluatedObject, name, arguments)
+                    }
+                }
+                // A function by name: Foundation's own are listed; any other is the selector
+                // of that name with its arguments, as Mapbox's "mgl_coalesce(%@)".
+                if isSymbol("(") {
+                    let function = Self.functionSelectors[word.lowercased()] ?? word + ":"
+                    advance()
+                    var arguments: [ExpressionNode] = []
+                    while !isSymbol(")") {
+                        arguments.append(parseExpression())
+                        if isSymbol(",") { advance() } else if !isSymbol(")") { fail("missing )") }
+                    }
+                    advance()
+                    return .function(function, arguments)
+                }
                 return .keyPath(word.hasPrefix("#") ? String(word.dropFirst()) : word)
             }
         case .symbol("{"):
@@ -597,6 +663,19 @@ struct PredicateParser {
         }
     }
 
+    /// The selector of each function a format calls by name, "sum({1, 2})".
+    private static let functionSelectors: [String: String] = {
+        var found = ["add": "add:to:", "subtract": "from:subtract:", "multiply": "multiply:by:", "divide": "divide:by:",
+                     "modulus": "modulus:by:", "power": "raise:toPower:", "bitwiseand": "bitwiseAnd:with:",
+                     "bitwiseor": "bitwiseOr:with:", "bitwisexor": "bitwiseXor:with:", "randomn": "randomn:", "cast": "castObject:toType:",
+                     "now": "now", "random": "random"]
+        for name in ["sum", "count", "min", "max", "average", "median", "mode", "stddev", "sqrt", "log", "ln", "exp",
+                     "floor", "ceiling", "abs", "trunc", "lowercase", "uppercase", "canonical", "distinct"] {
+            found[name] = name + ":"
+        }
+        return found
+    }()
+
     static func number(_ text: String) -> id {
         if text.lowercased().hasPrefix("0x"), let value = Int64(text.dropFirst(2), radix: 16) {
             return Numbers.make(nil, .signed(value))!
@@ -635,6 +714,16 @@ enum PredicateEvaluation {
         case .aggregate(let elements): return Arrays.autoreleased(elements.compactMap { value($0, object) })
         case .function(let name, let arguments): return function(name, arguments.map { value($0, object) })
         case .variable(let name): return variables[name]
+        case .conditional(let predicate, let whenTrue, let whenFalse):
+            return value(evaluate(predicate, object) ? whenTrue : whenFalse, object)
+        case .method(let operand, let name, let arguments):
+            guard let target = value(operand, object) else { return nil }
+            let selector = ObjC.selector(name)
+            switch arguments.count {
+            case 0: return ObjC.send(target, selector)
+            case 1: return ObjC.send(target, selector, value(arguments[0], object))
+            default: return ObjC.send(target, selector, value(arguments[0], object), value(arguments[1], object))
+            }
         case .subquery(let collection, let name, let predicate):
             let items = elements(value(collection, object)) ?? []
             let saved = variables[name]
@@ -656,6 +745,8 @@ enum PredicateEvaluation {
             guard arguments.count == 2, let target = arguments[0] else { return perry_foundation_boolean(0) }
             return perry_foundation_boolean(ObjC.sendBool(target, ObjC.selector(String(name.dropFirst(6))), arguments[1]) ? 1 : 0)
         }
+        // CAST(value, 'Type'): the value, which is not converted here.
+        if name == "castObject:toType:" { return arguments.first ?? nil }
         let items = arguments.first.flatMap { elements($0) } ?? []
         typealias DoubleValue = @convention(c) (id?, SEL) -> Double.ObjCResultType
         let doubleValue = unsafeBitCast(ObjC.msgSend, to: DoubleValue.self)
@@ -825,7 +916,20 @@ enum Predicates {
         return ObjC.autorelease(object)!
     }
 
+    /// PERRY_NSEXPRESSION_TRACE: every expression made, as it prints.
+    static let tracing = getenv("PERRY_NSEXPRESSION_TRACE") != nil
+
+    static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: NSExpression: \(message())\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+    }
+
     static func expression(_ node: ExpressionNode) -> id {
+        if tracing {
+            let line = "perry: NSExpression: \(PredicateFormat.expression(node))\n"
+            _ = line.withCString { write(2, $0, strlen($0)) }
+        }
         let object = Storage.allocate(UnsafeMutableRawPointer(expressionClass))!
         Storage.set(object, ExpressionStorage(node))
         return ObjC.autorelease(object)!
@@ -834,6 +938,11 @@ enum Predicates {
     static func parse(_ format: String, _ arguments: PredicateArguments) -> id {
         var parser = PredicateParser(format, arguments: arguments)
         return object(parser.parse())
+    }
+
+    static func parseExpression(_ format: String, _ arguments: PredicateArguments) -> id {
+        var parser = PredicateParser(format, arguments: arguments)
+        return expression(parser.parseStandaloneExpression())
     }
 }
 
@@ -978,12 +1087,26 @@ public class NSCompoundPredicate: NSPredicate {
 /// NSExpression.
 @ObjCClass("NSExpression")
 public class NSExpression: NSObject {
+    private var node: ExpressionNode { Predicates.expressionNode(objcObject) }
+
+    /// Set-up after the class is defined.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Predicates.expressionClass = cls.storage
+        cls.addMethod("expressionWithFormat:", types: "@24@0:8@16",
+                      implementation: variadicEntry(perry_imp_expressionWithFormat), isClassMethod: true)
     }
 
-    private var node: ExpressionNode { Predicates.expressionNode(objcObject) }
+    @ObjCClassMethod("expressionWithFormat:argumentArray:")
+    static func expression(format: String, argumentArray: ObjCObject?) -> ObjCObject {
+        ObjCObject(Predicates.parseExpression(format, .array(argumentArray.map { Arrays.elements($0.objcObject) } ?? [])))
+    }
+
+    @ObjCClassMethod("expressionWithFormat:arguments:", types: "@32@0:8@16*24")
+    static func expression(format: String, arguments: UnsafeRawPointer?) -> ObjCObject {
+        guard let arguments else { return ObjCObject(Predicates.parseExpression(format, .array([]))) }
+        return ObjCObject(Predicates.parseExpression(format, .variadic(DarwinArguments(arguments))))
+    }
 
     @ObjCClassMethod("expressionForKeyPath:")
     static func keyPath(_ path: String) -> ObjCObject { ObjCObject(Predicates.expression(.keyPath(path))) }
@@ -997,14 +1120,35 @@ public class NSExpression: NSObject {
         return ObjCObject(Predicates.expression(.function(name, nodes)))
     }
 
+    /// A function on a target, "sum:" of an operand: the target is not kept; a named function
+    /// has the evaluated object for its operand.
+    @ObjCClassMethod("expressionForFunction:selectorName:arguments:")
+    static func function(_ target: ObjCObject?, selectorName: String, arguments: ObjCObject?) -> ObjCObject {
+        let nodes = (arguments.map { Arrays.elements($0.objcObject) } ?? []).map(Predicates.expressionNode)
+        let operand = target.map { Predicates.expressionNode($0.objcObject) } ?? .evaluatedObject
+        return ObjCObject(Predicates.expression(.method(operand, selectorName, nodes)))
+    }
+
+    @ObjCMethod("operand")
+    func operand() -> ObjCObject? {
+        Predicates.trace(".operand of \(PredicateFormat.expression(node))")
+        if case .method(let operand, _, _) = node { return ObjCObject(Predicates.expression(operand)) }
+        guard case .function = node else { return nil }
+        return ObjCObject(Predicates.expression(.evaluatedObject))
+    }
+
     @ObjCMethod("function")
     func function() -> String? {
+        Predicates.trace(".function of \(PredicateFormat.expression(node))")
         if case .function(let name, _) = node { return name }
+        if case .method(_, let name, _) = node { return name }
         return nil
     }
 
     @ObjCMethod("arguments")
     func arguments() -> ObjCObject? {
+        Predicates.trace(".arguments of \(PredicateFormat.expression(node))")
+        if case .method(_, _, let arguments) = node { return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression))) }
         guard case .function(_, let arguments) = node else { return nil }
         return ObjCObject(Arrays.autoreleased(arguments.map(Predicates.expression)))
     }
@@ -1024,7 +1168,7 @@ public class NSExpression: NSObject {
         ObjC.superDealloc(objcObject, from: Predicates.expressionClass)
     }
 
-    @ObjCMethod("expressionType") func expressionType() -> UInt { node.type }
+    @ObjCMethod("expressionType") func expressionType() -> UInt { Predicates.trace(".expressionType of \(PredicateFormat.expression(node)) = \(node.type)"); return node.type }
 
     @ObjCMethod("keyPath")
     func keyPath() -> String? {
@@ -1032,15 +1176,54 @@ public class NSExpression: NSObject {
         return nil
     }
 
+    @ObjCClassMethod("expressionForConditional:trueExpression:falseExpression:")
+    static func conditional(_ predicate: ObjCObject, trueExpression: ObjCObject, falseExpression: ObjCObject) -> ObjCObject {
+        ObjCObject(Predicates.expression(.conditional(Predicates.node(predicate.objcObject),
+                                                     Predicates.expressionNode(trueExpression.objcObject),
+                                                     Predicates.expressionNode(falseExpression.objcObject))))
+    }
+
+    @ObjCMethod("predicate")
+    func conditionalPredicate() -> ObjCObject? {
+        guard case .conditional(let predicate, _, _) = node else { return nil }
+        return ObjCObject(Predicates.object(predicate))
+    }
+
+    @ObjCMethod("trueExpression")
+    func trueExpression() -> ObjCObject? {
+        guard case .conditional(_, let whenTrue, _) = node else { return nil }
+        return ObjCObject(Predicates.expression(whenTrue))
+    }
+
+    @ObjCMethod("falseExpression")
+    func falseExpression() -> ObjCObject? {
+        guard case .conditional(_, _, let whenFalse) = node else { return nil }
+        return ObjCObject(Predicates.expression(whenFalse))
+    }
+
+    @ObjCClassMethod("expressionForVariable:")
+    static func variable(_ name: String) -> ObjCObject { ObjCObject(Predicates.expression(.variable(name))) }
+
+    @ObjCMethod("variable")
+    func variable() -> String? {
+        if case .variable(let name) = node { return name }
+        return nil
+    }
+
     @ObjCMethod("constantValue")
     func constantValue() -> ObjCObject? {
+        Predicates.trace(".constantValue of \(PredicateFormat.expression(node))")
         if case .constant(let value) = node { return value }
+        // An aggregate's value is its expressions, as Darwin answers: Mapbox reads
+        // mgl_coalesce's arguments so.
+        if case .aggregate(let elements) = node { return ObjCObject(Arrays.autoreleased(elements.map(Predicates.expression))) }
         return nil
     }
 
     /// An aggregate's expressions.
     @ObjCMethod("collection")
     func collection() -> ObjCObject? {
+        Predicates.trace(".collection of \(PredicateFormat.expression(node))")
         guard case .aggregate(let elements) = node else { return nil }
         return ObjCObject(Arrays.autoreleased(elements.map(Predicates.expression)))
     }
@@ -1061,6 +1244,13 @@ public func perry_foundation_predicateWithFormat(_ cls: id?, _ cmd: SEL?, _ form
                                                  _ arguments: UnsafeRawPointer?) -> id? {
     guard let arguments else { return nil }
     return Predicates.parse(Strings.value(of: format) ?? "", .variadic(DarwinArguments(arguments)))
+}
+
+@c
+public func perry_foundation_expressionWithFormat(_ cls: id?, _ cmd: SEL?, _ format: id?,
+                                                  _ arguments: UnsafeRawPointer?) -> id? {
+    guard let arguments else { return nil }
+    return Predicates.parseExpression(Strings.value(of: format) ?? "", .variadic(DarwinArguments(arguments)))
 }
 
 /// Filtering collections with predicates.
