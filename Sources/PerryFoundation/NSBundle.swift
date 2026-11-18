@@ -59,7 +59,12 @@ final class BundleStorage {
     /// then in the localization directories; an iPhone variant (name~iphone)
     /// is preferred in each.
     func resource(_ name: String?, type: String?, directory: String?) -> String? {
-        guard let name, !name.isEmpty else { return nil }
+        // No name, with a type: the first resource of the type, as
+        // Foundation gives (Xcode finds its frameworks' plug-in data so).
+        guard let name, !name.isEmpty else {
+            guard let type, !type.isEmpty else { return nil }
+            return resources(type: type.hasPrefix(".") ? String(type.dropFirst()) : type, directory: directory).sorted().first
+        }
         // The type may come with its dot, as Foundation allows.
         let type = type.map { $0.hasPrefix(".") ? String($0.dropFirst()) : $0 }
         let suffix = type.map { $0.isEmpty ? "" : "." + $0 } ?? ""

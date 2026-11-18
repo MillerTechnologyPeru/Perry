@@ -15,6 +15,9 @@ final class ManagedObjectState: ObjectState {
     var id = ObjectID(rawValue: "")
     var objectID: NSManagedObjectID?
     var attributes: [String: AttributeValue] = [:]
+    /// Undefined attributes' values (transient ones of any class: Xcode's
+    /// plug-ins keep their NSBundle so), held as they are.
+    var objects: [String: NSObject] = [:]
     var relationships: [String: RelationshipValue] = [:]
     var inserted = false
     var updated = false
@@ -151,6 +154,7 @@ enum ManagedObjects {
             let targets = related(object, relationship)
             return relationship.isToMany ? NSMutableSet.of(targets) : targets.first
         }
+        if property.state.attributeType == AttributeKind.undefined { return state.objects[key] }
         let stored = self.object(state.attributes[key] ?? .null)
         // A transformable attribute's value, from its keyed archive; data
         // that is no archive is the value itself.
@@ -196,6 +200,10 @@ enum ManagedObjects {
             return
         }
         let kind = property.state.attributeType
+        if kind == AttributeKind.undefined {
+            state.objects[key] = value
+            return
+        }
         let newValue = self.value(value, kind: kind)
         if state.attributes[key] != newValue {
             state.attributes[key] = newValue
@@ -314,9 +322,14 @@ enum ManagedObjects {
         }
     }
 
+    /// Adds an accessor the class doesn't have from itself or a superclass,
+    /// as Core Data's dynamic ones only stand in for methods nothing
+    /// implements (a superclass's typed setter stays).
     private static func add(_ cls: ObjCClass, _ selector: String, _ types: String, _ implementation: UnsafeRawPointer) {
+        let name = ObjCRuntime.selector(selector)
+        if Runtime.getInstanceMethod(cls.pointer, name) != nil { return }
         let encoding = UnsafePointer(strdup(types)!)
-        _ = ObjCRuntime.functions.addMethod(cls.pointer, ObjCRuntime.selector(selector), implementation, encoding)
+        _ = ObjCRuntime.functions.addMethod(cls.pointer, name, implementation, encoding)
     }
 
     /// The property a setter or mutator names: "setURL:" and "setUrl:"

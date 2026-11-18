@@ -136,7 +136,9 @@ enum Fetching {
                 : "the model has no entity named '\(requestState.entityName)'"
             coreDataFatal("executeFetchRequest:error: A fetch request must have an entity (\(reason)).")
         }
-        guard let backend = context.store?.state.backend else {
+        // With no store, the context's own in memory, which holds nothing:
+        // the fetch finds the objects inserted in the context, as Core Data's.
+        guard let backend = context.insertionStore?.state.backend else {
             throw error(134060, "This NSPersistentStoreCoordinator has no persistent stores.")
         }
         let entityName = EntityName(rawValue: entity.state.name)

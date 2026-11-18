@@ -1190,14 +1190,22 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     // one SDK to the next (NSLayoutConstraint, bound to Foundation by newer
     // SDKs, or AVAudioPlayer to AVFAudio): one another provider defines is
     // the same class.
-    // So is libobjc's runtime data (_objc_empty_cache, _objc_empty_vtable),
-    // which 10.6's linker bound to whichever library it found first:
-    // Xcode 3's frameworks take it from WebKit.
     bool is_class = strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0;
-    bool is_runtime_data = strncmp(name, "__objc_empty_", 13) == 0;
-    for (uint32_t i = 0; (is_class || is_runtime_data) && !sym.found && i < loader->provider_count; i++)
+    for (uint32_t i = 0; is_class && !sym.found && i < loader->provider_count; i++)
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], name, &sym);
+
+    // libobjc's functions and data, which Mac OS X 10.6's linker bound to
+    // whichever library it found them in first: Xcode 3's frameworks take
+    // objc_msgSend, the write barriers and _objc_empty_cache from WebKit.
+    static const char *const objc_prefixes[] = {"_objc_", "__objc_", "_sel_", "_class_", "_object_", "_protocol_",
+                                                "_method_", "_ivar_", "_property_", "_imp_"};
+    for (size_t i = 0; !sym.found && i < sizeof(objc_prefixes) / sizeof(objc_prefixes[0]); i++) {
+        if (strncmp(name, objc_prefixes[i], strlen(objc_prefixes[i])) != 0) continue;
+        perry_provider *objc = perry_find_provider(loader, LIBOBJC);
+        if (objc) provider_lookup(loader, objc, name, &sym);
+        break;
+    }
 
     if (!sym.found && ordinal > 0) {
         void *table = resilient_witness_table(loader, &image->deps[ordinal - 1], name);

@@ -18,10 +18,12 @@ enum Runtime {
     typealias CopyAttributeValue = @convention(c) (UnsafeRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>?
     typealias GetName = @convention(c) (Pointer?) -> UnsafePointer<CChar>?
     typealias GetSuperclass = @convention(c) (Pointer?) -> Pointer?
+    typealias GetInstanceMethod = @convention(c) (Pointer?, UnsafeRawPointer?) -> UnsafeRawPointer?
     nonisolated(unsafe) static var getProperty: GetProperty!
     nonisolated(unsafe) static var copyAttributeValue: CopyAttributeValue!
     nonisolated(unsafe) static var getName: GetName!
     nonisolated(unsafe) static var getSuperclass: GetSuperclass!
+    nonisolated(unsafe) static var getInstanceMethod: GetInstanceMethod!
     nonisolated(unsafe) static var globalBlockClass: Pointer?
 
     /// A declared property's type encoding ("q", "@\"NSString\""), if the
@@ -47,6 +49,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard loaded, let getProperty = symbol("_class_getProperty"),
           let copyAttributeValue = symbol("_property_copyAttributeValue"),
           let getName = symbol("_class_getName"), let getSuperclass = symbol("_class_getSuperclass"),
+          let getInstanceMethod = symbol("_class_getInstanceMethod"),
           Classes.named("NSPredicate") != nil else {
         coreDataFatal("Core Data needs libPerryobjc and libPerryFoundation, which are missing or incomplete")
     }
@@ -54,6 +57,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     Runtime.copyAttributeValue = unsafeBitCast(copyAttributeValue, to: Runtime.CopyAttributeValue.self)
     Runtime.getName = unsafeBitCast(getName, to: Runtime.GetName.self)
     Runtime.getSuperclass = unsafeBitCast(getSuperclass, to: Runtime.GetSuperclass.self)
+    Runtime.getInstanceMethod = unsafeBitCast(getInstanceMethod, to: Runtime.GetInstanceMethod.self)
     Runtime.globalBlockClass = "/usr/lib/libSystem.B.dylib".withCString { library in
         "__NSConcreteGlobalBlock".withCString { lookup(library, $0) }
     }
