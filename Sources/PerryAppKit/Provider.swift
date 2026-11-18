@@ -569,6 +569,7 @@ class NSValue: NSObject {
 @ObjCWrapper("NSBundle")
 class NSBundle: NSObject {
     @ObjCClassMethod("mainBundle") static func main() -> NSBundle
+    @ObjCClassMethod("bundleForClass:") static func bundle(forClass cls: UnsafeMutableRawPointer?) -> NSBundle?
     @ObjCMethod("objectForInfoDictionaryKey:") func infoObject(forKey key: String) -> NSObject?
     @ObjCMethod("bundlePath") func bundlePath() -> String
     @ObjCMethod("bundleIdentifier") func bundleIdentifier() -> String?
