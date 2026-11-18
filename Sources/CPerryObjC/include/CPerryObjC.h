@@ -260,6 +260,8 @@ typedef struct perry_forward_result {
 } perry_forward_result;
 
 perry_forward_result perry_objc_forward(void *receiver, const void *sel, const void *caller);
+// The same for a message whose result comes back through memory.
+perry_forward_result perry_objc_forward_stret(void *receiver, const void *sel);
 
 // MARK: - Blocks runtime
 
