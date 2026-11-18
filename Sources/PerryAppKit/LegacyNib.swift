@@ -448,7 +448,15 @@ private enum LegacyClasses {
             entries.append(("NSDelegate", t.reference(reader.next())))
             entries.append(("NSIsVertical", .bool(reader.integer() & 1 != 0)))
         },
-        "NSTabView": { reader, _, _, _ in _ = reader.rest() },
+        "NSTabView": { reader, entries, t, _ in
+            entries.append(("NSTabViewItems", t.reference(reader.next())))
+            entries.append(("NSSelectedTabViewItem", t.reference(reader.next())))
+            entries.append(("NSFont", t.reference(reader.next())))
+            entries.append(("NSTvFlags", .integer(reader.integer())))
+            entries.append(("NSAllowTruncatedLabels", .bool(reader.integer() != 0)))
+            entries.append(("NSDrawsBackground", .bool(reader.integer() != 0)))
+            entries.append(("NSDelegate", t.reference(reader.next())))
+        },
         "NSBrowser": { reader, _, _, _ in _ = reader.rest() },
         "NSViewTemplate": { reader, entries, t, className in
             // A text view, kept as a template of its class and settings.
@@ -461,7 +469,15 @@ private enum LegacyClasses {
             _ = reader.rest()
         },
         "NSTextTemplate": { reader, _, _, _ in _ = reader.rest() },
-        "NSTabViewItem": { reader, _, _, _ in _ = reader.rest() },
+        "NSTabViewItem": { reader, entries, t, _ in
+            entries.append(("NSIdentifier", t.reference(reader.next())))
+            entries.append(("NSView", t.reference(reader.next())))
+            entries.append(("NSLabel", t.reference(reader.next())))
+            entries.append(("NSColor", t.reference(reader.next())))
+            reader.skip(1)
+            entries.append(("NSFirstResponder", t.reference(reader.next())))
+            entries.append(("NSTabView", t.reference(reader.next())))
+        },
 
         // MARK: Cells
         "NSCell": { reader, entries, t, _ in
