@@ -128,8 +128,23 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
 
     // MARK: Contents
 
+    /// The bytes of a PVRTC image of the size (MTLPixelFormat 160 to 167:
+    /// two bits a pixel, then four), which is given whole, with no row
+    /// length: at least 16 (or 8) pixels wide and 8 high.
+    private static func pvrtcBytes(format: UInt32, width: UInt64, height: UInt64) -> UInt64? {
+        switch format {
+        case 160, 161, 164, 165: return max(width, 16) * max(height, 8) / 4
+        case 162, 163, 166, 167: return max(width, 8) * max(height, 8) / 2
+        default: return nil
+        }
+    }
+
     private func length(_ region: MTLRegion, bytesPerRow: UInt, bytesPerImage: UInt) -> Int {
         let images = UInt64(max(region.size.depth, 1))
+        if bytesPerRow == 0, let image = MTLTexture.pvrtcBytes(format: UInt32(descriptor.pixel_format), width: UInt64(region.size.width),
+                                                              height: UInt64(region.size.height)) {
+            return Int(image * images)
+        }
         let rowCount = rows(format: descriptor.pixel_format, height: UInt64(region.size.height))
         let image = bytesPerImage != 0 ? UInt64(bytesPerImage) : UInt64(bytesPerRow) * rowCount
         return Int(image * (images - 1) + UInt64(bytesPerRow) * rowCount)

@@ -839,6 +839,9 @@ public final class Session: @unchecked Sendable {
         copy.protocolClasses = configuration.protocolClasses ?? []
         var (value, tag) = copy.forCorelibs()
         if let tag { pendingTags.append(tag) }
+        // No timeout, as a program asks for with zero, is Darwin's own of a
+        // minute; corelibs would time the request out at once.
+        if value.timeoutInterval <= 0 { value.timeoutInterval = 60 }
         URLTrace.blockWrite(&value)
         return value
     }
