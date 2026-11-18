@@ -435,3 +435,37 @@ const void *darwin_dyld_get_dlopen_image_header(void *handle) {
     (void)handle;
     return NULL;
 }
+
+// MARK: - <mach-o/utils.h>
+
+// The architecture's name for a CPU type and subtype, as lipo and arch
+// spell them; NULL for one unknown.
+const char *darwin_macho_arch_name_for_cpu_type(int32_t type, int32_t subtype) DARWIN_SYMBOL(macho_arch_name_for_cpu_type);
+const char *darwin_macho_arch_name_for_cpu_type(int32_t type, int32_t subtype) {
+    subtype &= 0x00ffffff;
+    switch ((uint32_t)type) {
+        case 0x0100000c: return subtype == 2 ? "arm64e" : "arm64";
+        case 0x0200000c: return "arm64_32";
+        case 0x01000007: return subtype == 8 ? "x86_64h" : "x86_64";
+        case 7: return "i386";
+        case 12:
+            switch (subtype) {
+                case 6: return "armv6";
+                case 9: return "armv7";
+                case 11: return "armv7s";
+                case 12: return "armv7k";
+                default: return "arm";
+            }
+        default: return NULL;
+    }
+}
+
+// The architecture's name for an image, from the CPU type and subtype its
+// header begins with after the magic number; the program's own for NULL.
+const char *darwin_macho_arch_name_for_mach_header(const void *header) DARWIN_SYMBOL(macho_arch_name_for_mach_header);
+const char *darwin_macho_arch_name_for_mach_header(const void *header) {
+    if (header == NULL) header = darwin_NSGetMachExecuteHeader();
+    if (header == NULL) return NULL;
+    const int32_t *words = header;
+    return darwin_macho_arch_name_for_cpu_type(words[1], words[2]);
+}
