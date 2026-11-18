@@ -247,6 +247,11 @@ public func class_createInstance(_ cls: Class?, _ extraBytes: Int) -> id? {
     cls.flatMap { Objects.createInstance($0, extraBytes: extraBytes) }
 }
 
+@c(_object_copy)
+public func object_copy(_ object: id?, _ size: Int) -> id? {
+    object.flatMap { Objects.copyInstance($0, size: size) }
+}
+
 @c(_objc_constructInstance)
 public func objc_constructInstance(_ cls: Class?, _ bytes: id?) -> id? {
     guard let cls, let bytes else { return nil }
