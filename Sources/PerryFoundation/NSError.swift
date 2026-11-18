@@ -179,6 +179,16 @@ public final class NSError: NSObject {
     @ObjCMethod("userInfo")
     func userInfo() -> ObjCObject { ObjCObject(parts?.userInfo ?? Dictionaries.autoreleased([])) }
 
+    /// The errors under this one: the user info's underlying error, then
+    /// its multiple underlying errors.
+    @ObjCMethod("underlyingErrors")
+    func underlyingErrors() -> ObjCObject {
+        let info = parts?.userInfo
+        var errors = Dictionaries.value(info, for: Strings.autoreleased("NSUnderlyingError")).map { [$0] } ?? []
+        errors += Arrays.elements(Dictionaries.value(info, for: Strings.autoreleased("NSMultipleUnderlyingErrorsKey")))
+        return ObjCObject(Arrays.autoreleased(errors))
+    }
+
     @ObjCMethod("localizedDescription") func localizedDescription() -> String { Errors.localizedDescription(objcObject) }
 
     @ObjCMethod("localizedRecoverySuggestion")
