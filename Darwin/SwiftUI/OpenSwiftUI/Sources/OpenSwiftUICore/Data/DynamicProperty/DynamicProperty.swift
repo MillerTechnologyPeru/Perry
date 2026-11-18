@@ -32,6 +32,11 @@ public protocol DynamicProperty {
     @available(OpenSwiftUI_v3_0, *)
     static var _propertyBehaviors: UInt32 { get }
 
+    /// Perry: the size of the storage the property keeps outside its
+    /// container, where it is fixed, as SwiftUI's newer protocol asks.
+    /// Nothing here reads it yet.
+    static var _propertyStorageSize: Int? { get }
+
     /// Updates the underlying value of the stored value.
     ///
     /// OpenSwiftUI calls this function before rendering a view's
@@ -137,6 +142,9 @@ extension DynamicProperty {
 
     @available(OpenSwiftUI_v3_0, *)
     public static var _propertyBehaviors: UInt32 { 0 }
+
+    /// No fixed size is known for a property that doesn't give one.
+    public static var _propertyStorageSize: Int? { nil }
 }
 
 // MARK: - DynamicPropertyCache [6.5.4]
