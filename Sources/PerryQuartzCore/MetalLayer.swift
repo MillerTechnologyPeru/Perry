@@ -8,11 +8,13 @@ import PerryObjCInterop
 // -_perryReadRGBA:width:height:, RGBA rows bottom first) and shows them on
 // the layer as a GL frame is shown. At most maximumDrawableCount drawables
 // are out at once; -nextDrawable waits a second for one, as Core
-// Animation's does. With displaySyncEnabled, as by default, it also hands
-// out at most one a display refresh (60 a second, as UIScreen's
-// maximumFramesPerSecond, or PERRY_METAL_FPS), as a drawable comes free
-// only at a refresh on iOS: an app drawing in a loop is paced by it. Their textures are reused once presented, as Core
-// Animation's are, so a drawable an app keeps holds no new memory.
+// Animation's does. With displaySyncEnabled, as by default, a presented
+// drawable comes free one display refresh after the one presented before
+// it (60 a second, as UIScreen's maximumFramesPerSecond, or
+// PERRY_METAL_FPS), as the display shows one a refresh on iOS: an app
+// drawing in a loop is paced by it, and one drawing slower than the display
+// never waits. Their textures are reused once free, as Core Animation's
+// are, so a drawable an app keeps holds no new memory.
 
 @ObjCWrapper("MTLTextureDescriptor")
 class MTLTextureDescriptor: NSObject {
@@ -45,6 +47,23 @@ final class DrawablePool: @unchecked Sendable {
         pthread_cond_init(&condition, nil)
     }
 
+    /// Presented drawables' textures, each with the time, on the monotonic
+    /// clock, it comes free at: they count as out until then.
+    private var shown: [(key: Key, texture: NSObject?, limit: Int, free: UInt64)] = []
+    /// When the last presented drawable comes, or came, free.
+    private var lastFree: UInt64 = 0
+
+    /// Gives back the presented drawables whose time has come. With the
+    /// mutex held.
+    private func collect(_ now: UInt64) {
+        guard !shown.isEmpty else { return }
+        for entry in shown where entry.free <= now {
+            if let texture = entry.texture, textures.count < entry.limit { textures.append((entry.key, texture)) }
+            out = max(0, out - 1)
+        }
+        shown.removeAll { $0.free <= now }
+    }
+
     /// Takes one, waiting up to `timeout` seconds while `limit` are out.
     func take(limit: Int, timeout: Double?) -> Bool {
         pthread_mutex_lock(&mutex)
@@ -54,11 +73,34 @@ final class DrawablePool: @unchecked Sendable {
         let nanoseconds = Int(deadline.tv_nsec) + Int((timeout ?? 0) * 1e9)
         deadline.tv_sec += nanoseconds / 1_000_000_000
         deadline.tv_nsec = nanoseconds % 1_000_000_000
-        while out >= limit {
-            if timeout == nil {
+        while true {
+            let now = clock_gettime_nsec_np()
+            collect(now)
+            if out < limit { break }
+            // Until a presented drawable comes free, one is given back, or
+            // the time is up.
+            var until = deadline
+            if let soonest = shown.map(\.free).min() {
+                var wake = timespec()
+                clock_gettime(CLOCK_REALTIME, &wake)
+                let total = Int(wake.tv_nsec) + Int(soonest - now)
+                wake.tv_sec += total / 1_000_000_000
+                wake.tv_nsec = total % 1_000_000_000
+                if timeout == nil || wake.tv_sec < until.tv_sec || (wake.tv_sec == until.tv_sec && wake.tv_nsec < until.tv_nsec) {
+                    until = wake
+                }
+            } else if timeout == nil {
                 pthread_cond_wait(&condition, &mutex)
-            } else if pthread_cond_timedwait(&condition, &mutex, &deadline) != 0 {
-                return false
+                continue
+            }
+            if pthread_cond_timedwait(&condition, &mutex, &until) != 0, timeout != nil {
+                var current = timespec()
+                clock_gettime(CLOCK_REALTIME, &current)
+                if current.tv_sec > deadline.tv_sec || (current.tv_sec == deadline.tv_sec && current.tv_nsec >= deadline.tv_nsec) {
+                    collect(clock_gettime_nsec_np())
+                    if out < limit { break }
+                    return false
+                }
             }
         }
         out += 1
@@ -78,6 +120,20 @@ final class DrawablePool: @unchecked Sendable {
         pthread_mutex_lock(&mutex)
         if let texture, textures.count < limit { textures.append((key, texture)) }
         out = max(0, out - 1)
+        pthread_cond_signal(&condition)
+        pthread_mutex_unlock(&mutex)
+    }
+
+    /// A presented drawable's texture, which comes free as the display
+    /// would let go of it: now, or `interval` nanoseconds after the one
+    /// before it does, one a refresh. An app that draws without waiting is
+    /// paced by that, a few frames ahead; one that draws slower than the
+    /// display never waits.
+    func givePresented(_ texture: NSObject?, key: Key, limit: Int, interval: UInt64) {
+        pthread_mutex_lock(&mutex)
+        let free = max(clock_gettime_nsec_np(), lastFree + interval)
+        lastFree = free
+        shown.append((key, texture, limit, free))
         pthread_cond_signal(&condition)
         pthread_mutex_unlock(&mutex)
     }
@@ -141,8 +197,6 @@ final class MetalLayerState {
     var colorspace: UnsafeMutableRawPointer?
     var nextID = 0
     let pool = DrawablePool()
-    /// When -nextDrawable last handed one out, on the monotonic clock.
-    var lastDrawable: UInt64 = 0
 
     /// The buffer drawables are read back into, reused frame to frame.
     var readback: UnsafeMutableRawPointer?
@@ -211,7 +265,6 @@ open class CAMetalLayer: CALayer {
             MetalTrace.log("nextDrawable #\(MetalTrace.drawables) of \(objcObject): \(size.width)×\(size.height), format \(metal.pixelFormat), device \(metal.device == nil ? "none" : "set"), \(metal.pool.out) out")
         }
         guard let device = metal.device, size.width >= 1, size.height >= 1 else { return nil }
-        if metal.displaySyncEnabled { waitForRefresh() }
         guard metal.pool.take(limit: metal.maximumDrawableCount, timeout: metal.allowsNextDrawableTimeout ? 1 : nil) else {
             return nil
         }
@@ -233,21 +286,6 @@ open class CAMetalLayer: CALayer {
         }
         metal.nextID += 1
         return CAMetalDrawable(texture: texture, key: key, layer: self, id: metal.nextID)
-    }
-
-    /// Waits, if need be, until a refresh after the last drawable handed out.
-    private func waitForRefresh() {
-        let interval = UInt64(1e9 / MetalTrace.framesPerSecond)
-        let now = clock_gettime_nsec_np()
-        let next = metal.lastDrawable + interval
-        if metal.lastDrawable != 0, now < next {
-            var until = timespec(tv_sec: Int(next / 1_000_000_000), tv_nsec: Int(next % 1_000_000_000))
-            while clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, nil) == EINTR {}
-            // A late frame does not make the next one early.
-            metal.lastDrawable = next
-        } else {
-            metal.lastDrawable = now
-        }
     }
 
     /// Shows pixels read from a presented drawable, as they are, as a GL
@@ -289,11 +327,18 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
 
     deinit { giveBack() }
 
-    private func giveBack() {
+    /// Back to the layer's pool: at once when it was never shown, and as
+    /// the display lets go of it when it was presented.
+    private func giveBack(presented: Bool = false) {
         guard !drawable.returned else { return }
         drawable.returned = true
         guard let layer = drawable.layer else { return }
-        layer.metal.pool.give(drawable.texture, key: drawable.key, limit: layer.metal.maximumDrawableCount)
+        if presented, layer.metal.displaySyncEnabled {
+            layer.metal.pool.givePresented(drawable.texture, key: drawable.key, limit: layer.metal.maximumDrawableCount,
+                                           interval: UInt64(1e9 / MetalTrace.framesPerSecond))
+        } else {
+            layer.metal.pool.give(drawable.texture, key: drawable.key, limit: layer.metal.maximumDrawableCount)
+        }
     }
 
     @ObjCMethod("texture") func texture() -> NSObject? { drawable.texture }
@@ -331,7 +376,7 @@ open class CAMetalDrawable: NSObject, CAMetalDrawableProtocol {
             (MetalTrace.readTime, MetalTrace.showTime) = (0, 0)
         }
         drawable.presentedTime = Double(clock_gettime_nsec_np()) / 1e9
-        giveBack()
+        giveBack(presented: true)
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void
         for handler in drawable.presentedHandlers {
             handler.function(as: Invoke.self)(handler.object, objcObject)
