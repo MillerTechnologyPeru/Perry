@@ -485,6 +485,24 @@ open class NSWindow: NSResponder {
     @ObjCMethod("frameAutosaveName") func windowFrameAutosaveName() -> String { frameAutosaveName }
     @ObjCMethod("setFrameUsingName:") func setFrameUsingName(_ name: NSObject?) -> Bool { false }
     @ObjCMethod("saveFrameUsingName:") func saveFrameUsingName(_ name: NSObject?) {}
+
+    /// The frame as AppKit saves it: the window's origin and size, then the
+    /// visible frame of its screen.
+    @ObjCMethod("stringWithSavedFrame")
+    func stringWithSavedFrame() -> String {
+        let screen = NSScreen.mainScreen()?.visibleFrame() ?? .zero
+        return [frame.minX, frame.minY, frame.width, frame.height, screen.minX, screen.minY, screen.width, screen.height]
+            .map { String(Int($0.rounded())) }.joined(separator: " ")
+    }
+
+    /// A frame from -stringWithSavedFrame; strings that aren't one change
+    /// nothing.
+    @ObjCMethod("setFrameFromString:")
+    func setFrame(from string: String?) {
+        let numbers = (string ?? "").split(separator: " ").compactMap { Double($0) }
+        guard numbers.count >= 4, numbers[2] > 0, numbers[3] > 0 else { return }
+        place(CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3]))
+    }
     @ObjCMethod("setTitleVisibility:") func setTitleVisibility(_ visibility: Int) {}
     @ObjCMethod("setTitlebarAppearsTransparent:") func setTitlebarAppearsTransparent(_ value: Bool) {}
     @ObjCMethod("setShowsResizeIndicator:") func setShowsResizeIndicator(_ value: Bool) {}
@@ -501,8 +519,10 @@ open class NSWindow: NSResponder {
     @ObjCMethod("resetCursorRects") func resetCursorRects() {}
     @ObjCMethod("disableCursorRects") func disableCursorRects() {}
     @ObjCMethod("enableCursorRects") func enableCursorRects() {}
-    @ObjCMethod("attachedSheet") func attachedSheet() -> NSObject? { nil }
-    @ObjCMethod("sheets") func sheets() -> NSObject { NSMutableArray.empty() }
+    @ObjCMethod("attachedSheet") func attachedSheet() -> NSWindow? { Sheets.attached(to: self) }
+    @ObjCMethod("sheets") func sheets() -> NSObject { NSMutableArray.of(Sheets.attached(to: self).map { [$0] } ?? []) }
+    @ObjCMethod("sheetParent") func sheetParent() -> NSWindow? { Sheets.parent(of: self) }
+    @ObjCMethod("isSheet") func isSheet() -> Bool { Sheets.parent(of: self) != nil }
     @ObjCMethod("parentWindow") func parentWindow() -> NSObject? { nil }
     @ObjCMethod("childWindows") func childWindows() -> NSObject { NSMutableArray.empty() }
     @ObjCMethod("addChildWindow:ordered:") func addChildWindow(_ window: NSObject?, ordered: Int) {}
@@ -510,14 +530,17 @@ open class NSWindow: NSResponder {
     @ObjCMethod("graphicsContext") func graphicsContext() -> NSObject? { nil }
     @ObjCMethod("windowRef") func windowRef() -> UnsafeMutableRawPointer? { nil }
 
-    /// A sheet is shown as a window of its own; its handler hears it ended
-    /// when it does.
+    /// A sheet is shown as a window of its own, over the top of this one;
+    /// its handler hears it ended when it does, after it is put away.
     @ObjCMethod("beginSheet:completionHandler:")
     func beginSheet(_ sheet: NSWindow?, completionHandler: ObjCBlock?) {
-        sheet.map { Send.void($0.objcObject, "makeKeyAndOrderFront:", nil) }
+        guard let sheet else { return }
+        Sheets.begin(sheet, on: self, ending: .handler(completionHandler))
     }
-    @ObjCMethod("endSheet:") func endSheet(_ sheet: NSWindow?) { sheet?.orderOut(nil) }
-    @ObjCMethod("endSheet:returnCode:") func endSheet(_ sheet: NSWindow?, returnCode: Int) { sheet?.orderOut(nil) }
+    @ObjCMethod("beginCriticalSheet:completionHandler:")
+    func beginCriticalSheet(_ sheet: NSWindow?, completionHandler: ObjCBlock?) { beginSheet(sheet, completionHandler: completionHandler) }
+    @ObjCMethod("endSheet:") func endSheet(_ sheet: NSWindow?) { endSheet(sheet, returnCode: 0) }   // NSModalResponseStop
+    @ObjCMethod("endSheet:returnCode:") func endSheet(_ sheet: NSWindow?, returnCode: Int) { sheet.map { Sheets.end($0, returnCode: returnCode) } }
 
     // MARK: Delegate and notifications
 
@@ -1175,4 +1198,57 @@ private struct XlibQueue {
                          checkTypedWindowEvent: unsafeBitCast(check, to: (@convention(c) (UnsafeMutableRawPointer, UInt, Int32,
                                                                                             UnsafeMutablePointer<Int>) -> Int32).self))
     }()
+}
+
+/// Sheets and the windows they are attached to. A sheet shows as a window
+/// of its own, centered under the top of its parent's. How it ends depends
+/// on how it began: NSWindow's completion handler runs after the sheet is
+/// put away; NSApplication's modal delegate is sent its did-end selector
+/// with the sheet still up, and puts it away itself, as AppKit's did.
+enum Sheets {
+    enum Ending {
+        case handler(ObjCBlock?)
+        /// Delegate (not retained), selector, context.
+        case delegate(UnsafeMutableRawPointer?, ObjCSelector?, UnsafeMutableRawPointer?)
+    }
+
+    struct Sheet {
+        let sheet: NSWindow
+        let parent: NSWindow
+        let ending: Ending
+    }
+
+    nonisolated(unsafe) static var sheets: [Sheet] = []
+
+    static func attached(to window: NSWindow) -> NSWindow? { sheets.first { $0.parent === window }?.sheet }
+    static func parent(of window: NSWindow) -> NSWindow? { sheets.first { $0.sheet === window }?.parent }
+
+    static func begin(_ sheet: NSWindow, on parent: NSWindow, ending: Ending) {
+        sheets.removeAll { $0.sheet === sheet }
+        sheets.append(Sheet(sheet: sheet, parent: parent, ending: ending))
+        let size = sheet.frame.size
+        sheet.place(CGRect(x: (parent.frame.midX - size.width / 2).rounded(), y: (parent.frame.maxY - 22 - size.height).rounded(),
+                           width: size.width, height: size.height))
+        Send.void(sheet.objcObject, "makeKeyAndOrderFront:", nil)
+    }
+
+    static func end(_ sheet: NSWindow, returnCode: Int) {
+        guard let index = sheets.firstIndex(where: { $0.sheet === sheet }) else {
+            sheet.orderOut(nil)
+            return
+        }
+        let ended = sheets.remove(at: index)
+        switch ended.ending {
+        case .handler(let handler):
+            sheet.orderOut(nil)
+            Send.void(ended.parent.objcObject, "makeKeyAndOrderFront:", nil)
+            if let handler { Blocks.call(handler, returnCode) }
+        case .delegate(let delegate, let selector, let context):
+            if let delegate, let selector {
+                typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void
+                unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(delegate, selector.pointer, sheet.objcObject, returnCode, context)
+            }
+            if !sheet.visible { Send.void(ended.parent.objcObject, "makeKeyAndOrderFront:", nil) }
+        }
+    }
 }
