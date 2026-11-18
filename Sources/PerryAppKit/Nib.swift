@@ -561,6 +561,12 @@ enum Nibs {
             awoken.insert(object.objcObject)
             if object.responds(to: "awakeFromNib") { Send.void(object.objcObject, "awakeFromNib") }
         }
+        // As AppKit does, File's Owner hears it too, once its outlets are
+        // connected: a controller that loads its own nib sets itself up from
+        // the views it was given there.
+        if let owner, !awoken.contains(owner.objcObject), owner.responds(to: "awakeFromNib") {
+            Send.void(owner.objcObject, "awakeFromNib")
+        }
         Trace.log("nib: \(archive.objects.count) entries, \(unarchiving.made.count) objects")
         for window in visible { Send.void(window.objcObject, "makeKeyAndOrderFront:", nil) }
         // The top level: the objects whose parent is File's Owner.

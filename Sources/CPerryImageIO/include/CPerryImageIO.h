@@ -39,6 +39,8 @@ int perry_webp_decode(const uint8_t *data, size_t size, perry_decoded *out);
 int perry_heif_decode(const uint8_t *data, size_t size, perry_decoded *out);
 /// TIFF, through libtiff when the system has it: one frame a directory.
 int perry_tiff_decode(const uint8_t *data, size_t size, perry_decoded *out);
+/// A PDF's first page, rendered at 144 dpi; Poppler is loaded when first needed.
+int perry_pdf_decode(const uint8_t *data, size_t size, perry_decoded *out);
 void perry_decoded_free(perry_decoded *decoded);
 
 int perry_png_encode(const uint8_t *rgba, int width, int height, int has_alpha, uint8_t **out, size_t *out_size);
