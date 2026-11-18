@@ -377,8 +377,15 @@ static void parse_load_commands(perry_image *image) {
         }
         case LC_UNIXTHREAD:
 #if defined(__LP64__)
-            if (mh->filetype == MH_EXECUTE)
-                perry_fatal("%s: LC_UNIXTHREAD executables are not supported", image->path);
+            // Mac OS X's executables before 10.8 start at crt1's `start`
+            // too; their _main is called as LC_MAIN's entry is.
+            if (mh->filetype == MH_EXECUTE) {
+                const struct thread_command *thread = (const void *)lc;
+                image->unixthread = true;
+                if (thread->flavor == X86_THREAD_STATE64 && thread->count > 2 * X86_THREAD_STATE64_RIP + 1)
+                    image->thread_pc = thread->state[2 * X86_THREAD_STATE64_RIP] |
+                                       (uint64_t)thread->state[2 * X86_THREAD_STATE64_RIP + 1] << 32;
+            }
 #else
             // iOS before 6 starts an executable at crt1's `start`, with the
             // kernel's stack. It calls _main, so find that and call it as
@@ -748,12 +755,20 @@ static char *expand_install_name(perry_loader *loader, perry_image *image, const
             if (swift_runtime_file(loader, buf, mapped, sizeof(mapped)))
                 return strdup(mapped);
         }
+        // An image already loaded by that install name, as dyld finds it:
+        // a plug-in opened later names the frameworks the executable
+        // loaded (Xcode's, by @rpath) with rpaths it has none of.
+        for (perry_image *loaded = loader->images; loaded; loaded = loaded->next)
+            if (loaded->install_name && strcmp(loaded->install_name, name) == 0)
+                return strdup(loaded->path);
         // As dyld does, search the rpaths of the loading image, then of each
         // image that led to loading it, out to the main executable: Swift's
-        // embedded overlays have none of their own.
+        // embedded overlays have none of their own. A library opened while
+        // the program runs has only itself in that chain, and the main
+        // executable's rpaths after it.
         uint32_t depth = loading_count < 64 ? loading_count : 64;
-        for (int s = (int)depth; s >= 0; s--) {
-            const perry_image *src = s == (int)depth ? image : loading[s];
+        for (int s = (int)depth; s >= -1; s--) {
+            const perry_image *src = s == (int)depth ? image : s == -1 ? loader->main_image : loading[s];
             if (!src || (s < (int)depth && src == image))
                 continue;
             for (uint32_t i = 0; i < src->rpath_count; i++) {
@@ -1340,19 +1355,22 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     run_image_initializers(loader, image, argc, argv, envp, apple);
 }
 
-#if !defined(__LP64__)
 // Finds _main in an executable's symbol table, with the Thumb bit its
 // definition carries, for executables that LC_UNIXTHREAD starts.
 static void *find_main(perry_image *image) {
     const struct symtab_command *st = image->symtab;
     if (!st)
         return NULL;
+#if defined(__LP64__)
+    const struct nlist_64 *syms = perry_image_fileoff(image, st->symoff);
+#else
     const struct nlist *syms = perry_image_fileoff(image, st->symoff);
+#endif
     const char *strings = perry_image_fileoff(image, st->stroff);
     if (!syms || !strings)
         return NULL;
     for (uint32_t i = 0; i < st->nsyms; i++) {
-        const struct nlist *sym = &syms[i];
+        const __typeof__(*syms) *sym = &syms[i];
         if ((sym->n_type & N_STAB) || (sym->n_type & N_TYPE) != N_SECT || sym->n_strx >= st->strsize)
             continue;
         if (strcmp(strings + sym->n_strx, "_main") != 0)
@@ -1366,7 +1384,6 @@ static void *find_main(perry_image *image) {
     }
     return NULL;
 }
-#endif
 
 #if defined(__arm__)
 // Starts a program at crt1's `start` as the kernel does: sp at argc, then
@@ -1412,6 +1429,28 @@ static void run_start(void *start, int argc, char **argv, char **envp, char **ap
     for (size_t i = 0; i < applec; i++) stack[n++] = (uintptr_t)apple[i];
     stack[n++] = 0;
     __asm__ volatile("mov %0, %%esp\n xor %%ebp, %%ebp\n jmp *%1" : : "r"(stack), "r"(start));
+    __builtin_unreachable();
+}
+#elif defined(__x86_64__)
+// Starts a program at crt1's `start` as the kernel does: rsp at argc, then
+// argv, the environment and the apple strings, each ended by a NULL.
+__attribute__((noreturn))
+static void run_start(void *start, int argc, char **argv, char **envp, char **apple) {
+    size_t envc = 0, applec = 0;
+    while (envp && envp[envc]) envc++;
+    while (apple && apple[applec]) applec++;
+    size_t words = 1 + (size_t)argc + 1 + envc + 1 + applec + 1;
+    uintptr_t *stack = __builtin_alloca(words * sizeof(uintptr_t) + 16);
+    stack = (uintptr_t *)(((uintptr_t)stack + 15) & ~(uintptr_t)15);
+    size_t n = 0;
+    stack[n++] = (uintptr_t)argc;
+    for (int i = 0; i < argc; i++) stack[n++] = (uintptr_t)argv[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < envc; i++) stack[n++] = (uintptr_t)envp[i];
+    stack[n++] = 0;
+    for (size_t i = 0; i < applec; i++) stack[n++] = (uintptr_t)apple[i];
+    stack[n++] = 0;
+    __asm__ volatile("mov %0, %%rsp\n xor %%ebp, %%ebp\n jmp *%1" : : "r"(stack), "r"(start));
     __builtin_unreachable();
 }
 #endif
@@ -1477,7 +1516,7 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
         image->legacy_main = find_main(image);
 #if defined(__arm__)
     if (!image->has_entry && !image->legacy_main && image->thread_pc) {
-        void *start = perry_image_vmaddr(image, image->thread_pc & ~1u);
+        void *start = perry_image_vmaddr(image, image->thread_pc & ~(uint64_t)1);
         perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
         run_start((void *)((uintptr_t)start | (image->thread_pc & 1)), argc, argv, envp, apple);
     }
@@ -1491,8 +1530,17 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
     if (!image->has_entry && !image->legacy_main)
         perry_fatal("%s: no LC_MAIN entry point and no _main", image->path);
 #else
-    if (!image->has_entry)
-        perry_fatal("%s: no LC_MAIN entry point", image->path);
+    if (!image->has_entry && image->unixthread)
+        image->legacy_main = find_main(image);
+#if defined(__x86_64__)
+    if (!image->has_entry && !image->legacy_main && image->thread_pc) {
+        void *start = perry_image_vmaddr(image, image->thread_pc);
+        perry_trace(PERRY_TRACE_INIT, "starting at LC_UNIXTHREAD's pc %p", start);
+        run_start(start, argc, argv, envp, apple);
+    }
+#endif
+    if (!image->has_entry && !image->legacy_main)
+        perry_fatal("%s: no LC_MAIN entry point and no _main", image->path);
 #endif
     typedef int (*main_fn)(int, char **, char **, char **);
     main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
