@@ -129,6 +129,7 @@ public struct URLResourceValues {
 
     /// The size the file takes on disk, in bytes.
     public var fileAllocatedSize: Int? { value(.fileAllocatedSizeKey) }
+    public var totalFileAllocatedSize: Int? { value(.totalFileAllocatedSizeKey) ?? value(.fileAllocatedSizeKey) }
 
     /// The file's size, as totalFileSize: no file here has more than one
     /// fork.

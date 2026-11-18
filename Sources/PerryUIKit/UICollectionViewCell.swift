@@ -30,8 +30,19 @@ open class UICollectionReusableView: UIView {
     @ObjCMethod("reuseIdentifier") func reuseIdentifier() -> String? { reusable.reuseIdentifier }
     @ObjCMethod("prepareForReuse") func prepareForReuse() {}
     @ObjCMethod("applyLayoutAttributes:") func apply(_ attributes: NSObject?) {}
+    /// The attributes with the height the view's constraints give at their
+    /// width, found through -systemLayoutSizeFittingSize:…, which a class
+    /// may have of its own; unchanged when the constraints give none.
     @ObjCMethod("preferredLayoutAttributesFittingAttributes:")
-    func preferredLayoutAttributes(fitting attributes: NSObject?) -> NSObject? { attributes }
+    func preferredLayoutAttributes(fitting attributes: NSObject?) -> NSObject? {
+        guard let given = attributes?.as(UICollectionViewLayoutAttributes.self) else { return attributes }
+        let size = given.attributes.frame.size
+        let fitted = sendSystemLayoutSizeFitting(size, horizontalPriority: 1000, verticalPriority: 50)
+        guard fitted.height > 0, fitted.height != size.height else { return attributes }
+        let preferred = given.copied().unsafeCast(to: UICollectionViewLayoutAttributes.self)
+        preferred.attributes.frame.size.height = fitted.height
+        return preferred
+    }
 }
 
 final class CollectionCellState: ObjectState {
@@ -68,6 +79,15 @@ open class UICollectionViewCell: UICollectionReusableView {
         cell.selectedBackgroundView = decoded.object("UISelectedBackgroundView")?.as(UIView.self)
         if cell.contentView == nil { makeContentView() }
         return self
+    }
+
+    /// A cell's fitting size is its content view's: the size asked for
+    /// when no constraints bear on the height.
+    @ObjCMethod("systemLayoutSizeFittingSize:withHorizontalFittingPriority:verticalFittingPriority:")
+    override func systemLayoutSizeFitting(_ size: CGSize, horizontalPriority: Float, verticalPriority: Float) -> CGSize {
+        let width = size.width > 0 ? size.width : state.bounds.width
+        guard let height = AutoLayout.fittingHeight(collectionCell.contentView ?? self, width: width) else { return size }
+        return CGSize(width: width, height: height)
     }
 
     private func makeContentView() {

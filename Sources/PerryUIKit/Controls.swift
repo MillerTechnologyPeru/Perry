@@ -711,9 +711,11 @@ open class UIButton: UIControl {
     func titleRect(forContentRect content: CGRect) -> CGRect { places(in: content).title }
 
     /// The image and the title where the button's rect methods put them,
-    /// which a subclass overrides to arrange them its own way.
+    /// which a subclass overrides to arrange them its own way; subviews a
+    /// subclass adds with constraints are laid out by those first.
     @ObjCMethod("layoutSubviews")
     override func layoutSubviews() {
+        super.layoutSubviews()
         updateConfigurationIfNeeded()
         let button = button
         if let view = button.backgroundView, let configuration = button.configuration {

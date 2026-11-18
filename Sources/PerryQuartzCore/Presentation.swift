@@ -26,9 +26,11 @@ enum Presentation {
     /// except that a discrete animation, like an activity indicator's
     /// steps, needs one only when it reaches its next value.
     static var animating: Bool {
-        let now = Clock.now
         var changed = false
         for layer in layers {
+            let (now, rate) = CALayer.wrap(layer).localNow
+            // A stopped layer's animations change only when its time is set.
+            guard rate != 0 else { continue }
             for entry in CALayer.state(of: layer).animations {
                 guard let step = discreteStep(of: entry.animation, at: now) else { return true }
                 if entry.animation.state.lastDiscreteStep != step {
@@ -63,7 +65,7 @@ enum Presentation {
         guard !model.animations.isEmpty || !modifiers.isEmpty else { return (model, shapeModel) }
         let state = model.copy()
         let shape = shapeModel?.copy()
-        let now = Clock.now
+        let now = layer.localNow.time
         for entry in model.animations {
             evaluate(entry.animation, at: now, keyPath: nil, model: { AnimatedValue.value(of: model, shape: shapeModel, $0) }) { key, value in
                 value.write(to: state, shape: shape, key)
@@ -86,23 +88,26 @@ enum Presentation {
     /// when it has no effect then.
     /// A group's animations without durations of their own last as long as
     /// it does.
+    /// One in a group still has its last value at the moment it ends: a
+    /// group that stays at its end holds its animations' final values,
+    /// whether or not they fill.
     static func evaluate(_ animation: CAAnimation, at now: Double, keyPath inherited: String?, groupDuration: Double? = nil,
-                         model: (String) -> AnimatedValue?, emit: (String, AnimatedValue) -> Void) {
+                         inGroup: Bool = false, model: (String) -> AnimatedValue?, emit: (String, AnimatedValue) -> Void) {
         let state = animation.state
         if animation.is(CAAnimationGroup.self) {
             let duration = state.duration > 0 ? state.duration : groupDuration ?? 0.25
-            guard let fraction = fraction(state, at: now, duration: duration) else { return }
+            guard let fraction = fraction(state, at: now, duration: duration, endIncluded: inGroup) else { return }
             let local = fraction * duration
             for child in state.values["animations"]?.as(NSArray.self)?.elements ?? [] {
                 guard let child = child.as(CAAnimation.self) else { continue }
-                evaluate(child, at: local, keyPath: nil, groupDuration: duration, model: model, emit: emit)
+                evaluate(child, at: local, keyPath: nil, groupDuration: duration, inGroup: true, model: model, emit: emit)
             }
             return
         }
         guard !animation.is(CATransition.self), let key = animation.keyPath() ?? inherited, let base = model(key) else { return }
         let spring = animation.is(CASpringAnimation.self) ? Spring(state) : nil
         let duration = state.duration > 0 ? state.duration : spring?.settlingDuration ?? groupDuration ?? 0.25
-        guard let fraction = fraction(state, at: now, duration: duration) else { return }
+        guard let fraction = fraction(state, at: now, duration: duration, endIncluded: inGroup) else { return }
         let value: AnimatedValue?
         if animation.is(CAKeyframeAnimation.self) {
             value = keyframe(animation, key: key, at: state.timingFunction?.value(at: fraction) ?? fraction)
@@ -118,13 +123,14 @@ enum Presentation {
     /// How far through its duration the animation is at `now`, 0 to 1,
     /// after its begin time, speed, offset, repeats and reversal; nil when
     /// it has not begun or has ended and does not fill.
-    static func fraction(_ state: AnimationState, at now: Double, duration: Double) -> Double? {
+    static func fraction(_ state: AnimationState, at now: Double, duration: Double, endIncluded: Bool = false) -> Double? {
         let fillsBackwards = state.fillMode == "backwards" || state.fillMode == "both"
-        let fillsForwards = state.fillMode == "forwards" || state.fillMode == "both"
+        var fillsForwards = state.fillMode == "forwards" || state.fillMode == "both"
         var t = (now - state.beginTime) * Double(state.speed) + state.timeOffset
         guard duration > 0 else { return t >= 0 || fillsBackwards ? 1 : nil }
         let cycle = duration * (state.autoreverses ? 2 : 1)
         let total = active(state, duration: duration)
+        if endIncluded, t <= total + 1e-9 { fillsForwards = true }
         if t < 0 {
             guard fillsBackwards else { return nil }
             t = 0
@@ -181,7 +187,7 @@ enum Presentation {
         case (nil, nil, let by?): (start, end) = (base, AnimatedValue.add(base, by))
         default: return nil
         }
-        return AnimatedValue.interpolate(start, end, progress)
+        return AnimatedValue.interpolate(start, end, progress, key: key)
     }
 
     private static func zero(like value: AnimatedValue) -> AnimatedValue {
@@ -198,14 +204,19 @@ enum Presentation {
 
     /// Values at key times, or a point along a path.
     private static func keyframe(_ animation: CAAnimation, key: String, at fraction: Double) -> AnimatedValue? {
-        if let path = animation.path() {
-            return PathTrimming.point(at: CGFloat(fraction), along: path).map { .point($0) }
-        }
+        if let path = animation.path() { return point(along: path, of: animation, at: fraction).map { .point($0) } }
         let values = animation.values()?.as(NSArray.self)?.elements.compactMap { AnimatedValue(boxed: $0, key: key) } ?? []
         guard let first = values.first else { return nil }
         guard values.count > 1 else { return first }
         var times = animation.keyTimes()?.as(NSArray.self)?.elements.map { $0.sendDoubleValue() } ?? []
         let discrete = animation.calculationMode() == "discrete"
+        // Stepped values may come with one more key time than values: each
+        // value lasts from its time to the next, and one whose stretch is
+        // empty (both times the same) never shows, at the very end either.
+        if discrete, times.count == values.count + 1 {
+            let index = values.indices.last { times[$0] <= fraction && times[$0] < times[$0 + 1] } ?? 0
+            return values[index]
+        }
         if times.count != values.count {
             let segments = Double(discrete ? values.count : values.count - 1)
             times = (0..<values.count).map { Double($0) / segments }
@@ -219,7 +230,33 @@ enum Presentation {
         var local = span > 0 ? (fraction - times[segment]) / span : 1
         let functions = animation.timingFunctions()?.as(NSArray.self)?.elements ?? []
         if segment < functions.count, let function = functions[segment].as(CAMediaTimingFunction.self) { local = function.value(at: local) }
-        return AnimatedValue.interpolate(values[segment], values[segment + 1], local)
+        return AnimatedValue.interpolate(values[segment], values[segment + 1], local, key: key)
+    }
+
+    /// Where an animation along a path is: paced ones go by the path's
+    /// length; the others take each point of the path as a keyframe, at
+    /// its key time (evenly spaced without them), and follow the path's
+    /// own line or curve between two, eased by that stretch's timing
+    /// function. Past the last key time it stays at the last point.
+    private static func point(along path: UnsafeMutableRawPointer, of animation: CAAnimation, at fraction: Double) -> CGPoint? {
+        let mode = animation.calculationMode()
+        if mode == "paced" || mode == "cubicPaced" { return PathTrimming.point(at: CGFloat(fraction), along: path) }
+        var times = animation.keyTimes()?.as(NSArray.self)?.elements.map { $0.sendDoubleValue() } ?? []
+        let keyframes = PathKeyframes(path, points: times.isEmpty ? nil : times.count)
+        guard keyframes.count > 1 else { return keyframes.first }
+        if times.count != keyframes.count {
+            times = (0..<keyframes.count).map { Double($0) / Double(keyframes.count - 1) }
+        }
+        if mode == "discrete" { return keyframes.point(times.lastIndex { $0 <= fraction } ?? 0) }
+        guard fraction > times[0] else { return keyframes.first }
+        guard let segment = (0..<keyframes.count - 1).first(where: { fraction <= times[$0 + 1] }) else {
+            return keyframes.point(keyframes.count - 1)
+        }
+        let span = times[segment + 1] - times[segment]
+        var local = span > 0 ? (fraction - times[segment]) / span : 1
+        let functions = animation.timingFunctions()?.as(NSArray.self)?.elements ?? []
+        if segment < functions.count, let function = functions[segment].as(CAMediaTimingFunction.self) { local = function.value(at: local) }
+        return keyframes.point(in: segment, at: CGFloat(local))
     }
 
     // MARK: Starting and stopping
@@ -227,10 +264,14 @@ enum Presentation {
     /// Tells delegates of animations that have started and stopped, removes
     /// those finished, and comes back when the next one starts or ends.
     static func settle() {
-        let now = Clock.now
+        let clock = Clock.now
         var next = Double.infinity
         for layerObject in layers {
             let state = CALayer.state(of: layerObject)
+            // Animations' times are the layer's; a stopped layer's neither
+            // start nor end until its time is set past them.
+            let (now, rate) = CALayer.wrap(layerObject).localNow
+            func wake(at time: Double) { if rate > 0 { next = min(next, clock + (time - now) / rate) } }
             var finished: [(key: String, animation: CAAnimation)] = []
             for entry in state.animations {
                 let animation = entry.animation
@@ -239,11 +280,11 @@ enum Presentation {
                         animation.state.started = true
                         notify(animation, "animationDidStart:")
                     } else {
-                        next = min(next, animation.state.beginTime)
+                        wake(at: animation.state.beginTime)
                     }
                 }
                 let end = end(of: animation)
-                if now >= end { finished.append(entry) } else { next = min(next, end) }
+                if now >= end { finished.append(entry) } else { wake(at: end) }
             }
             for entry in finished where entry.animation.state.removedOnCompletion {
                 state.animations.removeAll { $0.animation.objcObject == entry.animation.objcObject }

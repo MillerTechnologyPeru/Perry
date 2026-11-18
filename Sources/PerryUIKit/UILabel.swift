@@ -391,12 +391,31 @@ open class UILabel: UIView {
         super.dealloc()
     }
 
-    var font: UIFont { label.font ?? UIFont.systemFont(size: 17) }
+    /// The attributes of an attributed text's first run: the text is drawn in one style, that one, with the
+    /// label's own font and color where the run names none.
+    private var firstAttributes: NSDictionary? {
+        guard let attributed = label.attributedText, attributed.responds(to: "attributesAtIndex:effectiveRange:") else { return nil }
+        let string = attributed.unsafeCast(to: NSAttributedString.self)
+        return string.length() > 0 ? string.attributes(at: 0, effectiveRange: nil) : nil
+    }
+
+    var font: UIFont { firstAttributes?.object(forKey: "NSFont")?.as(UIFont.self) ?? label.font ?? UIFont.systemFont(size: 17) }
+
+    /// NSTextAlignment, from the attributed text's paragraph style when it has one.
+    private var alignment: Int {
+        firstAttributes?.object(forKey: "NSParagraphStyle")?.as(NSParagraphStyle.self)?.state.alignment ?? label.textAlignment
+    }
 
     @ObjCMethod("text") func text() -> String? { label.text }
 
+    /// Plain text replaces an attributed one.
     @ObjCMethod("setText:")
     func setText(_ text: String?) {
+        label.attributedText = nil
+        setPlainText(text)
+    }
+
+    private func setPlainText(_ text: String?) {
         label.text = text
         setNeedsDisplay()
         superviewNeedsLayout()
@@ -408,12 +427,13 @@ open class UILabel: UIView {
     @ObjCMethod("setAttributedText:")
     func setAttributedText(_ text: NSObject?) {
         label.attributedText = text
-        setText(text?.sendString())
+        setPlainText(text?.sendString())
     }
 
     @ObjCMethod("font") func fontObject() -> UIFont { font }
     @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { label.font = font; setNeedsDisplay(); superviewNeedsLayout() }
-    @ObjCMethod("textColor") func textColor() -> UIColor { label.textColor ?? UIColor.label() }
+    @ObjCMethod("textColor")
+    func textColor() -> UIColor { firstAttributes?.object(forKey: "NSColor")?.as(UIColor.self) ?? label.textColor ?? UIColor.label() }
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { label.textColor = color; setNeedsDisplay() }
     @ObjCMethod("highlightedTextColor") func highlightedTextColor() -> UIColor? { label.highlightedTextColor }
     @ObjCMethod("setHighlightedTextColor:") func setHighlightedTextColor(_ color: UIColor?) { label.highlightedTextColor = color }
@@ -476,10 +496,17 @@ open class UILabel: UIView {
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize {
         guard let text = label.text, !text.isEmpty else { return .zero }
-        guard label.numberOfLines != 1 else { return Text.size(text.replacingNewlines(), font: font) }
+        // Widths are whole pixels, rounded up: a layout that puts frames on
+        // pixels would else make the label a little narrower than its text
+        // where a pixel is not a whole point, and its last word would wrap.
+        func wholePixels(_ width: CGFloat) -> CGFloat { (width / Screen.pixel - 0.001).rounded(.up) * Screen.pixel }
+        guard label.numberOfLines != 1 else {
+            let size = Text.size(text.replacingNewlines(), font: font)
+            return CGSize(width: wholePixels(size.width), height: size.height)
+        }
         let width = size.width > 0 ? size.width : label.preferredMaxLayoutWidth > 0 ? label.preferredMaxLayoutWidth : .greatestFiniteMagnitude
         let lines = lines(width: width)
-        let widest = lines.map { Text.width($0, font: font).rounded(.up) }.max() ?? 0
+        let widest = wholePixels(lines.map { Text.width($0, font: font).rounded(.up) }.max() ?? 0)
         return CGSize(width: min(widest, width), height: CGFloat(lines.count) * Text.lineHeight(font))
     }
 
@@ -501,7 +528,7 @@ open class UILabel: UIView {
         for line in shown {
             let width = Text.width(line, font: font).rounded(.up)
             let x: CGFloat
-            switch label.textAlignment {
+            switch alignment {
             case 1: x = rect.midX - width / 2
             case 2: x = rect.maxX - width
             default: x = rect.minX

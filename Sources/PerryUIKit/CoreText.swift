@@ -112,6 +112,40 @@ open class UIFontDescriptor: NSObject {
         return attributes
     }
 
+    /// One attribute's value: the name is the font's own when the descriptor gives none.
+    @ObjCMethod("objectForKey:")
+    func object(forKey key: String?) -> NSObject? {
+        guard let key else { return nil }
+        let state = state
+        switch key {
+        case CoreTextKeys.traits:
+            // The traits a font of the descriptor has: its weight, width and slant, and the symbolic ones.
+            let traits = NSMutableDictionary.empty()
+            traits.set(NSNumber.make(double: Double(state.effectiveWeight)), forKey: CoreTextKeys.weight)
+            traits.set(NSNumber.make(double: 0), forKey: "NSCTFontProportionTrait")
+            traits.set(NSNumber.make(double: state.symbolicTraits & italicTrait != 0 ? 0.07 : 0), forKey: "NSCTFontSlantTrait")
+            traits.set(NSNumber.make(double: Double(state.symbolicTraits)), forKey: CoreTextKeys.symbolic)
+            if let design = state.design { traits.set(string: design, forKey: CoreTextKeys.design) }
+            return traits
+        case CoreTextKeys.size:
+            return NSNumber.make(double: Double(state.size))
+        case FontDescriptorKeys.UIFontDescriptorCharacterSetAttribute:
+            // The characters the font has glyphs for: taken as the Latin, Greek and Cyrillic blocks with their
+            // punctuation and symbols, which the system's fonts and most of an app's cover.
+            typealias Make = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt, UInt) -> UnsafeMutableRawPointer?
+            let set = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(ObjCClass(named: "NSCharacterSet").pointer,
+                                                                      ObjCRuntime.selector("characterSetWithRange:"), 0x20, 0x2190 - 0x20)
+            return set.map { NSObject($0) }
+        default:
+            break
+        }
+        if let value = fontAttributes().unsafeCast(to: NSDictionary.self).object(forKey: key) { return value }
+        guard key == CoreTextKeys.name || key == CoreTextKeys.family, let made = CTFontCreateWithFontDescriptor(objcObject, 0, nil) else { return nil }
+        defer { ObjCRuntime.release(made) }
+        guard let font = CTFonts.font(made) else { return nil }
+        return (key == CoreTextKeys.name ? font.fontName() : font.familyName()).objCArgument().map { NSObject($0) }
+    }
+
     @ObjCClassMethod("fontDescriptorWithFontAttributes:")
     static func descriptor(fontAttributes attributes: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         ObjCRuntime.autorelease(make { $0.apply(attributes) })
@@ -343,6 +377,13 @@ public func CTFontDescriptorGetTextStyleSize(
 }
 
 // MARK: Fonts
+
+/// The options say whether a font may be activated to satisfy the descriptor: there are none to activate.
+@c(_CTFontCreateWithFontDescriptorAndOptions)
+public func CTFontCreateWithFontDescriptorAndOptions(_ descriptor: UnsafeMutableRawPointer?, _ size: CGFloat, _ matrix: UnsafeRawPointer?,
+                                                     _ options: UInt) -> UnsafeMutableRawPointer? {
+    CTFontCreateWithFontDescriptor(descriptor, size, matrix)
+}
 
 @DarwinC("_CTFontCreateWithFontDescriptor")
 public func CTFontCreateWithFontDescriptor(_ descriptor: UnsafeMutableRawPointer?, _ size: CGFloat, _ matrix: UnsafeRawPointer?) -> UnsafeMutableRawPointer? {

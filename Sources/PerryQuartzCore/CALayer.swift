@@ -262,6 +262,7 @@ open class CALayer: NSObject {
 
     deinit {
         for sublayer in state.sublayers { sublayer.state.superlayer = nil }
+        if let mask = state.mask, mask.state.superlayer == objcObject { mask.state.superlayer = nil }
         Presentation.forget(objcObject)
         PresentationModifiers.forget(objcObject)
     }
@@ -434,7 +435,16 @@ open class CALayer: NSObject {
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { state.isOpaque }
     @ObjCMethod("setOpaque:") func setOpaque(_ opaque: Bool) { state.isOpaque = opaque }
     @ObjCMethod("mask") func mask() -> CALayer? { state.mask }
-    @ObjCMethod("setMask:") func setMask(_ mask: CALayer?) { changed { state.mask = mask } }
+    /// The mask's superlayer is the layer it masks, as Core Animation's:
+    /// it is laid out with the layer and takes its time from it.
+    @ObjCMethod("setMask:")
+    func setMask(_ mask: CALayer?) {
+        changed {
+            if let old = state.mask, old.state.superlayer == objcObject { old.state.superlayer = nil }
+            state.mask = mask
+            mask?.state.superlayer = objcObject
+        }
+    }
     @ObjCMethod("needsDisplayOnBoundsChange") func needsDisplayOnBoundsChange() -> Bool { state.needsDisplayOnBoundsChange }
     @ObjCMethod("setNeedsDisplayOnBoundsChange:") func setNeedsDisplayOnBoundsChange(_ needs: Bool) { state.needsDisplayOnBoundsChange = needs }
     @ObjCMethod("allowsGroupOpacity") func allowsGroupOpacity() -> Bool { state.allowsGroupOpacity }
@@ -581,7 +591,8 @@ open class CALayer: NSObject {
         // A nil animation adds nothing, as on iOS.
         guard let animation else { return }
         let copy = animation.copied()
-        if copy.state.beginTime == 0 { copy.state.beginTime = Clock.now }
+        // Begin times are in the layer's time space.
+        if copy.state.beginTime == 0 { copy.state.beginTime = localNow.time }
         copy.state.added = Clock.now
         let key = key ?? "__perry.animation.\(copy.objcObject)"
         if let index = state.animations.firstIndex(where: { $0.key == key }) {
@@ -612,6 +623,55 @@ open class CALayer: NSObject {
 
     @ObjCMethod("animationForKey:")
     func animation(forKey key: String) -> CAAnimation? { state.animations.first { $0.key == key }?.animation }
+
+    /// What a view tree dump says of the layer beyond its frame: opacity,
+    /// timing, a shape's path and colors, and its animations with their
+    /// key paths.
+    @ObjCMethod("_perryDebugDetails")
+    func perryDebugDetails() -> String? {
+        var text = ""
+        // As presented: with its animations' values at this moment.
+        let (state, shape) = Presentation.presented(self)
+        if state.opacity != 1 { text += " opacity \(state.opacity)" }
+        if state.hidden != self.state.hidden { text += " presented hidden \(state.hidden)" }
+        if state.speed != 1 || state.timeOffset != 0 { text += " speed \(state.speed) offset \(state.timeOffset)" }
+        if !state.transform.isIdentity {
+            let t = state.transform
+            text += " transform [\(t.a), \(t.b), \(t.c), \(t.d), \(t.tx), \(t.ty)]"
+        }
+        if state.anchorPoint != CGPoint(x: 0.5, y: 0.5) { text += " anchor (\(state.anchorPoint.x), \(state.anchorPoint.y))" }
+        if let shape {
+            func components(_ color: CGRef) -> String {
+                guard let c = CG.colorGetComponents(color) else { return "?" }
+                return "(" + (0..<CG.colorGetNumberOfComponents(color)).map { "\((c[$0] * 100).rounded() / 100)" }.joined(separator: ", ") + ")"
+            }
+            if let path = shape.path {
+                let box = CG.pathGetBoundingBox(path)
+                text += " path in (\(box.minX.rounded()), \(box.minY.rounded()), \(box.width.rounded()), \(box.height.rounded()))"
+            } else {
+                text += " no path"
+            }
+            if let fill = shape.fillColor { text += " fill \(components(fill))" }
+            if let stroke = shape.strokeColor { text += " stroke \(components(stroke)) \(shape.lineWidth)" }
+        }
+        func describe(_ animation: CAAnimation) -> String {
+            let name = animation.is(CAAnimationGroup.self) ? "group" : animation.is(CAKeyframeAnimation.self) ? "keyframe" : "basic"
+            let timing = animation.state
+            var text = "\(name) \(animation.keyPath() ?? "-")"
+            if name == "group" { text += " begin \(timing.beginTime) duration \(timing.duration) repeats \(timing.repeatCount)" }
+            if name == "keyframe" {
+                if animation.path() != nil { text += " along a path" }
+                text += " times \(animation.keyTimes()?.as(NSArray.self)?.elements.map { $0.sendDoubleValue() } ?? []) \(animation.calculationMode())"
+            }
+            let children = timing.values["animations"]?.as(NSArray.self)?.elements.compactMap { $0.as(CAAnimation.self) } ?? []
+            if !children.isEmpty { text += " [" + children.map(describe).joined(separator: "; ") + "]" }
+            return text
+        }
+        if !self.state.animations.isEmpty {
+            text += " animations {" + self.state.animations.map { describe($0.animation) }.joined(separator: " | ") + "}"
+        }
+        return text
+    }
 
     @ObjCMethod("animationKeys")
     func animationKeys() -> NSObject? {
@@ -677,7 +737,9 @@ open class CALayer: NSObject {
     func removeFromSuperlayer() {
         guard let superlayer = state.superlayer else { return }
         let retained = self
-        CALayer.state(of: superlayer).sublayers.removeAll { $0.objcObject == objcObject }
+        let parent = CALayer.state(of: superlayer)
+        parent.sublayers.removeAll { $0.objcObject == objcObject }
+        if parent.mask?.objcObject == objcObject { parent.mask = nil }
         retained.state.superlayer = nil
         retained.state.rendered = false
         Compositing.changed()
@@ -729,9 +791,29 @@ open class CALayer: NSObject {
     @ObjCMethod("beginTime") func beginTime() -> Double { state.beginTime }
     @ObjCMethod("setBeginTime:") func setBeginTime(_ time: Double) { state.beginTime = time }
     @ObjCMethod("timeOffset") func timeOffset() -> Double { state.timeOffset }
-    @ObjCMethod("setTimeOffset:") func setTimeOffset(_ offset: Double) { state.timeOffset = offset }
+    @ObjCMethod("setTimeOffset:") func setTimeOffset(_ offset: Double) { changed { state.timeOffset = offset } }
     @ObjCMethod("speed") func speed() -> Float { state.speed }
-    @ObjCMethod("setSpeed:") func setSpeed(_ speed: Float) { state.speed = speed }
+    @ObjCMethod("setSpeed:") func setSpeed(_ speed: Float) { changed { state.speed = speed } }
+
+    /// The current media time in this layer's time space, and how fast it
+    /// runs against the clock: the clock's own time at rate 1 unless the
+    /// layer or one above it has a begin time, speed or offset, as a
+    /// stopped layer scrubbed by its time offset has.
+    var localNow: (time: Double, rate: Double) {
+        var layers: [LayerState] = []
+        var plain = true
+        var next: LayerState? = state
+        while let layer = next {
+            layers.append(layer)
+            if layer.speed != 1 || layer.timeOffset != 0 || layer.beginTime != 0 { plain = false }
+            next = layer.superlayer.map { CALayer.state(of: $0) }
+        }
+        let now = Clock.now
+        guard !plain else { return (now, 1) }
+        return layers.reversed().reduce((now, 1)) { time, layer in
+            ((time.0 - layer.beginTime) * Double(layer.speed) + layer.timeOffset, time.1 * Double(layer.speed))
+        }
+    }
 
     /// The layers from this one up to the root.
     private var ancestry: [CALayer] {
@@ -812,6 +894,7 @@ open class CALayer: NSObject {
             sendLayoutSublayers()
         }
         for sublayer in state.sublayers { sublayer.layoutIfNeeded() }
+        state.mask?.layoutIfNeeded()
     }
 
     /// Asks the delegate to lay out the layer.

@@ -67,6 +67,13 @@ let package = Package(
         .library(name: "PerryVideoToolbox", type: .dynamic, targets: ["PerryVideoToolbox"]),
         .library(name: "PerryCarPlay", type: .dynamic, targets: ["PerryCarPlay"]),
         // CoreSpotlight, which takes an app's searchable items and forgets them.
+        .library(name: "PerryCallKit", type: .dynamic, targets: ["PerryCallKit"]),
+        .library(name: "PerryDeviceCheck", type: .dynamic, targets: ["PerryDeviceCheck"]),
+        .library(name: "PerryWatchConnectivity", type: .dynamic, targets: ["PerryWatchConnectivity"]),
+        .library(name: "PerryMetricKit", type: .dynamic, targets: ["PerryMetricKit"]),
+        .library(name: "PerryBackgroundTasks", type: .dynamic, targets: ["PerryBackgroundTasks"]),
+        .library(name: "PerryLocalAuthentication", type: .dynamic, targets: ["PerryLocalAuthentication"]),
+        .library(name: "PerryPushKit", type: .dynamic, targets: ["PerryPushKit"]),
         .library(name: "PerryCoreSpotlight", type: .dynamic, targets: ["PerryCoreSpotlight"]),
         .library(name: "PerryGameKit", type: .dynamic, targets: ["PerryGameKit"]),
         .library(name: "PerryGameController", type: .dynamic, targets: ["PerryGameController"]),
@@ -347,6 +354,48 @@ let package = Package(
         // StoreKit's Objective-C classes, with no App Store.
         .target(
             name: "PerryStoreKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // PushKit's registry, with no pushes.
+        .target(
+            name: "PerryPushKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // LocalAuthentication's context, which can evaluate nothing.
+        .target(
+            name: "PerryLocalAuthentication",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // BackgroundTasks' scheduler, which never launches a task.
+        .target(
+            name: "PerryBackgroundTasks",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // MetricKit's manager, with no metrics.
+        .target(
+            name: "PerryMetricKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // WatchConnectivity's session, with no watch.
+        .target(
+            name: "PerryWatchConnectivity",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // DeviceCheck's device and attestation service, neither supported.
+        .target(
+            name: "PerryDeviceCheck",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CallKit's classes, with no telephone.
+        .target(
+            name: "PerryCallKit",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),

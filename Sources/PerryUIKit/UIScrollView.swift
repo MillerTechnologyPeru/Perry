@@ -340,6 +340,10 @@ final class GestureRecognizerState: ObjectState {
     /// A swipe recognizer's direction (right 1, left 2, up 4, down 8, or several), and where and when its touch began.
     var swipeDirection: UInt = 1
     var swipeStart: (point: CGPoint, time: Double)?
+    /// A tap recognizer's taps and fingers needed, and the taps counted so far with when the last one lifted.
+    var tapsRequired: UInt = 1
+    var touchesRequired: UInt = 1
+    var taps: (count: UInt, time: Double) = (0, 0)
 }
 
 /// The recognizer's targets and its view; touches drive recognizers in the
@@ -563,6 +567,9 @@ open class UIScrollViewPanGestureRecognizer: UIPanGestureRecognizer {}
 open class UIHoverGestureRecognizer: UIGestureRecognizer {}
 
 /// A tap: recognized when the touch lifts, unless it moved ten points.
+/// One that needs several taps counts those that follow each other closely
+/// and fails for each touch before the last; one that needs several fingers
+/// fails, as there is one pointer here.
 @ObjCClass("UITapGestureRecognizer")
 open class UITapGestureRecognizer: UIGestureRecognizer {
     @ObjCMethod("touchesBegan:withEvent:")
@@ -578,7 +585,16 @@ open class UITapGestureRecognizer: UIGestureRecognizer {
 
     @ObjCMethod("touchesEnded:withEvent:")
     override func touchesEnded(_ touches: NSObject?, with event: NSObject?) {
-        if state.state == 0 { sendSetState(3) }
+        guard state.state == 0 else { return }
+        guard state.touchesRequired <= 1 else { return state.state = 5 }
+        let now = SKSupport.now()
+        let count = now - state.taps.time <= 0.4 ? state.taps.count + 1 : 1
+        guard count >= state.tapsRequired else {
+            state.taps = (count, now)
+            return state.state = 5
+        }
+        state.taps = (0, 0)
+        sendSetState(3)
     }
 
     /// Where the touch began, by recognizer object.
@@ -588,10 +604,10 @@ open class UITapGestureRecognizer: UIGestureRecognizer {
     }
     nonisolated(unsafe) static var starts: [UnsafeMutableRawPointer: CGPoint] = [:]
 
-    @ObjCMethod("numberOfTapsRequired") func numberOfTapsRequired() -> UInt { 1 }
-    @ObjCMethod("setNumberOfTapsRequired:") func setNumberOfTapsRequired(_ count: UInt) {}
-    @ObjCMethod("numberOfTouchesRequired") func numberOfTouchesRequired() -> UInt { 1 }
-    @ObjCMethod("setNumberOfTouchesRequired:") func setNumberOfTouchesRequired(_ count: UInt) {}
+    @ObjCMethod("numberOfTapsRequired") func numberOfTapsRequired() -> UInt { state.tapsRequired }
+    @ObjCMethod("setNumberOfTapsRequired:") func setNumberOfTapsRequired(_ count: UInt) { state.tapsRequired = max(count, 1) }
+    @ObjCMethod("numberOfTouchesRequired") func numberOfTouchesRequired() -> UInt { state.touchesRequired }
+    @ObjCMethod("setNumberOfTouchesRequired:") func setNumberOfTouchesRequired(_ count: UInt) { state.touchesRequired = max(count, 1) }
 }
 
 @ObjCClass("UILongPressGestureRecognizer")

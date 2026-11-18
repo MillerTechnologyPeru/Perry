@@ -24,6 +24,12 @@ extension NSFileHandle {
         offsetInFile
     }
 
+    /// Moves the offset to the file's end, and gives it.
+    @discardableResult
+    public func seekToEnd() throws -> UInt64 {
+        seekToEndOfFile()
+    }
+
     /// Writes the data at the offset.
     public func write<T: DataProtocol>(contentsOf data: T) throws {
         write(Data(data))
