@@ -248,6 +248,11 @@ enum DictionaryModes {
         ])
     }
 
+    /// The mode a program switched to (CGDisplaySwitchToMode), which it
+    /// sees as the display's until it releases the display; the screen
+    /// itself keeps its own, and a full-screen port is made at this size.
+    nonisolated(unsafe) static var switched: Int?
+
     /// The mode closest in size to the one asked for (the smallest that
     /// holds it, else the largest), and whether it is that size and depth.
     static func best(width: Int, height: Int, depth: Int, refreshRate: Double?) -> (Ref, Bool) {
@@ -265,8 +270,20 @@ enum DictionaryModes {
 
 @c(_CGDisplayAvailableModes) public func CGDisplayAvailableModes(_ display: UInt32) -> Ref? { DictionaryModes.array.objcObject }
 
-/// The mode the display is in: the desktop's, which is always first.
-@c(_CGDisplayCurrentMode) public func CGDisplayCurrentMode(_ display: UInt32) -> Ref? { DictionaryModes.all.first?.objcObject }
+/// The mode the display is in: the one switched to, else the desktop's,
+/// which is always first.
+@c(_CGDisplayCurrentMode) public func CGDisplayCurrentMode(_ display: UInt32) -> Ref? {
+    DictionaryModes.all.isEmpty ? nil : DictionaryModes.all[DictionaryModes.switched ?? 0].objcObject
+}
+
+/// For Carbon's full-screen ports: the size of the mode switched to, or
+/// zeros when there's none.
+@c(_PerryCGDisplaySwitchedSize)
+public func PerryCGDisplaySwitchedSize(_ width: UnsafeMutablePointer<Int32>?, _ height: UnsafeMutablePointer<Int32>?) {
+    let state = DictionaryModes.switched.map { Displays.all[$0] }
+    width?.pointee = Int32(state?.width ?? 0)
+    height?.pointee = Int32(state?.height ?? 0)
+}
 
 @c(_CGDisplayBestModeForParameters)
 public func CGDisplayBestModeForParameters(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int,
@@ -274,6 +291,15 @@ public func CGDisplayBestModeForParameters(_ display: UInt32, _ depth: Int, _ wi
     let (mode, exact) = DictionaryModes.best(width: width, height: height, depth: depth, refreshRate: nil)
     exactMatch?.pointee = exact ? 1 : 0
     return mode
+}
+
+/// The property a mode must have (safe for the hardware, say) every mode
+/// here has.
+@c(_CGDisplayBestModeForParametersAndRefreshRateWithProperty)
+public func CGDisplayBestModeForParametersAndRefreshRateWithProperty(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int,
+                                                                     _ refreshRate: Double, _ property: Ref?,
+                                                                     _ exactMatch: UnsafeMutablePointer<UInt32>?) -> Ref? {
+    CGDisplayBestModeForParametersAndRefreshRate(display, depth, width, height, refreshRate, exactMatch)
 }
 
 @c(_CGDisplayBestModeForParametersAndRefreshRate)
@@ -284,8 +310,14 @@ public func CGDisplayBestModeForParametersAndRefreshRate(_ display: UInt32, _ de
     return mode
 }
 
-/// Modes can't be changed: the current one stays, as CGDisplaySetDisplayMode's.
-@c(_CGDisplaySwitchToMode) public func CGDisplaySwitchToMode(_ display: UInt32, _ mode: Ref?) -> Int32 { success }
+/// Modes can't be changed: the screen keeps its own, as with
+/// CGDisplaySetDisplayMode, but the program sees the one it chose.
+@c(_CGDisplaySwitchToMode) public func CGDisplaySwitchToMode(_ display: UInt32, _ mode: Ref?) -> Int32 {
+    if let mode, let index = DictionaryModes.all.firstIndex(where: { $0.objcObject == mode }) {
+        DictionaryModes.switched = index == 0 ? nil : index
+    }
+    return success
+}
 
 @c(_CGDisplayBitsPerPixel) public func CGDisplayBitsPerPixel(_ display: UInt32) -> Int { 32 }
 @c(_CGDisplayBitsPerSample) public func CGDisplayBitsPerSample(_ display: UInt32) -> Int { 8 }
@@ -325,9 +357,21 @@ public func CGSetDisplayTransferByFormula(_ display: UInt32, _ redMin: Float, _ 
 // MARK: - Capture and the cursor
 
 @c(_CGDisplayCapture) public func CGDisplayCapture(_ display: UInt32) -> Int32 { success }
-@c(_CGDisplayRelease) public func CGDisplayRelease(_ display: UInt32) -> Int32 { success }
+// Releasing the displays puts back their modes.
+@c(_CGDisplayRelease) public func CGDisplayRelease(_ display: UInt32) -> Int32 { DictionaryModes.switched = nil; return success }
 @c(_CGCaptureAllDisplays) public func CGCaptureAllDisplays() -> Int32 { success }
-@c(_CGReleaseAllDisplays) public func CGReleaseAllDisplays() -> Int32 { success }
+@c(_CGReleaseAllDisplays) public func CGReleaseAllDisplays() -> Int32 { DictionaryModes.switched = nil; return success }
+
+// Fades: the screen isn't faded, and a reservation is always had.
+@c(_CGAcquireDisplayFadeReservation)
+public func CGAcquireDisplayFadeReservation(_ seconds: Float, _ token: UnsafeMutablePointer<UInt32>?) -> Int32 {
+    token?.pointee = 1
+    return success
+}
+@c(_CGReleaseDisplayFadeReservation) public func CGReleaseDisplayFadeReservation(_ token: UInt32) -> Int32 { success }
+@c(_CGDisplayFade)
+public func CGDisplayFade(_ token: UInt32, _ seconds: Float, _ start: Float, _ end: Float, _ red: Float, _ green: Float, _ blue: Float,
+                          _ synchronous: UInt32) -> Int32 { success }
 @c(_CGDisplayHideCursor) public func CGDisplayHideCursor(_ display: UInt32) -> Int32 { success }
 @c(_CGDisplayShowCursor) public func CGDisplayShowCursor(_ display: UInt32) -> Int32 { success }
 @c(_CGDisplayMoveCursorToPoint)
