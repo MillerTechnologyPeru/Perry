@@ -231,6 +231,21 @@ enum Snapshot {
             }
             if view.state.geometry?.contents == nil { tree += " no contents" }
         }
+        if let label = view.as(UILabel.self), let text = label.label.text {
+            tree += " \"\(text.prefix(40))\"" + (label.label.attributedText != nil ? " attributed" : "")
+            // Kept until its components are read: an attributed text's color may live only as long as this.
+            let color = label.textColor()
+            if let c = withExtendedLifetime(color, { SKRenderer.components(color.objcObject) }) {
+                tree += " color (\((c.0 * 100).rounded() / 100), \((c.1 * 100).rounded() / 100), \((c.2 * 100).rounded() / 100), \((c.3 * 100).rounded() / 100))"
+            }
+            tree += " font \(label.font.state.name) \(label.font.state.pointSize)"
+        }
+        if constraintsToo {
+            // Whether constraints place the view, whether it is a stack view, and whether it awaits layout.
+            if view.state.translatesAutoresizingMaskIntoConstraints { tree += " by frame" }
+            if let stack = view.as(UIStackView.self) { tree += " stack of \(stack.arranged.count)" }
+            if view.state.needsLayout { tree += " needs layout" }
+        }
         tree += view.state.hidden ? " hidden\n" : "\n"
         if constraintsToo {
             for constraint in view.state.constraints.compactMap({ $0.as(NSLayoutConstraint.self) }) {
@@ -282,7 +297,12 @@ enum Snapshot {
             let frame = sublayer.frame()
             tree += String(repeating: "  ", count: depth) + "layer \(name) (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))"
             if sublayer.masksToBounds() { tree += " clips" }
+            tree += sublayer.perryDebugDetails() ?? ""
             tree += sublayer.isHidden() ? " hidden\n" : "\n"
+            if let mask = sublayer.mask()?.as(CALayer.self) {
+                tree += String(repeating: "  ", count: depth + 1) + "mask \(mask.frame()):\(mask.perryDebugDetails() ?? "")\n"
+                describe(layer: mask, skipping: [], depth: depth + 2, into: &tree)
+            }
             describe(layer: sublayer, skipping: [], depth: depth + 1, into: &tree)
         }
     }
