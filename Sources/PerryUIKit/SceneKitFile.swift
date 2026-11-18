@@ -314,6 +314,12 @@ final class SCNSceneBuilder {
         if let contents = propertyContents(described["background"]) {
             withExtendedLifetime(contents) { SKSupport.replace(&scene.background().property.contents, with: contents.objcObject) }
         }
+        if let world = archive.dictionary(described["physicsWorld"]) {
+            let state = scene.physicsWorld().world
+            let gravity = archive.floats(world["gravity"])
+            if gravity.count == 3 { state.gravity = SCNVector3(x: gravity[0], y: gravity[1], z: gravity[2]) }
+            if let speed = archive.double(world["speed"]) { state.speed = CGFloat(speed) }
+        }
         if getenv("PERRY_SCENEKIT_TRACE") != nil, !skipped.isEmpty {
             let list = skipped.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
             let line = "perry: SceneKit: \(archive.directory): not built: \(list)\n"
@@ -409,12 +415,14 @@ final class SCNSceneBuilder {
         guard let described = archive.dictionary(reference) else { return nil }
         let made = SCNCamera.make(SCNCamera.objCClass)
         let state = made.camera
-        state.fieldOfView = CGFloat(archive.double(described["fov"]) ?? 60)
+        // An older file gives the angle up and down or across, and neither for the usual sixty degrees.
+        let across = archive.double(described["xFov"]) ?? 0, upright = archive.double(described["yFov"]) ?? 0
+        state.fieldOfView = CGFloat(archive.double(described["fov"]) ?? (upright != 0 ? upright : across != 0 ? across : 60))
         state.zNear = archive.double(described["zNear"]) ?? 1
         state.zFar = archive.double(described["zFar"]) ?? 100
         state.orthographic = archive.bool(described["usesOrthographicProjection"]) ?? false
         state.orthographicScale = archive.double(described["orthographicScale"]) ?? 1
-        state.horizontal = archive.int(described["projectionDirection"]) == 1
+        state.horizontal = archive.int(described["projectionDirection"]) == 1 || (described["fov"] == nil && upright == 0 && across != 0)
         return made
     }
 
@@ -501,6 +509,10 @@ final class SCNSceneBuilder {
         case "SCNActionRepeat":
             guard let inner = action(described["_repeatedAction"]) else { return nil }
             made = SCNAction.make(archive.bool(described["_forever"]) == true ? .forever(inner) : .repeatCount(inner, archive.int(described["_timesToRepeat"]) ?? 1))
+        case "SCNActionMove":
+            let target = SCNVector3(x: Float(archive.double(described["_posTarget.x"]) ?? 0), y: Float(archive.double(described["_posTarget.y"]) ?? 0),
+                                    z: Float(archive.double(described["_posTarget.z"]) ?? 0))
+            made = SCNAction.make(.move(target, by: archive.bool(described["_isRelative"]) ?? true), duration: duration)
         case "SCNActionRotate":
             let relative = archive.bool(described["_isRelative"]) ?? true
             if archive.bool(described["_isAxisAngle"]) == true {
@@ -535,6 +547,13 @@ final class SCNSceneBuilder {
         state.damping = CGFloat(archive.double(described["damping"]) ?? 0.1)
         state.angularDamping = CGFloat(archive.double(described["angularDamping"]) ?? 0.1)
         state.affectedByGravity = !(archive.bool(described["ignoreGravity"]) ?? false)
+        // How it is moving as the scene opens, and the axes it is kept to.
+        let velocity = archive.floats(described["velocity"]), spin = archive.floats(described["angularVelocity"])
+        if velocity.count == 3 { state.velocity = SCNVector3(x: velocity[0], y: velocity[1], z: velocity[2]) }
+        if spin.count == 4 { state.angularVelocity = SCNVector4(x: spin[0], y: spin[1], z: spin[2], w: spin[3]) }
+        let factor = archive.floats(described["velocityFactor"])
+        if factor.count == 3 { SCNKept.bodies[made.objcObject].vectors["velocityFactor"] = SCNVector3(x: factor[0], y: factor[1], z: factor[2]) }
+        if let rolling = archive.double(described["rollingFriction"]), rolling != 0 { SCNKept.bodies[made.objcObject].numbers["rollingFriction"] = rolling }
         if archive.bool(described["isDefaultShape"]) != true, let shape = archive.dictionary(described["physicsShape"]),
            archive.has(shape["referenceObject"]), let geometry = geometry(shape["referenceObject"]) {
             let made = SCNPhysicsShape.objCClass.object.allocated().unsafeCast(to: SCNPhysicsShape.self)
@@ -580,6 +599,8 @@ final class SCNSceneBuilder {
             if let wrapped = archive.dictionary(described[name]) {
                 property.property.wrapS = archive.int(wrapped["wrapS"]) ?? 1
                 property.property.wrapT = archive.int(wrapped["wrapT"]) ?? 1
+                let transform = archive.floats(wrapped["contentsTransform"])
+                if transform.count == 16, transform != SCNMath.identity { property.property.transform = transform }
             }
         }
         // The light map and occlusion map the renderer uses, with the texture coordinates each is laid out by.
@@ -669,6 +690,10 @@ final class SCNSceneBuilder {
             torus.geometry.segments = archive.int(described["torusringSegmentCount"]) ?? 48
             torus.geometry.pipeSegments = archive.int(described["toruspipeSegmentCount"]) ?? 24
             made = torus
+        case "SCNFloor":
+            made = SCNFloor.floor(SCNFloor.objCClass)
+        case "SCNPyramid":
+            made = SCNPyramid.pyramid(SCNPyramid.objCClass, width: number("pyramidwidth"), height: number("pyramidheight"), length: number("pyramidlength"))
         case "SCNGeometry":
             let custom = SCNGeometry.objCClass.object.allocated().unsafeCast(to: SCNGeometry.self)
             custom.geometry.kind = .custom
