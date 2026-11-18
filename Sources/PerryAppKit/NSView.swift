@@ -84,7 +84,7 @@ open class NSView: NSResponder {
     }
 
     /// What a view's archive holds besides its frame.
-    func decodeContents(_ decoded: Coder) {
+    func decodeContents(_ decoded: Coder, reversingSubviews: Bool = false) {
         let flags = UInt32(truncatingIfNeeded: decoded.integer("NSvFlags"))
         autoresizingMask = UInt(flags & 0x3f)
         autoresizesSubviews = flags & 0x100 != 0 || !decoded.has("NSvFlags")
@@ -101,7 +101,8 @@ open class NSView: NSResponder {
             let v = decoded.string("NSAntiCompressionPriority").map(NSView.pair) ?? []
             if v.count == 2 { compressionResistance = v }
         }
-        for subview in decoded.array("NSSubviews") {
+        let subviews = decoded.array("NSSubviews")
+        for subview in reversingSubviews ? subviews.reversed() : subviews {
             guard let view = subview.as(NSView.self) else { continue }
             addSubview(view)
         }
