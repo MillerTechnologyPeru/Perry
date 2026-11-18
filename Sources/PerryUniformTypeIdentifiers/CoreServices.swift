@@ -230,6 +230,18 @@ public func CloseComponent(_ instance: UnsafeMutableRawPointer?) -> Int32 {
     return audioFunction("_AudioComponentInstanceDispose", as: F.self)?(instance) ?? -192
 }
 
+/// A component's version, given the component or an instance of it.
+@c(_GetComponentVersion)
+public func GetComponentVersion(_ component: UnsafeMutableRawPointer?) -> Int32 {
+    typealias Component = @convention(c) (UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    typealias Version = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutablePointer<UInt32>?) -> Int32
+    guard let version = audioFunction("_AudioComponentGetVersion", as: Version.self) else { return 0 }
+    var result: UInt32 = 0
+    if version(component, &result) == 0 { return Int32(bitPattern: result) }
+    let owner = audioFunction("_AudioComponentInstanceGetComponent", as: Component.self)?(component)
+    return version(owner, &result) == 0 ? Int32(bitPattern: result) : 0
+}
+
 @c(_CallComponentVersion)
 public func CallComponentVersion(_ instance: UnsafeMutableRawPointer?) -> Int32 { 0x0001_0000 }
 
