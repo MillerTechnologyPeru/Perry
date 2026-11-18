@@ -90,12 +90,17 @@ enum ObjC {
             perry_foundation_set_exception_type_vtable(vtable + 2 * MemoryLayout<UnsafeRawPointer>.size)
         }
         notForwarded = bind("_perry_objc_not_forwarded", (@convention(c) (id?, SEL?) -> Void).self)
-        #if arch(arm64)
+        #if arch(arm64) || arch(x86_64)
         // Messages no method takes come to Foundation, for -forwardInvocation:.
         if notForwarded != nil,
            let install = bind("_objc_setForwardHandler", (@convention(c) (UnsafeRawPointer?, UnsafeRawPointer?) -> Void).self) {
             let handler = unsafeBitCast(perry_foundation_forward as @convention(c) () -> Void, to: UnsafeRawPointer.self)
+            #if arch(x86_64)
+            let stret = unsafeBitCast(perry_foundation_forward_stret as @convention(c) () -> Void, to: UnsafeRawPointer.self)
+            install(handler, stret)
+            #else
             install(handler, nil)
+            #endif
         }
         #endif
         imageName = bind("_class_getImageName", (@convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<CChar>?).self)
