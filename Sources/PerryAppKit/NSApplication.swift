@@ -417,6 +417,22 @@ open class NSApplication: NSResponder {
         return modalResponse
     }
 
+    /// A sheet on a window, which tells the modal delegate it ended with
+    /// -sheetDidEnd:returnCode:contextInfo: (or the selector given).
+    @ObjCMethod("beginSheet:modalForWindow:modalDelegate:didEndSelector:contextInfo:")
+    func beginSheet(_ sheet: NSWindow?, modalFor window: NSWindow?, modalDelegate: NSObject?, didEndSelector: ObjCSelector?,
+                    contextInfo: UnsafeMutableRawPointer?) {
+        guard let sheet else { return }
+        guard let window else {
+            Send.void(sheet.objcObject, "makeKeyAndOrderFront:", nil)
+            return
+        }
+        Sheets.begin(sheet, on: window, ending: .delegate(modalDelegate?.objcObject, didEndSelector, contextInfo))
+    }
+
+    @ObjCMethod("endSheet:") func endSheet(_ sheet: NSWindow?) { endSheet(sheet, returnCode: 0) }   // NSModalResponseStop
+    @ObjCMethod("endSheet:returnCode:") func endSheet(_ sheet: NSWindow?, returnCode: Int) { sheet.map { Sheets.end($0, returnCode: returnCode) } }
+
     @ObjCMethod("stopModal") func stopModal() { stopModal(withCode: -1000) }
     @ObjCMethod("stopModalWithCode:")
     func stopModal(withCode code: Int) {
