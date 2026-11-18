@@ -556,6 +556,13 @@ public func method_getTypeEncoding(_ method: Method?) -> UnsafePointer<CChar>? {
     method?.pointee.types
 }
 
+/// The method's objc_method_description (its selector and types): as on
+/// Apple's runtime, the method itself, whose first two fields they are.
+@c(_method_getDescription)
+public func method_getDescription(_ method: Method?) -> UnsafeMutableRawPointer? {
+    method.map { UnsafeMutableRawPointer($0) }
+}
+
 // A method's type encoding, as its parts: the return type, then each
 // argument's (the receiver and selector first), each a type with its
 // qualifiers and its stack offset after it ("v24@0:8@16").
