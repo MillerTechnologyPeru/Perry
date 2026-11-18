@@ -581,6 +581,34 @@ open class NSTextFieldCell: NSActionCell {
     }
 }
 
+/// AppKit's private text field cell with an image before its text, as a
+/// list of files shows each with its icon (Xcode's file names are one).
+@ObjCClass("NSImageTextFieldCell")
+open class NSImageTextFieldCell: NSTextFieldCell {
+    /// The image's square: the cell's height, at most 16 points.
+    func imageRect(for frame: CGRect) -> CGRect {
+        let side = min(16, frame.height)
+        return CGRect(x: frame.minX + 2, y: (frame.midY - side / 2).rounded(), width: side, height: side)
+    }
+
+    @ObjCMethod("titleRectForBounds:")
+    override func titleRect(forBounds rect: CGRect) -> CGRect {
+        let base = super.titleRect(forBounds: rect)
+        guard image != nil else { return base }
+        let shift = imageRect(for: rect).maxX + 3 - rect.minX
+        return CGRect(x: base.minX + shift, y: base.minY, width: max(0, base.width - shift), height: base.height)
+    }
+
+    @ObjCMethod("imageRectForBounds:")
+    override func imageRect(forBounds rect: CGRect) -> CGRect { image == nil ? .zero : imageRect(for: rect) }
+
+    @ObjCMethod("drawInteriorWithFrame:inView:")
+    override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
+        image?.draw(in: imageRect(for: frame), fraction: enabled ? 1 : 0.5)
+        super.drawInterior(withFrame: frame, in: view)
+    }
+}
+
 @ObjCClass("NSSecureTextFieldCell")
 open class NSSecureTextFieldCell: NSTextFieldCell {
     override func textRuns(color: NSColor?) -> [TextRun] {
@@ -1065,10 +1093,14 @@ open class NSTableHeaderCell: NSTextFieldCell {
         CG.restoreGState(context)
     }
 
-    /// AppKit's private drawing of a header's background, which subclasses
-    /// (Xcode's) draw their own contents over.
+    /// AppKit's private drawing of a whole header, its background and its
+    /// title or image, which subclasses (Xcode's) draw with.
     @ObjCMethod("_drawThemeContents:highlighted:inView:")
-    func drawThemeContents(_ frame: CGRect, highlighted: Bool, in view: NSView?) { drawBackground(frame, highlighted: highlighted) }
+    func drawThemeContents(_ frame: CGRect, highlighted: Bool, in view: NSView?) {
+        drawBackground(frame, highlighted: highlighted)
+        typealias Interior = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Interior.self)(objcObject, ObjCRuntime.selector("drawInteriorWithFrame:inView:"), frame, view?.objcObject)
+    }
 
     @ObjCMethod("drawInteriorWithFrame:inView:")
     override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
