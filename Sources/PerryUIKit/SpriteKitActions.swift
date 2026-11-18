@@ -21,6 +21,8 @@ indirect enum SKActionDef {
     case remove
     case block(ObjCBlock)
     case custom(ObjCBlock)
+    /// A sprite's texture, each of the textures in turn; `resize` gives the sprite each one's size.
+    case animate([SKTexture], resize: Bool)
     case nothing
 }
 
@@ -52,6 +54,16 @@ open class SKAction: NSObject {
 
     @ObjCMethod("init") func initialize() -> Self { self }
 
+    @ObjCClassMethod("animateWithTextures:timePerFrame:")
+    static func animate(_ cls: ObjCClass, textures: NSArray, timePerFrame: Double) -> SKAction {
+        animate(cls, textures: textures, timePerFrame: timePerFrame, resize: false, restore: false)
+    }
+    @ObjCClassMethod("animateWithTextures:timePerFrame:resize:restore:")
+    static func animate(_ cls: ObjCClass, textures: NSArray, timePerFrame: Double, resize: Bool, restore: Bool) -> SKAction {
+        let list = textures.elements.filter { $0.is(SKTexture.self) }.map { $0.unsafeCast(to: SKTexture.self) }
+        return make(.animate(list, resize: resize), duration: timePerFrame * Double(list.count))
+    }
+
     @ObjCClassMethod("moveTo:duration:")
     static func move(_ cls: ObjCClass, to point: CGPoint, duration: Double) -> SKAction { make(.move(point, by: false), duration: duration) }
     @ObjCClassMethod("moveByX:y:duration:")
@@ -60,6 +72,11 @@ open class SKAction: NSObject {
     }
     @ObjCClassMethod("rotateToAngle:duration:")
     static func rotate(_ cls: ObjCClass, toAngle angle: CGFloat, duration: Double) -> SKAction { make(.rotate(angle, by: false), duration: duration) }
+    /// The short way round is the way the angle says here.
+    @ObjCClassMethod("rotateToAngle:duration:shortestUnitArc:")
+    static func rotate(_ cls: ObjCClass, toAngle angle: CGFloat, duration: Double, shortestUnitArc: Bool) -> SKAction {
+        make(.rotate(angle, by: false), duration: duration)
+    }
     @ObjCClassMethod("rotateByAngle:duration:")
     static func rotate(_ cls: ObjCClass, byAngle angle: CGFloat, duration: Double) -> SKAction { make(.rotate(angle, by: true), duration: duration) }
     @ObjCClassMethod("scaleTo:duration:")
@@ -92,6 +109,9 @@ open class SKAction: NSObject {
     @ObjCClassMethod("repeatActionForever:")
     static func repeatForever(_ cls: ObjCClass, action: SKAction) -> SKAction { make(.forever(action)) }
     @ObjCClassMethod("removeFromParent") static func removeFromParent(_ cls: ObjCClass) -> SKAction { make(.remove) }
+    /// A sound file's action: it takes no time and plays nothing yet.
+    @ObjCClassMethod("playSoundFileNamed:waitForCompletion:")
+    static func playSound(_ cls: ObjCClass, fileNamed name: String?, waitForCompletion wait: Bool) -> SKAction { make(.nothing) }
     @ObjCClassMethod("runBlock:") static func run(_ cls: ObjCClass, block: ObjCBlock) -> SKAction { make(.block(block)) }
     @ObjCClassMethod("customActionWithDuration:actionBlock:")
     static func custom(_ cls: ObjCClass, duration: Double, actionBlock: ObjCBlock) -> SKAction { make(.custom(actionBlock), duration: duration) }
@@ -174,6 +194,7 @@ final class SKRunner {
         case .nothing: return dt
         case .block(let block):
             typealias Invoke = @convention(c) (UnsafeMutableRawPointer) -> Void
+            SKActions.trace("\(node.describedByObject()) runs a block")
             block.function(as: Invoke.self)(block.object)
             return dt
         case .sequence(let actions):
@@ -198,7 +219,7 @@ final class SKRunner {
             return allDone ? leftover : nil
         case .repeatCount(let inner, let count): return runRepeat(node, dt, inner, count: count)
         case .forever(let inner): return runRepeat(node, dt, inner, count: nil)
-        case .move, .rotate, .scale, .fade, .wait, .custom: return runInterval(node, dt)
+        case .move, .rotate, .scale, .fade, .wait, .custom, .animate: return runInterval(node, dt)
         }
     }
 
@@ -264,12 +285,51 @@ final class SKRunner {
         case .custom(let block):
             typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, CGFloat) -> Void
             block.function(as: Invoke.self)(block.object, node.objcObject, CGFloat(elapsed))
+        case .animate(let textures, let resize):
+            guard !textures.isEmpty, node.is(SKSpriteNode.self) else { break }
+            let texture = textures[min(Int(p * CGFloat(textures.count)), textures.count - 1)]
+            if n.texture !== texture {
+                n.texture = texture
+                if resize { n.size = texture.state.size }
+            }
         default: break
         }
     }
 }
 
 enum SKActions {
+    /// With PERRY_SPRITEKIT_TRACE set, the actions nodes are given, the blocks they run and the scenes shown are
+    /// written to standard error.
+    nonisolated(unsafe) static let tracing = getenv("PERRY_SPRITEKIT_TRACE") != nil
+
+    static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: SpriteKit: \(message())\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+
+    static func describe(_ action: SKAction) -> String {
+        let state = action.action
+        func list(_ actions: [SKAction]) -> String { actions.map(describe).joined(separator: ", ") }
+        switch state.def {
+        case .sequence(let actions): return "sequence [\(list(actions))]"
+        case .group(let actions): return "group [\(list(actions))]"
+        case .repeatCount(let inner, let count): return "repeat \(count) (\(describe(inner)))"
+        case .forever(let inner): return "forever (\(describe(inner)))"
+        case .move: return "move \(state.duration)s"
+        case .rotate: return "rotate \(state.duration)s"
+        case .scale: return "scale \(state.duration)s"
+        case .fade: return "fade \(state.duration)s"
+        case .wait: return "wait \(state.duration)s"
+        case .hide: return "hide"
+        case .remove: return "remove"
+        case .block: return "block"
+        case .custom: return "custom \(state.duration)s"
+        case .animate: return "animate \(state.duration)s"
+        case .nothing: return "nothing"
+        }
+    }
+
     /// Moves every node's actions on by `dt` seconds, parents first.
     static func advance(_ node: SKNode, _ dt: Double) {
         let state = node.node
@@ -292,6 +352,7 @@ enum SKActions {
 extension SKNode {
     private func start(_ action: SKAction?, key: String?, completion: ObjCBlock?) {
         guard let action else { return }
+        SKActions.trace("\(describedByObject()) runs \(SKActions.describe(action))\(key.map { " as \($0)" } ?? "")")
         if let key { node.running.removeAll { $0.key == key } }
         node.running.append(SKRunning(key: key, action: action, completion: completion))
     }
@@ -299,7 +360,10 @@ extension SKNode {
     @ObjCMethod("runAction:") func runAction(_ action: SKAction?) { start(action, key: nil, completion: nil) }
     @ObjCMethod("runAction:withKey:") func runAction(_ action: SKAction?, withKey key: String?) { start(action, key: key, completion: nil) }
     @ObjCMethod("runAction:completion:") func runAction(_ action: SKAction?, completion: ObjCBlock?) { start(action, key: nil, completion: completion) }
-    @ObjCMethod("removeAllActions") func removeAllActions() { node.running = [] }
+    @ObjCMethod("removeAllActions") func removeAllActions() {
+        if !node.running.isEmpty { SKActions.trace("\(describedByObject()) drops its \(node.running.count) actions") }
+        node.running = []
+    }
     @ObjCMethod("removeActionForKey:") func removeAction(forKey key: String) { node.running.removeAll { $0.key == key } }
     @ObjCMethod("hasActions") func hasActions() -> Bool { !node.running.isEmpty }
     @ObjCMethod("actionForKey:") func action(forKey key: String) -> SKAction? { node.running.first { $0.key == key }?.action }
