@@ -85,6 +85,9 @@ open class NSPersistentStore: NSObject {
     @ObjCMethod("options") func options() -> NSObject? { state.options }
     @ObjCMethod("configurationName") func configurationName() -> String { state.configuration ?? "PF_DEFAULT_CONFIGURATION_NAME" }
     @ObjCMethod("isReadOnly") func isReadOnly() -> Bool { false }
+    @ObjCMethod("metadata")
+    func metadata() -> NSObject { state.metadata ?? NSPersistentStoreCoordinator.defaultMetadata(type: state.type, identifier: state.identifier) }
+    @ObjCMethod("setMetadata:") func setMetadata(_ metadata: NSObject?) { state.metadata = metadata }
     @ObjCMethod("persistentStoreCoordinator")
     func persistentStoreCoordinator() -> NSPersistentStoreCoordinator? {
         state.coordinator.map { NSPersistentStoreCoordinator(objcObject: $0, ownership: .retain) }
