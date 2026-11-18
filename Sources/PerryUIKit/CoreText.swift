@@ -202,6 +202,19 @@ open class UIFontDescriptor: NSObject {
         })
     }
     @ObjCMethod("postscriptName") func postscriptName() -> String { state.name ?? ".SFUI-Regular" }
+
+    /// A copy in one of the system font's designs. Perry has one system
+    /// font: the monospaced design asks for its monospaced trait, and the
+    /// others give the font as it is.
+    @ObjCMethod("fontDescriptorWithDesign:")
+    func withDesign(_ design: String?) -> UnsafeMutableRawPointer? {
+        let original = state
+        return ObjCRuntime.autorelease(UIFontDescriptor.make { copy in
+            copy.copy(from: original)
+            // UIFontDescriptorTraitMonoSpace.
+            if design == "NSCTFontUIFontDesignMonospaced" { copy.symbolicTraits |= 1 << 10 }
+        })
+    }
 }
 
 /// Text styles' sizes by content size category, scaled from the Large
