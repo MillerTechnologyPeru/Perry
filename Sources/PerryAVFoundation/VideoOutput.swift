@@ -280,13 +280,25 @@ public func CVOpenGLESTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawP
 /// A frame's first row is its top one.
 @c(_CVOpenGLESTextureIsFlipped) public func CVOpenGLESTextureIsFlipped(_ texture: UnsafeMutableRawPointer?) -> UInt8 { 1 }
 
-// Metal textures: none, as there is no Metal device.
+// Metal textures. A cache is made for a device, as a renderer makes one when
+// it starts (Filament's Metal driver stops without it); no texture is made of
+// a pixel buffer yet, so a frame of video shown through one is not drawn.
+
+/// A Metal texture cache, which keeps nothing.
+@ObjCClass("__PerryCVMetalTextureCache")
+open class MetalTextureCache: NSObject {
+}
 
 @c(_CVMetalTextureCacheCreate)
 public func CVMetalTextureCacheCreate(_ allocator: UnsafeRawPointer?, _ cacheAttributes: UnsafeRawPointer?, _ device: UnsafeRawPointer?,
                                       _ textureAttributes: UnsafeRawPointer?, _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
-    out?.pointee = nil
-    return cvError
+    guard let out else { return cvInvalidArgument }
+    out.pointee = nil
+    guard device != nil else { return cvInvalidArgument }
+    let cache = NSObject(MetalTextureCache.objCClass.pointer).newInstance()
+    _ = ObjCRuntime.retain(cache.objcObject)
+    out.pointee = cache.objcObject
+    return cvSuccess
 }
 
 @c(_CVMetalTextureCacheCreateTextureFromImage)
