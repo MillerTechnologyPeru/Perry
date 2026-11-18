@@ -922,7 +922,10 @@ open class NSButtonCell: NSActionCell {
 
     /// A check box or radio button, and its title to the right.
     private func drawCheck(_ frame: CGRect, context: CGRef) {
-        let box = CGRect(x: frame.minX + 2, y: frame.midY - 7, width: 14, height: 14)
+        // An image-only check box (NSImageOnly), as a table's check box
+        // column has, is its box alone, centered.
+        let imageOnly = imagePosition == 1
+        let box = CGRect(x: imageOnly ? (frame.midX - 7).rounded() : frame.minX + 2, y: frame.midY - 7, width: 14, height: 14)
         let on = state != 0
         let radio = buttonType == 4
         let path = radio ? { () -> CGRef? in
@@ -945,6 +948,7 @@ open class NSButtonCell: NSActionCell {
                           NSColor.whiteColor(), width: 1.8, in: context)
             }
         }
+        if imageOnly { return }
         var style = TextStyle()
         style.maximumLines = 1
         style.lineBreakMode = 4
