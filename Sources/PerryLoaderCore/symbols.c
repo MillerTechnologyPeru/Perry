@@ -124,9 +124,40 @@ static void *perry_get_witness_table(const void *conformance, const void *type, 
     return real_get_witness_table(conformance, type, arguments);
 }
 
+// swift_getTypeByMangledNameInContext; with PERRY_SWIFT_TYPE_TRACE set, a name
+// that does not resolve is written out, with its bytes and its context, to find
+// what a Swift library asks for that is not there.
+static const void *(*real_get_type_by_mangled_name)(const char *, size_t, const void *, const void *const *);
+
+static const void *perry_get_type_by_mangled_name(const char *name, size_t length, const void *context, const void *const *arguments) {
+    const void *type = real_get_type_by_mangled_name(name, length, context, arguments);
+    // A closure of Swift 6's @isolated(any) async () -> () is named by a compiler in the
+    // implementation function form the runtime cannot make a type of ("IeAgH_"), though
+    // it has metadata, under the name it has as a function type.
+    if (!type && length == 6 && memcmp(name, "IeAgH_", 6) == 0)
+        type = real_get_type_by_mangled_name("yyYaYAc", 7, context, arguments);
+    if (!type && getenv("PERRY_SWIFT_TYPE_TRACE")) {
+        char line[1024];
+        int used = snprintf(line, sizeof(line), "perry: swift type not found: length %zu context %p args %p bytes", length, context, (const void *)arguments);
+        for (size_t i = 0; i < length && i < 48 && used < (int)sizeof(line) - 6; i++)
+            used += snprintf(line + used, sizeof(line) - used, " %02x", (unsigned char)name[i]);
+        snprintf(line + used, sizeof(line) - used, "\n");
+        fputs(line, stderr);
+    }
+    return type;
+}
+
 static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, const char *name,
                                  perry_symbol *out, int depth) {
     if (dep->image) {
+        if (strcmp(name, "_swift_getTypeByMangledNameInContext") == 0 && dep->image->install_name && strstr(dep->image->install_name, "libswiftCore.dylib")) {
+            if (!perry_exports_lookup(loader, dep->image, name, out, depth + 1))
+                return false;
+            if (!real_get_type_by_mangled_name)
+                real_get_type_by_mangled_name = out->address;
+            out->address = (void *)perry_get_type_by_mangled_name;
+            return true;
+        }
         if (strcmp(name, "_swift_getWitnessTable") == 0 && dep->image->install_name &&
             strstr(dep->image->install_name, "libswiftCore.dylib")) {
             if (!perry_exports_lookup(loader, dep->image, name, out, depth + 1))
