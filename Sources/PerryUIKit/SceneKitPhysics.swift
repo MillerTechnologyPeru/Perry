@@ -30,6 +30,7 @@ open class SCNPhysicsBody: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNPhysicsBody.states.remove(objcObject)
+        SCNKept.bodies.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNPhysicsBody.objCClass.pointer)
     }
 
@@ -198,6 +199,7 @@ open class SCNPhysicsWorld: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNPhysicsWorld.states.remove(objcObject)
+        SCNKept.worlds.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNPhysicsWorld.objCClass.pointer)
     }
 
