@@ -13,6 +13,12 @@ extension String {
         self = String._unconditionallyBridgeFromObjectiveC(string)
     }
 
+    /// A string made from a C string of UTF-8; nil when its bytes are not UTF-8.
+    public init?(utf8String bytes: UnsafePointer<CChar>) {
+        guard let string = String(validatingCString: bytes) else { return nil }
+        self = string
+    }
+
     /// A string made from UTF-16 code units.
     public init(utf16CodeUnits: UnsafePointer<unichar>, count: Int) {
         self = String(decoding: UnsafeBufferPointer(start: utf16CodeUnits, count: count), as: UTF16.self)
