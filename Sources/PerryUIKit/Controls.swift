@@ -408,7 +408,9 @@ open class UIButton: UIControl {
 
     /// A tint change is a configuration's colors' change.
     @ObjCMethod("tintColorDidChange")
-    func buttonTintColorDidChange() { if button.configuration != nil { applyConfiguration() } }
+    func buttonTintColorDidChange() {
+        if button.configuration != nil { applyConfiguration() } else { update() }
+    }
 
     // MARK: Menu
 
@@ -615,7 +617,9 @@ open class UIButton: UIControl {
             button.imageView?.setImage(nil)
         }
         if let background = current(button.backgroundImages) {
-            state.geometry.contents = background.state.cgImage.map { NSObject($0) }
+            // A template background is in the button's tint color.
+            let shown = background.state.renderingMode == 2 ? background.withTintColor(tintColor()) : background
+            state.geometry.contents = shown.state.cgImage.map { NSObject($0) }
         }
     }
 
