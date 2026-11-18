@@ -570,6 +570,8 @@ open class UIView: UIResponder, UICoordinateSpace {
     }
 
     /// iOS 17's trait overrides: the style set on it is the view's override.
+    /// Trait changes are delivered as they happen here: nothing waits to be updated.
+    @ObjCMethod("updateTraitsIfNeeded") func updateTraitsIfNeeded() {}
     @ObjCMethod("traitOverrides")
     func traitOverrides() -> NSObject {
         let overrides = UITraitOverrides.objCClass.object.allocated().unsafeCast(to: UITraitOverrides.self)
