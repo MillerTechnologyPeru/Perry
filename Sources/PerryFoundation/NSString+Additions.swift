@@ -629,6 +629,20 @@ extension NSString {
         return nil
     }
 
+    /// The forms from before Mac OS X 10.4, with no encoding: it is found
+    /// as for usedEncoding.
+    @ObjCClassMethod("stringWithContentsOfFile:")
+    static func string(contentsOfFile path: String?) -> String? {
+        path.flatMap { string(contentsOfFile: $0, usedEncoding: nil, error: nil) }
+    }
+
+    @ObjCMethod("initWithContentsOfFile:")
+    func initialize(contentsOfFile path: String?) -> Self? {
+        guard let path, let decoded = Self.string(contentsOfFile: path, usedEncoding: nil, error: nil) else { return nil }
+        Storage.set(objcObject, StringStorage(decoded))
+        return self
+    }
+
     @ObjCClassMethod("stringWithContentsOfFile:usedEncoding:error:")
     static func string(contentsOfFile path: String?, used encoding: UnsafeMutablePointer<UInt>?, error: UnsafeMutablePointer<id?>?) -> String? {
         path.flatMap { string(contentsOfFile: $0, usedEncoding: encoding, error: error) }
