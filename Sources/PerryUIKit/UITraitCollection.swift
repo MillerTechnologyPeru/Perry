@@ -137,6 +137,12 @@ open class UITraitCollection: NSObject {
     @ObjCMethod("horizontalSizeClass") func horizontalSizeClass() -> Int { traits.horizontalSizeClass }
     @ObjCMethod("verticalSizeClass") func verticalSizeClass() -> Int { traits.verticalSizeClass }
     @ObjCMethod("displayScale") func displayScale() -> CGFloat { traits.displayScale }
+    /// The configuration images are chosen by under the traits: one that
+    /// asks for nothing.
+    @ObjCMethod("imageConfiguration")
+    func imageConfiguration() -> UIImageConfiguration { UIImageConfiguration.make(UIImageConfiguration.objCClass) { _ in } }
+    /// No custom traits are kept.
+    @ObjCMethod("objectForTrait:") func object(forTrait trait: NSObject?) -> NSObject? { nil }
     @ObjCMethod("layoutDirection") func layoutDirection() -> Int { traits.layoutDirection }
     @ObjCMethod("preferredContentSizeCategory") func preferredContentSizeCategory() -> String { traits.contentSizeCategory }
     /// UIForceTouchCapability: unavailable 1.
@@ -182,3 +188,36 @@ open class UITraitCollection: NSObject {
 extension NSObject {
     @ObjCMethod("traitCollectionDidChange:") func sendTraitCollectionDidChange(_ previous: UITraitCollection?)
 }
+
+// MARK: - Trait definitions
+
+// The system's traits, as the classes a program names to say which traits'
+// changes it registers for. A registration here is called for any change,
+// so the classes only need to be there.
+
+/// What the system's trait classes are of.
+@ObjCClass("_PerryTraitDefinition")
+open class PerryTraitDefinition: NSObject {
+    /// The trait's values do not take part in color appearance or in
+    /// animations here.
+    @ObjCClassMethod("affectsColorAppearance") static func affectsColorAppearance(_ cls: ObjCClass) -> Bool { false }
+}
+
+@ObjCClass("UITraitUserInterfaceIdiom") open class UITraitUserInterfaceIdiom: PerryTraitDefinition {}
+@ObjCClass("UITraitUserInterfaceStyle") open class UITraitUserInterfaceStyle: PerryTraitDefinition {}
+@ObjCClass("UITraitUserInterfaceLevel") open class UITraitUserInterfaceLevel: PerryTraitDefinition {}
+@ObjCClass("UITraitLayoutDirection") open class UITraitLayoutDirection: PerryTraitDefinition {}
+@ObjCClass("UITraitDisplayScale") open class UITraitDisplayScale: PerryTraitDefinition {}
+@ObjCClass("UITraitHorizontalSizeClass") open class UITraitHorizontalSizeClass: PerryTraitDefinition {}
+@ObjCClass("UITraitVerticalSizeClass") open class UITraitVerticalSizeClass: PerryTraitDefinition {}
+@ObjCClass("UITraitForceTouchCapability") open class UITraitForceTouchCapability: PerryTraitDefinition {}
+@ObjCClass("UITraitPreferredContentSizeCategory") open class UITraitPreferredContentSizeCategory: PerryTraitDefinition {}
+@ObjCClass("UITraitDisplayGamut") open class UITraitDisplayGamut: PerryTraitDefinition {}
+@ObjCClass("UITraitAccessibilityContrast") open class UITraitAccessibilityContrast: PerryTraitDefinition {}
+@ObjCClass("UITraitActiveAppearance") open class UITraitActiveAppearance: PerryTraitDefinition {}
+@ObjCClass("UITraitLegibilityWeight") open class UITraitLegibilityWeight: PerryTraitDefinition {}
+@ObjCClass("UITraitToolbarItemPresentationSize") open class UITraitToolbarItemPresentationSize: PerryTraitDefinition {}
+@ObjCClass("UITraitImageDynamicRange") open class UITraitImageDynamicRange: PerryTraitDefinition {}
+@ObjCClass("UITraitTypesettingLanguage") open class UITraitTypesettingLanguage: PerryTraitDefinition {}
+@ObjCClass("UITraitSceneCaptureState") open class UITraitSceneCaptureState: PerryTraitDefinition {}
+@ObjCClass("UITraitListEnvironment") open class UITraitListEnvironment: PerryTraitDefinition {}
