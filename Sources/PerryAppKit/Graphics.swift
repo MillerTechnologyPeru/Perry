@@ -231,6 +231,10 @@ open class NSColor: NSObject {
     @ObjCClassMethod("windowBackgroundColor") static func windowBackgroundColor() -> NSColor { system("windowBackgroundColor")! }
     @ObjCClassMethod("underPageBackgroundColor") static func underPageBackgroundColor() -> NSColor { system("underPageBackgroundColor")! }
     @ObjCClassMethod("controlColor") static func controlColor() -> NSColor { system("controlColor")! }
+    @ObjCClassMethod("controlHighlightColor") static func controlHighlightColor() -> NSColor { system("controlHighlightColor")! }
+    @ObjCClassMethod("controlLightHighlightColor") static func controlLightHighlightColor() -> NSColor { system("controlLightHighlightColor")! }
+    @ObjCClassMethod("controlShadowColor") static func controlShadowColor() -> NSColor { system("controlShadowColor")! }
+    @ObjCClassMethod("controlDarkShadowColor") static func controlDarkShadowColor() -> NSColor { system("controlDarkShadowColor")! }
     @ObjCClassMethod("controlBackgroundColor") static func controlBackgroundColor() -> NSColor { system("controlBackgroundColor")! }
     @ObjCClassMethod("textColor") static func textColor() -> NSColor { system("textColor")! }
     @ObjCClassMethod("controlTextColor") static func controlTextColor() -> NSColor { system("controlTextColor")! }
@@ -251,6 +255,9 @@ open class NSColor: NSObject {
     @ObjCClassMethod("alternateSelectedControlColor") static func alternateSelectedControlColor() -> NSColor { system("alternateSelectedControlColor")! }
     @ObjCClassMethod("alternateSelectedControlTextColor")
     static func alternateSelectedControlTextColor() -> NSColor { system("alternateSelectedControlTextColor")! }
+    /// The text of the highlighted item in a menu, and its highlight.
+    @ObjCClassMethod("selectedMenuItemTextColor") static func selectedMenuItemTextColor() -> NSColor { system("selectedMenuItemTextColor")! }
+    @ObjCClassMethod("selectedMenuItemColor") static func selectedMenuItemColor() -> NSColor { system("controlAccentColor")! }
     @ObjCClassMethod("headerColor") static func headerColor() -> NSColor { system("headerColor")! }
     @ObjCClassMethod("headerTextColor") static func headerTextColor() -> NSColor { system("headerTextColor")! }
     @ObjCClassMethod("gridColor") static func gridColor() -> NSColor { system("gridColor")! }
@@ -860,6 +867,10 @@ open class NSImage: NSObject {
     @ObjCMethod("setName:") func setName(_ name: String?) -> Bool { self.name = name; return true }
     @ObjCMethod("isTemplate") func isTemplate() -> Bool { template }
     @ObjCMethod("setTemplate:") func setTemplate(_ value: Bool) { template = value }
+    /// How the image caches its representations: nothing is cached apart
+    /// from them here.
+    @ObjCMethod("cacheMode") func cacheMode() -> UInt { 0 }
+    @ObjCMethod("setCacheMode:") func setCacheMode(_ mode: UInt) {}
     @ObjCMethod("isValid") func isValid() -> Bool { true }
     @ObjCMethod("representations") func imageRepresentations() -> NSObject { NSMutableArray.of(representations) }
     @ObjCMethod("addRepresentation:") func addRepresentation(_ representation: NSObject?) { representation.map { representations.append($0) } }
