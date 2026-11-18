@@ -315,6 +315,14 @@ open class AVAudioSession: NSObject {
     @ObjCMethod("outputLatency") func outputLatency() -> Double { 0.023 }
     @ObjCMethod("inputLatency") func inputLatency() -> Double { 0.023 }
     @ObjCMethod("preferredIOBufferDuration") func preferredIOBufferDuration() -> Double { session.preferredIOBufferDuration }
+    /// Kept in name only: no system alert interrupts the session here.
+    @ObjCMethod("setPrefersNoInterruptionsFromSystemAlerts:error:")
+    func setPrefersNoInterruptionsFromSystemAlerts(_ prefers: Bool, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        error?.pointee = nil
+        return true
+    }
+    @ObjCMethod("prefersNoInterruptionsFromSystemAlerts") func prefersNoInterruptionsFromSystemAlerts() -> Bool { false }
+
     @ObjCMethod("setPreferredIOBufferDuration:error:")
     func setPreferredIOBufferDuration(_ duration: Double, error: ErrorOut) -> Bool { session.preferredIOBufferDuration = duration; return true }
     @ObjCMethod("outputNumberOfChannels") func outputNumberOfChannels() -> Int { 2 }
