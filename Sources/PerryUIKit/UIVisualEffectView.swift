@@ -113,6 +113,8 @@ final class VisualEffectViewState: ObjectState {
     var contentView: UIView?
     /// The effect's fill, behind the content view.
     var backdrop: UIView?
+    /// The backdrop group, which apps read and write by key (LNPopupController does).
+    var groupName: String?
 }
 
 /// The view a visual effect view's subviews go in, which nibs archive with
@@ -173,6 +175,8 @@ open class UIVisualEffectView: UIView {
 
     @ObjCMethod("contentView") func contentView() -> UIView? { effectView.contentView }
     @ObjCMethod("effect") func effect() -> UIVisualEffect? { effectView.effect }
+    @ObjCMethod("groupName") func groupName() -> String? { effectView.groupName }
+    @ObjCMethod("setGroupName:") func setGroupName(_ name: String?) { effectView.groupName = name }
 
     @ObjCMethod("setEffect:")
     func setEffect(_ effect: UIVisualEffect?) {

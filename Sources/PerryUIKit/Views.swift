@@ -42,6 +42,10 @@ open class UIToolbar: UIView {
     static let toolbarStates = StateTable<ToolbarState>()
     var toolbar: ToolbarState { UIToolbar.toolbarStates[objcObject] }
 
+    /// UIKit's private object that draws the bar, which a library that restyles
+    /// bars reads by key (LNPopupController's); there is none here.
+    @ObjCMethod("_visualProvider") func visualProvider() -> NSObject? { nil }
+
     @ObjCMethod("dealloc")
     override func dealloc() {
         UIToolbar.toolbarStates.remove(objcObject)
