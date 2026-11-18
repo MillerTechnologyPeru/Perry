@@ -68,6 +68,22 @@ enum Arrays {
         ObjC.autorelease(make(elements, cls: cls))!
     }
 
+    /// PERRY_FOUNDATION_RANGE=continue: reading an element past an array's
+    /// end gives nil, with a warning, where it raises on Darwin and ends
+    /// the process here. For getting past a failure to see what follows.
+    nonisolated(unsafe) static let readsPastEnd = getenv("PERRY_FOUNDATION_RANGE").map { String(cString: $0) == "continue" } ?? false
+
+    /// Whether the element can be read; false only under that switch.
+    static func canRead(_ index: UInt, _ count: Int, _ method: String) -> Bool {
+        if index < UInt(count) { return true }
+        if readsPastEnd {
+            foundationWarning("-[NSArray \(method)]: index \(index) beyond bounds [0 .. \(count - 1)], giving nil")
+            return false
+        }
+        checkIndex(index, count, method)
+        return true
+    }
+
     static func checkIndex(_ index: UInt, _ count: Int, _ method: String) {
         if Int(index) >= count {
             foundationFatal("-[NSArray \(method)]: index \(index) beyond bounds [0 .. \(count - 1)]")
@@ -254,16 +270,16 @@ public class NSArray: NSObject {
     }
 
     @ObjCMethod("objectAtIndex:")
-    func object(at index: UInt) -> ObjCObject {
+    func object(at index: UInt) -> ObjCObject? {
         let all = elements
-        Arrays.checkIndex(index, all.count, "objectAtIndex:")
+        guard Arrays.canRead(index, all.count, "objectAtIndex:") else { return nil }
         return ObjCObject(all[Int(index)])
     }
 
     @ObjCMethod("objectAtIndexedSubscript:")
-    func object(subscript index: UInt) -> ObjCObject {
+    func object(subscript index: UInt) -> ObjCObject? {
         let all = elements
-        Arrays.checkIndex(index, all.count, "objectAtIndexedSubscript:")
+        guard Arrays.canRead(index, all.count, "objectAtIndexedSubscript:") else { return nil }
         return ObjCObject(all[Int(index)])
     }
 
@@ -357,7 +373,7 @@ public class NSArray: NSObject {
     }
 
     @ObjCMethod("componentsJoinedByString:")
-    func joined(separator: String) -> String { elements.map { Format.describe($0) }.joined(separator: separator) }
+    func joined(separator: String?) -> String { elements.map { Format.describe($0) }.joined(separator: separator ?? "") }
 
     @ObjCMethod("makeObjectsPerformSelector:")
     func makeObjectsPerform(_ selector: ObjCSelector) {
