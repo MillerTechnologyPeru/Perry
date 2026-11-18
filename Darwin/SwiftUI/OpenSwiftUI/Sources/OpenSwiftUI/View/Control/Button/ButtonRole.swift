@@ -46,6 +46,20 @@ public struct ButtonRole: Equatable, Sendable {
     /// Use this role for a button that cancels the current operation.
     public static let cancel: ButtonRole = .init(rawValue: 1 << 2)
 
+    /// A role that indicates a button that confirms an operation.
+    ///
+    /// Use this role for a button that accepts or finishes what the user
+    /// is doing, such as the Done button of a sheet.
+    @available(OpenSwiftUI_v7_0, *)
+    public static let confirm: ButtonRole = .init(rawValue: 1 << 3)
+
+    /// A role that indicates a button that closes the view it is in.
+    ///
+    /// Use this role for a button that dismisses a sheet, popover or panel
+    /// without confirming or cancelling anything.
+    @available(OpenSwiftUI_v7_0, *)
+    public static let close: ButtonRole = .init(rawValue: 1 << 4)
+
     public static func == (a: ButtonRole, b: ButtonRole) -> Bool {
         a.rawValue == b.rawValue
     }
