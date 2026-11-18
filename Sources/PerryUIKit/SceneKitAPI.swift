@@ -115,6 +115,25 @@ extension SCNNode {
     }
 
     @ObjCMethod("enumerateChildNodesUsingBlock:") func enumerateChildNodes(_ block: ObjCBlock) { enumerate(block, includingSelf: false) }
+
+    /// The nodes below this one the block says yes to, until it sets stop.
+    @ObjCMethod("childNodesPassingTest:")
+    func childNodes(passingTest block: ObjCBlock) -> NSObject {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutablePointer<Bool>) -> Bool
+        let invoke = block.function(as: Invoke.self)
+        var stop = false
+        var found: [NSObject] = []
+        func visit(_ node: SCNNode) {
+            guard !stop else { return }
+            if invoke(block.object, node.objcObject, &stop) { found.append(node) }
+            for child in node.node.children { visit(child.unsafeCast(to: SCNNode.self)) }
+        }
+        for child in node.children { visit(child.unsafeCast(to: SCNNode.self)) }
+        return NSMutableArray.of(found)
+    }
+
+    @ObjCMethod("isPaused") func isPaused() -> Bool { node.paused }
+    @ObjCMethod("setPaused:") func setPaused(_ paused: Bool) { node.paused = paused }
     @ObjCMethod("enumerateHierarchyUsingBlock:") func enumerateHierarchy(_ block: ObjCBlock) { enumerate(block, includingSelf: true) }
 
     /// A copy of the node and what it holds, sharing its geometry and materials.
@@ -152,9 +171,10 @@ extension SCNNode {
     @ObjCMethod("setPhysicsBody:") func setPhysicsBody(_ body: NSObject?) { node.physicsBody = body }
 
     @ObjCMethod("particleSystems") func particleSystems() -> NSObject? { node.particleSystems.isEmpty ? nil : NSMutableArray.of(node.particleSystems) }
-    @ObjCMethod("addParticleSystem:") func addParticleSystem(_ system: NSObject) { node.particleSystems.append(system) }
+    // No system adds none, as SceneKit takes it.
+    @ObjCMethod("addParticleSystem:") func addParticleSystem(_ system: NSObject?) { if let system { node.particleSystems.append(system) } }
     @ObjCMethod("addParticleSystem:withTransform:")
-    func addParticleSystem(_ system: NSObject, withTransform transform: SCNMatrix4) { node.particleSystems.append(system) }
+    func addParticleSystem(_ system: NSObject?, withTransform transform: SCNMatrix4) { if let system { node.particleSystems.append(system) } }
     @ObjCMethod("removeParticleSystem:")
     func removeParticleSystem(_ system: NSObject) { node.particleSystems.removeAll { $0.objcObject == system.objcObject } }
     @ObjCMethod("removeAllParticleSystems") func removeAllParticleSystems() { node.particleSystems = [] }
@@ -378,7 +398,8 @@ extension SCNGeometry {
         to.kind = from.kind
         to.width = from.width; to.height = from.height; to.length = from.length
         to.radius = from.radius; to.topRadius = from.topRadius; to.bottomRadius = from.bottomRadius
-        to.segments = from.segments
+        to.innerRadius = from.innerRadius; to.pipeRadius = from.pipeRadius
+        to.segments = from.segments; to.pipeSegments = from.pipeSegments
         to.custom = from.custom
         to.materials = from.materials
         to.name = from.name
