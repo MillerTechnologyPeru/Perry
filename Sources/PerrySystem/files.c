@@ -100,6 +100,9 @@ static int directory_to_linux(int fd) {
     return fd == DARWIN_AT_FDCWD ? AT_FDCWD : fd;
 }
 
+// For other files' wrappers: Darwin's open flags as Linux's.
+int perry_open_flags_to_linux(int flags) { return open_flags_to_linux(flags); }
+
 static int at_flags_to_linux(int flags) {
     int out = 0;
     if (flags & DARWIN_AT_EACCESS) out |= AT_EACCESS;
