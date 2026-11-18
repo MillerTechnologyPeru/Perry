@@ -577,7 +577,9 @@ open class CALayer: NSObject {
     /// A copy of the animation runs on the layer, from now unless it says
     /// when; one under the same key is replaced.
     @ObjCMethod("addAnimation:forKey:")
-    func addAnimation(_ animation: CAAnimation, forKey key: String?) {
+    func addAnimation(_ animation: CAAnimation?, forKey key: String?) {
+        // A nil animation adds nothing, as on iOS.
+        guard let animation else { return }
         let copy = animation.copied()
         if copy.state.beginTime == 0 { copy.state.beginTime = Clock.now }
         copy.state.added = Clock.now
