@@ -2,6 +2,7 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 import SDL3Swift
+import CSDL3
 
 // NSWindow: a window on the screen, shown as an SDL window once it is
 // ordered front, whose content view's layer tree QuartzCore composites
@@ -45,7 +46,9 @@ enum Windows {
         dirty = false
         lastDraw = now
         ObjCRuntime.autoreleasepool {
-            for window in all where window.sdlWindow != nil && window.visible { window.draw() }
+            GLCurrent.preserving {
+                for window in all where window.sdlWindow != nil && window.visible { window.draw() }
+            }
             Snapshot.windowsDrew()
         }
     }
@@ -694,14 +697,49 @@ open class NSWindow: NSResponder {
     /// The SDL window and its renderer, made when the window is first shown.
     private func show() {
         if let sdlWindow {
+            if bordersWhileShown { _ = SDL_SetWindowBordered(sdlWindow.unsafePointer, true) }
             try? sdlWindow.show()
+            if bordersWhileShown { Self.removeBorder(sdlWindow) }
             return
         }
         makeSDLWindow(hidden: false)
     }
 
+    /// A window without a border that X11 shows with one, which it loses
+    /// once it's shown: mutter maps a window without a border never, and
+    /// SDL waits for the map forever.
+    private var bordersWhileShown = false
+
+    /// Takes an X11 window's border off. Mutter then unmaps the window,
+    /// takes it out of its frame and maps it again, after SDL is done: SDL
+    /// would see that map later, after a hide, as the window shown again,
+    /// and show it, waiting for a map that doesn't come. The map (and its
+    /// unmap) are taken from the queue as they come, as SDL's own border
+    /// change takes the ones it makes.
+    private static func removeBorder(_ window: SDLWindow) {
+        _ = SDL_SetWindowBordered(window.unsafePointer, false)
+        let properties = SDL_GetWindowProperties(window.unsafePointer)
+        let xid = UInt(truncatingIfNeeded: SDL_GetNumberProperty(properties, "SDL.window.x11.window", 0))
+        guard let display = SDL_GetPointerProperty(properties, "SDL.window.x11.display", nil), xid != 0,
+              let xlib = XlibQueue.shared else { return }
+        var event = [Int](repeating: 0, count: 64)   // an XEvent, with room
+        var waited = 0
+        while waited < 250 {
+            xlib.sync(display, 0)
+            if xlib.checkTypedWindowEvent(display, xid, 19, &event) != 0 {   // MapNotify
+                _ = xlib.checkTypedWindowEvent(display, xid, 18, &event)    // UnmapNotify
+                return
+            }
+            usleep(2000)
+            waited += 2
+        }
+    }
+
     /// Whether an NSOpenGLContext draws to one of the window's views.
     private var drawsWithOpenGL = false
+    /// The pixel format of the context that draws to it, which its SDL
+    /// window is made for.
+    private var openGLFormat: NSOpenGLPixelFormat?
 
     /// The window's NSOpenGLView, if it shows one.
     var openGLView: NSOpenGLView? { rootView?.allViews.lazy.compactMap { $0 as? NSOpenGLView }.first }
@@ -713,7 +751,7 @@ open class NSWindow: NSResponder {
         drawsWithOpenGL = true
         if sdlWindow != nil && renderer == nil { return }
         destroySDLWindow()
-        format?.applyToSDL()
+        openGLFormat = format
         makeSDLWindow(hidden: !visible)
     }
 
@@ -725,11 +763,17 @@ open class NSWindow: NSResponder {
 
     private func makeSDLWindowOnMain(hidden: Bool) {
         guard SDLSession.start() else { return }
+        // The window and its renderer are made with SDL's OpenGL
+        // attributes, which a game's thread may be setting for a context.
+        GLAttributes.lock()
+        defer { GLAttributes.unlock() }
         let usesOpenGL = drawsWithOpenGL || openGLView != nil
+        if usesOpenGL { openGLFormat?.applyToSDL() }
         var flags: BitMaskOptionSet<SDLWindow.Option> = usesOpenGL ? [.opengl] : [.highPixelDensity]
         if hidden { flags.insert(.hidden) }
         if styleMask & StyleMask.resizable != 0 { flags.insert(.resizable) }
-        if styleMask == 0 { flags.insert(.borderless) }
+        let borderLater = styleMask == 0 && SDL.currentVideoDriver == "x11"
+        if styleMask == 0 && !borderLater { flags.insert(.borderless) }
         if styleMask & StyleMask.fullScreen != 0 { flags.insert(.fullscreen) }
         let name = title.isEmpty ? (NSBundle.main().infoObject(forKey: "CFBundleName")?.stringValue ?? "") : title
         // A frame an app computed from nothing has no size SDL can make.
@@ -746,6 +790,12 @@ open class NSWindow: NSResponder {
         }
         sdlWindow = window
         sdlID = UInt32(window.id)
+        // Once the renderer's made: making it can make the X window again,
+        // which would be made without a border, and wait for a map.
+        defer {
+            bordersWhileShown = borderLater
+            if borderLater && !hidden { Self.removeBorder(window) }
+        }
         let top = Screens.flip(frame)
         try? window.setPosition(x: Int32(top.minX.rounded()), y: Int32(top.minY.rounded()))
         // Typed text for key events: SDL types only while text input is on.
@@ -758,7 +808,9 @@ open class NSWindow: NSResponder {
             return
         }
         do {
-            let made = try SDLRenderer(window: window, driver: SDLRenderer.Driver(name: "opengles2") ?? .default)
+            let made = try GLCurrent.preserving {
+                try SDLRenderer(window: window, driver: SDLRenderer.Driver(name: "opengles2") ?? .default)
+            }
             renderer = made
             Trace.log("window \(windowNumber) shown with SDL's \(made.name) renderer")
         } catch {
@@ -787,8 +839,9 @@ open class NSWindow: NSResponder {
     }
 
     private func destroySDLWindowOnMain() {
-        // The renderer goes before its window.
-        renderer = nil
+        // The renderer goes before its window; SDL makes its context
+        // current to destroy it.
+        GLCurrent.preserving { renderer = nil }
         sdlWindow = nil
         sdlID = 0
     }
@@ -1108,4 +1161,18 @@ open class NSWindowController: NSResponder {
 extension NSObject {
     @ObjCMethod("initWithWindow:")
     func initializeWindowController(window: NSWindow?) -> NSObject
+}
+
+/// The Xlib SDL draws X11 windows with, for what SDL doesn't do.
+private struct XlibQueue {
+    let sync: @convention(c) (UnsafeMutableRawPointer, Int32) -> Int32
+    let checkTypedWindowEvent: @convention(c) (UnsafeMutableRawPointer, UInt, Int32, UnsafeMutablePointer<Int>) -> Int32
+
+    nonisolated(unsafe) static let shared: XlibQueue? = {
+        guard let library = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD),
+              let sync = dlsym(library, "XSync"), let check = dlsym(library, "XCheckTypedWindowEvent") else { return nil }
+        return XlibQueue(sync: unsafeBitCast(sync, to: (@convention(c) (UnsafeMutableRawPointer, Int32) -> Int32).self),
+                         checkTypedWindowEvent: unsafeBitCast(check, to: (@convention(c) (UnsafeMutableRawPointer, UInt, Int32,
+                                                                                            UnsafeMutablePointer<Int>) -> Int32).self))
+    }()
 }
