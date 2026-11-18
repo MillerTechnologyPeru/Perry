@@ -423,7 +423,12 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("systemLayoutSizeFittingSize:")
     func systemLayoutSizeFitting(_ size: CGSize) -> CGSize {
         let width = size.width > 0 ? size.width : state.bounds.width
-        return CGSize(width: width, height: AutoLayout.fittingHeight(self, width: width) ?? state.bounds.height)
+        let fitted = CGSize(width: width, height: AutoLayout.fittingHeight(self, width: width) ?? state.bounds.height)
+        if CollectionTrace.enabled {
+            let line = "perry: fitting size of \(describedByObject() ?? "?") for \(size) is \(fitted), bounds \(state.bounds.size)\n"
+            _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
+        }
+        return fitted
     }
 
     @ObjCMethod("systemLayoutSizeFittingSize:withHorizontalFittingPriority:verticalFittingPriority:")
