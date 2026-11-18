@@ -245,5 +245,9 @@ private func scnMult(_ a: Matrix, _ b: Matrix) -> Matrix { SCNMath.multiply(b, a
     return SCNMath.matrix4(scnMult(r, SCNMath.matrix(m)))
 }
 
+// A GLKit matrix is the same sixteen floats, in the same order.
+@c(_SCNMatrix4ToGLKMatrix4) public func SCNMatrix4ToGLKMatrix4(_ m: SCNMatrix4) -> SCNMatrix4 { m }
+@c(_SCNMatrix4FromGLKMatrix4) public func SCNMatrix4FromGLKMatrix4(_ m: SCNMatrix4) -> SCNMatrix4 { m }
+
 @c(_SCNMatrix4EqualToMatrix4) public func SCNMatrix4EqualToMatrix4(_ a: SCNMatrix4, _ b: SCNMatrix4) -> Bool { SCNMath.matrix(a) == SCNMath.matrix(b) }
 @c(_SCNMatrix4IsIdentity) public func SCNMatrix4IsIdentity(_ m: SCNMatrix4) -> Bool { SCNMath.matrix(m) == SCNMath.identity }
