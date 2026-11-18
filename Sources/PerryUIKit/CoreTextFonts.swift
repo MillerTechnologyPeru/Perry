@@ -117,6 +117,11 @@ public func CTFontCopyFamilyName(_ font: UnsafeMutableRawPointer?) -> UnsafeMuta
     CTFonts.font(font).flatMap { $0.familyName().objCOwnedReturnValue() }
 }
 
+@c(_CTFontCopyPostScriptName)
+public func CTFontCopyPostScriptName(_ font: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    CTFonts.font(font).flatMap { $0.fontName().objCOwnedReturnValue() }
+}
+
 @c(_CTFontCopyFullName)
 public func CTFontCopyFullName(_ font: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     CTFonts.font(font).flatMap { $0.fontName().objCOwnedReturnValue() }
