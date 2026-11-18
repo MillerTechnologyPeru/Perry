@@ -413,11 +413,14 @@ extension NSWindowController {
 
     func loadWindowNib() {
         guard let name = windowNibName else { return }
-        guard let found = Nibs.find(name, bundle: nil) else {
+        let owner = windowNibOwner.map(NSObject.init) ?? self
+        // The nib in the bundle of the owner's class (a framework's window
+        // controllers keep theirs there), else in the app's, as AppKit looks.
+        let ownerBundle = NSBundle.bundle(forClass: ObjCRuntime.objectClass(owner.objcObject))
+        guard let found = ownerBundle.flatMap({ Nibs.find(name, bundle: $0) }) ?? Nibs.find(name, bundle: nil) else {
             appKitWarning("NSWindowController: no nib \(name)")
             return
         }
-        let owner = windowNibOwner.map(NSObject.init) ?? self
         let objects = Nibs.instantiate(found.archive, owner: owner, bundlePath: found.directory)
         Nibs.kept += objects
         // A nib owned by a document (or another object) names its window in
