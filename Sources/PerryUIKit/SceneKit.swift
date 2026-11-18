@@ -35,6 +35,9 @@ final class SCNMaterialPropertyState: ObjectState {
     var wrapS = 1, wrapT = 1
     /// Which set of texture coordinates the picture is laid out by.
     var mappingChannel = 0
+    /// SCNFilterMode: none 0, nearest 1, linear 2. Kept; pictures are drawn smoothed.
+    var minificationFilter = 2, magnificationFilter = 2, mipFilter = 0
+    var maxAnisotropy: CGFloat = 1
     deinit { ObjCRuntime.release(contents) }
 }
 
@@ -64,6 +67,14 @@ open class SCNMaterialProperty: NSObject {
     @ObjCMethod("setWrapS:") func setWrapS(_ mode: Int) { property.wrapS = mode }
     @ObjCMethod("wrapT") func wrapT() -> Int { property.wrapT }
     @ObjCMethod("setWrapT:") func setWrapT(_ mode: Int) { property.wrapT = mode }
+    @ObjCMethod("minificationFilter") func minificationFilter() -> Int { property.minificationFilter }
+    @ObjCMethod("setMinificationFilter:") func setMinificationFilter(_ mode: Int) { property.minificationFilter = mode }
+    @ObjCMethod("magnificationFilter") func magnificationFilter() -> Int { property.magnificationFilter }
+    @ObjCMethod("setMagnificationFilter:") func setMagnificationFilter(_ mode: Int) { property.magnificationFilter = mode }
+    @ObjCMethod("mipFilter") func mipFilter() -> Int { property.mipFilter }
+    @ObjCMethod("setMipFilter:") func setMipFilter(_ mode: Int) { property.mipFilter = mode }
+    @ObjCMethod("maxAnisotropy") func maxAnisotropy() -> CGFloat { property.maxAnisotropy }
+    @ObjCMethod("setMaxAnisotropy:") func setMaxAnisotropy(_ value: CGFloat) { property.maxAnisotropy = value }
 }
 
 // MARK: - Light
@@ -253,11 +264,15 @@ struct SCNMesh {
 }
 
 final class SCNGeometryState: ObjectState {
-    enum Kind { case box, sphere, plane, cylinder, cone, custom }
+    enum Kind { case box, sphere, plane, floor, cylinder, cone, tube, torus, custom }
     var kind = Kind.box
     var width: CGFloat = 1, height: CGFloat = 1, length: CGFloat = 1
     var radius: CGFloat = 0.5, topRadius: CGFloat = 0, bottomRadius: CGFloat = 0.5
-    var segments = 48
+    /// A tube's inner radius (its outer one is `radius`), and a torus's pipe's (its ring's is `radius`).
+    var innerRadius: CGFloat = 0.25, pipeRadius: CGFloat = 0.25
+    var segments = 48, pipeSegments = 24
+    /// Numbers a shape keeps that nothing draws by yet (a floor's reflections).
+    var extras: [String: Double] = [:]
     /// A geometry read from a scene file: its own triangles.
     var custom = SCNMesh()
     var materials: [NSObject] = []
@@ -289,6 +304,7 @@ open class SCNGeometry: NSObject {
     @ObjCMethod("dealloc")
     func dealloc() {
         SCNGeometry.states.remove(objcObject)
+        SCNKept.geometries.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNGeometry.objCClass.pointer)
     }
 
@@ -412,6 +428,105 @@ open class SCNCylinder: SCNGeometry {
     }
 }
 
+/// A floor: the plane of x and z, as far as it is drawn, facing up. With no width or length it has no end;
+/// what it would mirror is not drawn.
+@ObjCClass("SCNFloor")
+open class SCNFloor: SCNGeometry {
+    @ObjCClassMethod("floor")
+    static func floor(_ cls: ObjCClass) -> SCNFloor {
+        let made = cls.object.allocated().unsafeCast(to: SCNFloor.self)
+        made.geometry.kind = .floor
+        (made.geometry.width, made.geometry.length) = (0, 0)
+        return made
+    }
+
+    @ObjCMethod("init") override func initialize() -> Self {
+        geometry.kind = .floor
+        (geometry.width, geometry.length) = (0, 0)
+        return self
+    }
+    @ObjCMethod("width") func width() -> CGFloat { geometry.width }
+    @ObjCMethod("setWidth:") func setWidth(_ width: CGFloat) { geometry.width = width; geometry.revision += 1 }
+    @ObjCMethod("length") func length() -> CGFloat { geometry.length }
+    @ObjCMethod("setLength:") func setLength(_ length: CGFloat) { geometry.length = length; geometry.revision += 1 }
+    @ObjCMethod("reflectivity") func reflectivity() -> CGFloat { CGFloat(geometry.extras["reflectivity"] ?? 0.25) }
+    @ObjCMethod("setReflectivity:") func setReflectivity(_ value: CGFloat) { geometry.extras["reflectivity"] = Double(value) }
+    @ObjCMethod("reflectionFalloffStart") func reflectionFalloffStart() -> CGFloat { CGFloat(geometry.extras["falloffStart"] ?? 0) }
+    @ObjCMethod("setReflectionFalloffStart:") func setReflectionFalloffStart(_ value: CGFloat) {
+        geometry.extras["falloffStart"] = Double(value)
+    }
+    @ObjCMethod("reflectionFalloffEnd") func reflectionFalloffEnd() -> CGFloat { CGFloat(geometry.extras["falloffEnd"] ?? 0) }
+    @ObjCMethod("setReflectionFalloffEnd:") func setReflectionFalloffEnd(_ value: CGFloat) {
+        geometry.extras["falloffEnd"] = Double(value)
+    }
+    @ObjCMethod("reflectionResolutionScaleFactor") func reflectionResolutionScaleFactor() -> CGFloat {
+        CGFloat(geometry.extras["resolutionScale"] ?? 0.5)
+    }
+    @ObjCMethod("setReflectionResolutionScaleFactor:") func setReflectionResolutionScaleFactor(_ value: CGFloat) {
+        geometry.extras["resolutionScale"] = Double(value)
+    }
+    @ObjCMethod("reflectionCategoryBitMask") func reflectionCategoryBitMask() -> Int { Int(geometry.extras["reflectionMask"] ?? -1) }
+    @ObjCMethod("setReflectionCategoryBitMask:") func setReflectionCategoryBitMask(_ mask: Int) {
+        geometry.extras["reflectionMask"] = Double(mask)
+    }
+}
+
+@ObjCClass("SCNTube")
+open class SCNTube: SCNGeometry {
+    @ObjCClassMethod("tubeWithInnerRadius:outerRadius:height:")
+    static func tube(_ cls: ObjCClass, innerRadius: CGFloat, outerRadius: CGFloat, height: CGFloat) -> SCNTube {
+        let made = cls.object.allocated().unsafeCast(to: SCNTube.self)
+        made.geometry.kind = .tube
+        made.geometry.innerRadius = innerRadius
+        made.geometry.radius = outerRadius
+        made.geometry.height = height
+        return made
+    }
+
+    @ObjCMethod("init") override func initialize() -> Self { geometry.kind = .tube; return self }
+    @ObjCMethod("innerRadius") func innerRadius() -> CGFloat { geometry.innerRadius }
+    @ObjCMethod("setInnerRadius:") func setInnerRadius(_ radius: CGFloat) { geometry.innerRadius = radius; geometry.revision += 1 }
+    @ObjCMethod("outerRadius") func outerRadius() -> CGFloat { geometry.radius }
+    @ObjCMethod("setOuterRadius:") func setOuterRadius(_ radius: CGFloat) { geometry.radius = radius; geometry.revision += 1 }
+    @ObjCMethod("height") func height() -> CGFloat { geometry.height }
+    @ObjCMethod("setHeight:") func setHeight(_ height: CGFloat) { geometry.height = height; geometry.revision += 1 }
+    @ObjCMethod("radialSegmentCount") func radialSegmentCount() -> Int { geometry.segments }
+    @ObjCMethod("setRadialSegmentCount:") func setRadialSegmentCount(_ count: Int) {
+        geometry.segments = min(max(count, 3), 96)
+        geometry.revision += 1
+    }
+    @ObjCMethod("heightSegmentCount") func heightSegmentCount() -> Int { 1 }
+    @ObjCMethod("setHeightSegmentCount:") func setHeightSegmentCount(_ count: Int) {}
+}
+
+@ObjCClass("SCNTorus")
+open class SCNTorus: SCNGeometry {
+    @ObjCClassMethod("torusWithRingRadius:pipeRadius:")
+    static func torus(_ cls: ObjCClass, ringRadius: CGFloat, pipeRadius: CGFloat) -> SCNTorus {
+        let made = cls.object.allocated().unsafeCast(to: SCNTorus.self)
+        made.geometry.kind = .torus
+        made.geometry.radius = ringRadius
+        made.geometry.pipeRadius = pipeRadius
+        return made
+    }
+
+    @ObjCMethod("init") override func initialize() -> Self { geometry.kind = .torus; return self }
+    @ObjCMethod("ringRadius") func ringRadius() -> CGFloat { geometry.radius }
+    @ObjCMethod("setRingRadius:") func setRingRadius(_ radius: CGFloat) { geometry.radius = radius; geometry.revision += 1 }
+    @ObjCMethod("pipeRadius") func pipeRadius() -> CGFloat { geometry.pipeRadius }
+    @ObjCMethod("setPipeRadius:") func setPipeRadius(_ radius: CGFloat) { geometry.pipeRadius = radius; geometry.revision += 1 }
+    @ObjCMethod("ringSegmentCount") func ringSegmentCount() -> Int { geometry.segments }
+    @ObjCMethod("setRingSegmentCount:") func setRingSegmentCount(_ count: Int) {
+        geometry.segments = min(max(count, 3), 96)
+        geometry.revision += 1
+    }
+    @ObjCMethod("pipeSegmentCount") func pipeSegmentCount() -> Int { geometry.pipeSegments }
+    @ObjCMethod("setPipeSegmentCount:") func setPipeSegmentCount(_ count: Int) {
+        geometry.pipeSegments = min(max(count, 3), 96)
+        geometry.revision += 1
+    }
+}
+
 @ObjCClass("SCNCone")
 open class SCNCone: SCNGeometry {
     @ObjCClassMethod("coneWithTopRadius:bottomRadius:height:")
@@ -465,6 +580,8 @@ final class SCNNodeState: ObjectState {
     /// Animation players by key, with the keys in the order they were added.
     var animationPlayers: [String: NSObject] = [:]
     var animationKeys: [String] = []
+    /// A paused node's actions and animations, and those of the nodes below it, wait.
+    var paused = false
 
     /// The node's transform within its parent: translation, rotation and
     /// scale, then the pivot undone.
@@ -484,6 +601,7 @@ open class SCNNode: NSObject {
     func dealloc() {
         for child in node.children { SCNNode.nodeStates.existing(child.objcObject)?.parent = nil }
         SCNNode.nodeStates.remove(objcObject)
+        SCNKept.nodes.remove(objcObject)
         SCNExtras.nodes.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: SCNNode.objCClass.pointer)
     }
@@ -638,6 +756,8 @@ open class SCNNode: NSObject {
 final class SCNSceneState: ObjectState {
     var root: SCNNode?
     var background: SCNMaterialProperty?
+    /// A paused scene's actions, animations and physics wait.
+    var paused = false
 }
 
 @ObjCClass("SCNScene")
@@ -667,6 +787,9 @@ open class SCNScene: NSObject {
     static func scene(_ cls: ObjCClass, url: NSObject, options: NSObject?, error: UnsafeMutableRawPointer?) -> SCNScene? {
         url.scnPath().flatMap { SCNFile.scene(atPath: $0) }
     }
+
+    @ObjCMethod("isPaused") func isPaused() -> Bool { scene.paused }
+    @ObjCMethod("setPaused:") func setPaused(_ paused: Bool) { scene.paused = paused }
 
     @ObjCMethod("rootNode")
     func rootNode() -> SCNNode {
@@ -831,12 +954,15 @@ open class SCNView: UIView {
         scn.lastFrame = now
         SCNTimers.process(now: now)
         send("renderer:updateAtTime:") { $0.scnSendRenderer(self, updateAtTime: time) }
-        SCNActions.advance(scene.rootNode(), elapsed)
-        SCNAnimations.advance(scene.rootNode(), elapsed)
+        let paused = scene.scene.paused
+        if !paused {
+            SCNActions.advance(scene.rootNode(), elapsed)
+            SCNAnimations.advance(scene.rootNode(), elapsed)
+        }
         send("renderer:didApplyAnimationsAtTime:") { $0.scnSendRenderer(self, didApplyAnimationsAtTime: time) }
         send("renderer:didSimulatePhysicsAtTime:") { $0.scnSendRenderer(self, didSimulatePhysicsAtTime: time) }
         let camera = scn.pointOfView?.world
-        SCNCollision.step(scene)
+        if !paused { SCNCollision.step(scene) }
         SCNConstraints.apply(scene.rootNode(), elapsed: elapsed, cameraPosition: camera.map { SCNVector3(x: $0[12], y: $0[13], z: $0[14]) })
         if let delegate, delegate.responds(to: "renderer:willRenderScene:atTime:") {
             delegate.scnSendRenderer(self, willRenderScene: scene, atTime: time)
