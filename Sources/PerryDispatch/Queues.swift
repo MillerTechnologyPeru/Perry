@@ -47,6 +47,7 @@ enum DrainPool {
     }
 
     static func run<Result>(_ body: () -> Result) -> Result {
+        perry_dispatch_hold_thread_state()
         let state = state()
         let start = now()
         if state.pool != nil, start - state.touched > gap || start - state.born > limit {

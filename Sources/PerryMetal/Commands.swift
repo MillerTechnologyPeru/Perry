@@ -197,6 +197,16 @@ open class MTLCommandBuffer: NSObject, MTLCommandBufferProtocol {
         return Errors.make(MetalConstants.MTLCommandBufferErrorDomain, 1, String(cString: message))
     }
 
+    /// The event is at the value once the commands before this are done:
+    /// here, once the whole command buffer is.
+    @ObjCMethod("encodeSignalEvent:value:") func encodeSignal(event: MTLSharedEvent?, value: UInt64) {
+        guard let event else { return }
+        onCompletion { event.signal(value) }
+    }
+
+    /// The commands after this are not held back for the event.
+    @ObjCMethod("encodeWaitForEvent:value:") func encodeWait(event: MTLSharedEvent?, value: UInt64) {}
+
     @ObjCMethod("addScheduledHandler:") func addScheduledHandler(_ block: ObjCBlock?) {
         guard let block else { return }
         addHandler(block, scheduled: true)
@@ -461,8 +471,20 @@ open class MTLComputeCommandEncoder: NSObject, MTLComputeCommandEncoderProtocol 
         }
     }
 
-    /// Resources are tracked by the runtime as Metal's are.
-    @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {}
+    /// What a function reaches through an argument buffer is made resident.
+    @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {
+        guard let resource, let use = M2V.api.compute_encoder_use_resource else { return }
+        let buffer = resource.is(MTLBuffer.self) ? resource.unsafeCast(to: MTLBuffer.self).handle : nil
+        let texture = resource.is(MTLTexture.self) ? resource.unsafeCast(to: MTLTexture.self).handle : nil
+        guard buffer != nil || texture != nil else { return }
+        commandBuffer?.keep(resource)
+        encode("useResource:usage:") { use($0, buffer, texture, UInt32(usage), $1) }
+    }
+
+    @ObjCMethod("useResources:count:usage:")
+    func useResources(_ resources: UnsafePointer<UnsafeMutableRawPointer?>?, count: UInt, usage: UInt) {
+        for i in 0..<Int(count) { useResource(resources?[i].map { NSObject($0) }, usage: usage) }
+    }
     @ObjCMethod("memoryBarrierWithScope:") func memoryBarrier(scope: UInt) {
         encode("memoryBarrierWithScope:") { M2V.api.compute_encoder_memory_barrier($0, UInt64(scope), $1) }
     }

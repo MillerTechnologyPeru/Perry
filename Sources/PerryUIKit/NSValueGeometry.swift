@@ -64,6 +64,12 @@ extension NSValueObject {
     static func value(_ cls: ObjCClass, transform: CGAffineTransform) -> NSObject { box(cls, transform, Encodings.transform) }
     @ObjCClassMethod("valueWithUIEdgeInsets:")
     static func value(_ cls: ObjCClass, insets: UIEdgeInsets) -> NSObject { box(cls, insets, Encodings.insets) }
+    // NSDirectionalEdgeInsets are four CGFloats, as UIEdgeInsets are
+    // (leading is left): they travel as those.
+    @ObjCClassMethod("valueWithDirectionalEdgeInsets:")
+    static func value(_ cls: ObjCClass, directionalInsets: UIEdgeInsets) -> NSObject { box(cls, directionalInsets, Encodings.insets) }
+    @ObjCMethod("directionalEdgeInsetsValue")
+    func directionalInsetsValue() -> UIEdgeInsets { unbox(self, UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)) }
 
     // A CGVector is two CGFloats, as a CGPoint is: it travels as one. (The
     // macro does not see members under #if, so the 64-bit encodings are used on

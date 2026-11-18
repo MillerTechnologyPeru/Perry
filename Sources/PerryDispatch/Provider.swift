@@ -83,6 +83,13 @@ func providerDidStart(_ info: perry_startup_info) {
     Queues.register(main: perry_main_q())
     Logging.setUp()
     MainQueue.start()
+    // Linux's libdispatch cleans up after a thread once the thread's
+    // autorelease pools are drained, not before (CPerryDispatch/threads.c).
+    if perry_dispatch_hold_thread_states(), let lookup = info.lookup_symbol,
+       let setHook = libobjc.withCString({ library in "perry_objc_set_pool_thread_hook".withCString { lookup(library, $0) } }) {
+        typealias SetHook = @convention(c) ((@convention(c) () -> Void)?) -> Void
+        unsafeBitCast(setHook, to: SetHook.self)(perry_dispatch_hold_thread_state)
+    }
 }
 
 /// Reports a client error the way libdispatch's crashes read, and aborts.

@@ -702,6 +702,15 @@ open class UIView: UIResponder, UICoordinateSpace {
     }
 
     @ObjCMethod("tintColorDidChange") func tintColorDidChange() {}
+    /// UIViewTintAdjustmentMode: the tint is never dimmed, so normal (1).
+    @ObjCMethod("tintAdjustmentMode") func tintAdjustmentMode() -> Int { 1 }
+    @ObjCMethod("setTintAdjustmentMode:") func setTintAdjustmentMode(_ mode: Int) {}
+    // The content size category is the same everywhere, so its limits
+    // are kept as said and change nothing.
+    @ObjCMethod("minimumContentSizeCategory") func minimumContentSizeCategory() -> String? { nil }
+    @ObjCMethod("setMinimumContentSizeCategory:") func setMinimumContentSizeCategory(_ category: String?) {}
+    @ObjCMethod("maximumContentSizeCategory") func maximumContentSizeCategory() -> String? { nil }
+    @ObjCMethod("setMaximumContentSizeCategory:") func setMaximumContentSizeCategory(_ category: String?) {}
     @ObjCMethod("tag") func tag() -> Int { state.tag }
     @ObjCMethod("setTag:") func setTag(_ tag: Int) { state.tag = tag }
     @ObjCMethod("isUserInteractionEnabled") func isUserInteractionEnabled() -> Bool { state.userInteractionEnabled }
@@ -1174,6 +1183,10 @@ open class UIView: UIResponder, UICoordinateSpace {
             addGestureRecognizer(recognizer)
         }
     }
+
+    /// A view lets the recognizers attached to it begin; a subclass that
+    /// has its own answer sends this to super for the others.
+    @ObjCMethod("gestureRecognizerShouldBegin:") func gestureRecognizerShouldBegin(_ recognizer: NSObject?) -> Bool { true }
 
     @ObjCMethod("addGestureRecognizer:")
     func addGestureRecognizer(_ recognizer: UIGestureRecognizer?) {

@@ -115,6 +115,12 @@ public func objc_autoreleasePoolPop(_ token: UnsafeMutableRawPointer?) {
     AutoreleasePool.pop(token)
 }
 
+/// A provider's hook for threads that use pools (AutoreleasePool.threadHook).
+@c(perry_objc_set_pool_thread_hook)
+public func perry_objc_set_pool_thread_hook(_ hook: (@convention(c) () -> Void)?) {
+    AutoreleasePool.threadHook = hook
+}
+
 // The pool functions' names in Darwin's private API, which the Swift
 // runtime calls.
 @c(__objc_autoreleasePoolPush)

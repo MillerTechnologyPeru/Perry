@@ -444,6 +444,17 @@ public func CMSampleBufferSetDataBufferFromAudioBufferList(_ buffer: UnsafeMutab
     SampleBuffer.states[buffer] == nil ? 0 : 1
 }
 
+/// The largest rectangle of the aspect ratio that fits in the bounding
+/// one, centered in it.
+@c(_AVMakeRectWithAspectRatioInsideRect)
+public func AVMakeRectWithAspectRatioInsideRect(_ aspectRatio: CGSize, _ bounding: CGRect) -> CGRect {
+    guard aspectRatio.width > 0, aspectRatio.height > 0, bounding.size.width > 0, bounding.size.height > 0 else { return bounding }
+    let scale = min(bounding.size.width / aspectRatio.width, bounding.size.height / aspectRatio.height)
+    let size = CGSize(width: aspectRatio.width * scale, height: aspectRatio.height * scale)
+    return CGRect(origin: CGPoint(x: bounding.origin.x + (bounding.size.width - size.width) / 2,
+                                  y: bounding.origin.y + (bounding.size.height - size.height) / 2), size: size)
+}
+
 @ObjCConstants
 enum CoreMediaConstants {
     static let kCMFormatDescriptionExtension_Depth = "Depth"

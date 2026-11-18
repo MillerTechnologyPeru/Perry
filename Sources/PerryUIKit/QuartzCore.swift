@@ -35,6 +35,8 @@ class CALayer: NSObject {
     @ObjCMethod("mask") func mask() -> NSObject?
     @ObjCMethod("presentationLayer") func presentationLayer() -> CALayer?
     @ObjCMethod("setCornerRadius:") func setCornerRadius(_ radius: CGFloat)
+    @ObjCMethod("setBorderWidth:") func setBorderWidth(_ width: CGFloat)
+    @ObjCMethod("setBorderColor:") func setBorderColor(_ color: UnsafeMutableRawPointer?)
     @ObjCMethod("setZPosition:") func setZPosition(_ z: CGFloat)
     @ObjCMethod("backgroundColor") func backgroundColor() -> UnsafeMutableRawPointer?
     @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: UnsafeMutableRawPointer?)

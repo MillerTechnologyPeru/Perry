@@ -253,6 +253,13 @@ int perry_format_double(char *buffer, unsigned long size, const char *spec, doub
 const char *perry_dispatch_program_name(void);
 int perry_dispatch_thread_id(void);
 
+// Thread exit (threads.c): finds libdispatch's key for its thread state, and
+// makes this library's; false if there is nothing to hold. Then, on a
+// thread, takes libdispatch's state for it into keeping until the thread's
+// other destructors have run.
+bool perry_dispatch_hold_thread_states(void);
+void perry_dispatch_hold_thread_state(void);
+
 // DISPATCH_SOURCE_TYPE_*: only their addresses matter.
 enum perry_dispatch_source_kind {
     PERRY_SOURCE_DATA_ADD, PERRY_SOURCE_DATA_OR, PERRY_SOURCE_DATA_REPLACE, PERRY_SOURCE_MACH_SEND,

@@ -594,6 +594,10 @@ open class UITapGestureRecognizer: UIGestureRecognizer {
 open class UILongPressGestureRecognizer: UIGestureRecognizer {
     @ObjCMethod("minimumPressDuration") func minimumPressDuration() -> Double { 0.5 }
     @ObjCMethod("setMinimumPressDuration:") func setMinimumPressDuration(_ duration: Double) {}
+    // Kept as asked: a long press is one touch held, however it is set up.
+    @ObjCMethod("setNumberOfTapsRequired:") func setNumberOfTapsRequired(_ taps: UInt) {}
+    @ObjCMethod("allowableMovement") func allowableMovement() -> CGFloat { 10 }
+    @ObjCMethod("setAllowableMovement:") func setAllowableMovement(_ movement: CGFloat) {}
 }
 
 @ObjCClass("UISwipeGestureRecognizer")

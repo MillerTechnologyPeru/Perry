@@ -8,7 +8,7 @@
 // object an opaque handle, freed by its release; a call that can fail takes
 // `char **error` last, stores a message that string_free frees, and returns
 // NULL, false or -1. Version 2 adds rendering, 3 vertex attribute reflection, 4 compute
-// textures and samplers, 9 function constant values.
+// textures and samplers, 9 function constant values, 10 argument buffers.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -224,6 +224,16 @@ typedef struct perry_m2v_function_constant_value {
 } perry_m2v_function_constant_value;
 typedef void (*perry_m2v_handler)(void *context);
 
+/// One MTLArgumentDescriptor, its enums as Metal's raw values. Version 10.
+typedef struct perry_m2v_argument_descriptor {
+    uint32_t data_type;
+    uint32_t index;
+    uint32_t array_length;
+    uint32_t access;
+    uint32_t texture_type;
+    uint32_t constant_block_alignment;
+} perry_m2v_argument_descriptor;
+
 /// libmetal2vulkan.so's functions.
 typedef struct perry_m2v {
     void (* _Nonnull string_free)(char *);
@@ -382,6 +392,38 @@ typedef struct perry_m2v {
     bool (* _Nonnull compute_encoder_dispatch_threadgroups_indirect)(perry_m2v_handle, perry_m2v_handle, uint64_t, MTLSize,
                                                                        perry_m2v_error);
     bool (* _Nonnull compute_encoder_set_sampler_state)(perry_m2v_handle, perry_m2v_handle, uint32_t, perry_m2v_error);
+
+    // Version 10: argument buffers. NULL in a library of version 9, which
+    // makes no argument encoders.
+    perry_m2v_handle (* _Nullable device_new_argument_encoder_with_arguments)(perry_m2v_handle,
+                                                                              const perry_m2v_argument_descriptor *,
+                                                                              size_t, perry_m2v_error);
+    perry_m2v_handle (* _Nullable function_new_argument_encoder_with_buffer_index)(perry_m2v_handle, uint32_t,
+                                                                                   perry_m2v_error);
+    perry_m2v_handle (* _Nullable argument_encoder_new_for_buffer_at_index)(perry_m2v_handle, uint32_t, perry_m2v_error);
+    void (* _Nullable argument_encoder_release)(perry_m2v_handle);
+    uint64_t (* _Nullable argument_encoder_encoded_length)(perry_m2v_handle);
+    uint64_t (* _Nullable argument_encoder_alignment)(perry_m2v_handle);
+    bool (* _Nullable argument_encoder_set_argument_buffer)(perry_m2v_handle, perry_m2v_handle buffer, uint64_t offset,
+                                                            perry_m2v_error);
+    bool (* _Nullable argument_encoder_set_argument_buffer_array_element)(perry_m2v_handle, perry_m2v_handle buffer,
+                                                                          uint64_t start_offset, uint64_t element,
+                                                                          perry_m2v_error);
+    bool (* _Nullable argument_encoder_set_buffer)(perry_m2v_handle, perry_m2v_handle buffer, uint64_t offset,
+                                                   uint32_t index, perry_m2v_error);
+    bool (* _Nullable argument_encoder_set_texture)(perry_m2v_handle, perry_m2v_handle texture, uint32_t index,
+                                                    perry_m2v_error);
+    bool (* _Nullable argument_encoder_set_sampler_state)(perry_m2v_handle, perry_m2v_handle sampler, uint32_t index,
+                                                          perry_m2v_error);
+    void *_Nullable (* _Nullable argument_encoder_constant_data)(perry_m2v_handle, uint32_t index, perry_m2v_error);
+    uint64_t (* _Nullable buffer_gpu_address)(perry_m2v_handle);
+    uint64_t (* _Nullable texture_gpu_resource_id)(perry_m2v_handle);
+    uint64_t (* _Nullable sampler_state_gpu_resource_id)(perry_m2v_handle);
+    /// useResource:usage:stages: for a buffer or a texture, the other NULL.
+    bool (* _Nullable render_encoder_use_resource)(perry_m2v_handle, perry_m2v_handle buffer, perry_m2v_handle texture,
+                                                   uint32_t usage, uint32_t stages, perry_m2v_error);
+    bool (* _Nullable compute_encoder_use_resource)(perry_m2v_handle, perry_m2v_handle buffer, perry_m2v_handle texture,
+                                                    uint32_t usage, perry_m2v_error);
 } perry_m2v;
 
 /// Opens libmetal2vulkan.so the first time: PERRY_METAL2VULKAN's path, else

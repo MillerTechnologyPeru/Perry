@@ -12,7 +12,9 @@ import PerryObjCInterop
 // A pixel buffer is made into an OpenGL ES texture through a texture
 // cache, as on iOS, where the texture shares the buffer's memory: here the
 // pixels are uploaded to a new texture, in the context current on the
-// calling thread, each time one is made. There are no Metal textures.
+// calling thread, each time one is made. A Metal texture is made the same
+// way: a new texture of the cache's device, with the buffer's pixels where
+// they are four bytes each as the texture's are.
 
 // MARK: - Pixel buffers
 
@@ -105,6 +107,31 @@ public func CVPixelBufferCreate(_ allocator: UnsafeRawPointer?, _ width: Int, _ 
 @c(_CVPixelBufferGetBaseAddress) public func CVPixelBufferGetBaseAddress(_ buffer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     PixelBuffer.states[buffer]?.bytes
 }
+// A buffer is one plane: asked for a plane's, it gives its own.
+@c(_CVPixelBufferGetWidthOfPlane) public func CVPixelBufferGetWidthOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> Int {
+    PixelBuffer.states[buffer]?.width ?? 0
+}
+@c(_CVPixelBufferGetHeightOfPlane) public func CVPixelBufferGetHeightOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> Int {
+    PixelBuffer.states[buffer]?.height ?? 0
+}
+@c(_CVPixelBufferGetBytesPerRowOfPlane) public func CVPixelBufferGetBytesPerRowOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> Int {
+    (PixelBuffer.states[buffer]?.width ?? 0) * 4
+}
+@c(_CVPixelBufferGetBaseAddressOfPlane)
+public func CVPixelBufferGetBaseAddressOfPlane(_ buffer: UnsafeMutableRawPointer?, _ plane: Int) -> UnsafeMutableRawPointer? {
+    plane == 0 ? PixelBuffer.states[buffer]?.bytes : nil
+}
+
+// Buffers keep no attachments.
+@c(_CVBufferGetAttachment)
+public func CVBufferGetAttachment(_ buffer: UnsafeMutableRawPointer?, _ key: UnsafeRawPointer?, _ mode: UnsafeMutablePointer<UInt32>?) -> UnsafeMutableRawPointer? {
+    nil
+}
+@c(_CVBufferGetAttachments)
+public func CVBufferGetAttachments(_ buffer: UnsafeMutableRawPointer?, _ mode: UInt32) -> UnsafeMutableRawPointer? { nil }
+@c(_CVBufferSetAttachments)
+public func CVBufferSetAttachments(_ buffer: UnsafeMutableRawPointer?, _ attachments: UnsafeRawPointer?, _ mode: UInt32) {}
+
 @c(_CVPixelBufferIsPlanar) public func CVPixelBufferIsPlanar(_ buffer: UnsafeMutableRawPointer?) -> UInt8 { 0 }
 @c(_CVPixelBufferGetPlaneCount) public func CVPixelBufferGetPlaneCount(_ buffer: UnsafeMutableRawPointer?) -> Int { 0 }
 /// The memory is the buffer's own, there whether locked or not.
@@ -280,37 +307,181 @@ public func CVOpenGLESTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawP
 /// A frame's first row is its top one.
 @c(_CVOpenGLESTextureIsFlipped) public func CVOpenGLESTextureIsFlipped(_ texture: UnsafeMutableRawPointer?) -> UInt8 { 1 }
 
-// Metal textures. A cache is made for a device, as a renderer makes one when
-// it starts (Filament's Metal driver stops without it); no texture is made of
-// a pixel buffer yet, so a frame of video shown through one is not drawn.
+// MARK: - Pixel buffer pools
 
-/// A Metal texture cache, which keeps nothing.
+final class PixelBufferPoolState {
+    var width = 0
+    var height = 0
+    var format: UInt32 = PixelBuffer.bgra
+}
+
+/// A pool of pixel buffers of one size and format. It keeps none itself:
+/// buffers' memory is kept to be used again wherever they are made.
+@ObjCClass("__PerryCVPixelBufferPool")
+open class PixelBufferPool: NSObject {
+    static let states = StateTable<PixelBufferPoolState>()
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        PixelBufferPool.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: PixelBufferPool.objCClass.pointer)
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("objectForKey:") func sendPixelBufferAttribute(forKey key: String) -> NSObject?
+    @ObjCMethod("integerValue") func sendPixelBufferInteger() -> Int
+    @ObjCMethod("newTextureWithDescriptor:") func sendNewTexture(descriptor: NSObject) -> NSObject?
+}
+
+/// The pool's buffers are of the width, height and format the attributes
+/// give.
+@c(_CVPixelBufferPoolCreate)
+public func CVPixelBufferPoolCreate(_ allocator: UnsafeRawPointer?, _ poolAttributes: UnsafeMutableRawPointer?,
+                                    _ pixelBufferAttributes: UnsafeMutableRawPointer?,
+                                    _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let out else { return cvInvalidArgument }
+    out.pointee = nil
+    let attributes = pixelBufferAttributes.map { NSObject($0) }
+    let state = PixelBufferPoolState()
+    state.width = attributes?.sendPixelBufferAttribute(forKey: "Width")?.sendPixelBufferInteger() ?? 0
+    state.height = attributes?.sendPixelBufferAttribute(forKey: "Height")?.sendPixelBufferInteger() ?? 0
+    if let format = attributes?.sendPixelBufferAttribute(forKey: "PixelFormatType")?.sendPixelBufferInteger() {
+        state.format = UInt32(truncatingIfNeeded: format)
+    }
+    let pool = NSObject(PixelBufferPool.objCClass.pointer).newInstance()
+    PixelBufferPool.states.set(pool.objcObject, state)
+    _ = ObjCRuntime.retain(pool.objcObject)
+    out.pointee = pool.objcObject
+    return cvSuccess
+}
+
+@c(_CVPixelBufferPoolCreatePixelBuffer)
+public func CVPixelBufferPoolCreatePixelBuffer(_ allocator: UnsafeRawPointer?, _ pool: UnsafeMutableRawPointer?,
+                                               _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let out else { return cvInvalidArgument }
+    out.pointee = nil
+    guard let state = PixelBufferPool.states[pool] else { return cvInvalidArgument }
+    return CVPixelBufferCreate(allocator, state.width, state.height, state.format, nil, out)
+}
+
+@c(_CVPixelBufferPoolFlush) public func CVPixelBufferPoolFlush(_ pool: UnsafeMutableRawPointer?, _ options: UInt64) {}
+@c(_CVPixelBufferPoolRetain) public func CVPixelBufferPoolRetain(_ pool: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    if let pool { _ = ObjCRuntime.retain(pool) }
+    return pool
+}
+@c(_CVPixelBufferPoolRelease) public func CVPixelBufferPoolRelease(_ pool: UnsafeMutableRawPointer?) {
+    if let pool { ObjCRuntime.release(pool) }
+}
+
+// MARK: - Metal textures
+
+final class MetalTextureCacheState {
+    /// The device the cache's textures are made by.
+    var device: NSObject?
+}
+
+/// A Metal texture cache, which keeps its device and no textures.
 @ObjCClass("__PerryCVMetalTextureCache")
 open class MetalTextureCache: NSObject {
+    static let states = StateTable<MetalTextureCacheState>()
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        MetalTextureCache.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: MetalTextureCache.objCClass.pointer)
+    }
+}
+
+final class MetalTextureState {
+    var texture: NSObject?
+}
+
+/// A CVMetalTexture: the Metal texture made of a pixel buffer.
+@ObjCClass("__PerryCVMetalTexture")
+open class MetalTexture: NSObject {
+    static let states = StateTable<MetalTextureState>()
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        MetalTexture.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: MetalTexture.objCClass.pointer)
+    }
+}
+
+@ObjCWrapper("MTLTextureDescriptor")
+class MetalTextureDescriptor: NSObject {
+    @ObjCClassMethod("texture2DDescriptorWithPixelFormat:width:height:mipmapped:")
+    static func texture2D(pixelFormat: UInt, width: UInt, height: UInt, mipmapped: Bool) -> MetalTextureDescriptor
 }
 
 @c(_CVMetalTextureCacheCreate)
-public func CVMetalTextureCacheCreate(_ allocator: UnsafeRawPointer?, _ cacheAttributes: UnsafeRawPointer?, _ device: UnsafeRawPointer?,
+public func CVMetalTextureCacheCreate(_ allocator: UnsafeRawPointer?, _ cacheAttributes: UnsafeRawPointer?, _ device: UnsafeMutableRawPointer?,
                                       _ textureAttributes: UnsafeRawPointer?, _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
     guard let out else { return cvInvalidArgument }
     out.pointee = nil
-    guard device != nil else { return cvInvalidArgument }
+    guard let device else { return cvInvalidArgument }
     let cache = NSObject(MetalTextureCache.objCClass.pointer).newInstance()
+    let state = MetalTextureCacheState()
+    state.device = NSObject(device)
+    MetalTextureCache.states.set(cache.objcObject, state)
     _ = ObjCRuntime.retain(cache.objcObject)
     out.pointee = cache.objcObject
     return cvSuccess
 }
 
+/// The pixels go to the whole of a texture's first level: an MTLRegion is
+/// six words, which the call takes by reference on 64-bit ARM and as six
+/// arguments on 32-bit.
+private func replaceTexture(_ texture: NSObject, width: Int, height: Int, bytes: UnsafeRawPointer, bytesPerRow: Int) {
+    let selector = ObjCSelector("replaceRegion:mipmapLevel:withBytes:bytesPerRow:")
+    #if arch(arm64)
+    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeRawPointer, UInt, UnsafeRawPointer?, UInt) -> Void
+    var region: (UInt, UInt, UInt, UInt, UInt, UInt) = (0, 0, 0, UInt(width), UInt(height), 1)
+    withUnsafeBytes(of: &region) {
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(texture.objcObject, selector.pointer, $0.baseAddress!, 0, bytes, UInt(bytesPerRow))
+    }
+    #else
+    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt, UInt, UInt, UInt, UInt, UInt, UInt, UnsafeRawPointer?,
+                                     UInt) -> Void
+    unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(texture.objcObject, selector.pointer, 0, 0, 0, UInt(width), UInt(height), 1, 0, bytes,
+                                                      UInt(bytesPerRow))
+    #endif
+}
+
+/// A new texture of the format and size asked for, with the buffer's
+/// pixels when they are the texture's size and four bytes each as its
+/// format's are (MTLPixelFormat RGBA8 70, 71 and BGRA8 80, 81); otherwise
+/// the texture is left as it is made.
 @c(_CVMetalTextureCacheCreateTextureFromImage)
-public func CVMetalTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawPointer?, _ cache: UnsafeRawPointer?, _ image: UnsafeRawPointer?,
-                                                      _ attributes: UnsafeRawPointer?, _ format: UInt, _ width: Int, _ height: Int,
-                                                      _ planeIndex: Int, _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
-    out?.pointee = nil
-    return cvError
+public func CVMetalTextureCacheCreateTextureFromImage(_ allocator: UnsafeRawPointer?, _ cache: UnsafeMutableRawPointer?,
+                                                      _ image: UnsafeMutableRawPointer?, _ attributes: UnsafeRawPointer?, _ format: UInt,
+                                                      _ width: Int, _ height: Int, _ planeIndex: Int,
+                                                      _ out: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let out else { return cvInvalidArgument }
+    out.pointee = nil
+    guard let device = MetalTextureCache.states[cache]?.device, width > 0, height > 0 else { return cvInvalidArgument }
+    let descriptor = MetalTextureDescriptor.texture2D(pixelFormat: format, width: UInt(width), height: UInt(height), mipmapped: false)
+    guard let texture = device.sendNewTexture(descriptor: descriptor) else { return cvAllocationFailed }
+    if let pixels = PixelBuffer.states[image], let bytes = pixels.bytes, planeIndex == 0, pixels.width == width, pixels.height == height,
+       [70, 71, 80, 81].contains(format) {
+        replaceTexture(texture, width: width, height: height, bytes: bytes, bytesPerRow: width * 4)
+    }
+    let made = NSObject(MetalTexture.objCClass.pointer).newInstance()
+    let state = MetalTextureState()
+    state.texture = texture
+    MetalTexture.states.set(made.objcObject, state)
+    _ = ObjCRuntime.retain(made.objcObject)
+    out.pointee = made.objcObject
+    return cvSuccess
 }
 
 @c(_CVMetalTextureCacheFlush) public func CVMetalTextureCacheFlush(_ cache: UnsafeRawPointer?, _ options: UInt64) {}
-@c(_CVMetalTextureGetTexture) public func CVMetalTextureGetTexture(_ texture: UnsafeRawPointer?) -> UnsafeMutableRawPointer? { nil }
+@c(_CVMetalTextureGetTexture) public func CVMetalTextureGetTexture(_ texture: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    MetalTexture.states[texture]?.texture?.objcObject
+}
+/// The pixels' top row is the texture's first, as Metal has it: not flipped.
+@c(_CVMetalTextureIsFlipped) public func CVMetalTextureIsFlipped(_ texture: UnsafeMutableRawPointer?) -> UInt8 { 0 }
 
 // MARK: - AVPlayerItemVideoOutput
 

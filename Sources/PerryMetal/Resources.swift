@@ -50,7 +50,8 @@ open class MTLBuffer: NSObject, MTLBufferProtocol {
     @ObjCMethod("storageMode") func storageMode() -> UInt { (options >> 4) & 0xf }
     @ObjCMethod("hazardTrackingMode") func hazardTrackingMode() -> UInt { (options >> 8) & 0x3 }
     @ObjCMethod("allocatedSize") func allocatedSize() -> UInt { length() }
-    @ObjCMethod("gpuAddress") func gpuAddress() -> UInt64 { 0 }
+    /// What a program writes for the buffer in an argument buffer.
+    @ObjCMethod("gpuAddress") func gpuAddress() -> UInt64 { M2V.api.buffer_gpu_address?(handle) ?? 0 }
 
     @ObjCMethod("didModifyRange:") func didModifyRange(_ range: PerryRange) {
         let (_, message) = M2V.call {
@@ -260,6 +261,19 @@ open class MTLFunction: NSObject, MTLFunctionProtocol {
     @ObjCMethod("label") func getLabel() -> String? { label }
     @ObjCMethod("setLabel:") func setLabel(_ label: String?) { self.label = label }
     @ObjCMethod("name") func name() -> String { M2V.api.function_name(handle).map { String(cString: $0) } ?? "" }
+
+    /// An encoder of the argument buffer the function takes at a buffer index.
+    @ObjCMethod("newArgumentEncoderWithBufferIndex:")
+    func newArgumentEncoder(bufferIndex: UInt) -> MTLArgumentEncoder? {
+        let (encoder, message) = M2V.call {
+            M2V.api.function_new_argument_encoder_with_buffer_index?(handle, UInt32(bufferIndex), $0) ?? nil
+        }
+        guard let encoder else {
+            metalWarning("newArgumentEncoderWithBufferIndex: \(bufferIndex): \(message ?? "not in this metal2vulkan")")
+            return nil
+        }
+        return MTLArgumentEncoder(handle: encoder, device: owner)
+    }
     /// MTLFunctionType.
     @ObjCMethod("functionType") func functionType() -> UInt { UInt(M2V.api.function_type(handle)) }
     @ObjCMethod("options") func options() -> UInt { 0 }

@@ -706,16 +706,23 @@ public enum AutoreleasePool {
         return key
     }()
 
+    /// Called on a thread when its pools are first used and whenever it
+    /// starts one: libdispatch's provider's, which keeps Linux's libdispatch
+    /// from cleaning up after the thread before the pools here are drained.
+    nonisolated(unsafe) public static var threadHook: (@convention(c) () -> Void)?
+
     static var current: Stack {
         if let pointer = pthread_getspecific(key) {
             return Unmanaged<Stack>.fromOpaque(pointer).takeUnretainedValue()
         }
+        threadHook?()
         let stack = Stack()
         pthread_setspecific(key, Unmanaged.passRetained(stack).toOpaque())
         return stack
     }
 
     public static func push() -> UnsafeMutableRawPointer {
+        threadHook?()
         let stack = current
         stack.objects.append(nil)
         return UnsafeMutableRawPointer(bitPattern: stack.objects.count)!

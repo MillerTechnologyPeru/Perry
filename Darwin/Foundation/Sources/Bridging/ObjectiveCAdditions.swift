@@ -1,5 +1,5 @@
 // Parts of Darwin's Foundation overlay that programs built against it call
-// and swift-foundation leaves to Apple's build: literals for NSArray,
+// and swift-foundation leaves to Apple's build: literals for NSArray, NSSet,
 // NSDictionary, NSString and NSDecimal, key-value observation by key path, a scanner's
 // and a string's conveniences, and searching a Data.
 
@@ -30,6 +30,13 @@ extension NSDictionary: ExpressibleByDictionaryLiteral {
 }
 
 extension NSOrderedSet: ExpressibleByArrayLiteral {
+    public required convenience init(arrayLiteral elements: Any...) {
+        self.init(array: elements)
+    }
+}
+
+extension NSSet: ExpressibleByArrayLiteral {
+    /// A set of the elements, each bridged.
     public required convenience init(arrayLiteral elements: Any...) {
         self.init(array: elements)
     }

@@ -11,8 +11,10 @@
 // libmetal2vulkan.so, opened the first time Metal is asked for a device and
 // kept for the life of the process.
 
-/// The ABI these declarations are of.
-#define ABI_VERSION 9
+/// The ABI these declarations are of, and the oldest that still serves:
+/// what a later version adds is bound where the library has it.
+#define ABI_VERSION 10
+#define ABI_VERSION_OLDEST 9
 
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static perry_m2v table;
@@ -51,9 +53,10 @@ static void load(void) {
     if (!library)
         return;
     uint32_t (*abi_version)(void) = (uint32_t (*)(void))dlsym(library, "m2v_abi_version");
-    if (!abi_version || abi_version() != ABI_VERSION) {
-        snprintf(error, sizeof(error), "libmetal2vulkan.so has ABI version %u; Perry needs %u",
-                 abi_version ? abi_version() : 0, ABI_VERSION);
+    uint32_t version = abi_version ? abi_version() : 0;
+    if (version < ABI_VERSION_OLDEST || version > ABI_VERSION) {
+        snprintf(error, sizeof(error), "libmetal2vulkan.so has ABI version %u; Perry needs %u to %u", version,
+                 ABI_VERSION_OLDEST, ABI_VERSION);
         return;
     }
 #define BIND(name)                                                                                   \
@@ -168,6 +171,28 @@ static void load(void) {
     BIND(compute_encoder_dispatch_threadgroups_indirect)
     BIND(compute_encoder_set_sampler_state)
 #undef BIND
+    // Version 10's, which a version 9 library leaves NULL.
+#define BIND_FROM(since, name)                                                                       \
+    if (version >= since)                                                                            \
+        *(void **)&table.name = dlsym(library, "m2v_" #name);
+    BIND_FROM(10, device_new_argument_encoder_with_arguments)
+    BIND_FROM(10, function_new_argument_encoder_with_buffer_index)
+    BIND_FROM(10, argument_encoder_new_for_buffer_at_index)
+    BIND_FROM(10, argument_encoder_release)
+    BIND_FROM(10, argument_encoder_encoded_length)
+    BIND_FROM(10, argument_encoder_alignment)
+    BIND_FROM(10, argument_encoder_set_argument_buffer)
+    BIND_FROM(10, argument_encoder_set_argument_buffer_array_element)
+    BIND_FROM(10, argument_encoder_set_buffer)
+    BIND_FROM(10, argument_encoder_set_texture)
+    BIND_FROM(10, argument_encoder_set_sampler_state)
+    BIND_FROM(10, argument_encoder_constant_data)
+    BIND_FROM(10, buffer_gpu_address)
+    BIND_FROM(10, texture_gpu_resource_id)
+    BIND_FROM(10, sampler_state_gpu_resource_id)
+    BIND_FROM(10, render_encoder_use_resource)
+    BIND_FROM(10, compute_encoder_use_resource)
+#undef BIND_FROM
     loaded = &table;
 }
 

@@ -159,6 +159,10 @@ public func nw_path_is_expensive(_ path: UnsafeMutableRawPointer?) -> Bool { fal
 @c(_nw_path_is_constrained)
 public func nw_path_is_constrained(_ path: UnsafeMutableRawPointer?) -> Bool { false }
 
+/// No path is in the mode that asks for the least data either.
+@c(_nw_path_is_ultra_constrained)
+public func nw_path_is_ultra_constrained(_ path: UnsafeMutableRawPointer?) -> Bool { false }
+
 @c(_nw_path_has_ipv4)
 public func nw_path_has_ipv4(_ path: UnsafeMutableRawPointer?) -> Bool { NWPathObject.states[path]?.status == 1 }
 
