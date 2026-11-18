@@ -228,8 +228,11 @@ OSStatus darwin_AudioComponentGetDescription(const void *c, AudioComponentDescri
 
 OSStatus darwin_AudioComponentGetVersion(const void *c, uint32_t *version) DARWIN_SYMBOL(AudioComponentGetVersion);
 OSStatus darwin_AudioComponentGetVersion(const void *c, uint32_t *version) {
-    if (!valid_component(c) || !version) return kAudio_ParamError;
-    *version = 0x10000;
+    const component *found = valid_component(c);
+    if (!found || !version) return kAudio_ParamError;
+    // The 3D mixer's version past 2.0, which games check for before they
+    // use its distance and reverb (Miles asks for more than 0x1ffff).
+    *version = found->kind == MIXER_3D ? 0x20100 : 0x10000;
     return 0;
 }
 
