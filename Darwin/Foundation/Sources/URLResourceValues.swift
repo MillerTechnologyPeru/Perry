@@ -113,6 +113,15 @@ public struct URLResourceValues {
     }
 
     /// True if the resource should be excluded from backups.
+    /// Whether the user may not change the resource.
+    public var isUserImmutable: Bool? {
+        get { value(.isUserImmutableKey) }
+        set { set(.isUserImmutableKey, newValue) }
+    }
+
+    /// When the resource was added to its directory; not recorded here.
+    public var addedToDirectoryDate: Date? { value(.addedToDirectoryDateKey) }
+
     public var isExcludedFromBackup: Bool? {
         get { value(.isExcludedFromBackupKey) }
         set { set(.isExcludedFromBackupKey, newValue) }
