@@ -220,6 +220,9 @@ open class NSSavePanel: NSPanel {
 
     @ObjCMethod("URL") func url() -> NSObject? { chosen.first.flatMap { NSURL.make(fileURLWithPath: $0) } }
     @ObjCMethod("filename") func filename() -> String? { chosen.first }
+    /// Every path chosen, which AppKit's save panels answer too (one, or
+    /// none): Xcode 3 asks any panel for these before -filename.
+    @ObjCMethod("filenames") func filenames() -> NSObject { NSMutableArray.of(chosen.map { NSObject(objCReturnValue: $0.objCReturnValue()) }) }
     @ObjCMethod("directory") func directory() -> String? { directoryPath ?? defaultDirectory }
     @ObjCMethod("setDirectory:") func setDirectory(_ path: String?) { directoryPath = path }
     @ObjCMethod("directoryURL") func panelDirectoryURL() -> NSObject? { directory().flatMap { NSURL.make(fileURLWithPath: $0) } }
@@ -276,7 +279,6 @@ open class NSOpenPanel: NSSavePanel {
     override var allowsMultiple: Bool { allowsMultipleSelection }
 
     @ObjCMethod("URLs") func urls() -> NSObject { NSMutableArray.of(chosen.compactMap { NSURL.make(fileURLWithPath: $0) }) }
-    @ObjCMethod("filenames") func filenames() -> NSObject { NSMutableArray.of(chosen.map { NSObject(objCReturnValue: $0.objCReturnValue()) }) }
     @ObjCMethod("canChooseFiles") func panelCanChooseFiles() -> Bool { canChooseFiles }
     @ObjCMethod("setCanChooseFiles:") func setCanChooseFiles(_ value: Bool) { canChooseFiles = value }
     @ObjCMethod("canChooseDirectories") func panelCanChooseDirectories() -> Bool { canChooseDirectories }
