@@ -172,6 +172,55 @@ open class UIBezierPath: NSObject {
         state.replacePath(copy)
     }
 
+    /// The same outline drawn the other way: each subpath from its last
+    /// point back to its first, the subpaths in the reverse order.
+    @ObjCMethod("bezierPathByReversingPath")
+    func reversing() -> UIBezierPath {
+        UIBezierPath.reversalElements = []
+        CG.pathApply(state.path, nil) { _, element in
+            guard let element else { return }
+            let type = element.load(as: Int32.self)
+            let points = element.load(fromByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafePointer<CGPoint>?.self)
+            let count = [0: 1, 1: 1, 2: 2, 3: 3][type] ?? 0
+            UIBezierPath.reversalElements.append((type, points.map { points in (0..<count).map { points[$0] } } ?? []))
+        }
+        let elements = UIBezierPath.reversalElements
+        UIBezierPath.reversalElements = []
+        // Subpaths: where each starts, the segments that follow, and whether it closes.
+        var subpaths: [(start: CGPoint, segments: [[CGPoint]], closed: Bool)] = []
+        for element in elements {
+            switch element.type {
+            case 0: subpaths.append((element.points[0], [], false))
+            case 4: if !subpaths.isEmpty { subpaths[subpaths.count - 1].closed = true }
+            default:
+                if subpaths.isEmpty || subpaths[subpaths.count - 1].closed {
+                    subpaths.append((subpaths.last?.start ?? .zero, [], false))
+                }
+                subpaths[subpaths.count - 1].segments.append(element.points)
+            }
+        }
+        let reversed = UIBezierPath.make(objCClass) { path in
+            for subpath in subpaths.reversed() {
+                // Each segment's end point, then back along it to the end of the one before.
+                var ends = [subpath.start] + subpath.segments.map { $0[$0.count - 1] }
+                CG.pathMoveToPoint(path, nil, ends[ends.count - 1].x, ends[ends.count - 1].y)
+                for segment in subpath.segments.reversed() {
+                    ends.removeLast()
+                    let to = ends[ends.count - 1]
+                    switch segment.count {
+                    case 2: CG.pathAddQuadCurveToPoint(path, nil, segment[0].x, segment[0].y, to.x, to.y)
+                    case 3: CG.pathAddCurveToPoint(path, nil, segment[1].x, segment[1].y, segment[0].x, segment[0].y, to.x, to.y)
+                    default: CG.pathAddLineToPoint(path, nil, to.x, to.y)
+                    }
+                }
+                if subpath.closed { CG.pathCloseSubpath(path) }
+            }
+        }
+        reversed.state.copyAttributes(from: state)
+        return reversed
+    }
+    nonisolated(unsafe) private static var reversalElements: [(type: Int32, points: [CGPoint])] = []
+
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
         let copy = UIBezierPath.make(objCClass) { CG.pathAddPath($0, nil, state.path) }
