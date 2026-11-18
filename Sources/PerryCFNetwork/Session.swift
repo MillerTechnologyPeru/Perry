@@ -345,7 +345,7 @@ open class NSURLSessionTask: NSObject {
     @ObjCMethod("resume") func resume() {
         // PERRY_URL_TRACE: each task as it starts, so ones that never finish show.
         if getenv("PERRY_URL_TRACE") != nil {
-            let line = "perry: URL[\(time(nil) % 1000)]: start \(task?.originalRequest?.method ?? "GET") \(task?.originalRequest?.url?.absoluteString ?? "?")\n"
+            let line = "perry: URL[\(time(nil) % 1000)]: start \(task?.originalRequest?.method ?? "GET") \(task?.originalRequest?.url?.absoluteString ?? "?") (timeout \(task?.originalRequest?.timeout ?? -1))\n"
             _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
         }
         task?.resume()
