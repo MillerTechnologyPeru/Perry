@@ -290,6 +290,16 @@ public final class NSMapTable: NSObject {
     @ObjCClassMethod("weakToWeakObjectsMapTable")
     static func weakToWeak(_ cls: ObjCClass) -> UnsafeMutableRawPointer { MapTables.make(keys: 5, values: 5, cls: cls.pointer) }
 
+    // Mac OS X 10.5's names for them.
+    @ObjCClassMethod("mapTableWithStrongToStrongObjects")
+    static func strongToStrongLegacy(_ cls: ObjCClass) -> UnsafeMutableRawPointer { MapTables.make(keys: 0, values: 0, cls: cls.pointer) }
+    @ObjCClassMethod("mapTableWithStrongToWeakObjects")
+    static func strongToWeakLegacy(_ cls: ObjCClass) -> UnsafeMutableRawPointer { MapTables.make(keys: 0, values: 5, cls: cls.pointer) }
+    @ObjCClassMethod("mapTableWithWeakToStrongObjects")
+    static func weakToStrongLegacy(_ cls: ObjCClass) -> UnsafeMutableRawPointer { MapTables.make(keys: 5, values: 0, cls: cls.pointer) }
+    @ObjCClassMethod("mapTableWithWeakToWeakObjects")
+    static func weakToWeakLegacy(_ cls: ObjCClass) -> UnsafeMutableRawPointer { MapTables.make(keys: 5, values: 5, cls: cls.pointer) }
+
     @ObjCMethod("init")
     func initialize() -> Self { initialize(keyOptions: 0, valueOptions: 0, capacity: 0) }
 
