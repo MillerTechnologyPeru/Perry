@@ -405,7 +405,8 @@ open class UIGestureRecognizer: NSObject {
     @ObjCMethod("setState:")
     func setRecognizerState(_ newState: Int) {
         if getenv("PERRY_UIKIT_TOUCH_TRACE") != nil {
-            let line = "perry: UIKit: touch: recognizer \(objcObject) state \(state.state) -> \(newState)\n"
+            let actions = state.targets.map { ObjCSelector($0.action).name }
+            let line = "perry: UIKit: touch: recognizer \(objcObject) state \(state.state) -> \(newState), actions \(actions)\n"
             line.withCString { _ = write(2, $0, strlen($0)) }
         }
         let old = state.state
