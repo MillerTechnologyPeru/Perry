@@ -94,6 +94,76 @@ enum KeyBindings {
         insert(receiver, text: text)
         return true
     }
+
+    /// The bindings above as StandardKeyBinding.dict writes them: a key's
+    /// character, after ^ for control, ~ for option, $ for shift and @ for
+    /// command, to the command's selector.
+    static let standard: [(key: String, command: String)] = {
+        let (up, down, left, right) = ("\u{F700}", "\u{F701}", "\u{F702}", "\u{F703}")
+        let (forwardDelete, home, end, pageUp, pageDown) = ("\u{F728}", "\u{F729}", "\u{F72B}", "\u{F72C}", "\u{F72D}")
+        var bindings: [(String, String)] = [
+            ("\r", "insertNewline:"), ("\u{3}", "insertNewline:"), ("~\r", "insertNewlineIgnoringFieldEditor:"),
+            ("\t", "insertTab:"), ("$\t", "insertBacktab:"), ("\u{19}", "insertBacktab:"),
+            ("\u{7F}", "deleteBackward:"), ("~\u{7F}", "deleteWordBackward:"), ("@\u{7F}", "deleteToBeginningOfLine:"),
+            (forwardDelete, "deleteForward:"), ("~" + forwardDelete, "deleteWordForward:"),
+            ("\u{1B}", "cancelOperation:"),
+            (home, "scrollToBeginningOfDocument:"), ("$" + home, "moveToBeginningOfDocumentAndModifySelection:"),
+            (end, "scrollToEndOfDocument:"), ("$" + end, "moveToEndOfDocumentAndModifySelection:"),
+            (pageUp, "scrollPageUp:"), ("$" + pageUp, "pageUpAndModifySelection:"),
+            (pageDown, "scrollPageDown:"), ("$" + pageDown, "pageDownAndModifySelection:"),
+            ("^a", "moveToBeginningOfParagraph:"), ("^e", "moveToEndOfParagraph:"), ("^f", "moveForward:"),
+            ("^b", "moveBackward:"), ("^n", "moveDown:"), ("^p", "moveUp:"), ("^d", "deleteForward:"),
+            ("^h", "deleteBackward:"), ("^k", "deleteToEndOfParagraph:"), ("^y", "yank:"), ("^t", "transpose:"),
+            ("^l", "centerSelectionInVisibleArea:"),
+        ]
+        // Arrows, which select with shift.
+        for (key, plain, option, command) in [(left, "moveLeft", "moveWordLeft", "moveToBeginningOfLine"),
+                                              (right, "moveRight", "moveWordRight", "moveToEndOfLine"),
+                                              (up, "moveUp", "moveToBeginningOfParagraph", "moveToBeginningOfDocument"),
+                                              (down, "moveDown", "moveToEndOfParagraph", "moveToEndOfDocument")] {
+            for (prefix, name) in [("", plain), ("~", option), ("@", command)] {
+                bindings.append((prefix + key, name + ":"))
+                bindings.append((prefix + "$" + key, name + "AndModifySelection:"))
+            }
+        }
+        return bindings
+    }()
+}
+
+/// The text system's key bindings, AppKit's private keeper of them, which
+/// Xcode 3 reads to start its own text key bindings from.
+@ObjCClass("NSKeyBindingManager")
+open class NSKeyBindingManager: NSObject {
+    nonisolated(unsafe) static var shared: NSKeyBindingManager?
+    var bindings: NSMutableDictionary?
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCClassMethod("sharedKeyBindingManager")
+    static func sharedKeyBindingManager() -> NSKeyBindingManager {
+        if let shared { return shared }
+        let manager = NSKeyBindingManager()
+        shared = manager
+        return manager
+    }
+
+    /// The bindings, from key to selector name.
+    @ObjCMethod("dictionary")
+    func dictionary() -> NSMutableDictionary {
+        if let bindings { return bindings }
+        let made = NSMutableDictionary.empty()
+        for (key, command) in KeyBindings.standard {
+            made.set(NSObject(objCReturnValue: command.objCReturnValue()), forKey: key)
+        }
+        bindings = made
+        return made
+    }
+
+    @ObjCMethod("setDictionary:")
+    func setDictionary(_ dictionary: NSObject?) {
+        bindings = dictionary?.as(NSMutableDictionary.self)
+    }
 }
 
 /// The input context of a view that adopts NSTextInputClient.
