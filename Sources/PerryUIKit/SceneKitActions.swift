@@ -328,8 +328,14 @@ final class SCNRunner {
             }
         case .rotateEuler(let v, let by, let shortest):
             if by {
-                let now = SCNMath.euler(n.rotation)
-                n.rotation = SCNMath.quaternion(euler: SCNVector3(x: now.x + v.x * step, y: now.y + v.y * step, z: now.z + v.z * step))
+                // Each angle's turn added: about x from outside, about y and z from inside, which is the angles' sums
+                // for a node that is not rolled. (Read back, angles past a quarter turn come as others.)
+                let dx = SCNMath.quaternion(axis: SCNVector3(x: 1, y: 0, z: 0), angle: v.x * step)
+                let dy = SCNMath.quaternion(axis: SCNVector3(x: 0, y: 1, z: 0), angle: v.y * step)
+                let dz = SCNMath.quaternion(axis: SCNVector3(x: 0, y: 0, z: 1), angle: v.z * step)
+                n.rotation = SCNMath.normalized(SCNMath.multiply(SCNMath.multiply(SCNMath.multiply(dx, n.rotation), dy), dz))
+            } else if shortest {
+                n.rotation = SCNMath.slerp(startRotation, SCNMath.quaternion(euler: v), p)
             } else {
                 func delta(_ target: Float, _ from: Float) -> Float {
                     var d = target - from
