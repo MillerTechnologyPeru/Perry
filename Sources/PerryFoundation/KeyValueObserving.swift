@@ -81,6 +81,15 @@ enum KeyValueObserving {
     nonisolated(unsafe) static var observances: [id: [Observance]] = [:]
     nonisolated(unsafe) static var pending: [Pending] = []
 
+    /// PERRY_KVO_TRACE: each registration added and removed.
+    static let tracing = getenv("PERRY_KVO_TRACE") != nil
+
+    static func trace(_ message: @autoclosure () -> String) {
+        guard tracing else { return }
+        let line = "perry: KVO: \(message())\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+    }
+
     static func locked<T>(_ body: () -> T) -> T {
         pthread_mutex_lock(lock)
         defer { pthread_mutex_unlock(lock) }
@@ -310,6 +319,7 @@ extension NSObject {
     @ObjCMethod("addObserver:forKeyPath:options:context:")
     func addObserver(_ observer: ObjCObject?, forKeyPath keyPath: String, options: UInt, context: UnsafeMutableRawPointer?) {
         guard let observer else { return }
+        KeyValueObserving.trace("add \(objcObject) \(ObjC.className(objcObject)) key \(keyPath) observer \(observer.objcObject) context \(String(describing: context))")
         let observance = Observance(observer: observer.objcObject, keyPath: keyPath, options: options, context: context)
         KeyValueObserving.add(observance, to: objcObject)
         if options & KeyValueObserving.optionInitial != 0 {
@@ -322,6 +332,7 @@ extension NSObject {
     /// The newest matching registration.
     private func removeObservance(_ observer: ObjCObject?, _ keyPath: String, matching context: UnsafeMutableRawPointer??) {
         let object = objcObject
+        KeyValueObserving.trace("remove \(object) \(ObjC.className(object)) key \(keyPath) observer \(String(describing: observer?.objcObject)) context \(String(describing: context))")
         let found = KeyValueObserving.locked {
             KeyValueObserving.observances[object]?.last { observance in
                 observance.observer == observer?.objcObject && observance.keyPath == keyPath

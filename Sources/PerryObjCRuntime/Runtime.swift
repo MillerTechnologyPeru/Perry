@@ -1,5 +1,6 @@
 import CPerryObjC
 import Glibc
+import Synchronization
 
 /// Classes, method lookup and +initialize.
 public enum Runtime {
@@ -485,7 +486,11 @@ extension Runtime {
     /// a class made at run time (KVO's) must still have. nil for a class that is
     /// not Swift's, or whose metadata has no more than the ObjC class.
     private static func swiftSubclassStorage(_ superclass: ClassPointer?, extraBytes: Int) -> UnsafeMutablePointer<perry_objc_class>? {
-        guard let superclass, superclass.pointee.bits & 3 != 0 else { return nil }
+        // A Swift class, or a class made here from one (a subclass of that, as KVO
+        // makes, still has the tail to copy).
+        guard let superclass, superclass.pointee.bits & 3 != 0 || tailBearing.withLock({ $0.contains(UInt(bitPattern: superclass)) }) else {
+            return nil
+        }
         let base = UnsafeMutableRawPointer(superclass)
         // ClassMetadata: classSize and classAddressPoint, after the flags,
         // instance address point and size, alignment mask and reserved words.
@@ -500,8 +505,13 @@ extension Runtime {
               classSize < 1 << 20 else { return nil }
         let storage = calloc(1, classSize + max(extraBytes, 0))!
         memcpy(storage, base - addressPoint, classSize)
-        return (storage + addressPoint).assumingMemoryBound(to: perry_objc_class.self)
+        let made = (storage + addressPoint).assumingMemoryBound(to: perry_objc_class.self)
+        tailBearing.withLock { _ = $0.insert(UInt(bitPattern: made)) }
+        return made
     }
+
+    /// The classes made here with a copy of a Swift class's metadata, by address.
+    private static let tailBearing = Mutex<Set<UInt>>([])
 
     public static func initializeClassPair(superclass: ClassPointer?, name: UnsafePointer<CChar>,
                                            cls: ClassPointer, metaclass: ClassPointer) -> ClassPointer {

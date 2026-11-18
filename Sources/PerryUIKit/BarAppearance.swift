@@ -34,12 +34,30 @@ open class UIBarAppearance: NSObject {
         return object
     }
 
-    @ObjCMethod("init") func initialize() -> Self { self }
+    /// As UIKit's: -init is -initWithIdiom: of the unspecified idiom, so that a subclass's
+    /// override (LNPopupBarAppearance's, which observes its own properties) runs.
+    @ObjCMethod("init")
+    func initialize() -> Self {
+        _ = sendInitWithIdiom(-1)
+        return self
+    }
 
     @ObjCMethod("initWithIdiom:")
     func initialize(idiom: Int) -> Self {
         barState.numbers["idiom"] = Double(idiom)
         return self
+    }
+
+    /// UIKit's private change observer, set by key (LNPopupBarAppearance's children
+    /// get its own); a block is copied, an object retained. Kept, never called.
+    @ObjCMethod("changeObserver") func changeObserver() -> NSObject? { barState.objects["changeObserver"] }
+
+    @ObjCMethod("setChangeObserver:")
+    func setChangeObserver(_ observer: NSObject?) {
+        guard let observer else { barState.objects["changeObserver"] = nil; return }
+        let isBlock = observer.responds(to: "invoke")
+        let kept = isBlock ? ObjCRuntime.functions.retainBlock(observer.objcObject) : ObjCRuntime.retain(observer.objcObject)
+        barState.objects["changeObserver"] = kept.map { NSObject($0) }
     }
 
     @ObjCMethod("initWithBarAppearance:")
@@ -202,4 +220,8 @@ open class UITabBarItemAppearance: UIBarAppearance {
     @ObjCMethod("selected") func selected() -> NSObject { lazy("selected", UITabBarItemStateAppearance.objCClass) }
     @ObjCMethod("disabled") func disabled() -> NSObject { lazy("disabled", UITabBarItemStateAppearance.objCClass) }
     @ObjCMethod("focused") func focused() -> NSObject { lazy("focused", UITabBarItemStateAppearance.objCClass) }
+}
+
+extension NSObject {
+    @ObjCMethod("initWithIdiom:") func sendInitWithIdiom(_ idiom: Int) -> NSObject?
 }
