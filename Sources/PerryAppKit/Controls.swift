@@ -9,8 +9,8 @@ import SDL3Swift
 // released over them, toggling their state first when they show one; text
 // fields take keys while they are the first responder and tell their
 // delegate as their text changes. NSAlert shows its message in an SDL
-// message box (and on stderr) and answers with its first button; save and
-// open panels answer Cancel.
+// message box (and on stderr) and answers with its first button. Save and
+// open panels are in FilePanels.swift.
 
 @ObjCClass("NSControl")
 open class NSControl: NSView {
@@ -856,59 +856,4 @@ open class NSAlert: NSObject {
     func beginSheetModal(for window: NSObject?, modalDelegate: NSObject?, didEndSelector: ObjCSelector?, contextInfo: UnsafeMutableRawPointer?) {
         _ = runModal()
     }
-}
-
-/// NSSavePanel and NSOpenPanel: there is no file browser; they answer
-/// Cancel (NSModalResponseCancel, 0) with no URL.
-@ObjCClass("NSSavePanel")
-open class NSSavePanel: NSPanel {
-    var directoryURL: NSObject?
-    var nameFieldStringValue = ""
-    var message = ""
-    var prompt = ""
-    var accessory: NSObject?
-
-    @ObjCClassMethod("savePanel")
-    static func savePanel() -> NSSavePanel { NSSavePanel(contentRect: CGRect(x: 0, y: 0, width: 480, height: 320), styleMask: 3, backing: 2, defer: true) }
-
-    @ObjCMethod("runModal")
-    func runModal() -> Int {
-        appKitWarning("\(type(of: self).objCClassName): no file browser here; answering Cancel")
-        return 0
-    }
-    @ObjCMethod("beginSheetModalForWindow:completionHandler:")
-    func beginSheetModal(for window: NSObject?, completionHandler: ObjCBlock?) {
-        _ = runModal()
-        if let completionHandler { Dispatch.onMain { Blocks.call(completionHandler, 0) } }
-    }
-    @ObjCMethod("beginWithCompletionHandler:")
-    func begin(completionHandler: ObjCBlock?) { beginSheetModal(for: nil, completionHandler: completionHandler) }
-    @ObjCMethod("URL") func url() -> NSObject? { nil }
-    @ObjCMethod("directoryURL") func panelDirectoryURL() -> NSObject? { directoryURL }
-    @ObjCMethod("setDirectoryURL:") func setDirectoryURL(_ url: NSObject?) { directoryURL = url }
-    @ObjCMethod("nameFieldStringValue") func panelNameFieldStringValue() -> String { nameFieldStringValue }
-    @ObjCMethod("setNameFieldStringValue:") func setNameFieldStringValue(_ value: String?) { nameFieldStringValue = value ?? "" }
-    @ObjCMethod("setMessage:") func setMessage(_ message: String?) { self.message = message ?? "" }
-    @ObjCMethod("setPrompt:") func setPrompt(_ prompt: String?) { self.prompt = prompt ?? "" }
-    @ObjCMethod("setAllowedFileTypes:") func setAllowedFileTypes(_ types: NSObject?) {}
-    @ObjCMethod("setAllowedContentTypes:") func setAllowedContentTypes(_ types: NSObject?) {}
-    @ObjCMethod("setAllowsOtherFileTypes:") func setAllowsOtherFileTypes(_ value: Bool) {}
-    @ObjCMethod("setCanCreateDirectories:") func setCanCreateDirectories(_ value: Bool) {}
-    @ObjCMethod("setShowsHiddenFiles:") func setShowsHiddenFiles(_ value: Bool) {}
-    @ObjCMethod("setExtensionHidden:") func setExtensionHidden(_ value: Bool) {}
-    @ObjCMethod("setTreatsFilePackagesAsDirectories:") func setTreatsFilePackagesAsDirectories(_ value: Bool) {}
-    @ObjCMethod("accessoryView") func panelAccessoryView() -> NSObject? { accessory }
-    @ObjCMethod("setAccessoryView:") func setAccessoryView(_ view: NSObject?) { accessory = view }
-}
-
-@ObjCClass("NSOpenPanel")
-open class NSOpenPanel: NSSavePanel {
-    @ObjCClassMethod("openPanel")
-    static func openPanel() -> NSOpenPanel { NSOpenPanel(contentRect: CGRect(x: 0, y: 0, width: 480, height: 320), styleMask: 3, backing: 2, defer: true) }
-
-    @ObjCMethod("URLs") func urls() -> NSObject { NSMutableArray.empty() }
-    @ObjCMethod("setCanChooseFiles:") func setCanChooseFiles(_ value: Bool) {}
-    @ObjCMethod("setCanChooseDirectories:") func setCanChooseDirectories(_ value: Bool) {}
-    @ObjCMethod("setAllowsMultipleSelection:") func setAllowsMultipleSelection(_ value: Bool) {}
-    @ObjCMethod("setResolvesAliases:") func setResolvesAliases(_ value: Bool) {}
 }
