@@ -684,6 +684,13 @@ enum Outlets {
         let setter = "set" + first.uppercased() + key.dropFirst() + ":"
         if object.responds(to: setter) {
             Send.void(object.objcObject, setter, value?.objcObject)
+        } else if let offset = instanceVariableOffset(object, key) ?? instanceVariableOffset(object, "_" + key) {
+            // Stored in the variable itself, as AppKit's nib loading did,
+            // not through -setValue:forKey:, which some classes take for
+            // their own (Xcode 3's assistant pages keep settings by it).
+            // Retained, as key-value coding would have.
+            let slot = object.objcObject.advanced(by: offset).assumingMemoryBound(to: UnsafeMutableRawPointer?.self)
+            slot.pointee = value.flatMap { ObjCRuntime.retain($0.objcObject) }
         } else if hasInstanceVariable(object, key) || hasInstanceVariable(object, "_" + key) {
             object.sendSetValue(value, forKey: key)
         } else {
@@ -695,6 +702,24 @@ enum Outlets {
     typealias GetInstanceVariable = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?
     nonisolated(unsafe) static let getInstanceVariable = Symbols.symbol("/usr/lib/libobjc.A.dylib", "_class_getInstanceVariable")
         .map { unsafeBitCast($0, to: GetInstanceVariable.self) }
+
+    typealias GetOffset = @convention(c) (UnsafeMutableRawPointer?) -> Int
+    nonisolated(unsafe) static let getOffset = Symbols.symbol("/usr/lib/libobjc.A.dylib", "_ivar_getOffset")
+        .map { unsafeBitCast($0, to: GetOffset.self) }
+
+    typealias GetTypeEncoding = @convention(c) (UnsafeMutableRawPointer?) -> UnsafePointer<CChar>?
+    nonisolated(unsafe) static let getTypeEncoding = Symbols.symbol("/usr/lib/libobjc.A.dylib", "_ivar_getTypeEncoding")
+        .map { unsafeBitCast($0, to: GetTypeEncoding.self) }
+
+    /// Where the object keeps the object instance variable named `name`, if
+    /// it has one.
+    static func instanceVariableOffset(_ object: NSObject, _ name: String) -> Int? {
+        guard let getInstanceVariable, let getOffset, let getTypeEncoding,
+              let ivar = name.withCString({ getInstanceVariable(ObjCRuntime.objectClass(object.objcObject), $0) }),
+              getTypeEncoding(ivar)?.pointee == CChar(bitPattern: UInt8(ascii: "@")) else { return nil }
+        let offset = getOffset(ivar)
+        return offset > 0 ? offset : nil
+    }
 
     static func hasInstanceVariable(_ object: NSObject, _ name: String) -> Bool {
         guard let getInstanceVariable else { return true }
@@ -1001,9 +1026,19 @@ extension NSBundle {
         NSNib(nibNamed: name, bundle: self).instantiate(owner: owner, topLevelObjects: topLevelObjects)
     }
 
+    /// The nib in the bundle of the owner's class, else in the app's, as
+    /// AppKit looks: a framework's panels keep their nibs with it (Xcode 3's
+    /// new-project assistant is owned by its class, in DevToolsInterface).
     @ObjCClassMethod("loadNibNamed:owner:")
     static func loadNib(named name: String?, owner: NSObject?) -> Bool {
-        NSNib(nibNamed: name, bundle: nil).instantiate(owner: owner, topLevelObjects: nil)
+        guard let name else { return false }
+        let ownerBundle = owner.flatMap { Send.object($0.objcObject, "class") }.flatMap { NSBundle.bundle(forClass: $0) }
+        guard let found = ownerBundle.flatMap({ Nibs.find(name, bundle: $0) }) ?? Nibs.find(name, bundle: nil) else {
+            appKitWarning("NSBundle: no nib \(name)")
+            return false
+        }
+        Nibs.kept += Nibs.instantiate(found.archive, owner: owner, bundlePath: found.directory)
+        return true
     }
 
     @ObjCClassMethod("loadNibFile:externalNameTable:withZone:")
