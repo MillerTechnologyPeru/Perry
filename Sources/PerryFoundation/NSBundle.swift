@@ -238,6 +238,29 @@ enum Bundles {
         byPath.sorted { $0.key < $1.key }.first { storage($0.value)?.identifier == identifier }?.value
     }
 
+    /// The directories of the frameworks the loader has loaded Mach-O
+    /// images from, by dyld's image list.
+    static func loadedFrameworks() -> [String] {
+        typealias Count = @convention(c) () -> UInt32
+        typealias Name = @convention(c) (UInt32) -> UnsafePointer<CChar>?
+        guard let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD),
+              let countSymbol = dlsym(system, "__dyld_image_count"), let nameSymbol = dlsym(system, "__dyld_get_image_name") else {
+            return []
+        }
+        let count = unsafeBitCast(countSymbol, to: Count.self)()
+        let name = unsafeBitCast(nameSymbol, to: Name.self)
+        var frameworks: [String] = []
+        for index in 0..<count {
+            guard let path = name(index).map({ String(cString: $0) }), let range = path.range(of: ".framework/") else { continue }
+            let unresolved = String(path[..<range.lowerBound]) + ".framework"
+            guard let resolved = realpath(unresolved, nil) else { continue }
+            let framework = String(cString: resolved)
+            free(resolved)
+            if !frameworks.contains(framework) { frameworks.append(framework) }
+        }
+        return frameworks
+    }
+
     /// The executable's name of a system framework that has no directory
     /// here and that the loader has a provider for
     /// (/System/Library/Frameworks/Metal.framework), or nil. Unity finds
@@ -302,6 +325,22 @@ public final class NSBundle: NSObject {
     @ObjCClassMethod("bundleWithPath:")
     static func bundle(path: String?) -> UnsafeMutableRawPointer? { path.flatMap { Bundles.bundle(path: $0) } }
 
+    /// The resources of the bundle at a path, without making a bundle of
+    /// it first: the class methods of NSBundle's first versions.
+    @ObjCClassMethod("pathsForResourcesOfType:inDirectory:")
+    static func paths(forResourcesOfType type: String?, inBundle bundlePath: String?) -> NSArray? {
+        guard let bundle = bundlePath.flatMap({ Bundles.bundle(path: $0) }), let storage = Bundles.storage(bundle) else {
+            return Arrays.owned([])
+        }
+        return Arrays.owned(storage.resources(type: type, directory: nil).map { Strings.autoreleased($0) })
+    }
+
+    @ObjCClassMethod("pathForResource:ofType:inDirectory:")
+    static func path(forResource name: String?, ofType type: String?, inBundle bundlePath: String?) -> String? {
+        guard let bundle = bundlePath.flatMap({ Bundles.bundle(path: $0) }), let storage = Bundles.storage(bundle) else { return nil }
+        return storage.resource(name, type: type, directory: nil)
+    }
+
     @ObjCClassMethod("bundleWithURL:")
     static func bundle(url: NSURL?) -> UnsafeMutableRawPointer? { url.flatMap { Bundles.bundle(path: $0.url.path(percentEncoded: false)) } }
 
@@ -347,6 +386,14 @@ public final class NSBundle: NSObject {
         // Mapbox GL finds OpenGLES this way, to look the GL functions up in.
         if let name = Bundles.systemFrameworks[identifier], let bundle = Bundles.bundle(path: "/System/Library/Frameworks/" + name + ".framework") {
             return bundle
+        }
+        // A framework the process has loaded from anywhere (Xcode's, from
+        // /Developer/Library/PrivateFrameworks through @rpath), as Darwin
+        // finds those too.
+        for framework in Bundles.loadedFrameworks() {
+            if let bundle = Bundles.bundle(path: framework), Bundles.storage(bundle)?.identifier == identifier {
+                return bundle
+            }
         }
         return nil
     }
@@ -423,6 +470,9 @@ public final class NSBundle: NSObject {
 
     @ObjCMethod("principalClass")
     func principalClass() -> UnsafeMutableRawPointer? {
+        // The bundle's code is loaded first, as Darwin's does: plug-ins
+        // (Xcode's diagram layouters) are asked for their class unloaded.
+        _ = load()
         let key = Strings.make("NSPrincipalClass")
         defer { ObjC.release(key) }
         let named = Dictionaries.value(storage.infoDictionary, for: key).flatMap { Strings.value(of: $0) }
