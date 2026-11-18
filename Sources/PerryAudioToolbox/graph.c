@@ -161,6 +161,25 @@ OSStatus darwin_AUGraphNodeInfo(void *handle, int32_t id, AudioComponentDescript
     return n ? 0 : kAUGraphErr_NodeNotFound;
 }
 
+// The graph's calls from before Mac OS X 10.5, with class data (a
+// unit's saved state) that isn't kept.
+OSStatus darwin_AUGraphNewNode(void *handle, const AudioComponentDescription *description, uint32_t classDataSize,
+                               const void *classData, int32_t *out) DARWIN_SYMBOL(AUGraphNewNode);
+OSStatus darwin_AUGraphNewNode(void *handle, const AudioComponentDescription *description, uint32_t classDataSize,
+                               const void *classData, int32_t *out) {
+    (void)classDataSize, (void)classData;
+    return darwin_AUGraphAddNode(handle, description, out);
+}
+
+OSStatus darwin_AUGraphGetNodeInfo(void *handle, int32_t id, AudioComponentDescription *description, uint32_t *classDataSize,
+                                   void **classData, void **unit) DARWIN_SYMBOL(AUGraphGetNodeInfo);
+OSStatus darwin_AUGraphGetNodeInfo(void *handle, int32_t id, AudioComponentDescription *description, uint32_t *classDataSize,
+                                   void **classData, void **unit) {
+    if (classDataSize) *classDataSize = 0;
+    if (classData) *classData = NULL;
+    return darwin_AUGraphNodeInfo(handle, id, description, unit);
+}
+
 static void *unit_of(graph *g, int32_t id) {
     pthread_mutex_lock(&g->lock);
     node *n = find(g, id);

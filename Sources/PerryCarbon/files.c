@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,6 +98,29 @@ static uint32_t directory_id(const char *path) {
     return id;
 }
 
+/// A folder `depth` levels below `folder` whose inode is `identifier`, as
+/// a path to free; symbolic links to folders are followed.
+static char *find_directory(const char *folder, uint32_t identifier, int depth) {
+    if (strcmp(folder, "/") == 0) return NULL;   // too much to look through
+    DIR *listing = opendir(folder);
+    if (!listing) return NULL;
+    char *found = NULL;
+    for (struct dirent *entry; !found && (entry = readdir(listing));) {
+        if (entry->d_name[0] == '.') continue;
+        char path[PATH_MAX];
+        if (snprintf(path, sizeof path, "%s/%s", folder, entry->d_name) >= (int)sizeof path) continue;
+        struct stat info;
+        if (stat(path, &info) != 0 || !S_ISDIR(info.st_mode)) continue;
+        if (depth == 1) {
+            if ((uint32_t)info.st_ino == identifier) found = strdup(path);
+        } else {
+            found = find_directory(path, identifier, depth - 1);
+        }
+    }
+    closedir(listing);
+    return found;
+}
+
 /// The folder an ID is, of those seen: the root's, the program's working
 /// folder's, its bundle's and their parents' are seen from the start.
 static const char *directory_path(uint32_t identifier) {
@@ -118,6 +142,20 @@ static const char *directory_path(uint32_t identifier) {
     }
     for (size_t index = 0; index < directory_count; index++)
         if (directories[index].id == identifier) return directories[index].path;
+    // An ID given by CoreServices (a folder's node ID from its catalog
+    // information), which this hasn't seen: looked for in the folders
+    // below those it has.
+    size_t known = directory_count;
+    for (int depth = 1; depth <= 3; depth++)
+        for (size_t index = 0; index < known; index++) {
+            char *found = find_directory(directories[index].path, identifier, depth);
+            if (found) {
+                directory_id(found);
+                free(found);
+                for (size_t again = 0; again < directory_count; again++)
+                    if (directories[again].id == identifier) return directories[again].path;
+            }
+        }
     return NULL;
 }
 
@@ -426,6 +464,100 @@ static off_t seek(int descriptor, uint16_t mode, int64_t offset) {
     case 2: return lseek(descriptor, offset, SEEK_END);
     default: return lseek(descriptor, offset, SEEK_CUR);
     }
+}
+
+// MARK: - Reads by parameter block
+
+#pragma pack(push, 2)
+typedef struct io_block {
+    struct io_block *qLink;
+    int16_t qType, ioTrap;
+    void *ioCmdAddr;
+    void (*ioCompletion)(struct io_block *);
+    volatile int16_t ioResult;
+    unsigned char *ioNamePtr;
+    int16_t ioVRefNum, ioRefNum;
+    int8_t ioVersNum, ioPermssn;
+    void *ioMisc, *ioBuffer;
+    int32_t ioReqCount, ioActCount;
+    int16_t ioPosMode;
+    int32_t ioPosOffset;
+} IOParam;
+#pragma pack(pop)
+
+static off_t seek(int descriptor, uint16_t mode, int64_t offset);
+
+/// A block's read: from where its mode says, its count, leaving the mark
+/// after what was read in its offset.
+static OSErr read_block(IOParam *block) {
+    int descriptor = file_descriptor(block->ioRefNum);
+    block->ioActCount = 0;
+    if (descriptor < 0) return rfNumErr;
+    if (block->ioReqCount < 0) return paramErr;
+    if (seek(descriptor, (uint16_t)block->ioPosMode, block->ioPosOffset) < 0) return posErr;
+    int32_t got = 0;
+    while (got < block->ioReqCount) {
+        ssize_t read_now = read(descriptor, (char *)block->ioBuffer + got, (size_t)(block->ioReqCount - got));
+        if (read_now < 0) {
+            if (errno == EINTR) continue;
+            block->ioActCount = got;
+            return ioErr;
+        }
+        if (read_now == 0) break;
+        got += (int32_t)read_now;
+    }
+    block->ioActCount = got;
+    block->ioPosOffset = (int32_t)lseek(descriptor, 0, SEEK_CUR);
+    return got < block->ioReqCount ? eofErr : noErr;
+}
+
+OSErr carbon_PBReadSync(IOParam *block) CARBON_SYMBOL(PBReadSync);
+OSErr carbon_PBReadSync(IOParam *block) {
+    if (!block) return paramErr;
+    return block->ioResult = read_block(block);
+}
+
+// Asynchronous reads: in order, on a thread of their own, each block's
+// result set and then its completion routine called, as a Mac's are.
+static pthread_mutex_t reads_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t reads_waiting = PTHREAD_COND_INITIALIZER;
+static IOParam *reads_first, *reads_last;
+
+static void *run_reads(void *unused) {
+    (void)unused;
+    for (;;) {
+        pthread_mutex_lock(&reads_lock);
+        while (!reads_first) pthread_cond_wait(&reads_waiting, &reads_lock);
+        IOParam *block = reads_first;
+        reads_first = block->qLink;
+        if (!reads_first) reads_last = NULL;
+        pthread_mutex_unlock(&reads_lock);
+        block->qLink = NULL;
+        OSErr result = read_block(block);
+        __atomic_store_n(&block->ioResult, result, __ATOMIC_SEQ_CST);
+        if (block->ioCompletion) block->ioCompletion(block);
+    }
+    return NULL;
+}
+
+static void start_reads(void) {
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, run_reads, NULL) == 0) pthread_detach(thread);
+}
+
+OSErr carbon_PBReadAsync(IOParam *block) CARBON_SYMBOL(PBReadAsync);
+OSErr carbon_PBReadAsync(IOParam *block) {
+    if (!block) return paramErr;
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, start_reads);
+    block->ioResult = 1;   // ioInProgress
+    block->qLink = NULL;
+    pthread_mutex_lock(&reads_lock);
+    if (reads_last) reads_last->qLink = block; else reads_first = block;
+    reads_last = block;
+    pthread_cond_signal(&reads_waiting);
+    pthread_mutex_unlock(&reads_lock);
+    return noErr;
 }
 
 OSErr carbon_SetFPos(int16_t reference, int16_t mode, int32_t offset) CARBON_SYMBOL(SetFPos);
@@ -1072,6 +1204,19 @@ OSErr carbon_FSGetCatalogInfo(const FSRef *ref, uint32_t which, void *info, HFSU
     if (!catalog) return unimpErr;
     OSErr error = catalog(ref, which, info, name, NULL, parent);
     char path[PATH_MAX];
-    if (error == noErr && spec && ref_path(ref, path, sizeof path)) spec_for(path, spec);
+    if (error == noErr && ref_path(ref, path, sizeof path)) {
+        // The IDs given (a folder's own, its parent's) name it again: as
+        // an FSSpec's folder, which programs make of them.
+        struct stat item;
+        if (stat(path, &item) == 0 && S_ISDIR(item.st_mode)) directory_id(path);
+        char folder[PATH_MAX];
+        snprintf(folder, sizeof folder, "%s", path);
+        char *slash = strrchr(folder, '/');
+        if (slash && slash != folder) {
+            *slash = 0;
+            directory_id(folder);
+        }
+        if (spec) spec_for(path, spec);
+    }
     return error;
 }

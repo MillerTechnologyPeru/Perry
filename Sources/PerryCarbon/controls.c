@@ -73,7 +73,11 @@ static void perform(id self, SEL selector, id sender) {
     for (action *found = actions; found; found = found->next)
         if (found->sender == sender) {
             WindowRef window = carbon_window_from(found->window);
-            carbon_process_command(found->command, found->menu, found->item, window ? window->target : NULL);
+            // A control's command carries the control.
+            ControlRef control = NULL;
+            if (!found->menu)
+                for (control = controls; control && control->view != sender; control = control->next) {}
+            carbon_process_command(found->command, control, found->menu, found->item, window ? window->target : NULL);
             return;
         }
 }

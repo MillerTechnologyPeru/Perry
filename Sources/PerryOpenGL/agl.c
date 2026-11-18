@@ -292,6 +292,46 @@ void perry_aglGetVersion(GLint *major, GLint *minor) {
 // The one renderer, CGL's; its properties are CGL's, whose numbers AGL's are.
 extern int perry_CGLQueryRendererInfo(uint32_t display_mask, void **info, int *count) __asm__("_CGLQueryRendererInfo");
 extern int perry_CGLDescribeRenderer(void *info, int index, int property, int *value) __asm__("_CGLDescribeRenderer");
+extern int perry_CGLDescribePixelFormat(id format, int screen, int attribute, int *value) __asm__("_CGLDescribePixelFormat");
+
+// A pixel format's attributes by AGL's names: the color by its parts, and
+// the rest as NSOpenGLPixelFormat's, whose numbers are the same.
+GLboolean perry_aglDescribePixelFormat(id format, GLint attribute, GLint *value) AGL_SYMBOL(aglDescribePixelFormat);
+GLboolean perry_aglDescribePixelFormat(id format, GLint attribute, GLint *value) {
+    if (!format || !value) return fail(AGL_BAD_PIXELFMT);
+    int color = 0, alpha = 0, accum = 0;
+    perry_CGLDescribePixelFormat(format, 0, 8, &color);    // NSOpenGLPFAColorSize
+    perry_CGLDescribePixelFormat(format, 0, 11, &alpha);   // NSOpenGLPFAAlphaSize
+    switch (attribute) {
+    case AGL_RGBA: *value = 1; break;
+    case AGL_LEVEL: *value = 0; break;
+    case AGL_BUFFER_SIZE: case AGL_PIXEL_SIZE: *value = color + (color < 32 ? alpha : 0); break;
+    case AGL_RED_SIZE: case AGL_GREEN_SIZE: case AGL_BLUE_SIZE: *value = color >= 24 ? 8 : color / 3; break;
+    case AGL_ACCUM_RED_SIZE: case AGL_ACCUM_GREEN_SIZE: case AGL_ACCUM_BLUE_SIZE: case AGL_ACCUM_ALPHA_SIZE:
+        perry_CGLDescribePixelFormat(format, 0, 14, &accum);   // NSOpenGLPFAAccumSize
+        *value = accum / 4;
+        break;
+    default:
+        if (perry_CGLDescribePixelFormat(format, 0, attribute, value) != 0) return fail(AGL_BAD_ATTRIBUTE);
+    }
+    return 1;
+}
+
+// A context's options: its swap interval; the rest as they are when
+// they've not been set.
+GLboolean perry_aglGetInteger(id context, GLenum name, GLint *values) AGL_SYMBOL(aglGetInteger);
+GLboolean perry_aglGetInteger(id context, GLenum name, GLint *values) {
+    if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
+    if (!values) return fail(AGL_BAD_VALUE);
+    if (name == AGL_SWAP_INTERVAL) {
+        ((void (*)(id, SEL, GLint *, long))msg_send)(context, SELECTOR("getValues:forParameter:"), values, 222);
+    } else if (name == AGL_SWAP_RECT || name == AGL_BUFFER_RECT) {
+        values[0] = values[1] = values[2] = values[3] = 0;
+    } else {
+        values[0] = 0;
+    }
+    return 1;
+}
 
 id perry_aglQueryRendererInfo(const void *devices, GLint count) AGL_SYMBOL(aglQueryRendererInfo);
 id perry_aglQueryRendererInfo(const void *devices, GLint count) {

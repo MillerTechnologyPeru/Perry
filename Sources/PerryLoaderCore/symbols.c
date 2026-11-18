@@ -202,7 +202,17 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
 
 #if defined(__i386__)
 // Images linked before export tries list their exports in the symbol table,
-// sorted by name.
+// sorted by name by Apple's linker; others' (RAD's Bink) are in any order,
+// and are looked through.
+static bool symbol_table_found(perry_image *image, const struct nlist *symbol, perry_symbol *out) {
+    out->found = true;
+    out->weak_def = symbol->n_desc & N_WEAK_DEF;
+    out->address = (symbol->n_type & N_TYPE) == N_ABS
+        ? (void *)(uintptr_t)symbol->n_value
+        : perry_image_vmaddr(image, symbol->n_value);
+    return true;
+}
+
 static bool symbol_table_lookup(perry_image *image, const char *name, perry_symbol *out) {
     const struct symtab_command *st = image->symtab;
     const struct dysymtab_command *dst = image->dysymtab;
@@ -212,17 +222,25 @@ static bool symbol_table_lookup(perry_image *image, const char *name, perry_symb
         return false;
     const struct nlist *low = symbols + dst->iextdefsym;
     size_t count = dst->nextdefsym;
+    if (image->exports_sorted == 0) {
+        image->exports_sorted = 1;
+        for (size_t i = 1; i < count; i++)
+            if (strcmp(strings + low[i - 1].n_strx, strings + low[i].n_strx) > 0) {
+                image->exports_sorted = -1;
+                break;
+            }
+    }
+    if (image->exports_sorted < 0) {
+        for (size_t i = 0; i < count; i++)
+            if (strcmp(name, strings + low[i].n_strx) == 0)
+                return symbol_table_found(image, &low[i], out);
+        return false;
+    }
     while (count) {
         const struct nlist *middle = low + count / 2;
         int order = strcmp(name, strings + middle->n_strx);
-        if (order == 0) {
-            out->found = true;
-            out->weak_def = middle->n_desc & N_WEAK_DEF;
-            out->address = (middle->n_type & N_TYPE) == N_ABS
-                ? (void *)(uintptr_t)middle->n_value
-                : perry_image_vmaddr(image, middle->n_value);
-            return true;
-        }
+        if (order == 0)
+            return symbol_table_found(image, middle, out);
         if (order > 0) {
             low = middle + 1;
             count -= count / 2 + 1;

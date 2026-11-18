@@ -81,6 +81,7 @@ typedef struct perry_image {
     bool unixthread;            // started by LC_UNIXTHREAD rather than LC_MAIN
     const struct symtab_command *symtab;
     const struct dysymtab_command *dysymtab;
+    int8_t exports_sorted;      // whether the symbol table's exports are by name: 0 unknown, 1, -1
     void *legacy_main;          // _main, for LC_UNIXTHREAD executables, which have no LC_MAIN
     uint32_t thread_pc;         // LC_UNIXTHREAD's unslid pc: crt1's `start`
 
