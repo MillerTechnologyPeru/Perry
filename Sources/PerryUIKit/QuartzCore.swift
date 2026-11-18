@@ -29,6 +29,7 @@ class CALayer: NSObject {
     @ObjCMethod("zPosition") func zPosition() -> CGFloat
     @ObjCMethod("setOpacity:") func setOpacity(_ opacity: Float)
     @ObjCMethod("masksToBounds") func masksToBounds() -> Bool
+    @ObjCMethod("_perryDebugDetails") func perryDebugDetails() -> String?
     @ObjCMethod("setMasksToBounds:") func setMasksToBounds(_ masks: Bool)
     @ObjCMethod("setMaskedCorners:") func setMaskedCorners(_ corners: UInt)
     @ObjCMethod("cornerRadius") func cornerRadius() -> CGFloat
