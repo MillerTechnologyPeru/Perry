@@ -256,6 +256,33 @@ open class NSCell: NSObject {
     @ObjCMethod("menu") func cellMenu() -> NSObject? { nil }
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) {}
     @ObjCMethod("keyEquivalent") func keyEquivalent() -> String { "" }
+
+    /// NSCellAttribute: disabled 0, state 1, editable 3, highlighted 5,
+    /// is bordered 10, ...; others answer 0.
+    @ObjCMethod("cellAttribute:")
+    func cellAttribute(_ attribute: UInt) -> Int {
+        switch attribute {
+        case 0: return enabled ? 0 : 1
+        case 1: return state
+        case 3: return editable ? 1 : 0
+        case 5: return highlighted ? 1 : 0
+        case 10: return bordered ? 1 : 0
+        default: return 0
+        }
+    }
+
+    @ObjCMethod("setCellAttribute:to:")
+    func setCellAttribute(_ attribute: UInt, to value: Int) {
+        switch attribute {
+        case 0: enabled = value == 0
+        case 1: state = value
+        case 3: editable = value != 0
+        case 5: highlighted = value != 0
+        case 10: bordered = value != 0
+        default: return
+        }
+        changed()
+    }
     @ObjCMethod("mouseDownFlags") func mouseDownFlags() -> Int { 0 }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { false }
     @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
@@ -1019,18 +1046,40 @@ open class NSImageCell: NSCell {
 open class NSTableHeaderCell: NSTextFieldCell {
     @ObjCMethod("drawWithFrame:inView:")
     override func draw(withFrame frame: CGRect, in view: NSView?) {
+        drawBackground(frame, highlighted: highlighted)
+        drawInterior(withFrame: frame, in: view)
+    }
+
+    /// The header's background and its edge, darker while pressed.
+    func drawBackground(_ frame: CGRect, highlighted: Bool) {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
         CG.setFill(context, NSColor.headerColor())
         CG.fillRect(context, frame)
+        if highlighted {
+            CG.setFill(context, NSColor(white: 0, alpha: 0.08))
+            CG.fillRect(context, frame)
+        }
         CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, CGRect(x: frame.maxX - 1, y: frame.minY + 3, width: 1, height: frame.height - 6))
         CG.restoreGState(context)
-        drawInterior(withFrame: frame, in: view)
     }
+
+    /// AppKit's private drawing of a header's background, which subclasses
+    /// (Xcode's) draw their own contents over.
+    @ObjCMethod("_drawThemeContents:highlighted:inView:")
+    func drawThemeContents(_ frame: CGRect, highlighted: Bool, in view: NSView?) { drawBackground(frame, highlighted: highlighted) }
 
     @ObjCMethod("drawInteriorWithFrame:inView:")
     override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
+        // A header with an image and no title, as an icon column's, shows
+        // the image in the middle.
+        if cellString.isEmpty, let image {
+            let size = image.size
+            image.draw(in: CGRect(x: (frame.midX - size.width / 2).rounded(), y: (frame.midY - size.height / 2).rounded(),
+                                  width: size.width, height: size.height), fraction: 1)
+            return
+        }
         let rect = CGRect(x: frame.minX + 4, y: frame.minY, width: max(0, frame.width - 8), height: frame.height)
         var style = textStyle
         style.maximumLines = 1
@@ -1058,6 +1107,7 @@ open class NSPopUpButtonCell: NSButtonCell {
     var pullsDown = false
     var autoenablesItems = true
     var preferredEdge: UInt = 1
+    var arrow: UInt = 2
 
     @ObjCMethod("initWithCoder:")
     public required init(coder: NSObject?) {
@@ -1105,6 +1155,9 @@ open class NSPopUpButtonCell: NSButtonCell {
     @ObjCMethod("autoenablesItems") func cellAutoenablesItems() -> Bool { autoenablesItems }
     @ObjCMethod("setAutoenablesItems:") func setAutoenablesItems(_ value: Bool) { autoenablesItems = value }
     @ObjCMethod("preferredEdge") func cellPreferredEdge() -> UInt { preferredEdge }
+    /// NSPopUpArrowPosition: none 0, at center 1, at bottom 2.
+    @ObjCMethod("arrowPosition") func arrowPosition() -> UInt { arrow }
+    @ObjCMethod("setArrowPosition:") func setArrowPosition(_ value: UInt) { arrow = value; changed() }
     @ObjCMethod("setPreferredEdge:") func setPreferredEdge(_ value: UInt) { preferredEdge = value }
     @ObjCMethod("selectedItem") func cellSelectedItem() -> NSMenuItem? { selectedItem }
     @ObjCMethod("indexOfSelectedItem") func indexOfSelectedItem() -> Int { selectedIndex }
