@@ -20,6 +20,8 @@ final class ControlState: ObjectState {
     var tracking = false
     var contentHorizontalAlignment = 0
     var contentVerticalAlignment = 0
+    /// The actions performed for events.
+    var actions: [(action: UIAction, events: UInt)] = []
 }
 
 /// UIControlEvents: touch down 1, touch up inside 1 << 6, value changed
@@ -66,7 +68,47 @@ open class UIControl: UIView {
         return set
     }
 
-    @ObjCMethod("allControlEvents") func allControlEvents() -> UInt { control.targets.reduce(0) { $0 | $1.events } }
+    @ObjCMethod("allControlEvents")
+    func allControlEvents() -> UInt { control.actions.reduce(control.targets.reduce(0) { $0 | $1.events }) { $0 | $1.events } }
+
+    // Actions: an action is performed for its events as a target's is
+    // sent, after the targets'.
+
+    @ObjCMethod("initWithFrame:primaryAction:")
+    func initialize(frame: CGRect, primaryAction: UIAction?) -> Self {
+        _ = initializeView(frame: frame)
+        if let primaryAction { addAction(primaryAction, for: 1 << 13) }
+        return self
+    }
+
+    @ObjCMethod("addAction:forControlEvents:")
+    func addAction(_ action: UIAction, for events: UInt) {
+        removeAction(action, for: events)
+        control.actions.append((action, events))
+    }
+
+    /// The action, or any with its identifier, is no longer performed for
+    /// the events.
+    @ObjCMethod("removeAction:forControlEvents:")
+    func removeAction(_ action: UIAction, for events: UInt) {
+        let identifier = action.element.identifier
+        control.actions = control.actions.compactMap { entry in
+            guard entry.action.objcObject == action.objcObject || (identifier != nil && entry.action.element.identifier == identifier) else { return entry }
+            let left = entry.events & ~events
+            return left == 0 ? nil : (entry.action, left)
+        }
+    }
+
+    @ObjCMethod("removeActionForIdentifier:forControlEvents:")
+    func removeAction(identifier: String, for events: UInt) {
+        control.actions = control.actions.compactMap { entry in
+            guard entry.action.element.identifier == identifier else { return entry }
+            let left = entry.events & ~events
+            return left == 0 ? nil : (entry.action, left)
+        }
+    }
+
+    @ObjCMethod("performPrimaryAction") func performPrimaryAction() { sendActions(for: 1 << 13) }
 
     /// The targets' actions for the events, as a nil target goes up the
     /// responder chain to the first that handles the action.
@@ -80,6 +122,7 @@ open class UIControl: UIView {
                 sendAction(ObjCSelector(entry.action), to: nil, for: nil)
             }
         }
+        for entry in control.actions where entry.events & events != 0 { entry.action.perform(sender: self) }
     }
 
     @ObjCMethod("sendAction:to:forEvent:")
@@ -134,7 +177,9 @@ open class UIControl: UIView {
         sendHighlighted(false)
         let touch = touches.as(NSSet.self)?.anyObject()?.as(UITouch.self)
         let inside = touch.map { state.bounds.insetBy(-16).contains($0.location(in: self)) } ?? true
-        if inside { sendActions(for: 1 << 6 | 1 << 13) }
+        guard inside else { return }
+        sendActions(for: 1 << 6 | 1 << 13)
+        self.as(UIButton.self)?.showPrimaryMenu()
     }
 
     @ObjCMethod("touchesCancelled:withEvent:")
@@ -203,6 +248,19 @@ final class ButtonState: ObjectState {
     var contentEdgeInsets = UIEdgeInsets.zero
     var titleEdgeInsets = UIEdgeInsets.zero
     var imageEdgeInsets = UIEdgeInsets.zero
+    /// The configuration the button shows, a copy of the one it was given.
+    var configuration: UIButtonConfiguration?
+    var configurationUpdateHandler: ObjCBlock?
+    var automaticallyUpdatesConfiguration = true
+    var needsConfigurationUpdate = false
+    var updatingConfiguration = false
+    /// The configuration's background, behind the content.
+    var backgroundView: UIView?
+    var menu: UIMenu?
+    var showsMenuAsPrimaryAction = false
+    var changesSelectionAsPrimaryAction = false
+    var symbolConfigurations: [UInt: NSObject] = [:]
+    var pointerInteractionEnabled = false
 }
 
 @ObjCClass("UIButton")
@@ -223,6 +281,173 @@ open class UIButton: UIControl {
         button.button.type = type
         return button
     }
+
+    /// The button takes its title and image from the action, where it has
+    /// them, and performs it when it is tapped.
+    @ObjCClassMethod("buttonWithType:primaryAction:")
+    static func button(_ cls: ObjCClass, type: Int, primaryAction: UIAction?) -> NSObject {
+        let button = UIButton.button(cls, type: type).unsafeCast(to: UIButton.self)
+        guard let primaryAction else { return button }
+        if !primaryAction.element.title.isEmpty { button.setTitle(primaryAction.element.title, for: 0) }
+        if let image = primaryAction.element.image { button.setImage(image, for: 0) }
+        button.addAction(primaryAction, for: 1 << 13)
+        return button
+    }
+
+    @ObjCClassMethod("systemButtonWithPrimaryAction:")
+    static func systemButton(_ cls: ObjCClass, primaryAction: UIAction?) -> NSObject { button(cls, type: 1, primaryAction: primaryAction) }
+
+    /// The action gives the title and the image the configuration lacks.
+    @ObjCClassMethod("buttonWithConfiguration:primaryAction:")
+    static func button(_ cls: ObjCClass, configuration: UIButtonConfiguration?, primaryAction: UIAction?) -> NSObject {
+        let button = UIButton.button(cls, type: 1).unsafeCast(to: UIButton.self)
+        let shown = configuration?.duplicate()
+        if let primaryAction {
+            if let state = shown?.configuration {
+                if state.title == nil, state.attributedTitle == nil, !primaryAction.element.title.isEmpty { state.title = primaryAction.element.title }
+                if state.image == nil { state.image = primaryAction.element.image }
+            } else {
+                if !primaryAction.element.title.isEmpty { button.setTitle(primaryAction.element.title, for: 0) }
+                if let image = primaryAction.element.image { button.setImage(image, for: 0) }
+            }
+            button.addAction(primaryAction, for: 1 << 13)
+        }
+        if let shown { button.setConfiguration(shown) }
+        return button
+    }
+
+    // MARK: Configuration
+
+    /// A copy of the configuration, as the button keeps its own.
+    @ObjCMethod("configuration") func configuration() -> UIButtonConfiguration? { button.configuration?.duplicate() }
+
+    @ObjCMethod("setConfiguration:")
+    func setConfiguration(_ configuration: UIButtonConfiguration?) {
+        button.configuration = configuration?.duplicate()
+        applyConfiguration()
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    @ObjCMethod("configurationUpdateHandler") func configurationUpdateHandler() -> ObjCBlock? { button.configurationUpdateHandler }
+    @ObjCMethod("setConfigurationUpdateHandler:")
+    func setConfigurationUpdateHandler(_ handler: ObjCBlock?) {
+        button.configurationUpdateHandler = handler
+        setNeedsUpdateConfiguration()
+    }
+
+    @ObjCMethod("automaticallyUpdatesConfiguration") func automaticallyUpdatesConfiguration() -> Bool { button.automaticallyUpdatesConfiguration }
+    @ObjCMethod("setAutomaticallyUpdatesConfiguration:")
+    func setAutomaticallyUpdatesConfiguration(_ updates: Bool) { button.automaticallyUpdatesConfiguration = updates }
+
+    /// The configuration is updated before the button is next measured or
+    /// laid out.
+    @ObjCMethod("setNeedsUpdateConfiguration")
+    func setNeedsUpdateConfiguration() {
+        guard !button.updatingConfiguration else { return }
+        button.needsConfigurationUpdate = true
+        setNeedsLayout()
+    }
+
+    /// The update handler's turn, which a subclass overrides for its own.
+    @ObjCMethod("updateConfiguration")
+    func updateConfiguration() { button.configurationUpdateHandler.map { Blocks.call($0, self) } }
+
+    private func updateConfigurationIfNeeded() {
+        let button = button
+        guard button.needsConfigurationUpdate, !button.updatingConfiguration else { return }
+        (button.needsConfigurationUpdate, button.updatingConfiguration) = (false, true)
+        sendUpdateConfiguration()
+        button.updatingConfiguration = false
+    }
+
+    /// The configuration's title, image, colors and insets become the
+    /// button's, and its background the view behind them.
+    private func applyConfiguration() {
+        let button = button
+        guard let configuration = button.configuration else {
+            button.backgroundView?.removeFromSuperview()
+            button.backgroundView = nil
+            return
+        }
+        let shown = configuration.configuration
+        let colors = configuration.colors(tint: tintColor())
+        let title = configuration.titleAttributes(foreground: colors.foreground)
+        button.titles = (shown.title ?? shown.attributedTitle?.sendString()).map { [0: $0] } ?? [:]
+        button.images = shown.image.map { [0: $0] } ?? [:]
+        button.titleColors = [0: title.color]
+        button.contentEdgeInsets = shown.contentInsets
+        if let font = title.font { titleLabel().setFont(font) }
+        if shown.titleLineBreakMode != 0 { titleLabel().setLineBreakMode(shown.titleLineBreakMode) }
+        if shown.image != nil { imageView().setTintColor(colors.foreground) }
+
+        let background = shown.background?.background
+        let custom = background?.customView
+        let stroke = background.flatMap { $0.strokeWidth > 0 ? $0.strokeColor : nil }
+        if colors.fill != nil || custom != nil || stroke != nil {
+            let view: UIView
+            if let existing = button.backgroundView {
+                view = existing
+            } else {
+                view = UIView.objCClass.object.allocated().initializeView(frame: state.bounds).unsafeCast(to: UIView.self)
+                view.state.userInteractionEnabled = false
+                button.backgroundView = view
+                insertSubview(view, at: 0)
+            }
+            view.setBackgroundColor(colors.fill)
+            view.state.layer.setBorderWidth(stroke == nil ? 0 : background?.strokeWidth ?? 0)
+            view.state.layer.setBorderColor(stroke?.sendCGColor())
+            for subview in view.state.subviews where subview.objcObject != custom?.objcObject { subview.removeFromSuperview() }
+            if let custom, custom.state.superview != view.objcObject { view.addSubview(custom) }
+        } else {
+            button.backgroundView?.removeFromSuperview()
+            button.backgroundView = nil
+        }
+        update()
+    }
+
+    /// A tint change is a configuration's colors' change.
+    @ObjCMethod("tintColorDidChange")
+    func buttonTintColorDidChange() { if button.configuration != nil { applyConfiguration() } }
+
+    // MARK: Menu
+
+    @ObjCMethod("menu") func menu() -> UIMenu? { button.menu }
+    @ObjCMethod("setMenu:") func setMenu(_ menu: UIMenu?) { button.menu = menu }
+    @ObjCMethod("showsMenuAsPrimaryAction") func showsMenuAsPrimaryAction() -> Bool { button.showsMenuAsPrimaryAction }
+    @ObjCMethod("setShowsMenuAsPrimaryAction:") func setShowsMenuAsPrimaryAction(_ shows: Bool) { button.showsMenuAsPrimaryAction = shows }
+    @ObjCMethod("changesSelectionAsPrimaryAction") func changesSelectionAsPrimaryAction() -> Bool { button.changesSelectionAsPrimaryAction }
+    @ObjCMethod("setChangesSelectionAsPrimaryAction:")
+    func setChangesSelectionAsPrimaryAction(_ changes: Bool) { button.changesSelectionAsPrimaryAction = changes }
+
+    /// A tap on a button whose menu is its primary action shows the menu,
+    /// as a sheet over the view controller the button is in.
+    func showPrimaryMenu() {
+        guard button.showsMenuAsPrimaryAction, let menu = button.menu else { return }
+        var responder: NSObject? = self
+        while let current = responder {
+            if let controller = current.as(UIViewController.self) {
+                controller.present(PerryMenuSheetController.sheet(for: menu), animated: true, completion: nil)
+                return
+            }
+            responder = current.sendNextResponder()
+        }
+    }
+
+    // Kept, as a pointer and symbol images are not shown.
+    @ObjCMethod("isPointerInteractionEnabled") func isPointerInteractionEnabled() -> Bool { button.pointerInteractionEnabled }
+    @ObjCMethod("setPointerInteractionEnabled:") func setPointerInteractionEnabled(_ enabled: Bool) { button.pointerInteractionEnabled = enabled }
+    @ObjCMethod("pointerStyleProvider") func pointerStyleProvider() -> ObjCBlock? { nil }
+    @ObjCMethod("setPointerStyleProvider:") func setPointerStyleProvider(_ provider: ObjCBlock?) {}
+    // Images and titles are one size at every content size category.
+    @ObjCMethod("adjustsImageSizeForAccessibilityContentSizeCategory") func adjustsImageSizeForAccessibility() -> Bool { false }
+    @ObjCMethod("setAdjustsImageSizeForAccessibilityContentSizeCategory:") func setAdjustsImageSizeForAccessibility(_ adjusts: Bool) {}
+    @ObjCMethod("preferredSymbolConfigurationForImageInState:")
+    func preferredSymbolConfiguration(for state: UInt) -> NSObject? { button.symbolConfigurations[state] ?? button.symbolConfigurations[0] }
+    @ObjCMethod("setPreferredSymbolConfiguration:forImageInState:")
+    func setPreferredSymbolConfiguration(_ configuration: NSObject?, for state: UInt) { button.symbolConfigurations[state] = configuration }
+    @ObjCMethod("currentPreferredSymbolConfiguration")
+    func currentPreferredSymbolConfiguration() -> NSObject? { current(button.symbolConfigurations) }
 
     @ObjCClassMethod("systemButtonWithImage:target:action:")
     static func systemButton(_ cls: ObjCClass, image: UIImage?, target: NSObject?, action: ObjCSelector?) -> NSObject {
@@ -346,18 +571,21 @@ open class UIButton: UIControl {
     @ObjCMethod("setHighlighted:")
     override func setHighlighted(_ highlighted: Bool) {
         control.highlighted = highlighted
+        if button.configuration != nil || button.configurationUpdateHandler != nil { setNeedsUpdateConfiguration() }
         update()
     }
 
     @ObjCMethod("setEnabled:")
     override func setEnabled(_ enabled: Bool) {
         control.enabled = enabled
+        if button.configuration != nil || button.configurationUpdateHandler != nil { setNeedsUpdateConfiguration() }
         update()
     }
 
     @ObjCMethod("setSelected:")
     override func setSelected(_ selected: Bool) {
         control.selected = selected
+        if button.configuration != nil || button.configurationUpdateHandler != nil { setNeedsUpdateConfiguration() }
         update()
     }
 
@@ -377,6 +605,7 @@ open class UIButton: UIControl {
             let color = current(button.titleColors) ?? defaultTitleColor
             label.setTextColor(control.enabled ? color : UIColor.systemGray())
             label.state.alpha = control.highlighted && button.type == 1 ? 0.3 : 1
+            button.backgroundView?.state.alpha = control.highlighted ? 0.75 : 1
         } else {
             button.titleLabel?.setText(nil)
         }
@@ -392,9 +621,20 @@ open class UIButton: UIControl {
 
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize {
+        updateConfigurationIfNeeded()
         let title = current(button.titles).map { Text.size($0, font: titleLabel().font) } ?? .zero
         let image = current(button.images)?.state.size ?? .zero
         let insets = button.contentEdgeInsets
+        // A configuration's button is as large as its content and insets:
+        // the image beside the title, or over or under it, the padding
+        // between them.
+        if let shown = button.configuration?.configuration {
+            let padding = title.width > 0 && image.width > 0 ? shown.imagePadding : 0
+            let content = shown.imagePlacement == 1 || shown.imagePlacement == 4
+                ? CGSize(width: max(title.width, image.width), height: title.height + padding + image.height)
+                : CGSize(width: title.width + padding + image.width, height: max(title.height, image.height))
+            return CGSize(width: content.width + insets.left + insets.right, height: content.height + insets.top + insets.bottom)
+        }
         // A background image makes the button at least as large as itself.
         let background = current(button.backgroundImages)?.state.size ?? .zero
         return CGSize(width: max(title.width + image.width + insets.left + insets.right + (button.type == 1 ? 0 : 0), background.width),
@@ -420,6 +660,32 @@ open class UIButton: UIControl {
             if fit < 1 { imageSize = CGSize(width: imageSize.width * fit, height: imageSize.height * fit) }
         }
         let titleSize = button.titleLabel?.label.text.map { Text.size($0, font: titleLabel().font) } ?? .zero
+        // A configuration's image goes at the edge it says, the padding
+        // between it and the title.
+        if let shown = button.configuration?.configuration {
+            let padding = imageSize.width > 0 && titleSize.width > 0 ? shown.imagePadding : 0
+            if shown.imagePlacement == 1 || shown.imagePlacement == 4 {
+                let top = content.midY - (imageSize.height + padding + titleSize.height) / 2
+                let imageY = shown.imagePlacement == 1 ? top : top + titleSize.height + padding
+                let titleY = shown.imagePlacement == 1 ? top + imageSize.height + padding : top
+                let width = min(titleSize.width, content.width)
+                return (CGRect(x: content.midX - imageSize.width / 2, y: imageY, width: imageSize.width, height: imageSize.height),
+                        CGRect(x: content.midX - width / 2, y: titleY, width: width, height: titleSize.height))
+            }
+            let width = min(titleSize.width, max(content.width - imageSize.width - padding, 0))
+            let total = imageSize.width + padding + width
+            var x: CGFloat
+            switch control.contentHorizontalAlignment {
+            case 1, 4: x = content.minX
+            case 2, 5: x = content.maxX - total
+            default: x = content.midX - total / 2
+            }
+            let trailing = shown.imagePlacement == 8
+            let imageX = trailing ? x + width + padding : x
+            let titleX = trailing ? x : x + imageSize.width + padding
+            return (CGRect(x: imageX, y: content.midY - imageSize.height / 2, width: imageSize.width, height: imageSize.height),
+                    CGRect(x: titleX, y: content.midY - titleSize.height / 2, width: width, height: titleSize.height))
+        }
         let total = imageSize.width + titleSize.width
         var x: CGFloat
         switch control.contentHorizontalAlignment {
@@ -444,10 +710,22 @@ open class UIButton: UIControl {
     /// which a subclass overrides to arrange them its own way.
     @ObjCMethod("layoutSubviews")
     override func layoutSubviews() {
+        updateConfigurationIfNeeded()
+        let button = button
+        if let view = button.backgroundView, let configuration = button.configuration {
+            let frame = state.bounds.inset(by: configuration.configuration.background?.background.backgroundInsets ?? .zero)
+            view.sendSetFrame(frame)
+            view.state.layer.setCornerRadius(configuration.cornerRadius(height: frame.height))
+            configuration.configuration.background?.background.customView?.sendSetFrame(view.state.bounds)
+        }
         let content = sendContentRect(forBounds: state.bounds)
         button.imageView?.sendSetFrame(sendImageRect(forContentRect: content))
         button.titleLabel?.sendSetFrame(sendTitleRect(forContentRect: content))
     }
+}
+
+extension NSObject {
+    @ObjCMethod("updateConfiguration") func sendUpdateConfiguration()
 }
 
 extension NSObject {
