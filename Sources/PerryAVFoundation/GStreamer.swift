@@ -140,7 +140,11 @@ final class Pipeline {
 
     /// `format` is the order of a frame's four bytes: RGBA, or BGRA for
     /// the pixel buffers a video output hands out.
-    init?(uri: String, gst: GStreamer, video: Bool = true, format: String = "RGBA") {
+    ///
+    /// `reading` makes a pipeline to read a movie's frames from one after
+    /// another, as fast as they are taken and none dropped, with no sound:
+    /// an asset reader's.
+    init?(uri: String, gst: GStreamer, video: Bool = true, format: String = "RGBA", reading: Bool = false) {
         // In quotes, as the pipeline description reads them.
         var quoted = ""
         for character in uri {
@@ -148,7 +152,10 @@ final class Pipeline {
             quoted.append(character)
         }
         // Sound alone, as for AVAudioPlayer, sends any video nowhere.
-        let description = video
+        let description = reading
+            ? "playbin uri=\"\(quoted)\" flags=video audio-sink=fakesink video-sink=\"videoconvert ! video/x-raw,format=\(format) "
+                + "! appsink name=perryvideo sync=false max-buffers=2\""
+            : video
             ? "playbin uri=\"\(quoted)\" video-sink=\"videoconvert ! videoscale ! video/x-raw,format=\(format) "
                 + "! appsink name=perryvideo max-buffers=1 drop=true\""
             : "playbin uri=\"\(quoted)\" video-sink=fakesink"
@@ -312,6 +319,55 @@ final class Pipeline {
         guard let data, length >= count else { return false }
         copy(Int(width), Int(height), data, count)
         return true
+    }
+
+    /// The next frame in order, waited for, copied by `copy` (given its
+    /// width, height, bytes, their count and its time in seconds, if the
+    /// stream says) while it is mapped. False at the stream's end, or when
+    /// no frame comes in ten seconds.
+    func nextFrame(_ copy: (Int, Int, UnsafeRawPointer, Int, Double?) -> Void) -> Bool {
+        if sink == nil { sink = "perryvideo".withCString { gst.binGetByName(element, $0) } }
+        guard let sink else { return false }
+        var found: GStreamer.Pointer?
+        var waits = 0
+        while found == nil {
+            found = gst.pullSample(sink, 100_000_000)
+            if found != nil { break }
+            // None waiting: the stream has ended, or failed, or is still decoding.
+            if let bus, let message = gst.busPopFiltered(bus, GStreamer.messageEOS | GStreamer.messageError) {
+                gst.miniObjectUnref(message)
+                // What was decoded before the end came is still to be taken.
+                found = gst.pullSample(sink, 0)
+                if found == nil { return false }
+                break
+            }
+            waits += 1
+            if waits >= 100 { return false }
+        }
+        guard let sample = found else { return false }
+        defer { gst.miniObjectUnref(sample) }
+        var width: Int32 = 0, height: Int32 = 0
+        guard let caps = gst.sampleGetCaps(sample), let structure = gst.capsGetStructure(caps, 0),
+              "width".withCString({ gst.structureGetInt(structure, $0, &width) }) != 0,
+              "height".withCString({ gst.structureGetInt(structure, $0, &height) }) != 0,
+              width > 0, height > 0, let buffer = gst.sampleGetBuffer(sample),
+              gst.bufferMap(buffer, mapInfo, GStreamer.mapRead) != 0 else { return false }
+        defer { gst.bufferUnmap(buffer, mapInfo) }
+        let data = mapInfo.load(fromByteOffset: GStreamer.mapInfoData, as: UnsafeRawPointer?.self)
+        let length = mapInfo.load(fromByteOffset: GStreamer.mapInfoLength, as: Int.self)
+        let count = Int(width) * 4 * Int(height)
+        guard let data, length >= count else { return false }
+        // GstBuffer: a mini object, its pool, then its presentation time in nanoseconds (all ones for none).
+        let time = buffer.loadUnaligned(fromByteOffset: MemoryLayout<Int>.size == 8 ? 72 : 40, as: UInt64.self)
+        copy(Int(width), Int(height), data, count, time == UInt64.max ? nil : Double(time) / 1e9)
+        return true
+    }
+
+    /// Waits, as long as `timeout` seconds, for the pipeline to be paused on its first frame.
+    func prepare(timeout: Double) -> Bool {
+        guard let getState = gst.getState else { return false }
+        pause()
+        return getState(element, nil, nil, UInt64(timeout * 1e9)) != 0
     }
 
     /// Seconds into the stream, and its length.
