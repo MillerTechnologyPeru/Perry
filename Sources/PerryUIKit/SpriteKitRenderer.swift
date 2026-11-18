@@ -273,8 +273,9 @@ final class SKRenderer {
         let sceneSize = scene.node.sceneSize, anchor = scene.node.sceneAnchor
         let background = SKRenderer.components(scene.node.backgroundColor) ?? (0.15, 0.15, 0.15, 1)
         if drawsBackground {
+            // Behind everything, wherever the camera is.
             quad(CGRect(x: -anchor.x * sceneSize.width, y: -anchor.y * sceneSize.height, width: sceneSize.width, height: sceneSize.height),
-             matrix: sceneToClip, texture: white, nearest: false, coordinates: CGRect(x: 0, y: 0, width: 1, height: 1),
+             matrix: scene.sceneToView(bounds: bounds, withCamera: false).concatenating(toClip), texture: white, nearest: false, coordinates: CGRect(x: 0, y: 0, width: 1, height: 1),
                  color: SKRenderer.premultiplied(background, alpha: 1))
         }
 
