@@ -96,6 +96,10 @@ public final class NSJSONSerialization: NSObject {
             JSON.report(error, code: 3851, description: "The data couldn’t be written because it isn’t in the correct format.")
             return nil
         }
+        if getenv("PERRY_JSON_TRACE") != nil {
+            let line = "perry: JSON written: \(String(decoding: data.prefix(1500), as: UTF8.self))\n"
+            _ = line.withCString { write(2, $0, strlen($0)) }
+        }
         return DataObjects.owned(DataStorage(data))
     }
 
