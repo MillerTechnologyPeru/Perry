@@ -91,3 +91,15 @@ public func perry_objc_forward(_ receiver: UnsafeMutableRawPointer?, _ sel: Unsa
     }
     return perry_forward_result(target: result.target, handler: result.handler)
 }
+
+/// The same for a message whose result comes back through memory: its
+/// forward handler is the struct-returning one.
+@c @implementation
+public func perry_objc_forward_stret(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?) -> perry_forward_result {
+    guard let sel else { return perry_forward_result(target: nil, handler: nil) }
+    let result = Runtime.forward(receiver: receiver, selector: sel.assumingMemoryBound(to: CChar.self), stret: true)
+    if result.target == nil && result.handler == nil {
+        objcFatal("message \(String(cString: sel.assumingMemoryBound(to: CChar.self))) could not be forwarded")
+    }
+    return perry_forward_result(target: result.target, handler: result.handler)
+}
