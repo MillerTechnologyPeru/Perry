@@ -83,7 +83,7 @@ typedef struct perry_image {
     const struct dysymtab_command *dysymtab;
     int8_t exports_sorted;      // whether the symbol table's exports are by name: 0 unknown, 1, -1
     void *legacy_main;          // _main, for LC_UNIXTHREAD executables, which have no LC_MAIN
-    uint32_t thread_pc;         // LC_UNIXTHREAD's unslid pc: crt1's `start`
+    uint64_t thread_pc;         // LC_UNIXTHREAD's unslid pc: crt1's `start`
 
     // Linkedit data. Pointers are into the mapped __LINKEDIT segment.
     const struct linkedit_data_command *chained_fixups;
