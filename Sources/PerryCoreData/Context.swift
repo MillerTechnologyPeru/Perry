@@ -12,6 +12,9 @@ enum ConcurrencyType {
 
 final class ContextState: ObjectState {
     var coordinator: NSPersistentStoreCoordinator?
+    /// The store objects inserted with no store in the coordinator take
+    /// their IDs from.
+    var detachedStore: NSPersistentStore?
     /// The context this one was made under, retained as Core Data does.
     var parent: NSManagedObjectContext?
     var concurrencyType = ConcurrencyType.confinement
@@ -106,13 +109,21 @@ open class NSManagedObjectContext: NSObject {
 
     var store: NSPersistentStore? { coordinator?.state.stores.first }
 
+    /// Where inserted objects get their IDs: the first store, else one in
+    /// memory of the context's own while the coordinator has none.
+    var insertionStore: NSPersistentStore? {
+        if let store { return store }
+        if state.detachedStore == nil { state.detachedStore = coordinator?.detachedStore() }
+        return state.detachedStore
+    }
+
     /// Registers a new object with a permanent ID in the store, shown as a
     /// temporary ID until it is saved, and the entity's default values.
     @ObjCMethod("insertObject:")
     func insert(_ object: NSManagedObject) {
         let objectState = object.state
         guard objectState.context == nil, let entity = objectState.entity else { return }
-        guard let store, let backend = store.state.backend, let id = try? backend.newID(entity.state.name) else {
+        guard let store = insertionStore, let backend = store.state.backend, let id = try? backend.newID(entity.state.name) else {
             coreDataFatal("This NSPersistentStoreCoordinator has no persistent stores. It cannot perform a save operation.")
         }
         objectState.context = objcObject
