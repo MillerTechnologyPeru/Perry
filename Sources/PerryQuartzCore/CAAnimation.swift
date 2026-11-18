@@ -315,13 +315,15 @@ enum AnimatedValue {
         "opacity", "zPosition", "cornerRadius", "borderWidth", "shadowOpacity", "shadowRadius", "position.x", "position.y",
         "bounds.size.width", "bounds.size.height", "bounds.origin.x", "bounds.origin.y", "transform.rotation", "transform.rotation.z",
         "transform.scale", "transform.scale.x", "transform.scale.y", "transform.translation.x", "transform.translation.y",
+        "transform.rotation.x", "transform.rotation.y",
         "strokeStart", "strokeEnd", "lineWidth", "lineDashPhase", "miterLimit", "hidden",
     ]
     static let discreteKeys: Set<String> = ["hidden", "contents", "path", "masksToBounds"]
 
     static func animatable(_ key: String) -> Bool {
         colorKeys.contains(key) || numberKeys.contains(key) || discreteKeys.contains(key)
-            || ["position", "anchorPoint", "bounds", "bounds.size", "bounds.origin", "transform", "sublayerTransform", "shadowOffset"].contains(key)
+            || ["position", "anchorPoint", "bounds", "bounds.size", "bounds.origin", "transform", "sublayerTransform", "shadowOffset",
+                "transform.translation"].contains(key)
     }
 
     // MARK: Reading and writing
@@ -357,6 +359,9 @@ enum AnimatedValue {
         case "transform.rotation", "transform.rotation.z": return .number(atan2(Double(affine.b), Double(affine.a)))
         case "transform.scale", "transform.scale.x": return .number(Double((affine.a * affine.a + affine.b * affine.b).squareRoot()))
         case "transform.scale.y": return .number(Double((affine.c * affine.c + affine.d * affine.d).squareRoot()))
+        case "transform.translation": return .point(CGPoint(x: affine.tx, y: affine.ty))
+        // Turns out of the plane: none in a model transform kept flat.
+        case "transform.rotation.x", "transform.rotation.y": return .number(0)
         case "transform.translation.x": return .number(Double(affine.tx))
         case "transform.translation.y": return .number(Double(affine.ty))
         case "backgroundColor": return color(state.backgroundColor)
@@ -410,6 +415,11 @@ enum AnimatedValue {
         case ("transform.scale", .number(let value)): transformed { ($0.scaleX, $0.scaleY) = (value, value) }
         case ("transform.scale.x", .number(let value)): transformed { $0.scaleX = value }
         case ("transform.scale.y", .number(let value)): transformed { $0.scaleY = value }
+        case ("transform.translation", .point(let value)): transformed { ($0.tx, $0.ty) = (Double(value.x), Double(value.y)) }
+        case ("transform.translation", .size(let value)): transformed { ($0.tx, $0.ty) = (Double(value.width), Double(value.height)) }
+        // A turn about x or y, seen from the front, narrows the other axis.
+        case ("transform.rotation.x", .number(let value)): transformed { $0.scaleY *= cos(value) }
+        case ("transform.rotation.y", .number(let value)): transformed { $0.scaleX *= cos(value) }
         case ("transform.translation.x", .number(let value)): transformed { $0.tx = value }
         case ("transform.translation.y", .number(let value)): transformed { $0.ty = value }
         case ("backgroundColor", .color(let value)): AnimatedValue.assign(&state.backgroundColor, value)
@@ -522,6 +532,15 @@ enum AnimatedValue {
         case (.color(let x), .color(let y)): return .color(zip(x, y).map { mix($0, $1) })
         default: return t < 0.5 ? a : b
         }
+    }
+
+    /// As interpolate, with a shape's paths blended when they are made alike.
+    static func interpolate(_ a: AnimatedValue, _ b: AnimatedValue, _ t: Double, key: String) -> AnimatedValue {
+        if key == "path", case .object(let from?) = a, case .object(let to?) = b,
+           let path = PathBlending.blend(from.objcObject, to.objcObject, CGFloat(t)) {
+            return .object(NSObject(objcObject: path, ownership: .adopt))
+        }
+        return interpolate(a, b, t)
     }
 
     static func add(_ a: AnimatedValue, _ b: AnimatedValue) -> AnimatedValue {
