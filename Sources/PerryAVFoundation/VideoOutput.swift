@@ -75,6 +75,8 @@ open class PixelBuffer: NSObject {
         return buffer
     }
 
+    @ObjCMethod("_cfTypeID") func cfTypeID() -> UInt { MediaTypeIDs.pixelBuffer }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         PixelBuffer.states.remove(objcObject)
