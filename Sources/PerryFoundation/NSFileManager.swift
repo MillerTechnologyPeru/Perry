@@ -95,6 +95,15 @@ final class NSFileManager: NSObject {
     static func defaultManager() -> UnsafeMutableRawPointer? { FileManagers.defaultManager }
 
     /// No path names no file.
+    /// A path's bytes on disk, UTF-8 here: kept as the string's own, which
+    /// lasts as long as the path does (an autoreleased one, as programs
+    /// pass, outlasts the caller's use).
+    @ObjCMethod("fileSystemRepresentationWithPath:")
+    func fileSystemRepresentation(withPath path: ObjCObject?) -> UnsafePointer<CChar>? {
+        guard let path else { return nil }
+        return Strings.utf8(path.id)
+    }
+
     /// A path from its bytes on disk, which are UTF-8 here.
     @ObjCMethod("stringWithFileSystemRepresentation:length:")
     func string(fileSystemRepresentation bytes: UnsafePointer<UInt8>?, length: UInt) -> String? {
@@ -155,8 +164,9 @@ final class NSFileManager: NSObject {
 
     /// Before -createDirectoryAtPath:withIntermediateDirectories:attributes:error:'s day.
     @ObjCMethod("createDirectoryAtPath:attributes:")
-    func createDirectory(atPath path: String, attributes: ObjCObject?) -> Bool {
-        createDirectory(atPath: path, intermediates: false, attributes: attributes, error: nil)
+    func createDirectory(atPath path: String?, attributes: ObjCObject?) -> Bool {
+        guard let path else { return false }
+        return createDirectory(atPath: path, intermediates: false, attributes: attributes, error: nil)
     }
 
     @ObjCMethod("createDirectoryAtPath:withIntermediateDirectories:attributes:error:")
@@ -179,13 +189,15 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("createFileAtPath:contents:attributes:")
-    func createFile(atPath path: String, contents: NSData?, attributes: ObjCObject?) -> Bool {
-        files.createFile(atPath: path, contents: contents?.data)
+    func createFile(atPath path: String?, contents: NSData?, attributes: ObjCObject?) -> Bool {
+        guard let path else { return false }
+        return files.createFile(atPath: path, contents: contents?.data)
     }
 
     @ObjCMethod("contentsAtPath:")
-    func contents(atPath path: String) -> NSData? {
-        files.contents(atPath: path).map { DataObjects.owned(DataStorage($0)) }
+    func contents(atPath path: String?) -> NSData? {
+        guard let path else { return nil }
+        return files.contents(atPath: path).map { DataObjects.owned(DataStorage($0)) }
     }
 
     /// Before -contentsOfDirectoryAtPath:error:'s day.
@@ -193,7 +205,8 @@ final class NSFileManager: NSObject {
     func directoryContents(atPath path: String) -> NSArray? { contentsOfDirectory(atPath: path, error: nil) }
 
     @ObjCMethod("contentsOfDirectoryAtPath:error:")
-    func contentsOfDirectory(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
+    func contentsOfDirectory(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
+        guard let path else { return nil }
         do {
             return Arrays.owned(try files.contentsOfDirectory(atPath: path).map { Strings.autoreleased($0) })
         } catch {
@@ -219,7 +232,8 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("subpathsOfDirectoryAtPath:error:")
-    func subpaths(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
+    func subpaths(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> NSArray? {
+        guard let path else { return nil }
         do {
             return Arrays.owned(try files.subpathsOfDirectory(atPath: path).sorted().map { Strings.autoreleased($0) })
         } catch {
@@ -258,7 +272,8 @@ final class NSFileManager: NSObject {
     // MARK: Changing
 
     @ObjCMethod("removeItemAtPath:error:")
-    func removeItem(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+    func removeItem(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path else { return false }
         do {
             try files.removeItem(atPath: path)
             return true
@@ -274,7 +289,8 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("copyItemAtPath:toPath:error:")
-    func copyItem(atPath source: String, toPath destination: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+    func copyItem(atPath source: String?, toPath destination: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let source, let destination else { return false }
         do {
             try files.copyItem(atPath: source, toPath: destination)
             return true
@@ -290,7 +306,8 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("createSymbolicLinkAtPath:withDestinationPath:error:")
-    func createSymbolicLink(atPath path: String, withDestinationPath destination: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+    func createSymbolicLink(atPath path: String?, withDestinationPath destination: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path, let destination else { return false }
         guard symlink(destination, path) == 0 else {
             FileManagers.report(errorPointer, path)
             return false
@@ -304,7 +321,8 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("destinationOfSymbolicLinkAtPath:error:")
-    func destinationOfSymbolicLink(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> String? {
+    func destinationOfSymbolicLink(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> String? {
+        guard let path else { return nil }
         do {
             return try files.destinationOfSymbolicLink(atPath: path)
         } catch {
@@ -314,7 +332,8 @@ final class NSFileManager: NSObject {
     }
 
     @ObjCMethod("moveItemAtPath:toPath:error:")
-    func moveItem(atPath source: String, toPath destination: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+    func moveItem(atPath source: String?, toPath destination: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let source, let destination else { return false }
         do {
             try files.moveItem(atPath: source, toPath: destination)
             return true
@@ -327,7 +346,8 @@ final class NSFileManager: NSObject {
     /// NSFileType, NSFileSize, NSFileModificationDate, NSFileCreationDate
     /// and NSFilePosixPermissions.
     @ObjCMethod("attributesOfItemAtPath:error:")
-    func attributes(atPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
+    func attributes(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
+        guard let path else { return nil }
         var info = stat()
         guard lstat(path, &info) == 0 else {
             FileManagers.report(errorPointer, path)
@@ -354,7 +374,8 @@ final class NSFileManager: NSObject {
 
     /// The deprecated form: the item's attributes, or the link's target's.
     @ObjCMethod("fileAttributesAtPath:traverseLink:")
-    func fileAttributes(atPath path: String, traverseLink: Bool) -> NSDictionary? {
+    func fileAttributes(atPath path: String?, traverseLink: Bool) -> NSDictionary? {
+        guard let path else { return nil }
         guard traverseLink, let resolved = realpath(path, nil) else { return attributes(atPath: path, error: nil) }
         defer { free(resolved) }
         return attributes(atPath: String(cString: resolved), error: nil)
@@ -363,7 +384,8 @@ final class NSFileManager: NSObject {
     /// Permissions and the modification date are applied; other keys are
     /// accepted and left as they are.
     @ObjCMethod("setAttributes:ofItemAtPath:error:")
-    func setAttributes(_ attributes: NSDictionary?, ofItemAtPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+    func setAttributes(_ attributes: NSDictionary?, ofItemAtPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path else { return false }
         guard access(path, F_OK) == 0 else {
             FileManagers.report(errorPointer, path)
             return false
@@ -383,7 +405,8 @@ final class NSFileManager: NSObject {
 
     /// The size and free space of the file system holding `path`.
     @ObjCMethod("attributesOfFileSystemForPath:error:")
-    func fileSystemAttributes(forPath path: String, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
+    func fileSystemAttributes(forPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> NSDictionary? {
+        guard let path else { return nil }
         var info = statvfs()
         guard statvfs(path, &info) == 0 else {
             FileManagers.report(errorPointer, path)
