@@ -128,6 +128,8 @@ struct thread_command {
 #define ARM_THREAD_STATE_PC     15      // r15, in the 17 words of r0-r12, sp, lr, pc, cpsr
 #define X86_THREAD_STATE32      1
 #define X86_THREAD_STATE32_EIP  10      // of eax ebx ecx edx edi esi ebp esp ss eflags eip cs ds es fs gs
+#define X86_THREAD_STATE64      4
+#define X86_THREAD_STATE64_RIP  16      // of rax rbx rcx rdx rdi rsi rbp rsp r8-r15 rip, each two words
 
 #define SG_READ_ONLY 0x10
 
@@ -291,6 +293,14 @@ struct nlist {
     uint8_t n_sect;
     int16_t n_desc;
     uint32_t n_value;
+};
+
+struct nlist_64 {
+    uint32_t n_strx;
+    uint8_t n_type;
+    uint8_t n_sect;
+    uint16_t n_desc;
+    uint64_t n_value;
 };
 
 #define N_STAB                  0xe0

@@ -162,6 +162,11 @@ static inline void perry_store_release(void **slot, void *value) {
     __atomic_store_n(slot, value, __ATOMIC_RELEASE);
 }
 
+/// Sets *slot to replacement if it is still expected; whether it was.
+static inline _Bool perry_compare_and_swap(void **slot, void *expected, void *replacement) {
+    return __atomic_compare_exchange_n(slot, &expected, replacement, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+
 static inline void *perry_load_acquire(void *const *slot) {
     return __atomic_load_n(slot, __ATOMIC_ACQUIRE);
 }

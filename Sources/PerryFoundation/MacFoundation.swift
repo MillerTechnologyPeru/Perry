@@ -124,6 +124,23 @@ public func NSRoundDownToMultipleOfPageSize(_ bytes: UInt) -> UInt {
     return bytes / page * page
 }
 
+// Memory from the collector, for programs built to run with it: there is
+// none here (objc_collectingEnabled says so), so it is malloc's, which the
+// program frees, as it does when the collector is off.
+
+@c(_NSAllocateCollectable)
+public func NSAllocateCollectable(_ size: Int, _ options: UInt) -> UnsafeMutableRawPointer? {
+    calloc(1, max(size, 1))
+}
+
+@c(_NSReallocateCollectable)
+public func NSReallocateCollectable(_ pointer: UnsafeMutableRawPointer?, _ size: Int, _ options: UInt) -> UnsafeMutableRawPointer? {
+    realloc(pointer, max(size, 1))
+}
+
+@c(_NSMakeCollectable)
+public func NSMakeCollectable(_ object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { object }
+
 /// NSZeroPoint, NSZeroSize and NSZeroRect: zeros, which never change.
 enum ZeroGeometry {
     nonisolated(unsafe) static let storage: UnsafeMutableRawPointer = {

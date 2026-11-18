@@ -1190,8 +1190,12 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     // one SDK to the next (NSLayoutConstraint, bound to Foundation by newer
     // SDKs, or AVAudioPlayer to AVFAudio): one another provider defines is
     // the same class.
+    // So is libobjc's runtime data (_objc_empty_cache, _objc_empty_vtable),
+    // which 10.6's linker bound to whichever library it found first:
+    // Xcode 3's frameworks take it from WebKit.
     bool is_class = strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0;
-    for (uint32_t i = 0; is_class && !sym.found && i < loader->provider_count; i++)
+    bool is_runtime_data = strncmp(name, "__objc_empty_", 13) == 0;
+    for (uint32_t i = 0; (is_class || is_runtime_data) && !sym.found && i < loader->provider_count; i++)
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], name, &sym);
 

@@ -134,6 +134,17 @@ extension Runtime {
                 }
             }
 
+            // Mac OS X 10.6's message references, { IMP, SEL }, which sends
+            // go through: their selectors too.
+            if let refs = image.pointers("__objc_msgrefs") {
+                for index in stride(from: 1, to: refs.count, by: 2) {
+                    if let name = refs[index] {
+                        refs[index] = UnsafeMutableRawPointer(mutating: Selectors.register(
+                            name.assumingMemoryBound(to: CChar.self), copying: false))
+                    }
+                }
+            }
+
             // Protocols: one canonical protocol_t per name.
             for slot in image.pointers("__objc_protolist") ?? .init(start: nil, count: 0) {
                 guard let proto = slot?.assumingMemoryBound(to: perry_protocol.self), let name = proto.pointee.name else {

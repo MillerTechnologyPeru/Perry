@@ -61,6 +61,8 @@ final class StoreState: ObjectState {
     var configuration: String?
     var identifier = ""
     var backend: StoreBackend?
+    /// The store's metadata dictionary, set by setMetadata:forPersistentStore:.
+    var metadata: NSObject?
     /// The coordinator; not retained.
     var coordinator: UnsafeMutableRawPointer?
 }
@@ -181,6 +183,13 @@ open class NSPersistentStoreCoordinator: NSObject {
         } else {
             storage = InMemoryModelStorage(model: model)
         }
+        let store = makeStore(type: type, url: url, options: options, configuration: configuration, storage: storage, model: model)
+        state.stores.append(store)
+        return store
+    }
+
+    private func makeStore(type: String, url: NSURL?, options: NSObject?, configuration: String?, storage: any ModelStorage,
+                           model: Model) -> NSPersistentStore {
         let store = NSPersistentStore.objCClass.object.newInstance().unsafeCast(to: NSPersistentStore.self)
         store.state.type = type
         store.state.url = url
@@ -189,9 +198,56 @@ open class NSPersistentStoreCoordinator: NSObject {
         store.state.identifier = NSUUID.make().uuidString()
         store.state.backend = StoreBackend(storage: storage, model: model)
         store.state.coordinator = objcObject
-        state.stores.append(store)
         return store
     }
+
+    /// A store in memory that isn't among the coordinator's: a context
+    /// takes IDs from one for objects inserted while the coordinator has no
+    /// stores, as Core Data lets it (saving them fails).
+    func detachedStore() -> NSPersistentStore? {
+        guard let model = state.model?.coreModel else { return nil }
+        return makeStore(type: StoreTypes.NSInMemoryStoreType, url: nil, options: nil, configuration: nil,
+                         storage: InMemoryModelStorage(model: model), model: model)
+    }
+
+    // MARK: Metadata
+
+    /// A store's metadata: what was set, else its type and UUID.
+    static func defaultMetadata(type: String, identifier: String) -> NSObject {
+        NSMutableDictionary.of([("NSStoreType", NSObject(type.objCArgument()!)), ("NSStoreUUID", NSObject(identifier.objCArgument()!))])
+    }
+
+    @ObjCMethod("metadataForPersistentStore:")
+    func metadata(for store: NSPersistentStore) -> NSObject {
+        store.state.metadata ?? Self.defaultMetadata(type: store.state.type, identifier: store.state.identifier)
+    }
+
+    @ObjCMethod("setMetadata:forPersistentStore:")
+    func setMetadata(_ metadata: NSObject?, for store: NSPersistentStore) { store.state.metadata = metadata }
+
+    /// The metadata of the store at a URL, without adding it: that of one
+    /// this process has open there, else its type and a UUID when the file
+    /// is there; nil with a file-not-found error when it isn't, which
+    /// programs check for before they make a store.
+    @ObjCClassMethod("metadataForPersistentStoreOfType:URL:error:")
+    static func metadata(ofType type: String?, url: NSURL?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
+        metadata(ofType: type, url: url, options: nil, error: error)
+    }
+
+    @ObjCClassMethod("metadataForPersistentStoreOfType:URL:options:error:")
+    static func metadata(ofType type: String?, url: NSURL?, options: NSObject?,
+                         error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
+        guard let url, url.isFileURL() == true, let path = url.path(), NSFileManager.defaultManager().fileExists(atPath: path) else {
+            error?.pointee = StoreErrors.make(260, "The file doesn’t exist.").objCReturnValue()
+            return nil
+        }
+        return defaultMetadata(type: type ?? StoreTypes.NSSQLiteStoreType, identifier: NSUUID.make().uuidString())
+    }
+
+    /// Metadata for a store not open isn't kept.
+    @ObjCClassMethod("setMetadata:forPersistentStoreOfType:URL:error:")
+    static func setMetadata(_ metadata: NSObject?, ofType type: String?, url: NSURL?,
+                            error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool { true }
 
     @ObjCMethod("removePersistentStore:error:")
     func removePersistentStore(_ store: NSPersistentStore, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {

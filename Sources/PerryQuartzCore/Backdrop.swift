@@ -20,8 +20,12 @@ private func SDL_ConvertSurface(_ surface: UnsafeMutableRawPointer, _ format: UI
 @_silgen_name("SDL_DestroySurface")
 private func SDL_DestroySurface(_ surface: UnsafeMutableRawPointer)
 
-@_silgen_name("SDL_SavePNG")
-private func SDL_SavePNG(_ surface: UnsafeMutableRawPointer, _ file: UnsafePointer<CChar>) -> Bool
+/// SDL_SavePNG, which SDL has had since 3.4: looked up when a frame is
+/// dumped, so the provider loads with an older SDL (Debian's 3.2).
+nonisolated(unsafe) private let SDL_SavePNG: (@convention(c) (UnsafeMutableRawPointer, UnsafePointer<CChar>) -> Bool)? =
+    dlsym(UnsafeMutableRawPointer(bitPattern: 0), "SDL_SavePNG").map {
+        unsafeBitCast($0, to: (@convention(c) (UnsafeMutableRawPointer, UnsafePointer<CChar>) -> Bool).self)
+    }
 
 extension Compositor {
     /// PERRY_UIKIT_FRAME_DUMP, a path: the frame the GPU composited, about
@@ -35,7 +39,7 @@ extension Compositor {
         guard let path = Compositor.frameDump, Clock.now - Compositor.lastDump > 1 else { return }
         Compositor.lastDump = Clock.now
         guard let surface = SDL_RenderReadPixels(renderer.unsafePointer, nil) else { return }
-        _ = path.withCString { SDL_SavePNG(surface, $0) }
+        if let SDL_SavePNG { _ = path.withCString { SDL_SavePNG(surface, $0) } }
         SDL_DestroySurface(surface)
     }
 

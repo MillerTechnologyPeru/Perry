@@ -496,6 +496,159 @@ int darwin_fstatat(int directory, const char *path, struct darwin_stat *out, int
     return stat_at(directory_to_linux(directory), path, at_flags_to_linux(flags), out);
 }
 
+// MARK: - fts
+
+#if defined(__LP64__)
+#include <fts.h>
+
+// Darwin's struct stat from glibc's, with the change time for the birth.
+static void stat_to_darwin(const struct stat *in, struct darwin_stat *out) {
+    memset(out, 0, sizeof(*out));
+    out->st_dev = device_to_darwin(major(in->st_dev), minor(in->st_dev));
+    out->st_mode = (uint16_t)in->st_mode;
+    out->st_nlink = in->st_nlink > UINT16_MAX ? UINT16_MAX : (uint16_t)in->st_nlink;
+    out->st_ino = in->st_ino;
+    out->st_uid = in->st_uid;
+    out->st_gid = in->st_gid;
+    out->st_rdev = device_to_darwin(major(in->st_rdev), minor(in->st_rdev));
+    out->st_atimespec = in->st_atim;
+    out->st_mtimespec = in->st_mtim;
+    out->st_ctimespec = in->st_ctim;
+    out->st_birthtimespec = in->st_ctim;
+    out->st_size = (int64_t)in->st_size;
+    out->st_blocks = (int64_t)in->st_blocks;
+    out->st_blksize = (int32_t)in->st_blksize;
+}
+
+// Darwin's FTSENT, with 64-bit inodes: glibc's walk, each entry given in
+// this layout, beside the Linux entry it is made from, which keeps it in its
+// fts_pointer.
+struct darwin_ftsent {
+    struct darwin_ftsent *fts_cycle, *fts_parent, *fts_link;
+    long fts_number;
+    void *fts_pointer;
+    char *fts_accpath, *fts_path;
+    int fts_errno, fts_symfd;
+    unsigned short fts_pathlen, fts_namelen;
+    uint64_t fts_ino;
+    int32_t fts_dev;
+    uint16_t fts_nlink;
+    short fts_level;
+    unsigned short fts_info, fts_flags, fts_instr;
+    struct darwin_stat *fts_statp;
+    char fts_name[1];
+};
+_Static_assert(offsetof(struct darwin_ftsent, fts_ino) == 72, "fts_ino is at 72 on Darwin");
+_Static_assert(offsetof(struct darwin_ftsent, fts_statp) == 96, "fts_statp is at 96 on Darwin");
+_Static_assert(offsetof(struct darwin_ftsent, fts_name) == 104, "fts_name is at 104 on Darwin");
+
+typedef struct darwin_entry {
+    FTSENT *linux_entry;
+    struct darwin_entry *next_made;
+    struct darwin_stat stat;
+    struct darwin_ftsent entry;   // last: the name runs on past it
+} darwin_entry;
+
+typedef struct {
+    FTS *fts;
+    darwin_entry *made;
+} darwin_fts;
+
+static struct darwin_ftsent *darwin_entry_for(darwin_fts *walk, FTSENT *linux_entry) {
+    if (!linux_entry) return NULL;
+    darwin_entry *made = linux_entry->fts_pointer;
+    if (!made) {
+        made = calloc(1, sizeof(*made) + linux_entry->fts_namelen + 1);
+        if (!made) return NULL;
+        made->linux_entry = linux_entry;
+        made->next_made = walk->made;
+        walk->made = made;
+        linux_entry->fts_pointer = made;
+    }
+    struct darwin_ftsent *out = &made->entry;
+    // The roots' parent, at FTS_ROOTPARENTLEVEL, has no parent of its own
+    // (glibc leaves the field unset), and only a cycle has a cycle entry.
+    out->fts_parent = linux_entry->fts_level > FTS_ROOTPARENTLEVEL && linux_entry->fts_parent
+        ? darwin_entry_for(walk, linux_entry->fts_parent) : NULL;
+    out->fts_cycle = linux_entry->fts_info == FTS_DC && linux_entry->fts_cycle
+        ? darwin_entry_for(walk, linux_entry->fts_cycle) : NULL;
+    out->fts_link = NULL;
+    out->fts_accpath = linux_entry->fts_accpath;
+    out->fts_path = linux_entry->fts_path;
+    out->fts_errno = linux_entry->fts_errno ? perry_darwin_errno_from_linux(linux_entry->fts_errno) : 0;
+    out->fts_symfd = linux_entry->fts_symfd;
+    out->fts_pathlen = (unsigned short)linux_entry->fts_pathlen;
+    out->fts_namelen = (unsigned short)linux_entry->fts_namelen;
+    out->fts_ino = linux_entry->fts_ino;
+    out->fts_dev = device_to_darwin(major(linux_entry->fts_dev), minor(linux_entry->fts_dev));
+    out->fts_nlink = linux_entry->fts_nlink > UINT16_MAX ? UINT16_MAX : (uint16_t)linux_entry->fts_nlink;
+    out->fts_level = linux_entry->fts_level;
+    out->fts_info = linux_entry->fts_info;
+    out->fts_flags = linux_entry->fts_flags;
+    out->fts_instr = linux_entry->fts_instr;
+    if (linux_entry->fts_statp && linux_entry->fts_info != FTS_NS && linux_entry->fts_info != FTS_NSOK) {
+        stat_to_darwin(linux_entry->fts_statp, &made->stat);
+        out->fts_statp = &made->stat;
+    } else {
+        out->fts_statp = NULL;
+    }
+    memcpy(out->fts_name, linux_entry->fts_name, linux_entry->fts_namelen);
+    out->fts_name[linux_entry->fts_namelen] = 0;
+    return out;
+}
+
+/// Darwin's options are glibc's, with whiteouts, which Linux has none of,
+/// and the comparison flags, left out. Entries are walked in directory
+/// order: a comparison function, which would take Darwin's entries, isn't
+/// used.
+void *darwin_fts_open(char *const *paths, int options, void *compare) INODE64_SYMBOL(fts_open);
+void *darwin_fts_open(char *const *paths, int options, void *compare) {
+    (void)compare;
+    darwin_fts *walk = calloc(1, sizeof *walk);
+    if (!walk) {
+        errno = perry_darwin_errno_from_linux(ENOMEM);
+        return NULL;
+    }
+    walk->fts = fts_open(paths, options & 0x7f, NULL);
+    if (!walk->fts) {
+        int error = errno;
+        free(walk);
+        errno = perry_darwin_errno_from_linux(error);
+        return NULL;
+    }
+    return walk;
+}
+
+struct darwin_ftsent *darwin_fts_read(darwin_fts *walk) INODE64_SYMBOL(fts_read);
+struct darwin_ftsent *darwin_fts_read(darwin_fts *walk) {
+    if (!walk) return NULL;
+    errno = 0;
+    FTSENT *entry = fts_read(walk->fts);
+    if (!entry && errno) errno = perry_darwin_errno_from_linux(errno);
+    return darwin_entry_for(walk, entry);
+}
+
+int darwin_fts_set(darwin_fts *walk, struct darwin_ftsent *entry, int instruction) INODE64_SYMBOL(fts_set);
+int darwin_fts_set(darwin_fts *walk, struct darwin_ftsent *entry, int instruction) {
+    if (!walk || !entry) return -1;
+    darwin_entry *made = (darwin_entry *)((char *)entry - offsetof(darwin_entry, entry));
+    entry->fts_instr = (unsigned short)instruction;
+    return fts_set(walk->fts, made->linux_entry, instruction);
+}
+
+int darwin_fts_close(darwin_fts *walk) INODE64_SYMBOL(fts_close);
+int darwin_fts_close(darwin_fts *walk) {
+    if (!walk) return -1;
+    int result = fts_close(walk->fts);
+    for (darwin_entry *made = walk->made, *next; made; made = next) {
+        next = made->next_made;
+        free(made);
+    }
+    free(walk);
+    return result;
+}
+#endif
+
 // MARK: - Attribute lists
 
 // getattrlist for the attributes programs ask for most: the object's type,
