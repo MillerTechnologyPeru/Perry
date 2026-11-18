@@ -27,6 +27,10 @@ enum AssetCatalog {
         main?.image(named: name, dark: dark)
     }
 
+    /// Whether the main bundle's catalog renders the named image as a
+    /// template.
+    static func isTemplate(named name: String) -> Bool { main?.isTemplate(named: name) ?? false }
+
     /// Other bundles' catalogs (a Swift package's resource bundle, a
     /// framework's), by the bundle's path, read the first time one of their
     /// images is asked for.
