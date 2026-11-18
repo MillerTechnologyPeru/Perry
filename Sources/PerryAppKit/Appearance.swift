@@ -6,6 +6,10 @@ import PerryObjCInterop
 // org.freedesktop.appearance color-scheme (1 dark, 2 light), else GNOME's
 // org.gnome.desktop.interface color-scheme setting, else light.
 // PERRY_APPKIT_APPEARANCE=dark or light overrides both.
+//
+// As on macOS, a program built with an SDK before 10.14's, which predates
+// Dark Aqua and draws for light only, or whose Info.plist sets
+// NSRequiresAquaSystemAppearance, is always in Aqua.
 
 enum Appearances {
     static let aqua = "NSAppearanceNameAqua"
@@ -16,6 +20,7 @@ enum Appearances {
         if let setting = getenv("PERRY_APPKIT_APPEARANCE").map({ String(cString: $0).lowercased() }), !setting.isEmpty {
             return setting.contains("dark")
         }
+        if requiresAqua { return false }
         let portal = run("gdbus call --session --timeout 2 --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop "
                          + "--method org.freedesktop.portal.Settings.ReadOne org.freedesktop.appearance color-scheme")
         if portal.contains("uint32 1") { return true }
@@ -25,6 +30,20 @@ enum Appearances {
         if gnome.contains("prefer-light") || gnome.contains("default") { return false }
         return false
     }()
+
+    /// Whether the program is held to Aqua: built with an SDK before macOS
+    /// 10.14 (or before SDKs were recorded, 0), or asking for it in its
+    /// Info.plist.
+    static var requiresAqua: Bool {
+        if let value = NSBundle.main().infoObject(forKey: "NSRequiresAquaSystemAppearance") {
+            let asked = Send.bool(value.objcObject, "boolValue")
+            if asked { return true }
+        }
+        guard let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD),
+              let symbol = dlsym(system, "_dyld_get_program_sdk_version") else { return false }
+        let sdk = unsafeBitCast(symbol, to: (@convention(c) () -> UInt32).self)()
+        return sdk < 0x000A_0E00   // 10.14
+    }
 
     /// A command's output, or "" when it can't run.
     private static func run(_ command: String) -> String {
