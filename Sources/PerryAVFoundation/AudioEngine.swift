@@ -126,29 +126,27 @@ open class AVAudioEngine: NSObject {
 
     deinit {
         for node in attached { ObjCRuntime.release(node.objcObject) }
-        for node in [mixer, output, input] { if let node { ObjCRuntime.release(node.objcObject) } }
     }
 
-    private func node(_ cls: ObjCClass) -> NSObject {
-        let made = NSObject(cls.pointer).newInstance()
-        return made
-    }
+    /// A new node of the class, which the engine keeps by the wrapper it
+    /// is given in.
+    private func node(_ cls: ObjCClass) -> NSObject { NSObject(cls.pointer).newInstance() }
 
     @ObjCMethod("mainMixerNode")
     func mainMixerNode() -> NSObject {
-        if mixer == nil { mixer = ObjCRuntime.retain(node(AVAudioMixerNode.objCClass).objcObject).map { NSObject($0) } }
+        if mixer == nil { mixer = node(AVAudioMixerNode.objCClass) }
         return mixer!
     }
 
     @ObjCMethod("outputNode")
     func outputNode() -> NSObject {
-        if output == nil { output = ObjCRuntime.retain(node(AVAudioOutputNode.objCClass).objcObject).map { NSObject($0) } }
+        if output == nil { output = node(AVAudioOutputNode.objCClass) }
         return output!
     }
 
     @ObjCMethod("inputNode")
     func inputNode() -> NSObject {
-        if input == nil { input = ObjCRuntime.retain(node(AVAudioInputNode.objCClass).objcObject).map { NSObject($0) } }
+        if input == nil { input = node(AVAudioInputNode.objCClass) }
         return input!
     }
 
