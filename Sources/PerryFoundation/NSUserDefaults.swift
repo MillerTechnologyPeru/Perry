@@ -109,6 +109,17 @@ final class UserDefaultsStorage {
         lock.locked { registered.merge(defaults) { _, new in new } }
     }
 
+    /// The registration domain: what was registered.
+    var registeredValues: [String: PropertyValue] {
+        get { lock.locked { registered } }
+        set { lock.locked { registered = newValue } }
+    }
+
+    /// Volatile domains other than registration, by name: kept for the
+    /// session. NSArgumentDomain is empty here.
+    nonisolated(unsafe) static var volatileDomains: [String: [String: PropertyValue]] = ["NSArgumentDomain": [:]]
+    static let volatileLock = Monitor()
+
     var all: [String: PropertyValue] {
         lock.locked { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
     }
@@ -344,6 +355,42 @@ class NSUserDefaults: NSObject {
         if name == storage.suite { storage.removeAll() }
     }
 
+    /// A volatile domain's values: NSRegistrationDomain's are what was
+    /// registered; others are what was set for the session.
+    @ObjCMethod("volatileDomainForName:")
+    func volatileDomain(forName name: String?) -> ObjCObject? {
+        guard let name else { return nil }
+        let domain = name == "NSRegistrationDomain" ? storage.registeredValues
+            : UserDefaultsStorage.volatileLock.locked { UserDefaultsStorage.volatileDomains[name] } ?? [:]
+        return PropertyValue.dictionary(domain).object().map { ObjCObject($0) }
+    }
+
+    @ObjCMethod("setVolatileDomain:forName:")
+    func setVolatileDomain(_ domain: ObjCObject?, forName name: String?) {
+        guard let name, let domain, case .dictionary(let values)? = PropertyValue(object: domain.id) else { return }
+        if name == "NSRegistrationDomain" {
+            storage.registeredValues = values
+        } else {
+            UserDefaultsStorage.volatileLock.locked { UserDefaultsStorage.volatileDomains[name] = values }
+        }
+    }
+
+    @ObjCMethod("removeVolatileDomainForName:")
+    func removeVolatileDomain(forName name: String?) {
+        guard let name else { return }
+        if name == "NSRegistrationDomain" {
+            storage.registeredValues = [:]
+        } else {
+            UserDefaultsStorage.volatileLock.locked { _ = UserDefaultsStorage.volatileDomains.removeValue(forKey: name) }
+        }
+    }
+
+    @ObjCMethod("volatileDomainNames")
+    func volatileDomainNames() -> ObjCObject? {
+        let names = ["NSRegistrationDomain"] + UserDefaultsStorage.volatileLock.locked { Array(UserDefaultsStorage.volatileDomains.keys) }
+        return PropertyValue.array(names.map { .string($0) }).object().map { ObjCObject($0) }
+    }
+
     @ObjCMethod("registerDefaults:")
     func register(_ defaults: ObjCObject?) {
         // Nil, as from a plist that isn't there, registers nothing.
@@ -390,4 +437,8 @@ enum UserDefaultsConstants {
     static let NSUbiquitousKeyValueStoreChangeReasonKey = "NSUbiquitousKeyValueStoreChangeReasonKey"
     static let NSUbiquitousKeyValueStoreChangedKeysKey = "NSUbiquitousKeyValueStoreChangedKeysKey"
     static let NSUbiquityIdentityDidChangeNotification = "NSUbiquityIdentityDidChangeNotification"
+    /// The search list's domains.
+    static let NSArgumentDomain = "NSArgumentDomain"
+    static let NSGlobalDomain = "NSGlobalDomain"
+    static let NSRegistrationDomain = "NSRegistrationDomain"
 }
