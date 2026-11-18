@@ -764,6 +764,29 @@ enum BundleKeys {
     static let kCFBundleLocalizationsKey = "CFBundleLocalizations"
 }
 
+/// CFUserNotification's dictionary keys, and the system version's
+/// (programs read them; there are no user notifications here).
+@ObjCConstants
+enum UserNotificationKeys {
+    static let kCFUserNotificationIconURLKey = "IconURL"
+    static let kCFUserNotificationSoundURLKey = "SoundURL"
+    static let kCFUserNotificationLocalizationURLKey = "LocalizationURL"
+    static let kCFUserNotificationAlertHeaderKey = "AlertHeader"
+    static let kCFUserNotificationAlertMessageKey = "AlertMessage"
+    static let kCFUserNotificationDefaultButtonTitleKey = "DefaultButtonTitle"
+    static let kCFUserNotificationAlternateButtonTitleKey = "AlternateButtonTitle"
+    static let kCFUserNotificationOtherButtonTitleKey = "OtherButtonTitle"
+    static let kCFUserNotificationProgressIndicatorValueKey = "ProgressIndicatorValue"
+    static let kCFUserNotificationPopUpTitlesKey = "PopUpTitles"
+    static let kCFUserNotificationTextFieldTitlesKey = "TextFieldTitles"
+    static let kCFUserNotificationCheckBoxTitlesKey = "CheckBoxTitles"
+    static let kCFUserNotificationTextFieldValuesKey = "TextFieldValues"
+    static let kCFUserNotificationPopUpSelectionKey = "PopUpSelection"
+    static let _kCFSystemVersionProductNameKey = "ProductName"
+    static let _kCFSystemVersionProductVersionKey = "ProductVersion"
+    static let _kCFSystemVersionBuildVersionKey = "ProductBuildVersion"
+}
+
 @c(_CFBundleGetTypeID) public func CFBundleGetTypeID() -> UInt { CFTypeIDs.bundle }
 
 @c(_CFBundleGetMainBundle)

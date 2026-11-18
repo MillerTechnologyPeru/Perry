@@ -37,6 +37,8 @@ enum ObjC {
     nonisolated(unsafe) static var objectSetClass: (@convention(c) (id?, Class) -> Class?)!
     nonisolated(unsafe) static var methodImplementation: (@convention(c) (Class?, SEL) -> UnsafeRawPointer?)!
     nonisolated(unsafe) static var dispose: (@convention(c) (id?) -> id?)!
+    nonisolated(unsafe) static var copyObject: (@convention(c) (id?, Int) -> id?)?
+    nonisolated(unsafe) static var instanceSize: (@convention(c) (Class?) -> Int)?
     /// Instance variables, for key-value coding's direct access.
     nonisolated(unsafe) static var instanceVariable: (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?)?
     nonisolated(unsafe) static var ivarOffset: (@convention(c) (UnsafeMutableRawPointer?) -> Int)?
@@ -79,6 +81,8 @@ enum ObjC {
         objectSetClass = bind("_object_setClass", (@convention(c) (id?, Class) -> Class?).self)
         methodImplementation = bind("_class_getMethodImplementation", (@convention(c) (Class?, SEL) -> UnsafeRawPointer?).self)
         dispose = bind("_object_dispose", (@convention(c) (id?) -> id?).self)
+        copyObject = bind("_object_copy", (@convention(c) (id?, Int) -> id?).self)
+        instanceSize = bind("_class_getInstanceSize", (@convention(c) (Class?) -> Int).self)
         instanceVariable = bind("_class_getInstanceVariable", (@convention(c) (Class?, SEL) -> UnsafeMutableRawPointer?).self)
         ivarOffset = bind("_ivar_getOffset", (@convention(c) (UnsafeMutableRawPointer?) -> Int).self)
         ivarType = bind("_ivar_getTypeEncoding", (@convention(c) (UnsafeMutableRawPointer?) -> SEL?).self)

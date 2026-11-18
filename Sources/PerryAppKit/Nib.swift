@@ -67,6 +67,13 @@ struct NibArchive {
             keyed = true
             return
         }
+        // An older one still is a typedstream, NSArchiver's.
+        if TypedStream.matches(bytes) {
+            guard let objects = LegacyNib.objects(bytes) else { return nil }
+            self.objects = objects
+            keyed = true
+            return
+        }
         guard bytes.count >= 50, Array(bytes[0..<10]) == Array("NIBArchive".utf8) else { return nil }
         func u32(_ at: Int) -> Int {
             Int(bytes[at]) | Int(bytes[at + 1]) << 8 | Int(bytes[at + 2]) << 16 | Int(bytes[at + 3]) << 24
@@ -627,6 +634,11 @@ enum Nibs {
             let keys = unarchiving.archive.objects[paths].elements.compactMap { unarchiving.string(at: $0) }
             let items = unarchiving.archive.objects[values].elements.map { unarchiving.object(at: $0, decoder: decoder) }
             for (key, item) in zip(keys, items) { target.sendSetValue(item, forKeyPath: key) }
+        case "NSIBHelpConnector":
+            // Help for an object: its tooltip, the only kind kept here.
+            guard let destination = object("NSDestination"), unarchiving.string("NSMarker", of: connector) == "NSToolTipHelpKey",
+                  let text = unarchiving.string("NSFile", of: connector) else { return }
+            Send.void(destination.objcObject, "setToolTip:", text.objCArgument())
         case "NSNibBindingConnector":
             Bindings.connect(source: object("NSSource"), destination: object("NSDestination"), options: object("NSOptions"),
                              connector: connector, unarchiving: unarchiving)
@@ -641,7 +653,7 @@ enum Nibs {
         let base = name.hasSuffix(".nib") ? String(name.dropLast(4)) : name
         for path in ["\(directory)/\(base).nib", "\(directory)/\(base).nib/keyedobjects-110000.nib",
                      "\(directory)/\(base).nib/keyedobjects-101300.nib", "\(directory)/\(base).nib/keyedobjects.nib",
-                     "\(directory)/\(base).nib/runtime.nib"] {
+                     "\(directory)/\(base).nib/runtime.nib", "\(directory)/\(base).nib/objects.nib"] {
             if let bytes = Files.read(path), let archive = NibArchive(bytes) { return archive }
         }
         return nil
@@ -1043,7 +1055,7 @@ extension NSBundle {
 
     @ObjCClassMethod("loadNibFile:externalNameTable:withZone:")
     static func loadNibFile(_ path: String?, externalNameTable table: NSObject?, withZone zone: UnsafeMutableRawPointer?) -> Bool {
-        guard let path, let bytes = Files.read(path) ?? Files.read(path + "/keyedobjects.nib"), let archive = NibArchive(bytes) else { return false }
+        guard let path, let bytes = Files.read(path) ?? Files.read(path + "/keyedobjects.nib") ?? Files.read(path + "/objects.nib"), let archive = NibArchive(bytes) else { return false }
         let owner = table?.as(NSDictionary.self)?.object(forKey: "NSOwner")
         let directory = "/" + path.split(separator: "/").dropLast().joined(separator: "/")
         Nibs.kept += Nibs.instantiate(archive, owner: owner, bundlePath: directory)

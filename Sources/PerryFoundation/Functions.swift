@@ -67,6 +67,17 @@ public func NSAllocateObject(_ cls: UnsafeMutableRawPointer?, _ extraBytes: UInt
     return ObjC.createInstance(cls.assumingMemoryBound(to: perry_class_storage.self), Int(extraBytes))
 }
 
+/// A copy of the object, bit for bit, with `extraBytes` more after its
+/// instance variables: the object pointers in it are not retained, as
+/// Foundation's are not. The zone is ignored.
+@c(_NSCopyObject)
+public func NSCopyObject(_ object: UnsafeMutableRawPointer?, _ extraBytes: UInt,
+                         _ zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+    guard let object, let size = ObjC.instanceSize?(ObjCRuntime.objectClass(object)?.assumingMemoryBound(to: perry_class_storage.self))
+    else { return nil }
+    return ObjC.copyObject?(object, size + Int(extraBytes))
+}
+
 @c(_NSDeallocateObject)
 public func NSDeallocateObject(_ object: UnsafeMutableRawPointer?) {
     _ = ObjC.dispose?(object)
