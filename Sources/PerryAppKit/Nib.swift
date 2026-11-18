@@ -55,12 +55,16 @@ struct NibArchive {
     }
 
     let objects: [Object]
+    /// Whether the nib is an NSKeyedArchiver archive, as Xcode made them
+    /// before NIBArchive, rather than a NIBArchive.
+    var keyed = false
 
     init?(_ bytes: [UInt8]) {
         // An older nib is a keyed archive, a binary property list.
         if bytes.starts(with: Array("bplist00".utf8)) {
             guard let objects = KeyedNib.objects(bytes) else { return nil }
             self.objects = objects
+            keyed = true
             return
         }
         guard bytes.count >= 50, Array(bytes[0..<10]) == Array("NIBArchive".utf8) else { return nil }
@@ -461,7 +465,13 @@ final class NibUnarchiving {
             decoded[index] = allocated
             let view = NSObject(Send.initWithFrame(allocated.objcObject, NSView.frame(from: Coder(coder: decoder))) ?? allocated.objcObject)
             decoded[index] = view
-            NSView.objCInstance(view.objcObject, ownership: .retain).decodeContents(Coder(coder: decoder))
+            // A keyed nib's custom view takes its subviews back to front, as
+            // AppKit's NSCustomView gave them to the view it made: what the
+            // archive lists last draws behind. Xcode 3's welcome window lists
+            // its backdrop last, and its breakpoint actions a filled box after
+            // the controls on it.
+            NSView.objCInstance(view.objcObject, ownership: .retain).decodeContents(Coder(coder: decoder),
+                                                                                     reversingSubviews: archive.keyed)
             made.append(view)
             return view
         case "IBClassReference":
