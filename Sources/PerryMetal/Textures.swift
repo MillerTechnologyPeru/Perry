@@ -79,6 +79,8 @@ open class MTLTexture: NSObject, MTLTextureProtocol {
 
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
     @ObjCMethod("label") func getLabel() -> String? { label }
+    /// What a program writes for the texture in an argument buffer (MTLResourceID).
+    @ObjCMethod("gpuResourceID") func gpuResourceID() -> UInt64 { M2V.api.texture_gpu_resource_id?(handle) ?? 0 }
     @ObjCMethod("setLabel:") func setLabel(_ label: String?) { self.label = label }
     @ObjCMethod("textureType") func textureType() -> UInt { UInt(descriptor.texture_type) }
     @ObjCMethod("pixelFormat") func pixelFormat() -> UInt { UInt(descriptor.pixel_format) }
@@ -301,6 +303,8 @@ open class MTLSamplerState: NSObject, MTLSamplerStateProtocol {
 
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
     @ObjCMethod("label") func getLabel() -> String? { label }
+    /// What a program writes for the sampler state in an argument buffer (MTLResourceID).
+    @ObjCMethod("gpuResourceID") func gpuResourceID() -> UInt64 { M2V.api.sampler_state_gpu_resource_id?(handle) ?? 0 }
 }
 
 @ObjCClass("_MTLDepthStencilState")
