@@ -784,16 +784,17 @@ open class UIView: UIResponder, UICoordinateSpace {
         insert(view, at: sibling.flatMap(index(of:)).map { $0 + 1 } ?? state.subviews.count)
     }
 
+    // No view moves nothing, as on iOS (an outlet a layout leaves out).
     @ObjCMethod("bringSubviewToFront:")
-    func bringSubviewToFront(_ view: UIView) {
-        guard let index = index(of: view) else { return }
+    func bringSubviewToFront(_ view: UIView?) {
+        guard let view, let index = index(of: view) else { return }
         state.subviews.append(state.subviews.remove(at: index))
         placeLayer(of: view)
     }
 
     @ObjCMethod("sendSubviewToBack:")
-    func sendSubviewToBack(_ view: UIView) {
-        guard let index = index(of: view) else { return }
+    func sendSubviewToBack(_ view: UIView?) {
+        guard let view, let index = index(of: view) else { return }
         state.subviews.insert(state.subviews.remove(at: index), at: 0)
         placeLayer(of: view)
     }
