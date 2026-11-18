@@ -291,6 +291,7 @@ enum Trace {
     /// hidden, layer-backed and drawing.
     static func describe(_ view: NSView, depth: Int = 0) -> String {
         let flags = (view.hidden ? " hidden" : "") + (view.layer == nil ? " no-layer" : "") + (view.draws ? " draws" : "")
+            + (view.autoresizingMask != 0 ? " mask \(view.autoresizingMask)" : "") + (view.autoresizesSubviews ? "" : " fixed-subviews")
         let frame = view.frame
         var line = String(repeating: "  ", count: depth + 1)
             + "\(view.describedByObject() ?? "?") (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))\(flags)\n"
