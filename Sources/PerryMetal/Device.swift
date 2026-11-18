@@ -279,6 +279,11 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
         return MTLSamplerState(handle: sampler, device: self, label: descriptor.label)
     }
 
+    @ObjCMethod("newArgumentEncoderWithArguments:")
+    func newArgumentEncoder(arguments: NSObject?) -> MTLArgumentEncoder? { MTLArgumentEncoder.make(device: self, arguments: arguments) }
+
+    @ObjCMethod("newSharedEvent") func newSharedEvent() -> MTLSharedEvent? { MTLSharedEvent(device: self) }
+
     @ObjCMethod("newDepthStencilStateWithDescriptor:")
     func newDepthStencilState(descriptor: MTLDepthStencilDescriptor?) -> MTLDepthStencilState? {
         guard let descriptor else { return nil }
