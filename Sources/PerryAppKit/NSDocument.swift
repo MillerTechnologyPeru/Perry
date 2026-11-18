@@ -57,6 +57,8 @@ struct DocumentType {
     var extensions: [String]
     var className: String
     var role: String
+    /// A folder the app treats as one file (LSTypeIsPackage).
+    var isPackage = false
 }
 
 @ObjCClass("NSDocument")
@@ -94,6 +96,9 @@ open class NSDocument: NSObject {
 
     @ObjCMethod("fileURL") func documentFileURL() -> NSObject? { fileURL }
     @ObjCMethod("setFileURL:") func setFileURL(_ url: NSObject?) { fileURL = url }
+    /// The file as a path, as documents before Mac OS X 10.4 kept it.
+    @ObjCMethod("fileName") func fileName() -> String? { fileURL?.unsafeCast(to: DocumentURL.self).path() }
+    @ObjCMethod("setFileName:") func setFileName(_ path: String?) { fileURL = path.flatMap { DocumentURL.make(path: $0) } }
     @ObjCMethod("fileType") func documentFileType() -> String? { fileType }
     @ObjCMethod("setFileType:") func setFileType(_ type: String?) { fileType = type }
     @ObjCMethod("fileModificationDate") func fileModificationDate() -> NSObject? { nil }
@@ -177,6 +182,12 @@ open class NSDocument: NSObject {
             return false
         }
         return self.sendReadFromData(data, type, error)
+    }
+
+    /// Reading a file by path, before Mac OS X 10.4: the file's contents.
+    @ObjCMethod("readFromFile:ofType:")
+    func read(fromFile path: String?, type: String?) -> Bool {
+        read(from: path.flatMap { DocumentURL.make(path: $0) }, type: type, error: nil)
     }
 
     @ObjCMethod("readFromData:ofType:error:")
@@ -263,8 +274,9 @@ enum Documents {
             func string(_ key: String) -> String? { entry.object(forKeyObject: key.objCObject)?.stringValue }
             guard let className = string("NSDocumentClass"), !className.isEmpty else { return nil }
             let extensions = (entry.object(forKeyObject: "CFBundleTypeExtensions".objCObject)?.as(NSArray.self)?.elements ?? []).map(\.stringValue)
+            let package = entry.object(forKeyObject: "LSTypeIsPackage".objCObject).map { Send.bool($0.objcObject, "boolValue") } ?? false
             return DocumentType(name: string("CFBundleTypeName") ?? "", extensions: extensions,
-                                className: className, role: string("CFBundleTypeRole") ?? "")
+                                className: className, role: string("CFBundleTypeRole") ?? "", isPackage: package)
         }
     }()
 
@@ -285,6 +297,7 @@ open class NSDocumentController: NSObject {
     var documents: [NSDocument] = []
     var current: NSDocument?
     var recent: [NSObject] = []
+    var createsUI = true
 
     @ObjCMethod("init")
     public required override init() {
@@ -359,10 +372,64 @@ open class NSDocumentController: NSObject {
             return nil
         }
         guard let document = Send.object(cls.pointer, "alloc").flatMap({ Send.object($0, "init") }).map({ NSObject($0) }) else { return nil }
-        document.as(NSDocument.self)?.fileType = type
-        guard document.sendReadFromURL(url, type, error) else { return nil }
-        document.as(NSDocument.self)?.fileURL = url
+        Send.void(document.objcObject, "setFileType:", type?.objCArgument())
+        Send.void(document.objcObject, "setFileURL:", url?.objcObject)
+        guard Self.read(document, url, type, error) else { return nil }
         return document
+    }
+
+    /// Reads a document's file: through -readFromFile:ofType: if its class
+    /// reads that way, as documents before Mac OS X 10.4 did, else
+    /// -readFromURL:ofType:error:.
+    static func read(_ document: NSObject, _ url: NSObject?, _ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        if Methods.overrides(document.objcObject, "readFromFile:ofType:", of: NSDocument.objCClass.pointer),
+           let path = url?.unsafeCast(to: DocumentURL.self).path() {
+            typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
+            return unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(document.objcObject, ObjCRuntime.selector("readFromFile:ofType:"),
+                                                                      path.objCArgument(), type?.objCArgument())
+        }
+        return document.sendReadFromURL(url, type, error)
+    }
+
+    // MARK: Before Mac OS X 10.4: documents by path
+
+    @ObjCMethod("makeDocumentWithContentsOfFile:ofType:")
+    func makeDocument(contentsOfFile path: String?, type: String?) -> NSObject? {
+        guard let path, let url = DocumentURL.make(path: path) else { return nil }
+        return makeDocument(contentsOf: NSObject(url.objcObject), type: type, error: nil)
+    }
+
+    @ObjCMethod("documentForFileName:")
+    func document(forFileName path: String?) -> NSObject? {
+        guard let path else { return nil }
+        return documents.first { $0.fileName() == path }.map { NSObject($0.objcObject) }
+    }
+
+    @ObjCMethod("typeFromFileExtension:")
+    func type(fromFileExtension ext: String?) -> String? {
+        let ext = ext?.lowercased() ?? ""
+        return Documents.declared.first { $0.extensions.contains { $0.lowercased() == ext } }?.name
+    }
+
+    @ObjCMethod("fileExtensionsFromType:")
+    func fileExtensions(fromType type: String?) -> NSObject {
+        NSMutableArray.of((Documents.declared.first { $0.name == type }?.extensions ?? []).map(\.objCObject))
+    }
+
+    @ObjCMethod("openDocumentWithContentsOfFile:display:")
+    func openDocument(contentsOfFile path: String?, display: Bool) -> NSObject? {
+        guard let path, let url = DocumentURL.make(path: path) else { return nil }
+        var error: UnsafeMutableRawPointer?
+        return openDocument(contentsOf: NSObject(url.objcObject), display: display, error: &error)
+    }
+
+    /// By URL, before Mac OS X 10.4: by path.
+    @ObjCMethod("openDocumentWithContentsOfURL:display:")
+    func openDocument(contentsOf url: NSObject?, display: Bool) -> NSObject? {
+        guard let path = url?.unsafeCast(to: DocumentURL.self).path() else { return nil }
+        typealias Open = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, Bool) -> UnsafeMutableRawPointer?
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Open.self)(objcObject, ObjCRuntime.selector("openDocumentWithContentsOfFile:display:"),
+                                                                  path.objCArgument(), display).map(NSObject.init)
     }
 
     @ObjCMethod("makeDocumentForURL:withContentsOfURL:ofType:error:")
@@ -425,9 +492,58 @@ open class NSDocumentController: NSObject {
         _ = openUntitledDocument(display: true, error: &error)
     }
 
-    /// No file browser, so the open panel answers Cancel.
+    /// Open…: the documents chosen in the open panel, each opened through
+    /// the controller's own methods, which a subclass may override.
     @ObjCMethod("openDocument:") func openDocument(_ sender: NSObject?) {
-        appKitWarning("NSDocumentController: no file browser here; Open does nothing")
+        guard let urls = Send.object(objcObject, "URLsFromRunningOpenPanel").map(NSObject.init)?.as(NSArray.self) else { return }
+        for url in urls.elements { open(url) }
+    }
+
+    /// Opens the document at `url` by -openDocumentWithContentsOfURL:display:error:.
+    func open(_ url: NSObject) {
+        let base = NSDocumentController.objCClass.pointer
+        if Methods.overrides(objcObject, "openDocumentWithContentsOfURL:display:", of: base)
+            || Methods.overrides(objcObject, "openDocumentWithContentsOfFile:display:", of: base) {
+            if openDocument(contentsOf: url, display: true) == nil {
+                appKitWarning("NSDocumentController: couldn't open \(url.describedByObject() ?? "a document")")
+            }
+            return
+        }
+        typealias Open = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, Bool,
+                                         UnsafeMutablePointer<UnsafeMutableRawPointer?>) -> UnsafeMutableRawPointer?
+        var error: UnsafeMutableRawPointer?
+        let document = unsafeBitCast(ObjCRuntime.msgSend, to: Open.self)(objcObject, ObjCRuntime.selector("openDocumentWithContentsOfURL:display:error:"),
+                                                                          url.objcObject, true, &error)
+        if document == nil { appKitWarning("NSDocumentController: couldn't open \(url.describedByObject() ?? "a document")") }
+    }
+
+    /// The open panel the controller runs: any of its document types, more
+    /// than one at a time; the URLs chosen, or nil for Cancel.
+    @ObjCMethod("URLsFromRunningOpenPanel")
+    func urlsFromRunningOpenPanel() -> NSObject? {
+        let panel = NSOpenPanel.openPanel()
+        panel.setAllowsMultipleSelection(true)
+        typealias Run = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Int
+        let response = unsafeBitCast(ObjCRuntime.msgSend, to: Run.self)(objcObject, ObjCRuntime.selector("runModalOpenPanel:forTypes:"),
+                                                                        panel.objcObject, nil)
+        return response == 1 ? panel.urls() : nil
+    }
+
+    @ObjCMethod("fileNamesFromRunningOpenPanel")
+    func fileNamesFromRunningOpenPanel() -> NSObject? {
+        guard let urls = urlsFromRunningOpenPanel()?.as(NSArray.self) else { return nil }
+        return NSMutableArray.of(urls.elements.compactMap { Send.object($0.objcObject, "path").map(NSObject.init) })
+    }
+
+    /// Runs the panel for the types given, or for every type the app opens.
+    /// A package (a folder the app treats as a file, as an Xcode project)
+    /// is chosen by choosing a file in it.
+    @ObjCMethod("runModalOpenPanel:forTypes:")
+    func runModalOpenPanel(_ panel: NSObject?, forTypes types: NSObject?) -> Int {
+        guard let panel = panel?.as(NSOpenPanel.self) else { return 0 }
+        if let types { panel.setAllowedFileTypes(types) }
+        panel.packageExtensions = Set(Documents.declared.filter(\.isPackage).flatMap(\.extensions))
+        return panel.runModal()
     }
 
     @ObjCMethod("saveAllDocuments:") func saveAllDocuments(_ sender: NSObject?) {
@@ -459,6 +575,9 @@ open class NSDocumentController: NSObject {
     @ObjCMethod("autosavingDelay") func autosavingDelay() -> Double { 0 }
     @ObjCMethod("setAutosavingDelay:") func setAutosavingDelay(_ delay: Double) {}
     @ObjCMethod("currentDirectory") func currentDirectory() -> String? { nil }
+    /// Whether opening a document makes its windows, before Mac OS X 10.4.
+    @ObjCMethod("shouldCreateUI") func shouldCreateUI() -> Bool { createsUI }
+    @ObjCMethod("setShouldCreateUI:") func setShouldCreateUI(_ value: Bool) { createsUI = value }
 
     // MARK: Launching
 
@@ -471,8 +590,7 @@ open class NSDocumentController: NSObject {
         let controller = shared()
         if let list = getenv("PERRY_APPKIT_OPEN").map({ String(cString: $0) }), !list.isEmpty {
             for path in list.split(separator: ":") {
-                var error: UnsafeMutableRawPointer?
-                _ = controller.openDocument(contentsOf: DocumentURL.make(path: String(path)).map { NSObject($0.objcObject) }, display: true, error: &error)
+                if let url = DocumentURL.make(path: String(path)) { controller.open(NSObject(url.objcObject)) }
             }
         }
         guard controller.documents.isEmpty else { return }

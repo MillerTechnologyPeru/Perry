@@ -191,7 +191,11 @@ typedef struct {
 #define TABLE_MAGIC 0x5045525259544142ull   // "PERRYTAB"
 
 typedef struct table {
-    uint64_t magic;   // first, where an NSMapTable or NSHashTable object has its isa
+    // An object's isa: a class whose retain and release do nothing, so a
+    // table can be kept in a collection or another table that retains its
+    // objects, as Foundation's tables, which are objects, can.
+    void *isa;
+    uint64_t magic;
     map_key_callbacks keys;
     map_value_callbacks values;
     size_t count, used, capacity;   // used counts removed slots too
@@ -201,7 +205,11 @@ typedef struct table {
 
 /// Whether a table is one of these, not an NSMapTable or NSHashTable
 /// object, which the functions take too, as Foundation's do from 10.5.
-static bool ours(const table *t) { return t && t->magic == TABLE_MAGIC; }
+static void *table_class;
+
+void perry_foundation_set_table_class(void *cls) { table_class = cls; }
+
+static bool ours(const table *t) { return t && t->isa == table_class && t->magic == TABLE_MAGIC; }
 
 static uintptr_t count_of_object(const void *object) { return (uintptr_t)send0((id)object, "count"); }
 
@@ -216,6 +224,7 @@ static bool equal(table *t, const void *a, const void *b) {
 static table *make(const map_key_callbacks *keys, const map_value_callbacks *values, size_t capacity, bool is_hash) {
     table *t = calloc(1, sizeof *t);
     if (!t) return NULL;
+    t->isa = table_class;
     t->magic = TABLE_MAGIC;
     if (keys) t->keys = *keys;
     if (values) t->values = *values;
@@ -293,12 +302,17 @@ static void reset(table *t) {
     t->count = t->used = 0;
 }
 
+// Lets go of the table's keys and values and its slots. The table itself,
+// a few words, stays: an object whose release does nothing, as programs
+// release a table after freeing it, Foundation's tables being objects
+// (Xcode's indexer does).
 static void free_table(table *t) {
     if (!t) return;
-    t->magic = 0;
     reset(t);
+    t->magic = 0;
     free(t->slots);
-    free(t);
+    t->slots = NULL;
+    t->capacity = 0;
 }
 
 // Enumerators: { the table, the next slot, unused }.

@@ -14,6 +14,8 @@ open class NSColor: NSObject {
     /// A system color's name: "System", "controlTextColor".
     var catalogName: String?
     var colorName: String?
+    /// A pattern color's image, which it is drawn as its average stands in for.
+    var patternImage: NSObject?
     private var cgColor: CGRef?
 
     @ObjCMethod("init")
@@ -132,7 +134,13 @@ open class NSColor: NSObject {
         if count == 2 { return NSColor(white: components[0], alpha: components[1]) }
         return nil
     }
-    @ObjCClassMethod("colorWithPatternImage:") static func color(patternImage: NSObject?) -> NSColor { NSColor(white: 0.9, alpha: 1) }
+    @ObjCClassMethod("colorWithPatternImage:")
+    static func color(patternImage: NSObject?) -> NSColor {
+        let color = NSColor(white: 0.9, alpha: 1)
+        color.patternImage = patternImage
+        return color
+    }
+    @ObjCMethod("patternImage") func colorPatternImage() -> NSObject? { patternImage }
     /// A system color by name, else the app's asset catalog's.
     @ObjCClassMethod("colorNamed:")
     static func color(named name: String?) -> NSColor? { name.flatMap { system($0) ?? AppKitAssets.color(named: $0) } }

@@ -65,16 +65,41 @@ public func UCKeyTranslate(_ layout: UnsafeRawPointer?, _ keyCode: UInt16, _ act
     return 0
 }
 
-/// OSErr Gestalt(OSType selector, SInt32 *response): the system version,
-/// macOS 14.4, as 'sysv' (capped at 10.9.3 as Apple's is) and 'sys1' to
+/// The system version NSProcessInfo reports ("Version 10.5.8 (Perry)"):
+/// major, minor and patch; macOS 14.4 if there is none.
+private func systemVersion() -> (Int32, Int32, Int32) {
+    typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer) -> UnsafeMutableRawPointer?
+    let send = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)
+    guard let info = send(ObjCRuntime.classObject("NSProcessInfo"), ObjCRuntime.selector("processInfo")),
+          let text = send(info, ObjCRuntime.selector("operatingSystemVersionString")) else { return (14, 4, 0) }
+    let words = NSObject(text).stringValue.split(separator: " ")
+    let numbers = (words.count > 1 ? words[1] : "").split(separator: ".").compactMap { Int32($0) }
+    guard let major = numbers.first else { return (14, 4, 0) }
+    return (major, numbers.count > 1 ? numbers[1] : 0, numbers.count > 2 ? numbers[2] : 0)
+}
+
+/// OSErr Gestalt(OSType selector, SInt32 *response): the system version
+/// NSProcessInfo reports (Mac OS X 10.5.8 to a program from before 10.7),
+/// as 'sysv' (in BCD, capped at 10.9.3 as Apple's is) and 'sys1' to
 /// 'sys3'; other selectors aren't known.
 @c(_Gestalt)
 public func Gestalt(_ selector: UInt32, _ response: UnsafeMutablePointer<Int32>?) -> Int16 {
     func code(_ text: String) -> UInt32 { text.utf8.reduce(0) { $0 << 8 | UInt32($1) } }
-    let answers: [UInt32: Int32] = [code("sysv"): 0x1093, code("sys1"): 14, code("sys2"): 4, code("sys3"): 0]
+    let (major, minor, patch) = systemVersion()
+    let bcd: Int32 = major == 10 && minor <= 9 ? 0x1000 | minor << 4 | min(patch, 9) : 0x1093
+    let answers: [UInt32: Int32] = [code("sysv"): bcd, code("sys1"): major, code("sys2"): minor, code("sys3"): patch]
     guard let answer = answers[selector] else { return -5551 }    // gestaltUndefSelectorErr
     response?.pointee = answer
     return 0
+}
+
+/// cpu_type_t _CSGetProcessorArchitecture(void): the processor the program
+/// runs on, as Mach names it: CPU_TYPE_X86_64 for a 64-bit Intel program,
+/// CPU_TYPE_X86 for a 32-bit one (Xcode 3 names the native architecture by
+/// it).
+@c(__CSGetProcessorArchitecture)
+public func CSGetProcessorArchitecture() -> Int32 {
+    MemoryLayout<Int>.size == 8 ? 0x0100_0007 : 7
 }
 
 /// No other app can be found or opened here: kLSApplicationNotFoundErr.

@@ -54,6 +54,63 @@ perry_foundation_invoke:
     ret
     .size perry_foundation_invoke, . - perry_foundation_invoke
 
+// The forward handlers the runtime jumps to with a message no method took,
+// its arguments as sent: rdi-r9 and xmm0-xmm7 are kept and given, with the
+// caller's stack arguments, to perry_foundation_forward_invocation, which
+// sends -forwardInvocation:; what it leaves in its four words comes back in
+// rax, rdx, xmm0 and xmm1. The _stret one is for a message whose result
+// goes through memory, rdi naming it; it returns it in rax.
+//
+// Frame: 48 bytes of integer registers at 0, 64 of vector registers at 48,
+// four words out at 112; 144 in all, which with the return address and rbp
+// keeps the stack 16-byte aligned for the call.
+.macro FORWARD name, stret
+    .globl \name
+    .hidden \name
+    .type \name, @function
+    .p2align 4
+\name:
+    .cfi_startproc
+    pushq %rbp
+    .cfi_def_cfa_offset 16
+    .cfi_offset %rbp, -16
+    movq %rsp, %rbp
+    .cfi_def_cfa_register %rbp
+    subq $144, %rsp
+    movq %rdi, 0(%rsp)
+    movq %rsi, 8(%rsp)
+    movq %rdx, 16(%rsp)
+    movq %rcx, 24(%rsp)
+    movq %r8, 32(%rsp)
+    movq %r9, 40(%rsp)
+    movsd %xmm0, 48(%rsp)
+    movsd %xmm1, 56(%rsp)
+    movsd %xmm2, 64(%rsp)
+    movsd %xmm3, 72(%rsp)
+    movsd %xmm4, 80(%rsp)
+    movsd %xmm5, 88(%rsp)
+    movsd %xmm6, 96(%rsp)
+    movsd %xmm7, 104(%rsp)
+    movq %rsp, %rdi                 // the integer registers
+    leaq 48(%rsp), %rsi             // the vector registers
+    leaq 16(%rbp), %rdx             // the caller's stack arguments
+    leaq 112(%rsp), %rcx            // the four words out
+    movl $\stret, %r8d
+    call perry_foundation_forward_invocation@PLT
+    movq 112(%rsp), %rax
+    movq 120(%rsp), %rdx
+    movsd 128(%rsp), %xmm0
+    movsd 136(%rsp), %xmm1
+    leave
+    .cfi_def_cfa %rsp, 8
+    ret
+    .cfi_endproc
+    .size \name, . - \name
+.endm
+
+FORWARD perry_foundation_forward, 0
+FORWARD perry_foundation_forward_stret, 1
+
 #endif
 
 #if defined(__aarch64__) && defined(__ELF__)

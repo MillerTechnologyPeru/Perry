@@ -239,7 +239,7 @@ ENTRY __objc_msgForward_stret
     SAVE_ARGUMENTS
     movq %rsi, %rdi
     movq %rdx, %rsi
-    call perry_objc_forward@PLT
+    call perry_objc_forward_stret@PLT
     movq %rax, %r10
     movq %rdx, %r11
     RESTORE_ARGUMENTS

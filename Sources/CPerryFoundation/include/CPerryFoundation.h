@@ -115,6 +115,12 @@ void perry_foundation_set_exception_type_vtable(const void *vtable);
 // the method would be, and is not for calling from C.
 void perry_foundation_forward(void);
 #endif
+#if defined(__x86_64__)
+// The same on x86_64, and its _stret twin for a message whose result goes
+// through memory.
+void perry_foundation_forward(void);
+void perry_foundation_forward_stret(void);
+#endif
 #if defined(__i386__)
 // Calls imp with those stack words, and keeps eax and edx in `out` and, when
 // the result is floating point, the x87 result in `floating`.
@@ -146,6 +152,8 @@ bool perry_foundation_thread_exit(void);
 // The usable size of a malloc'd block (malloc_usable_size).
 size_t perry_foundation_usable_size(void *block);
 
+// The class Foundation's C map and hash tables are objects of.
+void perry_foundation_set_table_class(void *cls);
 // Gives the empty @[] and @{} singletons their classes.
 void perry_foundation_set_empty_array_class(void *cls);
 

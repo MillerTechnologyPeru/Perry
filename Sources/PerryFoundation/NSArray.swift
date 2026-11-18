@@ -259,6 +259,14 @@ public class NSArray: NSObject {
     @ObjCMethod("count")
     func count() -> UInt { UInt(elements.count) }
 
+    /// Every element, into a buffer long enough: deprecated, as there is no
+    /// knowing that it is.
+    @ObjCMethod("getObjects:")
+    func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
+        guard let buffer else { return }
+        for (offset, element) in elements.enumerated() { buffer[offset] = element }
+    }
+
     @ObjCMethod("getObjects:range:")
     func getObjects(_ buffer: UnsafeMutablePointer<UnsafeMutableRawPointer?>?, range: NSRange) {
         let all = elements

@@ -366,6 +366,30 @@ public final class NSRunLoop: NSObject {
         if let state, Timers.isValid(timer.id) { Timers.add(timer.id, to: state) }
     }
 
+    /// Sends the selector to the target on the loop's next pass, as a
+    /// perform request (order and modes aside: the loop runs one mode here).
+    @ObjCMethod("performSelector:target:argument:order:modes:")
+    func perform(_ selector: ObjCSelector, target: ObjCObject?, argument: ObjCObject?, order: UInt, modes: ObjCObject?) {
+        guard let state, let target else { return }
+        let request = Timers.make(TimerStorage(fireDate: absoluteTimeNow(), interval: 0, repeats: false, target: target.id,
+                                               selector: selector.pointer.assumingMemoryBound(to: CChar.self), userInfo: nil, block: nil,
+                                               argument: argument?.id, isPerformRequest: true))
+        Timers.add(request, to: state)
+        ObjC.release(request)
+    }
+
+    @ObjCMethod("cancelPerformSelector:target:argument:")
+    func cancelPerform(_ selector: ObjCSelector?, target: ObjCObject?, argument: ObjCObject?) {
+        state?.cancelPerformRequests {
+            $0.target == target?.id && UnsafeRawPointer($0.selector) == selector?.pointer && $0.argument == argument?.id
+        }
+    }
+
+    @ObjCMethod("cancelPerformSelectorsWithTarget:")
+    func cancelPerforms(target: ObjCObject?) {
+        state?.cancelPerformRequests { $0.target == target?.id }
+    }
+
     /// Runs a block on the loop's next pass; the loop runs one mode here.
     @ObjCMethod("performBlock:")
     func perform(block: ObjCObject?) {

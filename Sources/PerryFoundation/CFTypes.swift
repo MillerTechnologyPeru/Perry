@@ -1103,3 +1103,17 @@ public func CFTimeZoneGetNextDaylightSavingTimeTransition(_ zone: id?, _ time: D
     let date = Date(timeIntervalSinceReferenceDate: Double(objCArgument: time))
     return darwinResult(TimeZones.zone(zone)?.nextDaylightSavingTimeTransition(after: date)?.timeIntervalSinceReferenceDate ?? 0)
 }
+
+/// CFDictionaryRef _CFCopySystemVersionDictionary(void): the system's name
+/// and version, as SystemVersion.plist gives them, the version being the
+/// one NSProcessInfo reports.
+@c(__CFCopySystemVersionDictionary)
+public func CFCopySystemVersionDictionary() -> UnsafeMutableRawPointer? {
+    let version = Process.sdkVersion
+    let text = "\(version.majorVersion).\(version.minorVersion)" + (version.patchVersion > 0 ? ".\(version.patchVersion)" : "")
+    let dictionary: [String: PropertyValue] = [
+        "ProductName": .string("Mac OS X"), "ProductVersion": .string(text), "ProductBuildVersion": .string(Process.buildVersion),
+        "ProductCopyright": .string(""),
+    ]
+    return PropertyValue.dictionary(dictionary).object().flatMap { ObjC.retain($0) }
+}

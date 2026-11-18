@@ -1019,6 +1019,7 @@ public func objc_enumerationMutation(_ object: id?) {
 @c(_objc_setForwardHandler)
 public func objc_setForwardHandler(_ forward: UnsafeMutableRawPointer?, _ forwardStret: UnsafeMutableRawPointer?) {
     Runtime.forwardHandler = forward
+    Runtime.forwardStretHandler = forwardStret
 }
 
 /// For the forward handler: a message it has no invocation for, or that

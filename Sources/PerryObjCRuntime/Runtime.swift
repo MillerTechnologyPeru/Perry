@@ -325,13 +325,16 @@ public enum Runtime {
 
     // MARK: - Forwarding
 
-    /// The handler Foundation installs with objc_setForwardHandler.
+    /// The handlers Foundation installs with objc_setForwardHandler: for
+    /// messages, and for messages whose result comes back through memory
+    /// (objc_msgSend_stret's, where it is x86_64's first argument).
     nonisolated(unsafe) public static var forwardHandler: UnsafeMutableRawPointer?
+    nonisolated(unsafe) public static var forwardStretHandler: UnsafeMutableRawPointer?
 
     /// What _objc_msgForward does with an unrecognized message: resend to
     /// -forwardingTargetForSelector:'s answer, jump to the forward handler,
     /// or report the selector and abort.
-    public static func forward(receiver: ObjectPointer?, selector: SEL) -> (target: ObjectPointer?, handler: IMP?) {
+    public static func forward(receiver: ObjectPointer?, selector: SEL, stret: Bool = false) -> (target: ObjectPointer?, handler: IMP?) {
         guard let receiver else {
             return (nil, nil)
         }
@@ -340,8 +343,8 @@ public enum Runtime {
            target != receiver {
             return (target, nil)
         }
-        if let forwardHandler {
-            return (nil, forwardHandler)
+        if let handler = stret ? forwardStretHandler : forwardHandler {
+            return (nil, handler)
         }
         notForwarded(receiver, selector)
         return (nil, Unrecognized.returnZero)

@@ -7,8 +7,100 @@ import PerryObjCInterop
 // an NSInvocation with the arguments as they were sent, which the receiver's
 // -forwardInvocation: gets; what the invocation's return value is set to is
 // what the message answers. A receiver without a signature for the selector
-// (-methodSignatureForSelector:) doesn't recognize the message. arm64 only:
-// elsewhere such a message ends as unrecognized without this.
+// (-methodSignatureForSelector:) doesn't recognize the message. arm64 and
+// x86_64: elsewhere such a message ends as unrecognized without this.
+
+#if arch(x86_64)
+enum Forwarding {
+    nonisolated(unsafe) static let methodSignatureForSelector = ObjC.selector("methodSignatureForSelector:")
+    nonisolated(unsafe) static let forwardInvocation = ObjC.selector("forwardInvocation:")
+
+    /// Fills the invocation's arguments from where x86_64's convention put
+    /// them, as -invoke places them: up to six integer words in registers
+    /// (after the result's address, for a result in memory), up to eight
+    /// floating ones, structures over 16 bytes and whatever doesn't fit on
+    /// the stack, a word at a time.
+    static func capture(_ storage: InvocationStorage, _ details: MethodSignatureStorage, indirect: Bool,
+                        general: UnsafePointer<UInt64>, vector: UnsafePointer<UInt64>, stack: UnsafeRawPointer) {
+        var usedGeneral = indirect ? 1 : 0, usedVector = 0, stackWords = 0
+        for index in storage.arguments.indices {
+            let size = details.sizes[index + 1]
+            let words = (max(size, 1) + 7) / 8
+            let floating = Structures.floatingMembers(String(cString: details.parts[index + 1])) != nil
+            let source: UnsafeRawPointer
+            if size > 16 {
+                source = stack + stackWords * 8
+                stackWords += words
+            } else if floating, usedVector + words <= 8 {
+                source = UnsafeRawPointer(vector + usedVector)
+                usedVector += words
+            } else if !floating, usedGeneral + words <= 6 {
+                source = UnsafeRawPointer(general + usedGeneral)
+                usedGeneral += words
+            } else {
+                source = stack + stackWords * 8
+                stackWords += words
+            }
+            guard size > 0 else { continue }
+            storage.arguments[index].withUnsafeMutableBytes { $0.baseAddress!.copyMemory(from: source, byteCount: size) }
+        }
+    }
+
+    /// Puts the invocation's return value where the caller reads it: rax
+    /// and rdx, xmm0 and xmm1, or the memory the caller named.
+    static func answer(_ storage: InvocationStorage, _ details: MethodSignatureStorage,
+                       indirect: UInt64?, out: UnsafeMutablePointer<UInt64>) {
+        let size = details.sizes[0]
+        guard size > 0 else { return }
+        storage.result.withUnsafeBytes { result in
+            if let indirect {
+                UnsafeMutableRawPointer(bitPattern: UInt(indirect))?.copyMemory(from: result.baseAddress!, byteCount: min(size, result.count))
+                out[0] = indirect
+            } else if Structures.floatingMembers(String(cString: details.parts[0])) != nil {
+                UnsafeMutableRawPointer(out + 2).copyMemory(from: result.baseAddress!, byteCount: min(size, 16))
+            } else {
+                UnsafeMutableRawPointer(out).copyMemory(from: result.baseAddress!, byteCount: min(size, 16))
+            }
+        }
+    }
+
+    static func responds(_ receiver: id, _ selector: SEL) -> Bool {
+        ObjC.instanceMethod(ObjC.objectGetClass(receiver), selector) != nil
+    }
+}
+
+/// The forward handlers' work, called by perry_foundation_forward (and its
+/// _stret twin, `stret` set) with the registers the message was sent with
+/// (rdi-r9, xmm0-xmm7), the caller's stack arguments, and four words for
+/// rax, rdx, xmm0 and xmm1 to return.
+@c(perry_foundation_forward_invocation)
+public func perry_foundation_forward_invocation(_ general: UnsafePointer<UInt64>, _ vector: UnsafePointer<UInt64>,
+                                                _ stack: UnsafeRawPointer, _ out: UnsafeMutablePointer<UInt64>, _ stret: Int32) {
+    for word in 0..<4 { out[word] = 0 }
+    let first = stret != 0 ? 1 : 0
+    if stret != 0 { out[0] = general[0] }
+    guard let receiver = id(bitPattern: UInt(general[first])), let selector = SEL(bitPattern: UInt(general[first + 1])) else { return }
+    // The two messages forwarding itself sends can't be forwarded.
+    guard selector != Forwarding.methodSignatureForSelector, selector != Forwarding.forwardInvocation,
+          Forwarding.responds(receiver, Forwarding.methodSignatureForSelector),
+          Forwarding.responds(receiver, Forwarding.forwardInvocation),
+          let signature = ObjC.send(receiver, Forwarding.methodSignatureForSelector, UnsafeMutableRawPointer(mutating: selector)),
+          let details = MethodSignatures.storage(signature), details.parts.count >= 3 else {
+        ObjC.notForwarded?(receiver, selector)
+        return
+    }
+    // No autorelease pool of this function's own: what the method returns
+    // autoreleased has to outlive it, in the caller's pool.
+    typealias Make = @convention(c) (id?, SEL, id?) -> id?
+    let make = unsafeBitCast(ObjC.msgSend, to: Make.self)
+    guard let invocation = make(UnsafeMutableRawPointer(Invocations.invocationClass),
+                                ObjC.selector("invocationWithMethodSignature:"), signature),
+          let storage = Invocations.storage(invocation) else { return }
+    Forwarding.capture(storage, details, indirect: stret != 0, general: general, vector: vector, stack: stack)
+    _ = ObjC.send(receiver, Forwarding.forwardInvocation, invocation)
+    Forwarding.answer(storage, details, indirect: stret != 0 ? general[0] : nil, out: out)
+}
+#endif
 
 #if arch(arm64)
 enum Forwarding {

@@ -103,6 +103,20 @@ open class NSSavePanel: NSPanel {
     var chosen: [String] = []
     /// The answer of a modal run, while it waits.
     var modalResponse: Int?
+    /// Extensions of folders that are chosen as files: a file chosen in one
+    /// chooses the folder.
+    var packageExtensions: Set<String> = []
+
+    /// The package a path is in, or the path.
+    func package(of path: String) -> String {
+        guard !packageExtensions.isEmpty else { return path }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        for (index, part) in parts.enumerated() {
+            guard let dot = part.lastIndex(of: "."), packageExtensions.contains(String(part[part.index(after: dot)...])) else { continue }
+            return parts[...index].joined(separator: "/")
+        }
+        return path
+    }
 
     @ObjCClassMethod("savePanel")
     static func savePanel() -> NSSavePanel { NSSavePanel(contentRect: CGRect(x: 0, y: 0, width: 480, height: 320), styleMask: 3, backing: 2, defer: true) }
@@ -144,7 +158,7 @@ open class NSSavePanel: NSPanel {
                 done(0)
                 return
             }
-            chosen = dialogKind == .save ? [savePath(paths[0])] : paths
+            chosen = dialogKind == .save ? [savePath(paths[0])] : paths.map(package(of:))
             if let first = chosen.first {
                 let parts = first.split(separator: "/", omittingEmptySubsequences: false)
                 directoryPath = parts.dropLast().joined(separator: "/")
@@ -275,7 +289,19 @@ open class NSOpenPanel: NSSavePanel {
     @ObjCClassMethod("openPanel")
     static func openPanel() -> NSOpenPanel { NSOpenPanel(contentRect: CGRect(x: 0, y: 0, width: 480, height: 320), styleMask: 3, backing: 2, defer: true) }
 
-    override var dialogKind: FileDialogs.Kind { canChooseDirectories && !canChooseFiles ? .openFolders : .openFiles }
+    /// Folders for a panel that chooses folders, or packages (folders the
+    /// app treats as files, as Xcode's projects): the desktop's choosers
+    /// choose one or the other, and a file chooser goes into a package
+    /// rather than choosing it. Files otherwise.
+    override var dialogKind: FileDialogs.Kind { (canChooseDirectories && !canChooseFiles) || choosesPackages ? .openFolders : .openFiles }
+
+    /// Whether the panel is for packages: some of its types are, or, with
+    /// any type allowed, the document controller's packages are.
+    var choosesPackages: Bool {
+        let packages = packageExtensions.union(Documents.declared.filter(\.isPackage).flatMap(\.extensions))
+        guard !allowedFileTypes.isEmpty else { return !packageExtensions.isEmpty }
+        return !packages.isDisjoint(with: allowedFileTypes)
+    }
     override var allowsMultiple: Bool { allowsMultipleSelection }
 
     @ObjCMethod("URLs") func urls() -> NSObject { NSMutableArray.of(chosen.compactMap { NSURL.make(fileURLWithPath: $0) }) }
