@@ -90,7 +90,10 @@ open class UIImage: NSObject {
         let nibBundle = coder.as(UINibDecoder.self)?.nib?.bundlePath.flatMap { NSBundle.bundle(path: $0) }
         let image = nibBundle.flatMap { UIImage.image(UIImage.objCClass, named: name, in: $0, catalog: false) }
             ?? UIImage.image(UIImage.objCClass, named: name)
-        if let image { state.set(image.state.cgImage, scale: image.state.scale, orientation: 0) }
+        if let image {
+            state.set(image.state.cgImage, scale: image.state.scale, orientation: 0)
+            state.renderingMode = image.state.renderingMode
+        }
         return self
     }
 
@@ -173,9 +176,16 @@ open class UIImage: NSObject {
         // A catalog's images have no extension in their names; a nib
         // names one with the file's ("Header.png").
         for name in name == base ? [name] : [name, base] {
-            let found = bundle.objcObject == NSBundle.main().objcObject
-                ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
-            if let found { return make(cls, cgImage: found.image.object, scale: found.scale) }
+            let main = bundle.objcObject == NSBundle.main().objcObject
+            let found = main ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
+            guard let found else { continue }
+            let image = make(cls, cgImage: found.image.object, scale: found.scale)
+            // One the catalog renders as a template is drawn in the tint
+            // color of what shows it.
+            if main ? AssetCatalog.isTemplate(named: name) : AssetCatalog.catalog(in: bundle)?.isTemplate(named: name) ?? false {
+                image.state.renderingMode = 2
+            }
+            return image
         }
         if getenv("PERRY_UIKIT_IMAGE_TRACE") != nil {
             let line = "perry: UIImage: no image named \(name) in \(bundle.bundlePath())\n"

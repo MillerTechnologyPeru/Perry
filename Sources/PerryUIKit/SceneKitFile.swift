@@ -25,8 +25,15 @@ enum SCNFile {
 
     /// The scene in the main bundle at `name`, in `directory` if given.
     static func scene(named name: String, inDirectory directory: String?) -> SCNScene? {
-        for path in candidates(named: name, inDirectory: directory) where access(path, R_OK) == 0 {
-            if let scene = scene(atPath: path) { return scene }
+        // A name with no extension is a scene's or a model's.
+        let last = name.split(separator: "/").last ?? ""
+        let names = last.contains(".") ? [name] : [name, "\(name).scn", "\(name).dae"]
+        for name in names {
+            for path in candidates(named: name, inDirectory: directory) where access(path, R_OK) == 0 {
+                var info = stat()
+                guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { continue }
+                if let scene = scene(atPath: path) { return scene }
+            }
         }
         return nil
     }
@@ -56,8 +63,10 @@ enum SCNFile {
     }
 
     static func scene(atPath path: String) -> SCNScene? {
-        guard let archive = archive(atPath: path) else { return nil }
-        return SCNSceneBuilder(archive).scene()
+        if let archive = archive(atPath: path) { return SCNSceneBuilder(archive).scene() }
+        // Not an archive: a compiled model, perhaps.
+        guard let bytes = read(path) else { return nil }
+        return SCNCompiledModel.scene(bytes: bytes, path: path)
     }
 
     static func archive(atPath path: String) -> SCNArchive? {
@@ -97,6 +106,52 @@ enum SCNFile {
             defer { CG.release(picture) }
             return UIImage.make(UIImage.objCClass, cgImage: picture, scale: 1)
         }
+    }
+
+    /// A sky as the six faces of a cube side by side (as the renderer's sky box reads them): blue above, paler
+    /// toward the horizon, and the ground's colour below. It stands in for Model I/O's sky, whose numbers for the
+    /// sun and the air are not read.
+    static func skyImage(ground: (Float, Float, Float)?, albedo: Float) -> UIImage? {
+        let key = "sky:\(ground.map { "\($0.0),\($0.1),\($0.2)" } ?? "-"):\(albedo)"
+        if let known = images[key] { return known }
+        let size = 64
+        let zenith: (Float, Float, Float) = (0.22, 0.50, 0.93), horizon: (Float, Float, Float) = (0.78, 0.89, 0.99)
+        // A ground with no colour of its own is lit by the sky: the horizon's, as dark as it reflects.
+        let dark = min(max(albedo, 0), 1)
+        var below = ground ?? (horizon.0 * dark, horizon.1 * dark, horizon.2 * dark)
+        if below.0 + below.1 + below.2 < 0.01 { below = (horizon.0 * dark, horizon.1 * dark, horizon.2 * dark) }
+        func color(_ y: Float) -> (Float, Float, Float) {
+            func mix(_ a: (Float, Float, Float), _ b: (Float, Float, Float), _ t: Float) -> (Float, Float, Float) {
+                (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t, a.2 + (b.2 - a.2) * t)
+            }
+            if y >= 0 { return mix(horizon, zenith, powf(y, 0.55)) }
+            return mix(horizon, below, min(-y / 0.06, 1))
+        }
+        var pixels = [UInt8](repeating: 255, count: size * 6 * size * 4)
+        for face in 0..<6 {
+            for j in 0..<size {
+                for i in 0..<size {
+                    let a = (Float(i) + 0.5) / Float(size) * 2 - 1, b = (Float(j) + 0.5) / Float(size) * 2 - 1
+                    let length = (1 + a * a + b * b).squareRoot()
+                    // The third and fourth faces look up and down; on the others up is the top row.
+                    let y: Float = face == 2 ? 1 / length : face == 3 ? -1 / length : -b / length
+                    let rgb = color(y)
+                    let at = (j * size * 6 + face * size + i) * 4
+                    pixels[at] = UInt8(rgb.0 * 255 + 0.5); pixels[at + 1] = UInt8(rgb.1 * 255 + 0.5); pixels[at + 2] = UInt8(rgb.2 * 255 + 0.5)
+                }
+            }
+        }
+        guard let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
+        defer { CG.release(space) }
+        let made = pixels.withUnsafeMutableBytes { buffer -> UIImage? in
+            guard let context = CG.bitmapContextCreate(buffer.baseAddress, size * 6, size, 8, size * 6 * 4, space, 1 | 0x4000) else { return nil }
+            defer { CG.release(context) }
+            guard let picture = CG.bitmapContextCreateImage(context) else { return nil }
+            defer { CG.release(picture) }
+            return UIImage.make(UIImage.objCClass, cgImage: picture, scale: 1)
+        }
+        if let made { images[key] = made }
+        return made
     }
 
     static func read(_ path: String) -> [UInt8]? {
@@ -554,7 +609,14 @@ final class SCNSceneBuilder {
     private func propertyContents(_ reference: SCNArchive.Plist?) -> NSObject? {
         guard let described = archive.dictionary(reference) else { return nil }
         if archive.has(described["image"]) {
-            for (key, value) in archive.entries(described["image"]) where key == "path" {
+            // A sky made from numbers (the scene editor's procedural sky), not a picture's file.
+            let entries = archive.entries(described["image"])
+            if entries.contains(where: { $0.0 == "type" && archive.string($0.1) == "MDLSkyCubeTexture" }) {
+                let ground = entries.first { $0.0 == "groundColor" }.flatMap { archive.color($0.1) }
+                let albedo = entries.first { $0.0 == "groundAlbedo" }.flatMap { archive.double($0.1) } ?? 0.3
+                return SCNFile.skyImage(ground: ground.map { (Float($0.0), Float($0.1), Float($0.2)) }, albedo: Float(albedo))
+            }
+            for (key, value) in entries where key == "path" {
                 guard let relative = archive.string(value) else { continue }
                 // A source scene's pictures are beside it; a compiled scene's are named from the bundle.
                 var path = relative.hasPrefix("/") ? relative : "\(archive.directory)/\(relative)"
@@ -597,6 +659,16 @@ final class SCNSceneBuilder {
             let cylinder = SCNCylinder.cylinder(SCNCylinder.objCClass, radius: number("cylinderradius", 0.5), height: number("cylinderheight"))
             cylinder.geometry.segments = archive.int(described["cylinderradialSegmentCount"]) ?? 48
             made = cylinder
+        case "SCNTube":
+            let tube = SCNTube.tube(SCNTube.objCClass, innerRadius: number("tubeinnerRadius", 0.25), outerRadius: number("tubeouterRadius", 0.5),
+                                    height: number("tubeheight"))
+            tube.geometry.segments = archive.int(described["tuberadialSegmentCount"]) ?? 48
+            made = tube
+        case "SCNTorus":
+            let torus = SCNTorus.torus(SCNTorus.objCClass, ringRadius: number("torusringRadius", 0.5), pipeRadius: number("toruspipeRadius", 0.25))
+            torus.geometry.segments = archive.int(described["torusringSegmentCount"]) ?? 48
+            torus.geometry.pipeSegments = archive.int(described["toruspipeSegmentCount"]) ?? 24
+            made = torus
         case "SCNGeometry":
             let custom = SCNGeometry.objCClass.object.allocated().unsafeCast(to: SCNGeometry.self)
             custom.geometry.kind = .custom

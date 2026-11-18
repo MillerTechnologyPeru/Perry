@@ -38,12 +38,16 @@ struct SCNChannel {
 }
 
 extension SCNNode {
-    /// The node named by `path` below this one, each name found anywhere below the one before.
+    /// The node named by `path` below this one, each name found anywhere below the one before. The path may
+    /// start with this node itself: a model's animation is on the node its channels name first.
     func node(atPath path: [String]) -> SCNNode? {
         var current = self
-        for name in path {
-            guard let next = current.childNode(withName: name, recursively: true) else { return nil }
-            current = next
+        for (index, name) in path.enumerated() {
+            if let next = current.childNode(withName: name, recursively: true) {
+                current = next
+            } else if index != 0 || node.name != name {
+                return nil
+            }
         }
         return current
     }
@@ -63,6 +67,7 @@ enum SCNAnimations {
     /// Advances every playing animation by `dt` seconds and poses the nodes they animate.
     static func advance(_ root: SCNNode, _ dt: Double) {
         let state = root.node
+        guard !state.paused else { return }
         if !state.animationPlayers.isEmpty { pose(root, dt) }
         for child in state.children { advance(child.unsafeCast(to: SCNNode.self), dt) }
     }

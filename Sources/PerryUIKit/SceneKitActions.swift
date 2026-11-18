@@ -372,6 +372,7 @@ enum SCNActions {
     /// Moves every node's actions on by `dt` seconds, parents first.
     static func advance(_ node: SCNNode, _ dt: Double) {
         let state = node.node
+        guard !state.paused else { return }
         if !state.running.isEmpty {
             var finished: [SCNRunning] = []
             for run in state.running where run.runner.advance(node, dt) != nil { finished.append(run) }

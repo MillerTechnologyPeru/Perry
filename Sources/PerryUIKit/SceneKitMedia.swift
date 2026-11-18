@@ -93,6 +93,10 @@ final class SCNAnimationState: ObjectState {
     var usesSceneTimeBase = false
     /// The keyframed transforms of nodes below the node that plays it.
     var channels: [SCNChannel] = []
+    /// A CAAnimation's delegate (not retained here; it hears nothing yet) and speed, kept.
+    var delegate: UnsafeMutableRawPointer?
+    var speed: Float = 1
+    var timeOffset = 0.0
 }
 
 @ObjCClass("SCNAnimation")
@@ -121,6 +125,17 @@ open class SCNAnimation: NSObject {
     @ObjCMethod("setBlendInDuration:") func setBlendInDuration(_ duration: Double) { animation.fadeIn = duration }
     @ObjCMethod("blendOutDuration") func blendOutDuration() -> Double { animation.fadeOut }
     @ObjCMethod("setBlendOutDuration:") func setBlendOutDuration(_ duration: Double) { animation.fadeOut = duration }
+    // As a CAAnimation, which a model's animation is to apps made for earlier systems.
+    @ObjCMethod("fadeInDuration") func fadeInDuration() -> CGFloat { CGFloat(animation.fadeIn) }
+    @ObjCMethod("setFadeInDuration:") func setFadeInDuration(_ duration: CGFloat) { animation.fadeIn = Double(duration) }
+    @ObjCMethod("fadeOutDuration") func fadeOutDuration() -> CGFloat { CGFloat(animation.fadeOut) }
+    @ObjCMethod("setFadeOutDuration:") func setFadeOutDuration(_ duration: CGFloat) { animation.fadeOut = Double(duration) }
+    @ObjCMethod("delegate") func delegate() -> NSObject? { animation.delegate.map { NSObject($0) } }
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { animation.delegate = delegate?.objcObject }
+    @ObjCMethod("timeOffset") func timeOffset() -> Double { animation.timeOffset }
+    @ObjCMethod("setTimeOffset:") func setTimeOffset(_ offset: Double) { animation.timeOffset = offset }
+    @ObjCMethod("speed") func speed() -> Float { animation.speed }
+    @ObjCMethod("setSpeed:") func setSpeed(_ speed: Float) { animation.speed = speed }
     @ObjCMethod("usesSceneTimeBase") func usesSceneTimeBase() -> Bool { animation.usesSceneTimeBase }
     @ObjCMethod("setUsesSceneTimeBase:") func setUsesSceneTimeBase(_ uses: Bool) { animation.usesSceneTimeBase = uses }
 }
@@ -219,17 +234,33 @@ extension SCNNode {
     @ObjCMethod("animationKeys") func animationKeys() -> NSObject {
         NSMutableArray.of(node.animationKeys.compactMap { key in key.objCArgument().map { NSObject(objcObject: $0, ownership: .retain) } })
     }
-    /// A Core Animation animation is kept under its key, not played.
-    @ObjCMethod("addAnimation:forKey:") func addAnimation(_ animation: NSObject, forKey key: String?) {
+    /// A model's animation (which an app has as a CAAnimation) plays, from its start; a Core Animation animation is
+    /// kept under its key, not played.
+    @ObjCMethod("addAnimation:forKey:") func addAnimation(_ animation: NSObject?, forKey key: String?) {
+        guard let animation else { return }
+        if animation.is(SCNAnimation.self) {
+            let player = SCNAnimationPlayer.objCClass.object.allocated().unsafeCast(to: SCNAnimationPlayer.self)
+            player.player.animation = animation.unsafeCast(to: SCNAnimation.self)
+            player.player.playing = true
+            addAnimationPlayer(player, forKey: key)
+            return
+        }
         let name = key ?? "animation\(node.animationKeys.count)"
         if node.animationPlayers[name] == nil { node.animationKeys.append(name) }
         node.animationPlayers[name] = animation
     }
-    @ObjCMethod("animationForKey:") func animation(forKey key: String) -> NSObject? { node.animationPlayers[key] }
+    @ObjCMethod("animationForKey:") func animation(forKey key: String) -> NSObject? {
+        guard let kept = node.animationPlayers[key] else { return nil }
+        return kept.is(SCNAnimationPlayer.self) ? kept.unsafeCast(to: SCNAnimationPlayer.self).player.animation : kept
+    }
     @ObjCMethod("pauseAnimationForKey:") func pauseAnimation(forKey key: String) {}
     @ObjCMethod("resumeAnimationForKey:") func resumeAnimation(forKey key: String) {}
     @ObjCMethod("isAnimationForKeyPaused:") func isAnimationPaused(forKey key: String) -> Bool { false }
     @ObjCMethod("removeAnimationForKey:fadeOutDuration:") func removeAnimation(forKey key: String, fadeOutDuration: CGFloat) { removeAnimation(forKey: key) }
+    @ObjCMethod("removeAnimationForKey:blendOutDuration:") func removeAnimation(forKey key: String, blendOutDuration: CGFloat) { removeAnimation(forKey: key) }
+    @ObjCMethod("removeAllAnimationsWithBlendOutDuration:") func removeAllAnimations(blendOutDuration: CGFloat) {
+        for key in node.animationKeys { removeAnimation(forKey: key) }
+    }
     @ObjCMethod("removeAnimationForKey:") func removeAnimation(forKey key: String) {
         node.animationPlayers[key] = nil
         node.animationKeys.removeAll { $0 == key }
@@ -260,6 +291,8 @@ open class SCNParticleSystem: NSObject {
     }
 
     @ObjCClassMethod("particleSystem") static func make(_ cls: ObjCClass) -> SCNParticleSystem { cls.object.allocated().unsafeCast(to: SCNParticleSystem.self) }
+    /// From a particle file an app unarchives itself: a system with its default settings, as the file's are not read.
+    @ObjCMethod("initWithCoder:") func initialize(coder: NSObject?) -> Self { self }
     /// A system named by a particle file; the file's emitter is not read.
     @ObjCClassMethod("particleSystemNamed:inDirectory:")
     static func named(_ cls: ObjCClass, name: String, inDirectory directory: String?) -> SCNParticleSystem? {
@@ -325,6 +358,7 @@ extension SCNAnimation {
         to.fadeIn = from.fadeIn
         to.fadeOut = from.fadeOut
         to.channels = from.channels
+        (to.delegate, to.speed) = (from.delegate, from.speed)
         return made
     }
 }

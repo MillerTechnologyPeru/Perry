@@ -833,6 +833,10 @@ open class UIRuntimeEventConnection: UIRuntimeConnection {
             item.state.action = action.pointer
         } else if let control = source.as(UIControl.self) {
             control.addTarget(state.destination, action: action, for: state.eventMask == 0 ? 1 << 6 : state.eventMask)
+        } else if let recognizer = source.as(UIGestureRecognizer.self), let destination = state.destination {
+            // A gesture recognizer's action, which a storyboard connects as it does a control's.
+            let known = recognizer.state.targets.contains { $0.target == destination.objcObject && $0.action == action.pointer }
+            if !known { recognizer.addTarget(destination, action: action) }
         }
     }
 }

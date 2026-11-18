@@ -28,6 +28,8 @@ extension NSObject {
     @ObjCMethod("didChangeSize:") func skSendDidChangeSize(_ oldSize: CGSize)
     /// Sent so that a scene which watches its size hears the view change it.
     @ObjCMethod("setSize:") func skSendSetSize(_ size: CGSize)
+    @ObjCMethod("anyObject") func skAnyObject() -> NSObject?
+    @ObjCMethod("initWithTexture:color:size:") func skSendInit(texture: SKTexture?, color: NSObject?, size: CGSize) -> NSObject
 }
 
 // MARK: - Colors and the clock
@@ -84,11 +86,14 @@ final class SKTextureState: ObjectState {
     var image: CGRef?
     var rect = CGRect(x: 0, y: 0, width: 1, height: 1)
     var filtering = 1   // SKTextureFilteringMode: nearest 0, linear 1
+    /// The picture's pixels to a point: an image's scale (a @3x picture's 3).
+    var scale: CGFloat = 1
     deinit { if let image { CG.release(image) } }
 
+    /// The size in points.
     var size: CGSize {
         guard let image else { return .zero }
-        return CGSize(width: CGFloat(CG.imageGetWidth(image)) * rect.width, height: CGFloat(CG.imageGetHeight(image)) * rect.height)
+        return CGSize(width: CGFloat(CG.imageGetWidth(image)) * rect.width / scale, height: CGFloat(CG.imageGetHeight(image)) * rect.height / scale)
     }
 }
 
@@ -110,14 +115,25 @@ open class SKTexture: NSObject {
     }
 
     @ObjCClassMethod("textureWithImage:")
-    static func texture(_ cls: ObjCClass, image: UIImage?) -> SKTexture { make(cls, image: image?.state.cgImage) }
+    static func texture(_ cls: ObjCClass, image: UIImage?) -> SKTexture {
+        let texture = make(cls, image: image?.state.cgImage)
+        if let scale = image?.state.scale, scale > 0 { texture.state.scale = scale }
+        return texture
+    }
 
     @ObjCClassMethod("textureWithCGImage:")
     static func texture(_ cls: ObjCClass, cgImage: UnsafeMutableRawPointer?) -> SKTexture { make(cls, image: cgImage) }
 
     @ObjCClassMethod("textureWithImageNamed:")
     static func texture(_ cls: ObjCClass, imageNamed name: String) -> SKTexture {
-        make(cls, image: ObjCClass(named: "UIImage").object.skImageNamed(name)?.skCGImage())
+        let image = ObjCClass(named: "UIImage").object.skImageNamed(name)
+        let texture = make(cls, image: image?.skCGImage())
+        // A texture is as large as its image is in points.
+        if let image, image.is(UIImage.self) {
+            let scale = image.unsafeCast(to: UIImage.self).state.scale
+            if scale > 0 { texture.state.scale = scale }
+        }
+        return texture
     }
 
     @ObjCClassMethod("textureWithRect:inTexture:")
@@ -129,6 +145,7 @@ open class SKTexture: NSObject {
         texture.state.rect = CGRect(x: outer.minX + rect.minX * outer.width, y: outer.minY + rect.minY * outer.height,
                                     width: rect.width * outer.width, height: rect.height * outer.height)
         texture.state.filtering = base.state.filtering
+        texture.state.scale = base.state.scale
         return texture
     }
 
@@ -192,7 +209,12 @@ final class SKNodeState: ObjectState {
     var horizontalAlignment = 0   // SKLabelHorizontalAlignmentMode: center 0, left 1, right 2
     var verticalAlignment = 0     // SKLabelVerticalAlignmentMode: baseline 0, center 1, top 2, bottom 3
 
+    var numberOfLines = 1, lineBreakMode = 4
+    var preferredMaxLayoutWidth: CGFloat = 0
+
     // A shape's.
+    var lineJoin = 0, lineCap = 0
+    var miterLimit: CGFloat = 0.5
     var path: CGRef?
     var fillColor: UnsafeMutableRawPointer?
     var strokeColor: UnsafeMutableRawPointer?
@@ -205,6 +227,16 @@ final class SKNodeState: ObjectState {
     var sceneAnchor = CGPoint.zero
     var backgroundColor: UnsafeMutableRawPointer?
     var view: UnsafeMutableRawPointer?
+    /// The engine a scene's sounds are played through, made when it is asked for.
+    var audioEngine: NSObject?
+    /// The node the scene is seen from, and the world its bodies move in.
+    var camera: SKNode?
+    var physicsWorld: SKPhysicsWorld?
+
+    // Any node's: its body, a crop node's mask, and the shader it is drawn with (kept; nothing draws by it yet).
+    var physicsBody: SKPhysicsBody?
+    var maskNode: SKNode?
+    var shader: NSObject?
 
     deinit {
         ObjCRuntime.release(color)
@@ -258,6 +290,49 @@ open class SKNode: UIResponder {
     @ObjCMethod("setName:") func setName(_ name: String?) { node.name = name }
     @ObjCMethod("userData") func userData() -> NSObject? { nil }
     @ObjCMethod("setUserData:") func setUserData(_ data: NSObject?) {}
+    /// A copy of the node, with copies of its children, of its own class; its actions and its body are not copied.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> SKNode {
+        // Of the object's own class, which may be an app's.
+        let cls = ObjCRuntime.objectClass(objcObject).map { ObjCClass($0) } ?? SKNode.objCClass
+        let made = cls.object.allocated().unsafeCast(to: SKNode.self)
+        let (from, to) = (node, made.node)
+        (to.position, to.zPosition, to.zRotation, to.xScale, to.yScale) = (from.position, from.zPosition, from.zRotation, from.xScale, from.yScale)
+        (to.alpha, to.hidden, to.paused, to.speed, to.userInteractionEnabled, to.name) = (from.alpha, from.hidden, from.paused, from.speed, from.userInteractionEnabled, from.name)
+        (to.texture, to.size, to.anchor, to.colorBlendFactor, to.blendMode) = (from.texture, from.size, from.anchor, from.colorBlendFactor, from.blendMode)
+        (to.text, to.fontName, to.fontSize, to.horizontalAlignment, to.verticalAlignment) = (from.text, from.fontName, from.fontSize, from.horizontalAlignment, from.verticalAlignment)
+        (to.lineWidth, to.glowWidth, to.sceneSize, to.scaleMode, to.sceneAnchor) = (from.lineWidth, from.glowWidth, from.sceneSize, from.scaleMode, from.sceneAnchor)
+        SKSupport.replace(&to.color, with: from.color)
+        SKSupport.replace(&to.fontColor, with: from.fontColor)
+        SKSupport.replace(&to.fillColor, with: from.fillColor)
+        SKSupport.replace(&to.strokeColor, with: from.strokeColor)
+        SKSupport.replace(&to.backgroundColor, with: from.backgroundColor)
+        if let path = from.path { to.path = ObjCRuntime.retain(path) }
+        for child in from.children {
+            let copied = child.unsafeCast(to: SKNode.self).copy(zone: zone)
+            copied.node.parent = made.objcObject
+            to.children.append(copied)
+        }
+        return made
+    }
+
+    // A node passes the touches it does nothing with to its parent, as a responder does.
+    @ObjCMethod("touchesBegan:withEvent:") func touchesBegan(_ touches: NSObject, with event: NSObject?) { parent()?.sendTouchesBegan(touches, with: event) }
+    @ObjCMethod("touchesMoved:withEvent:") func touchesMoved(_ touches: NSObject, with event: NSObject?) { parent()?.sendTouchesMoved(touches, with: event) }
+    @ObjCMethod("touchesEnded:withEvent:") func touchesEnded(_ touches: NSObject, with event: NSObject?) { parent()?.sendTouchesEnded(touches, with: event) }
+    @ObjCMethod("touchesCancelled:withEvent:") func touchesCancelled(_ touches: NSObject, with event: NSObject?) {
+        parent()?.sendTouchesCancelled(touches, with: event)
+    }
+    @ObjCMethod("nextResponder") override func nextResponder() -> NSObject? { parent() }
+
+    @ObjCMethod("physicsBody") func physicsBody() -> SKPhysicsBody? { node.physicsBody }
+    @ObjCMethod("setPhysicsBody:") func setPhysicsBody(_ body: SKPhysicsBody?) {
+        node.physicsBody?.body.node = nil
+        node.physicsBody = body
+        body?.body.node = objcObject
+    }
+    @ObjCMethod("shader") func shader() -> NSObject? { node.shader }
+    @ObjCMethod("setShader:") func setShader(_ shader: NSObject?) { node.shader = shader }
 
     @ObjCMethod("parent") func parent() -> SKNode? { node.parent.map { SKNode(objcObject: $0, ownership: .retain) } }
     @ObjCMethod("children") func children() -> NSObject { NSMutableArray.of(node.children) }
@@ -309,7 +384,8 @@ open class SKNode: UIResponder {
 
     @ObjCMethod("childNodeWithName:")
     func childNode(withName name: String) -> SKNode? {
-        node.children.first { SKNode.nodeStates.existing($0.objcObject)?.name == name }?.unsafeCast(to: SKNode.self)
+        if name.hasPrefix("/") || name == "*" { return nodes(matching: name).first }
+        return node.children.first { SKNode.nodeStates.existing($0.objcObject)?.name == name }?.unsafeCast(to: SKNode.self)
     }
 
     @ObjCMethod("inParentHierarchy:")
@@ -352,6 +428,72 @@ open class SKNode: UIResponder {
     @ObjCMethod("containsPoint:")
     func contains(_ point: CGPoint) -> Bool { calculateAccumulatedFrame().contains(point) }
 
+    /// The nodes below this one at a point of its coordinates, the one drawn last (on top) first: each node
+    /// whose own picture, text or shape has the point, or whose children's frames together have it.
+    func nodes(at point: CGPoint) -> [SKNode] {
+        var found: [(node: SKNode, z: CGFloat, order: Int)] = []
+        var order = 0
+        func visit(_ parent: SKNode, _ local: CGPoint, _ z: CGFloat) {
+            for child in parent.node.children.map({ $0.unsafeCast(to: SKNode.self) }) {
+                let state = child.node
+                order += 1
+                let depth = z + state.zPosition
+                if child.calculateAccumulatedFrame().contains(local) { found.append((child, depth, order)) }
+                visit(child, SKSupport.rotationScale(state).inverted.apply(local), depth)
+            }
+        }
+        visit(self, point, 0)
+        return found.sorted { ($0.z, $0.order) > ($1.z, $1.order) }.map(\.node)
+    }
+
+    @ObjCMethod("nodesAtPoint:") func nodesAtPoint(_ point: CGPoint) -> NSObject { NSMutableArray.of(nodes(at: point)) }
+    /// The node on top at the point, or this one when none is.
+    @ObjCMethod("nodeAtPoint:") func nodeAtPoint(_ point: CGPoint) -> SKNode { nodes(at: point).first ?? self }
+
+    /// Whether the two nodes' frames, with their children's, overlap, in the scene.
+    @ObjCMethod("intersectsNode:")
+    func intersects(_ other: SKNode) -> Bool {
+        func placed(_ node: SKNode) -> CGRect {
+            let frame = node.calculateAccumulatedFrame()
+            guard let parent = node.parent() else { return frame }
+            let matrix = parent.toScene()
+            let corners = [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.maxY),
+                           CGPoint(x: frame.minX, y: frame.maxY)].map { matrix.apply($0) }
+            let xs = corners.map(\.x), ys = corners.map(\.y)
+            return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+        }
+        let (a, b) = (placed(self), placed(other))
+        return a.maxX > b.minX && a.minX < b.maxX && a.maxY > b.minY && a.minY < b.maxY
+    }
+
+    /// The nodes a search names: a name among the children, `//name` anywhere below, `*` for any.
+    func nodes(matching search: String) -> [SKNode] {
+        let deep = search.hasPrefix("//")
+        let name = deep ? String(search.dropFirst(2)) : search.hasPrefix("/") ? String(search.dropFirst()) : search
+        var found: [SKNode] = []
+        func visit(_ parent: SKNode) {
+            for child in parent.node.children.map({ $0.unsafeCast(to: SKNode.self) }) {
+                if name == "*" || child.node.name == name { found.append(child) }
+                if deep { visit(child) }
+            }
+        }
+        visit(self)
+        return found
+    }
+
+    @ObjCMethod("enumerateChildNodesWithName:usingBlock:")
+    func enumerateChildNodes(withName name: String, using block: ObjCBlock) {
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        var stop = false
+        for found in nodes(matching: name) {
+            invoke(block.object, found.objcObject, &stop)
+            if stop { break }
+        }
+    }
+
+    @ObjCMethod("objectForKeyedSubscript:") func nodes(named name: String) -> NSObject { NSMutableArray.of(nodes(matching: name)) }
+
     /// The frame of the node's own picture or path in its parent's
     /// coordinates, with its children's.
     @ObjCMethod("calculateAccumulatedFrame")
@@ -392,10 +534,11 @@ open class SKSpriteNode: SKNode {
         if let color { SKSupport.replace(&node.color, with: color); node.colorBlendFactor = 0 }
     }
 
-    private static func make(_ cls: ObjCClass, texture: SKTexture?, size: CGSize?, color: UnsafeMutableRawPointer? = nil) -> SKSpriteNode {
-        let sprite = cls.object.allocated().unsafeCast(to: SKSpriteNode.self)
-        sprite.configure(texture: texture, size: size ?? texture?.state.size ?? .zero, color: color)
-        return sprite
+    // Every way of making a sprite goes through initWithTexture:color:size:, sent so that a subclass's own
+    // (where a Swift subclass sets its properties up) runs, as SpriteKit's do.
+    private static func make(_ cls: ObjCClass, texture: SKTexture?, size: CGSize?, color: NSObject? = nil) -> SKSpriteNode {
+        cls.object.allocated().skSendInit(texture: texture, color: color ?? UIColor.gray(1, 1), size: size ?? texture?.state.size ?? .zero)
+            .unsafeCast(to: SKSpriteNode.self)
     }
 
     @ObjCClassMethod("spriteNodeWithTexture:")
@@ -407,29 +550,32 @@ open class SKSpriteNode: SKNode {
         make(cls, texture: SKTexture.texture(SKTexture.objCClass, imageNamed: name), size: nil)
     }
     @ObjCClassMethod("spriteNodeWithColor:size:")
-    static func sprite(_ cls: ObjCClass, color: NSObject?, size: CGSize) -> SKSpriteNode {
-        make(cls, texture: nil, size: size, color: color?.objcObject)
-    }
+    static func sprite(_ cls: ObjCClass, color: NSObject?, size: CGSize) -> SKSpriteNode { make(cls, texture: nil, size: size, color: color) }
 
+    @ObjCMethod("init") override func initialize() -> Self {
+        _ = skSendInit(texture: nil, color: UIColor.gray(1, 1), size: .zero)
+        return self
+    }
     @ObjCMethod("initWithTexture:") func initialize(texture: SKTexture?) -> Self {
-        configure(texture: texture, size: texture?.state.size ?? .zero)
+        _ = skSendInit(texture: texture, color: UIColor.gray(1, 1), size: texture?.state.size ?? .zero)
         return self
     }
     @ObjCMethod("initWithTexture:size:") func initialize(texture: SKTexture?, size: CGSize) -> Self {
-        configure(texture: texture, size: size)
+        _ = skSendInit(texture: texture, color: UIColor.gray(1, 1), size: size)
         return self
     }
+    /// The designated initializer.
     @ObjCMethod("initWithTexture:color:size:") func initialize(texture: SKTexture?, color: NSObject?, size: CGSize) -> Self {
         configure(texture: texture, size: size, color: color?.objcObject)
         return self
     }
     @ObjCMethod("initWithImageNamed:") func initialize(imageNamed name: String) -> Self {
         let texture = SKTexture.texture(SKTexture.objCClass, imageNamed: name)
-        configure(texture: texture, size: texture.state.size)
+        _ = skSendInit(texture: texture, color: UIColor.gray(1, 1), size: texture.state.size)
         return self
     }
     @ObjCMethod("initWithColor:size:") func initialize(color: NSObject?, size: CGSize) -> Self {
-        configure(texture: nil, size: size, color: color?.objcObject)
+        _ = skSendInit(texture: nil, color: color, size: size)
         return self
     }
 
@@ -497,6 +643,13 @@ open class SKLabelNode: SKNode {
 
     @ObjCMethod("text") func text() -> String? { node.text }
     @ObjCMethod("setText:") func setText(_ text: String?) { node.text = text; refresh() }
+    // Lines: kept; a label's text is drawn on one.
+    @ObjCMethod("numberOfLines") func numberOfLines() -> Int { node.numberOfLines }
+    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) { node.numberOfLines = lines }
+    @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { node.lineBreakMode }
+    @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { node.lineBreakMode = mode }
+    @ObjCMethod("preferredMaxLayoutWidth") func preferredMaxLayoutWidth() -> CGFloat { node.preferredMaxLayoutWidth }
+    @ObjCMethod("setPreferredMaxLayoutWidth:") func setPreferredMaxLayoutWidth(_ width: CGFloat) { node.preferredMaxLayoutWidth = width }
     @ObjCMethod("fontName") func fontName() -> String? { node.fontName }
     @ObjCMethod("setFontName:") func setFontName(_ name: String?) { node.fontName = name; refresh() }
     @ObjCMethod("fontSize") func fontSize() -> CGFloat { node.fontSize }
@@ -571,6 +724,13 @@ open class SKShapeNode: SKNode {
     @ObjCMethod("setLineWidth:") func setLineWidth(_ width: CGFloat) { node.lineWidth = width }
     @ObjCMethod("glowWidth") func glowWidth() -> CGFloat { node.glowWidth }
     @ObjCMethod("setGlowWidth:") func setGlowWidth(_ width: CGFloat) { node.glowWidth = width }
+    // How lines meet and end: kept; lines are drawn mitred and butted.
+    @ObjCMethod("lineJoin") func lineJoin() -> Int { node.lineJoin }
+    @ObjCMethod("setLineJoin:") func setLineJoin(_ join: Int) { node.lineJoin = join }
+    @ObjCMethod("lineCap") func lineCap() -> Int { node.lineCap }
+    @ObjCMethod("setLineCap:") func setLineCap(_ cap: Int) { node.lineCap = cap }
+    @ObjCMethod("miterLimit") func miterLimit() -> CGFloat { node.miterLimit }
+    @ObjCMethod("setMiterLimit:") func setMiterLimit(_ limit: CGFloat) { node.miterLimit = limit }
     @ObjCMethod("isAntialiased") func isAntialiased() -> Bool { true }
     @ObjCMethod("setAntialiased:") func setAntialiased(_ antialiased: Bool) {}
 }
@@ -602,6 +762,13 @@ open class SKScene: SKNode {
         skSendDidChangeSize(old)
     }
 
+    /// A scene's frame is what it shows: its size, from where its anchor puts its origin.
+    @ObjCMethod("frame")
+    override func frame() -> CGRect {
+        let size = node.sceneSize, anchor = node.sceneAnchor
+        return CGRect(x: -anchor.x * size.width, y: -anchor.y * size.height, width: size.width, height: size.height)
+    }
+
     @ObjCMethod("scaleMode") func scaleMode() -> Int { node.scaleMode }
     @ObjCMethod("setScaleMode:") func setScaleMode(_ mode: Int) { node.scaleMode = mode }
     @ObjCMethod("anchorPoint") func anchorPoint() -> CGPoint { node.sceneAnchor }
@@ -621,12 +788,33 @@ open class SKScene: SKNode {
     @ObjCMethod("didMoveToView:") func didMove(to view: SKView) {}
     @ObjCMethod("willMoveFromView:") func willMove(from view: SKView) {}
     @ObjCMethod("didChangeSize:") func didChangeSize(_ oldSize: CGSize) {}
-    @ObjCMethod("camera") func camera() -> NSObject? { nil }
+    /// The scene's audio engine: AVFoundation's, where it is loaded.
+    @ObjCMethod("audioEngine")
+    func audioEngine() -> NSObject? {
+        if let engine = node.audioEngine { return engine }
+        typealias GetClass = @convention(c) (UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?
+        guard let symbol = dlsym(nil, "objc_getClass") ?? dlsym(nil, "_objc_getClass"),
+              let cls = unsafeBitCast(symbol, to: GetClass.self)("AVAudioEngine") else { return nil }
+        let engine = ObjCClass(cls).object.newInstance()
+        node.audioEngine = engine
+        return engine
+    }
+    @ObjCMethod("listener") func listener() -> SKNode? { nil }
+    @ObjCMethod("setListener:") func setListener(_ listener: SKNode?) {}
+
+    @ObjCMethod("camera") func camera() -> SKNode? { node.camera }
+    @ObjCMethod("setCamera:") func setCamera(_ camera: SKNode?) { node.camera = camera }
+    @ObjCMethod("physicsWorld") func physicsWorld() -> SKPhysicsWorld {
+        if let world = node.physicsWorld { return world }
+        let world = SKPhysicsWorld.objCClass.object.allocated().unsafeCast(to: SKPhysicsWorld.self)
+        node.physicsWorld = world
+        return world
+    }
     @ObjCMethod("delegate") func delegate() -> NSObject? { nil }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) {}
 
     /// From the scene's coordinates to the view's, under the scale mode.
-    func sceneToView(bounds: CGSize) -> CGAffineTransform {
+    func sceneToView(bounds: CGSize, withCamera: Bool = true) -> CGAffineTransform {
         let size = node.sceneSize
         guard size.width > 0, size.height > 0 else { return .identity }
         var sx = bounds.width / size.width, sy = bounds.height / size.height
@@ -638,8 +826,12 @@ open class SKScene: SKNode {
         }
         let ox = (bounds.width - size.width * sx) / 2, oy = (bounds.height - size.height * sy) / 2
         let anchor = node.sceneAnchor
-        return CGAffineTransform(a: sx, b: 0, c: 0, d: -sy, tx: ox + sx * anchor.x * size.width,
-                                 ty: oy + sy * (size.height - anchor.y * size.height))
+        let plain = CGAffineTransform(a: sx, b: 0, c: 0, d: -sy, tx: ox + sx * anchor.x * size.width,
+                                      ty: oy + sy * (size.height - anchor.y * size.height))
+        // With a camera, where it is in the scene is the middle of the view, turned and scaled as it is.
+        guard withCamera, let camera = node.camera else { return plain }
+        let middle = CGAffineTransform(a: 1, b: 0, c: 0, d: 1, tx: (0.5 - anchor.x) * size.width, ty: (0.5 - anchor.y) * size.height)
+        return camera.toScene().inverted.concatenating(middle).concatenating(plain)
     }
 
     @ObjCMethod("convertPointFromView:")
@@ -670,6 +862,8 @@ final class SKViewState: ObjectState {
     var isOverlay = false
     /// The view's drawing, made at its first frame.
     var renderer: SKRenderer?
+    /// The node the touch under way began on.
+    var touchTarget: SKNode?
 }
 
 @ObjCClass("SKView")
@@ -733,6 +927,7 @@ open class SKView: UIView {
 
     @ObjCMethod("presentScene:")
     func presentScene(_ scene: SKScene?) {
+        SKActions.trace("\(describedByObject()) presents \(scene?.describedByObject() ?? "no scene") of \(scene?.node.sceneSize ?? .zero)")
         if let old = sk.scene {
             old.skSendWillMove(from: self)
             old.node.view = nil
@@ -761,14 +956,47 @@ open class SKView: UIView {
 
     // MARK: Touches
 
+    /// The node a touch is for: the one on top under it that takes touches and is shown, else the scene.
+    private func touchTarget(_ touches: NSObject) -> SKNode? {
+        guard let scene = sk.scene else { return nil }
+        guard let touch = touches.skAnyObject(), touch.is(UITouch.self) else { return scene }
+        let state = touch.unsafeCast(to: UITouch.self).state
+        let point = scene.convertPoint(fromView: convert(state.location, from: state.window))
+        func shown(_ node: SKNode) -> Bool {
+            var current: SKNode? = node
+            while let checked = current {
+                if checked.node.hidden { return false }
+                current = checked.parent()
+            }
+            return true
+        }
+        return scene.nodes(at: point).first { $0.node.userInteractionEnabled && shown($0) } ?? scene
+    }
+
+    // A touch goes to the node it began on until it ends.
     @ObjCMethod("touchesBegan:withEvent:")
-    func touchesBeganInScene(_ touches: NSObject, with event: NSObject?) { sk.scene?.sendTouchesBegan(touches, with: event) }
+    func touchesBeganInScene(_ touches: NSObject, with event: NSObject?) {
+        sk.touchTarget = touchTarget(touches)
+        if getenv("PERRY_UIKIT_TOUCH_TRACE") != nil, let target = sk.touchTarget {
+            let line = "perry: UIKit: touch: SpriteKit: began on \(target.describedByObject()) named \(target.node.name ?? "-")\n"
+            line.withCString { _ = write(2, $0, strlen($0)) }
+        }
+        sk.touchTarget?.sendTouchesBegan(touches, with: event)
+    }
     @ObjCMethod("touchesMoved:withEvent:")
-    func touchesMovedInScene(_ touches: NSObject, with event: NSObject?) { sk.scene?.sendTouchesMoved(touches, with: event) }
+    func touchesMovedInScene(_ touches: NSObject, with event: NSObject?) { (sk.touchTarget ?? sk.scene)?.sendTouchesMoved(touches, with: event) }
     @ObjCMethod("touchesEnded:withEvent:")
-    func touchesEndedInScene(_ touches: NSObject, with event: NSObject?) { sk.scene?.sendTouchesEnded(touches, with: event) }
+    func touchesEndedInScene(_ touches: NSObject, with event: NSObject?) {
+        let target = sk.touchTarget ?? sk.scene
+        sk.touchTarget = nil
+        target?.sendTouchesEnded(touches, with: event)
+    }
     @ObjCMethod("touchesCancelled:withEvent:")
-    func touchesCancelledInScene(_ touches: NSObject, with event: NSObject?) { sk.scene?.sendTouchesCancelled(touches, with: event) }
+    func touchesCancelledInScene(_ touches: NSObject, with event: NSObject?) {
+        let target = sk.touchTarget ?? sk.scene
+        sk.touchTarget = nil
+        target?.sendTouchesCancelled(touches, with: event)
+    }
 
     // MARK: Frames
 
@@ -798,6 +1026,7 @@ open class SKView: UIView {
         scene.skSendUpdate(now)
         SKActions.advance(scene, elapsed)
         scene.skSendDidEvaluateActions()
+        SKPhysics.step(scene, elapsed)
         scene.skSendDidSimulatePhysics()
         scene.skSendDidFinishUpdate()
         if sk.renderer == nil { sk.renderer = SKRenderer() }
