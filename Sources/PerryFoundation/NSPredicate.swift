@@ -997,6 +997,12 @@ public class NSPredicate: NSObject {
         PredicateEvaluation.evaluate(node, object?.objcObject, bindings: substitutionVariables?.objcObject)
     }
 
+    /// A copy with each $variable the dictionary has replaced by its value.
+    @ObjCMethod("predicateWithSubstitutionVariables:")
+    func substituting(_ variables: ObjCObject?) -> ObjCObject {
+        ObjCObject(Predicates.object(Substitution.predicate(node, variables?.objcObject, shadowed: [])))
+    }
+
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSPredicate { self }
 
     @ObjCMethod("isEqual:")
@@ -1278,5 +1284,44 @@ extension NSSet {
     @ObjCMethod("filteredSetUsingPredicate:")
     func filtered(using predicate: NSPredicate) -> ObjCObject {
         ObjCObject(Sets.autoreleased(Sets.elements(objcObject).filter { predicate.evaluate(with: ObjCObject($0)) }))
+    }
+}
+
+/// Substitution variables replaced by their values.
+enum Substitution {
+    static func predicate(_ node: PredicateNode, _ variables: id?, shadowed: Set<String>) -> PredicateNode {
+        switch node {
+        case .truth, .block: return node
+        case .comparison(var comparison):
+            comparison.left = expression(comparison.left, variables, shadowed: shadowed)
+            comparison.right = expression(comparison.right, variables, shadowed: shadowed)
+            return .comparison(comparison)
+        case .compound(let type, let subpredicates):
+            return .compound(type, subpredicates.map { predicate($0, variables, shadowed: shadowed) })
+        }
+    }
+
+    static func expression(_ node: ExpressionNode, _ variables: id?, shadowed: Set<String>) -> ExpressionNode {
+        switch node {
+        case .keyPath, .constant, .evaluatedObject: return node
+        case .variable(let name):
+            guard !shadowed.contains(name), let variables else { return node }
+            let key = Strings.make(name)
+            defer { ObjC.release(key) }
+            guard let value = Dictionaries.value(variables, for: key) else { return node }
+            return .constant(ObjCObject(value))
+        case .aggregate(let members): return .aggregate(members.map { expression($0, variables, shadowed: shadowed) })
+        case .function(let name, let arguments):
+            return .function(name, arguments.map { expression($0, variables, shadowed: shadowed) })
+        case .subquery(let collection, let variable, let inner):
+            return .subquery(expression(collection, variables, shadowed: shadowed), variable,
+                             predicate(inner, variables, shadowed: shadowed.union([variable])))
+        case .conditional(let condition, let then, let otherwise):
+            return .conditional(predicate(condition, variables, shadowed: shadowed), expression(then, variables, shadowed: shadowed),
+                                expression(otherwise, variables, shadowed: shadowed))
+        case .method(let target, let name, let arguments):
+            return .method(expression(target, variables, shadowed: shadowed), name,
+                           arguments.map { expression($0, variables, shadowed: shadowed) })
+        }
     }
 }
