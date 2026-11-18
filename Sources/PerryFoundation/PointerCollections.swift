@@ -1,3 +1,4 @@
+import CPerryFoundation
 import FoundationEssentials
 import PerryObjCInterop
 
@@ -478,5 +479,17 @@ public final class NSPointerArray: NSObject {
     @ObjCMethod("countByEnumeratingWithState:objects:count:")
     func enumerate(state enumerationState: UnsafeMutableRawPointer?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
         state.enumeration.enumerate(state.slots.compactMap { $0?.value }, state: enumerationState, buffer: objects, count: count)
+    }
+}
+
+/// What NSCreateMapTable's and NSCreateHashTable's tables are objects of:
+/// they are kept and let go of by NSFreeMapTable and NSFreeHashTable, so
+/// retain and release do nothing, as for a constant. A table in an array,
+/// or a value in another table whose callbacks retain, is then left as it is.
+@ObjCClass("NSConcreteCTable")
+final class NSConcreteCTable: NSObject {
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        perry_foundation_set_table_class(cls.markingStatic().pointer)
     }
 }
