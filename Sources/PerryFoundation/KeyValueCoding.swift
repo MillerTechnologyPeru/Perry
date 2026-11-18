@@ -729,3 +729,98 @@ public final class NSKeyValueIndexedMutableArray: NSObject {
                                                                  state, objects, count)
     }
 }
+
+// MARK: - Bindings of a key in a class
+
+/// A key of a class, and how its values are got and set: what
+/// +keyValueBindingForKey:typeMask: answered in Foundation before Mac OS X
+/// 10.5 (Xcode 3's project archiving keeps one for each archived key).
+final class KeyValueBindingState {
+    let key: String
+    let targetClass: Class
+
+    init(key: String, targetClass: Class) {
+        self.key = key
+        self.targetClass = targetClass
+    }
+
+    /// Whether the key's value is a number or structure rather than an
+    /// object: by its getter's result, else by its instance variable.
+    var isScalar: Bool {
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        for name in [key, "is" + capitalized, "get" + capitalized] {
+            if let method = ObjC.instanceMethod(targetClass, ObjC.selector(name)), let encoding = ObjC.methodTypes(method) {
+                let type = String(cString: encoding).first { !"rnNoORV".contains($0) }
+                return type != "@" && type != "#"
+            }
+        }
+        guard let find = ObjC.instanceVariable, let encoding = ObjC.ivarType else { return false }
+        for name in ["_" + key, "_is" + capitalized, key, "is" + capitalized] {
+            guard let ivar = name.withCString({ find(targetClass, $0) }) else { continue }
+            let type = encoding(ivar).map { UInt8(bitPattern: $0.pointee) } ?? UInt8(ascii: "@")
+            return type != UInt8(ascii: "@") && type != UInt8(ascii: "#")
+        }
+        return false
+    }
+}
+
+enum KeyValueBindings {
+    nonisolated(unsafe) static var bindingClass: Class!
+
+    static func make(_ cls: Class, _ key: String) -> id? {
+        guard let binding = Storage.allocate(UnsafeMutableRawPointer(bindingClass)) else { return nil }
+        Storage.set(binding, KeyValueBindingState(key: key, targetClass: cls))
+        return ObjC.autorelease(binding)
+    }
+}
+
+@ObjCClass("NSKeyValueBinding")
+public final class NSKeyValueBinding: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        KeyValueBindings.bindingClass = cls.storage
+    }
+
+    private var state: KeyValueBindingState? { Storage.get(objcObject, as: KeyValueBindingState.self) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: KeyValueBindings.bindingClass)
+    }
+
+    @ObjCMethod("key") func key() -> String { state?.key ?? "" }
+    @ObjCMethod("targetClass") func targetClass() -> UnsafeMutableRawPointer? { state.map { UnsafeMutableRawPointer($0.targetClass) } }
+    @ObjCMethod("isScalarProperty") func isScalarProperty() -> Bool { state?.isScalar ?? false }
+
+    /// The value, through the object's accessors or instance variable: not
+    /// through -valueForKey:, which a class may take for something else.
+    @ObjCMethod("getValueFromObject:")
+    func getValue(from object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let object, let state else { return nil }
+        return KeyValueCoding.value(object, state.key)
+    }
+
+    @ObjCMethod("setValue:inObject:")
+    func setValue(_ value: UnsafeMutableRawPointer?, in object: UnsafeMutableRawPointer?) {
+        guard let object, let state else { return }
+        KeyValueCoding.setValue(object, state.key, value)
+    }
+}
+
+@ObjCCategory("KeyValueBindings")
+extension NSObject {
+    /// The binding of `key` in the class; the type mask is not needed here.
+    @ObjCClassMethod("keyValueBindingForKey:typeMask:")
+    static func keyValueBinding(_ cls: ObjCClass, forKey key: String?, typeMask: UInt) -> UnsafeMutableRawPointer? {
+        guard let key, !key.isEmpty else { return nil }
+        return KeyValueBindings.make(cls.storage, key)
+    }
+
+    /// The binding of `key` in the object's class.
+    @ObjCMethod("keyValueBindingForKey:typeMask:")
+    func keyValueBinding(forKey key: String?, typeMask: UInt) -> UnsafeMutableRawPointer? {
+        guard let key, !key.isEmpty, let cls = ObjC.objectGetClass(objcObject) else { return nil }
+        return KeyValueBindings.make(cls, key)
+    }
+}
