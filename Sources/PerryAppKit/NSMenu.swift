@@ -74,6 +74,24 @@ open class NSMenu: NSObject {
 
     @ObjCMethod("addItem:") func addItem(_ item: NSMenuItem) { insertItem(item, at: items.count) }
 
+    /// Another menu of the class, with copies of the items: Xcode copies
+    /// menus from its main menu to make its contextual ones.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
+        let copy = NSMenu.objCInstance(Send.object(Send.object(ObjCRuntime.objectClass(objcObject), "alloc"), "init")!, ownership: .adopt)
+        copy.title = title
+        copy.delegate = delegate
+        copy.autoenablesItems = autoenablesItems
+        copy.font = font
+        copy.minimumWidth = minimumWidth
+        for item in items {
+            let itemCopy = NSMenuItem.objCInstance(item.copy(zone: nil), ownership: .adopt)
+            copy.addItem(itemCopy)
+            itemCopy.submenu?.supermenu = copy.objcObject
+        }
+        return ObjCRuntime.retain(copy.objcObject)!
+    }
+
     @ObjCMethod("insertItem:atIndex:")
     func insertItem(_ item: NSMenuItem, at index: Int) {
         items.insert(item, at: max(0, min(index, items.count)))
@@ -176,6 +194,32 @@ open class NSMenuItem: NSObject {
 
     @ObjCMethod("init")
     public required override init() { super.init() }
+
+    /// Another item of the class, with the same values and a copy of the
+    /// submenu, in no menu.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer {
+        let copy = NSMenuItem.objCInstance(Send.object(Send.object(ObjCRuntime.objectClass(objcObject), "alloc"), "init")!, ownership: .adopt)
+        copy.title = title
+        copy.action = action
+        copy.keyEquivalent = keyEquivalent
+        copy.keyEquivalentModifierMask = keyEquivalentModifierMask
+        copy.target = target
+        copy.tag = tag
+        copy.state = state
+        copy.enabled = enabled
+        copy.hidden = hidden
+        copy.separator = separator
+        copy.representedObject = representedObject
+        copy.image = image
+        copy.toolTip = toolTip
+        copy.indentationLevel = indentationLevel
+        if let submenu {
+            copy.submenu = NSMenu.objCInstance(submenu.copy(zone: nil), ownership: .adopt)
+            copy.submenu?.supermenu = nil
+        }
+        return ObjCRuntime.retain(copy.objcObject)!
+    }
 
     @ObjCMethod("initWithTitle:action:keyEquivalent:")
     public required init(title: String?, action: ObjCSelector?, keyEquivalent: String?) {
