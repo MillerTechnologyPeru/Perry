@@ -113,6 +113,10 @@ enum KeyValueCoding {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
+        // Indexed accessors, countOf<Key> and objectIn<Key>AtIndex:, as an
+        // array of what they give (Foundation's is a proxy that reads them
+        // as it goes).
+        if let elements = indexedElements(object, capitalized) { return Arrays.autoreleased(elements) }
         if let (storage, type) = instanceVariable(object, key) { return get(storage, type: type) }
         // As Foundation does: the object's -valueForUndefinedKey:, which
         // raises unless a class overrides it.
@@ -432,6 +436,20 @@ extension NSObject {
     @ObjCMethod("setValue:forKey:")
     func setKeyValue(_ value: ObjCObject?, forKey key: String) { KeyValueCoding.setValue(objcObject, key, value?.objcObject) }
 
+    /// The key's collection, to change in place: the mutable collection
+    /// the object holds, else a mutable one set for the key first. Changes
+    /// reach the object; they aren't observed as Foundation's proxy has them.
+    @ObjCMethod("mutableArrayValueForKey:")
+    func mutableArrayValue(forKey key: String) -> UnsafeMutableRawPointer? { KeyValueCoding.mutableCollection(objcObject, key, "NSMutableArray") }
+
+    @ObjCMethod("mutableSetValueForKey:")
+    func mutableSetValue(forKey key: String) -> UnsafeMutableRawPointer? { KeyValueCoding.mutableCollection(objcObject, key, "NSMutableSet") }
+
+    @ObjCMethod("mutableOrderedSetValueForKey:")
+    func mutableOrderedSetValue(forKey key: String) -> UnsafeMutableRawPointer? {
+        KeyValueCoding.mutableCollection(objcObject, key, "NSMutableOrderedSet")
+    }
+
     /// Asks the class's validate<Key>:error:, if it has one, whether the
     /// value may be set; any value is valid otherwise.
     @ObjCMethod("validateValue:forKey:error:")
@@ -526,5 +544,188 @@ extension NSArray {
             return a.offset < b.offset
         }.map(\.element)
         return ObjCObject(Arrays.autoreleased(sorted))
+    }
+}
+
+extension KeyValueCoding {
+    /// The elements indexed accessors give, if the object has them.
+    static func indexedElements(_ object: id, _ capitalized: String) -> [id]? {
+        let count = ObjC.selector("countOf" + capitalized), element = ObjC.selector("objectIn" + capitalized + "AtIndex:")
+        guard responds(object, count), responds(object, element) else { return nil }
+        return (0..<ObjC.sendUInt(object, count)).compactMap { ObjC.sendIndex(object, element, $0) }
+    }
+
+    static func mutableCollection(_ object: id, _ key: String, _ className: String) -> id? {
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        // A class with the mutating indexed accessors changes through them.
+        if className == "NSMutableArray", responds(object, ObjC.selector("insertObject:in" + capitalized + "AtIndex:")),
+           responds(object, ObjC.selector("removeObjectFrom" + capitalized + "AtIndex:")) {
+            return KeyValueArrayProxies.make(object, capitalized)
+        }
+        let keyObject = Strings.autoreleased(key)
+        guard let cls = ObjC.getClass(className) else { return nil }
+        let current = ObjC.send(object, ObjC.selector("valueForKey:"), keyObject)
+        if let current, ObjC.isKind(current, of: cls) { return current }
+        let made: id?
+        if let current {
+            made = ObjC.send(current, ObjC.selector("mutableCopy")).flatMap { ObjC.autorelease($0) }
+        } else {
+            made = ObjC.send(ObjC.send(UnsafeMutableRawPointer(cls), ObjC.selector("alloc")), ObjC.selector("init")).flatMap { ObjC.autorelease($0) }
+        }
+        if let made { ObjC.send(object, ObjC.selector("setValue:forKey:"), made, keyObject) }
+        return made
+    }
+}
+
+// mutableArrayValueForKey:'s array for a class with indexed accessors: an
+// object that answers an NSMutableArray's messages by the accessors,
+// countOf<Key>, objectIn<Key>AtIndex:, insertObject:in<Key>AtIndex:,
+// removeObjectFrom<Key>AtIndex: and replaceObjectIn<Key>AtIndex:withObject:.
+
+final class KeyValueArrayProxyState {
+    let object: id
+    let capitalized: String
+    /// What fast enumeration goes through, taken when it starts.
+    var snapshot: id?
+
+    init(_ object: id, _ capitalized: String) {
+        self.object = ObjC.retain(object)!
+        self.capitalized = capitalized
+    }
+
+    deinit {
+        ObjC.release(object)
+        if let snapshot { ObjC.release(snapshot) }
+    }
+
+    var count: UInt { ObjC.sendUInt(object, ObjC.selector("countOf" + capitalized)) }
+    func element(_ index: UInt) -> id? { ObjC.sendIndex(object, ObjC.selector("objectIn" + capitalized + "AtIndex:"), index) }
+    var elements: [id] { (0..<count).compactMap(element) }
+
+    func insert(_ value: id?, at index: UInt) {
+        typealias Insert = @convention(c) (id?, SEL, id?, UInt) -> Void
+        unsafeBitCast(ObjC.msgSend!, to: Insert.self)(object, ObjC.selector("insertObject:in" + capitalized + "AtIndex:"), value, index)
+    }
+
+    func remove(at index: UInt) {
+        typealias Remove = @convention(c) (id?, SEL, UInt) -> Void
+        unsafeBitCast(ObjC.msgSend!, to: Remove.self)(object, ObjC.selector("removeObjectFrom" + capitalized + "AtIndex:"), index)
+    }
+
+    func replace(at index: UInt, with value: id?) {
+        let selector = ObjC.selector("replaceObjectIn" + capitalized + "AtIndex:withObject:")
+        if KeyValueCoding.responds(object, selector) {
+            typealias Replace = @convention(c) (id?, SEL, UInt, id?) -> Void
+            unsafeBitCast(ObjC.msgSend!, to: Replace.self)(object, selector, index, value)
+        } else {
+            remove(at: index)
+            insert(value, at: index)
+        }
+    }
+}
+
+enum KeyValueArrayProxies {
+    nonisolated(unsafe) static var proxyClass: Class!
+
+    static func make(_ object: id, _ capitalized: String) -> id? {
+        guard let proxy = Storage.allocate(UnsafeMutableRawPointer(proxyClass)) else { return nil }
+        Storage.set(proxy, KeyValueArrayProxyState(object, capitalized))
+        return ObjC.autorelease(proxy)
+    }
+}
+
+@ObjCClass("NSKeyValueIndexedMutableArray")
+public final class NSKeyValueIndexedMutableArray: NSObject {
+    override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryStorageAllocated(cls)
+        KeyValueArrayProxies.proxyClass = cls.storage
+    }
+
+    private var proxy: KeyValueArrayProxyState? { Storage.get(objcObject, as: KeyValueArrayProxyState.self) }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        Storage.set(objcObject, nil)
+        ObjC.superDealloc(objcObject, from: KeyValueArrayProxies.proxyClass)
+    }
+
+    @ObjCMethod("count") func count() -> UInt { proxy?.count ?? 0 }
+    @ObjCMethod("objectAtIndex:") func object(at index: UInt) -> UnsafeMutableRawPointer? { proxy?.element(index) }
+    @ObjCMethod("firstObject") func firstObject() -> UnsafeMutableRawPointer? { count() > 0 ? proxy?.element(0) : nil }
+    @ObjCMethod("lastObject") func lastObject() -> UnsafeMutableRawPointer? { count() > 0 ? proxy?.element(count() - 1) : nil }
+
+    @ObjCMethod("indexOfObject:")
+    func index(of value: UnsafeMutableRawPointer?) -> UInt {
+        guard let proxy, let value else { return UInt.max }
+        let elements = proxy.elements
+        return elements.firstIndex { ObjC.sendBool($0, Selectors.isEqual, value) }.map(UInt.init) ?? UInt.max   // NSNotFound
+    }
+
+    @ObjCMethod("containsObject:") func contains(_ value: UnsafeMutableRawPointer?) -> Bool { index(of: value) != UInt.max }
+
+    @ObjCMethod("insertObject:atIndex:") func insert(_ value: UnsafeMutableRawPointer?, at index: UInt) { proxy?.insert(value, at: index) }
+    @ObjCMethod("addObject:") func add(_ value: UnsafeMutableRawPointer?) { proxy?.insert(value, at: count()) }
+
+    @ObjCMethod("addObjectsFromArray:")
+    func add(contentsOf array: UnsafeMutableRawPointer?) {
+        for value in Arrays.elements(array) { proxy?.insert(value, at: count()) }
+    }
+
+    @ObjCMethod("removeObjectAtIndex:") func remove(at index: UInt) { proxy?.remove(at: index) }
+    @ObjCMethod("removeLastObject") func removeLast() { if count() > 0 { proxy?.remove(at: count() - 1) } }
+
+    @ObjCMethod("removeObject:")
+    func remove(_ value: UnsafeMutableRawPointer?) {
+        guard let proxy, let value else { return }
+        var index = proxy.count
+        while index > 0 {
+            index -= 1
+            if let element = proxy.element(index), ObjC.sendBool(element, Selectors.isEqual, value) { proxy.remove(at: index) }
+        }
+    }
+
+    @ObjCMethod("removeAllObjects")
+    func removeAll() {
+        guard let proxy else { return }
+        while proxy.count > 0 { proxy.remove(at: proxy.count - 1) }
+    }
+
+    @ObjCMethod("replaceObjectAtIndex:withObject:")
+    func replace(at index: UInt, with value: UnsafeMutableRawPointer?) { proxy?.replace(at: index, with: value) }
+
+    @ObjCMethod("setArray:")
+    func setArray(_ array: UnsafeMutableRawPointer?) {
+        removeAll()
+        add(contentsOf: array)
+    }
+
+    /// An array of the elements as they are now.
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Arrays.make(proxy?.elements ?? []) }
+
+    @ObjCMethod("mutableCopyWithZone:")
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        ObjC.send(Arrays.autoreleased(proxy?.elements ?? []), ObjC.selector("mutableCopy"))
+    }
+
+    @ObjCMethod("objectEnumerator")
+    func objectEnumerator() -> UnsafeMutableRawPointer? {
+        ObjC.send(Arrays.autoreleased(proxy?.elements ?? []), ObjC.selector("objectEnumerator"))
+    }
+
+    @ObjCMethod("description")
+    func description() -> UnsafeMutableRawPointer? { ObjC.send(Arrays.autoreleased(proxy?.elements ?? []), ObjC.selector("description")) }
+
+    /// for-in: over the elements as they are when it starts.
+    @ObjCMethod("countByEnumeratingWithState:objects:count:")
+    func enumerate(state: UnsafeMutablePointer<UInt>?, objects: UnsafeMutablePointer<id?>?, count: UInt) -> UInt {
+        guard let proxy, let state else { return 0 }
+        if state.pointee == 0 {
+            if let old = proxy.snapshot { ObjC.release(old) }
+            proxy.snapshot = Arrays.make(proxy.elements)
+        }
+        typealias Enumerate = @convention(c) (id?, SEL, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<id?>?, UInt) -> UInt
+        return unsafeBitCast(ObjC.msgSend!, to: Enumerate.self)(proxy.snapshot, ObjC.selector("countByEnumeratingWithState:objects:count:"),
+                                                                 state, objects, count)
     }
 }

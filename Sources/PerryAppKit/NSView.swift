@@ -837,8 +837,11 @@ open class NSView: NSResponder {
 
     // MARK: Tracking areas and cursor rectangles
 
-    @ObjCMethod("addTrackingArea:") func addTrackingArea(_ area: NSTrackingArea) { trackingAreas.append(area) }
-    @ObjCMethod("removeTrackingArea:") func removeTrackingArea(_ area: NSTrackingArea) { trackingAreas.removeAll { $0 === area } }
+    // Nil does nothing, as AppKit's: views remove the area they haven't
+    // made yet before they make one.
+    @ObjCMethod("addTrackingArea:") func addTrackingArea(_ area: NSTrackingArea?) { if let area { trackingAreas.append(area) } }
+    @ObjCMethod("removeTrackingArea:")
+    func removeTrackingArea(_ area: NSTrackingArea?) { if let area { trackingAreas.removeAll { $0 === area } } }
     @ObjCMethod("trackingAreas") func viewTrackingAreas() -> NSObject { NSMutableArray.of(trackingAreas) }
     @ObjCMethod("updateTrackingAreas") func updateTrackingAreas() {}
     @ObjCMethod("addCursorRect:cursor:") func addCursorRect(_ rect: CGRect, cursor: NSObject?) {}

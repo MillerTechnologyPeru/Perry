@@ -300,7 +300,9 @@ static const uint8_t *first_load_command(const uint32_t *mach) {
 }
 
 // The executable's SDK, as dyld_get_program_sdk_version gives it: from
-// LC_BUILD_VERSION, or the older LC_VERSION_MIN_IPHONEOS.
+// LC_BUILD_VERSION, or the older LC_VERSION_MIN_IPHONEOS and
+// LC_VERSION_MIN_MACOSX; 0 for programs linked before those (Mac OS X 10.6
+// and earlier).
 static uint32_t program_sdk(void) {
     const uint32_t *mach = darwin_NSGetMachExecuteHeader();
     if (!mach)
@@ -310,12 +312,15 @@ static uint32_t program_sdk(void) {
         const uint32_t *words = (const uint32_t *)command;
         if (words[0] == 0x32 /* LC_BUILD_VERSION */)
             return words[4];
-        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */)
+        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */ || words[0] == 0x24 /* LC_VERSION_MIN_MACOSX */)
             return words[3];
         command += words[1];
     }
     return 0;
 }
+
+uint32_t darwin_dyld_get_program_sdk_version(void) DARWIN_SYMBOL(dyld_get_program_sdk_version);
+uint32_t darwin_dyld_get_program_sdk_version(void) { return program_sdk(); }
 
 /// The system's version, as libSystem gives it to the Swift runtime for
 /// availability checks: the SDK the program was built with (as
@@ -348,7 +353,7 @@ static uint32_t program_minos(void) {
         const uint32_t *words = (const uint32_t *)command;
         if (words[0] == 0x32 /* LC_BUILD_VERSION */)
             return words[3];
-        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */)
+        if (words[0] == 0x25 /* LC_VERSION_MIN_IPHONEOS */ || words[0] == 0x24 /* LC_VERSION_MIN_MACOSX */)
             return words[2];
         command += words[1];
     }
