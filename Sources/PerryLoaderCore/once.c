@@ -26,15 +26,6 @@ static const char *const once_functions[] = {
     NULL,
 };
 
-// A symbol table entry of a 64-bit image.
-struct nlist_64 {
-    uint32_t n_strx;
-    uint8_t n_type;
-    uint8_t n_sect;
-    uint16_t n_desc;
-    uint64_t n_value;
-};
-
 // Whether an instruction's meaning depends on where it is, so that it cannot
 // run from somewhere else: branches, adr and adrp, loads from a literal.
 static bool is_pc_relative(uint32_t i) {

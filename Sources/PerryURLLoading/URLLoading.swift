@@ -626,7 +626,23 @@ public final class Task: @unchecked Sendable {
 
     public func resume() { value.resume() }
     public func suspend() { value.suspend() }
-    public func cancel() { value.cancel() }
+    /// Whether the program has cancelled the task. corelibs may still report
+    /// the response it was handling then (a redirect's, when the delegate
+    /// cancelled the task in its redirect callback and answered with no
+    /// request); Darwin's delegate hears nothing more but the completion.
+    private var cancelRequested = false
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelRequested
+    }
+
+    public func cancel() {
+        lock.lock()
+        cancelRequested = true
+        lock.unlock()
+        value.cancel()
+    }
 }
 
 // MARK: - Sessions
@@ -658,6 +674,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
         guard let events, let task = task(dataTask) else { return completionHandler(.allow) }
+        if task.isCancelled { return completionHandler(.cancel) }
         // A challenge comes first: the 401 waits for the delegate's answer.
         if task.kind == .data, let http = response as? HTTPURLResponse, Authentication.space(for: http) != nil {
             task.hold(response)
@@ -670,7 +687,7 @@ final class Forwarder: NSObject, URLSessionDataDelegate, URLSessionDownloadDeleg
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let task = task(dataTask), !task.hold(data) else { return }
+        guard let task = task(dataTask), !task.isCancelled, !task.hold(data) else { return }
         task.count(data.count)
         URLTrace.body(dataTask.originalRequest?.url, data)
         events?.task(task, didReceive: data)
