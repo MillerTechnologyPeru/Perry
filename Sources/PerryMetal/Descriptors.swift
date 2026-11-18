@@ -806,3 +806,85 @@ open class MTLRenderPassDescriptor: NSObject {
     @ObjCMethod("defaultRasterSampleCount") func getDefaultRasterSampleCount() -> UInt { defaultRasterSampleCount }
     @ObjCMethod("setDefaultRasterSampleCount:") func setDefaultRasterSampleCount(_ count: UInt) { defaultRasterSampleCount = count }
 }
+
+// MARK: - Compute pipelines
+
+/// Whether a pipeline's buffer is written while it is bound. Kept as told:
+/// metal2vulkan takes no hint from it.
+@ObjCClass("MTLPipelineBufferDescriptor")
+open class MTLPipelineBufferDescriptor: NSObject {
+    var mutabilityValue: UInt = 0
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("mutability") func mutability() -> UInt { mutabilityValue }
+    @ObjCMethod("setMutability:") func setMutability(_ value: UInt) { mutabilityValue = value }
+}
+
+/// A pipeline descriptor's buffers, by index: each is made when first read.
+@ObjCClass("MTLPipelineBufferDescriptorArray")
+open class MTLPipelineBufferDescriptorArray: NSObject {
+    var buffers: [UInt: MTLPipelineBufferDescriptor] = [:]
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("objectAtIndexedSubscript:") func object(at index: UInt) -> MTLPipelineBufferDescriptor {
+        if let buffer = buffers[index] { return buffer }
+        let buffer = MTLPipelineBufferDescriptor()
+        buffers[index] = buffer
+        return buffer
+    }
+
+    @ObjCMethod("setObject:atIndexedSubscript:") func set(_ buffer: MTLPipelineBufferDescriptor?, at index: UInt) {
+        buffers[index] = buffer
+    }
+}
+
+/// A compute pipeline's kernel and settings. The pipeline is made of the
+/// kernel alone: its stage input descriptor and the other settings are
+/// kept and not used, as metal2vulkan's compute pipelines take a function.
+@ObjCClass("MTLComputePipelineDescriptor")
+open class MTLComputePipelineDescriptor: NSObject {
+    var function: MTLFunction?
+    var labelValue: String?
+    var multipleOfExecutionWidth = false
+    var maxThreads: UInt = 0
+    var maxCallStack: UInt = 1
+    var indirectCommandBuffers = false
+    var stageInput: NSObject?
+    var bufferArray = MTLPipelineBufferDescriptorArray()
+
+    @ObjCMethod("init") public required override init() { super.init() }
+
+    @ObjCMethod("label") func label() -> String? { labelValue }
+    @ObjCMethod("setLabel:") func setLabel(_ label: String?) { labelValue = label }
+    @ObjCMethod("computeFunction") func computeFunction() -> MTLFunction? { function }
+    @ObjCMethod("setComputeFunction:") func setComputeFunction(_ function: MTLFunction?) { self.function = function }
+    @ObjCMethod("threadGroupSizeIsMultipleOfThreadExecutionWidth")
+    func threadGroupSizeIsMultipleOfThreadExecutionWidth() -> Bool { multipleOfExecutionWidth }
+    @ObjCMethod("setThreadGroupSizeIsMultipleOfThreadExecutionWidth:")
+    func setThreadGroupSizeIsMultipleOfThreadExecutionWidth(_ value: Bool) { multipleOfExecutionWidth = value }
+    @ObjCMethod("maxTotalThreadsPerThreadgroup") func maxTotalThreadsPerThreadgroup() -> UInt { maxThreads }
+    @ObjCMethod("setMaxTotalThreadsPerThreadgroup:") func setMaxTotalThreadsPerThreadgroup(_ value: UInt) { maxThreads = value }
+    @ObjCMethod("maxCallStackDepth") func maxCallStackDepth() -> UInt { maxCallStack }
+    @ObjCMethod("setMaxCallStackDepth:") func setMaxCallStackDepth(_ value: UInt) { maxCallStack = value }
+    @ObjCMethod("supportIndirectCommandBuffers") func supportIndirectCommandBuffers() -> Bool { indirectCommandBuffers }
+    @ObjCMethod("setSupportIndirectCommandBuffers:") func setSupportIndirectCommandBuffers(_ value: Bool) { indirectCommandBuffers = value }
+    @ObjCMethod("stageInputDescriptor") func stageInputDescriptor() -> NSObject? { stageInput }
+    @ObjCMethod("setStageInputDescriptor:") func setStageInputDescriptor(_ descriptor: NSObject?) { stageInput = descriptor }
+    @ObjCMethod("buffers") func buffers() -> MTLPipelineBufferDescriptorArray { bufferArray }
+
+    @ObjCMethod("reset") func reset() {
+        (function, labelValue, multipleOfExecutionWidth, maxThreads, maxCallStack) = (nil, nil, false, 0, 1)
+        (indirectCommandBuffers, stageInput, bufferArray) = (false, nil, MTLPipelineBufferDescriptorArray())
+    }
+
+    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> MTLComputePipelineDescriptor {
+        let copy = MTLComputePipelineDescriptor()
+        (copy.function, copy.labelValue, copy.multipleOfExecutionWidth) = (function, labelValue, multipleOfExecutionWidth)
+        (copy.maxThreads, copy.maxCallStack, copy.indirectCommandBuffers) = (maxThreads, maxCallStack, indirectCommandBuffers)
+        copy.stageInput = stageInput
+        for (index, buffer) in bufferArray.buffers { copy.bufferArray.object(at: index).mutabilityValue = buffer.mutabilityValue }
+        return copy
+    }
+}
