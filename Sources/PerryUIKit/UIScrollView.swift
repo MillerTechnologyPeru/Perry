@@ -337,6 +337,9 @@ final class GestureRecognizerState: ObjectState {
     var allowedTouchTypes: NSObject?
     var allowedPressTypes: NSObject?
     var requiresExclusiveTouchType = true
+    /// A swipe recognizer's direction (right 1, left 2, up 4, down 8, or several), and where and when its touch began.
+    var swipeDirection: UInt = 1
+    var swipeStart: (point: CGPoint, time: Double)?
 }
 
 /// The recognizer's targets and its view; touches drive recognizers in the
@@ -601,10 +604,35 @@ open class UILongPressGestureRecognizer: UIGestureRecognizer {
     @ObjCMethod("setAllowableMovement:") func setAllowableMovement(_ movement: CGFloat) {}
 }
 
+/// A swipe: recognized once the touch has gone forty points, mostly along one of the recognizer's directions and
+/// within half a second of touching; one that goes another way, or too slowly, fails.
 @ObjCClass("UISwipeGestureRecognizer")
 open class UISwipeGestureRecognizer: UIGestureRecognizer {
-    @ObjCMethod("direction") func direction() -> UInt { 1 }
-    @ObjCMethod("setDirection:") func setDirection(_ direction: UInt) {}
+    @ObjCMethod("direction") func direction() -> UInt { state.swipeDirection }
+    @ObjCMethod("setDirection:") func setDirection(_ direction: UInt) { state.swipeDirection = direction }
+    @ObjCMethod("numberOfTouchesRequired") func numberOfTouchesRequired() -> UInt { 1 }
+    @ObjCMethod("setNumberOfTouchesRequired:") func setNumberOfTouchesRequired(_ count: UInt) {}
+
+    @ObjCMethod("touchesBegan:withEvent:")
+    override func touchesBegan(_ touches: NSObject?, with event: NSObject?) {
+        state.swipeStart = Touches.current.map { ($0.location(in: nil), SKSupport.now()) }
+    }
+
+    @ObjCMethod("touchesMoved:withEvent:")
+    override func touchesMoved(_ touches: NSObject?, with event: NSObject?) {
+        guard state.state == 0, let start = state.swipeStart, let point = Touches.current?.location(in: nil) else { return }
+        let dx = point.x - start.point.x, dy = point.y - start.point.y
+        guard max(abs(dx), abs(dy)) >= 40 else { return }
+        let way: UInt = abs(dx) >= abs(dy) ? (dx > 0 ? 1 : 2) : (dy < 0 ? 4 : 8)
+        if state.swipeDirection & way != 0, SKSupport.now() - start.time <= 0.5 {
+            sendSetState(3)
+        } else {
+            state.state = 5
+        }
+    }
+
+    @ObjCMethod("touchesEnded:withEvent:")
+    override func touchesEnded(_ touches: NSObject?, with event: NSObject?) { state.swipeStart = nil }
 }
 
 @ObjCClass("UIPinchGestureRecognizer")
