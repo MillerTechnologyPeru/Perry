@@ -41,6 +41,17 @@ public enum Objects {
         return constructInstance(object, info)
     }
 
+    /// A new instance of the object's class with its bytes after the isa,
+    /// `size` bytes in all: object_copy. Retain counts are kept apart from
+    /// objects, so the copy has its own; object pointers in it are not
+    /// retained, as Apple's are not.
+    public static func copyInstance(_ object: ObjectPointer, size: Int) -> ObjectPointer? {
+        let cls = classOf(object)
+        guard let info = Runtime.info(cls), let copy = createInstance(cls, extraBytes: max(size - info.instanceSize, 0)) else { return nil }
+        if size > Layout.word { memcpy(copy + Layout.word, object + Layout.word, size - Layout.word) }
+        return copy
+    }
+
     /// Runs C++ ivar constructors (.cxx_construct), superclass first.
     static func constructInstance(_ object: ObjectPointer, _ info: ClassInfo) -> ObjectPointer? {
         var chain: [ClassInfo] = []
