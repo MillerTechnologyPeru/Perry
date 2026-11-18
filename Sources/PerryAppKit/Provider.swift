@@ -601,6 +601,7 @@ class NSDate: NSObject {
 class NSURL: NSObject {
     @ObjCClassMethod("fileURLWithPath:") static func make(fileURLWithPath path: String) -> NSURL?
     @ObjCMethod("absoluteString") func absoluteString() -> String?
+    @ObjCMethod("path") func path() -> String?
 }
 
 /// Posts a notification from the default center.
