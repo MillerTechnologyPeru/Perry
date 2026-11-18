@@ -4,7 +4,8 @@ import Glibc
 // outside. A vertex is eight floats: position, normal, and the texture
 // coordinates. Boxes have six elements (front, right, back, left, top,
 // bottom as SceneKit orders its materials), cylinders and cones three (side,
-// top, bottom); spheres and planes one.
+// top, bottom), tubes four (outside, inside, top, bottom); spheres, planes
+// and toruses one.
 
 enum SCNMeshes {
     typealias Vector = (x: Float, y: Float, z: Float)
@@ -17,9 +18,86 @@ enum SCNMeshes {
         case .plane: plane(&mesh, Float(state.width), Float(state.height))
         case .cylinder: cone(&mesh, top: Float(state.radius), bottom: Float(state.radius), height: Float(state.height), segments: state.segments)
         case .cone: cone(&mesh, top: Float(state.topRadius), bottom: Float(state.bottomRadius), height: Float(state.height), segments: state.segments)
+        case .floor: floor(&mesh, Float(state.width), Float(state.length))
+        case .tube: tube(&mesh, inner: Float(state.innerRadius), outer: Float(state.radius), height: Float(state.height), segments: state.segments)
+        case .torus: torus(&mesh, ring: Float(state.radius), pipe: Float(state.pipeRadius), segments: state.segments, pipeSegments: state.pipeSegments)
         case .custom: break
         }
         return mesh
+    }
+
+    /// A floor: the plane of x and z, facing up; one with no width or length reaches far. Its picture is laid
+    /// out once to a unit, as SceneKit's is.
+    private static func floor(_ mesh: inout SCNMesh, _ width: Float, _ length: Float) {
+        let far: Float = 2000
+        let w = (width > 0 ? width : far) / 2, l = (length > 0 ? length : far) / 2
+        element(&mesh) { mesh in
+            func corner(_ i: Float, _ j: Float) { vertex(&mesh, (i * w, 0, j * l), (0, 1, 0), i * w, j * l) }
+            corner(-1, 1); corner(1, 1); corner(1, -1)
+            corner(-1, 1); corner(1, -1); corner(-1, -1)
+        }
+    }
+
+    /// A tube about the y axis: its outside, its inside (which faces the axis), and the rings at its ends.
+    private static func tube(_ mesh: inout SCNMesh, inner: Float, outer: Float, height: Float, segments: Int) {
+        let slices = max(segments, 3), half = height / 2
+        func angle(_ j: Int) -> Float { 2 * Float.pi * Float(j) / Float(slices) }
+        for (radius, facing) in [(outer, Float(1)), (inner, Float(-1))] {
+            element(&mesh) { mesh in
+                func point(_ j: Int, top: Bool) {
+                    let phi = angle(j)
+                    vertex(&mesh, (sinf(phi) * radius, top ? half : -half, cosf(phi) * radius), (sinf(phi) * facing, 0, cosf(phi) * facing),
+                           Float(j) / Float(slices), top ? 1 : 0)
+                }
+                for j in 0..<slices {
+                    if facing > 0 {
+                        point(j, top: true); point(j, top: false); point(j + 1, top: false)
+                        point(j, top: true); point(j + 1, top: false); point(j + 1, top: true)
+                    } else {
+                        point(j, top: true); point(j + 1, top: false); point(j, top: false)
+                        point(j, top: true); point(j + 1, top: true); point(j + 1, top: false)
+                    }
+                }
+            }
+        }
+        for isTop in [true, false] {
+            element(&mesh) { mesh in
+                guard outer > inner else { return }
+                let y = isTop ? half : -half, n: Vector = (0, isTop ? 1 : -1, 0)
+                func rim(_ j: Int, _ radius: Float) {
+                    let phi = angle(j), reach = radius / outer / 2
+                    vertex(&mesh, (sinf(phi) * radius, y, cosf(phi) * radius), n, 0.5 + sinf(phi) * reach, 0.5 + cosf(phi) * reach)
+                }
+                for j in 0..<slices {
+                    if isTop {
+                        rim(j, inner); rim(j, outer); rim(j + 1, outer)
+                        rim(j, inner); rim(j + 1, outer); rim(j + 1, inner)
+                    } else {
+                        rim(j, inner); rim(j + 1, outer); rim(j, outer)
+                        rim(j, inner); rim(j + 1, inner); rim(j + 1, outer)
+                    }
+                }
+            }
+        }
+    }
+
+    /// A torus about the y axis: a pipe bent round a ring in the plane of x and z.
+    private static func torus(_ mesh: inout SCNMesh, ring: Float, pipe: Float, segments: Int, pipeSegments: Int) {
+        let slices = max(segments, 3), sides = max(pipeSegments, 3)
+        element(&mesh) { mesh in
+            func point(_ i: Int, _ j: Int) {
+                let phi = 2 * Float.pi * Float(i) / Float(slices), theta = 2 * Float.pi * Float(j) / Float(sides)
+                // Out from the ring's circle, by the pipe's angle.
+                let n = (x: sinf(phi) * cosf(theta), y: sinf(theta), z: cosf(phi) * cosf(theta))
+                vertex(&mesh, (sinf(phi) * ring + n.x * pipe, n.y * pipe, cosf(phi) * ring + n.z * pipe), n, Float(i) / Float(slices), Float(j) / Float(sides))
+            }
+            for i in 0..<slices {
+                for j in 0..<sides {
+                    point(i, j); point(i + 1, j); point(i + 1, j + 1)
+                    point(i, j); point(i + 1, j + 1); point(i, j + 1)
+                }
+            }
+        }
     }
 
     private static func vertex(_ mesh: inout SCNMesh, _ p: Vector, _ n: Vector, _ s: Float, _ t: Float) {
