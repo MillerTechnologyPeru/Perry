@@ -64,6 +64,7 @@ final class SCNRenderer {
         var diffuseMap: Int32 = -1, emissionMap: Int32 = -1
         var skyColor: Int32 = -1, groundColor: Int32 = -1, environment: Int32 = -1
         var lightMap: Int32 = -1, occlusionMap: Int32 = -1, maps: Int32 = -1
+        var coordinateX: Int32 = -1, coordinateY: Int32 = -1
     }
     private var uniforms = Uniforms()
     /// Each geometry's vertices' buffer, by its identifier.
@@ -71,7 +72,7 @@ final class SCNRenderer {
     private var frame = 0
     /// Textures by picture, with the frame each was last drawn in; the
     /// picture is retained while its texture is kept.
-    private var textures: [UnsafeMutableRawPointer: (texture: GLuint, used: Int)] = [:]
+    private var textures: [UnsafeMutableRawPointer: (texture: GLuint, used: Int, seenThrough: Bool)] = [:]
     private var white: GLuint = 0
     /// The vertices of skinned geometry, made again for each draw.
     private var skinBuffer: GLuint = 0
@@ -97,6 +98,11 @@ final class SCNRenderer {
             var name = entry.texture
             GLES.deleteTextures?(1, &name)
             ObjCRuntime.release(image)
+        }
+        for (scene, entry) in sceneTextures {
+            var name = entry.texture
+            GLES.deleteTextures?(1, &name)
+            ObjCRuntime.release(scene)
         }
         if white != 0 { GLES.deleteTextures?(1, &white) }
         if skinBuffer != 0 { SKGL.deleteBuffers(1, &skinBuffer) }
@@ -125,7 +131,8 @@ final class SCNRenderer {
                                 lightColor: max(uniform("lightColor"), uniform("lightColor[0]")), ambient: uniform("ambient"),
                                 diffuseMap: uniform("diffuseMap"), emissionMap: uniform("emissionMap"),
                                 skyColor: uniform("skyColor"), groundColor: uniform("groundColor"), environment: uniform("environment"),
-                                lightMap: uniform("lightMap"), occlusionMap: uniform("occlusionMap"), maps: uniform("maps"))
+                                lightMap: uniform("lightMap"), occlusionMap: uniform("occlusionMap"), maps: uniform("maps"),
+                                coordinateX: uniform("coordinateX"), coordinateY: uniform("coordinateY"))
             white = makeTexture(pixels: [255, 255, 255, 255], width: 1, height: 1, mipmaps: false)
         }
         guard framebuffer == 0 || size != (width, height) else { return true }
@@ -140,7 +147,8 @@ final class SCNRenderer {
         GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.colorAttachment0, GLES.renderbuffer, color)
         GLES.genRenderbuffers(1, &depth)
         GLES.bindRenderbuffer(GLES.renderbuffer, depth)
-        GLES.renderbufferStorage(GLES.renderbuffer, GLES.depth16, Int32(width), Int32(height))
+        // Twenty-four bits: sixteen can't tell a road from the grass a hair under it.
+        GLES.renderbufferStorage(GLES.renderbuffer, GLES.depth24, Int32(width), Int32(height))
         GLES.framebufferRenderbuffer(GLES.framebuffer, GLES.depthAttachment, GLES.renderbuffer, depth)
         size = (width, height)
         return true
@@ -155,6 +163,8 @@ final class SCNRenderer {
             uniform mat4 mvp;
             uniform mat4 model;
             uniform mat3 normalMatrix;
+            uniform vec3 coordinateX;
+            uniform vec3 coordinateY;
             varying vec3 v_normal;
             varying vec3 v_position;
             varying vec2 v_coordinate;
@@ -163,7 +173,7 @@ final class SCNRenderer {
                 v_normal = normalMatrix * normal;
                 v_position = (model * vec4(position, 1.0)).xyz;
                 // Coordinates run down the picture from its top row, which is the first uploaded.
-                v_coordinate = coordinate;
+                v_coordinate = vec2(dot(coordinateX, vec3(coordinate, 1.0)), dot(coordinateY, vec3(coordinate, 1.0)));
                 v_coordinate2 = coordinate2;
                 gl_Position = mvp * vec4(position, 1.0);
             }
@@ -254,6 +264,7 @@ final class SCNRenderer {
     /// The texture of a material property's picture: its pixels drawn once
     /// into premultiplied RGBA, top row first; white when it has none.
     private func texture(of contents: UnsafeMutableRawPointer?) -> GLuint {
+        if let contents, NSObject(contents).is(SKScene.self) { return texture(ofScene: contents) }
         guard let contents, NSObject(contents).responds(to: "CGImage"), let image = NSObject(contents).skCGImage() else { return white }
         if let entry = textures[image] {
             textures[image]?.used = frame
@@ -267,11 +278,52 @@ final class SCNRenderer {
         guard let pixels = CG.bitmapContextGetData(bitmap) else { return white }
         let name = makeTexture(pixels: pixels, width: width, height: height, mipmaps: true)
         _ = ObjCRuntime.retain(image)
-        textures[image] = (name, frame)
+        // Whether any of it is seen through, which says when what it covers is drawn.
+        let bytes = UnsafeRawBufferPointer(start: pixels, count: width * height * 4)
+        var seenThrough = false
+        for index in stride(from: 3, to: bytes.count, by: 4) where bytes[index] < 250 { seenThrough = true; break }
+        textures[image] = (name, frame, seenThrough)
         return name
     }
 
+    /// SpriteKit scenes that are pictures, each with the renderer that draws it; the scene is retained.
+    private var sceneTextures: [UnsafeMutableRawPointer: (texture: GLuint, renderer: SKRenderer, used: Int)] = [:]
+
+    /// A SpriteKit scene as a picture, drawn again in each frame that shows it. It shows upside down, as it does
+    /// in SceneKit, where apps turn the surface over.
+    private func texture(ofScene scene: UnsafeMutableRawPointer) -> GLuint {
+        if let entry = sceneTextures[scene], entry.used == frame { return entry.texture }
+        if sceneTextures[scene] == nil {
+            guard let renderer = SKRenderer() else { return white }
+            var name: GLuint = 0
+            GLES.genTextures?(1, &name)
+            _ = ObjCRuntime.retain(scene)
+            sceneTextures[scene] = (name, renderer, frame)
+        }
+        guard let entry = sceneTextures[scene] else { return white }
+        sceneTextures[scene]?.used = frame
+        // The scene's own renderer draws in its own context, and comes back to this one.
+        guard let drawn = entry.renderer.pixels(of: NSObject(scene).unsafeCast(to: SKScene.self)) else { return white }
+        GLES.bindTexture?(SKGL.texture2D, entry.texture)
+        SKGL.pixelStorei(SKGL.unpackAlignment, 1)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SKGL.clampToEdge)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.minFilter, SKGL.linear)
+        GLES.texParameteri?(SKGL.texture2D, SKGL.magFilter, SKGL.linear)
+        // The scene's bottom row is the texture's first, as it was read.
+        drawn.pixels.withUnsafeBytes {
+            GLES.texImage2D?(SKGL.texture2D, 0, Int32(SKGL.rgba), Int32(drawn.width), Int32(drawn.height), 0, SKGL.rgba, SKGL.unsignedByte, $0.baseAddress)
+        }
+        return entry.texture
+    }
+
     private func evictTextures() {
+        for (scene, entry) in sceneTextures where frame - entry.used > 600 {
+            var name = entry.texture
+            GLES.deleteTextures?(1, &name)
+            sceneTextures[scene] = nil
+            ObjCRuntime.release(scene)
+        }
         for (image, entry) in textures where frame - entry.used > 600 {
             var name = entry.texture
             GLES.deleteTextures?(1, &name)
@@ -757,7 +809,14 @@ final class SCNRenderer {
             let material = materials[min(index, materials.count - 1)]
             let contents = material.diffuse().property.contents
             let alpha = SCNRenderer.alpha(of: contents) * Float(material.material.transparency) * item.opacity
-            if (alpha < 1) == translucent { drawn.append((element, material, alpha)) }
+            // A SpriteKit scene is seen through wherever it draws nothing.
+            var seenThrough = alpha < 1 || (contents.map { NSObject($0).is(SKScene.self) } ?? false)
+            // So is a picture with clear parts.
+            if !seenThrough, let contents, NSObject(contents).responds(to: "CGImage"), let image = NSObject(contents).skCGImage() {
+                if textures[image] == nil { _ = texture(of: contents) }
+                seenThrough = textures[image]?.seenThrough ?? false
+            }
+            if seenThrough == translucent { drawn.append((element, material, alpha)) }
         }
         guard !drawn.isEmpty else { return }
 
@@ -811,6 +870,10 @@ final class SCNRenderer {
             GLES.bindTexture?(SKGL.texture2D, texture(of: diffuseProperty.contents))
             GLES.texParameteri?(SKGL.texture2D, SKGL.wrapS, SCNRenderer.wrap(diffuseProperty.wrapS))
             GLES.texParameteri?(SKGL.texture2D, SKGL.wrapT, SCNRenderer.wrap(diffuseProperty.wrapT))
+            // The picture's own transform of the coordinates: a row vector's, so its fourth row moves them.
+            let laid = diffuseProperty.transform ?? SCNMath.identity
+            SCNGL.uniform3f(uniforms.coordinateX, laid[0], laid[4], laid[12])
+            SCNGL.uniform3f(uniforms.coordinateY, laid[1], laid[5], laid[13])
             let lightProperty = entry.material.selfIllumination().property, occlusionProperty = entry.material.ambientOcclusion().property
             let hasLight = lightProperty.contents.map { NSObject($0).responds(to: "CGImage") } ?? false
             let hasOcclusion = occlusionProperty.contents.map { NSObject($0).responds(to: "CGImage") } ?? false
