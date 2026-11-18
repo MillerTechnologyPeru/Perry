@@ -16,6 +16,8 @@ extension NSObject {
     @ObjCMethod("path") func scnPath() -> String?
 
     // The delegate's, sent when it answers them.
+    @ObjCMethod("description") func scnSendDescription() -> String
+    @ObjCMethod("path") func scnSendPath() -> String
     @ObjCMethod("renderer:updateAtTime:") func scnSendRenderer(_ renderer: NSObject, updateAtTime time: Double)
     @ObjCMethod("renderer:didApplyAnimationsAtTime:") func scnSendRenderer(_ renderer: NSObject, didApplyAnimationsAtTime time: Double)
     @ObjCMethod("renderer:didSimulatePhysicsAtTime:") func scnSendRenderer(_ renderer: NSObject, didSimulatePhysicsAtTime time: Double)
@@ -38,6 +40,8 @@ final class SCNMaterialPropertyState: ObjectState {
     /// SCNFilterMode: none 0, nearest 1, linear 2. Kept; pictures are drawn smoothed.
     var minificationFilter = 2, magnificationFilter = 2, mipFilter = 0
     var maxAnisotropy: CGFloat = 1
+    /// How the picture is laid over the texture coordinates, when it is not as they are.
+    var transform: Matrix?
     deinit { ObjCRuntime.release(contents) }
 }
 
@@ -60,7 +64,35 @@ open class SCNMaterialProperty: NSObject {
 
     @ObjCMethod("init") func initialize() -> Self { self }
     @ObjCMethod("contents") func contents() -> NSObject? { property.contents.map { NSObject($0) } }
-    @ObjCMethod("setContents:") func setContents(_ contents: NSObject?) { SKSupport.replace(&property.contents, with: contents?.objcObject) }
+    @ObjCMethod("setContents:") func setContents(_ contents: NSObject?) {
+        // A path, a name or a file's URL stands for its picture, which is what is kept (and read back).
+        let shown = contents.flatMap { SCNMaterialProperty.picture(named: $0) } ?? contents
+        SKSupport.replace(&property.contents, with: shown?.objcObject)
+    }
+
+    /// The picture a string or a file's URL names: a path, from the main bundle when it isn't a whole one, or
+    /// an image's name.
+    static func picture(named contents: NSObject) -> UIImage? {
+        let name: String
+        if contents.responds(to: "UTF8String") {
+            name = contents.scnSendDescription()
+        } else if contents.responds(to: "absoluteString"), contents.responds(to: "path") {
+            name = contents.scnSendPath()
+        } else {
+            return nil
+        }
+        var path = name
+        if !name.hasPrefix("/"), let base = NSBundle.main().resourcePath() { path = "\(base)/\(name)" }
+        if let known = SCNFile.images[path] { return known }
+        let found = access(path, R_OK) == 0 ? UIImage.image(UIImage.objCClass, contentsOfFile: path) : UIImage.image(UIImage.objCClass, named: name)
+        if let found { SCNFile.images[path] = found }
+        return found
+    }
+    @ObjCMethod("contentsTransform") func contentsTransform() -> SCNMatrix4 { SCNMath.matrix4(property.transform ?? SCNMath.identity) }
+    @ObjCMethod("setContentsTransform:") func setContentsTransform(_ transform: SCNMatrix4) {
+        let matrix = SCNMath.matrix(transform)
+        property.transform = matrix == SCNMath.identity ? nil : matrix
+    }
     @ObjCMethod("intensity") func intensity() -> CGFloat { property.intensity }
     @ObjCMethod("setIntensity:") func setIntensity(_ intensity: CGFloat) { property.intensity = intensity }
     @ObjCMethod("wrapS") func wrapS() -> Int { property.wrapS }
@@ -264,7 +296,7 @@ struct SCNMesh {
 }
 
 final class SCNGeometryState: ObjectState {
-    enum Kind { case box, sphere, plane, floor, cylinder, cone, tube, torus, custom }
+    enum Kind { case box, sphere, plane, floor, cylinder, cone, tube, torus, pyramid, custom }
     var kind = Kind.box
     var width: CGFloat = 1, height: CGFloat = 1, length: CGFloat = 1
     var radius: CGFloat = 0.5, topRadius: CGFloat = 0, bottomRadius: CGFloat = 0.5
@@ -471,6 +503,27 @@ open class SCNFloor: SCNGeometry {
     }
 }
 
+@ObjCClass("SCNPyramid")
+open class SCNPyramid: SCNGeometry {
+    @ObjCClassMethod("pyramidWithWidth:height:length:")
+    static func pyramid(_ cls: ObjCClass, width: CGFloat, height: CGFloat, length: CGFloat) -> SCNPyramid {
+        let made = cls.object.allocated().unsafeCast(to: SCNPyramid.self)
+        made.geometry.kind = .pyramid
+        made.geometry.width = width
+        made.geometry.height = height
+        made.geometry.length = length
+        return made
+    }
+
+    @ObjCMethod("init") override func initialize() -> Self { geometry.kind = .pyramid; return self }
+    @ObjCMethod("width") func width() -> CGFloat { geometry.width }
+    @ObjCMethod("setWidth:") func setWidth(_ width: CGFloat) { geometry.width = width; geometry.revision += 1 }
+    @ObjCMethod("height") func height() -> CGFloat { geometry.height }
+    @ObjCMethod("setHeight:") func setHeight(_ height: CGFloat) { geometry.height = height; geometry.revision += 1 }
+    @ObjCMethod("length") func length() -> CGFloat { geometry.length }
+    @ObjCMethod("setLength:") func setLength(_ length: CGFloat) { geometry.length = length; geometry.revision += 1 }
+}
+
 @ObjCClass("SCNTube")
 open class SCNTube: SCNGeometry {
     @ObjCClassMethod("tubeWithInnerRadius:outerRadius:height:")
@@ -557,7 +610,9 @@ open class SCNCone: SCNGeometry {
 
 final class SCNNodeState: ObjectState {
     var position = SCNVector3(x: 0, y: 0, z: 0)
-    var rotation = SCNMath.noRotation
+    var rotation = SCNMath.noRotation { didSet { eulerAsSet = nil } }
+    /// The Euler angles the rotation was last set by, which read back as they were given.
+    var eulerAsSet: SCNVector3?
     var scale = SCNVector3(x: 1, y: 1, z: 1)
     var pivot = SCNMath.identity
     var opacity: CGFloat = 1
@@ -642,8 +697,11 @@ open class SCNNode: NSObject {
     @ObjCMethod("setRotation:") func setRotation(_ rotation: SCNVector4) {
         node.rotation = SCNMath.quaternion(axis: SCNVector3(x: rotation.x, y: rotation.y, z: rotation.z), angle: rotation.w)
     }
-    @ObjCMethod("eulerAngles") func eulerAngles() -> SCNVector3 { SCNMath.euler(node.rotation) }
-    @ObjCMethod("setEulerAngles:") func setEulerAngles(_ angles: SCNVector3) { node.rotation = SCNMath.quaternion(euler: angles) }
+    @ObjCMethod("eulerAngles") func eulerAngles() -> SCNVector3 { node.eulerAsSet ?? SCNMath.euler(node.rotation, asReadBack: true) }
+    @ObjCMethod("setEulerAngles:") func setEulerAngles(_ angles: SCNVector3) {
+        node.rotation = SCNMath.quaternion(euler: angles)
+        node.eulerAsSet = angles
+    }
     @ObjCMethod("orientation") func orientation() -> SCNVector4 {
         SCNVector4(x: node.rotation.x, y: node.rotation.y, z: node.rotation.z, w: node.rotation.w)
     }
@@ -960,6 +1018,7 @@ open class SCNView: UIView {
             SCNAnimations.advance(scene.rootNode(), elapsed)
         }
         send("renderer:didApplyAnimationsAtTime:") { $0.scnSendRenderer(self, didApplyAnimationsAtTime: time) }
+        if !paused { SCNDynamics.step(scene, elapsed) }
         send("renderer:didSimulatePhysicsAtTime:") { $0.scnSendRenderer(self, didSimulatePhysicsAtTime: time) }
         let camera = scn.pointOfView?.world
         if !paused { SCNCollision.step(scene) }
