@@ -462,6 +462,9 @@ public final class NSBundle: NSObject {
         BundleLoading.loaded.insert(path)
         return true
     }
+    /// Code once loaded stays, as Darwin's Objective-C code does: unloading
+    /// answers that it could not.
+    @ObjCMethod("unload") func unload() -> Bool { false }
 
     /// The class Info.plist names as principal, else the one named as the
     /// bundle's executable is: a framework's first class is, by convention,
