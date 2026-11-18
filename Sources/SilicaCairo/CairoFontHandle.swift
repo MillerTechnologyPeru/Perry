@@ -113,7 +113,13 @@ public final class CairoFontHandle: CGFontHandle {
 
         let unitsPerEm = CGFloat(scaledFont.unitsPerEm)
 
-        return scaledFont.advances(for: glyphs).map { CGFloat($0) / unitsPerEm }
+        // A font of pictures only (color emoji) has no outlines to measure: its glyphs are a little wider than an em.
+        guard unitsPerEm > 0 else { return glyphs.map { _ in 1.2 } }
+
+        return scaledFont.advances(for: glyphs).map {
+            let advance = CGFloat($0) / unitsPerEm
+            return advance.isFinite ? advance : 1.2
+        }
     }
 }
 

@@ -20,6 +20,8 @@ final class SCNPhysicsBodyState: ObjectState {
     var categoryBitMask = 1, collisionBitMask = -1, contactTestBitMask = 0
     var affectedByGravity = true, allowsResting = true
     var velocity = SCNVector3(x: 0, y: 0, z: 0), angularVelocity = SCNVector4(x: 0, y: 0, z: 0, w: 0)
+    /// The forces given since the last step, which the next one applies.
+    var force = SCNVector3(x: 0, y: 0, z: 0)
 }
 
 @ObjCClass("SCNPhysicsBody")
@@ -76,9 +78,15 @@ open class SCNPhysicsBody: NSObject {
     @ObjCMethod("setVelocity:") func setVelocity(_ velocity: SCNVector3) { body.velocity = velocity }
     @ObjCMethod("angularVelocity") func angularVelocity() -> SCNVector4 { body.angularVelocity }
     @ObjCMethod("setAngularVelocity:") func setAngularVelocity(_ velocity: SCNVector4) { body.angularVelocity = velocity }
-    @ObjCMethod("applyForce:impulse:") func applyForce(_ direction: SCNVector3, impulse: Bool) {}
+    @ObjCMethod("applyForce:impulse:") func applyForce(_ direction: SCNVector3, impulse: Bool) { SCNDynamics.push(body, direction, at: nil, impulse: impulse) }
+    @ObjCMethod("applyForce:atPosition:impulse:")
+    func applyForce(_ direction: SCNVector3, at position: SCNVector3, impulse: Bool) { SCNDynamics.push(body, direction, at: position, impulse: impulse) }
+    @ObjCMethod("applyTorque:impulse:")
+    func applyTorque(_ torque: SCNVector4, impulse: Bool) {
+        if impulse { SCNDynamics.twist(body, SCNVector3(x: torque.x * torque.w, y: torque.y * torque.w, z: torque.z * torque.w)) }
+    }
     @ObjCMethod("resetTransform") func resetTransform() {}
-    @ObjCMethod("clearAllForces") func clearAllForces() {}
+    @ObjCMethod("clearAllForces") func clearAllForces() { body.force = SCNVector3(x: 0, y: 0, z: 0) }
 }
 
 final class SCNPhysicsShapeState: ObjectState {

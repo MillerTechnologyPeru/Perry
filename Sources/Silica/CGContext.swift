@@ -454,9 +454,28 @@ public extension CGContext {
             fontSize > 0.0 && text.isEmpty == false
             else { return }
 
-        let glyphs = text.unicodeScalars.map { font.glyph(for: $0) }
-
-        show(glyphs: glyphs)
+        // The font's own glyphs in runs; a character it lacks (an emoji, a symbol) is drawn from a font that has it.
+        let scalars = Array(text.unicodeScalars)
+        var run: [CGGlyph] = []
+        func flush() {
+            if !run.isEmpty { show(glyphs: run) }
+            run = []
+        }
+        for (index, scalar) in scalars.enumerated() {
+            // Selectors and joiners shape the characters beside them, and draw nothing themselves.
+            if scalar.value == 0xFE0F || scalar.value == 0xFE0E || scalar.value == 0x200D { continue }
+            let glyph = font.glyph(for: scalar)
+            let asEmoji = index + 1 < scalars.count && scalars[index + 1].value == 0xFE0F
+            if glyph == 0 || asEmoji, let (other, found) = CGFont.fallback(for: scalar, emojiFirst: true) {
+                flush()
+                setFont(other)
+                show(glyphs: [found])
+                setFont(font)
+                continue
+            }
+            run.append(glyph)
+        }
+        flush()
     }
 
     func show(glyphs: [CGGlyph]) {

@@ -5,8 +5,8 @@ import PerryObjCInterop
 // SceneKit's collisions, as far as a game needs to walk about: a sphere or
 // capsule swept through the triangles of the nodes whose bodies it may hit,
 // to the first place it touches, and bodies that ask to be told of contacts
-// told when their boxes begin to overlap and when they stop. There is no
-// simulation: bodies are not moved by it.
+// told when their boxes begin to overlap and when they stop. Bodies are
+// moved by SCNDynamics, which sweeps them through the same triangles.
 
 enum SCNOptions {
     /// A number in an options dictionary, by the key's text.
@@ -121,13 +121,25 @@ enum SCNCollision {
     /// takes `collisionMask`: where the shape is when it touches, the point and the surface's normal.
     static func sweep(_ shape: SCNPhysicsShape, from: V, to: V, root: SCNNode, collisionMask: Int) -> (node: SCNNode, fraction: Float, point: V, normal: V)? {
         let (radius, offsets) = spheres(of: shape)
-        let delta = sub(to, from)
+        return sweep(radius: radius, offsets: offsets, from: from, to: to, root: root, collisionMask: collisionMask)
+    }
+
+    /// The same for spheres of `radius` at `offsets` above the moving point. `moving` is a simulated body's node:
+    /// it is left out, and so are the other bodies the simulation moves, and whatever is hidden.
+    static func sweep(radius: Float, offsets: [Float], from: V, to: V, root: SCNNode, collisionMask: Int, moving: SCNNode? = nil)
+        -> (node: SCNNode, fraction: Float, point: V, normal: V)? {
         var best: (node: SCNNode, fraction: Float, point: V, normal: V)?
-        func visit(_ node: SCNNode, parent: Matrix) {
-            let state = node.node
+        func visit(_ visited: SCNNode, parent: Matrix, owner: (node: SCNNode, body: SCNPhysicsBodyState)?) {
+            let state = visited.node
+            if moving != nil, state.hidden { return }
             let model = SCNMath.multiply(parent, state.local)
-            if let body = state.physicsBody?.unsafeCast(to: SCNPhysicsBody.self).body, body.categoryBitMask & collisionMask != 0,
-               let geometry = state.geometry?.geometry, let box = geometry.bounds {
+            // A body's shape is its node's geometry and, for a simulated body, that of the nodes below with no body of their own.
+            var owner = owner
+            if let body = state.physicsBody?.unsafeCast(to: SCNPhysicsBody.self).body { owner = (visited, body) } else if moving == nil { owner = nil }
+            if let (node, body) = owner, body.categoryBitMask & collisionMask != 0,
+               moving == nil || body.type != 1,
+               let geometry = (moving == nil || node.objcObject != visited.objcObject ? nil : SCNDynamics.shapeGeometry(of: body)) ?? state.geometry?.geometry,
+               let box = geometry.bounds {
                 let inverse = SCNMath.inverse(model)
                 let scaleFactor = max((model[0] * model[0] + model[1] * model[1] + model[2] * model[2]).squareRoot(), 1e-6)
                 let r = radius / scaleFactor
@@ -163,9 +175,9 @@ enum SCNCollision {
                     }
                 }
             }
-            for child in state.children { visit(child.unsafeCast(to: SCNNode.self), parent: model) }
+            for child in state.children { visit(child.unsafeCast(to: SCNNode.self), parent: model, owner: owner) }
         }
-        visit(root, parent: SCNMath.identity)
+        visit(root, parent: SCNMath.identity, owner: nil)
         return best
     }
 
@@ -198,7 +210,7 @@ enum SCNCollision {
     /// those that asked by their contact test masks.
     static func step(_ scene: SCNScene) {
         let world = scene.physicsWorld()
-        guard let delegate = world.world.delegate.map({ NSObject($0) }) else { return }
+        guard let delegate = world.world.delegate.map({ NSObject($0) }) else { SCNDynamics.hits.removeAll(); return }
         var bodies: [(node: SCNNode, state: SCNPhysicsBodyState, box: (min: V, max: V))] = []
         func collect(_ node: SCNNode, parent: Matrix) {
             let model = SCNMath.multiply(parent, node.node.local)
@@ -207,10 +219,20 @@ enum SCNCollision {
         }
         collect(scene.rootNode(), parent: SCNMath.identity)
         var now: [Pair: (SCNNode, SCNNode, V)] = [:]
+        // What the simulated bodies hit in this step.
+        for hit in SCNDynamics.hits {
+            let reversed = Pair(a: hit.1.objcObject, b: hit.0.objcObject)
+            now[world.world.touching[reversed] != nil ? reversed : Pair(a: hit.0.objcObject, b: hit.1.objcObject)] = hit
+        }
+        SCNDynamics.hits.removeAll()
         for i in bodies.indices {
             for j in bodies.indices where j > i {
                 let (a, b) = (bodies[i], bodies[j])
                 guard a.state.contactTestBitMask & b.state.categoryBitMask != 0 || b.state.contactTestBitMask & a.state.categoryBitMask != 0 else { continue }
+                // A simulated body is told of what it bounces off when it does; boxes tell of what it passes through.
+                if a.state.type == 1, b.state.type != 1, a.state.collisionBitMask & b.state.categoryBitMask != 0 { continue }
+                if b.state.type == 1, a.state.type != 1, b.state.collisionBitMask & a.state.categoryBitMask != 0 { continue }
+                if a.node.node.hidden || b.node.node.hidden { continue }
                 guard a.box.max.x >= b.box.min.x, a.box.min.x <= b.box.max.x, a.box.max.y >= b.box.min.y, a.box.min.y <= b.box.max.y,
                       a.box.max.z >= b.box.min.z, a.box.min.z <= b.box.max.z else { continue }
                 let centre = V(x: (max(a.box.min.x, b.box.min.x) + min(a.box.max.x, b.box.max.x)) / 2, y: (max(a.box.min.y, b.box.min.y) + min(a.box.max.y, b.box.max.y)) / 2,

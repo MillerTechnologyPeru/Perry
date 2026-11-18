@@ -108,6 +108,20 @@ enum SCNMath {
         return SCNVector4(x: q.x / s, y: q.y / s, z: q.z / s, w: 2 * acosf(min(max(q.w, -1), 1)))
     }
 
+    /// The rotation `t` of the way from `a` to `b`, the short way round.
+    static func slerp(_ a: Quaternion, _ b: Quaternion, _ t: Float) -> Quaternion {
+        var b = b
+        var d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w
+        if d < 0 {
+            b = (-b.x, -b.y, -b.z, -b.w)
+            d = -d
+        }
+        if d > 0.9995 { return normalized((a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t)) }
+        let theta = acosf(min(d, 1)), s = sinf(theta)
+        let wa = sinf((1 - t) * theta) / s, wb = sinf(t * theta) / s
+        return normalized((a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb, a.w * wa + b.w * wb))
+    }
+
     static func rotation(_ q: Quaternion) -> Matrix {
         let q = normalized(q)
         let x = q.x, y = q.y, z = q.z, w = q.w
@@ -142,7 +156,8 @@ enum SCNMath {
         return multiply(multiply(x, y), z)
     }
 
-    static func euler(_ q: Quaternion) -> SCNVector3 {
+    /// The rotation as Euler angles. `asReadBack` gives what a node's `eulerAngles` reads, quirk and all.
+    static func euler(_ q: Quaternion, asReadBack: Bool = false) -> SCNVector3 {
         let m = rotation(q)
         // m = Rx * Ry * Rz; the entry at row r, column c is m[c * 4 + r].
         let sine = min(max(m[8], -1), 1)
@@ -150,6 +165,9 @@ enum SCNMath {
         if abs(sine) < 0.99999 {
             return SCNVector3(x: atan2f(-m[9], m[10]), y: yaw, z: atan2f(-m[4], m[0]))
         }
+        // A quarter turn about y exactly, as a file or an axis and angle gives it: SceneKit reads it back turned the
+        // other way, and games tell which way a thing faces by that sign.
+        if asReadBack, abs(sine) >= 0.9999999, abs(m[5] - 1) < 1e-6 { return SCNVector3(x: 0, y: -yaw, z: 0) }
         return SCNVector3(x: atan2f(m[6], m[5]), y: yaw, z: 0)
     }
 

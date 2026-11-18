@@ -240,7 +240,29 @@ final class SKRenderer {
     /// Draws the scene's frame at `width` by `height` pixels, the view's
     /// points times `scale`, and shows it in `layer`.
     func draw(_ scene: SKScene, in view: SKView, scale: CGFloat, layer: CALayer, opaque: Bool, background drawsBackground: Bool = true) {
-        let bounds = view.state.bounds.size
+        render(scene, bounds: view.state.bounds.size, scale: scale, opaque: opaque, background: drawsBackground) { _, _ in
+            if Renderbuffers.show(color, context: context.state.context, layer: layer, opaque: opaque) { Display.markDirty() }
+        }
+    }
+
+    /// The scene drawn at its own size and read back: premultiplied RGBA with the bottom row first, as OpenGL
+    /// keeps it (a scene that is a material's picture).
+    func pixels(of scene: SKScene) -> (pixels: [UInt8], width: Int, height: Int)? {
+        typealias Read = @convention(c) (Int32, Int32, Int32, Int32, GLenum, GLenum, UnsafeMutableRawPointer?) -> Void
+        guard SKGL.load(), let read = GLES.symbol("_glReadPixels").map({ unsafeBitCast($0, to: Read.self) }) else { return nil }
+        var result: (pixels: [UInt8], width: Int, height: Int)?
+        render(scene, bounds: scene.node.sceneSize, scale: 1, opaque: false, background: true) { width, height in
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            bytes.withUnsafeMutableBytes { read(0, 0, Int32(width), Int32(height), SKGL.rgba, SKGL.unsignedByte, $0.baseAddress) }
+            result = (bytes, width, height)
+        }
+        return result
+    }
+
+    /// Draws the scene into the renderer's buffer, `bounds` points at `scale` pixels each, then runs `finish`
+    /// with the buffer's size while it is still the one drawn to.
+    private func render(_ scene: SKScene, bounds: CGSize, scale: CGFloat, opaque: Bool, background drawsBackground: Bool,
+                        then finish: (Int, Int) -> Void) {
         let width = Int((bounds.width * scale).rounded()), height = Int((bounds.height * scale).rounded())
         guard width > 0, height > 0 else { return }
         let previous = EAGLContexts.current?.object
@@ -292,8 +314,7 @@ final class SKRenderer {
         }
         flush()
         evictTextures()
-
-        if Renderbuffers.show(color, context: context.state.context, layer: layer, opaque: opaque) { Display.markDirty() }
+        finish(width, height)
     }
 
     private func collect(_ node: SKNode, parent: CGAffineTransform, alpha: CGFloat, z: CGFloat, isScene: Bool,
