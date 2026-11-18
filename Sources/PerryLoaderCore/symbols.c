@@ -466,8 +466,8 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
     // controllers, AuthenticationServices' web sign-in sessions, CoreText's
-    // text attributes, AVKit's player view controller and Core Image's
-    // images and filters.
+    // text attributes, AVKit's player view controller, Core Image's
+    // images and filters and MessageUI's compose view controllers.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/MetalKit.framework/") || strstr(install_name, "/SpriteKit.framework/") ||
         strstr(install_name, "/SceneKit.framework/") || strstr(install_name, "/GameplayKit.framework/") ||
@@ -476,7 +476,8 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/AuthenticationServices.framework/") ||
         strstr(install_name, "/CoreText.framework/") ||
         strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
-        strstr(install_name, "/AdSupport.framework/") || strstr(install_name, "/CoreImage.framework/")) {
+        strstr(install_name, "/AdSupport.framework/") || strstr(install_name, "/CoreImage.framework/") ||
+        strstr(install_name, "/MessageUI.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;
     }
