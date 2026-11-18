@@ -309,8 +309,30 @@ open class MTLRenderCommandEncoder: NSObject, MTLRenderCommandEncoderProtocol {
 
     // MARK: Other
 
-    @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {}
-    @ObjCMethod("useResource:usage:stages:") func useResource(_ resource: NSObject?, usage: UInt, stages: UInt) {}
+    /// What a function reaches through an argument buffer is made resident
+    /// for the stages that read it: all of them where none are named.
+    @ObjCMethod("useResource:usage:") func useResource(_ resource: NSObject?, usage: UInt) {
+        useResource(resource, usage: usage, stages: 3)
+    }
+
+    @ObjCMethod("useResource:usage:stages:") func useResource(_ resource: NSObject?, usage: UInt, stages: UInt) {
+        guard let resource, let use = M2V.api.render_encoder_use_resource else { return }
+        let buffer = resource.is(MTLBuffer.self) ? resource.unsafeCast(to: MTLBuffer.self).handle : nil
+        let texture = resource.is(MTLTexture.self) ? resource.unsafeCast(to: MTLTexture.self).handle : nil
+        guard buffer != nil || texture != nil else { return }
+        keep(resource)
+        encode("useResource:usage:stages:") { use($0, buffer, texture, UInt32(usage), UInt32(stages), $1) }
+    }
+
+    @ObjCMethod("useResources:count:usage:")
+    func useResources(_ resources: UnsafePointer<UnsafeMutableRawPointer?>?, count: UInt, usage: UInt) {
+        for i in 0..<Int(count) { useResource(resources?[i].map { NSObject($0) }, usage: usage, stages: 3) }
+    }
+
+    @ObjCMethod("useResources:count:usage:stages:")
+    func useResources(_ resources: UnsafePointer<UnsafeMutableRawPointer?>?, count: UInt, usage: UInt, stages: UInt) {
+        for i in 0..<Int(count) { useResource(resources?[i].map { NSObject($0) }, usage: usage, stages: stages) }
+    }
     @ObjCMethod("pushDebugGroup:") func pushDebugGroup(_ name: String?) {}
     // Fences order nothing here (Fences.swift).
     @ObjCMethod("updateFence:") func updateFence(_ fence: NSObject?) {}
