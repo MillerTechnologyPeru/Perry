@@ -128,6 +128,41 @@ public func NSRoundDownToMultipleOfPageSize(_ bytes: UInt) -> UInt {
 // none here (objc_collectingEnabled says so), so it is malloc's, which the
 // program frees, as it does when the collector is off.
 
+// Zones: the one malloc zone, which each zone function allocates from, as
+// Foundation's have since Mac OS X 10.6.
+
+@c(_NSZoneMalloc)
+public func NSZoneMalloc(_ zone: UnsafeMutableRawPointer?, _ size: Int) -> UnsafeMutableRawPointer? { malloc(max(size, 1)) }
+
+@c(_NSZoneCalloc)
+public func NSZoneCalloc(_ zone: UnsafeMutableRawPointer?, _ count: Int, _ size: Int) -> UnsafeMutableRawPointer? {
+    calloc(max(count, 1), max(size, 1))
+}
+
+@c(_NSZoneRealloc)
+public func NSZoneRealloc(_ zone: UnsafeMutableRawPointer?, _ pointer: UnsafeMutableRawPointer?, _ size: Int) -> UnsafeMutableRawPointer? {
+    realloc(pointer, max(size, 1))
+}
+
+@c(_NSZoneFree)
+public func NSZoneFree(_ zone: UnsafeMutableRawPointer?, _ pointer: UnsafeMutableRawPointer?) { free(pointer) }
+
+/// The zone of any pointer: the default one, NSDefaultMallocZone's.
+@c(_NSZoneFromPointer)
+public func NSZoneFromPointer(_ pointer: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { NSDefaultMallocZone() }
+
+@c(_NSCreateZone)
+public func NSCreateZone(_ startSize: Int, _ granularity: Int, _ canFree: Bool) -> UnsafeMutableRawPointer? { NSDefaultMallocZone() }
+
+@c(_NSRecycleZone)
+public func NSRecycleZone(_ zone: UnsafeMutableRawPointer?) {}
+
+@c(_NSSetZoneName)
+public func NSSetZoneName(_ zone: UnsafeMutableRawPointer?, _ name: UnsafeMutableRawPointer?) {}
+
+@c(_NSZoneName)
+public func NSZoneName(_ zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Strings.autoreleased("DefaultMallocZone") }
+
 @c(_NSAllocateCollectable)
 public func NSAllocateCollectable(_ size: Int, _ options: UInt) -> UnsafeMutableRawPointer? {
     calloc(1, max(size, 1))
