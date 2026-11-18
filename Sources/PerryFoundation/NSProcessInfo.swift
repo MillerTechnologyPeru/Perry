@@ -19,9 +19,9 @@ enum Process {
         if let progname = info.progname { name = String(cString: progname) }
         if let path = info.executable_path { executablePath = String(cString: path) }
         bundlePath = info.bundle_path.map { String(cString: $0) }
-        if let header = info.main_header, let version = buildSDK(header) { sdkVersion = version }
-        // PERRY_OS_VERSION ("13.7") is the iOS version to be, in place of
-        // the one the app was built for.
+        if let header = info.main_header { sdkVersion = buildSDK(header) ?? legacyMacVersion }
+        // PERRY_OS_VERSION ("13.7", "10.6.8") is the version to be, in
+        // place of the one the app was built for.
         if let setting = getenv("PERRY_OS_VERSION") {
             let parts = String(cString: setting).split(separator: ".").compactMap { Int($0) }
             if let major = parts.first {
@@ -31,20 +31,44 @@ enum Process {
         }
     }
 
-    /// LC_BUILD_VERSION's sdk field: xxxx.yy.zz in nibbles.
+    /// The system a Mac program with no version in it runs on: one built
+    /// with Mac OS X 10.6's SDK or before, which named none. It sees Mac OS X
+    /// 10.5, as programs of that time knew it.
+    static let legacyMacVersion = NSOperatingSystemVersion(majorVersion: 10, minorVersion: 5, patchVersion: 8)
+
+    /// The SDK the program was built with: LC_BUILD_VERSION's, or
+    /// LC_VERSION_MIN_MACOSX's or LC_VERSION_MIN_IPHONEOS's (xxxx.yy.zz in
+    /// nibbles); nil for a program that names none.
     private static func buildSDK(_ header: UnsafeRawPointer) -> NSOperatingSystemVersion? {
+        func version(_ sdk: UInt32) -> NSOperatingSystemVersion {
+            NSOperatingSystemVersion(majorVersion: Int(sdk >> 16), minorVersion: Int((sdk >> 8) & 0xff), patchVersion: Int(sdk & 0xff))
+        }
         let count = Int(header.load(fromByteOffset: 16, as: UInt32.self))
         var command = header + DarwinLayout.machHeaderSize(header)
         for _ in 0..<count {
-            let cmd = command.load(as: UInt32.self)
-            if cmd == 0x32 {                        // LC_BUILD_VERSION
-                let sdk = command.load(fromByteOffset: 16, as: UInt32.self)
-                return NSOperatingSystemVersion(majorVersion: Int(sdk >> 16), minorVersion: Int((sdk >> 8) & 0xff),
-                                                patchVersion: Int(sdk & 0xff))
+            switch command.load(as: UInt32.self) {
+            case 0x32:                              // LC_BUILD_VERSION
+                return version(command.load(fromByteOffset: 16, as: UInt32.self))
+            case 0x24, 0x25:                        // LC_VERSION_MIN_MACOSX, LC_VERSION_MIN_IPHONEOS
+                let sdk = command.load(fromByteOffset: 12, as: UInt32.self)
+                // An SDK of 0 is a linker's that didn't name it: the
+                // minimum version stands for it.
+                return version(sdk != 0 ? sdk : command.load(fromByteOffset: 8, as: UInt32.self))
+            default:
+                break
             }
             command += Int(command.load(fromByteOffset: 4, as: UInt32.self))
         }
         return nil
+    }
+
+    /// Mac OS X's build of the version, for SystemVersion.plist.
+    static var buildVersion: String {
+        switch (sdkVersion.majorVersion, sdkVersion.minorVersion) {
+        case (10, 5): "9L31a"
+        case (10, 6): "10K549"
+        default: "Perry"
+        }
     }
 
     nonisolated(unsafe) static var processInfo: id!
@@ -113,6 +137,12 @@ public final class NSProcessInfo: NSObject {
         return "Version \(version.majorVersion).\(version.minorVersion)"
             + (version.patchVersion > 0 ? ".\(version.patchVersion)" : "") + " (Perry)"
     }
+
+    /// A process is ended as it ends here: nothing terminates it suddenly.
+    @ObjCMethod("disableSuddenTermination") func disableSuddenTermination() {}
+    @ObjCMethod("enableSuddenTermination") func enableSuddenTermination() {}
+    @ObjCMethod("disableAutomaticTermination:") func disableAutomaticTermination(_ reason: ObjCObject?) {}
+    @ObjCMethod("enableAutomaticTermination:") func enableAutomaticTermination(_ reason: ObjCObject?) {}
 
     @ObjCMethod("isOperatingSystemAtLeastVersion:")
     func isAtLeast(_ version: NSOperatingSystemVersion) -> Bool {
