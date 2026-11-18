@@ -394,6 +394,14 @@ open class MTLDevice: NSObject, MTLDeviceProtocol {
         }
         return state
     }
+
+    /// A descriptor's pipeline is its kernel's.
+    @ObjCMethod("newComputePipelineStateWithDescriptor:options:reflection:error:")
+    func newComputePipelineState(descriptor: MTLComputePipelineDescriptor?, options: UInt,
+                                 reflection: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+                                 error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> MTLComputePipelineState? {
+        newComputePipelineState(function: descriptor?.function, options: options, reflection: reflection, error: error)
+    }
 }
 
 enum Devices {
