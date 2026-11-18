@@ -754,11 +754,20 @@ open class NSView: NSResponder {
             }
             CG.translateCTM(context, -boundsOrigin.x, -boundsOrigin.y)
             Send.void(objcObject, "viewWillDraw")
+            let previous = NSView.focused
+            NSView.focused = objcObject
+            defer { NSView.focused = previous }
             typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect) -> Void
             unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("drawRect:"), bounds)
         }
         needsDisplay = false
     }
+
+    /// The view drawing now, which +focusView answers. Not retained.
+    nonisolated(unsafe) static var focused: UnsafeMutableRawPointer?
+
+    @ObjCClassMethod("focusView")
+    static func focusView() -> UnsafeMutableRawPointer? { focused }
 
     // MARK: Hit testing and conversion
 
