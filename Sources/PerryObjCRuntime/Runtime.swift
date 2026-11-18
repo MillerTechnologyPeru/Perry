@@ -470,12 +470,37 @@ extension Runtime {
     public static func allocateClassPair(superclass: ClassPointer?, name: UnsafePointer<CChar>,
                                          extraBytes: Int) -> ClassPointer {
         let size = MemoryLayout<perry_objc_class>.size + max(extraBytes, 0)
-        let cls = calloc(1, size)!.assumingMemoryBound(to: perry_objc_class.self)
+        let cls = swiftSubclassStorage(superclass, extraBytes: extraBytes)
+            ?? calloc(1, size)!.assumingMemoryBound(to: perry_objc_class.self)
         let meta = calloc(1, size)!.assumingMemoryBound(to: perry_objc_class.self)
         let superSize = superclass.flatMap { Runtime.info($0)?.instanceSize } ?? 8
         _ = makeClass(cls, metaclass: meta, superclass: superclass, name: name,
                       instanceSize: superSize, registerName: false)
         return cls
+    }
+
+    /// A subclass of a Swift class is as large as the Swift class's metadata and begins
+    /// with a copy of it: Swift code reads what follows the class's own fields (its
+    /// generic arguments, its vtable) from the metadata of an instance's class, which
+    /// a class made at run time (KVO's) must still have. nil for a class that is
+    /// not Swift's, or whose metadata has no more than the ObjC class.
+    private static func swiftSubclassStorage(_ superclass: ClassPointer?, extraBytes: Int) -> UnsafeMutablePointer<perry_objc_class>? {
+        guard let superclass, superclass.pointee.bits & 3 != 0 else { return nil }
+        let base = UnsafeMutableRawPointer(superclass)
+        // ClassMetadata: classSize and classAddressPoint, after the flags,
+        // instance address point and size, alignment mask and reserved words.
+#if _pointerBitWidth(_64)
+        let sizeOffset = 56
+#else
+        let sizeOffset = 36
+#endif
+        let classSize = Int(base.load(fromByteOffset: sizeOffset, as: UInt32.self))
+        let addressPoint = Int(base.load(fromByteOffset: sizeOffset + 4, as: UInt32.self))
+        guard classSize > MemoryLayout<perry_objc_class>.size, addressPoint <= classSize,
+              classSize < 1 << 20 else { return nil }
+        let storage = calloc(1, classSize + max(extraBytes, 0))!
+        memcpy(storage, base - addressPoint, classSize)
+        return (storage + addressPoint).assumingMemoryBound(to: perry_objc_class.self)
     }
 
     public static func initializeClassPair(superclass: ClassPointer?, name: UnsafePointer<CChar>,
