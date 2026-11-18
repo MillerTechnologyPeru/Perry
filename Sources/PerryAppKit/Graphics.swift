@@ -925,6 +925,31 @@ open class NSImage: NSObject {
     func draw(at point: CGPoint, from source: CGRect, operation: UInt, fraction: CGFloat) {
         draw(in: CGRect(origin: point, size: size), fraction: fraction)
     }
+    // Compositing, before -drawAtPoint:…: the point is the image's lower
+    // left corner, and the image is upright, in a flipped view too (where
+    // it then reaches up from the point).
+    func composite(to point: CGPoint, size: CGSize, fraction: CGFloat) {
+        let flipped = NSGraphicsContext.current?.flipped == true
+        draw(in: CGRect(x: point.x, y: flipped ? point.y - size.height : point.y, width: size.width, height: size.height), fraction: fraction)
+    }
+
+    @ObjCMethod("compositeToPoint:operation:")
+    func composite(to point: CGPoint, operation: UInt) { composite(to: point, size: size, fraction: 1) }
+    @ObjCMethod("compositeToPoint:operation:fraction:")
+    func composite(to point: CGPoint, operation: UInt, fraction: CGFloat) { composite(to: point, size: size, fraction: fraction) }
+    @ObjCMethod("compositeToPoint:fromRect:operation:")
+    func composite(to point: CGPoint, from source: CGRect, operation: UInt) { composite(to: point, size: size, fraction: 1) }
+    @ObjCMethod("compositeToPoint:fromRect:operation:fraction:")
+    func composite(to point: CGPoint, from source: CGRect, operation: UInt, fraction: CGFloat) { composite(to: point, size: size, fraction: fraction) }
+    @ObjCMethod("dissolveToPoint:fraction:")
+    func dissolve(to point: CGPoint, fraction: CGFloat) { composite(to: point, size: size, fraction: fraction) }
+    @ObjCMethod("dissolveToPoint:fromRect:fraction:")
+    func dissolve(to point: CGPoint, from source: CGRect, fraction: CGFloat) { composite(to: point, size: size, fraction: fraction) }
+
+    /// Scaling when resized, which drawing in a rect always does here.
+    @ObjCMethod("scalesWhenResized") func scalesWhenResized() -> Bool { true }
+    @ObjCMethod("setScalesWhenResized:") func setScalesWhenResized(_ value: Bool) {}
+
     @ObjCMethod("setAccessibilityDescription:") func setAccessibilityDescription(_ text: String?) {}
 }
 
