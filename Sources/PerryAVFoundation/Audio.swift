@@ -318,6 +318,11 @@ open class AVAudioSession: NSObject {
     @ObjCMethod("setPreferredIOBufferDuration:error:")
     func setPreferredIOBufferDuration(_ duration: Double, error: ErrorOut) -> Bool { session.preferredIOBufferDuration = duration; return true }
     @ObjCMethod("outputNumberOfChannels") func outputNumberOfChannels() -> Int { 2 }
+    // The output is stereo, whatever number of channels is preferred.
+    @ObjCMethod("maximumOutputNumberOfChannels") func maximumOutputNumberOfChannels() -> Int { 2 }
+    @ObjCMethod("preferredOutputNumberOfChannels") func preferredOutputNumberOfChannels() -> Int { 2 }
+    @ObjCMethod("setPreferredOutputNumberOfChannels:error:")
+    func setPreferredOutputNumberOfChannels(_ count: Int, error: ErrorOut) -> Bool { true }
     @ObjCMethod("inputAvailable") func inputAvailable() -> Bool { false }
     @ObjCMethod("isInputAvailable") func isInputAvailable() -> Bool { false }
     @ObjCMethod("delegate") func delegate() -> NSObject? { session.delegate.map { NSObject($0) } }
