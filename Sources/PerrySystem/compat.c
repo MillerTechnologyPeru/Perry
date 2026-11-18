@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <limits.h>
 #include <locale.h>
 #include <net/if.h>
@@ -313,6 +314,16 @@ int darwin_getpwnam_r(const char *name, struct darwin_passwd *out, char *buffer,
     struct passwd entry, *found = NULL;
     return passwd_r_to_darwin(getpwnam_r(name, &entry, buffer, size, &found), found, out, result);
 }
+
+// Group entries: Darwin's layout is glibc's (name, password, ID, members).
+struct group *darwin_getgrgid(gid_t gid) DARWIN_SYMBOL(getgrgid);
+struct group *darwin_getgrgid(gid_t gid) { return getgrgid(gid); }
+
+struct group *darwin_getgrnam(const char *name) DARWIN_SYMBOL(getgrnam);
+struct group *darwin_getgrnam(const char *name) { return getgrnam(name); }
+
+long darwin_gethostid(void) DARWIN_SYMBOL(gethostid);
+long darwin_gethostid(void) { return gethostid(); }
 
 // A locale object: glibc's, opaque to the program. Darwin's category masks
 // are bits 0 to 5 for collate, ctype, messages, monetary, numeric and time.
