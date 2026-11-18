@@ -135,6 +135,7 @@ END _objc_msgSend_stret
 
 // long double objc_msgSend_fpret(id self, SEL _cmd, ...)
 ENTRY _objc_msgSend_fpret
+.Lmsgsend_fpret:
     testq %rdi, %rdi
     jz 1f
     movq (%rdi), %r11
@@ -147,6 +148,7 @@ END _objc_msgSend_fpret
 
 // long double _Complex objc_msgSend_fp2ret(id self, SEL _cmd, ...)
 ENTRY _objc_msgSend_fp2ret
+.Lmsgsend_fp2ret:
     testq %rdi, %rdi
     jz 1f
     movq (%rdi), %r11
@@ -189,6 +191,31 @@ ENTRY _objc_msgSendSuper2_stret
     movq (%rsi), %rsi
     jmp .Llookup_stret
 END _objc_msgSendSuper2_stret
+
+// Mac OS X 10.6's sends through a message reference, { IMP, SEL }, which
+// the call site passes in the selector's place and calls through: the
+// fixup entry points, which the reference holds until dyld's libobjc
+// patched it, and the fixedup ones it was patched to. Each takes the
+// selector from the reference and sends; the reference is left as it is.
+.macro FIXUP name, reference, target
+ENTRY \name
+    movq 8(\reference), \reference
+    jmp \target
+END \name
+.endm
+
+FIXUP _objc_msgSend_fixup, %rsi, .Lmsgsend
+FIXUP _objc_msgSend_fixedup, %rsi, .Lmsgsend
+FIXUP _objc_msgSend_stret_fixup, %rdx, .Lmsgsend_stret
+FIXUP _objc_msgSend_stret_fixedup, %rdx, .Lmsgsend_stret
+FIXUP _objc_msgSend_fpret_fixup, %rsi, .Lmsgsend_fpret
+FIXUP _objc_msgSend_fpret_fixedup, %rsi, .Lmsgsend_fpret
+FIXUP _objc_msgSend_fp2ret_fixup, %rsi, .Lmsgsend_fp2ret
+FIXUP _objc_msgSend_fp2ret_fixedup, %rsi, .Lmsgsend_fp2ret
+FIXUP _objc_msgSendSuper2_fixup, %rsi, .Lmsgsend_super2
+FIXUP _objc_msgSendSuper2_fixedup, %rsi, .Lmsgsend_super2
+FIXUP _objc_msgSendSuper2_stret_fixup, %rdx, .Lmsgsend_super2_stret
+FIXUP _objc_msgSendSuper2_stret_fixedup, %rdx, .Lmsgsend_super2_stret
 
 // The IMP for selectors a class does not implement. Asks the runtime for a
 // forwarding target and resends, or jumps to the forward handler with the
