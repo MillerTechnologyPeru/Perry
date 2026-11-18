@@ -478,7 +478,8 @@ final class NibUnarchiving {
             // its backdrop last, and its breakpoint actions a filled box after
             // the controls on it.
             NSView.objCInstance(view.objcObject, ownership: .retain).decodeContents(Coder(coder: decoder),
-                                                                                     reversingSubviews: archive.keyed)
+                                                                                     reversingSubviews: archive.keyed,
+                                                                                     keepingAutoresizesSubviews: true)
             made.append(view)
             return view
         case "IBClassReference":
