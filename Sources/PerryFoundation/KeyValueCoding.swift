@@ -109,7 +109,8 @@ enum KeyValueCoding {
             return OrderedSets.make(OrderedSets.setClass, OrderedSets.storage(object).members.compactMap { value($0, key) })
         }
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
-        for name in [key, "is" + capitalized, "get" + capitalized] {
+        // get<Key>, <key>, is<Key>, then _<key>, as Foundation looks.
+        for name in ["get" + capitalized, key, "is" + capitalized, "_" + key] {
             let selector = ObjC.selector(name)
             if responds(object, selector) { return get(object, selector) }
         }
@@ -130,16 +131,47 @@ enum KeyValueCoding {
             else { _ = ObjC.send(object, ObjC.selector("removeObjectForKey:"), keyObject) }
             return
         }
-        let selector = ObjC.selector("set" + key.prefix(1).uppercased() + key.dropFirst() + ":")
-        guard responds(object, selector) else {
-            if let (storage, type) = instanceVariable(object, key) {
-                set(storage, type: type, value)
-                return
-            }
-            _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
+        // set<Key>:, then _set<Key>:, as Foundation looks.
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        for name in ["set" + capitalized + ":", "_set" + capitalized + ":"] {
+            let selector = ObjC.selector(name)
+            if responds(object, selector) { return set(object, selector, value) }
+        }
+        if let (storage, type) = instanceVariable(object, key) {
+            set(storage, type: type, value)
             return
         }
-        set(object, selector, value)
+        _ = ObjC.send(object, ObjC.selector("setValue:forUndefinedKey:"), value, Strings.autoreleased(key))
+    }
+
+    // MARK: Stored values
+
+    /// The key's value as it is stored, as -storedValueForKey: reads it for
+    /// archiving: private accessors first, then the instance variable, then
+    /// the public accessors.
+    static func storedValue(_ object: id, _ key: String) -> id? {
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        for name in ["_get" + capitalized, "_" + key] {
+            let selector = ObjC.selector(name)
+            if responds(object, selector) { return get(object, selector) }
+        }
+        if let (storage, type) = instanceVariable(object, key) { return get(storage, type: type) }
+        return value(object, key)
+    }
+
+    /// Sets the key's stored value, as -takeStoredValue:forKey: does for
+    /// unarchiving: _set<Key>:, then the instance variable, then the public
+    /// setter. A public setter may do more than store (Xcode's register
+    /// changes with their project), which a value being restored mustn't.
+    static func setStoredValue(_ object: id, _ key: String, _ value: id?) {
+        let capitalized = key.prefix(1).uppercased() + key.dropFirst()
+        let selector = ObjC.selector("_set" + capitalized + ":")
+        if responds(object, selector) { return set(object, selector, value) }
+        if let (storage, type) = instanceVariable(object, key) {
+            set(storage, type: type, value)
+            return
+        }
+        setValue(object, key, value)
     }
 
     // MARK: Instance variables
@@ -748,7 +780,7 @@ final class KeyValueBindingState {
     /// object: by its getter's result, else by its instance variable.
     var isScalar: Bool {
         let capitalized = key.prefix(1).uppercased() + key.dropFirst()
-        for name in [key, "is" + capitalized, "get" + capitalized] {
+        for name in ["get" + capitalized, key, "is" + capitalized, "_" + key] {
             if let method = ObjC.instanceMethod(targetClass, ObjC.selector(name)), let encoding = ObjC.methodTypes(method) {
                 let type = String(cString: encoding).first { !"rnNoORV".contains($0) }
                 return type != "@" && type != "#"
@@ -793,18 +825,18 @@ public final class NSKeyValueBinding: NSObject {
     @ObjCMethod("targetClass") func targetClass() -> UnsafeMutableRawPointer? { state.map { UnsafeMutableRawPointer($0.targetClass) } }
     @ObjCMethod("isScalarProperty") func isScalarProperty() -> Bool { state?.isScalar ?? false }
 
-    /// The value, through the object's accessors or instance variable: not
-    /// through -valueForKey:, which a class may take for something else.
+    /// The value as stored, as archiving reads it: not through
+    /// -valueForKey:, which a class may take for something else.
     @ObjCMethod("getValueFromObject:")
     func getValue(from object: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
         guard let object, let state else { return nil }
-        return KeyValueCoding.value(object, state.key)
+        return KeyValueCoding.storedValue(object, state.key)
     }
 
     @ObjCMethod("setValue:inObject:")
     func setValue(_ value: UnsafeMutableRawPointer?, in object: UnsafeMutableRawPointer?) {
         guard let object, let state else { return }
-        KeyValueCoding.setValue(object, state.key, value)
+        KeyValueCoding.setStoredValue(object, state.key, value)
     }
 }
 
