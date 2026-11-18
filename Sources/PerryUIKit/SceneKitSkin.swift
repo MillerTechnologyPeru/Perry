@@ -18,6 +18,9 @@ final class SCNSkinnerState: ObjectState {
     var weights: [Float] = []
     var indices: [UInt16] = []
     var influences = 4
+    /// Whether the inverse bind transforms are the ones a model was made with (a compiled model's), not an
+    /// archive's.
+    var exactInverseBind = false
 }
 
 @ObjCClass("SCNSkinner")
@@ -49,7 +52,11 @@ enum SCNSkinning {
         guard count > 0, mesh.sources.count * 8 == mesh.vertices.count else { return mesh.vertices }
         // A bone's turn from its bind pose, as a file's matrices give it, is the inverse of the product of its world
         // transform with its inverse bind transform: the other way round, the arms come out where they are not.
-        let matrices = (0..<count).map { SCNMath.inverse(SCNMath.multiply(skinner.bones[$0].world, skinner.inverseBind[$0])) }
+        // A compiled model's are the plain ones: a bone moves a vertex by its world transform after its inverse bind.
+        let matrices = (0..<count).map { index in
+            let product = SCNMath.multiply(skinner.bones[index].world, skinner.inverseBind[index])
+            return skinner.exactInverseBind ? product : SCNMath.inverse(product)
+        }
         let n = skinner.influences
         var out = mesh.vertices
         for vertex in 0..<mesh.sources.count {
