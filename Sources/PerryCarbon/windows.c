@@ -633,3 +633,15 @@ CGrafPtr carbon_PerryCarbonFullScreenPort(int width, int height) {
     carbon_ShowWindow(window);
     return window->port;
 }
+
+/// A port over a display, for drawing to it full screen: the full-screen
+/// port, at the size of the mode the program switched the display to.
+CGrafPtr carbon_CreateNewPortForCGDisplayID(uint32_t display) CARBON_SYMBOL(CreateNewPortForCGDisplayID);
+CGrafPtr carbon_CreateNewPortForCGDisplayID(uint32_t display) {
+    (void)display;
+    int32_t width = 0, height = 0;
+    void (*switched)(int32_t *, int32_t *) = (void (*)(int32_t *, int32_t *))carbon_function(
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices", "_PerryCGDisplaySwitchedSize");
+    if (switched) switched(&width, &height);
+    return carbon_PerryCarbonFullScreenPort(width, height);
+}
