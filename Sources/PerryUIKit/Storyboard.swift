@@ -246,11 +246,21 @@ open class UIStoryboardSegueTemplate: NSObject {
         return UIStoryboardSegue.objCClass
     }
 
-    /// Performed from a control or bar item: the controller performs it.
+    /// Performed from a control or bar item: the controller performs it,
+    /// by its identifier, as an override of the controller's does on iOS;
+    /// a segue the storyboard gave no identifier is performed as it is,
+    /// once the controller has agreed to it and prepared for it.
     @ObjCMethod("perform:")
     func perform(_ sender: NSObject?) {
-        guard let controller = viewController(), let identifier = state.identifier else { return }
-        controller.sendPerformSegue(identifier: identifier, sender: sender)
+        guard let controller = viewController() else { return }
+        if let identifier = state.identifier {
+            guard controller.sendShouldPerformSegue(identifier: identifier, sender: sender) else { return }
+            controller.sendPerformSegue(identifier: identifier, sender: sender)
+            return
+        }
+        guard let segue = segue(from: controller) else { return }
+        controller.sendPrepare(for: segue, sender: sender)
+        segue.sendPerform()
     }
 
     /// The segue to the destination, made from the storyboard.
