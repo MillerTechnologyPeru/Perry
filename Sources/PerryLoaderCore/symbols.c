@@ -106,10 +106,36 @@ static const uint8_t *trie_find(const uint8_t *start, uint32_t size, const char 
 }
 
 static bool provider_lookup(perry_loader *loader, perry_provider *provider, const char *name, perry_symbol *out);
+bool perry_address_is_unresolved_stub(const void *address);
+
+// swift_getWitnessTable for a conformance to a protocol of a framework Perry
+// lacks, whose descriptor an import left bound to a stub: libswiftCore reads
+// the descriptor and fails. There is no witness table for it, so the callers
+// (AppIntents' shortcut providers, whose methods are stubs too) get none.
+static void *(*real_get_witness_table)(const void *, const void *, const void *);
+
+static void *perry_get_witness_table(const void *conformance, const void *type, const void *arguments) {
+    // The first field is the protocol's relative pointer, indirect when its
+    // low bit is set.
+    uintptr_t target = (uintptr_t)conformance + (intptr_t)*(const int32_t *)conformance;
+    const void *protocol = (target & 1) ? *(const void *const *)(target & ~(uintptr_t)1) : (const void *)target;
+    if (!protocol || perry_address_is_unresolved_stub(protocol))
+        return NULL;
+    return real_get_witness_table(conformance, type, arguments);
+}
 
 static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, const char *name,
                                  perry_symbol *out, int depth) {
     if (dep->image) {
+        if (strcmp(name, "_swift_getWitnessTable") == 0 && dep->image->install_name &&
+            strstr(dep->image->install_name, "libswiftCore.dylib")) {
+            if (!perry_exports_lookup(loader, dep->image, name, out, depth + 1))
+                return false;
+            if (!real_get_witness_table)
+                real_get_witness_table = out->address;
+            out->address = (void *)perry_get_witness_table;
+            return true;
+        }
         // CGFloat has been in CoreFoundation since iOS 18. The CoreGraphics
         // overlay here is Xcode's back-deployment copy, which defines a type
         // of its own, one Foundation's bridging conformance (for
@@ -759,6 +785,17 @@ typedef struct stub_page {
 
 static hash_table stub_table;
 static stub_page current_page;
+static struct { uint8_t *base; size_t size; } stub_ranges[64];
+static int stub_range_count;
+
+// Whether an address is in a page of unresolved-import stubs.
+bool perry_address_is_unresolved_stub(const void *address) {
+    for (int i = 0; i < stub_range_count; i++) {
+        if ((const uint8_t *)address >= stub_ranges[i].base && (const uint8_t *)address < stub_ranges[i].base + stub_ranges[i].size)
+            return true;
+    }
+    return false;
+}
 
 void *perry_unresolved_stub(const char *library, const char *name) {
     char description[1024];
@@ -780,6 +817,11 @@ void *perry_unresolved_stub(const char *library, const char *name) {
                 perry_fatal("cannot allocate stub page");
         }
         current_page.used = 0;
+        if (stub_range_count < 64) {
+            stub_ranges[stub_range_count].base = current_page.base;
+            stub_ranges[stub_range_count].size = current_page.size;
+            stub_range_count++;
+        }
     } else if (!current_page.writable_exec) {
         mprotect(current_page.base, current_page.size, PROT_READ | PROT_WRITE);
     }
