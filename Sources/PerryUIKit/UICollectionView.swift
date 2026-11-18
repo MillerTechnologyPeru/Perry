@@ -235,7 +235,7 @@ open class UICollectionViewLayout: NSObject {
     @ObjCMethod("shouldInvalidateLayoutForPreferredLayoutAttributes:withOriginalAttributes:")
     func shouldInvalidateLayout(forPreferred preferred: NSObject?, original: NSObject?) -> Bool { false }
 
-    private func newInvalidationContext() -> NSObject {
+    func newInvalidationContext() -> NSObject {
         let cls = ObjCClass(ObjCRuntime.objectClass(objcObject)!).object.sendInvalidationContextClass()
         return cls.object.newInstance()
     }
@@ -379,7 +379,9 @@ open class UICollectionViewFlowLayout: UICollectionViewLayout {
 
         func itemSize(_ path: RowPath) -> CGSize {
             if asks("collectionView:layout:sizeForItemAtIndexPath:") {
-                return delegate!.sendCollectionView(collection, layout: layout, sizeForItemAt: path.object)
+                let size = delegate!.sendCollectionView(collection, layout: layout, sizeForItemAt: path.object)
+                CollectionTrace.note(collection, "the delegate's size for item \(path) is \(size)")
+                return size
             }
             let flow = layout.flow
             if flow.estimatedItemSize != .zero {
@@ -910,7 +912,7 @@ open class UICollectionView: UIScrollView {
     override func layoutSubviews() {
         applyAdjustedInset()
         guard !collection.laying else { return }
-        CollectionTrace.note(self, "layoutSubviews bounds \(state.bounds) window \(windowObject != nil)")
+        CollectionTrace.note(self, "layoutSubviews bounds \(state.bounds) window \(windowObject != nil) layout \(collection.layout?.describedByObject() ?? "none")")
         // UIKit reloads the data at the first layout pass by sending
         // -reloadData, which a subclass that loads its own data (as
         // Texture's does) overrides to start.
@@ -922,7 +924,11 @@ open class UICollectionView: UIScrollView {
         defer { collection.laying = false }
         let bounds = state.bounds
         if bounds != collection.lastBounds {
-            if collection.lastBounds == nil || (collection.layout?.sendShouldInvalidateLayout(forBoundsChange: bounds) ?? false) {
+            if collection.lastBounds == nil {
+                collection.prepared = false
+            } else if let layout = collection.layout, layout.sendShouldInvalidateLayout(forBoundsChange: bounds) {
+                // With the context the layout makes for the change, as UIKit does.
+                layout.sendInvalidateLayout(with: layout.sendInvalidationContext(forBoundsChange: bounds))
                 collection.prepared = false
             }
             collection.lastBounds = bounds
@@ -1049,15 +1055,13 @@ open class UICollectionView: UIScrollView {
         // A compositional layout's estimated item takes its cell's height at
         // the width it was given.
         if let layout = collection.layout?.as(UICollectionViewCompositionalLayout.self) {
-            guard layout.isEstimated(path), let content = cell.collectionCell.contentView else { return }
-            let width = attributes.attributes.frame.width
-            var height = AutoLayout.fittingHeight(content, width: width)
-            if height == nil {
-                let candidate = attributes.copied().unsafeCast(to: UICollectionViewLayoutAttributes.self)
-                let preferred = cell.sendPreferredLayoutAttributes(fitting: candidate)?.as(UICollectionViewLayoutAttributes.self)
-                height = preferred?.attributes.frame.height
-            }
-            if let height, layout.record(height: height, for: path) { collection.prepared = false }
+            guard layout.isEstimated(path), cell.collectionCell.contentView != nil else { return }
+            // The cell says what it prefers: by default its content view's
+            // fitting height, and a class of the app's may answer its own.
+            let candidate = attributes.copied().unsafeCast(to: UICollectionViewLayoutAttributes.self)
+            let preferred = cell.sendPreferredLayoutAttributes(fitting: candidate)?.as(UICollectionViewLayoutAttributes.self)
+            CollectionTrace.note(self, "item \(path) of \(candidate.attributes.frame.size) prefers \(String(describing: preferred?.attributes.frame.size))")
+            if let height = preferred?.attributes.frame.height, layout.record(height: height, for: path) { collection.prepared = false }
             return
         }
         guard let flow = collection.layout?.as(UICollectionViewFlowLayout.self), flow.flow.estimatedItemSize != .zero,
@@ -1143,6 +1147,15 @@ open class UICollectionView: UIScrollView {
         collection.counts = nil
         collection.selected = collection.selected.filter(contains)
         if let flow = collection.layout?.as(UICollectionViewFlowLayout.self) { flow.flow.measured = [:] }
+        // The layout is told all it knows is out of date, the counts among
+        // it: one of an app's own drops what it worked out from the old data.
+        if let layout = collection.layout {
+            let context = layout.newInvalidationContext()
+            if let state = context.as(UICollectionViewLayoutInvalidationContext.self)?.context {
+                (state.everything, state.dataSourceCounts) = (true, true)
+            }
+            layout.sendInvalidateLayout(with: context)
+        }
         layoutInvalidated()
     }
 
@@ -1291,10 +1304,14 @@ extension NSObject {
     func sendLayoutAttributesForSupplementaryView(kind: String, at path: NSObject) -> NSObject?
     @ObjCMethod("shouldInvalidateLayoutForBoundsChange:") func sendShouldInvalidateLayout(forBoundsChange bounds: CGRect) -> Bool
     @ObjCMethod("invalidateLayout") func sendInvalidateLayout()
+    @ObjCMethod("invalidateLayoutWithContext:") func sendInvalidateLayout(with context: NSObject?)
+    @ObjCMethod("invalidationContextForBoundsChange:") func sendInvalidationContext(forBoundsChange bounds: CGRect) -> NSObject?
     @ObjCMethod("layoutAttributesClass") func sendLayoutAttributesClass() -> ObjCClass
     @ObjCMethod("invalidationContextClass") func sendInvalidationContextClass() -> ObjCClass
     @ObjCMethod("applyLayoutAttributes:") func sendApply(_ attributes: NSObject)
     @ObjCMethod("preferredLayoutAttributesFittingAttributes:") func sendPreferredLayoutAttributes(fitting attributes: NSObject) -> NSObject?
+    @ObjCMethod("systemLayoutSizeFittingSize:withHorizontalFittingPriority:verticalFittingPriority:")
+    func sendSystemLayoutSizeFitting(_ size: CGSize, horizontalPriority: Float, verticalPriority: Float) -> CGSize
     @ObjCMethod("setSelected:") func sendSetSelected(_ selected: Bool)
     @ObjCMethod("setHighlighted:") func sendSetHighlighted(_ highlighted: Bool)
     @ObjCMethod("reloadData") func sendReloadData()
