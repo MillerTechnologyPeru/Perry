@@ -20,6 +20,8 @@ final class MenuElementState: ObjectState {
     /// UIMenuOptions: display inline 1, destructive 2, single selection 32.
     var options: UInt = 0
     var children: [NSObject] = []
+    /// What an action is being performed for; not retained.
+    var sender: UnsafeMutableRawPointer?
 }
 
 @ObjCClass("UIMenuElement")
@@ -77,10 +79,19 @@ open class UIAction: UIMenuElement {
     @ObjCMethod("setAttributes:") func setAttributes(_ attributes: UInt) { element.attributes = attributes }
     @ObjCMethod("state") func state() -> Int { element.elementState }
     @ObjCMethod("setState:") func setState(_ state: Int) { element.elementState = state }
-    @ObjCMethod("sender") func sender() -> NSObject? { nil }
+    @ObjCMethod("sender") func sender() -> NSObject? { element.sender.map { NSObject($0) } }
 
-    /// Runs the action's handler, given the action.
-    func perform() { element.handler.map { Blocks.call($0, self) } }
+    /// Runs the action's handler, given the action, whose sender is the
+    /// control it is performed for meanwhile.
+    func perform(sender: NSObject? = nil) {
+        let element = element
+        guard let handler = element.handler else { return }
+        element.sender = sender?.objcObject
+        Blocks.call(handler, self)
+        element.sender = nil
+    }
+
+    @ObjCMethod("performWithSender:target:") func perform(sender: NSObject?, target: NSObject?) { perform(sender: sender) }
 }
 
 @ObjCClass("UIMenu")
