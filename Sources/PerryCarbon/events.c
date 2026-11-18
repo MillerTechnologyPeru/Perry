@@ -956,9 +956,13 @@ OSStatus carbon_UnregisterEventHotKey(void *hotKey) { (void)hotKey; return noErr
 /// kEventCommandProcess event with its HICommand, to the target (a
 /// window's for a control's, the focus's for a menu's), on from there to
 /// the application's.
-OSStatus carbon_process_command(uint32_t command, void *menu, uint16_t item, carbon_target *target) {
+OSStatus carbon_process_command(uint32_t command, void *control, void *menu, uint16_t item, carbon_target *target) {
+    // HICommandExtended: kHICommandFromMenu with the menu and item, or
+    // kHICommandFromControl with the control, which dialogs' handlers
+    // look for before they act on a button's command.
 #pragma pack(push, 2)
-    struct { uint32_t attributes, commandID; void *menuRef; uint16_t menuItemIndex; } hicommand = {menu ? 1u : 0u, command, menu, item};
+    struct { uint32_t attributes, commandID; void *source; uint16_t menuItemIndex; } hicommand = {
+        menu ? 1u : control ? 2u : 0u, command, menu ? menu : control, menu ? item : 0};
 #pragma pack(pop)
     EventRef event = event_new(kEventClassCommand, 1, 0);
     if (!event) return memFullErr;
