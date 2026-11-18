@@ -542,6 +542,15 @@ public class NSMutableDictionary: NSDictionary {
     func add(entriesFrom other: NSDictionary?) {
         for entry in other?.entries ?? [] { storage.set(entry.value, for: entry.key) }
     }
+
+    /// The other dictionary's entries in place of this one's (taken first,
+    /// so the dictionary may be given itself).
+    @ObjCMethod("setDictionary:")
+    func setDictionary(_ other: NSDictionary?) {
+        let entries = other?.entries ?? []
+        storage.removeAll()
+        for entry in entries { storage.set(entry.value, for: entry.key) }
+    }
 }
 
 /// + (id)dictionaryWithObjectsAndKeys:(id)first, ... nil — value, key pairs.
