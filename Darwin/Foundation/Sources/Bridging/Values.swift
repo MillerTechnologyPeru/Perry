@@ -358,3 +358,79 @@ extension IndexPath: _ObjectiveCBridgeable {
         source.map(_bridging) ?? IndexPath()
     }
 }
+
+// MARK: - DateComponents
+
+/// Date components as NSDateComponents: each component that is set, with
+/// the calendar and time zone; one NSDateComponents leaves undefined is not
+/// set.
+extension DateComponents: _ObjectiveCBridgeable {
+    public typealias _ObjectiveCType = NSDateComponents
+
+    @_semantics("convertToObjectiveC")
+    public func _bridgeToObjectiveC() -> NSDateComponents {
+        let components = NSDateComponents()
+        if let calendar { components.calendar = calendar }
+        if let timeZone { components.timeZone = timeZone }
+        if let era { components.era = era }
+        if let year { components.year = year }
+        if let month { components.month = month }
+        if let day { components.day = day }
+        if let hour { components.hour = hour }
+        if let minute { components.minute = minute }
+        if let second { components.second = second }
+        if let nanosecond { components.nanosecond = nanosecond }
+        if let weekday { components.weekday = weekday }
+        if let weekdayOrdinal { components.weekdayOrdinal = weekdayOrdinal }
+        if let quarter { components.quarter = quarter }
+        if let weekOfMonth { components.weekOfMonth = weekOfMonth }
+        if let weekOfYear { components.weekOfYear = weekOfYear }
+        if let yearForWeekOfYear { components.yearForWeekOfYear = yearForWeekOfYear }
+        if let isLeapMonth { components.isLeapMonth = isLeapMonth }
+        return components
+    }
+
+    public static func _forceBridgeFromObjectiveC(_ source: NSDateComponents, result: inout DateComponents?) {
+        result = _unconditionallyBridgeFromObjectiveC(source)
+    }
+
+    @discardableResult
+    public static func _conditionallyBridgeFromObjectiveC(_ source: NSDateComponents, result: inout DateComponents?) -> Bool {
+        result = _unconditionallyBridgeFromObjectiveC(source)
+        return true
+    }
+
+    @_effects(readonly)
+    public static func _unconditionallyBridgeFromObjectiveC(_ source: NSDateComponents?) -> DateComponents {
+        guard let source else { return DateComponents() }
+        func defined(_ value: Int) -> Int? { value == NSDateComponentUndefined ? nil : value }
+        var components = DateComponents()
+        components.calendar = source.calendar
+        components.timeZone = source.timeZone
+        components.era = defined(source.era)
+        components.year = defined(source.year)
+        components.month = defined(source.month)
+        components.day = defined(source.day)
+        components.hour = defined(source.hour)
+        components.minute = defined(source.minute)
+        components.second = defined(source.second)
+        components.nanosecond = defined(source.nanosecond)
+        components.weekday = defined(source.weekday)
+        components.weekdayOrdinal = defined(source.weekdayOrdinal)
+        components.quarter = defined(source.quarter)
+        components.weekOfMonth = defined(source.weekOfMonth)
+        components.weekOfYear = defined(source.weekOfYear)
+        components.yearForWeekOfYear = defined(source.yearForWeekOfYear)
+        if source.isLeapMonth { components.isLeapMonth = true }
+        return components
+    }
+}
+
+// MARK: - Locale identifiers
+
+extension Locale {
+    /// A locale identifier's parts by their keys, as NSLocale gives them.
+    public static func components(fromIdentifier string: String) -> [String: String] {
+        NSLocale.components(fromLocaleIdentifier: string)
+    }
+}
