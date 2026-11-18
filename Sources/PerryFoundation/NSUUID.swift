@@ -55,7 +55,7 @@ public final class NSUUID: NSObject {
     @ObjCMethod("init") func initialize() -> Self? { setUUID(UUID()) }
 
     @ObjCMethod("initWithUUIDString:")
-    func initialize(string: String) -> Self? { setUUID(UUID(uuidString: string)) }
+    func initialize(string: String?) -> Self? { setUUID(string.flatMap { UUID(uuidString: $0) }) }
 
     /// uuid_t, 16 bytes.
     @ObjCMethod("initWithUUIDBytes:")
