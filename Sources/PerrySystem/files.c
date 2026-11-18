@@ -1543,3 +1543,51 @@ int darwin_alphasort32(const struct darwin_dirent32 **a, const struct darwin_dir
     return strcoll((*a)->d_name, (*b)->d_name);
 }
 #endif
+
+// MARK: - <sysdir.h>
+
+// The standard directories, one after another: here the user's only, as
+// paths from the home directory ("~/Library/Caches") that the caller
+// expands. The state is the directory asked for and how far the
+// enumeration is; zero ends it.
+typedef unsigned int darwin_sysdir_state;
+
+darwin_sysdir_state darwin_sysdir_start_search_path_enumeration(int directory, int domains)
+    DARWIN_SYMBOL(sysdir_start_search_path_enumeration);
+darwin_sysdir_state darwin_sysdir_start_search_path_enumeration(int directory, int domains) {
+    // SYSDIR_DOMAIN_MASK_USER is 1.
+    return (domains & 1) ? ((unsigned)directory << 8) | 1 : 0;
+}
+
+static const char *sysdir_user_path(int directory) {
+    switch (directory) {
+        case 1: case 100: return "~/Applications";
+        case 5: case 101: return "~/Library";
+        case 7: return "~";
+        case 9: return "~/Documents";
+        case 11: return "~/Library/Autosave Information";
+        case 12: return "~/Desktop";
+        case 13: return "~/Library/Caches";
+        case 14: return "~/Library/Application Support";
+        case 15: return "~/Downloads";
+        case 16: return "~/Library/Input Methods";
+        case 17: return "~/Movies";
+        case 18: return "~/Music";
+        case 19: return "~/Pictures";
+        case 21: return "~/Public";
+        case 22: return "~/Library/PreferencePanes";
+        default: return NULL;
+    }
+}
+
+darwin_sysdir_state darwin_sysdir_get_next_search_path_enumeration(darwin_sysdir_state state, char *path)
+    DARWIN_SYMBOL(sysdir_get_next_search_path_enumeration);
+darwin_sysdir_state darwin_sysdir_get_next_search_path_enumeration(darwin_sysdir_state state, char *path) {
+    if ((state & 0xff) != 1) return 0;
+    const char *found = sysdir_user_path((int)(state >> 8));
+    if (found == NULL || path == NULL) return 0;
+    // The caller's buffer holds PATH_MAX (1024) bytes.
+    strncpy(path, found, 1023);
+    path[1023] = '\0';
+    return (state & ~0xffu) | 2;
+}

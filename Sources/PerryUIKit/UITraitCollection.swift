@@ -99,6 +99,24 @@ open class UITraitCollection: NSObject {
     @ObjCClassMethod("traitCollectionWithActiveAppearance:")
     static func with(_ cls: ObjCClass, activeAppearance: Int) -> UITraitCollection { make(cls) { _ in } }
 
+    /// A collection of the traits a block sets on the mutable traits it is given.
+    @ObjCClassMethod("traitCollectionWithTraits:")
+    static func with(_ cls: ObjCClass, traits mutations: ObjCBlock?) -> UITraitCollection {
+        make(cls) { traits in UIMutableTraitsObject.mutate(traits, mutations) }
+    }
+
+    /// This collection with the traits a block changes.
+    @ObjCMethod("traitCollectionByModifyingTraits:")
+    func modifying(_ mutations: ObjCBlock?) -> UITraitCollection {
+        let mine = traits
+        return UITraitCollection.make { traits in
+            (traits.idiom, traits.style, traits.displayScale) = (mine.idiom, mine.style, mine.displayScale)
+            (traits.horizontalSizeClass, traits.verticalSizeClass) = (mine.horizontalSizeClass, mine.verticalSizeClass)
+            (traits.layoutDirection, traits.contentSizeCategory) = (mine.layoutDirection, mine.contentSizeCategory)
+            UIMutableTraitsObject.mutate(traits, mutations)
+        }
+    }
+
     /// Each trait from the last collection that specifies it.
     @ObjCClassMethod("traitCollectionWithTraitsFromCollections:")
     static func combining(_ cls: ObjCClass, collections: NSArray) -> UITraitCollection {
@@ -221,3 +239,67 @@ open class PerryTraitDefinition: NSObject {
 @ObjCClass("UITraitTypesettingLanguage") open class UITraitTypesettingLanguage: PerryTraitDefinition {}
 @ObjCClass("UITraitSceneCaptureState") open class UITraitSceneCaptureState: PerryTraitDefinition {}
 @ObjCClass("UITraitListEnvironment") open class UITraitListEnvironment: PerryTraitDefinition {}
+
+final class MutableTraitsState: ObjectState {
+    var traits: TraitState?
+}
+
+/// The mutable traits a block is handed to make a trait collection from:
+/// the traits a collection here holds are set through it, and others,
+/// custom ones among them, are accepted and not kept.
+@ObjCClass("_UIMutableTraits")
+open class UIMutableTraitsObject: NSObject {
+    static let states = StateTable<MutableTraitsState>()
+    var mutable: MutableTraitsState { UIMutableTraitsObject.states[objcObject] }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        UIMutableTraitsObject.states.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: UIMutableTraitsObject.objCClass.pointer)
+    }
+
+    /// Calls the block with mutable traits that write into `traits`.
+    static func mutate(_ traits: TraitState, _ block: ObjCBlock?) {
+        guard let block else { return }
+        let object = objCClass.object.allocated().unsafeCast(to: UIMutableTraitsObject.self)
+        object.mutable.traits = traits
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer) -> Void
+        block.function(as: Invoke.self)(block.object, object.objcObject)
+        object.mutable.traits = nil
+    }
+
+    @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { mutable.traits?.idiom ?? -1 }
+    @ObjCMethod("setUserInterfaceIdiom:") func setUserInterfaceIdiom(_ idiom: Int) { mutable.traits?.idiom = idiom }
+    @ObjCMethod("userInterfaceStyle") func userInterfaceStyle() -> Int { mutable.traits?.style ?? 0 }
+    @ObjCMethod("setUserInterfaceStyle:") func setUserInterfaceStyle(_ style: Int) { mutable.traits?.style = style }
+    @ObjCMethod("horizontalSizeClass") func horizontalSizeClass() -> Int { mutable.traits?.horizontalSizeClass ?? 0 }
+    @ObjCMethod("setHorizontalSizeClass:") func setHorizontalSizeClass(_ sizeClass: Int) { mutable.traits?.horizontalSizeClass = sizeClass }
+    @ObjCMethod("verticalSizeClass") func verticalSizeClass() -> Int { mutable.traits?.verticalSizeClass ?? 0 }
+    @ObjCMethod("setVerticalSizeClass:") func setVerticalSizeClass(_ sizeClass: Int) { mutable.traits?.verticalSizeClass = sizeClass }
+    @ObjCMethod("displayScale") func displayScale() -> CGFloat { mutable.traits?.displayScale ?? 0 }
+    @ObjCMethod("setDisplayScale:") func setDisplayScale(_ scale: CGFloat) { mutable.traits?.displayScale = scale }
+    @ObjCMethod("layoutDirection") func layoutDirection() -> Int { mutable.traits?.layoutDirection ?? -1 }
+    @ObjCMethod("setLayoutDirection:") func setLayoutDirection(_ direction: Int) { mutable.traits?.layoutDirection = direction }
+    @ObjCMethod("preferredContentSizeCategory")
+    func preferredContentSizeCategory() -> String { mutable.traits?.contentSizeCategory ?? "_UICTContentSizeCategoryUnspecified" }
+    @ObjCMethod("setPreferredContentSizeCategory:")
+    func setPreferredContentSizeCategory(_ category: String) { mutable.traits?.contentSizeCategory = category }
+
+    // Traits a collection here does not hold.
+    @ObjCMethod("setForceTouchCapability:") func setForceTouchCapability(_ capability: Int) {}
+    @ObjCMethod("setDisplayGamut:") func setDisplayGamut(_ gamut: Int) {}
+    @ObjCMethod("setAccessibilityContrast:") func setAccessibilityContrast(_ contrast: Int) {}
+    @ObjCMethod("setUserInterfaceLevel:") func setUserInterfaceLevel(_ level: Int) {}
+    @ObjCMethod("setLegibilityWeight:") func setLegibilityWeight(_ weight: Int) {}
+    @ObjCMethod("setActiveAppearance:") func setActiveAppearance(_ appearance: Int) {}
+    @ObjCMethod("setToolbarItemPresentationSize:") func setToolbarItemPresentationSize(_ size: Int) {}
+    @ObjCMethod("setImageDynamicRange:") func setImageDynamicRange(_ range: Int) {}
+    @ObjCMethod("setSceneCaptureState:") func setSceneCaptureState(_ state: Int) {}
+    @ObjCMethod("setTypesettingLanguage:") func setTypesettingLanguage(_ language: NSObject?) {}
+    @ObjCMethod("setNSIntegerValue:forTrait:") func setNSIntegerValue(_ value: Int, forTrait trait: NSObject?) {}
+    @ObjCMethod("setCGFloatValue:forTrait:") func setCGFloatValue(_ value: Double, forTrait trait: NSObject?) {}
+    @ObjCMethod("setObject:forTrait:") func setObject(_ value: NSObject?, forTrait trait: NSObject?) {}
+    @ObjCMethod("NSIntegerValueForTrait:") func nsIntegerValue(forTrait trait: NSObject?) -> Int { 0 }
+    @ObjCMethod("CGFloatValueForTrait:") func cgFloatValue(forTrait trait: NSObject?) -> Double { 0 }
+    @ObjCMethod("objectForTrait:") func object(forTrait trait: NSObject?) -> NSObject? { nil }
+}

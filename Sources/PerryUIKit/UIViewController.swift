@@ -334,6 +334,8 @@ open class UIViewController: UIResponder {
     @ObjCMethod("setNeedsUpdateOfScreenEdgesDeferringSystemGestures") func setNeedsUpdateOfScreenEdgesDeferringSystemGestures() {}
     @ObjCMethod("setNeedsUpdateOfPrefersPointerLocked") func setNeedsUpdateOfPrefersPointerLocked() {}
     @ObjCMethod("setNeedsUpdateOfSupportedInterfaceOrientations") func setNeedsUpdateOfSupportedInterfaceOrientations() {}
+    /// Trait changes are delivered as they happen here: nothing waits to be updated.
+    @ObjCMethod("updateTraitsIfNeeded") func updateTraitsIfNeeded() {}
     @ObjCMethod("preferredScreenEdgesDeferringSystemGestures") func preferredScreenEdgesDeferringSystemGestures() -> UInt { 0 }
     @ObjCMethod("prefersPointerLocked") func prefersPointerLocked() -> Bool { false }
     @ObjCMethod("setNeedsUpdateOfHomeIndicatorAutoHidden") func setNeedsUpdateOfHomeIndicatorAutoHidden() {}

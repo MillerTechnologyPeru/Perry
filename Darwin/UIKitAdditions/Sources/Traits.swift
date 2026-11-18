@@ -73,10 +73,10 @@ public protocol UIMutableTraits {
 struct _PerryMutableTraits : UIKit.UIMutableTraits {
   var values: [Swift.String: Any] = [:]
 
-  private func value<T: UIKit.UITraitDefinition>(_ trait: T.Type) -> T.Value {
+  func value<T: UIKit.UITraitDefinition>(_ trait: T.Type) -> T.Value {
     values[T.identifier] as? T.Value ?? T.defaultValue
   }
-  private mutating func set<T: UIKit.UITraitDefinition>(_ trait: T.Type, _ value: T.Value) {
+  mutating func set<T: UIKit.UITraitDefinition>(_ trait: T.Type, _ value: T.Value) {
     values[T.identifier] = value
   }
 
@@ -455,5 +455,281 @@ extension UITraitCollection {
       collections.append(UITraitCollection(preferredContentSizeCategory: category))
     }
     return UITraitCollection(traitsFrom: collections)
+  }
+}
+
+// MARK: - More system traits
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+public struct UITraitLegibilityWeight : UIKit.UITraitDefinition {
+  public static let defaultValue: UILegibilityWeight = .unspecified
+  public static let name: Swift.String = "LegibilityWeight"
+  public static let identifier: Swift.String = "UITraitLegibilityWeight"
+  public static let affectsColorAppearance: Swift.Bool = false
+  public static let _defaultValueRepresentsUnspecified: Swift.Bool = true
+  public static let _isPrivate: Swift.Bool = false
+  @available(iOS 17.0, tvOS 17.0, *)
+  @available(watchOS, unavailable)
+  public typealias Value = UILegibilityWeight
+}
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIKit.UIMutableTraits {
+  public var legibilityWeight: UILegibilityWeight {
+    get { self[UITraitLegibilityWeight.self] }
+    set { self[UITraitLegibilityWeight.self] = newValue }
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+public struct UITraitSceneCaptureState : UIKit.UITraitDefinition {
+  public static let defaultValue: UISceneCaptureState = .unspecified
+  public static let name: Swift.String = "SceneCaptureState"
+  public static let identifier: Swift.String = "UITraitSceneCaptureState"
+  public static let affectsColorAppearance: Swift.Bool = false
+  public static let _defaultValueRepresentsUnspecified: Swift.Bool = true
+  public static let _isPrivate: Swift.Bool = false
+  @available(iOS 17.0, tvOS 17.0, *)
+  @available(watchOS, unavailable)
+  public typealias Value = UISceneCaptureState
+}
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIKit.UIMutableTraits {
+  public var sceneCaptureState: UISceneCaptureState {
+    get { self[UITraitSceneCaptureState.self] }
+    set { self[UITraitSceneCaptureState.self] = newValue }
+  }
+}
+
+// MARK: - Reading a trait collection's traits
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UITraitCollection {
+  /// A trait's value in the collection: a system trait's from the property
+  /// Perry's UITraitCollection has for it; any other's, which the
+  /// collection has nowhere to keep, the trait's default.
+  func _perryValue<T: UIKit.UITraitDefinition>(_ trait: T.Type) -> T.Value {
+    let value: Any?
+    switch T.identifier {
+    case UITraitUserInterfaceStyle.identifier: value = userInterfaceStyle
+    case UITraitLayoutDirection.identifier: value = layoutDirection
+    case UITraitDisplayScale.identifier: value = displayScale
+    case UITraitHorizontalSizeClass.identifier: value = horizontalSizeClass
+    case UITraitVerticalSizeClass.identifier: value = verticalSizeClass
+    case UITraitPreferredContentSizeCategory.identifier: value = preferredContentSizeCategory
+    case UITraitUserInterfaceLevel.identifier: value = userInterfaceLevel
+    default: value = nil
+    }
+    return value as? T.Value ?? T.defaultValue
+  }
+
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == CoreFoundation.CGFloat {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == CoreFoundation.CGFloat? {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Double {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Double? {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Int {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Int? {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Bool {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == CoreFoundation.CGFloat {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == Swift.Double {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == Swift.Int {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == CoreFoundation.CGFloat {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == Swift.Double {
+    get { _perryValue(trait) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == Swift.Int {
+    get { _perryValue(trait) }
+  }
+
+  public typealias TraitMutations = (_ mutableTraits: inout any UIKit.UIMutableTraits) -> Swift.Void
+
+  /// A collection of the traits the mutations set.
+  convenience public init(mutations: UITraitCollection.TraitMutations) {
+    self.init(traitsFrom: [UITraitCollection()._modifyingTraits(environmentWrapper: nil, mutations: mutations)])
+  }
+
+  /// The collection with the mutations made.
+  public func modifyingTraits(_ mutations: UITraitCollection.TraitMutations) -> UITraitCollection {
+    _modifyingTraits(environmentWrapper: nil, mutations: mutations)
+  }
+
+  /// The system traits whose values differ from another collection's: all
+  /// of them from no collection.
+  public func changedTraits(from traitCollection: UITraitCollection?) -> [UIKit.UITrait] {
+    var changed: [UIKit.UITrait] = []
+    func compare<T: UIKit.UITraitDefinition>(_ trait: T.Type) where T.Value: Swift.Equatable {
+      if traitCollection == nil || traitCollection!._perryValue(trait) != _perryValue(trait) { changed.append(trait) }
+    }
+    compare(UITraitUserInterfaceStyle.self)
+    compare(UITraitLayoutDirection.self)
+    compare(UITraitDisplayScale.self)
+    compare(UITraitHorizontalSizeClass.self)
+    compare(UITraitVerticalSizeClass.self)
+    compare(UITraitPreferredContentSizeCategory.self)
+    compare(UITraitUserInterfaceLevel.self)
+    return changed
+  }
+}
+
+// MARK: - Trait overrides
+
+/// The traits a view, view controller or scene overrides for what it
+/// contains. They are kept, by trait, with the object; of them only the
+/// interface style changes what Perry shows, as the object's
+/// overrideUserInterfaceStyle.
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+public struct UITraitOverrides : UIKit.UIMutableTraits {
+  var traits = _PerryMutableTraits()
+
+  public func contains(_ trait: UIKit.UITrait) -> Swift.Bool { traits.values[trait.identifier] != nil }
+  public mutating func remove(_ trait: UIKit.UITrait) { traits.values[trait.identifier] = nil }
+
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == CoreFoundation.CGFloat {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == CoreFoundation.CGFloat? {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Double {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Double? {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Int {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Int? {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value == Swift.Bool {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == CoreFoundation.CGFloat {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == Swift.Double {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit._UICustomRawRepresentableTraitDefinition, T._CustomRawValue == Swift.Int {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == CoreFoundation.CGFloat {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == Swift.Double {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+  public subscript<T>(trait: T.Type) -> T.Value where T : UIKit.UITraitDefinition, T.Value : Swift.RawRepresentable, T.Value.RawValue == Swift.Int {
+    get { traits.value(trait) }
+    set { traits.set(trait, newValue) }
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+private enum _PerryTraitOverrides {
+  final class Box { var overrides = UITraitOverrides() }
+  nonisolated(unsafe) static var key: UInt8 = 0
+
+  static func overrides(of object: AnyObject) -> UITraitOverrides {
+    (objc_getAssociatedObject(object, &key) as? Box)?.overrides ?? UITraitOverrides()
+  }
+
+  /// Keeps the overrides and gives the style among them, if any.
+  static func set(_ overrides: UITraitOverrides, on object: AnyObject) -> UIUserInterfaceStyle {
+    let box = Box()
+    box.overrides = overrides
+    objc_setAssociatedObject(object, &key, box, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    return overrides.traits.values[UITraitUserInterfaceStyle.identifier] as? UIUserInterfaceStyle ?? .unspecified
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIView {
+  @_Concurrency.MainActor @preconcurrency public var traitOverrides: UIKit.UITraitOverrides {
+    get { _PerryTraitOverrides.overrides(of: self) }
+    set { overrideUserInterfaceStyle = _PerryTraitOverrides.set(newValue, on: self) }
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIViewController {
+  @_Concurrency.MainActor @preconcurrency public var traitOverrides: UIKit.UITraitOverrides {
+    get { _PerryTraitOverrides.overrides(of: self) }
+    set { overrideUserInterfaceStyle = _PerryTraitOverrides.set(newValue, on: self) }
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIWindowScene {
+  @_Concurrency.MainActor @preconcurrency public var traitOverrides: UIKit.UITraitOverrides {
+    get { _PerryTraitOverrides.overrides(of: self) }
+    set {
+      let style = _PerryTraitOverrides.set(newValue, on: self)
+      for window in windows { window.overrideUserInterfaceStyle = style }
+    }
   }
 }

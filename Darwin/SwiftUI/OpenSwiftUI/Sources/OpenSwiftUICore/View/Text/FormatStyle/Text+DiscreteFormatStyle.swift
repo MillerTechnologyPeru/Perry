@@ -713,3 +713,18 @@ extension String: AttributedStringConvertible {
 extension Bundle {
     package static let systemFormatStyle: Bundle = .openSwiftUICore
 }
+
+// MARK: - Perry: the string format initializer under another name
+
+@available(OpenSwiftUI_v6_0, *)
+extension Text {
+    /// Perry: what `init(_:format:)` makes for a format with string output.
+    /// The framework module declares that initializer again, as apps bind
+    /// it as an extension member, and builds its text through this one.
+    package init<V, F>(
+        timeDataSource source: TimeDataSource<V>,
+        stringFormat format: F
+    ) where V == F.FormatInput, F: DiscreteFormatStyle, F.FormatOutput == String {
+        self.init(anyTextStorage: source.box.textStorage(for: format))
+    }
+}

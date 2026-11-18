@@ -901,6 +901,17 @@ extension GraphicsContext {
         storage.cgContext?.scaleBy(x: x, y: y)
     }
 
+    /// Turns what is drawn next by `angle`, about the context's origin.
+    public mutating func rotate(by angle: Angle) {
+        storage.cgContext?.rotate(by: CGFloat(angle.radians))
+    }
+
+    /// Applies `matrix` to what is drawn next, ahead of the transform the
+    /// context already has.
+    public mutating func concatenate(_ matrix: CGAffineTransform) {
+        storage.cgContext?.concatenate(matrix)
+    }
+
     /// Limits what is drawn next to the inside of `path`: its fill under
     /// `style`, or everything outside it with the inverse option.
     public mutating func clip(

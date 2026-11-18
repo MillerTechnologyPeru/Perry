@@ -154,9 +154,13 @@ aliases=$work/aliases.txt
 nm -gU "$out/SwiftUI.framework/SwiftUI" | awk '{print $3}' | python3 -I -c '
 import re, subprocess, sys
 pairs = []
-for symbol in sys.stdin.read().split():
+symbols = sys.stdin.read().split()
+# A name the image already defines (the core module declares the member
+# too) is not aliased: it would be defined twice.
+defined = set(symbols)
+for symbol in symbols:
     match = re.match(r"^(_\$s7SwiftUI\d+[A-Za-z_0-9]*?[VCO])AAE(.+)$", symbol)
-    if match:
+    if match and match.group(1) + match.group(2) not in defined:
         pairs.append((symbol, match.group(1) + match.group(2)))
 def demangled(names):
     output = subprocess.run(["xcrun", "swift-demangle", "--compact"], input="\n".join(names),

@@ -320,6 +320,29 @@ final class NSFileManager: NSObject {
         moveItem(atPath: FileManagers.path(source.url), toPath: FileManagers.path(destination.url), error: errorPointer)
     }
 
+    /// Puts the new item in the original's place: the original, if there
+    /// is one, is removed (or kept under the backup name beside it), and
+    /// the new item moved there. The resulting URL is the original's.
+    @ObjCMethod("replaceItemAtURL:withItemAtURL:backupItemName:options:resultingItemURL:error:")
+    func replaceItem(at original: NSURL, withItemAt new: NSURL, backupItemName: String?, options: UInt,
+                     resultingItemURL: UnsafeMutablePointer<id?>?, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
+        let (target, source) = (FileManagers.path(original.url), FileManagers.path(new.url))
+        if files.fileExists(atPath: target) {
+            if let backupItemName {
+                let directory = target.lastIndex(of: "/").map { String(target[..<$0]) } ?? "."
+                let backup = directory + "/" + backupItemName
+                _ = try? files.removeItem(atPath: backup)
+                guard moveItem(atPath: target, toPath: backup, error: errorPointer) else { return false }
+            } else {
+                guard removeItem(atPath: target, error: errorPointer) else { return false }
+            }
+        }
+        guard moveItem(atPath: source, toPath: target, error: errorPointer) else { return false }
+        // Autoreleased, as a result given through a pointer is.
+        resultingItemURL?.pointee = ObjCRuntime.autorelease(ObjCRuntime.retain(original.objcObject))
+        return true
+    }
+
     @ObjCMethod("destinationOfSymbolicLinkAtPath:error:")
     func destinationOfSymbolicLink(atPath path: String?, error errorPointer: UnsafeMutablePointer<id?>?) -> String? {
         guard let path else { return nil }
@@ -522,6 +545,20 @@ final class NSFileManager: NSObject {
             guard createDirectory(atPath: path, intermediates: true, attributes: nil, error: errorPointer) else { return nil }
         }
         return URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory))
+    }
+
+    /// The temporary directory, as NSTemporaryDirectory() names it.
+    @ObjCMethod("temporaryDirectory")
+    func temporaryDirectory() -> NSURL? {
+        var path = getenv("TMPDIR").map { String(cString: $0) } ?? "/tmp/"
+        if !path.hasSuffix("/") { path += "/" }
+        return URLs.wrapped(URL(filePath: path, directoryHint: .isDirectory))
+    }
+
+    /// The user's home directory.
+    @ObjCMethod("homeDirectoryForCurrentUser")
+    func homeDirectoryForCurrentUser() -> NSURL? {
+        URLs.wrapped(URL(filePath: getenv("HOME").map { String(cString: $0) } ?? "/", directoryHint: .isDirectory))
     }
 }
 

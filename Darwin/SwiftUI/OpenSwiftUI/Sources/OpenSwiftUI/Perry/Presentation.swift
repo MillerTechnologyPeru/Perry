@@ -340,7 +340,7 @@ extension View {
 @available(OpenSwiftUI_v4_0, *)
 public struct PresentationDetent: Hashable, Sendable {
     enum Identifier: Hashable, Sendable {
-        case medium, large, fraction(CGFloat), height(CGFloat)
+        case medium, large, fraction(CGFloat), height(CGFloat), custom(ObjectIdentifier)
     }
 
     var identifier: Identifier

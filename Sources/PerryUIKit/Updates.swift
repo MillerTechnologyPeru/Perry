@@ -188,8 +188,19 @@ enum Snapshot {
     /// transform, its layer's z position, frame where that differs and class
     /// where it has one of its own, an image view's image and whether it
     /// is hidden.
+    /// An object's class by its description, or by the runtime's name for
+    /// it when the description gives none (a generic Swift class's).
+    static func className(_ object: UnsafeMutableRawPointer) -> String {
+        guard let cls = ObjCRuntime.objectClass(object) else { return "?" }
+        if let name = NSObject(cls).describedByObject() { return name }
+        typealias GetName = @convention(c) (UnsafeMutableRawPointer) -> UnsafePointer<CChar>?
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: 0), "_class_getName") ?? dlsym(UnsafeMutableRawPointer(bitPattern: 0), "class_getName"),
+              let name = unsafeBitCast(symbol, to: GetName.self)(cls) else { return "?" }
+        return String(cString: name)
+    }
+
     private static func describe(_ view: UIView, depth: Int, into tree: inout String) {
-        let name = ObjCRuntime.objectClass(view.objcObject).flatMap { NSObject($0).describedByObject() } ?? "?"
+        let name = className(view.objcObject)
         let frame = view.state.frame
         tree += String(repeating: "  ", count: depth) + "\(name) (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))"
         let origin = view.state.bounds.origin

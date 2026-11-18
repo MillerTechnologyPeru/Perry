@@ -48,11 +48,25 @@ public protocol PreferenceKey {
     /// Defaults to false. If true `_includesRemovedValues` should be
     /// false.
     static var _isReadableByHost: Bool { get }
+
+    /// Perry: whether two values of the preference are the same, as
+    /// SwiftUI's newer protocol asks its keys. Nothing here calls it yet.
+    static func _preferenceValuesEqual(_ lhs: Value, _ rhs: Value) -> Bool
 }
 
 extension PreferenceKey where Value: ExpressibleByNilLiteral {
     /// Let nil-expressible values default-initialize to nil.
     public static var defaultValue: Value { Value(nilLiteral: ()) }
+}
+
+extension PreferenceKey {
+    /// Values that cannot be compared count as different.
+    public static func _preferenceValuesEqual(_ lhs: Value, _ rhs: Value) -> Bool { false }
+}
+
+extension PreferenceKey where Value: Equatable {
+    /// Equatable values compare with `==`.
+    public static func _preferenceValuesEqual(_ lhs: Value, _ rhs: Value) -> Bool { lhs == rhs }
 }
 
 extension PreferenceKey {

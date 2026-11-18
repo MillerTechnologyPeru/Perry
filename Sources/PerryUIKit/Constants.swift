@@ -85,6 +85,11 @@ enum FontDescriptorKeys {
     static let UIFontDescriptorSizeAttribute = "NSFontSizeAttribute"
     static let UIFontDescriptorTraitsAttribute = "NSCTFontTraitsAttribute"
     static let UIFontDescriptorCharacterSetAttribute = "NSCTFontCharacterSetAttribute"
+    // The system font's designs, as -fontDescriptorWithDesign: takes them.
+    static let UIFontDescriptorSystemDesignDefault = "NSCTFontUIFontDesignDefault"
+    static let UIFontDescriptorSystemDesignRounded = "NSCTFontUIFontDesignRounded"
+    static let UIFontDescriptorSystemDesignSerif = "NSCTFontUIFontDesignSerif"
+    static let UIFontDescriptorSystemDesignMonospaced = "NSCTFontUIFontDesignMonospaced"
     static let UIFontDescriptorCascadeListAttribute = "NSCTFontCascadeListAttribute"
     static let UIFontWeightTrait = "NSCTFontWeightTrait"
     static let UIFontWidthTrait = "NSCTFontProportionTrait"

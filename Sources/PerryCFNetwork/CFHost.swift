@@ -18,3 +18,24 @@ public func CFHostGetAddressing(_ host: UnsafeMutableRawPointer?, _ hasBeenResol
     hasBeenResolved?.pointee = 0
     return nil
 }
+
+/// A client for a host's resolution: none is set, as there is no host.
+@c(_CFHostSetClient)
+public func CFHostSetClient(_ host: UnsafeMutableRawPointer?, _ callback: UnsafeMutableRawPointer?, _ context: UnsafeMutableRawPointer?) -> Bool {
+    false
+}
+
+@c(_CFHostScheduleWithRunLoop)
+public func CFHostScheduleWithRunLoop(_ host: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {}
+
+@c(_CFHostUnscheduleFromRunLoop)
+public func CFHostUnscheduleFromRunLoop(_ host: UnsafeMutableRawPointer?, _ runLoop: UnsafeMutableRawPointer?, _ mode: UnsafeMutableRawPointer?) {}
+
+@c(_CFHostCancelInfoResolution)
+public func CFHostCancelInfoResolution(_ host: UnsafeMutableRawPointer?, _ info: Int32) {}
+
+@c(_CFHostGetNames)
+public func CFHostGetNames(_ host: UnsafeMutableRawPointer?, _ hasBeenResolved: UnsafeMutablePointer<UInt8>?) -> UnsafeMutableRawPointer? {
+    hasBeenResolved?.pointee = 0
+    return nil
+}
