@@ -249,7 +249,7 @@ void carbon_target_free(carbon_target *target);
 
 /// Sends a command (a menu item's, a control's) to a target: the user
 /// focus's when NULL.
-OSStatus carbon_process_command(uint32_t command, void *menu, uint16_t item, carbon_target *target);
+OSStatus carbon_process_command(uint32_t command, void *control, void *menu, uint16_t item, carbon_target *target);
 
 /// The application is asked to quit (Quit in its menu).
 OSStatus carbon_quit_requested(void);
