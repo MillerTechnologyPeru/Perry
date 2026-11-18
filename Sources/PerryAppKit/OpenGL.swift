@@ -2,6 +2,7 @@ import CPerryGeometry
 import Glibc
 import PerryObjCInterop
 import SDL3Swift
+import CSDL3
 
 // NSOpenGLPixelFormat, NSOpenGLContext and NSOpenGLView, over SDL's OpenGL
 // contexts. A window showing an NSOpenGLView has no SDL renderer: the
@@ -41,6 +42,12 @@ open class NSOpenGLPixelFormat: NSObject {
     @ObjCMethod("getValues:forAttribute:forVirtualScreen:")
     func getValues(_ values: UnsafeMutablePointer<Int32>?, attribute: UInt32, screen: Int) {
         values?.pointee = value(attribute) ?? 0
+    }
+
+    /// What of the format makes the surface: windows made for formats of
+    /// the same kind take each other's contexts.
+    var surfaceKind: [Int32] {
+        [attributes[5] != nil ? 1 : 0, value(12) ?? 16, value(13) ?? 0, value(11) ?? 0, value(55) ?? 0, value(56) ?? 0]
     }
 
     /// SDL's attributes for the next context and window to have this format.
@@ -192,7 +199,9 @@ open class NSOpenGLContext: NSObject {
         }
     }
     /// For contexts made current before their view has a window.
-    nonisolated(unsafe) private static var holdingWindow: SDLWindow?
+    /// Hidden windows for contexts without a view yet, one for each kind
+    /// of surface: a context draws only to a window made for its format.
+    nonisolated(unsafe) private static var holdingWindows: [[Int32]: SDLWindow] = [:]
 
     var format: NSOpenGLPixelFormat?
     var shared: NSOpenGLContext?
@@ -218,11 +227,14 @@ open class NSOpenGLContext: NSObject {
             window.prepareForOpenGL(format)
             if let sdlWindow = window.sdlWindow { return sdlWindow }
         }
-        if let window = Self.holdingWindow { return window }
+        GLAttributes.lock()
+        defer { GLAttributes.unlock() }
+        let kind = format?.surfaceKind ?? []
+        if let window = Self.holdingWindows[kind] { return window }
         format?.applyToSDL()
         do {
             let window = try SDLWindow(title: "", width: 16, height: 16, options: [.opengl, .hidden])
-            Self.holdingWindow = window
+            Self.holdingWindows[kind] = window
             return window
         } catch {
             appKitWarning("SDL could not make a window for OpenGL: \(error)")
@@ -244,14 +256,17 @@ open class NSOpenGLContext: NSObject {
         }
         if resumed { return }
         if context == nil {
+            GLAttributes.lock()
+            defer { GLAttributes.unlock() }
             format?.applyToSDL()
             let sharing = shared?.context != nil
             if sharing, let other = shared?.context { _ = Self.bind(other, to: window) }
             try? SDL.glSetAttribute(.shareWithCurrentContext, sharing ? 1 : 0)
             do {
                 context = try SDLGLContext(window: window)
+                Trace.log("OpenGL: context \(context.map { String(describing: $0.unsafePointer) } ?? "nil") of \(Unmanaged.passUnretained(self).toOpaque()) for window \(window.id) on thread \(pthread_self()), surface \(format?.surfaceKind ?? []), sharing with \(shared.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "none") (\(shared?.context.map { String(describing: $0.unsafePointer) } ?? "no context"))")
             } catch {
-                appKitWarning("SDL could not make an OpenGL context: \(error)")
+                appKitWarning("SDL could not make an OpenGL context for window \(window.id), surface \(format?.surfaceKind ?? []), sharing: \(sharing): \(error)")
             }
             try? SDL.glSetSwapInterval(swapInterval)
         }
@@ -471,5 +486,34 @@ enum BlockingRelease {
         }
         unsafeBitCast(set, to: Set.self)({ NSOpenGLContext.releaseParked() })
         self.arm = unsafeBitCast(arm, to: Arm.self)
+    }
+}
+
+/// SDL's OpenGL attributes are the process's: each window, renderer or
+/// context is made with them while no other thread sets them, as a game
+/// making its context on its own thread while the main thread makes a
+/// window's renderer would otherwise have the renderer's.
+enum GLAttributes {
+    nonisolated(unsafe) private static let mutex: UnsafeMutablePointer<pthread_mutex_t> = {
+        let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(mutex, nil)
+        return mutex
+    }()
+
+    static func lock() { pthread_mutex_lock(mutex) }
+    static func unlock() { pthread_mutex_unlock(mutex) }
+}
+
+/// The thread's current OpenGL context, which AppKit's own drawing (SDL's
+/// renderers, whose contexts SDL makes current) leaves as it found it: a
+/// program's context stays current on a Mac until it says otherwise.
+enum GLCurrent {
+    static func preserving<T>(_ body: () throws -> T) rethrows -> T {
+        let context = SDL_GL_GetCurrentContext()
+        let window = SDL_GL_GetCurrentWindow()
+        defer {
+            if SDL_GL_GetCurrentContext() != context { _ = SDL_GL_MakeCurrent(window, context) }
+        }
+        return try body()
     }
 }
