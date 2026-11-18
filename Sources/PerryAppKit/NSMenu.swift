@@ -295,6 +295,10 @@ open class NSMenuItem: NSObject {
     @ObjCMethod("setImage:") func setImage(_ image: NSObject?) { self.image = image }
     @ObjCMethod("setOnStateImage:") func setOnStateImage(_ image: NSObject?) {}
     @ObjCMethod("setOffStateImage:") func setOffStateImage(_ image: NSObject?) {}
+    @ObjCMethod("setMixedStateImage:") func setMixedStateImage(_ image: NSObject?) {}
+    @ObjCMethod("onStateImage") func onStateImage() -> NSObject? { nil }
+    @ObjCMethod("offStateImage") func offStateImage() -> NSObject? { nil }
+    @ObjCMethod("mixedStateImage") func mixedStateImage() -> NSObject? { nil }
     @ObjCMethod("toolTip") func itemToolTip() -> String? { toolTip }
     @ObjCMethod("setToolTip:") func setToolTip(_ toolTip: String?) { self.toolTip = toolTip }
     @ObjCMethod("indentationLevel") func itemIndentationLevel() -> Int { indentationLevel }
