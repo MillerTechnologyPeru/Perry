@@ -356,11 +356,32 @@ extension NSDecimal {
         self = Decimal(value)._c
     }
 
+    public init(_ value: Int) {
+        self = Decimal(value)._c
+    }
+
+    public init(_ value: UInt64) {
+        self = Decimal(value)._c
+    }
+
+    public var isNaN: Bool { Decimal(self).isNaN }
+    public var isZero: Bool { Decimal(self).isZero }
+    public var isFinite: Bool { Decimal(self).isFinite }
+    public var magnitude: NSDecimal { Decimal(self).magnitude._c }
+
+    public static func - (lhs: NSDecimal, rhs: NSDecimal) -> NSDecimal { (Decimal(lhs) - Decimal(rhs))._c }
+    public static func * (lhs: NSDecimal, rhs: NSDecimal) -> NSDecimal { (Decimal(lhs) * Decimal(rhs))._c }
+    public static func / (lhs: NSDecimal, rhs: NSDecimal) -> NSDecimal { (Decimal(lhs) / Decimal(rhs))._c }
+
     public init?(string: __shared String, locale: __shared Locale? = nil) {
         guard let value = Decimal(string: string, locale: locale) else { return nil }
         self = value._c
     }
 }
+
+/// A decimal raised to a whole power.
+@available(*, unavailable)
+public func pow(_ x: NSDecimal, _ y: Int) -> NSDecimal { pow(Decimal(x), y)._c }
 
 @available(*, unavailable)
 extension NSDecimal: CustomStringConvertible {
