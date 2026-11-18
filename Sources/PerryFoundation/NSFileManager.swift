@@ -69,6 +69,15 @@ enum FileAttributes {
     static let NSFileSystemNodes = "NSFileSystemNodes"
     static let NSFileSystemFreeNodes = "NSFileSystemFreeNodes"
     static let NSFileSystemNumber = "NSFileSystemNumber"
+    static let NSFileSystemFileNumber = "NSFileSystemFileNumber"
+    static let NSFileOwnerAccountName = "NSFileOwnerAccountName"
+    static let NSFileOwnerAccountID = "NSFileOwnerAccountID"
+    static let NSFileGroupOwnerAccountName = "NSFileGroupOwnerAccountName"
+    static let NSFileGroupOwnerAccountID = "NSFileGroupOwnerAccountID"
+    static let NSFileTypeCharacterSpecial = "NSFileTypeCharacterSpecial"
+    static let NSFileTypeBlockSpecial = "NSFileTypeBlockSpecial"
+    static let NSFileTypeSocket = "NSFileTypeSocket"
+    static let NSFileTypeUnknown = "NSFileTypeUnknown"
 }
 
 /// NSFileManager.
