@@ -1,8 +1,12 @@
+import Glibc
 import PerryObjCInterop
 
 /// GKErrorDomain's codes: the player is not signed in to Game Center.
 enum GameErrors {
     static let domain = "GKErrorDomain"
+    /// The player turned the operation down, as one who declined to sign in
+    /// has; and no player is signed in.
+    static let cancelled = 2
     static let notAuthenticated = 6
 
     static func make(_ code: Int) -> NSError { NSError.make(domain: domain, code: code, userInfo: nil) }
@@ -48,9 +52,13 @@ open class GKPlayer: GKBasePlayer {
     @ObjCMethod("scopedIDsArePersistent") func scopedIDsArePersistent() -> Bool { false }
 }
 
-/// The local player, never signed in: the sign-in handler is kept and
-/// never called, as on a device whose Game Center sign-in is still to
-/// come, so a game neither shows a sign-in screen nor reports an error.
+/// The local player, never signed in: the sign-in handler is called once,
+/// later on the main queue, with no view controller to show and the error
+/// of a player who has turned Game Center's sign-in down, as on a device
+/// where it is switched off. A game that waits for the answer before its
+/// title goes on then plays without Game Center.
+/// PERRY_GAMEKIT_SIGN_IN=pending keeps the handler and never calls it, as
+/// while a sign-in is still to come.
 @ObjCClass("GKLocalPlayer")
 open class GKLocalPlayer: GKPlayer {
     nonisolated(unsafe) static var shared: GKLocalPlayer?
@@ -71,8 +79,27 @@ open class GKLocalPlayer: GKPlayer {
     @ObjCMethod("isMultiplayerGamingRestricted") func isMultiplayerGamingRestricted() -> Bool { true }
     @ObjCMethod("isPersonalizedCommunicationRestricted") func isPersonalizedCommunicationRestricted() -> Bool { true }
     @ObjCMethod("authenticateHandler") func authenticateHandler() -> ObjCBlock? { handler }
-    @ObjCMethod("setAuthenticateHandler:") func setAuthenticateHandler(_ handler: ObjCBlock?) { self.handler = handler }
-    @ObjCMethod("authenticateWithCompletionHandler:") func authenticate(completionHandler: ObjCBlock?) {}
+    nonisolated(unsafe) static let signInPending = getenv("PERRY_GAMEKIT_SIGN_IN").map { String(cString: $0) == "pending" } ?? false
+
+    @ObjCMethod("setAuthenticateHandler:") func setAuthenticateHandler(_ handler: ObjCBlock?) {
+        self.handler = handler
+        guard let handler, !GKLocalPlayer.signInPending else { return }
+        // ^(UIViewController *viewController, NSError *error)
+        Dispatch.onMain {
+            handler.function(as: (@convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?,
+                                                  UnsafeMutableRawPointer?) -> Void).self)(
+                handler.object, nil, GameErrors.make(GameErrors.cancelled).objcObject)
+        }
+    }
+
+    /// iOS 5's sign-in: its handler is given the same error.
+    @ObjCMethod("authenticateWithCompletionHandler:") func authenticate(completionHandler: ObjCBlock?) {
+        guard let completionHandler, !GKLocalPlayer.signInPending else { return }
+        Dispatch.onMain {
+            completionHandler.function(as: (@convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void).self)(
+                completionHandler.object, GameErrors.make(GameErrors.cancelled).objcObject)
+        }
+    }
     @ObjCMethod("registerListener:") func registerListener(_ listener: NSObject?) {}
     @ObjCMethod("unregisterListener:") func unregisterListener(_ listener: NSObject?) {}
     @ObjCMethod("unregisterAllListeners") func unregisterAllListeners() {}
