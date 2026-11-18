@@ -159,6 +159,7 @@ public struct ToolbarItemPlacement {
         case automatic, principal, navigation, primaryAction, secondaryAction, status
         case confirmationAction, cancellationAction, destructiveAction, keyboard
         case navigationBarLeading, navigationBarTrailing, bottomBar
+        case subtitle, hidden
     }
 
     var role: Role
@@ -186,7 +187,7 @@ public struct ToolbarItemPlacement {
         switch role {
         case .navigation, .navigationBarLeading, .cancellationAction: .leading
         case .principal: .principal
-        case .keyboard, .bottomBar, .status: nil
+        case .keyboard, .bottomBar, .status, .subtitle, .hidden: nil
         default: .trailing
         }
     }
