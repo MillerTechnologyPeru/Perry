@@ -12,6 +12,11 @@ extension NSObject {
     @ObjCMethod("description")
     func objectDescription() -> String { "<\(ObjC.className(objcObject)): \(objcObject)>" }
 
+    /// The name of the object's class, from Foundation's scripting
+    /// additions (Xcode 3 names its assistants' defaults by it).
+    @ObjCMethod("className")
+    func objectClassName() -> String { ObjC.className(objcObject) }
+
     /// A class describes itself by its name.
     @ObjCClassMethod("description")
     static func classDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
