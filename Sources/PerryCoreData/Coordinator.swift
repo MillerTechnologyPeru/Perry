@@ -98,6 +98,8 @@ final class CoordinatorState: ObjectState {
     var model: NSManagedObjectModel?
     var stores: [NSPersistentStore] = []
     var name: String?
+    /// The queue -performBlock: runs blocks on, made when first needed.
+    lazy var queue = SerialQueue()
 }
 
 enum StoreErrors {
@@ -165,6 +167,18 @@ open class NSPersistentStoreCoordinator: NSObject {
     @ObjCMethod("persistentStores") func persistentStores() -> NSObject { NSMutableArray.of(state.stores) }
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
+
+    /// Runs the block later, on the coordinator's own serial queue.
+    @ObjCMethod("performBlock:")
+    func perform(_ block: ObjCBlock) {
+        state.queue.async { ObjCRuntime.autoreleasepool { Blocks.call(block) } }
+    }
+
+    /// Runs the block now, on the calling thread, as a context does.
+    @ObjCMethod("performBlockAndWait:")
+    func performAndWait(_ block: ObjCBlock) {
+        ObjCRuntime.autoreleasepool { Blocks.call(block) }
+    }
 
     /// Adds a store: SQLite at the URL's path, any other type in memory.
     @ObjCMethod("addPersistentStoreWithType:configuration:URL:options:error:")
@@ -250,6 +264,10 @@ open class NSPersistentStoreCoordinator: NSObject {
     /// Metadata for a store not open isn't kept.
     @ObjCClassMethod("setMetadata:forPersistentStoreOfType:URL:error:")
     static func setMetadata(_ metadata: NSObject?, ofType type: String?, url: NSURL?,
+                            error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool { true }
+
+    @ObjCClassMethod("setMetadata:forPersistentStoreOfType:URL:options:error:")
+    static func setMetadata(_ metadata: NSObject?, ofType type: String?, url: NSURL?, options: NSObject?,
                             error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool { true }
 
     @ObjCMethod("removePersistentStore:error:")

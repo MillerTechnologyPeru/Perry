@@ -171,6 +171,10 @@ open class NSManagedObjectModel: NSObject {
 
     @ObjCMethod("fetchRequestTemplateForName:") func fetchRequestTemplate(forName name: String?) -> NSObject? { nil }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSManagedObjectModel { self }
+    /// Stores keep no entity version hashes here, and CoreModel-SQLite
+    /// adds tables a model gains, so every store's metadata is compatible.
+    @ObjCMethod("isConfiguration:compatibleWithStoreMetadata:")
+    func isConfiguration(_ configuration: String?, compatibleWithStoreMetadata metadata: NSObject?) -> Bool { true }
 
     /// The model for CoreModel's stores.
     var coreModel: Model {

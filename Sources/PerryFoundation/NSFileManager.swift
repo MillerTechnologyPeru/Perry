@@ -2,6 +2,7 @@ import CPerryFoundation
 import FoundationEssentials
 import Glibc
 import PerryObjCInterop
+import Synchronization
 
 /// NSFileManager over swift-foundation's FileManager.
 enum FileManagers {
@@ -93,6 +94,22 @@ final class NSFileManager: NSObject {
 
     @ObjCClassMethod("defaultManager")
     static func defaultManager() -> UnsafeMutableRawPointer? { FileManagers.defaultManager }
+
+    /// Each manager's delegate, not retained. It is kept for -delegate to
+    /// return; the delegate is not asked whether to copy, move or remove.
+    private static let delegates = Mutex<[UInt: UInt]>([:])
+
+    @ObjCMethod("delegate")
+    func delegate() -> UnsafeMutableRawPointer? {
+        let manager = UInt(bitPattern: objcObject)
+        return UnsafeMutableRawPointer(bitPattern: NSFileManager.delegates.withLock { $0[manager] ?? 0 })
+    }
+
+    @ObjCMethod("setDelegate:")
+    func setDelegate(_ delegate: UnsafeMutableRawPointer?) {
+        let manager = UInt(bitPattern: objcObject), value = delegate.map { UInt(bitPattern: $0) }
+        NSFileManager.delegates.withLock { $0[manager] = value }
+    }
 
     /// No path names no file.
     /// A path's bytes on disk, UTF-8 here: kept as the string's own, which

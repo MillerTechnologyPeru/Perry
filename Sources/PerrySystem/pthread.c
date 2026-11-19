@@ -981,6 +981,15 @@ int darwin_pthread_attr_setschedparam(pthread_attr_t *attributes, const void *pa
     return parameters ? 0 : 22;
 }
 
+// __pthread_workqueue_setkill: whether pthread_kill may signal the calling
+// workqueue thread. Perry's dispatch threads are plain threads that
+// pthread_kill always reaches, so the setting is accepted and changes nothing.
+int darwin___pthread_workqueue_setkill(int enable) DARWIN_SYMBOL(__pthread_workqueue_setkill);
+int darwin___pthread_workqueue_setkill(int enable) {
+    (void)enable;
+    return 0;
+}
+
 // Quality-of-service classes, which Linux has no counterpart for: accepted
 // and ignored, as a thread's priority already is.
 int darwin_pthread_set_qos_class_self_np(unsigned int qos, int relative_priority) DARWIN_SYMBOL(pthread_set_qos_class_self_np);

@@ -390,6 +390,15 @@ public final class NSURL: NSObject {
     @ObjCMethod("URLByDeletingPathExtension")
     func deletingPathExtension() -> NSURL? { URLs.wrapped(url.deletingPathExtension()) }
 
+    /// A file URL with its symbolic links resolved where the path exists;
+    /// any other URL as it is.
+    @ObjCMethod("URLByResolvingSymlinksInPath")
+    func resolvingSymlinksInPath() -> NSURL? { URLs.wrapped(url.isFileURL ? url.resolvingSymlinksInPath() : url) }
+
+    /// The path with . and .. taken out.
+    @ObjCMethod("URLByStandardizingPath")
+    func standardizingPath() -> NSURL? { URLs.wrapped(url.standardized) }
+
     // MARK: Comparing
 
     @ObjCMethod("description") func description() -> String { url.absoluteString }

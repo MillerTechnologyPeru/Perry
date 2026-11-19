@@ -116,6 +116,9 @@ open class NSURLRequest: NSObject {
     @ObjCMethod("allowsConstrainedNetworkAccess") func allowsConstrainedNetworkAccess() -> Bool { true }
     @ObjCMethod("networkServiceType") func networkServiceType() -> UInt { UInt(request.networkServiceType) }
     @ObjCMethod("assumesHTTP3Capable") func assumesHTTP3Capable() -> Bool { false }
+    /// Who a request is made for, the developer (0) or the user (1): only
+    /// privacy reports read it, and there are none, so it isn't kept.
+    @ObjCMethod("attribution") func attribution() -> UInt { 0 }
 
     /// A copy is of the request's own class, as CFNetwork's is: a mutable
     /// request's copy is mutable, which Swift's URLRequest relies on.
@@ -184,6 +187,7 @@ open class NSURLRequest: NSObject {
 open class NSMutableURLRequest: NSURLRequest {
     @ObjCMethod("setURL:") func setURL(_ url: NSURL?) { request.url = url?.url }
     @ObjCMethod("setHTTPMethod:") func setHTTPMethod(_ method: String?) { request.method = method ?? "GET" }
+    @ObjCMethod("setAttribution:") func setAttribution(_ attribution: UInt) {}
 
     @ObjCMethod("setAllHTTPHeaderFields:")
     func setAllHTTPHeaderFields(_ fields: NSDictionary?) { request.headers = fields?.strings }

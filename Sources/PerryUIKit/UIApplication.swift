@@ -205,6 +205,10 @@ open class UIApplication: UIResponder {
     @ObjCMethod("setNetworkActivityIndicatorVisible:") func setNetworkActivityIndicatorVisible(_ visible: Bool) {}
     @ObjCMethod("applicationIconBadgeNumber") func applicationIconBadgeNumber() -> Int { 0 }
     @ObjCMethod("setApplicationIconBadgeNumber:") func setApplicationIconBadgeNumber(_ number: Int) {}
+    /// There is no home screen icon to change: the primary icon is always
+    /// shown (a nil name).
+    @ObjCMethod("supportsAlternateIcons") func supportsAlternateIcons() -> Bool { false }
+    @ObjCMethod("alternateIconName") func alternateIconName() -> NSObject? { nil }
     /// Home screen quick actions, which have no home screen to show on.
     @ObjCMethod("shortcutItems") func shortcutItems() -> NSObject? { Application.shortcutItems }
     @ObjCMethod("setShortcutItems:") func setShortcutItems(_ items: NSObject?) {

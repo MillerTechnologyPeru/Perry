@@ -9,7 +9,7 @@ import PerryObjCInterop
 // the layer's sublayers in the same order.
 
 /// A registration for trait changes (iOS 17): the handler or the target's
-/// action is called when the view's traits change.
+/// action is called when the view's or view controller's traits change.
 final class TraitObserver {
     let token: NSObject
     let block: ObjCBlock?
@@ -19,10 +19,28 @@ final class TraitObserver {
     init(token: NSObject, block: ObjCBlock?, target: NSObject?, action: ObjCSelector?) {
         (self.token, self.block, self.target, self.action) = (token, block, target, action)
     }
+
+    /// Calls each registration for the object whose traits changed: a
+    /// handler with the object and its previous traits, a target's action
+    /// with the object.
+    static func call(_ observers: [TraitObserver], for object: UnsafeMutableRawPointer, previous: UITraitCollection) {
+        for observer in observers {
+            if let block = observer.block {
+                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
+                    block.object, object, previous.objcObject)
+            } else if let target = observer.target, let action = observer.action {
+                typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
+                unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(target.objcObject, action.pointer, object)
+            }
+        }
+    }
 }
 
 final class ViewState: ObjectState {
     var traitObservers: [TraitObserver] = []
+    var focusGroupIdentifier: String?
+    /// The intrinsic content size the constraints were last solved with.
+    var solvedIntrinsicSize: CGSize?
     /// The view's layer, and its properties.
     var layer: CALayer!
     var geometry: LayerGeometry!
@@ -416,14 +434,35 @@ open class UIView: UIResponder, UICoordinateSpace {
     @ObjCMethod("alignmentRectInsets") func alignmentRectInsets() -> UIEdgeInsets { UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
     @ObjCMethod("frameForAlignmentRect:") func frame(forAlignmentRect rect: CGRect) -> CGRect { rect }
     @ObjCMethod("alignmentRectForFrame:") func alignmentRect(forFrame frame: CGRect) -> CGRect { frame }
-    @ObjCMethod("invalidateIntrinsicContentSize") func invalidateIntrinsicContentSize() { setNeedsLayout(); superviewNeedsLayout() }
+    /// The constraints are solved again, unless the size is the one they
+    /// were last solved with: a view that invalidates it as it is laid out
+    /// would else be laid out again and again.
+    @ObjCMethod("invalidateIntrinsicContentSize")
+    func invalidateIntrinsicContentSize() {
+        if let solved = state.solvedIntrinsicSize {
+            let size = sendIntrinsicContentSize()
+            if size.width == solved.width, size.height == solved.height { return }
+        }
+        state.solvedIntrinsicSize = nil
+        setNeedsLayout()
+        superviewNeedsLayout()
+    }
     @ObjCMethod("intrinsicContentSize") func intrinsicContentSizeOfView() -> CGSize { CGSize(width: -1, height: -1) }
+
+    /// A view without constraints inside: as tall as its content at the
+    /// width (a label's text wrapped to it), else its intrinsic height,
+    /// else its own.
+    private func unconstrainedHeight(width: CGFloat) -> CGFloat {
+        if let label = self.as(UILabel.self) { return label.sizeThatFits(CGSize(width: width, height: 0)).height }
+        let intrinsic = sendIntrinsicContentSize()
+        return intrinsic.height >= 0 ? intrinsic.height : state.bounds.height
+    }
 
     /// The width given, and the least height the constraints allow there.
     @ObjCMethod("systemLayoutSizeFittingSize:")
     func systemLayoutSizeFitting(_ size: CGSize) -> CGSize {
         let width = size.width > 0 ? size.width : state.bounds.width
-        let fitted = CGSize(width: width, height: AutoLayout.fittingHeight(self, width: width) ?? state.bounds.height)
+        let fitted = CGSize(width: width, height: AutoLayout.fittingHeight(self, width: width) ?? unconstrainedHeight(width: width))
         if CollectionTrace.enabled {
             let line = "perry: fitting size of \(describedByObject() ?? "?") for \(size) is \(fitted), bounds \(state.bounds.size)\n"
             _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
@@ -564,6 +603,7 @@ open class UIView: UIResponder, UICoordinateSpace {
             view.callTraitObservers(previous)
             if let controller = view.state.viewController {
                 NSObject(controller).sendTraitCollectionDidChange(previous)
+                UIViewController.wrap(controller).callTraitObservers(previous)
             }
             pending.append(contentsOf: view.state.subviews)
         }
@@ -578,6 +618,12 @@ open class UIView: UIResponder, UICoordinateSpace {
         overrides.overrides.viewOwner = self
         return overrides
     }
+
+    /// The focus group a keyboard's focus moves within: there is no focus
+    /// system here, so it's kept only for the getter.
+    @ObjCMethod("focusGroupIdentifier") func focusGroupIdentifier() -> String? { state.focusGroupIdentifier }
+    @ObjCMethod("setFocusGroupIdentifier:")
+    func setFocusGroupIdentifier(_ identifier: String?) { state.focusGroupIdentifier = identifier }
 
     // MARK: Trait change registrations
 
@@ -603,15 +649,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// Calls the registrations made for any trait: a change of the traits
     /// here is of the appearance alone.
     func callTraitObservers(_ previous: UITraitCollection) {
-        for observer in state.traitObservers {
-            if let block = observer.block {
-                block.function(as: (@convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void).self)(
-                    block.object, objcObject, previous.objcObject)
-            } else if let target = observer.target, let action = observer.action {
-                typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?) -> Void
-                unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(target.objcObject, action.pointer, objcObject)
-            }
-        }
+        TraitObserver.call(state.traitObservers, for: objcObject, previous: previous)
     }
 
     @ObjCMethod("isHidden") func isHidden() -> Bool { state.hidden }
@@ -778,16 +816,22 @@ open class UIView: UIResponder, UICoordinateSpace {
         insert(view, at: state.subviews.count)
     }
 
+    // A nil view inserts nothing, as addSubview: does.
     @ObjCMethod("insertSubview:atIndex:")
-    func insertSubview(_ view: UIView, at index: Int) { insert(view, at: index) }
+    func insertSubview(_ view: UIView?, at index: Int) {
+        guard let view else { return uikitWarning("-[UIView insertSubview:atIndex:] with nil") }
+        insert(view, at: index)
+    }
 
     @ObjCMethod("insertSubview:belowSubview:")
-    func insertSubview(_ view: UIView, below sibling: UIView?) {
+    func insertSubview(_ view: UIView?, below sibling: UIView?) {
+        guard let view else { return uikitWarning("-[UIView insertSubview:belowSubview:] with nil") }
         insert(view, at: sibling.flatMap(index(of:)) ?? 0)
     }
 
     @ObjCMethod("insertSubview:aboveSubview:")
-    func insertSubview(_ view: UIView, above sibling: UIView?) {
+    func insertSubview(_ view: UIView?, above sibling: UIView?) {
+        guard let view else { return uikitWarning("-[UIView insertSubview:aboveSubview:] with nil") }
         insert(view, at: sibling.flatMap(index(of:)).map { $0 + 1 } ?? state.subviews.count)
     }
 
@@ -1115,7 +1159,8 @@ open class UIView: UIResponder, UICoordinateSpace {
     /// PERRY_UIKIT_LAYOUT_TRACE: every second in which views were laid
     /// out, how many times each class's were, the most first, and which
     /// views were marked as needing layout while which were being laid
-    /// out, to find a layout that keeps asking for another.
+    /// out, to find a layout that keeps asking for another; the first time
+    /// each pair is seen, the return addresses of the calls that marked it.
     enum LayoutTrace {
         static let enabled = getenv("PERRY_UIKIT_LAYOUT_TRACE") != nil
         nonisolated(unsafe) static var counts: [String: Int] = [:]
@@ -1157,7 +1202,25 @@ open class UIView: UIResponder, UICoordinateSpace {
 
         /// A view that didn't need layout was marked as needing it.
         static func marked(_ view: UIView) {
-            marks["\(name(view)) during \(layingOut.last ?? "no layout")", default: 0] += 1
+            let key = "\(name(view)) during \(layingOut.last ?? "no layout")"
+            if marks[key] == nil, !reported.contains(key), view.state.superview != nil || layingOut.last == name(view) {
+                reported.insert(key)
+                uikitWarning("layout marked \(key), by:\n\(callers())")
+            }
+            marks[key, default: 0] += 1
+        }
+
+        /// The marks whose callers were written: each once.
+        nonisolated(unsafe) static var reported: Set<String> = []
+
+        /// The return addresses of the calls that led here, a line each
+        /// (glibc's backtrace, looked up as it has no Swift import).
+        static func callers() -> String {
+            typealias Backtrace = @convention(c) (UnsafeMutablePointer<UnsafeMutableRawPointer?>?, Int32) -> Int32
+            guard let symbol = dlsym(dlopen(nil, RTLD_NOW), "backtrace") else { return "  (no backtrace)" }
+            var frames = [UnsafeMutableRawPointer?](repeating: nil, count: 24)
+            let count = Int(unsafeBitCast(symbol, to: Backtrace.self)(&frames, Int32(frames.count)))
+            return frames.prefix(count).dropFirst(2).map { "  \(String(describing: $0))" }.joined(separator: "\n")
         }
     }
 

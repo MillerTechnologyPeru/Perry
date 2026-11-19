@@ -409,8 +409,11 @@ open class UILabel: UIView {
     @ObjCMethod("text") func text() -> String? { label.text }
 
     /// Plain text replaces an attributed one.
+    /// The same text again changes nothing, as on iOS, so a layout that
+    /// sets it doesn't ask for another.
     @ObjCMethod("setText:")
     func setText(_ text: String?) {
+        if label.attributedText == nil, label.text == text { return }
         label.attributedText = nil
         setPlainText(text)
     }
@@ -421,17 +424,38 @@ open class UILabel: UIView {
         superviewNeedsLayout()
     }
 
-    @ObjCMethod("attributedText") func attributedText() -> NSObject? { label.attributedText }
+    /// The attributed text set, or as on iOS the plain text with the
+    /// label's font, color and alignment, which apps measure the label by.
+    @ObjCMethod("attributedText")
+    func attributedText() -> NSObject? {
+        if let attributed = label.attributedText { return attributed }
+        guard let text = label.text else { return nil }
+        let attributes = NSMutableDictionary.empty()
+        attributes.set(font, forKey: "NSFont")
+        attributes.set(textColor(), forKey: "NSColor")
+        let paragraph = NSMutableParagraphStyle.objCClass.object.newInstance().unsafeCast(to: NSMutableParagraphStyle.self)
+        paragraph.setAlignment(label.textAlignment)
+        paragraph.setLineBreakMode(label.lineBreakMode)
+        attributes.set(paragraph, forKey: "NSParagraphStyle")
+        return ObjCClass(named: "NSAttributedString").object.allocated().sendInitialize(string: text, attributes: attributes)
+    }
 
     /// Its string becomes the text.
     @ObjCMethod("setAttributedText:")
     func setAttributedText(_ text: NSObject?) {
+        if let text, let current = label.attributedText,
+           current.objcObject == text.objcObject || current.sendIsEqual(text) { return }
         label.attributedText = text
         setPlainText(text?.sendString())
     }
 
     @ObjCMethod("font") func fontObject() -> UIFont { font }
-    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { label.font = font; setNeedsDisplay(); superviewNeedsLayout() }
+    @ObjCMethod("setFont:") func setFont(_ font: UIFont?) {
+        if let font, let current = label.font, current.objcObject == font.objcObject || current.sendIsEqual(font) { return }
+        label.font = font
+        setNeedsDisplay()
+        superviewNeedsLayout()
+    }
     @ObjCMethod("textColor")
     func textColor() -> UIColor { firstAttributes?.object(forKey: "NSColor")?.as(UIColor.self) ?? label.textColor ?? UIColor.label() }
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { label.textColor = color; setNeedsDisplay() }
@@ -440,7 +464,12 @@ open class UILabel: UIView {
     @ObjCMethod("textAlignment") func textAlignment() -> Int { label.textAlignment }
     @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { label.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("numberOfLines") func numberOfLines() -> Int { label.numberOfLines }
-    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) { label.numberOfLines = lines; setNeedsDisplay(); superviewNeedsLayout() }
+    @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) {
+        guard lines != label.numberOfLines else { return }
+        label.numberOfLines = lines
+        setNeedsDisplay()
+        superviewNeedsLayout()
+    }
     @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { label.lineBreakMode }
     @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { label.lineBreakMode = mode }
     @ObjCMethod("adjustsFontSizeToFitWidth") func adjustsFontSizeToFitWidth() -> Bool { label.adjustsFontSizeToFitWidth }

@@ -83,6 +83,7 @@ enum AutoLayout {
         func addIntrinsicSize(_ item: Item) {
             let view = item.view
             var size = view.sendIntrinsicContentSize()
+            view.state.solvedIntrinsicSize = size
             if let label = view.as(UILabel.self), label.label.numberOfLines != 1 {
                 // As wide as its text unwrapped (or its preferred width), as
                 // tall as the text wraps to at the width it has, measured

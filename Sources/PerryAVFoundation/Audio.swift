@@ -333,6 +333,8 @@ open class AVAudioSession: NSObject {
     func setPreferredOutputNumberOfChannels(_ count: Int, error: ErrorOut) -> Bool { true }
     @ObjCMethod("inputAvailable") func inputAvailable() -> Bool { false }
     @ObjCMethod("isInputAvailable") func isInputAvailable() -> Bool { false }
+    /// With no input, recording is denied: AVAudioSessionRecordPermissionDenied, 'deny'.
+    @ObjCMethod("recordPermission") func recordPermission() -> UInt { 0x6465_6E79 }
     @ObjCMethod("delegate") func delegate() -> NSObject? { session.delegate.map { NSObject($0) } }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { session.delegate = delegate?.objcObject }
 

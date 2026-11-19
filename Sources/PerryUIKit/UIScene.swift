@@ -234,6 +234,13 @@ open class UIWindowScene: UIScene {
     /// The orientation the interface is in, the screen's.
     @ObjCMethod("interfaceOrientation") func interfaceOrientation() -> Int { Screen.orientation }
 
+    /// The limits on a resizable scene's size: none, as an iPhone's scene
+    /// can't be resized.
+    @ObjCMethod("sizeRestrictions") func sizeRestrictions() -> NSObject? { nil }
+
+    /// The device's traits, in the system's appearance.
+    @ObjCMethod("traitCollection") func traitCollection() -> UITraitCollection { UITraitCollection.device() }
+
     /// The one screen, which the scene fills.
     @ObjCMethod("screen") func screen() -> UIScreen { UIScreen.mainScreen() }
 
