@@ -22,6 +22,12 @@ open class UIRefreshControl: UIControl {
         super.dealloc()
     }
 
+    /// The designated initializer, as on iOS: it sets the control up as a
+    /// view of no size itself, not through -initWithFrame:, which a subclass
+    /// that declares only -init does not implement.
+    @ObjCMethod("init")
+    override func initialize() -> NSObject { initialize(frame: .zero) }
+
     @ObjCMethod("isRefreshing") func isRefreshing() -> Bool { refreshState.refreshing }
     @ObjCMethod("beginRefreshing") func beginRefreshing() { refreshState.refreshing = true }
     @ObjCMethod("endRefreshing") func endRefreshing() { refreshState.refreshing = false }
