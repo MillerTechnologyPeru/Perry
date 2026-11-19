@@ -172,6 +172,28 @@ extension UIKit.UIMutableTraits {
 
 @available(iOS 17.0, tvOS 17.0, *)
 @available(watchOS, unavailable)
+public struct UITraitUserInterfaceIdiom : UIKit.UITraitDefinition {
+  public static let defaultValue: UIUserInterfaceIdiom = .unspecified
+  public static let name: Swift.String = "UserInterfaceIdiom"
+  public static let identifier: Swift.String = "UITraitUserInterfaceIdiom"
+  public static let affectsColorAppearance: Swift.Bool = false
+  public static let _defaultValueRepresentsUnspecified: Swift.Bool = true
+  public static let _isPrivate: Swift.Bool = false
+  @available(iOS 17.0, tvOS 17.0, *)
+  @available(watchOS, unavailable)
+  public typealias Value = UIUserInterfaceIdiom
+}
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
+extension UIKit.UIMutableTraits {
+  public var userInterfaceIdiom: UIUserInterfaceIdiom {
+    get { self[UITraitUserInterfaceIdiom.self] }
+    set { self[UITraitUserInterfaceIdiom.self] = newValue }
+  }
+}
+
+@available(iOS 17.0, tvOS 17.0, *)
+@available(watchOS, unavailable)
 public struct UITraitLayoutDirection : UIKit.UITraitDefinition {
   public static let defaultValue: UITraitEnvironmentLayoutDirection = .unspecified
   public static let name: Swift.String = "LayoutDirection"
@@ -445,6 +467,9 @@ extension UITraitCollection {
     if let scale = changed[UITraitDisplayScale.identifier] as? CoreFoundation.CGFloat, scale > 0 {
       collections.append(UITraitCollection(displayScale: scale))
     }
+    if let idiom = changed[UITraitUserInterfaceIdiom.identifier] as? UIUserInterfaceIdiom {
+      collections.append(UITraitCollection(userInterfaceIdiom: idiom))
+    }
     if let size = changed[UITraitHorizontalSizeClass.identifier] as? UIUserInterfaceSizeClass {
       collections.append(UITraitCollection(horizontalSizeClass: size))
     }
@@ -518,6 +543,7 @@ extension UITraitCollection {
     case UITraitUserInterfaceStyle.identifier: value = userInterfaceStyle
     case UITraitLayoutDirection.identifier: value = layoutDirection
     case UITraitDisplayScale.identifier: value = displayScale
+    case UITraitUserInterfaceIdiom.identifier: value = userInterfaceIdiom
     case UITraitHorizontalSizeClass.identifier: value = horizontalSizeClass
     case UITraitVerticalSizeClass.identifier: value = verticalSizeClass
     case UITraitPreferredContentSizeCategory.identifier: value = preferredContentSizeCategory
