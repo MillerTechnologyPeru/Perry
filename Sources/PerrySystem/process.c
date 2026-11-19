@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/auxv.h>
+#include <time.h>
 #include <ucontext.h>
 #include <unistd.h>
 
@@ -469,6 +470,22 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         char build[16];
         snprintf(build, sizeof(build), "%d%c100", mac.darwin, 'A' + (mac.minor % 26));
         return sysctl_string(old, old_length, build);
+    }
+    if (strcmp(name, "kern.boottime") == 0) {
+        // When the system started: now less the time since boot, as Darwin's
+        // struct timeval (a long's seconds, then 32-bit microseconds).
+        struct timespec now, up;
+        clock_gettime(CLOCK_REALTIME, &now);
+        clock_gettime(CLOCK_BOOTTIME, &up);
+        int64_t microseconds = ((int64_t)now.tv_sec - up.tv_sec) * 1000000 + (now.tv_nsec - up.tv_nsec) / 1000;
+        struct { long seconds; int32_t microseconds; } boot = {
+            (long)(microseconds / 1000000), (int32_t)(microseconds % 1000000)
+        };
+        if (boot.microseconds < 0) {
+            boot.seconds -= 1;
+            boot.microseconds += 1000000;
+        }
+        return sysctl_value(old, old_length, &boot, sizeof(boot));
     }
     if (strcmp(name, "kern.hostname") == 0) {
         char host[256] = "localhost";
