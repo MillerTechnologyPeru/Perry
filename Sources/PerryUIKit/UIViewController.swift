@@ -22,6 +22,9 @@ enum Appearance {
 
 final class ViewControllerState: ObjectState {
     var view: UIView?
+    /// registerForTraitChanges: registrations, called when the view's
+    /// appearance changes.
+    var traitObservers: [TraitObserver] = []
     /// The view a nib holds with the controller itself, as nibs from before
     /// storyboards do: the controller's view when it is first asked for.
     var archivedView: UIView?
@@ -363,6 +366,37 @@ open class UIViewController: UIResponder {
     /// or its view's, or its parent's.
     @ObjCMethod("traitCollection")
     func traitCollection() -> UITraitCollection { UITraitCollection.device(style: interfaceStyle) }
+
+    // MARK: Trait change registrations
+
+    @ObjCMethod("registerForTraitChanges:withHandler:")
+    func registerForTraitChanges(_ traits: NSObject?, withHandler handler: ObjCBlock) -> NSObject {
+        let token = ObjCClass(named: "NSObject").object.newInstance()
+        state.traitObservers.append(TraitObserver(token: token, block: handler, target: nil, action: nil))
+        return token
+    }
+
+    @ObjCMethod("registerForTraitChanges:withTarget:action:")
+    func registerForTraitChanges(_ traits: NSObject?, withTarget target: NSObject?, action: ObjCSelector?) -> NSObject {
+        let token = ObjCClass(named: "NSObject").object.newInstance()
+        state.traitObservers.append(TraitObserver(token: token, block: nil, target: target, action: action))
+        return token
+    }
+
+    /// The target-action form with the controller as the target.
+    @ObjCMethod("registerForTraitChanges:withAction:")
+    func registerForTraitChanges(_ traits: NSObject?, withAction action: ObjCSelector?) -> NSObject {
+        registerForTraitChanges(traits, withTarget: NSObject(objcObject), action: action)
+    }
+
+    @ObjCMethod("unregisterForTraitChanges:")
+    func unregisterForTraitChanges(_ token: NSObject?) {
+        state.traitObservers.removeAll { $0.token.objcObject == token?.objcObject }
+    }
+
+    func callTraitObservers(_ previous: UITraitCollection) {
+        TraitObserver.call(state.traitObservers, for: objcObject, previous: previous)
+    }
 
     var interfaceStyle: Int {
         if state.userInterfaceStyle != 0 { return state.userInterfaceStyle }
