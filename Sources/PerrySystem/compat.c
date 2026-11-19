@@ -583,7 +583,8 @@ void darwin_srandomdev(void) { srandom(arc4random()); }
 
 // MARK: - sysctl
 
-enum { CTL_KERN = 1, CTL_HW = 6, CTL_USER = 8, USER_CS_PATH = 1, KERN_OSTYPE = 1, KERN_OSRELEASE = 2, KERN_PROC = 14, KERN_OSVERSION = 65,
+enum { CTL_KERN = 1, CTL_HW = 6, CTL_USER = 8, USER_CS_PATH = 1, KERN_OSTYPE = 1, KERN_OSRELEASE = 2, KERN_PROC = 14, KERN_BOOTTIME = 21,
+       KERN_OSVERSION = 65,
        HW_MACHINE = 1, HW_MODEL = 2, HW_NCPU = 3, HW_PHYSMEM = 5, HW_PAGESIZE = 7, HW_MEMSIZE = 24, HW_AVAILCPU = 25 };
 
 int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const void *new_value, size_t new_length)
@@ -664,6 +665,7 @@ int darwin_sysctl(const int *names, unsigned count, void *old, size_t *old_lengt
         case KERN_OSTYPE: name = "kern.ostype"; break;
         case KERN_OSRELEASE: name = "kern.osrelease"; break;
         case KERN_OSVERSION: name = "kern.osversion"; break;
+        case KERN_BOOTTIME: name = "kern.boottime"; break;
         case KERN_PROC: {
             // struct kinfo_proc is 648 bytes on arm64, 492 on armv7.
             if (!old_length)
