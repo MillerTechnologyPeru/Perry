@@ -371,7 +371,11 @@ open class UIColor: NSObject {
     @ObjCClassMethod("systemGroupedBackgroundColor") static func systemGroupedBackground() -> UIColor { dynamic((242, 242, 247, 1), (0, 0, 0, 1)) }
     @ObjCClassMethod("groupTableViewBackgroundColor") static func groupTableViewBackground() -> UIColor { systemGroupedBackground() }
     @ObjCClassMethod("secondarySystemGroupedBackgroundColor") static func secondarySystemGroupedBackground() -> UIColor { dynamic((255, 255, 255, 1), (28, 28, 30, 1)) }
+    @ObjCClassMethod("tertiarySystemGroupedBackgroundColor") static func tertiarySystemGroupedBackground() -> UIColor { dynamic((242, 242, 247, 1), (44, 44, 46, 1)) }
     @ObjCClassMethod("systemFillColor") static func systemFill() -> UIColor { dynamic((120, 120, 128, 0.2), (120, 120, 128, 0.36)) }
+    @ObjCClassMethod("secondarySystemFillColor") static func secondarySystemFill() -> UIColor { dynamic((120, 120, 128, 0.16), (120, 120, 128, 0.32)) }
+    @ObjCClassMethod("tertiarySystemFillColor") static func tertiarySystemFill() -> UIColor { dynamic((118, 118, 128, 0.12), (118, 118, 128, 0.24)) }
+    @ObjCClassMethod("quaternarySystemFillColor") static func quaternarySystemFill() -> UIColor { dynamic((116, 116, 128, 0.08), (118, 118, 128, 0.18)) }
 
     // MARK: Components
 
