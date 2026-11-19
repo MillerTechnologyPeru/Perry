@@ -297,7 +297,11 @@ final class Compositor {
         }
         let generation = Compositing.generation
         textures[key] = nil
-        let width = Int((state.bounds.width * scale).rounded(.up)), height = Int((state.bounds.height * scale).rounded(.up))
+        // A layer laid out to a size that is not a number, or is endless,
+        // has nothing to draw (and Int() of it would trap).
+        let pixels = (state.bounds.width * scale, state.bounds.height * scale)
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return }
+        let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
         guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
         defer { CG.release(context) }
         if state.mask != nil {
@@ -460,7 +464,11 @@ final class Compositor {
             return entry.texture
         }
         textures[key] = nil
-        let width = Int((state.bounds.width * scale).rounded(.up)), height = Int((state.bounds.height * scale).rounded(.up))
+        // A layer laid out to a size that is not a number, or is endless,
+        // has nothing to draw (and Int() of it would trap).
+        let pixels = (state.bounds.width * scale, state.bounds.height * scale)
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
         // A layer showing only what it drew, at the display's scale: its
         // backing's pixels are the texture's, without drawing them again.
         if !border, let texture = backingTexture(of: layer, state: state, shape: shape, width: width, height: height) {
