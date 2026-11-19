@@ -499,7 +499,7 @@ open class NSWindow: NSResponder {
     /// nothing.
     @ObjCMethod("setFrameFromString:")
     func setFrame(from string: String?) {
-        let numbers = (string ?? "").split(separator: " ").compactMap { Double($0) }
+        let numbers = (string ?? "").split(separator: " ").compactMap { Double($0).map { CGFloat($0) } }
         guard numbers.count >= 4, numbers[2] > 0, numbers[3] > 0 else { return }
         place(CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3]))
     }
