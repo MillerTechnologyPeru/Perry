@@ -14,6 +14,11 @@ open class CTTelephonyNetworkInfo: NSObject {
     @ObjCMethod("subscriberCellularProviderDidUpdateNotifier") func subscriberCellularProviderDidUpdateNotifier() -> NSObject? { nil }
     @ObjCMethod("setSubscriberCellularProviderDidUpdateNotifier:")
     func setSubscriberCellularProviderDidUpdateNotifier(_ notifier: NSObject?) {}
+    /// With no SIM no provider changes, so the per-service notifier is never called.
+    @ObjCMethod("serviceSubscriberCellularProvidersDidUpdateNotifier")
+    func serviceSubscriberCellularProvidersDidUpdateNotifier() -> NSObject? { nil }
+    @ObjCMethod("setServiceSubscriberCellularProvidersDidUpdateNotifier:")
+    func setServiceSubscriberCellularProvidersDidUpdateNotifier(_ notifier: NSObject?) {}
 }
 
 /// No calls are ever in progress.
