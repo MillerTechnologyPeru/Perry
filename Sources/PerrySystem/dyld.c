@@ -50,17 +50,40 @@ void perry_provider_image_map(const perry_image_info *image) {
     free(callbacks);
 }
 
+// The table is read under its lock: another thread mapping an image moves
+// it (realloc) and shifts its entries.
 uint32_t darwin_dyld_image_count(void) DARWIN_SYMBOL(_dyld_image_count);
-uint32_t darwin_dyld_image_count(void) { return image_count; }
+uint32_t darwin_dyld_image_count(void) {
+    pthread_mutex_lock(&lock);
+    uint32_t count = image_count;
+    pthread_mutex_unlock(&lock);
+    return count;
+}
 
 const void *darwin_dyld_get_image_header(uint32_t index) DARWIN_SYMBOL(_dyld_get_image_header);
-const void *darwin_dyld_get_image_header(uint32_t index) { return index < image_count ? images[index].header : NULL; }
+const void *darwin_dyld_get_image_header(uint32_t index) {
+    pthread_mutex_lock(&lock);
+    const void *header = index < image_count ? images[index].header : NULL;
+    pthread_mutex_unlock(&lock);
+    return header;
+}
 
 intptr_t darwin_dyld_get_image_vmaddr_slide(uint32_t index) DARWIN_SYMBOL(_dyld_get_image_vmaddr_slide);
-intptr_t darwin_dyld_get_image_vmaddr_slide(uint32_t index) { return index < image_count ? images[index].slide : 0; }
+intptr_t darwin_dyld_get_image_vmaddr_slide(uint32_t index) {
+    pthread_mutex_lock(&lock);
+    intptr_t slide = index < image_count ? images[index].slide : 0;
+    pthread_mutex_unlock(&lock);
+    return slide;
+}
 
+// Paths are never freed, so the one returned stays valid.
 const char *darwin_dyld_get_image_name(uint32_t index) DARWIN_SYMBOL(_dyld_get_image_name);
-const char *darwin_dyld_get_image_name(uint32_t index) { return index < image_count ? images[index].path : NULL; }
+const char *darwin_dyld_get_image_name(uint32_t index) {
+    pthread_mutex_lock(&lock);
+    const char *path = index < image_count ? images[index].path : NULL;
+    pthread_mutex_unlock(&lock);
+    return path;
+}
 
 void darwin_dyld_register_func_for_add_image(image_callback callback) DARWIN_SYMBOL(_dyld_register_func_for_add_image);
 void darwin_dyld_register_func_for_add_image(image_callback callback) {
@@ -93,11 +116,17 @@ void darwin_dyld_register_func_for_remove_image(image_callback callback) {
 // The executable's header: the image whose file type is MH_EXECUTE.
 const void *darwin_NSGetMachExecuteHeader(void) DARWIN_SYMBOL(_NSGetMachExecuteHeader);
 const void *darwin_NSGetMachExecuteHeader(void) {
+    pthread_mutex_lock(&lock);
+    const void *found = image_count ? images[0].header : NULL;
     for (uint32_t i = 0; i < image_count; i++) {
         const uint32_t *header = images[i].header;
-        if (header && header[3] == 2) return header;
+        if (header && header[3] == 2) {
+            found = header;
+            break;
+        }
     }
-    return image_count ? images[0].header : NULL;
+    pthread_mutex_unlock(&lock);
+    return found;
 }
 
 // MARK: - Sections
