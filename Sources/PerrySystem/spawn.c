@@ -4,7 +4,8 @@
 // flags both systems have (reset IDs, set the process group, set signals'
 // defaults, set the signal mask) are kept, Darwin's own (set exec, start
 // suspended, close on exec by default) are not, and signal sets are
-// renumbered. A Mac program to spawn runs under Perry, as this one does.
+// renumbered. A Mac program to spawn, or to exec, runs under Perry, as
+// this one does.
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
@@ -177,34 +178,34 @@ static char *resolve(const char *name, int search) {
     return strdup(name);
 }
 
+// Perry's own path, and an argument list that has it run `path` with
+// `argv`'s arguments after the first: perry <path> <arguments>.
+static char **loader_arguments(const char *path, char *const argv[], char *loader, size_t size) {
+    ssize_t length = readlink("/proc/self/exe", loader, size - 1);
+    if (length <= 0) return NULL;
+    loader[length] = 0;
+    size_t count = 0;
+    while (argv && argv[count]) count++;
+    char **arguments = calloc(count + 3, sizeof *arguments);
+    if (!arguments) return NULL;
+    arguments[0] = loader;
+    arguments[1] = (char *)path;
+    for (size_t index = 1; index < count; index++) arguments[index + 1] = argv[index];
+    return arguments;
+}
+
 static int spawn(pid_t *pid, const char *name, void **actions, void **attributes, char *const argv[], char *const envp[], int search) {
     char *path = resolve(name, search);
     int status;
     if (is_macho(path)) {
         // Perry itself runs it: perry <path> <its arguments>.
-        size_t count = 0;
-        while (argv && argv[count]) count++;
-        char **arguments = calloc(count + 2, sizeof *arguments);
-        if (!arguments) {
-            free(path);
-            return ENOMEM;
-        }
-        arguments[0] = path;
-        for (size_t index = 1; index < count; index++) arguments[index] = argv[index];
-        if (count == 0) count = 1;
         char loader[4096];
-        ssize_t length = readlink("/proc/self/exe", loader, sizeof loader - 1);
-        if (length <= 0) {
-            free(arguments);
+        char **arguments = loader_arguments(path, argv, loader, sizeof loader);
+        if (!arguments) {
             free(path);
             return ENOEXEC;
         }
-        loader[length] = 0;
-        char **with_loader = calloc(count + 2, sizeof *with_loader);
-        with_loader[0] = loader;
-        for (size_t index = 0; index < count; index++) with_loader[index + 1] = arguments[index];
-        status = posix_spawn(pid, loader, actions ? *actions : NULL, attributes ? *attributes : NULL, with_loader, envp);
-        free(with_loader);
+        status = posix_spawn(pid, loader, actions ? *actions : NULL, attributes ? *attributes : NULL, arguments, envp);
         free(arguments);
     } else {
         status = posix_spawn(pid, path, actions ? *actions : NULL, attributes ? *attributes : NULL, argv, envp);
@@ -224,3 +225,46 @@ int darwin_posix_spawnp(pid_t *pid, const char *file, void **actions, void **att
 int darwin_posix_spawnp(pid_t *pid, const char *file, void **actions, void **attributes, char *const argv[], char *const envp[]) {
     return spawn(pid, file, actions, attributes, argv, envp, 1);
 }
+
+// MARK: - Exec
+
+extern char **environ;
+
+// The exec family: a Mac program replaces this one with Perry running it
+// (Xcode's gcc driver runs the compiler for the architecture this way);
+// anything else, as the system execs it.
+static int exec(const char *name, char *const argv[], char *const envp[], int search) {
+    char *path = resolve(name, search);
+    if (is_macho(path)) {
+        char loader[4096];
+        char **arguments = loader_arguments(path, argv, loader, sizeof loader);
+        if (!arguments) {
+            free(path);
+            errno = ENOEXEC;
+            return -1;
+        }
+        execve(loader, arguments, envp);
+        int error = errno;
+        free(arguments);
+        free(path);
+        errno = error;
+        return -1;
+    }
+    execve(path, argv, envp);
+    int error = errno;
+    // A file found on PATH that isn't a program at all is run by the shell,
+    // as execvp does.
+    if (search && error == ENOEXEC) execvp(name, argv);
+    free(path);
+    errno = error;
+    return -1;
+}
+
+int darwin_execv(const char *path, char *const argv[]) DARWIN_SYMBOL(execv);
+int darwin_execv(const char *path, char *const argv[]) { return exec(path, argv, environ, 0); }
+
+int darwin_execve(const char *path, char *const argv[], char *const envp[]) DARWIN_SYMBOL(execve);
+int darwin_execve(const char *path, char *const argv[], char *const envp[]) { return exec(path, argv, envp, 0); }
+
+int darwin_execvp(const char *file, char *const argv[]) DARWIN_SYMBOL(execvp);
+int darwin_execvp(const char *file, char *const argv[]) { return exec(file, argv, environ, 1); }

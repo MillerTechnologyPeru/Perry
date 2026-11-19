@@ -119,7 +119,7 @@
 
 // MARK: - stdio
 VARIADIC _printf, vprintf, 1
-VARIADIC _fprintf, vfprintf, 2
+VARIADIC _fprintf, _vfprintf, 2
 VARIADIC _dprintf, vdprintf, 2
 VARIADIC _sprintf, perry_vsprintf, 2
 VARIADIC _snprintf, perry_vsnprintf, 3
@@ -128,7 +128,7 @@ VARIADIC _ioctl, perry_ioctl, 2
 VARIADIC _asl_log, perry_asl_log, 4
 VARIADIC _asprintf, vasprintf, 2
 VARIADIC _scanf, vscanf, 1
-VARIADIC _fscanf, vfscanf, 2
+VARIADIC _fscanf, _vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
 VARIADIC _swscanf, vswscanf, 2
 VARIADIC ___sprintf_chk, perry_vsprintf_chk, 4
@@ -216,28 +216,7 @@ ___chkstk_darwin:
 
 PASSTHROUGH _puts, puts
 PASSTHROUGH _putchar, putchar
-PASSTHROUGH _fputs, fputs
-PASSTHROUGH _fputc, fputc
-PASSTHROUGH _putc, putc
-PASSTHROUGH _fgetc, fgetc
-PASSTHROUGH _getc, getc
 PASSTHROUGH _getchar, getchar
-PASSTHROUGH _fgets, fgets
-PASSTHROUGH _ungetc, ungetc
-PASSTHROUGH _fwrite, fwrite
-PASSTHROUGH _fread, fread
-PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fopen, perry_fopen
-PASSTHROUGH _fdopen, fdopen
-PASSTHROUGH _fileno, fileno
-PASSTHROUGH _feof, feof
-PASSTHROUGH _ferror, ferror
-PASSTHROUGH _clearerr, clearerr
-PASSTHROUGH _rewind, rewind
-PASSTHROUGH _setvbuf, setvbuf
-PASSTHROUGH _getline, getline
-PASSTHROUGH _flockfile, flockfile
-PASSTHROUGH _funlockfile, funlockfile
 
 // MARK: - string
 PASSTHROUGH _strlen, strlen
@@ -358,8 +337,6 @@ PASSTHROUGH _fork, fork
 // vfork as fork: the child gets its own copy, which is safe for what a
 // vfork child may do (exec or _exit), where vfork itself shares the stack.
 PASSTHROUGH _vfork, fork
-PASSTHROUGH _execv, execv
-PASSTHROUGH _execve, execve
 PASSTHROUGH _div, div
 PASSTHROUGH _ldiv, ldiv
 PASSTHROUGH _ldexpf, ldexpf
@@ -369,7 +346,6 @@ PASSTHROUGH _basename, __xpg_basename
 PASSTHROUGH _dirname, dirname
 PASSTHROUGH _alarm, alarm
 PASSTHROUGH _getdtablesize, getdtablesize
-PASSTHROUGH _setbuf, setbuf
 PASSTHROUGH _setuid, setuid
 PASSTHROUGH _setgid, setgid
 PASSTHROUGH _waitpid, waitpid
@@ -397,7 +373,6 @@ PASSTHROUGH __Unwind_GetCFA, _Unwind_GetCFA
 PASSTHROUGH __Unwind_GetDataRelBase, _Unwind_GetDataRelBase
 PASSTHROUGH __Unwind_GetTextRelBase, _Unwind_GetTextRelBase
 PASSTHROUGH __Unwind_FindEnclosingFunction, _Unwind_FindEnclosingFunction
-PASSTHROUGH "_fopen$DARWIN_EXTSN", perry_fopen
 PASSTHROUGH _acosf, acosf
 PASSTHROUGH _atanf, atanf
 PASSTHROUGH _frexp, frexp
@@ -410,13 +385,9 @@ PASSTHROUGH ___exp10f, exp10f
 PASSTHROUGH ___exp10, exp10
 PASSTHROUGH _bcopy, bcopy
 PASSTHROUGH _difftime, difftime
-PASSTHROUGH _fseek, fseek
-PASSTHROUGH _ftell, ftell
 PASSTHROUGH _localtime, localtime
 PASSTHROUGH _gmtime, gmtime
 PASSTHROUGH _mktime, mktime
-PASSTHROUGH _fseeko, fseeko
-PASSTHROUGH _ftello, ftello
 PASSTHROUGH _remove, remove
 PASSTHROUGH _system, system
 PASSTHROUGH _isdigit, isdigit
@@ -681,7 +652,6 @@ PASSTHROUGH _ctime, ctime
 PASSTHROUGH _asctime, asctime
 PASSTHROUGH _closelog, closelog
 PASSTHROUGH _openlog, openlog
-PASSTHROUGH _execvp, execvp
 PASSTHROUGH _wait4, wait4
 PASSTHROUGH _pause, pause
 PASSTHROUGH _posix_madvise, posix_madvise

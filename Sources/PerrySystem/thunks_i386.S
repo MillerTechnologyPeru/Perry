@@ -71,7 +71,7 @@ VARIADIC _sprintf, _vsprintf, 2
 VARIADIC _snprintf, _vsnprintf, 3
 VARIADIC _asprintf, _vasprintf, 2
 VARIADIC _scanf, vscanf, 1
-VARIADIC _fscanf, vfscanf, 2
+VARIADIC _fscanf, _vfscanf, 2
 VARIADIC _sscanf, vsscanf, 2
 VARIADIC _syslog, _vsyslog, 2
 VARIADIC _ioctl, perry_ioctl, 2
@@ -84,28 +84,7 @@ VARIADIC ___sprintf_chk, ___vsprintf_chk, 4
 VARIADIC ___snprintf_chk, ___vsnprintf_chk, 5
 PASSTHROUGH _puts, puts
 PASSTHROUGH _putchar, putchar
-PASSTHROUGH _fputs, fputs
-PASSTHROUGH _fputc, fputc
-PASSTHROUGH _putc, putc
-PASSTHROUGH _fgetc, fgetc
-PASSTHROUGH _getc, getc
 PASSTHROUGH _getchar, getchar
-PASSTHROUGH _fgets, fgets
-PASSTHROUGH _ungetc, ungetc
-PASSTHROUGH _fwrite, fwrite
-PASSTHROUGH _fread, fread
-PASSTHROUGH _fflush, fflush
-PASSTHROUGH _fopen, perry_fopen
-PASSTHROUGH _fdopen, fdopen
-PASSTHROUGH _fileno, fileno
-PASSTHROUGH _feof, feof
-PASSTHROUGH _ferror, ferror
-PASSTHROUGH _clearerr, clearerr
-PASSTHROUGH _rewind, rewind
-PASSTHROUGH _setvbuf, setvbuf
-PASSTHROUGH _getline, getline
-PASSTHROUGH _flockfile, flockfile
-PASSTHROUGH _funlockfile, funlockfile
 PASSTHROUGH _strlen, strlen
 PASSTHROUGH _strnlen, strnlen
 PASSTHROUGH _strcmp, strcmp
@@ -159,14 +138,10 @@ PASSTHROUGH _atoll, atoll
 PASSTHROUGH _backtrace, backtrace
 PASSTHROUGH _backtrace_symbols, backtrace_symbols
 PASSTHROUGH _bcopy, bcopy
-PASSTHROUGH _execv, execv
-PASSTHROUGH _execve, execve
 PASSTHROUGH _exit, exit
 PASSTHROUGH _flock, flock
 PASSTHROUGH _fork, fork
 PASSTHROUGH _vfork, fork
-PASSTHROUGH _fseek, fseek
-PASSTHROUGH _ftell, ftell
 PASSTHROUGH _getdomainname, getdomainname
 PASSTHROUGH _getegid, getegid
 PASSTHROUGH _geteuid, geteuid
@@ -302,7 +277,6 @@ PASSTHROUGH _fputws, fputws
 PASSTHROUGH _rindex, rindex
 PASSTHROUGH _setlogmask, setlogmask
 PASSTHROUGH _swscanf, swscanf
-PASSTHROUGH _tmpfile, tmpfile
 
 // MARK: - setjmp
 //

@@ -63,3 +63,11 @@ int darwin_iconvctl(iconv_t cd, int request, void *argument) {
         return -1;
     }
 }
+
+// GNU libiconv's relocation, which programs built with it call to say where
+// its data is: glibc's iconv has none to move.
+void darwin_libiconv_set_relocation_prefix(const char *original, const char *current) DARWIN_SYMBOL(libiconv_set_relocation_prefix);
+void darwin_libiconv_set_relocation_prefix(const char *original, const char *current) {
+    (void)original;
+    (void)current;
+}

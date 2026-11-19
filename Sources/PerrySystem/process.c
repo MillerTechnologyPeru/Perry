@@ -361,6 +361,47 @@ static int sysctl_string(void *old, size_t *old_length, const char *value) {
     return sysctl_value(old, old_length, value, strlen(value) + 1);
 }
 
+// A program built for Mac OS X 10.4 to 10.6 (its LC_VERSION_MIN_MACOSX's SDK)
+// sees that system: its Darwin release and build, which kern.osrelease and
+// kern.osversion give (10.6.8 is Darwin 10.8.0, build 10K549), as Xcode 3's
+// compilers find the system's version from them. NULL for other programs.
+typedef struct { int major, minor; const char *release, *build; } perry_legacy_release;
+
+static const perry_legacy_release *legacy_release(void) {
+    static const perry_legacy_release releases[] = {
+        { 10, 4, "8.11.1", "8S2167" },
+        { 10, 5, "9.8.0", "9L31a" },
+        { 10, 6, "10.8.0", "10K549" },
+    };
+    const uint8_t *header = perry_system_main_header;
+    if (!header) return NULL;
+    uint32_t count = *(const uint32_t *)(header + 16);
+    const uint8_t *command = header + (*(const uint32_t *)header == 0xfeedface ? 28 : 32);
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t cmd = *(const uint32_t *)command, size = *(const uint32_t *)(command + 4);
+        // LC_VERSION_MIN_MACOSX: the least system (xxxx.yy.zz in nibbles),
+        // then the SDK, which is 0 for the oldest binaries.
+        if (cmd == 0x24) {
+            uint32_t sdk = *(const uint32_t *)(command + 12);
+            if (!sdk) sdk = *(const uint32_t *)(command + 8);
+            int major = (int)(sdk >> 16), minor = (int)((sdk >> 8) & 0xff);
+            for (size_t index = 0; index < sizeof releases / sizeof *releases; index++)
+                if (releases[index].major == major && releases[index].minor == minor) return &releases[index];
+            return NULL;
+        }
+        // Any other platform's version: not a legacy program.
+        if (cmd == 0x25 || cmd == 0x2f || cmd == 0x30 || cmd == 0x32) return NULL;
+        if (size == 0) break;
+        command += size;
+    }
+#if defined(__x86_64__) || defined(__i386__)
+    // No version at all: Mac OS X 10.5, as NSProcessInfo takes it to be.
+    return &releases[1];
+#else
+    return NULL;
+#endif
+}
+
 // A macOS program's system, from its LC_BUILD_VERSION: the Darwin release
 // of the macOS its SDK is (macOS 26 is Darwin 25, macOS 11 to 15 Darwin
 // 20 to 24) and an Apple-silicon Mac, as apps that check the OS read it
@@ -412,13 +453,16 @@ int darwin_sysctlbyname(const char *name, void *old, size_t *old_length, const v
         return sysctl_string(old, old_length, mac.darwin ? "Mac14,2" : PERRY_HW_MODEL);
     if (strcmp(name, "kern.ostype") == 0)
         return sysctl_string(old, old_length, "Darwin");
+    const perry_legacy_release *legacy = legacy_release();
     if (strcmp(name, "kern.osrelease") == 0) {
+        if (legacy) return sysctl_string(old, old_length, legacy->release);
         if (!mac.darwin) return sysctl_string(old, old_length, "21.0.0");
         char release[16];
         snprintf(release, sizeof(release), "%d.%d.0", mac.darwin, mac.minor);
         return sysctl_string(old, old_length, release);
     }
     if (strcmp(name, "kern.osversion") == 0) {
+        if (legacy) return sysctl_string(old, old_length, legacy->build);
         if (!mac.darwin) return sysctl_string(old, old_length, "19A346");
         // A build number of that release: its Darwin major, a letter for its
         // minor version, and a build.
