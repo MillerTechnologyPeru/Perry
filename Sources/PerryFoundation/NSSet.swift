@@ -190,13 +190,19 @@ public class NSSet: NSObject {
     @ObjCMethod("count")
     func count() -> UInt { UInt(members.count) }
 
+    // The object looked for is taken as it is, not retained and released
+    // as an argument object would be, as CFSet takes it: a class whose
+    // -release removes it from a set (Xcode's XCAttributeDictionary) would
+    // otherwise be removing itself again as each call let it go.
     @ObjCMethod("member:")
-    func member(_ candidate: ObjCObject?) -> ObjCObject? {
-        candidate.flatMap { Sets.storage(objcObject)?.member($0.id) }.map(ObjCObject.init)
+    func member(_ candidate: UnsafeMutableRawPointer?) -> ObjCObject? {
+        candidate.flatMap { Sets.storage(objcObject)?.member($0) }.map(ObjCObject.init)
     }
 
     @ObjCMethod("containsObject:")
-    func contains(_ candidate: ObjCObject?) -> Bool { member(candidate) != nil }
+    func contains(_ candidate: UnsafeMutableRawPointer?) -> Bool {
+        candidate.flatMap { Sets.storage(objcObject)?.member($0) } != nil
+    }
 
     @ObjCMethod("allObjects")
     func allObjects() -> NSArray { Arrays.owned(members) }
@@ -221,13 +227,13 @@ public class NSSet: NSObject {
     @ObjCMethod("isSubsetOfSet:")
     func isSubset(of other: NSSet?) -> Bool {
         guard let other else { return members.isEmpty }
-        return members.allSatisfy { other.contains(ObjCObject($0)) }
+        return members.allSatisfy { other.contains($0) }
     }
 
     @ObjCMethod("intersectsSet:")
     func intersects(_ other: NSSet?) -> Bool {
         guard let other else { return false }
-        return members.contains { other.contains(ObjCObject($0)) }
+        return members.contains { other.contains($0) }
     }
 
     @ObjCMethod("isEqualToSet:")
@@ -317,9 +323,10 @@ public class NSMutableSet: NSSet {
         for member in array?.elements ?? [] { storage.add(member) }
     }
 
+    /// Taken as it is, as -member: takes it.
     @ObjCMethod("removeObject:")
-    func remove(_ member: ObjCObject?) {
-        if let member { storage.remove(member.id) }
+    func remove(_ member: UnsafeMutableRawPointer?) {
+        if let member { storage.remove(member) }
     }
 
     @ObjCMethod("removeAllObjects")
@@ -346,7 +353,7 @@ public class NSMutableSet: NSSet {
 
     @ObjCMethod("intersectSet:")
     func intersect(_ other: NSSet?) {
-        for member in storage.members where !(other?.contains(ObjCObject(member)) ?? false) {
+        for member in storage.members where !(other?.contains(member) ?? false) {
             storage.remove(member)
         }
     }
