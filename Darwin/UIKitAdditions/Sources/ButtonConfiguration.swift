@@ -293,21 +293,31 @@ enum _ButtonConfigurations {
     objc_setAssociatedObject(button, &key, configuration.map(Box.init), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
   }
 
+  /// Sends a state-keyed setter as UIButton implements it, not as a
+  /// subclass overrides it: UIKit does not style a configured button
+  /// through these setters, and some apps' buttons trap in them.
+  private static func setForState(_ button: UIButton, _ name: String, _ value: AnyObject?) {
+    let selector = NSSelectorFromString(name)
+    guard let implementation = class_getMethodImplementation(UIButton.self, selector) else { return }
+    typealias Setter = @convention(c) (AnyObject, Selector, AnyObject?, UInt) -> Void
+    unsafeBitCast(implementation, to: Setter.self)(button, selector, value, UIControl.State.normal.rawValue)
+  }
+
   static func apply(_ configuration: UIButton.Configuration, to button: UIButton) {
     let tint = button.tintColor ?? .systemBlue
     let foreground = configuration.foregroundColor(tint: tint)
     if let title = configuration.resolvedTitle(color: foreground) {
-      button.setAttributedTitle(title, for: .normal)
+      setForState(button, "setAttributedTitle:forState:", title)
     } else {
-      button.setAttributedTitle(nil, for: .normal)
-      button.setTitle(nil, for: .normal)
+      setForState(button, "setAttributedTitle:forState:", nil)
+      setForState(button, "setTitle:forState:", nil)
     }
-    button.setTitleColor(foreground, for: .normal)
+    setForState(button, "setTitleColor:forState:", foreground)
     var image = configuration.image
     if let symbol = configuration.preferredSymbolConfigurationForImage, let configured = image?.applyingSymbolConfiguration(symbol) {
       image = configured
     }
-    button.setImage(image, for: .normal)
+    setForState(button, "setImage:forState:", image)
     button.tintColor = foreground
     button.titleLabel?.lineBreakMode = configuration._titleLineBreakMode
     switch configuration.titleAlignment {
