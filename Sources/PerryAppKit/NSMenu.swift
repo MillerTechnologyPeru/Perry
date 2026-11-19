@@ -136,8 +136,11 @@ open class NSMenu: NSObject {
                 continue
             }
             let name = action.name
+            // An item's own target is asked as it is, as AppKit's
+            // -targetForAction:to:from: returns it: one that forwards
+            // actions (Xcode's action manager) needn't say it responds.
             let receiver = item.target ?? App.shared?.receiver(forAction: name)
-            guard let receiver, Send.responds(receiver, name) else {
+            guard let receiver, item.target != nil || Send.responds(receiver, name) else {
                 item.enabled = false
                 continue
             }
@@ -146,7 +149,7 @@ open class NSMenu: NSObject {
             } else if Send.responds(receiver, "validateUserInterfaceItem:") {
                 item.enabled = Send.bool(receiver, "validateUserInterfaceItem:", item.objcObject)
             } else {
-                item.enabled = true
+                item.enabled = Send.responds(receiver, name)
             }
         }
     }
