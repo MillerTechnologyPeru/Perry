@@ -654,3 +654,9 @@ public func CFRunLoopSourceInvalidate(_ source: UnsafeMutableRawPointer?) {
     guard let storage = Sockets.storage(Sockets.source(source)?.socket) else { return }
     Sockets.unschedule(storage, from: nil)
 }
+
+/// A port another process registered under the name: there are no other
+/// processes here, so none is found, and CoreFoundation returns NULL for
+/// a name nothing has registered.
+@c(_CFMessagePortCreateRemote)
+public func CFMessagePortCreateRemote(_ allocator: UnsafeRawPointer?, _ name: id?) -> id? { nil }
