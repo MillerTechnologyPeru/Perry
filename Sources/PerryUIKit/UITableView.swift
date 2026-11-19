@@ -767,7 +767,7 @@ open class UITableView: UIScrollView {
     /// The delegate's height, else the table's when the section has a
     /// header, else none.
     private func headerHeight(_ section: Int, source: NSObject?, delegate: NSObject?) -> CGFloat {
-        if let delegate, delegate.responds(to: "tableView:heightForHeaderInSection:") {
+        if let delegate, implements(delegate, "tableView:heightForHeaderInSection:") {
             let height = delegate.sendTableView(self, heightForHeaderInSection: section)
             if height >= 0 { return height }
         }
@@ -775,27 +775,38 @@ open class UITableView: UIScrollView {
         if table.sectionHeaderHeight >= 0 { return table.sectionHeaderHeight }
         // UITableViewAutomaticDimension: the delegate's view, sized by its
         // constraints, which is kept to be shown.
-        if let delegate, delegate.responds(to: "tableView:viewForHeaderInSection:"),
+        if let delegate, implements(delegate, "tableView:viewForHeaderInSection:"),
            let view = table.headerViews[section] ?? delegate.sendTableView(self, viewForHeaderInSection: section) {
             table.headerViews[section] = view
             let measured = view.as(UITableViewCell.self)?.cell.contentView ?? view
             if let height = AutoLayout.fittingHeight(measured, width: state.bounds.width) { return height }
+        } else if headerTitle(section, source: source) == nil {
+            // The delegate's method gave no view, and there's no title.
+            return 0
         }
         return 28
     }
 
+    /// Whether the delegate has its own implementation of an optional
+    /// method UITableViewController also has: the controller's own does
+    /// nothing, and is there for a subclass's override to call super.
+    private func implements(_ delegate: NSObject?, _ selector: String) -> Bool {
+        guard let delegate, delegate.responds(to: selector) else { return false }
+        return Methods.overrides(delegate.objcObject, selector, of: UITableViewController.objCClass.pointer)
+    }
+
     private func footerHeight(_ section: Int, source: NSObject?, delegate: NSObject?) -> CGFloat {
-        if let delegate, delegate.responds(to: "tableView:heightForFooterInSection:") {
+        if let delegate, implements(delegate, "tableView:heightForFooterInSection:") {
             let height = delegate.sendTableView(self, heightForFooterInSection: section)
             if height >= 0 { return height }
         }
         guard footerTitle(section, source: source) != nil
-                || (delegate?.responds(to: "tableView:viewForFooterInSection:") ?? false) else { return 0 }
+                || implements(delegate, "tableView:viewForFooterInSection:") else { return 0 }
         return table.sectionFooterHeight >= 0 ? table.sectionFooterHeight : 28
     }
 
     private func hasHeader(_ section: Int, source: NSObject?, delegate: NSObject?) -> Bool {
-        headerTitle(section, source: source) != nil || (delegate?.responds(to: "tableView:viewForHeaderInSection:") ?? false)
+        headerTitle(section, source: source) != nil || implements(delegate, "tableView:viewForHeaderInSection:")
     }
 
     private func headerTitle(_ section: Int, source: NSObject?) -> String? {
@@ -996,7 +1007,7 @@ open class UITableView: UIScrollView {
             let view: UIView
             if let shown = table.visibleHeaders[section] {
                 view = shown
-            } else if let delegate, delegate.responds(to: "tableView:viewForHeaderInSection:"),
+            } else if let delegate, implements(delegate, "tableView:viewForHeaderInSection:"),
                       let custom = table.headerViews.removeValue(forKey: section) ?? delegate.sendTableView(self, viewForHeaderInSection: section) {
                 view = custom
                 table.visibleHeaders[section] = view
@@ -1260,6 +1271,14 @@ open class UITableViewController: UIViewController {
     @ObjCMethod("tableView:numberOfRowsInSection:") func tableView(_ table: UITableView, numberOfRowsInSection section: Int) -> Int { 0 }
     @ObjCMethod("tableView:titleForHeaderInSection:") func tableView(_ table: UITableView, titleForHeaderInSection section: Int) -> String? { nil }
     @ObjCMethod("tableView:titleForFooterInSection:") func tableView(_ table: UITableView, titleForFooterInSection section: Int) -> String? { nil }
+    // UITableViewDelegate's header and footer methods, which a subclass's
+    // overrides call super for: no view, and the table's own heights
+    // (UITableViewAutomaticDimension). The table view treats these as not
+    // implemented.
+    @ObjCMethod("tableView:viewForHeaderInSection:") func tableView(_ table: UITableView, viewForHeaderInSection section: Int) -> UIView? { nil }
+    @ObjCMethod("tableView:viewForFooterInSection:") func tableView(_ table: UITableView, viewForFooterInSection section: Int) -> UIView? { nil }
+    @ObjCMethod("tableView:heightForHeaderInSection:") func tableView(_ table: UITableView, heightForHeaderInSection section: Int) -> CGFloat { -1 }
+    @ObjCMethod("tableView:heightForFooterInSection:") func tableView(_ table: UITableView, heightForFooterInSection section: Int) -> CGFloat { -1 }
 
     /// Clears the selection as the controller appears, when it should.
     @ObjCMethod("viewWillAppear:")
