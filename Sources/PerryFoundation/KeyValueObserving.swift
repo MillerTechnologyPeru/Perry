@@ -363,8 +363,20 @@ extension NSObject {
 
     @ObjCMethod("didChangeValueForKey:")
     func didChangeValue(forKey key: String) {
+        KeyValueObserving.trace("did change \(objcObject) \(ObjC.className(objcObject)) key \(key)")
         KeyValueObserving.didChange(objcObject, key)
         Operations.didChangeValue(objcObject, forKey: key)
+        // An operation's -isReady and -isFinished may depend on other keys
+        // (+keyPathsForValuesAffectingIsFinished naming a state, as the
+        // sample operations of WWDC 2015 and Hulu's do): its queue, which
+        // Darwin has observe them, hears of them changing with those.
+        if Operations.isOperation(objcObject) {
+            for dependent in ["isFinished", "isReady"] where dependent != key {
+                var keys: Set<String> = []
+                KeyValueObserving.triggers(KeyValueObserving.original(objcObject), dependent, into: &keys)
+                if keys.contains(key) { Operations.didChangeValue(objcObject, forKey: dependent) }
+            }
+        }
     }
 
     @ObjCMethod("willChange:valuesAtIndexes:forKey:")
