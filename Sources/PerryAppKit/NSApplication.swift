@@ -275,7 +275,11 @@ open class NSApplication: NSResponder {
     }
 
     @ObjCMethod("currentEvent") func appCurrentEvent() -> NSEvent? { currentEvent }
-    @ObjCMethod("updateWindows") func updateWindows() {}
+    /// After each event, each shown window's -update.
+    @ObjCMethod("updateWindows")
+    func updateWindows() {
+        for window in Windows.all where window.visible { Send.void(window.objcObject, "update") }
+    }
     @ObjCMethod("setWindowsNeedUpdate:") func setWindowsNeedUpdate(_ value: Bool) {}
 
     @ObjCMethod("sendAction:to:from:")
@@ -283,13 +287,22 @@ open class NSApplication: NSResponder {
         guard let action else { return false }
         let name = action.name
         if let target {
-            guard Send.responds(target.objcObject, name) else { return false }
+            // Sent whether it says it responds or not, as AppKit does: a
+            // target that forwards actions (Xcode's action manager) gets it.
+            guard Send.responds(target.objcObject, name) || forwards(target.objcObject) else { return false }
             Send.void(target.objcObject, name, sender?.objcObject)
             return true
         }
         guard let receiver = self.receiver(forAction: name) else { return false }
         Send.void(receiver, name, sender?.objcObject)
         return true
+    }
+
+    /// Whether an object has its own -forwardInvocation:, to take
+    /// messages it doesn't say it responds to.
+    func forwards(_ object: UnsafeMutableRawPointer) -> Bool {
+        guard let root = Classes.named("NSObject") else { return false }
+        return Methods.overrides(object, "forwardInvocation:", of: root.pointer)
     }
 
     /// What an action with no target goes to, as AppKit finds it: along the
