@@ -81,6 +81,27 @@ open class NSDocument: NSObject {
         super.init()
     }
 
+    /// A document of a file, as documents before Mac OS X 10.4 were made
+    /// (Xcode's editor's): its path and type, read through -readFromFile:
+    /// ofType: (or -readFromURL:ofType:error:); none if it can't be read.
+    @ObjCMethod("initWithContentsOfFile:ofType:")
+    public required init?(contentsOfFile path: String?, ofType type: String?) {
+        super.init()
+        guard let path, let url = DocumentURL.make(path: path) else { return nil }
+        fileURL = url
+        fileType = type
+        guard NSDocumentController.read(self, url, type, nil) else { return nil }
+    }
+
+    @ObjCMethod("initWithContentsOfURL:ofType:")
+    public required init?(contentsOfURL url: NSObject?, ofType type: String?) {
+        super.init()
+        guard let url else { return nil }
+        fileURL = url
+        fileType = type
+        guard NSDocumentController.read(self, url, type, nil) else { return nil }
+    }
+
     // MARK: Class properties
 
     @ObjCClassMethod("autosavesInPlace") class func autosavesInPlace() -> Bool { false }
