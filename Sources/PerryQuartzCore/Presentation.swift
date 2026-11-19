@@ -284,10 +284,28 @@ enum Presentation {
                     }
                 }
                 let end = end(of: animation)
+                if traced, traceCount < 60 {
+                    traceCount += 1
+                    var chain = ""
+                    var up: LayerState? = state
+                    while let layer = up {
+                        chain += " [speed \(layer.speed) offset \(layer.timeOffset) begin \(layer.beginTime)]"
+                        up = layer.superlayer.map { CALayer.state(of: $0) }
+                    }
+                    let line = "perry: animation settle: chain\(chain)\nperry: animation settle: layer now \(now) rate \(rate) clock \(clock) begin \(animation.state.beginTime) "
+                        + "end \(end) duration \(animation.state.duration) started \(animation.state.started) repeat \(animation.state.repeatCount)\n"
+                    _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
+                }
                 if now >= end { finished.append(entry) } else { wake(at: end) }
             }
-            for entry in finished where entry.animation.state.removedOnCompletion {
-                state.animations.removeAll { $0.animation.objcObject == entry.animation.objcObject }
+            // A finished animation stops whether it is removed or not: one
+            // kept (isRemovedOnCompletion false, with a fill mode that holds
+            // its last value, as Lottie's are) still tells its delegate it
+            // has finished, which a completion handler waits for.
+            for entry in finished {
+                if entry.animation.state.removedOnCompletion {
+                    state.animations.removeAll { $0.animation.objcObject == entry.animation.objcObject }
+                }
                 stopped(entry.animation, on: CALayer.wrap(layerObject), finished: true)
             }
         }
@@ -312,10 +330,28 @@ enum Presentation {
         }
     }
 
+    /// PERRY_ANIMATION_TRACE: each animation that stops, its class, and
+    /// whether it has a delegate that answers -animationDidStop:finished:.
+    private static let traced = getenv("PERRY_ANIMATION_TRACE") != nil
+    nonisolated(unsafe) private static var traceCount = 0
+
     /// Tells the delegate the animation stopped, once.
     static func stopped(_ animation: CAAnimation, on layer: CALayer, finished: Bool) {
         guard animation.state.values["__perry.stopped"] == nil else { return }
         animation.state.values["__perry.stopped"] = NSNumber.make(bool: true)
+        if traced {
+            typealias Get = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+            let send = unsafeBitCast(ObjCRuntime.msgSend, to: Get.self)
+            func className(_ object: UnsafeMutableRawPointer?) -> String {
+                guard let object, let cls = send(object, ObjCRuntime.selector("class")),
+                      let text = send(cls, ObjCRuntime.selector("description")) else { return "none" }
+                return String(objCArgument: text)
+            }
+            let delegate = animation.state.delegate
+            let line = "perry: animation stopped: \(className(animation.objcObject)), delegate \(className(delegate?.objcObject)), "
+                + "responds \(delegate?.responds(to: "animationDidStop:finished:") ?? false)\n"
+            _ = line.withCString { Glibc.write(2, $0, strlen($0)) }
+        }
         guard let delegate = animation.state.delegate, delegate.responds(to: "animationDidStop:finished:") else { return }
         delegate.sendAnimationDidStop(animation, finished: finished)
     }
