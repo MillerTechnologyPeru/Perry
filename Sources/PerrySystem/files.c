@@ -555,6 +555,7 @@ typedef struct darwin_entry {
 typedef struct {
     FTS *fts;
     darwin_entry *made;
+    int options;
 } darwin_fts;
 
 static struct darwin_ftsent *darwin_entry_for(darwin_fts *walk, FTSENT *linux_entry) {
@@ -589,7 +590,10 @@ static struct darwin_ftsent *darwin_entry_for(darwin_fts *walk, FTSENT *linux_en
     out->fts_info = linux_entry->fts_info;
     out->fts_flags = linux_entry->fts_flags;
     out->fts_instr = linux_entry->fts_instr;
-    if (linux_entry->fts_statp && linux_entry->fts_info != FTS_NS && linux_entry->fts_info != FTS_NSOK) {
+    // With FTS_NOSTAT glibc stats into a buffer of its own and leaves an
+    // entry's fts_statp unset, whatever its type.
+    if (!(walk->options & FTS_NOSTAT) && linux_entry->fts_statp
+        && linux_entry->fts_info != FTS_NS && linux_entry->fts_info != FTS_NSOK) {
         stat_to_darwin(linux_entry->fts_statp, &made->stat);
         out->fts_statp = &made->stat;
     } else {
@@ -612,7 +616,8 @@ void *darwin_fts_open(char *const *paths, int options, void *compare) {
         errno = perry_darwin_errno_from_linux(ENOMEM);
         return NULL;
     }
-    walk->fts = fts_open(paths, options & 0x7f, NULL);
+    walk->options = options & 0x7f;
+    walk->fts = fts_open(paths, walk->options, NULL);
     if (!walk->fts) {
         int error = errno;
         free(walk);

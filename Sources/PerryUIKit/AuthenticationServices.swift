@@ -15,6 +15,13 @@ import PerryObjCInterop
 @ObjCConstants
 enum AuthenticationServicesConstants {
     static let ASWebAuthenticationSessionErrorDomain = "com.apple.AuthenticationServices.WebAuthenticationSession"
+    static let ASAuthorizationErrorDomain = "com.apple.AuthenticationServices.AuthorizationError"
+    /// ASAuthorizationOpenIDOperation, which sign-in libraries key their
+    /// requests by.
+    static let ASAuthorizationOperationImplicit = "implicit"
+    static let ASAuthorizationOperationLogin = "login"
+    static let ASAuthorizationOperationRefresh = "refresh"
+    static let ASAuthorizationOperationLogout = "logout"
 }
 
 final class WebAuthenticationState: ObjectState {
