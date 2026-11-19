@@ -282,7 +282,7 @@ open class NSManagedObjectContext: NSObject {
         var errors: [NSError] = []
         for object in state.inserted + state.updated {
             guard let entity = object.state.entity else { continue }
-            for property in entity.state.properties where !property.state.optional && !property.state.transient {
+            for property in entity.allProperties where !property.state.optional && !property.state.transient {
                 let name = property.state.name
                 let missing: Bool
                 if let relationship = property.as(NSRelationshipDescription.self) {

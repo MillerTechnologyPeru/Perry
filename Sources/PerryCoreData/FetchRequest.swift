@@ -160,14 +160,35 @@ enum Fetching {
         let limit = Int(clamping: requestState.fetchLimit), offset = Int(clamping: requestState.fetchOffset)
         let contextState = context.state
         let pending = requestState.includesPendingChanges
-            ? (contextState.inserted + contextState.updated + contextState.deleted).filter { $0.state.entityName == entity.state.name }
+            ? (contextState.inserted + contextState.updated + contextState.deleted).filter {
+                $0.state.entity?.isKind(named: entity.state.name) ?? ($0.state.entityName == entity.state.name)
+            }
             : []
-        let paged = pending.isEmpty && !filtersHere
+        // An entity that others inherit from also finds their objects, which
+        // are stored with their own entities'.
+        let targets = entity.withDescendants.filter { !$0.state.abstract }
+        let single = targets.count == 1 && targets[0].objcObject == entity.objcObject
+        let paged = pending.isEmpty && !filtersHere && single
         let storeRequest = FetchRequest(entity: entityName, sortDescriptors: sorts, predicate: predicate,
                                         fetchLimit: paged ? limit : 0, fetchOffset: paged ? offset : 0)
         var results: [ModelData]
+        var owners: [String: NSEntityDescription] = [:]
         do {
-            results = try backend.fetch(storeRequest)
+            if single {
+                results = try backend.fetch(storeRequest)
+            } else {
+                results = []
+                for target in targets {
+                    let part = try backend.fetch(FetchRequest(entity: EntityName(rawValue: target.state.name), sortDescriptors: sorts,
+                                                              predicate: predicate, fetchLimit: 0, fetchOffset: 0))
+                    for data in part { owners[data.id.rawValue] = target }
+                    results += part
+                }
+                if pending.isEmpty {
+                    results = FetchRequest(entity: entityName, sortDescriptors: sorts, predicate: nil,
+                                           fetchLimit: filtersHere ? 0 : limit, fetchOffset: filtersHere ? 0 : offset).evaluate(results)
+                }
+            }
         } catch let failure {
             throw error(134060, "The fetch failed: \(failure)")
         }
@@ -181,7 +202,7 @@ enum Fetching {
             results = FetchRequest(entity: entityName, sortDescriptors: sorts, predicate: nil,
                                    fetchLimit: limit, fetchOffset: offset).evaluate(results)
         }
-        var objects = results.map { context.materialize(entity, $0) }
+        var objects = results.map { context.materialize(owners[$0.id.rawValue] ?? entity, $0) }
         if filtersHere, let node = requestState.predicate {
             objects = objects.filter { node.sendEvaluate(withObject: $0) }
             if pending.isEmpty { objects = Array(objects.dropFirst(offset)); if limit > 0 { objects = Array(objects.prefix(limit)) } }

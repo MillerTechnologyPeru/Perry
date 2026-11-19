@@ -299,13 +299,18 @@ final class Compositor {
         textures[key] = nil
         // A layer laid out to a size that is not a number, or is endless,
         // has nothing to draw (and Int() of it would trap).
-        let pixels = (state.bounds.width * scale, state.bounds.height * scale)
+        // Drawn at the resolution it shows at: a layer scaled down on the
+        // display (an animation made at 1920x1080 and shown at a fifth of
+        // that) needs only the pixels it takes up, not its own size's.
+        let shown = (toScreen.a * toScreen.d - toScreen.b * toScreen.c).magnitude.squareRoot()
+        let renderScale = scale * min(1, shown.isFinite ? max(shown, 0.05) : 1)
+        let pixels = (state.bounds.width * renderScale, state.bounds.height * renderScale)
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return }
-        let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
-        guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return }
+        let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
+        guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: renderScale, opaque: false) else { return }
         defer { CG.release(context) }
         if state.mask != nil {
-            guard let image = CALayer.maskedImage(of: layer, state: state, shape: shape) else { return }
+            guard let image = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale) else { return }
             CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: state.bounds.size), context: context)
         } else {
             CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
@@ -321,7 +326,9 @@ final class Compositor {
     /// which change what shows without changing the layers.
     private static func isAnimating(_ layer: CALayer) -> Bool {
         let state = layer.state
-        if !state.animations.isEmpty { return true }
+        // A kept animation that has finished holds its last value and
+        // changes nothing more: it is not a reason to draw the layer again.
+        if state.animations.contains(where: { $0.animation.state.values["__perry.stopped"] == nil }) { return true }
         if state.livePixels != nil || state.sharedFrames != nil { return true }
         if let mask = state.mask, isAnimating(mask) { return true }
         return state.sublayers.contains(where: isAnimating)
