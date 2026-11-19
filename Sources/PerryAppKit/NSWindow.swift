@@ -715,7 +715,8 @@ open class NSWindow: NSResponder {
     @ObjCMethod("displayIfNeeded") func displayIfNeeded() { Windows.drawIfNeeded() }
     @ObjCMethod("setViewsNeedDisplay:") func setViewsNeedDisplay(_ value: Bool) { if value { Windows.layersChanged() } }
     @ObjCMethod("viewsNeedDisplay") func viewsNeedDisplay() -> Bool { false }
-    @ObjCMethod("update") func update() {}
+    /// After each event: the toolbar's items are validated.
+    @ObjCMethod("update") func update() { toolbar?.validateVisibleItems() }
     @ObjCMethod("disableScreenUpdatesUntilFlush") func disableScreenUpdatesUntilFlush() {}
     @ObjCMethod("flushWindow") func flushWindow() { Windows.layersChanged() }
     @ObjCMethod("useOptimizedDrawing:") func useOptimizedDrawing(_ value: Bool) {}
