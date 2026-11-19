@@ -248,6 +248,8 @@ open class UIButtonContent: NSObject {
 
 final class ButtonState: ObjectState {
     var type = 0
+    /// UIButtonRole: normal 0, primary 1, cancel 2, destructive 3.
+    var role = 0
     var titles: [UInt: String] = [:]
     var titleColors: [UInt: UIColor] = [:]
     var titleShadowColors: [UInt: UIColor] = [:]
@@ -336,7 +338,9 @@ open class UIButton: UIControl {
         button.configuration = configuration?.duplicate()
         applyConfiguration()
         invalidateIntrinsicContentSize()
-        setNeedsLayout()
+        // Set by -updateConfiguration, in the layout it is part of: that
+        // layout places the content, so it doesn't ask for another.
+        if !button.updatingConfiguration { setNeedsLayout() }
     }
 
     @ObjCMethod("configurationUpdateHandler") func configurationUpdateHandler() -> ObjCBlock? { button.configurationUpdateHandler }
@@ -490,6 +494,10 @@ open class UIButton: UIControl {
     }
 
     @ObjCMethod("buttonType") func buttonType() -> Int { button.type }
+    /// The button's role, kept for menus and alerts to read; the button
+    /// looks the same whatever it is.
+    @ObjCMethod("role") func role() -> Int { button.role }
+    @ObjCMethod("setRole:") func setRole(_ role: Int) { button.role = role }
 
     @ObjCMethod("titleLabel")
     func titleLabel() -> UILabel {
