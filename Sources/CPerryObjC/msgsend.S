@@ -175,6 +175,23 @@ END _objc_release_\reg
     RETAIN_RELEASE_VARIANT x27
     RETAIN_RELEASE_VARIANT x28
 
+// method_invoke(receiver, Method m, ...): the method's IMP called with the
+// receiver, the method's selector in m's place and the other arguments as
+// they were passed (J2ObjC's clone calls it). The IMP is kept in the free
+// slot at sp + 72 while the selector is looked up.
+ENTRY _method_invoke
+    SAVE_ARGUMENTS
+    mov x0, x1
+    bl _method_getImplementation
+    str x0, [sp, #72]
+    ldr x0, [sp, #8]
+    bl _method_getName
+    str x0, [sp, #8]
+    ldr x17, [sp, #72]
+    RESTORE_ARGUMENTS
+    br x17
+END _method_invoke
+
     .text
     .p2align 2
     .globl perry_objc_msgSend_address

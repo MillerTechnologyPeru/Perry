@@ -170,6 +170,8 @@ enum SessionRoles {
 /// Font text styles.
 @ObjCConstants
 enum TextStyles {
+    static let UIFontTextStyleExtraLargeTitle = "UICTFontTextStyleExtraLargeTitle"
+    static let UIFontTextStyleExtraLargeTitle2 = "UICTFontTextStyleExtraLargeTitle2"
     static let UIFontTextStyleLargeTitle = "UICTFontTextStyleTitle0"
     static let UIFontTextStyleTitle1 = "UICTFontTextStyleTitle1"
     static let UIFontTextStyleTitle2 = "UICTFontTextStyleTitle2"
@@ -238,6 +240,11 @@ enum ActivityConstants {
     static let UIActivityTypeMessage = "com.apple.UIKit.activity.Message"
     static let UIActivityTypeCopyToPasteboard = "com.apple.UIKit.activity.CopyToPasteboard"
     static let UIActivityTypePrint = "com.apple.UIKit.activity.Print"
+    static let UIActivityTypeAddToReadingList = "com.apple.UIKit.activity.AddToReadingList"
+    static let UIActivityTypeMarkupAsPDF = "com.apple.UIKit.activity.MarkupAsPDF"
+    static let UIActivityTypeOpenInIBooks = "com.apple.UIKit.activity.OpenInIBooks"
+    static let UIActivityTypePostToFlickr = "com.apple.UIKit.activity.PostToFlickr"
+    static let UIActivityTypePostToVimeo = "com.apple.UIKit.activity.PostToVimeo"
     static let SLServiceTypeFacebook = "com.apple.social.facebook"
     static let SLServiceTypeTwitter = "com.apple.social.twitter"
     static let SLServiceTypeSinaWeibo = "com.apple.social.sinaweibo"
@@ -341,4 +348,84 @@ enum AccessibilityConstants {
     static let UIAccessibilitySpeechAttributeAnnouncementPriority = "UIAccessibilitySpeechAttributeAnnouncementPriority"
     static let UIAccessibilitySpeechAttributeLanguage = "UIAccessibilitySpeechAttributeLanguage"
     static let UIAccessibilitySpeechAttributeQueueAnnouncement = "UIAccessibilitySpeechAttributeQueueAnnouncement"
+}
+
+/// UIMenuIdentifier: the system menus a menu builder edits, which apps
+/// name when they add to or remove from them. There is no menu bar here;
+/// the names are UIKit's.
+@ObjCConstants
+enum MenuIdentifiers {
+    static let UIMenuApplication = "com.apple.menu.application"
+    static let UIMenuFile = "com.apple.menu.file"
+    static let UIMenuEdit = "com.apple.menu.edit"
+    static let UIMenuView = "com.apple.menu.view"
+    static let UIMenuWindow = "com.apple.menu.window"
+    static let UIMenuHelp = "com.apple.menu.help"
+    static let UIMenuAbout = "com.apple.menu.about"
+    static let UIMenuPreferences = "com.apple.menu.preferences"
+    static let UIMenuServices = "com.apple.menu.services"
+    static let UIMenuHide = "com.apple.menu.hide"
+    static let UIMenuQuit = "com.apple.menu.quit"
+    static let UIMenuNewScene = "com.apple.menu.new-scene"
+    static let UIMenuNewItem = "com.apple.menu.new-item"
+    static let UIMenuOpenRecent = "com.apple.menu.open-recent"
+    static let UIMenuClose = "com.apple.menu.close"
+    static let UIMenuDocument = "com.apple.menu.document"
+    static let UIMenuPrint = "com.apple.menu.print"
+    static let UIMenuUndoRedo = "com.apple.menu.undo-redo"
+    static let UIMenuStandardEdit = "com.apple.menu.standard-edit"
+    static let UIMenuFind = "com.apple.menu.find"
+    static let UIMenuReplace = "com.apple.menu.replace"
+    static let UIMenuShare = "com.apple.menu.share"
+    static let UIMenuTextStyle = "com.apple.menu.text-style"
+    static let UIMenuSpelling = "com.apple.menu.spelling"
+    static let UIMenuSpellingPanel = "com.apple.menu.spelling-panel"
+    static let UIMenuSpellingOptions = "com.apple.menu.spelling-options"
+    static let UIMenuSubstitutions = "com.apple.menu.substitutions"
+    static let UIMenuSubstitutionsPanel = "com.apple.menu.substitutions-panel"
+    static let UIMenuSubstitutionOptions = "com.apple.menu.substitution-options"
+    static let UIMenuTransformations = "com.apple.menu.transformations"
+    static let UIMenuSpeech = "com.apple.menu.speech"
+    static let UIMenuLookup = "com.apple.menu.lookup"
+    static let UIMenuLearn = "com.apple.menu.learn"
+    static let UIMenuFormat = "com.apple.menu.format"
+    static let UIMenuAutoFill = "com.apple.menu.autofill"
+    static let UIMenuFont = "com.apple.menu.font"
+    static let UIMenuTextSize = "com.apple.menu.text-size"
+    static let UIMenuTextColor = "com.apple.menu.text-color"
+    static let UIMenuTextStylePasteboard = "com.apple.menu.text-style-pasteboard"
+    static let UIMenuText = "com.apple.menu.text"
+    static let UIMenuWritingDirection = "com.apple.menu.writing-direction"
+    static let UIMenuAlignment = "com.apple.menu.alignment"
+    static let UIMenuToolbar = "com.apple.menu.toolbar"
+    static let UIMenuSidebar = "com.apple.menu.sidebar"
+    static let UIMenuFullscreen = "com.apple.menu.fullscreen"
+    static let UIMenuMinimizeAndZoom = "com.apple.menu.minimize-and-zoom"
+    static let UIMenuBringAllToFront = "com.apple.menu.bring-all-to-front"
+    static let UIMenuRoot = "com.apple.menu.root"
+}
+
+/// String constants whose names give no hint that they are strings, which
+/// the loader can't make up for when they are missing.
+@ObjCConstants
+enum OtherStringConstants {
+    static let UIApplicationOpenNotificationSettingsURLString = "app-settings:notifications"
+    static let UIImagePickerControllerMediaType = "UIImagePickerControllerMediaType"
+    static let UIImagePickerControllerMediaURL = "UIImagePickerControllerMediaURL"
+    static let UIImagePickerControllerImageURL = "UIImagePickerControllerImageURL"
+    static let UIPasteboardOptionExpirationDate = "UIPasteboardOptionExpirationDate"
+    static let UIPasteboardOptionLocalOnly = "UIPasteboardOptionLocalOnly"
+    static let UISheetPresentationControllerDetentIdentifierLarge = "com.apple.UIKit.large"
+    static let UISheetPresentationControllerDetentIdentifierMedium = "com.apple.UIKit.medium"
+    /// The search icon's title in a table view's section index.
+    static let UITableViewIndexSearch = "{search}"
+    static let UIAccessibilitySpeechAttributeSpellOut = "UIAccessibilitySpeechAttributeSpellOut"
+    static let UIAccessibilityAnnouncementKeyWasSuccessful = "UIAccessibilityAnnouncementKeyWasSuccessful"
+    static let NSTextListMarkerCircle = "{circle}"
+    static let NSTextListMarkerDecimal = "{decimal}"
+    static let NSTextListMarkerDisc = "{disc}"
+    static let NSTextListMarkerLowercaseAlpha = "{lower-alpha}"
+    static let NSTextListMarkerLowercaseRoman = "{lower-roman}"
+    static let NSRTFTextDocumentType = "NSRTF"
+    static let NSCharacterEncodingDocumentOption = "CharacterEncoding"
 }

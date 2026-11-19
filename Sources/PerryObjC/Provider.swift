@@ -53,7 +53,18 @@ public func perry_provider_startup(_ info: UnsafePointer<perry_startup_info>?) {
     }
 }
 
-/// Called for each Mach-O image just before its initializers run.
+/// Called for every Mach-O image once all of a launch's (or a dlopen's)
+/// are mapped, before any initializer runs: their metadata and categories
+/// are registered, as dyld's map_images does.
+@c
+public func perry_provider_image_map(_ image: UnsafePointer<perry_image_info>?) {
+    guard let image, let header = image.pointee.header else { return }
+    RootClasses.bootstrap()
+    Runtime.registerImage(header: header, slide: image.pointee.slide, path: image.pointee.path)
+}
+
+/// Called for each Mach-O image just before its initializers run: its
+/// +load methods, after registering it if the map hook didn't.
 @c
 public func perry_provider_image_init(_ image: UnsafePointer<perry_image_info>?) {
     guard let image, let header = image.pointee.header else { return }

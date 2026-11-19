@@ -112,11 +112,30 @@ extension Runtime {
         }
     }
 
+    /// The +load methods of images registered but not yet initialized, by
+    /// header address.
+    nonisolated(unsafe) static var pendingLoads: [UInt: (classes: [ClassInfo], categories: [UnsafeMutablePointer<perry_category>])] = [:]
+    /// The images whose metadata is registered, by header address.
+    nonisolated(unsafe) static var registeredImages: Set<UInt> = []
+
     /// Registers an image's Objective-C metadata and calls its +load
     /// methods, as Apple's runtime does when dyld maps and initializes an
     /// image. Dependencies are mapped first, so superclasses and the classes
     /// categories extend are already known.
     public static func mapImage(header: UnsafeRawPointer, slide: Int, path: UnsafePointer<CChar>? = nil) {
+        registerImage(header: header, slide: slide, path: path)
+        initializeImage(header: header)
+    }
+
+    /// An image's metadata: its selectors, protocols and classes, and its
+    /// categories attached, as Apple's runtime does for every image dyld
+    /// maps at once before any +load runs. A library's +load then sees the
+    /// categories later images (the app's) add to its classes. Its +load
+    /// methods wait for initializeImage(header:).
+    public static func registerImage(header: UnsafeRawPointer, slide: Int, path: UnsafePointer<CChar>? = nil) {
+        let key = UInt(bitPattern: header)
+        let fresh = lock.withLock { registeredImages.insert(key).inserted }
+        guard fresh else { return }
         let image = MachOImage(header: header, slide: slide)
         var classNames: [UnsafePointer<CChar>] = []
         var loadClasses: [ClassInfo] = []
@@ -198,6 +217,18 @@ extension Runtime {
             }
         }
 
+        lock.withLock { pendingLoads[key] = (loadClasses, loadCategories) }
+    }
+
+    /// The image's load-image functions and +load methods, which run as
+    /// dyld initializes it, after its dependencies'. An image not registered
+    /// yet is registered first.
+    public static func initializeImage(header: UnsafeRawPointer) {
+        let key = UInt(bitPattern: header)
+        let pending = lock.withLock { pendingLoads.removeValue(forKey: key) }
+        guard let pending else { return }
+        let loadClasses = pending.classes, loadCategories = pending.categories
+
         let functions = lock.withLock { () -> [LoadImageFunction] in
             mappedImages.append(header)
             return loadImageFunctions
@@ -264,6 +295,14 @@ public enum Protocols {
         Runtime.lock.withLock { Runtime.protocolsByName[CStringKey(pointer: name)] }
     }
 
+    /// The canonical protocol for a copy: the one @protocol() and
+    /// objc_getProtocol give, as Apple's runtime remaps every protocol list
+    /// to it, so the protocols a class or protocol lists compare equal to
+    /// them by pointer (J2ObjC's do).
+    static func canonical(_ proto: UnsafeMutablePointer<perry_protocol>) -> UnsafeMutablePointer<perry_protocol> {
+        proto.pointee.name.flatMap(lookUp) ?? proto
+    }
+
     static func sameProtocol(_ a: UnsafePointer<perry_protocol>, _ b: UnsafePointer<perry_protocol>) -> Bool {
         if a == b { return true }
         guard let nameA = a.pointee.name, let nameB = b.pointee.name else { return false }
@@ -314,6 +353,7 @@ extension Protocols {
         guard let list = proto.pointee.protocols else { return [] }
         let count = Int(list.load(as: UInt.self))
         return (0..<count).compactMap { list.load(fromByteOffset: Layout.protocolEntry($0), as: UnsafeMutablePointer<perry_protocol>?.self) }
+            .map(canonical)
     }
 
     /// The protocols a class lists itself, its categories' included.
@@ -322,7 +362,7 @@ extension Protocols {
         return lists.flatMap { list -> [UnsafeMutablePointer<perry_protocol>] in
             let count = Int(list.load(as: UInt.self))
             return (0..<count).compactMap { list.load(fromByteOffset: Layout.protocolEntry($0), as: UnsafeMutablePointer<perry_protocol>?.self) }
-        }
+        }.map(canonical)
     }
 
     /// A protocol's method descriptions of one kind: selectors and types.
