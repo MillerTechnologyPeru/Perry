@@ -341,6 +341,10 @@ open class NSApplication: NSResponder {
     }
 
     @ObjCMethod("isActive") func isActive() -> Bool { active }
+    /// Menu items whose action the application has: enabled, as AppKit's
+    /// answers to subclasses that ask their superclass (Xcode's).
+    @ObjCMethod("validateMenuItem:") func validateMenuItem(_ item: NSObject?) -> Bool { true }
+    @ObjCMethod("validateUserInterfaceItem:") func validateUserInterfaceItem(_ item: NSObject?) -> Bool { true }
     @ObjCMethod("activateIgnoringOtherApps:") func activate(ignoringOtherApps flag: Bool) { activate(true) }
     @ObjCMethod("activate") func activateApp() { activate(true) }
     @ObjCMethod("deactivate") func deactivate() { activate(false) }
