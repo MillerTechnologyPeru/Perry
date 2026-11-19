@@ -1732,3 +1732,146 @@ int darwin_getopt(int argc, char *const argv[], const char *options) {
 int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) __asm__("_getopt$UNIX2003")
     __attribute__((visibility("default"), used));
 int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) { return darwin_getopt(argc, argv, options); }
+
+// MARK: - Odds and ends the GNU toolchain uses
+
+#include <sys/wait.h>
+
+int darwin_putenv(char *string) DARWIN_SYMBOL(putenv);
+int darwin_putenv(char *string) { return putenv(string); }
+
+// A signal's description, by Darwin's number.
+char *darwin_strsignal(int signal) DARWIN_SYMBOL(strsignal);
+char *darwin_strsignal(int signal) {
+    int linux_signal = perry_signal_to_linux(signal);
+    return strsignal(linux_signal > 0 ? linux_signal : signal);
+}
+
+int darwin_wcswidth(const wchar_t *string, size_t count) DARWIN_SYMBOL(wcswidth);
+int darwin_wcswidth(const wchar_t *string, size_t count) { return wcswidth(string, count); }
+
+int darwin_toupper(int c) DARWIN_SYMBOL(toupper);
+int darwin_toupper(int c) { return c >= -1 && c < 256 ? toupper(c) : c; }
+
+int darwin_tolower(int c) DARWIN_SYMBOL(tolower);
+int darwin_tolower(int c) { return c >= -1 && c < 256 ? tolower(c) : c; }
+
+char *darwin_rindex(const char *string, int c) DARWIN_SYMBOL(rindex);
+char *darwin_rindex(const char *string, int c) { return strrchr(string, c); }
+
+char *darwin_index(const char *string, int c) DARWIN_SYMBOL(index);
+char *darwin_index(const char *string, int c) { return strchr(string, c); }
+
+pid_t darwin_wait(int *status) DARWIN_SYMBOL(wait);
+pid_t darwin_wait(int *status) { return waitpid(-1, status, 0); }
+
+// libgcc's population count, which Darwin's libSystem carries.
+int darwin_popcountdi2(int64_t value) DARWIN_SYMBOL(__popcountdi2);
+int darwin_popcountdi2(int64_t value) { return __builtin_popcountll((uint64_t)value); }
+
+// MARK: - Architectures (<mach-o/arch.h>)
+
+typedef struct {
+    const char *name;
+    int32_t cputype;
+    int32_t cpusubtype;
+    int byteorder;   // NX_LittleEndian 1, NX_BigEndian 2
+    const char *description;
+} darwin_arch_info;
+
+enum { ARCH_ABI64 = 0x01000000, LITTLE = 1, BIG = 2 };
+
+// Darwin's table: each family's generic entry first, then particular CPUs.
+static const darwin_arch_info darwin_arch_infos[] = {
+    {"hppa", 11, 0, BIG, "HP-PA"},
+    {"i386", 7, 3, LITTLE, "Intel 80x86"},
+    {"x86_64", 7 | ARCH_ABI64, 3, LITTLE, "Intel x86-64"},
+    {"i860", 15, 0, BIG, "Intel 860"},
+    {"m68k", 6, 1, BIG, "Motorola 68K"},
+    {"m88k", 5, 0, BIG, "Motorola 88K"},
+    {"ppc", 18, 0, BIG, "PowerPC"},
+    {"ppc64", 18 | ARCH_ABI64, 0, BIG, "PowerPC 64-bit"},
+    {"sparc", 14, 0, BIG, "SPARC"},
+    {"arm", 12, 0, LITTLE, "ARM"},
+    {"any", -1, -1, 0, "Architecture Independent"},
+    {"veo", 255, 2, BIG, "veo"},
+    {"little", -1, 0, LITTLE, "Little Endian"},
+    {"big", -1, 1, BIG, "Big Endian"},
+    {"i486", 7, 4, LITTLE, "Intel 80486"},
+    {"i486SX", 7, 0x84, LITTLE, "Intel 80486SX"},
+    {"pentium", 7, 5, LITTLE, "Intel Pentium"},
+    {"i586", 7, 5, LITTLE, "Intel 80586"},
+    {"pentpro", 7, 0x16, LITTLE, "Intel Pentium Pro"},
+    {"i686", 7, 0x16, LITTLE, "Intel Pentium Pro"},
+    {"pentIIm3", 7, 0x36, LITTLE, "Intel Pentium II Model 3"},
+    {"pentIIm5", 7, 0x56, LITTLE, "Intel Pentium II Model 5"},
+    {"pentium4", 7, 0x0a, LITTLE, "Intel Pentium 4"},
+    {"ppc601", 18, 1, BIG, "PowerPC 601"},
+    {"ppc603", 18, 3, BIG, "PowerPC 603"},
+    {"ppc603e", 18, 4, BIG, "PowerPC 603e"},
+    {"ppc603ev", 18, 5, BIG, "PowerPC 603ev"},
+    {"ppc604", 18, 6, BIG, "PowerPC 604"},
+    {"ppc604e", 18, 7, BIG, "PowerPC 604e"},
+    {"ppc750", 18, 9, BIG, "PowerPC 750"},
+    {"ppc7400", 18, 10, BIG, "PowerPC 7400"},
+    {"ppc7450", 18, 11, BIG, "PowerPC 7450"},
+    {"ppc970", 18, 100, BIG, "PowerPC 970"},
+    {"ppc970-64", 18 | ARCH_ABI64, 100, BIG, "PowerPC 970 64-bit"},
+    {"armv4t", 12, 5, LITTLE, "arm v4t"},
+    {"armv5", 12, 7, LITTLE, "arm v5"},
+    {"xscale", 12, 8, LITTLE, "arm xscale"},
+    {"armv6", 12, 6, LITTLE, "arm v6"},
+    {"armv7", 12, 9, LITTLE, "arm v7"},
+    {NULL, 0, 0, 0, NULL},
+};
+
+const darwin_arch_info *darwin_NXGetAllArchInfos(void) DARWIN_SYMBOL(NXGetAllArchInfos);
+const darwin_arch_info *darwin_NXGetAllArchInfos(void) { return darwin_arch_infos; }
+
+const darwin_arch_info *darwin_NXGetArchInfoFromName(const char *name) DARWIN_SYMBOL(NXGetArchInfoFromName);
+const darwin_arch_info *darwin_NXGetArchInfoFromName(const char *name) {
+    for (const darwin_arch_info *info = darwin_arch_infos; name && info->name; info++)
+        if (strcmp(info->name, name) == 0) return info;
+    return NULL;
+}
+
+// Another architecture's entry, for NXGetArchInfoFromCpuType (mach.c).
+const void *perry_arch_info_from_cpu_type(int32_t cputype, int32_t cpusubtype) {
+    for (const darwin_arch_info *info = darwin_arch_infos; info->name; info++)
+        if (info->cputype == cputype && (cpusubtype == -1 || (info->cpusubtype & 0x00ffffff) == (cpusubtype & 0x00ffffff))) return info;
+    for (const darwin_arch_info *info = darwin_arch_infos; info->name; info++)
+        if (info->cputype == cputype) return info;
+    return NULL;
+}
+
+// MARK: - Old BSD interfaces the assembler uses
+
+char *darwin_getwd(char *buffer) DARWIN_SYMBOL(getwd);
+char *darwin_getwd(char *buffer) {
+    if (getcwd(buffer, PATH_MAX)) return buffer;
+    snprintf(buffer, PATH_MAX, "%s", strerror(errno));
+    return NULL;
+}
+
+// The error messages by Darwin's errno, as sys_errlist lists them (10.6's
+// list runs to EQFULL, 106).
+int perry_darwin_errno_from_linux(int value);
+enum { DARWIN_NERR = 107 };
+// glibc exports _sys_errlist and _sys_nerr too, and a reference from here
+// through the global offset table would bind to its (read-only) copies. The
+// storage is static, so nothing interposes it, and Darwin's names are
+// aliases of it.
+static const char *sys_errlist_storage[DARWIN_NERR];
+static const int sys_nerr_storage = DARWIN_NERR;
+extern const char *darwin_sys_errlist[DARWIN_NERR] __asm__("_sys_errlist") __attribute__((alias("sys_errlist_storage"), visibility("default"), used));
+extern const int darwin_sys_nerr __asm__("_sys_nerr") __attribute__((alias("sys_nerr_storage"), visibility("default"), used));
+
+__attribute__((constructor)) static void init_sys_errlist(void) {
+    sys_errlist_storage[0] = "Undefined error: 0";
+    for (int value = 1; value < 134; value++) {
+        int darwin = perry_darwin_errno_from_linux(value);
+        if (darwin > 0 && darwin < DARWIN_NERR && !sys_errlist_storage[darwin]) sys_errlist_storage[darwin] = strerror(value);
+    }
+    for (int darwin = 1; darwin < DARWIN_NERR; darwin++)
+        if (!sys_errlist_storage[darwin]) sys_errlist_storage[darwin] = "Unknown error";
+}
