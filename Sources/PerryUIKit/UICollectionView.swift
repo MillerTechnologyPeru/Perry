@@ -643,7 +643,10 @@ open class UICollectionView: UIScrollView {
 
     @ObjCMethod("initWithFrame:collectionViewLayout:")
     func initialize(frame: CGRect, collectionViewLayout layout: UICollectionViewLayout?) -> NSObject {
-        let view = initializeView(frame: frame).unsafeCast(to: UICollectionView.self)
+        // The view is set up here, not by sending -initWithFrame: to the
+        // receiver: a subclass that declares only this initializer leaves
+        // that one unimplemented, as UIKit's designated initializer allows.
+        let view = initialize(frame: frame)
         view.setCollectionViewLayout(layout)
         return view
     }

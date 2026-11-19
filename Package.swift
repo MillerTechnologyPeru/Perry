@@ -68,6 +68,7 @@ let package = Package(
         .library(name: "PerryCarPlay", type: .dynamic, targets: ["PerryCarPlay"]),
         // CoreSpotlight, which takes an app's searchable items and forgets them.
         .library(name: "PerryCallKit", type: .dynamic, targets: ["PerryCallKit"]),
+        .library(name: "PerryIntents", type: .dynamic, targets: ["PerryIntents"]),
         .library(name: "PerryDeviceCheck", type: .dynamic, targets: ["PerryDeviceCheck"]),
         .library(name: "PerryWatchConnectivity", type: .dynamic, targets: ["PerryWatchConnectivity"]),
         .library(name: "PerryMetricKit", type: .dynamic, targets: ["PerryMetricKit"]),
@@ -396,6 +397,12 @@ let package = Package(
         // CallKit's classes, with no telephone.
         .target(
             name: "PerryCallKit",
+            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Intents' classes, with no Siri or Shortcuts.
+        .target(
+            name: "PerryIntents",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),

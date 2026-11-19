@@ -545,7 +545,10 @@ open class UITableView: UIScrollView {
 
     @ObjCMethod("initWithFrame:style:")
     func initialize(frame: CGRect, style: Int) -> NSObject {
-        let table = initializeView(frame: frame).unsafeCast(to: UITableView.self)
+        // Set up here, not by sending -initWithFrame:, which a subclass with
+        // only this designated initializer leaves unimplemented (or inherits
+        // as a convenience initializer that comes back here).
+        let table = initialize(frame: frame)
         table.table.style = style
         if style != 0 { table.setBackgroundColor(UIColor.systemGroupedBackground()) }
         return table

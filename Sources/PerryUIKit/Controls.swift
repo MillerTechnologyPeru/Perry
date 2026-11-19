@@ -76,7 +76,9 @@ open class UIControl: UIView {
 
     @ObjCMethod("initWithFrame:primaryAction:")
     func initialize(frame: CGRect, primaryAction: UIAction?) -> Self {
-        _ = initializeView(frame: frame)
+        // Set up here, not by sending -initWithFrame: to a subclass that may
+        // not implement it.
+        _ = initialize(frame: frame)
         if let primaryAction { addAction(primaryAction, for: 1 << 13) }
         return self
     }

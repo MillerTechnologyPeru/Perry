@@ -85,6 +85,8 @@ int perry_linux_errno_from_darwin(int darwin_errno);
 
 // Darwin's __error(): the calling thread's Darwin-numbered errno.
 int *darwin_error(void) DARWIN_SYMBOL(__error);
+// Sets errno to a Darwin value with no Linux value of its own.
+void perry_set_darwin_errno(int linux_value, int darwin_value);
 
 // Linux's number for a Darwin signal, or -1 where Linux has none.
 int perry_signal_to_linux(int signal);

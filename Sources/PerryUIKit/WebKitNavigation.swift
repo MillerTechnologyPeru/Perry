@@ -32,6 +32,26 @@ enum WebKitErrorConstants {
     static let WKErrorDomain = "WKErrorDomain"
 }
 
+/// The kinds of data a website data store holds, by WebKit's names.
+@ObjCConstants
+enum WebsiteDataTypeConstants {
+    static let WKWebsiteDataTypeFetchCache = "WKWebsiteDataTypeFetchCache"
+    static let WKWebsiteDataTypeDiskCache = "WKWebsiteDataTypeDiskCache"
+    static let WKWebsiteDataTypeMemoryCache = "WKWebsiteDataTypeMemoryCache"
+    static let WKWebsiteDataTypeOfflineWebApplicationCache = "WKWebsiteDataTypeOfflineWebApplicationCache"
+    static let WKWebsiteDataTypeCookies = "WKWebsiteDataTypeCookies"
+    static let WKWebsiteDataTypeSessionStorage = "WKWebsiteDataTypeSessionStorage"
+    static let WKWebsiteDataTypeLocalStorage = "WKWebsiteDataTypeLocalStorage"
+    static let WKWebsiteDataTypeWebSQLDatabases = "WKWebsiteDataTypeWebSQLDatabases"
+    static let WKWebsiteDataTypeIndexedDBDatabases = "WKWebsiteDataTypeIndexedDBDatabases"
+    static let WKWebsiteDataTypeServiceWorkerRegistrations = "WKWebsiteDataTypeServiceWorkerRegistrations"
+    static let WKWebsiteDataTypeFileSystem = "WKWebsiteDataTypeFileSystem"
+    static let WKWebsiteDataTypeSearchFieldRecentSearches = "WKWebsiteDataTypeSearchFieldRecentSearches"
+    static let WKWebsiteDataTypeMediaKeys = "WKWebsiteDataTypeMediaKeys"
+    static let WKWebsiteDataTypeHashSalt = "WKWebsiteDataTypeHashSalt"
+    static let WKWebsiteDataTypeScreenTime = "WKWebsiteDataTypeScreenTime"
+}
+
 enum WebErrors {
     /// NSURLErrorNotConnectedToInternet, as without a network.
     static func offline() -> NSErrorObject { NSErrorObject.make(domain: "NSURLErrorDomain", code: -1009, userInfo: nil) }
