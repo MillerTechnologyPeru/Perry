@@ -208,6 +208,13 @@ open class NSOpenGLContext: NSObject {
     /// Not retained.
     var viewObject: UnsafeMutableRawPointer?
     var context: SDLGLContext?
+    /// A context of the same share group that is never left current: EGL
+    /// shares objects with the context current on the thread making a new
+    /// one, and the context a new one is asked to share with is often
+    /// current on another thread (a game's loading thread makes its context
+    /// while the main thread draws with the one it shares with), where it
+    /// can't be made current too. Shared by every context of the group.
+    var shareRoot: SDLGLContext?
     var swapInterval: Int32 = 0
 
     public required override init() { super.init() }
@@ -259,11 +266,25 @@ open class NSOpenGLContext: NSObject {
             GLAttributes.lock()
             defer { GLAttributes.unlock() }
             format?.applyToSDL()
-            let sharing = shared?.context != nil
-            if sharing, let other = shared?.context { _ = Self.bind(other, to: window) }
+            var sharing = false
+            if let root = shared?.shareRoot {
+                sharing = (try? root.makeCurrentWithoutSurface()) != nil
+            } else if let other = shared?.context {
+                sharing = Self.bind(other, to: window) != nil
+            }
             try? SDL.glSetAttribute(.shareWithCurrentContext, sharing ? 1 : 0)
             do {
-                context = try SDLGLContext(window: window)
+                let made = try SDLGLContext(window: window)
+                context = made
+                // The group's idle context: made from this one, which
+                // SDL has just made current.
+                if sharing, let root = shared?.shareRoot {
+                    shareRoot = root
+                } else {
+                    try? SDL.glSetAttribute(.shareWithCurrentContext, 1)
+                    shareRoot = try? SDLGLContext(window: window)
+                    try? made.makeCurrent(in: window)
+                }
                 Trace.log("OpenGL: context \(context.map { String(describing: $0.unsafePointer) } ?? "nil") of \(Unmanaged.passUnretained(self).toOpaque()) for window \(window.id) on thread \(pthread_self()), surface \(format?.surfaceKind ?? []), sharing with \(shared.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "none") (\(shared?.context.map { String(describing: $0.unsafePointer) } ?? "no context"))")
             } catch {
                 appKitWarning("SDL could not make an OpenGL context for window \(window.id), surface \(format?.surfaceKind ?? []), sharing: \(sharing): \(error)")
