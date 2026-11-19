@@ -260,6 +260,16 @@ open class NSToolbarItem: NSObject {
     @ObjCMethod("setImage:") func setImage(_ value: NSImage?) { image = value; changed() }
     @ObjCMethod("view") func itemView() -> NSView? { view }
     @ObjCMethod("setView:") func setView(_ value: NSView?) { view = value; changed() }
+    /// The sizes the toolbar lays the item out by: a subclass's -minSize
+    /// and -maxSize when it has its own (Xcode's search item works them
+    /// out rather than setting them).
+    var layoutMinSize: CGSize {
+        Methods.overrides(objcObject, "minSize", of: NSToolbarItem.objCClass.pointer) ? Send.size(objcObject, "minSize") : minSize
+    }
+    var layoutMaxSize: CGSize {
+        Methods.overrides(objcObject, "maxSize", of: NSToolbarItem.objCClass.pointer) ? Send.size(objcObject, "maxSize") : maxSize
+    }
+
     @ObjCMethod("minSize") func itemMinSize() -> CGSize { minSize }
     @ObjCMethod("setMinSize:") func setMinSize(_ value: CGSize) { minSize = value; changed() }
     @ObjCMethod("maxSize") func itemMaxSize() -> CGSize { maxSize }
@@ -465,13 +475,17 @@ open class ToolbarView: NSView {
             let base = baseWidth(item)
             return classic && !item.isFlexibleSpace && !item.isSpace ? max(base, labelWidth(item)) : base
         }
+        /// A view item whose max width is beyond its min: it takes spare room.
+        func resizable(_ item: NSToolbarItem) -> Bool {
+            item.itemView() != nil && item.layoutMaxSize.width > item.layoutMinSize.width && item.layoutMinSize.width > 0
+        }
         func baseWidth(_ item: NSToolbarItem) -> CGFloat {
             if item.isFlexibleSpace { return 0 }
             if item.isSpace { return 8 }
             if let view = item.itemView() {
                 let intrinsic = Send.size(view.objcObject, "intrinsicContentSize").width
-                var width = item.minSize.width > 0 ? item.minSize.width : intrinsic > 0 ? intrinsic : view.frame.width
-                if item.maxSize.width > 0 { width = min(max(width, view.frame.width), item.maxSize.width) }
+                var width = item.layoutMinSize.width > 0 ? item.layoutMinSize.width : intrinsic > 0 ? intrinsic : view.frame.width
+                if item.layoutMaxSize.width > 0 { width = min(max(width, view.frame.width), item.layoutMaxSize.width) }
                 return max(width, 20)
             }
             if item.image != nil { return item is NSMenuToolbarItem ? 44 : 32 }
@@ -496,14 +510,27 @@ open class ToolbarView: NSView {
             // Too wide for its section: items that can (a search field down
             // to its min size) shrink, the last first.
             var overflow = widths.reduce(0, +) + CGFloat(max(0, items.count - 1)) * 8 - (end - 8 - start)
-            for index in items.indices.reversed() where overflow > 0 && items[index].minSize.width > 0 {
-                let give = min(overflow, max(0, widths[index] - items[index].minSize.width))
+            for index in items.indices.reversed() where overflow > 0 && items[index].layoutMinSize.width > 0 {
+                let give = min(overflow, max(0, widths[index] - items[index].layoutMinSize.width))
                 widths[index] -= give
                 overflow -= give
             }
             let fixed = widths.reduce(0, +) + CGFloat(max(0, items.count - 1)) * 8
             let flexible = items.filter(\.isFlexibleSpace)
-            let extra = max(0, end - 8 - start - fixed)
+            var extra = max(0, end - 8 - start - fixed)
+            // Space left over goes first to views that can grow (a search
+            // field's max size beyond its min), as AppKit gives it, each
+            // to its max; flexible spaces share what they leave.
+            var growing = items.indices.filter { resizable(items[$0]) && widths[$0] < items[$0].layoutMaxSize.width }
+            while extra > 0.5, !growing.isEmpty {
+                let each = extra / CGFloat(growing.count)
+                for index in growing {
+                    let give = min(each, items[index].layoutMaxSize.width - widths[index])
+                    widths[index] += give
+                    extra -= give
+                }
+                growing = growing.filter { widths[$0] < items[$0].layoutMaxSize.width - 0.5 }
+            }
             let share = flexible.isEmpty ? 0 : extra / CGFloat(flexible.count)
             var x = start
             for (index, item) in items.enumerated() {
@@ -516,7 +543,7 @@ open class ToolbarView: NSView {
                         // label, in the icons' band.
                         let band = bounds.height - Self.labelHeight - 6
                         let height = min(max(view.frame.height, 22), band)
-                        let viewWidth = min(w, max(baseWidth(item), 20))
+                        let viewWidth = resizable(item) ? w : min(w, max(baseWidth(item), 20))
                         Send.void(view.objcObject, "setFrame:", rect: CGRect(x: (x + (w - viewWidth) / 2).rounded(), y: (3 + (band - height) / 2).rounded(),
                                                                              width: viewWidth, height: height))
                         viewLabels.append((item, CGRect(x: x, y: 0, width: w, height: bounds.height)))
