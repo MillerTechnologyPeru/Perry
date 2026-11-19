@@ -1018,7 +1018,7 @@ extension NSString {
     }
 
     @ObjCMethod("caseInsensitiveCompare:")
-    func caseInsensitiveCompare(_ other: String) -> Int { Strings.compare(value.lowercased(), other.lowercased()) }
+    func caseInsensitiveCompare(_ other: String?) -> Int { Strings.compare(value.lowercased(), (other ?? "").lowercased()) }
 
     /// NSStringCompareOptions: case insensitive 1, numeric 64 (digit runs
     /// compare as numbers); others compare literally.
@@ -1043,13 +1043,13 @@ extension NSString {
 
     /// Not localized, as the other comparisons here.
     @ObjCMethod("localizedCompare:")
-    func localizedCompare(_ other: String) -> Int { Strings.compare(value, other) }
+    func localizedCompare(_ other: String?) -> Int { Strings.compare(value, other ?? "") }
 
     @ObjCMethod("localizedCaseInsensitiveCompare:")
-    func localizedCaseInsensitiveCompare(_ other: String) -> Int { Strings.compare(value.lowercased(), other.lowercased()) }
+    func localizedCaseInsensitiveCompare(_ other: String?) -> Int { Strings.compare(value.lowercased(), (other ?? "").lowercased()) }
 
     @ObjCMethod("localizedStandardCompare:")
-    func localizedStandardCompare(_ other: String) -> Int { Strings.numericCompare(value.lowercased(), other.lowercased()) }
+    func localizedStandardCompare(_ other: String?) -> Int { Strings.numericCompare(value.lowercased(), (other ?? "").lowercased()) }
 
     /// A letter starts a word unless a letter precedes it, so digits split
     /// words too ("br0wn" becomes "Br0Wn"), as in Foundation.
