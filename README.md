@@ -95,7 +95,7 @@ Each app gets a home directory at `~/.perry/Containers/<bundle id>`.
  
 | Variable | Effect |
 | --- | --- |
-| `PERRY_SWIFT_RUNTIME` | Directory with Darwin's Swift runtime and Perry's Swift frameworks |
+| `PERRY_SWIFT_RUNTIME` | Directory with Swift runtime and frameworks, compiled on macOS against Darwin Swift |
 | `PERRY_LIBRARY_PATH` | Extra directories to search for providers |
 | `PERRY_CONTAINER` | The app's home directory |
 | `PERRY_DOCUMENTS`, `PERRY_LIBRARY`, `PERRY_CACHES`, `PERRY_PREFERENCES`, `PERRY_TMP` | Keep those container directories elsewhere, as a port keeps saves beside it |
