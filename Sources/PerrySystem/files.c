@@ -232,6 +232,58 @@ static bool darwin_system_file(const char *path, char *out, size_t size) {
     return rename(temporary, out) == 0;
 }
 
+// An iOS app sees an iOS file system, not this Linux host's: paths that
+// exist here but never in an iOS app's sandbox report as absent, as they do
+// on a device. These are the Unix shells and package-manager and tweak
+// locations that only a Linux box (or a jailbroken phone) has; an app that
+// checks for them to tell whether it is on a tampered system (Microsoft
+// Authenticator, banking apps) finds the same nothing an untouched iPhone
+// gives. The app's own bundle, its container and the iOS system paths
+// (/usr/lib, /System, /var, /private) are real and untouched. Set
+// PERRY_EXPOSE_HOST=1 to turn this off (for debugging the host itself).
+static const char *const host_only_paths[] = {
+    // Unix shells and login tools, which an iOS sandbox has none of.
+    "/bin/bash", "/bin/sh", "/bin/zsh", "/bin/csh", "/bin/tcsh", "/bin/dash",
+    "/bin/ksh", "/bin/su", "/bin/login", "/bin/busybox",
+    "/sbin/bash", "/usr/bin/bash", "/usr/bin/sh", "/usr/bin/zsh",
+    // SSH and package managers.
+    "/usr/bin/ssh", "/usr/bin/scp", "/usr/bin/sftp", "/usr/sbin/sshd",
+    "/usr/bin/sshd", "/etc/ssh", "/etc/apt", "/var/lib/apt", "/var/cache/apt",
+    "/var/lib/dpkg", "/private/var/lib/apt", "/private/var/cache/apt",
+    // Jailbreak runtimes, package tools and their stores.
+    "/Library/MobileSubstrate", "/Library/TweakInject", "/Library/Frameworks/CydiaSubstrate.framework",
+    "/usr/lib/libjailbreak.dylib", "/usr/lib/libhooker.dylib", "/usr/lib/libsubstitute.dylib",
+    "/usr/lib/libsubstrate.dylib", "/usr/lib/substrate", "/usr/lib/TweakInject",
+    "/usr/libexec/cydia", "/usr/libexec/sftp-server", "/usr/libexec/ssh-keysign",
+    "/usr/bin/cycript", "/usr/local/bin/cycript", "/usr/bin/frida-server", "/usr/sbin/frida-server",
+    "/private/var/lib/cydia", "/private/var/stash", "/private/var/tmp/cydia.log",
+    "/private/var/mobile/Library/Cydia", "/var/jb", "/jb",
+    "/.installed_unc0ver", "/.bootstrapped_electra", "/.cydia_no_stash",
+    "/Applications/Cydia.app", "/Applications/Sileo.app", "/Applications/Zebra.app",
+    "/Applications/Installer.app", "/Applications/Unc0ver.app", "/Applications/Checkra1n.app",
+    "/Applications/FakeCarrier.app", "/Applications/WinterBoard.app", "/Applications/SBSettings.app",
+    "/Applications/MxTube.app", "/Applications/IntelliScreen.app", "/Applications/RockApp.app",
+    "/Applications/blackra1n.app", "/Applications/Icy.app",
+};
+
+/// Whether `path` is one of the host-only paths, or a file inside one: an
+/// exact match, or the path continues after the entry with a '/'.
+static bool perry_path_hidden(const char *path) {
+    static int exposed = -1;
+    if (exposed < 0) {
+        const char *setting = getenv("PERRY_EXPOSE_HOST");
+        exposed = setting && *setting && strcmp(setting, "0") != 0;
+    }
+    if (exposed || !path || path[0] != '/')
+        return false;
+    for (size_t i = 0; i < sizeof(host_only_paths) / sizeof(host_only_paths[0]); i++) {
+        size_t length = strlen(host_only_paths[i]);
+        if (strncmp(path, host_only_paths[i], length) == 0 && (path[length] == '\0' || path[length] == '/'))
+            return true;
+    }
+    return false;
+}
+
 /// Whether a failed lookup of `path` is worth trying again: it was not
 /// found, and another name for it is, in another case or a system file
 /// made here. errno is kept.
@@ -247,6 +299,10 @@ static bool other_case(const char *path, char *out, size_t size) {
 
 int perry_vopen(const char *path, int flags, va_list arguments) {
     mode_t mode = (flags & DARWIN_O_CREAT) ? (mode_t)va_arg(arguments, int) : 0;
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return -1;
+    }
     int fd = open(path, open_flags_to_linux(flags), mode);
     char found[PATH_MAX];
     if (fd < 0 && !(flags & DARWIN_O_CREAT) && other_case(path, found, sizeof(found)))
@@ -262,6 +318,10 @@ FILE *perry_fopen(const char *path, const char *mode) {
 #else
     FILE *(*open_file)(const char *, const char *) = fopen;
 #endif
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return NULL;
+    }
     FILE *file = open_file(path, mode);
     char found[PATH_MAX];
     if (!file && mode && mode[0] == 'r' && other_case(path, found, sizeof(found)))
@@ -271,6 +331,10 @@ FILE *perry_fopen(const char *path, const char *mode) {
 
 /// access, finding the file in any case.
 int perry_access(const char *path, int how) {
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return -1;
+    }
     int result = access(path, how);
     char found[PATH_MAX];
     if (result != 0 && other_case(path, found, sizeof(found)))
@@ -473,6 +537,10 @@ static int stat_at(int directory, const char *path, int flags, struct darwin_sta
 
 int darwin_stat(const char *path, struct darwin_stat *out) INODE64_SYMBOL(stat);
 int darwin_stat(const char *path, struct darwin_stat *out) {
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return -1;
+    }
     int result = stat_at(AT_FDCWD, path, 0, out);
     char found[PATH_MAX];
     if (result != 0 && other_case(path, found, sizeof(found)))
@@ -482,6 +550,10 @@ int darwin_stat(const char *path, struct darwin_stat *out) {
 
 int darwin_lstat(const char *path, struct darwin_stat *out) INODE64_SYMBOL(lstat);
 int darwin_lstat(const char *path, struct darwin_stat *out) {
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return -1;
+    }
     int result = stat_at(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, out);
     char found[PATH_MAX];
     if (result != 0 && other_case(path, found, sizeof(found)))
@@ -1122,6 +1194,10 @@ static void entry_to_darwin(const struct dirent *entry, struct darwin_dirent *ou
 
 darwin_dir *darwin_opendir(const char *path) DARWIN_SYMBOL(opendir);
 darwin_dir *darwin_opendir(const char *path) {
+    if (perry_path_hidden(path)) {
+        errno = ENOENT;
+        return NULL;
+    }
     DIR *directory = opendir(path);
     char found[PATH_MAX];
     if (!directory && other_case(path, found, sizeof(found)))
