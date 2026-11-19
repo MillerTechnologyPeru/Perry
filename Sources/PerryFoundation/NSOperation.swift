@@ -101,6 +101,9 @@ struct Dependent {
 
 final class OperationStorage {
     let monitor = Monitor()
+    /// The operation this is the storage of, not held: the storage goes
+    /// when the operation does.
+    var owner: id?
     var cancelled = false
     var executing = false
     var finished = false
@@ -146,6 +149,7 @@ enum Operations {
         creation.locked {
             if let storage = Storage.get(object, as: OperationStorage.self) { return storage }
             let storage = OperationStorage()
+            storage.owner = object
             Storage.set(object, storage)
             return storage
         }
@@ -188,7 +192,18 @@ enum Operations {
             Dispatch.async(Dispatch.globalQueue(0x15, 0), completion, runBlockOnce)
         }
         handled.queue?.operationDidFinish(object)
-        for dependent in handled.dependents { dependent.storage?.queue?.schedule() }
+        for dependent in handled.dependents {
+            // Its -isReady may have become YES, as Darwin tells of: operations
+            // that observe their own readiness (Hulu's) start from the notice.
+            if let operation = dependent.storage?.owner, isReady(operation) { notifyReady(operation) }
+            dependent.storage?.queue?.schedule()
+        }
+    }
+
+    /// Sends the change notices for -isReady.
+    static func notifyReady(_ operation: id) {
+        _ = ObjC.send(operation, ObjC.selector("willChangeValueForKey:"), Strings.autoreleased("isReady"))
+        _ = ObjC.send(operation, ObjC.selector("didChangeValueForKey:"), Strings.autoreleased("isReady"))
     }
 
     /// A ready operation's dependencies have finished; a cancelled one is
@@ -259,6 +274,7 @@ public class NSOperation: NSObject {
         let storage = self.storage
         storage.monitor.locked { storage.cancelled = true }
         // A cancelled operation is ready to run, to finish.
+        Operations.notifyReady(objcObject)
         storage.queue?.schedule()
     }
 
@@ -450,7 +466,18 @@ final class QueueStorage: @unchecked Sendable {
         ObjC.release(underlying)
     }
 
+    /// PERRY_OPERATION_TRACE: each operation a queue is given, starts and
+    /// finishes, by class, to find the one a start-up waits for.
+    static let tracing = getenv("PERRY_OPERATION_TRACE") != nil
+
+    static func trace(_ event: String, _ operation: id) {
+        guard tracing else { return }
+        let line = "perry: operation \(event): \(ObjC.className(operation)) \(operation)\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+    }
+
     func add(_ operation: id) {
+        QueueStorage.trace("added", operation)
         let storage = Operations.storage(operation)
         if let barrier = monitor.locked({ barrier }), barrier != operation, !Operations.isFinished(barrier) {
             Operations.addDependency(operation, barrier)
@@ -471,7 +498,16 @@ final class QueueStorage: @unchecked Sendable {
         guard !pending.isEmpty else { return }
         // Asked outside the lock: subclasses' -isReady may do anything.
         let ready = pending.enumerated()
-            .filter { Messages.bool($0.element, "isReady") }
+            .filter { entry in
+                let isReady = Messages.bool(entry.element, "isReady")
+                if QueueStorage.tracing && !isReady {
+                    let waiting = Operations.storage(entry.element).monitor.locked {
+                        Operations.storage(entry.element).dependencies.filter { !Operations.isFinished($0) }
+                    }
+                    QueueStorage.trace("not ready (waiting for \(waiting.map { ObjC.className($0) })", entry.element)
+                }
+                return isReady
+            }
             .sorted { a, b in
                 let first = Operations.storage(a.element).queuePriority
                 let second = Operations.storage(b.element).queuePriority
@@ -507,6 +543,7 @@ final class QueueStorage: @unchecked Sendable {
         context.deallocate()
         let previous = pthread_getspecific(OperationQueues.currentKey)
         pthread_setspecific(OperationQueues.currentKey, queue.objectPointer)
+        QueueStorage.trace("start", operation)
         ObjC.autoreleasepool { Messages.send(operation, "start") }
         pthread_setspecific(OperationQueues.currentKey, previous)
         // An operation that finished without a change notice.
@@ -515,6 +552,7 @@ final class QueueStorage: @unchecked Sendable {
     }
 
     func operationDidFinish(_ operation: id) {
+        QueueStorage.trace("finished", operation)
         let removed = monitor.locked { () -> Bool in
             started.remove(operation)
             guard let index = operations.firstIndex(of: operation) else { return false }
