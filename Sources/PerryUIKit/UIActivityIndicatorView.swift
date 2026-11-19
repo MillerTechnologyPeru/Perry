@@ -28,11 +28,13 @@ open class UIActivityIndicatorView: UIView {
         super.dealloc()
     }
 
+    /// A designated initializer, so it does not send -initWithFrame: to
+    /// the view, where a Swift subclass's init(frame:) would run.
     @ObjCMethod("initWithActivityIndicatorStyle:")
     func initialize(style: Int) -> Self {
         indicator.style = style
         let side = UIActivityIndicatorView.side(style)
-        _ = initializeView(frame: CGRect(x: 0, y: 0, width: side, height: side))
+        _ = initialize(frame: CGRect(x: 0, y: 0, width: side, height: side))
         return self
     }
 
