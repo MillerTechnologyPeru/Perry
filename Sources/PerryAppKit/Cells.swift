@@ -256,6 +256,33 @@ open class NSCell: NSObject {
     @ObjCMethod("menu") func cellMenu() -> NSObject? { nil }
     @ObjCMethod("setMenu:") func setMenu(_ menu: NSObject?) {}
     @ObjCMethod("keyEquivalent") func keyEquivalent() -> String { "" }
+
+    /// NSCellAttribute: disabled 0, state 1, editable 3, highlighted 5,
+    /// is bordered 10, ...; others answer 0.
+    @ObjCMethod("cellAttribute:")
+    func cellAttribute(_ attribute: UInt) -> Int {
+        switch attribute {
+        case 0: return enabled ? 0 : 1
+        case 1: return state
+        case 3: return editable ? 1 : 0
+        case 5: return highlighted ? 1 : 0
+        case 10: return bordered ? 1 : 0
+        default: return 0
+        }
+    }
+
+    @ObjCMethod("setCellAttribute:to:")
+    func setCellAttribute(_ attribute: UInt, to value: Int) {
+        switch attribute {
+        case 0: enabled = value == 0
+        case 1: state = value
+        case 3: editable = value != 0
+        case 5: highlighted = value != 0
+        case 10: bordered = value != 0
+        default: return
+        }
+        changed()
+    }
     @ObjCMethod("mouseDownFlags") func mouseDownFlags() -> Int { 0 }
     @ObjCMethod("isOpaque") func isOpaque() -> Bool { false }
     @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
@@ -551,6 +578,34 @@ open class NSTextFieldCell: NSActionCell {
             CG.fillRect(context, CGRect(x: min(x, textRect.maxX - 1), y: y, width: 1, height: lineHeight))
             CG.restoreGState(context)
         }
+    }
+}
+
+/// AppKit's private text field cell with an image before its text, as a
+/// list of files shows each with its icon (Xcode's file names are one).
+@ObjCClass("NSImageTextFieldCell")
+open class NSImageTextFieldCell: NSTextFieldCell {
+    /// The image's square: the cell's height, at most 16 points.
+    func imageRect(for frame: CGRect) -> CGRect {
+        let side = min(16, frame.height)
+        return CGRect(x: frame.minX + 2, y: (frame.midY - side / 2).rounded(), width: side, height: side)
+    }
+
+    @ObjCMethod("titleRectForBounds:")
+    override func titleRect(forBounds rect: CGRect) -> CGRect {
+        let base = super.titleRect(forBounds: rect)
+        guard image != nil else { return base }
+        let shift = imageRect(for: rect).maxX + 3 - rect.minX
+        return CGRect(x: base.minX + shift, y: base.minY, width: max(0, base.width - shift), height: base.height)
+    }
+
+    @ObjCMethod("imageRectForBounds:")
+    override func imageRect(forBounds rect: CGRect) -> CGRect { image == nil ? .zero : imageRect(for: rect) }
+
+    @ObjCMethod("drawInteriorWithFrame:inView:")
+    override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
+        image?.draw(in: imageRect(for: frame), fraction: enabled ? 1 : 0.5)
+        super.drawInterior(withFrame: frame, in: view)
     }
 }
 
@@ -922,7 +977,10 @@ open class NSButtonCell: NSActionCell {
 
     /// A check box or radio button, and its title to the right.
     private func drawCheck(_ frame: CGRect, context: CGRef) {
-        let box = CGRect(x: frame.minX + 2, y: frame.midY - 7, width: 14, height: 14)
+        // An image-only check box (NSImageOnly), as a table's check box
+        // column has, is its box alone, centered.
+        let imageOnly = imagePosition == 1
+        let box = CGRect(x: imageOnly ? (frame.midX - 7).rounded() : frame.minX + 2, y: frame.midY - 7, width: 14, height: 14)
         let on = state != 0
         let radio = buttonType == 4
         let path = radio ? { () -> CGRef? in
@@ -945,6 +1003,7 @@ open class NSButtonCell: NSActionCell {
                           NSColor.whiteColor(), width: 1.8, in: context)
             }
         }
+        if imageOnly { return }
         var style = TextStyle()
         style.maximumLines = 1
         style.lineBreakMode = 4
@@ -1015,18 +1074,44 @@ open class NSImageCell: NSCell {
 open class NSTableHeaderCell: NSTextFieldCell {
     @ObjCMethod("drawWithFrame:inView:")
     override func draw(withFrame frame: CGRect, in view: NSView?) {
+        drawBackground(frame, highlighted: highlighted)
+        drawInterior(withFrame: frame, in: view)
+    }
+
+    /// The header's background and its edge, darker while pressed.
+    func drawBackground(_ frame: CGRect, highlighted: Bool) {
         guard let context = NSGraphicsContext.currentCG else { return }
         CG.saveGState(context)
         CG.setFill(context, NSColor.headerColor())
         CG.fillRect(context, frame)
+        if highlighted {
+            CG.setFill(context, NSColor(white: 0, alpha: 0.08))
+            CG.fillRect(context, frame)
+        }
         CG.setFill(context, NSColor.separatorColor())
         CG.fillRect(context, CGRect(x: frame.maxX - 1, y: frame.minY + 3, width: 1, height: frame.height - 6))
         CG.restoreGState(context)
-        drawInterior(withFrame: frame, in: view)
+    }
+
+    /// AppKit's private drawing of a whole header, its background and its
+    /// title or image, which subclasses (Xcode's) draw with.
+    @ObjCMethod("_drawThemeContents:highlighted:inView:")
+    func drawThemeContents(_ frame: CGRect, highlighted: Bool, in view: NSView?) {
+        drawBackground(frame, highlighted: highlighted)
+        typealias Interior = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Interior.self)(objcObject, ObjCRuntime.selector("drawInteriorWithFrame:inView:"), frame, view?.objcObject)
     }
 
     @ObjCMethod("drawInteriorWithFrame:inView:")
     override func drawInterior(withFrame frame: CGRect, in view: NSView?) {
+        // A header with an image and no title, as an icon column's, shows
+        // the image in the middle.
+        if cellString.isEmpty, let image {
+            let size = image.size
+            image.draw(in: CGRect(x: (frame.midX - size.width / 2).rounded(), y: (frame.midY - size.height / 2).rounded(),
+                                  width: size.width, height: size.height), fraction: 1)
+            return
+        }
         let rect = CGRect(x: frame.minX + 4, y: frame.minY, width: max(0, frame.width - 8), height: frame.height)
         var style = textStyle
         style.maximumLines = 1
@@ -1054,6 +1139,7 @@ open class NSPopUpButtonCell: NSButtonCell {
     var pullsDown = false
     var autoenablesItems = true
     var preferredEdge: UInt = 1
+    var arrow: UInt = 2
 
     @ObjCMethod("initWithCoder:")
     public required init(coder: NSObject?) {
@@ -1101,6 +1187,9 @@ open class NSPopUpButtonCell: NSButtonCell {
     @ObjCMethod("autoenablesItems") func cellAutoenablesItems() -> Bool { autoenablesItems }
     @ObjCMethod("setAutoenablesItems:") func setAutoenablesItems(_ value: Bool) { autoenablesItems = value }
     @ObjCMethod("preferredEdge") func cellPreferredEdge() -> UInt { preferredEdge }
+    /// NSPopUpArrowPosition: none 0, at center 1, at bottom 2.
+    @ObjCMethod("arrowPosition") func arrowPosition() -> UInt { arrow }
+    @ObjCMethod("setArrowPosition:") func setArrowPosition(_ value: UInt) { arrow = value; changed() }
     @ObjCMethod("setPreferredEdge:") func setPreferredEdge(_ value: UInt) { preferredEdge = value }
     @ObjCMethod("selectedItem") func cellSelectedItem() -> NSMenuItem? { selectedItem }
     @ObjCMethod("indexOfSelectedItem") func indexOfSelectedItem() -> Int { selectedIndex }

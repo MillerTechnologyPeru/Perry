@@ -209,6 +209,18 @@ open class NSScrollView: NSView {
     func tile() {
         let inset: CGFloat = borderType == 0 ? 0 : 1
         var content = CGRect(x: inset, y: inset, width: max(0, frame.width - 2 * inset), height: max(0, frame.height - 2 * inset))
+        // A document with a header view (a table's) has it shown above it,
+        // in a clip view of its own made for it when the scroll view was
+        // put together in code.
+        if let document = contentClip?.documentView, Send.responds(document.objcObject, "headerView"),
+           let header = Send.object(document.objcObject, "headerView") {
+            if headerClip == nil {
+                let clip = NSClipView(frame: .zero)
+                addSubview(clip)
+                headerClip = clip
+            }
+            if let headerClip, headerClip.documentView?.objcObject != header { headerClip.setDocumentView(NSView.wrap(header)) }
+        }
         if let headerClip, let header = headerClip.documentView {
             let height = header.frame.height > 0 ? header.frame.height : 23
             Send.void(headerClip.objcObject, "setFrame:", rect: CGRect(x: content.minX, y: content.minY, width: content.width, height: height))
@@ -509,6 +521,8 @@ open class NSScroller: NSControl {
     @ObjCMethod("setKnobStyle:") func setKnobStyle(_ value: Int) {}
     @ObjCMethod("hitPart") func hitPart() -> UInt { 2 }
     @ObjCMethod("usableParts") func usableParts() -> UInt { 2 }
+    /// Works out which parts fit, which -usableParts answers from here.
+    @ObjCMethod("checkSpaceForParts") func checkSpaceForParts() {}
     @ObjCMethod("isFlipped") override func isFlipped() -> Bool { true }
 
     /// The knob's rectangle in the scroller.

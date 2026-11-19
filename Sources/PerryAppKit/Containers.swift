@@ -163,6 +163,10 @@ open class NSSplitView: NSView {
         arrangesAllSubviews = !decoded.bool("NSDoesNotArrangeAllSubviews")
         arranged = decoded.array("NSArrangedSubviews").compactMap { $0.as(NSView.self) }
         holdingPriorities = decoded.array("NSHoldingPriorities").map { Float(Send.double($0.objcObject, "doubleValue")) }
+        // A split view and its panes resize what they hold, as AppKit's
+        // (and GNUstep's) decoding has them.
+        autoresizesSubviews = true
+        for pane in subviews { pane.autoresizesSubviews = true }
     }
 
     var panes: [NSView] { arrangesAllSubviews || arranged.isEmpty ? subviews : arranged }
@@ -196,9 +200,42 @@ open class NSSplitView: NSView {
         while holdingPriorities.count <= index { holdingPriorities.append(250) }
         holdingPriorities[index] = priority
     }
-    @ObjCMethod("isSubviewCollapsed:") func isSubviewCollapsed(_ view: NSView?) -> Bool { view?.hidden ?? false }
-    @ObjCMethod("minPossiblePositionOfDividerAtIndex:") func minPossiblePosition(ofDividerAt index: Int) -> CGFloat { 0 }
-    @ObjCMethod("maxPossiblePositionOfDividerAtIndex:") func maxPossiblePosition(ofDividerAt index: Int) -> CGFloat { vertical ? bounds.width : bounds.height }
+    @ObjCMethod("isSubviewCollapsed:")
+    func isSubviewCollapsed(_ view: NSView?) -> Bool {
+        guard let view else { return false }
+        return view.hidden || view.frame.width <= 0 || view.frame.height <= 0
+    }
+
+    /// Where a divider can go: from the start of the pane before it to the
+    /// end of the pane after it.
+    @ObjCMethod("minPossiblePositionOfDividerAtIndex:")
+    func minPossiblePosition(ofDividerAt index: Int) -> CGFloat {
+        let panes = self.panes.filter { !$0.hidden }
+        guard index >= 0, index + 1 < panes.count else { return 0 }
+        return vertical ? panes[index].frame.minX : panes[index].frame.minY
+    }
+
+    @ObjCMethod("maxPossiblePositionOfDividerAtIndex:")
+    func maxPossiblePosition(ofDividerAt index: Int) -> CGFloat {
+        let panes = self.panes.filter { !$0.hidden }
+        guard index >= 0, index + 1 < panes.count else { return vertical ? bounds.width : bounds.height }
+        return (vertical ? panes[index + 1].frame.maxX : panes[index + 1].frame.maxY) - dividerThickness()
+    }
+
+    /// The delegate's -splitView:shouldAdjustSizeOfSubview:, YES without one.
+    func shouldAdjust(_ pane: NSView) -> Bool {
+        guard Send.responds(delegateObject, "splitView:shouldAdjustSizeOfSubview:") else { return true }
+        typealias Should = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer) -> Bool
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Should.self)(delegateObject, ObjCRuntime.selector("splitView:shouldAdjustSizeOfSubview:"),
+                                                                    objcObject, pane.objcObject)
+    }
+
+    /// Whether the panes' holding priorities differ, as views set up since
+    /// Mac OS X 10.8 have them; equal ones share a change in proportion.
+    var prioritized: Bool {
+        let all = panes.indices.map { holdingPriority(forSubviewAt: $0) }
+        return Set(all).count > 1
+    }
 
     /// Each pane keeps its size along the split, but the panes fill it:
     /// the last pane, or the one holding least, takes what is left.
@@ -211,6 +248,37 @@ open class NSSplitView: NSView {
         // Laid out once there is room: squeezed into nothing, the panes'
         // own subviews would lose their layout.
         guard total > 0 else { return }
+        post("NSSplitViewWillResizeSubviewsNotification", object: self)
+        defer { post("NSSplitViewDidResizeSubviewsNotification", object: self) }
+        if !prioritized {
+            // As AppKit's before holding priorities (and GNUstep's): the
+            // panes keep their proportions, those the delegate says not to
+            // adjust keep their size, and the last takes what is left.
+            let available = total - thickness * CGFloat(panes.count - 1)
+            let sizes = panes.map { vertical ? $0.frame.width : $0.frame.height }
+            let oldTotal = sizes.reduce(0, +)
+            let fixed = zip(panes, sizes).dropLast().filter { !shouldAdjust($0.0) }.map(\.1).reduce(0, +)
+            let scale = oldTotal - fixed > 0 ? (available - fixed) / (oldTotal - fixed) : 0
+            var offset: CGFloat = 0
+            for (index, pane) in panes.enumerated() {
+                var size: CGFloat
+                if index == panes.count - 1 {
+                    size = max(0, total - offset)
+                } else if !shouldAdjust(pane) {
+                    size = sizes[index]
+                } else {
+                    size = oldTotal > 0 ? (sizes[index] * scale).rounded() : (available / CGFloat(panes.count)).rounded()
+                }
+                size = max(0, size)
+                let frame = vertical ? CGRect(x: offset, y: 0, width: size, height: bounds.height)
+                    : CGRect(x: 0, y: offset, width: bounds.width, height: size)
+                if pane.frame != frame { Send.void(pane.objcObject, "setFrame:", rect: frame) }
+                offset += size + thickness
+            }
+            setNeedsDisplay(true)
+            dividersMoved()
+            return
+        }
         var sizes = panes.map { pane in
             let limits = limits(of: pane)
             return min(max(vertical ? pane.frame.width : pane.frame.height, limits.minimum), limits.maximum)
@@ -273,11 +341,22 @@ open class NSSplitView: NSView {
     override func setFrameSize(_ size: CGSize) {
         let old = frame.size
         super.setFrameSize(size)
-        if old != size { adjustSubviews() }
+        // A split view lays its panes out as it changes, autoresizing or not.
+        if old != size, !autoresizesSubviews { resizeSubviews(withOldSize: old) }
     }
 
+    /// The delegate lays the panes out, when it says how; else
+    /// -adjustSubviews does.
     @ObjCMethod("resizeSubviewsWithOldSize:")
-    override func resizeSubviews(withOldSize old: CGSize) { adjustSubviews() }
+    override func resizeSubviews(withOldSize old: CGSize) {
+        if Send.responds(delegateObject, "splitView:resizeSubviewsWithOldSize:") {
+            typealias Resize = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, UnsafeMutableRawPointer, CGSize) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: Resize.self)(delegateObject, ObjCRuntime.selector("splitView:resizeSubviewsWithOldSize:"),
+                                                                 objcObject, old)
+        } else {
+            adjustSubviews()
+        }
+    }
 
     /// The dividers' rectangles.
     var dividers: [CGRect] {
@@ -326,7 +405,25 @@ open class NSSplitView: NSView {
     override func mouseDragged(_ event: NSObject?) {
         guard let dragging, let event = event?.as(NSEvent.self) else { return }
         let point = convert(event.locationInWindow, from: nil)
-        setPosition(dragging.position + (vertical ? point.x : point.y) - dragging.start, ofDividerAt: dragging.index)
+        var position = dragging.position + (vertical ? point.x : point.y) - dragging.start
+        // The delegate's limits and say, as a drag asks for them.
+        typealias Constrain = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer, UnsafeMutableRawPointer, CGFloat, Int) -> CGFloat
+        let constrain = unsafeBitCast(ObjCRuntime.msgSend, to: Constrain.self)
+        if Send.responds(delegateObject, "splitView:constrainMinCoordinate:ofSubviewAt:") {
+            let minimum = constrain(delegateObject, ObjCRuntime.selector("splitView:constrainMinCoordinate:ofSubviewAt:"), objcObject,
+                                    minPossiblePosition(ofDividerAt: dragging.index), dragging.index)
+            position = max(position, minimum)
+        }
+        if Send.responds(delegateObject, "splitView:constrainMaxCoordinate:ofSubviewAt:") {
+            let maximum = constrain(delegateObject, ObjCRuntime.selector("splitView:constrainMaxCoordinate:ofSubviewAt:"), objcObject,
+                                    maxPossiblePosition(ofDividerAt: dragging.index), dragging.index)
+            position = min(position, maximum)
+        }
+        if Send.responds(delegateObject, "splitView:constrainSplitPosition:ofSubviewAt:") {
+            position = constrain(delegateObject, ObjCRuntime.selector("splitView:constrainSplitPosition:ofSubviewAt:"), objcObject,
+                                 position, dragging.index)
+        }
+        setPosition(position, ofDividerAt: dragging.index)
     }
 
     @ObjCMethod("mouseUp:") override func mouseUp(_ event: NSObject?) { dragging = nil }

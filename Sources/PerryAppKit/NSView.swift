@@ -84,10 +84,14 @@ open class NSView: NSResponder {
     }
 
     /// What a view's archive holds besides its frame.
-    func decodeContents(_ decoded: Coder, reversingSubviews: Bool = false) {
+    /// A custom view's (`keepingAutoresizesSubviews`) keeps whether it
+    /// resizes its subviews as -initWithFrame: set it: AppKit's NSCustomView
+    /// gives the view it makes the placeholder's frame, mask and subviews,
+    /// not that.
+    func decodeContents(_ decoded: Coder, reversingSubviews: Bool = false, keepingAutoresizesSubviews: Bool = false) {
         let flags = UInt32(truncatingIfNeeded: decoded.integer("NSvFlags"))
         autoresizingMask = UInt(flags & 0x3f)
-        autoresizesSubviews = flags & 0x100 != 0 || !decoded.has("NSvFlags")
+        if !keepingAutoresizesSubviews { autoresizesSubviews = flags & 0x100 != 0 || !decoded.has("NSvFlags") }
         hidden = flags & 0x8000_0000 != 0
         translatesAutoresizingMask = !decoded.bool("NSDoNotTranslateAutoresizingMask")
         if decoded.bool("NSViewIsLayerTreeHost") || decoded.bool("NSViewWantsLayer") { wantsLayer = true }
@@ -750,11 +754,20 @@ open class NSView: NSResponder {
             }
             CG.translateCTM(context, -boundsOrigin.x, -boundsOrigin.y)
             Send.void(objcObject, "viewWillDraw")
+            let previous = NSView.focused
+            NSView.focused = objcObject
+            defer { NSView.focused = previous }
             typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect) -> Void
             unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("drawRect:"), bounds)
         }
         needsDisplay = false
     }
+
+    /// The view drawing now, which +focusView answers. Not retained.
+    nonisolated(unsafe) static var focused: UnsafeMutableRawPointer?
+
+    @ObjCClassMethod("focusView")
+    static func focusView() -> UnsafeMutableRawPointer? { focused }
 
     // MARK: Hit testing and conversion
 
