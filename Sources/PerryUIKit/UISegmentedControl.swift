@@ -71,10 +71,12 @@ open class UISegmentedControl: UIControl {
         super.dealloc()
     }
 
-    /// Titles and images, one segment each.
+    /// Titles and images, one segment each. A designated initializer, so it
+    /// does not send -initWithFrame: to the control, where a Swift
+    /// subclass's init(frame:) would run.
     @ObjCMethod("initWithItems:")
     func initialize(items: NSArray?) -> Self {
-        _ = initializeView(frame: .zero)
+        _ = initialize(frame: .zero)
         segmented.segments = items?.elements.map(UISegmentedControl.segment) ?? []
         var frame = state.frame
         frame.size = intrinsicContentSize()
