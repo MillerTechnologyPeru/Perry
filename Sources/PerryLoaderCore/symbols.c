@@ -1027,8 +1027,17 @@ static bool ends_with(const char *name, const char *suffix) {
 /// string constants Apple names alike: user activity types, capture device
 /// types and session presets, authorization scopes and options, SceneKit's
 /// lighting models and light types, pasteboard types and image names.
+/// The C frameworks' names without a k are functions, whatever they end
+/// with (CFLocaleCreateComponentsFromLocaleIdentifier): their constants
+/// are kCF…, kCG… and the like.
 static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
+    static const char *const function_prefixes[] = { "_CF", "_CG", "_CT", "_CV", "_CM", "_CC", "_Sec" };
+    for (size_t i = 0; i < sizeof(function_prefixes) / sizeof(function_prefixes[0]); i++) {
+        size_t length = strlen(function_prefixes[i]);
+        if (strncmp(name, function_prefixes[i], length) == 0 && name[length] >= 'A' && name[length] <= 'Z')
+            return NULL;
+    }
     static const char *const families[] = { "_NSUserActivityType", "_AVCaptureDeviceType", "_AVCaptureSessionPreset",
                                             "_ASAuthorizationScope", "_ASAuthorizationPublicKeyCredential",
                                             "_SCNLightingModel", "_SCNLightType", "_SCNPhysicsTest", "_SCNPhysicsShape",
