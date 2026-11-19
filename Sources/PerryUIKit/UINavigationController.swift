@@ -719,6 +719,7 @@ final class NavigationItemState: ObjectState {
     var backButtonDisplayMode = 0
     var searchController: NSObject?
     var hidesSearchBarWhenScrolling = true
+    var preferredSearchBarPlacement = 0
     var standardAppearance: NSObject?
     var scrollEdgeAppearance: NSObject?
     var compactAppearance: NSObject?
@@ -791,6 +792,11 @@ open class UINavigationItem: NSObject {
     @ObjCMethod("setSearchController:") func setSearchController(_ controller: NSObject?) { state.searchController = controller }
     @ObjCMethod("hidesSearchBarWhenScrolling") func hidesSearchBarWhenScrolling() -> Bool { state.hidesSearchBarWhenScrolling }
     @ObjCMethod("setHidesSearchBarWhenScrolling:") func setHidesSearchBarWhenScrolling(_ hides: Bool) { state.hidesSearchBarWhenScrolling = hides }
+    /// Where the search bar goes (UINavigationItemSearchBarPlacement), kept
+    /// for the getter: the bar is laid out the same way whatever it is.
+    @ObjCMethod("preferredSearchBarPlacement") func preferredSearchBarPlacement() -> Int { state.preferredSearchBarPlacement }
+    @ObjCMethod("setPreferredSearchBarPlacement:")
+    func setPreferredSearchBarPlacement(_ placement: Int) { state.preferredSearchBarPlacement = placement }
     @ObjCMethod("standardAppearance") func standardAppearance() -> NSObject? { state.standardAppearance }
     @ObjCMethod("setStandardAppearance:") func setStandardAppearance(_ appearance: NSObject?) { state.standardAppearance = appearance }
     @ObjCMethod("scrollEdgeAppearance") func scrollEdgeAppearance() -> NSObject? { state.scrollEdgeAppearance }
