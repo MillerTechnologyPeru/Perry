@@ -1,0 +1,23 @@
+title: Perry
+description: Which iOS and macOS apps run on Linux under Perry, and how far each one gets.
+url: https://millertechnologyperu.github.io
+baseurl: /Perry
+markdown: kramdown
+permalink: pretty
+repository_url: https://github.com/MillerTechnologyPeru/Perry
+
+collections:
+  apps:
+    output: true
+    permalink: /apps/:name/
+
+defaults:
+  - scope: { type: apps }
+    values: { layout: app }
+  - scope: { type: pages }
+    values: { layout: default }
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
