@@ -385,8 +385,24 @@ open class ToolbarView: NSView {
     /// Not retained.
     var toolbarObject: UnsafeMutableRawPointer?
     var buttons: [(item: NSToolbarItem, frame: CGRect)] = []
+    /// Labels under views, in the classic style.
+    var viewLabels: [(item: NSToolbarItem, frame: CGRect)] = []
 
-    static let height: CGFloat = 38
+    /// Toolbars as Mac OS X drew them before 10.11 and the unified style:
+    /// each item's 32-point icon or view with its label under it. For apps
+    /// built against an SDK of then.
+    static let classic: Bool = {
+        guard let info = Send.object(Classes.named("NSProcessInfo")?.pointer, "processInfo"),
+              let text = Send.object(info, "operatingSystemVersionString").map({ String(objCArgument: $0) }) else { return false }
+        // "Version 10.5.8 (Build 9L31a)"
+        let numbers = text.split(whereSeparator: { !$0.isNumber && $0 != "." }).first?.split(separator: ".").compactMap { Int($0) } ?? []
+        guard numbers.count >= 2 else { return false }
+        return numbers[0] == 10 && numbers[1] < 11
+    }()
+
+    static var height: CGFloat { classic ? 56 : 38 }
+    static var labelFont: NSFont { NSFont.system(size: 11) }
+    static var labelHeight: CGFloat { Text.lineHeight(labelFont) }
 
     var toolbar: NSToolbar? { toolbarObject.map { NSToolbar.objCInstance($0, ownership: .retain) } }
 
@@ -408,7 +424,17 @@ open class ToolbarView: NSView {
         let shown = toolbar.items.filter(\.visible).compactMap { $0.itemView() }
         for view in subviews where !shown.contains(where: { $0 === view }) { view.removeFromSuperview() }
         buttons = []
+        viewLabels = []
+        let classic = Self.classic
+        func labelWidth(_ item: NSToolbarItem) -> CGFloat {
+            let text = item.label.isEmpty ? item.title : item.label
+            return text.isEmpty ? 0 : Text.width(text, font: Self.labelFont) + 8
+        }
         func width(_ item: NSToolbarItem) -> CGFloat {
+            let base = baseWidth(item)
+            return classic && !item.isFlexibleSpace && !item.isSpace ? max(base, labelWidth(item)) : base
+        }
+        func baseWidth(_ item: NSToolbarItem) -> CGFloat {
             if item.isFlexibleSpace { return 0 }
             if item.isSpace { return 8 }
             if let view = item.itemView() {
@@ -452,12 +478,24 @@ open class ToolbarView: NSView {
             for (index, item) in items.enumerated() {
                 let w = item.isFlexibleSpace ? share : widths[index]
                 if let view = item.itemView() {
-                    let height = min(max(view.frame.height, 22), bounds.height - 8)
                     if view.superview !== self { addSubview(view) }
                     view.translatesAutoresizingMask = true
-                    Send.void(view.objcObject, "setFrame:", rect: CGRect(x: x, y: ((bounds.height - height) / 2).rounded(), width: w, height: height))
+                    if classic {
+                        // The view at its own width, centered over its
+                        // label, in the icons' band.
+                        let band = bounds.height - Self.labelHeight - 6
+                        let height = min(max(view.frame.height, 22), band)
+                        let viewWidth = min(w, max(baseWidth(item), 20))
+                        Send.void(view.objcObject, "setFrame:", rect: CGRect(x: (x + (w - viewWidth) / 2).rounded(), y: (3 + (band - height) / 2).rounded(),
+                                                                             width: viewWidth, height: height))
+                        viewLabels.append((item, CGRect(x: x, y: 0, width: w, height: bounds.height)))
+                    } else {
+                        let height = min(max(view.frame.height, 22), bounds.height - 8)
+                        Send.void(view.objcObject, "setFrame:", rect: CGRect(x: x, y: ((bounds.height - height) / 2).rounded(), width: w, height: height))
+                    }
                 } else if !item.isFlexibleSpace && !item.isSpace {
-                    buttons.append((item, CGRect(x: x, y: 5, width: w, height: bounds.height - 10)))
+                    buttons.append((item, classic ? CGRect(x: x, y: 2, width: w, height: bounds.height - 4)
+                                                   : CGRect(x: x, y: 5, width: w, height: bounds.height - 10)))
                 }
                 x += w + 8
             }
@@ -485,6 +523,21 @@ open class ToolbarView: NSView {
         CG.fillRect(context, CGRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1))
         CG.restoreGState(context)
         let selected = toolbar?.selectedItemIdentifier
+        if Self.classic {
+            for (item, frame) in buttons {
+                if item.identifier == selected || item === pressed {
+                    CG.fill(CG.roundedRect(frame, radius: 6), NSColor.labelColor().withAlphaComponent(0.12), in: context)
+                }
+                if let image = item.image {
+                    let side = min(32, frame.height - Self.labelHeight - 4)
+                    image.draw(in: CGRect(x: (frame.midX - side / 2).rounded(), y: frame.minY + 2, width: side, height: side),
+                               fraction: item.enabled ? (item === pressed ? 0.6 : 1) : 0.4)
+                }
+                drawLabel(item, in: frame)
+            }
+            for (item, frame) in viewLabels { drawLabel(item, in: frame) }
+            return
+        }
         for (item, frame) in buttons {
             if item.identifier == selected || item === pressed {
                 CG.fill(CG.roundedRect(frame, radius: 6), NSColor.labelColor().withAlphaComponent(0.12), in: context)
@@ -520,6 +573,18 @@ open class ToolbarView: NSView {
             Text.draw([TextRun(text: item.label.isEmpty ? item.title : item.label, font: font, color: color)],
                       in: CGRect(x: frame.minX, y: frame.maxY - labelHeight, width: frame.width, height: labelHeight), style: style)
         }
+    }
+
+    /// An item's label along the bottom of its frame, centered.
+    func drawLabel(_ item: NSToolbarItem, in frame: CGRect) {
+        var style = TextStyle()
+        style.alignment = 1
+        style.maximumLines = 1
+        style.lineBreakMode = 4
+        let color = item.enabled ? NSColor.labelColor() : NSColor.disabledControlTextColor()
+        let height = Self.labelHeight
+        Text.draw([TextRun(text: item.label.isEmpty ? item.title : item.label, font: Self.labelFont, color: color)],
+                  in: CGRect(x: frame.minX - 4, y: bounds.height - height - 3, width: frame.width + 8, height: height), style: style)
     }
 
     /// The item being pressed, drawn darker.
