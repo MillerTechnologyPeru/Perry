@@ -262,6 +262,7 @@ open class NSDocument: NSObject {
     }
     @ObjCMethod("revertDocumentToSaved:") func revertDocumentToSaved(_ sender: NSObject?) {}
     @ObjCMethod("validateUserInterfaceItem:") func validateUserInterfaceItem(_ item: NSObject?) -> Bool { true }
+    @ObjCMethod("validateMenuItem:") func validateMenuItem(_ item: NSObject?) -> Bool { true }
 
     // MARK: Closing
 
@@ -593,6 +594,7 @@ open class NSDocumentController: NSObject {
     @ObjCMethod("clearRecentDocuments:") func clearRecentDocuments(_ sender: NSObject?) { recent = [] }
     @ObjCMethod("maximumRecentDocumentCount") func maximumRecentDocumentCount() -> Int { 10 }
     @ObjCMethod("validateUserInterfaceItem:") func validateUserInterfaceItem(_ item: NSObject?) -> Bool { true }
+    @ObjCMethod("validateMenuItem:") func validateMenuItem(_ item: NSObject?) -> Bool { true }
     @ObjCMethod("autosavingDelay") func autosavingDelay() -> Double { 0 }
     @ObjCMethod("setAutosavingDelay:") func setAutosavingDelay(_ delay: Double) {}
     @ObjCMethod("currentDirectory") func currentDirectory() -> String? { nil }
