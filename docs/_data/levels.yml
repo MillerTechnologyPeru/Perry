@@ -1,0 +1,15 @@
+- level: 1
+  name: Loads
+  description: The app starts, then stops or crashes before it shows a screen of its own.
+- level: 2
+  name: First screen
+  description: The app reaches a first screen such as a splash, welcome, sign-in, launcher, loading or title screen.
+- level: 3
+  name: Main content, major issues
+  description: The app gets past its first screen into its menus or main content, with stated problems or no claim of being usable.
+- level: 4
+  name: Usable
+  description: The app runs or plays with its main content shown, and only small issues are named.
+- level: 5
+  name: Complete
+  description: The pull request states that everything tested works.
