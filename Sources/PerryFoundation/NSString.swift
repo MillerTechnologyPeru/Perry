@@ -411,7 +411,10 @@ public class NSString: NSObject {
     func hash() -> UInt { Strings.hash(value) }
 
     @ObjCMethod("compare:")
-    func compare(_ other: String) -> Int { Strings.compare(value, other) }
+    // A nil argument, which -[NSString compare:] raises on, is taken as the
+    // empty string here: a nil in a sorted collection orders first rather
+    // than aborting the sort.
+    func compare(_ other: String?) -> Int { Strings.compare(value, other ?? "") }
 
     @ObjCMethod("hasPrefix:")
     func hasPrefix(_ prefix: String) -> Bool { value.hasPrefix(prefix) }
