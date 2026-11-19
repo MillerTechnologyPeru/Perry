@@ -287,12 +287,15 @@ final class Compositor {
 
     private func drawFlattened(_ layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform, alpha: CGFloat) {
         let key = Key(layer: layer.objcObject, border: false)
+        // What shows is the layer's bounds, or where its mask lets content
+        // through when that reaches beyond them.
+        let extent = state.mask != nil ? CALayer.maskedExtent(of: state) : state.bounds
         // Nothing has changed since it was drawn, and nothing in it moves
         // without changing: what was drawn still shows.
-        if let entry = textures[key], let flattened = entry.flattened, flattened.size == state.bounds.size,
+        if let entry = textures[key], let flattened = entry.flattened, flattened.size == extent.size,
            flattened.generation == Compositing.generation, !Compositor.isAnimating(layer) {
             textures[key]?.used = true
-            place(entry.texture, state: state, toScreen: toScreen, alpha: alpha)
+            place(entry.texture, extent: extent, toScreen: toScreen, alpha: alpha)
             return
         }
         let generation = Compositing.generation
@@ -304,22 +307,22 @@ final class Compositor {
         // that) needs only the pixels it takes up, not its own size's.
         let shown = (toScreen.a * toScreen.d - toScreen.b * toScreen.c).magnitude.squareRoot()
         let renderScale = scale * min(1, shown.isFinite ? max(shown, 0.05) : 1)
-        let pixels = (state.bounds.width * renderScale, state.bounds.height * renderScale)
+        let pixels = (extent.width * renderScale, extent.height * renderScale)
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
-        guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: renderScale, opaque: false) else { return }
+        guard width > 0, height > 0, let context = CG.makeContext(size: extent.size, scale: renderScale, opaque: false) else { return }
         defer { CG.release(context) }
         if state.mask != nil {
             guard let image = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale) else { return }
-            CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: state.bounds.size), context: context)
+            CG.drawFlipped(image.object, in: CGRect(origin: .zero, size: extent.size), context: context)
         } else {
             CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
             CALayer.drawTree(of: layer, state: state, shape: shape, in: context)
         }
         guard let data = CG.bitmapContextGetData(context),
               let texture = makeTexture(width: width, height: height, pixels: data, pitch: width * 4) else { return }
-        textures[key] = Entry(texture: texture, signature: nil, used: true, flattened: (state.bounds.size, generation))
-        place(texture, state: state, toScreen: toScreen, alpha: alpha)
+        textures[key] = Entry(texture: texture, signature: nil, used: true, flattened: (extent.size, generation))
+        place(texture, extent: extent, toScreen: toScreen, alpha: alpha)
     }
 
     /// Whether the layer, its mask or anything under them has animations,
@@ -352,10 +355,14 @@ final class Compositor {
     }
 
     private func place(_ texture: SDLTexture, state: LayerState, toScreen: CGAffineTransform, alpha: CGFloat) {
+        place(texture, extent: state.bounds, toScreen: toScreen, alpha: alpha)
+    }
+
+    private func place(_ texture: SDLTexture, extent: CGRect, toScreen: CGAffineTransform, alpha: CGFloat) {
         let level = Float(alpha)
         try? texture.setAlphaModulation(level)
         try? texture.setColorModulation(red: level, green: level, blue: level)
-        render(texture, bounds: state.bounds, toScreen: toScreen, flip: 0)
+        render(texture, bounds: extent, toScreen: toScreen, flip: 0)
     }
 
     /// Draws `texture` into `bounds` taken to the screen by `toScreen`:
