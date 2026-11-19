@@ -209,7 +209,9 @@ enum Snapshot {
             if geometry.opacity < 1 { tree += " alpha \(geometry.opacity)" }
             if geometry.masksToBounds { tree += " clips" }
             if geometry.cornerRadius > 0 { tree += " radius \(geometry.cornerRadius)" }
-            if geometry.layer.mask() != nil { tree += " masked" }
+            if let mask = geometry.layer.mask() {
+                tree += " masked \(mask.unsafeCast(to: CALayer.self).frame()) by \(className(mask.objcObject))"
+            }
             if let presented = geometry.layer.presentationLayer() {
                 let model = geometry.layer
                 if presented.frame() != model.frame() { tree += " presented \(presented.frame())" }
