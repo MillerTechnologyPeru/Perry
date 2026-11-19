@@ -302,7 +302,7 @@ enum ManagedObjects {
                 }
                 guard !installed.contains(className), let cls = Classes.named(className) else { continue }
                 installed.insert(className)
-                for property in entity.state.properties {
+                for property in entity.allProperties {
                     let name = property.state.name
                     let capitalized = name.prefix(1).uppercased() + name.dropFirst()
                     let relationship = property.as(NSRelationshipDescription.self)
@@ -337,7 +337,7 @@ enum ManagedObjects {
     static func key(_ object: NSManagedObject, selector: UnsafeRawPointer?, prefix: String, suffix: String) -> String {
         let name = selector.map { String(cString: $0.assumingMemoryBound(to: CChar.self)) } ?? ""
         let middle = String(name.dropFirst(prefix.count).dropLast(suffix.count))
-        let properties = object.state.entity?.state.properties.map(\.state.name) ?? []
+        let properties = object.state.entity?.allProperties.map(\.state.name) ?? []
         return properties.first { $0 == middle }
             ?? properties.first { $0.prefix(1).uppercased() + $0.dropFirst() == middle }
             ?? middle.prefix(1).lowercased() + middle.dropFirst()
