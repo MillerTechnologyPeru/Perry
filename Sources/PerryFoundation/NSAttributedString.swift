@@ -189,9 +189,11 @@ public class NSAttributedString: NSObject {
         return self
     }
 
+    /// No string is an empty one: Xcode's value transformers make
+    /// attributed strings of a binding's value even when it is nil.
     @ObjCMethod("initWithString:")
-    func initialize(string: String) -> Self {
-        Storage.set(objcObject, AttributedStorage(units: Array(string.utf16), attributes: nil))
+    func initialize(string: String?) -> Self {
+        Storage.set(objcObject, AttributedStorage(units: Array((string ?? "").utf16), attributes: nil))
         return self
     }
 
@@ -226,8 +228,8 @@ public class NSAttributedString: NSObject {
     }
 
     @ObjCMethod("initWithString:attributes:")
-    func initialize(string: String, attributes: ObjCObject?) -> Self {
-        Storage.set(objcObject, AttributedStorage(units: Array(string.utf16), attributes: attributes?.id))
+    func initialize(string: String?, attributes: ObjCObject?) -> Self {
+        Storage.set(objcObject, AttributedStorage(units: Array((string ?? "").utf16), attributes: attributes?.id))
         return self
     }
 
