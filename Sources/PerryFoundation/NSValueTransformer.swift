@@ -27,7 +27,7 @@ enum ValueTransformers {
             ("NSIsNotNil", "_NSIsNotNilTransformer"),
             ("NSUnarchiveFromData", "_NSUnarchiveFromDataTransformer"),
             ("NSKeyedUnarchiveFromData", "_NSKeyedUnarchiveFromDataTransformer"),
-            ("NSSecureUnarchiveFromData", "_NSKeyedUnarchiveFromDataTransformer"),
+            ("NSSecureUnarchiveFromData", "NSSecureUnarchiveFromDataTransformer"),
         ]
         for (name, className) in builtIns where named[name] == nil {
             guard let cls = className.withCString({ ObjC.getClass($0) }),
@@ -118,6 +118,45 @@ class _NSKeyedUnarchiveFromDataTransformer: NSValueTransformer {
 
 @ObjCClass("_NSUnarchiveFromDataTransformer")
 final class _NSUnarchiveFromDataTransformer: _NSKeyedUnarchiveFromDataTransformer {}
+
+/// Data securely unarchived into an object of one of the classes
+/// +allowedTopLevelClasses gives (subclasses name theirs), and archived
+/// again requiring secure coding.
+@ObjCClass("NSSecureUnarchiveFromDataTransformer")
+open class NSSecureUnarchiveFromDataTransformer: NSValueTransformer {
+    /// Foundation's property list classes and a few more, as on Apple's.
+    @ObjCClassMethod("allowedTopLevelClasses")
+    static func allowedTopLevelClasses() -> UnsafeMutableRawPointer? {
+        let names = ["NSArray", "NSDictionary", "NSSet", "NSString", "NSNumber", "NSDate", "NSData", "NSURL", "NSUUID", "NSNull"]
+        let classes = names.compactMap { name in name.withCString { ObjC.getClass($0) }.map { UnsafeMutableRawPointer($0) } }
+        return Arrays.autoreleased(classes)
+    }
+
+    @ObjCClassMethod("transformedValueClass") static func secureTransformedValueClass() -> UnsafeMutableRawPointer? {
+        "NSObject".withCString { ObjC.getClass($0) }.map { UnsafeMutableRawPointer($0) }
+    }
+
+    @ObjCMethod("transformedValue:")
+    override func transformedValue(_ value: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        // The receiver's own class, so a subclass's allowed classes are used.
+        guard let value, let unarchiver = "NSKeyedUnarchiver".withCString({ ObjC.getClass($0) }),
+              let cls = ObjC.objectGetClass(objcObject) else { return nil }
+        let classes = ObjC.send(UnsafeMutableRawPointer(cls), ObjC.selector("allowedTopLevelClasses"))
+        typealias Unarchive = @convention(c) (UnsafeMutableRawPointer?, SEL, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                              UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        return unsafeBitCast(ObjC.msgSend, to: Unarchive.self)(UnsafeMutableRawPointer(unarchiver),
+            ObjC.selector("unarchivedObjectOfClasses:fromData:error:"), classes, value, nil)
+    }
+
+    @ObjCMethod("reverseTransformedValue:")
+    override func reverseTransformedValue(_ value: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        guard let value, let archiver = "NSKeyedArchiver".withCString({ ObjC.getClass($0) }) else { return nil }
+        typealias Archive = @convention(c) (UnsafeMutableRawPointer?, SEL, UnsafeMutableRawPointer?, Bool,
+                                            UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        return unsafeBitCast(ObjC.msgSend, to: Archive.self)(UnsafeMutableRawPointer(archiver),
+            ObjC.selector("archivedDataWithRootObject:requiringSecureCoding:error:"), value, true, nil)
+    }
+}
 
 /// The built-in transformers' names.
 @ObjCConstants
