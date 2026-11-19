@@ -19,6 +19,9 @@ extension NSObject {
     @ObjCMethod("isValidNextState:") func gkSendIsValidNextState(_ state: ObjCClass) -> Bool
     @ObjCMethod("didEnterWithPreviousState:") func gkSendDidEnter(previous: NSObject?)
     @ObjCMethod("willExitWithNextState:") func gkSendWillExit(next: NSObject?)
+    /// Sent to states here and to components in GameplayKit.swift, which is
+    /// built only for 64-bit machines.
+    @ObjCMethod("updateWithDeltaTime:") func gkSendUpdate(deltaTime seconds: Double)
 }
 
 @ObjCClass("GKState")
