@@ -62,6 +62,9 @@ final class EntityState: ObjectState {
     var abstract = false
     /// The model; not retained.
     var model: UnsafeMutableRawPointer?
+    /// The entity this inherits from, if any; not retained, as the model's
+    /// list of entities holds it.
+    var superentity: UnsafeMutableRawPointer?
 }
 
 final class PropertyState: ObjectState {
@@ -244,16 +247,43 @@ open class NSEntityDescription: NSObject {
 
     var model: NSManagedObjectModel? { state.model.map { NSManagedObjectModel(objcObject: $0, ownership: .retain) } }
 
+    var superentity: NSEntityDescription? { state.superentity.map { NSEntityDescription(objcObject: $0, ownership: .retain) } }
+
+    /// The entities that inherit directly from this one.
+    var subentities: [NSEntityDescription] {
+        model?.state.entities.filter { $0.state.superentity == objcObject } ?? []
+    }
+
+    /// This entity and those that inherit from it, at any depth.
+    var withDescendants: [NSEntityDescription] {
+        [self] + subentities.flatMap(\.withDescendants)
+    }
+
+    /// Whether this entity is `name` or inherits from it.
+    func isKind(named name: String) -> Bool {
+        var next: NSEntityDescription? = self
+        while let entity = next {
+            if entity.state.name == name { return true }
+            next = entity.superentity
+        }
+        return false
+    }
+
+    /// The properties of the entity it inherits from, then its own.
+    var allProperties: [NSPropertyDescription] {
+        (superentity?.allProperties ?? []) + state.properties
+    }
+
     var attributes: [NSAttributeDescription] {
-        state.properties.compactMap { $0.as(NSAttributeDescription.self) }
+        allProperties.compactMap { $0.as(NSAttributeDescription.self) }
     }
 
     var relationships: [NSRelationshipDescription] {
-        state.properties.compactMap { $0.as(NSRelationshipDescription.self) }
+        allProperties.compactMap { $0.as(NSRelationshipDescription.self) }
     }
 
     func property(named name: String) -> NSPropertyDescription? {
-        state.properties.first { $0.state.name == name }
+        allProperties.first { $0.state.name == name }
     }
 
     @ObjCMethod("init") func initialize() -> Self { self }
@@ -263,6 +293,7 @@ open class NSEntityDescription: NSObject {
         state.name = coder.coderObject(forKey: "NSEntityName")?.stringValue ?? ""
         state.className = coder.coderObject(forKey: "NSClassNameForEntity")?.stringValue ?? "NSManagedObject"
         state.abstract = coder.coderBool(forKey: "NSIsAbstract")
+        state.superentity = coder.coderObject(forKey: "NSSuperentity")?.as(NSEntityDescription.self)?.objcObject
         if let properties = coder.coderObject(forKey: "NSProperties")?.as(NSDictionary.self) {
             let list = properties.allKeys().elements.compactMap {
                 properties.object(forKey: $0)?.unsafeCast(to: NSPropertyDescription.self)
@@ -301,9 +332,12 @@ open class NSEntityDescription: NSObject {
     @ObjCMethod("isAbstract") func isAbstract() -> Bool { state.abstract }
     @ObjCMethod("setAbstract:") func setAbstract(_ value: Bool) { state.abstract = value }
     @ObjCMethod("managedObjectModel") func managedObjectModel() -> NSManagedObjectModel? { model }
-    @ObjCMethod("superentity") func superentity() -> NSEntityDescription? { nil }
+    @ObjCMethod("superentity") func superentityDescription() -> NSEntityDescription? { superentity }
+    @ObjCMethod("subentities") func subentitiesList() -> NSObject { NSMutableArray.of(subentities) }
+    @ObjCMethod("subentitiesByName")
+    func subentitiesByName() -> NSObject { NSMutableDictionary.of(subentities.map { ($0.state.name, $0) }) }
 
-    @ObjCMethod("properties") func properties() -> NSObject { NSMutableArray.of(state.properties) }
+    @ObjCMethod("properties") func properties() -> NSObject { NSMutableArray.of(allProperties) }
 
     @ObjCMethod("setProperties:")
     func setProperties(_ properties: NSObject?) {
@@ -313,14 +347,14 @@ open class NSEntityDescription: NSObject {
     }
 
     @ObjCMethod("propertiesByName")
-    func propertiesByName() -> NSObject { NSMutableDictionary.of(state.properties.map { ($0.state.name, $0) }) }
+    func propertiesByName() -> NSObject { NSMutableDictionary.of(allProperties.map { ($0.state.name, $0) }) }
     @ObjCMethod("attributesByName")
     func attributesByName() -> NSObject { NSMutableDictionary.of(attributes.map { ($0.state.name, $0) }) }
     @ObjCMethod("relationshipsByName")
     func relationshipsByName() -> NSObject { NSMutableDictionary.of(relationships.map { ($0.state.name, $0) }) }
 
     @ObjCMethod("isKindOfEntity:")
-    func isKind(ofEntity entity: NSEntityDescription?) -> Bool { entity?.state.name == state.name }
+    func isKind(ofEntity entity: NSEntityDescription?) -> Bool { entity.map { isKind(named: $0.state.name) } ?? false }
 
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> NSEntityDescription { self }
 
