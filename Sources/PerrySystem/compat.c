@@ -1305,7 +1305,7 @@ ssize_t darwin_getxattr(const char *path, const char *name, void *value, size_t 
     xattr_name(name, linux_name, sizeof(linux_name));
     ssize_t length = (options & 1) ? lgetxattr(path, linux_name, value, size) : getxattr(path, linux_name, value, size);
     if (length < 0 && errno == ENODATA)
-        errno = 93;    // ENOATTR
+        perry_set_darwin_errno(ENODATA, 93);    // ENOATTR
     return length;
 }
 
@@ -1326,7 +1326,7 @@ int darwin_removexattr(const char *path, const char *name, int options) {
     xattr_name(name, linux_name, sizeof(linux_name));
     int result = (options & 1) ? lremovexattr(path, linux_name) : removexattr(path, linux_name);
     if (result < 0 && errno == ENODATA)
-        errno = 93;
+        perry_set_darwin_errno(ENODATA, 93);    // ENOATTR
     return result;
 }
 
@@ -1338,7 +1338,7 @@ ssize_t darwin_fgetxattr(int fd, const char *name, void *value, size_t size, uin
     xattr_name(name, linux_name, sizeof(linux_name));
     ssize_t length = fgetxattr(fd, linux_name, value, size);
     if (length < 0 && errno == ENODATA)
-        errno = 93;
+        perry_set_darwin_errno(ENODATA, 93);    // ENOATTR
     return length;
 }
 
@@ -1359,7 +1359,7 @@ int darwin_fremovexattr(int fd, const char *name, int options) {
     xattr_name(name, linux_name, sizeof(linux_name));
     int result = fremovexattr(fd, linux_name);
     if (result < 0 && errno == ENODATA)
-        errno = 93;
+        perry_set_darwin_errno(ENODATA, 93);    // ENOATTR
     return result;
 }
 
