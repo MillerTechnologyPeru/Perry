@@ -218,7 +218,7 @@ enum Bundles {
 
     /// One NSBundle per path, kept for the life of the process.
     static func bundle(path: String) -> id? {
-        let key = Paths.normalized(path)
+        let key = standardized(path)
         if let existing = byPath[key] { return existing }
         var info = stat()
         let provided = stat(key, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR ? nil : providedFramework(key)
@@ -227,6 +227,21 @@ enum Bundles {
         Storage.set(object, BundleStorage(path: key, executable: provided))
         byPath[key] = object
         return object
+    }
+
+    /// A bundle's path with "." and ".." resolved, as CFBundle keeps it:
+    /// one bundle for a framework however its path was spelled (Xcode's
+    /// load commands reach its frameworks through Contents/MacOS/../../..).
+    static func standardized(_ path: String) -> String {
+        let normalized = Paths.normalized(path)
+        guard normalized.hasPrefix("/"), normalized.contains("/.") else { return normalized }
+        var parts: [Substring] = []
+        for part in normalized.split(separator: "/") {
+            if part == "." { continue }
+            if part == ".." { if !parts.isEmpty { parts.removeLast() }; continue }
+            parts.append(part)
+        }
+        return "/" + parts.joined(separator: "/")
     }
 
     /// The identifiers of system frameworks, and their names.
