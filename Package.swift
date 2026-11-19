@@ -23,6 +23,9 @@ let package = Package(
         // malloc from a window above 4 GB, as iOS's heap is, for games that
         // keep pointers in 32 bits; loaded with LD_PRELOAD.
         .library(name: "PerryLowHeap", type: .dynamic, targets: ["PerryLowHeap"]),
+        // Linux programs a Mac program starts (a shell running its compiler)
+        // run the Mac programs they exec under perry; loaded with LD_PRELOAD.
+        .library(name: "PerryExecShim", type: .dynamic, targets: ["PerryExecShim"]),
         .library(name: "PerryOpenAL", type: .dynamic, targets: ["PerryOpenAL"]),
         // OpenGL.framework: a Mac program's desktop OpenGL, over libGL.
         .library(name: "PerryOpenGL", type: .dynamic, targets: ["PerryOpenGL"]),
@@ -40,6 +43,7 @@ let package = Package(
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
         .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
         .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
+        .library(name: "Perryicucore", type: .dynamic, targets: ["PerryICUCore"]),
         // libcompression, Apple's API over open compressors.
         .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
         // CFNetwork, whose URL loading classes Foundation re-exports.
@@ -211,6 +215,7 @@ let package = Package(
         ),
         .target(name: "PerryZ", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("z")]),
         .target(name: "PerryLowHeap"),
+        .target(name: "PerryExecShim"),
         // libc++ and libc++abi, and OpenAL: LLVM's and OpenAL Soft, opened at run time.
         .target(name: "PerryCXX", dependencies: ["CPerryWrapped"]),
         .target(name: "PerryStdCXX", dependencies: ["CPerryWrapped"]),
@@ -231,6 +236,8 @@ let package = Package(
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
         .target(name: "PerryIconv"),
+        // The system's ICU, opened when first needed: its names carry its version.
+        .target(name: "PerryICUCore", linkerSettings: [.linkedLibrary("dl")]),
         .target(name: "PerryAccelerate", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("openblas")]),
         // AudioToolbox: files, converters, queues and audio units, played
         // through GStreamer.
