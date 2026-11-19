@@ -1299,18 +1299,11 @@ kern_return_t darwin_thread_get_exception_ports(mach_port_t thread, uint32_t mas
     kern_return_t darwin_##name(__VA_ARGS__) DARWIN_SYMBOL(name); \
     kern_return_t darwin_##name(__VA_ARGS__) { return KERN_FAILURE; }
 
-MACH_FAILS(task_set_exception_ports, mach_port_t task, uint32_t mask, mach_port_t port, int behavior, int flavor)
-MACH_FAILS(task_swap_exception_ports, mach_port_t task, uint32_t mask, mach_port_t port, int behavior, int flavor,
-           uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors)
-MACH_FAILS(thread_swap_exception_ports, mach_port_t thread, uint32_t mask, mach_port_t port, int behavior, int flavor,
-           uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors)
 MACH_FAILS(exception_raise, mach_port_t port, mach_port_t thread, mach_port_t task, int exception, void *code, uint32_t count)
 MACH_FAILS(exception_raise_state, mach_port_t port, int exception, void *code, uint32_t count, int *flavor,
            void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
 MACH_FAILS(exception_raise_state_identity, mach_port_t port, mach_port_t thread, mach_port_t task, int exception,
            void *code, uint32_t count, int *flavor, void *old_state, uint32_t old_count, void *new_state, uint32_t *new_count)
-MACH_FAILS(mach_port_insert_right, mach_port_t task, mach_port_t name, mach_port_t port, int disposition)
-MACH_FAILS(mach_port_mod_refs, mach_port_t task, mach_port_t name, int right, int delta)
 MACH_FAILS(mach_port_move_member, mach_port_t task, mach_port_t member, mach_port_t after)
 MACH_FAILS(mach_port_request_notification, mach_port_t task, mach_port_t name, int message_id, uint32_t sync,
            mach_port_t notify, int disposition, mach_port_t *previous)
@@ -1320,21 +1313,262 @@ MACH_FAILS(vm_map, mach_port_t task, uintptr_t *address, uintptr_t size, uintptr
            uintptr_t offset, int copy, int current, int maximum, int inheritance)
 
 // No ports can be made: there is no Mach IPC.
+// Ports within the process: mach_port_allocate (or mach_port_construct)
+// makes a port with a queue of messages, which mach_msg sends to and
+// receives from, waiting as long as the timeout says. Messages are copied
+// whole; port and memory descriptors in them are not carried (they arrive
+// as written). Nothing outside the process can reach a port. Exception
+// ports can be set on the task and its threads, and are never raised.
+// Crash reporters start their exception servers this way, and Chromium's
+// WaitableEvent signals and waits on a port. Any other name names nothing.
+#define PORTS_MAX 1024
+#define PORT_QUEUE_MAX 64
+
+struct port_message { uint32_t size; uint8_t *bytes; };
+
+struct port {
+    mach_port_t name;
+    bool live;
+    uint32_t limit;
+    uint32_t count, head;
+    struct port_message queue[PORT_QUEUE_MAX];
+};
+
+static pthread_mutex_t ports_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t ports_changed = PTHREAD_COND_INITIALIZER;
+static struct port ports[PORTS_MAX];
+static uint32_t ports_made;
+
+// The port a name names, under the lock; NULL for none.
+static struct port *find_port(mach_port_t name) {
+    if (name == 0)
+        return NULL;
+    for (uint32_t i = 0; i < ports_made; i++)
+        if (ports[i].live && ports[i].name == name)
+            return &ports[i];
+    return NULL;
+}
+
+static bool is_port(mach_port_t name) {
+    pthread_mutex_lock(&ports_lock);
+    bool found = find_port(name) != NULL;
+    pthread_mutex_unlock(&ports_lock);
+    return found;
+}
+
+static kern_return_t make_port(uint32_t limit, mach_port_t *name) {
+    pthread_mutex_lock(&ports_lock);
+    uint32_t index = 0;
+    while (index < ports_made && ports[index].live)
+        index++;
+    if (index == PORTS_MAX) {
+        pthread_mutex_unlock(&ports_lock);
+        if (name)
+            *name = 0;
+        return KERN_RESOURCE_SHORTAGE;
+    }
+    if (index == ports_made)
+        ports_made++;
+    struct port *port = &ports[index];
+    // Names as Darwin's look: an index and a generation, never 0 or ~0.
+    uint32_t generation = ((port->name & 0xff) + 4) & 0xfc;
+    *port = (struct port){ .name = ((index + 0x100) << 8) | generation | 3, .live = true,
+                           .limit = limit ? (limit < PORT_QUEUE_MAX ? limit : PORT_QUEUE_MAX) : 5 };
+    if (name)
+        *name = port->name;
+    pthread_mutex_unlock(&ports_lock);
+    return KERN_SUCCESS;
+}
+
 kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) DARWIN_SYMBOL(mach_port_allocate);
 kern_return_t darwin_mach_port_allocate(mach_port_t task, int right, mach_port_t *name) {
     (void)task, (void)right;
-    if (name)
-        *name = 0;
-    return KERN_RESOURCE_SHORTAGE;
+    return make_port(0, name);
 }
 
-// MACH_SEND_INVALID_DEST, MACH_RCV_INVALID_NAME: no port names anything.
+// mach_port_options_t: flags, then the queue limit.
+kern_return_t darwin_mach_port_construct(mach_port_t task, const uint32_t *options, uint64_t context, mach_port_t *name)
+    DARWIN_SYMBOL(mach_port_construct);
+kern_return_t darwin_mach_port_construct(mach_port_t task, const uint32_t *options, uint64_t context, mach_port_t *name) {
+    (void)task, (void)context;
+    return make_port(options ? options[1] : 0, name);
+}
+
+static void destroy_port(mach_port_t name) {
+    pthread_mutex_lock(&ports_lock);
+    struct port *port = find_port(name);
+    if (port) {
+        for (uint32_t i = 0; i < port->count; i++)
+            free(port->queue[(port->head + i) % PORT_QUEUE_MAX].bytes);
+        port->live = false;
+        pthread_cond_broadcast(&ports_changed);
+    }
+    pthread_mutex_unlock(&ports_lock);
+}
+
+kern_return_t darwin_mach_port_destruct(mach_port_t task, mach_port_t name, int delta, uint64_t guard)
+    DARWIN_SYMBOL(mach_port_destruct);
+kern_return_t darwin_mach_port_destruct(mach_port_t task, mach_port_t name, int delta, uint64_t guard) {
+    (void)task, (void)delta, (void)guard;
+    if (!is_port(name))
+        return 15;    // KERN_INVALID_NAME
+    destroy_port(name);
+    return KERN_SUCCESS;
+}
+
+// The time `timeout` milliseconds from now, for pthread_cond_timedwait.
+static struct timespec deadline_after(uint32_t timeout) {
+    struct timespec now;
+    clock_gettime(CLOCK_REALTIME, &now);
+    now.tv_sec += timeout / 1000;
+    now.tv_nsec += (long)(timeout % 1000) * 1000000;
+    if (now.tv_nsec >= 1000000000) {
+        now.tv_sec++;
+        now.tv_nsec -= 1000000000;
+    }
+    return now;
+}
+
+// MACH_SEND_MSG 1, MACH_RCV_MSG 2, MACH_SEND_TIMEOUT 0x10, MACH_RCV_TIMEOUT
+// 0x100. MACH_SEND_INVALID_DEST, MACH_SEND_TIMED_OUT, MACH_RCV_INVALID_NAME,
+// MACH_RCV_TIMED_OUT, MACH_RCV_TOO_LARGE, MACH_RCV_PORT_DIED.
 int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t receive_size, mach_port_t receive_name,
                     uint32_t timeout, mach_port_t notify) DARWIN_SYMBOL(mach_msg);
 int darwin_mach_msg(void *message, int option, uint32_t send_size, uint32_t receive_size, mach_port_t receive_name,
                     uint32_t timeout, mach_port_t notify) {
-    (void)message, (void)send_size, (void)receive_size, (void)receive_name, (void)timeout, (void)notify;
-    return (option & 1) ? 0x10000003 : 0x10004002;
+    (void)notify;
+    uint32_t *header = message;
+    if (option & 1) {
+        mach_port_t remote = header ? header[2] : 0;
+        pthread_mutex_lock(&ports_lock);
+        struct port *port = find_port(remote);
+        if (!port) {
+            pthread_mutex_unlock(&ports_lock);
+            return 0x10000003;
+        }
+        struct timespec deadline = deadline_after(timeout);
+        while (port->live && port->count >= port->limit) {
+            if ((option & 0x10) && (timeout == 0 || pthread_cond_timedwait(&ports_changed, &ports_lock, &deadline) == ETIMEDOUT)) {
+                pthread_mutex_unlock(&ports_lock);
+                return 0x10000004;
+            }
+            if (!(option & 0x10))
+                pthread_cond_wait(&ports_changed, &ports_lock);
+        }
+        if (!port->live) {
+            pthread_mutex_unlock(&ports_lock);
+            return 0x10000003;
+        }
+        uint32_t size = send_size < 24 ? 24 : send_size;
+        uint8_t *bytes = malloc(size);
+        memcpy(bytes, message, send_size < size ? send_size : size);
+        port->queue[(port->head + port->count) % PORT_QUEUE_MAX] = (struct port_message){ size, bytes };
+        port->count++;
+        pthread_cond_broadcast(&ports_changed);
+        pthread_mutex_unlock(&ports_lock);
+        if (!(option & 2))
+            return 0;
+    }
+    if (!(option & 2))
+        return 0x10004002;
+    pthread_mutex_lock(&ports_lock);
+    struct port *port = find_port(receive_name);
+    if (!port) {
+        pthread_mutex_unlock(&ports_lock);
+        return 0x10004002;
+    }
+    struct timespec deadline = deadline_after(timeout);
+    while (port->live && port->count == 0) {
+        if (option & 0x100) {
+            if (timeout == 0 || pthread_cond_timedwait(&ports_changed, &ports_lock, &deadline) == ETIMEDOUT) {
+                pthread_mutex_unlock(&ports_lock);
+                return 0x10004003;
+            }
+        } else {
+            pthread_cond_wait(&ports_changed, &ports_lock);
+        }
+    }
+    if (!port->live) {
+        pthread_mutex_unlock(&ports_lock);
+        return 0x10004009;
+    }
+    struct port_message *next = &port->queue[port->head];
+    if (next->size > receive_size) {
+        // MACH_RCV_LARGE (4) leaves the message queued and says its size.
+        if (header && receive_size >= 8)
+            header[1] = next->size;
+        if (!(option & 4)) {
+            free(next->bytes);
+            port->head = (port->head + 1) % PORT_QUEUE_MAX;
+            port->count--;
+            pthread_cond_broadcast(&ports_changed);
+        }
+        pthread_mutex_unlock(&ports_lock);
+        return 0x10004004;
+    }
+    memcpy(message, next->bytes, next->size);
+    header[1] = next->size;
+    header[3] = receive_name;
+    free(next->bytes);
+    port->head = (port->head + 1) % PORT_QUEUE_MAX;
+    port->count--;
+    pthread_cond_broadcast(&ports_changed);
+    pthread_mutex_unlock(&ports_lock);
+    return 0;
+}
+
+// Rights on a port made here are always there.
+kern_return_t darwin_mach_port_insert_right(mach_port_t task, mach_port_t name, mach_port_t port, int disposition)
+    DARWIN_SYMBOL(mach_port_insert_right);
+kern_return_t darwin_mach_port_insert_right(mach_port_t task, mach_port_t name, mach_port_t port, int disposition) {
+    (void)task, (void)port, (void)disposition;
+    return is_port(name) ? KERN_SUCCESS : KERN_FAILURE;
+}
+
+kern_return_t darwin_mach_port_mod_refs(mach_port_t task, mach_port_t name, int right, int delta)
+    DARWIN_SYMBOL(mach_port_mod_refs);
+kern_return_t darwin_mach_port_mod_refs(mach_port_t task, mach_port_t name, int right, int delta) {
+    (void)task;
+    if (!is_port(name))
+        return KERN_FAILURE;
+    // Giving up the receive right (MACH_PORT_RIGHT_RECEIVE 1) ends the port.
+    if (right == 1 && delta < 0)
+        destroy_port(name);
+    return KERN_SUCCESS;
+}
+
+// Exception ports are taken and never raised; the previous ones are none.
+#define EXCEPTION_PORTS_SET(name, target) \
+    kern_return_t darwin_##name(mach_port_t target, uint32_t mask, mach_port_t port, int behavior, int flavor) \
+        DARWIN_SYMBOL(name); \
+    kern_return_t darwin_##name(mach_port_t target, uint32_t mask, mach_port_t port, int behavior, int flavor) { \
+        (void)target, (void)mask, (void)port, (void)behavior, (void)flavor; \
+        return KERN_SUCCESS; \
+    }
+#define EXCEPTION_PORTS_SWAP(name, target) \
+    kern_return_t darwin_##name(mach_port_t target, uint32_t mask, mach_port_t port, int behavior, int flavor, \
+                                uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors) \
+        DARWIN_SYMBOL(name); \
+    kern_return_t darwin_##name(mach_port_t target, uint32_t mask, mach_port_t port, int behavior, int flavor, \
+                                uint32_t *masks, uint32_t *count, mach_port_t *ports, int *behaviors, int *flavors) { \
+        (void)target, (void)mask, (void)port, (void)behavior, (void)flavor, (void)masks, (void)ports, (void)behaviors, (void)flavors; \
+        if (count) \
+            *count = 0; \
+        return KERN_SUCCESS; \
+    }
+EXCEPTION_PORTS_SET(task_set_exception_ports, task)
+EXCEPTION_PORTS_SET(thread_set_exception_ports, thread)
+EXCEPTION_PORTS_SET(host_set_exception_ports, host)
+EXCEPTION_PORTS_SWAP(task_swap_exception_ports, task)
+EXCEPTION_PORTS_SWAP(thread_swap_exception_ports, thread)
+EXCEPTION_PORTS_SWAP(host_swap_exception_ports, host)
+
+kern_return_t darwin_host_get_exception_ports(mach_port_t host, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                              mach_port_t *ports, int *behaviors, int *flavors)
+    DARWIN_SYMBOL(host_get_exception_ports);
+kern_return_t darwin_host_get_exception_ports(mach_port_t host, uint32_t mask, uint32_t *masks, uint32_t *count,
+                                              mach_port_t *ports, int *behaviors, int *flavors) {
+    return darwin_task_get_exception_ports(host, mask, masks, count, ports, behaviors, flavors);
 }
 
 // MIG's NDR record, which marshalled messages begin with: little-endian,
