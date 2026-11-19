@@ -673,7 +673,7 @@ public final class NSCache: NSObject {
             // The new entry is in before the old one's objects go, which
             // may be the same ones.
             let old = storage.position(of: key.id).flatMap { storage.remove($0) }
-            storage.add(key: key.id, value: value.id, cost: Int(cost))
+            storage.add(key: key.id, value: value.id, cost: Int(clamping: cost))
             if let old {
                 ObjC.release(old.key)
                 ObjC.release(old.value)
@@ -718,7 +718,8 @@ public final class NSCache: NSObject {
     @ObjCMethod("setCountLimit:")
     func setCountLimit(_ limit: UInt) {
         storage.locked {
-            storage.countLimit = Int(limit)
+            // NSUIntegerMax, which apps set for no limit, doesn't fit an Int.
+            storage.countLimit = Int(clamping: limit)
             storage.evict(objcObject)
         }
     }
@@ -728,7 +729,7 @@ public final class NSCache: NSObject {
     @ObjCMethod("setTotalCostLimit:")
     func setTotalCostLimit(_ limit: UInt) {
         storage.locked {
-            storage.totalCostLimit = Int(limit)
+            storage.totalCostLimit = Int(clamping: limit)
             storage.evict(objcObject)
         }
     }
