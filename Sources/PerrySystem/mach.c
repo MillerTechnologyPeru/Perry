@@ -1617,6 +1617,8 @@ typedef struct { const char *name; int cputype; int cpusubtype; int byteorder; c
 static const darwin_arch_info local_arch_info = { "armv7", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "arm v7" };
 #elif defined(__i386__)
 static const darwin_arch_info local_arch_info = { "i386", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "Intel 80x86" };
+#elif defined(__x86_64__)
+static const darwin_arch_info local_arch_info = { "x86_64", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "Intel x86-64" };
 #else
 static const darwin_arch_info local_arch_info = { "arm64", PERRY_CPU_TYPE, PERRY_CPU_SUBTYPE, 1, "ARM64" };
 #endif
@@ -1625,9 +1627,10 @@ const darwin_arch_info *darwin_NXGetLocalArchInfo(void) DARWIN_SYMBOL(NXGetLocal
 const darwin_arch_info *darwin_NXGetLocalArchInfo(void) { return &local_arch_info; }
 
 const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) DARWIN_SYMBOL(NXGetArchInfoFromCpuType);
+const void *perry_arch_info_from_cpu_type(int32_t cputype, int32_t cpusubtype);
 const darwin_arch_info *darwin_NXGetArchInfoFromCpuType(int type, int subtype) {
-    (void)subtype;
-    return type == local_arch_info.cputype ? &local_arch_info : NULL;
+    if (type == local_arch_info.cputype) return &local_arch_info;
+    return perry_arch_info_from_cpu_type(type, subtype);
 }
 
 // The 32-bit header's lookup: a 64-bit image has no 32-bit segments, so
