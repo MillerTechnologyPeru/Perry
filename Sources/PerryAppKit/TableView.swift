@@ -856,8 +856,11 @@ open class NSTableView: NSControl {
                 }
                 for (index, entry) in rects.enumerated() {
                     guard let cell = entry.column.dataCell(forRow: row) else { continue }
+                    // Through -setObjectValue:, which a button cell takes as
+                    // its state and subclasses (Xcode's) override.
                     let value = objectValue(column: entry.column, row: row)
-                    cell.objectValue = value
+                    typealias SetValue = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?) -> Void
+                    unsafeBitCast(ObjCRuntime.msgSend, to: SetValue.self)(cell.objcObject, ObjCRuntime.selector("setObjectValue:"), value?.objcObject)
                     cell.backgroundStyle = selection.contains(row) && window?.isKeyWindow() != false ? 1 : 0
                     willDisplay(cell: cell, column: entry.column, row: row)
                     drawDisclosure(row: row, column: entry.column, context: context)

@@ -770,10 +770,14 @@ public final class NSKeyValueIndexedMutableArray: NSObject {
 final class KeyValueBindingState {
     let key: String
     let targetClass: Class
+    /// The key as a string object, kept as long as the binding: -key
+    /// answers it, and callers (Xcode's archiving) keep it unretained.
+    let keyObject: UnsafeMutableRawPointer
 
     init(key: String, targetClass: Class) {
         self.key = key
         self.targetClass = targetClass
+        keyObject = Strings.make(key)
     }
 
     /// Whether the key's value is a number or structure rather than an
@@ -799,10 +803,18 @@ final class KeyValueBindingState {
 enum KeyValueBindings {
     nonisolated(unsafe) static var bindingClass: Class!
 
+    /// One binding for each class and key, made once and kept, as
+    /// Foundation's are: callers (Xcode's archiving) hold on to them
+    /// without retaining them.
+    nonisolated(unsafe) static var made: [String: id] = [:]
+
     static func make(_ cls: Class, _ key: String) -> id? {
+        let name = "\(UInt(bitPattern: UnsafeMutableRawPointer(cls)))/\(key)"
+        if let binding = made[name] { return binding }
         guard let binding = Storage.allocate(UnsafeMutableRawPointer(bindingClass)) else { return nil }
         Storage.set(binding, KeyValueBindingState(key: key, targetClass: cls))
-        return ObjC.autorelease(binding)
+        made[name] = binding
+        return binding
     }
 }
 
@@ -810,6 +822,9 @@ enum KeyValueBindings {
 public final class NSKeyValueBinding: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
+        // Kept for good, as Foundation's are: Xcode's archiving releases
+        // the bindings it is given more than it retains them.
+        NSObject.registerObjCCategoryImmortal(cls)
         KeyValueBindings.bindingClass = cls.storage
     }
 
@@ -821,7 +836,7 @@ public final class NSKeyValueBinding: NSObject {
         ObjC.superDealloc(objcObject, from: KeyValueBindings.bindingClass)
     }
 
-    @ObjCMethod("key") func key() -> String { state?.key ?? "" }
+    @ObjCMethod("key") func key() -> UnsafeMutableRawPointer? { state?.keyObject }
     @ObjCMethod("targetClass") func targetClass() -> UnsafeMutableRawPointer? { state.map { UnsafeMutableRawPointer($0.targetClass) } }
     @ObjCMethod("isScalarProperty") func isScalarProperty() -> Bool { state?.isScalar ?? false }
 
