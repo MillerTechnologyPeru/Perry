@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/uio.h>
 #include <sys/syscall.h>
 #include <time.h>
@@ -1006,6 +1007,113 @@ size_t darwin_os_proc_available_memory(void) {
         fclose(meminfo);
     }
     return (size_t)(kilobytes * 1024);
+}
+
+uint64_t darwin_mach_absolute_time(void) DARWIN_SYMBOL(mach_absolute_time);
+int darwin_mach_timebase_info(uint32_t info[2]) DARWIN_SYMBOL(mach_timebase_info);
+
+// Nanoseconds as Mach time ticks, by the timebase mach_absolute_time uses.
+static uint64_t nanoseconds_to_ticks(uint64_t nanoseconds) {
+    uint32_t timebase[2] = { 1, 1 };
+    darwin_mach_timebase_info(timebase);
+    return nanoseconds / timebase[0] * timebase[1] + nanoseconds % timebase[0] * timebase[1] / timebase[0];
+}
+
+static uint64_t timeval_ticks(struct timeval time) {
+    return nanoseconds_to_ticks((uint64_t)time.tv_sec * 1000000000u + (uint64_t)time.tv_usec * 1000u);
+}
+
+// The size of each rusage_info_v<n>: a 16-byte UUID, then 64-bit counters,
+// each revision appending to the one before.
+static const size_t rusage_info_sizes[] = { 96, 144, 160, 232, 296, 304, 464 };
+
+/// proc_pid_rusage: this process's resource use, in the layout of the
+/// flavor (RUSAGE_INFO_V0 to V6) asked for, with times in Mach ticks. The
+/// CPU times, page-ins and child times come from getrusage, the memory from
+/// /proc/self, the disk bytes from /proc/self/io; energy, wake-ups and the
+/// QoS times are not counted, and stay 0. Other processes are not looked at.
+int darwin_proc_pid_rusage(int pid, int flavor, void *buffer) DARWIN_SYMBOL(proc_pid_rusage);
+int darwin_proc_pid_rusage(int pid, int flavor, void *buffer) {
+    if (pid != 0 && pid != getpid()) {
+        errno = ESRCH;
+        return -1;
+    }
+    if (flavor < 0 || flavor >= (int)(sizeof(rusage_info_sizes) / sizeof(rusage_info_sizes[0])) || !buffer) {
+        errno = EINVAL;
+        return -1;
+    }
+    size_t size = rusage_info_sizes[flavor];
+    uint64_t fields[(464 - 16) / 8] = { 0 };
+    struct rusage self, children;
+    getrusage(RUSAGE_SELF, &self);
+    getrusage(RUSAGE_CHILDREN, &children);
+    uint64_t virtual_size, resident, peak;
+    process_memory(&virtual_size, &resident, &peak);
+    uint64_t now = darwin_mach_absolute_time();
+
+    // The start, from /proc/self/stat's start time in clock ticks since boot.
+    uint64_t start = now;
+    FILE *stat = fopen("/proc/self/stat", "r");
+    if (stat) {
+        char line[1024];
+        if (fgets(line, sizeof(line), stat)) {
+            // After the command's closing parenthesis, field 22 is the 20th.
+            char *rest = strrchr(line, ')');
+            unsigned long long started = 0;
+            for (int field = 3; rest && field <= 22; field++) {
+                rest = strchr(rest + 1, ' ');
+                if (rest && field == 22)
+                    started = strtoull(rest + 1, NULL, 10);
+            }
+            struct timespec boot;
+            long hertz = sysconf(_SC_CLK_TCK);
+            if (started && hertz > 0 && clock_gettime(CLOCK_BOOTTIME, &boot) == 0) {
+                uint64_t uptime = (uint64_t)boot.tv_sec * 1000000000u + (uint64_t)boot.tv_nsec;
+                uint64_t since_boot = started * (1000000000u / (uint64_t)hertz);
+                if (uptime > since_boot) {
+                    uint64_t age = nanoseconds_to_ticks(uptime - since_boot);
+                    start = now > age ? now - age : 0;
+                }
+            }
+        }
+        fclose(stat);
+    }
+
+    uint64_t bytes_read = 0, bytes_written = 0;
+    FILE *io = fopen("/proc/self/io", "r");
+    if (io) {
+        char line[128];
+        unsigned long long value;
+        while (fgets(line, sizeof(line), io)) {
+            if (sscanf(line, "read_bytes: %llu", &value) == 1)
+                bytes_read = value;
+            else if (sscanf(line, "write_bytes: %llu", &value) == 1)
+                bytes_written = value;
+        }
+        fclose(io);
+    }
+
+    // Indices count the 64-bit fields after the UUID.
+    fields[0] = timeval_ticks(self.ru_utime);           // ri_user_time
+    fields[1] = timeval_ticks(self.ru_stime);           // ri_system_time
+    fields[4] = (uint64_t)self.ru_majflt;               // ri_pageins
+    fields[6] = resident;                               // ri_resident_size
+    fields[7] = resident;                               // ri_phys_footprint
+    fields[8] = start;                                  // ri_proc_start_abstime
+    fields[10] = timeval_ticks(children.ru_utime);      // ri_child_user_time
+    fields[11] = timeval_ticks(children.ru_stime);      // ri_child_system_time
+    fields[14] = (uint64_t)children.ru_majflt;          // ri_child_pageins
+    fields[16] = bytes_read;                            // ri_diskio_bytesread
+    fields[17] = bytes_written;                         // ri_diskio_byteswritten
+    fields[18] = fields[0] + fields[1];                 // ri_cpu_time_qos_default
+    fields[25] = fields[1];                             // ri_billed_system_time
+    fields[27] = bytes_written;                         // ri_logical_writes
+    fields[28] = peak;                                  // ri_lifetime_max_phys_footprint
+    fields[33] = peak;                                  // ri_interval_max_phys_footprint
+
+    memset(buffer, 0, 16);                              // ri_uuid
+    memcpy((uint8_t *)buffer + 16, fields, size - 16);
+    return 0;
 }
 
 // TASK_CATEGORY_POLICY (1): the task's role, which Perry's one task has as
