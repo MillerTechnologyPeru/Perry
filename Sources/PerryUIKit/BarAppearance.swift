@@ -81,13 +81,31 @@ open class UIBarAppearance: NSObject {
 
     @ObjCMethod("idiom") func idiom() -> Int { Int(barState.numbers["idiom"] ?? 0) }
 
-    @ObjCMethod("configureWithDefaultBackground") func configureWithDefaultBackground() { barState.objects["backgroundColor"] = nil }
-    @ObjCMethod("configureWithOpaqueBackground") func configureWithOpaqueBackground() { barState.objects["backgroundEffect"] = nil }
+    // The configuration is kept as "background": default 0, opaque 1,
+    // transparent 2, which a bar reads when no color is set.
+    @ObjCMethod("configureWithDefaultBackground")
+    func configureWithDefaultBackground() {
+        barState.objects["backgroundColor"] = nil
+        barState.numbers["background"] = 0
+    }
+    @ObjCMethod("configureWithOpaqueBackground")
+    func configureWithOpaqueBackground() {
+        barState.objects["backgroundEffect"] = nil
+        barState.numbers["background"] = 1
+    }
     @ObjCMethod("configureWithTransparentBackground")
     func configureWithTransparentBackground() {
         barState.objects["backgroundEffect"] = nil
         barState.objects["backgroundColor"] = nil
         barState.objects["shadowColor"] = nil
+        barState.numbers["background"] = 2
+    }
+
+    /// The background color it gives a bar: the one set, clear when it is
+    /// transparent, else nil for the bar's own.
+    var resolvedBackgroundColor: UIColor? {
+        if let color = barState.objects["backgroundColor"]?.as(UIColor.self) { return color }
+        return barState.numbers["background"] == 2 ? UIColor.clear() : nil
     }
 
     @ObjCMethod("backgroundEffect") func backgroundEffect() -> NSObject? { barState.objects["backgroundEffect"] }
