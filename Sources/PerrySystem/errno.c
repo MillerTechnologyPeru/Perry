@@ -74,3 +74,13 @@ int *darwin_error(void) {
     state.published_linux = errno;
     return &state.darwin;
 }
+
+// Sets errno to a Darwin value that has no Linux one of its own (ENOATTR):
+// glibc's errno takes the nearest Linux value, and Darwin code reads the
+// Darwin one, as long as nothing changes errno in between.
+void perry_set_darwin_errno(int linux_value, int darwin_value) {
+    errno = linux_value;
+    state.darwin = darwin_value;
+    state.published_darwin = darwin_value;
+    state.published_linux = linux_value;
+}
