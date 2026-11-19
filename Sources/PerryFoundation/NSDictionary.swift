@@ -19,14 +19,17 @@ final class DictionaryStorage {
         index[ObjectKey(object: key)].map { values[$0] }
     }
 
-    func set(_ value: id, for key: id) {
+    /// Sets a value. A new key is copied, unless `copyingKey` is false (as
+    /// CFDictionarySetValue only retains it) or its class can't copy.
+    func set(_ value: id, for key: id, copyingKey: Bool = true) {
         let retained = ObjC.retain(value)!
         if let position = index[ObjectKey(object: key)] {
             let old = values[position]
             values[position] = retained
             ObjC.release(old)
         } else {
-            let copied = ObjC.send(key, Selectors.copyWithZone, nil) ?? ObjC.retain(key)!
+            let copies = copyingKey && ObjC.instanceMethod(ObjC.objectGetClass(key), Selectors.copyWithZone) != nil
+            let copied = (copies ? ObjC.send(key, Selectors.copyWithZone, nil) : nil) ?? ObjC.retain(key)!
             index[ObjectKey(object: copied)] = keys.count
             keys.append(copied)
             values.append(retained)
@@ -508,6 +511,14 @@ public class NSMutableDictionary: NSDictionary {
             foundationFatal("-[NSMutableDictionary setObject:forKey:]: object cannot be nil (key: \(Format.describe(key.id)))")
         }
         storage.set(value.id, for: key.id)
+    }
+
+    /// Sets a value under a key that is retained, not copied, as
+    /// CFDictionarySetValue does with CFType callbacks.
+    @ObjCMethod("__setObject:forKey:")
+    func set(_ value: ObjCObject?, retainingKey key: ObjCObject?) {
+        guard let key, let value else { return }
+        storage.set(value.id, for: key.id, copyingKey: false)
     }
 
     /// dictionary[key] = value; nil removes the key. Swift's subscript on
