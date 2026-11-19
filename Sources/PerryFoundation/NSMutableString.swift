@@ -90,6 +90,15 @@ public class NSMutableString: NSString {
                                method: "replaceCharactersInRange:withString:")
     }
 
+    /// The range's characters replaced with `length` UTF-16 units, as
+    /// Foundation's own strings take them (Xcode's text storage does).
+    @ObjCMethod("replaceCharactersInRange:withCharacters:length:")
+    func replace(range: NSRange, withCharacters characters: UnsafePointer<UInt16>?, length: UInt) {
+        let units = characters.map { Array(UnsafeBufferPointer(start: $0, count: Int(length))) } ?? []
+        MutableStrings.replace(objcObject, location: range.location, length: range.length, with: String(decoding: units, as: UTF16.self),
+                               method: "replaceCharactersInRange:withCharacters:length:")
+    }
+
     /// Each match in the range, searched with the options; the number replaced.
     @ObjCMethod("replaceOccurrencesOfString:withString:options:range:")
     func replaceOccurrences(of target: String, with replacement: String, options: UInt, range: NSRange) -> UInt {
