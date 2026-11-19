@@ -73,25 +73,29 @@ open class NSHTTPCookie: NSObject {
     }
 
     @ObjCClassMethod("cookieWithProperties:")
-    static func make(properties: NSDictionary) -> NSObject? { Cookie(properties: Cookies.properties(properties)).map(Cookies.object) }
+    static func make(properties: NSDictionary?) -> NSObject? {
+        // No properties make no cookie, as on Darwin.
+        guard let properties else { return nil }
+        return Cookie(properties: Cookies.properties(properties)).map(Cookies.object)
+    }
 
     @ObjCMethod("initWithProperties:")
-    func initialize(properties: NSDictionary) -> UnsafeMutableRawPointer? {
-        guard let cookie = Cookie(properties: Cookies.properties(properties)) else { return nil }
+    func initialize(properties: NSDictionary?) -> UnsafeMutableRawPointer? {
+        guard let properties, let cookie = Cookie(properties: Cookies.properties(properties)) else { return nil }
         Cookies.states.set(objcObject, cookie)
         // The receiver's wrapper adopted its reference; the result is +1.
         return ObjCRuntime.retain(objcObject)
     }
 
     @ObjCClassMethod("cookiesWithResponseHeaderFields:forURL:")
-    static func cookies(withResponseHeaderFields fields: NSDictionary, for url: NSURL) -> NSArray {
-        guard let url = url.url else { return NSMutableArray.of([]) }
+    static func cookies(withResponseHeaderFields fields: NSDictionary?, for url: NSURL?) -> NSArray {
+        guard let fields, let url = url?.url else { return NSMutableArray.of([]) }
         return Cookies.objects(Cookie.parse(fields.strings, for: url))
     }
 
     @ObjCClassMethod("requestHeaderFieldsWithCookies:")
-    static func requestHeaderFields(withCookies cookies: NSArray) -> NSDictionary {
-        let headers = Cookie.requestHeaders(cookies.elements.compactMap(Cookies.cookie))
+    static func requestHeaderFields(withCookies cookies: NSArray?) -> NSDictionary {
+        let headers = Cookie.requestHeaders((cookies?.elements ?? []).compactMap(Cookies.cookie))
         return NSMutableDictionary.of(headers.sorted { $0.key < $1.key }.map { ($0.key, NSObject.string($0.value)) })
     }
 
@@ -145,15 +149,16 @@ open class NSHTTPCookieStorage: NSObject {
     @ObjCMethod("cookies") func cookies() -> NSArray { Cookies.objects(CookieStorage.all) }
 
     @ObjCMethod("cookiesForURL:")
-    func cookies(for url: NSURL) -> NSArray { Cookies.objects(url.url.map(CookieStorage.cookies(for:)) ?? []) }
+    func cookies(for url: NSURL?) -> NSArray { Cookies.objects(url?.url.map(CookieStorage.cookies(for:)) ?? []) }
 
-    @ObjCMethod("setCookie:") func setCookie(_ cookie: NSObject) { Cookies.cookie(cookie).map(CookieStorage.set) }
-    @ObjCMethod("deleteCookie:") func deleteCookie(_ cookie: NSObject) { Cookies.cookie(cookie).map(CookieStorage.delete) }
-    @ObjCMethod("removeCookiesSinceDate:") func removeCookies(since date: NSDate) { CookieStorage.removeAll(since: date.date) }
+    // A nil cookie or date, which apps pass when they have none, changes nothing.
+    @ObjCMethod("setCookie:") func setCookie(_ cookie: NSObject?) { Cookies.cookie(cookie).map(CookieStorage.set) }
+    @ObjCMethod("deleteCookie:") func deleteCookie(_ cookie: NSObject?) { Cookies.cookie(cookie).map(CookieStorage.delete) }
+    @ObjCMethod("removeCookiesSinceDate:") func removeCookies(since date: NSDate?) { date.map { CookieStorage.removeAll(since: $0.date) } }
 
     @ObjCMethod("setCookies:forURL:mainDocumentURL:")
-    func setCookies(_ cookies: NSArray, for url: NSURL?, mainDocumentURL: NSURL?) {
-        CookieStorage.set(cookies.elements.compactMap(Cookies.cookie), for: url?.url, mainDocumentURL: mainDocumentURL?.url)
+    func setCookies(_ cookies: NSArray?, for url: NSURL?, mainDocumentURL: NSURL?) {
+        CookieStorage.set((cookies?.elements ?? []).compactMap(Cookies.cookie), for: url?.url, mainDocumentURL: mainDocumentURL?.url)
     }
 
     @ObjCMethod("cookieAcceptPolicy") func cookieAcceptPolicy() -> UInt { UInt(CookieStorage.acceptPolicy) }
