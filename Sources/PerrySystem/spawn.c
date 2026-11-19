@@ -194,6 +194,80 @@ static char **loader_arguments(const char *path, char *const argv[], char *loade
     return arguments;
 }
 
+// The environment of a Linux program a Mac program starts: envp with
+// PERRY_LOADER naming perry, and libPerryExecShim.so (beside perry) first in
+// LD_PRELOAD, so that the Mac programs it runs in turn (a shell running
+// Xcode's compiler) run under perry too. NULL, for envp as it is, when the
+// shim isn't there. Its last two entries are its own, which
+// free_environment frees.
+// perry's path and libPerryExecShim.so's beside it; false if the shim
+// isn't there.
+static int shim_paths(char *loader, size_t loader_size, char *shim, size_t shim_size) {
+    ssize_t length = readlink("/proc/self/exe", loader, loader_size - 1);
+    if (length <= 0) return 0;
+    loader[length] = 0;
+    char *slash = strrchr(loader, '/');
+    if (!slash) return 0;
+    snprintf(shim, shim_size, "%.*s/libPerryExecShim.so", (int)(slash - loader), loader);
+    return access(shim, R_OK) == 0;
+}
+
+// The same in perry's own environment, once, for the Linux programs started
+// without an environment of their own: popen's and system's shell.
+__attribute__((constructor)) static void export_shim(void) {
+    char loader[4096], shim[4200];
+    if (!shim_paths(loader, sizeof loader, shim, sizeof shim)) return;
+    setenv("PERRY_LOADER", loader, 1);
+    const char *preload = getenv("LD_PRELOAD");
+    if (preload && strstr(preload, shim)) return;
+    size_t size = strlen(shim) + (preload ? strlen(preload) : 0) + 2;
+    char *value = malloc(size);
+    if (!value) return;
+    snprintf(value, size, "%s%s%s", shim, preload && *preload ? ":" : "", preload ? preload : "");
+    setenv("LD_PRELOAD", value, 1);
+    free(value);
+}
+
+static char **linux_environment(char *const envp[]) {
+    char loader[4096], shim[4200];
+    if (!shim_paths(loader, sizeof loader, shim, sizeof shim)) return NULL;
+    size_t count = 0;
+    while (envp && envp[count]) count++;
+    char **environment = calloc(count + 3, sizeof *environment);
+    if (!environment) return NULL;
+    size_t used = 0;
+    const char *preload = NULL;
+    for (size_t index = 0; index < count; index++) {
+        if (strncmp(envp[index], "PERRY_LOADER=", 13) == 0) continue;
+        if (strncmp(envp[index], "LD_PRELOAD=", 11) == 0) {
+            preload = envp[index] + 11;
+            continue;
+        }
+        environment[used++] = envp[index];
+    }
+    size_t size = strlen(loader) + 16;
+    char *loader_variable = malloc(size);
+    snprintf(loader_variable, size, "PERRY_LOADER=%s", loader);
+    size = strlen(shim) + (preload ? strlen(preload) : 0) + 16;
+    char *preload_variable = malloc(size);
+    if (preload && strstr(preload, shim)) snprintf(preload_variable, size, "LD_PRELOAD=%s", preload);
+    else snprintf(preload_variable, size, "LD_PRELOAD=%s%s%s", shim, preload && *preload ? ":" : "", preload ? preload : "");
+    environment[used++] = loader_variable;
+    environment[used++] = preload_variable;
+    return environment;
+}
+
+static void free_environment(char **environment) {
+    if (!environment) return;
+    size_t count = 0;
+    while (environment[count]) count++;
+    if (count >= 2) {
+        free(environment[count - 1]);
+        free(environment[count - 2]);
+    }
+    free(environment);
+}
+
 static int spawn(pid_t *pid, const char *name, void **actions, void **attributes, char *const argv[], char *const envp[], int search) {
     char *path = resolve(name, search);
     int status;
@@ -208,7 +282,10 @@ static int spawn(pid_t *pid, const char *name, void **actions, void **attributes
         status = posix_spawn(pid, loader, actions ? *actions : NULL, attributes ? *attributes : NULL, arguments, envp);
         free(arguments);
     } else {
-        status = posix_spawn(pid, path, actions ? *actions : NULL, attributes ? *attributes : NULL, argv, envp);
+        char **environment = linux_environment(envp);
+        status = posix_spawn(pid, path, actions ? *actions : NULL, attributes ? *attributes : NULL, argv,
+                             environment ? environment : envp);
+        free_environment(environment);
     }
     free(path);
     return status;
@@ -250,8 +327,10 @@ static int exec(const char *name, char *const argv[], char *const envp[], int se
         errno = error;
         return -1;
     }
-    execve(path, argv, envp);
+    char **environment = linux_environment(envp);
+    execve(path, argv, environment ? environment : envp);
     int error = errno;
+    free_environment(environment);
     // A file found on PATH that isn't a program at all is run by the shell,
     // as execvp does.
     if (search && error == ENOEXEC) execvp(name, argv);
