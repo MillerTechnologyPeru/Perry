@@ -993,7 +993,7 @@ extension CALayer {
             CG.beginTransparencyLayer(context, nil)
         }
         if let masked = maskedImage(of: layer, state: state, shape: shape) {
-            CG.drawFlipped(masked.object, in: state.bounds, context: context)
+            CG.drawFlipped(masked.object, in: maskedExtent(of: state), context: context)
         } else {
             drawTree(of: layer, state: state, shape: shape, in: context)
         }
@@ -1018,25 +1018,66 @@ extension CALayer {
     /// layer shows (the compositor's flattened layers): else the layers' own
     /// contents scale, which can be many times the size drawn (a 1920x1080
     /// animation scaled to a fifth on a 3x screen is 5760x3240 pixels).
+    /// The area a masked layer shows in, in its own coordinates: where its
+    /// mask has anything, as content outside the mask is hidden and content
+    /// outside the layer's bounds is not, unless it clips. SwiftUI masks
+    /// containers with bounds of a line of text around content laid out
+    /// far below, by a mask layer of no size that has the shapes for
+    /// sublayers.
+    static func maskedExtent(of state: LayerState) -> CGRect {
+        guard let mask = state.mask, !state.masksToBounds,
+              let inMask = contentExtent(of: mask, depth: 0) else { return state.bounds }
+        let frame = mask.state.toSuperlayer(within: state).apply(inMask)
+        let area = frame.width * frame.height
+        guard frame.minX.isFinite, frame.minY.isFinite, frame.maxX.isFinite, frame.maxY.isFinite, frame.width > 0, frame.height > 0,
+              area <= max(state.bounds.width * state.bounds.height * 4, 4_000_000) else { return state.bounds }
+        return frame
+    }
+
+    /// Where the layer and its sublayers have anything, in its coordinates.
+    private static func contentExtent(of layer: CALayer, depth: Int) -> CGRect? {
+        let state = layer.state
+        guard !state.hidden, state.opacity > 0, depth < 24 else { return nil }
+        var extent: CGRect? = state.bounds.width > 0 && state.bounds.height > 0 ? state.bounds : nil
+        for sublayer in state.sublayers {
+            guard let inside = contentExtent(of: sublayer, depth: depth + 1) else { continue }
+            let rect = sublayer.state.toSuperlayer(within: state).apply(inside)
+            guard rect.minX.isFinite, rect.minY.isFinite, rect.maxX.isFinite, rect.maxY.isFinite else { continue }
+            if let current = extent {
+                let minX = min(current.minX, rect.minX), minY = min(current.minY, rect.minY)
+                extent = CGRect(x: minX, y: minY, width: max(current.maxX, rect.maxX) - minX, height: max(current.maxY, rect.maxY) - minY)
+            } else {
+                extent = rect
+            }
+        }
+        if state.masksToBounds, let current = extent {
+            let minX = max(current.minX, state.bounds.minX), minY = max(current.minY, state.bounds.minY)
+            let width = min(current.maxX, state.bounds.maxX) - minX, height = min(current.maxY, state.bounds.maxY) - minY
+            return width > 0 && height > 0 ? CGRect(x: minX, y: minY, width: width, height: height) : nil
+        }
+        return extent
+    }
+
     static func maskedImage(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, scale requested: CGFloat? = nil) -> Owned? {
         guard let mask = state.mask, state.bounds.width > 0, state.bounds.height > 0 else { return nil }
+        let extent = maskedExtent(of: state)
         let scale = requested ?? max(state.contentsScale, mask.state.contentsScale, 1)
-        guard let content = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false),
-              let alpha = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return nil }
+        guard let content = CG.makeContext(size: extent.size, scale: scale, opaque: false),
+              let alpha = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
         defer {
             CG.release(content)
             CG.release(alpha)
         }
-        CG.translateCTM(content, -state.bounds.minX, -state.bounds.minY)
+        CG.translateCTM(content, -extent.minX, -extent.minY)
         drawTree(of: layer, state: state, shape: shape, in: content)
-        CG.translateCTM(alpha, -state.bounds.minX, -state.bounds.minY)
+        CG.translateCTM(alpha, -extent.minX, -extent.minY)
         render(mask, in: alpha, parent: state)
         guard let maskImage = CG.bitmapContextCreateImage(alpha) else { return nil }
         defer { CG.release(maskImage) }
         // kCGBlendModeDestinationIn: the content stays where the mask is.
         CG.saveGState(content)
         CG.setBlendMode(content, 22)
-        CG.drawFlipped(maskImage, in: state.bounds, context: content)
+        CG.drawFlipped(maskImage, in: extent, context: content)
         CG.restoreGState(content)
         return CG.bitmapContextCreateImage(content).map(Owned.init)
     }
