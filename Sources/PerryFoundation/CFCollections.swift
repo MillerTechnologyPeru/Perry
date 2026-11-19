@@ -589,8 +589,13 @@ enum CFDictionaries {
             return
         }
         let present = CFDictionaries.value(dictionary, key) != nil
-        guard present ? replace : add, let keyObject = CFCollections.object(key) else { return }
-        _ = ObjC.send(dictionary, ObjC.selector("setObject:forKey:"), CFCollections.object(value), keyObject)
+        guard present ? replace : add, let keyObject = CFCollections.object(key), let dictionary else { return }
+        // CoreFoundation retains a key and doesn't copy it; Perry's own
+        // dictionaries can, another class is sent -setObject:forKey:.
+        let retaining = ObjC.selector("__setObject:forKey:")
+        let selector = ObjC.instanceMethod(ObjC.objectGetClass(dictionary), retaining) != nil
+            ? retaining : ObjC.selector("setObject:forKey:")
+        _ = ObjC.send(dictionary, selector, CFCollections.object(value), keyObject)
     }
 }
 
