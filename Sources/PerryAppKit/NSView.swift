@@ -1,4 +1,5 @@
 import CPerryGeometry
+import Glibc
 import PerryObjCInterop
 
 // NSView: a rectangle in its superview, in AppKit's coordinates (origin at
@@ -300,7 +301,9 @@ open class NSView: NSResponder {
     @ObjCMethod("addGestureRecognizer:") func addGestureRecognizer(_ recognizer: NSObject?) { recognizer.map { gestureRecognizers.append($0) } }
     @ObjCMethod("removeGestureRecognizer:") func removeGestureRecognizer(_ recognizer: NSObject?) { gestureRecognizers.removeAll { $0 === recognizer } }
     @ObjCMethod("wantsDefaultClipping") func wantsDefaultClipping() -> Bool { true }
-    @ObjCMethod("clipsToBounds") func clipsToBounds() -> Bool { false }
+    @ObjCMethod("clipsToBounds") func clipsToBounds() -> Bool {
+        layer.map { Send.bool($0.objcObject, "masksToBounds") } ?? Clipping.byDefault
+    }
     @ObjCMethod("setClipsToBounds:") func setClipsToBounds(_ value: Bool) { layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).setMasksToBounds(value) } }
     @ObjCMethod("isRotatedFromBase") func isRotatedFromBase() -> Bool { false }
     @ObjCMethod("isRotatedOrScaledFromBase") func isRotatedOrScaledFromBase() -> Bool { false }
@@ -517,6 +520,7 @@ open class NSView: NSResponder {
         let wrapped = CALayer(objcObject: made, ownership: .retain)
         if let window { wrapped.setContentsScale(window.backingScaleFactor()) }
         if hidden { wrapped.setHidden(true) }
+        if Clipping.byDefault { wrapped.setMasksToBounds(true) }
         // A view that draws draws its layer, as its delegate.
         if draws {
             wrapped.setDelegate(self)
@@ -902,4 +906,17 @@ open class NSTrackingArea: NSObject {
 extension NSObject {
     @ObjCMethod("initWithFrame:")
     func initializeView(frame: CGRect) -> NSObject
+}
+
+/// Whether views clip their subviews unless told otherwise: AppKit's did
+/// for programs built with SDKs before macOS 14. Only those from before
+/// 10.10 (or that don't record an SDK, 0) are held to it here; their
+/// windows (Xcode 3's) leave views they shrink to nothing in place.
+enum Clipping {
+    nonisolated(unsafe) static let byDefault: Bool = {
+        guard let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD),
+              let symbol = dlsym(system, "_dyld_get_program_sdk_version") else { return false }
+        let sdk = unsafeBitCast(symbol, to: (@convention(c) () -> UInt32).self)()
+        return sdk < 0x000A_0A00   // 10.10
+    }()
 }
