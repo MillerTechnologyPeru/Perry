@@ -30,6 +30,9 @@ final class ContextState: ObjectState {
     var mergePolicy: NSObject?
     var automaticallyMerges = false
     var queue: SerialQueue?
+    /// The context's userInfo, made when first asked for.
+    lazy var userInfo = NSMutableDictionary.of([])
+    var retainsRegisteredObjects = false
 }
 
 /// NSValidation and store error codes.
@@ -75,6 +78,13 @@ open class NSManagedObjectContext: NSObject {
     @ObjCMethod("concurrencyType") func concurrencyType() -> UInt { state.concurrencyType }
     @ObjCMethod("name") func name() -> String? { state.name }
     @ObjCMethod("setName:") func setName(_ name: String?) { state.name = name }
+    /// A dictionary of the program's own, kept with the context.
+    @ObjCMethod("userInfo") func contextUserInfo() -> NSMutableDictionary { state.userInfo }
+    /// Registered objects are always kept here: the setting is only
+    /// remembered.
+    @ObjCMethod("retainsRegisteredObjects") func retainsRegisteredObjects() -> Bool { state.retainsRegisteredObjects }
+    @ObjCMethod("setRetainsRegisteredObjects:")
+    func setRetainsRegisteredObjects(_ retains: Bool) { state.retainsRegisteredObjects = retains }
     @ObjCMethod("parentContext") func parentContext() -> NSManagedObjectContext? { state.parent }
     @ObjCMethod("setParentContext:") func setParentContext(_ parent: NSManagedObjectContext?) { state.parent = parent }
     @ObjCMethod("undoManager") func undoManager() -> NSObject? { nil }
