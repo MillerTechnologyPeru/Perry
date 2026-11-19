@@ -12,19 +12,7 @@
 #include <syslog.h>
 #include <wchar.h>
 
-// MARK: - Standard streams
-
-// Darwin declares `extern FILE *__stdinp` and friends. Darwin code only uses
-// FILE * opaquely through functions, so glibc streams are handed out as-is.
-FILE *darwin_stdinp DARWIN_SYMBOL(__stdinp);
-FILE *darwin_stdoutp DARWIN_SYMBOL(__stdoutp);
-FILE *darwin_stderrp DARWIN_SYMBOL(__stderrp);
-
-__attribute__((constructor)) static void init_streams(void) {
-    darwin_stdinp = stdin;
-    darwin_stdoutp = stdout;
-    darwin_stderrp = stderr;
-}
+FILE *perry_stdio_stream(FILE *stream);
 
 // MARK: - Darwin va_list
 
@@ -97,7 +85,7 @@ int darwin_vprintf(const char *fmt, darwin_va_list ap) {
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfprintf);
 int darwin_vfprintf(FILE *f, const char *fmt, darwin_va_list ap) {
     DARWIN_VA_FORMAT(va, fmt, ap);
-    return vfprintf(f, fmt, va);
+    return vfprintf(perry_stdio_stream(f), fmt, va);
 }
 
 int darwin_vdprintf(int fd, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vdprintf);
@@ -185,7 +173,7 @@ int darwin_vscanf(const char *fmt, darwin_va_list ap) {
 int darwin_vfscanf(FILE *f, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vfscanf);
 int darwin_vfscanf(FILE *f, const char *fmt, darwin_va_list ap) {
     DARWIN_VA(va, ap);
-    return vfscanf(f, fmt, va);
+    return vfscanf(perry_stdio_stream(f), fmt, va);
 }
 
 int darwin_vsscanf(const char *str, const char *fmt, darwin_va_list ap) DARWIN_SYMBOL(vsscanf);
@@ -292,29 +280,3 @@ int perry_darwin_asl_log(void *client, void *message, int level, const char *fmt
 }
 #endif
 
-// putc's slow path, which Darwin's putc macro calls when the buffer fills.
-int darwin_swbuf(int c, FILE *f) DARWIN_SYMBOL(__swbuf);
-int darwin_swbuf(int c, FILE *f) { return fputc(c, f); }
-
-// Closing no stream: Darwin's fclose fails with EFAULT, where glibc's reads
-// the stream it wasn't given. Destructors of file classes rely on it.
-int darwin_fclose(FILE *f) DARWIN_SYMBOL(fclose);
-int darwin_fclose(FILE *f) {
-    if (f == NULL) {
-        errno = EFAULT;
-        return EOF;
-    }
-    return fclose(f);
-}
-
-// A stream's position: Darwin's fpos_t is an offset, glibc's a structure.
-int darwin_fgetpos(FILE *f, int64_t *position) DARWIN_SYMBOL(fgetpos);
-int darwin_fgetpos(FILE *f, int64_t *position) {
-    off_t offset = ftello(f);
-    if (offset < 0) return -1;
-    *position = offset;
-    return 0;
-}
-
-int darwin_fsetpos(FILE *f, const int64_t *position) DARWIN_SYMBOL(fsetpos);
-int darwin_fsetpos(FILE *f, const int64_t *position) { return fseeko(f, (off_t)*position, SEEK_SET); }
