@@ -1014,9 +1014,13 @@ extension CALayer {
     /// A layer with a mask, drawn with its sublayers into an image of its
     /// bounds where the mask layer, drawn in its coordinates, is opaque;
     /// nil without a mask.
-    static func maskedImage(of layer: CALayer, state: LayerState, shape: ShapeLayerState?) -> Owned? {
+    /// `scale` is the pixels a point gets, where the caller knows how big the
+    /// layer shows (the compositor's flattened layers): else the layers' own
+    /// contents scale, which can be many times the size drawn (a 1920x1080
+    /// animation scaled to a fifth on a 3x screen is 5760x3240 pixels).
+    static func maskedImage(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, scale requested: CGFloat? = nil) -> Owned? {
         guard let mask = state.mask, state.bounds.width > 0, state.bounds.height > 0 else { return nil }
-        let scale = max(state.contentsScale, mask.state.contentsScale, 1)
+        let scale = requested ?? max(state.contentsScale, mask.state.contentsScale, 1)
         guard let content = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false),
               let alpha = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return nil }
         defer {
