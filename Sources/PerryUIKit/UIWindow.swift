@@ -63,10 +63,12 @@ open class UIWindow: UIView {
     }
 
     /// A window in `scene`, the size of the screen; in none when an app
-    /// without scenes passes the nil it found.
+    /// without scenes passes the nil it found. It is a designated
+    /// initializer, so it does not send -initWithFrame: to the window: a
+    /// Swift subclass's init(frame:) would run inside its init(windowScene:).
     @ObjCMethod("initWithWindowScene:")
     func initialize(windowScene scene: UIWindowScene?) -> NSObject {
-        let window = initializeView(frame: Screen.bounds).unsafeCast(to: UIWindow.self)
+        let window = initialize(frame: Screen.bounds)
         window.setWindowScene(scene)
         return window
     }

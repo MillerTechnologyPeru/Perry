@@ -240,3 +240,13 @@ extension StringProtocol {
     public func substring(to index: Index) -> String { String(self[..<index]) }
     public func substring(with aRange: Range<Index>) -> String { String(self[aRange]) }
 }
+
+// MARK: - NSString's Swift members
+
+extension NSString {
+    /// The string with a formatted string appended, as -stringByAppendingFormat: makes it.
+    public func appendingFormat(_ format: NSString, _ args: any CVarArg...) -> NSString {
+        let formatted = withVaList(args) { NSString(format: format as String, locale: nil, arguments: $0) }
+        return appending(formatted as String) as NSString
+    }
+}

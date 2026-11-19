@@ -127,8 +127,14 @@ open class UIControl: UIView {
         for entry in control.actions where entry.events & events != 0 { entry.action.perform(sender: self) }
     }
 
+    /// Through the application, as UIKit sends it, so an app's own
+    /// -sendAction:to:from:forEvent: sees it.
     @ObjCMethod("sendAction:to:forEvent:")
     func sendAction(_ action: ObjCSelector, to target: NSObject?, for event: NSObject?) {
+        if let application = Application.shared {
+            _ = application.sendApplicationAction(action, to: target, from: self, for: event)
+            return
+        }
         var receiver = target
         if receiver == nil {
             var responder: NSObject? = self
@@ -194,6 +200,8 @@ open class UIControl: UIView {
 extension NSObject {
     @ObjCMethod("setHighlighted:") func sendHighlighted(_ highlighted: Bool)
     @ObjCMethod("anyObject") func anyObject() -> NSObject?
+    @ObjCMethod("sendAction:to:from:forEvent:")
+    func sendApplicationAction(_ action: ObjCSelector, to target: NSObject?, from sender: NSObject?, for event: NSObject?) -> Bool
 }
 
 extension NSSet {

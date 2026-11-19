@@ -200,6 +200,8 @@ open class UIViewController: UIResponder {
 
     @ObjCMethod("viewDidLoad") func viewDidLoad() {}
     @ObjCMethod("viewWillAppear:") func viewWillAppear(_ animated: Bool) {}
+    /// Sent once the view is in its window, before it is shown (iOS 17).
+    @ObjCMethod("viewIsAppearing:") func viewIsAppearing(_ animated: Bool) {}
     @ObjCMethod("viewDidAppear:") func viewDidAppear(_ animated: Bool) {}
     @ObjCMethod("viewWillDisappear:") func viewWillDisappear(_ animated: Bool) {}
     @ObjCMethod("viewDidDisappear:") func viewDidDisappear(_ animated: Bool) {}
@@ -528,6 +530,7 @@ open class UIViewController: UIResponder {
         switch state.appearance {
         case .appearing:
             state.appearance = .appeared
+            sendViewIsAppearing(state.animated)
             sendViewDidAppear(state.animated)
             for child in forwardedChildren where child.state.appearance == .appearing { child.finishAppearance() }
             if state.movingToParent {
@@ -858,6 +861,7 @@ extension NSObject {
     @ObjCMethod("loadView") func sendLoadView()
     @ObjCMethod("viewDidLoad") func sendViewDidLoad()
     @ObjCMethod("viewWillAppear:") func sendViewWillAppear(_ animated: Bool)
+    @ObjCMethod("viewIsAppearing:") func sendViewIsAppearing(_ animated: Bool)
     @ObjCMethod("viewDidAppear:") func sendViewDidAppear(_ animated: Bool)
     @ObjCMethod("viewWillDisappear:") func sendViewWillDisappear(_ animated: Bool)
     @ObjCMethod("viewDidDisappear:") func sendViewDidDisappear(_ animated: Bool)

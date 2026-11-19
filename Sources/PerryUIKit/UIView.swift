@@ -1337,6 +1337,41 @@ open class UIView: UIResponder, UICoordinateSpace {
         return true
     }
 
+    /// A new view the size of this one showing it as it is now: its
+    /// hierarchy rendered, at the screen's scale, into its layer's contents.
+    @ObjCMethod("snapshotViewAfterScreenUpdates:")
+    func snapshotView(afterScreenUpdates: Bool) -> UIView? {
+        snapshotView(of: state.bounds)
+    }
+
+    /// The part of the view in `rect`, as -snapshotViewAfterScreenUpdates:
+    /// shows the whole. The view is not stretched, so the insets go unused.
+    @ObjCMethod("resizableSnapshotViewFromRect:afterScreenUpdates:withCapInsets:")
+    func resizableSnapshotView(from rect: CGRect, afterScreenUpdates: Bool, withCapInsets insets: UIEdgeInsets) -> UIView? {
+        snapshotView(of: rect)
+    }
+
+    private func snapshotView(of rect: CGRect) -> UIView {
+        let snapshot = UIView.objCClass.object.allocated()
+            .initializeView(frame: CGRect(origin: .zero, size: rect.size)).unsafeCast(to: UIView.self)
+        let scale = Screen.scale
+        guard rect.width > 0, rect.height > 0, let context = CG.makeContext(size: rect.size, scale: scale, opaque: false) else {
+            return snapshot
+        }
+        defer { CG.release(context) }
+        let bounds = state.bounds
+        Graphics.drawing(in: context) {
+            _ = drawHierarchy(in: CGRect(x: bounds.minX - rect.minX, y: bounds.minY - rect.minY, width: bounds.width, height: bounds.height),
+                              afterScreenUpdates: false)
+        }
+        if let image = CG.bitmapContextCreateImage(context) {
+            snapshot.state.layer.setContents(NSObject(image))
+            snapshot.state.layer.setContentsScale(scale)
+            CG.release(image)
+        }
+        return snapshot
+    }
+
     // MARK: Hit testing
 
     /// The deepest visible, interactive descendant containing `point`,

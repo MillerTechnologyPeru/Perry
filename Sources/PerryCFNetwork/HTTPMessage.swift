@@ -461,6 +461,8 @@ enum ProxyConstants {
     static let kCFNetworkProxiesHTTPProxy = "HTTPProxy"
     static let kCFNetworkProxiesHTTPPort = "HTTPPort"
     static let kCFNetworkProxiesProxyAutoConfigEnable = "ProxyAutoConfigEnable"
+    static let kCFNetworkProxiesProxyAutoConfigURLString = "ProxyAutoConfigURLString"
+    static let kCFNetworkProxiesProxyAutoConfigJavaScript = "ProxyAutoConfigJavaScript"
 }
 
 /// The domain of CFNetwork's own errors, and the key of the URL an error

@@ -148,6 +148,24 @@ open class UIApplication: UIResponder {
     @ObjCMethod("keyWindow")
     func keyWindow() -> NSObject? { Windows.key.map(NSObject.init) }
 
+    /// Sends an action message to `target` or, with none, to the first
+    /// object along the responder chain that takes it, starting at the
+    /// first responder, or at the sender when there is none. Answers
+    /// whether anything took it.
+    @ObjCMethod("sendAction:to:from:forEvent:")
+    func sendAction(_ action: ObjCSelector, to target: NSObject?, from sender: NSObject?, for event: NSObject?) -> Bool {
+        var receiver = target
+        if receiver == nil {
+            var responder: NSObject? = Keyboard.responder ?? sender
+            while let candidate = responder, !candidate.responds(to: action.name) { responder = candidate.sendNextResponder() }
+            receiver = responder
+        }
+        guard let receiver else { return false }
+        typealias Send = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(receiver.objcObject, action.pointer, sender?.objcObject, event?.objcObject)
+        return true
+    }
+
     /// The app opens its own URLs (IncomingURLs); no other app can open
     /// URLs here.
     @ObjCMethod("canOpenURL:") func canOpenURL(_ url: NSObject?) -> Bool { IncomingURLs.isOwn(url) }
