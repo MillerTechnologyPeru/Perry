@@ -1,0 +1,70 @@
+---
+layout: default
+---
+{%- assign current = page.reports | last -%}
+{%- assign current_level = site.data.levels | where: "level", current.level | first -%}
+{%- assign platform_names = "ios:iOS,macos:macOS,catalyst:Mac Catalyst" | split: "," -%}
+{%- assign platform_name = page.platform -%}
+{%- for pair in platform_names -%}
+  {%- assign parts = pair | split: ":" -%}
+  {%- if parts[0] == page.platform -%}{%- assign platform_name = parts[1] -%}{%- endif -%}
+{%- endfor -%}
+<h1>{{ page.name | escape }}</h1>
+
+<dl class="app-facts">
+  <dt>Platform</dt>
+  <dd>{{ platform_name }}</dd>
+  <dt>Kind</dt>
+  <dd>{{ page.kind | capitalize }}</dd>
+  {%- if page.developer %}
+  <dt>Developer</dt>
+  <dd>{{ page.developer | escape }}</dd>
+  {%- endif %}
+  <dt>Level</dt>
+  <dd><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ current_level.name }}</span></dd>
+  <dt>Last tested</dt>
+  <dd>{{ current.date | date: "%Y-%m-%d" }}</dd>
+</dl>
+
+<h2>Reports</h2>
+{%- assign reports = page.reports | reverse %}
+{%- for report in reports %}
+{%- assign level = site.data.levels | where: "level", report.level | first %}
+<section class="report">
+  <h3><a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ report.pr }}">Pull request #{{ report.pr }}</a></h3>
+  <ul class="report-facts">
+    <li><span class="badge level-{{ report.level }}"><span class="badge-number">{{ report.level }}</span>{{ level.name }}</span></li>
+    <li><strong>Date</strong> {{ report.date | date: "%Y-%m-%d" }}</li>
+    {%- if report.arch %}
+    <li><strong>Architecture</strong> {{ report.arch }}</li>
+    {%- endif %}
+    {%- if report.app_version %}
+    <li><strong>App version</strong> {{ report.app_version | escape }}</li>
+    {%- endif %}
+    {%- if report.host %}
+    <li><strong>Host</strong> {{ report.host | escape }}</li>
+    {%- endif %}
+    <li><strong>Commit</strong> <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></li>
+    <li><strong>Level from</strong> {{ report.source }}</li>
+  </ul>
+  <p>{{ report.notes | escape }}</p>
+  {%- if report.screenshots %}
+  <div class="screenshots">
+    {%- for shot in report.screenshots %}
+    <figure>
+      <a href="{{ shot.url }}"><img src="{{ shot.url }}" alt="{{ shot.caption | escape }}" loading="lazy"></a>
+      <figcaption>{{ shot.caption | escape }}</figcaption>
+    </figure>
+    {%- endfor %}
+  </div>
+  {%- endif %}
+</section>
+{%- endfor %}
+
+{%- assign body = content | strip %}
+{%- if body != "" %}
+<h2>Notes</h2>
+{{ content }}
+{%- endif %}
+
+<p class="edit-link"><a href="{{ site.repository_url }}/edit/master/docs/{{ page.relative_path }}">Edit this page</a> · <a href="{{ '/compatibility/' | relative_url }}">All apps</a></p>

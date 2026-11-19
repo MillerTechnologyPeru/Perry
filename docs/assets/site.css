@@ -1,0 +1,319 @@
+:root {
+  color-scheme: light dark;
+  --text: #1d1d1f;
+  --muted: #5c5c63;
+  --background: #ffffff;
+  --surface: #f4f4f6;
+  --border: #d6d6dc;
+  --link: #0a58ca;
+  --level-1-bg: #fde2e1;
+  --level-1-fg: #8a1c14;
+  --level-2-bg: #feecd2;
+  --level-2-fg: #7a4100;
+  --level-3-bg: #fdf6c8;
+  --level-3-fg: #5e4f00;
+  --level-4-bg: #dcf3e1;
+  --level-4-fg: #165c2a;
+  --level-5-bg: #d9ebff;
+  --level-5-fg: #0b3f80;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #ececf0;
+    --muted: #a5a5ae;
+    --background: #151517;
+    --surface: #222226;
+    --border: #3a3a40;
+    --link: #78aefc;
+    --level-1-bg: #4a1c19;
+    --level-1-fg: #ffb4ad;
+    --level-2-bg: #4a3016;
+    --level-2-fg: #ffcf94;
+    --level-3-bg: #45400f;
+    --level-3-fg: #f3e48c;
+    --level-4-bg: #173d22;
+    --level-4-fg: #9fe3b0;
+    --level-5-bg: #142f52;
+    --level-5-fg: #a8cdff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--background);
+}
+
+a {
+  color: var(--link);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9em;
+  background: var(--surface);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  overflow-wrap: break-word;
+}
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  overflow-wrap: normal;
+}
+
+.site-header {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.site-nav {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+}
+
+.site-nav .site-title {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--text);
+  text-decoration: none;
+  margin-right: auto;
+}
+
+.site-nav a {
+  text-decoration: none;
+}
+
+.site-nav a:hover,
+.site-nav a:focus {
+  text-decoration: underline;
+}
+
+.site-nav a[aria-current="page"] {
+  color: var(--text);
+  font-weight: 600;
+}
+
+main {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 3rem;
+}
+
+h1, h2, h3 {
+  line-height: 1.25;
+}
+
+.site-footer {
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.site-footer p {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0 2rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+th {
+  background: var(--surface);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+main > table {
+  display: block;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.app-table td.notes {
+  min-width: 14rem;
+}
+
+.app-table img {
+  display: block;
+  width: auto;
+  max-width: 160px;
+  max-height: 120px;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.85em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge .badge-number::after {
+  content: "\00A0\00B7\00A0";
+}
+
+.level-1 { background: var(--level-1-bg); color: var(--level-1-fg); border-style: dotted; }
+.level-2 { background: var(--level-2-bg); color: var(--level-2-fg); border-style: dashed; }
+.level-3 { background: var(--level-3-bg); color: var(--level-3-fg); border-style: solid; }
+.level-4 { background: var(--level-4-bg); color: var(--level-4-fg); border-style: double; border-width: 3px; }
+.level-5 { background: var(--level-5-bg); color: var(--level-5-fg); border-style: solid; border-width: 2px; text-decoration: underline; }
+
+.level-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.level-list li {
+  margin: 0.5rem 0;
+}
+
+.app-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 1rem 0 2rem;
+}
+
+.app-facts dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.app-facts dd {
+  margin: 0;
+}
+
+.report {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: var(--surface);
+}
+
+.report h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.report-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  padding: 0;
+  margin: 0 0 0.5rem;
+  list-style: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.report-facts strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.screenshots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.screenshots figure {
+  margin: 0;
+  max-width: 100%;
+  width: 18rem;
+}
+
+.screenshots img {
+  display: block;
+  max-width: 100%;
+  max-height: 32rem;
+  width: auto;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.screenshots figcaption {
+  font-size: 0.875rem;
+  color: var(--muted);
+  margin-top: 0.35rem;
+}
+
+.edit-link {
+  margin-top: 2rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 40rem) {
+  body {
+    font-size: 0.95rem;
+  }
+
+  .app-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .app-facts dd {
+    margin-bottom: 0.5rem;
+  }
+}

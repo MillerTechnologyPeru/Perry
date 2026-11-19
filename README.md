@@ -22,6 +22,9 @@ everything it calls is ordinary Linux code, mostly written in Swift.
 `perry` reads a program's architectures and hands 32-bit ones to `perry32`
 (beside it, or at `$PERRY32`). arm64e and FairPlay-encrypted binaries are
 rejected with a clear error, so App Store apps must be decrypted first.
+
+The [compatibility database](https://millertechnologyperu.github.io/Perry/compatibility/)
+lists the apps and games tested so far and how far each one gets.
  
 ## Frameworks
  
