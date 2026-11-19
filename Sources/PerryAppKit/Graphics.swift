@@ -633,6 +633,9 @@ open class NSImage: NSObject {
     /// The decoded bitmap: retained; nil until it is first drawn.
     var cgImage: CGRef?
     private var decoded = false
+    var focusContext: CGRef?
+    var focusPrevious: NSGraphicsContext?
+    var flippedImage = false
     /// Pixels a point in the decoded file, from its resolution.
     private var pixelsPerPoint: CGFloat = 1
     /// An image drawn by code: an app's block, or a system image's drawing.
@@ -840,8 +843,14 @@ open class NSImage: NSObject {
                 image.size = CGSize(width: 16, height: 16)
                 image.drawing = drawing
                 image.template = true
-            } else {
+            } else if name.hasPrefix("NS") {
+                // AppKit's own images Perry doesn't draw: blank, but there.
                 image.size = CGSize(width: 32, height: 32)
+            } else {
+                // Not the app's or AppKit's: nil, as AppKit answers, so
+                // that callers look in their own bundles (Xcode's
+                // frameworks do).
+                return nil
             }
         }
         named[name] = image
@@ -886,8 +895,35 @@ open class NSImage: NSObject {
     @ObjCMethod("CGImageForProposedRect:context:hints:")
     func cgImage(forProposedRect rect: UnsafeMutablePointer<CGRect>?, context: NSObject?, hints: NSObject?) -> UnsafeMutableRawPointer? { bitmap() }
     @ObjCMethod("TIFFRepresentation") func tiffRepresentation() -> NSObject? { data }
-    @ObjCMethod("lockFocus") func lockFocus() {}
-    @ObjCMethod("unlockFocus") func unlockFocus() {}
+    /// Drawing into the image: a bitmap context at twice its size, with
+    /// what the image showed already, current until -unlockFocus, which
+    /// makes what was drawn the image's bitmap.
+    @ObjCMethod("lockFocus") func lockFocus() { lockFocus(flipped: flippedImage) }
+    @ObjCMethod("lockFocusFlipped:") func lockFocus(flipped: Bool) {
+        guard focusContext == nil, size.width > 0, size.height > 0, let context = CG.makeContext(size: size, scale: 2) else { return }
+        if let existing = bitmap() { CG.drawImage(context, CGRect(origin: .zero, size: size), existing) }
+        if flipped {
+            CG.translateCTM(context, 0, size.height)
+            CG.scaleCTM(context, 1, -1)
+        }
+        focusContext = context
+        focusPrevious = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: flipped)
+    }
+    @ObjCMethod("unlockFocus") func unlockFocus() {
+        guard let context = focusContext else { return }
+        NSGraphicsContext.current = focusPrevious
+        focusPrevious = nil
+        focusContext = nil
+        if let cgImage { CG.release(cgImage) }
+        cgImage = CG.bitmapContextCreateImage(context)
+        decoded = true
+        drawing = nil
+        drawingHandler = nil
+        CG.release(context)
+    }
+    @ObjCMethod("isFlipped") func isFlipped() -> Bool { flippedImage }
+    @ObjCMethod("setFlipped:") func setFlipped(_ value: Bool) { flippedImage = value }
     @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
     /// Draws the bitmap in `rect` of the current context, upright in a
