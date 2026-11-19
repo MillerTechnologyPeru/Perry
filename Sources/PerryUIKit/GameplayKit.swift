@@ -47,7 +47,6 @@ open class GKComponent: NSObject {
 extension NSObject {
     @ObjCMethod("didAddToEntity") func gkSendDidAddToEntity()
     @ObjCMethod("willRemoveFromEntity") func gkSendWillRemoveFromEntity()
-    @ObjCMethod("updateWithDeltaTime:") func gkSendUpdate(deltaTime seconds: Double)
 }
 
 final class GKEntityState: ObjectState {
