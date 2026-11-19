@@ -252,6 +252,68 @@ open class NSArrayController: NSObjectController {
     @ObjCMethod("insert:") func insert(_ sender: NSObject?) { add(sender) }
 }
 
+/// A tree controller, kept as an array controller of the tree's top
+/// level: its arranged objects are the content's objects (no child nodes
+/// yet), its selection index paths one index each. Enough for nibs that
+/// bind a list to one (Xcode's library chooser).
+@ObjCClass("NSTreeController")
+open class NSTreeController: NSArrayController {
+    var childrenKeyPath: String?
+    var countKeyPath: String?
+    var leafKeyPath: String?
+
+    @ObjCMethod("init")
+    public required init() { super.init() }
+
+    @ObjCMethod("initWithContent:")
+    public required init(content: NSObject?) { super.init(content: content) }
+
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init(coder: coder)
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        childrenKeyPath = decoded.string("NSTreeContentChildrenKey")
+        countKeyPath = decoded.string("NSTreeContentCountKey")
+        leafKeyPath = decoded.string("NSTreeContentLeafKey")
+    }
+
+    @ObjCMethod("childrenKeyPath") func treeChildrenKeyPath() -> String? { childrenKeyPath }
+    @ObjCMethod("setChildrenKeyPath:") func setChildrenKeyPath(_ value: String?) { childrenKeyPath = value }
+    @ObjCMethod("countKeyPath") func treeCountKeyPath() -> String? { countKeyPath }
+    @ObjCMethod("setCountKeyPath:") func setCountKeyPath(_ value: String?) { countKeyPath = value }
+    @ObjCMethod("leafKeyPath") func treeLeafKeyPath() -> String? { leafKeyPath }
+    @ObjCMethod("setLeafKeyPath:") func setLeafKeyPath(_ value: String?) { leafKeyPath = value }
+
+    /// Each selected index as a one-index path.
+    @ObjCMethod("selectionIndexPaths")
+    func selectionIndexPaths() -> NSObject {
+        guard let pathClass = Classes.named("NSIndexPath")?.pointer else { return NSMutableArray.of([]) }
+        typealias Make = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UInt) -> UnsafeMutableRawPointer?
+        let make = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)
+        return NSMutableArray.of(selectionIndexes.compactMap { index in
+            make(pathClass, ObjCRuntime.selector("indexPathWithIndex:"), UInt(index)).map(NSObject.init)
+        })
+    }
+
+    @ObjCMethod("setSelectionIndexPaths:")
+    func setSelectionIndexPaths(_ paths: NSObject?) -> Bool {
+        typealias Position = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UInt) -> UInt
+        let position = unsafeBitCast(ObjCRuntime.msgSend, to: Position.self)
+        let indexes = (paths?.as(NSArray.self)?.elements ?? []).map { Int(position($0.objcObject, ObjCRuntime.selector("indexAtPosition:"), 0)) }
+        Send.void(objcObject, "setSelectionIndexes:", IndexSets.make(indexes).objcObject)
+        return true
+    }
+
+    @ObjCMethod("selectionIndexPath")
+    func selectionIndexPath() -> NSObject? { (selectionIndexPaths().as(NSArray.self)?.elements ?? []).first }
+
+    @ObjCMethod("setSelectionIndexPath:")
+    func setSelectionIndexPath(_ path: NSObject?) -> Bool { setSelectionIndexPaths(path.map { NSMutableArray.of([$0]) }) }
+
+    @ObjCMethod("selectedNodes") func selectedNodes() -> NSObject { selectedObjects() }
+}
+
 /// The shared user defaults controller: "values.<key>" are the defaults'.
 @ObjCClass("NSUserDefaultsController")
 open class NSUserDefaultsController: NSController {
