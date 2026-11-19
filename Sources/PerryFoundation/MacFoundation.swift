@@ -81,6 +81,20 @@ public func CFLocaleCreateCanonicalLanguageIdentifierFromString(_ allocator: Uns
     ObjC.retain(ObjC.send(named("NSLocale"), ObjC.selector("canonicalLanguageIdentifierFromString:"), string))
 }
 
+/// A locale identifier's language, script, country, variant and keywords,
+/// as +[NSLocale componentsFromLocaleIdentifier:] gives them.
+@c(_CFLocaleCreateComponentsFromLocaleIdentifier)
+public func CFLocaleCreateComponentsFromLocaleIdentifier(_ allocator: UnsafeRawPointer?, _ identifier: id?) -> id? {
+    ObjC.retain(ObjC.send(named("NSLocale"), ObjC.selector("componentsFromLocaleIdentifier:"), identifier))
+}
+
+/// The identifier of a dictionary of locale components, as
+/// +[NSLocale localeIdentifierFromComponents:] makes it.
+@c(_CFLocaleCreateLocaleIdentifierFromComponents)
+public func CFLocaleCreateLocaleIdentifierFromComponents(_ allocator: UnsafeRawPointer?, _ components: id?) -> id? {
+    ObjC.retain(ObjC.send(named("NSLocale"), ObjC.selector("localeIdentifierFromComponents:"), components))
+}
+
 /// The Windows locale code (LCID) of a locale identifier, for the
 /// languages games are localized into; US English otherwise.
 @c(_CFLocaleGetWindowsLocaleCodeFromLocaleIdentifier)
