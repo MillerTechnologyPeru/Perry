@@ -806,6 +806,112 @@ int32_t darwin_OSAtomicAnd32Orig(uint32_t mask, volatile uint32_t *value) { retu
 int32_t darwin_OSAtomicOr32(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32);
 int32_t darwin_OSAtomicOr32(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_or_fetch(value, mask, __ATOMIC_SEQ_CST); }
 
+// The generic atomics compiler-rt has in libSystem, which compilers call for
+// objects of any size: __atomic_load(size, source, destination, order) and
+// the rest. Sizes the processor does atomically use its instructions, as
+// inline atomics on the same objects do; other sizes take one of a set of
+// locks chosen by the object's address. Every access to such an object goes
+// through these, so they agree.
+enum { ATOMIC_LOCK_COUNT = 64 };
+static pthread_mutex_t atomic_locks[ATOMIC_LOCK_COUNT];
+static pthread_once_t atomic_locks_once = PTHREAD_ONCE_INIT;
+
+static void atomic_locks_init(void) {
+    for (int i = 0; i < ATOMIC_LOCK_COUNT; i++)
+        pthread_mutex_init(&atomic_locks[i], NULL);
+}
+
+static pthread_mutex_t *atomic_lock_for(const void *address) {
+    pthread_once(&atomic_locks_once, atomic_locks_init);
+    return &atomic_locks[((uintptr_t)address >> 4) % ATOMIC_LOCK_COUNT];
+}
+
+static bool atomic_lock_free(size_t size, const void *address) {
+    return (size == 1 || size == 2 || size == 4 || size == 8) && ((uintptr_t)address & (size - 1)) == 0;
+}
+
+void darwin_atomic_load(size_t size, void *source, void *destination, int order) DARWIN_SYMBOL(__atomic_load);
+void darwin_atomic_load(size_t size, void *source, void *destination, int order) {
+    (void)order;
+    if (atomic_lock_free(size, source)) {
+        switch (size) {
+        case 1: *(uint8_t *)destination = __atomic_load_n((uint8_t *)source, __ATOMIC_SEQ_CST); return;
+        case 2: *(uint16_t *)destination = __atomic_load_n((uint16_t *)source, __ATOMIC_SEQ_CST); return;
+        case 4: *(uint32_t *)destination = __atomic_load_n((uint32_t *)source, __ATOMIC_SEQ_CST); return;
+        default: *(uint64_t *)destination = __atomic_load_n((uint64_t *)source, __ATOMIC_SEQ_CST); return;
+        }
+    }
+    pthread_mutex_t *lock = atomic_lock_for(source);
+    pthread_mutex_lock(lock);
+    memcpy(destination, source, size);
+    pthread_mutex_unlock(lock);
+}
+
+void darwin_atomic_store(size_t size, void *destination, void *source, int order) DARWIN_SYMBOL(__atomic_store);
+void darwin_atomic_store(size_t size, void *destination, void *source, int order) {
+    (void)order;
+    if (atomic_lock_free(size, destination)) {
+        switch (size) {
+        case 1: __atomic_store_n((uint8_t *)destination, *(uint8_t *)source, __ATOMIC_SEQ_CST); return;
+        case 2: __atomic_store_n((uint16_t *)destination, *(uint16_t *)source, __ATOMIC_SEQ_CST); return;
+        case 4: __atomic_store_n((uint32_t *)destination, *(uint32_t *)source, __ATOMIC_SEQ_CST); return;
+        default: __atomic_store_n((uint64_t *)destination, *(uint64_t *)source, __ATOMIC_SEQ_CST); return;
+        }
+    }
+    pthread_mutex_t *lock = atomic_lock_for(destination);
+    pthread_mutex_lock(lock);
+    memcpy(destination, source, size);
+    pthread_mutex_unlock(lock);
+}
+
+void darwin_atomic_exchange(size_t size, void *object, void *value, void *old, int order) DARWIN_SYMBOL(__atomic_exchange);
+void darwin_atomic_exchange(size_t size, void *object, void *value, void *old, int order) {
+    (void)order;
+    if (atomic_lock_free(size, object)) {
+        switch (size) {
+        case 1: *(uint8_t *)old = __atomic_exchange_n((uint8_t *)object, *(uint8_t *)value, __ATOMIC_SEQ_CST); return;
+        case 2: *(uint16_t *)old = __atomic_exchange_n((uint16_t *)object, *(uint16_t *)value, __ATOMIC_SEQ_CST); return;
+        case 4: *(uint32_t *)old = __atomic_exchange_n((uint32_t *)object, *(uint32_t *)value, __ATOMIC_SEQ_CST); return;
+        default: *(uint64_t *)old = __atomic_exchange_n((uint64_t *)object, *(uint64_t *)value, __ATOMIC_SEQ_CST); return;
+        }
+    }
+    pthread_mutex_t *lock = atomic_lock_for(object);
+    pthread_mutex_lock(lock);
+    memcpy(old, object, size);
+    memcpy(object, value, size);
+    pthread_mutex_unlock(lock);
+}
+
+/// Stores `desired` if the object holds `expected`; else the object's value
+/// goes to `expected`. Whether it stored.
+bool darwin_atomic_compare_exchange(size_t size, void *object, void *expected, void *desired, int success, int failure)
+    DARWIN_SYMBOL(__atomic_compare_exchange);
+bool darwin_atomic_compare_exchange(size_t size, void *object, void *expected, void *desired, int success, int failure) {
+    (void)success;
+    (void)failure;
+    if (atomic_lock_free(size, object)) {
+        switch (size) {
+        case 1: return __atomic_compare_exchange_n((uint8_t *)object, (uint8_t *)expected, *(uint8_t *)desired, false,
+                                                   __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        case 2: return __atomic_compare_exchange_n((uint16_t *)object, (uint16_t *)expected, *(uint16_t *)desired, false,
+                                                   __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        case 4: return __atomic_compare_exchange_n((uint32_t *)object, (uint32_t *)expected, *(uint32_t *)desired, false,
+                                                   __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        default: return __atomic_compare_exchange_n((uint64_t *)object, (uint64_t *)expected, *(uint64_t *)desired, false,
+                                                    __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+        }
+    }
+    pthread_mutex_t *lock = atomic_lock_for(object);
+    pthread_mutex_lock(lock);
+    bool equal = memcmp(object, expected, size) == 0;
+    if (equal)
+        memcpy(object, desired, size);
+    else
+        memcpy(expected, object, size);
+    pthread_mutex_unlock(lock);
+    return equal;
+}
+
 int32_t darwin_OSAtomicOr32Orig(uint32_t mask, volatile uint32_t *value) DARWIN_SYMBOL(OSAtomicOr32Orig);
 int32_t darwin_OSAtomicOr32Orig(uint32_t mask, volatile uint32_t *value) { return (int32_t)__atomic_fetch_or(value, mask, __ATOMIC_SEQ_CST); }
 
