@@ -396,6 +396,8 @@ final class NavigationBarState: ObjectState {
     var compactAppearance: NSObject?
     var compactScrollEdgeAppearance: NSObject?
     var shadowImage: NSObject?
+    /// Background images by UIBarMetrics.
+    var backgroundImages: [Int: NSObject] = [:]
     var backIndicatorImage: NSObject?
     var backIndicatorTransitionMaskImage: NSObject?
     /// What the bar last drew, to tell when its items have changed.
@@ -532,8 +534,15 @@ open class UINavigationBar: UIView {
     @ObjCMethod("setBackIndicatorTransitionMaskImage:")
     func setBackIndicatorTransitionMaskImage(_ image: NSObject?) { barState.backIndicatorTransitionMaskImage = image }
 
-    @ObjCMethod("setBackgroundImage:forBarMetrics:") func setBackgroundImage(_ image: NSObject?, for metrics: Int) {}
-    @ObjCMethod("backgroundImageForBarMetrics:") func backgroundImage(for metrics: Int) -> NSObject? { nil }
+    /// Kept by metrics: an empty image (UIImage()), as apps set to make the
+    /// bar transparent, leaves its background clear; others aren't drawn.
+    @ObjCMethod("setBackgroundImage:forBarMetrics:")
+    func setBackgroundImage(_ image: NSObject?, for metrics: Int) {
+        barState.backgroundImages[metrics] = image
+        barState.extensionView?.setBackgroundColor(backgroundColor)
+        setNeedsDisplay()
+    }
+    @ObjCMethod("backgroundImageForBarMetrics:") func backgroundImage(for metrics: Int) -> NSObject? { barState.backgroundImages[metrics] }
 
     @ObjCMethod("sizeThatFits:")
     override func sizeThatFits(_ size: CGSize) -> CGSize { CGSize(width: size.width, height: barHeight) }
@@ -604,7 +613,11 @@ open class UINavigationBar: UIView {
             CG.fillRect(context, bounds)
             // A shadow image replaces the hairline; Perry draws images in
             // its place as nothing.
-            if barState.shadowImage == nil {
+            // A transparent appearance has no hairline, unless it was given
+            // a shadow color.
+            let appearance = barState.standardAppearance?.as(UIBarAppearance.self)?.barState
+            let transparent = appearance?.numbers["background"] == 2 && appearance?.objects["shadowColor"] == nil
+            if barState.shadowImage == nil && !transparent {
                 CG.setFillColorWithColor(context, separator.state.makeCGColor())
                 CG.fillRect(context, CGRect(x: 0, y: bounds.maxY - Screen.pixel, width: bounds.width, height: Screen.pixel))
             }
@@ -637,7 +650,17 @@ open class UINavigationBar: UIView {
         }
     }
 
-    var backgroundColor: UIColor { barState.barTintColor ?? UIColor.gray(0.97) }
+    /// The bar tint color; else the standard appearance's background;
+    /// else clear for an empty background image; else light or, in the
+    /// dark appearance or the black bar style, dark gray.
+    var backgroundColor: UIColor {
+        if let tint = barState.barTintColor { return tint }
+        if let color = barState.standardAppearance?.as(UIBarAppearance.self)?.resolvedBackgroundColor { return color }
+        if let image = barState.backgroundImages[0]?.as(UIImage.self), image.state.size.width == 0 || image.state.size.height == 0 {
+            return UIColor.clear()
+        }
+        return interfaceStyle == 2 || barState.barStyle != 0 ? UIColor.gray(0.11) : UIColor.gray(0.97)
+    }
 
     /// Continues the bar's background `height` points up, to the top of
     /// the screen, as UIKit's bars do behind the status bar.
