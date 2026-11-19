@@ -372,11 +372,15 @@ public class NSDictionary: NSObject {
         }
     }
 
+    /// Through -isEqualToDictionary:, as Foundation compares, so a
+    /// subclass's own comparison (Xcode's XCAttributeDictionary's) is used;
+    /// the other object taken as it is, not retained and released.
     @ObjCMethod("isEqual:")
-    func isEqual(_ other: ObjCObject?) -> Bool {
+    func isEqual(_ other: UnsafeMutableRawPointer?) -> Bool {
         guard let other else { return false }
-        return other.id == objcObject
-            || (other.is(NSDictionary.self) && isEqual(toDictionary: other.unsafeCast(to: NSDictionary.self)))
+        if other == objcObject { return true }
+        guard ObjC.isKind(other, of: Dictionaries.dictionaryClass) else { return false }
+        return ObjC.sendBool(objcObject, ObjC.selector("isEqualToDictionary:"), other)
     }
 
     @ObjCMethod("hash")

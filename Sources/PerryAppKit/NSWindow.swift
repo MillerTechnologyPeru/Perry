@@ -559,6 +559,9 @@ open class NSWindow: NSResponder {
     @ObjCMethod("isVisible") func isVisible() -> Bool { visible }
     @ObjCMethod("setIsVisible:") func setIsVisible(_ value: Bool) { value ? orderFront(nil) : orderOut(nil) }
     @ObjCMethod("isKeyWindow") func isKeyWindow() -> Bool { Windows.key === self }
+    /// Menu items whose action the window has: enabled, for subclasses
+    /// that ask their superclass.
+    @ObjCMethod("validateMenuItem:") func validateMenuItem(_ item: NSObject?) -> Bool { true }
     @ObjCMethod("isMainWindow") func isMainWindow() -> Bool { Windows.main === self }
     @ObjCMethod("canBecomeKeyWindow") func canBecomeKeyWindow() -> Bool { true }
     @ObjCMethod("canBecomeMainWindow") func canBecomeMainWindow() -> Bool { styleMask & StyleMask.titled != 0 || true }

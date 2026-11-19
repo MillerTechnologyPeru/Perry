@@ -16,6 +16,10 @@ void *darwin_objc_empty_vtable DARWIN_SYMBOL("__objc_empty_vtable");
 void *perry_objc_empty_cache_table(void) { return empty_table_storage; }
 void *perry_objc_empty_cache(void) { return darwin_objc_empty_cache; }
 
+// NSObject's isa's offset, 0, which code that reads an object's class
+// itself (Xcode's) loads, pointer-sized.
+long darwin_objc_ivar_nsobject_isa DARWIN_SYMBOL("_OBJC_IVAR_$_NSObject.isa") = 0;
+
 // Root classes. The Swift runtime fills these in at startup, before any
 // Mach-O code runs; images bind to the addresses when they load.
 perry_objc_class nsobject_class DARWIN_SYMBOL("_OBJC_CLASS_$_NSObject");

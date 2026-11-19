@@ -271,11 +271,14 @@ enum Bundles {
         let name = unsafeBitCast(nameSymbol, to: Name.self)
         var frameworks: [String] = []
         for index in 0..<count {
-            guard let path = name(index).map({ String(cString: $0) }), let range = path.range(of: ".framework/") else { continue }
-            let unresolved = String(path[..<range.lowerBound]) + ".framework"
-            guard let resolved = realpath(unresolved, nil) else { continue }
-            let framework = String(cString: resolved)
-            free(resolved)
+            // The image's own framework: its path resolved first, then cut at
+            // the last ".framework/" (Xcode loads XcodeEdit through
+            // DevToolsInterface.framework/Versions/A/../../../XcodeEdit.framework).
+            guard let named = name(index), let resolvedImage = realpath(named, nil) else { continue }
+            let path = String(cString: resolvedImage)
+            free(resolvedImage)
+            guard let range = path.range(of: ".framework/", options: .backwards) else { continue }
+            let framework = String(path[..<range.lowerBound]) + ".framework"
             if !frameworks.contains(framework) { frameworks.append(framework) }
         }
         return frameworks
