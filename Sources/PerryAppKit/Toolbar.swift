@@ -128,8 +128,39 @@ open class NSToolbar: NSObject {
     @ObjCMethod("validateVisibleItems") func validateVisibleItems() {}
     @ObjCMethod("runCustomizationPalette:") func runCustomizationPalette(_ sender: NSObject?) {}
     @ObjCMethod("customizationPaletteIsRunning") func customizationPaletteIsRunning() -> Bool { false }
-    @ObjCMethod("setConfigurationFromDictionary:") func setConfiguration(from dictionary: NSObject?) {}
-    @ObjCMethod("configurationDictionary") func configurationDictionary() -> NSObject { NSMutableDictionary.empty() }
+    /// The configuration AppKit saves in defaults: its display and size
+    /// modes, whether it shows, and its items' identifiers, in order.
+    @ObjCMethod("configurationDictionary")
+    func configurationDictionary() -> NSObject {
+        loadItems()
+        let dictionary = NSMutableDictionary.empty()
+        dictionary.set(NSNumber.make(integer: Int(displayMode)), forKey: "TB Display Mode")
+        dictionary.set(NSNumber.make(integer: Int(sizeMode)), forKey: "TB Icon Size Mode")
+        dictionary.set(NSNumber.make(integer: Int(sizeMode)), forKey: "TB Size Mode")
+        dictionary.set(NSNumber.make(integer: visible ? 1 : 0), forKey: "TB Is Shown")
+        dictionary.set(NSMutableArray.of(items.map { NSObject(objCReturnValue: $0.identifier.objCArgument()) }), forKey: "TB Item Identifiers")
+        return dictionary
+    }
+
+    @ObjCMethod("setConfigurationFromDictionary:")
+    func setConfiguration(from dictionary: NSObject?) {
+        guard let dictionary else { return }
+        func number(_ key: String) -> Int? {
+            Send.object(dictionary.objcObject, "objectForKey:", key.objCArgument()).map { Send.integer($0, "integerValue") }
+        }
+        if let mode = number("TB Display Mode") { displayMode = UInt(max(0, mode)) }
+        if let mode = number("TB Size Mode") ?? number("TB Icon Size Mode") { sizeMode = UInt(max(0, mode)) }
+        if let shown = number("TB Is Shown") { visible = shown != 0 }
+        if let identifiers = Send.object(dictionary.objcObject, "objectForKey:", "TB Item Identifiers".objCArgument()).map(NSObject.init)?.as(NSArray.self)?.elements {
+            loadItems()
+            var arranged: [NSToolbarItem] = []
+            for identifier in identifiers.map(\.stringValue) {
+                if let item = items.first(where: { item in item.identifier == identifier && !arranged.contains(where: { $0 === item }) }) ?? makeItem(identifier) { arranged.append(item) }
+            }
+            items = arranged
+        }
+        window?.toolbarChanged()
+    }
 }
 
 @ObjCClass("NSToolbarItem")
