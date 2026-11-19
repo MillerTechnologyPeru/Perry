@@ -346,7 +346,18 @@ open class NSWorkspace: NSObject {
     @ObjCMethod("runningApplications") func runningApplications() -> NSObject { NSMutableArray.of([NSRunningApplication.currentApplication()]) }
     @ObjCMethod("frontmostApplication") func frontmostApplication() -> NSObject? { NSRunningApplication.currentApplication() }
     @ObjCMethod("menuBarOwningApplication") func menuBarOwningApplication() -> NSObject? { NSRunningApplication.currentApplication() }
-    @ObjCMethod("iconForFile:") func icon(forFile path: String?) -> NSObject? { NSImage(size: CGSize(width: 32, height: 32)) }
+    /// Icons from the desktop's icon theme (FileIcons).
+    @ObjCMethod("iconForFile:")
+    func icon(forFile path: String?) -> NSObject? { FileIcons.icon(forMIMEType: path.map(FileIcons.type(ofFile:)) ?? "text/plain") }
+    @ObjCMethod("iconForFileType:")
+    func icon(forFileType type: String?) -> NSObject? { FileIcons.icon(forMIMEType: type.map(FileIcons.type(forFileType:)) ?? "text/plain") }
+    /// Several files: their icon if they're all of one type, else a
+    /// generic document's.
+    @ObjCMethod("iconForFiles:")
+    func icon(forFiles paths: NSObject?) -> NSObject? {
+        let types = Set((paths?.as(NSArray.self)?.elements ?? []).map { String(objCArgument: $0.objcObject) }.map(FileIcons.type(ofFile:)))
+        return FileIcons.icon(forMIMEType: types.count == 1 ? types.first! : "application/octet-stream")
+    }
     @ObjCMethod("isFilePackageAtPath:") func isFilePackage(atPath path: String?) -> Bool { path?.hasSuffix(".app") ?? false }
     @ObjCMethod("accessibilityDisplayShouldReduceMotion") func reduceMotion() -> Bool { false }
     @ObjCMethod("accessibilityDisplayShouldReduceTransparency") func reduceTransparency() -> Bool { false }
