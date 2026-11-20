@@ -87,6 +87,8 @@ let package = Package(
         .library(name: "PerryCoreLocation", type: .dynamic, targets: ["PerryCoreLocation"]),
         // CoreBluetooth, a central over BlueZ.
         .library(name: "PerryCoreBluetooth", type: .dynamic, targets: ["PerryCoreBluetooth"]),
+        // CoreWLAN, over NetworkManager's D-Bus API.
+        .library(name: "PerryCoreWLAN", type: .dynamic, targets: ["PerryCoreWLAN"]),
         .library(name: "PerryMapKit", type: .dynamic, targets: ["PerryMapKit"]),
         .library(name: "PerryMapKitAppKit", type: .dynamic, targets: ["PerryMapKitAppKit"]),
         .library(name: "PerryCloudKit", type: .dynamic, targets: ["PerryCloudKit"]),
@@ -315,6 +317,16 @@ let package = Package(
         // CoreBluetooth: a central over BlueZ's D-Bus API.
         .target(
             name: "PerryCoreBluetooth",
+            dependencies: [
+                "PerryInterface", "PerryObjCInterop",
+                .product(name: "DBUS", package: "dbus"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // CoreWLAN: Wi-Fi interfaces and scans over NetworkManager's D-Bus API.
+        .target(
+            name: "PerryCoreWLAN",
             dependencies: [
                 "PerryInterface", "PerryObjCInterop",
                 .product(name: "DBUS", package: "dbus"),
