@@ -3,6 +3,7 @@ name: "SpongeBob SquarePants: Battle for Bikini Bottom"
 bundle_id: "com.hg.bfbb"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 45
     date: 2026-11-06
