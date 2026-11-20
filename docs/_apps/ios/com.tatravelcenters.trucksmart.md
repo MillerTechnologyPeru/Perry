@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "6.3"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Launches, loads its sites from its API and shows its first-launch screen.
@@ -24,6 +25,7 @@ reports:
     cpu: arm64
     app_version: "6.3"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Gets past its splash and first-launch screen to the guest Home tab with live locations.
@@ -36,6 +38,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: The Locations tab shows its map, drawn by MapLibre, with the app's site pins.
@@ -45,6 +48,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: "Map annotations draw as on the iPhone: rounded site bubbles with centered titles."
@@ -54,6 +58,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: "Location search looks as on an iPhone: the map behind the search bar and the results list."
@@ -63,6 +68,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Starts again without aborting and no longer redraws while idle; list drags are still slow.
