@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.43"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 2
     source: body
     notes: Reaches its first screen with Unity on Metal; not playable yet.
@@ -24,6 +25,7 @@ reports:
     cpu: arm64
     app_version: "1.19.1"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 2
     source: body
     notes: Reaches its loading screen on OpenGL ES 2; not playable yet.
