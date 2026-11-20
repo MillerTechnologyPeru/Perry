@@ -12,4 +12,4 @@
   description: The app runs or plays with its main content shown, and only small issues are named.
 - level: 5
   name: Complete
-  description: The pull request states that everything tested works.
+  description: The pull request, or the maintainer's review, states that everything tested works.
