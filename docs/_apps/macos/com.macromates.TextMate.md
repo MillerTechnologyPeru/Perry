@@ -13,6 +13,9 @@ reports:
     level: 4
     source: body
     notes: Runs, lays out as on macOS, follows dark mode, takes typing, and its status bar menus work.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/583ae095-704f-4392-945b-34402596610f
+        caption: Editor with the language menu
   - pr: 62
     date: 2026-11-06
     perry: "473396e0"
