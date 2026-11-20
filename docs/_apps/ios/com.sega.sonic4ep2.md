@@ -13,4 +13,7 @@ reports:
     level: 2
     source: body
     notes: Gets through its intro and cutscene, then stops on its first loading screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/22a3e562-ef21-43f9-a6fd-46ff29f11988
+        caption: First loading screen
 ---
