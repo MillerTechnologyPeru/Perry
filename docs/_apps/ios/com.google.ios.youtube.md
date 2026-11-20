@@ -34,4 +34,7 @@ reports:
     level: 3
     source: body
     notes: "Shows its Home feed: cells, images and text."
+    screenshots:
+      - url: https://github.com/user-attachments/assets/ef6038fe-f78b-4dfe-a99f-d2069d13b794
+        caption: Home feed
 ---
