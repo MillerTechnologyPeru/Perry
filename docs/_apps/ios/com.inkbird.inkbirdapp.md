@@ -3,6 +3,7 @@ name: Inkbird
 bundle_id: "com.inkbird.inkbirdapp"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 162
     date: 2026-11-16
