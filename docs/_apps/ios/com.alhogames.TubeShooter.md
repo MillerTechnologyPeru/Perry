@@ -3,7 +3,7 @@ name: Spaceholes
 bundle_id: "com.alhogames.TubeShooter"
 platform: ios
 kind: game
-tags: [Swift, ObjC, C++]
+tags: [Swift, ObjC, C++, SpriteKit, SceneKit]
 reports:
   - pr: 192
     date: 2026-11-18
