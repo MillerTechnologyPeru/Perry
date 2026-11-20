@@ -747,3 +747,29 @@ enum HTTPVersionConstants {
     static let kCFHTTPVersion1_0 = "HTTP/1.0"
     static let kCFHTTPVersion1_1 = "HTTP/1.1"
 }
+
+// MARK: - Asset downloads
+
+/// AVFoundation's session for downloading HLS assets to play offline, here
+/// because it is an NSURLSession: apps make one as they start (Crunchyroll
+/// keeps it for its downloads, and takes none for an error). It is a
+/// session like any other; nothing downloads assets yet, so its tasks are
+/// nil.
+@ObjCClass("AVAssetDownloadURLSession")
+open class AVAssetDownloadURLSession: NSURLSession {
+    @ObjCClassMethod("sessionWithConfiguration:assetDownloadDelegate:delegateQueue:")
+    static func make(_ cls: ObjCClass, configuration: NSObject, assetDownloadDelegate: NSObject?,
+                     delegateQueue: NSOperationQueue?) -> NSObject {
+        Sessions.make(cls, configuration: configuration, delegate: assetDownloadDelegate, queue: delegateQueue)
+    }
+
+    @ObjCMethod("assetDownloadTaskWithURLAsset:assetTitle:assetArtworkData:options:")
+    func assetDownloadTask(asset: NSObject?, title: NSObject?, artwork: NSObject?, options: NSObject?) -> NSObject? { nil }
+
+    @ObjCMethod("aggregateAssetDownloadTaskWithURLAsset:mediaSelections:assetTitle:assetArtworkData:options:")
+    func aggregateAssetDownloadTask(asset: NSObject?, mediaSelections: NSObject?, title: NSObject?, artwork: NSObject?,
+                                    options: NSObject?) -> NSObject? { nil }
+
+    @ObjCMethod("assetDownloadTaskWithConfiguration:")
+    func assetDownloadTask(configuration: NSObject?) -> NSObject? { nil }
+}
