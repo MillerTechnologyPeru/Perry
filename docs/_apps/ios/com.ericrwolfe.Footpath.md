@@ -3,6 +3,7 @@ name: Footpath
 bundle_id: "com.ericrwolfe.Footpath"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 179
     date: 2026-11-18
