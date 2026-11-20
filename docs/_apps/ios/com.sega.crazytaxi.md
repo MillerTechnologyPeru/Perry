@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2, Retroid Pocket 5
+    os: ROCKNIX
     level: 5
     source: maintainer
     notes: Everything tested works, at 60 frames a second.
