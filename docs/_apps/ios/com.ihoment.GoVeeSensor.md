@@ -24,6 +24,9 @@ reports:
     level: 4
     source: body
     notes: Logs in, opens all five tabs, lists the account's devices and holds its AWS IoT connection.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/cbefd869-fb02-449a-af66-97d97903e77f
+        caption: Device list
   - pr: 160
     date: 2026-11-16
     perry: "a93a7c6b"
