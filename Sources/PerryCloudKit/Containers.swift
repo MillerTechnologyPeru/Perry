@@ -23,6 +23,7 @@ open class CKContainer: NSObject {
     /// CloudKit answers: apps start their loading indicators after asking.
     @ObjCMethod("accountStatusWithCompletionHandler:")
     func accountStatus(completionHandler: ObjCBlock?) {
+        CloudTrace.say("account status: no account")
         guard let completionHandler else { return }
         let handler = UnsafeSendableBlock(block: completionHandler)
         DispatchQueue.global().async {
@@ -57,7 +58,8 @@ open class CKDatabase: NSObject {
     static func notAuthenticated() -> NSError { NSError.error(domain: CloudKitConstants.CKErrorDomain, code: 9, userInfo: nil) }
 
     /// Calls a handler that takes a result, none here, and an error.
-    private func fail(_ handler: ObjCBlock?) {
+    private func fail(_ handler: ObjCBlock?, _ request: String = #function) {
+        CloudTrace.say("\(request): not signed in")
         guard let handler else { return }
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
         handler.function(as: Invoke.self)(handler.object, nil, CKDatabase.notAuthenticated().objcObject)
@@ -68,7 +70,7 @@ open class CKDatabase: NSObject {
     @ObjCMethod("addOperation:")
     func addOperation(_ operation: NSObject?) {
         guard let operation, operation.is(CKOperation.self) else { return }
-        operation.unsafeCast(to: CKOperation.self).finishWithoutAccount()
+        CKOperation.finish(operation)
     }
 
     @ObjCMethod("fetchRecordWithID:completionHandler:")
@@ -85,6 +87,21 @@ open class CKDatabase: NSObject {
 
     @ObjCMethod("fetchAllRecordZonesWithCompletionHandler:")
     func fetchAllRecordZones(completionHandler: ObjCBlock?) { fail(completionHandler) }
+
+    @ObjCMethod("fetchRecordZoneWithID:completionHandler:")
+    func fetchRecordZone(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+
+    @ObjCMethod("saveRecordZone:completionHandler:")
+    func save(recordZone: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+
+    @ObjCMethod("deleteRecordZoneWithID:completionHandler:")
+    func deleteRecordZone(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+
+    @ObjCMethod("fetchSubscriptionWithID:completionHandler:")
+    func fetchSubscription(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+
+    @ObjCMethod("deleteSubscriptionWithID:completionHandler:")
+    func deleteSubscription(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
 
     @ObjCMethod("fetchAllSubscriptionsWithCompletionHandler:")
     func fetchAllSubscriptions(completionHandler: ObjCBlock?) { fail(completionHandler) }
