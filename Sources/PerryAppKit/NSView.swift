@@ -417,7 +417,7 @@ open class NSView: NSResponder {
             Send.void(view.objcObject, "viewWillMoveToSuperview:", objcObject)
         }
         let moving = view.windowObject != windowObject
-        if moving { Send.void(view.objcObject, "viewWillMoveToWindow:", windowObject) }
+        if moving { view.willMoveToWindowTree(windowObject) }
         subviews.insert(view, at: min(index, subviews.count))
         view.superviewObject = objcObject
         view.nextResponderObject = objcObject
@@ -441,7 +441,7 @@ open class NSView: NSResponder {
         guard superviewObject != nil else { return }
         Send.void(objcObject, "viewWillMoveToSuperview:", nil)
         let hadWindow = windowObject != nil
-        if hadWindow { Send.void(objcObject, "viewWillMoveToWindow:", nil) }
+        if hadWindow { willMoveToWindowTree(nil) }
         detachFromSuperview()
         setWindowTree(nil)
         Send.void(objcObject, "viewDidMoveToSuperview")
@@ -464,6 +464,14 @@ open class NSView: NSResponder {
     func setWindowTree(_ window: UnsafeMutableRawPointer?) {
         windowObject = window
         for subview in subviews { subview.setWindowTree(window) }
+    }
+
+    /// -viewWillMoveToWindow: down the tree, as AppKit sends it to a view
+    /// and all its subviews (Xcode's editor text view, inside a scroll
+    /// view, sets up its layout manager's delegate there).
+    func willMoveToWindowTree(_ window: UnsafeMutableRawPointer?) {
+        Send.void(objcObject, "viewWillMoveToWindow:", window)
+        for subview in subviews { subview.willMoveToWindowTree(window) }
     }
 
     /// -viewDidMoveToWindow down the tree, after the layers are in place.
