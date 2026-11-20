@@ -50,7 +50,7 @@ a merged pull request, which the Last tested column links to.
       <td>{{ cpus }}</td>
       {%- if current %}
       <td><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ level.name }}</span></td>
-      <td class="nowrap">{{ current.date | date: "%Y-%m-%d" }}<br><a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ current.pr }}">#{{ current.pr }}</a></td>
+      <td class="nowrap">{{ current.date | date: "%Y-%m-%d" }}<br>{% if current.pr %}<a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ current.pr }}">#{{ current.pr }}</a>{% else %}<a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ current.perry }}"><code>{{ current.perry }}</code></a>{% endif %}</td>
       <td class="notes">{{ current.notes | escape }}</td>
       {%- else %}
       <td><span class="badge untested">Not tested yet</span></td>
