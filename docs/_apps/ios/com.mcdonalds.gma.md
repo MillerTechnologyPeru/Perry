@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "26.72.5"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: No longer aborts in its Akamai SDK at start-up.
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     app_version: "26.72.5"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Reaches its splash screen.
