@@ -178,6 +178,11 @@ public enum Objects {
         }
     }
 
+    /// Deallocates the objects waiting since their last reference went
+    /// (RetainCounts.defersDeallocation): at a point where no program code
+    /// that might still use one is running.
+    public static func collect() { RetainCounts.collect() }
+
     /// With PERRY_OBJC_ZOMBIES set, reports `object` if it was deallocated,
     /// as the use `what` names, by a C function that takes an object with no
     /// message to it; whether it was.
@@ -283,6 +288,9 @@ enum RetainCounts {
     struct Entry {
         var extra: UInt = 0
         var deallocating = false
+        /// Its last reference went while deallocation is deferred: it goes
+        /// at the next collection unless retained again first.
+        var dying = false
         var weaklyReferenced = false
         var hasAssociations = false
         /// The peer's address, holding one Swift reference for the object's
@@ -422,10 +430,57 @@ enum RetainCounts {
         return shards[Int((address >> 4) ^ (address >> 14)) & 1023]
     }
 
+    // MARK: Deferred deallocation
+
+    /// Whether an object whose last reference goes waits for collect(), as
+    /// it would for the collector, rather than going at once: set when an
+    /// image built for garbage collection is loaded. Such code, run with
+    /// reference counts, uses objects past their last release, as the
+    /// collector, which scans the stack, let it (Xcode 3 releases a tree
+    /// node and then removes it from a set).
+    nonisolated(unsafe) static var defersDeallocation = false
+    /// The objects waiting, by address.
+    static let dying = Mutex<[UInt]>([])
+
+    /// Deallocates the objects whose last reference went and that haven't
+    /// been retained since, and those their deallocation lets go.
+    static func collect() {
+        for _ in 0..<64 {
+            let waiting = dying.withLock { list -> [UInt] in
+                defer { list = [] }
+                return list
+            }
+            if waiting.isEmpty { return }
+            for address in waiting {
+                guard let object = ObjectPointer(bitPattern: address) else { continue }
+                let goes = shard(object).table.withLock { table -> Bool in
+                    guard var entry = table[address], entry.dying else { return false }
+                    entry.dying = false
+                    // A peer Swift retained meanwhile lives on.
+                    if let peer = entry.peer, swift_retainCount(peer) > 1 {
+                        table[address] = entry
+                        return false
+                    }
+                    entry.deallocating = true
+                    table[address] = entry
+                    return true
+                }
+                if goes { Messages.sendVoid(object, Sel.dealloc) }
+            }
+        }
+    }
+
     static func retain(_ object: ObjectPointer) {
         defer { if Zombies.tracing { Zombies.trace(object, "retain") } }
         let peerAddress = shard(object).table.withLock { table -> UInt in
             let key = UInt(bitPattern: object)
+            // A dying object retained lives on with this one reference, its
+            // own, which it kept (a peer's Swift one included).
+            if var entry = table[key], entry.dying {
+                entry.dying = false
+                table[key] = entry
+                return 0
+            }
             if let address = table[key]?.peerAddress, address != 0 { return address }
             table[key, default: Entry()].extra += 1
             return 0
@@ -439,16 +494,21 @@ enum RetainCounts {
     /// run if Swift let go at the same moment.
     static func release(_ object: ObjectPointer) -> Bool {
         if Zombies.tracing { Zombies.trace(object, "release") }
-        enum Outcome { case keep, deallocate, releasePeer(UInt) }
+        enum Outcome { case keep, deallocate, waits, releasePeer(UInt) }
         let outcome = shard(object).table.withLock { table -> Outcome in
             let key = UInt(bitPattern: object)
             var entry = table[key] ?? Entry()
-            if entry.deallocating {
+            if entry.deallocating || entry.dying {
                 return .keep
             }
             if let peer = entry.peer {
                 // The last reference is the object's own.
                 guard swift_retainCount(peer) <= 1 else { return .releasePeer(entry.peerAddress) }
+                if defersDeallocation {
+                    entry.dying = true
+                    table[key] = entry
+                    return .waits
+                }
                 entry.deallocating = true
                 table[key] = entry
                 return .deallocate
@@ -458,6 +518,11 @@ enum RetainCounts {
                 table[key] = entry
                 return .keep
             }
+            if defersDeallocation {
+                entry.dying = true
+                table[key] = entry
+                return .waits
+            }
             entry.deallocating = true
             table[key] = entry
             return .deallocate
@@ -465,17 +530,22 @@ enum RetainCounts {
         switch outcome {
         case .keep: return false
         case .deallocate: return true
+        case .waits:
+            dying.withLock { $0.append(UInt(bitPattern: object)) }
+            return false
         case .releasePeer(let address):
             if let peer = UnsafeMutableRawPointer(bitPattern: address) { Unmanaged<AnyObject>.fromOpaque(peer).release() }
             return false
         }
     }
 
+    /// The object's references; none for a dying one.
     static func count(_ object: ObjectPointer) -> UInt {
-        let (extra, peerAddress) = shard(object).table.withLock { table -> (UInt, UInt) in
+        let (extra, peerAddress, dying) = shard(object).table.withLock { table -> (UInt, UInt, Bool) in
             let entry = table[UInt(bitPattern: object)]
-            return (entry?.extra ?? 0, entry?.peerAddress ?? 0)
+            return (entry?.extra ?? 0, entry?.peerAddress ?? 0, entry?.dying ?? false)
         }
+        if dying { return 0 }
         if let peer = UnsafeMutableRawPointer(bitPattern: peerAddress) { return UInt(max(swift_retainCount(peer), 1)) }
         return extra + 1
     }
@@ -750,6 +820,21 @@ public enum AutoreleasePool {
                 Objects.release(object)
             }
         }
+    }
+
+    /// Whether the thread's pools hold every reference to `object`, so that
+    /// it goes when they drain: an autoreleased object nothing has retained.
+    /// Only the newest entries are looked at, as such an object is new.
+    public static func holdsOnlyReferences(to object: ObjectPointer) -> Bool {
+        let references = RetainCounts.count(object)
+        if references == 0 { return true }  // dying: nothing holds it
+        let objects = current.objects
+        var found: UInt = 0
+        for entry in objects.reversed().prefix(4096) where entry == object {
+            found += 1
+            if found >= references { return true }
+        }
+        return false
     }
 
     /// An object already being deallocated is left out: its memory is gone
