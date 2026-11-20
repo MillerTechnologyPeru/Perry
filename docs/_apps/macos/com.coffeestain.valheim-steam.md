@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: Gets through Mono start-up, its C# code and Metal device creation.
