@@ -1243,6 +1243,11 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
     // SDKs, or AVAudioPlayer to AVFAudio): one another provider defines is
     // the same class.
     bool is_class = strncmp(name, "_OBJC_CLASS_$_", 14) == 0 || strncmp(name, "_OBJC_METACLASS_$_", 18) == 0;
+    // The image's own libraries come first: where two providers define a
+    // class of one name (AppKit's and UIKit's NSLayoutConstraint, in a Mac
+    // Catalyst app with an AppKit bridge), it is the one the image links.
+    for (uint32_t i = 0; is_class && !sym.found && i < image->dep_count; i++)
+        lookup_in_dependency(loader, &image->deps[i], name, &sym, 0);
     for (uint32_t i = 0; is_class && !sym.found && i < loader->provider_count; i++)
         if (loader->providers[i]->handle)
             provider_lookup(loader, loader->providers[i], name, &sym);

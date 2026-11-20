@@ -12,7 +12,7 @@
 # and linked as libswift<Name>.dylib, which the loader looks in after the
 # module's overlay.
 #
-# Usage: [PERRY_OVERLAY_PLATFORM=macosx] Scripts/build-overlay.sh <Module> [output directory]
+# Usage: [PERRY_OVERLAY_PLATFORM=macosx] [PERRY_OVERLAY_TARGET=<triple>] Scripts/build-overlay.sh <Module> [output directory]
 #   default output: .build/perry-swift-runtime
 set -eu
 cd "$(dirname "$0")/.."
@@ -33,6 +33,9 @@ platform=${PERRY_OVERLAY_PLATFORM:-$platform}
 sdk=$(xcrun --sdk "$platform" --show-sdk-path)
 target=arm64-apple-ios18.0
 [ "$platform" = macosx ] && target=arm64-apple-macos15.0
+# PERRY_OVERLAY_TARGET names another: x86_64-apple-macos15.0 for a Mac app
+# on x86_64, x86_64-apple-ios18.0-macabi for a Mac Catalyst one.
+target=${PERRY_OVERLAY_TARGET:-$target}
 mkdir -p "$work" "$out"
 
 # Declarations the SDK's public headers lack, in Darwin/<Module>/include.
@@ -45,6 +48,16 @@ if [ -f "Darwin/$module/swiftc-flags" ]; then
     while IFS= read -r flag; do [ -n "$flag" ] && flags+=("$flag"); done < "Darwin/$module/swiftc-flags"
 fi
 
+# Mac Catalyst's frameworks and Swift modules are under the macOS SDK's
+# System/iOSSupport, where its libraries are installed too.
+install=/usr/lib/swift
+case $target in *-macabi)
+    install=/System/iOSSupport/usr/lib/swift
+    support=$sdk/System/iOSSupport
+    flags+=(-Fsystem "$support/System/Library/Frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift"
+            -Xcc -isystem -Xcc "$support/usr/include" -Xcc -iframework -Xcc "$support/System/Library/Frameworks") ;;
+esac
+
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
@@ -53,6 +66,6 @@ xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \
     ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" -framework "$swift_module" \
-    -Xlinker -install_name -Xlinker "/usr/lib/swift/libswift$module.dylib" \
+    -Xlinker -install_name -Xlinker "$install/libswift$module.dylib" \
     -o "$out/libswift$module.dylib"
 echo "$out/libswift$module.dylib"

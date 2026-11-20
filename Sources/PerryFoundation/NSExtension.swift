@@ -198,16 +198,19 @@ public class NSXPCConnection: NSObject {
         return object
     }
 
-    private func ensureStorage() -> UnsafeMutableRawPointer {
+    // The initializers return Self: an init method's result is owned, and a
+    // plain pointer would go back without the reference the receiver's
+    // wrapper drops.
+    private func ensureStorage() -> Self {
         if storage == nil { Storage.set(objcObject, ConnectionStorage()) }
-        return objcObject
+        return self
     }
 
-    @ObjCMethod("init") func initialize() -> UnsafeMutableRawPointer { ensureStorage() }
-    @ObjCMethod("initWithServiceName:") func initialize(serviceName: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ensureStorage() }
-    @ObjCMethod("initWithListenerEndpoint:") func initialize(endpoint: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ensureStorage() }
+    @ObjCMethod("init") func initialize() -> Self { ensureStorage() }
+    @ObjCMethod("initWithServiceName:") func initialize(serviceName: UnsafeMutableRawPointer?) -> Self { ensureStorage() }
+    @ObjCMethod("initWithListenerEndpoint:") func initialize(endpoint: UnsafeMutableRawPointer?) -> Self { ensureStorage() }
     @ObjCMethod("initWithMachServiceName:options:")
-    func initialize(machService: UnsafeMutableRawPointer?, options: UInt) -> UnsafeMutableRawPointer { ensureStorage() }
+    func initialize(machService: UnsafeMutableRawPointer?, options: UInt) -> Self { ensureStorage() }
 
     @ObjCMethod("remoteObjectInterface")
     func remoteObjectInterface() -> UnsafeMutableRawPointer? { storage?.remoteInterface }
@@ -317,8 +320,8 @@ public class NSXPCListener: NSObject {
     @ObjCClassMethod("serviceListener")
     static func service(_ cls: ObjCClass) -> UnsafeMutableRawPointer? { make(cls) }
 
-    @ObjCMethod("init") func initialize() -> UnsafeMutableRawPointer { objcObject }
-    @ObjCMethod("initWithMachServiceName:") func initialize(name: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("init") func initialize() -> Self { self }
+    @ObjCMethod("initWithMachServiceName:") func initialize(name: UnsafeMutableRawPointer?) -> Self { self }
 
     @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { nil }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: UnsafeMutableRawPointer?) {}
