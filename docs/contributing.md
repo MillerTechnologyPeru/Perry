@@ -46,6 +46,7 @@ reports:
     args:                # options passed to perry before the app, if any
       - "--report"
     os: Debian sid       # the operating system that machine ran
+    packaging: Packaging/ios/com.hulu.plus/linux  # the launcher folder it ran with, if any
     level: 2
     source: title        # title | body | screenshot | maintainer: what the level rests on
     notes: Reaches the Welcome screen.
@@ -96,6 +97,10 @@ more than the reports do.
   quoted `"NAME=value"`, and `args` the options passed to `perry`. Give
   them when the pull request says the app needs them or was tested with
   them, so someone else can run it the same way.
+- `packaging` is the folder in [Packaging](https://github.com/MillerTechnologyPeru/Perry/tree/master/Packaging)
+  holding the launcher, desktop entry or port script the app ran with,
+  such as `Packaging/macos/com.popcap.Bejeweled3/portmaster`. The app page
+  links to it.
 - `notes` is one or two plain sentences in the present tense saying how
   far the app gets and what is known to be wrong.
 - Don't add `layout`, `title` or `permalink`; the site's settings supply
