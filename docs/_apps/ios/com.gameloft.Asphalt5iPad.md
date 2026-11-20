@@ -12,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 2
     source: body
     notes: Reaches its title screen and language picker.
