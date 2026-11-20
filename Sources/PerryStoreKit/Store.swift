@@ -229,6 +229,27 @@ open class SKStoreReviewController: NSObject {
 open class SKAdNetwork: NSObject {
     @ObjCClassMethod("registerAppForAdNetworkAttribution") static func registerAppForAdNetworkAttribution() {}
     @ObjCClassMethod("updateConversionValue:") static func updateConversionValue(_ value: Int) {}
+
+    // Postback conversion values, which there is no ad network here to
+    // take: the handler hears of no error, as it does once one is noted.
+    @ObjCClassMethod("updatePostbackConversionValue:completionHandler:")
+    static func updatePostbackConversionValue(_ value: Int, completionHandler: ObjCBlock?) { noted(completionHandler) }
+
+    @ObjCClassMethod("updatePostbackConversionValue:coarseValue:completionHandler:")
+    static func updatePostbackConversionValue(_ value: Int, coarseValue: NSObject?, completionHandler: ObjCBlock?) {
+        noted(completionHandler)
+    }
+
+    @ObjCClassMethod("updatePostbackConversionValue:coarseValue:lockWindow:completionHandler:")
+    static func updatePostbackConversionValue(_ value: Int, coarseValue: NSObject?, lockWindow: Bool, completionHandler: ObjCBlock?) {
+        noted(completionHandler)
+    }
+
+    /// Calls a `^(NSError *error)` handler with no error.
+    private static func noted(_ handler: ObjCBlock?) {
+        guard let handler else { return }
+        handler.function(as: (@convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void).self)(handler.object, nil)
+    }
 }
 
 // MARK: - Delegate messages
