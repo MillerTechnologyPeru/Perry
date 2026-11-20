@@ -16,8 +16,8 @@ APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware level source notes screenshots].freeze
-REPORT_REQUIRED = %w[pr date perry platform cpu hardware level source notes].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os level source notes screenshots].freeze
+REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
 # Darwin's platform names, and the CPUs a Mach-O for each can be built for.
@@ -82,6 +82,8 @@ def check_report(file, where, report, platform, urls)
   end
   hardware = report["hardware"]
   error(file, "#{where} 'hardware' is not a string") unless hardware.nil? || hardware.is_a?(String)
+  os = report["os"]
+  error(file, "#{where} 'os' is not a string") unless os.nil? || os.is_a?(String)
   level = report["level"]
   error(file, "#{where} 'level' is not an integer from 1 to 5") unless level.nil? || (level.is_a?(Integer) && (1..5).cover?(level))
   source = report["source"]
