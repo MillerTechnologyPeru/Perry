@@ -221,6 +221,118 @@ public final class NSFileHandle: NSObject {
         storage.closed = true
         close(storage.descriptor)
     }
+
+    // MARK: In the background
+
+    @ObjCMethod("readInBackgroundAndNotify")
+    func readInBackgroundAndNotify() { background(.read) }
+    @ObjCMethod("readInBackgroundAndNotifyForModes:")
+    func readInBackgroundAndNotify(forModes modes: ObjCObject?) { background(.read) }
+    @ObjCMethod("readToEndOfFileInBackgroundAndNotify")
+    func readToEndOfFileInBackgroundAndNotify() { background(.readToEnd) }
+    @ObjCMethod("readToEndOfFileInBackgroundAndNotifyForModes:")
+    func readToEndOfFileInBackgroundAndNotify(forModes modes: ObjCObject?) { background(.readToEnd) }
+    @ObjCMethod("waitForDataInBackgroundAndNotify")
+    func waitForDataInBackgroundAndNotify() { background(.waitForData) }
+    @ObjCMethod("waitForDataInBackgroundAndNotifyForModes:")
+    func waitForDataInBackgroundAndNotify(forModes modes: ObjCObject?) { background(.waitForData) }
+
+    private func background(_ kind: FileHandleBackground.Kind) {
+        guard let storage, !storage.closed else { return }
+        FileHandleBackground.start(objcObject, descriptor: storage.descriptor, kind: kind)
+    }
+}
+
+/// A file handle's reading in the background: on a thread of its own, its
+/// notification then posted on the run loop of the thread that asked, in
+/// any mode (perry's run loops run everything in every mode). The thread
+/// reads a duplicate of the descriptor, so closing the handle meanwhile
+/// can't leave it reading another file given the same number.
+enum FileHandleBackground {
+    enum Kind { case read, readToEnd, waitForData }
+
+    private final class Request {
+        let handle: id
+        let descriptor: Int32
+        let kind: Kind
+        let loop: RunLoopState
+
+        init(handle: id, descriptor: Int32, kind: Kind, loop: RunLoopState) {
+            self.handle = handle
+            self.descriptor = descriptor
+            self.kind = kind
+            self.loop = loop
+        }
+
+        func run() {
+            var data = Data()
+            var failure: Int32 = 0
+            var buffer = [UInt8](repeating: 0, count: 65_536)
+            switch kind {
+            case .read, .readToEnd:
+                while true {
+                    let count = Glibc.read(descriptor, &buffer, buffer.count)
+                    if count < 0 && errno == EINTR { continue }
+                    if count < 0 { failure = errno }
+                    guard count > 0 else { break }
+                    data.append(contentsOf: buffer[0..<count])
+                    if kind == .read { break }
+                }
+            case .waitForData:
+                var file = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+                while poll(&file, 1, -1) < 0 && errno == EINTR {}
+            }
+            close(descriptor)
+            loop.perform(work: { [self] in
+                post(data: data, failure: failure)
+                loop.removeSource()
+                ObjC.release(handle)
+            })
+        }
+
+        private func post(data: Data, failure: Int32) {
+            let name: String
+            var entries: [(key: id, value: id)] = []
+            switch kind {
+            case .read: name = "NSFileHandleReadCompletionNotification"
+            case .readToEnd: name = "NSFileHandleReadToEndOfFileCompletionNotification"
+            case .waitForData: name = "NSFileHandleDataAvailableNotification"
+            }
+            if kind != .waitForData, let object = DataObjects.autoreleased(data) {
+                entries.append((Strings.autoreleased("NSFileHandleNotificationDataItem"), object))
+            }
+            if failure != 0, let number = Numbers.make(nil, .signed(Int64(failure))) {
+                entries.append((Strings.autoreleased("NSFileHandleError"), number))
+            }
+            guard let centerClass = "NSNotificationCenter".withCString({ ObjC.getClass($0) }),
+                  let center = ObjC.send(UnsafeMutableRawPointer(centerClass), ObjC.selector("defaultCenter")) else { return }
+            typealias Post = @convention(c) (id?, SEL, id?, id?, id?) -> Void
+            unsafeBitCast(ObjC.msgSend, to: Post.self)(center, ObjC.selector("postNotificationName:object:userInfo:"),
+                                                        Strings.autoreleased(name), handle, Dictionaries.autoreleased(entries))
+        }
+    }
+
+    static func start(_ handle: id, descriptor: Int32, kind: Kind) {
+        let copy = dup(descriptor)
+        guard copy >= 0 else { return }
+        let loop = RunLoops.current
+        loop.addSource()
+        _ = ObjC.retain(handle)
+        let request = Request(handle: handle, descriptor: copy, kind: kind, loop: loop)
+        var thread = pthread_t()
+        let context = Unmanaged.passRetained(request).toOpaque()
+        if pthread_create(&thread, nil, { context in
+            Unmanaged<Request>.fromOpaque(context!).takeRetainedValue().run()
+            return nil
+        }, context) == 0 {
+            pthread_detach(thread)
+        } else {
+            Unmanaged<Request>.fromOpaque(context).release()
+            close(copy)
+            loop.removeSource()
+            ObjC.release(handle)
+        }
+    }
 }
 
 @ObjCClass("NSPort")
