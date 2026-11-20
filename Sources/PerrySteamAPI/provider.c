@@ -629,12 +629,13 @@ void *darwin_SteamInternal_ContextInit(void *data) {
 
 static char bundled_library[4096];
 
-/// The app's bundle, from the loader: where its libsteam_api.dylib is.
+/// The app's bundle, from the loader: where its libsteam_api.dylib is, in
+/// its Frameworks or, as older games ship it, beside its executable.
 __attribute__((visibility("default")))
 void perry_provider_startup(const perry_startup_info *info) {
     if (info && info->bundle_path)
         snprintf(bundled_library, sizeof(bundled_library), "%s/Contents/Frameworks/libsteam_api.dylib", info->bundle_path);
-    else if (info && info->executable_path) {
+    if (info && info->executable_path && (!bundled_library[0] || access(bundled_library, R_OK) != 0)) {
         snprintf(bundled_library, sizeof(bundled_library), "%s", info->executable_path);
         char *slash = strrchr(bundled_library, '/');
         if (slash)
