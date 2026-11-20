@@ -13,4 +13,7 @@ reports:
     level: 3
     source: body
     notes: Runs at about 45 to 52 frames a second, plays its intro movie and music, and takes multitouch.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/284ff1f1-a462-4197-b7ab-639690738420
+        caption: In play
 ---
