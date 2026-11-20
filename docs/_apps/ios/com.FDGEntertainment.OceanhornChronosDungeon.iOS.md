@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 2
     source: body
     notes: Reaches its title screen at 1920x1080.
@@ -22,6 +23,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays at 1920x1080, at about 50 to 58 frames a second in World I-1.
