@@ -1,12 +1,26 @@
 import CPerryObjC
 import Glibc
+import PerryObjCRuntime
 
 // Objective-C garbage collection's API, from Mac OS X 10.5 to 10.7, for
 // programs built to run with the collector (Xcode 3's, Interface Builder's).
 // There is no collector here: the collector is off, as objc_collectingEnabled
-// says, so code built for both modes manages memory by reference counts, and
-// the write barriers the compiler puts in stores of object pointers are plain
-// stores. Weak references don't zero.
+// says, so code built for both modes manages memory by reference counts.
+//
+// Such code still counts on the collector in places, storing an
+// autoreleased object with no retain (Xcode's debugger keeps its thread
+// list in an instance variable so), which the collector would keep alive.
+// So a strong store of an object that only the thread's autorelease pools
+// hold, which would go when they drain, retains it, as the collector's
+// reference would keep it; that reference is never given back, a leak in
+// place of a crash. Any other store is plain: code that retains what it
+// stores, or stores what it made, manages it itself. (A pointer that isn't
+// an object is never in a pool.) Weak references don't zero.
+
+/// Keeps `value` alive past its autorelease pools when nothing else would.
+private func keepIfOnlyAutoreleased(_ value: UnsafeMutableRawPointer?) {
+    if let value, AutoreleasePool.holdsOnlyReferences(to: value) { _ = Objects.retain(value) }
+}
 
 /// Whether the collector runs: never.
 @c(_objc_collectingEnabled)
@@ -19,6 +33,7 @@ public func objc_collecting_enabled() -> Bool { false }
 @c(_objc_assign_strongCast)
 public func objc_assign_strongCast(_ value: UnsafeMutableRawPointer?, _ destination: UnsafeMutablePointer<UnsafeMutableRawPointer?>?)
     -> UnsafeMutableRawPointer? {
+    keepIfOnlyAutoreleased(value)
     destination?.pointee = value
     return value
 }
@@ -27,6 +42,7 @@ public func objc_assign_strongCast(_ value: UnsafeMutableRawPointer?, _ destinat
 @c(_objc_assign_global)
 public func objc_assign_global(_ value: UnsafeMutableRawPointer?, _ destination: UnsafeMutablePointer<UnsafeMutableRawPointer?>?)
     -> UnsafeMutableRawPointer? {
+    keepIfOnlyAutoreleased(value)
     destination?.pointee = value
     return value
 }
@@ -44,6 +60,7 @@ public func objc_assign_threadlocal(_ value: UnsafeMutableRawPointer?, _ destina
 @c(_objc_assign_ivar)
 public func objc_assign_ivar(_ value: UnsafeMutableRawPointer?, _ base: UnsafeMutableRawPointer?, _ offset: Int)
     -> UnsafeMutableRawPointer? {
+    keepIfOnlyAutoreleased(value)
     base?.storeBytes(of: value, toByteOffset: offset, as: UnsafeMutableRawPointer?.self)
     return value
 }
@@ -113,7 +130,16 @@ public func objc_atomicCompareAndSwapInstanceVariableBarrier(_ expected: UnsafeM
     compareAndSwap(expected, replacement, location)
 }
 
-// The collector's controls, which have nothing to control.
+/// Perry's own: deallocates the objects of a program built for the
+/// collector that lost their last reference, which wait for a point no
+/// code of the program is running (Foundation's main run loop, as it waits
+/// for events), as the collector would free them.
+@c(_perry_objc_collect)
+public func perry_objc_collect() { Objects.collect() }
+
+// The collector's controls, which have nothing to control. (A program's own
+// call to collect comes while its code, which may still hold an object
+// whose last reference went, is running.)
 
 @c(_objc_clear_stack)
 public func objc_clear_stack(_ options: UInt) {}
