@@ -3,6 +3,7 @@ name: BioShock
 bundle_id: "com.2k.bioshock"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unreal]
 reports:
   - pr: 141
     date: 2026-11-12
