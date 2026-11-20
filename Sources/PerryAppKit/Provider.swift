@@ -338,8 +338,14 @@ enum Trace {
         let flags = (view.hidden ? " hidden" : "") + (view.layer == nil ? " no-layer" : "") + (view.draws ? " draws" : "")
             + (view.autoresizingMask != 0 ? " mask \(view.autoresizingMask)" : "") + (view.autoresizesSubviews ? "" : " fixed-subviews")
         let frame = view.frame
+        // A text view's storage, and how much text it shows.
+        let text = view.as(NSTextView.self).map { textView in
+            let storageClass = textView.storage.flatMap { Send.object(Send.object($0.objcObject, "class"), "description") }
+                .map { String(objCArgument: $0) } ?? "none"
+            return " text \(storageClass) \(textView.string.utf16.count) chars"
+        } ?? ""
         var line = String(repeating: "  ", count: depth + 1)
-            + "\(view.describedByObject() ?? "?") (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))\(flags)\n"
+            + "\(view.describedByObject() ?? "?") (\(frame.minX), \(frame.minY), \(frame.width), \(frame.height))\(flags)\(text)\n"
         for subview in view.subviews { line += describe(subview, depth: depth + 1) }
         return line
     }
