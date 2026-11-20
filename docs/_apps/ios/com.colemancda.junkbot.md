@@ -22,4 +22,7 @@ reports:
     level: 3
     source: body
     notes: Matches the iOS Simulator and runs with sound.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/5e6d88fc-24ce-4630-9d73-d54229e64454
+        caption: Factory level
 ---
