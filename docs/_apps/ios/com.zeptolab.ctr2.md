@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.17.2"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Reaches its main menu; not playable yet.
@@ -24,6 +25,7 @@ reports:
     cpu: armv7
     app_version: "1.6.9"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 1
     source: body
     notes: First steps under perry32; does not run yet.
