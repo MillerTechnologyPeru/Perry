@@ -23,12 +23,13 @@ open class CKContainer: NSObject {
     /// CloudKit answers: apps start their loading indicators after asking.
     @ObjCMethod("accountStatusWithCompletionHandler:")
     func accountStatus(completionHandler: ObjCBlock?) {
-        CloudTrace.say("account status: no account")
+        let status = Backend.enabled ? 1 : 3
+        CloudTrace.say("account status: \(status == 1 ? "available, through MistKit" : "no account")")
         guard let completionHandler else { return }
         let handler = UnsafeSendableBlock(block: completionHandler)
         DispatchQueue.global().async {
             typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Int, UnsafeMutableRawPointer?) -> Void
-            handler.block.function(as: Invoke.self)(handler.block.object, 3, nil)
+            handler.block.function(as: Invoke.self)(handler.block.object, status, nil)
         }
     }
 
@@ -37,9 +38,9 @@ open class CKContainer: NSObject {
 
     // The container's databases: one object for them all, which answers
     // every request with the error of an account that is not signed in.
-    @ObjCMethod("privateCloudDatabase") func privateCloudDatabase() -> CKDatabase { CKDatabase.shared }
-    @ObjCMethod("publicCloudDatabase") func publicCloudDatabase() -> CKDatabase { CKDatabase.shared }
-    @ObjCMethod("sharedCloudDatabase") func sharedCloudDatabase() -> CKDatabase { CKDatabase.shared }
+    @ObjCMethod("privateCloudDatabase") func privateCloudDatabase() -> CKDatabase { CKDatabase.database(scope: 2, container: containerIdentifier() ?? "") }
+    @ObjCMethod("publicCloudDatabase") func publicCloudDatabase() -> CKDatabase { CKDatabase.database(scope: 1, container: containerIdentifier() ?? "") }
+    @ObjCMethod("sharedCloudDatabase") func sharedCloudDatabase() -> CKDatabase { CKDatabase.database(scope: 3, container: containerIdentifier() ?? "") }
 }
 
 @ObjCWrapper("NSError")
@@ -53,6 +54,23 @@ class NSError: NSObject {
 @ObjCClass("CKDatabase")
 open class CKDatabase: NSObject {
     nonisolated(unsafe) static let shared = NSObject(objCClass.pointer).newInstance().unsafeCast(to: CKDatabase.self)
+    nonisolated(unsafe) private static var databases: [String: CKDatabase] = [:]
+    private static let databasesLock = Lock()
+
+    /// The database of a scope in a container: one object for each.
+    static func database(scope: Int, container: String) -> CKDatabase {
+        databasesLock.withLock {
+            let key = "\(scope):\(container)"
+            if let database = databases[key] { return database }
+            let database = NSObject(objCClass.pointer).newInstance().unsafeCast(to: CKDatabase.self)
+            database.cloud.scope = scope
+            database.cloud.container = container
+            databases[key] = database
+            return database
+        }
+    }
+
+    var cloud: CloudState { Cloud.state(objcObject) }
 
     /// CKErrorNotAuthenticated, 9.
     static func notAuthenticated() -> NSError { NSError.error(domain: CloudKitConstants.CKErrorDomain, code: 9, userInfo: nil) }
@@ -66,7 +84,7 @@ open class CKDatabase: NSObject {
     }
 
     /// CKDatabaseScope: private, 2.
-    @ObjCMethod("databaseScope") func databaseScope() -> Int { 2 }
+    @ObjCMethod("databaseScope") func databaseScope() -> Int { cloud.scope }
     @ObjCMethod("addOperation:")
     func addOperation(_ operation: NSObject?) {
         guard let operation, operation.is(CKOperation.self) else { return }
@@ -74,16 +92,28 @@ open class CKDatabase: NSObject {
     }
 
     @ObjCMethod("fetchRecordWithID:completionHandler:")
-    func fetchRecord(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+    func fetchRecord(withID id: NSObject?, completionHandler: ObjCBlock?) {
+        if Backend.enabled { return Backend.fetch(container: cloud.container, scope: cloud.scope, recordID: id, completion: completionHandler) }
+        fail(completionHandler)
+    }
 
     @ObjCMethod("saveRecord:completionHandler:")
-    func save(record: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+    func save(record: NSObject?, completionHandler: ObjCBlock?) {
+        if Backend.enabled { return Backend.save(container: cloud.container, scope: cloud.scope, record: record, completion: completionHandler) }
+        fail(completionHandler)
+    }
 
     @ObjCMethod("deleteRecordWithID:completionHandler:")
-    func deleteRecord(withID id: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+    func deleteRecord(withID id: NSObject?, completionHandler: ObjCBlock?) {
+        if Backend.enabled { return Backend.delete(container: cloud.container, scope: cloud.scope, recordID: id, completion: completionHandler) }
+        fail(completionHandler)
+    }
 
     @ObjCMethod("performQuery:inZoneWithID:completionHandler:")
-    func perform(query: NSObject?, inZoneWithID zone: NSObject?, completionHandler: ObjCBlock?) { fail(completionHandler) }
+    func perform(query: NSObject?, inZoneWithID zone: NSObject?, completionHandler: ObjCBlock?) {
+        if Backend.enabled { return Backend.query(container: cloud.container, scope: cloud.scope, query: query, completion: completionHandler) }
+        fail(completionHandler)
+    }
 
     @ObjCMethod("fetchAllRecordZonesWithCompletionHandler:")
     func fetchAllRecordZones(completionHandler: ObjCBlock?) { fail(completionHandler) }
