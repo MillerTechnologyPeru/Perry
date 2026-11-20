@@ -206,13 +206,18 @@ VARIADIC _openat, perry_vopenat, 3
 VARIADIC _sem_open, perry_vsem_open, 2
 VARIADIC _fcntl, perry_vfcntl, 2
 
-// ___chkstk_darwin probes each page of a large stack frame, which Darwin
-// needs below its guard pages; Linux grows stacks on its own.
+// __chkstk_darwin probes each page of a large stack frame, which Darwin
+// needs below its guard pages; Linux grows stacks on its own. Its Mach-O
+// name is ____chkstk_darwin; programs keep the size it is given (rax, x15).
+    .globl ____chkstk_darwin
+    .type ____chkstk_darwin, %function
     .globl ___chkstk_darwin
     .type ___chkstk_darwin, %function
     .p2align 2
+____chkstk_darwin:
 ___chkstk_darwin:
     ret
+    .size ____chkstk_darwin, . - ____chkstk_darwin
     .size ___chkstk_darwin, . - ___chkstk_darwin
 
 PASSTHROUGH _puts, puts
