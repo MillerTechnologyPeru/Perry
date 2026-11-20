@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.5.6"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays, from its intro movie into the city.
