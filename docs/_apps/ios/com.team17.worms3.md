@@ -14,4 +14,7 @@ reports:
     level: 4
     source: body
     notes: Starts, loads its sounds, reaches the main menu at 30 frames a second and plays, with its own controller support.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/6acf505f-9581-4f72-b82f-e6ee6609cdec
+        caption: Main menu
 ---
