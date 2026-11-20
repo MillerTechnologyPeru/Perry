@@ -22,4 +22,7 @@ reports:
     level: 4
     source: body
     notes: Goes from the main menu into a game, with its dialogs, currency symbol and dice working.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/d60fec08-cf17-4596-8bfb-12426ecad17a
+        caption: Game board
 ---
