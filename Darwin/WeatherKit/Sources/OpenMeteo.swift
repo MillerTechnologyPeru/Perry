@@ -21,7 +21,6 @@ struct OpenMeteo: Sendable {
     // MARK: Response
 
     private struct Response: Decodable {
-        var utc_offset_seconds: Int
         var current: Current
         var hourly: Hourly
         var daily: Daily
@@ -123,9 +122,8 @@ struct OpenMeteo: Sendable {
             temperature: current.temperature, apparentTemperature: current.apparentTemperature, uvIndex: current.uvIndex,
             visibility: current.visibility, wind: current.wind, metadata: metadata)
         let d = response.daily
-        let offset = TimeInterval(response.utc_offset_seconds)
         let days: [DayWeather] = d.time.indices.map { i in
-            let start = Date(timeIntervalSince1970: TimeInterval(d.time[i]) - offset)
+            let start = Date(timeIntervalSince1970: TimeInterval(d.time[i]))
             let end = start.addingTimeInterval(86_400)
             let ofDay = hours.filter { $0.date >= start && $0.date < end }
             return day(d, i, start: start, hours: ofDay, now: now)
