@@ -62,6 +62,12 @@ layout: default
     <li><strong>Level from</strong> {{ report.source }}</li>
   </ul>
   <p>{{ report.notes | escape }}</p>
+  {%- if report.env or report.args %}
+  <p class="run-settings">Run with
+    {%- for setting in report.env %} <code>{{ setting | escape }}</code>{% endfor %}
+    {%- if report.args %} <code>perry{% for arg in report.args %} {{ arg | escape }}{% endfor %}</code>{% endif %}
+  </p>
+  {%- endif %}
   {%- if report.screenshots %}
   <div class="screenshots">
     {%- for shot in report.screenshots %}
