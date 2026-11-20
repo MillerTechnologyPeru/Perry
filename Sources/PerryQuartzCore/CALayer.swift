@@ -992,7 +992,14 @@ extension CALayer {
         // A blend mode applies where the layer's whole drawing composites.
         let blend = blendMode(named: state.compositingFilter)
         let group = state.opacity < 1 || blend != 0
+        var grouped: CGRect?
         if group {
+            // A group is as large as the clip: one for a layer much larger
+            // than what it draws takes the time of its whole size.
+            if state.mask == nil, blendLeavesOutsideAlone(blend), let drawn = drawnExtent(of: layer, depth: 0) { grouped = drawn }
+            if state.mask == nil, blendLeavesOutsideAlone(blend), grouped == nil { return }
+            CG.saveGState(context)
+            if let grouped { CG.clipToRect(context, grouped) }
             CG.setAlpha(context, CGFloat(state.opacity))
             if blend != 0 { CG.setBlendMode(context, blend) }
             CG.beginTransparencyLayer(context, nil)
@@ -1003,7 +1010,56 @@ extension CALayer {
         } else {
             drawTree(of: layer, state: state, shape: shape, in: context)
         }
-        if group { CG.endTransparencyLayer(context) }
+        if group {
+            CG.endTransparencyLayer(context)
+            CG.restoreGState(context)
+        }
+    }
+
+    /// Whether a layer drawn under the blend mode changes nothing where it
+    /// draws nothing (the unbounded modes, destination in and the like,
+    /// clear what is outside).
+    static func blendLeavesOutsideAlone(_ mode: Int32) -> Bool {
+        mode <= 15 || [20, 21, 23, 25, 26, 27].contains(mode)
+    }
+
+    /// Where the layer and its sublayers draw anything, as they present, in
+    /// its own coordinates; nil when nowhere. A shape is its path's box (and
+    /// stroke), not its layer's bounds, which an animation made at 3840x2160
+    /// gives a shape the size of a letter.
+    static func drawnExtent(of layer: CALayer, depth: Int) -> CGRect? {
+        let (state, shape) = Presentation.presented(layer)
+        guard !state.hidden, state.opacity > 0, depth < 24 else { return nil }
+        var extent: CGRect?
+        func add(_ rect: CGRect) {
+            guard rect.minX.isFinite, rect.minY.isFinite, rect.maxX.isFinite, rect.maxY.isFinite else { return }
+            if let current = extent {
+                let minX = min(current.minX, rect.minX), minY = min(current.minY, rect.minY)
+                extent = CGRect(x: minX, y: minY, width: max(current.maxX, rect.maxX) - minX, height: max(current.maxY, rect.maxY) - minY)
+            } else {
+                extent = rect
+            }
+        }
+        let bounds = state.bounds
+        if state.backgroundColor != nil || state.contents != nil || state.livePixels != nil || state.sharedFrames != nil
+            || layer.state.backing != nil || state.borderWidth > 0 || layer.draws {
+            add(bounds)
+        }
+        if let shape, let path = shape.path {
+            let box = CG.pathGetBoundingBox(path)
+            let pad = shape.strokeColor == nil ? 1 : shape.lineWidth * max(shape.miterLimit, 1) / 2 + 1
+            add(CGRect(x: box.minX - pad, y: box.minY - pad, width: box.width + 2 * pad, height: box.height + 2 * pad))
+        }
+        for sublayer in state.sublayers {
+            guard let inside = drawnExtent(of: sublayer, depth: depth + 1) else { continue }
+            add(Presentation.presented(sublayer).state.toSuperlayer(within: state).apply(inside))
+        }
+        if state.masksToBounds, let current = extent {
+            let minX = max(current.minX, bounds.minX), minY = max(current.minY, bounds.minY)
+            let width = min(current.maxX, bounds.maxX) - minX, height = min(current.maxY, bounds.maxY) - minY
+            return width > 0 && height > 0 ? CGRect(x: minX, y: minY, width: width, height: height) : nil
+        }
+        return extent
     }
 
     /// The CGBlendMode a compositing filter's name stands for, 0 (normal) for
@@ -1082,22 +1138,18 @@ extension CALayer {
         guard let mask = state.mask, state.bounds.width > 0, state.bounds.height > 0 else { return nil }
         let extent = maskedExtent(of: state)
         let scale = requested ?? max(state.contentsScale, mask.state.contentsScale, 1)
-        guard let content = CG.makeContext(size: extent.size, scale: scale, opaque: false),
-              let alpha = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
-        defer {
-            CG.release(content)
-            CG.release(alpha)
-        }
+        guard let content = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
+        defer { CG.release(content) }
         CG.translateCTM(content, -extent.minX, -extent.minY)
         drawTree(of: layer, state: state, shape: shape, in: content)
-        CG.translateCTM(alpha, -extent.minX, -extent.minY)
-        render(mask, in: alpha, parent: state)
-        guard let maskImage = CG.bitmapContextCreateImage(alpha) else { return nil }
-        defer { CG.release(maskImage) }
-        // kCGBlendModeDestinationIn: the content stays where the mask is.
+        // kCGBlendModeDestinationIn: the content stays where the mask, drawn
+        // as a group, is.
         CG.saveGState(content)
         CG.setBlendMode(content, 22)
-        CG.drawFlipped(maskImage, in: extent, context: content)
+        CG.beginTransparencyLayer(content, nil)
+        CG.setBlendMode(content, 0)
+        render(mask, in: content, parent: state)
+        CG.endTransparencyLayer(content)
         CG.restoreGState(content)
         return CG.bitmapContextCreateImage(content).map(Owned.init)
     }
