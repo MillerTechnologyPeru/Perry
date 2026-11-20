@@ -13,6 +13,9 @@ reports:
     level: 3
     source: body
     notes: Reaches its menu and consent dialog; touch input on the dialog does not work.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/f4dade9b-4058-4b30-9d89-cbdfacfe867a
+        caption: Title, drawn inside a portrait screen
 ---
 
 The game draws its landscape picture inside a portrait screen. `PERRY_UIKIT_SCREEN=390x844@3 PERRY_UIKIT_ORIENTATION=portrait PERRY_UIKIT_DISPLAY_ROTATION=90` shows it upright.
