@@ -183,3 +183,45 @@ public func _accessibilitySettingsAnimatedImagesEnabled() -> Bool { true }
 /// AXAssistiveAccessEnabled(): Assistive Access is off.
 @_cdecl("AXAssistiveAccessEnabled")
 public func AXAssistiveAccessEnabled() -> Bool { false }
+
+// MARK: - Notifications
+
+/// The notifications apps post for assistive technologies (an announcement
+/// to speak, a changed layout): none listens here, so posting does nothing.
+@available(iOS 17.0, *)
+public enum AccessibilityNotification {
+    public struct Announcement: _AccessibilityNotifications {
+        public init(_ announcement: AttributedString) {}
+        public init(_ announcement: String) {}
+        public init(_ announcement: NSAttributedString) {}
+        public typealias _Info = NSAttributedString
+    }
+
+    public struct LayoutChanged: _AccessibilityNotifications {
+        public init(_ element: Any? = nil) {}
+        public typealias _Info = Any?
+    }
+
+    public struct ScreenChanged: _AccessibilityNotifications {
+        public init(_ element: Any? = nil) {}
+        public typealias _Info = Any?
+    }
+
+    public struct PageScrolled: _AccessibilityNotifications {
+        public init(_ announcement: AttributedString) {}
+        public init(_ announcement: String) {}
+        public init(_ announcement: NSAttributedString) {}
+        public typealias _Info = NSAttributedString
+    }
+}
+
+@available(iOS 17.0, *)
+public protocol _AccessibilityNotifications {
+    associatedtype _Info
+    func post()
+}
+
+@available(iOS 17.0, *)
+extension _AccessibilityNotifications {
+    public func post() {}
+}

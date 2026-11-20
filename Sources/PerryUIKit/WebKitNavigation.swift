@@ -216,3 +216,101 @@ open class WKContentWorld: NSObject {
     }
     @ObjCMethod("name") func name() -> String? { worldName }
 }
+
+// MARK: - Navigation policy
+
+/// Where a navigation comes from or goes: the main frame, always.
+@ObjCClass("WKFrameInfo")
+open class WKFrameInfo: NSObject {
+    var frameRequest: NSObject?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCMethod("isMainFrame") func isMainFrame() -> Bool { true }
+    @ObjCMethod("request") func request() -> NSObject? { frameRequest }
+}
+
+/// A navigation the delegate is asked to allow.
+@ObjCClass("WKNavigationAction")
+open class WKNavigationAction: NSObject {
+    var actionRequest: NSObject?
+    var type = -1
+    var frame: WKFrameInfo?
+
+    @ObjCMethod("init") public required override init() { super.init() }
+    @ObjCMethod("request") func request() -> NSObject? { actionRequest }
+    @ObjCMethod("navigationType") func navigationType() -> Int { type }
+    @ObjCMethod("sourceFrame") func sourceFrame() -> NSObject? { frame }
+    @ObjCMethod("targetFrame") func targetFrame() -> NSObject? { frame }
+    @ObjCMethod("shouldPerformDownload") func shouldPerformDownload() -> Bool { false }
+    @ObjCMethod("modifierFlags") func modifierFlags() -> Int { 0 }
+    @ObjCMethod("buttonNumber") func buttonNumber() -> Int { 0 }
+}
+
+extension NSObject {
+    @ObjCMethod("webView:decidePolicyForNavigationAction:decisionHandler:")
+    func sendDecidePolicy(_ view: NSObject, _ action: NSObject, _ handler: UnsafeMutableRawPointer?)
+    @ObjCMethod("webView:decidePolicyForNavigationAction:preferences:decisionHandler:")
+    func sendDecidePolicy(_ view: NSObject, _ action: NSObject, preferences: NSObject?, _ handler: UnsafeMutableRawPointer?)
+}
+
+/// The navigation delegate's say over a navigation, before it loads: an app
+/// takes its sign-in page's last redirect, to a scheme of its own, from
+/// here (Crunchyroll's crunchyroll://sso_auth) and cancels it.
+enum WebNavigationPolicy {
+    /// What the delegate's handler was called with, during the call.
+    nonisolated(unsafe) static var answer: Int?
+
+    /// decisionHandler(policy), and with preferences decisionHandler(policy,
+    /// preferences): the policy is the first argument of both.
+    nonisolated(unsafe) static let handler: UnsafeMutableRawPointer? = {
+        guard let isa = Display.globalBlockClass else { return nil }
+        let invoke: @convention(c) (UnsafeMutableRawPointer?, Int, UnsafeMutableRawPointer?) -> Void = { _, policy, _ in
+            WebNavigationPolicy.answer = policy
+        }
+        let word = MemoryLayout<UnsafeRawPointer>.size
+        let descriptor = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
+        descriptor.storeBytes(of: 0, as: UInt.self)
+        descriptor.storeBytes(of: UInt(3 * word + 8), toByteOffset: word, as: UInt.self)
+        let block = UnsafeMutableRawPointer.allocate(byteCount: 3 * word + 8, alignment: 8)
+        block.storeBytes(of: isa, as: UnsafeMutableRawPointer.self)
+        block.storeBytes(of: Int32(1 << 28), toByteOffset: word, as: Int32.self)   // BLOCK_IS_GLOBAL
+        block.storeBytes(of: Int32(0), toByteOffset: word + 4, as: Int32.self)
+        block.storeBytes(of: unsafeBitCast(invoke, to: UnsafeRawPointer.self), toByteOffset: word + 8, as: UnsafeRawPointer.self)
+        block.storeBytes(of: UnsafeRawPointer(descriptor), toByteOffset: 2 * word + 8, as: UnsafeRawPointer.self)
+        return block
+    }()
+
+    /// Whether the navigation to `uri` goes ahead. WebKit's navigation types
+    /// are WKNavigationType's but for "other", its last. A delegate that
+    /// answers later is taken to allow what a web engine can load and to
+    /// cancel the rest, which it has seen and nothing could load.
+    static func decide(_ object: UnsafeMutableRawPointer, uri: String, type: Int32) -> Bool {
+        // The page outlives its view while a load winds down: a view the
+        // app has let go (its sign-in sheet, once signed in) has no say.
+        guard WebViews.live.contains(where: { $0.object == object }) else { return true }
+        let view = WKWebView(objcObject: object, ownership: .retain)
+        let scheme = uri.prefix { $0 != ":" }.lowercased()
+        let configuration = view.web.configuration?.as(WKWebViewConfiguration.self)
+        let loadable = ["http", "https", "about", "data", "blob", "file"].contains(scheme)
+            || configuration?.schemeHandlers[scheme] != nil
+        guard let delegate = view.navigationDelegate(), let handler, Classes.named("NSURLRequest") != nil,
+              let request = NSURLObject.make(string: uri).map({ NSURLRequestFactory.make(url: $0) }) else { return true }
+        let action = WKNavigationAction()
+        let frame = WKFrameInfo()
+        frame.frameRequest = request
+        action.actionRequest = request
+        action.type = (0...4).contains(type) ? Int(type) : -1
+        action.frame = frame
+        answer = nil
+        if delegate.responds(to: "webView:decidePolicyForNavigationAction:preferences:decisionHandler:") {
+            delegate.sendDecidePolicy(view, action, preferences: configuration?.defaultWebpagePreferencesObject(), handler)
+        } else if delegate.responds(to: "webView:decidePolicyForNavigationAction:decisionHandler:") {
+            delegate.sendDecidePolicy(view, action, handler)
+        } else {
+            return true
+        }
+        defer { answer = nil }
+        // WKNavigationActionPolicyCancel is 0.
+        return answer.map { $0 != 0 } ?? loadable
+    }
+}
