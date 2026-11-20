@@ -13,6 +13,7 @@ reports:
     app_version: "1.0.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 4
     source: body
     notes: Runs under perry32 and plays with a gamepad.
