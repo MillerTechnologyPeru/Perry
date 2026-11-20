@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 3
     source: body
     notes: Runs at about 45 to 52 frames a second, plays its intro movie and music, and takes multitouch.
