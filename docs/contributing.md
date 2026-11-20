@@ -61,8 +61,10 @@ more than the reports do.
 
 - Reports are in date order, oldest first. An app's level is its newest
   report's level.
-- `name`, `bundle_id`, `platform`, `kind` and `reports` are required, and
-  each report needs `pr`, `date`, `perry`, `platform`, `cpu`, `hardware`,
+- An app can be listed before anyone has tested it: leave `reports` out
+  and the site shows it as not tested yet.
+- `name`, `bundle_id`, `platform` and `kind` are required, and each
+  report needs `pr`, `date`, `perry`, `platform`, `cpu`, `hardware`,
   `os`, `level`, `source` and `notes`. Leave out `app_version` when the pull
   request does not state it; never guess a version or a result.
 - `cpu` is the slice of the binary that ran, and `hardware` the machine it
