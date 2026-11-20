@@ -285,6 +285,9 @@ enum WebNavigationPolicy {
     /// answers later is taken to allow what a web engine can load and to
     /// cancel the rest, which it has seen and nothing could load.
     static func decide(_ object: UnsafeMutableRawPointer, uri: String, type: Int32) -> Bool {
+        // The page outlives its view while a load winds down: a view the
+        // app has let go (its sign-in sheet, once signed in) has no say.
+        guard WebViews.live.contains(where: { $0.object == object }) else { return true }
         let view = WKWebView(objcObject: object, ownership: .retain)
         let scheme = uri.prefix { $0 != ":" }.lowercased()
         let configuration = view.web.configuration?.as(WKWebViewConfiguration.self)
