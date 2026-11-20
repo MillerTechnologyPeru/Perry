@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     app_version: "2.6.2"
     hardware: Chromebook
+    os: Debian 13
     level: 4
     source: body
     notes: Scans, lists nearby peripherals, connects and reads their characteristics through BlueZ.
@@ -22,6 +23,7 @@ reports:
     cpu: arm64
     app_version: "5.5.1"
     hardware: Chromebook
+    os: Debian 13
     level: 1
     source: body
     notes: Gets past launch, then stops at the next missing method.
@@ -32,6 +34,7 @@ reports:
     cpu: arm64
     app_version: "5.5.2"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Shows its onboarding, then lists nearby BLE peripherals with their names and signal strength.
