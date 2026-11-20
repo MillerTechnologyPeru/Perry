@@ -659,6 +659,9 @@ open class WKWebView: UIView {
         WebNavigations.start(self, failing: nil)
     }
     @ObjCMethod("customUserAgent") func customUserAgent() -> String? { web.customUserAgent }
+    /// The user agent the view sends: WebKit's private property, which ad
+    /// SDKs read through key-value coding.
+    @ObjCMethod("userAgent") func userAgent() -> String { web.customUserAgent ?? WebViews.userAgent(for: web) }
     @ObjCMethod("setCustomUserAgent:") func setCustomUserAgent(_ agent: String?) {
         web.customUserAgent = agent
         web.page?.setUserAgent(agent ?? WebViews.userAgent(for: web))
