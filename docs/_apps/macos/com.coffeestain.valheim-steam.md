@@ -3,6 +3,7 @@ name: Valheim
 bundle_id: "com.coffeestain.valheim-steam"
 platform: macos
 kind: game
+tags: [C++, Unity, Mono]
 reports:
   - pr: 133
     date: 2026-11-10
