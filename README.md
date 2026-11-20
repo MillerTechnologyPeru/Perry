@@ -37,7 +37,7 @@ Providers are named by convention: `UIKit.framework/UIKit` maps to
 | --- | --- | --- |
 | System | libSystem, libobjc, libdispatch, libc++, CommonCrypto, libcompression, unified logging, Mach ports | glibc, Linux libdispatch, LLVM libc++ built as Apple's, OpenSSL |
 | Foundation | Foundation and CoreFoundation, toll-free bridged; CFNetwork and `NSURLSession`; Bonjour | swift-foundation, ICU, swift-corelibs `URLSession` over libcurl, Avahi |
-| Swift | Swift apps; Combine; SwiftUI; CryptoKit, WidgetKit, ActivityKit, AppIntents, StoreKit and other Swift-only frameworks | OpenCombine, OpenSwiftUI |
+| Swift | Swift apps; Combine; SwiftUI; CryptoKit, WidgetKit, ActivityKit, AppIntents, StoreKit, WeatherKit and other Swift-only frameworks | OpenCombine, OpenSwiftUI |
 | UIKit | Views, controls, Auto Layout, storyboards and nibs, table and collection views (compositional layouts, diffable data sources), navigation, search, text, scroll physics, touch, keyboard and game pad input | QuartzCore compositor on SDL3 |
 | AppKit | Windows, menus, nibs (keyed, NIBArchive and typedstream), documents, bindings, tables and outlines, toolbars, text views, Auto Layout; Carbon, QuickTime and AGL for pre-Cocoa games | The same compositor on SDL3 |
 | Graphics | CoreGraphics, CoreText, CoreImage, ImageIO, QuartzCore, asset catalogs, SF Symbols | Silica over Cairo, FreeType, Fontconfig, libpng, libjpeg-turbo, giflib, libwebp, libheif |
