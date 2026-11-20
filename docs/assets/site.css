@@ -317,3 +317,10 @@ main > table {
     margin-bottom: 0.5rem;
   }
 }
+
+.bundle-id {
+  font-size: 0.8em;
+  color: var(--muted);
+  background: none;
+  padding: 0;
+}
