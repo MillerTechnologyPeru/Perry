@@ -38,7 +38,11 @@ a merged pull request, which the Last tested column links to.
   {%- for app in platform_apps %}
     {%- assign current = app.reports | last -%}
     {%- assign level = site.data.levels | where: "level", current.level | first -%}
-    {%- assign cpus = app.reports | map: "cpu" | uniq | join: ", " -%}
+    {%- assign cpu_order = "armv6,armv7,i386,x86_64,arm64" | split: "," -%}
+    {%- assign tested = app.reports | map: "cpu" | uniq -%}
+    {%- assign cpus = "" | split: "" -%}
+    {%- for cpu in cpu_order -%}{%- if tested contains cpu -%}{%- assign cpus = cpus | push: cpu -%}{%- endif -%}{%- endfor -%}
+    {%- assign cpus = cpus | join: ", " -%}
     {%- assign shot = current.screenshots | first %}
     <tr>
       <td><a href="{{ app.url | relative_url }}">{{ app.name | escape }}</a><br><code class="bundle-id">{{ app.bundle_id }}</code></td>
