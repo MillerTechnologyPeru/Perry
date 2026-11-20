@@ -38,7 +38,7 @@ reports:
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
     level: 2
-    source: title        # title | body | screenshot: what the level rests on
+    source: title        # title | body | screenshot | maintainer: what the level rests on
     notes: Reaches the Welcome screen.
     screenshots:
       - url: https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000000
@@ -84,7 +84,8 @@ more than the reports do.
 
 - Use the lowest level the evidence supports. A title that only says
   "Run X" with no milestone is level 3, `source: title`.
-- Level 5 needs an explicit statement in the pull request.
+- Level 5 needs an explicit statement in the pull request, or the
+  maintainer's review of the app, recorded as `source: maintainer`.
 - A screenshot may raise the level only to what it plainly shows.
 - For iOS apps `cpu` is `arm64` unless the pull request says `armv7` or
   `armv6`.
