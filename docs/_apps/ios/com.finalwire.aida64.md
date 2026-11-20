@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     app_version: "2.01"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its My Device screen shows the device, with the host's real battery and storage.
@@ -25,6 +26,7 @@ reports:
     cpu: arm64
     app_version: "2.01"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Follows its red tint and draws an iPhone's tab bar.
