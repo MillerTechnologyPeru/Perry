@@ -11,6 +11,7 @@ reports:
     cpu: armv7
     app_version: "2.0"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 1
     source: body
     notes: Gets through its static initialisation and its SDKs' start-up, then stops.
@@ -20,6 +21,7 @@ reports:
     platform: ios
     cpu: armv7
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 2
     source: body
     notes: Gets past start-up and loading to its title screen with sound.
