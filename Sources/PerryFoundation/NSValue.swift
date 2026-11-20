@@ -1,3 +1,4 @@
+import CPerryGeometry
 import CPerryFoundation
 import FoundationEssentials
 import Glibc
@@ -28,6 +29,12 @@ enum Values {
 
     static func storage(_ object: id?) -> ValueStorage? {
         Storage.get(object, as: ValueStorage.self)
+    }
+
+    /// A value's bytes as `T`, or `fallback` when it holds fewer.
+    static func load<T>(_ object: id?, _ fallback: T) -> T {
+        guard let storage = storage(object), storage.bytes.count >= MemoryLayout<T>.size else { return fallback }
+        return storage.bytes.withUnsafeBytes { $0.loadUnaligned(as: T.self) }
     }
 
     /// A new value of `cls` copying `size` bytes, +1.
@@ -145,6 +152,34 @@ public class NSValue: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Values.valueClass = cls.storage
+        addGeometryMethods(cls)
+    }
+
+    /// Rectangles, points and sizes in values (AppKit's NSValue additions),
+    /// as C functions, since this library's methods don't take them.
+    private static func addGeometryMethods(_ cls: ObjCClass) {
+        let rectType = "{CGRect={CGPoint=dd}{CGSize=dd}}", pointType = "{CGPoint=dd}", sizeType = "{CGSize=dd}"
+        let rect: @convention(c) (id?, SEL, CGRect) -> id? = { cls, _, value in
+            withUnsafeBytes(of: value) { ObjC.autorelease(Values.make(cls!, bytes: $0.baseAddress, type: "{CGRect={CGPoint=dd}{CGSize=dd}}")) }
+        }
+        let point: @convention(c) (id?, SEL, CGPoint) -> id? = { cls, _, value in
+            withUnsafeBytes(of: value) { ObjC.autorelease(Values.make(cls!, bytes: $0.baseAddress, type: "{CGPoint=dd}")) }
+        }
+        let size: @convention(c) (id?, SEL, CGSize) -> id? = { cls, _, value in
+            withUnsafeBytes(of: value) { ObjC.autorelease(Values.make(cls!, bytes: $0.baseAddress, type: "{CGSize=dd}")) }
+        }
+        let rectValue: @convention(c) (id?, SEL) -> CGRect = { value, _ in Values.load(value, CGRect(origin: CGPoint(x: 0, y: 0), size: CGSize(width: 0, height: 0))) }
+        let pointValue: @convention(c) (id?, SEL) -> CGPoint = { value, _ in Values.load(value, CGPoint(x: 0, y: 0)) }
+        let sizeValue: @convention(c) (id?, SEL) -> CGSize = { value, _ in Values.load(value, CGSize(width: 0, height: 0)) }
+        func add(_ name: String, _ types: String, _ implementation: UnsafeRawPointer, _ isClassMethod: Bool) {
+            cls.addMethod(name, types: types, implementation: implementation, isClassMethod: isClassMethod)
+        }
+        add("valueWithRect:", "@48@0:8\(rectType)16", unsafeBitCast(rect, to: UnsafeRawPointer.self), true)
+        add("valueWithPoint:", "@32@0:8\(pointType)16", unsafeBitCast(point, to: UnsafeRawPointer.self), true)
+        add("valueWithSize:", "@32@0:8\(sizeType)16", unsafeBitCast(size, to: UnsafeRawPointer.self), true)
+        add("rectValue", "\(rectType)16@0:8", unsafeBitCast(rectValue, to: UnsafeRawPointer.self), false)
+        add("pointValue", "\(pointType)16@0:8", unsafeBitCast(pointValue, to: UnsafeRawPointer.self), false)
+        add("sizeValue", "\(sizeType)16@0:8", unsafeBitCast(sizeValue, to: UnsafeRawPointer.self), false)
     }
 
     private var storage: ValueStorage? { Values.storage(objcObject) }
