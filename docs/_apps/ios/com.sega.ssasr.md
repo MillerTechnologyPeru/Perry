@@ -12,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 4
     source: body
     notes: Runs under perry32 with its music and a gamepad.
