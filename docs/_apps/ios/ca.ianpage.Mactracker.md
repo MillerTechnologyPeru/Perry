@@ -3,6 +3,7 @@ name: Mactracker
 bundle_id: "ca.ianpage.Mactracker"
 platform: ios
 kind: app
+tags: [ObjC]
 reports:
   - pr: 28
     date: 2026-11-06
