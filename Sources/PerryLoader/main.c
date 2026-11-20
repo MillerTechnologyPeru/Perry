@@ -4,6 +4,7 @@
 
 #define _GNU_SOURCE
 #include "bundle.h"
+#include "gdb_mi.h"
 #include "image.h"
 #include "log.h"
 
@@ -274,6 +275,9 @@ int main(int argc, char **argv) {
     char resolved[PATH_MAX];
     const char *executable = has_bundle ? bundle.executable_path
                            : (realpath(target, resolved) ? resolved : target);
+
+    if (perry_gdb_mi_wanted(executable))
+        return perry_gdb_mi(argc - i, argv + i);
 
 #if defined(__aarch64__) || defined(__x86_64__)
     run_in_32_bit_loader(executable, argv);
