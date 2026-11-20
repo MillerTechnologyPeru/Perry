@@ -3,7 +3,7 @@ name: Bejeweled 3
 bundle_id: "com.popcap.Bejeweled3"
 platform: macos
 kind: game
-tags: [C++]
+tags: [C++, SexyAppFramework]
 reports:
   - pr: 128
     date: 2026-11-09
