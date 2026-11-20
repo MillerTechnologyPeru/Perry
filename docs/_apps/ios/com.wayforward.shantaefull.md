@@ -20,4 +20,15 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/284ff1f1-a462-4197-b7ab-639690738420
         caption: In play
+  - date: 2026-11-19
+    perry: "1b26a12e"
+    platform: ios
+    cpu: arm64
+    hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
+    graphics: OpenGL ES 1
+    fps: 60
+    level: 5
+    source: maintainer
+    notes: Runs perfectly at 60 frames a second.
 ---
