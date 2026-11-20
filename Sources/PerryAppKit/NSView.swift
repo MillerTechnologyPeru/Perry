@@ -852,6 +852,14 @@ open class NSView: NSResponder {
     @ObjCMethod("convertSizeFromBacking:") func convertSizeFromBacking(_ size: CGSize) -> CGSize { Backing.scale(size, by: 1 / backingScale) }
     @ObjCMethod("backingAlignedRect:options:")
     func backingAlignedRect(_ rect: CGRect, options: UInt64) -> CGRect { Backing.aligned(rect, scale: backingScale) }
+    /// The rectangle's edges moved to the nearest whole pixels.
+    @ObjCMethod("centerScanRect:")
+    func centerScanRect(_ rect: CGRect) -> CGRect {
+        let scale = backingScale
+        let minX = (rect.minX * scale).rounded() / scale, minY = (rect.minY * scale).rounded() / scale
+        let maxX = (rect.maxX * scale).rounded() / scale, maxY = (rect.maxY * scale).rounded() / scale
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
 
     // MARK: Tracking areas and cursor rectangles
 
