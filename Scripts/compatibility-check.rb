@@ -17,7 +17,7 @@ APPS = File.join(DOCS, "_apps")
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind].freeze
 REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args level source notes screenshots].freeze
-REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
+REPORT_REQUIRED = %w[date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
 # Darwin's platform names, and the CPUs a Mach-O for each can be built for.
@@ -68,6 +68,8 @@ def check_report(file, where, report, platform, kind, urls)
 
   pr = report["pr"]
   error(file, "#{where} 'pr' is not a positive integer") unless pr.nil? || (pr.is_a?(Integer) && pr.positive?)
+  # A report comes from a pull request, or from the maintainer's own test of a commit.
+  error(file, "#{where} is missing 'pr'") if pr.nil? && report["source"] != "maintainer"
   date = report["date"]
   error(file, "#{where} 'date' is not a date") unless date.nil? || date.is_a?(Date)
   perry = report["perry"]
