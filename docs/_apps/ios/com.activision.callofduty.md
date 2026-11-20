@@ -3,6 +3,7 @@ name: "Call of Duty: World at War: Zombies"
 bundle_id: "com.activision.callofduty"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 47
     date: 2026-11-06
@@ -37,6 +38,9 @@ reports:
     app_version: "1.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    resolution: "1080x1620"
+    env:
+      - "PERRY_UIKIT_GL_SCALE=native"
     level: 3
     source: body
     notes: Loads its controller library and draws its menus and first map at native resolution.
