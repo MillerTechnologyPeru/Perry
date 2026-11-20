@@ -381,3 +381,12 @@ extension AttributedString {
         self = parsed ?? AttributedString(string)
     }
 }
+
+// Locale's lists of ISO codes as strings, which swift-foundation declares
+// with its Objective-C bridging and so leaves out here: the consent and
+// analytics SDKs apps carry still read them.
+extension Locale {
+    public static var isoLanguageCodes: [String] { Locale.LanguageCode.isoLanguageCodes.map(\.identifier) }
+    public static var isoRegionCodes: [String] { Locale.Region.isoRegions.map(\.identifier) }
+    public static var isoCurrencyCodes: [String] { Locale.Currency.isoCurrencies.map(\.identifier) }
+}
