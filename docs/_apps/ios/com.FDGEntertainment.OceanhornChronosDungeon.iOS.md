@@ -3,6 +3,7 @@ name: "Oceanhorn: Chronos Dungeon"
 bundle_id: "com.FDGEntertainment.OceanhornChronosDungeon.iOS"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unity]
 reports:
   - pr: 120
     date: 2026-11-09
@@ -11,6 +12,9 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    resolution: "1920x1080"
+    env:
+      - "PERRY_UIKIT_SCREEN=640x360@3"
     level: 2
     source: body
     notes: Reaches its title screen at 1920x1080.
@@ -24,6 +28,8 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    resolution: "1920x1080"
+    fps: "50-58"
     level: 4
     source: body
     notes: Plays at 1920x1080, at about 50 to 58 frames a second in World I-1.
