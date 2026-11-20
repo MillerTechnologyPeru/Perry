@@ -3,6 +3,7 @@ name: Google
 bundle_id: "com.google.GoogleMobile"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 204
     date: 2026-11-19
