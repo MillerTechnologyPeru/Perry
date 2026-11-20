@@ -37,8 +37,10 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     #if !arch(arm)
     // A Mac app's WebKit, Auto Layout and paragraph styles are AppKit's;
     // UIKit, there for its CoreText, keeps its own classes of those under
-    // names of its own. armv7 runs only iOS apps.
-    if isMacApp(info.main_header) {
+    // names of its own. So does a Mac Catalyst app with an AppKit bridge,
+    // where AppKit's provider has defined them already. armv7 runs only iOS
+    // apps.
+    if isMacApp(info.main_header) || Classes.named("NSLayoutAnchor") != nil {
         let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
                              "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration", "WKScriptMessage",
                              "WKWebpagePreferences", "WKWebsiteDataStore",
