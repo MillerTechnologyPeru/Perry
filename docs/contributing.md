@@ -38,6 +38,7 @@ reports:
     cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
+    resolution: "1170x2532"  # the size it drew at, if stated: "WxH" pixels, or "WxH@S" points at a scale
     fps: 60              # games only: the frame rate in play, or a range such as "45-52"
     env:                 # environment variables it ran with, if any
       - "PERRY_OS_VERSION=18.0"
@@ -75,6 +76,9 @@ more than the reports do.
 - `fps` is for games: the frame rate the pull request measured while
   playing, or the menu's if play wasn't reached. A range is quoted, as
   `"45-52"`.
+- `resolution` is the screen size the app drew at, when the pull request
+  states it: `"1920x1080"` in pixels, or `"390x844@3"` in points at a
+  scale, as `PERRY_UIKIT_SCREEN` takes it. It is always quoted.
 - `env` lists the environment variables the app ran with, each as a
   quoted `"NAME=value"`, and `args` the options passed to `perry`. Give
   them when the pull request says the app needs them or was tested with
