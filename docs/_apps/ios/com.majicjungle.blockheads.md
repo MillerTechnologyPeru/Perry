@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.7.4"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Reaches its main menu and loads a world.
