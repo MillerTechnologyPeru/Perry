@@ -49,11 +49,12 @@ enum Events {
             case .minimized: window?.sdlMinimized(true)
             case .restored, .shown: window?.sdlMinimized(false)
             case .moved, .resized: window?.sdlWindowChanged()
-            case .pixelSizeChanged:
+            case .pixelSizeChanged, .displayScaleChanged:
                 window?.updateBackingScale()
                 Windows.layersChanged()
             case .exposed: Windows.layersChanged()
-            case .hidden, .maximized: break
+            // The pointer entering and leaving, and what SDL adds later.
+            default: break
             }
         case let .mouseMotion(id, which, buttons, x, y, relativeX, relativeY):
             let window = Windows.shown(sdl: id)
