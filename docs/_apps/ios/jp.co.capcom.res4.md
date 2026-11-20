@@ -3,6 +3,7 @@ name: Resident Evil 4
 bundle_id: "jp.co.capcom.res4"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 123
     date: 2026-11-09
