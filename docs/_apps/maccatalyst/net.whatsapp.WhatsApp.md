@@ -19,6 +19,21 @@ reports:
     level: 1
     source: maintainer
     notes: Loads its frameworks, then crashes at start-up before a window; Perry has no macOS Swift runtime, SwiftUI or Combine for x86_64 yet.
+  - date: 2026-11-20
+    perry: "e3820e47"
+    platform: maccatalyst
+    cpu: arm64
+    app_version: "26.46.17"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "PERRY_KEEP_CRASH_HANDLERS=segv,bus,abrt,trap,fpe"
+      - "PERRY_OS_VERSION=18.0"
+    level: 1
+    source: maintainer
+    notes: Loads and runs for about 28 seconds, then stops on an ARMv8.4 instruction (ldapur) in its arm64 slice that the Duet's CPU does not have; no window.
 ---
 
-The Mac build is the one `whatsapp.com/download/mac` leads to (a universal Mac Catalyst app that uses SwiftUI). On the Lenovo Duet 3 its arm64 slice runs for about 28 seconds and then stops on an ARMv8.4 instruction (`ldapur`) that the Duet's CPU does not have, so the Mac slice needs a newer arm64 CPU or a build for older ones.
+The Mac build is the one `whatsapp.com/download/mac` leads to (a universal Mac Catalyst app that uses SwiftUI). The Duet 3's libraries came from several builds around that commit, so its report's commit is the closest known. The Mac arm64 slice needs a CPU with ARMv8.4 (untried on the Retroid handhelds).
