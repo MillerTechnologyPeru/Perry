@@ -3,6 +3,7 @@ name: Temple Run
 bundle_id: "com.imangi.templerun"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unity]
 reports:
   - pr: 64
     date: 2026-11-06
@@ -12,6 +13,11 @@ reports:
     app_version: "1.43"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    resolution: "390x844@3"
+    fps: 30
+    env:
+      - "PERRY_UIKIT_SCREEN=390x844@3"
+      - "PERRY_UIKIT_ORIENTATION=portrait"
     level: 2
     source: body
     notes: Reaches its first screen with Unity on Metal; not playable yet.
@@ -26,6 +32,11 @@ reports:
     app_version: "1.19.1"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    resolution: "390x844@3"
+    fps: 60
+    env:
+      - "PERRY_UIKIT_SCREEN=390x844@3"
+      - "PERRY_UIKIT_ORIENTATION=portrait"
     level: 2
     source: body
     notes: Reaches its loading screen on OpenGL ES 2; not playable yet.
