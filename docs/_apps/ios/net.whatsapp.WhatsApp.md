@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "26.45.75"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Shows its complete welcome screen.
