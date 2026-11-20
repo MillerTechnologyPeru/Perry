@@ -10,9 +10,9 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2, Retroid Pocket 5
-    level: 4
-    source: body
-    notes: Plays.
+    level: 5
+    source: maintainer
+    notes: Everything tested works, at 60 frames a second.
     screenshots:
       - url: https://github.com/user-attachments/assets/4986e864-ac66-47b5-8855-d6c4377faf39
         caption: In play
