@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "8.29.08"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: The feed shows posts, scrolls and loads videos; about one run in five ends with a double free.
