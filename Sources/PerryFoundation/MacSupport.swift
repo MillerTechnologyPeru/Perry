@@ -99,6 +99,105 @@ open class NSScriptCommand: NSObject {
     @ObjCMethod("resumeExecutionWithResult:") func resumeExecution(withResult result: UnsafeMutableRawPointer?) {}
 }
 
+// MARK: - NSAppleScript
+
+/// Looks at a script a program asked to run and reports what it would do.
+/// Perry runs none of it, so this is only to make the attempt visible —
+/// above all a `do script`, which drives Terminal, and a command that reaches
+/// a private framework or asks for `sudo`, which the sandbox never grants.
+enum ScriptInspection {
+    static func report(_ source: String?) {
+        guard let source, source.contains(where: { !$0.isWhitespace }) else { return }
+        let firstLine = source.split(whereSeparator: \.isNewline).first.map(String.init) ?? source
+        warn("NSAppleScript: not run, as Linux has no AppleScript: \(firstLine.prefix(200))")
+
+        let lower = source.lowercased()
+        var notes: [String] = []
+        if lower.contains("do script") || lower.contains("tell application \"terminal\"") { notes.append("drives Terminal") }
+        if source.contains("/System/Library/PrivateFrameworks/") { notes.append("a private framework") }
+        if lower.contains("apple80211") || lower.contains("/resources/airport") { notes.append("the airport Wi-Fi utility") }
+        if lower.contains("sudo ") || lower.contains("with administrator privileges") { notes.append("elevated privileges") }
+        guard !notes.isEmpty else { return }
+        warn("NSAppleScript: declined privileged or private automation (\(notes.joined(separator: ", "))); Perry does not run it")
+    }
+
+    private static func warn(_ message: String) {
+        let line = "perry: \(message)\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+    }
+}
+
+/// Each script's source, by the Objective-C object: the app allocates and
+/// uses the object itself, so the state is kept here rather than on the Swift
+/// wrapper, which a dispatch may remake.
+private enum ScriptSources {
+    nonisolated(unsafe) private static var map: [UnsafeMutableRawPointer: String] = [:]
+    nonisolated(unsafe) private static var mutex: pthread_mutex_t = {
+        var m = pthread_mutex_t(); pthread_mutex_init(&m, nil); return m
+    }()
+
+    static func set(_ object: UnsafeMutableRawPointer, _ source: String?) {
+        pthread_mutex_lock(&mutex); defer { pthread_mutex_unlock(&mutex) }
+        map[object] = source
+    }
+    static func get(_ object: UnsafeMutableRawPointer) -> String? {
+        pthread_mutex_lock(&mutex); defer { pthread_mutex_unlock(&mutex) }
+        return map[object]
+    }
+    static func remove(_ object: UnsafeMutableRawPointer) {
+        pthread_mutex_lock(&mutex); defer { pthread_mutex_unlock(&mutex) }
+        map[object] = nil
+    }
+}
+
+/// NSAppleScript on Linux: there is no AppleScript engine, so a script never
+/// runs. The stub lets apps that automate through -executeAndReturnError:
+/// go on instead of crashing on a missing class, and reports the attempt.
+@ObjCClass("NSAppleScript")
+open class NSAppleScript: NSObject {
+    @ObjCMethod("initWithSource:")
+    func initialize(source: String?) -> NSAppleScript {
+        ScriptSources.set(objcObject, source)
+        return self
+    }
+
+    @ObjCMethod("initWithContentsOfURL:error:")
+    func initialize(contentsOf url: UnsafeMutableRawPointer?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSAppleScript {
+        error?.pointee = nil
+        return self
+    }
+
+    @ObjCMethod("source") func sourceString() -> String? { ScriptSources.get(objcObject) }
+    @ObjCMethod("isCompiled") func isCompiled() -> Bool { false }
+    @ObjCMethod("compileAndReturnError:")
+    func compile(error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        error?.pointee = nil
+        return true
+    }
+
+    /// Reports the script and returns nil, as a failed execution does; the
+    /// error dictionary is left nil, which callers take as "no result".
+    @ObjCMethod("executeAndReturnError:")
+    func execute(error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UnsafeMutableRawPointer? {
+        ScriptInspection.report(ScriptSources.get(objcObject))
+        error?.pointee = nil
+        return nil
+    }
+
+    @ObjCMethod("executeAppleEvent:error:")
+    func execute(appleEvent: UnsafeMutableRawPointer?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UnsafeMutableRawPointer? {
+        ScriptInspection.report(ScriptSources.get(objcObject))
+        error?.pointee = nil
+        return nil
+    }
+
+    @ObjCMethod("dealloc")
+    func dealloc() {
+        ScriptSources.remove(objcObject)
+        ObjCRuntime.superDealloc(objcObject, definedOn: NSAppleScript.objCClass.pointer)
+    }
+}
+
 // MARK: - User notifications
 
 @ObjCClass("NSUserNotification")
