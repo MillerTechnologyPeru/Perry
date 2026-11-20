@@ -14,4 +14,7 @@ reports:
     level: 4
     source: body
     notes: Plays with a controller.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/fc7ee314-e94b-43fd-8982-db97a3a0a9fb
+        caption: Main menu
 ---
