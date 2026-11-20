@@ -100,9 +100,9 @@ open class NSApplication: NSResponder {
     }
 
     /// With PERRY_APPKIT_CLICKS set to "x,y;x,y…", clicks at those points
-    /// of the first window shown (from its top left), two seconds apart
-    /// starting six seconds after launch, go to the window on top there:
-    /// to try menus and controls without a mouse.
+    /// of the first window shown (from its top left; the next one shown, once
+    /// it closes), two seconds apart starting six seconds after launch, go to
+    /// the window on top there: to try menus and controls without a mouse.
     /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
     /// positive), as a mouse wheel's notches.
     nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
@@ -120,7 +120,7 @@ open class NSApplication: NSResponder {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
         let (point, scroll) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
-        if NSApplication.clickWindow == nil { NSApplication.clickWindow = Windows.all.first { $0.visible } }
+        if NSApplication.clickWindow?.visible != true { NSApplication.clickWindow = Windows.all.first { $0.visible } }
         if let base = NSApplication.clickWindow {
             let screen = CGPoint(x: base.frame.minX + point.x, y: base.frame.maxY - point.y)
             let target = Windows.all.last { $0.visible && $0.frame.contains(screen) } ?? base
@@ -275,7 +275,14 @@ open class NSApplication: NSResponder {
     }
 
     @ObjCMethod("currentEvent") func appCurrentEvent() -> NSEvent? { currentEvent }
-    @ObjCMethod("updateWindows") func updateWindows() {}
+    /// After each event, each shown window's -update, between the
+    /// application's will- and did-update notifications.
+    @ObjCMethod("updateWindows")
+    func updateWindows() {
+        notify("applicationWillUpdate:", Constants.NSApplicationWillUpdateNotification)
+        for window in Windows.all where window.visible { Send.void(window.objcObject, "update") }
+        notify("applicationDidUpdate:", Constants.NSApplicationDidUpdateNotification)
+    }
     @ObjCMethod("setWindowsNeedUpdate:") func setWindowsNeedUpdate(_ value: Bool) {}
 
     @ObjCMethod("sendAction:to:from:")
@@ -283,13 +290,22 @@ open class NSApplication: NSResponder {
         guard let action else { return false }
         let name = action.name
         if let target {
-            guard Send.responds(target.objcObject, name) else { return false }
+            // Sent whether it says it responds or not, as AppKit does: a
+            // target that forwards actions (Xcode's action manager) gets it.
+            guard Send.responds(target.objcObject, name) || forwards(target.objcObject) else { return false }
             Send.void(target.objcObject, name, sender?.objcObject)
             return true
         }
         guard let receiver = self.receiver(forAction: name) else { return false }
         Send.void(receiver, name, sender?.objcObject)
         return true
+    }
+
+    /// Whether an object has its own -forwardInvocation:, to take
+    /// messages it doesn't say it responds to.
+    func forwards(_ object: UnsafeMutableRawPointer) -> Bool {
+        guard let root = Classes.named("NSObject") else { return false }
+        return Methods.overrides(object, "forwardInvocation:", of: root.pointer)
     }
 
     /// What an action with no target goes to, as AppKit finds it: along the

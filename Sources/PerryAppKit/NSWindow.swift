@@ -715,7 +715,14 @@ open class NSWindow: NSResponder {
     @ObjCMethod("displayIfNeeded") func displayIfNeeded() { Windows.drawIfNeeded() }
     @ObjCMethod("setViewsNeedDisplay:") func setViewsNeedDisplay(_ value: Bool) { if value { Windows.layersChanged() } }
     @ObjCMethod("viewsNeedDisplay") func viewsNeedDisplay() -> Bool { false }
-    @ObjCMethod("update") func update() {}
+    /// After each event: the toolbar's items are validated, and the window
+    /// posts NSWindowDidUpdateNotification (Xcode's editors finish opening a
+    /// file when their window has updated).
+    @ObjCMethod("update")
+    func update() {
+        toolbar?.validateVisibleItems()
+        notify("windowDidUpdate:", Constants.NSWindowDidUpdateNotification)
+    }
     @ObjCMethod("disableScreenUpdatesUntilFlush") func disableScreenUpdatesUntilFlush() {}
     @ObjCMethod("flushWindow") func flushWindow() { Windows.layersChanged() }
     @ObjCMethod("useOptimizedDrawing:") func useOptimizedDrawing(_ value: Bool) {}
@@ -1074,6 +1081,9 @@ open class NSWindowController: NSResponder {
     var document: NSObject?
     var storyboard: NSStoryboard?
     var loadingWindow = false
+    /// The nib has been loaded: once, even when it has no window (Xcode's
+    /// modules' nibs give their views).
+    var windowNibLoaded = false
     var shouldCascadeWindows = true
     var windowFrameAutosaveName = ""
     var pendingContentViewController: NSViewController?
@@ -1146,7 +1156,7 @@ open class NSWindowController: NSResponder {
     }
     @ObjCMethod("windowNibName") func controllerWindowNibName() -> String? { windowNibName }
     @ObjCMethod("windowNibPath") func windowNibPath() -> String? { nil }
-    @ObjCMethod("isWindowLoaded") func isWindowLoaded() -> Bool { window != nil }
+    @ObjCMethod("isWindowLoaded") func isWindowLoaded() -> Bool { window != nil || windowNibLoaded }
     @ObjCMethod("loadWindow") func loadWindow() { loadWindowNib() }
     @ObjCMethod("windowDidLoad") func windowDidLoad() {}
     @ObjCMethod("windowWillLoad") func windowWillLoad() {}

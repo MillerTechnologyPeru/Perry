@@ -82,11 +82,31 @@ open class NSBox: NSView {
     @ObjCMethod("contentViewMargins") func boxContentViewMargins() -> CGSize { contentViewMargins }
     @ObjCMethod("setContentViewMargins:") func setContentViewMargins(_ value: CGSize) { contentViewMargins = value }
     @ObjCMethod("contentView") func boxContentView() -> NSView? { contentView }
+    /// The new content view fills the box where the old one did (its
+    /// content area), as AppKit sizes it.
     @ObjCMethod("setContentView:")
     func setContentView(_ view: NSView?) {
+        let area = contentView?.frame ?? CGRect(origin: .zero, size: frame.size)
         contentView?.removeFromSuperview()
         contentView = view
-        if let view { addSubview(view) }
+        guard let view else { return }
+        addSubview(view)
+        Send.void(view.objcObject, "setFrame:", rect: area)
+    }
+
+    /// The box keeps its content view filling its content area as it
+    /// resizes, whether the box autoresizes its subviews or not: the
+    /// content view keeps its distance from each edge.
+    @ObjCMethod("setFrameSize:")
+    override func setFrameSize(_ size: CGSize) {
+        let old = frame.size
+        let area = contentView?.frame
+        super.setFrameSize(size)
+        guard let contentView, let area, size != old else { return }
+        let right = old.width - area.maxX, bottom = old.height - area.maxY
+        let fitted = CGRect(x: area.minX, y: area.minY, width: max(0, size.width - area.minX - right),
+                            height: max(0, size.height - area.minY - bottom))
+        if contentView.frame != fitted { Send.void(contentView.objcObject, "setFrame:", rect: fitted) }
     }
     @ObjCMethod("sizeToFit") func sizeToFit() {}
     @ObjCMethod("setFrameFromContentFrame:") func setFrame(fromContentFrame frame: CGRect) { Send.void(objcObject, "setFrame:", rect: frame) }

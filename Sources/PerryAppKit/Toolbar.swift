@@ -125,7 +125,13 @@ open class NSToolbar: NSObject {
         items.remove(at: index)
         window?.toolbarChanged()
     }
-    @ObjCMethod("validateVisibleItems") func validateVisibleItems() {}
+    /// Each shown item's -validate, as AppKit sends after each event: a
+    /// subclass's own (Xcode's) enables it as its state allows.
+    @ObjCMethod("validateVisibleItems")
+    func validateVisibleItems() {
+        guard visible else { return }
+        for item in items where item.visible { Send.void(item.objcObject, "validate") }
+    }
     @ObjCMethod("runCustomizationPalette:") func runCustomizationPalette(_ sender: NSObject?) {}
     @ObjCMethod("customizationPaletteIsRunning") func customizationPaletteIsRunning() -> Bool { false }
     /// The configuration AppKit saves in defaults: its display and size
@@ -260,6 +266,20 @@ open class NSToolbarItem: NSObject {
     @ObjCMethod("setImage:") func setImage(_ value: NSImage?) { image = value; changed() }
     @ObjCMethod("view") func itemView() -> NSView? { view }
     @ObjCMethod("setView:") func setView(_ value: NSView?) { view = value; changed() }
+    /// The button AppKit shows for an item without a view of its own.
+    var standardButton: NSButton?
+    /// AppKit's private -_view: the item's view, or the button standing in
+    /// for one (Xcode's build items keep it to show in text mode).
+    @ObjCMethod("_view")
+    func shownView() -> NSView? {
+        if let view { return view }
+        if standardButton == nil {
+            let button = NSButton.make(title: nil, image: image, target: target.map(NSObject.init), action: action)
+            button.setBordered(false)
+            standardButton = button
+        }
+        return standardButton
+    }
     /// The sizes the toolbar lays the item out by: a subclass's -minSize
     /// and -maxSize when it has its own (Xcode's search item works them
     /// out rather than setting them).
@@ -297,7 +317,15 @@ open class NSToolbarItem: NSObject {
     @ObjCMethod("isVisible") func isVisible() -> Bool { visible }
     @ObjCMethod("isHidden") func isHidden() -> Bool { hidden }
     @ObjCMethod("setHidden:") func setHidden(_ value: Bool) { hidden = value; changed() }
-    @ObjCMethod("validate") func validate() {}
+    /// An autovalidating item without a view is enabled when its action
+    /// has a receiver that, asked with -validateToolbarItem:, allows it.
+    @ObjCMethod("validate")
+    func validate() {
+        guard autovalidates, view == nil, let action, let app = App.shared else { return }
+        let receiver = target ?? app.receiver(forAction: action.name)
+        let allowed = receiver.map { !Send.responds($0, "validateToolbarItem:") || Send.bool($0, "validateToolbarItem:", objcObject) } ?? false
+        if allowed != enabled { setEnabled(allowed) }
+    }
     @ObjCMethod("allowsDuplicatesInToolbar") func allowsDuplicatesInToolbar() -> Bool { false }
 
     func changed() { toolbar()?.window?.toolbarChanged() }

@@ -168,6 +168,44 @@ reports:
     level: 3
     source: body
     notes: Opening source files, the project inspector and menus no longer crashes or hangs.
+  - pr: 224
+    date: 2026-11-19
+    perry: "68463b14"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: Builds a project from its Build menu, compiling and linking the app, and opens source files in editors; nibs and strings files fail to build, and the editor shows no text.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
+
+## Status as of [#224]({{ site.repository_url }}/pull/224)
+
+Working:
+
+- Opening a project in its project window, with Groups & Files, the
+  toolbar (search field included) and the menu bar.
+- Build from the Build menu or toolbar: gcc-4.2 compiles the sources and
+  ld links the app's executable, with build output parsed for the status
+  bar and Build Results.
+- Selecting a source file opens an editor in the project window, and
+  editor windows open with their navigation bar.
+- Collapsed panes stay hidden instead of drawing over their neighbours.
+
+Broken:
+
+- `.xib` files don't compile: ibtool runs but needs AppKit classes Perry
+  doesn't have (`NSCachedImageRep`, `NSBrowser`, `NSDatePicker`,
+  `NSPathControl`, `NSWindowTemplate` and others).
+- `InfoPlist.strings` doesn't build: copystrings is a Ruby script and
+  needs `/usr/bin/ruby`.
+- So the built app has no nibs, and Build and Run isn't usable yet.
+- The source editor shows no text.
+- Debugging isn't supported.

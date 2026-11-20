@@ -196,6 +196,18 @@ open class NSScrollView: NSView {
         let inset: CGFloat = borderType == 0 ? 0 : 2
         return CGSize(width: size.width + inset, height: size.height + inset)
     }
+    /// The forms from before scroller classes: the scrollers lie over the
+    /// content here, so only the border counts.
+    @ObjCClassMethod("contentSizeForFrameSize:hasHorizontalScroller:hasVerticalScroller:borderType:")
+    static func contentSize(forFrameSize size: CGSize, hasHorizontalScroller: Bool, hasVerticalScroller: Bool, borderType: UInt) -> CGSize {
+        contentSize(forFrameSize: size, horizontalScrollerClass: nil, verticalScrollerClass: nil, borderType: borderType, controlSize: 0,
+                    scrollerStyle: 0)
+    }
+    @ObjCClassMethod("frameSizeForContentSize:hasHorizontalScroller:hasVerticalScroller:borderType:")
+    static func frameSize(forContentSize size: CGSize, hasHorizontalScroller: Bool, hasVerticalScroller: Bool, borderType: UInt) -> CGSize {
+        frameSize(forContentSize: size, horizontalScrollerClass: nil, verticalScrollerClass: nil, borderType: borderType, controlSize: 0,
+                  scrollerStyle: 0)
+    }
 
     @ObjCMethod("setFrameSize:")
     override func setFrameSize(_ size: CGSize) {

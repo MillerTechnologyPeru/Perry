@@ -54,11 +54,242 @@ open class NSTextStorage: NSObject {
         delegateObject = decoded.object("NSDelegate")?.objcObject
     }
 
-    /// Everything else is the attributed string's.
+    /// Everything else is the attributed string's, unless the storage is a
+    /// subclass that forwards messages itself (Xcode's folding storage sends
+    /// them to the storage it shows), which then gets them.
     @ObjCMethod("forwardingTargetForSelector:")
-    func forwardingTarget(for selector: ObjCSelector?) -> NSObject? { contents }
+    func forwardingTarget(for selector: ObjCSelector?) -> NSObject? {
+        if let root = Classes.named("NSObject"), Methods.overrides(objcObject, "forwardInvocation:", of: root.pointer) {
+            return nil
+        }
+        return contents
+    }
 
-    var string: String { Send.object(contents.objcObject, "string").map { String(objCArgument: $0) } ?? "" }
+    // MARK: Subclasses with their own text
+    //
+    // A subclass that keeps its text itself (Xcode's editor storages)
+    // answers the primitives: -string, -length, -attributesAtIndex:
+    // effectiveRange:, -replaceCharactersInRange:withString: and
+    // -setAttributes:range:. As AppKit's, the other methods are then made of
+    // those, sent to the storage; this class's own text is its attributed
+    // string, which they go to directly.
+
+    /// Whether the text is this class's attributed string: the subclass
+    /// doesn't answer -string itself.
+    lazy var keepsOwnText: Bool = {
+        guard let base = Classes.named("NSTextStorage") else { return true }
+        return !Methods.overrides(objcObject, "string", of: base.pointer)
+    }()
+
+    private typealias SendRange = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
+    private typealias SendRangeObject = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange, UnsafeMutableRawPointer?) -> Void
+    private typealias SendObjectRange = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, NSRange) -> Void
+    private typealias SendObjectObjectRange = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                                             NSRange) -> Void
+    private typealias AttributesAt = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UInt, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+    private typealias Substring = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> UnsafeMutableRawPointer?
+
+    /// The text, as the storage answers -string.
+    var string: String { Send.object(objcObject, "string").map { String(objCArgument: $0) } ?? "" }
+    /// The length, as the storage answers -length.
+    var textLength: Int { Send.integer(objcObject, "length") }
+
+    /// The attributes at `index` in `object` (an attributed string or this
+    /// storage), and the range they run over.
+    private static func attributes(of object: UnsafeMutableRawPointer, at index: Int, _ effective: inout NSRange) -> UnsafeMutableRawPointer? {
+        unsafeBitCast(ObjCRuntime.msgSend, to: AttributesAt.self)(object, ObjCRuntime.selector("attributesAtIndex:effectiveRange:"), UInt(index),
+                                                                   &effective)
+    }
+
+    /// Each run of `object`'s attributes over `range`, cut to it.
+    private static func runs(of object: UnsafeMutableRawPointer, in range: NSRange) -> [(attributes: UnsafeMutableRawPointer?, range: NSRange)] {
+        var result: [(UnsafeMutableRawPointer?, NSRange)] = []
+        var location = Int(range.location)
+        let end = Int(range.location + range.length)
+        while location < end {
+            var effective = NSRange(location: 0, length: 0)
+            let attributes = attributes(of: object, at: location, &effective)
+            let next = min(end, max(location + 1, Int(effective.location + effective.length)))
+            result.append((attributes, NSRange(location: UInt(location), length: UInt(next - location))))
+            location = next
+        }
+        return result
+    }
+
+    /// Sends a primitive to the storage itself.
+    func replaceText(in range: NSRange, with text: String) {
+        unsafeBitCast(ObjCRuntime.msgSend, to: SendRangeObject.self)(objcObject, ObjCRuntime.selector("replaceCharactersInRange:withString:"), range,
+                                                                     text.objCArgument())
+    }
+    private func sendSetAttributes(_ attributes: UnsafeMutableRawPointer?, _ range: NSRange) {
+        unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectRange.self)(objcObject, ObjCRuntime.selector("setAttributes:range:"), attributes, range)
+    }
+
+    /// A new attributed string (+1) of `range` of the text, made of the
+    /// primitives.
+    private func copyText(in range: NSRange, mutable: Bool) -> UnsafeMutableRawPointer? {
+        let units = Array(string.utf16)
+        let lower = min(Int(range.location), units.count), upper = min(Int(range.location + range.length), units.count)
+        let text = String(decoding: units[lower..<upper], as: UTF16.self)
+        let cls = Classes.named("NSMutableAttributedString")?.pointer
+        guard let made = Send.object(Send.object(cls, "alloc"), "initWithString:", text.objCArgument()) else { return nil }
+        for run in NSTextStorage.runs(of: objcObject, in: range) {
+            let local = NSRange(location: run.range.location - range.location, length: run.range.length)
+            unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectRange.self)(made, ObjCRuntime.selector("setAttributes:range:"), run.attributes, local)
+        }
+        if mutable { return made }
+        defer { ObjCRuntime.release(made) }
+        return Send.object(made, "copy")
+    }
+
+    /// Replaces `range` with an attributed string's characters and
+    /// attributes, through the primitives.
+    private func replaceText(in range: NSRange, withAttributed value: UnsafeMutableRawPointer?) {
+        let text = Send.object(value, "string").map { String(objCArgument: $0) } ?? ""
+        Send.void(objcObject, "beginEditing")
+        replaceText(in: range, with: text)
+        if let value {
+            for run in NSTextStorage.runs(of: value, in: NSRange(location: 0, length: UInt(text.utf16.count))) {
+                sendSetAttributes(run.attributes, NSRange(location: range.location + run.range.location, length: run.range.length))
+            }
+        }
+        Send.void(objcObject, "endEditing")
+    }
+
+    /// Changes each run's attributes over `range`, through the primitives.
+    private func changeAttributes(in range: NSRange, _ change: (UnsafeMutableRawPointer) -> Void) {
+        Send.void(objcObject, "beginEditing")
+        for run in NSTextStorage.runs(of: objcObject, in: range) {
+            let empty = { Send.object(Send.object(Classes.named("NSMutableDictionary")?.pointer, "alloc"), "init") }
+            guard let copied = run.attributes.flatMap({ Send.object($0, "mutableCopy") }) ?? empty() else { continue }
+            change(copied)
+            sendSetAttributes(copied, run.range)
+            ObjCRuntime.release(copied)
+        }
+        Send.void(objcObject, "endEditing")
+    }
+
+    @ObjCMethod("attributesAtIndex:effectiveRange:")
+    func attributes(at index: UInt, effectiveRange: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        unsafeBitCast(ObjCRuntime.msgSend, to: AttributesAt.self)(contents.objcObject, ObjCRuntime.selector("attributesAtIndex:effectiveRange:"), index,
+                                                                   effectiveRange)
+    }
+
+    @ObjCMethod("setAttributes:range:")
+    func setAttributes(_ attributes: NSObject?, range: NSRange) {
+        unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectRange.self)(contents.objcObject, ObjCRuntime.selector("setAttributes:range:"),
+                                                                     attributes?.objcObject, range)
+        edited()
+    }
+
+    @ObjCMethod("attribute:atIndex:effectiveRange:")
+    func attribute(_ name: NSObject?, at index: UInt, effectiveRange: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UInt, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        guard !keepsOwnText else {
+            return unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(contents.objcObject, ObjCRuntime.selector("attribute:atIndex:effectiveRange:"),
+                                                                   name?.objcObject, index, effectiveRange)
+        }
+        var effective = NSRange(location: 0, length: 0)
+        let attributes = NSTextStorage.attributes(of: objcObject, at: Int(index), &effective)
+        effectiveRange?.storeBytes(of: effective, as: NSRange.self)
+        return Send.object(attributes, "objectForKey:", name?.objcObject)
+    }
+
+    @ObjCMethod("attributedSubstringFromRange:")
+    func attributedSubstring(from range: NSRange) -> UnsafeMutableRawPointer? {
+        guard !keepsOwnText else {
+            return unsafeBitCast(ObjCRuntime.msgSend, to: Substring.self)(contents.objcObject, ObjCRuntime.selector("attributedSubstringFromRange:"), range)
+        }
+        return copyText(in: range, mutable: false).flatMap { ObjCRuntime.autorelease($0) }
+    }
+
+    @ObjCMethod("addAttribute:value:range:")
+    func addAttribute(_ name: NSObject?, value: NSObject?, range: NSRange) {
+        guard !keepsOwnText else {
+            unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectObjectRange.self)(contents.objcObject, ObjCRuntime.selector("addAttribute:value:range:"),
+                                                                               name?.objcObject, value?.objcObject, range)
+            return
+        }
+        guard let name, let value else { return }
+        changeAttributes(in: range) { Send.void($0, "setObject:forKey:", value.objcObject, name.objcObject) }
+    }
+
+    @ObjCMethod("addAttributes:range:")
+    func addAttributes(_ attributes: NSObject?, range: NSRange) {
+        guard !keepsOwnText else {
+            unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectRange.self)(contents.objcObject, ObjCRuntime.selector("addAttributes:range:"),
+                                                                         attributes?.objcObject, range)
+            return
+        }
+        guard let attributes else { return }
+        changeAttributes(in: range) { Send.void($0, "addEntriesFromDictionary:", attributes.objcObject) }
+    }
+
+    @ObjCMethod("removeAttribute:range:")
+    func removeAttribute(_ name: NSObject?, range: NSRange) {
+        guard !keepsOwnText else {
+            unsafeBitCast(ObjCRuntime.msgSend, to: SendObjectRange.self)(contents.objcObject, ObjCRuntime.selector("removeAttribute:range:"),
+                                                                         name?.objcObject, range)
+            return
+        }
+        guard let name else { return }
+        changeAttributes(in: range) { Send.void($0, "removeObjectForKey:", name.objcObject) }
+    }
+
+    @ObjCMethod("insertAttributedString:atIndex:")
+    func insertAttributedString(_ value: NSObject?, at index: UInt) {
+        replaceCharacters(in: NSRange(location: index, length: 0), withAttributedString: value)
+    }
+
+    /// Options: NSAttributedStringEnumerationReverse (2).
+    @ObjCMethod("enumerateAttributesInRange:options:usingBlock:")
+    func enumerateAttributes(in range: NSRange, options: UInt, using block: ObjCBlock?) {
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange, UInt, UnsafeMutableRawPointer?) -> Void
+        guard !keepsOwnText else {
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(contents.objcObject, ObjCRuntime.selector("enumerateAttributesInRange:options:usingBlock:"),
+                                                           range, options, block?.object)
+            return
+        }
+        guard let block else { return }
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, NSRange, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        var runs = NSTextStorage.runs(of: objcObject, in: range)
+        if options & 2 != 0 { runs.reverse() }
+        for run in runs {
+            var stop = false
+            invoke(block.object, run.attributes, run.range, &stop)
+            if stop { return }
+        }
+    }
+
+    @ObjCMethod("enumerateAttribute:inRange:options:usingBlock:")
+    func enumerateAttribute(_ name: NSObject?, in range: NSRange, options: UInt, using block: ObjCBlock?) {
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, NSRange, UInt, UnsafeMutableRawPointer?) -> Void
+        guard !keepsOwnText else {
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(contents.objcObject, ObjCRuntime.selector("enumerateAttribute:inRange:options:usingBlock:"),
+                                                           name?.objcObject, range, options, block?.object)
+            return
+        }
+        guard let block else { return }
+        typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?, NSRange, UnsafeMutablePointer<Bool>) -> Void
+        let invoke = block.function(as: Invoke.self)
+        var runs = NSTextStorage.runs(of: objcObject, in: range).map { (value: Send.object($0.attributes, "objectForKey:", name?.objcObject), range: $0.range) }
+        if options & 2 != 0 { runs.reverse() }
+        for run in runs {
+            var stop = false
+            invoke(block.object, run.value, run.range, &stop)
+            if stop { return }
+        }
+    }
+
+    // Attribute fixing: the storage's text is shown as its attributes are.
+    @ObjCMethod("fixesAttributesLazily") func fixesAttributesLazily() -> Bool { false }
+    @ObjCMethod("fixAttributesInRange:") func fixAttributes(in range: NSRange) {}
+    @ObjCMethod("fixFontAttributeInRange:") func fixFontAttribute(in range: NSRange) {}
+    @ObjCMethod("fixParagraphStyleAttributeInRange:") func fixParagraphStyleAttribute(in range: NSRange) {}
+    @ObjCMethod("fixAttachmentAttributeInRange:") func fixAttachmentAttribute(in range: NSRange) {}
+    @ObjCMethod("invalidateAttributesInRange:") func invalidateAttributes(in range: NSRange) {}
+    @ObjCMethod("ensureAttributesAreFixedInRange:") func ensureAttributesAreFixed(in range: NSRange) {}
 
     /// The text changed: its layout managers' text views show it again.
     func edited() {
@@ -69,34 +300,60 @@ open class NSTextStorage: NSObject {
         for manager in layoutManagers { manager.textChanged() }
     }
 
-    @ObjCMethod("string") func storageString() -> String { string }
+    @ObjCMethod("string") func storageString() -> String { Send.object(contents.objcObject, "string").map { String(objCArgument: $0) } ?? "" }
     @ObjCMethod("length") func length() -> UInt { UInt(Send.integer(contents.objcObject, "length")) }
     @ObjCMethod("mutableString") func mutableString() -> NSObject? { Send.object(contents.objcObject, "mutableString").map(NSObject.init) }
     @ObjCMethod("delegate") func storageDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ value: NSObject?) { delegateObject = value?.objcObject }
     @ObjCMethod("layoutManagers") func storageLayoutManagers() -> NSObject { NSMutableArray.of(layoutManagers) }
+    /// The layout manager lays out this storage's text, no longer its
+    /// previous storage's, and its text views show it.
     @ObjCMethod("addLayoutManager:")
     func addLayoutManager(_ manager: NSLayoutManager?) {
         guard let manager else { return }
-        layoutManagers.append(manager)
+        if let previous = manager.textStorage, previous !== self { previous.layoutManagers.removeAll { $0 === manager } }
+        if !layoutManagers.contains(where: { $0 === manager }) { layoutManagers.append(manager) }
         manager.textStorage = self
+        manager.textChanged()
     }
     @ObjCMethod("removeLayoutManager:") func removeLayoutManager(_ manager: NSLayoutManager?) { layoutManagers.removeAll { $0 === manager } }
+    /// What the last edit changed, as -edited:range:changeInLength: gave it.
+    var editedMask: UInt = 0
+    var editedRange = NSRange(location: 0, length: 0)
+    var changeInLength = 0
+
     @ObjCMethod("beginEditing") func beginEditing() { editing += 1 }
+    /// The outermost -endEditing processes the edits, through -processEditing
+    /// (which subclasses override).
     @ObjCMethod("endEditing")
     func endEditing() {
         editing = max(0, editing - 1)
-        edited()
+        if editing == 0 { Send.void(objcObject, "processEditing") }
     }
-    @ObjCMethod("edited:range:changeInLength:") func edited(_ mask: UInt, range: NSRange, changeInLength delta: Int) { edited() }
+    @ObjCMethod("edited:range:changeInLength:")
+    func edited(_ mask: UInt, range: NSRange, changeInLength delta: Int) {
+        (editedMask, editedRange, changeInLength) = (mask, range, delta)
+        if editing == 0 { Send.void(objcObject, "processEditing") }
+    }
     @ObjCMethod("processEditing") func processEditing() { edited() }
+    @ObjCMethod("editedMask") func storageEditedMask() -> UInt { editedMask }
+    @ObjCMethod("editedRange") func storageEditedRange() -> NSRange { editedRange }
+    @ObjCMethod("changeInLength") func storageChangeInLength() -> Int { changeInLength }
     @ObjCMethod("setAttributedString:")
     func setAttributedString(_ value: NSObject?) {
+        guard keepsOwnText else {
+            replaceText(in: NSRange(location: 0, length: UInt(textLength)), withAttributed: value?.objcObject)
+            return
+        }
         Send.void(contents.objcObject, "setAttributedString:", value?.objcObject)
         edited()
     }
     @ObjCMethod("appendAttributedString:")
     func appendAttributedString(_ value: NSObject?) {
+        guard keepsOwnText else {
+            replaceText(in: NSRange(location: UInt(textLength), length: 0), withAttributed: value?.objcObject)
+            return
+        }
         Send.void(contents.objcObject, "appendAttributedString:", value?.objcObject)
         edited()
     }
@@ -109,6 +366,10 @@ open class NSTextStorage: NSObject {
     }
     @ObjCMethod("replaceCharactersInRange:withAttributedString:")
     func replaceCharacters(in range: NSRange, withAttributedString string: NSObject?) {
+        guard keepsOwnText else {
+            replaceText(in: range, withAttributed: string?.objcObject)
+            return
+        }
         typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange, UnsafeMutableRawPointer?) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(contents.objcObject, ObjCRuntime.selector("replaceCharactersInRange:withAttributedString:"), range,
                                                        string?.objcObject)
@@ -116,12 +377,21 @@ open class NSTextStorage: NSObject {
     }
     @ObjCMethod("deleteCharactersInRange:")
     func deleteCharacters(in range: NSRange) {
-        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
-        unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(contents.objcObject, ObjCRuntime.selector("deleteCharactersInRange:"), range)
+        guard keepsOwnText else {
+            replaceText(in: range, with: "")
+            return
+        }
+        unsafeBitCast(ObjCRuntime.msgSend, to: SendRange.self)(contents.objcObject, ObjCRuntime.selector("deleteCharactersInRange:"), range)
         edited()
     }
-    @ObjCMethod("copyWithZone:") func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Send.object(contents.objcObject, "copy") }
-    @ObjCMethod("mutableCopyWithZone:") func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? { Send.object(contents.objcObject, "mutableCopy") }
+    @ObjCMethod("copyWithZone:")
+    func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        keepsOwnText ? Send.object(contents.objcObject, "copy") : copyText(in: NSRange(location: 0, length: UInt(textLength)), mutable: false)
+    }
+    @ObjCMethod("mutableCopyWithZone:")
+    func mutableCopy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
+        keepsOwnText ? Send.object(contents.objcObject, "mutableCopy") : copyText(in: NSRange(location: 0, length: UInt(textLength)), mutable: true)
+    }
     @ObjCMethod("description") func storageDescription() -> String { string }
 }
 
@@ -160,7 +430,10 @@ open class NSLayoutManager: NSObject {
 
     @ObjCMethod("textStorage") func managerTextStorage() -> NSTextStorage? { textStorage }
     @ObjCMethod("setTextStorage:") func setTextStorage(_ value: NSTextStorage?) { textStorage = value }
-    @ObjCMethod("replaceTextStorage:") func replaceTextStorage(_ value: NSTextStorage?) { value?.addLayoutManager(self) }
+    /// Sent, so a storage subclass's -addLayoutManager: runs.
+    @ObjCMethod("replaceTextStorage:") func replaceTextStorage(_ value: NSTextStorage?) { Send.void(value?.objcObject, "addLayoutManager:", objcObject) }
+    @ObjCMethod("firstTextView") func firstTextView() -> NSTextView? { containers.first?.textView }
+    @ObjCMethod("textViewForBeginningOfSelection") func textViewForBeginningOfSelection() -> NSTextView? { containers.first?.textView }
     @ObjCMethod("textContainers") func textContainers() -> NSObject { NSMutableArray.of(containers) }
     @ObjCMethod("addTextContainer:")
     func addTextContainer(_ container: NSTextContainer?) {
@@ -171,6 +444,13 @@ open class NSLayoutManager: NSObject {
     @ObjCMethod("removeTextContainerAtIndex:") func removeTextContainer(at index: Int) { if containers.indices.contains(index) { containers.remove(at: index) } }
     @ObjCMethod("delegate") func managerDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ value: NSObject?) { delegateObject = value?.objcObject }
+    /// Kept for the program to ask back; the text views lay out their text
+    /// themselves.
+    var typesetterObject: NSObject?
+    @ObjCMethod("typesetter") func managerTypesetter() -> NSObject? { typesetterObject ?? NSATSTypesetter.sharedTypesetter() }
+    @ObjCMethod("setTypesetter:") func setTypesetter(_ value: NSObject?) { typesetterObject = value }
+    @ObjCMethod("typesetterBehavior") func typesetterBehavior() -> Int { NSTypesetter.latestBehavior }
+    @ObjCMethod("setTypesetterBehavior:") func setTypesetterBehavior(_ value: Int) {}
     @ObjCMethod("ensureLayoutForTextContainer:") func ensureLayout(for container: NSTextContainer?) {}
     @ObjCMethod("ensureLayoutForCharacterRange:") func ensureLayout(forCharacterRange range: NSRange) {}
     @ObjCMethod("usedRectForTextContainer:")
@@ -178,7 +458,7 @@ open class NSLayoutManager: NSObject {
         guard let view = container?.textView else { return .zero }
         return CGRect(origin: .zero, size: view.textSize(width: container?.size.width ?? view.bounds.width))
     }
-    @ObjCMethod("numberOfGlyphs") func numberOfGlyphs() -> UInt { textStorage?.length() ?? 0 }
+    @ObjCMethod("numberOfGlyphs") func numberOfGlyphs() -> UInt { UInt(textStorage?.textLength ?? 0) }
     @ObjCMethod("setAllowsNonContiguousLayout:") func setAllowsNonContiguousLayout(_ value: Bool) {}
     @ObjCMethod("setBackgroundLayoutEnabled:") func setBackgroundLayoutEnabled(_ value: Bool) {}
     @ObjCMethod("setShowsInvisibleCharacters:") func setShowsInvisibleCharacters(_ value: Bool) {}
@@ -256,6 +536,59 @@ open class NSLayoutManager: NSObject {
     func invalidateLayout(forCharacterRange range: NSRange, actual: UnsafeMutableRawPointer?) { view?.textChanged() }
 }
 
+/// NSTypesetter: the object a layout manager lays lines out with, which
+/// programs subclass (Xcode's editor does) and give their layout manager.
+/// Text views here lay out their own text, so a typesetter keeps the
+/// settings it is given for the program to read back.
+@ObjCClass("NSTypesetter")
+open class NSTypesetter: NSObject {
+    /// NSTypesetterLatestBehavior.
+    static let latestBehavior = -1
+
+    var behavior = NSTypesetter.latestBehavior
+    var padding: CGFloat = 0
+    var fontLeading = true
+    var hyphenation: Float = 0
+    var bidiProcessing = true
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
+
+    @ObjCClassMethod("sharedSystemTypesetter") static func sharedSystemTypesetter() -> NSObject { NSATSTypesetter.sharedTypesetter() }
+    @ObjCClassMethod("sharedSystemTypesetterForBehavior:") static func sharedSystemTypesetter(forBehavior behavior: Int) -> NSObject {
+        NSATSTypesetter.sharedTypesetter()
+    }
+    @ObjCClassMethod("defaultTypesetterBehavior") static func defaultTypesetterBehavior() -> Int { latestBehavior }
+
+    @ObjCMethod("typesetterBehavior") func typesetterBehavior() -> Int { behavior }
+    @ObjCMethod("setTypesetterBehavior:") func setTypesetterBehavior(_ value: Int) { behavior = value }
+    @ObjCMethod("lineFragmentPadding") func lineFragmentPadding() -> CGFloat { padding }
+    @ObjCMethod("setLineFragmentPadding:") func setLineFragmentPadding(_ value: CGFloat) { padding = value }
+    @ObjCMethod("usesFontLeading") func usesFontLeading() -> Bool { fontLeading }
+    @ObjCMethod("setUsesFontLeading:") func setUsesFontLeading(_ value: Bool) { fontLeading = value }
+    @ObjCMethod("hyphenationFactor") func hyphenationFactor() -> Float { hyphenation }
+    @ObjCMethod("setHyphenationFactor:") func setHyphenationFactor(_ value: Float) { hyphenation = value }
+    @ObjCMethod("bidiProcessingEnabled") func bidiProcessingEnabled() -> Bool { bidiProcessing }
+    @ObjCMethod("setBidiProcessingEnabled:") func setBidiProcessingEnabled(_ value: Bool) { bidiProcessing = value }
+}
+
+/// NSATSTypesetter: the system's concrete typesetter.
+@ObjCClass("NSATSTypesetter")
+open class NSATSTypesetter: NSTypesetter {
+    nonisolated(unsafe) private static var shared: NSATSTypesetter?
+
+    @ObjCMethod("init")
+    public required init() { super.init() }
+
+    @ObjCClassMethod("sharedTypesetter")
+    static func sharedTypesetter() -> NSObject {
+        if let shared { return shared }
+        let typesetter = NSATSTypesetter()
+        shared = typesetter
+        return typesetter
+    }
+}
+
 @ObjCClass("NSTextContainer")
 open class NSTextContainer: NSObject {
     var size = CGSize(width: 10_000_000, height: 10_000_000)
@@ -311,6 +644,22 @@ open class NSTextContainer: NSObject {
     @ObjCMethod("textView") func containerTextView() -> NSTextView? { textView }
     @ObjCMethod("setTextView:") func setTextView(_ view: NSTextView?) { textViewObject = view?.objcObject }
     @ObjCMethod("layoutManager") func containerLayoutManager() -> NSLayoutManager? { layoutManager }
+    /// The new layout manager takes the old one's containers and storage,
+    /// and their text views use it.
+    @ObjCMethod("replaceLayoutManager:")
+    func replaceLayoutManager(_ value: NSLayoutManager?) {
+        guard let value, let old = layoutManager, old !== value else {
+            layoutManagerObject = value?.objcObject
+            return
+        }
+        let moved = old.containers
+        old.containers.removeAll()
+        for container in moved {
+            value.addTextContainer(container)
+            container.textView?.manager = value
+        }
+        if let storage = old.textStorage { Send.void(storage.objcObject, "addLayoutManager:", value.objcObject) }
+    }
     @ObjCMethod("setMaximumNumberOfLines:") func setMaximumNumberOfLines(_ value: Int) {}
     @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ value: Int) {}
 }
@@ -364,7 +713,14 @@ open class NSTextView: NSText {
     /// The automatic substitution, spelling and the like switches set, by name.
     var switches: [String: Bool] = [:]
     var checkingTypes: UInt64 = 0
-    var storage: NSTextStorage?
+    /// The storage the view made or was made with, kept alive here.
+    var ownStorage: NSTextStorage?
+    /// The text: the layout manager's storage, which a program may replace
+    /// (Xcode gives its editor's its own).
+    var storage: NSTextStorage? {
+        get { manager?.textStorage ?? ownStorage }
+        set { ownStorage = newValue }
+    }
     var container: NSTextContainer?
     var manager: NSLayoutManager?
     var textContainerInset = CGSize.zero
@@ -399,6 +755,9 @@ open class NSTextView: NSText {
         setUpText(size: frame.size)
     }
 
+    /// The container's layout manager is the view's, with a storage until
+    /// the program gives it its own (Xcode's editor adds its document's
+    /// storage to the layout manager it made the view with).
     @ObjCMethod("initWithFrame:textContainer:")
     public required init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame)
@@ -407,6 +766,11 @@ open class NSTextView: NSText {
             manager = textContainer.layoutManager
             storage = manager?.textStorage
             textContainer.textViewObject = objcObject
+        }
+        if let manager, storage == nil {
+            let made = NSTextStorage()
+            made.addLayoutManager(manager)
+            storage = made
         }
         if storage == nil { setUpText(size: frame.size) }
     }
@@ -468,18 +832,24 @@ open class NSTextView: NSText {
     @ObjCMethod("string") func textString() -> String { string }
     @ObjCMethod("setString:")
     func setString(_ value: String?) {
-        storage?.contents = NSTextStorage.makeContents(value)
-        applyFont(effectiveFont, to: NSRange(location: 0, length: storage?.length() ?? 0))
+        guard let storage else { return }
+        if storage.keepsOwnText {
+            storage.contents = NSTextStorage.makeContents(value)
+        } else {
+            storage.replaceText(in: NSRange(location: 0, length: UInt(storage.textLength)), with: value ?? "")
+        }
+        applyFont(effectiveFont, to: NSRange(location: 0, length: UInt(storage.textLength)))
         textChanged()
     }
 
     /// Text in a text view always has a font, as AppKit's storage fixes it,
     /// and apps read it back from the attributes.
     private func applyFont(_ font: NSFont, to range: NSRange) {
-        guard range.length > 0, let contents = storage?.contents else { return }
+        guard range.length > 0, let storage else { return }
+        let target = storage.keepsOwnText ? storage.contents.objcObject : storage.objcObject
         typealias Add = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, NSRange) -> Void
         let key = NSObject(objCReturnValue: "NSFont".objCReturnValue()).objcObject
-        unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(contents.objcObject, ObjCRuntime.selector("addAttribute:value:range:"), key, font.objcObject, range)
+        unsafeBitCast(ObjCRuntime.msgSend, to: Add.self)(target, ObjCRuntime.selector("addAttribute:value:range:"), key, font.objcObject, range)
     }
 
     private var typingFont: NSFont {
@@ -522,10 +892,12 @@ open class NSTextView: NSText {
         let replacement = NSObject(objCReturnValue: text.objCReturnValue())
         guard ask(objcObject, ObjCRuntime.selector("shouldChangeTextInRange:replacementString:"), range, replacement.objcObject) else { return }
         if isString {
-            storage.replaceCharacters(in: range, with: text)
+            storage.replaceText(in: range, with: text)
             applyFont(typingFont, to: NSRange(location: range.location, length: UInt(text.utf16.count)))
         } else {
-            storage.replaceCharacters(in: range, withAttributedString: value)
+            typealias Replace = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange, UnsafeMutableRawPointer?) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: Replace.self)(storage.objcObject, ObjCRuntime.selector("replaceCharactersInRange:withAttributedString:"),
+                                                                 range, value.objcObject)
         }
         moveInsertionPoint(to: Int(range.location) + text.utf16.count)
         Send.void(objcObject, "didChangeText")
@@ -533,7 +905,7 @@ open class NSTextView: NSText {
 
     @ObjCMethod("replaceCharactersInRange:withString:")
     func replaceCharacters(in range: NSRange, with text: String?) {
-        storage?.replaceCharacters(in: range, with: text ?? "")
+        storage?.replaceText(in: range, with: text ?? "")
         textChanged()
     }
 
@@ -555,7 +927,7 @@ open class NSTextView: NSText {
     @ObjCMethod("selectedRange") func viewSelectedRange() -> NSRange { selectedRange }
     @ObjCMethod("setSelectedRange:")
     func setSelectedRange(_ range: NSRange) {
-        let length = storage?.length() ?? 0
+        let length = UInt(storage?.textLength ?? 0)
         let location = min(range.location, length)
         selectedRange = NSRange(location: location, length: min(range.length, length - location))
         selectionAnchor = Int(selectedRange.location)
@@ -584,7 +956,7 @@ open class NSTextView: NSText {
     @ObjCMethod("scrollToEndOfDocument:") func scrollToEndOfDocument(_ sender: NSObject?) { _ = scrollRectToVisible(CGRect(x: 0, y: max(0, bounds.height - 1), width: 1, height: 1)) }
     @ObjCMethod("scrollToBeginningOfDocument:") func scrollToBeginningOfDocument(_ sender: NSObject?) { _ = scrollRectToVisible(CGRect(x: 0, y: 0, width: 1, height: 1)) }
     @ObjCMethod("selectAll:")
-    func selectAll(_ sender: NSObject?) { setSelectedRange(NSRange(location: 0, length: storage?.length() ?? 0)) }
+    func selectAll(_ sender: NSObject?) { setSelectedRange(NSRange(location: 0, length: UInt(storage?.textLength ?? 0))) }
 
     private var selectedText: String {
         let utf16 = Array(string.utf16)
@@ -633,7 +1005,7 @@ open class NSTextView: NSText {
     }
 
     private func moveInsertionPoint(to index: Int, extending: Bool = false) {
-        let length = Int(storage?.length() ?? 0)
+        let length = Int(storage?.textLength ?? 0)
         let target = max(0, min(length, index))
         if !extending { selectionAnchor = target }
         selectedRange = NSRange(location: UInt(min(selectionAnchor, target)), length: UInt(abs(selectionAnchor - target)))
@@ -651,7 +1023,7 @@ open class NSTextView: NSText {
         guard let current = fragment(containing: movingEnd), let index = all.firstIndex(where: { $0.range == current.range }) else { return movingEnd }
         let target = index + lines
         if target < 0 { return 0 }
-        if target >= all.count { return Int(storage?.length() ?? 0) }
+        if target >= all.count { return Int(storage?.textLength ?? 0) }
         return characterIndex(at: CGPoint(x: x(of: movingEnd, in: current), y: all[target].rect.midY))
     }
 
@@ -756,7 +1128,7 @@ open class NSTextView: NSText {
     @ObjCMethod("setFont:")
     func setFont(_ value: NSFont?) {
         font = value
-        if let value { applyFont(value, to: NSRange(location: 0, length: storage?.length() ?? 0)) }
+        if let value { applyFont(value, to: NSRange(location: 0, length: UInt(storage?.textLength ?? 0))) }
         textChanged()
     }
     @ObjCMethod("alignment") func viewAlignment() -> Int { alignment }
@@ -826,7 +1198,7 @@ open class NSTextView: NSText {
 
     func runs() -> (runs: [TextRun], style: TextStyle) {
         guard let storage else { return ([], TextStyle()) }
-        let (runs, paragraph) = Text.runs(storage.contents, font: effectiveFont, color: textColor ?? NSColor.textColor())
+        let (runs, paragraph) = Text.runs(storage.keepsOwnText ? storage.contents : storage, font: effectiveFont, color: textColor ?? NSColor.textColor())
         var style = TextStyle()
         style.alignment = alignment
         Text.style(paragraph, into: &style)
@@ -988,7 +1360,7 @@ open class NSTextView: NSText {
         let index = characterIndex(at: point(of: event))
         switch event.clickCount {
         case 2:
-            let start = word(from: min(index + 1, Int(storage?.length() ?? 0)), forward: false)
+            let start = word(from: min(index + 1, Int(storage?.textLength ?? 0)), forward: false)
             setSelectedRange(NSRange(location: UInt(start), length: UInt(max(start, word(from: start, forward: true)) - start)))
         case 3...:
             if let line = fragment(containing: index) { setSelectedRange(NSRange(location: UInt(line.range.lowerBound), length: UInt(line.range.count))) }
