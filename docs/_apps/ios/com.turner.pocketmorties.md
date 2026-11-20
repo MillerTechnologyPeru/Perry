@@ -14,6 +14,7 @@ reports:
     hardware: Lenovo Duet 3
     os: Debian sid
     resolution: "932x430@3"
+    graphics: Metal
     level: 3
     source: body
     notes: Runs into its opening scenes in Rick's garage.
