@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 2
     source: body
     notes: Reaches its loading screen in landscape, then stops on a nil argument or crashes with a memory fault.
@@ -19,6 +20,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Goes from the main menu into a game, with its dialogs, currency symbol and dice working.
