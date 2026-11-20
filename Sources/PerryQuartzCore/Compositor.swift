@@ -36,6 +36,13 @@ public func PerryCAComposite(_ renderer: UnsafeMutableRawPointer?, _ scale: Doub
     guard let renderer else { return false }
     let compositor = Compositor.shared(renderer, scale: CGFloat(scale))
     let layers = (0..<count).compactMap { roots?[$0] }.map(CALayer.wrap)
+    // Through Cacao's engine, as a display list, when that is asked for.
+    if DisplayListCompositor.enabled, let output = compositor.renderer.outputSize {
+        let size = CGSize(width: CGFloat(output.width) / CGFloat(scale), height: CGFloat(output.height) / CGFloat(scale))
+        DisplayListCompositor.shared(renderer, scale: CGFloat(scale)).draw(layers, size: size)
+        compositor.finishFrame()
+        return true
+    }
     compositor.draw(layers)
     return true
 }
@@ -194,6 +201,12 @@ final class Compositor {
             entry.destroy()
             sharedTextures[key] = nil
         }
+        finishFrame()
+    }
+
+    /// The frame rate over the frame, the frame dumped when that is due,
+    /// and the frame shown.
+    func finishFrame() {
         if FrameRate.on { FrameRate.frame(renderer: renderer) }
         dumpFrame()
         renderer.present()
@@ -339,7 +352,7 @@ final class Compositor {
 
     /// Whether the layer, its mask or anything under them has animations,
     /// which change what shows without changing the layers.
-    private static func isAnimating(_ layer: CALayer) -> Bool {
+    static func isAnimating(_ layer: CALayer) -> Bool {
         let state = layer.state
         // A kept animation that has finished holds its last value and
         // changes nothing more: it is not a reason to draw the layer again.
