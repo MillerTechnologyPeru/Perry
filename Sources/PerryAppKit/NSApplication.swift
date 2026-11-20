@@ -189,6 +189,9 @@ open class NSApplication: NSResponder {
                 }
                 Send.void(objcObject, "updateWindows")
             }
+            // Between events none of the program's code is running: objects
+            // a program built for the garbage collector let go of go now.
+            ObjCRuntime.collect()
         }
     }
 
