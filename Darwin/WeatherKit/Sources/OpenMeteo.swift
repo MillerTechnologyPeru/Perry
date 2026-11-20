@@ -1,6 +1,6 @@
 // Open-Meteo's forecast API (https://open-meteo.com/en/docs), answered as
-// WeatherKit's types. It has no minute forecasts or alerts, and its day
-// parts, twilight times and moon rise and set are worked out or left empty.
+// WeatherKit's types. It has no minute forecasts or alerts; the twilights,
+// moon rise and set (Astronomy.swift) and day parts are worked out.
 
 import CoreLocation
 import Foundation
@@ -126,7 +126,7 @@ struct OpenMeteo: Sendable {
             let start = Date(timeIntervalSince1970: TimeInterval(d.time[i]))
             let end = start.addingTimeInterval(86_400)
             let ofDay = hours.filter { $0.date >= start && $0.date < end }
-            return day(d, i, start: start, hours: ofDay, now: now)
+            return day(d, i, start: start, hours: ofDay, now: now, latitude: latitude, longitude: longitude)
         }
         return Weather(
             currentWeather: currentWeather, minuteForecast: nil,
@@ -165,7 +165,7 @@ struct OpenMeteo: Sendable {
             wind: OpenMeteo.wind(speed: value(h.wind_speed_10m, i), direction: value(h.wind_direction_10m, i), gust: value(h.wind_gusts_10m, i)))
     }
 
-    private func day(_ d: Response.Daily, _ i: Int, start: Date, hours: [HourWeather], now: Date) -> DayWeather {
+    private func day(_ d: Response.Daily, _ i: Int, start: Date, hours: [HourWeather], now: Date, latitude: Double, longitude: Double) -> DayWeather {
         let code = d.weather_code[i] ?? 0
         let condition = OpenMeteo.condition(code: code)
         let high = hours.max { $0.temperature < $1.temperature }, low = hours.min { $0.temperature < $1.temperature }
@@ -178,7 +178,8 @@ struct OpenMeteo: Sendable {
             sleet: Measurement(value: 0, unit: .millimeters), precipitation: total, snowfallAmount: SnowfallAmount(amount: snow, snowfallAmount: snow))
         let sunrise = d.sunrise[i].map { Date(timeIntervalSince1970: TimeInterval($0)) }
         let sunset = d.sunset[i].map { Date(timeIntervalSince1970: TimeInterval($0)) }
-        let noon = sunrise.flatMap { rise in sunset.map { Date(timeIntervalSince1970: ($0.timeIntervalSince1970 + rise.timeIntervalSince1970) / 2) } }
+        let sunTimes = Astronomy.sun(dayStarting: start, latitude: latitude, longitude: longitude)
+        let moonTimes = Astronomy.moon(dayStarting: start, latitude: latitude, longitude: longitude)
         let wind = OpenMeteo.wind(speed: value(d.wind_speed_10m_max, i), direction: value(d.wind_direction_10m_dominant, i),
                                   gust: value(d.wind_gusts_10m_max, i))
         let highT = Measurement(value: value(d.temperature_2m_max, i), unit: UnitTemperature.celsius)
@@ -205,8 +206,12 @@ struct OpenMeteo: Sendable {
             highTemperatureTime: high?.date, lowTemperature: lowT, lowTemperatureTime: low?.date, maximumHumidity: humidities.max() ?? 0,
             minimumHumidity: humidities.min() ?? 0, precipitation: OpenMeteo.precipitation(code: code, amount: value(d.precipitation_sum, i)),
             precipitationChance: chance, rainfallAmount: rain, snowfallAmount: snow, precipitationAmountByType: amounts,
-            sun: SunEvents(sunrise: sunrise, solarNoon: noon, sunset: sunset),
-            moon: MoonEvents(phase: OpenMeteo.moonPhase(on: start), moonrise: nil, moonset: nil),
+            sun: SunEvents(
+                astronomicalDawn: sunTimes.astronomicalDawn, nauticalDawn: sunTimes.nauticalDawn, civilDawn: sunTimes.civilDawn,
+                sunrise: sunrise ?? sunTimes.sunrise, solarNoon: sunTimes.solarNoon, sunset: sunset ?? sunTimes.sunset,
+                civilDusk: sunTimes.civilDusk, nauticalDusk: sunTimes.nauticalDusk, astronomicalDusk: sunTimes.astronomicalDusk,
+                solarMidnight: sunTimes.solarMidnight),
+            moon: MoonEvents(phase: OpenMeteo.moonPhase(on: start), moonrise: moonTimes.rise, moonset: moonTimes.set),
             uvIndex: OpenMeteo.uvIndex(Int(value(d.uv_index_max, i).rounded())), maximumVisibility: visibilities.max() ?? 0,
             minimumVisibility: visibilities.min() ?? 0, wind: wind, highWindSpeed: wind.gust,
             daytimeForecast: part(daytime), overnightForecast: part(overnight), restOfDayForecast: rest.isEmpty ? nil : part(rest))
