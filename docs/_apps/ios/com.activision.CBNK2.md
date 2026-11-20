@@ -14,4 +14,7 @@ reports:
     level: 4
     source: body
     notes: Runs under perry32 and plays with a gamepad.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/dd6a05e9-5ec3-4993-b7db-db452f370dca
+        caption: Race in progress
 ---
