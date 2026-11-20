@@ -43,7 +43,9 @@ a merged pull request, which the Last tested column links to.
     {%- assign cpus = "" | split: "" -%}
     {%- for cpu in cpu_order -%}{%- if tested contains cpu -%}{%- assign cpus = cpus | push: cpu -%}{%- endif -%}{%- endfor -%}
     {%- assign cpus = cpus | join: ", " -%}
-    {%- assign shot = current.screenshots | first %}
+    {%- assign shot = nil -%}
+    {%- assign newest_first = app.reports | reverse -%}
+    {%- for report in newest_first -%}{%- if report.screenshots -%}{%- assign shot = report.screenshots | first -%}{%- break -%}{%- endif -%}{%- endfor %}
     <tr>
       <td><a href="{{ app.url | relative_url }}">{{ app.name | escape }}</a><br><code class="bundle-id">{{ app.bundle_id }}</code>{% if app.tags %}<ul class="tags">{% for tag in app.tags %}<li class="tag">{{ tag | escape }}</li>{% endfor %}</ul>{% endif %}</td>
       <td>{{ app.kind | capitalize }}</td>
