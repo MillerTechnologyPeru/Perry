@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Runs, lays out as on macOS, follows dark mode, takes typing, and its status bar menus work.
@@ -22,6 +23,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Bundle commands run from submenus, and tabs and syntax colors draw.
