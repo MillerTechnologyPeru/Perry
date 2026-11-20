@@ -317,10 +317,40 @@ open class NSTextStorage: NSObject {
         manager.textChanged()
     }
     @ObjCMethod("removeLayoutManager:") func removeLayoutManager(_ manager: NSLayoutManager?) { layoutManagers.removeAll { $0 === manager } }
-    /// What the last edit changed, as -edited:range:changeInLength: gave it.
-    var editedMask: UInt = 0
-    var editedRange = NSRange(location: 0, length: 0)
-    var changeInLength = 0
+    /// AppKit's instance variables for the edit being processed, which
+    /// subclasses read themselves (Xcode's text storages read the edited
+    /// range and delta in their -processEditing): the edited range and
+    /// change in length, the flags holding the edited mask in their low
+    /// byte, and side data.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] {
+        [ObjCInstanceVariable("_editedRange", size: 16, alignment: 3, types: "{_NSRange=QQ}"),
+         ObjCInstanceVariable("_editedDelta", size: 8, alignment: 3, types: "q"),
+         ObjCInstanceVariable("_flags", size: 4, alignment: 2, types: "I"),
+         ObjCInstanceVariable("_sideData", types: "@")]
+    }
+
+    private static let offsets: (range: Int, delta: Int, flags: Int) = (
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_editedRange") ?? 0,
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_editedDelta") ?? 0,
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_flags") ?? 0)
+
+    /// What the last edit changed, as -edited:range:changeInLength: gave it,
+    /// kept in AppKit's instance variables.
+    var editedMask: UInt {
+        get { UInt(objcObject.load(fromByteOffset: Self.offsets.flags, as: UInt32.self) & 0xff) }
+        set {
+            let flags = objcObject.load(fromByteOffset: Self.offsets.flags, as: UInt32.self)
+            objcObject.storeBytes(of: flags & ~0xff | UInt32(newValue & 0xff), toByteOffset: Self.offsets.flags, as: UInt32.self)
+        }
+    }
+    var editedRange: NSRange {
+        get { objcObject.load(fromByteOffset: Self.offsets.range, as: NSRange.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.range, as: NSRange.self) }
+    }
+    var changeInLength: Int {
+        get { objcObject.load(fromByteOffset: Self.offsets.delta, as: Int.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.delta, as: Int.self) }
+    }
 
     @ObjCMethod("beginEditing") func beginEditing() { editing += 1 }
     /// The outermost -endEditing processes the edits, through -processEditing
@@ -330,6 +360,19 @@ open class NSTextStorage: NSObject {
         editing = max(0, editing - 1)
         if editing == 0 { Send.void(objcObject, "processEditing") }
     }
+    /// A file read into the storage itself, not the attributed string its
+    /// other messages go to: a subclass keeping its own text (Xcode's) gets
+    /// it through its -replaceCharactersInRange:withString:.
+    @ObjCMethod("readFromURL:options:documentAttributes:")
+    func read(from url: NSObject?, options: NSObject?, documentAttributes: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        AttributedStringReading.read(into: objcObject, from: url, options: options, documentAttributes: documentAttributes)
+    }
+    @ObjCMethod("readFromURL:options:documentAttributes:error:")
+    func read(from url: NSObject?, options: NSObject?, documentAttributes: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+              error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        AttributedStringReading.read(into: objcObject, from: url, options: options, documentAttributes: documentAttributes)
+    }
+
     @ObjCMethod("edited:range:changeInLength:")
     func edited(_ mask: UInt, range: NSRange, changeInLength delta: Int) {
         (editedMask, editedRange, changeInLength) = (mask, range, delta)
