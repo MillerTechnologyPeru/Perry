@@ -45,7 +45,7 @@ a merged pull request, which the Last tested column links to.
     {%- assign cpus = cpus | join: ", " -%}
     {%- assign shot = current.screenshots | first %}
     <tr>
-      <td><a href="{{ app.url | relative_url }}">{{ app.name | escape }}</a><br><code class="bundle-id">{{ app.bundle_id }}</code></td>
+      <td><a href="{{ app.url | relative_url }}">{{ app.name | escape }}</a><br><code class="bundle-id">{{ app.bundle_id }}</code>{% if app.tags %}<ul class="tags">{% for tag in app.tags %}<li class="tag">{{ tag | escape }}</li>{% endfor %}</ul>{% endif %}</td>
       <td>{{ app.kind | capitalize }}</td>
       <td>{{ cpus }}</td>
       <td><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ level.name }}</span></td>
