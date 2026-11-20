@@ -31,6 +31,17 @@ struct Encoder {
         typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Bool, UnsafeMutableRawPointer?) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(coder.objcObject, ObjCRuntime.selector("encodeBool:forKey:"), value, key(name))
     }
+    func double(_ value: Double, _ name: String) {
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Double, UnsafeMutableRawPointer?) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(coder.objcObject, ObjCRuntime.selector("encodeDouble:forKey:"), value, key(name))
+    }
+    func bytes(_ value: [UInt8], _ name: String) {
+        typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeRawPointer?, Int, UnsafeMutableRawPointer?) -> Void
+        value.withUnsafeBytes {
+            unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(coder.objcObject, ObjCRuntime.selector("encodeBytes:length:forKey:"), $0.baseAddress,
+                                                           value.count, key(name))
+        }
+    }
     func rect(_ value: CGRect, _ name: String) {
         typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, CGRect, UnsafeMutableRawPointer?) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(coder.objcObject, ObjCRuntime.selector("encodeRect:forKey:"), value, key(name))
@@ -46,6 +57,7 @@ open class NSCustomObject: NSObject {
     var className: String?
     var object: NSObject?
 
+    @ObjCMethod("init")
     public required override init() { super.init() }
 
     /// "NSClassName": the class of the object the nib makes.
@@ -92,14 +104,12 @@ open class NSCustomView: NSView {
     }
 
     @ObjCMethod("encodeWithCoder:")
-    func encode(with coder: NSObject?) {
+    override func encode(with coder: NSObject?) {
+        super.encode(with: coder)
         guard let coder else { return }
         let encoder = Encoder(coder: coder)
         encoder.string(className, "NSClassName")
         encoder.object(extensionObject, "NSExtension")
-        encoder.rect(frame, "NSFrame")
-        encoder.integer(Int(autoresizingMask) | (hidden ? Int(bitPattern: 0x8000_0000) : 0), "NSvFlags")
-        if !subviews.isEmpty { encoder.object(NSMutableArray.of(subviews), "NSSubviews") }
     }
 
     @ObjCMethod("className") func customClassName() -> String? { className }
@@ -113,6 +123,7 @@ open class NSCustomResource: NSObject {
     var className: String?
     var resourceName: String?
 
+    @ObjCMethod("init")
     public required override init() { super.init() }
 
     /// "NSClassName" (NSImage, NSSound, NSColor) and "NSResourceName".
@@ -142,21 +153,51 @@ open class NSCustomResource: NSObject {
 /// A window's settings, from which loading the nib makes the window.
 @ObjCClass("NSWindowTemplate")
 open class NSWindowTemplate: NSObject {
+    /// AppKit's instance variables that Interface Builder's Cocoa plug-in
+    /// reads and writes itself: the window's and screen's rectangles and the
+    /// content view. The template keeps those values in them.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] {
+        let rect = "{CGRect={CGPoint=dd}{CGSize=dd}}"
+        return [ObjCInstanceVariable("windowRect", size: 32, alignment: 3, types: rect),
+                ObjCInstanceVariable("screenRect", size: 32, alignment: 3, types: rect),
+                ObjCInstanceVariable("windowView", types: "@\"NSView\"")]
+    }
+
+    private static let offsets: (window: Int, screen: Int, view: Int) = (
+        ObjCRuntime.ivarOffset(NSWindowTemplate.objCClass, "windowRect") ?? 0,
+        ObjCRuntime.ivarOffset(NSWindowTemplate.objCClass, "screenRect") ?? 0,
+        ObjCRuntime.ivarOffset(NSWindowTemplate.objCClass, "windowView") ?? 0)
+
     var windowClass = "NSWindow"
     var title = ""
-    var frame = CGRect.zero
+    var frame: CGRect {
+        get { objcObject.load(fromByteOffset: Self.offsets.window, as: CGRect.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.window, as: CGRect.self) }
+    }
     var styleMask: UInt = 0
     var backingType: UInt = 2
-    var view: NSView?
+    /// Held retained in the instance variable.
+    var view: NSView? {
+        get { objcObject.load(fromByteOffset: Self.offsets.view, as: UnsafeMutableRawPointer?.self).map { NSView.objCInstance($0, ownership: .retain) } }
+        set {
+            let old = objcObject.load(fromByteOffset: Self.offsets.view, as: UnsafeMutableRawPointer?.self)
+            objcObject.storeBytes(of: ObjCRuntime.retain(newValue?.objcObject), toByteOffset: Self.offsets.view, as: UnsafeMutableRawPointer?.self)
+            ObjCRuntime.release(old)
+        }
+    }
     var minSize = CGSize.zero
     var maxSize = CGSize(width: 10_000_000, height: 10_000_000)
     var contentMinSize = CGSize.zero
     var contentMaxSize = CGSize(width: 10_000_000, height: 10_000_000)
     var autosaveName = ""
     var flags = 0
-    var screenRect = CGRect.zero
+    var screenRect: CGRect {
+        get { objcObject.load(fromByteOffset: Self.offsets.screen, as: CGRect.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.screen, as: CGRect.self) }
+    }
     var viewClass: String?
 
+    @ObjCMethod("init")
     public required override init() { super.init() }
 
     @ObjCMethod("initWithCoder:")
