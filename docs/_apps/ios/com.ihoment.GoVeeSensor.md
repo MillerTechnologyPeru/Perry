@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "7.7.20"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Draws its home screen and responds to taps; Add Device runs its Bluetooth scan.
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     app_version: "7.7.20"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Logs in, opens all five tabs, lists the account's devices and holds its AWS IoT connection.
@@ -34,6 +36,7 @@ reports:
     cpu: arm64
     app_version: "7.7.20"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: The tab bar hides for pushed screens.
@@ -44,6 +47,7 @@ reports:
     cpu: arm64
     app_version: "7.7.20"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its custom tab bar is sized and its icons fit.
