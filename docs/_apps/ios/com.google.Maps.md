@@ -3,6 +3,7 @@ name: Google Maps
 bundle_id: "com.google.Maps"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 131
     date: 2026-11-10
