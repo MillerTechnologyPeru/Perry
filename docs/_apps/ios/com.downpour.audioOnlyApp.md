@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "7.8.17"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: Gets through Sentry's and Koin's start-up.
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     app_version: "7.8.17"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: Its player popup no longer crashes in the Swift runtime.
@@ -31,6 +33,7 @@ reports:
     cpu: arm64
     app_version: "7.8.17"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Starts and shows its welcome sheet.
