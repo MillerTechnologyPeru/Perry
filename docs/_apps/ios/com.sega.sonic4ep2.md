@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2, Retroid Pocket 5
+    os: ROCKNIX
     level: 2
     source: body
     notes: Gets through its intro and cutscene, then stops on its first loading screen.
