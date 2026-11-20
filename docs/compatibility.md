@@ -48,9 +48,15 @@ a merged pull request, which the Last tested column links to.
       <td><a href="{{ app.url | relative_url }}">{{ app.name | escape }}</a><br><code class="bundle-id">{{ app.bundle_id }}</code>{% if app.tags %}<ul class="tags">{% for tag in app.tags %}<li class="tag">{{ tag | escape }}</li>{% endfor %}</ul>{% endif %}</td>
       <td>{{ app.kind | capitalize }}</td>
       <td>{{ cpus }}</td>
+      {%- if current %}
       <td><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ level.name }}</span></td>
       <td class="nowrap">{{ current.date | date: "%Y-%m-%d" }}<br><a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ current.pr }}">#{{ current.pr }}</a></td>
       <td class="notes">{{ current.notes | escape }}</td>
+      {%- else %}
+      <td><span class="badge untested">Not tested yet</span></td>
+      <td></td>
+      <td></td>
+      {%- endif %}
       <td>{% if shot %}<a href="{{ app.url | relative_url }}"><img src="{{ shot.url }}" alt="{{ shot.caption | escape }}" width="160" loading="lazy"></a>{% endif %}</td>
     </tr>
   {%- endfor %}
