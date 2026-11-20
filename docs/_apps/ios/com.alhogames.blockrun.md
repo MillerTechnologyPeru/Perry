@@ -3,6 +3,7 @@ name: Block Run World
 bundle_id: "com.alhogames.blockrun"
 platform: ios
 kind: game
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 192
     date: 2026-11-18
