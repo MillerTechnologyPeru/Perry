@@ -14,6 +14,7 @@ reports:
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
     resolution: "390x844@3"
+    graphics: Metal
     fps: 30
     env:
       - "PERRY_UIKIT_SCREEN=390x844@3"
@@ -33,6 +34,7 @@ reports:
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
     resolution: "390x844@3"
+    graphics: OpenGL ES 2
     fps: 60
     env:
       - "PERRY_UIKIT_SCREEN=390x844@3"
