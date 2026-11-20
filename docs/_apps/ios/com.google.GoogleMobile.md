@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "447.9"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Builds its home screen's views, but its layout constants are wrong and only the notifications bell draws.
