@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "26.11.20"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Shows its welcome screen with its illustration, and Get started opens the Sign in sheet.
