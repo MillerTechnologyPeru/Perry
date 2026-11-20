@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "4.7"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Shows its welcome window and Learn to Code's starting points; Create New App stops while evaluating the package manifest.
