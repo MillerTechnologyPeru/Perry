@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "6.0.261109"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Shows its welcome screen with its Sign In button; signing in needs a real account.
