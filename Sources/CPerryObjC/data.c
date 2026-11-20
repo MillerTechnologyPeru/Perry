@@ -2,6 +2,7 @@
 // through the accessors in CPerryObjC.h.
 
 #include "CPerryObjC.h"
+#include <string.h>
 
 #define DARWIN_SYMBOL(name) __asm__(name) __attribute__((visibility("default"), used))
 
@@ -19,6 +20,19 @@ void *perry_objc_empty_cache(void) { return darwin_objc_empty_cache; }
 // NSObject's isa's offset, 0, which code that reads an object's class
 // itself (Xcode's) loads, pointer-sized.
 long darwin_objc_ivar_nsobject_isa DARWIN_SYMBOL("_OBJC_IVAR_$_NSObject.isa") = 0;
+
+// objc_absolute_packed_isa_class_mask: an absolute symbol whose address is
+// the mask that takes an isa to its class. The Swift runtime for macOS on
+// x86_64 checks it against its own at startup. Classes here are plain
+// pointers, which the mask leaves as they are. The loader asks for it here,
+// as it is no address in this library.
+__attribute__((visibility("default"), used))
+void *perry_provider_symbol(const char *name) {
+#if defined(__x86_64__)
+    if (strcmp(name, "_objc_absolute_packed_isa_class_mask") == 0) return (void *)0x00007ffffffffff8;
+#endif
+    return 0;
+}
 
 // Root classes. The Swift runtime fills these in at startup, before any
 // Mach-O code runs; images bind to the addresses when they load.
