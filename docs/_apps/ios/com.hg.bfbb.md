@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: Metal
     level: 1
     source: body
     notes: Gets through the engine's start to a Metal device and layer, then stops at missing Metal.
