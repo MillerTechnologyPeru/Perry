@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "3.7.4"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Launches into its tab bar, and all five tabs open.
