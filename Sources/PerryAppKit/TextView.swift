@@ -430,8 +430,21 @@ open class NSLayoutManager: NSObject {
 
     @ObjCMethod("textStorage") func managerTextStorage() -> NSTextStorage? { textStorage }
     @ObjCMethod("setTextStorage:") func setTextStorage(_ value: NSTextStorage?) { textStorage = value }
-    /// Sent, so a storage subclass's -addLayoutManager: runs.
-    @ObjCMethod("replaceTextStorage:") func replaceTextStorage(_ value: NSTextStorage?) { Send.void(value?.objcObject, "addLayoutManager:", objcObject) }
+    /// Sent, so a storage subclass's -addLayoutManager: runs. A text view
+    /// that kept the old storage keeps the new one instead, as AppKit's text
+    /// views own the text system they made (Xcode's console replaces its
+    /// storage with one it autoreleases).
+    @ObjCMethod("replaceTextStorage:")
+    func replaceTextStorage(_ value: NSTextStorage?) {
+        // The old storage lives until the manager has left it.
+        let old = textStorage
+        Send.void(value?.objcObject, "addLayoutManager:", objcObject)
+        for container in containers {
+            guard let view = container.textView, view.ownStorage == nil || view.ownStorage === old else { continue }
+            view.ownStorage = value
+        }
+        withExtendedLifetime(old) {}
+    }
     @ObjCMethod("firstTextView") func firstTextView() -> NSTextView? { containers.first?.textView }
     @ObjCMethod("textViewForBeginningOfSelection") func textViewForBeginningOfSelection() -> NSTextView? { containers.first?.textView }
     @ObjCMethod("textContainers") func textContainers() -> NSObject { NSMutableArray.of(containers) }
