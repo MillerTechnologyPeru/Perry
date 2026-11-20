@@ -13,4 +13,7 @@ reports:
     level: 4
     source: body
     notes: Its menus work and it plays races.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1caf6918-ea44-4957-9983-11f899c97921
+        caption: Race in progress
 ---
