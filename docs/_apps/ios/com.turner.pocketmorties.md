@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "2.41.0"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Runs into its opening scenes in Rick's garage.
