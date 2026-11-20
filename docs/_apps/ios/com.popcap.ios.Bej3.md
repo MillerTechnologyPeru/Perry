@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2, Retroid Pocket 5
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays.
@@ -19,6 +20,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays, with its level music; an iPad screen is available with PERRY_UIKIT_SCREEN=ipad.
