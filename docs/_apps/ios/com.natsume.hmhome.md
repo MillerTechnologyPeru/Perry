@@ -14,4 +14,7 @@ reports:
     level: 2
     source: body
     notes: Gets past its title's Game Center wait and draws at its full 30 frames a second.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/7ba05847-e4bc-4e1e-ab93-423a634afa36
+        caption: Title screen
 ---
