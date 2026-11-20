@@ -15,4 +15,7 @@ reports:
     level: 3
     source: body
     notes: Its age gate, main menu and game setup draw correctly; entering a game is unchecked.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/a7417a15-7fb0-4423-90a3-54d1c8ecbfab
+        caption: Game mode menu
 ---
