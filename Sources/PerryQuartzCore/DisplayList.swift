@@ -116,6 +116,7 @@ final class DisplayListCompositor {
 
     private init(renderer: UnsafeMutableRawPointer, scale: CGFloat) {
         (self.renderer, self.scale) = (renderer, scale)
+        "perry: QuartzCore: compositing through Cacao's engine\n".withCString { _ = write(2, $0, strlen($0)) }
         // Compositing is on the main thread, where the engine draws.
         nonisolated(unsafe) let pointer = OpaquePointer(renderer)
         host = MainActor.assumeIsolated {
