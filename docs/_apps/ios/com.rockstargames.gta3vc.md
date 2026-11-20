@@ -14,4 +14,7 @@ reports:
     level: 4
     source: body
     notes: Plays, from its intro movie into the city.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/5e03ba14-81b5-4651-acb9-812cb7323113
+        caption: In the city
 ---
