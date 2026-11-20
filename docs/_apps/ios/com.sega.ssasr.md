@@ -3,6 +3,7 @@ name: Sonic & SEGA All-Stars Racing
 bundle_id: "com.sega.ssasr"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 68
     date: 2026-11-06
