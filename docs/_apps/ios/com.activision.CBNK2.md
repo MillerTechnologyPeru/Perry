@@ -3,6 +3,7 @@ name: Crash Bandicoot Nitro Kart 2
 bundle_id: "com.activision.CBNK2"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 63
     date: 2026-11-06
