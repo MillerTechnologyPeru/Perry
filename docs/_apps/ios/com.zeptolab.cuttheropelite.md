@@ -14,6 +14,7 @@ reports:
     hardware: Lenovo Duet 3
     os: Debian sid
     resolution: "320x480"
+    graphics: OpenGL ES 1
     level: 2
     source: body
     notes: Reaches its age-gate screen; levels and sound are untried.
