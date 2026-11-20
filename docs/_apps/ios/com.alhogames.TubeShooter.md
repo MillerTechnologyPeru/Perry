@@ -13,4 +13,7 @@ reports:
     level: 2
     source: body
     notes: Shows its title screen with its wormhole.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/00954438-2570-42d6-b13a-d62dfdc5eb82
+        caption: Title screen
 ---
