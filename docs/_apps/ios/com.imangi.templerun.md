@@ -14,6 +14,9 @@ reports:
     level: 2
     source: body
     notes: Reaches its first screen with Unity on Metal; not playable yet.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/d5ee9f5f-7f47-4f54-8360-1b0a803165b3
+        caption: First screen
   - pr: 66
     date: 2026-11-06
     perry: "fa5f0ced"
@@ -24,4 +27,7 @@ reports:
     level: 2
     source: body
     notes: Reaches its loading screen on OpenGL ES 2; not playable yet.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/63e78cfe-0300-4b1e-b59a-7665115c7ec5
+        caption: Loading screen
 ---
