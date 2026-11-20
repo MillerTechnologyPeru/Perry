@@ -11,6 +11,7 @@ reports:
     cpu: armv6
     app_version: "1.0.5"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 4
     source: body
     notes: Runs under perry32 and plays with a gamepad.
