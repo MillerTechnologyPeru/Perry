@@ -843,7 +843,7 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     unit *u = valid(handle);
     if (!u) return kAudio_ParamError;
     OSStatus status = 0;
-    bool replaced_callback = false;
+    bool replaced_input = false;
     pthread_mutex_lock(&u->lock);
     switch (id) {
     case kAudioUnitProperty_StreamFormat: {
@@ -907,7 +907,7 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     case kAudioUnitProperty_SetRenderCallback: {
         if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
         bus *b = &u->inputs[element];
-        replaced_callback = b->callback != NULL;
+        replaced_input = b->source || b->callback;
         // AURenderCallbackStruct: the function, then its refcon, a word each.
         if (value && size >= 2 * sizeof(void *)) {
             memcpy(&b->callback, value, sizeof b->callback);
@@ -920,9 +920,15 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
         break;
     }
     case kAudioUnitProperty_MakeConnection: {
-        if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
-        bus *b = &u->inputs[element];
-        // AudioUnitConnection: the source unit, a word, then two 32-bit numbers.
+        // AudioUnitConnection: the source unit, a word, then two 32-bit
+        // numbers, its output and the input it goes to. That input is the
+        // one connected, as on Darwin, whatever element is given: apps pass 0.
+        uint32_t input = element;
+        if (value && size >= sizeof(void *) + 8) memcpy(&input, (const uint8_t *)value + sizeof(void *) + 4, 4);
+        if (input >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
+        bus *b = &u->inputs[input];
+        element = input;
+        replaced_input = b->source || b->callback;
         if (value && size >= sizeof(void *) + 8) {
             void *source;
             memcpy(&source, value, sizeof source);
@@ -939,9 +945,10 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
         break;
     }
     pthread_mutex_unlock(&u->lock);
-    // A callback taken away isn't called once this returns, as on Darwin:
-    // waits out a mix under way, unless this is that mix's thread.
-    if (replaced_callback && u->component->kind != OUTPUT && !(u->mixing && pthread_equal(pthread_self(), u->mixing_thread))) {
+    // An input's callback or source taken away isn't called once this
+    // returns, as on Darwin: waits out a mix under way, unless this is that
+    // mix's thread.
+    if (replaced_input && u->component->kind != OUTPUT && !(u->mixing && pthread_equal(pthread_self(), u->mixing_thread))) {
         pthread_mutex_lock(&u->rendering);
         pthread_mutex_unlock(&u->rendering);
     }
