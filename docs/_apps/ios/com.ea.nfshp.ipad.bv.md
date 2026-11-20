@@ -13,4 +13,7 @@ reports:
     level: 4
     source: body
     notes: Plays its tutorial race.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/c4d42a13-7190-4f4f-927a-ac78b071d022
+        caption: Tutorial race
 ---
