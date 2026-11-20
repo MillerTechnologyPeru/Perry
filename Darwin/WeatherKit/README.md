@@ -20,6 +20,11 @@ nil, and `availability` says they are unsupported); twilight times and
 moonrise and moonset are nil; the moon's phase is worked out; the parts of
 a day are made from the hours.
 
+The weather symbols (`symbolName`) are SF Symbols, which Perry draws from
+what macOS renders into the app's copy: copy `SFSymbols.txt` here (the names,
+and their `.fill` forms that apps build) into `<App>.app` before
+`Scripts/extract-assets.sh`, since the app's own files don't name them.
+
 Not here yet: statistics (`dailyStatistics`, `hourlyStatistics`,
 `monthlyStatistics`, `dailySummary`), `.changes`, `.historicalComparisons`,
 air quality, and Apple's own REST API with a signed token (a Service
