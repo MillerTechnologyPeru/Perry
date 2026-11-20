@@ -1,5 +1,5 @@
 {
-  "originHash" : "4b0265a64bdfcae0c7549451084a8a247b00c5c03c55987a235f0d798b192b00",
+  "originHash" : "243dc66cad54092f4dd3baeb5966d5a7f7707ce364d0a8d8ebf64aa355fd971a",
   "pins" : [
     {
       "identity" : "android",
@@ -16,7 +16,7 @@
       "location" : "https://github.com/PureSwift/Cacao.git",
       "state" : {
         "branch" : "develop",
-        "revision" : "3b4506c57383a8e6120b06acc023d829dd207bf8"
+        "revision" : "d6803d8d202bd3d8f7527ff50830c7fb8c62dd75"
       }
     },
     {
@@ -96,7 +96,7 @@
       "location" : "https://github.com/PureSwift/SDL.git",
       "state" : {
         "branch" : "master",
-        "revision" : "5e491df8b06353ee87b0929776c96a53e668261f"
+        "revision" : "8b77f4f74969dc2ebb622b93c282ffe308ace832"
       }
     },
     {
