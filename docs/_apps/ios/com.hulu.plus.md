@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "9.40.0"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Goes from its launch splash to its Welcome screen; signing in needs an account.
@@ -23,6 +24,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Its My Disney login form draws its email field, text and Continue button.
