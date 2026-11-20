@@ -3,6 +3,7 @@ name: Cync
 bundle_id: "com.ge.cbyge1"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 164
     date: 2026-11-16
