@@ -1,6 +1,6 @@
 import CPerryGeometry
-import CacaoHost
 import CacaoRender
+import CacaoSDLRenderer
 import Foundation
 import Glibc
 import PerryObjCInterop

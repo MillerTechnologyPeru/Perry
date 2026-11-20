@@ -120,7 +120,7 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
         // Cacao's engine: the display list QuartzCore's layers are drawn as,
-        // its compositor and its SDL host.
+        // and its compositor on an SDL renderer.
         .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop"),
         // SDL3, which UIKit's and AppKit's windows, QuartzCore's compositor, CoreGraphics' displays and
         // GameController's gamepads are drawn and read through.
@@ -516,7 +516,7 @@ let package = Package(
         .target(
             name: "PerryQuartzCore",
             dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop", .product(name: "SDL3Swift", package: "SDL"),
-                           .product(name: "CacaoCompositor", package: "Cacao"), .product(name: "CacaoHost", package: "Cacao")],
+                           .product(name: "CacaoRender", package: "Cacao"), .product(name: "CacaoSDLRenderer", package: "Cacao")],
             plugins: ["PerryProviderPlugin"]
         ),
         // UIKit, a client of libobjc's C API and Foundation's classes.
