@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.3.5"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 3
     source: body
     notes: Reaches its menus.
@@ -20,6 +21,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 3
     source: body
     notes: Launches reliably, shows its menus and runs a level at about 60 frames a second with sound.
