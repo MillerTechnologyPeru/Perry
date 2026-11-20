@@ -4,6 +4,7 @@ bundle_id: "com.PunchThrough.LightBlue"
 platform: ios
 kind: app
 developer: Punch Through
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 5
     date: 2026-11-04
