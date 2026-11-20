@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "6.8.58"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Reaches its full main screen; adding an account needs a real sign-in.
