@@ -3,6 +3,7 @@ name: Monopoly
 bundle_id: "com.ea.monoclinc"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 27
     date: 2026-11-06
