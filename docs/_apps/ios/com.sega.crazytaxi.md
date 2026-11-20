@@ -13,4 +13,7 @@ reports:
     level: 4
     source: body
     notes: Plays.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/4986e864-ac66-47b5-8855-d6c4377faf39
+        caption: In play
 ---
