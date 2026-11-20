@@ -3,6 +3,7 @@ name: "Batman: Arkham City"
 bundle_id: "com.feralinteractive.bmac"
 platform: macos
 kind: game
+tags: [ObjC, C++, Unreal]
 reports:
   - pr: 145
     date: 2026-11-12
