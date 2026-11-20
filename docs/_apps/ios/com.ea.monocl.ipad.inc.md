@@ -3,6 +3,7 @@ name: Monopoly HD
 bundle_id: "com.ea.monocl.ipad.inc"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 18
     date: 2026-11-05
