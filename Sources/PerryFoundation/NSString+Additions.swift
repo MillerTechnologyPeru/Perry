@@ -375,6 +375,15 @@ extension NSString {
         return self
     }
 
+    /// The characters copied (the string keeps its own), then freed if the
+    /// string was to own them.
+    @ObjCMethod("initWithCharactersNoCopy:length:freeWhenDone:")
+    func initialize(charactersNoCopy characters: UnsafeMutablePointer<UInt16>?, length: UInt, freeWhenDone: Bool) -> Self {
+        let string = initialize(characters: characters.map { UnsafePointer($0) }, length: length)
+        if freeWhenDone { free(characters) }
+        return string
+    }
+
     @ObjCMethod("getCharacters:range:")
     func getCharacters(_ buffer: UnsafeMutablePointer<UInt16>?, range: NSRange) {
         let units = value.utf16, location = Int(range.location), length = Int(range.length)
