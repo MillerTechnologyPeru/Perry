@@ -202,6 +202,9 @@ public class NSArray: NSObject {
     @ObjCMethod("initWithArray:")
     func initialize(array other: NSArray?) -> Self { setElements(other?.elements ?? []) }
 
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject?) -> Self { setElements(CollectionCoding.objects(coder?.id)) }
+
     /// With copyItems, each element is the element's -copy.
     @ObjCMethod("initWithArray:copyItems:")
     func initialize(array other: NSArray?, copyItems: Bool) -> Self {
@@ -761,4 +764,44 @@ func nilTerminated(_ first: id?, _ arguments: UnsafeRawPointer?) -> [id] {
         objects.append(next)
     }
     return objects
+}
+
+/// A collection's contents from a keyed coder that isn't NSKeyedUnarchiver
+/// (which makes Foundation's collections itself), as Foundation's
+/// -initWithCoder: reads them: an array under "NS.objects" (and "NS.keys"),
+/// else one object (and key) under each of "NS.object.0", "NS.object.1"…
+/// Interface Builder's XIB decoder gives a dictionary this way.
+enum CollectionCoding {
+    private static func contains(_ coder: id, _ key: String) -> Bool {
+        ObjC.sendBool(coder, ObjC.selector("containsValueForKey:"), Strings.autoreleased(key))
+    }
+
+    private static func object(_ coder: id, _ key: String) -> id? {
+        ObjC.send(coder, ObjC.selector("decodeObjectForKey:"), Strings.autoreleased(key))
+    }
+
+    private static func keyed(_ coder: id?) -> id? {
+        guard let coder, ObjC.sendBool(coder, ObjC.selector("allowsKeyedCoding"), nil) else { return nil }
+        return coder
+    }
+
+    static func objects(_ coder: id?) -> [id] {
+        guard let coder = keyed(coder) else { return [] }
+        if contains(coder, "NS.objects") { return Arrays.elements(object(coder, "NS.objects")) }
+        var objects: [id] = []
+        while let next = object(coder, "NS.object.\(objects.count)") { objects.append(next) }
+        return objects
+    }
+
+    static func entries(_ coder: id?) -> [(key: id, value: id)] {
+        guard let coder = keyed(coder) else { return [] }
+        if contains(coder, "NS.keys") {
+            return zip(Arrays.elements(object(coder, "NS.keys")), Arrays.elements(object(coder, "NS.objects"))).map { (key: $0, value: $1) }
+        }
+        var entries: [(key: id, value: id)] = []
+        while let key = object(coder, "NS.key.\(entries.count)"), let value = object(coder, "NS.object.\(entries.count)") {
+            entries.append((key: key, value: value))
+        }
+        return entries
+    }
 }
