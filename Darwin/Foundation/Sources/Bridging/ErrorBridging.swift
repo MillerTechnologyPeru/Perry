@@ -36,6 +36,28 @@ extension CocoaError.Code: _ErrorCodeProtocol {
     public typealias _ErrorType = CocoaError
 }
 
+// MARK: - POSIXError
+
+// swift-foundation keeps a POSIXError's code alone; here it also bridges as
+// Darwin's does, to an NSError of the POSIX domain, which apps' conformance
+// lookups and code matching (`catch POSIXError.ENOENT`) bind to.
+@available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
+extension POSIXError: _BridgedStoredNSError {
+    public var _nsError: NSError { NSError(domain: NSPOSIXErrorDomain, code: Int(code.rawValue), userInfo: nil) }
+
+    public init(_nsError error: NSError) {
+        self.init(Code(rawValue: Int32(truncatingIfNeeded: error.code)) ?? .EINVAL)
+    }
+
+    public var errorCode: Int { Int(code.rawValue) }
+    public var errorUserInfo: [String: Any] { [:] }
+}
+
+@available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
+extension POSIXErrorCode: _ErrorCodeProtocol {
+    public typealias _ErrorType = POSIXError
+}
+
 // The codes swift-foundation leaves to Darwin's build.
 @available(macOS 10.10, iOS 8.0, watchOS 2.0, tvOS 9.0, *)
 extension CocoaError.Code {
