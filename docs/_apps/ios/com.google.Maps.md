@@ -11,6 +11,7 @@ reports:
     cpu: armv7
     app_version: "4.22.2"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: body
     notes: Starts and draws its map view, search bar and location dot, but the map has no tiles.
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     app_version: "26.46.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Starts and shows its logo and floating buttons over an empty map area.
@@ -31,6 +33,7 @@ reports:
     cpu: arm64
     app_version: "26.46.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Draws its map, and the main screen's buttons get their configurations.
