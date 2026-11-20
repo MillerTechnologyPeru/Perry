@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "26.42.7"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Gets past its splash screen and stops at a bot check that needs a person.
