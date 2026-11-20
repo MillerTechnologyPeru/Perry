@@ -3,6 +3,7 @@ name: Downpour
 bundle_id: "com.downpour.audioOnlyApp"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++, Kotlin]
 reports:
   - pr: 167
     date: 2026-11-16
