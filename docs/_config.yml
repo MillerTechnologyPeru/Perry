@@ -9,7 +9,7 @@ repository_url: https://github.com/MillerTechnologyPeru/Perry
 collections:
   apps:
     output: true
-    permalink: /apps/:name/
+    permalink: /apps/:path/
 
 defaults:
   - scope: { type: apps }
