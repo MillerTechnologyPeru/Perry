@@ -52,6 +52,10 @@ final class TextFieldState: ObjectState {
     var editing = false
     /// The whole text is selected: typing replaces it.
     var allSelected = false
+    /// Whether UITextField's own -drawRect: ran in the layer's drawing: a
+    /// subclass's that does not call it draws the field's background and
+    /// border itself, and the text is still drawn.
+    var drewContent = false
 }
 
 @ObjCClass("UITextField")
@@ -370,9 +374,21 @@ open class UITextField: UIControl {
         }
     }
 
+    /// The layer's content: -drawRect:, then the text if that did not draw it.
+    /// Text is part of a field's drawing here, while on iOS a subclass that
+    /// draws its own background (Disney's code boxes do) keeps its text.
+    @ObjCMethod("drawLayer:inContext:")
+    override func drawLayer(_ layer: CALayer, in context: UnsafeMutableRawPointer?) {
+        guard let context else { return }
+        field.drewContent = false
+        super.drawLayer(layer, in: context)
+        if !field.drewContent { Graphics.drawing(in: context) { drawText(in: state.bounds) } }
+    }
+
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard let context = Graphics.current else { return }
+        field.drewContent = true
         let bounds = state.bounds
         let enabled = UIControl.controlStates[objcObject].enabled
         if let image = (!enabled ? field.disabledBackground : nil) ?? field.background {
@@ -397,6 +413,12 @@ open class UITextField: UIControl {
                 CG.strokeRect(context, CGRect(x: half, y: half, width: bounds.width - Screen.pixel, height: bounds.height - Screen.pixel))
             }
         }
+        drawText(in: bounds)
+    }
+
+    /// The text, the placeholder and the caret.
+    private func drawText(in bounds: CGRect) {
+        guard let context = Graphics.current else { return }
         let area = textRect(forBounds: bounds)
         var shown = field.text ?? ""
         var color = textColor()

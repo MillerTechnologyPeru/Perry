@@ -40,6 +40,15 @@ extension SecureField: Sendable {}
 
 @available(OpenSwiftUI_v1_0, *)
 extension SecureField where Label == Text {
+    /// Creates a secure field from a localized title, with an action to
+    /// perform when the user presses return.
+    nonisolated public init(_ titleKey: LocalizedStringKey, text: Binding<String>, onCommit: @escaping () -> Void) {
+        self.text = text
+        self.label = Text(titleKey)
+        self.prompt = nil
+        self.onCommit = onCommit
+    }
+
     /// Creates a secure field from a title string, with an action to
     /// perform when the user presses return.
     @_disfavoredOverload
