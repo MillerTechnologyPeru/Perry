@@ -41,7 +41,11 @@ public final class ObjCClassExports: @unchecked Sendable {
             if let pair = storage[String(name)] { return isMetaclass ? pair.metaclass : pair.cls }
             // Defined already, on the heap, as no image had asked for it:
             // a library the program loads while it runs gets the class.
-            if let pair = ObjCRuntime.registeredClassPair(String(name)) { return isMetaclass ? pair.metaclass : pair.cls }
+            // The provider's own comes first, which may go by another name
+            // where a second provider has a class of this one.
+            if let pair = ObjCRuntime.ownClassPair(String(name)) ?? ObjCRuntime.registeredClassPair(String(name)) {
+                return isMetaclass ? pair.metaclass : pair.cls
+            }
             let pair = allocate(String(name))
             return isMetaclass ? pair.metaclass : pair.cls
         }
