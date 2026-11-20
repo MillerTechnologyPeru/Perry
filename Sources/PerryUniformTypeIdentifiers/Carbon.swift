@@ -216,6 +216,34 @@ public func LSCopyDisplayNameForURL(_ url: UnsafeMutableRawPointer?, _ name: Uns
     return 0
 }
 
+/// OSStatus LSCopyItemAttribute(const FSRef *, LSRolesMask, CFStringRef
+/// attribute, CFTypeRef *value): an item's content type (by its extension;
+/// a folder's is public.folder), extension or display name, +1;
+/// kLSAttributeNotAvailableErr for the others.
+@c(_LSCopyItemAttribute)
+public func LSCopyItemAttribute(_ ref: UnsafeRawPointer?, _ roles: UInt32, _ attribute: UnsafeMutableRawPointer?,
+                                _ value: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    guard let path = FileRefs.path(of: ref), let attribute, let value else { return -50 }
+    value.pointee = nil
+    let leaf = String(path.split(separator: "/").last ?? "/")
+    let dot = leaf.lastIndex(of: ".")
+    let pathExtension = dot.map { String(leaf[leaf.index(after: $0)...]) } ?? ""
+    let result: String
+    switch String(objCArgument: attribute) {
+    case "LSItemContentType":
+        result = FileRefs.isDirectory(path) && pathExtension.isEmpty
+            ? "public.folder" : Database.preferred(tag: pathExtension, tagClass: TagClass.filenameExtension, conformingTo: nil).identifier
+    case "LSItemExtension":
+        result = pathExtension
+    case "LSItemDisplayName":
+        result = leaf
+    default:
+        return -10662   // kLSAttributeNotAvailableErr
+    }
+    value.pointee = NSObject.string(result).objCOwnedReturnValue()
+    return 0
+}
+
 // MARK: - Time Manager
 
 /// AbsoluteTime UpTime(void): nanoseconds since boot, as an UnsignedWide
