@@ -29,7 +29,7 @@ bundle_id: "com.hulu.plus"  # CFBundleIdentifier, always quoted
 platform: ios            # ios | macos | maccatalyst, the folder it is in
 kind: app                # app | game
 developer: Hulu          # only if a PR states it or it is unambiguous
-tags: [Swift, ObjC]      # engines and languages: Swift, ObjC, C++, Unity, Unreal, Mono, XNA, Lua, Kotlin
+tags: [Swift, ObjC]      # engines and languages: Swift, ObjC, C++, Unity, Unreal, SexyAppFramework, Mono, XNA, Lua, Kotlin
 reports:
   - pr: 216
     date: 2026-11-19     # the PR's merge date
@@ -71,7 +71,8 @@ more than the reports do.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
   x86 machine runs x86_64 or i386 ones.
 - `tags` names the engines and languages the app is built with, from
-  Swift, ObjC, C++, Unity, Unreal, Mono, XNA, Lua and Kotlin. Add a tag
+  Swift, ObjC, C++, Unity, Unreal, SexyAppFramework, Mono, XNA, Lua and
+  Kotlin. Add a tag
   only when the app's bundle or its pull request shows it.
 - `fps` is for games: the frame rate the pull request measured while
   playing, or the menu's if play wasn't reached. A range is quoted, as
