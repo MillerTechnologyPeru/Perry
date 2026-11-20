@@ -24,6 +24,7 @@ reports:
     app_version: "26.46.1"
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: Metal
     level: 3
     source: body
     notes: Starts and shows its logo and floating buttons over an empty map area.
@@ -35,6 +36,7 @@ reports:
     app_version: "26.46.1"
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: Metal
     level: 3
     source: body
     notes: Draws its map, and the main screen's buttons get their configurations.
