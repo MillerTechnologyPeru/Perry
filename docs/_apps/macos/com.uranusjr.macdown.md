@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Opens a Markdown file with a highlighted editor and live preview; typing was not tried.
@@ -20,6 +21,7 @@ reports:
     cpu: x86_64
     app_version: "0.7.3"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Opens a Markdown file in its editor and live preview, with its menu bar.
@@ -30,6 +32,7 @@ reports:
     cpu: x86_64
     app_version: "0.7.3"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 4
     source: body
     notes: Shows its theme and syntax highlighting, and typed text reaches the live preview.
