@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Plays past PLAY with its character textured and animated.
@@ -22,6 +23,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Still plays.
