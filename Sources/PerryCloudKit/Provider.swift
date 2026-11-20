@@ -66,3 +66,15 @@ final class StateTable<State: AnyObject>: @unchecked Sendable {
     func remove(_ object: UnsafeMutableRawPointer) { _ = lock.withLock { states.removeValue(forKey: object) } }
 }
 
+
+/// With PERRY_CLOUDKIT_TRACE set, each request and the answer it gets are
+/// written to standard error.
+enum CloudTrace {
+    nonisolated(unsafe) static let on = getenv("PERRY_CLOUDKIT_TRACE") != nil
+
+    static func say(_ message: @autoclosure () -> String) {
+        guard on else { return }
+        let line = "perry: CloudKit: \(message())\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+}
