@@ -1382,6 +1382,7 @@ void perry_run_initializers(perry_loader *loader, perry_image *image, int argc, 
     const char *slash = strrchr(argv[0], '/');
     program_name = slash ? slash + 1 : argv[0];
     start_providers(loader, image);
+    perry_resolve_pending_ivar_offsets(loader);
     perry_make_witness_tables(loader);
     notify_images_mapped(loader);
     // Dependencies first, in load order, then the main executable last.
