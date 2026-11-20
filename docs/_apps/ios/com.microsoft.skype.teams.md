@@ -14,6 +14,9 @@ reports:
     level: 2
     source: body
     notes: Shows its sign-in screen; signing in needs a real account.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/891e994f-f05e-49bd-8e4f-8b927afcd24a
+        caption: Sign-in screen
 ---
 
 Needs `PERRY_OS_VERSION=18.0` and `Scripts/extract-assets.sh` run on the app.
