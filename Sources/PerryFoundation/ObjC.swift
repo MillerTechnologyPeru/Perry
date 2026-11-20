@@ -36,6 +36,9 @@ enum ObjC {
     nonisolated(unsafe) static var allocateClassPair: (@convention(c) (Class?, SEL, Int) -> Class?)!
     nonisolated(unsafe) static var objectSetClass: (@convention(c) (id?, Class) -> Class?)!
     nonisolated(unsafe) static var methodImplementation: (@convention(c) (Class?, SEL) -> UnsafeRawPointer?)!
+    /// objc_copyClassNamesForImage: the classes an image defines, in order.
+    nonisolated(unsafe) static var classNamesForImage:
+        (@convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<UInt32>?) -> UnsafeMutablePointer<UnsafePointer<CChar>?>?)?
     nonisolated(unsafe) static var dispose: (@convention(c) (id?) -> id?)!
     nonisolated(unsafe) static var copyObject: (@convention(c) (id?, Int) -> id?)?
     nonisolated(unsafe) static var instanceSize: (@convention(c) (Class?) -> Int)?
@@ -80,6 +83,9 @@ enum ObjC {
         allocateClassPair = bind("_objc_allocateClassPair", (@convention(c) (Class?, SEL, Int) -> Class?).self)
         objectSetClass = bind("_object_setClass", (@convention(c) (id?, Class) -> Class?).self)
         methodImplementation = bind("_class_getMethodImplementation", (@convention(c) (Class?, SEL) -> UnsafeRawPointer?).self)
+        classNamesForImage = bind("_objc_copyClassNamesForImage",
+                                  (@convention(c) (UnsafePointer<CChar>?, UnsafeMutablePointer<UInt32>?)
+                                      -> UnsafeMutablePointer<UnsafePointer<CChar>?>?).self)
         dispose = bind("_object_dispose", (@convention(c) (id?) -> id?).self)
         copyObject = bind("_object_copy", (@convention(c) (id?, Int) -> id?).self)
         instanceSize = bind("_class_getInstanceSize", (@convention(c) (Class?) -> Int).self)
