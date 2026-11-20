@@ -3,6 +3,7 @@ name: NetNewsWire for iOS
 bundle_id: "com.ranchero.NetNewsWire.iOS"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 103
     date: 2026-11-08
