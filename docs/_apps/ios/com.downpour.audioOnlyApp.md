@@ -34,4 +34,7 @@ reports:
     level: 2
     source: body
     notes: Starts and shows its welcome sheet.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/4671176d-8e0f-4358-9140-fa92f39be112
+        caption: Welcome sheet
 ---
