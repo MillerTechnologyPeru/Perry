@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "5.1.2"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its categories, model lists and model pages work.
@@ -25,6 +26,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its Trivia screen, model page tabs and editing screens' bars work.
@@ -37,6 +39,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Every screen opens.
@@ -46,6 +49,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: "Search works: typing filters its lists and a result opens its model page."
@@ -55,6 +59,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its Favorites list, sort menu and deleting a favorite work.
@@ -64,6 +69,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its Compare screen, Trivia pictures and My Models date picker work.
