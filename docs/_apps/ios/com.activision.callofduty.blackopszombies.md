@@ -23,4 +23,7 @@ reports:
     level: 3
     source: body
     notes: Launches reliably, shows its menus and runs a level at about 60 frames a second with sound.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/8e8085e7-f4c3-4545-8208-c5b1c5a2ec26
+        caption: Main menu
 ---
