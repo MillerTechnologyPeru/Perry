@@ -276,7 +276,9 @@ open class NSApplication: NSResponder {
         let mask = NSEvent.mask(fromWord: wordMask)
         Events.pump()
         let limit = event?.eventNumber ?? Int.max
+        let before = queue.count
         queue.removeAll { $0.type.mask & mask != 0 && $0.eventNumber < limit }
+        if queue.count != before { Trace.log("application: discarded \(before - queue.count) events") }
     }
 
     @ObjCMethod("postEvent:atStart:")
@@ -291,6 +293,7 @@ open class NSApplication: NSResponder {
         guard let event = eventObject?.as(NSEvent.self) else { return }
         currentEvent = event
         let window = event.type.isKey ? (Windows.key ?? event.window) : (event.window ?? Windows.key)
+        if event.type == .leftMouseDown { Trace.log("application: mouse down for window \(window?.windowNumber ?? 0)") }
         guard let window else { return }
         Send.void(window.objcObject, "sendEvent:", event.objcObject)
     }
