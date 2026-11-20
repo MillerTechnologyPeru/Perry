@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "16.15.5"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: screenshot
     notes: Gets past its start-up stop in the Mono bridge to its title screen.
