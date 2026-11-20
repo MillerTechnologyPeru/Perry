@@ -205,30 +205,50 @@ public enum ObjCRuntime {
     @discardableResult
     public static func defineClass(named name: String, superclass: ObjCClass?,
                                    _ registrations: [ObjCMethodRegistration]) -> ObjCClass {
-        // A class registered under a private name is the provider's own,
-        // on the heap; the public name stays free for another provider.
-        let registeredName = privateClassNames[name] ?? name
-        var created: UnsafeMutableRawPointer? = registeredName.withCString { cName in
-            if registeredName == name, let (cls, metaclass) = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name) {
-                return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
+        // A class registered under a private name is the provider's own;
+        // the public name stays free for another provider. Images that
+        // bound the class to this provider have its storage all the same,
+        // so the class is made there whatever name it goes by.
+        var registeredName = privateClassNames[name] ?? name
+        let storage = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name)
+        func create(_ registered: String) -> UnsafeMutableRawPointer? {
+            registered.withCString { cName in
+                if let (cls, metaclass) = storage {
+                    return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
+                }
+                return functions.allocateClassPair(superclass?.pointer, cName, 0)
             }
-            return functions.allocateClassPair(superclass?.pointer, cName, 0)
         }
+        var created = create(registeredName)
         if created == nil, registeredClassPair(registeredName) != nil {
             // Another provider has the name: a Mac Catalyst app with an
             // AppKit bridge loads AppKit's and UIKit's providers, which
             // each define classes of the same names (MapKit's, Auto
             // Layout's). The first keeps the public name; this one's goes
             // by a name of its own, which its own code finds all the same.
-            let own = "PerryDuplicate" + name
-            created = own.withCString { functions.allocateClassPair(superclass?.pointer, $0, 0) }
+            registeredName = "PerryDuplicate" + name
+            created = create(registeredName)
         }
         guard let created else { objcInteropFatal("cannot define class \(registeredName); is the name taken?") }
         let cls = ObjCClass(created)
         for register in registrations { register(cls) }
         functions.registerClassPair(created)
-        cacheLock.withLock { classes[name] = created }
+        cacheLock.withLock {
+            classes[name] = created
+            if registeredName != name { ownClassNames[name] = registeredName }
+        }
         return cls
+    }
+
+    /// The names this provider's classes are registered under, where they
+    /// are not their public ones.
+    nonisolated(unsafe) private static var ownClassNames: [String: String] = [:]
+
+    /// The class this provider defined as `name`, and its metaclass, under
+    /// whichever name it is registered; nil if it defined none.
+    public static func ownClassPair(_ name: String) -> (cls: UnsafeMutableRawPointer, metaclass: UnsafeMutableRawPointer)? {
+        let registered = cacheLock.withLock { classes[name] == nil ? nil : (ownClassNames[name] ?? name) }
+        return registered.flatMap { registeredClassPair($0) }
     }
 
     // MARK: - Selectors and classes
