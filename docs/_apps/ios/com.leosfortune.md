@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.0.15"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays.
@@ -23,6 +24,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 5
     source: maintainer
     notes: Everything tested works, music included. Game Center is out of scope.
