@@ -410,6 +410,53 @@ extension NSDecimal: Codable {
     }
 }
 
+// Decimal's format styles, under the C structure's name as apps name them:
+// the currency style, which prices are written with (StoreKit's
+// priceFormatStyle), over the Swift structure's own.
+
+@available(*, unavailable)
+extension NSDecimal {
+    public struct FormatStyle: Sendable {
+        public struct Currency: Foundation.FormatStyle, Sendable {
+            var base: Decimal.FormatStyle.Currency
+
+            public var locale: Locale {
+                get { base.locale }
+                set { base.locale = newValue }
+            }
+
+            public var currencyCode: String { base.currencyCode }
+
+            public init(code: String, locale: Locale = .autoupdatingCurrent) {
+                base = Decimal.FormatStyle.Currency(code: code, locale: locale)
+            }
+
+            public func locale(_ locale: Locale) -> Currency {
+                var copy = self
+                copy.base = base.locale(locale)
+                return copy
+            }
+
+            public func format(_ value: NSDecimal) -> String { base.format(Decimal(value)) }
+
+            public static func == (lhs: Currency, rhs: Currency) -> Bool { lhs.base == rhs.base }
+            public func hash(into hasher: inout Hasher) { base.hash(into: &hasher) }
+
+            public init(from decoder: any Decoder) throws { base = try Decimal.FormatStyle.Currency(from: decoder) }
+            public func encode(to encoder: any Encoder) throws { try base.encode(to: encoder) }
+        }
+    }
+
+    public func formatted<S: Foundation.FormatStyle>(_ format: S) -> S.FormatOutput where S.FormatInput == NSDecimal {
+        format.format(self)
+    }
+}
+
+@available(*, unavailable)
+extension FormatStyle where Self == NSDecimal.FormatStyle.Currency {
+    public static func currency(code: String) -> Self { NSDecimal.FormatStyle.Currency(code: code) }
+}
+
 @available(*, unavailable)
 extension NSDecimal: _ObjectiveCBridgeable {
     public typealias _ObjectiveCType = NSDecimalNumber
