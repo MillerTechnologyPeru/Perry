@@ -13,6 +13,7 @@ reports:
     app_version: "1.31"
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: Metal
     fps: 30
     level: 2
     source: body
