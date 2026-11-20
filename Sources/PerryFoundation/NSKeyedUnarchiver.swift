@@ -309,6 +309,7 @@ public class NSKeyedUnarchiver: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Unarchivers.unarchiverClass = cls.storage
+        CoderGeometry.add(to: cls)
     }
 
     private var storage: UnarchiverStorage? { Unarchivers.storage(objcObject) }
