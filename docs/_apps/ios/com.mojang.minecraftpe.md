@@ -24,4 +24,7 @@ reports:
     level: 2
     source: body
     notes: Runs its loading screen at 60 frames a second; it more often stops at 33% than reaching the title screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/5f63e7ac-6d2f-4d32-be45-c9a2364c76b5
+        caption: Loading screen
 ---
