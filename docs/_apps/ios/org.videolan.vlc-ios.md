@@ -14,4 +14,7 @@ reports:
     level: 4
     source: body
     notes: Launches into its tab bar, and all five tabs open.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1df3bd61-5795-4dc2-904b-3792999c7fd6
+        caption: Playlists tab
 ---
