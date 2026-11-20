@@ -3,6 +3,7 @@ name: Microsoft Authenticator
 bundle_id: "com.microsoft.azureauthenticator"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 215
     date: 2026-11-19
@@ -12,6 +13,8 @@ reports:
     app_version: "6.8.58"
     hardware: Lenovo Duet 3
     os: Debian sid
+    env:
+      - "PERRY_OS_VERSION=18.0"
     level: 3
     source: body
     notes: Reaches its full main screen; adding an account needs a real sign-in.
