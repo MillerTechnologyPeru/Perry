@@ -24,4 +24,7 @@ reports:
     level: 2
     source: body
     notes: Reaches its splash screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/2068f07d-f79e-4143-a348-f29a69762c2f
+        caption: Splash screen
 ---
