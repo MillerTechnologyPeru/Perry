@@ -14,4 +14,7 @@ reports:
     level: 2
     source: body
     notes: Its title screen and story movies play.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/cb757ad6-1cc6-41ae-becb-63953556dfe6
+        caption: Title screen
 ---
