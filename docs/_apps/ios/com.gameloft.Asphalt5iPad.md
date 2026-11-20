@@ -13,4 +13,7 @@ reports:
     level: 2
     source: body
     notes: Reaches its title screen and language picker.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/73dca6df-3b05-4498-976a-9d94b3c0d230
+        caption: Title screen
 ---
