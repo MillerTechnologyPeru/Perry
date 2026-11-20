@@ -3,6 +3,7 @@ name: "Asphalt 6: Adrenaline HD"
 bundle_id: "com.gameloft.Asphalt6ipad"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 117
     date: 2026-11-09
