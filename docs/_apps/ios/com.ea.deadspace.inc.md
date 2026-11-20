@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: armv7
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: body
     notes: Plays menu sound effects but is silent in gameplay and for music.
