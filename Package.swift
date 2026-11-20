@@ -2,6 +2,11 @@
 import CompilerPluginSupport
 import PackageDescription
 
+// PERRY_CLOUDKIT_MISTKIT=1 builds CloudKit's MistKit backend, which talks to CloudKit Web Services when
+// PERRY_CLOUDKIT_API_TOKEN is set. It stays out of the package graph otherwise: MistKit needs swift-crypto 4,
+// which every other build would resolve to as well.
+let mistKit = Context.environment["PERRY_CLOUDKIT_MISTKIT"] == "1"
+
 let package = Package(
     name: "Perry",
     products: [
@@ -111,7 +116,9 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/CoreModel.git", from: "2.11.0"),
         .package(url: "https://github.com/PureSwift/CoreModel-SQLite.git", from: "0.3.3"),
         // CryptoKit's API with its own BoringSSL, and X.509, for Security.
-        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.0"),
+        // MistKit needs swift-crypto 4, which the default builds keep clear of.
+        mistKit ? .package(url: "https://github.com/apple/swift-crypto.git", "3.15.0"..<"5.0.0")
+            : .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.0"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
         // Silica: CoreGraphics' drawing model in Swift, and its Cairo renderer.
         .package(url: "https://github.com/PureSwift/Silica.git", branch: "master"),
@@ -131,7 +138,7 @@ let package = Package(
         .package(url: "https://github.com/PureSwift/Socket.git", from: "0.5.1"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
-    ],
+    ] + (mistKit ? [.package(url: "https://github.com/brightdigit/MistKit.git", from: "1.0.0-beta.5")] : []),
     targets: [
         .target(name: "PerryInterface"),
         // The Cassowary constraint solver UIKit's and AppKit's Auto Layout share.
@@ -304,10 +311,12 @@ let package = Package(
             dependencies: ["PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
-        // CloudKit, with no iCloud account.
+        // CloudKit, with no iCloud account unless MistKit is built in and given a token.
         .target(
             name: "PerryCloudKit",
-            dependencies: ["PerryInterface", "PerryObjCInterop"],
+            dependencies: ["PerryInterface", "PerryObjCInterop"]
+                + (mistKit ? [.product(name: "MistKit", package: "MistKit")] : []),
+            swiftSettings: mistKit ? [.define("PERRY_MISTKIT")] : [],
             plugins: ["PerryProviderPlugin"]
         ),
         // CoreLocation, over GeoClue's D-Bus API.

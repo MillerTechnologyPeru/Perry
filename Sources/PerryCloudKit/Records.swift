@@ -26,6 +26,9 @@ final class CloudState {
     var completion: ObjCBlock?
     var savePolicy = 0
     var qualityOfService = -1
+    /// A database's: CKDatabaseScope (public 1, private 2, shared 3) and its container's identifier.
+    var scope = 2
+    var container = ""
 }
 
 enum Cloud {
