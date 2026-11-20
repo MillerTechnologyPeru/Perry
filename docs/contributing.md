@@ -37,6 +37,7 @@ reports:
     cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
+    os: Debian sid       # the operating system that machine ran
     level: 2
     source: title        # title | body | screenshot | maintainer: what the level rests on
     notes: Reaches the Welcome screen.
@@ -54,10 +55,12 @@ more than the reports do.
   report's level.
 - `name`, `bundle_id`, `platform`, `kind` and `reports` are required, and
   each report needs `pr`, `date`, `perry`, `platform`, `cpu`, `hardware`,
-  `level`, `source` and `notes`. Leave out `app_version` when the pull
+  `os`, `level`, `source` and `notes`. Leave out `app_version` when the pull
   request does not state it; never guess a version or a result.
 - `cpu` is the slice of the binary that ran, and `hardware` the machine it
-  ran on, such as Lenovo Duet 3, Retroid Pocket 5 or Dell OptiPlex 7020.
+  ran on, such as Lenovo Duet 3, Retroid Pocket 5 or Dell OptiPlex 7020;
+  `os` is the operating system it ran, such as Debian 13, Debian sid or
+  ROCKNIX.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
   x86 machine runs x86_64 or i386 ones.
 - `notes` is one or two plain sentences in the present tense saying how
