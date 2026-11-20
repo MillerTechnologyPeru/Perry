@@ -400,8 +400,14 @@ extension NSWindowController {
     /// The window from the controller's nib, loaded once: a nib without a
     /// window isn't loaded again, as its objects (and the outlets set to
     /// them) would be made again.
+    /// The nib's name as the controller answers -windowNibName, which a
+    /// subclass may override (Xcode's modules answer their module nib).
+    var sentWindowNibName: String? {
+        Send.object(objcObject, "windowNibName").map { String(objCArgument: $0) }
+    }
+
     func loadWindowIfNeeded() {
-        guard window == nil, !windowNibLoaded, !loadingWindow, let name = windowNibName else { return }
+        guard window == nil, !windowNibLoaded, !loadingWindow, let name = sentWindowNibName else { return }
         loadingWindow = true
         defer { loadingWindow = false }
         Send.void(objcObject, "windowWillLoad")
@@ -415,7 +421,7 @@ extension NSWindowController {
     }
 
     func loadWindowNib() {
-        guard let name = windowNibName else { return }
+        guard let name = sentWindowNibName else { return }
         let owner = windowNibOwner.map(NSObject.init) ?? self
         // The nib in the bundle of the owner's class (a framework's window
         // controllers keep theirs there), else in the app's, as AppKit looks.
