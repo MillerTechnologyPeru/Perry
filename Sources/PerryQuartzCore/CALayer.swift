@@ -121,7 +121,8 @@ final class LayerState {
     var mask: CALayer?
     var actions: NSObject?
     var style: NSObject?
-    /// Filters, kept but not applied in drawing.
+    /// A blend mode's name (Lottie's track mattes use one); other filters are
+    /// kept but not applied in drawing.
     var compositingFilter: NSObject?
     var allowsEdgeAntialiasing = false
     /// CAEdgeAntialiasingMask: all four edges.
@@ -633,6 +634,7 @@ open class CALayer: NSObject {
         // As presented: with its animations' values at this moment.
         let (state, shape) = Presentation.presented(self)
         if state.opacity != 1 { text += " opacity \(state.opacity)" }
+        if let filter = state.compositingFilter { text += " filter \(filter.stringValue)" }
         if state.hidden != self.state.hidden { text += " presented hidden \(state.hidden)" }
         if state.speed != 1 || state.timeOffset != 0 { text += " speed \(state.speed) offset \(state.timeOffset)" }
         if !state.transform.isIdentity {
@@ -987,10 +989,14 @@ extension CALayer {
         CG.saveGState(context)
         defer { CG.restoreGState(context) }
         if !root { CG.concatCTM(context, toSuperlayer) }
-        let group = state.opacity < 1
+        // A blend mode applies where the layer's whole drawing composites.
+        let blend = blendMode(named: state.compositingFilter)
+        let group = state.opacity < 1 || blend != 0
         if group {
             CG.setAlpha(context, CGFloat(state.opacity))
+            if blend != 0 { CG.setBlendMode(context, blend) }
             CG.beginTransparencyLayer(context, nil)
+            if blend != 0 { CG.setBlendMode(context, 0) }
         }
         if let masked = maskedImage(of: layer, state: state, shape: shape) {
             CG.drawFlipped(masked.object, in: maskedExtent(of: state), context: context)
@@ -998,6 +1004,20 @@ extension CALayer {
             drawTree(of: layer, state: state, shape: shape, in: context)
         }
         if group { CG.endTransparencyLayer(context) }
+    }
+
+    /// The CGBlendMode a compositing filter's name stands for, 0 (normal) for
+    /// the names that are not blend modes.
+    static func blendMode(named filter: NSObject?) -> Int32 {
+        guard let filter else { return 0 }
+        var name = filter.stringValue.lowercased()
+        for (word, replacement) in [("blendmode", ""), ("destination", "dest")] where name.hasSuffix(word) || name.hasPrefix(word) {
+            name = name.hasSuffix(word) ? String(name.dropLast(word.count)) : replacement + name.dropFirst(word.count)
+        }
+        let names = ["", "multiply", "screen", "overlay", "darken", "lighten", "colordodge", "colorburn", "softlight", "hardlight",
+                     "difference", "exclusion", "hue", "saturation", "color", "luminosity", "clear", "copy", "sourcein", "sourceout",
+                     "sourceatop", "destover", "destin", "destout", "destatop", "xor", "plusd", "plusl"]
+        return Int32(names.firstIndex(of: name) ?? 0)
     }
 
     /// The layer's own drawing and its sublayers', in its coordinates.
