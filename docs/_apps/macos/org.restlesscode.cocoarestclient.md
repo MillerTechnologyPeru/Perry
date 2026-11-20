@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Launches with its window, request and response panes, and menu bar.
