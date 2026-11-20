@@ -11,6 +11,7 @@ reports:
     cpu: armv7
     app_version: "2.7.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Reaches its age-gate screen; levels and sound are untried.
