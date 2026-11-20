@@ -1028,11 +1028,16 @@ static bool ends_with(const char *name, const char *suffix) {
 /// types and session presets, authorization scopes and options, SceneKit's
 /// lighting models and light types, pasteboard types and image names.
 /// The C frameworks' names without a k are functions, whatever they end
-/// with (CFLocaleCreateComponentsFromLocaleIdentifier): their constants
-/// are kCF…, kCG… and the like, which any name starting with k and a capital is.
+/// with (CFLocaleCreateComponentsFromLocaleIdentifier, LSCopyItemAttribute):
+/// their constants are kCF…, kCG…, kLS… and the like, which any name
+/// starting with k and a capital is.
 static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
-    static const char *const function_prefixes[] = { "_CF", "_CG", "_CT", "_CV", "_CM", "_CC", "_Sec" };
+    // LaunchServices, Accessibility, the File Manager, Apple Events and
+    // Search Kit name their constants kLS…, kAX…, kAE… too
+    // (LSCopyItemAttribute is a function).
+    static const char *const function_prefixes[] = { "_CF", "_CG", "_CT", "_CV", "_CM", "_CC", "_Sec",
+                                                     "_LS", "_AX", "_FS", "_AE", "_SK" };
     for (size_t i = 0; i < sizeof(function_prefixes) / sizeof(function_prefixes[0]); i++) {
         size_t length = strlen(function_prefixes[i]);
         if (strncmp(name, function_prefixes[i], length) == 0 && name[length] >= 'A' && name[length] <= 'Z')
