@@ -13,4 +13,7 @@ reports:
     level: 3
     source: body
     notes: Reaches its menu.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/279eddb5-56c3-426f-8cd0-511a45cc3ba6
+        caption: Title screen
 ---
