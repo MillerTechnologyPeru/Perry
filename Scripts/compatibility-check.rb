@@ -16,7 +16,7 @@ APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os fps env args level source notes screenshots].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution fps env args level source notes screenshots].freeze
 REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
@@ -91,6 +91,12 @@ def check_report(file, where, report, platform, kind, urls)
       error(file, "#{where} 'fps' is not a frame rate such as 60 or \"45-52\"")
     end
     error(file, "#{where} has 'fps', but the app's kind is not game") unless kind == "game"
+  end
+  if report.key?("resolution")
+    resolution = report["resolution"]
+    unless resolution.is_a?(String) && resolution.match?(/\A[1-9]\d*x[1-9]\d*(@[1-9])?\z/)
+      error(file, "#{where} 'resolution' is not a size such as \"1920x1080\" or \"390x844@3\"")
+    end
   end
   if report.key?("env")
     env = report["env"]
