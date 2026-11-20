@@ -1,6 +1,7 @@
 import CPerryFoundation
 import FoundationEssentials
 import PerryObjCInterop
+import Synchronization
 
 // NSCharacterSet: a set of Unicode scalars, as a membership test. The
 // standard sets follow Apple's definitions by Unicode general category.
@@ -18,6 +19,8 @@ final class CharacterSetStorage {
 enum CharacterSets {
     nonisolated(unsafe) static var setClass: Class!
     nonisolated(unsafe) static var mutableClass: Class!
+    /// The class of the shared standard sets, which retain and release leave be.
+    nonisolated(unsafe) static var standardClass: Class!
 
     static func storage(_ object: id?) -> CharacterSetStorage? {
         Storage.get(object, as: CharacterSetStorage.self)
@@ -68,79 +71,98 @@ public class NSCharacterSet: NSObject {
         CharacterSets.make(cls.pointer, contains).map(NSCharacterSet.init(objCOwned:))
     }
 
+    /// The standard sets of NSCharacterSet itself, by selector: made once,
+    /// of a class that retain and release leave be, as Foundation's are
+    /// immortal, since programs keep them without retaining them (Flow Free,
+    /// in a static). A subclass's, NSMutableCharacterSet's, are new each
+    /// time, as they may change.
+    private static let standardSets = Mutex<[String: UInt]>([:])
+
+    private static func standard(_ cls: ObjCClass, _ name: String = #function,
+                                 contains: @escaping (Unicode.Scalar) -> Bool) -> NSCharacterSet? {
+        guard cls.pointer == UnsafeMutableRawPointer(CharacterSets.setClass) else { return set(cls, contains) }
+        let object = standardSets.withLock { sets -> UInt? in
+            if let object = sets[name] { return object }
+            guard let object = CharacterSets.make(UnsafeMutableRawPointer(CharacterSets.standardClass), contains) else { return nil }
+            sets[name] = UInt(bitPattern: object)
+            return UInt(bitPattern: object)
+        }
+        return object.flatMap { UnsafeMutableRawPointer(bitPattern: $0) }.map { NSCharacterSet(objcObject: $0, ownership: .retain) }
+    }
+
     var contains: (Unicode.Scalar) -> Bool { CharacterSets.storage(objcObject)?.contains ?? { _ in false } }
 
     /// Spaces (general category Zs) and tab.
     @ObjCClassMethod("whitespaceCharacterSet")
     static func whitespace(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls) { $0.value == 0x09 || $0.properties.generalCategory == .spaceSeparator }
+        standard(cls) { $0.value == 0x09 || $0.properties.generalCategory == .spaceSeparator }
     }
 
     /// Separators (Z*), tab and newlines.
     @ObjCClassMethod("whitespaceAndNewlineCharacterSet")
     static func whitespaceAndNewline(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.isWhitespaceOrNewline)
+        standard(cls, contains: CharacterSets.isWhitespaceOrNewline)
     }
 
     @ObjCClassMethod("newlineCharacterSet")
-    static func newline(_ cls: ObjCClass) -> NSCharacterSet? { set(cls) { CharacterSets.newlines.contains($0.value) } }
+    static func newline(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls) { CharacterSets.newlines.contains($0.value) } }
 
     @ObjCClassMethod("decimalDigitCharacterSet")
-    static func decimalDigit(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.decimalNumber])) }
+    static func decimalDigit(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories([.decimalNumber])) }
 
     /// Letters (L*) and marks (M*).
     @ObjCClassMethod("letterCharacterSet")
-    static func letter(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories(CharacterSets.letterCategories)) }
+    static func letter(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories(CharacterSets.letterCategories)) }
 
     @ObjCClassMethod("lowercaseLetterCharacterSet")
-    static func lowercaseLetter(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.lowercaseLetter])) }
+    static func lowercaseLetter(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories([.lowercaseLetter])) }
 
     @ObjCClassMethod("uppercaseLetterCharacterSet")
     static func uppercaseLetter(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.categories([.uppercaseLetter, .titlecaseLetter]))
+        standard(cls, contains: CharacterSets.categories([.uppercaseLetter, .titlecaseLetter]))
     }
 
     /// Letters, marks and numbers (N*).
     @ObjCClassMethod("alphanumericCharacterSet")
     static func alphanumeric(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.categories(CharacterSets.letterCategories.union([.decimalNumber, .letterNumber, .otherNumber])))
+        standard(cls, contains: CharacterSets.categories(CharacterSets.letterCategories.union([.decimalNumber, .letterNumber, .otherNumber])))
     }
 
     @ObjCClassMethod("punctuationCharacterSet")
     static func punctuation(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.categories([.connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+        standard(cls, contains: CharacterSets.categories([.connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
                                             .initialPunctuation, .finalPunctuation, .otherPunctuation]))
     }
 
     @ObjCClassMethod("symbolCharacterSet")
     static func symbol(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.categories([.mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol]))
+        standard(cls, contains: CharacterSets.categories([.mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol]))
     }
 
     @ObjCClassMethod("controlCharacterSet")
-    static func control(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.control, .format])) }
+    static func control(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories([.control, .format])) }
 
     /// Combining marks: general categories Mn, Mc and Me.
     @ObjCClassMethod("nonBaseCharacterSet")
     static func nonBase(_ cls: ObjCClass) -> NSCharacterSet? {
-        set(cls, CharacterSets.categories([.nonspacingMark, .spacingMark, .enclosingMark]))
+        standard(cls, contains: CharacterSets.categories([.nonspacingMark, .spacingMark, .enclosingMark]))
     }
 
     /// Titlecase letters (Lt).
     @ObjCClassMethod("capitalizedLetterCharacterSet")
-    static func capitalizedLetter(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.titlecaseLetter])) }
+    static func capitalizedLetter(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories([.titlecaseLetter])) }
 
     /// Code points Unicode has not assigned (Cn).
     @ObjCClassMethod("illegalCharacterSet")
-    static func illegal(_ cls: ObjCClass) -> NSCharacterSet? { set(cls, CharacterSets.categories([.unassigned])) }
+    static func illegal(_ cls: ObjCClass) -> NSCharacterSet? { standard(cls, contains: CharacterSets.categories([.unassigned])) }
 
     // The characters each part of a URL allows unescaped, as RFC 3986 and
     // Foundation's sets have them: ASCII letters and digits, the unreserved
     // "-._~", the sub-delimiters "!$&'()*+,;=", and what the part adds.
 
-    private static func urlSet(_ cls: ObjCClass, adding extra: String) -> NSCharacterSet? {
+    private static func urlSet(_ cls: ObjCClass, adding extra: String, _ name: String = #function) -> NSCharacterSet? {
         let members = Set(("-._~!$&'()*+,;=" + extra).unicodeScalars.map(\.value))
-        return set(cls) { scalar in
+        return standard(cls, name) { scalar in
             let v = scalar.value
             return (0x30...0x39).contains(v) || (0x41...0x5a).contains(v) || (0x61...0x7a).contains(v) || members.contains(v)
         }
@@ -221,6 +243,15 @@ public class NSCharacterSet: NSObject {
 
     @ObjCMethod("bitmapRepresentation")
     func bitmapRepresentation() -> UnsafeMutableRawPointer? { DataObjects.autoreleased(CharacterSets.bitmap(contains)) }
+}
+
+/// A standard set, shared and never freed.
+@ObjCClass("_PerryStandardCharacterSet")
+final class PerryStandardCharacterSet: NSCharacterSet {
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+        CharacterSets.standardClass = cls.storage
+    }
 }
 
 /// A character set whose members change.

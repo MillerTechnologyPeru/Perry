@@ -1,4 +1,5 @@
 import PerryObjCInterop
+import Synchronization
 
 /// NSDecimalNumber, as an NSNumber holding a double: decimal numbers'
 /// arithmetic and parsing, without their 38 digits of precision. Apps name
@@ -21,13 +22,31 @@ public class NSDecimalNumber: NSNumber {
         string.flatMap { Double($0.filter { !$0.isWhitespace }) } ?? .nan
     }
 
-    @ObjCClassMethod("zero") static func zero(_ cls: ObjCClass) -> NSDecimalNumber { number(cls, 0) }
-    @ObjCClassMethod("one") static func one(_ cls: ObjCClass) -> NSDecimalNumber { number(cls, 1) }
-    @ObjCClassMethod("notANumber") static func notANumber(_ cls: ObjCClass) -> NSDecimalNumber { number(cls, .nan) }
+    /// NSDecimalNumber's own constants, by selector: made once, of a class
+    /// that retain and release leave be, as Foundation's are shared and
+    /// immortal, since programs keep them without retaining them (Flow Free
+    /// keeps notANumber in a static). A subclass's are new each time.
+    private static let constants = Mutex<[String: UInt]>([:])
+
+    private static func constant(_ cls: ObjCClass, _ value: Double, _ name: String = #function) -> NSDecimalNumber {
+        guard cls.pointer == NSDecimalNumber.objCClass.pointer else { return number(cls, value) }
+        let object = constants.withLock { constants -> UInt? in
+            if let object = constants[name] { return object }
+            guard let object = Numbers.make(PerryConstantDecimalNumber.objCClass.pointer, .double(value)) else { return nil }
+            constants[name] = UInt(bitPattern: object)
+            return UInt(bitPattern: object)
+        }
+        guard let object = object.flatMap({ UnsafeMutableRawPointer(bitPattern: $0) }) else { return number(cls, value) }
+        return NSDecimalNumber(objcObject: object, ownership: .retain)
+    }
+
+    @ObjCClassMethod("zero") static func zero(_ cls: ObjCClass) -> NSDecimalNumber { constant(cls, 0) }
+    @ObjCClassMethod("one") static func one(_ cls: ObjCClass) -> NSDecimalNumber { constant(cls, 1) }
+    @ObjCClassMethod("notANumber") static func notANumber(_ cls: ObjCClass) -> NSDecimalNumber { constant(cls, .nan) }
     @ObjCClassMethod("minimumDecimalNumber")
-    static func minimum(_ cls: ObjCClass) -> NSDecimalNumber { number(cls, -.greatestFiniteMagnitude) }
+    static func minimum(_ cls: ObjCClass) -> NSDecimalNumber { constant(cls, -.greatestFiniteMagnitude) }
     @ObjCClassMethod("maximumDecimalNumber")
-    static func maximum(_ cls: ObjCClass) -> NSDecimalNumber { number(cls, .greatestFiniteMagnitude) }
+    static func maximum(_ cls: ObjCClass) -> NSDecimalNumber { constant(cls, .greatestFiniteMagnitude) }
 
     @ObjCClassMethod("decimalNumberWithString:")
     static func decimalNumber(_ cls: ObjCClass, string: String?) -> NSDecimalNumber { number(cls, parse(string)) }
@@ -139,6 +158,14 @@ final class DecimalHandlerStorage {
 /// NSDecimalNumberHandler: a rounding mode and a scale, the behavior a
 /// decimal number rounds by. The raise-on flags are kept out: arithmetic
 /// here does not raise.
+/// A shared NSDecimalNumber constant, never freed.
+@ObjCClass("_PerryConstantDecimalNumber")
+final class PerryConstantDecimalNumber: NSDecimalNumber {
+    override class func didDefineObjCClass(_ cls: ObjCClass) {
+        NSObject.registerObjCCategoryImmortal(cls)
+    }
+}
+
 @ObjCClass("NSDecimalNumberHandler")
 public final class NSDecimalNumberHandler: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {

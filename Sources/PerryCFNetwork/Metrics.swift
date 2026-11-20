@@ -88,6 +88,19 @@ open class NSURLSessionTaskTransactionMetrics: NSObject {
     @ObjCMethod("secureConnectionStartDate") func secureConnectionStartDate() -> NSDate? { nil }
     @ObjCMethod("secureConnectionEndDate") func secureConnectionEndDate() -> NSDate? { nil }
     @ObjCMethod("requestEndDate") func requestEndDate() -> NSDate? { metrics.map { NSDate.of($0.start) } }
+
+    // The transfer's sizes, which are not counted here, and what the
+    // connection negotiated, unknown.
+    @ObjCMethod("countOfRequestHeaderBytesSent") func countOfRequestHeaderBytesSent() -> Int64 { 0 }
+    @ObjCMethod("countOfRequestBodyBytesSent") func countOfRequestBodyBytesSent() -> Int64 { 0 }
+    @ObjCMethod("countOfRequestBodyBytesBeforeEncoding") func countOfRequestBodyBytesBeforeEncoding() -> Int64 { 0 }
+    @ObjCMethod("countOfResponseHeaderBytesReceived") func countOfResponseHeaderBytesReceived() -> Int64 { 0 }
+    @ObjCMethod("countOfResponseBodyBytesReceived") func countOfResponseBodyBytesReceived() -> Int64 { 0 }
+    @ObjCMethod("countOfResponseBodyBytesAfterDecoding") func countOfResponseBodyBytesAfterDecoding() -> Int64 { 0 }
+    @ObjCMethod("negotiatedTLSProtocolVersion") func negotiatedTLSProtocolVersion() -> NSObject? { nil }
+    @ObjCMethod("negotiatedTLSCipherSuite") func negotiatedTLSCipherSuite() -> NSObject? { nil }
+    /// NSURLSessionTaskMetricsDomainResolutionProtocolUnknown.
+    @ObjCMethod("domainResolutionProtocol") func domainResolutionProtocol() -> Int { 0 }
 }
 
 enum Metrics {
