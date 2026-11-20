@@ -23,7 +23,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
-    level: 4
-    source: body
-    notes: Plays its background music as well as its sound effects.
+    level: 5
+    source: maintainer
+    notes: Everything tested works, music included. Game Center is out of scope.
 ---
