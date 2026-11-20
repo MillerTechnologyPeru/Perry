@@ -223,6 +223,14 @@ extension NSObject {
     /// The class an object archives as: its own.
     @ObjCMethod("classForCoder") func classForCoder() -> ObjCClass { objCClass }
     @ObjCMethod("classForKeyedArchiver") func classForKeyedArchiver() -> ObjCClass { objCClass }
+    @ObjCMethod("classForArchiver") func classForArchiver() -> ObjCClass { objCClass }
+    /// What an object decodes or encodes as: itself, unless a class
+    /// substitutes another (decoders use the answer in its place).
+    @ObjCMethod("awakeAfterUsingCoder:") func awakeAfterUsingCoder(_ coder: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("replacementObjectForCoder:") func replacementObject(forCoder coder: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("replacementObjectForKeyedArchiver:")
+    func replacementObject(forKeyedArchiver archiver: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }
+    @ObjCMethod("replacementObjectForArchiver:") func replacementObject(forArchiver archiver: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }
 
     @ObjCMethod("respondsToSelector:")
     func responds(to selector: ObjCSelector?) -> Bool {
