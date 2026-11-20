@@ -13,4 +13,7 @@ reports:
     level: 3
     source: body
     notes: Sound plays and the first race runs at 60 frames a second; finishing a race is unconfirmed.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/e0fa7ef8-8431-466b-b2b5-6e856eb87ed5
+        caption: Title screen
 ---
