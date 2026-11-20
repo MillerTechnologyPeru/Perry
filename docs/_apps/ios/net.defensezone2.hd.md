@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.8.13"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Plays.
