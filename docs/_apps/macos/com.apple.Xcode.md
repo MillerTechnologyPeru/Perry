@@ -3,6 +3,7 @@ name: Xcode
 bundle_id: "com.apple.Xcode"
 platform: macos
 kind: app
+tags: [ObjC]
 reports:
   - pr: 186
     date: 2026-11-18
