@@ -975,6 +975,7 @@ open class NSWindow: NSResponder {
         guard !ignoresMouseEvents else { return }
         let view = viewAt(event.locationInWindow)
         mouseDownView = view
+        Trace.log("window \(windowNumber): mouse down at \(event.locationInWindow) on \(view.map { NSObject($0.objcObject).describedByObject() ?? "?" } ?? "the window")")
         if event.type == .leftMouseDown, let view, view.objcObject != firstResponderObject,
            Send.bool(view.objcObject, "acceptsFirstResponder") {
             _ = makeFirstResponder(view)
