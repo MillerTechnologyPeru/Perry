@@ -16,7 +16,7 @@ APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution fps env args level source notes screenshots].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args level source notes screenshots].freeze
 REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
@@ -27,8 +27,10 @@ PLATFORM_CPUS = {
   "maccatalyst" => %w[arm64 x86_64]
 }.freeze
 KINDS = %w[app game].freeze
-# The engines and languages an app is built with.
-TAGS = %w[Swift ObjC C++ Unity Unreal SexyAppFramework Mono XNA Lua Kotlin].freeze
+# The languages and engines an app is built with.
+TAGS = %w[Swift ObjC C++ Unity Unreal SpriteKit SceneKit Cocos2D Cocos2D-X SexyAppFramework Mono XNA Lua Kotlin].freeze
+# The graphics API a report's run drew with.
+GRAPHICS = ["OpenGL", "OpenGL ES 1", "OpenGL ES 2", "OpenGL ES 3", "Metal"].freeze
 SOURCES = %w[title body screenshot maintainer].freeze
 BUNDLE_ID = /\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/
 
@@ -84,6 +86,9 @@ def check_report(file, where, report, platform, kind, urls)
   end
   hardware = report["hardware"]
   error(file, "#{where} 'hardware' is not a string") unless hardware.nil? || hardware.is_a?(String)
+  if report.key?("graphics") && !GRAPHICS.include?(report["graphics"])
+    error(file, "#{where} 'graphics' is not one of #{GRAPHICS.join(", ")}")
+  end
   if report.key?("fps")
     fps = report["fps"]
     range = fps.is_a?(String) && fps.match(/\A(\d+)-(\d+)\z/)
