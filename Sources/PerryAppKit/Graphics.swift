@@ -77,6 +77,33 @@ open class NSColor: NSObject {
         }
     }
 
+    /// A system color by catalog and name, with its value as an RGB color
+    /// under "NSColor"; another as calibrated RGB ("NSRGB"), or calibrated
+    /// white ("NSWhite") when it is gray: each component list as text.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        func text(_ values: [CGFloat]) -> [UInt8] {
+            Array(values.map { value in
+                let number = Double(value)
+                return number == number.rounded() ? String(Int(number)) : String(number)
+            }.joined(separator: " ").utf8) + [0]
+        }
+        if let catalogName, let colorName {
+            encoder.integer(6, "NSColorSpace")
+            encoder.string(catalogName, "NSCatalogName")
+            encoder.string(colorName, "NSColorName")
+            encoder.object(NSColor(red: red, green: green, blue: blue, alpha: alpha), "NSColor")
+        } else if red == green && green == blue {
+            encoder.integer(3, "NSColorSpace")
+            encoder.bytes(text(alpha == 1 ? [red] : [red, alpha]), "NSWhite")
+        } else {
+            encoder.integer(1, "NSColorSpace")
+            encoder.bytes(text(alpha == 1 ? [red, green, blue] : [red, green, blue, alpha]), "NSRGB")
+        }
+    }
+
     deinit { if let cgColor { CG.release(cgColor) } }
 
     /// For a system color from a nib, the appearance its components are
@@ -477,6 +504,16 @@ open class NSFont: NSObject {
         let decoded = Coder(coder: coder)
         let named = NSFont(name: decoded.string("NSName") ?? ".AppleSystemUIFont", size: decoded.double("NSSize"))
         (name, size, bold, italic) = (named.name, named.size, named.bold, named.italic)
+    }
+
+    /// "NSName", "NSSize", and "NSfFlags" as AppKit writes them for a font.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.string(name, "NSName")
+        encoder.double(Double(size), "NSSize")
+        encoder.integer(16, "NSfFlags")
     }
 
     /// A system font of a weight: NSFontWeight's semibold (0.3) and heavier
