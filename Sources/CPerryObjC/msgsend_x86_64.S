@@ -63,9 +63,21 @@
     leave
 .endm
 
+// Jumps to the IMP in \imp, using \scratch. A send returning through memory
+// must reach the forwarder that finds the receiver past the result pointer;
+// the runtime has one IMP for "not implemented", so that send swaps it here.
+.macro JUMP_IMP imp, scratch, stret
+.if \stret
+    leaq .Lmsgforward(%rip), \scratch
+    cmpq \scratch, \imp
+    je .Lmsgforward_stret
+.endif
+    jmp *\imp
+.endm
+
 // With the receiver in \receiver, the selector in \selector and the class
 // in r11: jumps to the method.
-.macro LOOKUP receiver, selector
+.macro LOOKUP receiver, selector, stret=0
     movq %rax, -8(%rsp)
     movq 16(%r11), %r10             // class->cache
     testq %r10, %r10
@@ -86,7 +98,7 @@
     testq %r10, %r10
     jz 3f
     movq -8(%rsp), %rax
-    jmp *%r10
+    JUMP_IMP %r10, %r11, \stret
 3:  movq -8(%rsp), %rax
     SAVE_ARGUMENTS
     // In this order, since \selector may be rsi or rdx.
@@ -96,7 +108,7 @@
     call perry_objc_lookup_slow@PLT
     movq %rax, %r11
     RESTORE_ARGUMENTS
-    jmp *%r11
+    JUMP_IMP %r11, %r10, \stret
 .endm
 
 // id objc_msgSend(id self, SEL _cmd, ...)
@@ -127,7 +139,7 @@ ENTRY _objc_msgSend_stret
     testq %r11, %r11
     jz .Lnil_stret
 .Llookup_stret:
-    LOOKUP %rsi, %rdx
+    LOOKUP %rsi, %rdx, 1
 .Lnil_stret:                        // the result is left alone, as Darwin's is
     movq %rdi, %rax
     ret
@@ -236,6 +248,7 @@ ENTRY __objc_msgForward
 END __objc_msgForward
 
 ENTRY __objc_msgForward_stret
+.Lmsgforward_stret:
     SAVE_ARGUMENTS
     movq %rsi, %rdi
     movq %rdx, %rsi
