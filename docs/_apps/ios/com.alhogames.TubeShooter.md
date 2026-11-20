@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Shows its title screen with its wormhole.
