@@ -29,7 +29,7 @@ bundle_id: "com.hulu.plus"  # CFBundleIdentifier, always quoted
 platform: ios            # ios | macos | maccatalyst, the folder it is in
 kind: app                # app | game
 developer: Hulu          # only if a PR states it or it is unambiguous
-tags: [Swift, ObjC]      # engines and languages: Swift, ObjC, C++, Unity, Unreal, SexyAppFramework, Mono, XNA, Lua, Kotlin
+tags: [Swift, ObjC]      # languages and engines; see the list below
 reports:
   - pr: 216
     date: 2026-11-19     # the PR's merge date
@@ -39,6 +39,7 @@ reports:
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
     resolution: "1170x2532"  # the size it drew at, if stated: "WxH" pixels, or "WxH@S" points at a scale
+    graphics: Metal      # the graphics API this run drew with, if known
     fps: 60              # games only: the frame rate in play, or a range such as "45-52"
     env:                 # environment variables it ran with, if any
       - "PERRY_OS_VERSION=18.0"
@@ -70,10 +71,16 @@ more than the reports do.
   ROCKNIX.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
   x86 machine runs x86_64 or i386 ones.
-- `tags` names the engines and languages the app is built with, from
-  Swift, ObjC, C++, Unity, Unreal, SexyAppFramework, Mono, XNA, Lua and
-  Kotlin. Add a tag
-  only when the app's bundle or its pull request shows it.
+- `tags` names the languages and engines the app is built with: Swift,
+  ObjC, C++, Unity, Unreal, SpriteKit, SceneKit, Cocos2D (cocos2d-iphone,
+  Objective-C), Cocos2D-X (C++), SexyAppFramework, Mono, XNA, Lua and
+  Kotlin. Add a tag only when the app's bundle or its pull request shows
+  it.
+- `graphics` is the graphics API that run drew with: OpenGL, OpenGL ES 1,
+  OpenGL ES 2, OpenGL ES 3 or Metal. It belongs to the report, not the app:
+  older builds of a game may use OpenGL ES where newer ones use Metal, and
+  a game that supports both runs on OpenGL ES when Metal is turned off
+  (`PERRY_METAL=0`, listed in `env`).
 - `fps` is for games: the frame rate the pull request measured while
   playing, or the menu's if play wasn't reached. A range is quoted, as
   `"45-52"`.
