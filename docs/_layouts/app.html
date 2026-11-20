@@ -54,7 +54,11 @@ layout: default
 {%- for report in reports %}
 {%- assign level = site.data.levels | where: "level", report.level | first %}
 <section class="report">
+  {%- if report.pr %}
   <h3><a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ report.pr }}">Pull request #{{ report.pr }}</a></h3>
+  {%- else %}
+  <h3>Maintainer's test of <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></h3>
+  {%- endif %}
   <ul class="report-facts">
     <li><span class="badge level-{{ report.level }}"><span class="badge-number">{{ report.level }}</span>{{ level.name }}</span></li>
     <li><strong>Date</strong> {{ report.date | date: "%Y-%m-%d" }}</li>
