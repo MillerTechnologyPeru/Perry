@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Shows its daily bonus panel and menu, and puts a ball in play at 60 frames a second with a controller.
