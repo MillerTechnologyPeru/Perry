@@ -39,6 +39,10 @@ reports:
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
     fps: 60              # games only: the frame rate in play, or a range such as "45-52"
+    env:                 # environment variables it ran with, if any
+      - "PERRY_OS_VERSION=18.0"
+    args:                # options passed to perry before the app, if any
+      - "--report"
     os: Debian sid       # the operating system that machine ran
     level: 2
     source: title        # title | body | screenshot | maintainer: what the level rests on
@@ -71,6 +75,10 @@ more than the reports do.
 - `fps` is for games: the frame rate the pull request measured while
   playing, or the menu's if play wasn't reached. A range is quoted, as
   `"45-52"`.
+- `env` lists the environment variables the app ran with, each as a
+  quoted `"NAME=value"`, and `args` the options passed to `perry`. Give
+  them when the pull request says the app needs them or was tested with
+  them, so someone else can run it the same way.
 - `notes` is one or two plain sentences in the present tense saying how
   far the app gets and what is known to be wrong.
 - Don't add `layout`, `title` or `permalink`; the site's settings supply
