@@ -3,6 +3,7 @@ name: Call of Duty 4
 bundle_id: "com.aspyr.callofduty4.sp.steam"
 platform: macos
 kind: game
+tags: [C++]
 reports:
   - pr: 178
     date: 2026-11-17
