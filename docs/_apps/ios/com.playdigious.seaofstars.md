@@ -3,6 +3,7 @@ name: Sea of Stars
 bundle_id: "com.playdigious.seaofstars"
 platform: ios
 kind: game
+tags: [C++, Unity]
 reports:
   - pr: 185
     date: 2026-11-18
