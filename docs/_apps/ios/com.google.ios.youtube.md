@@ -3,6 +3,7 @@ name: YouTube
 bundle_id: "com.google.ios.youtube"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 132
     date: 2026-11-10
