@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Bejeweled 3
+Comment=PopCap's match-three game, the Mac build through Perry and box86
+Exec=com.popcap.Bejeweled3
+Icon=com.popcap.Bejeweled3
+Terminal=false
+Categories=Game;LogicGame;
+StartupWMClass=com.popcap.Bejeweled3
