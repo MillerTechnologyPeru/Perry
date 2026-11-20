@@ -310,7 +310,19 @@ final class Compositor {
         let pixels = (extent.width * renderScale, extent.height * renderScale)
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
-        guard width > 0, height > 0, let context = CG.makeContext(size: extent.size, scale: renderScale, opaque: false) else { return }
+        guard width > 0, height > 0 else { return }
+        // A masked layer's image is made at the texture's size: its pixels
+        // are the texture's.
+        if state.mask != nil, let image = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale),
+           CG.imageGetWidth(image.object) == width, CG.imageGetHeight(image.object) == height,
+           let texture = CG.withPixels(of: image.object, { pixels, bytesPerRow -> SDLTexture? in
+               bytesPerRow >= width * 4 ? makeTexture(width: width, height: height, pixels: pixels, pitch: bytesPerRow) : nil
+           }) {
+            textures[key] = Entry(texture: texture, signature: nil, used: true, flattened: (extent.size, generation))
+            place(texture, extent: extent, toScreen: toScreen, alpha: alpha)
+            return
+        }
+        guard let context = CG.makeContext(size: extent.size, scale: renderScale, opaque: false) else { return }
         defer { CG.release(context) }
         if state.mask != nil {
             guard let image = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale) else { return }
@@ -341,8 +353,68 @@ final class Compositor {
     /// keeps it upright, else turned about its center.
     private func drawTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool, toScreen: CGAffineTransform,
                              alpha: CGFloat) {
+        if !border, let shape, let extent = Compositor.shapeExtent(of: layer, state: state, shape: shape) {
+            guard let texture = shapeTexture(of: layer, state: state, shape: shape, extent: extent, toScreen: toScreen) else { return }
+            place(texture, extent: extent, toScreen: toScreen, alpha: alpha)
+            return
+        }
         guard let texture = texture(of: layer, state: state, shape: shape, border: border) else { return }
         place(texture, state: state, toScreen: toScreen, alpha: alpha)
+    }
+
+    /// Where a layer that shows only a shape draws: the path's box and its
+    /// stroke's, within the bounds when they clip. An animation made at
+    /// 3840x2160 has layers that big with a shape the size of a letter, and
+    /// drawing the whole layer each frame takes tens of megabytes.
+    fileprivate static func shapeExtent(of layer: CALayer, state: LayerState, shape: ShapeLayerState) -> CGRect? {
+        guard state.backgroundColor == nil, state.contents == nil, state.livePixels == nil, state.sharedFrames == nil,
+              state.cornerRadius == 0, layer.state.backing == nil, !layer.draws, let path = shape.path else { return nil }
+        let box = CG.pathGetBoundingBox(path)
+        guard box.minX.isFinite, box.minY.isFinite, box.width.isFinite, box.height.isFinite else { return nil }
+        let pad = shape.strokeColor == nil ? 1 : shape.lineWidth * max(shape.miterLimit, 1) / 2 + 1
+        var extent = CGRect(x: box.minX - pad, y: box.minY - pad, width: box.width + 2 * pad, height: box.height + 2 * pad)
+        if state.masksToBounds { extent = extent.intersection(state.bounds) }
+        guard extent.width > 0, extent.height > 0 else { return nil }
+        // Only for layers much larger than their shape.
+        return extent.width * extent.height * 4 < state.bounds.width * state.bounds.height ? extent : nil
+    }
+
+    /// The texture of a shape's `extent`, at the resolution it shows at
+    /// (halved as many times as keeps it at least as sharp as the display),
+    /// drawn again when the shape changes.
+    private func shapeTexture(of layer: CALayer, state: LayerState, shape: ShapeLayerState, extent: CGRect,
+                              toScreen: CGAffineTransform) -> SDLTexture? {
+        let key = Key(layer: layer.objcObject, border: false)
+        let shown = (toScreen.a * toScreen.d - toScreen.b * toScreen.c).magnitude.squareRoot()
+        var factor: CGFloat = 1
+        if shown.isFinite { while factor > 1.0 / 16, factor / 2 >= shown { factor /= 2 } } else { factor = 1 }
+        let renderScale = scale * factor
+        var signature = Signature(size: extent.size, cornerRadius: 0, maskedCorners: 0, color: nil)
+        signature.contentsScale = renderScale
+        signature.contentsRect = extent
+        signature.shape = ShapeSignature(path: shape.path, fillColor: shape.fillColor, strokeColor: shape.strokeColor,
+                                         lineWidth: shape.lineWidth, strokeStart: shape.strokeStart, strokeEnd: shape.strokeEnd,
+                                         lineDashPhase: shape.lineDashPhase, lineCap: shape.lineCap, lineJoin: shape.lineJoin)
+        if let entry = textures[key], entry.signature == signature {
+            textures[key]?.used = true
+            return entry.texture
+        }
+        textures[key] = nil
+        let pixels = (extent.width * renderScale, extent.height * renderScale)
+        guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
+        let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
+        guard let context = CG.makeContext(size: extent.size, scale: renderScale, opaque: false) else { return nil }
+        defer { CG.release(context) }
+        CG.scaleCTM(context, CGFloat(width) / pixels.0, CGFloat(height) / pixels.1)
+        CG.translateCTM(context, -extent.minX, -extent.minY)
+        CG.saveGState(context)
+        if state.masksToBounds { CALayer.clip(to: state, in: context) }
+        CALayer.drawContent(of: layer, state: state, shape: shape, in: context)
+        CG.restoreGState(context)
+        guard let data = CG.bitmapContextGetData(context),
+              let texture = makeTexture(width: width, height: height, pixels: data, pitch: width * 4) else { return nil }
+        textures[key] = Entry(texture: texture, signature: signature, used: true)
+        return texture
     }
 
     /// A static texture of premultiplied ARGB pixels, scaled linearly.
