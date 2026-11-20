@@ -13,6 +13,7 @@ reports:
     app_version: "1.24"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 1
     fps: 30
     level: 4
     source: body
