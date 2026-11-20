@@ -19,7 +19,7 @@ extension NSObject {
 
     /// A class describes itself by its name.
     @ObjCClassMethod("description")
-    static func classDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
+    static func classDescription(_ cls: ObjCClass) -> String { ObjC.name(ofClass: cls.pointer) }
 
     /// The class version, which nothing here archives by: kept as it is set.
     @ObjCClassMethod("setVersion:")
@@ -33,7 +33,7 @@ extension NSObject {
     }
 
     @ObjCClassMethod("debugDescription")
-    static func classDebugDescription(_ cls: ObjCClass) -> String { ObjC.className(cls.pointer) }
+    static func classDebugDescription(_ cls: ObjCClass) -> String { ObjC.name(ofClass: cls.pointer) }
 }
 
 /// retain, release and autorelease for static objects such as literals.
