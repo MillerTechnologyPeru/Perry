@@ -13,6 +13,7 @@ reports:
     hardware: Retroid Pocket 5
     os: ROCKNIX
     resolution: "480x320"
+    graphics: OpenGL ES 2
     level: 3
     source: body
     notes: Reaches its menu.
