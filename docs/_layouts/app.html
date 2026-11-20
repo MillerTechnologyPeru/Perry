@@ -49,6 +49,7 @@ layout: default
     <li><strong>App version</strong> {{ report.app_version | escape }}</li>
     {%- endif %}
     <li><strong>Hardware</strong> {{ report.hardware | escape }}</li>
+    <li><strong>OS</strong> {{ report.os | escape }}</li>
     <li><strong>Commit</strong> <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></li>
     <li><strong>Level from</strong> {{ report.source }}</li>
   </ul>
