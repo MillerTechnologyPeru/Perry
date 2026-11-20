@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "7.2.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Launches and shows its sidebar, timeline and detail panes; the article pane is not shown yet.
@@ -20,6 +21,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Loads its feeds and shows a selected feed's articles in the timeline.
@@ -29,6 +31,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: The article pane shows the selected article through WPE WebKit.
@@ -38,6 +41,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Article links open in the desktop's browser.
@@ -47,6 +51,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Its timeline scrolls by touch with momentum, in frames of about 8 to 12 ms.
