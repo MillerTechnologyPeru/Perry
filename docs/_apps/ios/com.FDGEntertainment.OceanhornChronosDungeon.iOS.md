@@ -15,6 +15,7 @@ reports:
     resolution: "1920x1080"
     env:
       - "PERRY_UIKIT_SCREEN=640x360@3"
+    graphics: Metal
     level: 2
     source: body
     notes: Reaches its title screen at 1920x1080.
@@ -29,6 +30,7 @@ reports:
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
     resolution: "1920x1080"
+    graphics: Metal
     fps: "50-58"
     level: 4
     source: body
