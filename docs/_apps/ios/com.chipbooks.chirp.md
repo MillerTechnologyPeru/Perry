@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "6.9.7"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Starts, shows its loading screen and makes its first request.
