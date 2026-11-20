@@ -12,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 1
     source: body
     notes: Starts without crashing, but its screen stays black.
@@ -23,6 +24,7 @@ reports:
     app_version: "1.3.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 3
     source: body
     notes: Its main menu works and New Game starts.
