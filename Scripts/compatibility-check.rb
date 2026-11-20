@@ -28,7 +28,7 @@ PLATFORM_CPUS = {
 }.freeze
 KINDS = %w[app game].freeze
 # The engines and languages an app is built with.
-TAGS = %w[Swift ObjC C++ Unity Unreal Mono XNA Lua Kotlin].freeze
+TAGS = %w[Swift ObjC C++ Unity Unreal SexyAppFramework Mono XNA Lua Kotlin].freeze
 SOURCES = %w[title body screenshot maintainer].freeze
 BUNDLE_ID = /\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/
 
