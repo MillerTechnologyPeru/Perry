@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: title
     notes: Runs on Perry's SpriteKit.
@@ -19,6 +20,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Matches the iOS Simulator and runs with sound.
