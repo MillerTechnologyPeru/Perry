@@ -16,7 +16,7 @@ APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os fps level source notes screenshots].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os fps env args level source notes screenshots].freeze
 REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
@@ -91,6 +91,18 @@ def check_report(file, where, report, platform, kind, urls)
       error(file, "#{where} 'fps' is not a frame rate such as 60 or \"45-52\"")
     end
     error(file, "#{where} has 'fps', but the app's kind is not game") unless kind == "game"
+  end
+  if report.key?("env")
+    env = report["env"]
+    if !env.is_a?(Array) || env.empty? || !env.all? { |v| v.is_a?(String) && v.match?(/\A[A-Za-z_][A-Za-z0-9_]*=/) }
+      error(file, "#{where} 'env' is not a list of NAME=value settings")
+    end
+  end
+  if report.key?("args")
+    args = report["args"]
+    if !args.is_a?(Array) || args.empty? || !args.all? { |v| v.is_a?(String) && !v.empty? }
+      error(file, "#{where} 'args' is not a list of command-line arguments")
+    end
   end
   os = report["os"]
   error(file, "#{where} 'os' is not a string") unless os.nil? || os.is_a?(String)
