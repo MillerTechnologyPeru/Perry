@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "2.2.9"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Runs to its tabbed main interface and its screens open; an intermittent heap corruption ends some runs.
