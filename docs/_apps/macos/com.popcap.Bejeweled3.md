@@ -11,6 +11,8 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
     level: 3
     source: body
     notes: Loads, draws in OpenGL, plays sound and reaches a Classic game board.
