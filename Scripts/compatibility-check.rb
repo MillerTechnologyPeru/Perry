@@ -27,7 +27,7 @@ PLATFORM_CPUS = {
   "maccatalyst" => %w[arm64 x86_64]
 }.freeze
 KINDS = %w[app game].freeze
-SOURCES = %w[title body screenshot].freeze
+SOURCES = %w[title body screenshot maintainer].freeze
 BUNDLE_ID = /\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/
 
 SCREENSHOT_URL = %r{\A(?:
