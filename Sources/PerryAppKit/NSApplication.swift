@@ -101,25 +101,46 @@ open class NSApplication: NSResponder {
 
     /// With PERRY_APPKIT_CLICKS set to "x,y;x,y…", clicks at those points
     /// of the first window shown (from its top left; the next one shown, once
-    /// it closes), two seconds apart starting six seconds after launch, go to
-    /// the window on top there: to try menus and controls without a mouse.
+    /// it closes), six seconds after launch and then each two seconds after
+    /// the one before was handled (so a busy app doesn't get them at once),
+    /// go to the window on top there: to try menus and controls without a mouse.
     /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
-    /// positive), as a mouse wheel's notches.
-    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
+    /// positive), as a mouse wheel's notches; "m:Title" chooses the main
+    /// menu's item of that title, wherever its menu is.
+    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?, menuItem: String?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
         String(cString: value).split(separator: ";").compactMap { entry in
+            if entry.hasPrefix("m:") { return (.zero, nil, String(entry.dropFirst(2))) }
             let scrolls = entry.hasPrefix("s:")
             let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }).map { CGFloat($0) } }
-            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2])) : nil }
-            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil) : nil
+            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2]), nil) : nil }
+            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil, nil) : nil
         }
+    }
+
+    /// The item titled `title` in `menu` or its submenus.
+    private static func menuItem(titled title: String, in menu: NSMenu?) -> NSMenuItem? {
+        for item in menu?.items ?? [] {
+            if item.title == title { return item }
+            if let found = menuItem(titled: title, in: item.submenu) { return found }
+        }
+        return nil
     }
     nonisolated(unsafe) private static var clickWindow: NSWindow?
 
     @ObjCMethod("_perryScriptedClick")
     func scriptedClick() {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
-        let (point, scroll) = clicks.removeFirst()
+        let (point, scroll, title) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
+        if !clicks.isEmpty { scheduleScriptedClick(after: 2) }
+        if let title {
+            guard let item = NSApplication.menuItem(titled: title, in: mainMenu?.as(NSMenu.self)) else {
+                Trace.log("scripted menu item \(title): none")
+                return
+            }
+            MenuTracking.perform(item)
+            return
+        }
         if NSApplication.clickWindow?.visible != true { NSApplication.clickWindow = Windows.all.first { $0.visible } }
         if let base = NSApplication.clickWindow {
             let screen = CGPoint(x: base.frame.minX + point.x, y: base.frame.maxY - point.y)
@@ -150,7 +171,7 @@ open class NSApplication: NSResponder {
     @ObjCMethod("run")
     func run() {
         Send.void(objcObject, "finishLaunching")
-        for index in NSApplication.scriptedClicks?.indices ?? 0..<0 { scheduleScriptedClick(after: 6 + 2 * Double(index)) }
+        if NSApplication.scriptedClicks?.isEmpty == false { scheduleScriptedClick(after: 6) }
         if getenv("PERRY_APPKIT_TYPE") != nil {
             typealias F = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, Double) -> Void
             unsafeBitCast(ObjCRuntime.msgSend, to: F.self)(objcObject, ObjCRuntime.selector("performSelector:withObject:afterDelay:"),
