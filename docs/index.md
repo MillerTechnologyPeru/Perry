@@ -24,10 +24,15 @@ everything it calls is ordinary Linux code, mostly written in Swift.
 ## Apps tested so far
 
 {% assign report_count = 0 -%}
+{%- assign tested_count = 0 -%}
 {%- for app in site.apps -%}
-  {%- assign report_count = report_count | plus: app.reports.size -%}
+  {%- if app.reports -%}
+    {%- assign report_count = report_count | plus: app.reports.size -%}
+    {%- assign tested_count = tested_count | plus: 1 -%}
+  {%- endif -%}
 {%- endfor -%}
-{{ site.apps.size }} apps and games have {{ report_count }} reports, each from a merged pull request.
+{%- assign untested_count = site.apps.size | minus: tested_count -%}
+{{ tested_count }} apps and games have {{ report_count }} reports, each from a merged pull request{% if untested_count > 0 %}, and {{ untested_count }} more are listed but not tested yet{% endif %}.
 An app's level is the level of its newest report.
 
 <div class="table-wrap">
@@ -47,6 +52,12 @@ An app's level is the level of its newest report.
       <td>{{ count }}</td>
     </tr>
   {%- endfor %}
+  {%- if untested_count > 0 %}
+    <tr>
+      <td><span class="badge untested">Not tested yet</span></td>
+      <td>{{ untested_count }}</td>
+    </tr>
+  {%- endif %}
   </tbody>
 </table>
 </div>
