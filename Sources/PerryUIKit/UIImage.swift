@@ -175,7 +175,13 @@ open class UIImage: NSObject {
         guard catalog else { return nil }
         // A catalog's images have no extension in their names; a nib
         // names one with the file's ("Header.png").
-        for name in name == base ? [name] : [name, base] {
+        // A vector image is named with its file's extension too
+        // ("Background.svg"), which the catalog's name doesn't have.
+        var catalogBase = base
+        for suffix in [".svg", ".pdf", ".jpeg", ".gif", ".heic", ".webp"] where catalogBase.hasSuffix(suffix) {
+            catalogBase = String(catalogBase.dropLast(suffix.count))
+        }
+        for name in name == catalogBase ? [name] : (base == catalogBase ? [name, base] : [name, base, catalogBase]) {
             let main = bundle.objcObject == NSBundle.main().objcObject
             let found = main ? AssetCatalog.image(named: name, dark: dark) : AssetCatalog.catalog(in: bundle)?.image(named: name, dark: dark)
             guard let found else { continue }
