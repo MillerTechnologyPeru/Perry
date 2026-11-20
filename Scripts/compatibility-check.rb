@@ -16,7 +16,7 @@ APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
 APP_REQUIRED = %w[name bundle_id platform kind].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args level source notes screenshots].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args packaging level source notes screenshots].freeze
 REPORT_REQUIRED = %w[date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
@@ -119,6 +119,13 @@ def check_report(file, where, report, platform, kind, urls)
   end
   os = report["os"]
   error(file, "#{where} 'os' is not a string") unless os.nil? || os.is_a?(String)
+  if report.key?("packaging")
+    packaging = report["packaging"]
+    unless packaging.is_a?(String) && packaging.start_with?("Packaging/") && !packaging.include?("..") &&
+           File.directory?(File.join(ROOT, packaging))
+      error(file, "#{where} 'packaging' is not a folder in Packaging/")
+    end
+  end
   level = report["level"]
   error(file, "#{where} 'level' is not an integer from 1 to 5") unless level.nil? || (level.is_a?(Integer) && (1..5).cover?(level))
   source = report["source"]
