@@ -84,6 +84,23 @@ enum Sets {
     static func owned(_ members: [id], cls: id? = nil) -> NSSet {
         NSSet(objCOwned: make(members, cls: cls))
     }
+
+    /// A new set of `cls`, +1. A subclass that sets itself up in its own
+    /// -init (Xcode's ordered sets make their hash table there) is made with
+    /// +alloc and -init, and given its members with -addObject:, as
+    /// Foundation's constructors make sets; this library's classes are
+    /// made directly.
+    static func owned(_ members: [id], subclass cls: id) -> NSSet {
+        let selector = ObjC.selector("init")
+        let own = ObjC.methodImplementation(cls.assumingMemoryBound(to: perry_class_storage.self), selector)
+        guard own != ObjC.methodImplementation(setClass, selector), own != ObjC.methodImplementation(mutableClass, selector),
+              let allocated = ObjC.send(cls, ObjC.selector("alloc")), let made = ObjC.send(allocated, selector) else {
+            return owned(members, cls: cls)
+        }
+        let add = ObjC.selector("addObject:")
+        for member in members { _ = ObjC.send(made, add, member) }
+        return NSSet(objCOwned: made)
+    }
 }
 
 /// NSSet.
@@ -110,21 +127,21 @@ public class NSSet: NSObject {
     }
 
     @ObjCClassMethod("set")
-    static func set(_ cls: ObjCClass) -> NSSet { Sets.owned([], cls: cls.pointer) }
+    static func set(_ cls: ObjCClass) -> NSSet { Sets.owned([], subclass: cls.pointer) }
 
     @ObjCClassMethod("setWithObject:")
-    static func set(_ cls: ObjCClass, object: ObjCObject) -> NSSet { Sets.owned([object.id], cls: cls.pointer) }
+    static func set(_ cls: ObjCClass, object: ObjCObject) -> NSSet { Sets.owned([object.id], subclass: cls.pointer) }
 
     @ObjCClassMethod("setWithArray:")
-    static func set(_ cls: ObjCClass, array: NSArray?) -> NSSet { Sets.owned(array?.elements ?? [], cls: cls.pointer) }
+    static func set(_ cls: ObjCClass, array: NSArray?) -> NSSet { Sets.owned(array?.elements ?? [], subclass: cls.pointer) }
 
     @ObjCClassMethod("setWithObjects:count:")
     static func set(_ cls: ObjCClass, objects: UnsafePointer<id?>?, count: UInt) -> NSSet {
-        Sets.owned(Arrays.objects(objects, count: count, method: "+[NSSet setWithObjects:count:]"), cls: cls.pointer)
+        Sets.owned(Arrays.objects(objects, count: count, method: "+[NSSet setWithObjects:count:]"), subclass: cls.pointer)
     }
 
     @ObjCClassMethod("setWithSet:")
-    static func set(_ cls: ObjCClass, set other: ObjCObject?) -> NSSet { Sets.owned(Sets.elements(other?.id), cls: cls.pointer) }
+    static func set(_ cls: ObjCClass, set other: ObjCObject?) -> NSSet { Sets.owned(Sets.elements(other?.id), subclass: cls.pointer) }
 
     @ObjCMethod("init")
     func initialize() -> Self { setMembers([]) }
@@ -175,6 +192,9 @@ public class NSSet: NSObject {
 
     @ObjCMethod("initWithArray:")
     func initialize(array: NSArray?) -> Self { setMembers(array?.elements ?? []) }
+
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject?) -> Self { setMembers(CollectionCoding.objects(coder?.id)) }
 
     @ObjCMethod("initWithObjects:count:")
     func initialize(objects: UnsafePointer<id?>?, count: UInt) -> Self {
@@ -304,7 +324,7 @@ public class NSMutableSet: NSSet {
     }
 
     @ObjCClassMethod("setWithCapacity:")
-    static func set(_ cls: ObjCClass, capacity: UInt) -> NSSet { Sets.owned([], cls: cls.pointer) }
+    static func set(_ cls: ObjCClass, capacity: UInt) -> NSSet { Sets.owned([], subclass: cls.pointer) }
 
     @ObjCMethod("initWithCapacity:")
     func initialize(capacity: UInt) -> Self {
