@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.31"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Gets past its title's Game Center wait and draws at its full 30 frames a second.
