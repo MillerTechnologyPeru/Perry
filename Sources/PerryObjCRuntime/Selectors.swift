@@ -28,6 +28,8 @@ public enum Selectors {
 /// Selectors the runtime sends or looks up itself.
 enum Sel {
     nonisolated(unsafe) static let alloc = Selectors.register("alloc")
+    nonisolated(unsafe) static let classSelector = Selectors.register("class")
+    nonisolated(unsafe) static let classForCoder = Selectors.register("classForCoder")
     nonisolated(unsafe) static let allocWithZone = Selectors.register("allocWithZone:")
     nonisolated(unsafe) static let `init` = Selectors.register("init")
     nonisolated(unsafe) static let new = Selectors.register("new")
