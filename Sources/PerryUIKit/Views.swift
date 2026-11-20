@@ -772,6 +772,7 @@ open class WKWebView: UIView {
         let object = objcObject
         attachContent(page, web)
         page.loadChanged = { event in WebViews.loadChanged(object, event) }
+        page.decideNavigation = { uri, type in WebNavigationPolicy.decide(object, uri: uri, type: type) }
         page.loadFailed = { committed, domain, code, message in
             WebViews.loadFailed(object, committed: committed, domain: domain, code: code, message: message)
         }
