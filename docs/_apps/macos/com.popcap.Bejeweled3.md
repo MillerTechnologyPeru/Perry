@@ -95,6 +95,40 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/52a05b2a-72af-423b-95ad-121b2e6b75be
         caption: A Classic game full screen
+  - pr: 225
+    date: 2026-11-19
+    perry: "d41ddf0c"
+    platform: macos
+    cpu: i386
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    packaging: Packaging/macos/com.popcap.Bejeweled3/linux
+    resolution: "1024x768"
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "SteamAppId=78000"
+    graphics: OpenGL
+    fps: 60
+    level: 5
+    source: maintainer
+    notes: Everything tested works, started from the Packaging launcher, with MangoHud.
+  - pr: 225
+    date: 2026-11-19
+    perry: "d41ddf0c"
+    platform: macos
+    cpu: i386
+    hardware: Powkiddy X55
+    os: ROCKNIX 20261101
+    packaging: Packaging/macos/com.popcap.Bejeweled3/portmaster
+    resolution: "1280x720"
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    graphics: OpenGL
+    level: 3
+    source: body
+    notes: Starts Classic games full screen under box86, from the PortMaster port; loading takes about 100 seconds.
 ---
 
 Needs `PERRY_UNIMPLEMENTED=continue` and `PERRY_OBJC_UNRECOGNIZED=continue`.
