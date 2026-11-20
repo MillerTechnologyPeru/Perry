@@ -19,4 +19,7 @@ reports:
     level: 2
     source: body
     notes: Launches under perry32 to its title screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/cb4637a9-b77d-4819-9710-6a58c6388c09
+        caption: Controls screen
 ---
