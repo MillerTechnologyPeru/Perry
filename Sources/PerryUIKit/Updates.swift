@@ -78,6 +78,7 @@ enum Updates {
             }
             for window in Windows.visible { window.layoutIfNeeded() }
         }
+        GeometryObservers.check()
         let after = afterwards
         afterwards = []
         for body in after { ObjCRuntime.autoreleasepool { body() } }
@@ -323,4 +324,53 @@ enum Snapshot {
 
 extension NSObject {
     @ObjCMethod("writeToFile:atomically:") @discardableResult func sendWrite(toFile path: String, atomically: Bool) -> Bool
+}
+
+
+/// The views that asked for notice of their ancestors' geometry changing
+/// (SwiftUI's hosting views, which keep the transform of where they are in
+/// their window for hit testing): each with where it was, as the transforms
+/// of its layer and its ancestors' up to the window's.
+enum GeometryObservers {
+    nonisolated(unsafe) private static var observed: [UnsafeMutableRawPointer: [Double]] = [:]
+
+    static func register(_ view: UIView) {
+        observed[view.objcObject] = signature(of: view)
+    }
+
+    static func remove(_ view: UnsafeMutableRawPointer) {
+        observed[view] = nil
+    }
+
+    private static func signature(of view: UIView) -> [Double] {
+        var values: [Double] = []
+        var current: UnsafeMutableRawPointer? = view.objcObject
+        while let pointer = current {
+            let state = UIView.states[pointer]
+            let frame = state.frame, origin = state.bounds.origin
+            values += [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height), Double(origin.x), Double(origin.y)]
+            if let t = state.geometry?.transform { values += [Double(t.a), Double(t.b), Double(t.c), Double(t.d), Double(t.tx), Double(t.ty)] }
+            if UIView.wrap(pointer).is(UIWindow.self) { break }
+            current = state.superview
+        }
+        return values
+    }
+
+    /// Tells the views that have moved, once each; they ask again if they
+    /// still want to hear.
+    static func check() {
+        guard !observed.isEmpty else { return }
+        for (pointer, before) in observed {
+            let view = UIView.wrap(pointer)
+            guard signature(of: view) != before else { continue }
+            observed[pointer] = nil
+            // The hosting view's -_geometryChanged:forAncestor: does not read the change.
+            var change = [Double](repeating: 0, count: 16)
+            change.withUnsafeBytes { NSObject(pointer).sendGeometryChanged($0.baseAddress, forAncestor: nil) }
+        }
+    }
+}
+
+extension NSObject {
+    @ObjCMethod("_geometryChanged:forAncestor:") func sendGeometryChanged(_ change: UnsafeRawPointer?, forAncestor ancestor: NSObject?)
 }
