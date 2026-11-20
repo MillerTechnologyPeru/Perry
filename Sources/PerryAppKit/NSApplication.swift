@@ -153,7 +153,7 @@ open class NSApplication: NSResponder {
                 queue.append(event)
                 return
             }
-            Trace.log("scripted click at \(point) in window \(target.windowNumber)")
+            Trace.log("scripted click at \(point) of window \(base.windowNumber) in window \(target.windowNumber), at \(local)")
             for type in [EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent(type, window: target, location: local)
                 event.clickCount = 1
@@ -189,9 +189,6 @@ open class NSApplication: NSResponder {
                 }
                 Send.void(objcObject, "updateWindows")
             }
-            // Between events none of the program's code is running: objects
-            // a program built for the garbage collector let go of go now.
-            ObjCRuntime.collect()
         }
     }
 
