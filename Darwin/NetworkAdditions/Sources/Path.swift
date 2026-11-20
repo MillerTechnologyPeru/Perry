@@ -49,3 +49,15 @@ public struct NWPath {
     /// Whether the path uses an interface in an ultra-constrained mode; never, here.
     public var isUltraConstrained: Bool { false }
 }
+
+/// NWBrowser, iOS 13's browser for services on the local network, which the
+/// overlay predates. Only what names a thing to browse for is here: apps
+/// make a descriptor to hand to a device picker (Crunchyroll's is an
+/// application service), and nothing browses yet.
+public final class NWBrowser {
+    public enum Descriptor: Sendable {
+        case bonjour(type: String, domain: String?)
+        case bonjourWithTXTRecord(type: String, domain: String?)
+        case applicationService(name: String)
+    }
+}
