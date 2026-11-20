@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Parallels VM on an arm64 Mac
     os: Debian 13
+    graphics: Metal
     level: 1
     source: body
     notes: Gets through Feral's start-up and initializes Steam, then its game run returns before making a window.
@@ -35,6 +36,7 @@ reports:
     cpu: arm64
     hardware: Parallels VM on an arm64 Mac
     os: Debian 13
+    graphics: Metal
     level: 1
     source: body
     notes: Gets past the launcher's PLAY button, then stops at Metal function constants.
@@ -45,6 +47,7 @@ reports:
     cpu: arm64
     hardware: Parallels VM on an arm64 Mac
     os: Debian 13
+    graphics: Metal
     level: 2
     source: body
     notes: Reaches its own window, where it shows its emblem.
@@ -55,6 +58,7 @@ reports:
     cpu: arm64
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: Metal
     fps: 9
     level: 1
     source: body
