@@ -93,21 +93,6 @@ open class NSBox: NSView {
         addSubview(view)
         Send.void(view.objcObject, "setFrame:", rect: area)
     }
-
-    /// The box keeps its content view filling its content area as it
-    /// resizes, whether the box autoresizes its subviews or not: the
-    /// content view keeps its distance from each edge.
-    @ObjCMethod("setFrameSize:")
-    override func setFrameSize(_ size: CGSize) {
-        let old = frame.size
-        let area = contentView?.frame
-        super.setFrameSize(size)
-        guard let contentView, let area, size != old else { return }
-        let right = old.width - area.maxX, bottom = old.height - area.maxY
-        let fitted = CGRect(x: area.minX, y: area.minY, width: max(0, size.width - area.minX - right),
-                            height: max(0, size.height - area.minY - bottom))
-        if contentView.frame != fitted { Send.void(contentView.objcObject, "setFrame:", rect: fitted) }
-    }
     @ObjCMethod("sizeToFit") func sizeToFit() {}
     @ObjCMethod("setFrameFromContentFrame:") func setFrame(fromContentFrame frame: CGRect) { Send.void(objcObject, "setFrame:", rect: frame) }
 
