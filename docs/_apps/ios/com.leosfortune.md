@@ -13,6 +13,7 @@ reports:
     app_version: "1.0.15"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 2
     fps: 60
     level: 4
     source: body
@@ -27,6 +28,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 5
     source: maintainer
     notes: Everything tested works, music included. Game Center is out of scope.
