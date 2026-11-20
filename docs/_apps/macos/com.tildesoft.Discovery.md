@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: arm64
     hardware: Parallels VM on an arm64 Mac
+    os: Debian 13
     level: 4
     source: body
     notes: Browses Avahi's services, expands the outline, resolves services and shows their TXT records.
