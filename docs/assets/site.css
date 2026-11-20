@@ -353,3 +353,9 @@ h1 + .tags {
   font-size: 0.9rem;
   color: var(--muted);
 }
+
+.badge.untested {
+  color: var(--muted);
+  background: var(--surface);
+  border-style: dashed;
+}
