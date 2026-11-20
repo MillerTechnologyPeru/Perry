@@ -272,6 +272,16 @@ enum TypeConstants {
 /// MobileCoreServices' type identifiers and keys, as CFStrings.
 @ObjCConstants
 enum LegacyTypeConstants {
+    /// LSCopyItemAttribute's attribute names.
+    static let kLSItemContentType = "LSItemContentType"
+    static let kLSItemFileType = "LSItemFileType"
+    static let kLSItemFileCreator = "LSItemFileCreator"
+    static let kLSItemExtension = "LSItemExtension"
+    static let kLSItemDisplayName = "LSItemDisplayName"
+    static let kLSItemDisplayKind = "LSItemDisplayKind"
+    static let kLSItemRoleHandlerDisplayName = "LSItemRoleHandlerDisplayName"
+    static let kLSItemIsInvisible = "LSItemIsInvisible"
+    static let kLSItemExtensionIsHidden = "LSItemExtensionIsHidden"
     static let kUTTagClassFilenameExtension = "public.filename-extension"
     static let kUTTagClassMIMEType = "public.mime-type"
     static let kUTTagClassNSPboardType = "com.apple.nspboard-type"
