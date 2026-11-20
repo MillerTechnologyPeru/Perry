@@ -26,8 +26,10 @@ layout: default
   {%- assign cpus = "" | split: "" -%}
   {%- for cpu in cpu_order -%}{%- if tested contains cpu -%}{%- assign cpus = cpus | push: cpu -%}{%- endif -%}{%- endfor -%}
   {%- assign cpus = cpus | join: ", " -%}
+  {%- if cpus != "" %}
   <dt>CPUs tested</dt>
   <dd>{{ cpus }}</dd>
+  {%- endif %}
   <dt>Kind</dt>
   <dd>{{ page.kind | capitalize }}</dd>
   {%- if page.developer %}
@@ -35,12 +37,19 @@ layout: default
   <dd>{{ page.developer | escape }}</dd>
   {%- endif %}
   <dt>Level</dt>
+  {%- if current %}
   <dd><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ current_level.name }}</span></dd>
   <dt>Last tested</dt>
   <dd>{{ current.date | date: "%Y-%m-%d" }}</dd>
+  {%- else %}
+  <dd><span class="badge untested">Not tested yet</span></dd>
+  {%- endif %}
 </dl>
 
 <h2>Reports</h2>
+{%- unless current %}
+<p>No one has reported running this app under Perry yet. To add a report, see <a href="{{ '/contributing/' | relative_url }}">Contributing</a>.</p>
+{%- endunless %}
 {%- assign reports = page.reports | reverse %}
 {%- for report in reports %}
 {%- assign level = site.data.levels | where: "level", report.level | first %}
