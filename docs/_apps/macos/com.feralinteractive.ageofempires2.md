@@ -3,6 +3,7 @@ name: "Age of Empires II: Definitive Edition"
 bundle_id: "com.feralinteractive.ageofempires2"
 platform: macos
 kind: game
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 37
     date: 2026-11-06
@@ -54,6 +55,7 @@ reports:
     cpu: arm64
     hardware: Lenovo Duet 3
     os: Debian sid
+    fps: 9
     level: 1
     source: body
     notes: Loads its data and renders about 9 frames a second, but the window stays black; needs swap on an 8 GB device.
