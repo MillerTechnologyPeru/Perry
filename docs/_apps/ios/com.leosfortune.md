@@ -3,6 +3,7 @@ name: Leo's Fortune
 bundle_id: "com.leosfortune"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 73
     date: 2026-11-07
@@ -12,6 +13,7 @@ reports:
     app_version: "1.0.15"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 4
     source: body
     notes: Plays.
