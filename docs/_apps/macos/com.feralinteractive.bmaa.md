@@ -32,6 +32,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    graphics: OpenGL
     level: 3
     source: body
     notes: Goes from its menus into a level, and its intro movie plays.
@@ -42,6 +43,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    graphics: OpenGL
     fps: 38
     level: 4
     source: body
@@ -53,6 +55,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    graphics: OpenGL
     level: 4
     source: body
     notes: The mouse cursor hides in play and a start-up crash is fixed.
