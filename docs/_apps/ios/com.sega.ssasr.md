@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: armv7
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 4
     source: body
     notes: Runs under perry32 with its music and a gamepad.
