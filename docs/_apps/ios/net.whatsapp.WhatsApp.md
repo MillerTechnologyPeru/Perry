@@ -3,6 +3,7 @@ name: WhatsApp
 bundle_id: "net.whatsapp.WhatsApp"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 210
     date: 2026-11-19
@@ -12,6 +13,8 @@ reports:
     app_version: "26.45.75"
     hardware: Lenovo Duet 3
     os: Debian sid
+    env:
+      - "PERRY_OS_VERSION=18.0"
     level: 2
     source: body
     notes: Shows its complete welcome screen.
