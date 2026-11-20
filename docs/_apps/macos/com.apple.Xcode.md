@@ -11,6 +11,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 1
     source: body
     notes: Loads its frameworks and plug-ins, then stops before showing a window.
@@ -21,6 +22,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 1
     source: body
     notes: Gets through launch and waits in its event loop.
@@ -31,6 +33,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: Gets through launch to its Welcome to Xcode window.
@@ -41,6 +44,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: The welcome window opens at its real size, with its PDF header art.
@@ -51,6 +55,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: The welcome window shows its header art, start items and Recent Projects panel.
@@ -61,6 +66,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Create a new Xcode project opens the New Project assistant; template icons and option check boxes don't draw.
@@ -71,6 +77,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Saving a new project instantiates the Cocoa Application template, and typedstream nibs load.
@@ -81,6 +88,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Opens a project in its project window, with Groups & Files and the menu bar.
@@ -91,6 +99,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: The project window fills its window; file and column-header icons are missing.
@@ -104,6 +113,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: The project window shows Xcode's own icons and toolbar buttons.
@@ -117,6 +127,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Its toolbar is labelled, target boxes are checked, and projects save without crashing.
@@ -127,6 +138,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Its gcc-4.2 and ld compile and link a hello world program that Perry runs.
@@ -137,6 +149,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Its toolbar search field shows, with its menu and placeholder.
@@ -150,6 +163,7 @@ reports:
     cpu: x86_64
     app_version: "3.2.6"
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Opening source files, the project inspector and menus no longer crashes or hangs.
