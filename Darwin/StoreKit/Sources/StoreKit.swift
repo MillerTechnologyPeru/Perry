@@ -343,3 +343,69 @@ extension VerificationResult where SignedType == AppTransaction {
     public var headerData: Data { Data() }
     public var payloadData: Data { Data() }
 }
+
+// MARK: - Messages
+
+/// A message the App Store has for the user (a price increase to consent to,
+/// a billing issue): none comes, here.
+@available(iOS 16.0, *)
+public struct Message: Sendable {
+    public let reason: Reason
+
+    public struct Reason: RawRepresentable, Equatable, Hashable, Sendable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        public static let generic = Reason(rawValue: 0)
+        public static let priceIncreaseConsent = Reason(rawValue: 1)
+        @available(iOS 16.4, *)
+        public static let billingIssue = Reason(rawValue: 2)
+        @available(iOS 18.0, *)
+        public static let winBackOffer = Reason(rawValue: 3)
+    }
+}
+
+@available(iOS 16.0, *)
+extension Message: Equatable {
+    public static func == (lhs: Message, rhs: Message) -> Bool { lhs.reason == rhs.reason }
+}
+
+@available(iOS 16.0, *)
+extension Message: Hashable {
+    public func hash(into hasher: inout Hasher) { hasher.combine(reason) }
+}
+
+@available(iOS 16.0, *)
+extension Message {
+    /// Shows the message's sheet: there is none to show.
+    @MainActor public func display(in scene: UIWindowScene) throws {}
+}
+
+@available(iOS 16.0, *)
+extension Message {
+    /// The messages as they come: none.
+    public struct Messages: AsyncSequence, Sendable {
+        public typealias Element = Message
+
+        public struct AsyncIterator: AsyncIteratorProtocol {
+            public mutating func next() async -> Message? { nil }
+            public typealias Element = Message
+        }
+
+        public func makeAsyncIterator() -> AsyncIterator { AsyncIterator() }
+    }
+
+    public static var messages: Messages { Messages() }
+}
+
+@available(iOS 16.0, *)
+extension Message.Reason {
+    public var localizedDescription: String {
+        switch self {
+        case .priceIncreaseConsent: "Price Increase Consent"
+        case .billingIssue: "Billing Issue"
+        case .winBackOffer: "Win-Back Offer"
+        default: "Generic"
+        }
+    }
+}
