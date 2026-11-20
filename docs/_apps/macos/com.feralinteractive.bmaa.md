@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 1
     source: body
     notes: Starts and stops at its Steam check.
@@ -19,6 +20,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: Passes its Steam check, shows its launcher and starts the game from PLAY.
@@ -28,6 +30,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Goes from its menus into a level, and its intro movie plays.
@@ -37,6 +40,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 4
     source: body
     notes: Plays lit, with sound, at about 38 frames a second.
@@ -46,6 +50,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 4
     source: body
     notes: The mouse cursor hides in play and a start-up crash is fixed.
