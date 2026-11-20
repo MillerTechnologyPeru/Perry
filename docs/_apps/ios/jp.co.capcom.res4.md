@@ -12,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 3
     source: body
     notes: Being brought up on perry32; sound and movie playback work.
