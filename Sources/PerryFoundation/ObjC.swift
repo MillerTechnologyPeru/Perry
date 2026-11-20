@@ -23,6 +23,8 @@ enum ObjC {
     nonisolated(unsafe) static var getClass: (@convention(c) (SEL) -> Class?)!
     nonisolated(unsafe) static var objectGetClass: (@convention(c) (id?) -> Class?)!
     nonisolated(unsafe) static var objectGetClassName: (@convention(c) (id?) -> SEL?)!
+    nonisolated(unsafe) static var classGetName: (@convention(c) (id?) -> SEL?)?
+    nonisolated(unsafe) static var classIsMetaClass: (@convention(c) (Class?) -> Bool)?
     nonisolated(unsafe) static var addMethod: (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> Bool)!
     nonisolated(unsafe) static var replaceMethod: (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> UnsafeRawPointer?)!
     nonisolated(unsafe) static var createInstance: (@convention(c) (Class, Int) -> id?)!
@@ -70,6 +72,8 @@ enum ObjC {
         getClass = bind("_objc_getClass", (@convention(c) (SEL) -> Class?).self)
         objectGetClass = bind("_object_getClass", (@convention(c) (id?) -> Class?).self)
         objectGetClassName = bind("_object_getClassName", (@convention(c) (id?) -> SEL?).self)
+        classGetName = bind("_class_getName", (@convention(c) (id?) -> SEL?).self)
+        classIsMetaClass = bind("_class_isMetaClass", (@convention(c) (Class?) -> Bool).self)
         addMethod = bind("_class_addMethod", (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> Bool).self)
         replaceMethod = bind("_class_replaceMethod", (@convention(c) (Class, SEL, UnsafeRawPointer, SEL) -> UnsafeRawPointer?).self)
         createInstance = bind("_class_createInstance", (@convention(c) (Class, Int) -> id?).self)
@@ -133,6 +137,14 @@ enum ObjC {
 
     static func className(_ object: id?) -> String {
         objectGetClassName(object).map { String(cString: $0) } ?? "nil"
+    }
+
+    /// A class's own name. Not its class's, the metaclass's, which is
+    /// another class's for a class whose metaclass is not its own: a class
+    /// named UIDevice that Hulu passed to NSStringFromClass had NSObject's.
+    static func name(ofClass cls: id?) -> String {
+        guard let name = classGetName?(cls) else { return className(cls) }
+        return String(cString: name)
     }
 
     /// Whether `object`'s class is `cls` or a subclass of it.

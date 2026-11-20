@@ -124,11 +124,22 @@ public final class NSMethodSignature: NSObject {
 
 @ObjCCategory("MethodSignatures")
 extension NSObject {
-    /// The signature of the receiver's method: an instance's, or for a
-    /// class, its class method's.
+    /// The signature of the receiver's method.
     @ObjCMethod("methodSignatureForSelector:")
     func methodSignature(for selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
-        MethodSignatures.of(ObjC.objectGetClass(objcObject), selector.map { $0.pointer.assumingMemoryBound(to: CChar.self) })
+        // NSObject's looks in [self class], which for a class is the class
+        // itself: this implementation called with a class for its receiver
+        // (Hulu takes it from class_getMethodImplementation) gives the
+        // signature of instances' method.
+        var cls = ObjC.objectGetClass(objcObject)
+        if let isMeta = ObjC.classIsMetaClass, isMeta(cls) { cls = objcObject.assumingMemoryBound(to: Class.Pointee.self) }
+        return MethodSignatures.of(cls, selector.map { $0.pointer.assumingMemoryBound(to: CChar.self) })
+    }
+
+    /// The signature of a class's own method, sent to the class.
+    @ObjCClassMethod("methodSignatureForSelector:")
+    static func classMethodSignature(_ cls: ObjCClass, for selector: ObjCSelector?) -> UnsafeMutableRawPointer? {
+        MethodSignatures.of(ObjC.objectGetClass(cls.pointer), selector.map { $0.pointer.assumingMemoryBound(to: CChar.self) })
     }
 
     /// The signature of instances' method, sent to a class.

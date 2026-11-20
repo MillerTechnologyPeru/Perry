@@ -383,6 +383,11 @@ public struct ObjCClass: ObjCNullable, Hashable, ObjCMethodRegistrar {
     public func addMethod(_ selector: String, types: String, implementation: UnsafeRawPointer, isClassMethod: Bool) {
         let target = isClassMethod ? metaclass.pointer : pointer
         let sel = ObjCRuntime.selector(selector)
+        // A class method written to return a raw pointer returns an object
+        // (+processInfo, +currentLocale, +defaultManager): Darwin's encoding
+        // says so, and a caller that reads it (Hulu calls these through
+        // NSInvocation) takes a pointer's result for no object.
+        let types = isClassMethod && types.hasPrefix("^v") ? "@" + types.dropFirst(2) : types
         // The runtime keeps the encoding, so it must outlive this call.
         let encoding = UnsafePointer(strdup(types)!)
         if !ObjCRuntime.functions.addMethod(target, sel, implementation, encoding) {

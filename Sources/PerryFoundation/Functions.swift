@@ -48,8 +48,7 @@ public func NSSelectorFromString(_ string: UnsafeMutableRawPointer?) -> UnsafeRa
 @c(_NSStringFromClass)
 public func NSStringFromClass(_ cls: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer? {
     guard let cls else { return nil }
-    // A class object's class is its metaclass, which has the same name.
-    return Strings.autoreleased(ObjC.className(cls))
+    return Strings.autoreleased(ObjC.name(ofClass: cls))
 }
 
 @c(_NSClassFromString)

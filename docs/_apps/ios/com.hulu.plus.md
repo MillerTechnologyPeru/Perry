@@ -45,4 +45,17 @@ reports:
     level: 2
     source: body
     notes: Plays its launch animation, then the Welcome screen; LOG IN reaches the My Disney login form, where taps and the email and password fields work, but it crashes after sign-in.
+  - pr: 244
+    date: 2026-11-20
+    perry: "bf314a7a"
+    platform: ios
+    cpu: arm64
+    app_version: "9.40.0"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    env:
+      - "PERRY_OS_VERSION=18.0"
+    level: 2
+    source: body
+    notes: Submitting the My Disney login form no longer crashes; a wrong password shows the form's own error message. A real sign-in has not been tested.
 ---
