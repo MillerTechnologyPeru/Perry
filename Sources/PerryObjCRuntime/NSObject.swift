@@ -220,10 +220,13 @@ extension NSObject {
     @ObjCMethod("isMemberOfClass:")
     func isMember(of target: ObjCClass?) -> Bool { objCClass == target }
 
-    /// The class an object archives as: its own.
-    @ObjCMethod("classForCoder") func classForCoder() -> ObjCClass { objCClass }
-    @ObjCMethod("classForKeyedArchiver") func classForKeyedArchiver() -> ObjCClass { objCClass }
-    @ObjCMethod("classForArchiver") func classForArchiver() -> ObjCClass { objCClass }
+    /// The class an object archives as: the one it answers -class with,
+    /// which a key-value observed object's hidden subclass answers with the
+    /// object's own class.
+    @ObjCMethod("classForCoder") func classForCoder() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.classSelector) }
+    @ObjCMethod("classForKeyedArchiver")
+    func classForKeyedArchiver() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.classForCoder) }
+    @ObjCMethod("classForArchiver") func classForArchiver() -> UnsafeMutableRawPointer? { Messages.send(objcObject, Sel.classForCoder) }
     /// What an object decodes or encodes as: itself, unless a class
     /// substitutes another (decoders use the answer in its place).
     @ObjCMethod("awakeAfterUsingCoder:") func awakeAfterUsingCoder(_ coder: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { objcObject }

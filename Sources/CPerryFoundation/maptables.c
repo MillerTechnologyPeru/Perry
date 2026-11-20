@@ -391,6 +391,15 @@ table *ns_create_map_table(map_key_callbacks keys, map_value_callbacks values, u
     return make(&keys, &values, capacity, false);
 }
 
+// NSCreateMapTable with its callbacks by pointer, for this library's other
+// providers, which make the tables Mac programs use with the C functions
+// (AppKit's NSIBObjectData) and find the callbacks by name.
+table *perry_create_map_table(const map_key_callbacks *keys, const map_value_callbacks *values, uintptr_t capacity)
+    __attribute__((visibility("default"), used));
+table *perry_create_map_table(const map_key_callbacks *keys, const map_value_callbacks *values, uintptr_t capacity) {
+    return make(keys, values, capacity, false);
+}
+
 table *ns_copy_map_table_with_zone(table *t, void *zone) DARWIN_SYMBOL("_NSCopyMapTableWithZone");
 table *ns_copy_map_table_with_zone(table *t, void *zone) {
     (void)zone;

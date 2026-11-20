@@ -80,6 +80,27 @@ open class NSView: NSResponder {
         decodeContents(decoded)
     }
 
+    /// The keys initWithCoder: reads: the frame ("NSFrameSize" at the
+    /// origin), "NSvFlags", the subviews, and the superview it is in.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        if let superview {
+            encoder.object(superview, "NSSuperview")
+            encoder.object(superview, "NSNextResponder")
+        }
+        if !subviews.isEmpty { encoder.object(NSMutableArray.of(subviews), "NSSubviews") }
+        var flags = Int(autoresizingMask & 0x3f)
+        if autoresizesSubviews { flags |= 0x100 }
+        if hidden { flags |= 0x8000_0000 }
+        encoder.integer(flags, "NSvFlags")
+        if frame.minX == 0 && frame.minY == 0 { encoder.size(frame.size, "NSFrameSize") } else { encoder.rect(frame, "NSFrame") }
+        encoder.string(toolTip, "NSToolTip")
+        encoder.string(identifier, "NSUserInterfaceItemIdentifier")
+        if wantsLayer { encoder.bool(true, "NSViewWantsLayer") }
+    }
+
     static func frame(from coder: Coder) -> CGRect {
         coder.has("NSFrame") ? coder.rect("NSFrame") : CGRect(origin: .zero, size: coder.size("NSFrameSize"))
     }
@@ -352,6 +373,12 @@ open class NSView: NSResponder {
         for subview in subviews { Send.void(subview.objcObject, "removeFromSuperview") }
         for object in views?.as(NSArray.self)?.elements ?? [] { Send.void(objcObject, "addSubview:", object.objcObject) }
     }
+
+    /// The subviews in the opposite order: Interface Builder turns a nib's
+    /// back to front order to its own (or reads AppKit's instance variable
+    /// when a view doesn't have this).
+    @ObjCMethod("_reverseSubviewsForIB")
+    func reverseSubviewsForIB() { setSubviews(NSMutableArray.of(Array(subviews.reversed()))) }
 
     @ObjCMethod("addSubview:")
     func addSubview(_ view: NSView) { insert(view, at: subviews.count) }

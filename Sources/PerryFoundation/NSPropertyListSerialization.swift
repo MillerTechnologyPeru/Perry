@@ -740,9 +740,18 @@ enum Archivers {
     }
 
     /// Encodes an object, returning its UID.
-    static func encode(_ object: id?, in archiver: id, storage: ArchiverStorage) -> ArchiveValue {
-        guard let object else { return .uid(0) }
-        if let uid = storage.uids[object] { return .uid(uid) }
+    static func encode(_ original: id?, in archiver: id, storage: ArchiverStorage) -> ArchiveValue {
+        guard let original else { return .uid(0) }
+        if let uid = storage.uids[original] { return .uid(uid) }
+        // What the object archives as: the object it answers
+        // -replacementObjectForKeyedArchiver: with (Interface Builder's
+        // objects substitute their runtime counterparts), encoded once.
+        let object = original
+        if let replaced = ObjC.send(original, ObjC.selector("replacementObjectForKeyedArchiver:"), archiver), replaced != original {
+            let value = encode(replaced, in: archiver, storage: storage)
+            if case .uid(let uid) = value { storage.uids[original] = uid }
+            return value
+        }
         // Plain values sit in $objects as themselves.
         let plain: ArchiveValue?
         if ObjC.isKind(object, of: Numbers.numberClass) {
@@ -811,8 +820,10 @@ enum Archivers {
             return ["NSUUID", "NSObject"]
         }
         if object == Nulls.null { return ["NSNull", "NSObject"] }
-        // An app's class encodes itself.
-        let cls = ObjC.objectGetClass(object)!
+        // An app's class encodes itself, named as it answers
+        // -classForKeyedArchiver (a key-value observed object as its own class).
+        let cls = ObjC.send(object, ObjC.selector("classForKeyedArchiver")).map { $0.assumingMemoryBound(to: perry_class_storage.self) }
+            ?? ObjC.objectGetClass(object)!
         if storage.requiresSecureCoding,
            !ObjC.sendBool(UnsafeMutableRawPointer(cls), ObjC.selector("respondsToSelector:"),
                           UnsafeMutableRawPointer(mutating: ObjC.selector("supportsSecureCoding")))
@@ -844,6 +855,7 @@ public class NSKeyedArchiver: NSObject {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Archivers.archiverClass = cls.storage
+        CoderGeometry.add(to: cls)
     }
 
     var storage: ArchiverStorage {

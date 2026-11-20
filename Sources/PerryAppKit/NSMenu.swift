@@ -42,13 +42,28 @@ open class NSMenu: NSObject {
             items.append(item)
             item.menu = objcObject
         }
-        switch decoded.string("NSName") {
+        name = decoded.string("NSName")
+        switch name {
         case "_NSMainMenu": App.shared?.setMainMenu(self)
         case "_NSServicesMenu": App.shared?.servicesMenu = self
         case "_NSHelpMenu": App.shared?.helpMenu = self
         case "_NSWindowsMenu": App.shared?.windowsMenu = self
         default: break
         }
+    }
+
+    /// The name a nib gives the menus AppKit keeps track of ("_NSMainMenu").
+    var name: String?
+    @ObjCMethod("_menuName") func menuName() -> String? { name }
+    @ObjCMethod("_setMenuName:") func setMenuName(_ value: String?) { name = value }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.string(title, "NSTitle")
+        encoder.object(NSMutableArray.of(items), "NSMenuItems")
+        encoder.string(name, "NSName")
     }
 
     @ObjCMethod("title") func menuTitle() -> String { title }
@@ -251,7 +266,38 @@ open class NSMenuItem: NSObject {
         image = decoded.object("NSImage")
         toolTip = decoded.string("NSToolTip")
         indentationLevel = decoded.integer("NSIndent")
+        onImage = decoded.object("NSOnImage")
+        mixedImage = decoded.object("NSMixedImage")
         if let submenu = decoded.object("NSSubmenu")?.as(NSMenu.self) { setSubmenu(submenu) }
+    }
+
+    /// The check mark and mixed state images a nib gives an item.
+    var onImage: NSObject?
+    var mixedImage: NSObject?
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.object(menu.map { NSObject($0) }, "NSMenu")
+        if separator { encoder.bool(true, "NSIsSeparator") }
+        if !enabled && !separator { encoder.bool(true, "NSIsDisabled") }
+        if hidden { encoder.bool(true, "NSIsHidden") }
+        encoder.string(title, "NSTitle")
+        encoder.string(keyEquivalent, "NSKeyEquiv")
+        encoder.integer(Int(bitPattern: keyEquivalentModifierMask), "NSKeyEquivModMask")
+        encoder.integer(Int(Int32.max), "NSMnemonicLoc")
+        encoder.object(onImage, "NSOnImage")
+        encoder.object(mixedImage, "NSMixedImage")
+        encoder.object(image, "NSImage")
+        encoder.string(action?.name, "NSAction")
+        encoder.object(target.map { NSObject($0) }, "NSTarget")
+        if tag != 0 { encoder.integer(tag, "NSTag") }
+        if state != 0 { encoder.integer(state, "NSState") }
+        encoder.object(representedObject, "NSRepObject")
+        encoder.string(toolTip, "NSToolTip")
+        if indentationLevel != 0 { encoder.integer(indentationLevel, "NSIndent") }
+        encoder.object(submenu, "NSSubmenu")
     }
 
     @ObjCClassMethod("separatorItem")

@@ -38,6 +38,18 @@ open class NSControl: NSView {
         makeCell()
     }
 
+    /// A view's keys, its cell and whether it is enabled; targets and
+    /// actions are the nib's connections.
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        super.encode(with: coder)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.object(cellObject, "NSCell")
+        encoder.bool(enabled, "NSEnabled")
+        if refusesFirstResponder { encoder.bool(true, "NSControlRefusesFirstResponder") }
+    }
+
     /// NSControl's archive: its cell ("NSCell"), whether it is enabled, and
     /// a target and action it was archived with (as a scroller's).
     @ObjCMethod("initWithCoder:")

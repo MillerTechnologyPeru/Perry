@@ -20,6 +20,7 @@ open class NSAnimation: NSObject {
     var delegateObject: UnsafeMutableRawPointer?
     var progressMarks: [Float] = []
 
+    @ObjCMethod("init")
     public required override init() { super.init() }
 
     @ObjCMethod("initWithDuration:animationCurve:")

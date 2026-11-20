@@ -123,6 +123,9 @@ public enum ObjCRuntime {
             weakFunctions = (store: store, loadRetained: load)
         }
         addIvarFunction = bind("_class_addIvar", as: AddIvar.self)
+        if let get = bind("_class_getInstanceVariable", as: GetIvar.self), let offset = bind("_ivar_getOffset", as: IvarOffset.self) {
+            ivarFunctions = (get, offset)
+        }
         guard let getProtocol = bind("_objc_getProtocol", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
               let allocateProtocol = bind("_objc_allocateProtocol",
                                           as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
@@ -300,6 +303,17 @@ public enum ObjCRuntime {
         return ivar.name.withCString { name in
             ivar.types.withCString { addIvarFunction(cls.pointer, name, ivar.size, ivar.alignment, $0) }
         }
+    }
+
+    typealias GetIvar = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?
+    typealias IvarOffset = @convention(c) (UnsafeMutableRawPointer?) -> Int
+    nonisolated(unsafe) static var ivarFunctions: (get: GetIvar, offset: IvarOffset)?
+
+    /// The offset of the class's instance variable `name` in its objects
+    /// (class_getInstanceVariable and ivar_getOffset); nil if it has none.
+    public static func ivarOffset(_ cls: ObjCClass, _ name: String) -> Int? {
+        guard let ivarFunctions, let ivar = name.withCString({ ivarFunctions.get(cls.pointer, $0) }) else { return nil }
+        return ivarFunctions.offset(ivar)
     }
 
     /// objc_storeWeak and objc_loadWeakRetained; nil until bound, when

@@ -52,9 +52,23 @@ public class NSCoder: NSObject {
         typealias F = @convention(c) (id?, SEL, Int64, id?) -> Void
         unsafeBitCast(ObjC.msgSend, to: F.self)(objcObject, ObjC.selector("encodeInt64:forKey:"), Int64(value), Strings.autoreleased(key ?? ""))
     }
-    /// Rectangles, points and sizes, which this library's methods don't
-    /// take, as C functions.
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
+        CoderGeometry.add(to: cls)
+    }
+
+    @ObjCMethod("encodeRootObject:") func encodeRoot(object: UnsafeMutableRawPointer?) { encode(object: object) }
+    @ObjCMethod("encodeBycopyObject:") func encodeBycopy(object: UnsafeMutableRawPointer?) { encode(object: object) }
+    @ObjCMethod("encodeByrefObject:") func encodeByref(object: UnsafeMutableRawPointer?) { encode(object: object) }
+    @ObjCMethod("encodeConditionalObject:") func encodeConditional(object: UnsafeMutableRawPointer?) { encode(object: object) }
+}
+
+/// A keyed coder's rectangles, points and sizes, as strings of them under
+/// the key (as Foundation's coders keep them, and nibs hold "NSFrame"),
+/// made of the coder's -decodeObjectForKey: and -encodeObject:forKey:: for
+/// NSCoder and the keyed archiver and unarchiver, as C functions, since
+/// this library's methods don't take them.
+enum CoderGeometry {
+    static func add(to cls: ObjCClass) {
         let rect: @convention(c) (id?, SEL, id?) -> CGRect = { coder, _, key in
             NSRectFromString(ObjC.send(coder, ObjC.selector("decodeObjectForKey:"), key))
         }
@@ -87,9 +101,4 @@ public class NSCoder: NSObject {
         cls.addMethod("encodeSize:forKey:", types: "v40@0:8\(sizeType)16@32", implementation: unsafeBitCast(encodeSize, to: UnsafeRawPointer.self),
                       isClassMethod: false)
     }
-
-    @ObjCMethod("encodeRootObject:") func encodeRoot(object: UnsafeMutableRawPointer?) { encode(object: object) }
-    @ObjCMethod("encodeBycopyObject:") func encodeBycopy(object: UnsafeMutableRawPointer?) { encode(object: object) }
-    @ObjCMethod("encodeByrefObject:") func encodeByref(object: UnsafeMutableRawPointer?) { encode(object: object) }
-    @ObjCMethod("encodeConditionalObject:") func encodeConditional(object: UnsafeMutableRawPointer?) { encode(object: object) }
 }

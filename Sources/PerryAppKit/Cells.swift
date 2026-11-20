@@ -121,6 +121,28 @@ open class NSCell: NSObject {
         controlViewObject = decoded.object("NSControlView")?.objcObject
     }
 
+    /// The keys initWithCoder: reads, its flags packed as it unpacks them.
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        func bit(_ value: Bool, _ mask: UInt32) -> UInt32 { value ? mask : 0 }
+        var flags = bit(state != 0, 0x8000_0000) | bit(highlighted, 0x4000_0000) | bit(!enabled, 0x2000_0000) | bit(editable, 0x1000_0000)
+        flags |= UInt32(type & 3) << 26 | bit(bordered, 0x80_0000) | bit(bezeled, 0x40_0000) | bit(selectable, 0x20_0000)
+        flags |= bit(scrollable, 0x10_0000) | bit(continuous, 0x8_0000) | UInt32(lineBreakMode & 7) << 12 | bit(usesSingleLineMode, 0x200)
+        flags |= bit(truncatesLastVisibleLine, 0x40) | bit(showsFirstResponder, 0x4) | UInt32(focusRingType & 3)
+        var flags2 = bit(sendsActionOnEndEditing, 0x40_0000) | bit(allowsMixedState, 0x100_0000) | bit(refusesFirstResponder, 0x200_0000)
+        flags2 |= UInt32(Alignment.fromArchive(alignment) & 7) << 26 | bit(allowsEditingTextAttributes, 0x4000_0000)
+        encoder.integer(Int(flags), "NSCellFlags")
+        encoder.integer(Int(flags2), "NSCellFlags2")
+        if controlSize != 0 { encoder.integer(Int(controlSize), "NSControlSize2") }
+        encoder.object(image ?? objectValue, "NSContents")
+        encoder.object(font, "NSSupport")
+        encoder.object(formatter, "NSFormatter")
+        if tag != 0 { encoder.integer(tag, "NSTag") }
+        encoder.object(controlViewObject.map { NSObject($0) }, "NSControlView")
+    }
+
     var controlView: NSView? { controlViewObject.map(NSView.wrap) }
 
     // MARK: Values
@@ -480,6 +502,18 @@ open class NSTextFieldCell: NSActionCell {
         placeholder = decoded.object("NSPlaceholderString")
         bezelStyle = UInt(decoded.integer("NSTextBezelStyle"))
         type = 1
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        super.encode(with: coder)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.object(textColor, "NSTextColor")
+        encoder.object(backgroundColor, "NSBackgroundColor")
+        if drawsBackground { encoder.bool(true, "NSDrawsBackground") }
+        encoder.object(placeholder, "NSPlaceholderString")
+        if bezelStyle != 0 { encoder.integer(Int(bezelStyle), "NSTextBezelStyle") }
     }
 
     @ObjCMethod("textColor") func cellTextColor() -> NSColor? { textColor ?? NSColor.controlTextColor() }
