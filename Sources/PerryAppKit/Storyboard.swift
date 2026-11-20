@@ -397,14 +397,17 @@ extension NSWindow {
 }
 
 extension NSWindowController {
-    /// The window from the controller's nib, loaded once.
+    /// The window from the controller's nib, loaded once: a nib without a
+    /// window isn't loaded again, as its objects (and the outlets set to
+    /// them) would be made again.
     func loadWindowIfNeeded() {
-        guard window == nil, !loadingWindow, let name = windowNibName else { return }
+        guard window == nil, !windowNibLoaded, !loadingWindow, let name = windowNibName else { return }
         loadingWindow = true
         defer { loadingWindow = false }
         Send.void(objcObject, "windowWillLoad")
         if let document { Send.void(document.objcObject, "windowControllerWillLoadNib:", objcObject) }
         Send.void(objcObject, "loadWindow")
+        windowNibLoaded = true
         if let window { window.windowControllerObject = objcObject }
         Send.void(objcObject, "windowDidLoad")
         if let document { Send.void(document.objcObject, "windowControllerDidLoadNib:", objcObject) }
