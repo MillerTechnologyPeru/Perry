@@ -43,6 +43,31 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     return true
 }
 
+/// A Mac Catalyst app has an application before its code runs: UIKit's, an
+/// NSApplication its AppKit bridge reads through NSApp (WhatsApp's asks it
+/// whether the app is active). The app is UIKit's to run, so this one is
+/// only made, and is active as the app is.
+func providerDidStart(_ info: perry_startup_info) {
+    guard isMacCatalystApp(info.main_header), let cls = Classes.named("NSApplication") else { return }
+    _ = Send.object(cls.pointer, "sharedApplication")
+    App.shared?.active = true
+}
+
+/// Whether the main executable is a Mac Catalyst program: its
+/// LC_BUILD_VERSION's platform is PLATFORM_MACCATALYST.
+private func isMacCatalystApp(_ header: UnsafeRawPointer?) -> Bool {
+    guard let header, header.load(as: UInt32.self) == 0xFEED_FACF else { return false }
+    let count = header.load(fromByteOffset: 16, as: UInt32.self)
+    var command = header + 32    // mach_header_64
+    for _ in 0..<count {
+        let cmd = command.load(as: UInt32.self), size = command.load(fromByteOffset: 4, as: UInt32.self)
+        if cmd == 0x32 { return command.load(fromByteOffset: 8, as: UInt32.self) == 6 }   // LC_BUILD_VERSION
+        guard size >= 8 else { return false }
+        command += Int(size)
+    }
+    return false
+}
+
 /// AppKit's structure constants, which the loader asks for while binding
 /// images.
 func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { StructureConstants.values[name] }
