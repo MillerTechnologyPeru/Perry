@@ -133,8 +133,10 @@ typedef struct unit {
     /// disposal; between a stop and the next start it pushes silence
     /// instead of rendering, so the device stays open and the stream's
     /// times keep up with the clock. `rendering` is held while it renders.
-    pthread_t thread;
+    /// Other units hold it while they mix their inputs, on `mixing_thread`.
+    pthread_t thread, mixing_thread;
     pthread_mutex_t rendering;
+    bool mixing;
     bool thread_started, running, stop;
     void *pipeline, *src;
     double sample_time;
@@ -510,7 +512,14 @@ static OSStatus render(unit *u, uint32_t *flags, const AudioTimeStamp *time, uin
         // An output unit's output is its input bus 0, as the hardware gets it.
         status = pull(u, 0, time, frames, io);
     } else {
+        // Held while the inputs' callbacks run, so that one taken away
+        // isn't called after: an app frees what its refcon points to.
+        pthread_mutex_lock(&u->rendering);
+        u->mixing_thread = pthread_self();
+        u->mixing = true;
         status = mix(u, time, frames, io);
+        u->mixing = false;
+        pthread_mutex_unlock(&u->rendering);
     }
     for (uint32_t i = 0; i < count; i++) {
         uint32_t post = (flags ? *flags : 0) | kAudioUnitRenderAction_PostRender;
@@ -834,6 +843,7 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     unit *u = valid(handle);
     if (!u) return kAudio_ParamError;
     OSStatus status = 0;
+    bool replaced_callback = false;
     pthread_mutex_lock(&u->lock);
     switch (id) {
     case kAudioUnitProperty_StreamFormat: {
@@ -897,6 +907,7 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
     case kAudioUnitProperty_SetRenderCallback: {
         if (element >= u->input_count) { status = kAudioUnitErr_InvalidElement; break; }
         bus *b = &u->inputs[element];
+        replaced_callback = b->callback != NULL;
         // AURenderCallbackStruct: the function, then its refcon, a word each.
         if (value && size >= 2 * sizeof(void *)) {
             memcpy(&b->callback, value, sizeof b->callback);
@@ -928,6 +939,12 @@ OSStatus darwin_AudioUnitSetProperty(void *handle, uint32_t id, uint32_t scope, 
         break;
     }
     pthread_mutex_unlock(&u->lock);
+    // A callback taken away isn't called once this returns, as on Darwin:
+    // waits out a mix under way, unless this is that mix's thread.
+    if (replaced_callback && u->component->kind != OUTPUT && !(u->mixing && pthread_equal(pthread_self(), u->mixing_thread))) {
+        pthread_mutex_lock(&u->rendering);
+        pthread_mutex_unlock(&u->rendering);
+    }
     if (status) perry_audio_trace("%s: setting property %u (scope %u, element %u) failed: %d", u->component->name, id, scope, element, (int)status);
     return status;
 }
