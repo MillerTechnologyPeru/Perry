@@ -3,6 +3,7 @@ name: TruckSmart
 bundle_id: "com.tatravelcenters.trucksmart"
 platform: ios
 kind: app
+tags: [Swift]
 reports:
   - pr: 21
     date: 2026-11-05
