@@ -13,6 +13,7 @@ reports:
     app_version: "1.26.62"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: Metal
     level: 1
     source: body
     notes: Gets through start-up into its Metal renderer; no menu is drawn yet.
