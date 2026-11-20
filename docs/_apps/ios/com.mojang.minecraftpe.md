@@ -3,6 +3,7 @@ name: Minecraft
 bundle_id: "com.mojang.minecraftpe"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 80
     date: 2026-11-07
@@ -23,6 +24,7 @@ reports:
     app_version: "1.18.12"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 2
     source: body
     notes: Runs its loading screen at 60 frames a second; it more often stops at 33% than reaching the title screen.
