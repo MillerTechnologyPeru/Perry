@@ -23,4 +23,7 @@ reports:
     level: 2
     source: body
     notes: Gets past start-up and loading to its title screen with sound.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/79bc8a44-3c05-493b-a4d7-c4c315f85569
+        caption: Title screen
 ---
