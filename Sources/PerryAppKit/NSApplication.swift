@@ -100,9 +100,9 @@ open class NSApplication: NSResponder {
     }
 
     /// With PERRY_APPKIT_CLICKS set to "x,y;x,y…", clicks at those points
-    /// of the first window shown (from its top left), two seconds apart
-    /// starting six seconds after launch, go to the window on top there:
-    /// to try menus and controls without a mouse.
+    /// of the first window shown (from its top left; the next one shown, once
+    /// it closes), two seconds apart starting six seconds after launch, go to
+    /// the window on top there: to try menus and controls without a mouse.
     /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
     /// positive), as a mouse wheel's notches.
     nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
@@ -120,7 +120,7 @@ open class NSApplication: NSResponder {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
         let (point, scroll) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
-        if NSApplication.clickWindow == nil { NSApplication.clickWindow = Windows.all.first { $0.visible } }
+        if NSApplication.clickWindow?.visible != true { NSApplication.clickWindow = Windows.all.first { $0.visible } }
         if let base = NSApplication.clickWindow {
             let screen = CGPoint(x: base.frame.minX + point.x, y: base.frame.maxY - point.y)
             let target = Windows.all.last { $0.visible && $0.frame.contains(screen) } ?? base
@@ -275,10 +275,13 @@ open class NSApplication: NSResponder {
     }
 
     @ObjCMethod("currentEvent") func appCurrentEvent() -> NSEvent? { currentEvent }
-    /// After each event, each shown window's -update.
+    /// After each event, each shown window's -update, between the
+    /// application's will- and did-update notifications.
     @ObjCMethod("updateWindows")
     func updateWindows() {
+        notify("applicationWillUpdate:", Constants.NSApplicationWillUpdateNotification)
         for window in Windows.all where window.visible { Send.void(window.objcObject, "update") }
+        notify("applicationDidUpdate:", Constants.NSApplicationDidUpdateNotification)
     }
     @ObjCMethod("setWindowsNeedUpdate:") func setWindowsNeedUpdate(_ value: Bool) {}
 
