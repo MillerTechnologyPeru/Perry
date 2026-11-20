@@ -141,6 +141,14 @@ extension Runtime {
         var loadClasses: [ClassInfo] = []
         var loadCategories: [UnsafeMutablePointer<perry_category>] = []
 
+        // An image built for the garbage collector (its image info's flags
+        // say it supports or requires it) relies on it: objects then go as
+        // the collector would let them (RetainCounts.defersDeallocation).
+        if let info = image.section(segment: "__DATA", name: "__objc_imageinfo") ?? image.section(segment: "__OBJC", name: "__image_info"),
+           info.count >= 8, info.load(fromByteOffset: 4, as: UInt32.self) & 0x6 != 0 {
+            RetainCounts.defersDeallocation = true
+        }
+
         lock.withLock {
             // Selector references point at each image's own strings; make
             // them all the unique selector for their name.

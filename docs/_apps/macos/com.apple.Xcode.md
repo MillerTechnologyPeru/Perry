@@ -182,30 +182,45 @@ reports:
     level: 3
     source: body
     notes: Builds a project from its Build menu, compiling and linking the app, and opens source files in editors; nibs and strings files fail to build, and the editor shows no text.
+  - pr: 237
+    date: 2026-11-20
+    perry: "88961049"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: Builds a Cocoa document app with its nibs and strings, runs it with Build and Run, and keeps running when it exits; the source editor shows no text, and debugging isn't supported.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
 
-## Status as of [#224]({{ site.repository_url }}/pull/224)
+## Status as of [#237]({{ site.repository_url }}/pull/237)
 
 Working:
 
 - Opening a project in its project window, with Groups & Files, the
   toolbar (search field included) and the menu bar.
-- Build from the Build menu or toolbar: gcc-4.2 compiles the sources and
-  ld links the app's executable, with build output parsed for the status
-  bar and Build Results.
+- Build from the Build menu or toolbar ends in "Build succeeded": gcc-4.2
+  compiles the sources, ld links the app's executable, ibtool compiles its
+  `.xib` files to nibs ([#233]({{ site.repository_url }}/pull/233)), and
+  copystrings copies `InfoPlist.strings` (it's a Ruby script, so it needs
+  `/usr/bin/ruby` installed).
+- Build and Run (with breakpoints off) builds the app and runs it under
+  Perry, its output on Xcode's console, and Xcode keeps running when it
+  exits. Xcode runs programs through Apple's gdb, which Perry answers for
+  itself ([#236]({{ site.repository_url }}/pull/236)).
 - Selecting a source file opens an editor in the project window, and
   editor windows open with their navigation bar.
 - Collapsed panes stay hidden instead of drawing over their neighbours.
 
 Broken:
 
-- `.xib` files don't compile: ibtool runs but needs AppKit classes Perry
-  doesn't have (`NSCachedImageRep`, `NSBrowser`, `NSDatePicker`,
-  `NSPathControl`, `NSWindowTemplate` and others).
-- `InfoPlist.strings` doesn't build: copystrings is a Ruby script and
-  needs `/usr/bin/ruby`.
-- So the built app has no nibs, and Build and Run isn't usable yet.
 - The source editor shows no text.
-- Debugging isn't supported.
+- Debugging isn't supported: breakpoints are accepted and never hit, and
+  there is no stepping or variables view.

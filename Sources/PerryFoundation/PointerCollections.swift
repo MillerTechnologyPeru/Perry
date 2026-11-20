@@ -235,20 +235,28 @@ final class MapTableState {
 
     func value(for key: id) -> id? { index(of: key).flatMap { entries[$0].value.value } }
 
+    // What a change drops is let go only after it: releasing a value can
+    // deallocate an object whose -dealloc uses this table.
+
     func set(_ value: id, for key: id) {
         let slot = PointerSlot(value, valueOptions)
+        var replaced: PointerSlot?
         if let index = index(of: key) {
+            replaced = entries[index].value
             entries[index].value = slot
         } else {
             // Keys are copied only when the options ask for it.
             entries.append((PointerSlot(key, keyOptions), slot))
         }
         enumeration.mutated()
+        withExtendedLifetime(replaced) {}
     }
 
     func remove(_ key: id) {
-        entries.removeAll { same($0.key.value, key, keyOptions) }
+        let before = entries
+        entries = before.filter { !same($0.key.value, key, keyOptions) }
         enumeration.mutated()
+        withExtendedLifetime(before) {}
     }
 }
 
@@ -333,8 +341,10 @@ public final class NSMapTable: NSObject {
     @ObjCMethod("removeObjectForKey:") func remove(forKey key: UnsafeMutableRawPointer?) { if let key { state.remove(key) } }
     @ObjCMethod("removeAllObjects")
     func removeAll() {
-        state.entries.removeAll()
+        let before = state.entries
+        state.entries = []
         state.enumeration.mutated()
+        withExtendedLifetime(before) {}
     }
     @ObjCMethod("keyEnumerator") func keyEnumerator() -> ObjCObject { Enumerators.make(state.live.map(\.key)) }
     @ObjCMethod("objectEnumerator") func objectEnumerator() -> ObjCObject { Enumerators.make(state.live.map(\.value)) }
