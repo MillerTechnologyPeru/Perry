@@ -96,6 +96,20 @@ open class NSBox: NSView {
     @ObjCMethod("sizeToFit") func sizeToFit() {}
     @ObjCMethod("setFrameFromContentFrame:") func setFrame(fromContentFrame frame: CGRect) { Send.void(objcObject, "setFrame:", rect: frame) }
 
+    /// The content view keeps filling the box's content area, whether or
+    /// not the box resizes its subviews: it grows and shrinks by what the
+    /// box does. (Only by the change, so a size set again moves nothing.)
+    @ObjCMethod("setFrameSize:")
+    override func setFrameSize(_ size: CGSize) {
+        let old = frame.size
+        super.setFrameSize(size)
+        let change = CGSize(width: size.width - old.width, height: size.height - old.height)
+        guard let contentView, contentView.superview === self, !autoresizesSubviews, change.width != 0 || change.height != 0 else { return }
+        let content = contentView.frame
+        Send.void(contentView.objcObject, "setFrameSize:",
+                  size: CGSize(width: max(0, content.width + change.width), height: max(0, content.height + change.height)))
+    }
+
     @ObjCMethod("drawRect:")
     override func draw(_ rect: CGRect) {
         guard !transparent, let context = NSGraphicsContext.currentCG else { return }
