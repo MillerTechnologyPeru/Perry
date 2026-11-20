@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 1
     fps: "45-52"
     level: 3
     source: body
