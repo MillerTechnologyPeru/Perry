@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: armv7
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 2
     source: body
     notes: Reaches its title screen and language picker.
