@@ -12,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 4
     source: body
     notes: Its menus work and it plays races.
