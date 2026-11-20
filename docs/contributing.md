@@ -5,9 +5,13 @@ title: Contributing
 # Adding a compatibility report
 
 Every app has one Markdown file in
-[`docs/_apps`]({{ site.repository_url }}/tree/master/docs/_apps), named
-after the app: its name in lowercase ASCII with hyphens, such as
-`cut-the-rope-2.md`. Each report in it comes from a merged pull request.
+[`docs/_apps`]({{ site.repository_url }}/tree/master/docs/_apps), named by
+its Darwin platform and bundle identifier:
+`docs/_apps/<platform>/<bundle id>.md`, such as
+`docs/_apps/ios/com.hulu.plus.md`. The platform and bundle ID together are
+the app's identifier, since an iOS app and a Mac app can share a bundle ID.
+Read the bundle ID from the app's `Info.plist` (`CFBundleIdentifier`). Each
+report in the file comes from a merged pull request.
 To add a report, open a pull request that changes Perry and adds or edits
 the app's file in the same branch, or send a pull request with the file
 alone that links the pull request it reports on.
@@ -21,16 +25,18 @@ opened, so the file reads well there too.
 ```markdown
 ---
 name: Hulu
-platform: ios            # ios | macos | catalyst
+bundle_id: "com.hulu.plus"  # CFBundleIdentifier, always quoted
+platform: ios            # ios | macos | maccatalyst, the folder it is in
 kind: app                # app | game
 developer: Hulu          # only if a PR states it or it is unambiguous
 reports:
   - pr: 216
     date: 2026-11-19     # the PR's merge date
     perry: "e9a46074"    # the merge commit, 8 characters, always quoted
-    arch: arm64          # arm64 | armv7 | armv6 | x86_64 | i386
+    platform: ios        # the same as the app's platform
+    cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
-    host: Lenovo Duet 3  # only if the PR states it
+    hardware: Lenovo Duet 3  # the machine it ran on
     level: 2
     source: title        # title | body | screenshot: what the level rests on
     notes: Reaches the Welcome screen.
@@ -46,10 +52,14 @@ more than the reports do.
 
 - Reports are in date order, oldest first. An app's level is its newest
   report's level.
-- `name`, `platform`, `kind` and `reports` are required, and each report
-  needs `pr`, `date`, `perry`, `level`, `source` and `notes`. Leave out a
-  field the pull request does not state; never guess a version, device or
-  result.
+- `name`, `bundle_id`, `platform`, `kind` and `reports` are required, and
+  each report needs `pr`, `date`, `perry`, `platform`, `cpu`, `hardware`,
+  `level`, `source` and `notes`. Leave out `app_version` when the pull
+  request does not state it; never guess a version or a result.
+- `cpu` is the slice of the binary that ran, and `hardware` the machine it
+  ran on, such as Lenovo Duet 3, Retroid Pocket 5 or Dell OptiPlex 7020.
+  Perry runs code natively, so an arm64 machine runs arm64 slices and an
+  x86 machine runs x86_64 or i386 ones.
 - `notes` is one or two plain sentences in the present tense saying how
   far the app gets and what is known to be wrong.
 - Don't add `layout`, `title` or `permalink`; the site's settings supply
@@ -57,7 +67,7 @@ more than the reports do.
 
 ### Quoting
 
-- `perry` and `app_version` are always quoted, so YAML never reads a commit
+- `bundle_id`, `perry` and `app_version` are always quoted, so YAML never reads a commit
   such as `12345678` or a version such as `6.30` as a number.
 - A value containing `: ` or starting with a quote, `#`, `[`, `{`, `*`,
   `&`, `!`, `|`, `>`, `@` or a backtick is quoted.
@@ -76,8 +86,8 @@ more than the reports do.
   "Run X" with no milestone is level 3, `source: title`.
 - Level 5 needs an explicit statement in the pull request.
 - A screenshot may raise the level only to what it plainly shows.
-- For iOS apps `arch` is `arm64` unless the pull request says `armv7` or
-  `armv6`. For Mac apps leave it out unless the pull request states it.
+- For iOS apps `cpu` is `arm64` unless the pull request says `armv7` or
+  `armv6`.
 
 ## Screenshots
 
