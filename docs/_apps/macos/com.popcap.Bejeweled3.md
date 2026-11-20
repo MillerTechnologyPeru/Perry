@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 3
     source: body
     notes: Loads, draws in OpenGL, plays sound and reaches a Classic game board.
@@ -19,6 +20,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: screenshot
     notes: Runs under box86 on the Duet 3 to its main menu.
