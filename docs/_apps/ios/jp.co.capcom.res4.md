@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: armv7
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: body
     notes: Being brought up on perry32; sound and movie playback work.
