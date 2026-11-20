@@ -58,6 +58,9 @@ layout: default
     {%- if report.resolution %}
     <li><strong>Resolution</strong> {{ report.resolution | replace: "x", "×" }}</li>
     {%- endif %}
+    {%- if report.graphics %}
+    <li><strong>Graphics</strong> {{ report.graphics | escape }}</li>
+    {%- endif %}
     {%- if report.fps %}
     <li><strong>FPS</strong> {{ report.fps | replace: "-", "–" }}</li>
     {%- endif %}
