@@ -104,6 +104,7 @@ open class NSColorList: NSObject {
     var keys: [String] = []
     var colors: [String: NSColor] = [:]
 
+    @ObjCMethod("init")
     public required override init() { super.init() }
 
     @ObjCMethod("initWithName:")
@@ -194,6 +195,9 @@ open class NSColorPanel: NSPanel {
 open class NSSpellChecker: NSObject {
     nonisolated(unsafe) private static var shared: NSSpellChecker?
     var language = "en"
+
+    @ObjCMethod("init")
+    public required override init() { super.init() }
 
     @ObjCClassMethod("sharedSpellChecker")
     static func sharedSpellChecker() -> NSSpellChecker {
