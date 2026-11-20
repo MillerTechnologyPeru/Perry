@@ -15,6 +15,7 @@
 #include <locale.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <pty.h>
 #include <pwd.h>
 #include <regex.h>
 #include <sched.h>
@@ -485,6 +486,16 @@ int darwin_tcsetattr(int fd, int action, const void *attributes) {
     (void)fd; (void)action; (void)attributes;
     errno = ENOTTY;
     return -1;
+}
+
+/// A pseudo-terminal pair (Xcode gives a program it runs one for its
+/// console). Its window size is laid out alike on both systems; Darwin's
+/// termios isn't, so the terminal keeps Linux's default settings.
+int darwin_openpty(int *master, int *slave, char *name, const void *attributes, const struct winsize *size)
+    DARWIN_SYMBOL(openpty);
+int darwin_openpty(int *master, int *slave, char *name, const void *attributes, const struct winsize *size) {
+    (void)attributes;
+    return openpty(master, slave, name, NULL, size);
 }
 
 // MARK: - Strings
