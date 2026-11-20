@@ -14,6 +14,9 @@ reports:
     level: 2
     source: body
     notes: Launches, loads its sites from its API and shows its first-launch screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/11ec1031-9553-4535-837f-b48c3b773d75
+        caption: First-launch screen
   - pr: 70
     date: 2026-11-06
     perry: "dcf412dc"
@@ -24,6 +27,9 @@ reports:
     level: 3
     source: body
     notes: Gets past its splash and first-launch screen to the guest Home tab with live locations.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1e9edd39-9346-4edf-9ea1-167e48b2e454
+        caption: Services tab
   - pr: 76
     date: 2026-11-07
     perry: "28bd9336"
