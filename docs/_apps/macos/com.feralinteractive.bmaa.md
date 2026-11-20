@@ -3,6 +3,7 @@ name: "Batman: Arkham Asylum"
 bundle_id: "com.feralinteractive.bmaa"
 platform: macos
 kind: game
+tags: [Unreal]
 reports:
   - pr: 137
     date: 2026-11-11
@@ -41,6 +42,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    fps: 38
     level: 4
     source: body
     notes: Plays lit, with sound, at about 38 frames a second.
