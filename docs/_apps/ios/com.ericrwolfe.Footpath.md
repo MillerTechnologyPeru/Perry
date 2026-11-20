@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "4.11.2"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: Launches and loads Mapbox's map style, then aborts in Mapbox before the map draws.
