@@ -1117,6 +1117,8 @@ open class NSWindowController: NSResponder {
         return initialized
     }
 
+    @ObjCMethod("windowNibName") func storedWindowNibName() -> String? { windowNibName }
+
     @ObjCMethod("initWithWindowNibPath:owner:")
     func initialize(windowNibPath: String?, owner: NSObject?) -> NSObject {
         let file = windowNibPath.map { String($0.split(separator: "/").last ?? "") } ?? ""

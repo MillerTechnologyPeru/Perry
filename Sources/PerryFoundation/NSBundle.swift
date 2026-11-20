@@ -660,12 +660,14 @@ public final class NSBundle: NSObject {
     /// language where the bundle has it; else `value`, or the key when
     /// there is no value.
     @ObjCMethod("localizedStringForKey:value:table:")
-    func localizedString(forKey key: String, value: String?, table: String?) -> String {
+    func localizedString(forKey key: String?, value: String?, table: String?) -> String {
         localizedString(forKey: key, value: value, table: table, localization: nil)
     }
 
+    /// Without a key, the value (or an empty string), as Foundation answers.
     @ObjCMethod("localizedStringForKey:value:table:localization:")
-    func localizedString(forKey key: String, value: String?, table: String?, localization: String?) -> String {
+    func localizedString(forKey key: String?, value: String?, table: String?, localization: String?) -> String {
+        guard let key else { return value ?? "" }
         let directories = storage.localizationDirectories(localization, available: storage.localizations,
                                                           development: developmentLocalization() ?? "en")
         if let found = storage.localizedString(key, table: table, directories: directories) { return found }

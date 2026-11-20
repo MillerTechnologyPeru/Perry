@@ -217,8 +217,13 @@ extension NSObject {
         return false
     }
 
+    /// Whether the object's class is `target`: the class it answers -class
+    /// with, so a key-value observed object is still a member of its own.
     @ObjCMethod("isMemberOfClass:")
-    func isMember(of target: ObjCClass?) -> Bool { objCClass == target }
+    func isMember(of target: ObjCClass?) -> Bool {
+        let answered: UnsafeMutableRawPointer? = Messages.send(objcObject, Sel.classSelector)
+        return answered == target?.pointer
+    }
 
     /// The class an object archives as: the one it answers -class with,
     /// which a key-value observed object's hidden subclass answers with the
