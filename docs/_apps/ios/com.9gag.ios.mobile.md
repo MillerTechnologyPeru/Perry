@@ -3,6 +3,7 @@ name: 9GAG
 bundle_id: "com.9gag.ios.mobile"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 169
     date: 2026-11-16
