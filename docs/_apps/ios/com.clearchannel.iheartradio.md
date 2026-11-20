@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "10.67.2"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Runs to its splash screen.
