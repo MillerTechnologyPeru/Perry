@@ -1,3 +1,4 @@
+import Glibc
 import PerryObjCInterop
 
 // The keyboard: what is typed in the live view goes to the first
@@ -166,4 +167,23 @@ open class UIPointerInteraction: NSObject {
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { pointer.enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { pointer.enabled = enabled }
     @ObjCMethod("invalidate") func invalidate() {}
+}
+
+/// The keyboard's input mode: one, the language of the environment (LANG,
+/// "en_US.UTF-8" as "en-US"), shared, as iOS gives a device's keyboards.
+@ObjCClass("UITextInputMode")
+open class UITextInputMode: NSObject {
+    nonisolated(unsafe) static let current = NSObject(UITextInputMode.objCClass.pointer).newInstance()
+
+    static let language: String = {
+        let names: [String] = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        let values: [String] = names.compactMap { (name: String) -> String? in getenv(name).map { String(cString: $0) } }
+        let value = values.first { !$0.isEmpty && $0 != "C" && $0 != "POSIX" } ?? "en_US"
+        let name = value.split(separator: ".").first.map(String.init) ?? "en_US"
+        return String(name.map { $0 == "_" ? "-" : $0 })
+    }()
+
+    @ObjCClassMethod("currentInputMode") static func currentInputMode() -> NSObject { current }
+    @ObjCClassMethod("activeInputModes") static func activeInputModes() -> NSArray { NSMutableArray.of([current]) }
+    @ObjCMethod("primaryLanguage") func primaryLanguage() -> String? { UITextInputMode.language }
 }
