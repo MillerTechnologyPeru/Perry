@@ -30,13 +30,15 @@ nonisolated(unsafe) private let SDL_SavePNG: (@convention(c) (UnsafeMutableRawPo
 extension Compositor {
     /// PERRY_UIKIT_FRAME_DUMP, a path: the frame the GPU composited, about
     /// every second, as a PNG there, as the display shows it (the snapshots
-    /// draw in software).
+    /// draw in software). PERRY_UIKIT_FRAME_DUMP_INTERVAL, in seconds, makes
+    /// it more often.
     nonisolated(unsafe) static let frameDump: String? = getenv("PERRY_UIKIT_FRAME_DUMP").map { String(cString: $0) }
+    nonisolated(unsafe) private static let dumpInterval: Double = getenv("PERRY_UIKIT_FRAME_DUMP_INTERVAL").flatMap { Double(String(cString: $0)) } ?? 1
     nonisolated(unsafe) private static var lastDump: Double = 0
 
     /// Writes the frame drawn so far, when a dump is asked for and is due.
     func dumpFrame() {
-        guard let path = Compositor.frameDump, Clock.now - Compositor.lastDump > 1 else { return }
+        guard let path = Compositor.frameDump, Clock.now - Compositor.lastDump > Compositor.dumpInterval else { return }
         Compositor.lastDump = Clock.now
         guard let surface = SDL_RenderReadPixels(renderer.unsafePointer, nil) else { return }
         if let SDL_SavePNG { _ = path.withCString { SDL_SavePNG(surface, $0) } }
