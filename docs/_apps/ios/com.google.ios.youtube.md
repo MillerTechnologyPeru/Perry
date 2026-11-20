@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "21.44.4"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 1
     source: body
     notes: Runs about 10 seconds with no window, then crashes.
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     app_version: "21.44.4"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Runs for minutes signed in and shows its home screen; the feed is empty.
@@ -31,6 +33,7 @@ reports:
     cpu: arm64
     app_version: "21.44.4"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: "Shows its Home feed: cells, images and text."
