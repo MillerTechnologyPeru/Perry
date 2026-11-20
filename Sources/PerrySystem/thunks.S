@@ -380,6 +380,10 @@ PASSTHROUGH _ldexp, ldexp
 PASSTHROUGH _log10f, log10f
 PASSTHROUGH _lround, lround
 PASSTHROUGH _lroundf, lroundf
+PASSTHROUGH _lrint, lrint
+PASSTHROUGH _lrintf, lrintf
+PASSTHROUGH _llrint, llrint
+PASSTHROUGH _llrintf, llrintf
 PASSTHROUGH _modff, modff
 PASSTHROUGH ___exp10f, exp10f
 PASSTHROUGH ___exp10, exp10

@@ -492,6 +492,7 @@ enum Controllers {
             trace("SDL3's gamepads aren't available; no controllers")
             return
         }
+        KeyboardGamepad.attach()
         scan()
         schedule()
     }
@@ -505,6 +506,7 @@ enum Controllers {
     }
 
     private static func tick() {
+        KeyboardGamepad.update()
         SDLGamepad.update()
         ticks &+= 1
         // Gamepads coming and going, twice a second.
