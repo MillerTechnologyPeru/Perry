@@ -23,4 +23,7 @@ reports:
     level: 3
     source: body
     notes: Its main menu works and New Game starts.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/7068bbdf-d3fb-43b7-b883-0ef35d5c7838
+        caption: Main menu
 ---
