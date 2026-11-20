@@ -113,12 +113,18 @@ let package = Package(
         // CryptoKit's API with its own BoringSSL, and X.509, for Security.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.0"),
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.21.0"),
-        // Cairo and FontConfig, which Silica renders CoreGraphics with.
+        // Silica: CoreGraphics' drawing model in Swift, and its Cairo renderer.
+        .package(url: "https://github.com/PureSwift/Silica.git", branch: "master"),
+        // Cairo and FontConfig, which Silica renders with, and CoreGraphics
+        // and CoreText use directly.
         .package(url: "https://github.com/PureSwift/Cairo.git", branch: "master"),
         .package(url: "https://github.com/PureSwift/FontConfig.git", branch: "master"),
+        // Cacao's engine: the display list QuartzCore's layers are drawn as,
+        // its compositor and its SDL host.
+        .package(url: "https://github.com/PureSwift/Cacao.git", branch: "develop"),
         // SDL3, which UIKit's and AppKit's windows, QuartzCore's compositor, CoreGraphics' displays and
         // GameController's gamepads are drawn and read through.
-        .package(url: "https://github.com/PureSwift/SDL.git", branch: "perry-support"),
+        .package(url: "https://github.com/PureSwift/SDL.git", branch: "master"),
         // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
         .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
         // Sockets and their addresses, typed, for CFSocket.
@@ -496,30 +502,21 @@ let package = Package(
             linkerSettings: [.linkedLibrary("png"), .linkedLibrary("jpeg"), .linkedLibrary("gif"), .linkedLibrary("webp"),
                              .linkedLibrary("heif"), .linkedLibrary("z")]
         ),
-        // Silica (PureSwift, MIT): CoreGraphics' drawing model in Swift, and
-        // its Cairo renderer. Copied from github.com/PureSwift/Silica.
-        .target(name: "Silica", exclude: ["LICENSE"]),
-        .target(
-            name: "SilicaCairo",
-            dependencies: [
-                "Silica",
-                .product(name: "Cairo", package: "Cairo"),
-                .product(name: "FontConfig", package: "FontConfig"),
-            ]
-        ),
         // CoreGraphics' images, colors and bitmap contexts, which draw
         // through Silica's Cairo renderer, and ImageIO.
         .target(
             name: "PerryCoreGraphics",
             dependencies: ["CPerryCoreGraphics", "CPerryGeometry", "CPerryImageIO", "PerryInterface", "PerryObjCInterop",
-                           "SilicaCairo", .product(name: "SDL3Swift", package: "SDL")],
+                           .product(name: "SilicaCairo", package: "Silica"), .product(name: "Cairo", package: "Cairo"),
+                           .product(name: "FontConfig", package: "FontConfig"), .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
         // Core Animation: the layer tree UIKit's views are backed by, drawn
         // through CoreGraphics and composited on the GPU, and its animations.
         .target(
             name: "PerryQuartzCore",
-            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop", .product(name: "SDL3Swift", package: "SDL")],
+            dependencies: ["CPerryGeometry", "PerryInterface", "PerryObjCInterop", .product(name: "SDL3Swift", package: "SDL"),
+                           .product(name: "CacaoCompositor", package: "Cacao"), .product(name: "CacaoHost", package: "Cacao")],
             plugins: ["PerryProviderPlugin"]
         ),
         // UIKit, a client of libobjc's C API and Foundation's classes.
