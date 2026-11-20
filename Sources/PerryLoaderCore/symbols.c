@@ -1018,6 +1018,36 @@ static bool ends_with(const char *name, const char *suffix) {
     return n >= m && strcmp(name + n - m, suffix) == 0;
 }
 
+/// For an instance variable's offset no image exports
+/// (_OBJC_IVAR_$_NSWindowTemplate.windowRect, which Interface Builder's
+/// plug-in reads AppKit's objects with), a word holding the offset the
+/// runtime gives that class's instance variable of that name, where a
+/// provider's class declares it; NULL otherwise.
+static void *ivar_offset_cell(perry_loader *loader, const char *name) {
+    static const char prefix[] = "_OBJC_IVAR_$_";
+    if (strncmp(name, prefix, sizeof prefix - 1) != 0) return NULL;
+    const char *rest = name + sizeof prefix - 1;
+    const char *dot = strchr(rest, '.');
+    char class_name[256];
+    if (!dot || (size_t)(dot - rest) >= sizeof class_name) return NULL;
+    memcpy(class_name, rest, (size_t)(dot - rest));
+    class_name[dot - rest] = 0;
+    perry_provider *objc = perry_find_provider(loader, LIBOBJC);
+    perry_symbol get_class = { 0 }, get_ivar = { 0 }, get_offset = { 0 };
+    if (!objc || !provider_lookup(loader, objc, "_objc_getClass", &get_class) ||
+        !provider_lookup(loader, objc, "_class_getInstanceVariable", &get_ivar) ||
+        !provider_lookup(loader, objc, "_ivar_getOffset", &get_offset))
+        return NULL;
+    void *cls = ((void *(*)(const char *))get_class.address)(class_name);
+    void *ivar = cls ? ((void *(*)(void *, const char *))get_ivar.address)(cls, dot + 1) : NULL;
+    if (!ivar) return NULL;
+    intptr_t *cell = malloc(sizeof *cell);
+    if (!cell) return NULL;
+    *cell = ((intptr_t (*)(void *))get_offset.address)(ivar);
+    perry_trace(PERRY_TRACE_BIND, "%s = %ld, the runtime's", name, (long)*cell);
+    return cell;
+}
+
 /// For an unresolved string constant's import, a pointer to a constant
 /// CFString of its name ("_UIFooNotification" is @"UIFooNotification"),
 /// made once; NULL for other symbols, or before Foundation is loaded. A
@@ -1268,6 +1298,11 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
             fprintf(stderr, "perry: warning: %s: class %s (%s) is not available\n", image->path, class_name, library);
         }
         sym.address = placeholder;
+        return sym;
+    }
+    void *offset = ivar_offset_cell(loader, name);
+    if (offset) {
+        sym.address = offset;
         return sym;
     }
     // A string constant (a notification's name, a dictionary key) is data
