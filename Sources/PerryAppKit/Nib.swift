@@ -828,17 +828,27 @@ open class NSNibDecoder: NSObject {
     @ObjCMethod("decodeTopLevelObjectOfClass:forKey:error:")
     func decodeTopLevelObject(ofClass cls: ObjCClass?, forKey key: String, error: UnsafeMutableRawPointer?) -> NSObject? { decodeObject(forKey: key) }
 
+    // A double as an integer, saturating: a nib stores a column's maxWidth and
+    // other limits as a huge double (CGFLOAT_MAX, ~3.4e38), which Int64() traps
+    // on. The integer only matters when an app decodes such a value as an int.
+    private func asInt64(_ value: Double) -> Int64 {
+        if value.isNaN { return 0 }
+        if value >= 0x1p63 { return .max }
+        if value < -0x1p63 { return .min }
+        return Int64(value)
+    }
+
     private func number(_ key: String) -> (Int64, Double)? {
         switch unarchiving?.value(key) {
         case .integer(let value): return (value, Double(value))
-        case .double(let value): return (Int64(value), value)
+        case .double(let value): return (asInt64(value), value)
         case .bool(let value): return (value ? 1 : 0, value ? 1 : 0)
         case .object(let index):
             // A number archived as an object.
             guard let entry = unarchiving?.archive.objects[index], entry.className == "NSNumber" else { return nil }
             switch entry.value("NS.intval") ?? entry.value("NS.dblval") ?? entry.value("NS.boolval") {
             case .integer(let value): return (value, Double(value))
-            case .double(let value): return (Int64(value), value)
+            case .double(let value): return (asInt64(value), value)
             case .bool(let value): return (value ? 1 : 0, value ? 1 : 0)
             default: return nil
             }
