@@ -22,4 +22,7 @@ reports:
     level: 4
     source: body
     notes: Plays, with its level music; an iPad screen is available with PERRY_UIKIT_SCREEN=ipad.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/a2e30060-15a9-4f57-ab83-98d9d489488d
+        caption: Game board
 ---
