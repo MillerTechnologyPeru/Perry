@@ -49,6 +49,9 @@ reports:
     level: 5
     source: maintainer
     notes: Everything tested works, with Steam running.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/e768e87b-81a1-42db-88c0-1a3de782b8d8
+        caption: A Classic game at 60 frames a second
   - pr: 221
     date: 2026-11-19
     perry: "8ab75200"
@@ -68,6 +71,8 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/1cdadf8f-5ee4-4b7d-bc69-568428236950
         caption: A Classic game through a level transition, at 60 frames a second
+      - url: https://github.com/user-attachments/assets/98a37c0f-6591-4cd2-a69c-670263d4c166
+        caption: A Classic game in a window, at 60 frames a second
   - pr: 221
     date: 2026-11-19
     perry: "8ab75200"
@@ -84,6 +89,9 @@ reports:
     level: 5
     source: maintainer
     notes: Everything tested works under box86, with sound and a controller.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/52a05b2a-72af-423b-95ad-121b2e6b75be
+        caption: A Classic game full screen
 ---
 
 Needs `PERRY_UNIMPLEMENTED=continue` and `PERRY_OBJC_UNRECOGNIZED=continue`.
