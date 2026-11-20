@@ -14,6 +14,9 @@ reports:
     level: 2
     source: body
     notes: Goes from its launch splash to its Welcome screen; signing in needs an account.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/6aade8d3-760c-44ee-96b5-21de521bb1a8
+        caption: Welcome screen
   - pr: 218
     date: 2026-11-19
     perry: "bcde038e"
