@@ -504,6 +504,7 @@ open class UIView: UIResponder, UICoordinateSpace {
     func dealloc() {
         for subview in state.subviews { subview.state.superview = nil }
         state.layer.setDelegate(nil)
+        GeometryObservers.remove(objcObject)
         UIView.states.remove(objcObject)
         UIView.guides.remove(objcObject)
         ObjCRuntime.superDealloc(objcObject, definedOn: UIView.objCClass.pointer)
@@ -1238,10 +1239,11 @@ open class UIView: UIResponder, UICoordinateSpace {
     // MARK: Gesture recognizers
 
     /// UIKit's private notice of ancestors' geometry changes, which
-    /// SwiftUI's hosting view asks for: views here are laid out anew each
-    /// pass, so there is nothing to register.
-    @ObjCMethod("_registerForGeometryChanges") func registerForGeometryChanges() {}
-    @ObjCMethod("_unregisterForGeometryChanges") func unregisterForGeometryChanges() {}
+    /// SwiftUI's hosting view asks for: after an update pass the view is
+    /// sent -_geometryChanges:forAncestor: if where it is in its window
+    /// has changed since.
+    @ObjCMethod("_registerForGeometryChanges") func registerForGeometryChanges() { GeometryObservers.register(self) }
+    @ObjCMethod("_unregisterForGeometryChanges") func unregisterForGeometryChanges() { GeometryObservers.remove(objcObject) }
 
     @ObjCMethod("gestureRecognizers")
     func gestureRecognizers() -> NSObject? { state.gestureRecognizers.isEmpty ? nil : NSMutableArray.of(state.gestureRecognizers) }
