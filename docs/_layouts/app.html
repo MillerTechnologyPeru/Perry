@@ -3,7 +3,7 @@ layout: default
 ---
 {%- assign current = page.reports | last -%}
 {%- assign current_level = site.data.levels | where: "level", current.level | first -%}
-{%- assign platform_names = "ios:iOS,macos:macOS,catalyst:Mac Catalyst" | split: "," -%}
+{%- assign platform_names = "ios:iOS,macos:macOS,maccatalyst:Mac Catalyst" | split: "," -%}
 {%- assign platform_name = page.platform -%}
 {%- for pair in platform_names -%}
   {%- assign parts = pair | split: ":" -%}
@@ -12,8 +12,13 @@ layout: default
 <h1>{{ page.name | escape }}</h1>
 
 <dl class="app-facts">
+  <dt>Bundle ID</dt>
+  <dd><code>{{ page.bundle_id }}</code></dd>
   <dt>Platform</dt>
   <dd>{{ platform_name }}</dd>
+  {%- assign cpus = page.reports | map: "cpu" | uniq | join: ", " %}
+  <dt>CPUs tested</dt>
+  <dd>{{ cpus }}</dd>
   <dt>Kind</dt>
   <dd>{{ page.kind | capitalize }}</dd>
   {%- if page.developer %}
@@ -35,15 +40,11 @@ layout: default
   <ul class="report-facts">
     <li><span class="badge level-{{ report.level }}"><span class="badge-number">{{ report.level }}</span>{{ level.name }}</span></li>
     <li><strong>Date</strong> {{ report.date | date: "%Y-%m-%d" }}</li>
-    {%- if report.arch %}
-    <li><strong>Architecture</strong> {{ report.arch }}</li>
-    {%- endif %}
+    <li><strong>CPU</strong> {{ report.cpu }}</li>
     {%- if report.app_version %}
     <li><strong>App version</strong> {{ report.app_version | escape }}</li>
     {%- endif %}
-    {%- if report.host %}
-    <li><strong>Host</strong> {{ report.host | escape }}</li>
-    {%- endif %}
+    <li><strong>Hardware</strong> {{ report.hardware | escape }}</li>
     <li><strong>Commit</strong> <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></li>
     <li><strong>Level from</strong> {{ report.source }}</li>
   </ul>
