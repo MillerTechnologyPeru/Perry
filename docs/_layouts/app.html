@@ -87,6 +87,9 @@ layout: default
     {%- if report.args %} <code>perry{% for arg in report.args %} {{ arg | escape }}{% endfor %}</code>{% endif %}
   </p>
   {%- endif %}
+  {%- if report.packaging %}
+  <p class="run-settings">Launched with <a href="{{ site.repository_url }}/tree/master/{{ report.packaging | uri_escape }}"><code>{{ report.packaging | escape }}</code></a></p>
+  {%- endif %}
   {%- if report.screenshots %}
   <div class="screenshots">
     {%- for shot in report.screenshots %}

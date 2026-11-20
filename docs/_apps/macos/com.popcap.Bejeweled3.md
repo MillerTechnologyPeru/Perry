@@ -39,6 +39,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    packaging: Packaging/macos/com.popcap.Bejeweled3/linux
     resolution: "1024x768"
     env:
       - "PERRY_UNIMPLEMENTED=continue"
@@ -59,6 +60,7 @@ reports:
     cpu: i386
     hardware: Lenovo Duet 3
     os: Debian sid
+    packaging: Packaging/macos/com.popcap.Bejeweled3/box86
     resolution: "1024x768"
     env:
       - "PERRY_UNIMPLEMENTED=continue"
@@ -80,6 +82,7 @@ reports:
     cpu: i386
     hardware: Retroid Pocket 5
     os: ROCKNIX 20261101
+    packaging: Packaging/macos/com.popcap.Bejeweled3/portmaster
     resolution: "1920x1080"
     env:
       - "PERRY_UNIMPLEMENTED=continue"
