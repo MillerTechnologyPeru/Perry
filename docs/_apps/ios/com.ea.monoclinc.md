@@ -12,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 2
     source: body
     notes: Gets as far as its first screen.
