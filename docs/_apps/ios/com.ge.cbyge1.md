@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "6.24.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Shows its onboarding pager, and Log in pushes the login screen.
@@ -24,6 +25,7 @@ reports:
     cpu: arm64
     app_version: "6.24.1"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 4
     source: body
     notes: Signs in, passes two-factor verification, opens its home screen and device set-up list, and follows dark mode.
