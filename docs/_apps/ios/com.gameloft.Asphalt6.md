@@ -3,6 +3,7 @@ name: "Asphalt 6: Adrenaline"
 bundle_id: "com.gameloft.Asphalt6"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 97
     date: 2026-11-07
@@ -11,6 +12,10 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    resolution: "320x480"
+    env:
+      - "PERRY_UIKIT_SCREEN=320x480"
+      - "PERRY_UIKIT_GL_SCALE=native"
     level: 2
     source: body
     notes: Launches under perry32 to its title screen.

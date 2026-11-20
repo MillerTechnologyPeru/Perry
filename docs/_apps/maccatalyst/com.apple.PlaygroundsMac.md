@@ -3,6 +3,7 @@ name: Swift Playgrounds
 bundle_id: "com.apple.PlaygroundsMac"
 platform: maccatalyst
 kind: app
+tags: [Swift, ObjC]
 reports:
   - pr: 153
     date: 2026-11-13

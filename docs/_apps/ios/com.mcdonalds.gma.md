@@ -3,6 +3,7 @@ name: McDonald's
 bundle_id: "com.mcdonalds.gma"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++, Kotlin]
 reports:
   - pr: 170
     date: 2026-11-16

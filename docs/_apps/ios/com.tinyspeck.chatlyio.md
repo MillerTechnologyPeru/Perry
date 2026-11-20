@@ -3,6 +3,7 @@ name: Slack
 bundle_id: "com.tinyspeck.chatlyio"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 199
     date: 2026-11-18

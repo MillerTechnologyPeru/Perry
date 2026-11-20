@@ -3,6 +3,7 @@ name: Sonic & All-Stars Racing Transformed
 bundle_id: "com.sega.sart"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 69
     date: 2026-11-06
@@ -12,6 +13,7 @@ reports:
     app_version: "2.0"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 1
     source: body
     notes: Gets through its static initialisation and its SDKs' start-up, then stops.
@@ -22,6 +24,8 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    resolution: "480x320@2"
+    graphics: OpenGL ES 2
     level: 2
     source: body
     notes: Gets past start-up and loading to its title screen with sound.

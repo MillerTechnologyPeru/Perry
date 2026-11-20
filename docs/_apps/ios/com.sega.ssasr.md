@@ -3,6 +3,7 @@ name: Sonic & SEGA All-Stars Racing
 bundle_id: "com.sega.ssasr"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 68
     date: 2026-11-06
@@ -11,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 4
     source: body
     notes: Runs under perry32 with its music and a gamepad.

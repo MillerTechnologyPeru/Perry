@@ -3,6 +3,7 @@ name: N.O.V.A. 3
 bundle_id: "com.gameloft.nova3"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 115
     date: 2026-11-09
@@ -11,6 +12,11 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    resolution: "390x844@3"
+    env:
+      - "PERRY_UIKIT_SCREEN=390x844@3"
+      - "PERRY_UIKIT_ORIENTATION=portrait"
+      - "PERRY_UIKIT_DISPLAY_ROTATION=90"
     level: 3
     source: body
     notes: Reaches its menu and consent dialog; touch input on the dialog does not work.

@@ -3,6 +3,7 @@ name: Wild West Pinball
 bundle_id: "com.gameprom.software.WildWest"
 platform: ios
 kind: game
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 54
     date: 2026-11-06
@@ -11,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 4
     source: body
     notes: Shows its daily bonus panel and menu, and puts a ball in play at 60 frames a second with a controller.

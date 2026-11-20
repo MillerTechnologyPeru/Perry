@@ -29,6 +29,7 @@ bundle_id: "com.hulu.plus"  # CFBundleIdentifier, always quoted
 platform: ios            # ios | macos | maccatalyst, the folder it is in
 kind: app                # app | game
 developer: Hulu          # only if a PR states it or it is unambiguous
+tags: [Swift, ObjC]      # languages and engines; see the list below
 reports:
   - pr: 216
     date: 2026-11-19     # the PR's merge date
@@ -37,6 +38,13 @@ reports:
     cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
+    resolution: "1170x2532"  # the size it drew at, if stated: "WxH" pixels, or "WxH@S" points at a scale
+    graphics: Metal      # the graphics API this run drew with, if known
+    fps: 60              # games only: the frame rate in play, or a range such as "45-52"
+    env:                 # environment variables it ran with, if any
+      - "PERRY_OS_VERSION=18.0"
+    args:                # options passed to perry before the app, if any
+      - "--report"
     os: Debian sid       # the operating system that machine ran
     level: 2
     source: title        # title | body | screenshot | maintainer: what the level rests on
@@ -53,8 +61,13 @@ more than the reports do.
 
 - Reports are in date order, oldest first. An app's level is its newest
   report's level.
-- `name`, `bundle_id`, `platform`, `kind` and `reports` are required, and
-  each report needs `pr`, `date`, `perry`, `platform`, `cpu`, `hardware`,
+- A report from the maintainer's own test, rather than a pull request,
+  leaves out `pr`, sets `source: maintainer`, and gives the tested commit
+  as `perry` and the test's date as `date`.
+- An app can be listed before anyone has tested it: leave `reports` out
+  and the site shows it as not tested yet.
+- `name`, `bundle_id`, `platform` and `kind` are required, and each
+  report needs `pr` (except a maintainer's test), `date`, `perry`, `platform`, `cpu`, `hardware`,
   `os`, `level`, `source` and `notes`. Leave out `app_version` when the pull
   request does not state it; never guess a version or a result.
 - `cpu` is the slice of the binary that ran, and `hardware` the machine it
@@ -63,6 +76,26 @@ more than the reports do.
   ROCKNIX.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
   x86 machine runs x86_64 or i386 ones.
+- `tags` names the languages and engines the app is built with: Swift,
+  ObjC, C++, Unity, Unreal, SpriteKit, SceneKit, Cocos2D (cocos2d-iphone,
+  Objective-C), Cocos2D-X (C++), SexyAppFramework, Mono, XNA, Lua and
+  Kotlin. Add a tag only when the app's bundle or its pull request shows
+  it.
+- `graphics` is the graphics API that run drew with: OpenGL, OpenGL ES 1,
+  OpenGL ES 2, OpenGL ES 3 or Metal. It belongs to the report, not the app:
+  older builds of a game may use OpenGL ES where newer ones use Metal, and
+  a game that supports both runs on OpenGL ES when Metal is turned off
+  (`PERRY_METAL=0`, listed in `env`).
+- `fps` is for games: the frame rate the pull request measured while
+  playing, or the menu's if play wasn't reached. A range is quoted, as
+  `"45-52"`.
+- `resolution` is the screen size the app drew at, when the pull request
+  states it: `"1920x1080"` in pixels, or `"390x844@3"` in points at a
+  scale, as `PERRY_UIKIT_SCREEN` takes it. It is always quoted.
+- `env` lists the environment variables the app ran with, each as a
+  quoted `"NAME=value"`, and `args` the options passed to `perry`. Give
+  them when the pull request says the app needs them or was tested with
+  them, so someone else can run it the same way.
 - `notes` is one or two plain sentences in the present tense saying how
   far the app gets and what is known to be wrong.
 - Don't add `layout`, `title` or `permalink`; the site's settings supply

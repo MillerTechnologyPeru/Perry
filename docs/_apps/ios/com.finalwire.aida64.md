@@ -4,6 +4,7 @@ bundle_id: "com.finalwire.aida64"
 platform: ios
 kind: app
 developer: FinalWire
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 48
     date: 2026-11-06

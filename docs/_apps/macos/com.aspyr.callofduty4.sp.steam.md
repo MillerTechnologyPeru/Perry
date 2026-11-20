@@ -3,6 +3,7 @@ name: Call of Duty 4
 bundle_id: "com.aspyr.callofduty4.sp.steam"
 platform: macos
 kind: game
+tags: [C++]
 reports:
   - pr: 178
     date: 2026-11-17
@@ -21,6 +22,8 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    resolution: "1024x768"
+    graphics: OpenGL
     level: 2
     source: body
     notes: Goes from its launcher through engine, sound, renderer and asset start-up into its main loop, where it renders frames.

@@ -3,6 +3,7 @@ name: The Blockheads
 bundle_id: "com.majicjungle.blockheads"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 71
     date: 2026-11-06
@@ -12,6 +13,7 @@ reports:
     app_version: "1.7.4"
     hardware: Lenovo Duet 3
     os: Debian sid
+    fps: 30
     level: 3
     source: body
     notes: Reaches its main menu and loads a world.

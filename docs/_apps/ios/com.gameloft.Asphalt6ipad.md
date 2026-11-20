@@ -3,6 +3,7 @@ name: "Asphalt 6: Adrenaline HD"
 bundle_id: "com.gameloft.Asphalt6ipad"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 117
     date: 2026-11-09
@@ -11,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 4
     source: body
     notes: Its menus work and it plays races.

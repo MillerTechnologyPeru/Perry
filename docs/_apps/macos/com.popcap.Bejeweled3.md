@@ -3,6 +3,7 @@ name: Bejeweled 3
 bundle_id: "com.popcap.Bejeweled3"
 platform: macos
 kind: game
+tags: [C++, SexyAppFramework]
 reports:
   - pr: 128
     date: 2026-11-09
@@ -11,6 +12,9 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+    graphics: OpenGL
     level: 3
     source: body
     notes: Loads, draws in OpenGL, plays sound and reaches a Classic game board.
@@ -21,6 +25,7 @@ reports:
     cpu: i386
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: OpenGL
     level: 2
     source: screenshot
     notes: Runs under box86 on the Duet 3 to its main menu.

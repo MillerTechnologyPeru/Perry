@@ -3,6 +3,7 @@ name: Cut the Rope 2
 bundle_id: "com.zeptolab.ctr2"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 59
     date: 2026-11-06
@@ -12,6 +13,8 @@ reports:
     app_version: "1.17.2"
     hardware: Lenovo Duet 3
     os: Debian sid
+    graphics: OpenGL ES 2
+    fps: 60
     level: 3
     source: body
     notes: Reaches its main menu; not playable yet.

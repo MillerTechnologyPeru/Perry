@@ -3,6 +3,7 @@ name: Sea of Stars
 bundle_id: "com.playdigious.seaofstars"
 platform: ios
 kind: game
+tags: [C++, Unity]
 reports:
   - pr: 185
     date: 2026-11-18
@@ -12,6 +13,7 @@ reports:
     app_version: "3.0"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: Metal
     level: 3
     source: body
     notes: Its title, main menu and New Game work through to character select.

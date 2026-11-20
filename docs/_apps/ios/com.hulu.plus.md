@@ -3,6 +3,7 @@ name: Hulu
 bundle_id: "com.hulu.plus"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 216
     date: 2026-11-19

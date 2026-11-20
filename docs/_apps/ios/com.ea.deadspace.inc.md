@@ -3,6 +3,7 @@ name: Dead Space
 bundle_id: "com.ea.deadspace.inc"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 136
     date: 2026-11-11

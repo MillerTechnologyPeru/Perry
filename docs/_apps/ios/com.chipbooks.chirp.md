@@ -3,6 +3,7 @@ name: Chirp Audiobooks
 bundle_id: "com.chipbooks.chirp"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 166
     date: 2026-11-16

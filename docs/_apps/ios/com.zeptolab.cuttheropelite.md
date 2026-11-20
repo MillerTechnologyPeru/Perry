@@ -3,6 +3,7 @@ name: Cut the Rope
 bundle_id: "com.zeptolab.cuttheropelite"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 138
     date: 2026-11-11
@@ -12,6 +13,8 @@ reports:
     app_version: "2.7.1"
     hardware: Lenovo Duet 3
     os: Debian sid
+    resolution: "320x480"
+    graphics: OpenGL ES 1
     level: 2
     source: body
     notes: Reaches its age-gate screen; levels and sound are untried.

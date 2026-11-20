@@ -14,10 +14,10 @@ ROOT = File.expand_path("..", __dir__)
 DOCS = File.join(ROOT, "docs")
 APPS = File.join(DOCS, "_apps")
 
-APP_KEYS = %w[name bundle_id platform kind developer reports].freeze
-APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
-REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os level source notes screenshots].freeze
-REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
+APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
+APP_REQUIRED = %w[name bundle_id platform kind].freeze
+REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args level source notes screenshots].freeze
+REPORT_REQUIRED = %w[date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
 
 # Darwin's platform names, and the CPUs a Mach-O for each can be built for.
@@ -27,6 +27,10 @@ PLATFORM_CPUS = {
   "maccatalyst" => %w[arm64 x86_64]
 }.freeze
 KINDS = %w[app game].freeze
+# The languages and engines an app is built with.
+TAGS = %w[Swift ObjC C++ Unity Unreal SpriteKit SceneKit Cocos2D Cocos2D-X SexyAppFramework Mono XNA Lua Kotlin].freeze
+# The graphics API a report's run drew with.
+GRAPHICS = ["OpenGL", "OpenGL ES 1", "OpenGL ES 2", "OpenGL ES 3", "Metal"].freeze
 SOURCES = %w[title body screenshot maintainer].freeze
 BUNDLE_ID = /\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/
 
@@ -59,11 +63,13 @@ def check_keys(file, where, hash, allowed, required)
   true
 end
 
-def check_report(file, where, report, platform, urls)
+def check_report(file, where, report, platform, kind, urls)
   return unless check_keys(file, where, report, REPORT_KEYS, REPORT_REQUIRED)
 
   pr = report["pr"]
   error(file, "#{where} 'pr' is not a positive integer") unless pr.nil? || (pr.is_a?(Integer) && pr.positive?)
+  # A report comes from a pull request, or from the maintainer's own test of a commit.
+  error(file, "#{where} is missing 'pr'") if pr.nil? && report["source"] != "maintainer"
   date = report["date"]
   error(file, "#{where} 'date' is not a date") unless date.nil? || date.is_a?(Date)
   perry = report["perry"]
@@ -82,6 +88,35 @@ def check_report(file, where, report, platform, urls)
   end
   hardware = report["hardware"]
   error(file, "#{where} 'hardware' is not a string") unless hardware.nil? || hardware.is_a?(String)
+  if report.key?("graphics") && !GRAPHICS.include?(report["graphics"])
+    error(file, "#{where} 'graphics' is not one of #{GRAPHICS.join(", ")}")
+  end
+  if report.key?("fps")
+    fps = report["fps"]
+    range = fps.is_a?(String) && fps.match(/\A(\d+)-(\d+)\z/)
+    unless (fps.is_a?(Integer) && fps.positive?) || (range && range[1].to_i.positive? && range[1].to_i < range[2].to_i)
+      error(file, "#{where} 'fps' is not a frame rate such as 60 or \"45-52\"")
+    end
+    error(file, "#{where} has 'fps', but the app's kind is not game") unless kind == "game"
+  end
+  if report.key?("resolution")
+    resolution = report["resolution"]
+    unless resolution.is_a?(String) && resolution.match?(/\A[1-9]\d*x[1-9]\d*(@[1-9])?\z/)
+      error(file, "#{where} 'resolution' is not a size such as \"1920x1080\" or \"390x844@3\"")
+    end
+  end
+  if report.key?("env")
+    env = report["env"]
+    if !env.is_a?(Array) || env.empty? || !env.all? { |v| v.is_a?(String) && v.match?(/\A[A-Za-z_][A-Za-z0-9_]*=/) }
+      error(file, "#{where} 'env' is not a list of NAME=value settings")
+    end
+  end
+  if report.key?("args")
+    args = report["args"]
+    if !args.is_a?(Array) || args.empty? || !args.all? { |v| v.is_a?(String) && !v.empty? }
+      error(file, "#{where} 'args' is not a list of command-line arguments")
+    end
+  end
   os = report["os"]
   error(file, "#{where} 'os' is not a string") unless os.nil? || os.is_a?(String)
   level = report["level"]
@@ -146,14 +181,24 @@ def check_app(file, urls)
   end
   error(file, "'kind' is not one of #{KINDS.join(", ")}") unless data["kind"].nil? || KINDS.include?(data["kind"])
   error(file, "'developer' is not a string") if data.key?("developer") && !data["developer"].is_a?(String)
+  if data.key?("tags")
+    tags = data["tags"]
+    if !tags.is_a?(Array) || tags.empty?
+      error(file, "'tags' is not a list")
+    else
+      (tags - TAGS).each { |tag| error(file, "tag '#{tag}' is not one of #{TAGS.join(", ")}") }
+      error(file, "'tags' lists a tag twice") if tags.uniq.size != tags.size
+    end
+  end
 
+  # An app may be listed before anyone has tested it: then it has no reports.
+  return 0 unless data.key?("reports")
   reports = data["reports"]
-  return 0 if reports.nil?
   unless reports.is_a?(Array) && !reports.empty?
-    error(file, "'reports' is not a list with at least one report")
+    error(file, "'reports' is not a list with at least one report; leave it out until there is one")
     return 0
   end
-  reports.each_with_index { |report, i| check_report(file, "report #{i + 1}", report, dir_platform, urls) }
+  reports.each_with_index { |report, i| check_report(file, "report #{i + 1}", report, dir_platform, data["kind"], urls) }
 
   dates = reports.map { |report| report.is_a?(Hash) ? report["date"] : nil }
   if dates.all? { |date| date.is_a?(Date) } && dates.each_cons(2).any? { |a, b| b < a }

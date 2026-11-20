@@ -3,6 +3,7 @@ name: iHeartRadio
 bundle_id: "com.clearchannel.iheartradio"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++, Kotlin]
 reports:
   - pr: 175
     date: 2026-11-17

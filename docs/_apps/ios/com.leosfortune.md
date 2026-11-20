@@ -3,6 +3,7 @@ name: Leo's Fortune
 bundle_id: "com.leosfortune"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 73
     date: 2026-11-07
@@ -12,6 +13,8 @@ reports:
     app_version: "1.0.15"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 2
+    fps: 60
     level: 4
     source: body
     notes: Plays.
@@ -25,6 +28,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 5
     source: maintainer
     notes: Everything tested works, music included. Game Center is out of scope.

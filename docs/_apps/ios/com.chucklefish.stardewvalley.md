@@ -3,6 +3,7 @@ name: Stardew Valley
 bundle_id: "com.chucklefish.stardewvalley"
 platform: ios
 kind: game
+tags: [ObjC, C++, Mono, XNA]
 reports:
   - pr: 198
     date: 2026-11-18
@@ -12,6 +13,7 @@ reports:
     app_version: "16.15.5"
     hardware: Lenovo Duet 3
     os: Debian sid
+    resolution: "932x430@3"
     level: 2
     source: screenshot
     notes: Gets past its start-up stop in the Mono bridge to its title screen.

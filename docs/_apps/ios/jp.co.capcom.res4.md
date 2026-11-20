@@ -3,6 +3,7 @@ name: Resident Evil 4
 bundle_id: "jp.co.capcom.res4"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 123
     date: 2026-11-09
@@ -11,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 3
     source: body
     notes: Being brought up on perry32; sound and movie playback work.

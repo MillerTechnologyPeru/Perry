@@ -3,6 +3,7 @@ name: Riptide GP2
 bundle_id: "com.vectorunit.red"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 18
     date: 2026-11-05
@@ -11,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 3
     source: body
     notes: Sound plays and the first race runs at 60 frames a second; finishing a race is unconfirmed.

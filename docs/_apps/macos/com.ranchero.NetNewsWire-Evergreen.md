@@ -3,6 +3,7 @@ name: NetNewsWire for Mac
 bundle_id: "com.ranchero.NetNewsWire-Evergreen"
 platform: macos
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 67
     date: 2026-11-06

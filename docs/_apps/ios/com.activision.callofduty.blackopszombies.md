@@ -3,6 +3,7 @@ name: "Call of Duty: Black Ops Zombies"
 bundle_id: "com.activision.callofduty.blackopszombies"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 27
     date: 2026-11-06
@@ -12,6 +13,7 @@ reports:
     app_version: "1.3.5"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 3
     source: body
     notes: Reaches its menus.
@@ -22,6 +24,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 3
     source: body
     notes: Launches reliably, shows its menus and runs a level at about 60 frames a second with sound.

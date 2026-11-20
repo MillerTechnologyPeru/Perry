@@ -3,6 +3,7 @@ name: MacDown
 bundle_id: "com.uranusjr.macdown"
 platform: macos
 kind: app
+tags: [ObjC]
 reports:
   - pr: 104
     date: 2026-11-09

@@ -3,6 +3,7 @@ name: Crazy Taxi
 bundle_id: "com.sega.crazytaxi"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 15
     date: 2026-11-05
@@ -11,6 +12,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2, Retroid Pocket 5
     os: ROCKNIX
+    fps: 60
     level: 5
     source: maintainer
     notes: Everything tested works, at 60 frames a second.

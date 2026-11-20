@@ -3,6 +3,7 @@ name: Lock's Quest
 bundle_id: "com.hg.locksquest"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unity]
 reports:
   - pr: 35
     date: 2026-11-06
@@ -12,6 +13,8 @@ reports:
     app_version: "1.0.480"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    graphics: OpenGL ES 2
+    fps: 60
     level: 2
     source: body
     notes: Its title screen and story movies play.

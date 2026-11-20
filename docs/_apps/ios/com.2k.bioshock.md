@@ -3,6 +3,7 @@ name: BioShock
 bundle_id: "com.2k.bioshock"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unreal]
 reports:
   - pr: 141
     date: 2026-11-12
@@ -11,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 1
     source: body
     notes: Starts without crashing, but its screen stays black.
@@ -22,6 +24,7 @@ reports:
     app_version: "1.3.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 2
     level: 3
     source: body
     notes: Its main menu works and New Game starts.

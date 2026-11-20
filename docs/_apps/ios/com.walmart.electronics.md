@@ -3,6 +3,7 @@ name: Walmart
 bundle_id: "com.walmart.electronics"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 207
     date: 2026-11-19

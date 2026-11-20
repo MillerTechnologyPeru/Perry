@@ -3,6 +3,7 @@ name: Bejeweled Classic HD
 bundle_id: "com.popcap.ios.Bej3"
 platform: ios
 kind: game
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 15
     date: 2026-11-05
@@ -21,6 +22,7 @@ reports:
     cpu: arm64
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: "49-51"
     level: 4
     source: body
     notes: Plays, with its level music; an iPad screen is available with PERRY_UIKIT_SCREEN=ipad.

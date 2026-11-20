@@ -3,6 +3,7 @@ name: Wikipedia
 bundle_id: "org.wikimedia.wikipedia"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 25
     date: 2026-11-05

@@ -10,6 +10,11 @@ layout: default
   {%- if parts[0] == page.platform -%}{%- assign platform_name = parts[1] -%}{%- endif -%}
 {%- endfor -%}
 <h1>{{ page.name | escape }}</h1>
+{%- if page.tags %}
+<ul class="tags" aria-label="Engines and languages">
+  {%- for tag in page.tags %}<li class="tag">{{ tag | escape }}</li>{% endfor %}
+</ul>
+{%- endif %}
 
 <dl class="app-facts">
   <dt>Bundle ID</dt>
@@ -21,8 +26,10 @@ layout: default
   {%- assign cpus = "" | split: "" -%}
   {%- for cpu in cpu_order -%}{%- if tested contains cpu -%}{%- assign cpus = cpus | push: cpu -%}{%- endif -%}{%- endfor -%}
   {%- assign cpus = cpus | join: ", " -%}
+  {%- if cpus != "" %}
   <dt>CPUs tested</dt>
   <dd>{{ cpus }}</dd>
+  {%- endif %}
   <dt>Kind</dt>
   <dd>{{ page.kind | capitalize }}</dd>
   {%- if page.developer %}
@@ -30,17 +37,28 @@ layout: default
   <dd>{{ page.developer | escape }}</dd>
   {%- endif %}
   <dt>Level</dt>
+  {%- if current %}
   <dd><span class="badge level-{{ current.level }}"><span class="badge-number">{{ current.level }}</span>{{ current_level.name }}</span></dd>
   <dt>Last tested</dt>
   <dd>{{ current.date | date: "%Y-%m-%d" }}</dd>
+  {%- else %}
+  <dd><span class="badge untested">Not tested yet</span></dd>
+  {%- endif %}
 </dl>
 
 <h2>Reports</h2>
+{%- unless current %}
+<p>No one has reported running this app under Perry yet. To add a report, see <a href="{{ '/contributing/' | relative_url }}">Contributing</a>.</p>
+{%- endunless %}
 {%- assign reports = page.reports | reverse %}
 {%- for report in reports %}
 {%- assign level = site.data.levels | where: "level", report.level | first %}
 <section class="report">
+  {%- if report.pr %}
   <h3><a href="https://github.com/MillerTechnologyPeru/Perry/pull/{{ report.pr }}">Pull request #{{ report.pr }}</a></h3>
+  {%- else %}
+  <h3>Maintainer's test of <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></h3>
+  {%- endif %}
   <ul class="report-facts">
     <li><span class="badge level-{{ report.level }}"><span class="badge-number">{{ report.level }}</span>{{ level.name }}</span></li>
     <li><strong>Date</strong> {{ report.date | date: "%Y-%m-%d" }}</li>
@@ -50,10 +68,25 @@ layout: default
     {%- endif %}
     <li><strong>Hardware</strong> {{ report.hardware | escape }}</li>
     <li><strong>OS</strong> {{ report.os | escape }}</li>
+    {%- if report.resolution %}
+    <li><strong>Resolution</strong> {{ report.resolution | replace: "x", "×" }}</li>
+    {%- endif %}
+    {%- if report.graphics %}
+    <li><strong>Graphics</strong> {{ report.graphics | escape }}</li>
+    {%- endif %}
+    {%- if report.fps %}
+    <li><strong>FPS</strong> {{ report.fps | replace: "-", "–" }}</li>
+    {%- endif %}
     <li><strong>Commit</strong> <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></li>
     <li><strong>Level from</strong> {{ report.source }}</li>
   </ul>
   <p>{{ report.notes | escape }}</p>
+  {%- if report.env or report.args %}
+  <p class="run-settings">Run with
+    {%- for setting in report.env %} <code>{{ setting | escape }}</code>{% endfor %}
+    {%- if report.args %} <code>perry{% for arg in report.args %} {{ arg | escape }}{% endfor %}</code>{% endif %}
+  </p>
+  {%- endif %}
   {%- if report.screenshots %}
   <div class="screenshots">
     {%- for shot in report.screenshots %}

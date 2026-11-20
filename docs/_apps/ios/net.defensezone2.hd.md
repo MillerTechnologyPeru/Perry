@@ -3,6 +3,7 @@ name: Defense Zone 2 HD
 bundle_id: "net.defensezone2.hd"
 platform: ios
 kind: game
+tags: [ObjC, C++, Unity]
 reports:
   - pr: 27
     date: 2026-11-06
@@ -12,6 +13,7 @@ reports:
     app_version: "1.8.13"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 30
     level: 4
     source: body
     notes: Plays.

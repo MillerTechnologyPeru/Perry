@@ -3,6 +3,7 @@ name: Sonic 4 Episode II
 bundle_id: "com.sega.sonic4ep2"
 platform: ios
 kind: game
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 15
     date: 2026-11-05

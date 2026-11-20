@@ -3,6 +3,7 @@ name: VLC for iOS
 bundle_id: "org.videolan.vlc-ios"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 65
     date: 2026-11-06
