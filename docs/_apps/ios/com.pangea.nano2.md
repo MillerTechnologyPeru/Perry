@@ -3,6 +3,7 @@ name: Nanosaur 2
 bundle_id: "com.pangea.nano2"
 platform: ios
 kind: game
+tags: [ObjC]
 reports:
   - pr: 49
     date: 2026-11-06
@@ -12,6 +13,7 @@ reports:
     app_version: "8.0"
     hardware: Retroid Pocket Flip 2
     os: ROCKNIX
+    fps: 60
     level: 4
     source: body
     notes: Plays with a controller.
