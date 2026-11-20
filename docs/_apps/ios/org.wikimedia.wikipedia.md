@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Runs as far as its onboarding screen.
@@ -22,6 +23,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Goes through its first four onboarding screens.
@@ -35,6 +37,7 @@ reports:
     cpu: arm64
     app_version: "2026.10.27"
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 2
     source: body
     notes: Gets through launch and onboarding.
