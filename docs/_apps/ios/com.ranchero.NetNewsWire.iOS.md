@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Its Feeds list runs, idles without redrawing and scrolls cheaply.
@@ -19,6 +20,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Lenovo Duet 3
+    os: Debian sid
     level: 3
     source: body
     notes: Its feed list draws separators and rounded cards as iOS does.
