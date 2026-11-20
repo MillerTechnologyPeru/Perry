@@ -3,6 +3,7 @@ name: Need for Speed Hot Pursuit HD
 bundle_id: "com.ea.nfshp.ipad.bv"
 platform: ios
 kind: game
+tags: [ObjC, C++]
 reports:
   - pr: 102
     date: 2026-11-08
@@ -11,6 +12,7 @@ reports:
     cpu: armv7
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    resolution: "1024x768"
     level: 4
     source: body
     notes: Plays its tutorial race.
