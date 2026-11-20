@@ -65,6 +65,9 @@ reports:
     level: 5
     source: maintainer
     notes: Everything tested works under box86, in a window; full screen does not work.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/1cdadf8f-5ee4-4b7d-bc69-568428236950
+        caption: A Classic game through a level transition, at 60 frames a second
   - pr: 221
     date: 2026-11-19
     perry: "8ab75200"
