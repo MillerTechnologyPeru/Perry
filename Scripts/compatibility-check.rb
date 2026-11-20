@@ -15,7 +15,7 @@ DOCS = File.join(ROOT, "docs")
 APPS = File.join(DOCS, "_apps")
 
 APP_KEYS = %w[name bundle_id platform kind developer tags reports].freeze
-APP_REQUIRED = %w[name bundle_id platform kind reports].freeze
+APP_REQUIRED = %w[name bundle_id platform kind].freeze
 REPORT_KEYS = %w[pr date perry platform cpu app_version hardware os resolution graphics fps env args level source notes screenshots].freeze
 REPORT_REQUIRED = %w[pr date perry platform cpu hardware os level source notes].freeze
 SCREENSHOT_KEYS = %w[url caption].freeze
@@ -189,10 +189,11 @@ def check_app(file, urls)
     end
   end
 
+  # An app may be listed before anyone has tested it: then it has no reports.
+  return 0 unless data.key?("reports")
   reports = data["reports"]
-  return 0 if reports.nil?
   unless reports.is_a?(Array) && !reports.empty?
-    error(file, "'reports' is not a list with at least one report")
+    error(file, "'reports' is not a list with at least one report; leave it out until there is one")
     return 0
   end
   reports.each_with_index { |report, i| check_report(file, "report #{i + 1}", report, dir_platform, data["kind"], urls) }
