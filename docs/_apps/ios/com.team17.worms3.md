@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.24"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 4
     source: body
     notes: Starts, loads its sounds, reaches the main menu at 30 frames a second and plays, with its own controller support.
