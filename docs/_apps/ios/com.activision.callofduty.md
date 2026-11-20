@@ -13,6 +13,7 @@ reports:
     app_version: "1.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 3
     source: title
     notes: Runs under perry32.
@@ -27,6 +28,7 @@ reports:
     app_version: "1.5"
     hardware: Retroid Pocket 5
     os: ROCKNIX
+    graphics: OpenGL ES 1
     level: 3
     source: title
     notes: Sound, textures and the accelerometer work; not yet played with a gamepad.
@@ -41,6 +43,7 @@ reports:
     resolution: "1080x1620"
     env:
       - "PERRY_UIKIT_GL_SCALE=native"
+    graphics: OpenGL ES 1
     level: 3
     source: body
     notes: Loads its controller library and draws its menus and first map at native resolution.
