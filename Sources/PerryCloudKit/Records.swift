@@ -162,7 +162,24 @@ open class CKOperation: NSObject {
         }
     }
 
-    @ObjCMethod("start") func start() { finishWithoutAccount() }
+    @ObjCMethod("start") func start() { CKOperation.finish(self) }
+
+    /// Finishes an operation as its own class does: an object reached
+    /// through a message is wrapped as the class that declares the method,
+    /// so the subclass's finishing is picked by the object's class here.
+    static func finish(_ operation: NSObject) {
+        let kinds: [(NSObject) -> CKOperation?] = [
+            { $0.is(CKQueryOperation.self) ? $0.unsafeCast(to: CKQueryOperation.self) : nil },
+            { $0.is(CKModifyRecordsOperation.self) ? $0.unsafeCast(to: CKModifyRecordsOperation.self) : nil },
+            { $0.is(CKFetchRecordsOperation.self) ? $0.unsafeCast(to: CKFetchRecordsOperation.self) : nil },
+            { $0.is(CKModifyRecordZonesOperation.self) ? $0.unsafeCast(to: CKModifyRecordZonesOperation.self) : nil },
+            { $0.is(CKModifySubscriptionsOperation.self) ? $0.unsafeCast(to: CKModifySubscriptionsOperation.self) : nil },
+            { $0.is(CKFetchRecordZoneChangesOperation.self) ? $0.unsafeCast(to: CKFetchRecordZoneChangesOperation.self) : nil },
+        ]
+        let typed = kinds.lazy.compactMap { $0(operation) }.first ?? operation.unsafeCast(to: CKOperation.self)
+        CloudTrace.say("\(type(of: typed)) \(operation.objcObject) finishes not signed in")
+        typed.finishWithoutAccount()
+    }
     @ObjCMethod("cancel") func cancel() {}
     @ObjCMethod("isFinished") func isFinished() -> Bool { true }
     @ObjCMethod("isExecuting") func isExecuting() -> Bool { false }
