@@ -14,6 +14,9 @@ reports:
     level: 4
     source: body
     notes: Plays.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/3ca97402-7446-4bd9-b659-68c25902ead8
+        caption: Title screen
   - pr: 87
     date: 2026-11-07
     perry: "fa4973d0"
