@@ -3,6 +3,7 @@ name: TextMate
 bundle_id: "com.macromates.TextMate"
 platform: macos
 kind: app
+tags: [ObjC, C++]
 reports:
   - pr: 61
     date: 2026-11-06
