@@ -3,6 +3,7 @@ name: Discovery
 bundle_id: "com.tildesoft.Discovery"
 platform: macos
 kind: app
+tags: [Swift, ObjC]
 reports:
   - pr: 52
     date: 2026-11-06
