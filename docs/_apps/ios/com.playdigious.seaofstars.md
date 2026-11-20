@@ -14,4 +14,7 @@ reports:
     level: 3
     source: body
     notes: Its title, main menu and New Game work through to character select.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/3865ee38-0407-4241-bec6-a7b1c07c8ecf
+        caption: Title screen
 ---
