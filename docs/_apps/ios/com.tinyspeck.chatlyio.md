@@ -14,4 +14,7 @@ reports:
     level: 2
     source: body
     notes: Shows its welcome screen with its illustration, and Get started opens the Sign in sheet.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/c0b2f6cb-0e4b-4c0a-978c-6cb04754ee82
+        caption: Welcome screen
 ---
