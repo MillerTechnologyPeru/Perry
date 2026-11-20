@@ -9,7 +9,10 @@ final class BundleStorage {
     let path: String
     let contentsPath: String
     let resourcePath: String
-    let info: [String: PropertyValue]
+    /// The Info.plist's values; a bundle without the file has the ones its
+    /// executable embeds or names, found when first asked for.
+    private(set) lazy var info: [String: PropertyValue] = infoWithoutFile()
+    private let standInExecutable: String?
     /// The Info.plist as an NSDictionary, built once so it keeps its identity.
     private(set) lazy var infoDictionary: id = {
         let dictionary = PropertyValue.dictionary(info).object() ?? Dictionaries.autoreleased([])
@@ -28,18 +31,34 @@ final class BundleStorage {
         resourcePath = macOS ? contentsPath + "/Resources" : versioned ? self.path + "/Resources" : self.path
         let plist = (try? Data(contentsOf: URL(filePath: (versioned ? resourcePath : contentsPath) + "/Info.plist")))
             .flatMap { try? PropertyListDecoder().decode(PropertyValue.self, from: $0) }
-        if case .dictionary(let values) = plist {
-            info = values
-        } else if let executable {
-            info = ["CFBundleExecutable": .string(executable), "CFBundleName": .string(executable),
-                    "CFBundleIdentifier": .string("com.apple." + executable)]
-        } else {
-            info = [:]
-        }
+        standInExecutable = executable
         isMacOSLayout = macOS
+        if case .dictionary(let values) = plist { info = values }
     }
 
     let isMacOSLayout: Bool
+
+    /// A tool's embedded Info.plist, else a stand-in framework's names.
+    private func infoWithoutFile() -> [String: PropertyValue] {
+        if case .dictionary(let values) = BundleStorage.embeddedInfo(forDirectory: path) { return values }
+        guard let executable = standInExecutable else { return [:] }
+        return ["CFBundleExecutable": .string(executable), "CFBundleName": .string(executable),
+                "CFBundleIdentifier": .string("com.apple." + executable)]
+    }
+
+    /// A command-line tool's Info.plist, which it keeps in its executable's
+    /// __TEXT,__info_plist section (ibtool's names it com.apple.ibtool): the
+    /// main bundle's, when the tool's directory is that bundle.
+    static func embeddedInfo(forDirectory directory: String) -> PropertyValue? {
+        guard let header = Process.mainHeader,
+              Paths.normalized(Paths.deletingLastComponent(Process.executablePath)) == directory else { return nil }
+        typealias Section = @convention(c) (UnsafeRawPointer?, UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafeMutablePointer<UInt>) -> UnsafePointer<UInt8>?
+        guard let system = dlopen("libPerrySystem.so", RTLD_NOW | RTLD_NOLOAD),
+              let section = dlsym(system, "_getsectiondata").map({ unsafeBitCast($0, to: Section.self) }) else { return nil }
+        var size: UInt = 0
+        guard let bytes = section(header, "__TEXT", "__info_plist", &size), size > 0 else { return nil }
+        return try? PropertyListDecoder().decode(PropertyValue.self, from: Data(bytes: bytes, count: Int(size)))
+    }
 
     var identifier: String? {
         if case .string(let value) = info["CFBundleIdentifier"] { return value }
@@ -338,10 +357,19 @@ public final class NSBundle: NSObject {
         let path = String(cString: name)
         // …/Name.framework/Name: the framework's directory.
         let bytes = Array(path.utf8), marker = Array(".framework/".utf8)
-        guard bytes.count > marker.count,
-              let start = (0...(bytes.count - marker.count)).last(where: { bytes[$0..<$0 + marker.count].elementsEqual(marker) })
+        if bytes.count > marker.count,
+           let start = (0...(bytes.count - marker.count)).last(where: { bytes[$0..<$0 + marker.count].elementsEqual(marker) }) {
+            return Bundles.bundle(path: String(decoding: bytes[..<(start + marker.count - 1)], as: UTF8.self)) ?? Bundles.main
+        }
+        // …/Name.bundle/Contents/MacOS/Name: a Mac bundle's (a plug-in's,
+        // or the app's own).
+        let contents = Array("/Contents/MacOS/".utf8)
+        guard bytes.count > contents.count,
+              let start = (0...(bytes.count - contents.count)).last(where: { bytes[$0..<$0 + contents.count].elementsEqual(contents) })
         else { return Bundles.main }
-        return Bundles.bundle(path: String(decoding: bytes[..<(start + marker.count - 1)], as: UTF8.self)) ?? Bundles.main
+        let directory = Bundles.standardized(String(decoding: bytes[..<start], as: UTF8.self))
+        if let main = Bundles.storage(Bundles.main), main.path == directory { return Bundles.main }
+        return Bundles.bundle(path: directory) ?? Bundles.main
     }
 
     /// No path or URL gives no bundle, as on Darwin.
@@ -480,6 +508,24 @@ public final class NSBundle: NSObject {
         BundleLoading.loaded.insert(path)
         return true
     }
+    /// -load, with NSExecutableLoadError (3587) when the executable couldn't
+    /// be loaded.
+    @ObjCMethod("loadAndReturnError:")
+    func load(error: UnsafeMutablePointer<id?>?) -> Bool {
+        if load() { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 3587,
+                                             description: "The bundle “\(storage.executablePath ?? "")” couldn’t be loaded.")
+        return false
+    }
+    /// Whether the bundle has an executable that could be loaded:
+    /// NSExecutableNotLoadableError (3584) when it names one that isn't there.
+    @ObjCMethod("preflightAndReturnError:")
+    func preflight(error: UnsafeMutablePointer<id?>?) -> Bool {
+        guard let path = storage.executablePath, access(path, F_OK) != 0 else { return true }
+        error?.pointee = Errors.autoreleased(domain: Errors.cocoaDomain, code: 3584,
+                                             description: "The bundle’s executable “\(path)” couldn’t be found.")
+        return false
+    }
     /// Code once loaded stays, as Darwin's Objective-C code does: unloading
     /// answers that it could not.
     @ObjCMethod("unload") func unload() -> Bool { false }
@@ -506,7 +552,14 @@ public final class NSBundle: NSObject {
         for name in [named, executable].compactMap({ $0 }) where !name.isEmpty {
             if let cls = name.withCString({ ObjC.getClass($0) }) { return UnsafeMutableRawPointer(cls) }
         }
-        return nil
+        // Else the first class the executable defines, as Darwin's is:
+        // Interface Builder's Carbon placeholder names a class it doesn't have.
+        guard let path = storage.executablePath, let copy = ObjC.classNamesForImage else { return nil }
+        var count: UInt32 = 0
+        guard let names = path.withCString({ copy($0, &count) }) else { return nil }
+        defer { free(names) }
+        guard count > 0, let first = names[0], let cls = ObjC.getClass(first) else { return nil }
+        return UnsafeMutableRawPointer(cls)
     }
 
     @ObjCMethod("infoDictionary")

@@ -322,6 +322,42 @@ static bool open_macho(const char *path, macho_file *out) {
     return true;
 }
 
+// Whether a library opened while the program runs is a Mach-O with code
+// for this CPU: a plug-in without one (Interface Builder's Carbon plug-in
+// is 32-bit) fails to load, as on Darwin, rather than ending the program.
+static bool macho_loadable(const char *path) {
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+    uint8_t head[4096];
+    ssize_t length = read(fd, head, sizeof head);
+    close(fd);
+    if (length < (ssize_t)sizeof(uint32_t))
+        return false;
+    uint32_t magic = *(const uint32_t *)head;
+    if (magic == be32(FAT_MAGIC) || magic == be32(FAT_MAGIC_64)) {
+        const struct fat_header *fat = (const struct fat_header *)head;
+        bool is64 = magic == be32(FAT_MAGIC_64);
+        uint32_t count = be32(fat->nfat_arch);
+        size_t entry = is64 ? sizeof(struct fat_arch_64) : sizeof(struct fat_arch);
+        for (uint32_t i = 0; i < count && sizeof *fat + (i + 1) * entry <= (size_t)length; i++) {
+            const uint8_t *arch = head + sizeof *fat + i * entry;
+            int32_t cputype = (int32_t)be32(*(const uint32_t *)arch);
+            int32_t cpusubtype = (int32_t)be32(*(const uint32_t *)(arch + 4));
+            if (cpu_supported(cputype, cpusubtype))
+                return true;
+        }
+        fprintf(stderr, "perry: warning: %s has no " NATIVE_CPU_NAME " code, not loaded\n", path);
+        return false;
+    }
+    if (length < (ssize_t)sizeof(mach_header_t) || magic != MH_MAGIC_NATIVE ||
+        !cpu_supported(((const mach_header_t *)head)->cputype, ((const mach_header_t *)head)->cpusubtype)) {
+        fprintf(stderr, "perry: warning: %s is not a Mach-O with " NATIVE_CPU_NAME " code, not loaded\n", path);
+        return false;
+    }
+    return true;
+}
+
 // MARK: - Load command parsing
 
 #define FOR_EACH_LOAD_COMMAND(mh, lc) \
@@ -1481,7 +1517,7 @@ static bool load_library(const char *path) {
     }
     if (!image) {
         macho_file file;
-        if (!open_macho(path, &file)) {
+        if (!macho_loadable(path) || !open_macho(path, &file)) {
             pthread_mutex_unlock(&lock);
             return false;
         }

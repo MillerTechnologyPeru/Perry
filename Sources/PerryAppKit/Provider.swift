@@ -67,6 +67,26 @@ enum StructureConstants {
 enum Constants {
     /// Set when the shared application is made.
     nonisolated(unsafe) static let NSApp: UnsafeMutableRawPointer? = nil
+    /// Interface Builder's identifier for Cocoa documents' target runtime.
+    static let IBCocoaFramework = "IBCocoaFramework"
+    /// The keys of -[NSBundle loadNibFile:externalNameTable:withZone:]'s table.
+    static let NSNibOwner = "NSOwner"
+    static let NSNibTopLevelObjects = "NSTopLevelObjects"
+    /// The names a nib gives its main, font, help, services, windows and
+    /// recent documents menus.
+    static let _NSMainMenuName = "_NSMainMenu"
+    static let _NSFontMenuName = "_NSFontMenu"
+    static let _NSHelpMenuName = "_NSHelpMenu"
+    static let _NSServicesMenuName = "_NSServicesMenu"
+    static let _NSWindowsMenuName = "_NSWindowsMenu"
+    static let _NSRecentDocumentsMenuName = "_NSRecentDocumentsMenu"
+    /// NSViewAnimation's dictionary keys and effects.
+    static let NSViewAnimationTargetKey = "NSViewAnimationTargetKey"
+    static let NSViewAnimationStartFrameKey = "NSViewAnimationStartFrameKey"
+    static let NSViewAnimationEndFrameKey = "NSViewAnimationEndFrameKey"
+    static let NSViewAnimationEffectKey = "NSViewAnimationEffectKey"
+    static let NSViewAnimationFadeInEffect = "NSViewAnimationFadeInEffect"
+    static let NSViewAnimationFadeOutEffect = "NSViewAnimationFadeOutEffect"
     static let NSApplicationDidFinishLaunchingNotification = "NSApplicationDidFinishLaunchingNotification"
     static let NSApplicationWillFinishLaunchingNotification = "NSApplicationWillFinishLaunchingNotification"
     static let NSApplicationDidBecomeActiveNotification = "NSApplicationDidBecomeActiveNotification"

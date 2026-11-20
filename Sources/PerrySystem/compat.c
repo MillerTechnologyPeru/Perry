@@ -1841,6 +1841,35 @@ int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) __
     __attribute__((visibility("default"), used));
 int darwin_getopt_unix2003(int argc, char *const argv[], const char *options) { return darwin_getopt(argc, argv, options); }
 
+// getopt_long and getopt_long_only: glibc's, which move operands to the
+// end as Darwin's (FreeBSD's) do; struct option is laid out the same.
+static void darwin_getopt_enter(void) {
+    optind = darwin_optreset || darwin_optind == 0 ? 0 : darwin_optind;
+    darwin_optreset = 0;
+    opterr = darwin_opterr;
+}
+
+static int darwin_getopt_leave(int result) {
+    darwin_optind = optind;
+    darwin_optarg = optarg;
+    darwin_optopt = optopt;
+    return result;
+}
+
+int darwin_getopt_long(int argc, char *const argv[], const char *options, const struct option *longs, int *index)
+    DARWIN_SYMBOL(getopt_long);
+int darwin_getopt_long(int argc, char *const argv[], const char *options, const struct option *longs, int *index) {
+    darwin_getopt_enter();
+    return darwin_getopt_leave(getopt_long(argc, argv, options ? options : "", longs, index));
+}
+
+int darwin_getopt_long_only(int argc, char *const argv[], const char *options, const struct option *longs, int *index)
+    DARWIN_SYMBOL(getopt_long_only);
+int darwin_getopt_long_only(int argc, char *const argv[], const char *options, const struct option *longs, int *index) {
+    darwin_getopt_enter();
+    return darwin_getopt_leave(getopt_long_only(argc, argv, options ? options : "", longs, index));
+}
+
 // MARK: - Odds and ends the GNU toolchain uses
 
 #include <sys/wait.h>

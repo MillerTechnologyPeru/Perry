@@ -11,6 +11,8 @@ enum Process {
     nonisolated(unsafe) static var name = "perry"
     nonisolated(unsafe) static var executablePath = ""
     nonisolated(unsafe) static var bundlePath: String?
+    /// The main executable's Mach-O header, once the loader has mapped it.
+    nonisolated(unsafe) static var mainHeader: UnsafeRawPointer?
     /// The SDK the main executable was built with, from LC_BUILD_VERSION.
     nonisolated(unsafe) static var sdkVersion = NSOperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0)
 
@@ -19,6 +21,7 @@ enum Process {
         if let progname = info.progname { name = String(cString: progname) }
         if let path = info.executable_path { executablePath = String(cString: path) }
         bundlePath = info.bundle_path.map { String(cString: $0) }
+        mainHeader = info.main_header.map { UnsafeRawPointer($0) }
         if let header = info.main_header { sdkVersion = buildSDK(header) ?? legacyMacVersion }
         // PERRY_OS_VERSION ("13.7", "10.6.8") is the version to be, in
         // place of the one the app was built for.

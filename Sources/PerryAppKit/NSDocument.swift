@@ -49,6 +49,19 @@ extension NSObject {
     @ObjCMethod("windowControllerWillLoadNib:") func sendWindowControllerWillLoadNib(_ controller: NSObject?)
     @ObjCMethod("addWindowController:") func sendAddWindowController(_ controller: NSObject?)
     @ObjCMethod("windowNibName") func sendWindowNibName() -> String?
+
+    // A document controller's steps, sent so a subclass's overrides run
+    // (Interface Builder's keeps its own document types).
+    @ObjCMethod("typeForContentsOfURL:error:")
+    func sendTypeForContentsOfURL(_ url: NSObject?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> String?
+    @ObjCMethod("makeDocumentWithContentsOfURL:ofType:error:")
+    func sendMakeDocument(_ url: NSObject?, _ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject?
+    @ObjCMethod("makeUntitledDocumentOfType:error:")
+    func sendMakeUntitledDocument(_ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject?
+    @ObjCMethod("documentForURL:") func sendDocumentForURL(_ url: NSObject?) -> NSObject?
+    @ObjCMethod("addDocument:") func sendAddDocument(_ document: NSObject?)
+    @ObjCMethod("defaultType") func sendDefaultType() -> String?
+    @ObjCMethod("documentClassForType:") func sendDocumentClassForType(_ type: String?) -> ObjCClass?
 }
 
 /// A document type from the Info.plist.
@@ -195,8 +208,23 @@ open class NSDocument: NSObject {
 
     // MARK: Reading and writing
 
+    /// The file's contents, through -readFromFileWrapper:ofType:error: when
+    /// the document's class reads file wrappers (Interface Builder's do),
+    /// else -readFromData:ofType:error:, as AppKit reads them.
     @ObjCMethod("readFromURL:ofType:error:")
     func read(from url: NSObject?, type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        if Methods.overrides(objcObject, "readFromFileWrapper:ofType:error:", of: NSDocument.objCClass.pointer) {
+            typealias Make = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UInt,
+                                             UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> UnsafeMutableRawPointer?
+            typealias Read = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                             UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool
+            guard let allocated = Send.object(Classes.named("NSFileWrapper")?.pointer, "alloc"),
+                  let wrapper = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(allocated, ObjCRuntime.selector("initWithURL:options:error:"),
+                                                                                    url?.objcObject, 0, error) else { return false }
+            defer { ObjCRuntime.release(wrapper) }
+            return unsafeBitCast(ObjCRuntime.msgSend, to: Read.self)(objcObject, ObjCRuntime.selector("readFromFileWrapper:ofType:error:"),
+                                                                      wrapper, type?.objCArgument(), error)
+        }
         guard let path = url?.unsafeCast(to: DocumentURL.self).path(), let data = DocumentData.contents(ofFile: path) else {
             // NSFileReadNoSuchFileError.
             error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 260, userInfo: nil).objcObject
@@ -209,6 +237,17 @@ open class NSDocument: NSObject {
     @ObjCMethod("readFromFile:ofType:")
     func read(fromFile path: String?, type: String?) -> Bool {
         read(from: path.flatMap { DocumentURL.make(path: $0) }, type: type, error: nil)
+    }
+
+    /// A regular file's contents, through -readFromData:ofType:error:.
+    @ObjCMethod("readFromFileWrapper:ofType:error:")
+    func read(fromFileWrapper wrapper: NSObject?, type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        guard let wrapper, Send.bool(wrapper.objcObject, "isRegularFile"), let data = Send.object(wrapper.objcObject, "regularFileContents") else {
+            // NSFileReadUnknownError.
+            error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 256, userInfo: nil).objcObject
+            return false
+        }
+        return self.sendReadFromData(NSObject(data), type, error)
     }
 
     @ObjCMethod("readFromData:ofType:error:")
@@ -327,11 +366,17 @@ open class NSDocumentController: NSObject {
         if NSDocumentController.sharedController == nil { NSDocumentController.sharedController = self }
     }
 
+    /// The shared controller, made from the class asked the first time, as
+    /// AppKit's is (Interface Builder's tools ask their own subclass), with
+    /// +alloc and -init so the subclass sets itself up.
     @ObjCClassMethod("sharedDocumentController")
-    static func shared() -> NSDocumentController {
+    static func shared(_ cls: ObjCClass) -> NSDocumentController {
         if let controller = sharedController { return controller }
-        return NSDocumentController.objCClass.object.newInstance().unsafeCast(to: NSDocumentController.self)
+        let made = cls.object.allocated().initialized()
+        if sharedController == nil { sharedController = made.as(NSDocumentController.self) }
+        return sharedController ?? made.unsafeCast(to: NSDocumentController.self)
     }
+    static func shared() -> NSDocumentController { shared(NSDocumentController.objCClass) }
 
     func remove(_ document: NSDocument) {
         documents.removeAll { $0 === document }
@@ -378,7 +423,7 @@ open class NSDocumentController: NSObject {
 
     @ObjCMethod("makeUntitledDocumentOfType:error:")
     func makeUntitledDocument(ofType type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
-        guard let cls = documentClass(forType: type) else {
+        guard let cls = sendDocumentClassForType(type) else {
             // NSFileReadUnknownError.
             error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 256, userInfo: nil).objcObject
             return nil
@@ -389,7 +434,7 @@ open class NSDocumentController: NSObject {
 
     @ObjCMethod("makeDocumentWithContentsOfURL:ofType:error:")
     func makeDocument(contentsOf url: NSObject?, type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
-        guard let cls = documentClass(forType: type) else {
+        guard let cls = sendDocumentClassForType(type) else {
             error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 256, userInfo: nil).objcObject
             return nil
         }
@@ -462,7 +507,7 @@ open class NSDocumentController: NSObject {
 
     /// Adds the document and, to display it, makes its windows and shows them.
     func present(_ document: NSObject, display: Bool) {
-        addDocument(document)
+        sendAddDocument(document)
         Trace.log("documents: presenting \(document) display \(display)")
         guard display else { return }
         document.sendMakeWindowControllers()
@@ -472,7 +517,7 @@ open class NSDocumentController: NSObject {
 
     @ObjCMethod("openUntitledDocumentAndDisplay:error:")
     func openUntitledDocument(display: Bool, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
-        guard let type = defaultType(), let document = makeUntitledDocument(ofType: type, error: error) else { return nil }
+        guard let type = sendDefaultType(), let document = sendMakeUntitledDocument(type, error) else { return nil }
         document.as(NSDocument.self)?.draft = true
         present(document, display: display)
         return document
@@ -480,12 +525,12 @@ open class NSDocumentController: NSObject {
 
     @ObjCMethod("openDocumentWithContentsOfURL:display:error:")
     func openDocument(contentsOf url: NSObject?, display: Bool, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
-        if let open = document(for: url) {
+        if let open = sendDocumentForURL(url) {
             if display { open.sendShowWindows() }
             return open
         }
-        guard let type = type(forContentsOf: url, error: error),
-              let document = makeDocument(contentsOf: url, type: type, error: error) else { return nil }
+        guard let type = sendTypeForContentsOfURL(url, error),
+              let document = sendMakeDocument(url, type, error) else { return nil }
         present(document, display: display)
         noteNewRecentDocumentURL(url)
         return document
@@ -504,7 +549,7 @@ open class NSDocumentController: NSObject {
     }
 
     @ObjCMethod("openUntitledDocumentOfType:display:") func openUntitledDocument(ofType type: String?, display: Bool) -> NSObject? {
-        guard let document = makeUntitledDocument(ofType: type, error: nil) else { return nil }
+        guard let document = sendMakeUntitledDocument(type, nil) else { return nil }
         present(document, display: display)
         return document
     }

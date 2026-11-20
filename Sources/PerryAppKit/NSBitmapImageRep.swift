@@ -33,6 +33,39 @@ open class NSImageRep: NSObject {
     @ObjCMethod("setColorSpaceName:") func setRepColorSpaceName(_ name: String?) { if let name { colorSpace = name } }
 }
 
+/// NSCachedImageRep: an image drawn into an offscreen window, from before
+/// image reps drew themselves (Interface Builder subclasses it). It keeps
+/// its size; the window and rectangle it was given are kept to give back.
+@ObjCClass("NSCachedImageRep")
+open class NSCachedImageRep: NSImageRep {
+    var cacheWindow: NSWindow?
+    var cacheRect = CGRect.zero
+
+    public required init() { super.init() }
+
+    @ObjCMethod("initWithSize:depth:separate:alpha:")
+    public required init(size: CGSize, depth: Int32, separate: Bool, alpha: Bool) {
+        super.init()
+        self.size = size
+        (pixelsWide, pixelsHigh) = (Int(size.width), Int(size.height))
+        hasAlpha = alpha
+        cacheRect = CGRect(origin: .zero, size: size)
+    }
+
+    @ObjCMethod("initWithWindow:rect:")
+    public required init(window: NSWindow?, rect: CGRect) {
+        super.init()
+        cacheWindow = window
+        cacheRect = rect
+        size = rect.size
+        (pixelsWide, pixelsHigh) = (Int(rect.width), Int(rect.height))
+    }
+
+    @ObjCMethod("window") func repWindow() -> NSWindow? { cacheWindow }
+    @ObjCMethod("rect") func repRect() -> CGRect { cacheRect }
+    @ObjCMethod("draw") func draw() -> Bool { true }
+}
+
 @ObjCClass("NSBitmapImageRep")
 open class NSBitmapImageRep: NSImageRep {
     var samplesPerPixel = 4

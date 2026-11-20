@@ -269,6 +269,9 @@ public class NSDictionary: NSObject {
     @ObjCMethod("initWithDictionary:")
     func initialize(dictionary other: NSDictionary?) -> Self { setEntries(other?.entries ?? []) }
 
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject?) -> Self { setEntries(CollectionCoding.entries(coder?.id)) }
+
     /// With copyItems, each value is the value's -copy, as Foundation's.
     @ObjCMethod("initWithDictionary:copyItems:")
     func initialize(dictionary other: NSDictionary?, copyItems: Bool) -> Self {
