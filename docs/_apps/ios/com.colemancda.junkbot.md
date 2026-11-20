@@ -3,7 +3,7 @@ name: Junkbot
 bundle_id: "com.colemancda.junkbot"
 platform: ios
 kind: game
-tags: [Swift]
+tags: [Swift, SpriteKit]
 reports:
   - pr: 134
     date: 2026-11-10
