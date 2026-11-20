@@ -29,6 +29,7 @@ bundle_id: "com.hulu.plus"  # CFBundleIdentifier, always quoted
 platform: ios            # ios | macos | maccatalyst, the folder it is in
 kind: app                # app | game
 developer: Hulu          # only if a PR states it or it is unambiguous
+tags: [Swift, ObjC]      # engines and languages: Swift, ObjC, C++, Unity, Unreal, Mono, XNA, Lua, Kotlin
 reports:
   - pr: 216
     date: 2026-11-19     # the PR's merge date
@@ -37,6 +38,7 @@ reports:
     cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
+    fps: 60              # games only: the frame rate in play, or a range such as "45-52"
     os: Debian sid       # the operating system that machine ran
     level: 2
     source: title        # title | body | screenshot | maintainer: what the level rests on
@@ -63,6 +65,12 @@ more than the reports do.
   ROCKNIX.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
   x86 machine runs x86_64 or i386 ones.
+- `tags` names the engines and languages the app is built with, from
+  Swift, ObjC, C++, Unity, Unreal, Mono, XNA, Lua and Kotlin. Add a tag
+  only when the app's bundle or its pull request shows it.
+- `fps` is for games: the frame rate the pull request measured while
+  playing, or the menu's if play wasn't reached. A range is quoted, as
+  `"45-52"`.
 - `notes` is one or two plain sentences in the present tense saying how
   far the app gets and what is known to be wrong.
 - Don't add `layout`, `title` or `permalink`; the site's settings supply
