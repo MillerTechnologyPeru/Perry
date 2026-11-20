@@ -289,7 +289,29 @@ open class NSTextStorage: NSObject {
     @ObjCMethod("fixParagraphStyleAttributeInRange:") func fixParagraphStyleAttribute(in range: NSRange) {}
     @ObjCMethod("fixAttachmentAttributeInRange:") func fixAttachmentAttribute(in range: NSRange) {}
     @ObjCMethod("invalidateAttributesInRange:") func invalidateAttributes(in range: NSRange) {}
-    @ObjCMethod("ensureAttributesAreFixedInRange:") func ensureAttributesAreFixed(in range: NSRange) {}
+    /// A storage that fixes its attributes lazily fixes them now, before
+    /// they're read (Xcode's colours its syntax so).
+    @ObjCMethod("ensureAttributesAreFixedInRange:")
+    func ensureAttributesAreFixed(in range: NSRange) {
+        guard Send.bool(objcObject, "fixesAttributesLazily") else { return }
+        typealias Fix = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Fix.self)(objcObject, ObjCRuntime.selector("fixAttributesInRange:"), range)
+    }
+
+    /// Whether the attributes are being fixed, during which reading them
+    /// doesn't fix them again.
+    var fixingAttributes = false
+
+    /// Has the attributes of all the text fixed, as the storage (or a
+    /// subclass) does it.
+    func fixAllAttributes() {
+        guard !fixingAttributes else { return }
+        fixingAttributes = true
+        defer { fixingAttributes = false }
+        typealias Ensure = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Ensure.self)(objcObject, ObjCRuntime.selector("ensureAttributesAreFixedInRange:"),
+                                                             NSRange(location: 0, length: UInt(max(0, textLength))))
+    }
 
     /// The text changed: its layout managers' text views show it again.
     func edited() {
@@ -586,6 +608,25 @@ open class NSLayoutManager: NSObject {
         NSLayoutManager.store(NSRange(location: UInt(fragment.range.lowerBound), length: UInt(fragment.range.count)), effectiveRange)
         return toContainer(fragment.rect)
     }
+
+    /// The glyph under a point in the container (glyphs are characters here),
+    /// and how far through it the point is. Xcode's editor gutter finds the
+    /// lines it shows numbers for so.
+    @ObjCMethod("glyphIndexForPoint:inTextContainer:fractionOfDistanceThroughGlyph:")
+    func glyphIndex(for point: CGPoint, in container: NSTextContainer?, fraction: UnsafeMutablePointer<CGFloat>?) -> UInt {
+        fraction?.pointee = 0
+        guard let view else { return 0 }
+        let inView = CGPoint(x: point.x + view.textContainerInset.width, y: point.y + view.textContainerInset.height)
+        let length = view.string.utf16.count
+        return UInt(max(0, min(view.characterIndex(at: inView), max(0, length - 1))))
+    }
+    @ObjCMethod("glyphIndexForPoint:inTextContainer:")
+    func glyphIndex(for point: CGPoint, in container: NSTextContainer?) -> UInt { glyphIndex(for: point, in: container, fraction: nil) }
+
+    /// The line after text ending in a line break: none is laid out apart here.
+    @ObjCMethod("extraLineFragmentTextContainer") func extraLineFragmentTextContainer() -> NSTextContainer? { nil }
+    @ObjCMethod("extraLineFragmentRect") func extraLineFragmentRect() -> CGRect { .zero }
+    @ObjCMethod("extraLineFragmentUsedRect") func extraLineFragmentUsedRect() -> CGRect { .zero }
 
     @ObjCMethod("invalidateDisplayForCharacterRange:") func invalidateDisplay(forCharacterRange range: NSRange) { view?.setNeedsDisplay(true) }
     @ObjCMethod("invalidateLayoutForCharacterRange:actualCharacterRange:")
@@ -1254,11 +1295,47 @@ open class NSTextView: NSText {
 
     func runs() -> (runs: [TextRun], style: TextStyle) {
         guard let storage else { return ([], TextStyle()) }
-        let (runs, paragraph) = Text.runs(storage.keepsOwnText ? storage.contents : storage, font: effectiveFont, color: textColor ?? NSColor.textColor())
+        if !storage.keepsOwnText { storage.fixAllAttributes() }
+        var (runs, paragraph) = Text.runs(storage.keepsOwnText ? storage.contents : storage, font: effectiveFont, color: textColor ?? NSColor.textColor())
+        runs = withTemporaryAttributes(runs, paragraph: &paragraph)
         var style = TextStyle()
         style.alignment = alignment
         Text.style(paragraph, into: &style)
         return (runs, style)
+    }
+
+    /// The runs as the layout manager's delegate has them drawn: it is asked
+    /// (-layoutManager:shouldUseTemporaryAttributes:forDrawingToScreen:
+    /// atCharacterIndex:effectiveRange:) for the attributes to draw each
+    /// stretch of text with, in place of the storage's. Xcode's editor
+    /// colours its syntax so, keeping no colours in its storage.
+    private func withTemporaryAttributes(_ runs: [TextRun], paragraph: inout NSObject?) -> [TextRun] {
+        let selector = "layoutManager:shouldUseTemporaryAttributes:forDrawingToScreen:atCharacterIndex:effectiveRange:"
+        guard let manager, let delegate = manager.delegateObject, Send.responds(delegate, selector) else { return runs }
+        typealias Ask = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer?, Bool, UInt,
+                                        UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        let ask = unsafeBitCast(ObjCRuntime.msgSend, to: Ask.self)
+        let empty = NSMutableDictionary.empty()
+        var result: [TextRun] = []
+        var start = 0
+        for run in runs {
+            let units = Array(run.text.utf16)
+            var offset = 0
+            while offset < units.count {
+                // The range the storage's attributes hold over, which the
+                // delegate narrows to what its own do.
+                var range = NSRange(location: UInt(start + offset), length: UInt(units.count - offset))
+                let attributes = ask(delegate, ObjCRuntime.selector(selector), manager.objcObject, empty.objcObject, true, UInt(start + offset), &range)
+                let end = min(units.count, max(offset + 1, Int(range.location + range.length) - start))
+                var piece = run
+                piece.text = String(decoding: units[offset..<end], as: UTF16.self)
+                if let attributes = attributes.map(NSObject.init)?.as(NSDictionary.self) { Text.style(&piece, attributes, paragraph: &paragraph) }
+                result.append(piece)
+                offset = end
+            }
+            start += units.count
+        }
+        return result
     }
 
     /// The text's size laid out in `width`.
