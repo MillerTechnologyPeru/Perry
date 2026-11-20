@@ -4,6 +4,7 @@ bundle_id: "com.marmalade.monopoly"
 platform: ios
 kind: game
 developer: Marmalade
+tags: [Swift, ObjC, C++, Unity]
 reports:
   - pr: 185
     date: 2026-11-18
