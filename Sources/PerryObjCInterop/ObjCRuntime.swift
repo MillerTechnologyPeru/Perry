@@ -126,6 +126,7 @@ public enum ObjCRuntime {
         if let get = bind("_class_getInstanceVariable", as: GetIvar.self), let offset = bind("_ivar_getOffset", as: IvarOffset.self) {
             ivarFunctions = (get, offset)
         }
+        collectFunction = bind("_perry_objc_collect", as: (@convention(c) () -> Void).self)
         guard let getProtocol = bind("_objc_getProtocol", as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
               let allocateProtocol = bind("_objc_allocateProtocol",
                                           as: (@convention(c) (UnsafePointer<CChar>?) -> Object).self),
@@ -304,6 +305,14 @@ public enum ObjCRuntime {
             ivar.types.withCString { addIvarFunction(cls.pointer, name, ivar.size, ivar.alignment, $0) }
         }
     }
+
+    nonisolated(unsafe) static var collectFunction: (@convention(c) () -> Void)?
+
+    /// Deallocates the objects of a program built for the garbage collector
+    /// that lost their last reference (perry_objc_collect): from a point
+    /// where none of the program's code is running, as an event loop's
+    /// between events.
+    public static func collect() { collectFunction?() }
 
     typealias GetIvar = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?) -> UnsafeMutableRawPointer?
     typealias IvarOffset = @convention(c) (UnsafeMutableRawPointer?) -> Int
