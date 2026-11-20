@@ -14,4 +14,7 @@ reports:
     level: 2
     source: body
     notes: Runs to its splash screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/cd98dcd8-063e-400a-95de-a5b0015fb034
+        caption: Splash screen
 ---
