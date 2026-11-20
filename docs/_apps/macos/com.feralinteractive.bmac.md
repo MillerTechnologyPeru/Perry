@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: x86_64
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 1
     source: body
     notes: Start-up gets past linking Core Text and Core Image.
@@ -19,6 +20,7 @@ reports:
     platform: macos
     cpu: x86_64
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 1
     source: body
     notes: Its HTTPS requests complete, but it quits at its own Steam ownership check.
