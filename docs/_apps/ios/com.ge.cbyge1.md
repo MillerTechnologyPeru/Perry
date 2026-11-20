@@ -14,6 +14,9 @@ reports:
     level: 2
     source: body
     notes: Shows its onboarding pager, and Log in pushes the login screen.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/69f101ac-f214-451a-9a41-7662edac2bf0
+        caption: Onboarding pager
   - pr: 165
     date: 2026-11-16
     perry: "33fc2943"
