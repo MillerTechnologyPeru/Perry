@@ -15,4 +15,7 @@ reports:
     level: 3
     source: body
     notes: Plays menu sound effects but is silent in gameplay and for music.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/cb7d759a-2fbf-4bbf-b061-764caaeba589
+        caption: First level, with the movement tutorial
 ---
