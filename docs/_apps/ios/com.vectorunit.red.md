@@ -10,6 +10,7 @@ reports:
     platform: ios
     cpu: arm64
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 3
     source: body
     notes: Sound plays and the first race runs at 60 frames a second; finishing a race is unconfirmed.
