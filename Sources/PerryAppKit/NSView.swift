@@ -393,6 +393,22 @@ open class NSView: NSResponder {
         insert(view, at: place == -1 ? index : index + 1)
     }
 
+    /// `newView` in `oldView`'s place among the subviews, and `oldView` out.
+    /// Without an old view in the subviews the new one goes on top; without
+    /// a new view the old one just leaves.
+    @ObjCMethod("replaceSubview:with:")
+    func replaceSubview(_ oldView: NSView?, with newView: NSView?) {
+        guard oldView !== newView else { return }
+        guard let oldView, let index = subviews.firstIndex(where: { $0 === oldView }) else {
+            newView.map { insert($0, at: subviews.count) }
+            return
+        }
+        withExtendedLifetime(oldView) {
+            Send.void(oldView.objcObject, "removeFromSuperview")
+            newView.map { insert($0, at: index) }
+        }
+    }
+
     private func insert(_ view: NSView, at index: Int) {
         if view.superviewObject == objcObject, let current = subviews.firstIndex(where: { $0 === view }) {
             subviews.remove(at: current)
