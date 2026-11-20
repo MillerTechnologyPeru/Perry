@@ -208,11 +208,20 @@ public enum ObjCRuntime {
         // A class registered under a private name is the provider's own,
         // on the heap; the public name stays free for another provider.
         let registeredName = privateClassNames[name] ?? name
-        let created: UnsafeMutableRawPointer? = registeredName.withCString { cName in
+        var created: UnsafeMutableRawPointer? = registeredName.withCString { cName in
             if registeredName == name, let (cls, metaclass) = classStorage?(name) ?? ObjCClassExports.shared.storage(for: name) {
                 return functions.initializeClassPair(superclass?.pointer, cName, cls, metaclass)
             }
             return functions.allocateClassPair(superclass?.pointer, cName, 0)
+        }
+        if created == nil, registeredClassPair(registeredName) != nil {
+            // Another provider has the name: a Mac Catalyst app with an
+            // AppKit bridge loads AppKit's and UIKit's providers, which
+            // each define classes of the same names (MapKit's, Auto
+            // Layout's). The first keeps the public name; this one's goes
+            // by a name of its own, which its own code finds all the same.
+            let own = "PerryDuplicate" + name
+            created = own.withCString { functions.allocateClassPair(superclass?.pointer, $0, 0) }
         }
         guard let created else { objcInteropFatal("cannot define class \(registeredName); is the name taken?") }
         let cls = ObjCClass(created)
