@@ -348,3 +348,8 @@ h1 + .tags {
   background: var(--surface);
   white-space: nowrap;
 }
+
+.run-settings {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
