@@ -21,6 +21,7 @@ reports:
     cpu: i386
     hardware: Dell OptiPlex 7020
     os: Debian 13
+    resolution: "1024x768"
     level: 2
     source: body
     notes: Goes from its launcher through engine, sound, renderer and asset start-up into its main loop, where it renders frames.
