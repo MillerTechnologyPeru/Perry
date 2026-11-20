@@ -11,6 +11,7 @@ reports:
     cpu: arm64
     app_version: "1.0.480"
     hardware: Retroid Pocket Flip 2
+    os: ROCKNIX
     level: 2
     source: body
     notes: Its title screen and story movies play.
