@@ -11,6 +11,7 @@ reports:
     cpu: armv6
     app_version: "1.5"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: title
     notes: Runs under perry32.
@@ -24,6 +25,7 @@ reports:
     cpu: armv6
     app_version: "1.5"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: title
     notes: Sound, textures and the accelerometer work; not yet played with a gamepad.
@@ -34,6 +36,7 @@ reports:
     cpu: armv6
     app_version: "1.5"
     hardware: Retroid Pocket 5
+    os: ROCKNIX
     level: 3
     source: body
     notes: Loads its controller library and draws its menus and first map at native resolution.
