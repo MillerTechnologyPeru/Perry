@@ -10,6 +10,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: Gets through its launcher into the engine's initialization and main loop.
@@ -19,6 +20,7 @@ reports:
     platform: macos
     cpu: i386
     hardware: Dell OptiPlex 7020
+    os: Debian 13
     level: 2
     source: body
     notes: Goes from its launcher through engine, sound, renderer and asset start-up into its main loop, where it renders frames.
