@@ -10,6 +10,11 @@ layout: default
   {%- if parts[0] == page.platform -%}{%- assign platform_name = parts[1] -%}{%- endif -%}
 {%- endfor -%}
 <h1>{{ page.name | escape }}</h1>
+{%- if page.tags %}
+<ul class="tags" aria-label="Engines and languages">
+  {%- for tag in page.tags %}<li class="tag">{{ tag | escape }}</li>{% endfor %}
+</ul>
+{%- endif %}
 
 <dl class="app-facts">
   <dt>Bundle ID</dt>
@@ -50,6 +55,9 @@ layout: default
     {%- endif %}
     <li><strong>Hardware</strong> {{ report.hardware | escape }}</li>
     <li><strong>OS</strong> {{ report.os | escape }}</li>
+    {%- if report.fps %}
+    <li><strong>FPS</strong> {{ report.fps | replace: "-", "–" }}</li>
+    {%- endif %}
     <li><strong>Commit</strong> <a href="https://github.com/MillerTechnologyPeru/Perry/commit/{{ report.perry }}"><code>{{ report.perry }}</code></a></li>
     <li><strong>Level from</strong> {{ report.source }}</li>
   </ul>
