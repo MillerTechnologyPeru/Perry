@@ -3,6 +3,7 @@ name: Govee Home
 bundle_id: "com.ihoment.GoVeeSensor"
 platform: ios
 kind: app
+tags: [Swift, ObjC, C++]
 reports:
   - pr: 158
     date: 2026-11-15
