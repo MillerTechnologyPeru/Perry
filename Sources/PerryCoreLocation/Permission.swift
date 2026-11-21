@@ -1,6 +1,5 @@
-import DBUS
+import DBus
 import Glibc
-import Logging
 
 // Whether the user lets the app know its location, as the desktop keeps it:
 // the permission store's "location" table (org.freedesktop.impl.portal.
@@ -27,40 +26,42 @@ enum DesktopPermission {
     private static let storePath = "/org/freedesktop/impl/portal/PermissionStore"
     private static let accessInterface = "org.freedesktop.impl.portal.Access"
 
-    private static let logger: Logger = {
-        var logger = Logger(label: "perry.corelocation.permission")
-        logger.logLevel = .critical
-        return logger
-    }()
-
     /// GeoClue's accuracy levels by the names the table keeps.
     private static let levels: [String: UInt32] = ["NONE": 0, "COUNTRY": 1, "CITY": 4, "NEIGHBORHOOD": 5, "STREET": 6, "EXACT": 8]
 
     /// The app's permission: kept, else the user's answer to the dialog,
     /// which is then kept.
     static func ask(appID: String, name: String, reason: String?) async -> Answer {
-        do {
-            return try await DBusClient.withSessionBus(auth: .external(userID: String(getuid())), logger: logger) { connection in
-                if let kept = try await lookUp(appID, on: connection) { return kept }
-                guard let granted = try await dialog(appID: appID, name: name, reason: reason, on: connection) else { return .unknown }
-                try? await keep(appID, granted ? "EXACT" : "NONE", on: connection)
-                return granted ? .allowed(level: 8) : .denied
-            }
-        } catch {
-            return .unknown
+        let asked: Answer? = try? await withSessionBus { connection in
+            if let kept = try await lookUp(appID, on: connection) { return kept }
+            guard let granted = try await dialog(appID: appID, name: name, reason: reason, on: connection) else { return .unknown }
+            try? await keep(appID, granted ? "EXACT" : "NONE", on: connection)
+            return granted ? .allowed(level: 8) : .denied
         }
+        return asked ?? .unknown
     }
 
     /// The app's permission as the table keeps it, without asking; nil
     /// when it has none, or there is no table.
     static func kept(appID: String) async -> Answer? {
-        try? await DBusClient.withSessionBus(auth: .external(userID: String(getuid())), logger: logger) { connection in
-            try await lookUp(appID, on: connection)
+        (try? await withSessionBus { connection in try await lookUp(appID, on: connection) }) ?? nil
+    }
+
+    /// A connection to the session bus for the length of `body`.
+    private static func withSessionBus<T: Sendable>(_ body: (DBusConnection) async throws -> T) async throws -> T {
+        let connection = try await DBusConnection.connect(to: .session)
+        do {
+            let result = try await body(connection)
+            await connection.close()
+            return result
+        } catch {
+            await connection.close()
+            throw error
         }
     }
 
     /// The table's entry for the app; nil when there is none.
-    private static func lookUp(_ appID: String, on connection: DBusClient.Connection) async throws -> Answer? {
+    private static func lookUp(_ appID: String, on connection: DBusConnection) async throws -> Answer? {
         let reply: [DBusValue]
         do {
             reply = try await call(connection, destination: storeName, path: storePath, interface: storeName, method: "Lookup",
@@ -69,8 +70,8 @@ enum DesktopPermission {
             return nil
         }
         guard case .dictionary(let entries)? = reply.first else { return nil }
-        for (key, value) in entries where key.string == appID {
-            guard let level = value.array?.first?.string else { return nil }
+        for entry in entries where entry.key.stringValue == appID {
+            guard case .array(let values) = entry.value, let level = values.first?.stringValue else { return nil }
             let numeric = levels[level.uppercased()] ?? 0
             return numeric == 0 ? .denied : .allowed(level: numeric)
         }
@@ -80,26 +81,26 @@ enum DesktopPermission {
     /// The desktop's dialog: true if the user allows, false if not; nil
     /// without one.
     private static func dialog(appID: String, name: String, reason: String?,
-                               on connection: DBusClient.Connection) async throws -> Bool? {
+                               on connection: DBusConnection) async throws -> Bool? {
         // The desktop's portal backend: GNOME's, else any that answers.
         for backend in ["org.freedesktop.impl.portal.desktop.gnome", "org.freedesktop.impl.portal.desktop.gtk"] {
-            let options: [DBusValue: DBusValue] = [
-                .string("deny_label"): .variant(DBusVariant(.string("Deny"))),
-                .string("grant_label"): .variant(DBusVariant(.string("Allow"))),
-                .string("icon"): .variant(DBusVariant(.string("find-location-symbolic"))),
+            let options: [String: DBusValue] = [
+                "deny_label": .string("Deny"),
+                "grant_label": .string("Allow"),
+                "icon": .string("find-location-symbolic"),
             ]
             let body: [DBusValue] = [
-                .objectPath("/org/freedesktop/portal/desktop/request/perry/location"),
+                .objectPath(DBusObjectPath(rawValue: "/org/freedesktop/portal/desktop/request/perry/location")!),
                 .string(appID), .string(""),
                 .string("Allow \(name) to Use Your Location?"),
                 .string(reason ?? "\(name) wants to know where you are."),
                 .string("Location access can be changed at any time from the privacy settings."),
-                .dictionary(options),
+                .options(options),
             ]
             let reply: [DBusValue]
             do {
                 reply = try await call(connection, destination: backend, path: "/org/freedesktop/portal/desktop",
-                                       interface: accessInterface, method: "AccessDialog", body: body, signature: "osssssa{sv}")
+                                       interface: accessInterface, method: "AccessDialog", body: body)
             } catch let error as PermissionError where error.name.hasSuffix("ServiceUnknown") || error.name.hasSuffix("UnknownMethod")
                 || error.name.hasSuffix("UnknownInterface") || error.name.hasSuffix("UnknownObject") || error.name.hasSuffix("NameHasNoOwner") {
                 continue
@@ -112,28 +113,30 @@ enum DesktopPermission {
     }
 
     /// Keeps the app's level in the table.
-    private static func keep(_ appID: String, _ level: String, on connection: DBusClient.Connection) async throws {
+    private static func keep(_ appID: String, _ level: String, on connection: DBusConnection) async throws {
         var now = timespec()
         clock_gettime(CLOCK_REALTIME, &now)
         _ = try await call(connection, destination: storeName, path: storePath, interface: storeName, method: "SetPermission",
                            body: [.string(table), .boolean(true), .string(table), .string(appID),
-                                  .array([.string(level), .string(String(now.tv_sec))])],
-                           signature: "sbssas")
+                                  .strings([level, String(now.tv_sec)])])
     }
 
     private struct PermissionError: Error {
         let name: String
     }
 
-    private static func call(_ connection: DBusClient.Connection, destination: String, path: String, interface: String,
-                             method: String, body: [DBusValue], signature: String? = nil) async throws -> [DBusValue] {
-        let request = DBusRequest.createMethodCall(destination: destination, path: path, interface: interface,
-                                                   method: method, body: body, signature: signature)
-        guard let reply = try await connection.send(request) else { return [] }
-        if case .error = reply.messageType {
-            let name = reply.headerFields.first { $0.code == .errorName }.flatMap { $0.variant.value.string }
-            throw PermissionError(name: name ?? "org.freedesktop.DBus.Error.Failed")
+    private static func call(_ connection: DBusConnection, destination: String, path: String, interface: String,
+                             method: String, body: [DBusValue]) async throws -> [DBusValue] {
+        guard let destination = DBusBusName(rawValue: destination), let path = DBusObjectPath(rawValue: path),
+              let interface = DBusInterface(rawValue: interface), let method = DBusMember(rawValue: method) else {
+            throw PermissionError(name: "org.freedesktop.DBus.Error.InvalidArgs")
         }
-        return reply.body
+        do {
+            // No timeout: a call waits for its answer, which may be the user's.
+            return try await connection.callMethod(destination: destination, path: path, interface: interface, method: method,
+                                                   arguments: body, timeout: nil)
+        } catch let error as DBusError {
+            throw PermissionError(name: error.name.rawValue)
+        }
     }
 }
