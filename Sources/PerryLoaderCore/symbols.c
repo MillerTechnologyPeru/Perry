@@ -1318,6 +1318,16 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
         break;
     }
 
+    // A Swift symbol's name holds its module, so one another image defines
+    // is the same entity. Types move between libraries from one SDK to the
+    // next and keep their names (CGFloat, "CoreGraphics.CGFloat" still, is
+    // bound to libswiftCoreFoundation by newer SDKs and defined by
+    // libswiftCoreGraphics in older runtimes); left unresolved, the two
+    // sides of a conformance would name different type descriptors.
+    bool is_swift = strncmp(name, "_$s", 3) == 0;
+    for (perry_image *img = loader->images; is_swift && ordinal > 0 && !sym.found && img; img = img->next)
+        perry_exports_lookup(loader, img, name, &sym, 0);
+
     if (!sym.found && ordinal > 0) {
         void *table = resilient_witness_table(loader, &image->deps[ordinal - 1], name);
         if (table) {
