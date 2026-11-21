@@ -249,6 +249,7 @@ open class NSControl: NSView {
     /// Sends the action to the target, or along the responder chain.
     @ObjCMethod("sendAction:to:")
     func sendAction(_ action: ObjCSelector?, to target: NSObject?) -> Bool {
+        BindingTable.pushValue(of: objcObject)
         guard let action, let app = App.shared else { return false }
         return app.sendAction(action, to: target, from: self)
     }
@@ -574,6 +575,7 @@ open class NSTextField: NSControl {
         editing = false
         setNeedsDisplay(true)
         if edited {
+            BindingTable.pushValue(of: objcObject)
             notify("controlTextDidEndEditing:", "NSControlTextDidEndEditingNotification")
             if fieldCell?.sendsActionOnEndEditing == true { _ = sendAction(action, to: target.map(NSObject.init)) }
         }
@@ -617,6 +619,7 @@ open class NSTextField: NSControl {
         edited = true
         cellObject?.setStringValue(value)
         valueChanged()
+        BindingTable.pushValue(of: objcObject, continuously: true)
         notify("controlTextDidChange:", "NSControlTextDidChangeNotification")
         if cellObject?.continuous == true { _ = sendAction(action, to: target.map(NSObject.init)) }
     }
