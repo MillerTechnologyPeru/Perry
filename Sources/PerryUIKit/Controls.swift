@@ -1179,8 +1179,9 @@ open class UITextView: UIScrollView {
     @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { textState.font = font; textChanged() }
     @ObjCMethod("textColor") func textColor() -> UIColor? { textState.textColor }
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { textState.textColor = color; textChanged() }
-    @ObjCMethod("textAlignment") func textAlignment() -> Int { textState.textAlignment }
-    @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { textState.textAlignment = alignment; textChanged() }
+    @ObjCMethod("textAlignment") func textAlignment() -> Int { AppTextAlignment.convert(textState.textAlignment) }
+    @ObjCMethod("setTextAlignment:") func setAppTextAlignment(_ alignment: Int) { setTextAlignment(AppTextAlignment.convert(alignment)) }
+    func setTextAlignment(_ alignment: Int) { textState.textAlignment = alignment; textChanged() }
     @ObjCMethod("isEditable") func isEditable() -> Bool { textState.editable }
     @ObjCMethod("setEditable:") func setEditable(_ editable: Bool) { textState.editable = editable }
     @ObjCMethod("isSelectable") func isSelectable() -> Bool { textState.selectable }

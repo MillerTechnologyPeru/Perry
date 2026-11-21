@@ -232,6 +232,17 @@ enum BarIcons {
 
 // MARK: - Paragraph styles
 
+/// NSTextAlignment as the app numbers it. UIKit keeps the iOS numbering
+/// (left 0, center 1, right 2); an Intel Mac program, a Mac Catalyst one
+/// included, has right 1 and center 2. The change is its own inverse.
+enum AppTextAlignment {
+    nonisolated(unsafe) static var intelMac = false
+    static func convert(_ alignment: Int) -> Int {
+        guard intelMac else { return alignment }
+        return alignment == 1 ? 2 : alignment == 2 ? 1 : alignment
+    }
+}
+
 final class ParagraphStyleState: ObjectState {
     var alignment = 4
     var lineBreakMode = 0
@@ -308,7 +319,7 @@ open class NSParagraphStyle: NSObject {
         return ObjCRuntime.retain(copy.objcObject)!
     }
 
-    @ObjCMethod("alignment") func alignment() -> Int { state.alignment }
+    @ObjCMethod("alignment") func alignment() -> Int { AppTextAlignment.convert(state.alignment) }
     @ObjCMethod("lineBreakMode") func lineBreakMode() -> Int { state.lineBreakMode }
     @ObjCMethod("lineSpacing") func lineSpacing() -> CGFloat { state.lineSpacing }
     @ObjCMethod("paragraphSpacing") func paragraphSpacing() -> CGFloat { state.paragraphSpacing }
@@ -334,7 +345,8 @@ open class NSParagraphStyle: NSObject {
 
 @ObjCClass("NSMutableParagraphStyle")
 open class NSMutableParagraphStyle: NSParagraphStyle {
-    @ObjCMethod("setAlignment:") func setAlignment(_ alignment: Int) { state.alignment = alignment }
+    @ObjCMethod("setAlignment:") func setAppAlignment(_ alignment: Int) { state.alignment = AppTextAlignment.convert(alignment) }
+    func setAlignment(_ alignment: Int) { state.alignment = alignment }
     @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ mode: Int) { state.lineBreakMode = mode }
     @ObjCMethod("setLineSpacing:") func setLineSpacing(_ spacing: CGFloat) { state.lineSpacing = spacing }
     @ObjCMethod("setParagraphSpacing:") func setParagraphSpacing(_ spacing: CGFloat) { state.paragraphSpacing = spacing }

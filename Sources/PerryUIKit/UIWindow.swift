@@ -12,6 +12,9 @@ final class WindowState: ObjectState {
     var transitionView: UIView?
     /// UIWindowLevel: normal 0, status bar 1000, alert 2000.
     var level: CGFloat = 0
+    /// Traits an app sets on the window through key-value coding
+    /// ("localOverrideTraitCollection", private to UIKit).
+    var localOverrideTraits: UITraitCollection?
 }
 
 enum Windows {
@@ -52,6 +55,16 @@ open class UIWindow: UIView {
         if Coder(coder: coder).bool("UIResizesToFullScreen") { sendSetFrame(Screen.bounds) }
         if !Windows.all.contains(objcObject) { Windows.all.append(objcObject) }
         return self
+    }
+
+    /// Private to UIKit, and set by key: traits that override the window's
+    /// own (WhatsApp for Mac sets its appearance so). The interface style
+    /// is the one of them the window has to give.
+    @ObjCMethod("localOverrideTraitCollection") func localOverrideTraitCollection() -> UITraitCollection? { windowState.localOverrideTraits }
+    @ObjCMethod("setLocalOverrideTraitCollection:")
+    func setLocalOverrideTraitCollection(_ traits: UITraitCollection?) {
+        windowState.localOverrideTraits = traits
+        setOverrideUserInterfaceStyle(traits?.userInterfaceStyle() ?? 0)
     }
 
     @ObjCMethod("windowLevel") func windowLevel() -> CGFloat { windowState.level }

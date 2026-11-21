@@ -218,6 +218,20 @@ void darwin_qsort_b(void *base, size_t count, size_t size, void *block) {
     qsort_r(base, count, size, compare_with_block, block);
 }
 
+// bsearch_b: the block compares the key, first, with an element.
+void *darwin_bsearch_b(const void *key, const void *base, size_t count, size_t size, void *block) DARWIN_SYMBOL(bsearch_b);
+void *darwin_bsearch_b(const void *key, const void *base, size_t count, size_t size, void *block) {
+    size_t low = 0, high = count;
+    while (low < high) {
+        size_t middle = low + (high - low) / 2;
+        const void *element = (const char *)base + middle * size;
+        int order = compare_with_block(key, element, block);
+        if (order == 0) return (void *)element;
+        if (order < 0) high = middle; else low = middle + 1;
+    }
+    return NULL;
+}
+
 // MARK: - Locale
 
 // Darwin: LC_ALL 0, LC_COLLATE 1, LC_CTYPE 2, LC_MONETARY 3, LC_NUMERIC 4, LC_TIME 5, LC_MESSAGES 6.
