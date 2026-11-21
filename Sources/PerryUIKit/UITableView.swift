@@ -92,6 +92,13 @@ final class CellState: ObjectState {
     /// it shows.
     var accessoryIndicator: UIImageView?
     var accessoryIndicatorType = 0
+    /// The background the cell gave itself, while it still has it: a
+    /// grouped table changes it for its own, as it doesn't a color the app
+    /// set.
+    var ownBackground: UIColor?
+    /// The last row of an inset grouped section, which ends its card
+    /// without a line.
+    var endsCard = false
     /// The gray behind the content while highlighted or selected, unless
     /// the app gives a selected background view.
     var highlight: UIView?
@@ -149,8 +156,20 @@ open class UITableViewCell: UIView {
         cell.accessoryType = decoded.integer("UIAccessoryType")
         if decoded.has("UISelectionStyle") { cell.selectionStyle = decoded.integer("UISelectionStyle") }
         if cell.contentView == nil { setUp(style: cell.style, reuseIdentifier: cell.reuseIdentifier) }
-        if state.backgroundColor == nil { setBackgroundColor(UIColor.systemBackground()) }
+        if state.backgroundColor == nil { setOwnBackground(UIColor.systemBackground()) }
         return self
+    }
+
+    /// Gives the cell a background of its own choosing.
+    func setOwnBackground(_ color: UIColor) {
+        setBackgroundColor(color)
+        cell.ownBackground = color
+    }
+
+    /// Whether the background is still the one the cell gave itself.
+    var hasOwnBackground: Bool {
+        guard let own = cell.ownBackground else { return false }
+        return state.backgroundColor?.objcObject == own.objcObject
     }
 
     /// The width the accessory takes from the content view.
@@ -166,7 +185,7 @@ open class UITableViewCell: UIView {
             cell.contentView = content
             addSubview(content)
         }
-        setBackgroundColor(UIColor.systemBackground())
+        setOwnBackground(UIColor.systemBackground())
     }
 
     @ObjCMethod("dealloc")
@@ -383,7 +402,7 @@ open class UITableViewCell: UIView {
             ancestor = UIView.states[next].superview
         }
         if let owner {
-            cell.separator?.setHidden(owner.table.separatorStyle == 0)
+            cell.separator?.setHidden(owner.table.separatorStyle == 0 || cell.endsCard)
             if let color = owner.table.separatorColor { cell.separator?.setBackgroundColor(color) }
         }
         let hairline = Screen.pixel
@@ -395,7 +414,9 @@ open class UITableViewCell: UIView {
             image.sendSetFrame(CGRect(x: 16, y: (bounds.height - size.height) / 2, width: size.width, height: size.height))
             x += size.width + 16
         }
-        let width = max(content.width - x - 16, 0)
+        // A standard accessory has its own space before it.
+        let trailing: CGFloat = cell.accessoryView == nil && cell.accessoryType != 0 ? 0 : 16
+        let width = max(content.width - x - trailing, 0)
         switch (cell.style, cell.textLabel, cell.detailTextLabel) {
         case (3, let text?, let detail?):
             text.sendSetFrame(CGRect(x: x, y: content.height / 2 - 21, width: width, height: 21))
@@ -764,8 +785,12 @@ open class UITableView: UIScrollView {
         setNeedsLayout()
     }
 
+    /// An inset grouped table's margin either side of its rows.
+    private var rowInset: CGFloat { table.style == 2 ? 16 : 0 }
+
     private func computeLayout() -> TableLayout {
         let width = state.bounds.width
+        let rowInset = rowInset
         var y: CGFloat = table.tableHeaderView?.state.bounds.height ?? 0
         var layout = TableLayout()
         let source = source, delegate = delegate()
@@ -789,7 +814,7 @@ open class UITableView: UIScrollView {
                     table.automaticRows.insert(path)
                     height = table.measuredHeights[path] ?? automaticRowHeight
                 }
-                rows.append(CGRect(x: 0, y: y, width: width, height: height))
+                rows.append(CGRect(x: rowInset, y: y, width: max(width - 2 * rowInset, 0), height: height))
                 y += height
             }
             let footer = footerHeight(section, source: source, delegate: delegate)
@@ -987,7 +1012,7 @@ open class UITableView: UIScrollView {
         guard table.automaticRows.contains(path) else { return }
         var height = cell.cell.designHeight
         if let content = cell.cell.contentView {
-            let width = state.bounds.width - cell.accessoryWidth
+            let width = state.bounds.width - 2 * rowInset - cell.accessoryWidth
             if let fitting = AutoLayout.fittingHeight(content, width: width) { height = fitting + Screen.pixel }
         }
         guard height > 0, table.measuredHeights[path] != height else { return }
@@ -1003,8 +1028,30 @@ open class UITableView: UIScrollView {
         }
         cell.state.hidden = false
         if let frame = rect(path) { cell.sendSetFrame(frame) }
+        applyGroupedStyle(to: cell, at: path)
         if table.selected.contains(path) != cell.cell.selected { cell.sendSetSelected(table.selected.contains(path), animated: false) }
         cell.layoutIfNeeded()
+    }
+
+    /// What a grouped table gives its cells: their background, unless the
+    /// app set one, and in the inset style a card's rounded corners on a
+    /// section's first and last rows, the last without a line under it.
+    private func applyGroupedStyle(to cell: UITableViewCell, at path: RowPath) {
+        guard table.style != 0 else { return }
+        if cell.hasOwnBackground { cell.setOwnBackground(UIColor.tableCellGroupedBackground()) }
+        guard table.style == 2 else { return }
+        let sections = layout.sections
+        let count = sections.indices.contains(path.section) ? sections[path.section].rows.count : 0
+        // CACornerMask: the top two, 3, and the bottom two, 12.
+        let corners: UInt = (path.row == 0 ? 3 : 0) | (path.row == count - 1 ? 12 : 0)
+        cell.state.layer.setCornerRadius(corners == 0 ? 0 : ListMetrics.cornerRadius)
+        cell.state.layer.setMaskedCorners(corners)
+        cell.state.layer.setMasksToBounds(true)
+        let endsCard = path.row == count - 1
+        if cell.cell.endsCard != endsCard {
+            cell.cell.endsCard = endsCard
+            cell.setNeedsLayout()
+        }
     }
 
     /// Puts a cell in its pool, out of sight.
