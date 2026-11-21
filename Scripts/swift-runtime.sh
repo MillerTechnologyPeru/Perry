@@ -12,8 +12,17 @@
 # Swift 5.0 overlays Xcode keeps for apps that embed the runtime, which
 # have the Swift code. Overlays with neither are left out.
 #
+# The runtime itself and the standard library (libswiftCore,
+# libswift_Concurrency, libswift_StringProcessing…) come from swift.org's
+# sources when Scripts/build-swift-runtime.sh has built them: the same
+# release, without the ARMv8.3 instructions the simulator's use. The
+# simulator's are kept when there is no such build, and for the overlays,
+# which swift.org's sources do not have.
+#
 # Usage: Scripts/swift-runtime.sh [output directory]
 #   default output: .build/perry-swift-runtime
+#   PERRY_SWIFT_SOURCE: where build-swift-runtime.sh built
+#     (default .build/swift-source)
 set -eu
 cd "$(dirname "$0")/.."
 [ "$(uname)" = Darwin ] || { echo "needs macOS with Xcode" >&2; exit 1; }
@@ -65,4 +74,19 @@ for library in "$swift_dir"/*.dylib; do
         lipo "$library" -thin arm64 -output "$out/$name" 2>/dev/null || cp "$library" "$out/$name"
     fi
 done
+
+built="${PERRY_SWIFT_SOURCE:-.build/swift-source}/install/usr/lib/swift/iphoneos"
+if [ -f "$built/libswiftCore.dylib" ]; then
+    echo "source build: $built"
+    for library in "$built"/*.dylib; do
+        # libswiftCompatibilitySpan is a link to libswiftCore there.
+        [ -L "$library" ] && continue
+        name=$(basename "$library")
+        rm -f "$out/$name"
+        cp "$library" "$out/$name"
+        echo "$name: built from source"
+    done
+else
+    echo "no source build at $built (Scripts/build-swift-runtime.sh): the simulator's runtime is used"
+fi
 echo "PERRY_SWIFT_RUNTIME=$(cd "$out" && pwd)"
