@@ -1590,8 +1590,8 @@ open class UIDevice: NSObject {
         if let setting = getenv("PERRY_OS_VERSION") { return String(cString: setting) }
         return NSBundle.main().infoObject(forKey: "DTPlatformVersion")?.stringValue ?? "18.0"
     }
-    /// UIUserInterfaceIdiom: phone 0.
-    @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { 0 }
+    /// UIUserInterfaceIdiom: phone 0, or a Mac app's.
+    @ObjCMethod("userInterfaceIdiom") func userInterfaceIdiom() -> Int { MainProgram.idiom }
     /// UIDeviceOrientation: portrait 1.
     /// UIDeviceOrientation, which numbers landscape as the interface does.
     @ObjCMethod("orientation") func orientation() -> Int { Screen.orientation }
