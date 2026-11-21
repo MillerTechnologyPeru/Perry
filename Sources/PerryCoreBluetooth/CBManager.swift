@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import Glibc
 import PerryObjCInterop
 
@@ -154,16 +154,16 @@ open class CBCentralManager: CBManager {
         state.allowDuplicates = options?.option(Constants.CBCentralManagerScanOptionAllowDuplicatesKey)?
             .unsafeCast(to: NSNumber.self).boolValue() ?? false
         state.scanServices = services?.uuids ?? []
-        var filter: [DBusValue: DBusValue] = [
-            .string("Transport"): .variant(DBusVariant(.string("le"))),
-            .string("DuplicateData"): .variant(DBusVariant(.boolean(state.allowDuplicates))),
+        var filter: [String: DBusValue] = [
+            "Transport": .string("le"),
+            "DuplicateData": .boolean(state.allowDuplicates),
         ]
         if !state.scanServices.isEmpty {
-            filter[.string("UUIDs")] = .variant(DBusVariant(signature: "as", value: .array(state.scanServices.map { .string($0.bluezString) })))
+            filter["UUIDs"] = .strings(state.scanServices.map(\.bluezString))
         }
-        let body: [DBusValue] = [.dictionary(filter)]
+        let body: [DBusValue] = [.options(filter)]
         state.command {
-            _ = try? await BlueZ.shared.call(adapter, BlueZInterface.adapter, "SetDiscoveryFilter", body, signature: "a{sv}")
+            _ = try? await BlueZ.shared.call(adapter, BlueZInterface.adapter, "SetDiscoveryFilter", body)
             _ = try? await BlueZ.shared.call(adapter, BlueZInterface.adapter, "StartDiscovery")
         }
     }
@@ -443,7 +443,7 @@ enum Advertisement {
             data.set(string: name, forKey: Constants.CBAdvertisementDataLocalNameKey)
         }
         if case .dictionary(let manufacturers)? = device["ManufacturerData"],
-           let (company, value) = manufacturers.first, let identifier = company.intValue, let bytes = value.bytes {
+           let manufacturer = manufacturers.first, let identifier = manufacturer.key.intValue, let bytes = manufacturer.value.bytes {
             data.set(NSData.of([UInt8(identifier & 0xff), UInt8(identifier >> 8)] + bytes), forKey: Constants.CBAdvertisementDataManufacturerDataKey)
         }
         if !services.isEmpty {
@@ -451,8 +451,8 @@ enum Advertisement {
         }
         if case .dictionary(let entries)? = device["ServiceData"], !entries.isEmpty {
             let serviceData = NSMutableDictionary.empty()
-            for (uuid, value) in entries {
-                guard let uuid = uuid.stringValue.flatMap(BluetoothUUID.init(string:)), let bytes = value.bytes else { continue }
+            for entry in entries {
+                guard let uuid = entry.key.stringValue.flatMap(BluetoothUUID.init(string:)), let bytes = entry.value.bytes else { continue }
                 serviceData.set(NSData.of(bytes), forObjectKey: CBUUID.make(uuid))
             }
             data.set(serviceData, forKey: Constants.CBAdvertisementDataServiceDataKey)
