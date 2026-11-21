@@ -1,0 +1,43 @@
+diff --git a/include/swift/Threading/Impl/Darwin.h b/include/swift/Threading/Impl/Darwin.h
+index ac0f8baf..7eec8581 100644
+--- a/include/swift/Threading/Impl/Darwin.h
++++ b/include/swift/Threading/Impl/Darwin.h
+@@ -231,7 +231,7 @@ inline void once_impl(once_t &predicate, void (*fn)(void *), void *context) {
+ // On Darwin, we want to use the reserved keys
+ #define SWIFT_THREADING_USE_RESERVED_TLS_KEYS 1
+ 
+-#if !(SWIFT_THREADING_IS_COMPATIBILITY_LIBRARY && (__ARM_ARCH_7K__ || __ARM64_ARCH_8_32__)) && __has_include(<pthread/tsd_private.h>)
++#if !(SWIFT_THREADING_IS_COMPATIBILITY_LIBRARY && (__ARM_ARCH_7K__ || __ARM64_ARCH_8_32__)) && __has_include(<pthread/tsd_private.h>) && !defined(SWIFT_THREADING_NO_DIRECT_TSD)
+ } // namespace threading_impl
+ } // namespace swift
+ 
+diff --git a/stdlib/public/SwiftShims/swift/shims/ThreadLocalStorage.h b/stdlib/public/SwiftShims/swift/shims/ThreadLocalStorage.h
+index 8ce94c5c..e10560e5 100644
+--- a/stdlib/public/SwiftShims/swift/shims/ThreadLocalStorage.h
++++ b/stdlib/public/SwiftShims/swift/shims/ThreadLocalStorage.h
+@@ -33,7 +33,7 @@ void * _Nullable _swift_getExclusivityTLS(void);
+ SWIFT_RUNTIME_STDLIB_INTERNAL
+ void _swift_setExclusivityTLS(void * _Nullable newValue);
+ 
+-#elif defined(TARGET_OS_MAC) && TARGET_OS_MAC && !TARGET_OS_SIMULATOR && __arm64__
++#elif defined(TARGET_OS_MAC) && TARGET_OS_MAC && !TARGET_OS_SIMULATOR && __arm64__ && !defined(SWIFT_THREADING_NO_DIRECT_TSD)
+ 
+ // Use a fast path on Darwin ARM64, where we have a dedicated TLS key and fast
+ // access to read/write it. Note: for historical reasons, TARGET_OS_MAC includes
+diff --git a/stdlib/public/runtime/Private.h b/stdlib/public/runtime/Private.h
+index 3fa503d8..264ba89a 100644
+--- a/stdlib/public/runtime/Private.h
++++ b/stdlib/public/runtime/Private.h
+@@ -133,6 +133,12 @@ public:
+ #  else
+ #    error Unknown architecture for masked isa.
+ #  endif
++// A build may keep more of the isa, as the simulators' does: one whose
++// classes may be anywhere in a 48-bit address space.
++#  ifdef SWIFT_ISA_MASK_OVERRIDE
++#    undef SWIFT_ISA_MASK
++#    define SWIFT_ISA_MASK SWIFT_ISA_MASK_OVERRIDE
++#  endif
+ #endif
+ 
+ #if SWIFT_OBJC_INTEROP
