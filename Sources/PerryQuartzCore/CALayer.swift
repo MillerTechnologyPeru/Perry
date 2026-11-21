@@ -1101,9 +1101,12 @@ extension CALayer {
     /// far below, by a mask layer of no size that has the shapes for
     /// sublayers.
     static func maskedExtent(of state: LayerState) -> CGRect {
+        // Where the mask draws as it presents: an animation's matte has its
+        // place and size from its animations alone, and its layers' own
+        // values put it elsewhere.
         guard let mask = state.mask, !state.masksToBounds,
-              let inMask = contentExtent(of: mask, depth: 0) else { return state.bounds }
-        let frame = mask.state.toSuperlayer(within: state).apply(inMask)
+              let inMask = drawnExtent(of: mask, depth: 0) ?? contentExtent(of: mask, depth: 0) else { return state.bounds }
+        let frame = Presentation.presented(mask).state.toSuperlayer(within: state).apply(inMask)
         let area = frame.width * frame.height
         guard frame.minX.isFinite, frame.minY.isFinite, frame.maxX.isFinite, frame.maxY.isFinite, frame.width > 0, frame.height > 0,
               area <= max(state.bounds.width * state.bounds.height * 4, 4_000_000) else { return state.bounds }
