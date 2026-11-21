@@ -133,7 +133,7 @@ extension NSString {
     func draw(in rect: CGRect, withFont font: UIFont?, lineBreakMode: Int, alignment: Int) -> CGSize {
         let font = font ?? UIFont.systemFont(size: 12)
         let laidOut = layOut(stringValue, font: font, size: rect.size, lineBreakMode: lineBreakMode)
-        drawLines(laidOut.lines, in: rect, font: font, color: nil, alignment: alignment)
+        drawLines(laidOut.lines, in: rect, font: font, color: nil, alignment: AppTextAlignment.convert(alignment))
         return laidOut.size
     }
 }
