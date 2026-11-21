@@ -241,11 +241,25 @@ reports:
     level: 3
     source: body
     notes: File > Save in the editor writes the file, and nibs compiled by ibtool keep their buttons' titles, radio buttons, matrices and boxes. Debugging isn't supported.
+  - pr: 260
+    date: 2026-11-21
+    perry: "c0b90871"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: An app Xcode builds with radio buttons and text fields bound through their cells takes what is clicked and typed. Debugging isn't supported.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
 
-## Status as of [#254]({{ site.repository_url }}/pull/254)
+## Status as of [#260]({{ site.repository_url }}/pull/260)
 
 Working:
 
@@ -272,8 +286,9 @@ Working:
   works when run by hand; under that name from Xcode is untested).
 - ibtool compiles xibs holding number formatters and Cocoa bindings, and
   the nibs keep their buttons' titles, radio buttons, matrices and boxes.
-  An app built this way runs under Perry: its bound fields set its model
-  and `NSRunAlertPanel` reports the result.
+  An app built this way runs under Perry: its bound fields and radio
+  buttons set its model, whether the binding is the control's or its
+  cell's, and `NSRunAlertPanel` reports the result.
 
 Broken:
 
