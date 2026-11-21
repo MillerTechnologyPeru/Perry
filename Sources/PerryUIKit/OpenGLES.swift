@@ -303,6 +303,48 @@ enum GLTrace {
         let line = "perry: UIKit: GL: \(text) (thread \(String(UInt(pthread_self()), radix: 16)))\n"
         line.withCString { _ = write(2, $0, strlen($0)) }
     }
+    private typealias CheckStatus = @convention(c) (UInt32) -> UInt32
+    private typealias GetAttachment = @convention(c) (UInt32, UInt32, UInt32, UnsafeMutablePointer<Int32>?) -> Void
+    private static let checkStatus: CheckStatus? = GLES.host("glCheckFramebufferStatus").map { unsafeBitCast($0, to: CheckStatus.self) }
+    private static let getAttachment: GetAttachment? =
+        GLES.host("glGetFramebufferAttachmentParameteriv").map { unsafeBitCast($0, to: GetAttachment.self) }
+
+    /// Each of the first few framebuffers' completeness and attachments:
+    /// for a program whose drawing fails as incomplete.
+    static func sayFramebuffers() {
+        guard let checkStatus, let getAttachment else { return }
+        var bound: Int32 = 0, boundRenderbuffer: Int32 = 0
+        GLES.getIntegerv(GLES.framebufferBinding, &bound)
+        GLES.getIntegerv(GLES.renderbufferBinding, &boundRenderbuffer)
+        defer {
+            GLES.bindFramebuffer(GLES.framebuffer, UInt32(bound))
+            GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(boundRenderbuffer))
+        }
+        for framebuffer: UInt32 in 1...4 {
+            GLES.bindFramebuffer(GLES.framebuffer, framebuffer)
+            let status = checkStatus(GLES.framebuffer)
+            var parts: [String] = []
+            for (label, attachment) in [("color", UInt32(0x8CE0)), ("depth", UInt32(0x8D00)), ("stencil", UInt32(0x8D20))] {
+                var type: Int32 = 0, name: Int32 = 0
+                getAttachment(GLES.framebuffer, attachment, 0x8CD0, &type)
+                getAttachment(GLES.framebuffer, attachment, 0x8CD1, &name)
+                guard type != 0 else { continue }
+                var detail = "\(label) type 0x\(String(type, radix: 16)) name \(name)"
+                if type == 0x8D41 {     // GL_RENDERBUFFER
+                    var width: Int32 = 0, height: Int32 = 0, format: Int32 = 0, samples: Int32 = 0
+                    GLES.bindRenderbuffer(GLES.renderbuffer, UInt32(name))
+                    GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D42, &width)
+                    GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D43, &height)
+                    GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8D44, &format)
+                    GLES.getRenderbufferParameteriv(GLES.renderbuffer, 0x8CAB, &samples)
+                    detail += " \(width)x\(height) format 0x\(String(format, radix: 16)) samples \(samples)"
+                }
+                parts.append(detail)
+            }
+            say("framebuffer \(framebuffer)\(framebuffer == UInt32(bound) ? " (bound)" : "") of context \(String(describing: GLES.getCurrentContext?())): status 0x\(String(status, radix: 16)); "
+                + (parts.isEmpty ? "no attachments" : parts.joined(separator: "; ")))
+        }
+    }
 }
 
 final class SharegroupState: ObjectState {
@@ -698,6 +740,7 @@ open class EAGLContext: NSObject {
         if GLTrace.on {
             GLTrace.presents += 1
             if GLTrace.presents <= 3 || GLTrace.presents % 300 == 0 { GLTrace.say("present \(GLTrace.presents)") }
+            if GLTrace.presents <= 3 { GLTrace.sayFramebuffers() }
         }
         var name: Int32 = 0
         GLES.getIntegerv(GLES.renderbufferBinding, &name)
