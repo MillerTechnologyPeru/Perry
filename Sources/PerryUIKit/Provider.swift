@@ -63,6 +63,14 @@ enum MainProgram {
     /// A Mac program: a macOS one (PLATFORM_MACOS, 1) or a Mac Catalyst one
     /// (PLATFORM_MACCATALYST, 6).
     static var isMac: Bool { platform == 1 || platform == 6 }
+    /// UIUserInterfaceIdiom: phone 0 for an iOS app. A Mac Catalyst app is
+    /// mac 5 when it is made for the Mac's own look (device family 6), and
+    /// pad 1 when it is an iPad app scaled for the Mac.
+    static let idiom: Int = {
+        guard isMac else { return 0 }
+        let families = NSBundle.main().infoObject(forKey: "UIDeviceFamily")?.as(NSArray.self)?.elements.map { $0.sendIntegerValue() } ?? []
+        return families.contains(6) ? 5 : 1
+    }()
 }
 
 /// The main executable's platform, from its LC_BUILD_VERSION: PLATFORM_MACOS

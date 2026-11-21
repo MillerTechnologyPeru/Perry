@@ -73,6 +73,26 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/35a826a6-6558-41c3-a6c7-a5130a6063f8
         caption: Welcome screen with its artwork
+  - pr: 252
+    date: 2026-11-21
+    perry: "fc154136"
+    platform: maccatalyst
+    cpu: x86_64
+    app_version: "26.46.17"
+    hardware: Dell OptiPlex 7020
+    resolution: "1024x699@1"
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+      - "PERRY_CRASH_REPORT=1"
+      - "PERRY_OS_VERSION=15.2"
+    level: 2
+    source: screenshot
+    notes: The welcome screen has its Terms & Privacy Policy link, and the artwork's speech bubbles and globe draw whole. Run on an older source copy with these changes patched in.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/0c425a60-dde0-458a-b9c5-9ddc303b2995
+        caption: Welcome screen with the Terms link, part-way through its animation
 ---
 
 The Mac build is the one `whatsapp.com/download/mac` leads to (a universal Mac Catalyst app that uses SwiftUI). The Duet 3's libraries came from several builds around that commit, so its report's commit is the closest known. The Mac arm64 slice needs a CPU with ARMv8.4 (untried on the Retroid handhelds).
