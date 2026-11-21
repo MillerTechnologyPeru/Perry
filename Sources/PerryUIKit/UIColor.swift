@@ -242,8 +242,8 @@ open class UIColor: NSObject {
         make(cls) { $0.set(red: red, green: green, blue: blue, alpha: alpha) }
     }
 
-    /// A dynamic color is its light appearance.
-    /// From a nib: a named system color, or components.
+    /// From a nib: a named system color, with both its appearances, or
+    /// components.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
@@ -252,6 +252,7 @@ open class UIColor: NSObject {
             if let named = unsafeBitCast(ObjCRuntime.msgSend, to: Send.self)(UIColor.objCClass.pointer, ObjCRuntime.selector(name)) {
                 let source = UIColor.states[named]
                 (state.red, state.green, state.blue, state.alpha, state.white) = (source.red, source.green, source.blue, source.alpha, source.white)
+                state.variants = source.variants
                 return self
             }
         }
@@ -371,6 +372,11 @@ open class UIColor: NSObject {
     @ObjCClassMethod("systemGroupedBackgroundColor") static func systemGroupedBackground() -> UIColor { dynamic((242, 242, 247, 1), (0, 0, 0, 1)) }
     @ObjCClassMethod("groupTableViewBackgroundColor") static func groupTableViewBackground() -> UIColor { systemGroupedBackground() }
     @ObjCClassMethod("secondarySystemGroupedBackgroundColor") static func secondarySystemGroupedBackground() -> UIColor { dynamic((255, 255, 255, 1), (28, 28, 30, 1)) }
+    // UIKit's own names for a table's and its cells' backgrounds, which
+    // storyboards give a table view controller's views.
+    @ObjCClassMethod("tableBackgroundColor") static func tableBackground() -> UIColor { systemBackground() }
+    @ObjCClassMethod("tableCellPlainBackgroundColor") static func tableCellPlainBackground() -> UIColor { systemBackground() }
+    @ObjCClassMethod("tableCellGroupedBackgroundColor") static func tableCellGroupedBackground() -> UIColor { secondarySystemGroupedBackground() }
     @ObjCClassMethod("tertiarySystemGroupedBackgroundColor") static func tertiarySystemGroupedBackground() -> UIColor { dynamic((242, 242, 247, 1), (44, 44, 46, 1)) }
     @ObjCClassMethod("systemFillColor") static func systemFill() -> UIColor { dynamic((120, 120, 128, 0.2), (120, 120, 128, 0.36)) }
     @ObjCClassMethod("secondarySystemFillColor") static func secondarySystemFill() -> UIColor { dynamic((120, 120, 128, 0.16), (120, 120, 128, 0.32)) }
