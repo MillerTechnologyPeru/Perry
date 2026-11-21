@@ -50,6 +50,9 @@ reports:
     level: 2
     source: maintainer
     notes: Reaches its welcome screen (title, text and Continue button) in about 40 seconds; the Lottie artwork above the title and the Terms link below are missing.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/dec53a4c-1131-4940-bf22-c40657bf3946
+        caption: Welcome screen
 ---
 
 The Mac build is the one `whatsapp.com/download/mac` leads to (a universal Mac Catalyst app that uses SwiftUI). The Duet 3's libraries came from several builds around that commit, so its report's commit is the closest known. The Mac arm64 slice needs a CPU with ARMv8.4 (untried on the Retroid handhelds).
