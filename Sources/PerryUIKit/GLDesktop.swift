@@ -81,6 +81,11 @@ enum GLDesktop {
         _ = bindAPI(desktop ? GLDesktop.openGLESAPI : GLDesktop.openGLAPI)
         _ = real(display, nil, nil, nil)
         _ = bindAPI(desktop ? GLDesktop.openGLAPI : GLDesktop.openGLESAPI)
+        // Let go under its own API too: the context may still be current
+        // there from before another API's was made current behind this
+        // wrapper (by SDL's renderer), and EGL, finding it current, would
+        // leave calls going to the other.
+        _ = real(display, nil, nil, nil)
         return real(display, draw, read, context)
     }
 
