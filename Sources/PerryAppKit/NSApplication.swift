@@ -112,15 +112,16 @@ open class NSApplication: NSResponder {
     /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
     /// positive), as a mouse wheel's notches; "m:Title" chooses the main
     /// menu's item of that title, wherever its menu is; "t:text" types the
-    /// text into the key window ("\\n" is Return).
-    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?, menuItem: String?, text: String?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
+    /// text into the key window ("\\n" is Return); "k:x,y" clicks at that
+    /// point of the key window, wherever it is on the screen.
+    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?, menuItem: String?, text: String?, key: Bool)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
         String(cString: value).split(separator: ";").compactMap { entry in
-            if entry.hasPrefix("m:") { return (.zero, nil, String(entry.dropFirst(2)), nil) }
-            if entry.hasPrefix("t:") { return (.zero, nil, nil, String(entry.dropFirst(2))) }
-            let scrolls = entry.hasPrefix("s:")
-            let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }).map { CGFloat($0) } }
-            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2]), nil, nil) : nil }
-            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil, nil, nil) : nil
+            if entry.hasPrefix("m:") { return (.zero, nil, String(entry.dropFirst(2)), nil, false) }
+            if entry.hasPrefix("t:") { return (.zero, nil, nil, String(entry.dropFirst(2)), false) }
+            let scrolls = entry.hasPrefix("s:"), key = entry.hasPrefix("k:")
+            let numbers = entry.dropFirst(scrolls || key ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }).map { CGFloat($0) } }
+            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2]), nil, nil, false) : nil }
+            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil, nil, nil, key) : nil
         }
     }
 
@@ -143,7 +144,7 @@ open class NSApplication: NSResponder {
     @ObjCMethod("_perryScriptedClick")
     func scriptedClick() {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
-        let (point, scroll, title, text) = clicks.removeFirst()
+        let (point, scroll, title, text, inKeyWindow) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
         if !clicks.isEmpty { scheduleScriptedClick(after: 2) }
         if let text {
@@ -159,6 +160,16 @@ open class NSApplication: NSResponder {
             MenuTracking.perform(item)
             return
         }
+        if inKeyWindow, let key = Windows.key {
+            let local = CGPoint(x: point.x, y: key.frame.height - point.y)
+            Trace.log("scripted click at \(point) of key window \(key.windowNumber), at \(local)")
+            for type in [EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent(type, window: key, location: local)
+                event.clickCount = 1
+                queue.append(event)
+            }
+            return
+        }
         if NSApplication.clickWindow?.visible != true { NSApplication.clickWindow = Windows.all.first { $0.visible } }
         if let base = NSApplication.clickWindow {
             let screen = CGPoint(x: base.frame.minX + point.x, y: base.frame.maxY - point.y)
@@ -172,6 +183,11 @@ open class NSApplication: NSResponder {
                 return
             }
             Trace.log("scripted click at \(point) of window \(base.windowNumber) in window \(target.windowNumber), at \(local)")
+            // A click on a titled window brings it the keyboard, as the
+            // window system's focus does for a real one.
+            if Windows.key !== target, target.styleMask & 1 != 0, Send.bool(target.objcObject, "canBecomeKeyWindow") {
+                Send.void(target.objcObject, "makeKeyWindow")
+            }
             for type in [EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent(type, window: target, location: local)
                 event.clickCount = 1
