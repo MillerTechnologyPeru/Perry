@@ -285,6 +285,19 @@ open class NSScrollView: NSView {
         verticalScroller?.autoresizingMask = 1 | 16
         horizontalScroller?.autoresizingMask = 2 | 32
         if let contentClip, contentClip.frame != content { Send.void(contentClip.objcObject, "setFrame:", rect: content) }
+        // A document view set to fill its scroll view (width- or height-sizable)
+        // grows to the clip view's size when it would be smaller, as its
+        // autoresizing asks: the nib's fixed sizes leave no resize delta to
+        // carry it there, so a page or other filling view would stay narrow and
+        // bare the clip's background beside it. A larger document (one scrolled
+        // through) keeps its size.
+        if let contentClip, let document = contentClip.documentView {
+            var size = document.frame.size
+            let mask = document.autoresizingMask
+            if mask & 2 != 0 { size.width = max(size.width, contentClip.bounds.width) }
+            if mask & 16 != 0 { size.height = max(size.height, contentClip.bounds.height) }
+            if size != document.frame.size { Send.void(document.objcObject, "setFrameSize:", size: size) }
+        }
         if let verticalScroller {
             verticalScroller.setFrame(CGRect(x: content.maxX - 15, y: content.minY, width: 15, height: content.height))
         }
