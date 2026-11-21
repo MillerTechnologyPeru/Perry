@@ -534,7 +534,7 @@ public func CTParagraphStyleGetValueForSpecifier(_ style: UnsafeMutableRawPointe
         return true
     }
     switch specifier {
-    case 0: return byte(Int(NSTextAlignmentToCTTextAlignment(state.alignment)))
+    case 0: return byte(Int(coreTextAlignment(state.alignment)))
     case 1: return float(state.firstLineHeadIndent)
     case 2: return float(state.headIndent)
     case 3: return float(state.tailIndent)
