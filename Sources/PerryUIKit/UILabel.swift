@@ -461,8 +461,9 @@ open class UILabel: UIView {
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { label.textColor = color; setNeedsDisplay() }
     @ObjCMethod("highlightedTextColor") func highlightedTextColor() -> UIColor? { label.highlightedTextColor }
     @ObjCMethod("setHighlightedTextColor:") func setHighlightedTextColor(_ color: UIColor?) { label.highlightedTextColor = color }
-    @ObjCMethod("textAlignment") func textAlignment() -> Int { label.textAlignment }
-    @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { label.textAlignment = alignment; setNeedsDisplay() }
+    @ObjCMethod("textAlignment") func textAlignment() -> Int { AppTextAlignment.convert(label.textAlignment) }
+    @ObjCMethod("setTextAlignment:") func setAppTextAlignment(_ alignment: Int) { setTextAlignment(AppTextAlignment.convert(alignment)) }
+    func setTextAlignment(_ alignment: Int) { label.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("numberOfLines") func numberOfLines() -> Int { label.numberOfLines }
     @ObjCMethod("setNumberOfLines:") func setNumberOfLines(_ lines: Int) {
         guard lines != label.numberOfLines else { return }
