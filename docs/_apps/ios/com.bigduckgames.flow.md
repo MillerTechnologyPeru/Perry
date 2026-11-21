@@ -7,7 +7,7 @@ tags: [ObjC, Swift, Cocos2D]
 reports:
   - pr: 256
     date: 2026-11-21
-    perry: "53381af0"
+    perry: "81d3d3e0"
     platform: ios
     cpu: arm64
     app_version: "5.0"
@@ -19,10 +19,10 @@ reports:
       - "PERRY_OS_VERSION=17.0"
     level: 2
     source: body
-    notes: Its main menu draws; about 11 seconds in it stops with SIGTRAP while SwiftUI is working.
+    notes: Its main menu draws, with its banner ad; it keeps running.
     screenshots:
-      - url: https://github.com/user-attachments/assets/dd02d243-1ea7-4c41-ad42-9bd0c7b98233
-        caption: Main menu
+      - url: https://github.com/user-attachments/assets/e78d4205-519a-40cb-a2e5-17554b3ca8ed
+        caption: Main menu with its banner ad
   - pr: 238
     date: 2026-11-20
     perry: "22fc21f5"
@@ -45,6 +45,7 @@ reports:
 
 A Cocos2D game drawing with OpenGL ES 1. Its frames were white while its draws
 went to the compositor's GL context, where its framebuffer doesn't exist; with
-the app's context kept current, the main menu draws. About 11 seconds in it
-stops with SIGTRAP. `PERRY_OS_VERSION=17.0` keeps its ad code off
+the app's context kept current, the main menu draws. Its ad SDK MolocoSDK
+force-unwraps an icon from its asset catalog stored in CoreUI's palette-img
+compression, which Perry now decodes. `PERRY_OS_VERSION=17.0` keeps its ad code off
 AdAttributionKit, which Perry doesn't have.
