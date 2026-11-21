@@ -78,6 +78,9 @@ final class CellState: ObjectState {
     var designHeight: CGFloat = 0
     /// UITableViewCellSelectionStyle: default 3.
     var selectionStyle = 3
+    /// UITableViewCellFocusStyle: default 0. Kept for the app to read
+    /// back; nothing here draws focus.
+    var focusStyle = 0
     var selected = false
     var highlighted = false
     var editing = false
@@ -226,6 +229,8 @@ open class UITableViewCell: UIView {
     }
     @ObjCMethod("selectionStyle") func selectionStyle() -> Int { cell.selectionStyle }
     @ObjCMethod("setSelectionStyle:") func setSelectionStyle(_ style: Int) { cell.selectionStyle = style }
+    @ObjCMethod("focusStyle") func focusStyle() -> Int { cell.focusStyle }
+    @ObjCMethod("setFocusStyle:") func setFocusStyle(_ style: Int) { cell.focusStyle = style }
     @ObjCMethod("isSelected") func isSelected() -> Bool { cell.selected }
     @ObjCMethod("setSelected:") func setSelected(_ selected: Bool) { sendSetSelected(selected, animated: false) }
     @ObjCMethod("setSelected:animated:")
