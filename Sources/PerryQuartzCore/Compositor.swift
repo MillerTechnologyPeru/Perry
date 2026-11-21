@@ -388,8 +388,15 @@ final class Compositor {
         var extent = CGRect(x: box.minX - pad, y: box.minY - pad, width: box.width + 2 * pad, height: box.height + 2 * pad)
         if state.masksToBounds { extent = extent.intersection(state.bounds) }
         guard extent.width > 0, extent.height > 0 else { return nil }
-        // Only for layers much larger than their shape.
-        return extent.width * extent.height * 4 < state.bounds.width * state.bounds.height ? extent : nil
+        // A shape shows outside its layer's bounds too (an animation's
+        // shapes are drawn around their layers' origins), which a texture
+        // of the bounds would cut off.
+        let bounds = state.bounds
+        if extent.minX < bounds.minX || extent.minY < bounds.minY || extent.maxX > bounds.maxX || extent.maxY > bounds.maxY {
+            return extent
+        }
+        // Within them, only for layers much larger than their shape.
+        return extent.width * extent.height * 4 < bounds.width * bounds.height ? extent : nil
     }
 
     /// The texture of a shape's `extent`, at the resolution it shows at
