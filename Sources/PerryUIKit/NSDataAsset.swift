@@ -1,3 +1,4 @@
+import Glibc
 import PerryAssetCatalog
 import PerryObjCInterop
 
@@ -32,7 +33,11 @@ open class NSDataAsset: NSObject {
 
     private func load(_ name: String, in bundle: NSBundle) -> Self? {
         let catalog = bundle === NSBundle.main() ? AssetCatalog.main : AssetCatalog.catalog(in: bundle)
-        guard let file = catalog?.extractedDataFile(named: name), let data = NSData.contents(ofFile: file) else { return nil }
+        guard let file = catalog?.extractedDataFile(named: name), let data = NSData.contents(ofFile: file) else {
+            if getenv("PERRY_UIKIT_IMAGE_TRACE") != nil { uikitWarning("NSDataAsset: no data set named \(name) in \(bundle.bundlePath())") }
+            return nil
+        }
+        if getenv("PERRY_UIKIT_IMAGE_TRACE") != nil { uikitWarning("NSDataAsset: \(name) from \(file)") }
         state.name = name
         state.contents = data
         return self
