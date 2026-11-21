@@ -111,8 +111,9 @@ open class UITextField: UIControl {
     @ObjCMethod("setFont:") func setFont(_ font: UIFont?) { field.font = font; setNeedsDisplay(); superviewNeedsLayout() }
     @ObjCMethod("textColor") func textColor() -> UIColor { field.textColor ?? UIColor.label() }
     @ObjCMethod("setTextColor:") func setTextColor(_ color: UIColor?) { field.textColor = color; setNeedsDisplay() }
-    @ObjCMethod("textAlignment") func textAlignment() -> Int { field.textAlignment }
-    @ObjCMethod("setTextAlignment:") func setTextAlignment(_ alignment: Int) { field.textAlignment = alignment; setNeedsDisplay() }
+    @ObjCMethod("textAlignment") func textAlignment() -> Int { AppTextAlignment.convert(field.textAlignment) }
+    @ObjCMethod("setTextAlignment:") func setAppTextAlignment(_ alignment: Int) { setTextAlignment(AppTextAlignment.convert(alignment)) }
+    func setTextAlignment(_ alignment: Int) { field.textAlignment = alignment; setNeedsDisplay() }
     @ObjCMethod("borderStyle") func borderStyle() -> Int { field.borderStyle }
     @ObjCMethod("background") func background() -> UIImage? { field.background }
     @ObjCMethod("setBackground:") func setBackground(_ image: UIImage?) { field.background = image; setNeedsDisplay() }
