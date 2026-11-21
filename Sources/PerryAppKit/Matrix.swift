@@ -315,6 +315,9 @@ open class NSMatrix: NSControl {
             cells[index].setNextState()
             (selectedRow, selectedColumn) = (index / max(columns, 1), index % max(columns, 1))
         }
+        // A cell's own value binding (a radio button bound to a property)
+        // takes the state the click gave it.
+        BindingTable.pushValue(of: cells[index].objcObject)
         _ = sendMatrixAction()
     }
 
