@@ -5,24 +5,6 @@ platform: ios
 kind: game
 tags: [ObjC, Swift, Cocos2D]
 reports:
-  - pr: 256
-    date: 2026-11-21
-    perry: "81d3d3e0"
-    platform: ios
-    cpu: arm64
-    app_version: "5.0"
-    hardware: Lenovo Duet 3
-    os: Debian sid
-    resolution: "430x932@3"
-    graphics: OpenGL ES 1
-    env:
-      - "PERRY_OS_VERSION=17.0"
-    level: 2
-    source: body
-    notes: Its main menu draws, with its banner ad; it keeps running.
-    screenshots:
-      - url: https://github.com/user-attachments/assets/e78d4205-519a-40cb-a2e5-17554b3ca8ed
-        caption: Main menu with its banner ad
   - pr: 238
     date: 2026-11-20
     perry: "22fc21f5"
@@ -41,6 +23,24 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/2031216c-93da-49a0-9653-8af487cfe458
         caption: White frames from its OpenGL ES 1 view
+  - pr: 256
+    date: 2026-11-21
+    perry: "81d3d3e0"
+    platform: ios
+    cpu: arm64
+    app_version: "5.0"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    resolution: "430x932@3"
+    graphics: OpenGL ES 1
+    env:
+      - "PERRY_OS_VERSION=17.0"
+    level: 2
+    source: body
+    notes: Its main menu draws, with its banner ad; it keeps running.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/e78d4205-519a-40cb-a2e5-17554b3ca8ed
+        caption: Main menu with its banner ad
 ---
 
 A Cocos2D game drawing with OpenGL ES 1. Its frames were white while its draws
