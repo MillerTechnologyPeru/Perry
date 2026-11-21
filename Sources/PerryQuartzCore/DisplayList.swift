@@ -185,8 +185,11 @@ final class DisplayListCompositor {
             if let background = state.backgroundColor, !live.opaque { addFill(frame, with: background, of: layer, alpha: alpha, into: &items) }
             addLive(live, of: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
         } else if textured {
-            if let entry = image(of: layer, state: state, shape: shape, border: false) {
-                add(entry, of: layer, part: .content, extent: state.bounds, toScreen: toScreen, alpha: alpha, into: &items)
+            // A shape's image is of where its path draws, which may reach
+            // outside the layer's bounds.
+            let extent = shape.flatMap { Compositor.shapeExtent(of: layer, state: state, shape: $0) } ?? state.bounds
+            if let entry = image(of: layer, state: state, shape: shape, border: false, extent: extent) {
+                add(entry, of: layer, part: .content, extent: extent, toScreen: toScreen, alpha: alpha, into: &items)
             }
         } else if let background = state.backgroundColor {
             addFill(frame, with: background, of: layer, alpha: alpha, into: &items)
@@ -204,7 +207,7 @@ final class DisplayListCompositor {
         } else {
             items.append(contentsOf: inner)
         }
-        if state.borderWidth > 0, state.borderColor != nil, let entry = image(of: layer, state: state, shape: nil, border: true) {
+        if state.borderWidth > 0, state.borderColor != nil, let entry = image(of: layer, state: state, shape: nil, border: true, extent: state.bounds) {
             add(entry, of: layer, part: .border, extent: state.bounds, toScreen: toScreen, alpha: alpha, into: &items)
         }
     }
@@ -346,11 +349,12 @@ final class DisplayListCompositor {
         return versions
     }
 
-    /// The layer's image, drawn again when what it shows has changed.
-    private func image(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool) -> Entry? {
+    /// The image of `extent` of the layer (its bounds, or where its shape
+    /// draws), drawn again when what it shows has changed.
+    private func image(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, border: Bool, extent: CGRect) -> Entry? {
         let key = Key(layer: layer.objcObject, part: border ? .border : .content)
         let model = layer.state
-        var signature = Signature(size: state.bounds.size, cornerRadius: state.cornerRadius, maskedCorners: state.maskedCorners,
+        var signature = Signature(size: extent.size, cornerRadius: state.cornerRadius, maskedCorners: state.maskedCorners,
                                   color: border ? state.borderColor : state.backgroundColor)
         if border {
             signature.borderWidth = state.borderWidth
@@ -372,16 +376,16 @@ final class DisplayListCompositor {
         images[key] = nil
         // A layer laid out to a size that is not a number, or is endless,
         // has nothing to draw (and Int() of it would trap).
-        let pixels = (state.bounds.width * scale, state.bounds.height * scale)
+        let pixels = (extent.width * scale, extent.height * scale)
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
         let width = Int(pixels.0.rounded(.up)), height = Int(pixels.1.rounded(.up))
-        guard width > 0, height > 0, let context = CG.makeContext(size: state.bounds.size, scale: scale, opaque: false) else { return nil }
+        guard width > 0, height > 0, let context = CG.makeContext(size: extent.size, scale: scale, opaque: false) else { return nil }
         defer { CG.release(context) }
         // The image is whole pixels and the layer may not be: what is drawn
         // is stretched to fill it, so that its last row and column are
         // covered, not left partly clear at the layer's edge.
-        CG.scaleCTM(context, CGFloat(width) / (state.bounds.width * scale), CGFloat(height) / (state.bounds.height * scale))
-        CG.translateCTM(context, -state.bounds.minX, -state.bounds.minY)
+        CG.scaleCTM(context, CGFloat(width) / (extent.width * scale), CGFloat(height) / (extent.height * scale))
+        CG.translateCTM(context, -extent.minX, -extent.minY)
         if border {
             CALayer.drawBorder(of: state, in: context)
         } else {
