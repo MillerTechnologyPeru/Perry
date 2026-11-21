@@ -54,7 +54,7 @@ open class UITraitCollection: NSObject {
     static func device(style: Int = SystemAppearance.style) -> UITraitCollection {
         make { traits in
             let size = Screen.bounds.size
-            traits.idiom = 0
+            traits.idiom = MainProgram.idiom
             traits.style = style
             traits.horizontalSizeClass = size.width >= 700 ? 2 : 1
             traits.verticalSizeClass = size.height < 500 ? 1 : 2
