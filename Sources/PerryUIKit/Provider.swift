@@ -16,6 +16,10 @@ private let libobjc = "/usr/lib/libobjc.A.dylib"
 /// API and checks Foundation is running.
 func providerWillStart(_ info: perry_startup_info) -> Bool {
     guard info.version >= 2, let lookup = info.lookup_symbol else { return false }
+    MainProgram.platform = mainPlatform(info.main_header)
+    #if arch(x86_64)
+    AppTextAlignment.intelMac = MainProgram.isMac
+    #endif
     // Before the app's code runs.
     SDLSetup.prepareEnvironment()
     func symbol(_ library: String, _ name: String) -> UnsafeMutableRawPointer? {
@@ -40,7 +44,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     // names of its own. So does a Mac Catalyst app with an AppKit bridge,
     // where AppKit's provider has defined them already. armv7 runs only iOS
     // apps.
-    if isMacApp(info.main_header) || Classes.named("NSLayoutAnchor") != nil {
+    if MainProgram.platform == 1 || Classes.named("NSLayoutAnchor") != nil {
         let appKitClasses = ["WKContentWorld", "WKHTTPCookieStore", "WKNavigation", "WKPreferences", "WKProcessPool",
                              "WKUserContentController", "WKUserScript", "WKWebView", "WKWebViewConfiguration", "WKScriptMessage",
                              "WKWebpagePreferences", "WKWebsiteDataStore",
@@ -52,22 +56,29 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
     return true
 }
 
-#if !arch(arm)
-/// Whether the main executable is a macOS program: its LC_BUILD_VERSION's
-/// platform is PLATFORM_MACOS.
-private func isMacApp(_ header: UnsafeRawPointer?) -> Bool {
-    guard let header, header.load(as: UInt32.self) == 0xFEED_FACF else { return false }
+/// The app's main executable.
+enum MainProgram {
+    /// Its LC_BUILD_VERSION platform, when it has one.
+    nonisolated(unsafe) static var platform: UInt32?
+    /// A Mac program: a macOS one (PLATFORM_MACOS, 1) or a Mac Catalyst one
+    /// (PLATFORM_MACCATALYST, 6).
+    static var isMac: Bool { platform == 1 || platform == 6 }
+}
+
+/// The main executable's platform, from its LC_BUILD_VERSION: PLATFORM_MACOS
+/// 1, PLATFORM_MACCATALYST 6.
+private func mainPlatform(_ header: UnsafeRawPointer?) -> UInt32? {
+    guard let header, header.load(as: UInt32.self) == 0xFEED_FACF else { return nil }
     let count = header.load(fromByteOffset: 16, as: UInt32.self)
     var command = header + 32    // mach_header_64
     for _ in 0..<count {
         let cmd = command.load(as: UInt32.self), size = command.load(fromByteOffset: 4, as: UInt32.self)
-        if cmd == 0x32 { return command.load(fromByteOffset: 8, as: UInt32.self) == 1 }   // LC_BUILD_VERSION, PLATFORM_MACOS
-        guard size >= 8 else { return false }
+        if cmd == 0x32 { return command.load(fromByteOffset: 8, as: UInt32.self) }   // LC_BUILD_VERSION
+        guard size >= 8 else { return nil }
         command += Int(size)
     }
-    return false
+    return nil
 }
-#endif
 
 /// UIKit's numeric and structure constants, which the loader asks for
 /// while binding images, before the provider starts.
