@@ -185,8 +185,12 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
         if (perry_exports_lookup(loader, dep->image, name, out, depth + 1))
             return true;
         // A Swift overlay's API newer than the overlay, which Perry adds.
-        return dep->swift_additions && strncmp(name, "_$s", 3) == 0 &&
-               perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1);
+        if (dep->swift_additions && strncmp(name, "_$s", 3) == 0 &&
+            perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1))
+            return true;
+        // A framework with Swift code (StoreKit's) may have a provider too,
+        // for its Objective-C classes and constants (SKErrorDomain).
+        return dep->provider && provider_lookup(loader, dep->provider, name, out);
     }
     if (dep->provider && provider_lookup(loader, dep->provider, name, out))
         return true;
