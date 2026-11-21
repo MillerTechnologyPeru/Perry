@@ -209,10 +209,13 @@ enum CoreTextAttributeKeys {
 /// NSTextAlignment (left, center, right, justified, natural) as
 /// CTTextAlignment (left, right, center, justified, natural).
 @c(_NSTextAlignmentToCTTextAlignment)
-public func NSTextAlignmentToCTTextAlignment(_ alignment: Int) -> UInt8 { [0, 2, 1, 3, 4][min(max(alignment, 0), 4)] }
+public func NSTextAlignmentToCTTextAlignment(_ alignment: Int) -> UInt8 { coreTextAlignment(AppTextAlignment.convert(alignment)) }
+
+/// UIKit's own NSTextAlignment as CTTextAlignment.
+func coreTextAlignment(_ alignment: Int) -> UInt8 { [0, 2, 1, 3, 4][min(max(alignment, 0), 4)] }
 
 @c(_NSTextAlignmentFromCTTextAlignment)
-public func NSTextAlignmentFromCTTextAlignment(_ alignment: UInt8) -> Int { [0, 2, 1, 3, 4][min(Int(alignment), 4)] }
+public func NSTextAlignmentFromCTTextAlignment(_ alignment: UInt8) -> Int { AppTextAlignment.convert([0, 2, 1, 3, 4][min(Int(alignment), 4)]) }
 
 // MARK: Lines
 
