@@ -93,7 +93,7 @@ open class NSView: NSResponder {
         if !subviews.isEmpty { encoder.object(NSMutableArray.of(subviews), "NSSubviews") }
         var flags = Int(autoresizingMask & 0x3f)
         if autoresizesSubviews { flags |= 0x100 }
-        if hidden { flags |= 0x8000_0000 }
+        if hidden { flags |= 1 << 31 }
         encoder.integer(flags, "NSvFlags")
         if frame.minX == 0 && frame.minY == 0 { encoder.size(frame.size, "NSFrameSize") } else { encoder.rect(frame, "NSFrame") }
         encoder.string(toolTip, "NSToolTip")
