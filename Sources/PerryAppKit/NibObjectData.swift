@@ -181,6 +181,54 @@ open class NSNibConnector: NSObject {
     @ObjCMethod("establishConnection") func establishConnection() {}
 }
 
+/// A Cocoa binding: the source's binding ("NSBinding") is bound to the
+/// destination's key path ("NSKeyPath") with options ("NSOptions").
+@ObjCClass("NSNibBindingConnector")
+open class NSNibBindingConnector: NSNibConnector {
+    var binding: String?
+    var keyPath: String?
+    var options: NSObject?
+    var version = 2
+
+    @ObjCMethod("init")
+    public required init() { super.init() }
+
+    @ObjCMethod("initWithCoder:")
+    public required init(coder: NSObject?) {
+        super.init(coder: coder)
+        guard let coder else { return }
+        let decoded = Coder(coder: coder)
+        binding = decoded.string("NSBinding")
+        keyPath = decoded.string("NSKeyPath")
+        options = decoded.object("NSOptions")
+        if decoded.has("NSNibBindingConnectorVersion") { version = decoded.integer("NSNibBindingConnectorVersion") }
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        super.encode(with: coder)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.string(binding, "NSBinding")
+        encoder.string(keyPath, "NSKeyPath")
+        encoder.object(options, "NSOptions")
+        encoder.integer(version, "NSNibBindingConnectorVersion")
+    }
+
+    @ObjCMethod("binding") func connectorBinding() -> String? { binding }
+    @ObjCMethod("setBinding:") func setBinding(_ value: String?) { binding = value }
+    @ObjCMethod("keyPath") func connectorKeyPath() -> String? { keyPath }
+    @ObjCMethod("setKeyPath:") func setKeyPath(_ value: String?) { keyPath = value }
+    @ObjCMethod("options") func connectorOptions() -> NSObject? { options }
+    @ObjCMethod("setOptions:") func setOptions(_ value: NSObject?) { options = value }
+
+    @ObjCMethod("establishConnection")
+    override func establishConnection() {
+        guard let source, let destination, let binding, let keyPath else { return }
+        BindingTable.bind(source.objcObject, binding, to: destination, keyPath: keyPath, options: options)
+    }
+}
+
 /// An outlet: the source's outlet named by the label is the destination.
 @ObjCClass("NSNibOutletConnector")
 open class NSNibOutletConnector: NSNibConnector {
