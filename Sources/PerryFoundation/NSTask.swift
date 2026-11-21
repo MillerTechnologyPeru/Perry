@@ -187,6 +187,7 @@ open class NSTask: NSObject {
         Tasks.closeChildEnd(standardError, input: false)
         pid = child
         running = true
+        TaskTrace.log("launched \(launchPath) as \(child)")
         _ = ObjC.retain(objcObject)
         let waiter = Waiter(pid: child) { code, reason in
             RunLoops.mainLoop.perform(work: { self.ended(status: code, reason: reason) })
@@ -199,6 +200,7 @@ open class NSTask: NSObject {
         }, context) == 0 {
             pthread_detach(thread)
         } else {
+            TaskTrace.log("no thread to wait for \(child)")
             Unmanaged<Waiter>.fromOpaque(context).release()
         }
         return true
@@ -206,6 +208,7 @@ open class NSTask: NSObject {
 
     /// The task has ended: what launching it retained is let go.
     private func ended(status: Int32, reason: Int) {
+        TaskTrace.log("\(pid) ended with \(status), reason \(reason)")
         finish(status: status, reason: reason)
         ObjC.release(objcObject)
     }
@@ -227,6 +230,7 @@ open class NSTask: NSObject {
 
     @ObjCMethod("waitUntilExit")
     func waitUntilExit() {
+        TaskTrace.log("waiting until \(pid) exits, running \(running)")
         while running {
             _ = RunLoops.current.run(until: absoluteTimeNow() + 0.05, returnAfterSourceHandled: true)
         }
@@ -236,6 +240,18 @@ open class NSTask: NSObject {
     @ObjCMethod("interrupt") func interrupt() { if running { kill(pid, SIGINT) } }
     @ObjCMethod("suspend") func suspend() -> Bool { running && kill(pid, SIGSTOP) == 0 }
     @ObjCMethod("resume") func resume() -> Bool { running && kill(pid, SIGCONT) == 0 }
+}
+
+/// With PERRY_TASK_TRACE set, the tasks launched and how they end, on
+/// standard error.
+enum TaskTrace {
+    static let enabled = getenv("PERRY_TASK_TRACE") != nil
+
+    static func log(_ message: @autoclosure () -> String) {
+        guard enabled else { return }
+        let line = "perry: task: " + message() + "\n"
+        _ = line.withCString { write(2, $0, strlen($0)) }
+    }
 }
 
 /// Waits for a child to end, on a thread of its own: its exit status, or
@@ -251,7 +267,9 @@ private final class Waiter {
 
     func wait() {
         var status: Int32 = 0
-        while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
+        var result = waitpid(pid, &status, 0)
+        while result < 0 && errno == EINTR { result = waitpid(pid, &status, 0) }
+        TaskTrace.log("waited for \(pid): \(result), errno \(result < 0 ? errno : 0), status \(status)")
         let exited = status & 0x7f == 0
         done(exited ? (status >> 8) & 0xff : status & 0x7f, exited ? 1 : 2)
     }
