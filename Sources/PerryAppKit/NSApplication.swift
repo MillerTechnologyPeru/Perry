@@ -126,11 +126,17 @@ open class NSApplication: NSResponder {
 
     /// The item titled `title` in `menu` or its submenus.
     private static func menuItem(titled title: String, in menu: NSMenu?) -> NSMenuItem? {
+        // An item that acts comes before a menu of the same title (Xcode's
+        // Build menu has a Build item).
+        var menuOfTitle: NSMenuItem?
         for item in menu?.items ?? [] {
-            if item.title == title { return item }
-            if let found = menuItem(titled: title, in: item.submenu) { return found }
+            if item.title == title {
+                if item.submenu == nil { return item }
+                menuOfTitle = menuOfTitle ?? item
+            }
+            if let found = menuItem(titled: title, in: item.submenu), found.submenu == nil { return found }
         }
-        return nil
+        return menuOfTitle
     }
     nonisolated(unsafe) private static var clickWindow: NSWindow?
 
