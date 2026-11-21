@@ -308,6 +308,10 @@ public final class CompiledAssetCatalog {
               Array(bytes[data.lowerBound..<data.lowerBound + 4]) == Array("MLEC".utf8) else { return nil }
         let version = le32(data.lowerBound + 4), compression = le32(data.lowerBound + 8), count = le32(data.lowerBound + 12)
         if compression == 10 { return deepmap(data, version: version, count: count, width: width, height: height) }
+        if compression == 8 {
+            guard !gray, version == 0 else { return nil }
+            return palette(data.lowerBound + 16..<min(data.lowerBound + 16 + count, data.upperBound), width: width, height: height)
+        }
         let depth = gray ? 2 : 4
         var raw: [UInt8] = []
         if version == 0 {
@@ -338,6 +342,30 @@ public final class CompiledAssetCatalog {
                     (bytes[to], bytes[to + 1], bytes[to + 2], bytes[to + 3]) = (raw[from], raw[from + 1], raw[from + 2], raw[from + 3])
                 }
             }
+        }
+        return Pixels(width: width, height: height, bytes: bytes)
+    }
+
+    // MARK: Palette
+
+    /// A rendition in CoreUI's "palette-img" compression (8), for images of
+    /// few colors: an LZFSE (or LZVN) stream of 0xCAFEF00D, a version (1),
+    /// the count of colors as 16 bits, the colors as premultiplied alpha,
+    /// red, green and blue bytes, then a color's index for each pixel, rows
+    /// from the top.
+    private func palette(_ range: Range<Int>, width: Int, height: Int) -> Pixels? {
+        guard let raw = decompress(range, 4, capacity: 10 + 4 * 256 + width * height),
+              raw.count >= 10, raw[0..<4] == [0x0d, 0xf0, 0xfe, 0xca] else { return nil }
+        let count = Int(raw[8]) | Int(raw[9]) << 8
+        let indices = 10 + 4 * count
+        guard count > 0, raw.count >= indices + width * height else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for pixel in 0..<width * height {
+            let index = Int(raw[indices + pixel])
+            guard index < count else { continue }
+            let color = 10 + 4 * index
+            (bytes[pixel * 4], bytes[pixel * 4 + 1], bytes[pixel * 4 + 2], bytes[pixel * 4 + 3]) =
+                (raw[color + 3], raw[color + 2], raw[color + 1], raw[color])
         }
         return Pixels(width: width, height: height, bytes: bytes)
     }
