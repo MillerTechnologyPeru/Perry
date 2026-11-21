@@ -92,7 +92,11 @@ public enum Runtime {
                 return nil
             }
             let info = ClassInfo(cls: cls, ro: ro, superInfo: superInfo)
-            slideIvars(info, ro: ro)
+            // A class with a Swift metadata initializer (RO_HAS_SWIFT_INITIALIZER)
+            // is laid out by Swift's runtime, which then realizes it again:
+            // until then its class_ro_t is a placeholder, with offsets of
+            // fields that take no room in constant memory.
+            if ro.pointee.flags & 0x40 == 0 { slideIvars(info, ro: ro) }
             if let methods = info.baseMethods {
                 info.addMethods(methods, replacing: false)
             }
