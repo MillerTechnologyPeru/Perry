@@ -88,6 +88,10 @@ final class CellState: ObjectState {
     var indentationLevel = 0
     var indentationWidth: CGFloat = 10
     var separator: UIView?
+    /// The standard accessory drawn for the accessory type, and the type
+    /// it shows.
+    var accessoryIndicator: UIImageView?
+    var accessoryIndicatorType = 0
     /// The gray behind the content while highlighted or selected, unless
     /// the app gives a selected background view.
     var highlight: UIView?
@@ -318,6 +322,37 @@ open class UITableViewCell: UIView {
         showSelection()
     }
 
+    /// The standard accessory for the accessory type, at the trailing
+    /// edge, unless the app gave an accessory view: a gray chevron for a
+    /// disclosure indicator (1), a checkmark (3) or an info button (2 and
+    /// 4, the first without its chevron) in the tint color.
+    private func layoutAccessoryIndicator(in bounds: CGRect) {
+        let cell = cell
+        let type = cell.accessoryView == nil ? cell.accessoryType : 0
+        let names = [1: "chevron.right", 2: "info.circle", 3: "checkmark", 4: "info.circle"]
+        guard let name = names[type] else {
+            cell.accessoryIndicator?.setHidden(true)
+            return
+        }
+        let indicator: UIImageView
+        if let existing = cell.accessoryIndicator {
+            indicator = existing
+        } else {
+            indicator = UIImageView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIImageView.self)
+            cell.accessoryIndicator = indicator
+            addSubview(indicator)
+        }
+        if cell.accessoryIndicatorType != type {
+            cell.accessoryIndicatorType = type
+            indicator.setImage(Symbols.image(named: name))
+            indicator.setTintColor(type == 1 ? UIColor.tertiaryLabel() : nil)
+        }
+        indicator.setHidden(false)
+        // The chevron is small, as UIKit's; the others the size of the text.
+        let side: CGFloat = type == 1 ? 14 : 22
+        indicator.sendSetFrame(CGRect(x: bounds.width - 16 - side, y: (bounds.height - side) / 2, width: side, height: side))
+    }
+
     /// The content view fills the cell, less an accessory; labels sit
     /// inside the margins, a value at the trailing edge or below.
     @ObjCMethod("layoutSubviews")
@@ -332,6 +367,7 @@ open class UITableViewCell: UIView {
             accessory.sendSetFrame(CGRect(x: bounds.width - 16 - size.width, y: (bounds.height - size.height) / 2,
                                           width: size.width, height: size.height))
         }
+        layoutAccessoryIndicator(in: bounds)
         // A hairline along the bottom, from the separator inset.
         if cell.separator == nil {
             let line = UIView.objCClass.object.allocated().initializeView(frame: .zero).unsafeCast(to: UIView.self)
