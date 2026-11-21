@@ -305,7 +305,7 @@ enum Unarchivers {
 
 /// NSKeyedUnarchiver.
 @ObjCClass("NSKeyedUnarchiver")
-public class NSKeyedUnarchiver: NSObject {
+public class NSKeyedUnarchiver: NSCoder {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Unarchivers.unarchiverClass = cls.storage
@@ -388,8 +388,8 @@ public class NSKeyedUnarchiver: NSObject {
         ObjC.superDealloc(objcObject, from: Unarchivers.unarchiverClass)
     }
 
-    @ObjCMethod("allowsKeyedCoding") func allowsKeyedCoding() -> Bool { true }
-    @ObjCMethod("requiresSecureCoding") func requiresSecureCoding() -> Bool { storage?.requiresSecureCoding ?? false }
+    @ObjCMethod("allowsKeyedCoding") override func allowsKeyedCoding() -> Bool { true }
+    @ObjCMethod("requiresSecureCoding") override func requiresSecureCoding() -> Bool { storage?.requiresSecureCoding ?? false }
     @ObjCMethod("setRequiresSecureCoding:") func setRequiresSecureCoding(_ value: Bool) { storage?.requiresSecureCoding = value }
     @ObjCMethod("finishDecoding") func finishDecoding() {}
 
@@ -421,7 +421,7 @@ public class NSKeyedUnarchiver: NSObject {
         return "$\(storage.unkeyed)"
     }
 
-    @ObjCMethod("decodeObject") func decodeObject() -> ObjCObject? { decodeObject(forKey: nextKey()) }
+    @ObjCMethod("decodeObject") func decodeNextObject() -> ObjCObject? { decodeObject(forKey: nextKey()) }
 
     @ObjCMethod("decodeValueOfObjCType:at:")
     func decodeValue(ofObjCType type: UnsafePointer<CChar>?, at address: UnsafeMutableRawPointer?) {
