@@ -89,6 +89,11 @@ open class NSApplication: NSResponder {
     @ObjCMethod("_perryTypeScriptedText")
     func typeScriptedText() {
         guard let text = getenv("PERRY_APPKIT_TYPE").map({ String(cString: $0) }) else { return }
+        type(text)
+    }
+
+    /// Types `text` into the key window, a key at a time.
+    private func type(_ text: String) {
         let window = Windows.key ?? Windows.all.last { $0.visible }
         for character in text.replacingEscapes() {
             let (keyCode, characters): (UInt16, String) = character == "\n" ? (0x24, "\r") : character == "\t" ? (0x30, "\t") : (0, String(character))
@@ -106,14 +111,16 @@ open class NSApplication: NSResponder {
     /// go to the window on top there: to try menus and controls without a mouse.
     /// An entry "s:x,y,dy" scrolls there instead, dy wheel lines (up
     /// positive), as a mouse wheel's notches; "m:Title" chooses the main
-    /// menu's item of that title, wherever its menu is.
-    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?, menuItem: String?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
+    /// menu's item of that title, wherever its menu is; "t:text" types the
+    /// text into the key window ("\\n" is Return).
+    nonisolated(unsafe) private static var scriptedClicks: [(point: CGPoint, scroll: CGFloat?, menuItem: String?, text: String?)]? = getenv("PERRY_APPKIT_CLICKS").map { value in
         String(cString: value).split(separator: ";").compactMap { entry in
-            if entry.hasPrefix("m:") { return (.zero, nil, String(entry.dropFirst(2))) }
+            if entry.hasPrefix("m:") { return (.zero, nil, String(entry.dropFirst(2)), nil) }
+            if entry.hasPrefix("t:") { return (.zero, nil, nil, String(entry.dropFirst(2))) }
             let scrolls = entry.hasPrefix("s:")
             let numbers = entry.dropFirst(scrolls ? 2 : 0).split(separator: ",").compactMap { Double($0.filter { $0 != " " }).map { CGFloat($0) } }
-            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2]), nil) : nil }
-            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil, nil) : nil
+            if scrolls { return numbers.count == 3 ? (CGPoint(x: numbers[0], y: numbers[1]), CGFloat(numbers[2]), nil, nil) : nil }
+            return numbers.count == 2 ? (CGPoint(x: numbers[0], y: numbers[1]), nil, nil, nil) : nil
         }
     }
 
@@ -130,9 +137,14 @@ open class NSApplication: NSResponder {
     @ObjCMethod("_perryScriptedClick")
     func scriptedClick() {
         guard var clicks = NSApplication.scriptedClicks, !clicks.isEmpty else { return }
-        let (point, scroll, title) = clicks.removeFirst()
+        let (point, scroll, title, text) = clicks.removeFirst()
         NSApplication.scriptedClicks = clicks
         if !clicks.isEmpty { scheduleScriptedClick(after: 2) }
+        if let text {
+            Trace.log("scripted typing of \(text)")
+            type(text)
+            return
+        }
         if let title {
             guard let item = NSApplication.menuItem(titled: title, in: mainMenu?.as(NSMenu.self)) else {
                 Trace.log("scripted menu item \(title): none")
