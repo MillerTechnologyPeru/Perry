@@ -220,6 +220,13 @@ open class NSApplication: NSResponder {
         queue.append(NSEvent(.applicationDefined, window: nil, location: .zero))
     }
 
+    /// Shows an error in an alert; no recovery is attempted.
+    @ObjCMethod("presentError:")
+    func presentError(_ error: NSObject?) -> Bool {
+        _ = NSAlert.alert(error: error).runModal()
+        return false
+    }
+
     /// The delegate may cancel or delay; then the app ends.
     @ObjCMethod("terminate:")
     func terminate(_ sender: NSObject?) {
