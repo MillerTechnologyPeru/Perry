@@ -151,6 +151,9 @@ final class Compositor {
         self.density = density > 0 ? density : 1
         fitted = Screen.fixed != nil
         rendererContext = EAGLContexts.save()
+        // Making the renderer made its context current: the app's, which
+        // may already draw, is again.
+        EAGLContexts.restore()
         let name = renderer.name.isEmpty ? "unknown" : renderer.name
         Display.gpuRenderer = name
         uikitWarning("live view composited by SDL's \(name) renderer, at \(scale) pixels a point, \(self.density) a window coordinate")
