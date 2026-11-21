@@ -176,15 +176,18 @@ open class NSDocument: NSObject {
 
     @ObjCMethod("windowNibName") func windowNibName() -> String? { nil }
     @ObjCMethod("windowControllers") func windowControllers() -> NSObject { NSMutableArray.of(controllers.map { NSObject($0.objcObject) }) }
+    // The controller's document is set by -setDocument:, sent so a
+    // subclass's runs, as AppKit's does (Xcode's file editors install the
+    // document's text there).
     @ObjCMethod("addWindowController:") func addWindowController(_ controller: NSObject?) {
         guard let controller = controller?.as(NSWindowController.self), !controllers.contains(where: { $0 === controller }) else { return }
         controllers.append(controller)
-        if controller.document !== self { controller.document = self }
+        if controller.document !== self { Send.void(controller.objcObject, "setDocument:", objcObject) }
     }
     @ObjCMethod("removeWindowController:") func removeWindowController(_ controller: NSObject?) {
         guard let controller = controller?.as(NSWindowController.self) else { return }
         controllers.removeAll { $0 === controller }
-        if controller.document === self { controller.document = nil }
+        if controller.document === self { Send.void(controller.objcObject, "setDocument:", nil) }
     }
     @ObjCMethod("makeWindowControllers") func makeWindowControllers() {
         let nibName = self.sendWindowNibName()

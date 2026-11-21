@@ -153,7 +153,7 @@ open class NSApplication: NSResponder {
                 queue.append(event)
                 return
             }
-            Trace.log("scripted click at \(point) in window \(target.windowNumber)")
+            Trace.log("scripted click at \(point) of window \(base.windowNumber) in window \(target.windowNumber), at \(local)")
             for type in [EventType.leftMouseDown, .leftMouseUp] {
                 let event = NSEvent(type, window: target, location: local)
                 event.clickCount = 1
@@ -189,9 +189,6 @@ open class NSApplication: NSResponder {
                 }
                 Send.void(objcObject, "updateWindows")
             }
-            // Between events none of the program's code is running: objects
-            // a program built for the garbage collector let go of go now.
-            ObjCRuntime.collect()
         }
     }
 
@@ -279,7 +276,9 @@ open class NSApplication: NSResponder {
         let mask = NSEvent.mask(fromWord: wordMask)
         Events.pump()
         let limit = event?.eventNumber ?? Int.max
+        let before = queue.count
         queue.removeAll { $0.type.mask & mask != 0 && $0.eventNumber < limit }
+        if queue.count != before { Trace.log("application: discarded \(before - queue.count) events") }
     }
 
     @ObjCMethod("postEvent:atStart:")
@@ -294,6 +293,7 @@ open class NSApplication: NSResponder {
         guard let event = eventObject?.as(NSEvent.self) else { return }
         currentEvent = event
         let window = event.type.isKey ? (Windows.key ?? event.window) : (event.window ?? Windows.key)
+        if event.type == .leftMouseDown { Trace.log("application: mouse down for window \(window?.windowNumber ?? 0)") }
         guard let window else { return }
         Send.void(window.objcObject, "sendEvent:", event.objcObject)
     }

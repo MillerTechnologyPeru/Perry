@@ -31,6 +31,11 @@ open class NSScrollView: NSView {
     var horizontalScrollElasticity = 0
     var usesPredominantAxisScrolling = true
     var findBarPosition = 1
+    var hasVerticalRuler = false
+    var hasHorizontalRuler = false
+    var rulersVisible = false
+    var verticalRuler: NSRulerView?
+    var horizontalRuler: NSRulerView?
 
     public required init() {
         super.init()
@@ -135,11 +140,32 @@ open class NSScrollView: NSView {
     }
     @ObjCMethod("autohidesScrollers") func scrollAutohidesScrollers() -> Bool { autohidesScrollers }
     @ObjCMethod("setAutohidesScrollers:") func setAutohidesScrollers(_ value: Bool) { autohidesScrollers = value; tile() }
-    @ObjCMethod("hasVerticalRuler") func hasVerticalRuler() -> Bool { false }
-    @ObjCMethod("setHasVerticalRuler:") func setHasVerticalRuler(_ value: Bool) {}
-    @ObjCMethod("hasHorizontalRuler") func hasHorizontalRuler() -> Bool { false }
-    @ObjCMethod("setHasHorizontalRuler:") func setHasHorizontalRuler(_ value: Bool) {}
-    @ObjCMethod("setRulersVisible:") func setRulersVisible(_ value: Bool) {}
+    // A vertical ruler shows at the clip view's left when the scroll view
+    // has one and its rulers are visible (Xcode's editor gutter). A
+    // horizontal ruler is kept but not shown.
+    @ObjCMethod("hasVerticalRuler") func hasVerticalRulerValue() -> Bool { hasVerticalRuler }
+    @ObjCMethod("setHasVerticalRuler:")
+    func setHasVerticalRuler(_ value: Bool) {
+        hasVerticalRuler = value
+        if value, verticalRuler == nil { setVerticalRulerView(NSRulerView(scrollView: self, orientation: 1)) }
+        tile()
+    }
+    @ObjCMethod("hasHorizontalRuler") func hasHorizontalRulerValue() -> Bool { hasHorizontalRuler }
+    @ObjCMethod("setHasHorizontalRuler:") func setHasHorizontalRuler(_ value: Bool) { hasHorizontalRuler = value }
+    @ObjCMethod("rulersVisible") func rulersVisibleValue() -> Bool { rulersVisible }
+    @ObjCMethod("setRulersVisible:") func setRulersVisible(_ value: Bool) { rulersVisible = value; tile() }
+    @ObjCMethod("verticalRulerView") func verticalRulerView() -> NSRulerView? { verticalRuler }
+    @ObjCMethod("setVerticalRulerView:")
+    func setVerticalRulerView(_ ruler: NSRulerView?) {
+        verticalRuler?.removeFromSuperview()
+        verticalRuler = ruler
+        ruler?.scrollViewObject = objcObject
+        tile()
+    }
+    @ObjCMethod("horizontalRulerView") func horizontalRulerView() -> NSRulerView? { horizontalRuler }
+    @ObjCMethod("setHorizontalRulerView:") func setHorizontalRulerView(_ ruler: NSRulerView?) { horizontalRuler = ruler }
+    @ObjCClassMethod("rulerViewClass") static func rulerViewClass(_ cls: ObjCClass) -> ObjCClass { NSRulerView.objCClass }
+    @ObjCClassMethod("setRulerViewClass:") static func setRulerViewClass(_ cls: ObjCClass, _ ruler: ObjCClass?) {}
     @ObjCMethod("borderType") func scrollBorderType() -> UInt { borderType }
     @ObjCMethod("setBorderType:") func setBorderType(_ value: UInt) { borderType = value; tile(); setNeedsDisplay(true) }
     @ObjCMethod("drawsBackground") func drawsBackground() -> Bool { contentClip?.drawsBackground ?? false }
@@ -239,6 +265,19 @@ open class NSScrollView: NSView {
             content.origin.y += height
             content.size.height = max(0, content.height - height)
         }
+        // The vertical ruler, as thick as it asks, at the clip view's left.
+        if let verticalRuler {
+            if hasVerticalRuler && rulersVisible {
+                if verticalRuler.superview !== self { addSubview(verticalRuler) }
+                let thickness = min(content.width, verticalRuler.requiredThickness())
+                verticalRuler.autoresizingMask = 16
+                verticalRuler.setFrame(CGRect(x: content.minX, y: content.minY, width: thickness, height: content.height))
+                content.origin.x += thickness
+                content.size.width = max(0, content.width - thickness)
+            } else if verticalRuler.superview === self {
+                verticalRuler.removeFromSuperview()
+            }
+        }
         // As tiling places them, also when constraints resize the scroll
         // view: the clip view grows with it, the scrollers keep to its
         // right and bottom edges.
@@ -276,8 +315,10 @@ open class NSScrollView: NSView {
         update(verticalScroller, has: hasVerticalScroller, visible: visible.height, whole: whole.height,
                offset: document.flipped ? visible.minY - whole.minY : whole.maxY - visible.maxY)
         update(horizontalScroller, has: hasHorizontalScroller, visible: visible.width, whole: whole.width, offset: visible.minX - whole.minX)
-        // A table's header scrolls sideways with it.
+        // A table's header scrolls sideways with it; a ruler shows what's
+        // now in view.
         if let headerClip, headerClip.boundsOrigin.x != visible.minX { headerClip.setBoundsOrigin(CGPoint(x: visible.minX, y: headerClip.boundsOrigin.y)) }
+        if rulersVisible, let verticalRuler, verticalRuler.superview === self { verticalRuler.setNeedsDisplay(true) }
     }
 
     /// Scrolls by a wheel turn: lines, or points for a trackpad's precise

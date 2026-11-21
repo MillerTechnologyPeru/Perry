@@ -237,6 +237,9 @@ public class NSData: NSObject {
         return (try? Data(contentsOf: URL(filePath: path))).map { DataObjects.owned(DataStorage($0), cls: cls) }
     }
 
+    @ObjCClassMethod("dataWithContentsOfMappedFile:")
+    static func data(_ cls: ObjCClass, contentsOfMappedFile path: String?) -> NSData? { data(cls, contentsOfFile: path) }
+
     @ObjCClassMethod("dataWithContentsOfURL:")
     static func data(_ cls: ObjCClass, contentsOfURL url: NSURL?) -> NSData? {
         url.flatMap(contents).map { DataObjects.owned(DataStorage($0), cls: cls) }
@@ -329,6 +332,11 @@ public class NSData: NSObject {
         guard let path else { return nil }
         return (try? Data(contentsOf: URL(filePath: path))).map { setStorage(DataStorage($0)) }
     }
+
+    /// The file read, as mapping it would show it (Xcode reads source files
+    /// so).
+    @ObjCMethod("initWithContentsOfMappedFile:")
+    func initialize(contentsOfMappedFile path: String?) -> Self? { initialize(contentsOfFile: path) }
 
     @ObjCMethod("initWithContentsOfURL:")
     func initialize(contentsOfURL url: NSURL?) -> Self? { url.flatMap(NSData.contents).map { setStorage(DataStorage($0)) } }

@@ -289,7 +289,29 @@ open class NSTextStorage: NSObject {
     @ObjCMethod("fixParagraphStyleAttributeInRange:") func fixParagraphStyleAttribute(in range: NSRange) {}
     @ObjCMethod("fixAttachmentAttributeInRange:") func fixAttachmentAttribute(in range: NSRange) {}
     @ObjCMethod("invalidateAttributesInRange:") func invalidateAttributes(in range: NSRange) {}
-    @ObjCMethod("ensureAttributesAreFixedInRange:") func ensureAttributesAreFixed(in range: NSRange) {}
+    /// A storage that fixes its attributes lazily fixes them now, before
+    /// they're read (Xcode's colours its syntax so).
+    @ObjCMethod("ensureAttributesAreFixedInRange:")
+    func ensureAttributesAreFixed(in range: NSRange) {
+        guard Send.bool(objcObject, "fixesAttributesLazily") else { return }
+        typealias Fix = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Fix.self)(objcObject, ObjCRuntime.selector("fixAttributesInRange:"), range)
+    }
+
+    /// Whether the attributes are being fixed, during which reading them
+    /// doesn't fix them again.
+    var fixingAttributes = false
+
+    /// Has the attributes of all the text fixed, as the storage (or a
+    /// subclass) does it.
+    func fixAllAttributes() {
+        guard !fixingAttributes else { return }
+        fixingAttributes = true
+        defer { fixingAttributes = false }
+        typealias Ensure = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
+        unsafeBitCast(ObjCRuntime.msgSend, to: Ensure.self)(objcObject, ObjCRuntime.selector("ensureAttributesAreFixedInRange:"),
+                                                             NSRange(location: 0, length: UInt(max(0, textLength))))
+    }
 
     /// The text changed: its layout managers' text views show it again.
     func edited() {
@@ -317,10 +339,40 @@ open class NSTextStorage: NSObject {
         manager.textChanged()
     }
     @ObjCMethod("removeLayoutManager:") func removeLayoutManager(_ manager: NSLayoutManager?) { layoutManagers.removeAll { $0 === manager } }
-    /// What the last edit changed, as -edited:range:changeInLength: gave it.
-    var editedMask: UInt = 0
-    var editedRange = NSRange(location: 0, length: 0)
-    var changeInLength = 0
+    /// AppKit's instance variables for the edit being processed, which
+    /// subclasses read themselves (Xcode's text storages read the edited
+    /// range and delta in their -processEditing): the edited range and
+    /// change in length, the flags holding the edited mask in their low
+    /// byte, and side data.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] {
+        [ObjCInstanceVariable("_editedRange", size: 16, alignment: 3, types: "{_NSRange=QQ}"),
+         ObjCInstanceVariable("_editedDelta", size: 8, alignment: 3, types: "q"),
+         ObjCInstanceVariable("_flags", size: 4, alignment: 2, types: "I"),
+         ObjCInstanceVariable("_sideData", types: "@")]
+    }
+
+    private static let offsets: (range: Int, delta: Int, flags: Int) = (
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_editedRange") ?? 0,
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_editedDelta") ?? 0,
+        ObjCRuntime.ivarOffset(NSTextStorage.objCClass, "_flags") ?? 0)
+
+    /// What the last edit changed, as -edited:range:changeInLength: gave it,
+    /// kept in AppKit's instance variables.
+    var editedMask: UInt {
+        get { UInt(objcObject.load(fromByteOffset: Self.offsets.flags, as: UInt32.self) & 0xff) }
+        set {
+            let flags = objcObject.load(fromByteOffset: Self.offsets.flags, as: UInt32.self)
+            objcObject.storeBytes(of: flags & ~0xff | UInt32(newValue & 0xff), toByteOffset: Self.offsets.flags, as: UInt32.self)
+        }
+    }
+    var editedRange: NSRange {
+        get { objcObject.load(fromByteOffset: Self.offsets.range, as: NSRange.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.range, as: NSRange.self) }
+    }
+    var changeInLength: Int {
+        get { objcObject.load(fromByteOffset: Self.offsets.delta, as: Int.self) }
+        set { objcObject.storeBytes(of: newValue, toByteOffset: Self.offsets.delta, as: Int.self) }
+    }
 
     @ObjCMethod("beginEditing") func beginEditing() { editing += 1 }
     /// The outermost -endEditing processes the edits, through -processEditing
@@ -330,6 +382,19 @@ open class NSTextStorage: NSObject {
         editing = max(0, editing - 1)
         if editing == 0 { Send.void(objcObject, "processEditing") }
     }
+    /// A file read into the storage itself, not the attributed string its
+    /// other messages go to: a subclass keeping its own text (Xcode's) gets
+    /// it through its -replaceCharactersInRange:withString:.
+    @ObjCMethod("readFromURL:options:documentAttributes:")
+    func read(from url: NSObject?, options: NSObject?, documentAttributes: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        AttributedStringReading.read(into: objcObject, from: url, options: options, documentAttributes: documentAttributes)
+    }
+    @ObjCMethod("readFromURL:options:documentAttributes:error:")
+    func read(from url: NSObject?, options: NSObject?, documentAttributes: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
+              error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        AttributedStringReading.read(into: objcObject, from: url, options: options, documentAttributes: documentAttributes)
+    }
+
     @ObjCMethod("edited:range:changeInLength:")
     func edited(_ mask: UInt, range: NSRange, changeInLength delta: Int) {
         (editedMask, editedRange, changeInLength) = (mask, range, delta)
@@ -543,6 +608,25 @@ open class NSLayoutManager: NSObject {
         NSLayoutManager.store(NSRange(location: UInt(fragment.range.lowerBound), length: UInt(fragment.range.count)), effectiveRange)
         return toContainer(fragment.rect)
     }
+
+    /// The glyph under a point in the container (glyphs are characters here),
+    /// and how far through it the point is. Xcode's editor gutter finds the
+    /// lines it shows numbers for so.
+    @ObjCMethod("glyphIndexForPoint:inTextContainer:fractionOfDistanceThroughGlyph:")
+    func glyphIndex(for point: CGPoint, in container: NSTextContainer?, fraction: UnsafeMutablePointer<CGFloat>?) -> UInt {
+        fraction?.pointee = 0
+        guard let view else { return 0 }
+        let inView = CGPoint(x: point.x + view.textContainerInset.width, y: point.y + view.textContainerInset.height)
+        let length = view.string.utf16.count
+        return UInt(max(0, min(view.characterIndex(at: inView), max(0, length - 1))))
+    }
+    @ObjCMethod("glyphIndexForPoint:inTextContainer:")
+    func glyphIndex(for point: CGPoint, in container: NSTextContainer?) -> UInt { glyphIndex(for: point, in: container, fraction: nil) }
+
+    /// The line after text ending in a line break: none is laid out apart here.
+    @ObjCMethod("extraLineFragmentTextContainer") func extraLineFragmentTextContainer() -> NSTextContainer? { nil }
+    @ObjCMethod("extraLineFragmentRect") func extraLineFragmentRect() -> CGRect { .zero }
+    @ObjCMethod("extraLineFragmentUsedRect") func extraLineFragmentUsedRect() -> CGRect { .zero }
 
     @ObjCMethod("invalidateDisplayForCharacterRange:") func invalidateDisplay(forCharacterRange range: NSRange) { view?.setNeedsDisplay(true) }
     @ObjCMethod("invalidateLayoutForCharacterRange:actualCharacterRange:")
@@ -1211,11 +1295,47 @@ open class NSTextView: NSText {
 
     func runs() -> (runs: [TextRun], style: TextStyle) {
         guard let storage else { return ([], TextStyle()) }
-        let (runs, paragraph) = Text.runs(storage.keepsOwnText ? storage.contents : storage, font: effectiveFont, color: textColor ?? NSColor.textColor())
+        if !storage.keepsOwnText { storage.fixAllAttributes() }
+        var (runs, paragraph) = Text.runs(storage.keepsOwnText ? storage.contents : storage, font: effectiveFont, color: textColor ?? NSColor.textColor())
+        runs = withTemporaryAttributes(runs, paragraph: &paragraph)
         var style = TextStyle()
         style.alignment = alignment
         Text.style(paragraph, into: &style)
         return (runs, style)
+    }
+
+    /// The runs as the layout manager's delegate has them drawn: it is asked
+    /// (-layoutManager:shouldUseTemporaryAttributes:forDrawingToScreen:
+    /// atCharacterIndex:effectiveRange:) for the attributes to draw each
+    /// stretch of text with, in place of the storage's. Xcode's editor
+    /// colours its syntax so, keeping no colours in its storage.
+    private func withTemporaryAttributes(_ runs: [TextRun], paragraph: inout NSObject?) -> [TextRun] {
+        let selector = "layoutManager:shouldUseTemporaryAttributes:forDrawingToScreen:atCharacterIndex:effectiveRange:"
+        guard let manager, let delegate = manager.delegateObject, Send.responds(delegate, selector) else { return runs }
+        typealias Ask = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer, UnsafeMutableRawPointer?, Bool, UInt,
+                                        UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+        let ask = unsafeBitCast(ObjCRuntime.msgSend, to: Ask.self)
+        let empty = NSMutableDictionary.empty()
+        var result: [TextRun] = []
+        var start = 0
+        for run in runs {
+            let units = Array(run.text.utf16)
+            var offset = 0
+            while offset < units.count {
+                // The range the storage's attributes hold over, which the
+                // delegate narrows to what its own do.
+                var range = NSRange(location: UInt(start + offset), length: UInt(units.count - offset))
+                let attributes = ask(delegate, ObjCRuntime.selector(selector), manager.objcObject, empty.objcObject, true, UInt(start + offset), &range)
+                let end = min(units.count, max(offset + 1, Int(range.location + range.length) - start))
+                var piece = run
+                piece.text = String(decoding: units[offset..<end], as: UTF16.self)
+                if let attributes = attributes.map(NSObject.init)?.as(NSDictionary.self) { Text.style(&piece, attributes, paragraph: &paragraph) }
+                result.append(piece)
+                offset = end
+            }
+            start += units.count
+        }
+        return result
     }
 
     /// The text's size laid out in `width`.

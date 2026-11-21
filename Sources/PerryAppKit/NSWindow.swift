@@ -162,7 +162,7 @@ open class NSWindow: NSResponder {
     @ObjCMethod("setContentView:")
     func setContentView(_ view: NSView?) {
         if let old = contentView, old !== view {
-            Send.void(old.objcObject, "viewWillMoveToWindow:", nil)
+            old.willMoveToWindowTree(nil)
             old.layer.map { CALayer(objcObject: $0.objcObject, ownership: .retain).removeFromSuperlayer() }
             old.setWindowTree(nil)
             old.nextResponderObject = nil
@@ -187,7 +187,7 @@ open class NSWindow: NSResponder {
             Windows.layersChanged()
             return
         }
-        Send.void(view.objcObject, "viewWillMoveToWindow:", objcObject)
+        view.willMoveToWindowTree(objcObject)
         contentView = view
         view.nextResponderObject = objcObject
         view.setWindowTree(objcObject)
@@ -975,6 +975,7 @@ open class NSWindow: NSResponder {
         guard !ignoresMouseEvents else { return }
         let view = viewAt(event.locationInWindow)
         mouseDownView = view
+        Trace.log("window \(windowNumber): mouse down at \(event.locationInWindow) on \(view.map { NSObject($0.objcObject).describedByObject() ?? "?" } ?? "the window")")
         if event.type == .leftMouseDown, let view, view.objcObject != firstResponderObject,
            Send.bool(view.objcObject, "acceptsFirstResponder") {
             _ = makeFirstResponder(view)

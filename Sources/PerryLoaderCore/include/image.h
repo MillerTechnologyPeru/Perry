@@ -173,6 +173,10 @@ perry_symbol perry_resolve(perry_loader *loader, perry_image *image, int ordinal
 /// Fills in the witness tables made for apps from libraries' resilient
 /// conformances, once every image is bound.
 void perry_make_witness_tables(perry_loader *loader);
+/// Fills in the offsets of instance variables of a provider's classes that
+/// images import, whose classes weren't defined yet when the images were
+/// bound: once the providers have started, before any image's initializers.
+void perry_resolve_pending_ivar_offsets(perry_loader *loader);
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth);
 #if defined(__arm__)
 /// The entry an armv7 image calls an imported function through, which aligns

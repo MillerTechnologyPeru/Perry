@@ -1023,13 +1023,16 @@ static bool ends_with(const char *name, const char *suffix) {
 /// plug-in reads AppKit's objects with), a word holding the offset the
 /// runtime gives that class's instance variable of that name, where a
 /// provider's class declares it; NULL otherwise.
-static void *ivar_offset_cell(perry_loader *loader, const char *name) {
+typedef enum { IVAR_FOUND, IVAR_NO_CLASS, IVAR_MISSING } ivar_lookup;
+
+/// The runtime's offset of `name`'s instance variable (an
+/// _OBJC_IVAR_$_Class.ivar symbol), into `offset`.
+static ivar_lookup runtime_ivar_offset(perry_loader *loader, const char *name, intptr_t *offset) {
     static const char prefix[] = "_OBJC_IVAR_$_";
-    if (strncmp(name, prefix, sizeof prefix - 1) != 0) return NULL;
     const char *rest = name + sizeof prefix - 1;
     const char *dot = strchr(rest, '.');
     char class_name[256];
-    if (!dot || (size_t)(dot - rest) >= sizeof class_name) return NULL;
+    if (!dot || (size_t)(dot - rest) >= sizeof class_name) return IVAR_MISSING;
     memcpy(class_name, rest, (size_t)(dot - rest));
     class_name[dot - rest] = 0;
     perry_provider *objc = perry_find_provider(loader, LIBOBJC);
@@ -1037,15 +1040,66 @@ static void *ivar_offset_cell(perry_loader *loader, const char *name) {
     if (!objc || !provider_lookup(loader, objc, "_objc_getClass", &get_class) ||
         !provider_lookup(loader, objc, "_class_getInstanceVariable", &get_ivar) ||
         !provider_lookup(loader, objc, "_ivar_getOffset", &get_offset))
-        return NULL;
+        return IVAR_MISSING;
     void *cls = ((void *(*)(const char *))get_class.address)(class_name);
-    void *ivar = cls ? ((void *(*)(void *, const char *))get_ivar.address)(cls, dot + 1) : NULL;
-    if (!ivar) return NULL;
+    if (!cls) return IVAR_NO_CLASS;
+    void *ivar = ((void *(*)(void *, const char *))get_ivar.address)(cls, dot + 1);
+    if (!ivar) return IVAR_MISSING;
+    *offset = ((intptr_t (*)(void *))get_offset.address)(ivar);
+    return IVAR_FOUND;
+}
+
+/// Cells for offsets of instance variables whose classes a provider hadn't
+/// defined yet when an image importing them was bound.
+typedef struct pending_ivar {
+    intptr_t *cell;
+    char *name;
+    struct pending_ivar *next;
+} pending_ivar;
+static pending_ivar *pending_ivars;
+
+/// For an import of an instance variable's offset no image exports (a
+/// provider's class, whose instance variables an app reads itself), a cell
+/// holding the runtime's offset for it. A provider's classes may be defined
+/// only when it starts, after the images are bound: the cell then holds 0
+/// until perry_resolve_pending_ivar_offsets fills it in.
+static void *ivar_offset_cell(perry_loader *loader, const char *name) {
+    static const char prefix[] = "_OBJC_IVAR_$_";
+    if (strncmp(name, prefix, sizeof prefix - 1) != 0) return NULL;
+    intptr_t offset = 0;
+    ivar_lookup found = runtime_ivar_offset(loader, name, &offset);
+    if (found == IVAR_MISSING) return NULL;
     intptr_t *cell = malloc(sizeof *cell);
     if (!cell) return NULL;
-    *cell = ((intptr_t (*)(void *))get_offset.address)(ivar);
-    perry_trace(PERRY_TRACE_BIND, "%s = %ld, the runtime's", name, (long)*cell);
+    *cell = offset;
+    if (found == IVAR_NO_CLASS) {
+        pending_ivar *pending = malloc(sizeof *pending);
+        if (!pending) return cell;
+        *pending = (pending_ivar){ .cell = cell, .name = strdup(name), .next = pending_ivars };
+        pending_ivars = pending;
+        perry_trace(PERRY_TRACE_BIND, "%s: its class isn't defined yet", name);
+        return cell;
+    }
+    perry_trace(PERRY_TRACE_BIND, "%s = %ld, the runtime's", name, (long)offset);
     return cell;
+}
+
+void perry_resolve_pending_ivar_offsets(perry_loader *loader) {
+    pending_ivar *pending = pending_ivars;
+    pending_ivars = NULL;
+    while (pending) {
+        pending_ivar *next = pending->next;
+        intptr_t offset = 0;
+        if (runtime_ivar_offset(loader, pending->name, &offset) == IVAR_FOUND) {
+            *pending->cell = offset;
+            perry_trace(PERRY_TRACE_BIND, "%s = %ld, the runtime's", pending->name, (long)offset);
+        } else {
+            perry_warn("instance variable %s isn't available", pending->name + 13);
+        }
+        free(pending->name);
+        free(pending);
+        pending = next;
+    }
 }
 
 /// For an unresolved string constant's import, a pointer to a constant
