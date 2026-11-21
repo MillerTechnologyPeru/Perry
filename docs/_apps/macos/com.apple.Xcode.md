@@ -210,6 +210,9 @@ reports:
     level: 3
     source: body
     notes: The source editor shows a file's text with syntax colouring and the folding bar; builds and runs a Cocoa document app as before. Typing in the editor is untested, and debugging isn't supported.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/0f28c626-2d41-4de6-ba8f-673ec8050f66
+        caption: Source editor showing MyDocument.m with syntax colouring
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
