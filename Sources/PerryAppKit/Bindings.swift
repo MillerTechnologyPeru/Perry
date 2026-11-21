@@ -61,7 +61,10 @@ final class _PerryBinding: NSObject {
                                               UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
             var parsed: UnsafeMutableRawPointer?
             guard unsafeBitCast(ObjCRuntime.msgSend, to: Parse.self)(formatter, ObjCRuntime.selector("getObjectValue:forString:errorDescription:"),
-                                                                    &parsed, text.objcObject, nil) else { return }
+                                                                    &parsed, text.objcObject, nil) else {
+                Trace.log("binding: \(keyPath) keeps its value, the formatter not reading \(String(objCArgument: text.objcObject))")
+                return
+            }
             value = parsed.map(NSObject.init)
         }
         let options = self.options?.as(NSDictionary.self)
@@ -182,7 +185,11 @@ enum BindingTable {
     /// is bound to; `continuously` for a change that isn't the last (text
     /// being typed), which only a binding that updates continuously takes.
     static func pushValue(of receiver: UnsafeMutableRawPointer, continuously: Bool = false) {
-        guard let binding = bindings[receiver]?["value"], !continuously || binding.updatesContinuously else { return }
+        // The binding is the control's, or its cell's (as Interface Builder
+        // makes a text field's when the cell is what was selected).
+        var binding = bindings[receiver]?["value"]
+        if binding == nil, Send.responds(receiver, "cell"), let cell = Send.object(receiver, "cell") { binding = bindings[cell]?["value"] }
+        guard let binding, !continuously || binding.updatesContinuously else { return }
         binding.push()
     }
 
