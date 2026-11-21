@@ -780,6 +780,11 @@ open class NSButtonImageSource: NSObject {
         super.init()
         if let coder { name = Coder(coder: coder).string("NSImageName") ?? "" }
     }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(with coder: NSObject?) {
+        if let coder { Encoder(coder: coder).string(name, "NSImageName") }
+    }
 }
 
 /// NSButtonType: momentary light 0, push on/off 1, toggle 2, switch (check
@@ -817,6 +822,12 @@ open class NSButtonCell: NSActionCell {
     var showsBorderOnlyWhileMouseInside = false
     var bezelColor: NSColor?
     var attributedTitle: NSObject?
+    /// What an archive held that the cell keeps only in part (the flags
+    /// carry more than it reads), to archive again as it was.
+    var archivedButtonFlags: (first: Int, second: Int)?
+    var archivedPeriodic: (delay: Int, interval: Int)?
+    var archivedNormalImage: NSObject?
+    var archivedAlternateImage: NSObject?
 
     @ObjCMethod("init")
     public required init() {
@@ -859,8 +870,10 @@ open class NSButtonCell: NSActionCell {
         if flags & 0x40_0000 != 0 {
             imagePosition = flags & 0x8_0000 != 0 ? 1 : flags & 0x10_0000 != 0 ? 6 : flags & 0x20_0000 != 0 ? 3 : 2
         }
+        // A check box's or radio button's image source is the normal image,
+        // or in archives from before Mac OS X 10.10 the alternate one.
         let normal = decoded.object("NSNormalImage")
-        if let source = normal?.as(NSButtonImageSource.self) {
+        if let source = normal?.as(NSButtonImageSource.self) ?? decoded.object("NSAlternateImage")?.as(NSButtonImageSource.self) {
             buttonType = source.name == "NSRadioButton" ? 4 : 3
             image = nil
         } else if let picture = normal?.as(NSImage.self) {
@@ -872,6 +885,46 @@ open class NSButtonCell: NSActionCell {
         }
         if let color = decoded.object("NSBezelColor")?.as(NSColor.self) { bezelColor = color }
         type = 1
+        if decoded.has("NSButtonFlags") { archivedButtonFlags = (decoded.integer("NSButtonFlags"), decoded.integer("NSButtonFlags2")) }
+        if decoded.has("NSPeriodicDelay") { archivedPeriodic = (decoded.integer("NSPeriodicDelay"), decoded.integer("NSPeriodicInterval")) }
+        archivedNormalImage = normal
+        archivedAlternateImage = decoded.object("NSAlternateImage")
+    }
+
+    /// The keys initWithCoder: reads: the title as the contents, and the
+    /// flags as an archive gave them, or else packed as they're unpacked.
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        let (savedValue, savedImage) = (objectValue, image)
+        objectValue = attributedTitle ?? title.objCArgument().map(NSObject.init)
+        image = nil
+        super.encode(with: coder)
+        (objectValue, image) = (savedValue, savedImage)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        if let archivedButtonFlags {
+            encoder.integer(archivedButtonFlags.first, "NSButtonFlags")
+            encoder.integer(archivedButtonFlags.second, "NSButtonFlags2")
+        } else {
+            var flags: UInt32 = (bordered ? 0x80_0000 : 0) | (transparent ? 0x8000 : 0)
+            switch imagePosition {
+            case 0: break
+            case 1: flags |= 0x48_0000
+            case 6: flags |= 0x50_0000
+            case 3: flags |= 0x60_0000
+            default: flags |= 0x40_0000
+            }
+            encoder.integer(Int(Int32(bitPattern: flags)), "NSButtonFlags")
+            encoder.integer(Int(bezelStyle & 0x7 | (bezelStyle & 0x8) << 2), "NSButtonFlags2")
+        }
+        encoder.string(alternateTitle, "NSAlternateContents")
+        encoder.string(keyEquivalentValue, "NSKeyEquivalent")
+        if keyEquivalentModifierMask != 0 { encoder.integer(Int(keyEquivalentModifierMask), "NSKeyEquivModMask") }
+        encoder.integer(archivedPeriodic?.delay ?? 400, "NSPeriodicDelay")
+        encoder.integer(archivedPeriodic?.interval ?? 75, "NSPeriodicInterval")
+        encoder.object(archivedNormalImage ?? savedImage, "NSNormalImage")
+        encoder.object(archivedAlternateImage ?? alternateImage, "NSAlternateImage")
+        encoder.object(bezelColor, "NSBezelColor")
     }
 
     var isCheckLike: Bool { buttonType == 3 || buttonType == 4 }

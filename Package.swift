@@ -533,11 +533,13 @@ let package = Package(
                            "PerryScrollPhysics", .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),
+        // AppKit: variadic entry points.
+        .target(name: "CPerryAppKit"),
         // AppKit, a client of libobjc's C API and Foundation's classes, whose
         // views are backed by QuartzCore's layers.
         .target(
             name: "PerryAppKit",
-            dependencies: ["CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics",
+            dependencies: ["CPerryAppKit", "CPerryGeometry", "PerryAssetCatalog", "PerryInterface", "PerryLayoutSolver", "PerryObjCInterop", "PerryScrollPhysics",
                            .product(name: "SDL3Swift", package: "SDL")],
             plugins: ["PerryProviderPlugin"]
         ),

@@ -49,6 +49,38 @@ open class NSBox: NSView {
         transparent = decoded.bool("NSTransparent")
         contentView = decoded.object("NSContentView")?.as(NSView.self)
         if let contentView, contentView.superview !== self { addSubview(contentView) }
+        // The content view's frame is from AppKit's box, which isn't
+        // flipped: below a title it is at the bottom, not the top.
+        if let contentView, contentView.superview === self {
+            contentView.frame.origin.y = frame.height - contentView.frame.maxY
+        }
+    }
+
+    /// A view's keys and the ones initWithCoder: reads. The content view,
+    /// archived as the box's subview, has its frame as AppKit's box (not
+    /// flipped) would while it is.
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        let content = contentView.flatMap { $0.superview === self ? $0 : nil }
+        func flipContent() { content.map { $0.frame.origin.y = frame.height - $0.frame.maxY } }
+        flipContent()
+        defer { flipContent() }
+        super.encode(with: coder)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        encoder.integer(Int(boxType), "NSBoxType")
+        encoder.integer(Int(borderType), "NSBorderType")
+        encoder.integer(Int(titlePosition), "NSTitlePosition")
+        encoder.object(titleCell, "NSTitleCell")
+        encoder.size(contentViewMargins, "NSOffsets")
+        if boxType == 4 {
+            encoder.object(fillColor, "NSFillColor2")
+            encoder.object(borderColor, "NSBorderColor2")
+            encoder.double(borderWidth, "NSBorderWidth2")
+            encoder.double(cornerRadius, "NSCornerRadius2")
+        }
+        encoder.bool(transparent, "NSTransparent")
+        encoder.object(contentView, "NSContentView")
     }
 
     var title: String { titleCell?.cellString ?? "" }

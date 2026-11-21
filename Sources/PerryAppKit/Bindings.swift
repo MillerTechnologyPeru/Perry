@@ -4,8 +4,11 @@ import PerryObjCInterop
 // the bound object's key path and sets the receiver's binding from it, now
 // and whenever it changes. The binding name is the receiver's key ("value"
 // is a control's object value), unless it is one of the names below.
-// Changes made in the receiver go back only through -setValue:forKey: on
-// the binding name, which the app calls itself.
+// A control's "value" goes back to the bound object when the user changes
+// it: as its action is sent, when a text field's editing ends, and as its
+// text changes if the binding updates continuously. Other changes made in
+// the receiver go back only through -setValue:forKey: on the binding name,
+// which the app calls itself.
 
 private typealias Object = UnsafeMutableRawPointer
 
@@ -32,9 +35,50 @@ final class _PerryBinding: NSObject {
     var observed: NSObject?
     var keyPath = ""
     var options: NSObject?
+    /// Set while the receiver's value goes to the bound object, whose
+    /// change then isn't set back in the receiver (a text field being
+    /// typed in keeps its text).
+    var pushing = false
 
     @ObjCMethod("init")
     public required override init() { super.init() }
+
+    var updatesContinuously: Bool {
+        options?.as(NSDictionary.self)?.object(forKey: "NSContinuouslyUpdatesValue").map { Send.bool($0.objcObject, "boolValue") } ?? false
+    }
+
+    /// The receiver's object value, back through the binding's transformer
+    /// if it has one, set in the bound object.
+    func push() {
+        guard let receiver, let observed, !pushing, Send.responds(receiver, "objectValue") else { return }
+        var value = Send.object(receiver, "objectValue").map(NSObject.init)
+        // Text typed in a field with a formatter is the formatter's object
+        // for it, as AppKit validates the editing; text the formatter
+        // can't read changes nothing.
+        if let text = value, text.responds(to: "UTF8String"), Send.responds(receiver, "formatter"),
+           let formatter = Send.object(receiver, "formatter") {
+            typealias Parse = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutablePointer<UnsafeMutableRawPointer?>,
+                                              UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
+            var parsed: UnsafeMutableRawPointer?
+            guard unsafeBitCast(ObjCRuntime.msgSend, to: Parse.self)(formatter, ObjCRuntime.selector("getObjectValue:forString:errorDescription:"),
+                                                                    &parsed, text.objcObject, nil) else { return }
+            value = parsed.map(NSObject.init)
+        }
+        let options = self.options?.as(NSDictionary.self)
+        var transformer = options?.object(forKey: "NSValueTransformer")?.objcObject
+        if let name = options?.object(forKey: "NSValueTransformerName"), let transformerClass = Classes.named("NSValueTransformer") {
+            transformer = Send.object(transformerClass.pointer, "valueTransformerForName:", name.objcObject)
+        }
+        if let transformer {
+            guard Send.bool(Send.object(transformer, "class"), "allowsReverseTransformation") else { return }
+            value = Send.object(transformer, "reverseTransformedValue:", value?.objcObject).map(NSObject.init)
+        }
+        Trace.log("binding: \(keyPath) takes \(value.map { Send.object($0.objcObject, "description").map { String(objCArgument: $0) } ?? "" } ?? "nil")")
+        pushing = true
+        defer { pushing = false }
+        let path = NSObject(objCReturnValue: keyPath.objCReturnValue())
+        Send.void(observed.objcObject, "setValue:forKeyPath:", value?.objcObject, path.objcObject)
+    }
 
     func start() {
         guard let observed else { return }
@@ -57,7 +101,7 @@ final class _PerryBinding: NSObject {
 
     /// The bound value, transformed as the options say, set in the receiver.
     func update() {
-        guard let receiver, let observed else { return }
+        guard let receiver, let observed, !pushing else { return }
         var value = observed.sendValue(forKeyPath: keyPath)
         let options = self.options?.as(NSDictionary.self)
         if let name = options?.object(forKey: "NSValueTransformerName"),
@@ -132,6 +176,14 @@ enum BindingTable {
         binding.options = options
         bindings[receiver, default: [:]][name] = binding
         binding.start()
+    }
+
+    /// A control's value, changed by the user, to the object its "value"
+    /// is bound to; `continuously` for a change that isn't the last (text
+    /// being typed), which only a binding that updates continuously takes.
+    static func pushValue(of receiver: UnsafeMutableRawPointer, continuously: Bool = false) {
+        guard let binding = bindings[receiver]?["value"], !continuously || binding.updatesContinuously else { return }
+        binding.push()
     }
 
     static func unbind(_ receiver: UnsafeMutableRawPointer, _ name: String) {
