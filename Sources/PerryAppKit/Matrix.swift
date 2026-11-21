@@ -107,6 +107,31 @@ open class NSMatrix: NSControl {
         (keyRow, keyColumn) = (selectedRow, selectedColumn)
     }
 
+    /// A control's keys and the ones initWithCoder: reads, the flags packed
+    /// as it unpacks them.
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(with coder: NSObject?) {
+        super.encode(with: coder)
+        guard let coder else { return }
+        let encoder = Encoder(coder: coder)
+        func bit(_ value: Bool, _ mask: UInt32) -> UInt32 { value ? mask : 0 }
+        var flags: UInt32 = mode == .radio ? 0x4000_0000 : mode == .list ? 0x2000_0000 : mode == .highlight ? 0x8000_0000 : 0
+        flags |= bit(allowsEmptySelection, 0x1000_0000) | bit(selectionByRect, 0x0400_0000) | bit(drawsCellBackground, 0x0200_0000)
+        flags |= bit(drawsBackground, 0x0100_0000) | bit(autosizesCells, 0x0080_0000) | bit(tabKeyTraversesCells, 0x0020_0000)
+        encoder.integer(Int(flags), "NSMatrixFlags")
+        encoder.integer(rows, "NSNumRows")
+        encoder.integer(columns, "NSNumCols")
+        encoder.object(NSMutableArray.of(cells), "NSCells")
+        encoder.size(cellSize, "NSCellSize")
+        encoder.size(intercellSpacing, "NSIntercellSpacing")
+        encoder.object(prototype, "NSProtoCell")
+        encoder.object(backgroundColor, "NSBackgroundColor")
+        encoder.object(cellBackgroundColor, "NSCellBackgroundColor")
+        if selectedRow >= 0, selectedColumn >= 0, selectedRow * columns + selectedColumn < cells.count {
+            encoder.object(cells[selectedRow * columns + selectedColumn], "NSSelectedCell")
+        }
+    }
+
     /// A radio matrix that can't be empty has a cell on.
     func selectInitially() {
         if let index = cells.firstIndex(where: { $0.state != 0 }) {
