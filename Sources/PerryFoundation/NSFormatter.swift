@@ -427,6 +427,8 @@ final class NumberFormatterStorage {
     var generatesDecimalNumbers = false
     /// Whether a parsed string may have a fraction.
     var allowsFloats = true
+    /// The fields the formatter was unarchived with, to archive it again.
+    var archived: ArchivedFields?
     var pattern: String?
     var attributes: [UInt32: Int32] = [:]
     var doubleAttributes: [UInt32: Double] = [:]
@@ -618,6 +620,44 @@ public final class NSNumberFormatter: NSFormatter {
     func dealloc() {
         Storage.set(objcObject, nil)
         ObjC.superDealloc(objcObject, from: NumberFormatters.formatterClass)
+    }
+
+    private static let archivedFields: [ArchivedFields.Field] = [
+        ("NS.attributes", .object), ("NS.positiveformat", .object), ("NS.negativeformat", .object), ("NS.positiveattrs", .object),
+        ("NS.negativeattrs", .object), ("NS.zero", .object), ("NS.nil", .object), ("NS.nan", .object), ("NS.min", .object),
+        ("NS.max", .object), ("NS.rounding", .object), ("NS.decimal", .object), ("NS.thousand", .object), ("NS.hasthousands", .bool),
+        ("NS.localized", .bool), ("NS.allowsfloats", .bool),
+    ]
+
+    /// From a keyed archive or nib: the style, the formats and whether
+    /// fractions are allowed are used; the rest is kept to archive again.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject) -> Self {
+        let fields = ArchivedFields(coder: coder.id, fields: Self.archivedFields)
+        let storage = storage
+        if let attributes = fields.object("NS.attributes"), ObjC.isKind(attributes, of: Dictionaries.dictionaryClass),
+           let style = ObjC.send(attributes, ObjC.selector("objectForKey:"), Strings.autoreleased("numberStyle")) {
+            storage.setStyle(ObjC.sendInt(style, ObjC.selector("integerValue"), nil))
+        }
+        if let positive = fields.string("NS.positiveformat"), !positive.isEmpty {
+            let negative = fields.string("NS.negativeformat") ?? ""
+            storage.pattern = negative.isEmpty || negative == positive ? positive : positive + ";" + negative
+        }
+        if let allows = fields.bool("NS.allowsfloats") { storage.allowsFloats = allows }
+        storage.archived = fields
+        storage.changed()
+        return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: ObjCObject) {
+        if let archived = storage.archived { return archived.encode(coder: coder.id) }
+        typealias EncodeObject = @convention(c) (id?, SEL, id?, id?) -> Void
+        typealias EncodeBool = @convention(c) (id?, SEL, Bool, id?) -> Void
+        let object = unsafeBitCast(ObjC.msgSend, to: EncodeObject.self), bool = unsafeBitCast(ObjC.msgSend, to: EncodeBool.self)
+        object(coder.id, ObjC.selector("encodeObject:forKey:"), Strings.autoreleased(storage.positiveFormat), Strings.autoreleased("NS.positiveformat"))
+        object(coder.id, ObjC.selector("encodeObject:forKey:"), Strings.autoreleased(storage.negativeFormat), Strings.autoreleased("NS.negativeformat"))
+        bool(coder.id, ObjC.selector("encodeBool:forKey:"), storage.allowsFloats, Strings.autoreleased("NS.allowsfloats"))
     }
 
     @ObjCMethod("stringFromNumber:") func string(from number: ObjCObject) -> String? { storage.string(from: number.id) }
