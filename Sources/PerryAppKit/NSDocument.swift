@@ -41,6 +41,7 @@ extension NSObject {
     func sendReadFromURL(_ url: NSObject?, _ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool
     @ObjCMethod("writeToURL:ofType:error:")
     func sendWriteToURL(_ url: NSObject?, _ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool
+    @ObjCMethod("init") func sendInit() -> NSObject?
     @ObjCMethod("initWithType:error:")
     func sendInitWithType(_ type: String?, _ error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject?
     @ObjCMethod("makeWindowControllers") func sendMakeWindowControllers()
@@ -88,31 +89,33 @@ open class NSDocument: NSObject {
     @ObjCMethod("init")
     public required override init() { super.init() }
 
+    // The other initializers send -init, as AppKit's do, so a subclass's
+    // runs (Xcode's file documents set their flags there, among them that
+    // the document is of a file on disk, without which Save asks for a
+    // name).
+
     @ObjCMethod("initWithType:error:")
-    public required init(type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) {
-        fileType = type
-        super.init()
+    func initialize(type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> NSObject? {
+        guard let document = sendInit()?.as(NSDocument.self) else { return nil }
+        document.fileType = type
+        return document
     }
 
     /// A document of a file, as documents before Mac OS X 10.4 were made
     /// (Xcode's editor's): its path and type, read through -readFromFile:
     /// ofType: (or -readFromURL:ofType:error:); none if it can't be read.
     @ObjCMethod("initWithContentsOfFile:ofType:")
-    public required init?(contentsOfFile path: String?, ofType type: String?) {
-        super.init()
-        guard let path, let url = DocumentURL.make(path: path) else { return nil }
-        fileURL = url
-        fileType = type
-        guard NSDocumentController.read(self, url, type, nil) else { return nil }
+    func initialize(contentsOfFile path: String?, ofType type: String?) -> NSObject? {
+        initialize(contentsOfURL: path.flatMap { DocumentURL.make(path: $0) }, ofType: type)
     }
 
     @ObjCMethod("initWithContentsOfURL:ofType:")
-    public required init?(contentsOfURL url: NSObject?, ofType type: String?) {
-        super.init()
-        guard let url else { return nil }
-        fileURL = url
-        fileType = type
-        guard NSDocumentController.read(self, url, type, nil) else { return nil }
+    func initialize(contentsOfURL url: NSObject?, ofType type: String?) -> NSObject? {
+        guard let url, let document = sendInit()?.as(NSDocument.self) else { return nil }
+        document.fileURL = url
+        document.fileType = type
+        guard NSDocumentController.read(document, url, type, nil) else { return nil }
+        return document
     }
 
     // MARK: Class properties
@@ -266,16 +269,120 @@ open class NSDocument: NSObject {
         return nil
     }
 
-    @ObjCMethod("writeToURL:ofType:error:")
-    func write(to url: NSObject?, type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
-        guard let data = self.sendDataOfType(type, error), let path = url?.unsafeCast(to: DocumentURL.self).path() else { return false }
-        guard data.unsafeCast(to: DocumentData.self).write(toFile: path, atomically: true) else {
+    /// Whether the document's class has its own method for a selector.
+    private func overrides(_ selector: String) -> Bool {
+        Methods.overrides(objcObject, selector, of: NSDocument.objCClass.pointer)
+    }
+
+    private typealias URLError = UnsafeMutablePointer<UnsafeMutableRawPointer?>?
+    private typealias PathWriter = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
+    private typealias PathSaver = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Int) -> Bool
+    private typealias OriginalSaver = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                                      UnsafeMutableRawPointer?, Int) -> Bool
+    private typealias URLSaver = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                                 Int, URLError) -> Bool
+    private typealias OriginalURLSaver = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?,
+                                                         Int, UnsafeMutableRawPointer?, URLError) -> Bool
+
+    private func path(_ url: NSObject?) -> String? { url?.unsafeCast(to: DocumentURL.self).path() }
+
+    private func write(_ data: NSObject?, toFile path: String?, error: URLError) -> Bool {
+        guard let data, let path, data.unsafeCast(to: DocumentData.self).write(toFile: path, atomically: true) else {
             // NSFileWriteUnknownError.
-            error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 512, userInfo: nil).objcObject
+            if error?.pointee == nil { error?.pointee = DocumentError.make(domain: "NSCocoaErrorDomain", code: 512, userInfo: nil).objcObject }
             return false
         }
         return true
     }
+
+    /// The document's contents to a file: through -writeToFile:ofType: when
+    /// the class has its own (a document from before Mac OS X 10.4, as
+    /// Xcode's are), else the data of -dataOfType:error:.
+    @ObjCMethod("writeToURL:ofType:error:")
+    func write(to url: NSObject?, type: String?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        if overrides("writeToFile:ofType:"), let path = path(url) {
+            return unsafeBitCast(ObjCRuntime.msgSend, to: PathWriter.self)(objcObject, ObjCRuntime.selector("writeToFile:ofType:"),
+                                                                            path.objCArgument(), type?.objCArgument())
+        }
+        return write(self.sendDataOfType(type, error), toFile: path(url), error: error)
+    }
+
+    /// As -writeToURL:ofType:error:, or through -writeToFile:ofType:
+    /// originalFile:saveOperation: when the class has its own.
+    @ObjCMethod("writeToURL:ofType:forSaveOperation:originalContentsURL:error:")
+    func write(to url: NSObject?, type: String?, operation: Int, original: NSObject?, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        if overrides("writeToFile:ofType:originalFile:saveOperation:"), let path = path(url) {
+            return unsafeBitCast(ObjCRuntime.msgSend, to: OriginalSaver.self)(
+                objcObject, ObjCRuntime.selector("writeToFile:ofType:originalFile:saveOperation:"),
+                path.objCArgument(), type?.objCArgument(), self.path(original)?.objCArgument(), operation)
+        }
+        return self.sendWriteToURL(url, type, error)
+    }
+
+    @ObjCMethod("writeSafelyToURL:ofType:forSaveOperation:error:")
+    func writeSafely(to url: NSObject?, type: String?, operation: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        unsafeBitCast(ObjCRuntime.msgSend, to: OriginalURLSaver.self)(
+            objcObject, ObjCRuntime.selector("writeToURL:ofType:forSaveOperation:originalContentsURL:error:"),
+            url?.objcObject, type?.objCArgument(), operation, fileURL?.objcObject, error)
+    }
+
+    /// Saves to a file and, unless it's a copy (NSSaveToOperation), makes it
+    /// the document's file with no changes to save. A class with its own
+    /// -writeWithBackupToFile:ofType:saveOperation: saves through that.
+    @ObjCMethod("saveToURL:ofType:forSaveOperation:error:")
+    func save(to url: NSObject?, type: String?, operation: Int, error: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Bool {
+        let saved: Bool
+        if overrides("writeWithBackupToFile:ofType:saveOperation:"), let path = path(url) {
+            saved = unsafeBitCast(ObjCRuntime.msgSend, to: PathSaver.self)(
+                objcObject, ObjCRuntime.selector("writeWithBackupToFile:ofType:saveOperation:"), path.objCArgument(), type?.objCArgument(), operation)
+        } else {
+            saved = unsafeBitCast(ObjCRuntime.msgSend, to: URLSaver.self)(
+                objcObject, ObjCRuntime.selector("writeSafelyToURL:ofType:forSaveOperation:error:"),
+                url?.objcObject, type?.objCArgument(), operation, error)
+        }
+        guard saved else { return false }
+        if operation != 2 {
+            fileURL = url
+            fileType = type
+            // NSChangeCleared, sent so a subclass's runs.
+            typealias Change = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, Int) -> Void
+            unsafeBitCast(ObjCRuntime.msgSend, to: Change.self)(objcObject, ObjCRuntime.selector("updateChangeCount:"), 2)
+        }
+        return true
+    }
+
+    // Saving by path, as documents did before Mac OS X 10.4: each step the
+    // next one down, for a class that sends them to super.
+
+    @ObjCMethod("writeWithBackupToFile:ofType:saveOperation:")
+    func writeWithBackup(toFile path: String?, type: String?, operation: Int) -> Bool {
+        unsafeBitCast(ObjCRuntime.msgSend, to: OriginalSaver.self)(
+            objcObject, ObjCRuntime.selector("writeToFile:ofType:originalFile:saveOperation:"),
+            path?.objCArgument(), type?.objCArgument(), self.path(fileURL)?.objCArgument(), operation)
+    }
+
+    @ObjCMethod("writeToFile:ofType:originalFile:saveOperation:")
+    func write(toFile path: String?, type: String?, originalFile: String?, operation: Int) -> Bool {
+        unsafeBitCast(ObjCRuntime.msgSend, to: PathWriter.self)(objcObject, ObjCRuntime.selector("writeToFile:ofType:"),
+                                                                 path?.objCArgument(), type?.objCArgument())
+    }
+
+    @ObjCMethod("writeToFile:ofType:")
+    func write(toFile path: String?, type: String?) -> Bool {
+        if overrides("dataRepresentationOfType:") {
+            typealias Representation = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+            let data = unsafeBitCast(ObjCRuntime.msgSend, to: Representation.self)(objcObject, ObjCRuntime.selector("dataRepresentationOfType:"),
+                                                                                    type?.objCArgument())
+            return write(data.map { NSObject($0) }, toFile: path, error: nil)
+        }
+        var error: UnsafeMutableRawPointer?
+        return write(self.sendDataOfType(type, &error), toFile: path, error: nil)
+    }
+
+    @ObjCMethod("dataRepresentationOfType:") func dataRepresentation(ofType type: String?) -> NSObject? { nil }
+    @ObjCMethod("keepBackupFile") func keepBackupFile() -> Bool { false }
+    @ObjCMethod("fileAttributesToWriteToFile:ofType:saveOperation:")
+    func fileAttributes(toFile path: String?, type: String?, operation: Int) -> NSObject? { nil }
 
     @ObjCMethod("prepareSavePanel:") func prepareSavePanel(_ panel: NSObject?) -> Bool { true }
 
@@ -287,7 +394,9 @@ open class NSDocument: NSObject {
             return
         }
         var error: UnsafeMutableRawPointer?
-        if self.sendWriteToURL(url, fileType, &error) { changeCount = 0 }
+        let saved = unsafeBitCast(ObjCRuntime.msgSend, to: URLSaver.self)(
+            objcObject, ObjCRuntime.selector("saveToURL:ofType:forSaveOperation:error:"), url.objcObject, fileType?.objCArgument(), 0, &error)
+        if !saved { appKitWarning("NSDocument: \(displayName()) wasn't saved") }
     }
     @ObjCMethod("saveDocumentAs:") func saveDocumentAs(_ sender: NSObject?) { saveDocument(sender) }
     @ObjCMethod("saveToURL:ofType:forSaveOperation:completionHandler:")
