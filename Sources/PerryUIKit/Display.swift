@@ -55,7 +55,9 @@ enum Display {
         let native = SDLSetup.nativeScale() ?? 1
         guard let pixels = SDLSetup.usableDisplaySize() else { return native }
         let fitting = (min(pixels.width, pixels.height) / iPhoneShortSide).rounded(.up)
-        let chosen = native != 1 ? native : max(fitting, 1)
+        // A Mac app's points are the desktop's, as on a Mac's display; an
+        // iPhone app's are enlarged to fill a display that has many more.
+        let chosen = native != 1 || MainProgram.isMac ? native : max(fitting, 1)
         // An iPhone's screen (PERRY_UIKIT_SCREEN=iphone) is a window that
         // fits the usable area, in quarter steps, however small that makes
         // it: 390 by 844 points is taller than a laptop's display at @3x.
