@@ -196,11 +196,25 @@ reports:
     level: 3
     source: body
     notes: Builds a Cocoa document app with its nibs and strings, runs it with Build and Run, and keeps running when it exits; the source editor shows no text, and debugging isn't supported.
+  - pr: 248
+    date: 2026-11-21
+    perry: "82715d3b"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: The source editor shows a file's text with syntax colouring and the folding bar; builds and runs a Cocoa document app as before. Typing in the editor is untested, and debugging isn't supported.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
 
-## Status as of [#237]({{ site.repository_url }}/pull/237)
+## Status as of [#248]({{ site.repository_url }}/pull/248)
 
 Working:
 
@@ -216,11 +230,13 @@ Working:
   exits. Xcode runs programs through Apple's gdb, which Perry answers for
   itself ([#236]({{ site.repository_url }}/pull/236)).
 - Selecting a source file opens an editor in the project window, and
-  editor windows open with their navigation bar.
+  editor windows open with their navigation bar. The editor shows the
+  file's text with syntax colouring and the folding bar in its gutter.
 - Collapsed panes stay hidden instead of drawing over their neighbours.
 
 Broken:
 
-- The source editor shows no text.
+- Line numbers don't show in the editor's gutter, and typing in the
+  editor is untested.
 - Debugging isn't supported: breakpoints are accepted and never hit, and
   there is no stepping or variables view.
