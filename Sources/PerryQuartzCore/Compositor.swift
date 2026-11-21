@@ -379,7 +379,7 @@ final class Compositor {
     /// stroke's, within the bounds when they clip. An animation made at
     /// 3840x2160 has layers that big with a shape the size of a letter, and
     /// drawing the whole layer each frame takes tens of megabytes.
-    fileprivate static func shapeExtent(of layer: CALayer, state: LayerState, shape: ShapeLayerState) -> CGRect? {
+    static func shapeExtent(of layer: CALayer, state: LayerState, shape: ShapeLayerState) -> CGRect? {
         guard state.backgroundColor == nil, state.contents == nil, state.livePixels == nil, state.sharedFrames == nil,
               state.cornerRadius == 0, layer.state.backing == nil, !layer.draws, let path = shape.path else { return nil }
         let box = CG.pathGetBoundingBox(path)
