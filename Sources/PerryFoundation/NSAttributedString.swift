@@ -227,6 +227,18 @@ public class NSAttributedString: NSObject {
         return self
     }
 
+    /// To a keyed archive: the string, and the attributes when one run has
+    /// them all (as a formatter's symbols in a nib do).
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: ObjCObject) {
+        typealias EncodeObject = @convention(c) (id?, SEL, id?, id?) -> Void
+        let encode = unsafeBitCast(ObjC.msgSend, to: EncodeObject.self)
+        encode(coder.id, ObjC.selector("encodeObject:forKey:"), Strings.autoreleased(storage.string), Strings.autoreleased("NSString"))
+        if storage.runs.count == 1 {
+            encode(coder.id, ObjC.selector("encodeObject:forKey:"), storage.runs[0].attributes, Strings.autoreleased("NSAttributes"))
+        }
+    }
+
     @ObjCMethod("initWithString:attributes:")
     func initialize(string: String?, attributes: ObjCObject?) -> Self {
         Storage.set(objcObject, AttributedStorage(units: Array((string ?? "").utf16), attributes: attributes?.id))
