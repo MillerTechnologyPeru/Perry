@@ -1,6 +1,5 @@
-import DBUS
+import DBus
 import Glibc
-import Logging
 
 // NetworkManager, Linux's network service, through its D-Bus API on the
 // system bus. CoreWLAN's interfaces and scans read live state from it: the
@@ -54,25 +53,22 @@ actor NetworkManager {
     static let shared = NetworkManager()
 
     private enum Phase {
-        case idle, connecting, connected(DBusClient.Connection), unavailable
+        case idle, connecting, connected(DBusConnection), unavailable
     }
 
     private var phase = Phase.idle
-    private var waiting: [CheckedContinuation<DBusClient.Connection?, Never>] = []
-
-    private static let logger: Logger = {
-        var logger = Logger(label: "perry.corewlan.dbus")
-        logger.logLevel = .critical
-        return logger
-    }()
+    private var waiting: [CheckedContinuation<DBusConnection?, Never>] = []
 
     // MARK: Connection
 
     /// The connection, made on first use; nil when there is no system bus or
     /// NetworkManager is not on it.
-    func connection() async -> DBusClient.Connection? {
+    func connection() async -> DBusConnection? {
         switch phase {
-        case .connected(let connection): return connection
+        case .connected(let connection):
+            if await connection.isConnected { return connection }
+            phase = .unavailable
+            return nil
         case .unavailable: return nil
         case .idle:
             phase = .connecting
@@ -84,15 +80,13 @@ actor NetworkManager {
 
     private static func run() async {
         do {
-            try await DBusClient.withSystemBus(auth: .external(userID: String(getuid())), logger: logger) { connection in
-                try await NetworkManager.shared.connected(connection)
-                while true { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
-            }
-        } catch {}
-        await NetworkManager.shared.closed()
+            await NetworkManager.shared.connected(try await DBusConnection.connect(to: .system))
+        } catch {
+            await NetworkManager.shared.closed()
+        }
     }
 
-    private func connected(_ connection: DBusClient.Connection) async {
+    private func connected(_ connection: DBusConnection) async {
         phase = .connected(connection)
         let waiters = waiting
         waiting = []
@@ -113,35 +107,37 @@ actor NetworkManager {
 
     // MARK: Calls
 
-    private func call(_ path: String, _ interface: String, _ method: String, _ body: [DBusValue] = [],
-                      signature: String? = nil) async throws -> [DBusValue] {
+    private func call(_ path: String, _ interface: String, _ method: String, _ body: [DBusValue] = []) async throws -> [DBusValue] {
         guard let connection = await connection() else {
             throw NMError(name: "org.freedesktop.DBus.Error.ServiceUnknown", message: "NetworkManager is not running")
         }
-        let request = DBusRequest.createMethodCall(destination: NM.service, path: path, interface: interface,
-                                                   method: method, body: body, signature: signature)
-        guard let reply = try await connection.send(request) else { return [] }
-        if case .error = reply.messageType {
-            let name = reply.headerFields.first { $0.code == .errorName }.flatMap { $0.variant.value.stringValue }
-            throw NMError(name: name ?? "org.freedesktop.NetworkManager.Error.Failed", message: reply.body.first?.stringValue ?? "")
+        guard let destination = DBusBusName(rawValue: NM.service), let path = DBusObjectPath(rawValue: path),
+              let interface = DBusInterface(rawValue: interface), let method = DBusMember(rawValue: method) else {
+            throw NMError(name: "org.freedesktop.DBus.Error.InvalidArgs", message: "\(path) \(interface).\(method)")
         }
-        return reply.body
+        do {
+            // No timeout: a call waits for its answer.
+            return try await connection.callMethod(destination: destination, path: path, interface: interface, method: method,
+                                                   arguments: body, timeout: nil)
+        } catch let error as DBusError {
+            throw NMError(name: error.name.rawValue, message: error.message)
+        }
     }
 
     /// Every property of an object's interface, a{sv}.
     private func getAll(_ path: String, _ interface: String) async -> [String: DBusValue] {
-        guard let reply = try? await call(path, NM.properties, "GetAll", [.string(interface)], signature: "s"),
+        guard let reply = try? await call(path, NM.properties, "GetAll", [.string(interface)]),
               case .dictionary(let entries)? = reply.first else { return [:] }
         var properties: [String: DBusValue] = [:]
-        for (name, value) in entries {
-            guard let name = name.stringValue else { continue }
-            properties[name] = value.unwrapped
+        for entry in entries {
+            guard let name = entry.key.stringValue else { continue }
+            properties[name] = entry.value.unwrapped
         }
         return properties
     }
 
     private func get(_ path: String, _ interface: String, _ property: String) async -> DBusValue? {
-        guard let reply = try? await call(path, NM.properties, "Get", [.string(interface), .string(property)], signature: "ss") else {
+        guard let reply = try? await call(path, NM.properties, "Get", [.string(interface), .string(property)]) else {
             return nil
         }
         return reply.first?.unwrapped
@@ -185,8 +181,7 @@ actor NetworkManager {
     func setWirelessEnabled(_ enabled: Bool) async -> Bool {
         do {
             _ = try await call(NM.rootPath, NM.properties, "Set",
-                               [.string(NM.manager), .string("WirelessEnabled"), .variant(DBusVariant(.boolean(enabled)))],
-                               signature: "ssv")
+                               [.string(NM.manager), .string("WirelessEnabled"), .variant(DBusVariant(.boolean(enabled)))])
             return true
         } catch { return false }
     }
@@ -234,7 +229,7 @@ actor NetworkManager {
     func scan(deviceAt path: String, timeout: Double = 8) async -> [NMAccessPoint] {
         let before = await lastScan(ofDevice: path)
         do {
-            _ = try await call(path, NM.wireless, "RequestScan", [.dictionary([:])], signature: "a{sv}")
+            _ = try await call(path, NM.wireless, "RequestScan", [.options()])
             wlanTrace("RequestScan(\(path)) accepted")
         } catch let error as NMError {
             wlanTrace("RequestScan(\(path)) refused: \(error.name)")
@@ -259,21 +254,18 @@ actor NetworkManager {
 
 // MARK: - D-Bus value helpers
 
-extension DBusValue {
+typealias DBusValue = DBusMessageArgument
+typealias DBusVariant = DBusMessageArgument.Variant
+
+extension DBusMessageArgument {
     var unwrapped: DBusValue {
-        if case .variant(let variant) = self { return variant.value.unwrapped }
+        if case .variant(let variant) = self { return variant.element.unwrapped }
         return self
     }
 
-    var stringValue: String? {
-        switch unwrapped {
-        case .string(let string), .objectPath(let string): string
-        default: nil
-        }
-    }
-
+    /// An object path's text, or a string's.
     var pathValue: String? {
-        if case .objectPath(let path) = unwrapped { return path }
+        if case .objectPath(let path) = unwrapped { return path.rawValue }
         return stringValue
     }
 
@@ -299,5 +291,11 @@ extension DBusValue {
     var bytes: [UInt8]? {
         guard case .array(let elements) = unwrapped else { return nil }
         return elements.compactMap { if case .byte(let byte) = $0 { byte } else { nil } }
+    }
+
+    /// a{sv}, each value in a variant.
+    static func options(_ entries: [String: DBusValue] = [:]) -> DBusValue {
+        .dictionary(Dictionary(keyType: .string, valueType: .variant,
+                               entries.sorted { $0.key < $1.key }.map { .init(key: .string($0.key), value: .variant(DBusVariant($0.value))) })!)
     }
 }
