@@ -1,4 +1,4 @@
-import DBUS
+import DBus
 import PerryObjCInterop
 
 // CBPeripheral: a BlueZ device (org.bluez.Device1) and its GATT database,
@@ -202,7 +202,7 @@ open class CBPeripheral: CBPeer {
         peripheral.reading.insert(path)
         Task {
             let result = await Result { try await BlueZ.shared.call(path, BlueZInterface.characteristic, "ReadValue",
-                                                                    [.dictionary([:])], signature: "a{sv}") }
+                                                                    [.options()]) }
             Dispatch.on(owner.value.queue) {
                 let characteristic = target.value
                 owner.value.peripheral.reading.remove(path)
@@ -225,10 +225,10 @@ open class CBPeripheral: CBPeer {
         guard let data, let characteristic else { return }
         let owner = Unchecked(self), target = Unchecked(characteristic), path = characteristic.attribute.path
         let bytes = data.byteArray
-        let options: DBusValue = .dictionary([.string("type"): .variant(DBusVariant(.string(type == 1 ? "command" : "request")))])
+        let options: DBusValue = .options(["type": .string(type == 1 ? "command" : "request")])
         Task {
             let result = await Result { try await BlueZ.shared.call(path, BlueZInterface.characteristic, "WriteValue",
-                                                                    [.byteArray(bytes), options], signature: "aya{sv}") }
+                                                                    [.byteArray(bytes), options]) }
             guard type != 1 else { return }
             Dispatch.on(owner.value.queue) {
                 var error: NSError?
@@ -266,7 +266,7 @@ open class CBPeripheral: CBPeer {
         let owner = Unchecked(self), target = Unchecked(descriptor), path = descriptor.attribute.path
         Task {
             let result = await Result { try await BlueZ.shared.call(path, BlueZInterface.descriptor, "ReadValue",
-                                                                    [.dictionary([:])], signature: "a{sv}") }
+                                                                    [.options()]) }
             Dispatch.on(owner.value.queue) {
                 var error: NSError?
                 switch result {
@@ -287,7 +287,7 @@ open class CBPeripheral: CBPeer {
         let bytes = data.byteArray
         Task {
             let result = await Result { try await BlueZ.shared.call(path, BlueZInterface.descriptor, "WriteValue",
-                                                                    [.byteArray(bytes), .dictionary([:])], signature: "aya{sv}") }
+                                                                    [.byteArray(bytes), .options()]) }
             Dispatch.on(owner.value.queue) {
                 var error: NSError?
                 if case .failure(let failure) = result { error = BluetoothErrors.error(failure, reading: false) }

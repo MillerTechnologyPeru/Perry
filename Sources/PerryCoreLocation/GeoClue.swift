@@ -1,6 +1,5 @@
-import DBUS
+import DBus
 import Glibc
-import Logging
 
 // GeoClue, the desktop's location service, through its D-Bus API on the
 // system bus (DBUS_SYSTEM_BUS_ADDRESS, or /var/run/dbus/system_bus_socket).
@@ -49,11 +48,11 @@ actor GeoClue {
     static let shared = GeoClue()
 
     private enum Phase {
-        case idle, connecting, connected(DBusClient.Connection), unavailable
+        case idle, connecting, connected(DBusConnection), unavailable
     }
 
     private var phase = Phase.idle
-    private var waiting: [CheckedContinuation<DBusClient.Connection?, Never>] = []
+    private var waiting: [CheckedContinuation<DBusConnection?, Never>] = []
     /// The client, once started; nil before and when refused.
     private var client: String?
     private var answer: GeoClueAnswer?
@@ -61,19 +60,16 @@ actor GeoClue {
     private var latest: GeoClueFix?
     private var observers: [@Sendable (GeoClueFix) -> Void] = []
 
-    private static let logger: Logger = {
-        var logger = Logger(label: "perry.corelocation.dbus")
-        logger.logLevel = .critical
-        return logger
-    }()
-
     // MARK: Connection
 
     /// The system bus, with GeoClue on it or able to start; nil when there
     /// is no bus or no GeoClue.
-    private func connection() async -> DBusClient.Connection? {
+    private func connection() async -> DBusConnection? {
         switch phase {
-        case .connected(let connection): return connection
+        case .connected(let connection):
+            if await connection.isConnected { return connection }
+            phase = .unavailable
+            return nil
         case .unavailable: return nil
         case .idle:
             phase = .connecting
@@ -88,29 +84,29 @@ actor GeoClue {
     func isAvailable() async -> Bool { await connection() != nil }
 
     private static func run() async {
+        var connection: DBusConnection?
         do {
-            try await DBusClient.withSystemBus(auth: .external(userID: String(getuid())), logger: logger) { connection in
-                try await GeoClue.shared.connected(connection)
-                while true { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
-            }
-        } catch {}
-        await GeoClue.shared.closed()
+            connection = try await DBusConnection.connect(to: .system)
+            try await GeoClue.shared.connected(connection!)
+        } catch {
+            await connection?.close()
+            await GeoClue.shared.closed()
+        }
     }
 
-    private func connected(_ connection: DBusClient.Connection) async throws {
-        let owned = try await Self.call(connection, destination: "org.freedesktop.DBus", path: "/org/freedesktop/DBus",
-                                        interface: "org.freedesktop.DBus", method: "NameHasOwner", body: [.string(GeoClueName.service)])
-        var present = owned.first?.boolean ?? false
-        if !present {
-            let names = try await Self.call(connection, destination: "org.freedesktop.DBus", path: "/org/freedesktop/DBus",
-                                            interface: "org.freedesktop.DBus", method: "ListActivatableNames")
-            present = names.first?.array?.contains { $0.string == GeoClueName.service } ?? false
-        }
+    private func connected(_ connection: DBusConnection) async throws {
+        guard let service = DBusBusName(rawValue: GeoClueName.service), let client = DBusInterface(rawValue: GeoClueName.client),
+              let updated = DBusMember(rawValue: "LocationUpdated") else { return }
+        var present = try await connection.nameHasOwner(service)
+        if !present { present = try await connection.listActivatableNames().contains(GeoClueName.service) }
         guard present else { throw GeoClueError(name: "org.freedesktop.DBus.Error.ServiceUnknown", message: "GeoClue is not there") }
-        _ = try await connection.send(.createMethodCall(
-            destination: "org.freedesktop.DBus", path: "/org/freedesktop/DBus", interface: "org.freedesktop.DBus", method: "AddMatch",
-            body: [.string("type='signal',sender='\(GeoClueName.service)',interface='\(GeoClueName.client)',member='LocationUpdated'")]))
-        let updates = await connection.subscribeToSignal(interface: GeoClueName.client, member: "LocationUpdated")
+        // The bus sends only GeoClue's; the connection hands them on unsorted, as it knows a sender
+        // by its unique name, not the one the rule gives.
+        let (updates, heard) = AsyncStream<DBusMessage>.makeStream()
+        await connection.setMessageHandler { message in
+            if message.type == .signal, message.interface == client, message.member == updated { heard.yield(message) }
+        }
+        try await connection.addMatch(.signal(interface: client, member: updated, sender: service))
         Task { for await message in updates { await self.locationUpdated(message) } }
         phase = .connected(connection)
         let waiters = waiting
@@ -126,17 +122,19 @@ actor GeoClue {
         if client == nil { finish(.unavailable) }
     }
 
-    private static func call(_ connection: DBusClient.Connection, destination: String = GeoClueName.service, path: String,
-                             interface: String, method: String, body: [DBusValue] = [],
-                             signature: String? = nil) async throws -> [DBusValue] {
-        let request = DBusRequest.createMethodCall(destination: destination, path: path, interface: interface,
-                                                   method: method, body: body, signature: signature)
-        guard let reply = try await connection.send(request) else { return [] }
-        if case .error = reply.messageType {
-            let name = reply.headerFields.first { $0.code == .errorName }.flatMap { $0.variant.value.string }
-            throw GeoClueError(name: name ?? "org.freedesktop.DBus.Error.Failed", message: reply.body.first?.string ?? "")
+    private static func call(_ connection: DBusConnection, destination: String = GeoClueName.service, path: String,
+                             interface: String, method: String, body: [DBusValue] = []) async throws -> [DBusValue] {
+        guard let destination = DBusBusName(rawValue: destination), let path = DBusObjectPath(rawValue: path),
+              let interface = DBusInterface(rawValue: interface), let method = DBusMember(rawValue: method) else {
+            throw GeoClueError(name: "org.freedesktop.DBus.Error.InvalidArgs", message: "\(path) \(interface).\(method)")
         }
-        return reply.body
+        do {
+            // No timeout: a call waits for its answer, which may be the user's.
+            return try await connection.callMethod(destination: destination, path: path, interface: interface, method: method,
+                                                   arguments: body, timeout: nil)
+        } catch let error as DBusError {
+            throw GeoClueError(name: error.name.rawValue, message: error.message)
+        }
     }
 
     // MARK: Authorization
@@ -166,11 +164,10 @@ actor GeoClue {
         do {
             let reply = try await Self.call(connection, path: "/org/freedesktop/GeoClue2/Manager",
                                             interface: GeoClueName.manager, method: "GetClient")
-            guard let path = reply.first?.objectPath else { return finish(.unavailable) }
+            guard let path = reply.first?.pathValue else { return finish(.unavailable) }
             for (property, value) in [("DesktopId", DBusValue.string(desktopID)), ("RequestedAccuracyLevel", .uint32(level))] {
                 _ = try await Self.call(connection, path: path, interface: GeoClueName.properties, method: "Set",
-                                        body: [.string(GeoClueName.client), .string(property), .variant(DBusVariant(value))],
-                                        signature: "ssv")
+                                        body: [.string(GeoClueName.client), .string(property), .variant(DBusVariant(value))])
             }
             client = path
             // GeoClue asks the agent before it answers.
@@ -204,31 +201,60 @@ actor GeoClue {
     }
 
     private func locationUpdated(_ message: DBusMessage) async {
-        let sender = message.headerFields.first { $0.code == .path }.flatMap { $0.variant.value.objectPath }
-        guard let client, sender == nil || sender == client, message.body.count >= 2, let path = message.body[1].objectPath,
+        let sender = message.path?.rawValue
+        guard let client, sender == nil || sender == client, message.arguments.count >= 2, let path = message.arguments[1].pathValue,
               case .connected(let connection) = phase else { return }
         guard let reply = try? await Self.call(connection, path: path, interface: GeoClueName.properties, method: "GetAll",
                                                body: [.string(GeoClueName.location)]),
               case .dictionary(let entries)? = reply.first else { return }
         var properties: [String: DBusValue] = [:]
-        for (key, value) in entries {
-            guard let key = key.string else { continue }
-            if case .variant(let variant) = value { properties[key] = variant.value } else { properties[key] = value }
+        for entry in entries {
+            guard let key = entry.key.stringValue else { continue }
+            properties[key] = entry.value.variantValue ?? entry.value
         }
-        guard let latitude = properties["Latitude"]?.double, let longitude = properties["Longitude"]?.double else { return }
+        guard let latitude = properties["Latitude"]?.doubleValue, let longitude = properties["Longitude"]?.doubleValue else { return }
         func known(_ name: String, below: Double = -1e300) -> Double? {
-            guard let value = properties[name]?.double, value > below else { return nil }
+            guard let value = properties[name]?.doubleValue, value > below else { return nil }
             return value
         }
         var timestamp: Double?
-        if case .structure(let parts)? = properties["Timestamp"], parts.count == 2,
+        if case .struct(let parts)? = properties["Timestamp"], parts.count == 2,
            case .uint64(let seconds) = parts[0], case .uint64(let microseconds) = parts[1] {
             timestamp = Double(seconds) + Double(microseconds) / 1_000_000
         }
-        let fix = GeoClueFix(latitude: latitude, longitude: longitude, accuracy: properties["Accuracy"]?.double ?? 0,
+        let fix = GeoClueFix(latitude: latitude, longitude: longitude, accuracy: properties["Accuracy"]?.doubleValue ?? 0,
                              altitude: known("Altitude"), speed: known("Speed", below: -0.5),
                              heading: known("Heading", below: -0.5), timestamp: timestamp)
         latest = fix
         observers.forEach { $0(fix) }
+    }
+}
+
+// MARK: - D-Bus value helpers
+
+typealias DBusValue = DBusMessageArgument
+typealias DBusVariant = DBusMessageArgument.Variant
+
+extension DBusMessageArgument {
+    /// An object path's text.
+    var pathValue: String? {
+        if case .objectPath(let path) = self { return path.rawValue }
+        return nil
+    }
+
+    var doubleValue: Double? {
+        if case .double(let value) = self { return value }
+        return nil
+    }
+
+    /// as.
+    static func strings(_ strings: [String]) -> DBusValue {
+        .array(Array(type: .string, strings.map { .string($0) })!)
+    }
+
+    /// a{sv}, each value in a variant.
+    static func options(_ entries: [String: DBusValue] = [:]) -> DBusValue {
+        .dictionary(Dictionary(keyType: .string, valueType: .variant,
+                               entries.sorted { $0.key < $1.key }.map { .init(key: .string($0.key), value: .variant(DBusVariant($0.value))) })!)
     }
 }

@@ -132,10 +132,11 @@ let package = Package(
         // SDL3, which UIKit's and AppKit's windows, QuartzCore's compositor, CoreGraphics' displays and
         // GameController's gamepads are drawn and read through.
         .package(url: "https://github.com/PureSwift/SDL.git", branch: "master"),
-        // D-Bus, which CoreBluetooth talks to BlueZ over; it has no releases.
-        .package(url: "https://github.com/wendylabsinc/dbus.git", revision: "5727296ecaef9655b781f82c7ebde5c9f0d45551"),
-        // Sockets and their addresses, typed, for CFSocket.
-        .package(url: "https://github.com/PureSwift/Socket.git", from: "0.5.1"),
+        // D-Bus, which CoreBluetooth talks to BlueZ over, CoreLocation to GeoClue and CoreWLAN to
+        // NetworkManager.
+        .package(url: "https://github.com/PureSwift/DBus.git", branch: "master"),
+        // Sockets and their addresses, typed, for CFSocket; its main branch, as DBus asks for.
+        .package(url: "https://github.com/PureSwift/Socket.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ] + (mistKit ? [.package(url: "https://github.com/brightdigit/MistKit.git", from: "1.0.0-beta.5")] : []),
@@ -324,8 +325,7 @@ let package = Package(
             name: "PerryCoreLocation",
             dependencies: [
                 "CPerryGeometry", "PerryInterface", "PerryObjCInterop",
-                .product(name: "DBUS", package: "dbus"),
-                .product(name: "Logging", package: "swift-log"),
+                .product(name: "DBus", package: "DBus"),
             ],
             plugins: ["PerryProviderPlugin"]
         ),
@@ -334,8 +334,7 @@ let package = Package(
             name: "PerryCoreBluetooth",
             dependencies: [
                 "PerryInterface", "PerryObjCInterop",
-                .product(name: "DBUS", package: "dbus"),
-                .product(name: "Logging", package: "swift-log"),
+                .product(name: "DBus", package: "DBus"),
             ],
             plugins: ["PerryProviderPlugin"]
         ),
@@ -344,8 +343,7 @@ let package = Package(
             name: "PerryCoreWLAN",
             dependencies: [
                 "PerryInterface", "PerryObjCInterop",
-                .product(name: "DBUS", package: "dbus"),
-                .product(name: "Logging", package: "swift-log"),
+                .product(name: "DBus", package: "DBus"),
             ],
             plugins: ["PerryProviderPlugin"]
         ),
