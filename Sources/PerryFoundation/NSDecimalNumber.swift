@@ -153,6 +153,8 @@ final class DecimalBehaviorObject: NSObject {
 final class DecimalHandlerStorage {
     var mode: UInt = 0
     var scale: Int16 = Int16.max
+    /// The fields the handler was unarchived with, to archive it again.
+    var archived: ArchivedFields?
 }
 
 /// NSDecimalNumberHandler: a rounding mode and a scale, the behavior a
@@ -203,6 +205,31 @@ public final class NSDecimalNumberHandler: NSObject {
         storage.mode = roundingMode
         storage.scale = scale
         return self
+    }
+
+    private static let archivedFields: [ArchivedFields.Field] = [
+        ("NS.roundingmode", .integer), ("NS.scale", .integer), ("NS.raise.exactness", .bool), ("NS.raise.overflow", .bool),
+        ("NS.raise.underflow", .bool), ("NS.raise.dividebyzero", .bool),
+    ]
+
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject) -> Self {
+        let fields = ArchivedFields(coder: coder.id, fields: Self.archivedFields)
+        if let mode = fields.integer("NS.roundingmode") { storage.mode = UInt(max(0, mode)) }
+        if let scale = fields.integer("NS.scale") { storage.scale = Int16(truncatingIfNeeded: scale) }
+        storage.archived = fields
+        return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: ObjCObject) {
+        if let archived = storage.archived { return archived.encode(coder: coder.id) }
+        typealias EncodeInteger = @convention(c) (id?, SEL, Int, id?) -> Void
+        let integer = unsafeBitCast(ObjC.msgSend, to: EncodeInteger.self)
+        integer(coder.id, ObjC.selector("encodeInteger:forKey:"), Int(storage.mode), Strings.autoreleased("NS.roundingmode"))
+        if storage.scale != Int16.max {
+            integer(coder.id, ObjC.selector("encodeInteger:forKey:"), Int(storage.scale), Strings.autoreleased("NS.scale"))
+        }
     }
 
     @ObjCMethod("roundingMode") func roundingMode() -> UInt { storage.mode }

@@ -161,6 +161,21 @@ public final class NSLocale: NSObject {
         return self
     }
 
+    /// From a keyed archive or nib: the locale of the archived identifier.
+    @ObjCMethod("initWithCoder:")
+    func initialize(coder: ObjCObject) -> Self {
+        let identifier = ObjC.send(coder.id, ObjC.selector("decodeObjectForKey:"), Strings.autoreleased("NS.identifier"))
+        Storage.set(objcObject, LocaleStorage(Locale(identifier: Strings.value(of: identifier) ?? "")))
+        return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: ObjCObject) {
+        typealias EncodeObject = @convention(c) (id?, SEL, id?, id?) -> Void
+        unsafeBitCast(ObjC.msgSend, to: EncodeObject.self)(coder.id, ObjC.selector("encodeObject:forKey:"),
+                                                            Strings.autoreleased(locale.identifier), Strings.autoreleased("NS.identifier"))
+    }
+
     @ObjCClassMethod("currentLocale") static func current() -> UnsafeMutableRawPointer { Locales.autoreleased(Locales.current) }
     @ObjCClassMethod("autoupdatingCurrentLocale") static func autoupdating() -> UnsafeMutableRawPointer { Locales.autoreleased(Locales.current) }
     @ObjCClassMethod("systemLocale") static func system() -> UnsafeMutableRawPointer { Locales.autoreleased(Locale(identifier: "")) }

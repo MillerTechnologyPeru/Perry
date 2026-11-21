@@ -130,19 +130,25 @@ final class RunLoopState {
 
     /// Runs the blocks performed so far; whether there were any.
     private func runBlocks() -> Bool {
-        let (pending, bodies) = locked { () -> ([id], [() -> Void]) in
-            defer {
-                blocks.removeAll()
-                work.removeAll()
-            }
-            return (blocks, work)
-        }
-        for block in pending {
+        // Each is taken from the list as its turn comes, so one that runs
+        // the loop again (waiting on a task, say) finds the rest still
+        // there: a task's end queued behind it would otherwise wait for it
+        // to return, and it for the task's end. Only those performed so
+        // far run in this pass.
+        var (blockCount, workCount) = locked { (blocks.count, work.count) }
+        let any = blockCount > 0 || workCount > 0
+        while blockCount > 0 {
+            blockCount -= 1
+            guard let block = locked({ blocks.isEmpty ? nil : blocks.removeFirst() }) else { break }
             ObjC.autoreleasepool { Blocks.invoke(block, as: (@convention(c) (id) -> Void).self)(block) }
             ObjC.release(block)
         }
-        for body in bodies { ObjC.autoreleasepool { body() } }
-        return !pending.isEmpty || !bodies.isEmpty
+        while workCount > 0 {
+            workCount -= 1
+            guard let body = locked({ work.isEmpty ? nil : work.removeFirst() }) else { break }
+            ObjC.autoreleasepool { body() }
+        }
+        return any
     }
 
     func snapshotTimers() -> [id] { locked { timers } }
@@ -286,7 +292,6 @@ enum MainDispatchQueue {
 
 enum RunLoops {
     nonisolated(unsafe) static var runLoopClass: Class!
-    nonisolated(unsafe) private static var main: RunLoopState?
     nonisolated(unsafe) static var mainThread: pthread_t?
 
     static let key: pthread_key_t = {
@@ -296,12 +301,10 @@ enum RunLoops {
     }()
 
     /// The run loop of the thread that started the program.
-    static var mainLoop: RunLoopState {
-        if let main { return main }
-        let created = RunLoopState(isMain: true)
-        main = created
-        return created
-    }
+    /// Made once, whichever thread asks first: a thread waiting on a task
+    /// performs onto it, possibly before the main thread has run it, and
+    /// two loops would leave that work on one nothing runs.
+    nonisolated(unsafe) static let mainLoop = RunLoopState(isMain: true)
 
     static var current: RunLoopState {
         if let mainThread, pthread_equal(mainThread, pthread_self()) != 0 {

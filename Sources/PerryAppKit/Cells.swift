@@ -790,6 +790,21 @@ open class NSButtonImageSource: NSObject {
 /// inline 15.
 @ObjCClass("NSButtonCell")
 open class NSButtonCell: NSActionCell {
+    /// AppKit's instance variables, which Interface Builder reads and
+    /// writes itself (it sets a bit of the flags when the alternate image
+    /// is a key equivalent's font). They aren't what the cell draws from.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] {
+        [ObjCInstanceVariable("_altContents", types: "@"),
+         ObjCInstanceVariable("_sound", types: "@"),
+         ObjCInstanceVariable("_keyEquivalent", types: "@"),
+         ObjCInstanceVariable("_bcFlags2", size: 4, alignment: 2, types: "I"),
+         ObjCInstanceVariable("_periodicDelay", size: 2, alignment: 1, types: "S"),
+         ObjCInstanceVariable("_periodicInterval", size: 2, alignment: 1, types: "S"),
+         ObjCInstanceVariable("_bcFlags", size: 4, alignment: 2, types: "I"),
+         ObjCInstanceVariable("_normalImage", types: "@"),
+         ObjCInstanceVariable("_alternateImageOrKeyEquivalentFont", types: "@")]
+    }
+
     var alternateTitle = ""
     var alternateImage: NSImage?
     var keyEquivalentValue = ""

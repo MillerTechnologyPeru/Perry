@@ -375,6 +375,7 @@ open class NSTextStorage: NSObject {
     }
 
     @ObjCMethod("beginEditing") func beginEditing() { editing += 1 }
+    @ObjCMethod("_isEditing") func isEditing() -> Bool { editing > 0 }
     /// The outermost -endEditing processes the edits, through -processEditing
     /// (which subclasses override).
     @ObjCMethod("endEditing")
@@ -996,6 +997,9 @@ open class NSTextView: NSText {
             unsafeBitCast(ObjCRuntime.msgSend, to: Replace.self)(storage.objcObject, ObjCRuntime.selector("replaceCharactersInRange:withAttributedString:"),
                                                                  range, value.objcObject)
         }
+        // A storage subclass that processes its edits its own way may not
+        // reach the layout manager, so the lines are laid out again here.
+        textChanged()
         moveInsertionPoint(to: Int(range.location) + text.utf16.count)
         Send.void(objcObject, "didChangeText")
     }
@@ -1381,7 +1385,9 @@ open class NSTextView: NSText {
         var position = 0
         var top = textContainerInset.height
         func add(_ line: Text.Line, upTo end: Int) {
-            let height = max(line.height, minimumHeight)
+            // A line is as tall as it's drawn; only one with no height of
+            // its own (the empty last one) takes the view's font's.
+            let height = line.height > 0 ? line.height : minimumHeight
             made.append(Fragment(range: position..<end, rect: CGRect(x: textContainerInset.width + padding, y: top, width: line.width, height: height), line: line))
             top += height + style.lineSpacing
             position = end
@@ -1491,6 +1497,7 @@ open class NSTextView: NSText {
         guard selectable || editable, let event = eventObject?.as(NSEvent.self) else { return }
         if let window = Send.object(objcObject, "window") { _ = Send.bool(window, "makeFirstResponder:", objcObject) }
         let index = characterIndex(at: point(of: event))
+        Trace.log("text view: mouse down at \(point(of: event)), character \(index)")
         switch event.clickCount {
         case 2:
             let start = word(from: min(index + 1, Int(storage?.textLength ?? 0)), forward: false)
