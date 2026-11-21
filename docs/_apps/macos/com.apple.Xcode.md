@@ -213,11 +213,25 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/0f28c626-2d41-4de6-ba8f-673ec8050f66
         caption: Source editor showing MyDocument.m with syntax colouring
+  - pr: 251
+    date: 2026-11-21
+    perry: "6bbb3b95"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: Typing in the source editor works, and a second Cocoa app with formatters and bindings in its nibs compiles and links for ppc, i386 and x86_64; joining the slices needs a lipo at /usr/bin/lipo. File > Save doesn't write the file, and debugging isn't supported.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
 
-## Status as of [#248]({{ site.repository_url }}/pull/248)
+## Status as of [#251]({{ site.repository_url }}/pull/251)
 
 Working:
 
@@ -235,11 +249,18 @@ Working:
 - Selecting a source file opens an editor in the project window, and
   editor windows open with their navigation bar. The editor shows the
   file's text with syntax colouring and the folding bar in its gutter.
+- Typing in the editor: a click places the insertion point on the line
+  clicked, and typed text appears there.
 - Collapsed panes stay hidden instead of drawing over their neighbours.
+- A universal build: with `ARCHS = ppc i386 x86_64` gcc-4.2 compiles and
+  ld links each slice. Xcode joins them with `/usr/bin/lipo`, so the build
+  ends in an error unless one is installed there (LLVM's `llvm-lipo`
+  works when run by hand; under that name from Xcode is untested).
+- ibtool compiles xibs holding number formatters and Cocoa bindings.
 
 Broken:
 
-- Line numbers don't show in the editor's gutter, and typing in the
-  editor is untested.
+- Line numbers don't show in the editor's gutter.
+- File > Save in the editor doesn't write the file.
 - Debugging isn't supported: breakpoints are accepted and never hit, and
   there is no stepping or variables view.
