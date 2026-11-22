@@ -61,13 +61,17 @@ enum CFNumberTypes {
     static let long = 10, longLong = 11, float = 12, double = 13, cfIndex = 14, nsInteger = 15, cgFloat = 16
 
     /// The canonical type of a number of `type`, as CFNumberGetType reports.
+    /// long, CFIndex and NSInteger are a word, and CGFloat a float on
+    /// 32-bit systems.
     static func canonical(_ type: Int) -> Int {
         switch type {
         case sint8, char: return sint8
         case sint16, short: return sint16
         case sint32, int: return sint32
         case float32, float: return float32
-        case float64, double, cgFloat: return float64
+        case float64, double: return float64
+        case long, cfIndex, nsInteger: return MemoryLayout<Int>.size == 4 ? sint32 : sint64
+        case cgFloat: return MemoryLayout<Int>.size == 4 ? float32 : float64
         default: return sint64
         }
     }
