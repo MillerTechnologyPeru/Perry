@@ -61,6 +61,37 @@ struct DarwinFixtureTests {
         #expect(messages == ["0: Kiwi says ... on 2 legs", "1: Rex says woof on 4 legs"])
     }
 
+    /// PERRY_QUARTZCORE_ENGINE=cacao composites through Cacao's engine: each
+    /// of Prism's scenes must come out as Perry's own compositor draws it.
+    /// The frames are the GPU's (PERRY_UIKIT_FRAME_DUMP), so this needs a
+    /// display; the PNGs are the same bytes when their pixels are.
+    @Test("Cacao's engine draws layer scenes as Perry's compositor does",
+          .enabled(if: DarwinFixtures.built("Prism") && DarwinFixtures.hasDisplay, "needs Prism built and a display"),
+          arguments: DarwinFixtures.layerScenes)
+    func engineMatchesCompositor(_ scene: String) throws {
+        let scratch = TestEnvironment.fixtureBuild.appending(path: "prism-frames")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let frames = try ["own", "cacao"].map { engine -> Data in
+            let frame = scratch.appending(path: "\(scene)-\(engine).png")
+            try? FileManager.default.removeItem(at: frame)
+            var environment = [
+                "PRISM_SCENE": scene, "PRISM_SECONDS": "3",
+                "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0.5",
+                "PERRY_UIKIT_SCREEN": "480x360@1",
+            ]
+            if engine == "cacao" { environment["PERRY_QUARTZCORE_ENGINE"] = "cacao" }
+            let result = try runPerry([DarwinFixtures.app("Prism").path], environment: environment)
+            #expect(result.status == 0, "\(engine): \(result.stderr)")
+            #expect(result.stdout.lines == ["scene \(scene)"], "\(engine)")
+            return try Data(contentsOf: frame)
+        }
+        withKnownIssue("the two compositors draw \(scene) differently") {
+            #expect(frames[0] == frames[1], "\(scene): frames differ, in \(scratch.path)")
+        } when: {
+            DarwinFixtures.layerScenesThatDiffer.contains(scene)
+        }
+    }
+
     /// Each app's stdout must match what it prints with Apple's Foundation
     /// on macOS, recorded by Scripts/build-darwin-fixtures.sh.
     @Test("Apps print exactly what they print on Darwin", arguments: DarwinFixtures.withReference)
@@ -93,6 +124,22 @@ enum DarwinFixtures {
         } + swift.filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path) && swiftRuntime != nil
         }
+    }
+
+    /// Prism's scenes that both compositors can be asked for. Its texts
+    /// scene is left out until there is a CATextLayer to draw.
+    static let layerScenes = ["basics", "masks", "shadows", "gradients", "contents", "transforms", "ordering", "corners",
+                              "shapes", "replicated"]
+
+    /// Scenes the compositors are known to draw differently: a skewed layer
+    /// in transforms, which Perry's compositor draws upright, and the edges
+    /// of masked layers, a pixel apart.
+    static let layerScenesThatDiffer: Set<String> = ["masks", "transforms"]
+
+    /// Whether there is a display to open a window on.
+    static var hasDisplay: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["DISPLAY"] != nil || environment["WAYLAND_DISPLAY"] != nil
     }
 
     /// Fixtures written in Swift, which run on Apple's Swift runtime.
