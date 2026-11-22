@@ -1366,6 +1366,22 @@ enum SystemImages {
                 stroke(line([CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)]))
                 stroke(line([CGPoint(x: box.minX, y: box.maxY), CGPoint(x: box.maxX, y: box.minY)]))
             }
+        case "NSQuickLookTemplate", "eye":
+            // An eye: an almond of two arcs and its pupil.
+            return { rect in
+                let box = rect.insetBy(dx: 1.5, dy: rect.height * 0.25)
+                let left = CGPoint(x: box.minX, y: box.midY), right = CGPoint(x: box.maxX, y: box.midY)
+                let lid = NSBezierPath()
+                lid.move(to: left)
+                lid.curve(to: right, controlPoint1: CGPoint(x: box.minX + box.width * 0.25, y: box.maxY + box.height * 0.3),
+                          controlPoint2: CGPoint(x: box.maxX - box.width * 0.25, y: box.maxY + box.height * 0.3))
+                lid.curve(to: left, controlPoint1: CGPoint(x: box.maxX - box.width * 0.25, y: box.minY - box.height * 0.3),
+                          controlPoint2: CGPoint(x: box.minX + box.width * 0.25, y: box.minY - box.height * 0.3))
+                stroke(lid)
+                let radius = box.height * 0.32
+                NSColor.labelColor().setFill()
+                NSBezierPath.bezierPath(ovalIn: CGRect(x: rect.midX - radius, y: rect.midY - radius, width: radius * 2, height: radius * 2)).fill()
+            }
         case "NSStopProgressFreestandingTemplate", "xmark.circle.fill":
             return { rect in
                 NSColor.labelColor().setFill()
