@@ -76,6 +76,11 @@ open class NSDatePicker: NSControl {
 /// NSFormCell: a title beside an editable field, a cell of a form.
 @ObjCClass("NSFormCell")
 open class NSFormCell: NSActionCell {
+    /// AppKit's instance variable for the cell that draws the title, which
+    /// Interface Builder reads itself. The title isn't drawn by a cell
+    /// here, so it stays nil.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] { [ObjCInstanceVariable("_titleCell", types: "@")] }
+
     var titleWidth: CGFloat = -1
     var titleFont: NSFont?
     var titleAlignment = 2

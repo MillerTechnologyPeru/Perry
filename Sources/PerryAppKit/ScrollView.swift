@@ -12,7 +12,19 @@ import PerryObjCInterop
 @ObjCClass("NSScrollView")
 open class NSScrollView: NSView {
     var contentClip: NSClipView?
-    var headerClip: NSClipView?
+    /// AppKit's instance variable for the header's clip view, which
+    /// Interface Builder reads itself.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] { [ObjCInstanceVariable("_headerClipView", types: "@")] }
+    private static let headerClipOffset = ObjCRuntime.ivarOffset(NSScrollView.objCClass, "_headerClipView")
+    private var storedHeaderClip: NSClipView?
+    /// The clip view of a table's header, kept in the instance variable too.
+    var headerClip: NSClipView? {
+        get { storedHeaderClip }
+        set {
+            storedHeaderClip = newValue
+            if let offset = Self.headerClipOffset { objcObject.storeBytes(of: newValue?.objcObject, toByteOffset: offset, as: UnsafeMutableRawPointer?.self) }
+        }
+    }
     var verticalScroller: NSScroller?
     var horizontalScroller: NSScroller?
     var cornerView: NSView?
