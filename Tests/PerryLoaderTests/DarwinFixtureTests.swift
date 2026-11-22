@@ -75,7 +75,7 @@ struct DarwinFixtureTests {
         try? FileManager.default.removeItem(at: frame)
         let environment = [
             "PRISM_SCENE": scene, "PRISM_SECONDS": "3",
-            "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0.5",
+            "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0",
             "PERRY_UIKIT_SCREEN": "480x360@1",
         ]
         let result = try runPerry([DarwinFixtures.app("Prism").path], environment: environment)
@@ -101,7 +101,7 @@ struct DarwinFixtureTests {
             try? FileManager.default.removeItem(at: frame)
             let environment = [
                 "PRISM_SCENE": "frames", "PRISM_SECONDS": "3",
-                "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0.5",
+                "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0",
                 "PERRY_UIKIT_SCREEN": "480x360@1", "PERRY_UIKIT_ZERO_COPY": way == "shared" ? "1" : "0",
             ]
             let result = try runPerry([DarwinFixtures.app("Prism").path], environment: environment)
