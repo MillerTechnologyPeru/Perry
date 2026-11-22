@@ -454,6 +454,9 @@ final class HeaderFooterState: ObjectState {
     var textLabel: UILabel?
     var detailTextLabel: UILabel?
     var backgroundView: UIView?
+    /// Where the title starts: further in under an inset grouped table's
+    /// cards.
+    var textInset: CGFloat = 16
 }
 
 @ObjCClass("UITableViewHeaderFooterView")
@@ -507,7 +510,8 @@ open class UITableViewHeaderFooterView: UIView {
         let bounds = state.bounds
         header.contentView?.sendSetFrame(bounds)
         header.backgroundView?.sendSetFrame(bounds)
-        header.textLabel?.sendSetFrame(CGRect(x: 16, y: 0, width: max(bounds.width - 32, 0), height: bounds.height))
+        let inset = header.textInset
+        header.textLabel?.sendSetFrame(CGRect(x: inset, y: 0, width: max(bounds.width - 2 * inset, 0), height: bounds.height))
     }
 }
 
@@ -586,7 +590,9 @@ open class UITableView: UIScrollView {
         _ = super.initialize(coder: coder)
         let decoded = Coder(coder: coder)
         let table = table
-        table.style = decoded.integer("UIStyle")
+        // UIStyle is grouped for an inset grouped table, for systems before
+        // that style; UITableViewStyle has it.
+        table.style = decoded.has("UITableViewStyle") ? decoded.integer("UITableViewStyle") : decoded.integer("UIStyle")
         if decoded.has("UIRowHeight") { table.rowHeight = decoded.double("UIRowHeight") }
         if decoded.has("UISectionHeaderHeight") { table.sectionHeaderHeight = decoded.double("UISectionHeaderHeight") }
         if decoded.has("UISectionFooterHeight") { table.sectionFooterHeight = decoded.double("UISectionFooterHeight") }
@@ -1102,7 +1108,19 @@ open class UITableView: UIScrollView {
             } else {
                 let header = UITableViewHeaderFooterView.objCClass.object.allocated().initializeHeaderFooter(reuseIdentifier: nil)
                     .unsafeCast(to: UITableViewHeaderFooterView.self)
-                header.textLabel()?.setText(headerTitle(section, source: source))
+                let title = headerTitle(section, source: source)
+                if table.style == 0 {
+                    header.textLabel()?.setText(title)
+                } else {
+                    // A grouped table's title: small gray capitals on the
+                    // table's own background.
+                    header.setBackgroundColor(UIColor.clear())
+                    header.header.textInset = 16 + rowInset
+                    let label = header.textLabel()
+                    label?.setFont(UIFont.systemFont(size: 13))
+                    label?.setTextColor(UIColor.secondaryLabel())
+                    label?.setText(title?.uppercased())
+                }
                 view = header
                 table.visibleHeaders[section] = view
             }
