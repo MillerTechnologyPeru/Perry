@@ -2,10 +2,11 @@ import Glibc
 import PerryObjCInterop
 
 // The I/O Registry: io_object_t handles, as mach ports are, for its
-// entries and for iterators over matches. It has the root and the
-// platform expert device (IOPlatformUUID, IOPlatformSerialNumber, model);
-// matching dictionaries find the platform device by its class and nothing
-// else, so an app looking for a GPU, a battery or USB devices finds none.
+// entries and for iterators over matches. It has the root, the platform
+// expert device (IOPlatformUUID, IOPlatformSerialNumber, model) and the
+// keyboard, an IOHIDDevice whose plug-in is the HID device interface;
+// matching dictionaries find those by their classes and nothing else, so an
+// app looking for a GPU, a battery or USB devices finds none.
 
 public typealias Handle = UInt32
 
@@ -25,6 +26,7 @@ final class RegistryEntry {
 enum Registry {
     static let rootHandle: Handle = 0x1001
     static let platformHandle: Handle = 0x1002
+    static let keyboardHandle: Handle = 0x1003
 
     private static let lock = Lock()
     nonisolated(unsafe) private static var iterators: [Handle: [Handle]] = [:]
@@ -61,6 +63,9 @@ enum Registry {
              ("manufacturer", NSData.of("Perry")),
              ("product-name", NSData.of("Perry")),
              ("IOProviderClass", NSObject.string("IOPlatformExpertDevice"))]
+        },
+        keyboardHandle: RegistryEntry(className: "IOHIDDevice", name: "Apple Keyboard", parent: platformHandle) {
+            Keyboard.registryProperties
         },
     ]
 
@@ -304,13 +309,19 @@ public func IONotificationPortSetDispatchQueue(_ port: UnsafeMutableRawPointer?,
 
 @c(_IONotificationPortGetMachPort) public func IONotificationPortGetMachPort(_ port: UnsafeMutableRawPointer?) -> UInt32 { 0 }
 
-/// There are no drivers to load plug-ins from.
+/// A HID device's plug-in, its user client's; other services have no
+/// drivers to load plug-ins from.
 @c(_IOCreatePlugInInterfaceForService)
 public func IOCreatePlugInInterfaceForService(_ service: Handle, _ pluginType: UnsafeRawPointer?, _ interfaceType: UnsafeRawPointer?,
                                               _ interface: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                                               _ score: UnsafeMutablePointer<Int32>?) -> Int32 {
-    interface?.pointee = nil
-    return IOReturn.unsupported
+    guard Registry.entry(service)?.className == "IOHIDDevice" else {
+        interface?.pointee = nil
+        return IOReturn.unsupported
+    }
+    interface?.pointee = HIDInterfaces.makePlugin(for: service)
+    score?.pointee = 0
+    return IOReturn.success
 }
 
 @c(_IODestroyPlugInInterface) public func IODestroyPlugInInterface(_ interface: UnsafeMutableRawPointer?) -> Int32 { IOReturn.success }
