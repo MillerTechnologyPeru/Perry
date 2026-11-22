@@ -79,7 +79,7 @@ reports:
         caption: Compare screen
   - pr: 262
     date: 2026-11-21
-    perry: "3a2980f8"
+    perry: "3cf2d700"
     platform: ios
     cpu: arm64
     app_version: "5.1.2"
