@@ -282,6 +282,38 @@ public class NSAttributedString: NSObject {
     /// One attribute's value, and the range over which it is the same.
     @ObjCMethod("attribute:atIndex:effectiveRange:")
     func attribute(_ name: ObjCObject, at index: UInt, effectiveRange: UnsafeMutablePointer<NSRange>?) -> UnsafeMutableRawPointer? {
+        // A subclass that keeps the text itself (Xcode's long attributed
+        // string) answers the primitive, which this is then made of: the
+        // value in its attributes at the index, over the runs around it
+        // that have the same value.
+        let primitive = ObjC.selector("attributesAtIndex:effectiveRange:")
+        if ObjC.overrides(objcObject, primitive, of: AttributedStrings.stringClass) {
+            typealias Primitive = @convention(c) (id?, SEL, UInt, UnsafeMutablePointer<NSRange>?) -> id?
+            let attributes = unsafeBitCast(ObjC.msgSend, to: Primitive.self)
+            typealias Length = @convention(c) (id?, SEL) -> UInt
+            let length = unsafeBitCast(ObjC.msgSend, to: Length.self)(objcObject, ObjC.selector("length"))
+            var range = NSRange(location: 0, length: 0)
+            let value = attributes(objcObject, primitive, index, &range).flatMap { Dictionaries.value($0, for: name.id) }
+            guard let effectiveRange else { return value }
+            let same = { (other: id?) -> Bool in
+                value == nil ? other == nil : other.map { AttributedStorage.equal($0, value!) } ?? false
+            }
+            var start = range.location, end = range.location + range.length
+            while start > 0 {
+                var before = NSRange(location: 0, length: 0)
+                guard same(attributes(objcObject, primitive, start - 1, &before).flatMap { Dictionaries.value($0, for: name.id) }),
+                      before.location < start else { break }
+                start = before.location
+            }
+            while end < length {
+                var after = NSRange(location: 0, length: 0)
+                guard same(attributes(objcObject, primitive, end, &after).flatMap { Dictionaries.value($0, for: name.id) }),
+                      after.location + after.length > end else { break }
+                end = after.location + after.length
+            }
+            effectiveRange.pointee = NSRange(location: start, length: end - start)
+            return value
+        }
         guard let (position, _) = storage.run(at: Int(index)) else {
             Exceptions.raise(name: "NSRangeException", reason: "-[NSAttributedString attribute:atIndex:effectiveRange:]: Range or index out of bounds")
         }
