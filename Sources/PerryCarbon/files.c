@@ -167,8 +167,16 @@ static const char *folder_of(int16_t volume, int32_t directory) {
     if (directory == 0) {
         if (volume != 0 && volume != default_volume) return "/";
         if (default_directory == 0) {
+            // A bundled program starts in its executable's folder,
+            // Contents/MacOS, as Mac OS X starts one: Pangea's games find
+            // "::Resources:Data:" from it. Others, in the working folder.
             static char here[PATH_MAX];
-            if (!getcwd(here, sizeof here)) strcpy(here, "/");
+            id executable = SEND(SEND(CLASS("NSBundle"), "mainBundle"), "executablePath");
+            const char *path = executable ? ((const char *(*)(id, SEL))objc_send)(executable, SELECTOR("UTF8String")) : NULL;
+            char *slash = path && strstr(path, "/Contents/MacOS/") && snprintf(here, sizeof here, "%s", path) < (int)sizeof here
+                ? strrchr(here, '/') : NULL;
+            if (slash && slash != here) *slash = 0;
+            else if (!getcwd(here, sizeof here)) strcpy(here, "/");
             default_directory = directory_id(here);
         }
         directory = (int32_t)default_directory;
@@ -195,19 +203,25 @@ static bool join(const char *folder, const unsigned char *name, char *path, size
     } else if (*cursor == ':') {
         cursor++;
     }
-    for (; *cursor && out + 1 < sizeof converted; cursor++) {
-        // "::" goes up a folder; ':' parts the names, '/' in a name is ':'.
+    while (*cursor && out + 4 < sizeof converted) {
+        // ':' parts the names, and each more ':' in a row goes up a folder,
+        // as does each at the start ("::a" is the parent's a); '/' in a
+        // name is ':'.
         if (*cursor == ':') {
-            if (cursor[1] == ':') {
-                memcpy(converted + out, "/..", 3);
-                out += 3;
-                cursor++;
-                continue;
+            size_t run = 0;
+            while (cursor[run] == ':') run++;
+            cursor += run;
+            size_t ups = out == 0 ? run : run - 1;
+            if (out > 0) converted[out++] = '/';
+            for (size_t up = 0; up < ups && out + 4 < sizeof converted; up++) {
+                memcpy(converted + out, "..", 2);
+                out += 2;
+                if (up + 1 < ups || *cursor) converted[out++] = '/';
             }
-            converted[out++] = '/';
-        } else {
-            converted[out++] = *cursor == '/' ? ':' : *cursor;
+            continue;
         }
+        converted[out++] = *cursor == '/' ? ':' : *cursor;
+        cursor++;
     }
     converted[out] = 0;
     if (!converted[0]) return (size_t)snprintf(path, size, "%s", folder) < size;
@@ -993,6 +1007,19 @@ typedef struct {
     int16_t ioFiller4[14];
     int32_t ioAPPLParID;
 } DTPB;
+
+/// A working directory's parameters, for PBHSetVol and PBHGetVol.
+typedef struct {
+    ParamHeader header;
+    int16_t filler1;
+    int16_t ioWDIndex;
+    int32_t ioWDProcID;
+    int16_t ioWDVRefNum;
+    int16_t filler2[7];
+    int32_t reserved1;
+    int32_t ioWDDirID;
+    int32_t reserved2;
+} WDPBRec;
 #pragma pack(pop)
 
 static uint32_t mac_time(time_t seconds) { return (uint32_t)((int64_t)seconds + 2082844800LL); }
@@ -1107,6 +1134,27 @@ OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     block->ioVDirCnt = 0;
     memset(block->ioVFndrInfo, 0, sizeof block->ioVFndrInfo);
     CARBON_TRACE("volume info: index %d, %u blocks of %u, %u free", block->ioVolIndex, block->ioVNmAlBlks, size, block->ioVFrBlk);
+    return block->header.ioResult = noErr;
+}
+
+/// The default folder from a parameter block: its volume and folder ID, as
+/// HSetVol takes them. Pangea's games set their Resources folder so and
+/// find ":Data:" in it.
+OSErr carbon_PBHSetVolSync(WDPBRec *block) CARBON_SYMBOL(PBHSetVolSync);
+OSErr carbon_PBHSetVolSync(WDPBRec *block) {
+    if (!block) return paramErr;
+    return block->header.ioResult = carbon_HSetVol(block->header.ioNamePtr, block->header.ioVRefNum, block->ioWDDirID);
+}
+
+OSErr carbon_PBHGetVolSync(WDPBRec *block) CARBON_SYMBOL(PBHGetVolSync);
+OSErr carbon_PBHGetVolSync(WDPBRec *block) {
+    if (!block) return paramErr;
+    int16_t volume = 0;
+    int32_t directory = 0;
+    carbon_HGetVol(block->header.ioNamePtr, &volume, &directory);
+    block->header.ioVRefNum = block->ioWDVRefNum = volume;
+    block->ioWDDirID = directory;
+    block->ioWDProcID = 0;
     return block->header.ioResult = noErr;
 }
 
