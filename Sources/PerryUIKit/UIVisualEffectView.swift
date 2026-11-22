@@ -51,14 +51,16 @@ open class UIVisualEffect: NSObject {
         }
     }
 
-    /// The fill the effect shows: gray level and opacity.
-    var tint: (white: CGFloat, alpha: CGFloat)? {
+    /// The fill the effect shows, in a light or dark appearance: gray
+    /// level and opacity.
+    func tint(darkAppearance: Bool) -> (white: CGFloat, alpha: CGFloat)? {
         guard !effect.vibrancy else { return nil }
         // UIBlurEffectStyle: extra light 0, light 1, dark 2, extra dark 3,
         // regular 4, prominent 5, then the system materials from ultra thin
-        // to chrome (6-10), in light (11-15) and dark (16-20).
+        // to chrome (6-10), in light (11-15) and dark (16-20). Regular,
+        // prominent and the plain system materials follow the appearance.
         let style = effect.style
-        let dark = style == 2 || style == 3 || (16...20).contains(style)
+        let dark = style == 2 || style == 3 || (16...20).contains(style) || (darkAppearance && (4...10).contains(style))
         let thickness: CGFloat
         switch style {
         case 6, 11, 16: thickness = 0.55
@@ -181,7 +183,7 @@ open class UIVisualEffectView: UIView {
     @ObjCMethod("setEffect:")
     func setEffect(_ effect: UIVisualEffect?) {
         effectView.effect = effect
-        let tint = effect?.tint
+        let tint = effect?.tint(darkAppearance: interfaceStyle == 2)
         effectView.backdrop?.setBackgroundColor(tint.map { UIColor.gray($0.white, $0.alpha) })
         if let backdrop = effectView.backdrop {
             // The blur, or none for no effect or a vibrancy's.
