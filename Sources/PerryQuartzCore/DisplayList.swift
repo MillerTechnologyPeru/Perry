@@ -425,6 +425,18 @@ final class DisplayListCompositor {
         let pixels = (extent.width * renderScale, extent.height * renderScale)
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
+        // A masked layer's image is made at this size: its pixels are the
+        // image's, as in Perry's compositor. Drawing it again would shrink
+        // it by the fraction of a pixel its extent has past a whole one.
+        if state.mask != nil, let masked = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale),
+           CG.imageGetWidth(masked.object) == width, CG.imageGetHeight(masked.object) == height,
+           let image = CG.withPixels(of: masked.object, { pixels, bytesPerRow -> ImageSource? in
+               bytesPerRow >= width * 4 ? makeImage(width: width, height: height, pixels: pixels, pitch: bytesPerRow) : nil
+           }) {
+            let entry = Entry(image: image, version: nextVersion(), signature: nil, used: true, flattened: (extent.size, generation))
+            images[key] = entry
+            return entry
+        }
         guard let context = CG.makeContext(size: extent.size, scale: renderScale, opaque: false) else { return nil }
         defer { CG.release(context) }
         if state.mask != nil {
