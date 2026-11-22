@@ -1,8 +1,8 @@
-// Layer trees for comparing compositors: each scene is one still frame of a
+// Layer trees for the compositor: each scene is one still frame of a
 // 480x360 tree that uses one family of CALayer features (masks, shadows,
 // gradients, text, image contents, transforms, ordering and opacity,
-// corners, shapes, replicators). Perry's tests draw each with its own
-// compositor and with Cacao's engine and compare the two frames.
+// corners, shapes, replicators). Perry's tests composite each and check
+// the frame.
 //
 // PRISM_SCENE names the scene to show (default basics); PRISM_SECONDS, when
 // set, is how long it stays up before the app exits. A class or method the

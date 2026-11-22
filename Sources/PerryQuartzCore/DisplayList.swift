@@ -7,8 +7,7 @@ import PerryObjCInterop
 
 // Compositing through Cacao's engine: the presented layer trees become a
 // display list each frame, which Cacao's compositor draws with the SDL3
-// renderer UIKit's window has. PERRY_QUARTZCORE_ENGINE=cacao turns it on;
-// Perry's own compositor (Compositor.swift) draws otherwise.
+// renderer UIKit's window has.
 //
 // A layer's own drawing is still CoreGraphics': its background in the shape
 // of its corners, what it displayed, its contents and a shape layer's path
@@ -16,8 +15,8 @@ import PerryObjCInterop
 // Plain rectangular backgrounds are colors, clipping to bounds is a
 // rectangular clip, opacity is an opacity effect on each drawing, and a
 // layer that is turned is drawn through a transform. A layer that clips to
-// rounded corners, or has a mask, is one image with its sublayers, as in
-// Perry's compositor. GL and Metal frames are an external surface's.
+// rounded corners, or has a mask, is one image with its sublayers. GL and
+// Metal frames are an external surface's.
 //
 // Not through the engine yet: GL frames shared as GPU buffers (the layer
 // is told they failed, so its frames come as pixels).
@@ -44,9 +43,6 @@ extension Transform2D {
 }
 
 final class DisplayListCompositor {
-    /// Whether PERRY_QUARTZCORE_ENGINE is "cacao".
-    static let enabled = getenv("PERRY_QUARTZCORE_ENGINE").map { String(cString: $0) == "cacao" } ?? false
-
     nonisolated(unsafe) private static var current: DisplayListCompositor?
 
     static func shared(_ renderer: UnsafeMutableRawPointer, scale: CGFloat) -> DisplayListCompositor {
@@ -200,7 +196,7 @@ final class DisplayListCompositor {
             build(sublayer, toScreen: presented.toSuperlayer(within: state).concatenating(toScreen), alpha: alpha, into: &inner)
         }
         if state.masksToBounds, !inner.isEmpty {
-            // As Perry's compositor clips: to the layer's box on the screen.
+            // To the layer's box on the screen.
             let clip = ClipEffect(path: Path(Foundation.CGRect(frame)), isRectangle: true)
             items.append(DisplayList.Item(frame: Foundation.CGRect(frame), identity: identity(layer, .clip), version: 0,
                                           value: .effect(.clip(clip), DisplayList(items: inner))))
@@ -426,7 +422,7 @@ final class DisplayListCompositor {
         guard pixels.0.isFinite, pixels.1.isFinite, pixels.0 < 1_048_576, pixels.1 < 1_048_576 else { return nil }
         let width = max(Int(pixels.0.rounded(.up)), 1), height = max(Int(pixels.1.rounded(.up)), 1)
         // A masked layer's image is made at this size: its pixels are the
-        // image's, as in Perry's compositor. Drawing it again would shrink
+        // image's. Drawing it again would shrink
         // it by the fraction of a pixel its extent has past a whole one.
         if state.mask != nil, let masked = CALayer.maskedImage(of: layer, state: state, shape: shape, scale: renderScale),
            CG.imageGetWidth(masked.object) == width, CG.imageGetHeight(masked.object) == height,
