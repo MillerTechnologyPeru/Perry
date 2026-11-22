@@ -238,9 +238,7 @@ PASSTHROUGH _sched_yield, sched_yield
 PASSTHROUGH _arc4random, arc4random
 PASSTHROUGH _arc4random_buf, arc4random_buf
 PASSTHROUGH _arc4random_uniform, arc4random_uniform
-PASSTHROUGH _ftello, ftello64
 PASSTHROUGH _lseek, lseek64
-PASSTHROUGH _fseeko, fseeko64
 PASSTHROUGH _ftruncate, ftruncate64
 PASSTHROUGH _truncate, truncate64
 PASSTHROUGH _pread, pread64
@@ -274,7 +272,6 @@ PASSTHROUGH _wcscpy, wcscpy
 PASSTHROUGH _wcsncmp, wcsncmp
 PASSTHROUGH _wcsncpy, wcsncpy
 PASSTHROUGH _fputws, fputws
-PASSTHROUGH _rindex, rindex
 PASSTHROUGH _setlogmask, setlogmask
 PASSTHROUGH _swscanf, swscanf
 
