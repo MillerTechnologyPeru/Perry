@@ -56,6 +56,16 @@ enum Windows {
 
 @ObjCClass("NSWindow")
 open class NSWindow: NSResponder {
+    /// AppKit's instance variables that Interface Builder reads and writes
+    /// itself: the dragged types registered and the views last hit by the
+    /// mouse buttons. The window keeps none of these in them; they are
+    /// there to be nil rather than another variable's memory.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] {
+        [ObjCInstanceVariable("_dragTypes", types: "@"),
+         ObjCInstanceVariable("_lastLeftHit", types: "@"),
+         ObjCInstanceVariable("_lastRightHit", types: "@")]
+    }
+
     /// The content rectangle, in screen coordinates.
     var frame = CGRect(x: 0, y: 0, width: 640, height: 480)
     var styleMask: UInt = StyleMask.titled
