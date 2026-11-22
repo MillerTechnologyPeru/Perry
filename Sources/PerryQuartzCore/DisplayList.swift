@@ -12,7 +12,9 @@ import PerryObjCInterop
 // A layer's own drawing is still CoreGraphics': its background in the shape
 // of its corners, what it displayed, its contents and a shape layer's path
 // are an image in the list, drawn again only when what they show changes.
-// Plain rectangular backgrounds are colors, clipping to bounds is a
+// Plain rectangular backgrounds are colors, and rounded ones with nothing
+// drawn over them are rounded rectangles the engine draws on the GPU,
+// without an image. Clipping to bounds is a
 // rectangular clip, opacity is an opacity effect on each drawing, and a
 // layer that is turned is drawn through a transform. A layer that clips to
 // rounded corners, or has a mask, is one image with its sublayers. GL and
@@ -187,6 +189,9 @@ final class DisplayListCompositor {
         } else if let live = state.livePixels {
             if let background = state.backgroundColor, !live.opaque { addFill(frame, with: background, of: layer, alpha: alpha, into: &items) }
             addLive(live, of: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
+        } else if rounded, let rounding = roundedRectangle(of: layer, state: state, shape: shape, toScreen: toScreen, alpha: alpha) {
+            items.append(DisplayList.Item(frame: Foundation.CGRect(frame), identity: identity(layer, .content), version: 0,
+                                          value: .content(.roundedRectangle(rounding))))
         } else if textured {
             // A shape's image is of where its path draws, which may reach
             // outside the layer's bounds.
@@ -228,14 +233,36 @@ final class DisplayListCompositor {
                                       value: .effect(.opacity(Double(alpha)), DisplayList(items: [item]))))
     }
 
-    private func addFill(_ rect: CGRect, with color: CGRef, of layer: CALayer, alpha: CGFloat, into items: inout [DisplayList.Item]) {
-        guard let components = CG.colorGetComponents(color) else { return }
+    /// A gray or RGB color, faded by `alpha`.
+    private func resolved(_ color: CGRef, alpha: CGFloat) -> ResolvedColor? {
+        guard let components = CG.colorGetComponents(color) else { return nil }
         let gray = CG.colorGetNumberOfComponents(color) == 2
         let (r, g, b, a) = gray ? (components[0], components[0], components[0], components[1])
             : (components[0], components[1], components[2], components[3])
-        let resolved = ResolvedColor(red: Float(r), green: Float(g), blue: Float(b), opacity: Float(a * alpha))
+        return ResolvedColor(red: Float(r), green: Float(g), blue: Float(b), opacity: Float(a * alpha))
+    }
+
+    private func addFill(_ rect: CGRect, with color: CGRef, of layer: CALayer, alpha: CGFloat, into items: inout [DisplayList.Item]) {
+        guard let resolved = resolved(color, alpha: alpha) else { return }
         items.append(DisplayList.Item(frame: Foundation.CGRect(rect), identity: identity(layer, .content), version: 0,
                                       value: .content(.color(resolved))))
+    }
+
+    /// A layer whose only drawing is its rounded background, moved and
+    /// scaled alike in both directions: a rounded rectangle, which the
+    /// engine draws on the GPU. Nil for anything else, drawn as an image.
+    private func roundedRectangle(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform,
+                                  alpha: CGFloat) -> RoundedRectangleContent? {
+        guard shape == nil, state.contents == nil, layer.state.backing == nil, !layer.draws,
+              toScreen.b == 0, toScreen.c == 0, toScreen.a > 0, toScreen.a == toScreen.d,
+              let background = state.backgroundColor, let color = resolved(background, alpha: alpha) else { return nil }
+        // CACornerMask's corners are min and max x and y: 1, 2, 4 and 8.
+        var corners: RoundedRectangleContent.Corners = []
+        if state.maskedCorners & 1 != 0 { corners.insert(.topLeading) }
+        if state.maskedCorners & 2 != 0 { corners.insert(.topTrailing) }
+        if state.maskedCorners & 4 != 0 { corners.insert(.bottomLeading) }
+        if state.maskedCorners & 8 != 0 { corners.insert(.bottomTrailing) }
+        return RoundedRectangleContent(color: color, cornerRadius: Foundation.CGFloat(Double(state.cornerRadius * toScreen.a)), corners: corners)
     }
 
     /// A drawing that fills `extent` of the layer, placed by `toScreen`: in
