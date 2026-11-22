@@ -77,4 +77,19 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/c358421c-fa42-4c38-a11d-be60d5d073d2
         caption: Compare screen
+  - pr: 261
+    date: 2026-11-21
+    perry: "3a2980f8"
+    platform: ios
+    cpu: arm64
+    app_version: "5.1.2"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    resolution: "488x1055"
+    env:
+      - "PERRY_OS_VERSION=17.0"
+      - "PERRY_UIKIT_SCREEN=iphone"
+    level: 4
+    source: body
+    notes: Its categories, model lists and model pages draw as on iOS 17 in light and dark, with inset cards, section titles, disclosure chevrons and symbols in the bar. A model page's header stays light in the dark appearance, and list rows do not grow for wrapped subtitles.
 ---
