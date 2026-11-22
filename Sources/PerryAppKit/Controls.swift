@@ -834,8 +834,14 @@ open class NSAlert: NSObject {
             return 1000
         }
         let cancel = titles.firstIndex { $0 == "Cancel" }
-        let chosen = try? SDL.showMessageBox(flags: flags, title: messageText, message: message, buttons: titles,
-                                             escapeIndex: cancel, window: Windows.key?.sdlWindow)
+        let chosen: Int??
+        do {
+            chosen = try SDL.showMessageBox(flags: flags, title: messageText, message: message, buttons: titles,
+                                            escapeIndex: cancel, window: Windows.key?.sdlWindow)
+        } catch {
+            appKitWarning("alert: not shown: \(error)")
+            chosen = nil
+        }
         // Closing the box answers as Escape would: with Cancel, if there is
         // one, else the first button.
         let index = chosen.flatMap { $0 } ?? (cancel ?? 0)
