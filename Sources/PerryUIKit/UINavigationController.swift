@@ -953,6 +953,9 @@ final class BarItemState: ObjectState {
     var style = 0
     /// UIBarButtonSystemItem, or -1.
     var systemItem = -1
+    /// The system item's symbol, once looked for: nil for an item shown as
+    /// its word.
+    var systemImage: UIImage??
     /// Not retained, as UIKit's targets.
     var target: UnsafeMutableRawPointer?
     var action: UnsafeRawPointer?
@@ -1003,8 +1006,20 @@ open class UIBarButtonItem: UIBarItem {
     }
 
     /// The title shown for the item, or its system item's.
-    /// The image shown for an item without a title, in the bar.
-    var barImage: UIImage? { displayTitle.isEmpty ? state.image : nil }
+    /// The image shown for the item in the bar: its own, which a bar shows
+    /// in place of a title it also has, or its system item's.
+    var barImage: UIImage? { state.image ?? systemImage }
+
+    /// The symbol UIKit shows for a system item that is a picture, of those
+    /// drawn here; the others keep their word.
+    private var systemImage: UIImage? {
+        let state = state
+        if let looked = state.systemImage { return looked }
+        let symbols = [9: "square.and.arrow.up", 12: "magnifyingglass", 13: "arrow.clockwise", 14: "xmark", 16: "trash"]
+        let image = state.title == nil ? symbols[state.systemItem].flatMap { Symbols.image(named: $0) } : nil
+        state.systemImage = .some(image)
+        return image
+    }
 
     /// The bar image's size: its own, at most 24 points tall.
     var barImageSize: CGSize {
@@ -1020,6 +1035,7 @@ open class UIBarButtonItem: UIBarItem {
 
     var displayTitle: String {
         if let title = state.title { return title }
+        if systemImage != nil { return "" }
         let system = ["Done", "Cancel", "Edit", "Save", "+", "", "", "Compose", "Reply", "Action", "Organize", "Bookmarks",
                       "Search", "Refresh", "Stop", "Camera", "Trash", "Play", "Pause", "Rewind", "Fast Forward", "Undo", "Redo"]
         return system.indices.contains(state.systemItem) ? system[state.systemItem] : ""
