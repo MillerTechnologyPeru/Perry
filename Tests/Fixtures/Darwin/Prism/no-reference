@@ -1,1 +1,1 @@
-Prism draws; it prints only the name of its scene. Perry's tests compare its frames between compositors.
+Prism draws; it prints only the name of its scene. Perry's tests check that each scene composites to a frame.
