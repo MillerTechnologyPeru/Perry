@@ -88,6 +88,10 @@ final class CellState: ObjectState {
     var indentationLevel = 0
     var indentationWidth: CGFloat = 10
     var separator: UIView?
+    /// Whether a table shows the cell as one of its rows: a cell a
+    /// delegate gives as a section's header or footer view has no
+    /// separator, as on iOS.
+    var isRow = false
     /// The standard accessory drawn for the accessory type, and the type
     /// it shows.
     var accessoryIndicator: UIImageView?
@@ -402,25 +406,25 @@ open class UITableViewCell: UIView {
             ancestor = UIView.states[next].superview
         }
         if let owner {
-            cell.separator?.setHidden(owner.table.separatorStyle == 0 || cell.endsCard)
+            cell.separator?.setHidden(owner.table.separatorStyle == 0 || cell.endsCard || !cell.isRow)
             if let color = owner.table.separatorColor { cell.separator?.setBackgroundColor(color) }
         }
         let hairline = Screen.pixel
         cell.separator?.sendSetFrame(CGRect(x: cell.separatorInset.left, y: bounds.height - hairline,
                                             width: max(bounds.width - cell.separatorInset.left - cell.separatorInset.right, 0),
                                             height: hairline))
-        var x: CGFloat = 16
         if let image = cell.imageView, let size = image.imageState.image?.state.size {
             image.sendSetFrame(CGRect(x: 16, y: (bounds.height - size.height) / 2, width: size.width, height: size.height))
-            x += size.width + 16
         }
-        // A standard accessory has its own space before it.
-        let trailing: CGFloat = cell.accessoryView == nil && cell.accessoryType != 0 ? 0 : 16
-        let width = max(content.width - x - trailing, 0)
+        let (x, width) = labelColumn(contentWidth: content.width)
         switch (cell.style, cell.textLabel, cell.detailTextLabel) {
         case (3, let text?, let detail?):
-            text.sendSetFrame(CGRect(x: x, y: content.height / 2 - 21, width: width, height: 21))
-            detail.sendSetFrame(CGRect(x: x, y: content.height / 2, width: width, height: 18))
+            // A line each, around the middle; labels with more lines
+            // take what they wrap to, and the pair stays centered.
+            let (textHeight, detailHeight) = subtitleHeights(text: text, detail: detail, width: width)
+            let top = content.height / 2 - 21 - (textHeight - 21 + detailHeight - 18) / 2
+            text.sendSetFrame(CGRect(x: x, y: top, width: width, height: textHeight))
+            detail.sendSetFrame(CGRect(x: x, y: top + textHeight, width: width, height: detailHeight))
         case (1, let text, let detail?):
             text?.sendSetFrame(CGRect(x: x, y: 0, width: width, height: content.height))
             detail.setTextAlignment(2)
@@ -430,6 +434,37 @@ open class UITableViewCell: UIView {
         default:
             break
         }
+    }
+}
+
+extension UITableViewCell {
+    /// Where the standard labels go across a content view of `contentWidth`:
+    /// after the image, and short of the trailing margin, which a standard
+    /// accessory has its own space for.
+    func labelColumn(contentWidth: CGFloat) -> (x: CGFloat, width: CGFloat) {
+        var x: CGFloat = 16
+        if let size = cell.imageView?.imageState.image?.state.size { x += size.width + 16 }
+        let trailing: CGFloat = cell.accessoryView == nil && cell.accessoryType != 0 ? 0 : 16
+        return (x, max(contentWidth - x - trailing, 0))
+    }
+
+    /// A subtitle cell's labels' heights: a line each (21 and 18 points),
+    /// or what a label with more lines wraps to at the width.
+    func subtitleHeights(text: UILabel, detail: UILabel, width: CGFloat) -> (CGFloat, CGFloat) {
+        func height(_ label: UILabel, line: CGFloat) -> CGFloat {
+            guard label.label.numberOfLines != 1 else { return line }
+            return max(line, label.sizeThatFits(CGSize(width: width, height: 0)).height.rounded(.up))
+        }
+        return (height(text, line: 21), height(detail, line: 18))
+    }
+
+    /// The height a subtitle cell's labels need in a content view of
+    /// `contentWidth`, with the content view's margins (11 points above
+    /// and below); nil for the other styles.
+    func standardHeight(contentWidth: CGFloat) -> CGFloat? {
+        guard cell.style == 3, let text = cell.textLabel, let detail = cell.detailTextLabel else { return nil }
+        let (textHeight, detailHeight) = subtitleHeights(text: text, detail: detail, width: labelColumn(contentWidth: contentWidth).width)
+        return 11 + textHeight + detailHeight + 11
     }
 }
 
@@ -457,6 +492,9 @@ final class HeaderFooterState: ObjectState {
     /// Where the title starts: further in under an inset grouped table's
     /// cards.
     var textInset: CGFloat = 16
+    /// A grouped table's title sits this far above the section, on one
+    /// line; nil centers the text.
+    var textBottom: CGFloat?
 }
 
 @ObjCClass("UITableViewHeaderFooterView")
@@ -511,7 +549,13 @@ open class UITableViewHeaderFooterView: UIView {
         header.contentView?.sendSetFrame(bounds)
         header.backgroundView?.sendSetFrame(bounds)
         let inset = header.textInset
-        header.textLabel?.sendSetFrame(CGRect(x: inset, y: 0, width: max(bounds.width - 2 * inset, 0), height: bounds.height))
+        let width = max(bounds.width - 2 * inset, 0)
+        if let bottom = header.textBottom, let label = header.textLabel {
+            let line = label.sizeThatFits(CGSize(width: width, height: 0)).height.rounded(.up)
+            label.sendSetFrame(CGRect(x: inset, y: bounds.height - bottom - line, width: width, height: line))
+        } else {
+            header.textLabel?.sendSetFrame(CGRect(x: inset, y: 0, width: width, height: bounds.height))
+        }
     }
 }
 
@@ -844,6 +888,11 @@ open class UITableView: UIScrollView {
             if height >= 0 { return height }
         }
         guard hasHeader(section, source: source, delegate: delegate) else { return 0 }
+        // A grouped table's title takes the room it needs: 41 points (as
+        // iOS 17 lays out an inset grouped table), or more if asked for.
+        let titled = table.style != 0 && !implements(delegate, "tableView:viewForHeaderInSection:")
+            && headerTitle(section, source: source) != nil
+        if titled { return max(table.sectionHeaderHeight, Self.groupedTitleHeight) }
         if table.sectionHeaderHeight >= 0 { return table.sectionHeaderHeight }
         // UITableViewAutomaticDimension: the delegate's view, sized by its
         // constraints, which is kept to be shown.
@@ -873,9 +922,19 @@ open class UITableView: UIScrollView {
             if height >= 0 { return height }
         }
         guard footerTitle(section, source: source) != nil
-                || implements(delegate, "tableView:viewForFooterInSection:") else { return 0 }
+                || implements(delegate, "tableView:viewForFooterInSection:") else {
+            // A grouped table spaces its sections by the footer's height
+            // even with nothing in it.
+            guard table.style != 0 else { return 0 }
+            return table.sectionFooterHeight >= 0 ? table.sectionFooterHeight : 18
+        }
         return table.sectionFooterHeight >= 0 ? table.sectionFooterHeight : 28
     }
+
+    /// A grouped table's header title: its height, and how far its text
+    /// sits above the section.
+    static let groupedTitleHeight: CGFloat = 41
+    static let groupedTitleBottom: CGFloat = 10
 
     private func hasHeader(_ section: Int, source: NSObject?, delegate: NSObject?) -> Bool {
         headerTitle(section, source: source) != nil || implements(delegate, "tableView:viewForHeaderInSection:")
@@ -1017,9 +1076,13 @@ open class UITableView: UIScrollView {
     private func measure(_ cell: UITableViewCell, at path: RowPath) {
         guard table.automaticRows.contains(path) else { return }
         var height = cell.cell.designHeight
-        if let content = cell.cell.contentView {
-            let width = state.bounds.width - 2 * rowInset - cell.accessoryWidth
-            if let fitting = AutoLayout.fittingHeight(content, width: width) { height = fitting + Screen.pixel }
+        let width = state.bounds.width - 2 * rowInset - cell.accessoryWidth
+        if let content = cell.cell.contentView, let fitting = AutoLayout.fittingHeight(content, width: width) {
+            height = fitting + Screen.pixel
+        } else if let labels = cell.standardHeight(contentWidth: width) {
+            // A standard cell without constraints: tall enough for its
+            // labels, and at least as designed.
+            height = max(height, labels + Screen.pixel)
         }
         guard height > 0, table.measuredHeights[path] != height else { return }
         let estimated = table.measuredHeights[path] ?? automaticRowHeight
@@ -1029,6 +1092,7 @@ open class UITableView: UIScrollView {
 
     private func show(_ cell: UITableViewCell, at path: RowPath) {
         table.visibleCells[path] = cell
+        cell.cell.isRow = true
         if cell.state.superview != objcObject {
             insertSubview(cell, at: 0)
         }
@@ -1116,6 +1180,7 @@ open class UITableView: UIScrollView {
                     // table's own background.
                     header.setBackgroundColor(UIColor.clear())
                     header.header.textInset = 16 + rowInset
+                    header.header.textBottom = Self.groupedTitleBottom
                     let label = header.textLabel()
                     label?.setFont(UIFont.systemFont(size: 13))
                     label?.setTextColor(UIColor.secondaryLabel())

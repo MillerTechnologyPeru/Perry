@@ -690,7 +690,9 @@ open class UINavigationBar: UIView {
         for item in items {
             content += "|\(item.state.title ?? "")|\(item.state.backButtonTitle ?? "")|\(item.state.hidesBackButton)"
             for button in item.state.leftItems + item.state.rightItems {
-                content += "|\(button.displayTitle)|\(button.state.style)|\(button.state.enabled)"
+                // The image too: one set after the bar drew must show.
+                let image = button.barImage.map { "\(UInt(bitPattern: $0.objcObject))" } ?? ""
+                content += "|\(button.displayTitle)|\(image)|\(button.state.style)|\(button.state.enabled)"
             }
         }
         guard content != barState.drawn else { return false }
@@ -1005,9 +1007,10 @@ open class UIBarButtonItem: UIBarItem {
         state.action = action
     }
 
-    /// The title shown for the item, or its system item's.
-    /// The image shown for an item without a title, in the bar.
-    var barImage: UIImage? { displayTitle.isEmpty ? state.image ?? systemImage : nil }
+    /// The image shown in the bar: the item's own, which wins over its
+    /// title as on iOS (the title is then for accessibility), else a
+    /// system item's picture.
+    var barImage: UIImage? { state.image ?? (displayTitle.isEmpty ? systemImage : nil) }
 
     /// The symbol UIKit shows for a system item that is a picture, of those
     /// drawn here; the others keep their word.
