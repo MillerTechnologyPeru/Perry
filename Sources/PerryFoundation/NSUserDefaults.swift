@@ -28,7 +28,26 @@ final class UserDefaultsStorage {
     /// any thread, as NSUserDefaults allows.
     private let lock = Monitor()
 
-    func value(_ key: String) -> PropertyValue? { lock.locked { values[key] ?? registered[key] } ?? Self.global[key] }
+    func value(_ key: String) -> PropertyValue? {
+        Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"]?[key] } ?? lock.locked { values[key] ?? registered[key] } ?? Self.global[key]
+    }
+
+    /// The defaults given on the command line, each "-Key value": the
+    /// argument domain, searched before every other. A value is a string.
+    static func argumentDomain(_ arguments: [String]) -> [String: PropertyValue] {
+        var found: [String: PropertyValue] = [:]
+        var index = 1
+        while index + 1 < arguments.count {
+            let key = arguments[index]
+            if key.hasPrefix("-"), key.count > 1, Double(key) == nil {
+                found[String(key.dropFirst())] = .string(arguments[index + 1])
+                index += 2
+            } else {
+                index += 1
+            }
+        }
+        return found
+    }
 
     /// NSGlobalDomain's values that apps read as iOS always has them: the
     /// languages, most preferred first, and the locale.
@@ -116,12 +135,14 @@ final class UserDefaultsStorage {
     }
 
     /// Volatile domains other than registration, by name: kept for the
-    /// session. NSArgumentDomain is empty here.
-    nonisolated(unsafe) static var volatileDomains: [String: [String: PropertyValue]] = ["NSArgumentDomain": [:]]
+    /// session. NSArgumentDomain starts as the command line's defaults.
+    nonisolated(unsafe) static var volatileDomains: [String: [String: PropertyValue]] = ["NSArgumentDomain": argumentDomain(Process.arguments)]
     static let volatileLock = Monitor()
 
     var all: [String: PropertyValue] {
-        lock.locked { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+        let arguments = Self.volatileLock.locked { Self.volatileDomains["NSArgumentDomain"] } ?? [:]
+        return lock.locked { Self.global.merging(registered) { _, new in new }.merging(values) { _, set in set } }
+            .merging(arguments) { _, given in given }
     }
 
     @discardableResult
