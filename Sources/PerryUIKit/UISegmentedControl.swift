@@ -320,8 +320,10 @@ open class UISegmentedControl: UIControl {
         guard let context = Graphics.current else { return }
         let bounds = state.bounds, frames = segmentFrames()
         let selected = segmented.momentary ? segmented.pressed ?? -1 : segmented.selected
-        let track = UIColor.rgb(118.0 / 255, 118.0 / 255, 128.0 / 255, 0.12)
-        let tile = segmented.selectedTintColor ?? UIColor.white()
+        // The track and the raised tile, as each appearance has them.
+        let dark = interfaceStyle == 2
+        let track = UIColor.rgb(118.0 / 255, 118.0 / 255, 128.0 / 255, dark ? 0.24 : 0.12)
+        let tile = segmented.selectedTintColor ?? (dark ? UIColor.rgb(99.0 / 255, 99.0 / 255, 102.0 / 255) : UIColor.white())
         let separator = UIColor.rgb(142.0 / 255, 142.0 / 255, 147.0 / 255, 0.3)
         let pressed = UIColor.gray(0, 0.06)
         withExtendedLifetime((track, tile, separator, pressed)) {
