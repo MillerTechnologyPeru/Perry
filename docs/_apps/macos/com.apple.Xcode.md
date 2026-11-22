@@ -255,11 +255,25 @@ reports:
     level: 3
     source: body
     notes: An app Xcode builds with radio buttons and text fields bound through their cells takes what is clicked and typed. Debugging isn't supported.
+  - pr: 263
+    date: 2026-11-21
+    perry: "9fa89f8e"
+    platform: macos
+    cpu: x86_64
+    app_version: "3.2.6"
+    hardware: Dell OptiPlex 7020
+    os: Debian 13
+    env:
+      - "PERRY_UNIMPLEMENTED=continue"
+      - "PERRY_OBJC_UNRECOGNIZED=continue"
+    level: 3
+    source: body
+    notes: The editor's gutter shows line numbers when the preference is on, and a universal build ends with Xcode joining the slices itself once a lipo is at /usr/bin/lipo. Debugging isn't supported.
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
 
-## Status as of [#260]({{ site.repository_url }}/pull/260)
+## Status as of [#263]({{ site.repository_url }}/pull/263)
 
 Working:
 
@@ -276,14 +290,18 @@ Working:
   itself ([#236]({{ site.repository_url }}/pull/236)).
 - Selecting a source file opens an editor in the project window, and
   editor windows open with their navigation bar. The editor shows the
-  file's text with syntax colouring and the folding bar in its gutter.
+  file's text with syntax colouring and the folding bar in its gutter,
+  and line numbers there when "Show line numbers" is on (off by default,
+  as Xcode ships; `-PBXShowLineNumbers YES` on the command line turns it
+  on).
 - Typing in the editor: a click places the insertion point on the line
   clicked, and typed text appears there. File > Save writes the file.
 - Collapsed panes stay hidden instead of drawing over their neighbours.
 - A universal build: with `ARCHS = ppc i386 x86_64` gcc-4.2 compiles and
   ld links each slice. Xcode joins them with `/usr/bin/lipo`, so the build
-  ends in an error unless one is installed there (LLVM's `llvm-lipo`
-  works when run by hand; under that name from Xcode is untested).
+  ends in an error unless one is installed there; LLVM's `llvm-lipo`
+  linked at that path works, and Xcode then writes the three-slice
+  executable itself.
 - ibtool compiles xibs holding number formatters and Cocoa bindings, and
   the nibs keep their buttons' titles, radio buttons, matrices and boxes.
   An app built this way runs under Perry: its bound fields and radio
@@ -292,6 +310,7 @@ Working:
 
 Broken:
 
-- Line numbers don't show in the editor's gutter.
+- A `/usr/sbin/sysctl` Xcode starts for its build host's details is
+  never waited for, and stays a zombie while Xcode runs.
 - Debugging isn't supported: breakpoints are accepted and never hit, and
   there is no stepping or variables view.
