@@ -185,8 +185,24 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
         if (perry_exports_lookup(loader, dep->image, name, out, depth + 1))
             return true;
         // A Swift overlay's API newer than the overlay, which Perry adds.
-        return dep->swift_additions && strncmp(name, "_$s", 3) == 0 &&
-               perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1);
+        if (dep->swift_additions && strncmp(name, "_$s", 3) == 0 &&
+            perry_exports_lookup(loader, dep->swift_additions, name, out, depth + 1))
+            return true;
+        // The other way round: a runtime whose CoreFoundation overlay
+        // predates the move (Swift 5.0's, an x86_64 Mac app's) has CGFloat
+        // in its CoreGraphics overlay alone, where a program built since
+        // does not look.
+        if (strncmp(name, cgfloat, sizeof(cgfloat) - 1) == 0 && dep->image->install_name &&
+            strstr(dep->image->install_name, "libswiftCoreFoundation.dylib")) {
+            for (perry_image *each = loader->images; each; each = each->next) {
+                if (each != dep->image && each->install_name && strstr(each->install_name, "libswiftCoreGraphics.dylib") &&
+                    perry_exports_lookup(loader, each, name, out, depth + 1))
+                    return true;
+            }
+        }
+        // A framework with Swift code (StoreKit's) may have a provider too,
+        // for its Objective-C classes and constants (SKErrorDomain).
+        return dep->provider && provider_lookup(loader, dep->provider, name, out);
     }
     if (dep->provider && provider_lookup(loader, dep->provider, name, out))
         return true;

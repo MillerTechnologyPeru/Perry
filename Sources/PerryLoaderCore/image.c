@@ -944,13 +944,17 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         const char *name = dep->install_name;
 
         // Mac Catalyst code is iOS code: its UIKit is iOS apps' provider. Its
-        // AppKit, which such an app links for a few Mac touches, gets none,
-        // as AppKit's provider defines classes UIKit's does (NSLayoutConstraint)
-        // and one process can hold only one of each.
+        // AppKit, which such an app links for a few Mac touches, is not
+        // AppKit's provider, which defines classes UIKit's does
+        // (NSLayoutConstraint) when one process can hold only one of each.
+        // The text constants both frameworks export (NSFontAttributeName,
+        // UIFontWeightBold, NSHTMLTextDocumentType), which a Mac Catalyst
+        // image binds to AppKit, come from UIKit's.
         char catalyst_name[PATH_MAX];
         if (image->platform == PLATFORM_MACCATALYST) {
             if (strstr(name, "/AppKit.framework/")) {
-                perry_trace(PERRY_TRACE_LOAD, "%s: no AppKit for a Mac Catalyst image", name);
+                dep->provider = perry_find_provider(loader, "/System/Library/Frameworks/UIKit.framework/UIKit");
+                perry_trace(PERRY_TRACE_LOAD, "%s: UIKit's provider for a Mac Catalyst image", name);
                 continue;
             }
             if (catalyst_install_name(name, catalyst_name, sizeof(catalyst_name))) {
@@ -962,6 +966,11 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         // Swift's libraries, from the Darwin runtime given, when it has them,
         // and frameworks written in Swift that it holds (Combine).
         char swift_path[PATH_MAX];
+        // POSIXErrorCode and errno, now in libswift_errno, are the Darwin
+        // overlay's in a runtime that predates that library (Swift 5.0's).
+        if (strcmp(name, "/usr/lib/swift/libswift_errno.dylib") == 0 &&
+            !swift_runtime_file(loader, name, swift_path, sizeof(swift_path)))
+            name = "/usr/lib/swift/libswiftDarwin.dylib";
         if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path)) ||
             swift_runtime_framework(loader, name, swift_path, sizeof(swift_path))) {
             dep->image = find_loaded(loader, swift_path);

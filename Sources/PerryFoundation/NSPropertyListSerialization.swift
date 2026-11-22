@@ -851,7 +851,7 @@ enum Archivers {
 
 /// NSKeyedArchiver.
 @ObjCClass("NSKeyedArchiver")
-public class NSKeyedArchiver: NSObject {
+public class NSKeyedArchiver: NSCoder {
     override public class func didDefineObjCClass(_ cls: ObjCClass) {
         NSObject.registerObjCCategoryStorageAllocated(cls)
         Archivers.archiverClass = cls.storage
@@ -917,9 +917,9 @@ public class NSKeyedArchiver: NSObject {
         return FileManager.default.createFile(atPath: path, contents: DataObjects.data(data))
     }
 
-    @ObjCMethod("requiresSecureCoding") func requiresSecureCoding() -> Bool { storage.requiresSecureCoding }
+    @ObjCMethod("requiresSecureCoding") override func requiresSecureCoding() -> Bool { storage.requiresSecureCoding }
     @ObjCMethod("setRequiresSecureCoding:") func setRequiresSecureCoding(_ value: Bool) { storage.requiresSecureCoding = value }
-    @ObjCMethod("allowsKeyedCoding") func allowsKeyedCoding() -> Bool { true }
+    @ObjCMethod("allowsKeyedCoding") override func allowsKeyedCoding() -> Bool { true }
     @ObjCMethod("outputFormat") func outputFormat() -> UInt { storage.format }
     @ObjCMethod("setOutputFormat:") func setOutputFormat(_ format: UInt) { storage.format = format }
     @ObjCMethod("finishEncoding") func finishEncoding() { _ = Archivers.finish(storage) }

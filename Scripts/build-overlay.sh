@@ -58,6 +58,12 @@ case $target in *-macabi)
             -Xcc -isystem -Xcc "$support/usr/include" -Xcc -iframework -Xcc "$support/System/Library/Frameworks") ;;
 esac
 
+# A module of libSystem's headers (os) has no framework to link.
+framework=()
+for dir in "$sdk/System/Library/Frameworks" "$sdk/System/iOSSupport/System/Library/Frameworks"; do
+    [ -d "$dir/$swift_module.framework" ] && framework=(-framework "$swift_module")
+done
+
 sources=()
 while IFS= read -r file; do sources+=("$file"); done < <(find "Darwin/$module/Sources" -name '*.swift' | sort)
 
@@ -65,7 +71,7 @@ xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" \
     -module-name "$swift_module" -parse-as-library -import-underlying-module \
     -enable-library-evolution -swift-version 5 -O -wmo \
     -emit-library -emit-module -emit-module-path "$work/$swift_module.swiftmodule" \
-    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" -framework "$swift_module" \
+    ${includes[@]+"${includes[@]}"} ${flags[@]+"${flags[@]}"} "${sources[@]}" ${framework[@]+"${framework[@]}"} \
     -Xlinker -install_name -Xlinker "$install/libswift$module.dylib" \
     -o "$out/libswift$module.dylib"
 echo "$out/libswift$module.dylib"
