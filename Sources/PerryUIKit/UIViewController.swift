@@ -737,9 +737,14 @@ enum ProgramSDK {
     nonisolated(unsafe) static let iOS13 = atLeast(major: 13) ?? true
 
     /// The design of iOS 26, which an app can decline in its Info.plist;
-    /// false when the SDK can't be told.
+    /// false when the SDK can't be told, and on an earlier system
+    /// (PERRY_OS_VERSION), where an app built for it has that system's.
     nonisolated(unsafe) static let iOS26Design: Bool = {
         guard atLeast(major: 26) ?? false else { return false }
+        if let setting = getenv("PERRY_OS_VERSION"),
+           let major = Int(String(cString: setting).split(separator: ".").first ?? ""), major < 26 {
+            return false
+        }
         return NSBundle.main().infoObject(forKey: "UIDesignRequiresCompatibility")?.sendBoolValue() != true
     }()
 
