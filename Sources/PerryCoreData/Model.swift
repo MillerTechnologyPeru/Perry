@@ -108,6 +108,16 @@ extension NSObject {
     @ObjCMethod("containsValueForKey:") func coderContains(_ key: String) -> Bool
 }
 
+/// An NSKeyedArchiver, as -encodeWithCoder: receives it: the descriptions
+/// encode under the keys they decode, so a model archived (as Xcode does
+/// its own at launch) unarchives as it was.
+extension NSObject {
+    @ObjCMethod("encodeObject:forKey:") func coderEncode(_ object: NSObject?, forKey key: String)
+    @ObjCMethod("encodeObject:forKey:") func coderEncode(string value: String, forKey key: String)
+    @ObjCMethod("encodeInteger:forKey:") func coderEncode(integer value: Int, forKey key: String)
+    @ObjCMethod("encodeBool:forKey:") func coderEncode(bool value: Bool, forKey key: String)
+}
+
 // MARK: - NSManagedObjectModel
 
 @ObjCClass("NSManagedObjectModel")
@@ -152,6 +162,11 @@ open class NSManagedObjectModel: NSObject {
         } ?? []
         setEntities(NSMutableArray.of(values))
         return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: NSObject) {
+        coder.coderEncode(entitiesByName(), forKey: "NSEntities")
     }
 
     @ObjCMethod("dealloc")
@@ -303,6 +318,15 @@ open class NSEntityDescription: NSObject {
         return self
     }
 
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: NSObject) {
+        coder.coderEncode(string: state.name, forKey: "NSEntityName")
+        coder.coderEncode(string: state.className, forKey: "NSClassNameForEntity")
+        coder.coderEncode(bool: state.abstract, forKey: "NSIsAbstract")
+        coder.coderEncode(superentity, forKey: "NSSuperentity")
+        coder.coderEncode(NSMutableDictionary.of(state.properties.map { ($0.state.name, $0) }), forKey: "NSProperties")
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Descriptions.entities.remove(objcObject)
@@ -397,6 +421,13 @@ open class NSPropertyDescription: NSObject {
         return self
     }
 
+    @ObjCMethod("encodeWithCoder:")
+    func encode(coder: NSObject) {
+        coder.coderEncode(string: state.name, forKey: "NSPropertyName")
+        coder.coderEncode(bool: state.optional, forKey: "NSIsOptional")
+        coder.coderEncode(bool: state.transient, forKey: "NSIsTransient")
+    }
+
     @ObjCMethod("dealloc")
     func dealloc() {
         Descriptions.properties.remove(objcObject)
@@ -435,6 +466,13 @@ open class NSAttributeDescription: NSPropertyDescription {
         return self
     }
 
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(coder: NSObject) {
+        super.encode(coder: coder)
+        coder.coderEncode(integer: Int(state.attributeType), forKey: "NSAttributeType")
+        coder.coderEncode(state.defaultValue, forKey: "NSDefaultValue")
+    }
+
     @ObjCMethod("attributeType") func attributeType() -> UInt { state.attributeType }
     @ObjCMethod("setAttributeType:") func setAttributeType(_ type: UInt) { state.attributeType = type }
     @ObjCMethod("defaultValue") func defaultValue() -> NSObject? { state.defaultValue }
@@ -465,6 +503,16 @@ open class NSRelationshipDescription: NSPropertyDescription {
         state.maxCount = UInt(coder.coderInteger(forKey: "NSMaxCount"))
         state.minCount = UInt(coder.coderInteger(forKey: "NSMinCount"))
         return self
+    }
+
+    @ObjCMethod("encodeWithCoder:")
+    override func encode(coder: NSObject) {
+        super.encode(coder: coder)
+        coder.coderEncode(destination, forKey: "NSDestinationEntity")
+        coder.coderEncode(inverse, forKey: "NSInverseRelationship")
+        coder.coderEncode(integer: Int(state.deleteRule), forKey: "NSDeleteRule")
+        coder.coderEncode(integer: Int(state.maxCount), forKey: "NSMaxCount")
+        coder.coderEncode(integer: Int(state.minCount), forKey: "NSMinCount")
     }
 
     @ObjCMethod("destinationEntity") func destinationEntity() -> NSEntityDescription? { destination }
