@@ -31,9 +31,17 @@ open class UIVisualEffect: NSObject {
     @ObjCMethod("copyWithZone:")
     func copy(zone: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer { ObjCRuntime.retain(objcObject)! }
 
+    /// Nibs from newer Xcodes keep the style for older systems under
+    /// UIBlurEffectStyle and the one that follows the appearance (as
+    /// prominent, 5) under UIBlurEffectAutomaticStyle, which wins. A
+    /// vibrancy effect's keys are its blur's, and it shows no fill.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
-        effect.style = Coder(coder: coder).integer("UIBlurEffectStyle")
+        let decoded = Coder(coder: coder)
+        effect.vibrancy = decoded.has("UIVibrancyEffectBlurStyle") || decoded.has("UIVibrancyEffectBlurAutomaticStyle")
+        let (automatic, style) = effect.vibrancy ? ("UIVibrancyEffectBlurAutomaticStyle", "UIVibrancyEffectBlurStyle")
+            : ("UIBlurEffectAutomaticStyle", "UIBlurEffectStyle")
+        effect.style = decoded.has(automatic) ? decoded.integer(automatic) : decoded.integer(style)
         return self
     }
 
