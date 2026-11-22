@@ -269,6 +269,9 @@ reports:
     level: 3
     source: body
     notes: The editor's gutter shows line numbers when the preference is on, and a universal build ends with Xcode joining the slices itself once a lipo is at /usr/bin/lipo. Debugging isn't supported.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/36030b46-6d22-4520-a375-c14fdc2033c3
+        caption: Source editor with line numbers in its gutter
 ---
 
 Xcode 3.2.6 from Mac OS X 10.6, the x86_64 slice.
