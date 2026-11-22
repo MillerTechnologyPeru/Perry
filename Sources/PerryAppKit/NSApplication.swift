@@ -576,6 +576,10 @@ open class NSApplication: NSResponder {
     @ObjCMethod("registerForRemoteNotificationTypes:") func registerForRemoteNotificationTypes(_ types: UInt) {}
     @ObjCMethod("enabledRemoteNotificationTypes") func enabledRemoteNotificationTypes() -> UInt { 0 }
     @ObjCMethod("registerServicesMenuSendTypes:returnTypes:") func registerServicesMenuSendTypes(_ send: NSObject?, returnTypes: NSObject?) {}
+    /// The Help menu's search of the app's own items (Xcode registers its
+    /// documentation's): there is no Help menu search here, so it is never asked.
+    @ObjCMethod("registerUserInterfaceItemSearchHandler:") func registerUserInterfaceItemSearchHandler(_ handler: NSObject?) {}
+    @ObjCMethod("unregisterUserInterfaceItemSearchHandler:") func unregisterUserInterfaceItemSearchHandler(_ handler: NSObject?) {}
     @ObjCMethod("enumerateWindowsWithOptions:usingBlock:")
     func enumerateWindows(options: Int, using block: ObjCBlock) {
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer, UnsafeMutablePointer<Bool>) -> Void
