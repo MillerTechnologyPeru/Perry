@@ -17,7 +17,9 @@ import PerryObjCInterop
 // without an image. Clipping to bounds is a
 // rectangular clip, opacity is an opacity effect on each drawing, and a
 // layer that is turned is drawn through a transform. A layer that clips to
-// rounded corners, or has a mask, is one image with its sublayers. GL and
+// rounded corners clips its sublayers to a rounded rectangle, which the
+// engine cuts at the corners; turned or skewed, or with a mask, it is one
+// image with its sublayers. GL and
 // Metal frames are an external surface's: GL frames shared as GPU buffers
 // the engine imports, or else pixels published to one.
 
@@ -165,9 +167,14 @@ final class DisplayListCompositor {
         if layer.state.filters != nil, let backdrop = layer.as(CABackdropLayer.self) {
             addBackdrop(backdrop, of: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
         }
-        // A masked layer, or one clipping to rounded corners, and its
+        // A layer clipping to rounded corners, moved and scaled alike in
+        // both directions, clips its sublayers to a rounded rectangle the
+        // engine cuts at the corners on the GPU.
+        let roundedClip = state.mask == nil && state.masksToBounds && state.cornerRadius > 0 && Self.isUniform(toScreen)
+            && !Self.hasBackdrop(under: state)
+        // A masked layer, or another clipping to rounded corners, and its
         // sublayers are one image, drawn again when anything changes.
-        if state.mask != nil || (state.masksToBounds && state.cornerRadius > 0) {
+        if !roundedClip, state.mask != nil || (state.masksToBounds && state.cornerRadius > 0) {
             addNestedBackdrops(in: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
             if let entry = flattened(layer, state: state, shape: shape, toScreen: toScreen) {
                 let extent = state.mask != nil ? CALayer.maskedExtent(of: state) : state.bounds
@@ -208,8 +215,11 @@ final class DisplayListCompositor {
             build(sublayer, toScreen: presented.toSuperlayer(within: state).concatenating(toScreen), alpha: alpha, into: &inner)
         }
         if state.masksToBounds, !inner.isEmpty {
-            // To the layer's box on the screen.
-            let clip = ClipEffect(path: Path(Foundation.CGRect(frame)), isRectangle: true)
+            // To the layer's box on the screen, in the shape of its corners.
+            let clip = roundedClip
+                ? ClipEffect(roundedRectangleOf: Foundation.CGRect(frame).size, cornerRadius: Foundation.CGFloat(Double(state.cornerRadius * toScreen.a)),
+                             corners: Self.corners(state.maskedCorners))
+                : ClipEffect(path: Path(Foundation.CGRect(frame)), isRectangle: true)
             items.append(DisplayList.Item(frame: Foundation.CGRect(frame), identity: identity(layer, .clip), version: 0,
                                           value: .effect(.clip(clip), DisplayList(items: inner))))
         } else {
@@ -253,16 +263,39 @@ final class DisplayListCompositor {
     /// engine draws on the GPU. Nil for anything else, drawn as an image.
     private func roundedRectangle(of layer: CALayer, state: LayerState, shape: ShapeLayerState?, toScreen: CGAffineTransform,
                                   alpha: CGFloat) -> RoundedRectangleContent? {
-        guard shape == nil, state.contents == nil, layer.state.backing == nil, !layer.draws,
-              toScreen.b == 0, toScreen.c == 0, toScreen.a > 0, toScreen.a == toScreen.d,
+        guard shape == nil, state.contents == nil, layer.state.backing == nil, Self.isUniform(toScreen), !layer.draws,
               let background = state.backgroundColor, let color = resolved(background, alpha: alpha) else { return nil }
-        // CACornerMask's corners are min and max x and y: 1, 2, 4 and 8.
+        return RoundedRectangleContent(color: color, cornerRadius: Foundation.CGFloat(Double(state.cornerRadius * toScreen.a)),
+                                       corners: Self.corners(state.maskedCorners))
+    }
+
+    /// Whether a transform only moves and scales, alike in both directions,
+    /// so a rounded rectangle stays one, its corners circles.
+    private static func isUniform(_ toScreen: CGAffineTransform) -> Bool {
+        toScreen.b == 0 && toScreen.c == 0 && toScreen.a > 0 && toScreen.a == toScreen.d
+    }
+
+    /// CACornerMask's corners, min and max x and y (1, 2, 4 and 8), as
+    /// Cacao's.
+    private static func corners(_ mask: UInt) -> RoundedRectangleContent.Corners {
         var corners: RoundedRectangleContent.Corners = []
-        if state.maskedCorners & 1 != 0 { corners.insert(.topLeading) }
-        if state.maskedCorners & 2 != 0 { corners.insert(.topTrailing) }
-        if state.maskedCorners & 4 != 0 { corners.insert(.bottomLeading) }
-        if state.maskedCorners & 8 != 0 { corners.insert(.bottomTrailing) }
-        return RoundedRectangleContent(color: color, cornerRadius: Foundation.CGFloat(Double(state.cornerRadius * toScreen.a)), corners: corners)
+        if mask & 1 != 0 { corners.insert(.topLeading) }
+        if mask & 2 != 0 { corners.insert(.topTrailing) }
+        if mask & 4 != 0 { corners.insert(.bottomLeading) }
+        if mask & 8 != 0 { corners.insert(.bottomTrailing) }
+        return corners
+    }
+
+    /// Whether a visible backdrop layer is among the sublayers: what it
+    /// blurs is the screen's, which a clip's offscreen drawing doesn't
+    /// have, so such a layer is still drawn as one image over the backdrops.
+    private static func hasBackdrop(under state: LayerState) -> Bool {
+        state.sublayers.contains { sublayer in
+            let presented = Presentation.state(of: sublayer)
+            guard !presented.hidden, presented.opacity > 0 else { return false }
+            if sublayer.state.filters != nil, sublayer.as(CABackdropLayer.self) != nil { return true }
+            return hasBackdrop(under: presented)
+        }
     }
 
     /// A drawing that fills `extent` of the layer, placed by `toScreen`: in
