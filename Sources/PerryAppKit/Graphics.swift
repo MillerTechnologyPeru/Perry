@@ -580,6 +580,12 @@ open class NSFont: NSObject {
     @ObjCClassMethod("systemFontSizeForControlSize:") static func systemFontSize(forControlSize size: UInt) -> CGFloat { [13, 11, 9, 13][Int(min(size, 3))] }
 
     @ObjCMethod("fontName") func fontName() -> String { name }
+    /// The font for the screen and for printing: one font here, as there
+    /// are no bitmap screen fonts. (Xcode's gutter draws its line numbers
+    /// in its font's screen font.)
+    @ObjCMethod("screenFont") func screenFont() -> NSFont { self }
+    @ObjCMethod("printerFont") func printerFont() -> NSFont { self }
+    @ObjCMethod("screenFontWithRenderingMode:") func screenFont(renderingMode: UInt) -> NSFont { self }
     @ObjCMethod("familyName") func familyName() -> String { name.hasPrefix(".") ? "System Font" : name.split(separator: "-").first.map(String.init) ?? name }
     @ObjCMethod("displayName") func displayName() -> String { name.hasPrefix(".") ? "System Font Regular" : name }
     @ObjCMethod("pointSize") func pointSize() -> CGFloat { size }
