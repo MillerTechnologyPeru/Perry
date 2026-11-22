@@ -14,14 +14,18 @@ cd "$(dirname "$0")/.."
 
 out=${1:-.build/perry-swift-runtime}
 work=.build/perry-combine
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-target=arm64-apple-ios15.0
+# PERRY_OVERLAY_PLATFORM and PERRY_OVERLAY_TARGET name another SDK and
+# target, as for Scripts/build-overlay.sh: macosx and x86_64-apple-macos15.0
+# for a Mac app on x86_64.
+platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
+sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+target=${PERRY_OVERLAY_TARGET:-arm64-apple-ios15.0}
 mkdir -p "$work" "$out/Combine.framework"
 
-xcrun --sdk iphoneos clang++ -target "$target" -isysroot "$sdk" -std=c++17 -O2 -Wno-\#warnings \
+xcrun --sdk "$platform" clang++ -target "$target" -isysroot "$sdk" -std=c++17 -O2 -Wno-\#warnings \
     -I Darwin/Combine/Helpers/include -c Darwin/Combine/Helpers/COpenCombineHelpers.cpp -o "$work/helpers.o"
 
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -module-name Combine -parse-as-library \
+xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" -module-name Combine -parse-as-library \
     -enable-library-evolution -O -emit-library \
     -emit-module -emit-module-path "$work/Combine.swiftmodule" \
     -I Darwin/Combine/Helpers/include \
