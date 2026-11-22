@@ -144,7 +144,10 @@ FILE *darwin_popen(const char *command, const char *mode) { return (FILE *)wrap(
 int darwin_pclose(FILE *stream) DARWIN_SYMBOL(pclose);
 int darwin_pclose(FILE *stream) {
     FILE *real = REAL(stream);
-    if (real != stream) free(stream);
+    if (real != stream) {
+        free(((darwin_file *)stream)->lb.base);
+        free(stream);
+    }
     return pclose(real);
 }
 
@@ -161,7 +164,10 @@ int darwin_fclose(FILE *stream) {
     }
     FILE *real = REAL(stream);
     // The standard streams' stand-ins stay, closed or not.
-    if (real != stream && stream != darwin_stdinp && stream != darwin_stdoutp && stream != darwin_stderrp) free(stream);
+    if (real != stream && stream != darwin_stdinp && stream != darwin_stdoutp && stream != darwin_stderrp) {
+        free(((darwin_file *)stream)->lb.base);
+        free(stream);
+    }
     return fclose(real);
 }
 
@@ -184,6 +190,33 @@ STREAM_FUNCTION(size_t, fwrite, (const void *p, size_t size, size_t count, FILE 
 STREAM_FUNCTION(size_t, fread, (void *p, size_t size, size_t count, FILE *stream), fread(p, size, count, REAL(stream)))
 STREAM_FUNCTION(ssize_t, getline, (char **line, size_t *size, FILE *stream), getline(line, size, REAL(stream)))
 STREAM_FUNCTION(ssize_t, getdelim, (char **line, size_t *size, int delimiter, FILE *stream), getdelim(line, size, delimiter, REAL(stream)))
+
+// BSD's fgetln: the next line, its newline included and no NUL after it,
+// with its length in `length`; NULL at the end of the file. The line is the
+// stream's until its next read (its _lb, freed when it closes), or the
+// thread's for a stream that isn't one of Perry's.
+char *darwin_fgetln(FILE *stream, size_t *length) DARWIN_SYMBOL(fgetln);
+char *darwin_fgetln(FILE *stream, size_t *length) {
+    static _Thread_local char *line;
+    static _Thread_local size_t capacity;
+    darwin_file *file = (darwin_file *)stream;
+    int wrapped = file && file->close == marker;
+    char *buffer = wrapped ? (char *)file->lb.base : line;
+    size_t size = wrapped ? (size_t)file->lb.size : capacity;
+    ssize_t count = getline(&buffer, &size, REAL(stream));
+    if (wrapped) {
+        file->lb.base = (unsigned char *)buffer;
+        file->lb.size = (int)size;
+    } else {
+        line = buffer;
+        capacity = size;
+    }
+    sync_flags(stream);
+    if (count < 0) return NULL;
+    if (length) *length = (size_t)count;
+    return buffer;
+}
+
 STREAM_FUNCTION(int, fseek, (FILE *stream, long offset, int whence), fseek(REAL(stream), offset, whence))
 STREAM_FUNCTION(long, ftell, (FILE *stream), ftell(REAL(stream)))
 STREAM_FUNCTION(int, fseeko, (FILE *stream, off_t offset, int whence), fseeko(REAL(stream), offset, whence))
