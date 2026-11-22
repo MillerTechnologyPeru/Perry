@@ -97,7 +97,7 @@ final class LayerState {
     /// CALayerContentsScaling ("stretch", "repeat"); kept, as contents are
     /// stretched here.
     var contentsScaling = "stretch"
-    /// Extended dynamic range, which Perry's compositor doesn't show: kept.
+    /// Extended dynamic range, which the compositor doesn't show: kept.
     var wantsExtendedDynamicRangeContent = false
     var contentsMaximumDesiredEDR: CGFloat = 1
     /// Private: the color the contents are multiplied by, and whether their
