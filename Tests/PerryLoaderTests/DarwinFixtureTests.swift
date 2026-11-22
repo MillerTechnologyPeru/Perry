@@ -132,8 +132,8 @@ enum DarwinFixtures {
                               "shapes", "replicated"]
 
     /// Scenes the compositors are known to draw differently: a skewed layer
-    /// in transforms, which Perry's compositor draws upright, and the edges
-    /// of masked layers, a pixel apart.
+    /// in transforms, which Perry's compositor draws upright, and one pixel
+    /// in masks.
     static let layerScenesThatDiffer: Set<String> = ["masks", "transforms"]
 
     /// Whether there is a display to open a window on.
