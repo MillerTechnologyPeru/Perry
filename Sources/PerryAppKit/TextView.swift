@@ -1242,8 +1242,8 @@ open class NSTextView: NSText {
         if let value { applyFont(value, to: NSRange(location: 0, length: UInt(storage?.textLength ?? 0))) }
         textChanged()
     }
-    @ObjCMethod("alignment") func viewAlignment() -> Int { alignment }
-    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = value; setNeedsDisplay(true) }
+    @ObjCMethod("alignment") func viewAlignment() -> Int { Alignment.app(alignment) }
+    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = Alignment.app(value); setNeedsDisplay(true) }
     @ObjCMethod("delegate") func textDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ value: NSObject?) { delegateObject = value?.objcObject }
     @ObjCMethod("isVerticallyResizable") func isVerticallyResizable() -> Bool { verticallyResizable }

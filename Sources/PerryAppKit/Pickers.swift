@@ -94,8 +94,8 @@ open class NSFormCell: NSActionCell {
     @ObjCMethod("titleWidth:") func titleWidth(_ size: CGSize) -> CGFloat { cellTitleWidth() }
     @ObjCMethod("titleFont") func cellTitleFont() -> NSFont? { titleFont ?? font }
     @ObjCMethod("setTitleFont:") func setTitleFont(_ value: NSFont?) { titleFont = value }
-    @ObjCMethod("titleAlignment") func cellTitleAlignment() -> Int { titleAlignment }
-    @ObjCMethod("setTitleAlignment:") func setTitleAlignment(_ value: Int) { titleAlignment = value }
+    @ObjCMethod("titleAlignment") func cellTitleAlignment() -> Int { Alignment.app(titleAlignment) }
+    @ObjCMethod("setTitleAlignment:") func setTitleAlignment(_ value: Int) { titleAlignment = Alignment.app(value) }
     @ObjCMethod("placeholderString") func placeholderString() -> NSObject? { placeholder }
     @ObjCMethod("setPlaceholderString:") func setPlaceholderString(_ value: NSObject?) { placeholder = value }
     @ObjCMethod("placeholderAttributedString") func placeholderAttributedString() -> NSObject? { placeholder }

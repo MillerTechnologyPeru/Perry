@@ -136,7 +136,7 @@ open class NSTextTab: NSObject {
     @ObjCMethod("initWithTextAlignment:location:options:")
     public required init(textAlignment alignment: Int, location: CGFloat, options: NSObject?) {
         super.init()
-        (self.alignment, self.location, self.options) = (alignment, location, options)
+        (self.alignment, self.location, self.options) = (Alignment.app(alignment), location, options)
     }
 
     /// NSTextTabType: left 0, right 1, center 2, decimal 3.
@@ -147,7 +147,7 @@ open class NSTextTab: NSObject {
         self.location = location
     }
 
-    @ObjCMethod("alignment") func alignmentValue() -> Int { alignment }
+    @ObjCMethod("alignment") func alignmentValue() -> Int { Alignment.app(alignment) }
     @ObjCMethod("location") func locationValue() -> CGFloat { location }
     @ObjCMethod("options") func optionsValue() -> NSObject? { options }
     @ObjCMethod("tabStopType") func tabStopType() -> UInt { alignment == 2 ? 1 : alignment == 1 ? 2 : 0 }

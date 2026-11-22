@@ -13,9 +13,20 @@ import PerryObjCInterop
 
 /// NSTextAlignment, as arm64 Macs number it: left 0, center 1, right 2,
 /// justified 3, natural 4. Archives use the Intel numbering, where right
-/// is 1 and center 2.
+/// is 1 and center 2, and so does an x86_64 program. The change is its
+/// own inverse.
 enum Alignment {
     static func fromArchive(_ value: Int) -> Int { value == 1 ? 2 : value == 2 ? 1 : value }
+
+    /// An alignment the program passes or is given, as Perry numbers it and
+    /// back.
+    static func app(_ value: Int) -> Int {
+        #if arch(x86_64)
+        return fromArchive(value)
+        #else
+        return value
+        #endif
+    }
 }
 
 @ObjCClass("NSCell")
@@ -209,8 +220,8 @@ open class NSCell: NSObject {
 
     @ObjCMethod("font") func cellFont() -> NSFont? { font }
     @ObjCMethod("setFont:") func setFont(_ font: NSFont?) { self.font = font; changed() }
-    @ObjCMethod("alignment") func cellAlignment() -> Int { alignment }
-    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = value; changed() }
+    @ObjCMethod("alignment") func cellAlignment() -> Int { Alignment.app(alignment) }
+    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = Alignment.app(value); changed() }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ value: Bool) { enabled = value; changed() }
     @ObjCMethod("isEditable") func isEditable() -> Bool { editable }

@@ -323,7 +323,8 @@ enum Text {
     /// A paragraph style's alignment and line breaks.
     static func style(_ paragraph: NSObject?, into style: inout TextStyle) {
         guard let paragraph else { return }
-        style.alignment = Send.integer(paragraph.objcObject, "alignment")
+        // As the program numbers it.
+        style.alignment = Alignment.app(Send.integer(paragraph.objcObject, "alignment"))
         style.lineBreakMode = Send.integer(paragraph.objcObject, "lineBreakMode")
         style.lineSpacing = CGFloat(Send.double(paragraph.objcObject, "lineSpacing"))
     }
@@ -535,7 +536,7 @@ open class NSParagraphStyle: NSObject {
         return ObjCRuntime.retain(copy.objcObject)!
     }
 
-    @ObjCMethod("alignment") func styleAlignment() -> Int { alignment }
+    @ObjCMethod("alignment") func styleAlignment() -> Int { Alignment.app(alignment) }
     @ObjCMethod("lineBreakMode") func styleLineBreakMode() -> Int { lineBreakMode }
     @ObjCMethod("lineSpacing") func styleLineSpacing() -> CGFloat { lineSpacing }
     @ObjCMethod("paragraphSpacing") func styleParagraphSpacing() -> CGFloat { paragraphSpacing }
@@ -558,7 +559,7 @@ open class NSParagraphStyle: NSObject {
 
 @ObjCClass("NSMutableParagraphStyle")
 open class NSMutableParagraphStyle: NSParagraphStyle {
-    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = value }
+    @ObjCMethod("setAlignment:") func setAlignment(_ value: Int) { alignment = Alignment.app(value) }
     @ObjCMethod("setLineBreakMode:") func setLineBreakMode(_ value: Int) { lineBreakMode = value }
     @ObjCMethod("setLineSpacing:") func setLineSpacing(_ value: CGFloat) { lineSpacing = value }
     @ObjCMethod("setParagraphSpacing:") func setParagraphSpacing(_ value: CGFloat) { paragraphSpacing = value }
