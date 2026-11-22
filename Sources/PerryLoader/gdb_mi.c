@@ -206,7 +206,8 @@ static bool answer(char *line) {
 
     if (starts(command, "-gdb-exit") || starts(command, "quit")) {
         stop_program();
-        say("%.*s^exit\n", token, line);
+        // Apple's gdb answers ^done; Xcode's parser knows no ^exit.
+        say("%.*s^done\n", token, line);
         return false;
     }
     if (starts(command, "-gdb-version")) {
