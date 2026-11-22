@@ -258,6 +258,7 @@ enum Constants {
     static let NSImageNameRemoveTemplate = "NSRemoveTemplate"
     static let NSImageNameRefreshTemplate = "NSRefreshTemplate"
     static let NSImageNameStopProgressTemplate = "NSStopProgressTemplate"
+    static let NSImageNameQuickLookTemplate = "NSQuickLookTemplate"
     static let NSImageNameStopProgressFreestandingTemplate = "NSStopProgressFreestandingTemplate"
     static let NSImageNameGoLeftTemplate = "NSGoLeftTemplate"
     static let NSImageNameGoRightTemplate = "NSGoRightTemplate"
