@@ -10,7 +10,7 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$root:/perry" -w /pe
     gcc=$(dirname "$(find $sysroot -name crtbegin.o | head -1)")
     cflags="--target=i686-linux-gnu --sysroot=$sysroot --gcc-install-dir=$gcc -march=i686 -msse2 -mfpmath=sse -fPIC -O1 -g -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -ISources/PerryLoaderCore/include -ISources/PerryInterface/include"
     objects=""
-    for source in Sources/PerryLoaderCore/*.c Sources/PerryLoaderCore/*.S Sources/PerryInterface/interface.c Sources/PerryLoader/main.c; do
+    for source in Sources/PerryLoaderCore/*.c Sources/PerryLoaderCore/*.S Sources/PerryInterface/interface.c Sources/PerryLoader/*.c; do
         object=$out/obj/loader-$(basename "$source").o
         clang $cflags -c "$source" -o "$object"
         objects="$objects $object"
