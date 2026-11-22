@@ -28,7 +28,7 @@ struct MachOImage {
                     let section = command + Self.firstSection + index * Self.sectionSize
                     if name.withCString({ strncmp(section.assumingMemoryBound(to: CChar.self), $0, 16) == 0 }) {
                         return UnsafeMutableRawBufferPointer(
-                            start: UnsafeMutableRawPointer(bitPattern: Int(section.loadWord(at: Self.sectionAddress)) + slide),
+                            start: UnsafeMutableRawPointer(bitPattern: Int(truncatingIfNeeded: section.loadWord(at: Self.sectionAddress)) &+ slide),
                             count: Int(section.loadWord(at: Self.sectionBytes)))
                     }
                 }
@@ -51,7 +51,7 @@ struct MachOImage {
                     let section = command + Self.firstSection + index * Self.sectionSize
                     let matches = name.withCString { strncmp(section.assumingMemoryBound(to: CChar.self), $0, 16) == 0 }
                     if matches {
-                        let address = Int(section.loadWord(at: Self.sectionAddress)) + slide
+                        let address = Int(truncatingIfNeeded: section.loadWord(at: Self.sectionAddress)) &+ slide
                         let bytes = Int(section.loadWord(at: Self.sectionBytes))
                         return UnsafeMutableBufferPointer(
                             start: UnsafeMutablePointer(bitPattern: address), count: bytes / Layout.word)
