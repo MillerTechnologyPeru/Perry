@@ -23,7 +23,19 @@ open class NSMatrix: NSControl {
     var cellSize = CGSize(width: 100, height: 17)
     var intercellSpacing = CGSize(width: 1, height: 1)
     var mode = Mode.radio
-    var prototype: NSCell?
+    /// AppKit's instance variable for the prototype, which Interface Builder
+    /// reads itself.
+    override public class var objCInstanceVariables: [ObjCInstanceVariable] { [ObjCInstanceVariable("_protoCell", types: "@")] }
+    private static let protoCellOffset = ObjCRuntime.ivarOffset(NSMatrix.objCClass, "_protoCell")
+    private var storedPrototype: NSCell?
+    /// The cell new cells are copies of, kept in the instance variable too.
+    var prototype: NSCell? {
+        get { storedPrototype }
+        set {
+            storedPrototype = newValue
+            if let offset = Self.protoCellOffset { objcObject.storeBytes(of: newValue?.objcObject, toByteOffset: offset, as: UnsafeMutableRawPointer?.self) }
+        }
+    }
     var matrixCellClass: ObjCClass?
     var selectedRow = -1
     var selectedColumn = -1
