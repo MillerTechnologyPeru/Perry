@@ -236,6 +236,8 @@ open class NSURLCache: NSObject {
 
     @ObjCMethod("initWithMemoryCapacity:diskCapacity:diskPath:")
     func initialize(memoryCapacity: UInt, diskCapacity: UInt, diskPath: String?) -> Self { self }
+    @ObjCMethod("initWithMemoryCapacity:diskCapacity:directoryURL:")
+    func initialize(memoryCapacity: UInt, diskCapacity: UInt, directoryURL: NSObject?) -> Self { self }
 
     @ObjCMethod("memoryCapacity") func memoryCapacity() -> UInt { 512_000 }
     @ObjCMethod("diskCapacity") func diskCapacity() -> UInt { 10_000_000 }
