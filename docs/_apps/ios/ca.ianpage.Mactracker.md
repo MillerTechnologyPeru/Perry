@@ -77,7 +77,7 @@ reports:
     screenshots:
       - url: https://github.com/user-attachments/assets/c358421c-fa42-4c38-a11d-be60d5d073d2
         caption: Compare screen
-  - pr: 261
+  - pr: 262
     date: 2026-11-21
     perry: "3a2980f8"
     platform: ios
