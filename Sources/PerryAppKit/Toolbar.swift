@@ -263,7 +263,14 @@ open class NSToolbarItem: NSObject {
     @ObjCMethod("toolTip") func itemToolTip() -> String? { toolTip }
     @ObjCMethod("setToolTip:") func setToolTip(_ value: String?) { toolTip = value }
     @ObjCMethod("image") func itemImage() -> NSImage? { image }
-    @ObjCMethod("setImage:") func setImage(_ value: NSImage?) { image = value; changed() }
+    /// An item with a view that takes an image (a button) passes the image
+    /// on to it, as AppKit does.
+    @ObjCMethod("setImage:")
+    func setImage(_ value: NSImage?) {
+        image = value
+        if let view = view?.objcObject, Send.responds(view, "setImage:") { Send.void(view, "setImage:", value?.objcObject) }
+        changed()
+    }
     @ObjCMethod("view") func itemView() -> NSView? { view }
     @ObjCMethod("setView:") func setView(_ value: NSView?) { view = value; changed() }
     /// The button AppKit shows for an item without a view of its own.
