@@ -362,6 +362,35 @@ extension NSString {
 
     @ObjCClassMethod("defaultCStringEncoding") static func defaultCStringEncoding() -> UInt { 4 }
 
+    /// An encoding's name as Foundation shows it (Xcode lists them in its
+    /// file inspector); an encoding it doesn't know has none.
+    @ObjCClassMethod("localizedNameOfStringEncoding:")
+    static func localizedName(ofStringEncoding encoding: UInt) -> ObjCObject {
+        ObjCObject(Strings.autoreleased(encodingNames[encoding] ?? ""))
+    }
+
+    /// The encodings Foundation names, ended by 0, as
+    /// +availableStringEncodings answers them.
+    @ObjCClassMethod("availableStringEncodings")
+    static func availableStringEncodings() -> UnsafePointer<UInt> { UnsafePointer(availableEncodings) }
+
+    static let encodingNames: [UInt: String] = [
+        1: "Western (ASCII)", 2: "Japanese (EUC)", 3: "Japanese (Shift JIS)", 4: "Unicode (UTF-8)",
+        5: "Western (ISO Latin 1)", 6: "Symbol (Mac OS)", 7: "Non-lossy ASCII", 8: "Japanese (Shift JIS)",
+        9: "Central European (ISO Latin 2)", 10: "Unicode (UTF-16)", 11: "Cyrillic (Windows)",
+        12: "Western (Windows Latin 1)", 13: "Greek (Windows)", 14: "Turkish (Windows Latin 5)",
+        15: "Central European (Windows Latin 2)", 21: "Japanese (ISO 2022-JP)", 30: "Western (Mac OS Roman)",
+        0x9000_0100: "Unicode (UTF-16BE)", 0x9400_0100: "Unicode (UTF-16LE)",
+        0x8C00_0100: "Unicode (UTF-32)", 0x9800_0100: "Unicode (UTF-32BE)", 0x9C00_0100: "Unicode (UTF-32LE)",
+    ]
+
+    nonisolated(unsafe) static let availableEncodings: UnsafeMutablePointer<UInt> = {
+        let list = encodingNames.keys.sorted() + [0]
+        let pointer = UnsafeMutablePointer<UInt>.allocate(capacity: list.count)
+        pointer.initialize(from: list, count: list.count)
+        return pointer
+    }()
+
     @ObjCClassMethod("stringWithCharacters:length:")
     static func string(_ cls: ObjCClass, characters: UnsafePointer<UInt16>?, length: UInt) -> ObjCObject {
         let text = characters.map { String(decoding: UnsafeBufferPointer(start: $0, count: Int(length)), as: UTF16.self) } ?? ""

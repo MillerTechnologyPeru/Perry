@@ -409,6 +409,21 @@ public final class NSConnection: NSObject {
     @ObjCMethod("setRootObject:") func setRootObject(_ object: UnsafeMutableRawPointer?) {}
     @ObjCMethod("rootProxy") func rootProxy() -> UnsafeMutableRawPointer? { nil }
     @ObjCMethod("invalidate") func invalidate() {}
+    @ObjCMethod("isValid") func isValid() -> Bool { true }
+    // Its setup: kept by none, as no request ever comes.
+    @ObjCMethod("addRequestMode:") func addRequestMode(_ mode: String?) {}
+    @ObjCMethod("removeRequestMode:") func removeRequestMode(_ mode: String?) {}
+    @ObjCMethod("requestModes") func requestModes() -> UnsafeMutableRawPointer? { Arrays.autoreleased([]) }
+    @ObjCMethod("addRunLoop:") func addRunLoop(_ runLoop: UnsafeMutableRawPointer?) {}
+    @ObjCMethod("removeRunLoop:") func removeRunLoop(_ runLoop: UnsafeMutableRawPointer?) {}
+    @ObjCMethod("runInNewThread") func runInNewThread() {}
+    @ObjCMethod("enableMultipleThreads") func enableMultipleThreads() {}
+    @ObjCMethod("setIndependentConversationQueueing:") func setIndependentConversationQueueing(_ value: Bool) {}
+    @ObjCMethod("setRequestTimeout:") func setRequestTimeout(_ seconds: Double) {}
+    @ObjCMethod("setReplyTimeout:") func setReplyTimeout(_ seconds: Double) {}
+    @ObjCMethod("setDelegate:") func setDelegate(_ delegate: UnsafeMutableRawPointer?) {}
+    @ObjCMethod("delegate") func delegate() -> UnsafeMutableRawPointer? { nil }
+    @ObjCMethod("rootObject") func rootObject() -> UnsafeMutableRawPointer? { nil }
 }
 
 // MARK: - Byte counts

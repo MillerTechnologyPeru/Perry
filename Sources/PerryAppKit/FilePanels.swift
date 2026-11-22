@@ -107,12 +107,19 @@ open class NSSavePanel: NSPanel {
     /// chooses the folder.
     var packageExtensions: Set<String> = []
 
+    /// The extensions of the folders a chosen file chooses.
+    var packageTypes: Set<String> { packageExtensions }
+
+    /// The types the chooser filters by.
+    var filterTypes: [String] { dialogKind == .openFolders ? [] : allowedFileTypes }
+
     /// The package a path is in, or the path.
     func package(of path: String) -> String {
-        guard !packageExtensions.isEmpty else { return path }
+        let packages = packageTypes
+        guard !packages.isEmpty else { return path }
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         for (index, part) in parts.enumerated() {
-            guard let dot = part.lastIndex(of: "."), packageExtensions.contains(String(part[part.index(after: dot)...])) else { continue }
+            guard let dot = part.lastIndex(of: "."), packages.contains(String(part[part.index(after: dot)...])) else { continue }
             return parts[...index].joined(separator: "/")
         }
         return path
@@ -152,8 +159,7 @@ open class NSSavePanel: NSPanel {
     /// Asks the chooser, then answers `done` with NSModalResponseOK (1) or
     /// NSModalResponseCancel (0).
     func present(over window: NSWindow?, done: @escaping (Int) -> Void) {
-        let types = dialogKind == .openFolders ? [] : allowedFileTypes
-        FileDialogs.show(dialogKind, over: window ?? Windows.key, location: startLocation, types: types, multiple: allowsMultiple) { [self] paths in
+        FileDialogs.show(dialogKind, over: window ?? Windows.key, location: startLocation, types: filterTypes, multiple: allowsMultiple) { [self] paths in
             guard let paths, !paths.isEmpty else {
                 done(0)
                 return
@@ -289,18 +295,32 @@ open class NSOpenPanel: NSSavePanel {
     @ObjCClassMethod("openPanel")
     static func openPanel() -> NSOpenPanel { NSOpenPanel(contentRect: CGRect(x: 0, y: 0, width: 480, height: 320), styleMask: 3, backing: 2, defer: true) }
 
-    /// Folders for a panel that chooses folders, or packages (folders the
-    /// app treats as files, as Xcode's projects): the desktop's choosers
-    /// choose one or the other, and a file chooser goes into a package
-    /// rather than choosing it. Files otherwise.
-    override var dialogKind: FileDialogs.Kind { (canChooseDirectories && !canChooseFiles) || choosesPackages ? .openFolders : .openFiles }
+    /// Folders for a panel that chooses only folders, or only packages
+    /// (folders the app treats as files, as Xcode's projects). Files
+    /// otherwise, of any type: the desktop's choosers choose files or
+    /// folders, not both, and go into a folder rather than choosing it, so
+    /// a file chosen in a package chooses the package (a project's
+    /// project.pbxproj chooses the project).
+    override var dialogKind: FileDialogs.Kind {
+        (canChooseDirectories && !canChooseFiles) || choosesOnlyPackages ? .openFolders : .openFiles
+    }
 
-    /// Whether the panel is for packages: some of its types are, or, with
-    /// any type allowed, the document controller's packages are.
-    var choosesPackages: Bool {
-        let packages = packageExtensions.union(Documents.declared.filter(\.isPackage).flatMap(\.extensions))
-        guard !allowedFileTypes.isEmpty else { return !packageExtensions.isEmpty }
-        return !packages.isDisjoint(with: allowedFileTypes)
+    /// The panel's packages and the app's.
+    override var packageTypes: Set<String> {
+        packageExtensions.union(Documents.declared.filter(\.isPackage).flatMap(\.extensions))
+    }
+
+    /// Whether every type the panel allows is a package.
+    var choosesOnlyPackages: Bool {
+        !allowedFileTypes.isEmpty && packageTypes.isSuperset(of: allowedFileTypes)
+    }
+
+    /// No filter when packages may be chosen, so their files show, nor
+    /// for a type named as a UTI (com.apple.xcode.project), which no
+    /// file name matches.
+    override var filterTypes: [String] {
+        dialogKind == .openFolders || !packageTypes.isDisjoint(with: allowedFileTypes)
+            || allowedFileTypes.contains { $0.contains(".") && !$0.hasPrefix(".") } ? [] : allowedFileTypes
     }
     override var allowsMultiple: Bool { allowsMultipleSelection }
 
