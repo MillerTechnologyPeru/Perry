@@ -1006,9 +1006,8 @@ open class UIBarButtonItem: UIBarItem {
     }
 
     /// The title shown for the item, or its system item's.
-    /// The image shown for the item in the bar: its own, which a bar shows
-    /// in place of a title it also has, or its system item's.
-    var barImage: UIImage? { state.image ?? systemImage }
+    /// The image shown for an item without a title, in the bar.
+    var barImage: UIImage? { displayTitle.isEmpty ? state.image ?? systemImage : nil }
 
     /// The symbol UIKit shows for a system item that is a picture, of those
     /// drawn here; the others keep their word.
