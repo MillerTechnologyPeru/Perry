@@ -186,8 +186,8 @@ open class NSControl: NSView {
         cellObject?.font = font
         valueChanged()
     }
-    @ObjCMethod("alignment") func controlAlignment() -> Int { alignment }
-    @ObjCMethod("setAlignment:") func setAlignment(_ alignment: Int) { self.alignment = alignment; setNeedsDisplay(true) }
+    @ObjCMethod("alignment") func controlAlignment() -> Int { Alignment.app(alignment) }
+    @ObjCMethod("setAlignment:") func setAlignment(_ alignment: Int) { self.alignment = Alignment.app(alignment); setNeedsDisplay(true) }
     @ObjCMethod("formatter") func controlFormatter() -> NSObject? { cellObject?.formatter }
     @ObjCMethod("setFormatter:") func setFormatter(_ formatter: NSObject?) { cellObject?.formatter = formatter; valueChanged() }
     @ObjCMethod("controlSize") func controlControlSize() -> UInt { cellObject?.controlSize ?? 0 }
