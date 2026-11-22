@@ -293,10 +293,20 @@ open class NSTextStorage: NSObject {
     /// they're read (Xcode's colours its syntax so).
     @ObjCMethod("ensureAttributesAreFixedInRange:")
     func ensureAttributesAreFixed(in range: NSRange) {
-        guard Send.bool(objcObject, "fixesAttributesLazily") else { return }
+        // Not again while they are being fixed: a storage's own
+        // -fixAttributesInRange: reads attributes, which asks for this
+        // (Xcode's PBXTextStorage does, fixing its wrapped lines' indents).
+        // Nor for no text: there is nothing to fix, and a storage's fixing
+        // may read the attributes at the range's start.
+        guard !ensuringAttributes, range.length > 0, textLength > 0, Send.bool(objcObject, "fixesAttributesLazily") else { return }
+        ensuringAttributes = true
+        defer { ensuringAttributes = false }
         typealias Fix = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, NSRange) -> Void
         unsafeBitCast(ObjCRuntime.msgSend, to: Fix.self)(objcObject, ObjCRuntime.selector("fixAttributesInRange:"), range)
     }
+
+    /// Whether -ensureAttributesAreFixedInRange: is fixing them now.
+    var ensuringAttributes = false
 
     /// Whether the attributes are being fixed, during which reading them
     /// doesn't fix them again.
