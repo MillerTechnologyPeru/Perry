@@ -1,8 +1,8 @@
 // Layer trees for the compositor: each scene is one still frame of a
 // 480x360 tree that uses one family of CALayer features (masks, shadows,
 // gradients, text, image contents, transforms, ordering and opacity,
-// corners, shapes, replicators). Perry's tests composite each and check
-// the frame.
+// corners, shapes, replicators, GL frames). Perry's tests composite each
+// and check the frame.
 //
 // PRISM_SCENE names the scene to show (default basics); PRISM_SECONDS, when
 // set, is how long it stays up before the app exits. A class or method the
@@ -16,6 +16,7 @@
 #import <Cocoa/Cocoa.h>
 #else
 #import <UIKit/UIKit.h>
+#import <OpenGLES/ES2/gl.h>
 #endif
 #import <QuartzCore/QuartzCore.h>
 
@@ -545,6 +546,75 @@ static void replicated(CALayer *root) {
     [root addSublayer:scroll];
 }
 
+#if !TARGET_OS_OSX
+
+/// GL frames presented to a CAEAGLLayer at each display refresh, as a
+/// game's are: the top half blue and the bottom orange, so a frame drawn
+/// upside down shows.
+@interface Frames : NSObject
+@property (nonatomic) EAGLContext *context;
+@property (nonatomic) GLuint framebuffer;
+@property (nonatomic) GLuint renderbuffer;
+@property (nonatomic) GLint width;
+@property (nonatomic) GLint height;
+@end
+
+@implementation Frames
+
+- (void)draw:(CADisplayLink *)link {
+    [EAGLContext setCurrentContext:self.context];
+    glBindFramebuffer(GL_FRAMEBUFFER, self.framebuffer);
+    glViewport(0, 0, self.width, self.height);
+    glClearColor(0.1, 0.5, 0.9, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    // GL's rows are bottom first: this is the bottom half.
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0, 0, self.width, self.height / 2);
+    glClearColor(0.9, 0.4, 0.1, 1);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
+    glBindRenderbuffer(GL_RENDERBUFFER, self.renderbuffer);
+    [self.context presentRenderbuffer:GL_RENDERBUFFER];
+}
+
+@end
+
+static void frames(CALayer *root) {
+    CAEAGLLayer *layer = [CAEAGLLayer layer];
+    layer.frame = CGRectMake(40, 40, 400, 280);
+    layer.opaque = YES;
+    [root addSublayer:layer];
+    static Frames *presenter;
+    presenter = [Frames new];
+    presenter.context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+    if (!presenter.context) { fprintf(stderr, "prism: no OpenGL ES 2 context\n"); return; }
+    [EAGLContext setCurrentContext:presenter.context];
+    GLuint framebuffer, renderbuffer;
+    glGenFramebuffers(1, &framebuffer);
+    glGenRenderbuffers(1, &renderbuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer);
+    [presenter.context renderbufferStorage:GL_RENDERBUFFER fromDrawable:layer];
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, renderbuffer);
+    GLint width = 0, height = 0;
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width);
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height);
+    presenter.framebuffer = framebuffer;
+    presenter.renderbuffer = renderbuffer;
+    presenter.width = width;
+    presenter.height = height;
+    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:presenter selector:@selector(draw:)];
+    [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+}
+
+#else
+
+static void frames(CALayer *root) {
+    fprintf(stderr, "prism: no CAEAGLLayer on macOS\n");
+}
+
+#endif
+
 // MARK: Hosts
 
 /// Builds the named scene in `root`; NO when there is no such scene.
@@ -555,7 +625,7 @@ static BOOL build(NSString *name, CALayer *root) {
         @"texts": ^(CALayer *l) { texts(l); }, @"contents": ^(CALayer *l) { contents(l); },
         @"transforms": ^(CALayer *l) { transforms(l); }, @"ordering": ^(CALayer *l) { ordering(l); },
         @"corners": ^(CALayer *l) { corners(l); }, @"shapes": ^(CALayer *l) { shapes(l); },
-        @"replicated": ^(CALayer *l) { replicated(l); },
+        @"replicated": ^(CALayer *l) { replicated(l); }, @"frames": ^(CALayer *l) { frames(l); },
     };
     void (^scene)(CALayer *) = scenes[name];
     if (!scene) {

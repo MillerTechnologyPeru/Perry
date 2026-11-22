@@ -62,8 +62,9 @@ struct DarwinFixtureTests {
     }
 
     /// Each of Prism's scenes must composite, through Cacao's engine, to a
-    /// frame of its 480x360 screen. The frames are the GPU's
-    /// (PERRY_UIKIT_FRAME_DUMP), so this needs a display.
+    /// frame of its 480x360 screen, which the window may scale up to fit
+    /// the display. The frames are the GPU's (PERRY_UIKIT_FRAME_DUMP), so
+    /// this needs a display.
     @Test("Layer scenes composite",
           .enabled(if: DarwinFixtures.built("Prism") && DarwinFixtures.hasDisplay, "needs Prism built and a display"),
           arguments: DarwinFixtures.layerScenes)
@@ -83,7 +84,32 @@ struct DarwinFixtureTests {
         // A PNG's header chunk: its width and height, big-endian, at 16.
         let png = try Data(contentsOf: frame)
         let size = png.count >= 24 ? (png[16..<20].reduce(0) { $0 << 8 | Int($1) }, png[20..<24].reduce(0) { $0 << 8 | Int($1) }) : (0, 0)
-        #expect(size == (480, 360), "\(scene): \(frame.path)")
+        #expect(size.0 >= 480 && size.0 * 3 == size.1 * 4, "\(scene): \(size), \(frame.path)")
+    }
+
+    /// Prism's GL frames must composite the same whether they are shared
+    /// with the compositor as GPU buffers or read back as pixels
+    /// (PERRY_UIKIT_ZERO_COPY=0): the same way up and the same colors.
+    /// Where the host can't share them, both are read back.
+    @Test("GL frames composite alike shared and read back",
+          .enabled(if: DarwinFixtures.built("Prism") && DarwinFixtures.hasDisplay, "needs Prism built and a display"))
+    func sharedFramesMatchReadBack() throws {
+        let scratch = TestEnvironment.fixtureBuild.appending(path: "prism-frames")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let frames = try ["shared", "read"].map { way -> Data in
+            let frame = scratch.appending(path: "frames-\(way).png")
+            try? FileManager.default.removeItem(at: frame)
+            let environment = [
+                "PRISM_SCENE": "frames", "PRISM_SECONDS": "3",
+                "PERRY_UIKIT_FRAME_DUMP": frame.path, "PERRY_UIKIT_FRAME_DUMP_INTERVAL": "0.5",
+                "PERRY_UIKIT_SCREEN": "480x360@1", "PERRY_UIKIT_ZERO_COPY": way == "shared" ? "1" : "0",
+            ]
+            let result = try runPerry([DarwinFixtures.app("Prism").path], environment: environment)
+            #expect(result.status == 0, "\(way): \(result.stderr)")
+            #expect(result.stdout.lines == ["scene frames"], "\(way)")
+            return try Data(contentsOf: frame)
+        }
+        #expect(frames[0] == frames[1], "frames differ, in \(scratch.path)")
     }
 
     /// Each app's stdout must match what it prints with Apple's Foundation
@@ -123,7 +149,7 @@ enum DarwinFixtures {
     /// Prism's scenes. Its texts scene is left out until there is a
     /// CATextLayer to draw.
     static let layerScenes = ["basics", "masks", "shadows", "gradients", "contents", "transforms", "ordering", "corners",
-                              "shapes", "replicated"]
+                              "shapes", "replicated", "frames"]
 
     /// Whether there is a display to open a window on.
     static var hasDisplay: Bool {

@@ -16,10 +16,8 @@ import PerryObjCInterop
 // rectangular clip, opacity is an opacity effect on each drawing, and a
 // layer that is turned is drawn through a transform. A layer that clips to
 // rounded corners, or has a mask, is one image with its sublayers. GL and
-// Metal frames are an external surface's.
-//
-// Not through the engine yet: GL frames shared as GPU buffers (the layer
-// is told they failed, so its frames come as pixels).
+// Metal frames are an external surface's: GL frames shared as GPU buffers
+// the engine imports, or else pixels published to one.
 
 // This file sees two families of geometry: Darwin's, laid out in C, which
 // layers use, and Foundation's, which the display list uses.
@@ -140,7 +138,12 @@ final class DisplayListCompositor {
         let frame = Foundation.CGSize(width: Double(size.width), height: Double(size.height))
         let scale = Foundation.CGFloat(Double(self.scale))
         let host = host
-        MainActor.assumeIsolated { host.render(list, size: frame, scale: scale) }
+        let waiting = MainActor.assumeIsolated {
+            host.render(list, size: frame, scale: scale)
+            return host.hasNewExternalFrames
+        }
+        // A GL frame the GPU is still copying shows on a later pass.
+        if waiting { Compositing.changed() }
     }
 
     private func identity(_ layer: CALayer, _ part: Part) -> Int {
@@ -174,10 +177,14 @@ final class DisplayListCompositor {
         let rounded = state.cornerRadius > 0 && state.backgroundColor != nil
         let textured = layer.state.backing != nil || state.contents != nil || rounded || shape != nil
             || (!aligned && state.backgroundColor != nil)
-        // Shared buffers are not imported through the engine yet: the
-        // layer's frames come as pixels.
-        if let shared = state.sharedFrames, !shared.hasFailed { shared.fail() }
-        if let live = state.livePixels {
+        if let shared = state.sharedFrames, !shared.hasFailed {
+            if let background = state.backgroundColor, !shared.surface.isOpaque {
+                addFill(frame, with: background, of: layer, alpha: alpha, into: &items)
+            }
+            FrameRate.glFrames += shared.takePublished()
+            place(.external(ExternalContent(surface: shared.surface)), identity: identity(layer, .live), version: 0, extent: state.bounds,
+                  toScreen: toScreen, alpha: alpha, into: &items)
+        } else if let live = state.livePixels {
             if let background = state.backgroundColor, !live.opaque { addFill(frame, with: background, of: layer, alpha: alpha, into: &items) }
             addLive(live, of: layer, state: state, toScreen: toScreen, alpha: alpha, into: &items)
         } else if textured {
