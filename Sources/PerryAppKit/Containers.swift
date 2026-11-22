@@ -76,8 +76,8 @@ open class NSBox: NSView {
         if boxType == 4 {
             encoder.object(fillColor, "NSFillColor2")
             encoder.object(borderColor, "NSBorderColor2")
-            encoder.double(borderWidth, "NSBorderWidth2")
-            encoder.double(cornerRadius, "NSCornerRadius2")
+            encoder.double(Double(borderWidth), "NSBorderWidth2")
+            encoder.double(Double(cornerRadius), "NSCornerRadius2")
         }
         encoder.bool(transparent, "NSTransparent")
         encoder.object(contentView, "NSContentView")
