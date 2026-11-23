@@ -1,8 +1,11 @@
 // The Control Manager and HIView: a control is a view of AppKit's in its
-// window's content (a button, a text field, an image view), with Carbon's
-// ID, bounds in the window's coordinates and a parent. A window's root
-// control is its content view. Buttons send their commands as Carbon's do;
-// a scrolling text box shows its 'TEXT' resource.
+// window's content (a button, a pop-up button, a checkbox, radio buttons, a
+// group box, a text field, an image view), with Carbon's ID, bounds in the
+// window's coordinates, a parent and a value between its minimum and
+// maximum. A window's root control is its content view. Buttons send their
+// commands as Carbon's do; a pop-up button's value is its chosen item's
+// number, a checkbox's its state, a radio group's its chosen button's
+// number; a scrolling text box shows its 'TEXT' resource.
 
 #include "PerryCarbon.h"
 
@@ -23,9 +26,21 @@ struct carbon_control {
     uint32_t command;
     long refCon;
     bool visible, active;
+    int32_t value, minimum, maximum;
+    MenuRef menu;      // a pop-up button's
+    id *radios;        // a radio group's buttons
+    int radio_count;
     carbon_target *target;
     ControlRef next;   // the window's controls
 };
+
+#define KIND_BUTTON FOUR('b', 'u', 't', 'n')
+#define KIND_POPUP FOUR('p', 'o', 'p', 'b')
+#define KIND_CHECKBOX FOUR('c', 'b', 'o', 'x')
+#define KIND_RADIO_GROUP FOUR('r', 'g', 'r', 'p')
+#define KIND_EDIT_TEXT FOUR('e', 't', 'x', 't')
+
+static void write_value(ControlRef control);
 
 #define CARBON_CONTROL_MAGIC 0x434e544cu   // 'CNTL'
 
@@ -70,6 +85,14 @@ void carbon_action_register(id sender, uint32_t command, WindowRef window, void 
 
 static void perform(id self, SEL selector, id sender) {
     (void)self; (void)selector;
+    // A radio button chooses itself in its group, which sends the command.
+    for (ControlRef group = controls; group; group = group->next)
+        for (int index = 0; index < group->radio_count; index++)
+            if (group->radios[index] == sender) {
+                group->value = index + 1;
+                write_value(group);
+                sender = group->view;
+            }
     for (action *found = actions; found; found = found->next)
         if (found->sender == sender) {
             WindowRef window = carbon_window_from(found->window);
@@ -137,6 +160,7 @@ ControlRef carbon_control_new(WindowRef window, ControlRef parent, id view, cons
     control->bounds = *bounds;
     control->kind = kind;
     control->visible = control->active = true;
+    control->maximum = 1;
     control->target = carbon_target_new(control);
     control->next = controls;
     controls = control;
@@ -245,8 +269,12 @@ OSStatus carbon_SetControlVisibility(ControlRef control, Boolean visible, Boolea
 
 static void set_enabled(ControlRef control, bool enabled) {
     control->active = enabled;
-    if (control->view && control->parent && control->kind == FOUR('b', 'u', 't', 'n'))
+    if (!control->view || !control->parent) return;
+    if (control->kind == KIND_BUTTON || control->kind == KIND_POPUP || control->kind == KIND_CHECKBOX ||
+        control->kind == KIND_EDIT_TEXT)
         ((void (*)(id, SEL, signed char))objc_send)(control->view, SELECTOR("setEnabled:"), enabled ? 1 : 0);
+    for (int index = 0; index < control->radio_count; index++)
+        ((void (*)(id, SEL, signed char))objc_send)(control->radios[index], SELECTOR("setEnabled:"), enabled ? 1 : 0);
 }
 
 OSStatus carbon_ActivateControl(ControlRef control) CARBON_SYMBOL(ActivateControl);
@@ -281,6 +309,7 @@ void carbon_DisposeControl(ControlRef control) {
         SEND(control->view, "removeFromSuperview");
         SEND(control->view, "release");
     }
+    free(control->radios);
     carbon_target_free(control->target);
     control->magic = 0;
     free(control);
@@ -302,6 +331,112 @@ void carbon_Draw1Control(ControlRef control) CARBON_SYMBOL(Draw1Control);
 void carbon_Draw1Control(ControlRef control) {
     if ((control = control_from(control)) && control->view)
         ((void (*)(id, SEL, signed char))objc_send)(control->view, SELECTOR("setNeedsDisplay:"), 1);
+}
+
+// MARK: - Values
+
+/// The value the control's view shows now, as the user may have changed it.
+static int32_t read_value(ControlRef control) {
+    if (!control->view) return control->value;
+    if (control->kind == KIND_POPUP)
+        return (int32_t)((long (*)(id, SEL))objc_send)(control->view, SELECTOR("indexOfSelectedItem")) + 1;
+    if (control->kind == KIND_CHECKBOX) return (int32_t)((long (*)(id, SEL))objc_send)(control->view, SELECTOR("state"));
+    if (control->kind == KIND_RADIO_GROUP)
+        for (int index = 0; index < control->radio_count; index++)
+            if (((long (*)(id, SEL))objc_send)(control->radios[index], SELECTOR("state"))) return index + 1;
+    return control->value;
+}
+
+/// Shows the control's value in its view.
+static void write_value(ControlRef control) {
+    if (!control->view) return;
+    if (control->kind == KIND_POPUP)
+        ((void (*)(id, SEL, long))objc_send)(control->view, SELECTOR("selectItemAtIndex:"), (long)control->value - 1);
+    else if (control->kind == KIND_CHECKBOX)
+        ((void (*)(id, SEL, long))objc_send)(control->view, SELECTOR("setState:"), (long)control->value);
+    for (int index = 0; index < control->radio_count; index++)
+        ((void (*)(id, SEL, long))objc_send)(control->radios[index], SELECTOR("setState:"), index + 1 == control->value ? 1 : 0);
+}
+
+static void set_value(ControlRef control, int32_t value) {
+    if (value < control->minimum) value = control->minimum;
+    if (value > control->maximum) value = control->maximum;
+    control->value = value;
+    write_value(control);
+}
+
+int32_t carbon_GetControl32BitValue(ControlRef control) CARBON_SYMBOL(GetControl32BitValue);
+int32_t carbon_GetControl32BitValue(ControlRef control) {
+    if (!(control = control_from(control))) return 0;
+    return control->value = read_value(control);
+}
+
+void carbon_SetControl32BitValue(ControlRef control, int32_t value) CARBON_SYMBOL(SetControl32BitValue);
+void carbon_SetControl32BitValue(ControlRef control, int32_t value) { if ((control = control_from(control))) set_value(control, value); }
+
+int16_t carbon_GetControlValue(ControlRef control) CARBON_SYMBOL(GetControlValue);
+int16_t carbon_GetControlValue(ControlRef control) { return (int16_t)carbon_GetControl32BitValue(control); }
+
+void carbon_SetControlValue(ControlRef control, int16_t value) CARBON_SYMBOL(SetControlValue);
+void carbon_SetControlValue(ControlRef control, int16_t value) { carbon_SetControl32BitValue(control, value); }
+
+int32_t carbon_GetControl32BitMinimum(ControlRef control) CARBON_SYMBOL(GetControl32BitMinimum);
+int32_t carbon_GetControl32BitMinimum(ControlRef control) { return (control = control_from(control)) ? control->minimum : 0; }
+
+void carbon_SetControl32BitMinimum(ControlRef control, int32_t minimum) CARBON_SYMBOL(SetControl32BitMinimum);
+void carbon_SetControl32BitMinimum(ControlRef control, int32_t minimum) {
+    if (!(control = control_from(control))) return;
+    control->minimum = minimum;
+    if (control->value < minimum) set_value(control, minimum);
+}
+
+int32_t carbon_GetControl32BitMaximum(ControlRef control) CARBON_SYMBOL(GetControl32BitMaximum);
+int32_t carbon_GetControl32BitMaximum(ControlRef control) { return (control = control_from(control)) ? control->maximum : 0; }
+
+void carbon_SetControl32BitMaximum(ControlRef control, int32_t maximum) CARBON_SYMBOL(SetControl32BitMaximum);
+void carbon_SetControl32BitMaximum(ControlRef control, int32_t maximum) {
+    if (!(control = control_from(control))) return;
+    control->maximum = maximum;
+    if (control->value > maximum) set_value(control, maximum);
+}
+
+int16_t carbon_GetControlMinimum(ControlRef control) CARBON_SYMBOL(GetControlMinimum);
+int16_t carbon_GetControlMinimum(ControlRef control) { return (int16_t)carbon_GetControl32BitMinimum(control); }
+
+void carbon_SetControlMinimum(ControlRef control, int16_t minimum) CARBON_SYMBOL(SetControlMinimum);
+void carbon_SetControlMinimum(ControlRef control, int16_t minimum) { carbon_SetControl32BitMinimum(control, minimum); }
+
+int16_t carbon_GetControlMaximum(ControlRef control) CARBON_SYMBOL(GetControlMaximum);
+int16_t carbon_GetControlMaximum(ControlRef control) { return (int16_t)carbon_GetControl32BitMaximum(control); }
+
+void carbon_SetControlMaximum(ControlRef control, int16_t maximum) CARBON_SYMBOL(SetControlMaximum);
+void carbon_SetControlMaximum(ControlRef control, int16_t maximum) { carbon_SetControl32BitMaximum(control, maximum); }
+
+// MARK: - Data
+
+/// A pop-up button's menu (kControlPopupButtonMenuHandleTag, 'mhan'), and
+/// a text field's or label's text as a new CFString ('cfst').
+OSErr carbon_GetControlData(ControlRef control, int16_t part, OSType tag, size_t size, void *data, size_t *actual)
+    CARBON_SYMBOL(GetControlData);
+OSErr carbon_GetControlData(ControlRef control, int16_t part, OSType tag, size_t size, void *data, size_t *actual) {
+    (void)part;
+    if (!(control = control_from(control))) return paramErr;
+    if (tag == FOUR('m', 'h', 'a', 'n') && control->menu) {
+        if (actual) *actual = sizeof(MenuRef);
+        if (data && size >= sizeof(MenuRef)) *(MenuRef *)data = control->menu;
+        return noErr;
+    }
+    if (tag == FOUR('c', 'f', 's', 't') && control->view && control->kind != KIND_BUTTON) {
+        if (actual) *actual = sizeof(id);
+        if (data && size >= sizeof(id)) *(id *)data = SEND(SEND(control->view, "stringValue"), "copy");
+        return noErr;
+    }
+    return -30583;   // errDataNotSupported
+}
+
+OSErr carbon_GetControlDataSize(ControlRef control, int16_t part, OSType tag, size_t *size) CARBON_SYMBOL(GetControlDataSize);
+OSErr carbon_GetControlDataSize(ControlRef control, int16_t part, OSType tag, size_t *size) {
+    return carbon_GetControlData(control, part, tag, 0, NULL, size);
 }
 
 // MARK: - Text
@@ -339,6 +474,91 @@ OSStatus carbon_SetControlTitleWithCFString(ControlRef control, id title) {
 }
 
 // MARK: - Making controls
+
+static id small_font(void) { return ((id (*)(id, SEL, CGFloat))objc_send)(CLASS("NSFont"), SELECTOR("systemFontOfSize:"), 11); }
+
+/// A checkbox or radio button, sending its command.
+static id choice_button(id title, unsigned long type, bool small) {
+    id button = SEND(SEND(CLASS("NSButton"), "alloc"), "init");
+    ((void (*)(id, SEL, unsigned long))objc_send)(button, SELECTOR("setButtonType:"), type);
+    SEND1(button, "setTitle:", title ? title : carbon_string(""));
+    if (small) SEND1(button, "setFont:", small_font());
+    SEND1(button, "setTarget:", carbon_action_target());
+    ((void (*)(id, SEL, SEL))objc_send)(button, SELECTOR("setAction:"), SELECTOR("perryCarbonPerform:"));
+    return button;
+}
+
+/// A pop-up button over a Carbon menu, whose items choose.
+ControlRef carbon_popup_control(WindowRef window, const Rect *bounds, MenuRef menu, int32_t value, uint32_t command) {
+    id button = SEND(SEND(CLASS("NSPopUpButton"), "alloc"), "init");
+    SEND1(button, "setMenu:", carbon_menu_object(menu));
+    SEND1(button, "setTarget:", carbon_action_target());
+    ((void (*)(id, SEL, SEL))objc_send)(button, SELECTOR("setAction:"), SELECTOR("perryCarbonPerform:"));
+    ControlRef control = carbon_control_new(window, NULL, button, bounds, KIND_POPUP);
+    if (!control) return NULL;
+    control->menu = menu;
+    control->minimum = 1;
+    control->maximum = 0x7fff;
+    set_value(control, value > 0 ? value : 1);
+    carbon_action_register(button, command, window, NULL, 0);
+    control->command = command;
+    return control;
+}
+
+ControlRef carbon_checkbox_control(WindowRef window, const Rect *bounds, id title, int32_t value, uint32_t command, bool small) {
+    id button = choice_button(title, 3, small);   // NSButtonTypeSwitch
+    ControlRef control = carbon_control_new(window, NULL, button, bounds, KIND_CHECKBOX);
+    if (!control) return NULL;
+    set_value(control, value);
+    carbon_action_register(button, command, window, NULL, 0);
+    control->command = command;
+    return control;
+}
+
+/// Radio buttons in a column of `rows` (or a row), one apart by `spacing`,
+/// the group's view theirs; its value is the chosen one's number.
+ControlRef carbon_radio_group_control(WindowRef window, const Rect *bounds, id *titles, int count, int rows, int spacing,
+                                      int32_t value, uint32_t command, bool small) {
+    id group = SEND(SEND(CLASS("NSView"), "alloc"), "init");
+    ControlRef control = carbon_control_new(window, NULL, group, bounds, KIND_RADIO_GROUP);
+    if (!control || count <= 0) return control;
+    control->radios = calloc((size_t)count, sizeof(id));
+    if (!control->radios) return control;
+    control->radio_count = count;
+    if (rows <= 0) rows = count;
+    int columns = (count + rows - 1) / rows;
+    CGFloat width = (CGFloat)(bounds->right - bounds->left) / columns;
+    CGFloat height = rows > 1 ? ((CGFloat)(bounds->bottom - bounds->top) - spacing * (rows - 1)) / rows
+                              : (CGFloat)(bounds->bottom - bounds->top);
+    for (int index = 0; index < count; index++) {
+        id button = choice_button(titles[index], 4, small);   // NSButtonTypeRadio
+        int row = index % rows, column = index / rows;
+        NSRect frame = {{column * width, (bounds->bottom - bounds->top) - (row + 1) * height - row * spacing}, {width, height}};
+        ((void (*)(id, SEL, NSRect))objc_send)(button, SELECTOR("setFrame:"), frame);
+        SEND1(group, "addSubview:", button);
+        control->radios[index] = button;
+    }
+    control->minimum = 1;
+    control->maximum = count;
+    set_value(control, value > 0 ? value : 1);
+    carbon_action_register(group, command, window, NULL, 0);
+    control->command = command;
+    return control;
+}
+
+ControlRef carbon_group_box_control(WindowRef window, const Rect *bounds, id title, bool small) {
+    id box = SEND(SEND(CLASS("NSBox"), "alloc"), "init");
+    SEND1(box, "setTitle:", title ? title : carbon_string(""));
+    if (small) SEND1(box, "setTitleFont:", small_font());
+    return carbon_control_new(window, NULL, box, bounds, FOUR('g', 'r', 'p', 'b'));
+}
+
+ControlRef carbon_edit_text_control(WindowRef window, const Rect *bounds, id text, bool small) {
+    id field = SEND(SEND(CLASS("NSTextField"), "alloc"), "init");
+    SEND1(field, "setStringValue:", text ? text : carbon_string(""));
+    if (small) SEND1(field, "setFont:", small_font());
+    return carbon_control_new(window, NULL, field, bounds, KIND_EDIT_TEXT);
+}
 
 /// A label: a text field that isn't edited, without a bezel or background.
 id carbon_label_view(id text, bool small) {
