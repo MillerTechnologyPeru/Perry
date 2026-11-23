@@ -1687,6 +1687,11 @@ const uint8_t darwin_NDR_record[8] DARWIN_SYMBOL(NDR_record) = { 0, 0, 0, 0, 1, 
 // arm64 iOS's pages are 16 KB, armv7's 4 KB.
 uintptr_t darwin_vm_page_size DARWIN_SYMBOL(vm_page_size) = PERRY_PAGE_SIZE;
 uintptr_t darwin_vm_page_mask DARWIN_SYMBOL(vm_page_mask) = PERRY_PAGE_SIZE - 1;
+// The kernel's own pages, which a program reads to turn host_statistics64's
+// page counts into bytes: the same size here.
+uintptr_t darwin_vm_kernel_page_size DARWIN_SYMBOL(vm_kernel_page_size) = PERRY_PAGE_SIZE;
+uintptr_t darwin_vm_kernel_page_mask DARWIN_SYMBOL(vm_kernel_page_mask) = PERRY_PAGE_SIZE - 1;
+int darwin_vm_kernel_page_shift DARWIN_SYMBOL(vm_kernel_page_shift) = PERRY_PAGE_SIZE == 16384 ? 14 : 12;
 
 // Copies another address's memory, failing rather than faulting where none
 // is mapped.
