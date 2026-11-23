@@ -49,6 +49,9 @@ final class DateFormatterStorage {
     var lenient = false
     /// AM and PM symbols set over the locale's, by their index in ICU's list.
     var amPMSymbols: [Int32: String] = [:]
+    /// What CFDateFormatter's Get functions return, and properties it only
+    /// keeps, alive as long as the formatter.
+    let held = HeldObjects()
     private var cached: (key: String, handle: DateHandle)?
 
     deinit {
@@ -434,6 +437,11 @@ final class NumberFormatterStorage {
     var doubleAttributes: [UInt32: Double] = [:]
     var textAttributes: [UInt32: String] = [:]
     var symbols: [UInt32: String] = [:]
+    /// What zero formats as, instead of its digits.
+    var zeroSymbol: String?
+    /// What CFNumberFormatter's Get functions return, alive as long as the
+    /// formatter.
+    let held = HeldObjects()
     private var cached: NumberHandle?
 
     deinit {
@@ -543,6 +551,7 @@ final class NumberFormatterStorage {
     func string(from number: id) -> String? {
         guard let handle else { return nil }
         let value = Numbers.storage(number)
+        if let zeroSymbol, value.double == 0 { return zeroSymbol }
         if case .double(let double) = value.value {
             return ICU.string { swift_unum_formatDouble(handle, double, $0, $1, nil, $2) }
         }
@@ -587,17 +596,6 @@ enum NumberFormatters {
         Storage.set(object, storage)
         return storage
     }
-}
-
-/// CFNumberFormatterCreate: an NSNumberFormatter, whose styles are
-/// CFNumberFormatterStyle's numbers, in the locale given.
-@c(_CFNumberFormatterCreate)
-public func CFNumberFormatterCreate(_ allocator: UnsafeRawPointer?, _ locale: id?, _ style: Int) -> id? {
-    guard let object = Storage.allocate(UnsafeMutableRawPointer(NumberFormatters.formatterClass)) else { return nil }
-    let storage = NumberFormatters.storage(object)
-    storage.locale = locale.map { Locales.locale($0) }
-    storage.setStyle(style)
-    return object
 }
 
 /// NSNumberFormatter.
@@ -840,7 +838,8 @@ public final class NSNumberFormatter: NSFormatter {
     @ObjCMethod("setPlusSign:") func setPlusSign(_ value: String?) { storage.setSymbol(UNUM_PLUS_SIGN_SYMBOL, value) }
     @ObjCMethod("exponentSymbol") func exponentSymbol() -> String { storage.symbol(UNUM_EXPONENTIAL_SYMBOL) }
     @ObjCMethod("perMillSymbol") func perMillSymbol() -> String { storage.symbol(UNUM_PERMILL_SYMBOL) }
-    @ObjCMethod("zeroSymbol") func zeroSymbol() -> String? { nil }
+    @ObjCMethod("zeroSymbol") func zeroSymbol() -> String? { storage.zeroSymbol }
+    @ObjCMethod("setZeroSymbol:") func setZeroSymbol(_ value: String?) { storage.zeroSymbol = value }
     @ObjCMethod("notANumberSymbol") func notANumberSymbol() -> String { storage.symbol(UNUM_NAN_SYMBOL) }
     @ObjCMethod("positiveInfinitySymbol") func positiveInfinitySymbol() -> String { storage.symbol(UNUM_INFINITY_SYMBOL) }
     @ObjCMethod("currencyDecimalSeparator")
