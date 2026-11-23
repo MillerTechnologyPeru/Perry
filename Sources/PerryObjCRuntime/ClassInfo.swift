@@ -93,6 +93,10 @@ public final class ClassInfo {
     /// Adds or replaces a method; returns the previous IMP.
     @discardableResult
     func addMethod(_ selector: SEL, types: UnsafePointer<CChar>?, imp: IMP?, replacing: Bool) -> IMP? {
+        #if arch(powerpc)
+        // Darwin code calls a provider's method through its Darwin entry.
+        let imp = PPCABI.darwinCallable(imp, types: types)
+        #endif
         if let method = methods[selector] {
             let old = method.pointee.imp
             if replacing {
