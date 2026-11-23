@@ -18,6 +18,28 @@ static perry_wrapped_library gl = PERRY_WRAPPED_SONAME("libGL.so.1");
 /// programs that put that in their shaders' #version line get the core
 /// language, which has none of the built-in variables (gl_TexCoord) their
 /// shaders were written to use.
+#if defined(__i386__)
+/// GL_EXTENSIONS no longer than a 32-bit Mac's drivers made it, a few
+/// thousand bytes: programs of their time copy it into a buffer of about
+/// that size (Age of Empires III's is 4 KB), which Linux's list, many times
+/// longer, runs past. It's cut at a name's end; Mesa lists the oldest
+/// first, so the names those programs look for are kept.
+static const unsigned char *short_extensions(const unsigned char *full) {
+    enum { LIMIT = 4000 };
+    static const unsigned char *source;
+    static char trimmed[LIMIT + 1];
+    if (!full || strlen((const char *)full) <= LIMIT) return full;
+    if (full != source) {
+        size_t length = LIMIT;
+        while (length > 0 && full[length] != ' ') length--;
+        memcpy(trimmed, full, length);
+        trimmed[length] = 0;
+        source = full;
+    }
+    return (const unsigned char *)trimmed;
+}
+#endif
+
 static const unsigned char *perry_glGetString(unsigned int name) {
     static const unsigned char *(*get_string)(unsigned int);
     if (!get_string) {
@@ -27,6 +49,9 @@ static const unsigned char *perry_glGetString(unsigned int name) {
     }
     if (name == 0x8B8C /* GL_SHADING_LANGUAGE_VERSION */ && !perry_cgl_current_is_core())
         return (const unsigned char *)"1.20";
+#if defined(__i386__)
+    if (name == 0x1F03 /* GL_EXTENSIONS */ && get_string) return short_extensions(get_string(name));
+#endif
     return get_string ? get_string(name) : NULL;
 }
 
