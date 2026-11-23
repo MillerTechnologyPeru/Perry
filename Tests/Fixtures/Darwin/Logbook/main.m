@@ -37,8 +37,10 @@ int main(int argc, char *argv[]) {
         os_signpost_id_t first = os_signpost_id_generate(log);
         os_signpost_id_t second = os_signpost_id_generate(log);
         os_signpost_id_t pointer = os_signpost_id_make_with_pointer(log, (void *)0x1000);
-        printf("signposts: %d %d %d, enabled %d\n", first != OS_SIGNPOST_ID_NULL && first != OS_SIGNPOST_ID_INVALID,
-               first != second, pointer == os_signpost_id_make_with_pointer(log, (void *)0x1000), os_signpost_enabled(log));
+        // Not os_signpost_enabled: Perry reports signposts as never enabled,
+        // as nothing reads them, where Darwin has them enabled.
+        printf("signposts: %d %d %d\n", first != OS_SIGNPOST_ID_NULL && first != OS_SIGNPOST_ID_INVALID,
+               first != second, pointer == os_signpost_id_make_with_pointer(log, (void *)0x1000));
         os_signpost_interval_begin(log, first, "Load", "start %d", 1);
         os_signpost_event_emit(log, first, "Step");
         os_signpost_interval_end(log, first, "Load", "end");
