@@ -306,6 +306,17 @@ struct darwin_passwd *darwin_getpwuid(uid_t uid) { return passwd_to_darwin(getpw
 struct darwin_passwd *darwin_getpwnam(const char *name) DARWIN_SYMBOL(getpwnam);
 struct darwin_passwd *darwin_getpwnam(const char *name) { return passwd_to_darwin(getpwnam(name)); }
 
+// getlogin(): the session's user, as a Mac always has one. Without a
+// terminal glibc's has none, so the user of the process's uid, or $USER.
+char *darwin_getlogin(void) DARWIN_SYMBOL(getlogin);
+char *darwin_getlogin(void) {
+    char *name = getlogin();
+    if (name) return name;
+    struct passwd *entry = getpwuid(getuid());
+    if (entry) return entry->pw_name;
+    return getenv("USER");
+}
+
 /// The entry in the caller's storage: the host's strings in the buffer.
 static int passwd_r_to_darwin(int status, const struct passwd *entry, struct darwin_passwd *out, struct darwin_passwd **result) {
     *result = NULL;
