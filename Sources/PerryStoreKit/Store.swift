@@ -245,11 +245,63 @@ open class SKAdNetwork: NSObject {
         noted(completionHandler)
     }
 
+    // View-through impressions (iOS 14.5), which ad SDKs start when an ad
+    // shows and end when it goes: noted with no error.
+    @ObjCClassMethod("startImpression:completionHandler:")
+    static func startImpression(_ impression: NSObject?, completionHandler: ObjCBlock?) { noted(completionHandler) }
+
+    @ObjCClassMethod("endImpression:completionHandler:")
+    static func endImpression(_ impression: NSObject?, completionHandler: ObjCBlock?) { noted(completionHandler) }
+
     /// Calls a `^(NSError *error)` handler with no error.
     private static func noted(_ handler: ObjCBlock?) {
         guard let handler else { return }
         handler.function(as: (@convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer?) -> Void).self)(handler.object, nil)
     }
+}
+
+/// An ad's view-through impression: what an ad SDK fills in to start and
+/// end one with SKAdNetwork. It keeps what it is given.
+@ObjCClass("SKAdImpression")
+open class SKAdImpression: NSObject {
+    var values: [String: NSObject] = [:]
+
+    @ObjCMethod("initWithSourceAppStoreItemIdentifier:advertisedAppStoreItemIdentifier:adNetworkIdentifier:adCampaignIdentifier:adImpressionIdentifier:timestamp:signature:version:")
+    func initialize(source: NSObject?, advertised: NSObject?, network: NSObject?, campaign: NSObject?,
+                    impression: NSObject?, timestamp: NSObject?, signature: NSObject?, version: NSObject?) -> Self {
+        for (key, value) in [("sourceAppStoreItemIdentifier", source), ("advertisedAppStoreItemIdentifier", advertised),
+                             ("adNetworkIdentifier", network), ("adCampaignIdentifier", campaign),
+                             ("sourceIdentifier", campaign), ("adImpressionIdentifier", impression),
+                             ("timestamp", timestamp), ("signature", signature), ("version", version)] {
+            values[key] = value
+        }
+        return self
+    }
+
+    @ObjCMethod("sourceAppStoreItemIdentifier") func sourceAppStoreItemIdentifier() -> NSObject? { values["sourceAppStoreItemIdentifier"] }
+    @ObjCMethod("setSourceAppStoreItemIdentifier:") func setSourceAppStoreItemIdentifier(_ value: NSObject?) { values["sourceAppStoreItemIdentifier"] = value }
+    @ObjCMethod("advertisedAppStoreItemIdentifier") func advertisedAppStoreItemIdentifier() -> NSObject? { values["advertisedAppStoreItemIdentifier"] }
+    @ObjCMethod("setAdvertisedAppStoreItemIdentifier:") func setAdvertisedAppStoreItemIdentifier(_ value: NSObject?) { values["advertisedAppStoreItemIdentifier"] = value }
+    @ObjCMethod("adNetworkIdentifier") func adNetworkIdentifier() -> NSObject? { values["adNetworkIdentifier"] }
+    @ObjCMethod("setAdNetworkIdentifier:") func setAdNetworkIdentifier(_ value: NSObject?) { values["adNetworkIdentifier"] = value }
+    @ObjCMethod("adCampaignIdentifier") func adCampaignIdentifier() -> NSObject? { values["adCampaignIdentifier"] }
+    @ObjCMethod("setAdCampaignIdentifier:") func setAdCampaignIdentifier(_ value: NSObject?) { values["adCampaignIdentifier"] = value }
+    @ObjCMethod("sourceIdentifier") func sourceIdentifier() -> NSObject? { values["sourceIdentifier"] }
+    @ObjCMethod("setSourceIdentifier:") func setSourceIdentifier(_ value: NSObject?) { values["sourceIdentifier"] = value }
+    @ObjCMethod("adImpressionIdentifier") func adImpressionIdentifier() -> NSObject? { values["adImpressionIdentifier"] }
+    @ObjCMethod("setAdImpressionIdentifier:") func setAdImpressionIdentifier(_ value: NSObject?) { values["adImpressionIdentifier"] = value }
+    @ObjCMethod("adType") func adType() -> NSObject? { values["adType"] }
+    @ObjCMethod("setAdType:") func setAdType(_ value: NSObject?) { values["adType"] = value }
+    @ObjCMethod("adDescription") func adDescription() -> NSObject? { values["adDescription"] }
+    @ObjCMethod("setAdDescription:") func setAdDescription(_ value: NSObject?) { values["adDescription"] = value }
+    @ObjCMethod("adPurchaserName") func adPurchaserName() -> NSObject? { values["adPurchaserName"] }
+    @ObjCMethod("setAdPurchaserName:") func setAdPurchaserName(_ value: NSObject?) { values["adPurchaserName"] = value }
+    @ObjCMethod("timestamp") func timestamp() -> NSObject? { values["timestamp"] }
+    @ObjCMethod("setTimestamp:") func setTimestamp(_ value: NSObject?) { values["timestamp"] = value }
+    @ObjCMethod("signature") func signature() -> NSObject? { values["signature"] }
+    @ObjCMethod("setSignature:") func setSignature(_ value: NSObject?) { values["signature"] = value }
+    @ObjCMethod("version") func version() -> NSObject? { values["version"] }
+    @ObjCMethod("setVersion:") func setVersion(_ value: NSObject?) { values["version"] = value }
 }
 
 // MARK: - Delegate messages
