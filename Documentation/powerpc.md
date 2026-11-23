@@ -63,6 +63,11 @@ Under qemu-user, with the target's libraries at `$TARGET`:
 - `long double` is IBM's 128-bit double-double on both (Mac OS X 10.4 and
   later). Functions that take one have a `$LDBL128` variant on Darwin, which
   the loader binds to the plain name.
+- Apple's GCC sends messages with `bla 0xfffeff00`, an absolute branch to
+  the commpage's objc_msgSend (Bean has 9,708 of them, and 311 `ba` tail
+  calls). On 32-bit Linux that address is the kernel's, so the loader turns
+  each into a relative branch to an island just past the image, which jumps
+  to libobjc's objc_msgSend.
 - Images from before Mac OS X 10.6 have no `LC_DYLD_INFO`: they are bound
   through the indirect symbol table and relocations, as i386's are, and crt1
   reaches dyld through `__DATA,__dyld`.
@@ -96,23 +101,46 @@ r12 and cr0, which are scratch at a call in both ABIs:
   threads, libxml2's callbacks, signal handlers, and messages that providers
   send to the program's objects.
 
+## Methods and functions with floating point or structures
+
+A method or function whose arguments are words, pointers and objects passes
+the same on both, and most do. One that takes a `double`, a `float` (a
+`CGFloat`), a `long long` or a structure (`NSRect`) does not, and the 32-bit
+ObjCValue types armv7 uses can't make it pass: Linux's ppc passes every
+structure, `ObjCWordPair` and `ObjCWords4` included, through a pointer, and
+one parameter cannot stand for the GPRs Darwin skips after a floating-point
+argument. The plan is to translate by the method's type encoding, which the
+macros already emit: an assembly entry takes Darwin's r3-r10, f1-f13 and
+parameter area, and calls the Swift implementation with the arguments where
+Linux's ABI puts them (libffi's `ffi_call`, or a small encoding-driven
+shuffle of its own), and the reverse for sends from providers to the
+program's methods. C entry points with such parameters (`ldexp`, `modf`,
+CoreGraphics' functions) get the same moves as thunks.
+
 ## Status
 
 - Loader: fat slices, the ppc CPU type, `LC_UNIXTHREAD`'s srr0, crt1's start
   on a kernel-style stack, classic binding and `__dyld`, unresolved-import
   stubs and the ppc crash and profiler register views. Bean's ppc slice
-  is mapped at 0x1000, bound to libPerrySystem, and runs from crt1 through
-  `main` to `NSApplicationMain` under qemu-ppc. The r2 stubs work under
+  is mapped at 0x1000 and bound to libPerrySystem and libPerryobjc. libobjc
+  reads its classes and categories from the old ABI's `__OBJC` metadata
+  (warning only of AppKit's classes, which are not built yet), its
+  initializers run, and it reaches `NSApplicationMain` from `main` under
+  qemu-ppc. The r2 stubs work under
   qemu-ppc with r2 wrecked before the call: `errno` and `__thread`
   variables read right, on the main thread and on a second one.
 - libSystem: the C sources build for ppc. Done: the printf family's
   `va_list` and argument repacking, block trampolines, signal contexts as
   Darwin's ppc thread states, and the 32-bit file layouts from before 64-bit
   inodes.
-- Not yet: `objc_msgSend` and the old-ABI exception entry points for ppc
-  (libobjc does not load), the rest of the thread pointer, ppc's libSystem thunks
-  (setjmp, `long long` and floating-point argument moves), and the
-  Swift providers' entry points with floating-point, structure or 64-bit
-  parameters. Fixtures need a ppc Darwin compiler and linker. Today's clang
+- libobjc: `objc_msgSend` and its stret and super forms, message forwarding
+  (`msgsend_ppc.S`), and the old ABI's exception entry points over Darwin's
+  ppc jmp_buf. libSystem's thunks (`thunks_ppc.S`): word-only functions pass
+  through, variadic functions spill r3-r10 into the caller's parameter area
+  (with a glibc va_list built over it for `open`, `fcntl`, `ioctl` and
+  `scanf`), 64-bit offsets move to aligned pairs, and setjmp keeps r1, lr,
+  cr, r13-r31, f14-f31 and the FPSCR.
+- Not yet: the rest of the thread pointer, floating-point and structure
+  arguments (above), and the Swift providers past libobjc. Fixtures need a ppc Darwin compiler and linker. Today's clang
   has no ppc Darwin target (`powerpc-apple-macosx`), and current ld64 has
   dropped ppc, so for now the test programs are real ppc apps.
