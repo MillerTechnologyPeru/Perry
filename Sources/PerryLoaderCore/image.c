@@ -1160,15 +1160,26 @@ static uint32_t image_hook_count;
 static perry_provider_image_fn *map_hooks;
 static uint32_t map_hook_count;
 
+// An image after the libraries it links, as initializers run: an old
+// Objective-C image's classes are linked to their superclasses by name as
+// it is registered, so a framework's must be there before a subclass's in
+// the program or another framework (Adium's plug-ins subclass its
+// framework's AIPlugin).
+static void notify_image_mapped(perry_image *image) {
+    if (image->map_notified)
+        return;
+    image->map_notified = true;
+    for (uint32_t i = 0; i < image->dep_count; i++)
+        if (image->deps[i].image)
+            notify_image_mapped(image->deps[i].image);
+    perry_image_info info = { image->header, image->slide, image->path };
+    for (uint32_t i = 0; i < map_hook_count; i++)
+        map_hooks[i](&info);
+}
+
 static void notify_images_mapped(perry_loader *loader) {
-    for (perry_image *img = loader->images; img; img = img->next) {
-        if (img->map_notified)
-            continue;
-        img->map_notified = true;
-        perry_image_info info = { img->header, img->slide, img->path };
-        for (uint32_t i = 0; i < map_hook_count; i++)
-            map_hooks[i](&info);
-    }
+    for (perry_image *img = loader->images; img; img = img->next)
+        notify_image_mapped(img);
 }
 
 static void notify_image_init(perry_image *image) {
