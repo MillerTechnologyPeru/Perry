@@ -21,16 +21,31 @@ cd "$(dirname "$0")/.."
 module=$1
 out=${2:-.build/perry-swift-runtime}
 modules=.build/perry-frameworks/$module.swiftmodule
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-target=${TARGET:-arm64-apple-ios18.0}
+# PERRY_OVERLAY_PLATFORM and PERRY_OVERLAY_TARGET name another SDK and
+# target, as for Scripts/build-overlay.sh: macosx and
+# x86_64-apple-ios18.0-macabi for a Mac Catalyst app on x86_64. The
+# interfaces are named for the target, as the compiler looks them up.
+platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
+sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+target=${PERRY_OVERLAY_TARGET:-${TARGET:-arm64-apple-ios18.0}}
+interface=$(echo "$target" | sed -E 's/(ios|macos)[0-9.]+/\1/')
 mkdir -p "$modules" "$out/$module.framework"
 
-xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -module-name "$module" -parse-as-library \
-    -enable-library-evolution -language-mode 5 -O -emit-library \
-    -emit-module-interface-path "$modules/arm64-apple-ios.swiftinterface" \
-    -emit-private-module-interface-path "$modules/arm64-apple-ios.private.swiftinterface" \
+# Mac Catalyst's frameworks and Swift modules are under the macOS SDK's
+# System/iOSSupport.
+catalyst= install=
+case $target in *-macabi)
+    support=$sdk/System/iOSSupport
+    install=/System/iOSSupport
+    catalyst="-Fsystem $support/System/Library/Frameworks -I $support/usr/lib/swift -L $support/usr/lib/swift" ;;
+esac
+
+xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" -module-name "$module" -parse-as-library \
+    -enable-library-evolution -language-mode 5 -O -emit-library $catalyst \
+    -emit-module-interface-path "$modules/$interface.swiftinterface" \
+    -emit-private-module-interface-path "$modules/$interface.private.swiftinterface" \
     $(find "Darwin/$module/Sources" -name '*.swift' | sort) \
-    -Xlinker -install_name -Xlinker "/System/Library/Frameworks/$module.framework/$module" \
+    -Xlinker -install_name -Xlinker "$install/System/Library/Frameworks/$module.framework/$module" \
     -Xlinker -not_for_dyld_shared_cache \
     -o "$out/$module.framework/$module"
 echo "$out/$module.framework/$module"
