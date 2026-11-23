@@ -568,6 +568,13 @@ open class NSApplication: NSResponder {
     @ObjCMethod("userInterfaceLayoutDirection") func userInterfaceLayoutDirection() -> Int { 0 }
     @ObjCMethod("isFullKeyboardAccessEnabled") func isFullKeyboardAccessEnabled() -> Bool { false }
     @ObjCMethod("orderFrontStandardAboutPanel:") func orderFrontStandardAboutPanel(_ sender: NSObject?) {}
+    /// The shared color panel, brought to the front (Interface Builder
+    /// swizzles this method, so it must be here).
+    @ObjCMethod("orderFrontColorPanel:")
+    func orderFrontColorPanel(_ sender: NSObject?) {
+        guard let cls = Classes.named("NSColorPanel"), let panel = Send.object(cls.pointer, "sharedColorPanel") else { return }
+        Send.void(panel, "orderFront:", sender?.objcObject)
+    }
     @ObjCMethod("orderFrontStandardAboutPanelWithOptions:") func orderFrontStandardAboutPanel(options: NSObject?) {}
     @ObjCMethod("setAutomaticCustomizeTouchBarMenuItemEnabled:") func setAutomaticCustomizeTouchBarMenuItemEnabled(_ value: Bool) {}
     @ObjCMethod("registerForRemoteNotifications") func registerForRemoteNotifications() {}

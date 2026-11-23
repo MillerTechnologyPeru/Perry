@@ -49,6 +49,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 /// only made, and is active as the app is.
 func providerDidStart(_ info: perry_startup_info) {
     NSAlert.registerLegacyConstructor()
+    StandInClasses.register()
     guard isMacCatalystApp(info.main_header), let cls = Classes.named("NSApplication") else { return }
     _ = Send.object(cls.pointer, "sharedApplication")
     App.shared?.active = true
@@ -71,7 +72,9 @@ private func isMacCatalystApp(_ header: UnsafeRawPointer?) -> Bool {
 
 /// AppKit's structure constants, which the loader asks for while binding
 /// images.
-func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? { StructureConstants.values[name] }
+func providerSymbol(_ name: String) -> UnsafeMutableRawPointer? {
+    StructureConstants.values[name] ?? StandInClasses.symbol(name)
+}
 
 enum StructureConstants {
     nonisolated(unsafe) static let values: [String: UnsafeMutableRawPointer] = {

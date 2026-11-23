@@ -1,6 +1,7 @@
 import Glibc
 import PerryInterface
 import PerryObjCInterop
+import Synchronization
 
 // libPerryMetal: the provider for Metal.framework, on Vulkan through
 // metal2vulkan, a separate library opened when an app first asks for a
@@ -52,7 +53,9 @@ enum Trace {
     /// PERRY_METAL_DEBUG_NO_MIPS: samplers read only the base level.
     nonisolated(unsafe) static let debugNoMips = getenv("PERRY_METAL_DEBUG_NO_MIPS") != nil
     nonisolated(unsafe) static let debugBarriers = getenv("PERRY_METAL_DEBUG_BARRIERS") != nil
-    nonisolated(unsafe) private static var counts: [String: Int] = [:]
+    /// How many of each kind were logged: Unity uploads textures from
+    /// several threads at once.
+    private static let counts = Mutex<[String: Int]>([:])
 
     /// The first floats of some bytes, for a log.
     static func floats(_ bytes: UnsafeRawPointer?, _ length: UInt) -> String {
@@ -63,8 +66,11 @@ enum Trace {
     /// Logs the first three of each kind, then every 300th.
     static func log(_ kind: String, _ message: @autoclosure () -> String = "") {
         guard enabled else { return }
-        let count = (counts[kind] ?? 0) + 1
-        counts[kind] = count
+        let count = counts.withLock { counts in
+            let count = (counts[kind] ?? 0) + 1
+            counts[kind] = count
+            return count
+        }
         guard count <= 3 || count % 300 == 0 || all.contains(kind) else { return }
         let line = "perry: Metal: \(kind) #\(count) \(message())\n"
         line.withCString { _ = write(2, $0, strlen($0)) }

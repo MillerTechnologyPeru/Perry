@@ -148,8 +148,7 @@ public enum Runtime {
             // class_rw_t: flags, witness and index, ro_or_rw_ext, then the
             // first subclass and the next sibling, which are not kept.
             let size = 8 + 3 * Layout.word
-            let readWrite = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 8)
-            readWrite.initializeMemory(as: UInt8.self, repeating: 0, count: size)
+            let readWrite = ClassDataArena.allocate(byteCount: size)
             readWrite.storeBytes(of: Layout.realizedFlag, as: UInt32.self)
             readWrite.storeBytes(of: UInt(bitPattern: data), toByteOffset: 8, as: UInt.self)
             target.pointee.bits = UInt(bitPattern: readWrite) | flags
@@ -440,7 +439,7 @@ public enum Runtime {
     }
 
     private static func makeRO(flags: UInt32, start: Int, size: Int, name: UnsafePointer<CChar>) -> UnsafeMutablePointer<perry_class_ro> {
-        let ro = UnsafeMutablePointer<perry_class_ro>.allocate(capacity: 1)
+        let ro = ClassDataArena.allocate(byteCount: MemoryLayout<perry_class_ro>.stride).bindMemory(to: perry_class_ro.self, capacity: 1)
         // A 64-bit class_ro_t pads after instance_size; armv7's does not.
 #if _pointerBitWidth(_64)
         ro.initialize(to: perry_class_ro(

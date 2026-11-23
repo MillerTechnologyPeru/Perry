@@ -506,6 +506,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UniformTypeIdentifiers");
         return true;
     }
+    // PackageKit, the installer's private framework, which Mac apps read
+    // packages and receipts with, is beside them.
+    if (strstr(install_name, "/PackageKit.framework/")) {
+        snprintf(out, out_size, "UniformTypeIdentifiers");
+        return true;
+    }
     // Accelerate's sub-frameworks (vecLib, vImage) are the umbrella's provider.
     if (strstr(install_name, "/Accelerate.framework/")) {
         snprintf(out, out_size, "Accelerate");
@@ -525,6 +531,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
+    // A Mac app's AuthenticationServices has no provider: it's UIKit's,
+    // whose classes AppKit's would collide with (NSTextContainer), so a Mac
+    // app finds it missing, as one that links it weakly can. TurboTax links
+    // it for web sign-in.
+    if (strstr(install_name, "/AuthenticationServices.framework/Versions/"))
+        return false;
 #endif
     // Core Image is QuartzCore's, for Mac and iOS apps alike: Mac OS X kept
     // its classes in QuartzCore until 10.11.

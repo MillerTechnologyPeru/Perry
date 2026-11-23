@@ -100,7 +100,7 @@ open class UIViewController: UIResponder {
     @ObjCMethod("initWithNibName:bundle:")
     func initialize(nibName: String?, bundle: NSObject?) -> Self {
         state.nibName = nibName
-        state.nibBundlePath = bundle?.as(NSBundle.self)?.bundlePath()
+        state.nibBundlePath = bundle?.as(NSBundle.self)?.resourceDirectory
         return self
     }
 

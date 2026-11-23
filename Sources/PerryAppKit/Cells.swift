@@ -31,6 +31,10 @@ enum Alignment {
 
 @ObjCClass("NSCell")
 open class NSCell: NSObject {
+    /// AppKit's private commit of a field editor's text to the cell, which
+    /// Interface Builder swizzles: fields here commit their text themselves.
+    @ObjCMethod("_validateEditing:") func validateEditing(_ editor: NSObject?) {}
+
     var objectValue: NSObject?
     var font: NSFont?
     var alignment = 4
@@ -806,6 +810,11 @@ open class NSButtonImageSource: NSObject {
 /// inline 15.
 @ObjCClass("NSButtonCell")
 open class NSButtonCell: NSActionCell {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// Whether the default button's pulse is running: it never is.
+    @ObjCMethod("_isAnimatingDefaultCell") func isAnimatingDefaultCell() -> Bool { false }
+
     /// AppKit's instance variables, which Interface Builder reads and
     /// writes itself (it sets a bit of the flags when the alternate image
     /// is a key equivalent's font). They aren't what the cell draws from.
