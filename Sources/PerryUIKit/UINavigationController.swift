@@ -949,6 +949,13 @@ extension NSObject {
 final class BarItemState: ObjectState {
     var title: String?
     var image: UIImage?
+    /// The images for a phone's landscape bars and for large text, kept for
+    /// the app: the bars here show the item's image.
+    var landscapeImagePhone: UIImage?
+    var largeContentSizeImage: UIImage?
+    var imageInsets = UIEdgeInsets.zero
+    var landscapeImagePhoneInsets = UIEdgeInsets.zero
+    var largeContentSizeImageInsets = UIEdgeInsets.zero
     var enabled = true
     var tag = 0
     /// UIBarButtonItemStyle: plain 0, done 2.
@@ -983,6 +990,16 @@ open class UIBarItem: NSObject {
     @ObjCMethod("setTitle:") func setTitle(_ title: String?) { state.title = title }
     @ObjCMethod("image") func image() -> UIImage? { state.image }
     @ObjCMethod("setImage:") func setImage(_ image: UIImage?) { state.image = image }
+    @ObjCMethod("landscapeImagePhone") func landscapeImagePhone() -> UIImage? { state.landscapeImagePhone }
+    @ObjCMethod("setLandscapeImagePhone:") func setLandscapeImagePhone(_ image: UIImage?) { state.landscapeImagePhone = image }
+    @ObjCMethod("largeContentSizeImage") func largeContentSizeImage() -> UIImage? { state.largeContentSizeImage }
+    @ObjCMethod("setLargeContentSizeImage:") func setLargeContentSizeImage(_ image: UIImage?) { state.largeContentSizeImage = image }
+    @ObjCMethod("imageInsets") func barImageInsets() -> UIEdgeInsets { state.imageInsets }
+    @ObjCMethod("setImageInsets:") func setBarImageInsets(_ insets: UIEdgeInsets) { state.imageInsets = insets }
+    @ObjCMethod("landscapeImagePhoneInsets") func landscapeImagePhoneInsets() -> UIEdgeInsets { state.landscapeImagePhoneInsets }
+    @ObjCMethod("setLandscapeImagePhoneInsets:") func setLandscapeImagePhoneInsets(_ insets: UIEdgeInsets) { state.landscapeImagePhoneInsets = insets }
+    @ObjCMethod("largeContentSizeImageInsets") func largeContentSizeImageInsets() -> UIEdgeInsets { state.largeContentSizeImageInsets }
+    @ObjCMethod("setLargeContentSizeImageInsets:") func setLargeContentSizeImageInsets(_ insets: UIEdgeInsets) { state.largeContentSizeImageInsets = insets }
     @ObjCMethod("isEnabled") func isEnabled() -> Bool { state.enabled }
     @ObjCMethod("setEnabled:") func setEnabled(_ enabled: Bool) { state.enabled = enabled }
     @ObjCMethod("tag") func tag() -> Int { state.tag }
