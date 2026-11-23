@@ -69,6 +69,8 @@ let package = Package(
         .library(name: "PerryUserNotifications", type: .dynamic, targets: ["PerryUserNotifications"]),
         .library(name: "PerryAVFoundation", type: .dynamic, targets: ["PerryAVFoundation"]),
         .library(name: "PerrySystemConfiguration", type: .dynamic, targets: ["PerrySystemConfiguration"]),
+        // Network.framework's C API: connections, listeners and groups.
+        .library(name: "PerryNetwork", type: .dynamic, targets: ["PerryNetwork"]),
         // IOKit: the registry a Mac app reads, HID managers and power sources.
         .library(name: "PerryIOKit", type: .dynamic, targets: ["PerryIOKit"]),
         // CoreTelephony, on a device without a cellular radio.
@@ -382,6 +384,15 @@ let package = Package(
         .target(
             name: "PerrySystemConfiguration",
             dependencies: ["PerryInterface", "PerryObjCInterop"],
+            plugins: ["PerryProviderPlugin"]
+        ),
+        // Network.framework and libnetwork (nw_*): TCP, UDP, TLS (through
+        // Security's Secure Transport), WebSocket and framers over Linux
+        // sockets, listeners, multicast groups, paths and reports.
+        .target(name: "CPerryNetwork"),
+        .target(
+            name: "PerryNetwork",
+            dependencies: ["CPerryNetwork", "PerryInterface", "PerryObjCInterop"],
             plugins: ["PerryProviderPlugin"]
         ),
         // IOKit, over a registry with the platform device and no others.

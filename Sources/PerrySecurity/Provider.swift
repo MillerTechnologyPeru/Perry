@@ -45,14 +45,20 @@ enum Classes {
     }
 }
 
-/// libdispatch, for SecTrustEvaluateAsyncWithError.
+/// libdispatch, for SecTrustEvaluateAsyncWithError and Network's verify
+/// blocks, and the blocks runtime's heap block class, for the completion
+/// blocks those are given.
 enum Dispatch {
     typealias Function = @convention(c) (UnsafeMutableRawPointer?) -> Void
     typealias Async = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, Function) -> Void
     nonisolated(unsafe) static var async: Async?
+    nonisolated(unsafe) static var mainQueue: UnsafeMutableRawPointer?
+    nonisolated(unsafe) static var mallocBlockClass: UnsafeMutableRawPointer?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) {
         async = lookup("_dispatch_async_f").map { unsafeBitCast($0, to: Async.self) }
+        mainQueue = lookup("__dispatch_main_q")
+        mallocBlockClass = lookup("__NSConcreteMallocBlock")
     }
 }
 
