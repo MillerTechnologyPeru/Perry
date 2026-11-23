@@ -995,11 +995,22 @@ static void load_dependencies(perry_loader *loader, perry_image *image) {
         // Swift's libraries, from the Darwin runtime given, when it has them,
         // and frameworks written in Swift that it holds (Combine).
         char swift_path[PATH_MAX];
-        // POSIXErrorCode and errno, now in libswift_errno, are the Darwin
-        // overlay's in a runtime that predates that library (Swift 5.0's).
-        if (strcmp(name, "/usr/lib/swift/libswift_errno.dylib") == 0 &&
-            !swift_runtime_file(loader, name, swift_path, sizeof(swift_path)))
-            name = "/usr/lib/swift/libswiftDarwin.dylib";
+        // The C library's Swift API, which newer SDKs split into libswift_errno,
+        // libswift_DarwinFoundation1-3 and libswift_Builtin_float, is the
+        // Darwin overlay's in a runtime without those libraries (Swift 5.0's,
+        // or Perry's own Darwin overlay, which has all of it).
+        static const char *const darwin_parts[] = {
+            "/usr/lib/swift/libswift_errno.dylib",
+            "/usr/lib/swift/libswift_DarwinFoundation1.dylib",
+            "/usr/lib/swift/libswift_DarwinFoundation2.dylib",
+            "/usr/lib/swift/libswift_DarwinFoundation3.dylib",
+            "/usr/lib/swift/libswift_Builtin_float.dylib",
+        };
+        for (size_t part = 0; part < sizeof(darwin_parts) / sizeof(darwin_parts[0]); part++)
+            if (strcmp(name, darwin_parts[part]) == 0 && !swift_runtime_file(loader, name, swift_path, sizeof(swift_path))) {
+                name = "/usr/lib/swift/libswiftDarwin.dylib";
+                break;
+            }
         if (swift_runtime_file(loader, name, swift_path, sizeof(swift_path)) ||
             swift_runtime_framework(loader, name, swift_path, sizeof(swift_path))) {
             dep->image = find_loaded(loader, swift_path);
