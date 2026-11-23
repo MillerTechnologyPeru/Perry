@@ -40,6 +40,26 @@ typedef struct CVTextureFormatAndType {
     uint32_t type;
 } CVTextureFormatAndType;
 
+// CoreVideo's time, as a display link gives its refresh period.
+typedef struct CVTime {
+    int64_t timeValue;
+    int32_t timeScale;
+    int32_t flags;
+} CVTime;
+
+// The time a display link hands its callback: 80 bytes.
+typedef struct CVTimeStamp {
+    uint32_t version;
+    int32_t videoTimeScale;
+    int64_t videoTime;
+    uint64_t hostTime;
+    double rateScalar;
+    int64_t videoRefreshPeriod;
+    uint8_t smpteTime[24];
+    uint64_t flags;
+    uint64_t reserved;
+} CVTimeStamp;
+
 /// g_object_set(object, name, value, NULL), called as the variadic function it is.
 void perry_g_object_set_double(void *object_set, void *object, const char *name, double value);
 
