@@ -53,13 +53,13 @@ public func NSAccessibilityActionDescription(_ action: UnsafeMutableRawPointer?)
 }
 
 /// A rectangle in a view, in screen coordinates.
-@c(_NSAccessibilityFrameInView)
+@DarwinC("_NSAccessibilityFrameInView")
 public func NSAccessibilityFrameInView(_ view: UnsafeMutableRawPointer?, _ rect: CGRect) -> CGRect {
     guard let view, let object = NSObject(view).as(NSView.self), let window = object.window else { return rect }
     return window.convertRect(toScreen: object.convert(rect, to: nil))
 }
 
-@c(_NSAccessibilityPointInView)
+@DarwinC("_NSAccessibilityPointInView")
 public func NSAccessibilityPointInView(_ view: UnsafeMutableRawPointer?, _ point: CGPoint) -> CGPoint {
     let frame = NSAccessibilityFrameInView(view, CGRect(origin: point, size: .zero))
     return frame.origin

@@ -127,7 +127,7 @@ public func CGGetActiveDisplayList(_ capacity: UInt32, _ displays: UnsafeMutable
     list(capacity, displays, count)
 }
 
-@c(_CGGetDisplaysWithPoint)
+@DarwinC("_CGGetDisplaysWithPoint")
 public func CGGetDisplaysWithPoint(_ point: CGPoint, _ capacity: UInt32, _ displays: UnsafeMutablePointer<UInt32>?,
                                    _ count: UnsafeMutablePointer<UInt32>?) -> Int32 {
     list(capacity, displays, count)
@@ -184,7 +184,7 @@ public func CGOpenGLDisplayMaskToDisplayID(_ mask: UInt32) -> UInt32 { mask & 1 
 
 /// How long local events are held back after the cursor is moved by the
 /// program: they never are here.
-@c(_CGSetLocalEventsSuppressionInterval) public func CGSetLocalEventsSuppressionInterval(_ seconds: Double) -> Int32 { 0 }
+@DarwinC("_CGSetLocalEventsSuppressionInterval") public func CGSetLocalEventsSuppressionInterval(_ seconds: Double) -> Int32 { 0 }
 
 /// Displays aren't reconfigured here: the callback is never called.
 @c(_CGDisplayRegisterReconfigurationCallback)
@@ -311,14 +311,14 @@ public func CGDisplayBestModeForParameters(_ display: UInt32, _ depth: Int, _ wi
 
 /// The property a mode must have (safe for the hardware, say) every mode
 /// here has.
-@c(_CGDisplayBestModeForParametersAndRefreshRateWithProperty)
+@DarwinC("_CGDisplayBestModeForParametersAndRefreshRateWithProperty")
 public func CGDisplayBestModeForParametersAndRefreshRateWithProperty(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int,
                                                                      _ refreshRate: Double, _ property: Ref?,
                                                                      _ exactMatch: UnsafeMutablePointer<UInt32>?) -> Ref? {
     CGDisplayBestModeForParametersAndRefreshRate(display, depth, width, height, refreshRate, exactMatch)
 }
 
-@c(_CGDisplayBestModeForParametersAndRefreshRate)
+@DarwinC("_CGDisplayBestModeForParametersAndRefreshRate")
 public func CGDisplayBestModeForParametersAndRefreshRate(_ display: UInt32, _ depth: Int, _ width: Int, _ height: Int, _ refreshRate: Double,
                                                          _ exactMatch: UnsafeMutablePointer<UInt32>?) -> Ref? {
     let (mode, exact) = DictionaryModes.best(width: width, height: height, depth: depth, refreshRate: refreshRate)
@@ -363,7 +363,7 @@ public func CGGetDisplayTransferByTable(_ display: UInt32, _ capacity: UInt32, _
 public func CGSetDisplayTransferByTable(_ display: UInt32, _ size: UInt32, _ red: UnsafePointer<Float>?, _ green: UnsafePointer<Float>?,
                                         _ blue: UnsafePointer<Float>?) -> Int32 { success }
 
-@c(_CGSetDisplayTransferByFormula)
+@DarwinC("_CGSetDisplayTransferByFormula")
 public func CGSetDisplayTransferByFormula(_ display: UInt32, _ redMin: Float, _ redMax: Float, _ redGamma: Float, _ greenMin: Float,
                                           _ greenMax: Float, _ greenGamma: Float, _ blueMin: Float, _ blueMax: Float,
                                           _ blueGamma: Float) -> Int32 { success }
@@ -379,24 +379,24 @@ public func CGSetDisplayTransferByFormula(_ display: UInt32, _ redMin: Float, _ 
 @c(_CGReleaseAllDisplays) public func CGReleaseAllDisplays() -> Int32 { DictionaryModes.switched = nil; return success }
 
 // Fades: the screen isn't faded, and a reservation is always had.
-@c(_CGAcquireDisplayFadeReservation)
+@DarwinC("_CGAcquireDisplayFadeReservation")
 public func CGAcquireDisplayFadeReservation(_ seconds: Float, _ token: UnsafeMutablePointer<UInt32>?) -> Int32 {
     token?.pointee = 1
     return success
 }
 @c(_CGReleaseDisplayFadeReservation) public func CGReleaseDisplayFadeReservation(_ token: UInt32) -> Int32 { success }
-@c(_CGDisplayFade)
+@DarwinC("_CGDisplayFade")
 public func CGDisplayFade(_ token: UInt32, _ seconds: Float, _ start: Float, _ end: Float, _ red: Float, _ green: Float, _ blue: Float,
                           _ synchronous: UInt32) -> Int32 { success }
 @c(_CGDisplayHideCursor) public func CGDisplayHideCursor(_ display: UInt32) -> Int32 { success }
 @c(_CGDisplayShowCursor) public func CGDisplayShowCursor(_ display: UInt32) -> Int32 { success }
-@c(_CGDisplayMoveCursorToPoint)
+@DarwinC("_CGDisplayMoveCursorToPoint")
 public func CGDisplayMoveCursorToPoint(_ display: UInt32, _ point: CGPoint) -> Int32 {
     Displays.warp(to: point)
     return success
 }
 
-@c(_CGWarpMouseCursorPosition)
+@DarwinC("_CGWarpMouseCursorPosition")
 public func CGWarpMouseCursorPosition(_ point: CGPoint) -> Int32 {
     Displays.warp(to: point)
     return success
@@ -498,13 +498,13 @@ public func CGEventSourceCreate(_ state: Int32) -> Ref? {
 @c(_CGEventSourceKeyState) public func CGEventSourceKeyState(_ state: Int32, _ key: UInt16) -> Bool { false }
 @c(_CGEventSourceButtonState) public func CGEventSourceButtonState(_ state: Int32, _ button: UInt32) -> Bool { false }
 @c(_CGEventSourceFlagsState) public func CGEventSourceFlagsState(_ state: Int32) -> UInt64 { 0 }
-@c(_CGEventSourceSetLocalEventsSuppressionInterval)
+@DarwinC("_CGEventSourceSetLocalEventsSuppressionInterval")
 public func CGEventSourceSetLocalEventsSuppressionInterval(_ source: Ref?, _ seconds: Double) {}
 
 /// A null event, where the mouse is now.
 @c(_CGEventCreate) public func CGEventCreate(_ source: Ref?) -> Ref? { event(at: Displays.mouse) }
 
-@c(_CGEventCreateMouseEvent)
+@DarwinC("_CGEventCreateMouseEvent")
 public func CGEventCreateMouseEvent(_ source: Ref?, _ type: UInt32, _ location: CGPoint, _ button: UInt32) -> Ref? {
     event(at: location, type: type, fields: [EventField.mouseButtonNumber: Int64(button)])
 }
@@ -547,10 +547,10 @@ public func CGGetLastMouseDelta(_ deltaX: UnsafeMutablePointer<Int32>?, _ deltaY
 }
 
 @c(_CGEventGetLocation) public func CGEventGetLocation(_ object: Ref?) -> CGPoint { CGEventObject.states[object]?.location ?? Displays.mouse }
-@c(_CGEventSetLocation) public func CGEventSetLocation(_ object: Ref?, _ location: CGPoint) { CGEventObject.states[object]?.location = location }
+@DarwinC("_CGEventSetLocation") public func CGEventSetLocation(_ object: Ref?, _ location: CGPoint) { CGEventObject.states[object]?.location = location }
 @c(_CGEventGetFlags) public func CGEventGetFlags(_ object: Ref?) -> UInt64 { CGEventObject.states[object]?.flags ?? 0 }
-@c(_CGEventSetFlags) public func CGEventSetFlags(_ object: Ref?, _ flags: UInt64) { CGEventObject.states[object]?.flags = flags }
-@c(_CGEventSetIntegerValueField)
+@DarwinC("_CGEventSetFlags") public func CGEventSetFlags(_ object: Ref?, _ flags: UInt64) { CGEventObject.states[object]?.flags = flags }
+@DarwinC("_CGEventSetIntegerValueField")
 public func CGEventSetIntegerValueField(_ object: Ref?, _ field: UInt32, _ value: Int64) { CGEventObject.states[object]?.fields[field] = value }
 @c(_CGEventGetIntegerValueField)
 public func CGEventGetIntegerValueField(_ object: Ref?, _ field: UInt32) -> Int64 { CGEventObject.states[object]?.fields[field] ?? 0 }

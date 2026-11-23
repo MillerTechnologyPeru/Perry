@@ -213,7 +213,7 @@ public class NSDate: NSObject {
     func copy(zone: UnsafeMutableRawPointer?) -> NSDate { self }
 }
 
-@c(_CFAbsoluteTimeGetCurrent)
-public func CFAbsoluteTimeGetCurrent() -> Double.ObjCResultType {
-    darwinResult(absoluteTimeNow())
+@DarwinC("_CFAbsoluteTimeGetCurrent")
+public func CFAbsoluteTimeGetCurrent() -> Double {
+    absoluteTimeNow()
 }

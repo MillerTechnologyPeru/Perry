@@ -23,7 +23,7 @@ SCREENSHOT_KEYS = %w[url caption].freeze
 # Darwin's platform names, and the CPUs a Mach-O for each can be built for.
 PLATFORM_CPUS = {
   "ios" => %w[arm64 armv7 armv6],
-  "macos" => %w[arm64 x86_64 i386],
+  "macos" => %w[arm64 x86_64 i386 ppc],
   "maccatalyst" => %w[arm64 x86_64]
 }.freeze
 KINDS = %w[app game].freeze

@@ -11,16 +11,20 @@
 //     words
 //   - a structure goes in its words, as it is laid out in memory, unless it
 //     holds just one float or double, which goes as that does
-//   - results are in r3 (and r4 for a long long), f1 for floating point, and
-//     a structure is returned through a pointer in r3, before the arguments
 //
-// Linux's side is the C signature the Swift providers give such functions
-// on 32-bit, through ObjCValue (PerryObjCInterop): a float is its bits as a
-// UInt32; a double or long long is an ObjCWordPair (a structure of its low
-// and high words); a structure is ObjCWords2, ObjCWords4 and so on; results
-// are UInt64 for a double or long long, and UInt32 for a float. SysV passes
-// every structure through a pointer to a copy, and the rest as words, so the
-// Linux side of a call is all words: r3-r10, then 8(r1).
+// Linux's (SysV), for the same C signature, as Swift's types give it on ppc
+// (ObjCValue's types are the types themselves there, as on i386):
+//
+//   - words go in r3-r10, then from 8(r1)
+//   - a long long takes an even register pair (r3:r4, r5:r6, ...), or 8
+//     aligned bytes of the stack
+//   - a double or float goes in f1-f8, then 8 aligned bytes of the stack,
+//     and takes no general registers
+//   - a structure goes as a pointer to a copy of it
+//
+// Results are in the same registers on both: r3, r3:r4 for a long long, f1
+// for floating point, and memory through a pointer in r3, before the
+// arguments, for a structure.
 
 #define _GNU_SOURCE
 
@@ -36,14 +40,9 @@
 #include <string.h>
 #include <sys/mman.h>
 
-typedef struct perry_ppc_registers {
-    uint32_t r3, r4;
-    double f1;
-} perry_ppc_registers;
-
 void perry_ppc_darwin_trampoline(void);
-void perry_ppc_invoke_sysv(void *function, const uint32_t gprs[8], const uint32_t *stack, uint32_t stack_words,
-                           perry_ppc_registers *result);
+void perry_ppc_invoke_sysv(void *function, const uint32_t gprs[8], const double fprs[8], const uint32_t *stack,
+                           uint32_t stack_words, perry_ppc_registers *result);
 void perry_ppc_invoke_darwin(void *function, const uint32_t gprs[8], const double fprs[13], const uint32_t *words,
                              uint32_t word_count, perry_ppc_registers *result);
 
@@ -231,15 +230,103 @@ static bool parse(const char *types, perry_ppc_plan *plan) {
     return ok;
 }
 
-// Whether a plan's arguments and result all pass the same in both ABIs.
+// Whether a plan's arguments all pass the same in both ABIs: words only.
+// Results always do (r3, r3:r4, f1, or memory through a pointer in r3).
 static bool all_words(const perry_ppc_plan *plan) {
-    if (plan->result.kind != KIND_WORD && plan->result.kind != KIND_VOID && plan->result.kind != KIND_PAIR &&
-        !is_structure(plan->result.kind))
-        return false;
     for (uint32_t i = 0; i < plan->count; i++)
         if (plan->arguments[i].kind != KIND_WORD)
             return false;
     return true;
+}
+
+// MARK: - Linux's side of a call
+
+// Where Linux's ABI puts a call's arguments, as they are laid out one after
+// another: by perry_ppc_from_darwin to make a call, and by
+// perry_ppc_call_darwin to read one.
+typedef struct sysv_call {
+    uint32_t gprs[8];
+    double fprs[8];
+    uint32_t stack[MAX_ARGUMENTS * 2 + 8];
+    uint32_t gpr, fpr, stack_count;
+} sysv_call;
+
+static void sysv_align_stack(sysv_call *call) {
+    if (call->stack_count & 1)
+        call->stack_count++;
+}
+
+static void sysv_put_word(sysv_call *call, uint32_t word) {
+    if (call->gpr < 8)
+        call->gprs[call->gpr++] = word;
+    else
+        call->stack[call->stack_count++] = word;
+}
+
+static void sysv_put_pair(sysv_call *call, uint32_t high, uint32_t low) {
+    if (call->gpr & 1)
+        call->gpr++;
+    if (call->gpr <= 6) {
+        call->gprs[call->gpr++] = high;
+        call->gprs[call->gpr++] = low;
+    } else {
+        call->gpr = 8;
+        sysv_align_stack(call);
+        call->stack[call->stack_count++] = high;
+        call->stack[call->stack_count++] = low;
+    }
+}
+
+static void sysv_put_double(sysv_call *call, double value) {
+    if (call->fpr < 8) {
+        call->fprs[call->fpr++] = value;
+    } else {
+        uint64_t bits;
+        memcpy(&bits, &value, 8);
+        sysv_align_stack(call);
+        call->stack[call->stack_count++] = (uint32_t)(bits >> 32);
+        call->stack[call->stack_count++] = (uint32_t)bits;
+    }
+}
+
+// The same, reading a call Linux code made: its registers, and its stack
+// from 8(r1).
+typedef struct sysv_args {
+    const uint32_t *gprs;
+    const double *fprs;
+    const uint32_t *stack;
+    uint32_t gpr, fpr, stack_index;
+} sysv_args;
+
+static uint32_t sysv_word(sysv_args *args) {
+    return args->gpr < 8 ? args->gprs[args->gpr++] : args->stack[args->stack_index++];
+}
+
+static void sysv_pair(sysv_args *args, uint32_t *high, uint32_t *low) {
+    if (args->gpr & 1)
+        args->gpr++;
+    if (args->gpr <= 6) {
+        *high = args->gprs[args->gpr++];
+        *low = args->gprs[args->gpr++];
+    } else {
+        args->gpr = 8;
+        if (args->stack_index & 1)
+            args->stack_index++;
+        *high = args->stack[args->stack_index++];
+        *low = args->stack[args->stack_index++];
+    }
+}
+
+static double sysv_double(sysv_args *args) {
+    if (args->fpr < 8)
+        return args->fprs[args->fpr++];
+    if (args->stack_index & 1)
+        args->stack_index++;
+    uint64_t bits = (uint64_t)args->stack[args->stack_index] << 32 | args->stack[args->stack_index + 1];
+    args->stack_index += 2;
+    double value;
+    memcpy(&value, &bits, 8);
+    return value;
 }
 
 // MARK: - Darwin to Linux
@@ -248,67 +335,63 @@ static uint32_t darwin_word(const uint32_t *gprs, const uint32_t *caller_stack, 
     return index < 8 ? gprs[index] : caller_stack[6 + index];   // 24(r1) is word 6
 }
 
-// Calls the plan's Linux function with Darwin's arguments; leaves Darwin's
-// result registers in `result`. Called by perry_ppc_darwin_trampoline.
+static double darwin_double(const double *fprs, uint32_t *fpr, const uint32_t *gprs, const uint32_t *caller_stack,
+                            uint32_t word) {
+    if (*fpr < 13)
+        return fprs[(*fpr)++];
+    uint64_t bits = (uint64_t)darwin_word(gprs, caller_stack, word) << 32 | darwin_word(gprs, caller_stack, word + 1);
+    double value;
+    memcpy(&value, &bits, 8);
+    return value;
+}
+
+// Calls the plan's Linux function with Darwin's arguments; leaves the result
+// registers, the same on both, in `result`. Called by
+// perry_ppc_darwin_trampoline.
 __attribute__((visibility("hidden")))
 void perry_ppc_from_darwin(const perry_ppc_plan *plan, const uint32_t *gprs, const double *fprs,
                            const uint32_t *caller_stack, perry_ppc_registers *result) {
-    uint32_t words[MAX_ARGUMENTS * 2 + 8];
-    uint32_t count = 0;
-    // Copies of what goes through a pointer: up to two words for each value,
-    // and structures' words.
+    sysv_call call;
+    memset(&call, 0, sizeof(call));
+    // Copies of structures, which Linux passes through pointers.
     uint32_t copies_size = 0;
     for (uint32_t i = 0; i < plan->count; i++)
-        copies_size += plan->arguments[i].kind == KIND_STRUCT ? plan->arguments[i].words : 2;
+        copies_size += is_structure(plan->arguments[i].kind) ? (plan->arguments[i].words ? plan->arguments[i].words : 2) : 0;
     uint32_t *copies = __builtin_alloca(copies_size * sizeof(uint32_t) + 8);
     uint32_t copied = 0;
 
     uint32_t word = 0, fpr = 0;
-    // A structure result comes through a pointer before the arguments, the
-    // same on both.
     if (is_structure(plan->result.kind))
-        words[count++] = darwin_word(gprs, caller_stack, word++);
+        sysv_put_word(&call, darwin_word(gprs, caller_stack, word++));
     for (uint32_t i = 0; i < plan->count; i++) {
         const plan_value *argument = &plan->arguments[i];
         switch (argument->kind) {
         case KIND_WORD:
         case KIND_VOID:
-            words[count++] = darwin_word(gprs, caller_stack, word++);
+            sysv_put_word(&call, darwin_word(gprs, caller_stack, word++));
             break;
         case KIND_PAIR: {
-            uint32_t *pair = &copies[copied];
-            copied += 2;
-            pair[1] = darwin_word(gprs, caller_stack, word++);     // high
-            pair[0] = darwin_word(gprs, caller_stack, word++);     // low
-            words[count++] = (uint32_t)(uintptr_t)pair;
-            break;
-        }
-        case KIND_DOUBLE: {
-            uint64_t bits;
-            if (fpr < 13) {
-                memcpy(&bits, &fprs[fpr++], 8);
-            } else {
-                uint32_t high = darwin_word(gprs, caller_stack, word), low = darwin_word(gprs, caller_stack, word + 1);
-                bits = (uint64_t)high << 32 | low;
-            }
+            uint32_t high = darwin_word(gprs, caller_stack, word), low = darwin_word(gprs, caller_stack, word + 1);
             word += 2;
-            uint32_t *pair = &copies[copied];
-            copied += 2;
-            pair[0] = (uint32_t)bits;
-            pair[1] = (uint32_t)(bits >> 32);
-            words[count++] = (uint32_t)(uintptr_t)pair;
+            sysv_put_pair(&call, high, low);
             break;
         }
+        case KIND_DOUBLE:
+            sysv_put_double(&call, darwin_double(fprs, &fpr, gprs, caller_stack, word));
+            word += 2;
+            break;
         case KIND_FLOAT: {
-            uint32_t bits;
+            double value;
             if (fpr < 13) {
-                float single = (float)fprs[fpr++];
-                memcpy(&bits, &single, 4);
+                value = fprs[fpr++];
             } else {
-                bits = darwin_word(gprs, caller_stack, word);
+                uint32_t bits = darwin_word(gprs, caller_stack, word);
+                float single;
+                memcpy(&single, &bits, 4);
+                value = single;
             }
             word += 1;
-            words[count++] = bits;
+            sysv_put_double(&call, value);
             break;
         }
         case KIND_STRUCT: {
@@ -316,60 +399,36 @@ void perry_ppc_from_darwin(const perry_ppc_plan *plan, const uint32_t *gprs, con
             copied += argument->words;
             for (uint32_t w = 0; w < argument->words; w++)
                 copy[w] = darwin_word(gprs, caller_stack, word++);
-            words[count++] = (uint32_t)(uintptr_t)copy;
+            sysv_put_word(&call, (uint32_t)(uintptr_t)copy);
             break;
         }
         case KIND_STRUCT_DOUBLE: {
-            // Its memory, which is the double's.
             uint32_t *copy = &copies[copied];
             copied += 2;
-            if (fpr < 13) {
-                memcpy(copy, &fprs[fpr++], 8);
-            } else {
-                copy[0] = darwin_word(gprs, caller_stack, word);
-                copy[1] = darwin_word(gprs, caller_stack, word + 1);
-            }
+            double value = darwin_double(fprs, &fpr, gprs, caller_stack, word);
+            memcpy(copy, &value, 8);
             word += 2;
-            words[count++] = (uint32_t)(uintptr_t)copy;
+            sysv_put_word(&call, (uint32_t)(uintptr_t)copy);
             break;
         }
         case KIND_STRUCT_FLOAT: {
             uint32_t *copy = &copies[copied];
             copied += 1;
+            float single;
             if (fpr < 13) {
-                float single = (float)fprs[fpr++];
-                memcpy(copy, &single, 4);
+                single = (float)fprs[fpr++];
             } else {
-                copy[0] = darwin_word(gprs, caller_stack, word);
+                uint32_t bits = darwin_word(gprs, caller_stack, word);
+                memcpy(&single, &bits, 4);
             }
+            memcpy(copy, &single, 4);
             word += 1;
-            words[count++] = (uint32_t)(uintptr_t)copy;
+            sysv_put_word(&call, (uint32_t)(uintptr_t)copy);
             break;
         }
         }
     }
-
-    perry_ppc_registers registers;
-    perry_ppc_invoke_sysv(plan->function, words, count > 8 ? words + 8 : NULL, count > 8 ? count - 8 : 0,
-                          &registers);
-    result->r3 = registers.r3;
-    result->r4 = registers.r4;
-    result->f1 = 0;
-    switch (plan->result.kind) {
-    case KIND_DOUBLE: {
-        uint64_t bits = (uint64_t)registers.r3 << 32 | registers.r4;    // a UInt64, r3 high
-        memcpy(&result->f1, &bits, 8);
-        break;
-    }
-    case KIND_FLOAT: {
-        float single;
-        memcpy(&single, &registers.r3, 4);
-        result->f1 = single;
-        break;
-    }
-    default:
-        break;
-    }
+    perry_ppc_invoke_sysv(plan->function, call.gprs, call.fprs, call.stack, call.stack_count, result);
 }
 
 // MARK: - Stubs
@@ -452,57 +511,57 @@ void *perry_ppc_darwin_entry(void *function, const char *types) {
 
 // MARK: - Linux to Darwin
 
-void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *linux_words, uint32_t linux_count,
-                           uint32_t result[2]) {
+// Calls a Darwin function with the arguments of a call Linux code made (its
+// registers, and its stack from 8(r1)), laid out for Darwin by `types`; the
+// result registers are the same on both.
+void perry_ppc_call_darwin(void *function, const char *types, const uint32_t linux_gprs[8], const double linux_fprs[8],
+                           const uint32_t *linux_stack, perry_ppc_registers *result) {
     perry_ppc_plan plan;
     if (!parse(types, &plan))
         perry_fatal("cannot move the arguments of %s for Darwin's ppc ABI", types);
+    sysv_args args = { linux_gprs, linux_fprs, linux_stack, 0, 0, 0 };
     uint32_t gprs[8] = { 0 };
     double fprs[13] = { 0 };
     uint32_t words[MAX_ARGUMENTS * 4 + 8];
-    uint32_t word = 0, fpr = 0, in = 0;
-#define NEXT_LINUX() (in < linux_count ? linux_words[in++] : 0)
+    uint32_t word = 0, fpr = 0;
     if (is_structure(plan.result.kind))
-        words[word++] = NEXT_LINUX();
+        words[word++] = sysv_word(&args);
     for (uint32_t i = 0; i < plan.count; i++) {
         const plan_value *argument = &plan.arguments[i];
         switch (argument->kind) {
         case KIND_WORD:
         case KIND_VOID:
-            words[word++] = NEXT_LINUX();
+            words[word++] = sysv_word(&args);
             break;
-        case KIND_PAIR: {
-            const uint32_t *pair = (const uint32_t *)(uintptr_t)NEXT_LINUX();
-            words[word++] = pair[1];
-            words[word++] = pair[0];
+        case KIND_PAIR:
+            sysv_pair(&args, &words[word], &words[word + 1]);
+            word += 2;
             break;
-        }
         case KIND_DOUBLE: {
-            const uint32_t *pair = (const uint32_t *)(uintptr_t)NEXT_LINUX();
-            uint64_t bits = (uint64_t)pair[1] << 32 | pair[0];
-            words[word++] = pair[1];
-            words[word++] = pair[0];
+            double value = sysv_double(&args);
+            uint64_t bits;
+            memcpy(&bits, &value, 8);
+            words[word++] = (uint32_t)(bits >> 32);
+            words[word++] = (uint32_t)bits;
             if (fpr < 13)
-                memcpy(&fprs[fpr++], &bits, 8);
+                fprs[fpr++] = value;
             break;
         }
         case KIND_FLOAT: {
-            uint32_t bits = NEXT_LINUX();
-            float single;
-            memcpy(&single, &bits, 4);
-            words[word++] = bits;
+            float single = (float)sysv_double(&args);
+            memcpy(&words[word++], &single, 4);
             if (fpr < 13)
                 fprs[fpr++] = single;
             break;
         }
         case KIND_STRUCT: {
-            const uint32_t *copy = (const uint32_t *)(uintptr_t)NEXT_LINUX();
+            const uint32_t *copy = (const uint32_t *)(uintptr_t)sysv_word(&args);
             for (uint32_t w = 0; w < argument->words; w++)
                 words[word++] = copy[w];
             break;
         }
         case KIND_STRUCT_DOUBLE: {
-            const uint32_t *copy = (const uint32_t *)(uintptr_t)NEXT_LINUX();
+            const uint32_t *copy = (const uint32_t *)(uintptr_t)sysv_word(&args);
             words[word++] = copy[0];
             words[word++] = copy[1];
             if (fpr < 13)
@@ -510,7 +569,7 @@ void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *li
             break;
         }
         case KIND_STRUCT_FLOAT: {
-            const uint32_t *copy = (const uint32_t *)(uintptr_t)NEXT_LINUX();
+            const uint32_t *copy = (const uint32_t *)(uintptr_t)sysv_word(&args);
             float single;
             memcpy(&single, copy, 4);
             words[word++] = copy[0];
@@ -520,30 +579,9 @@ void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *li
         }
         }
     }
-#undef NEXT_LINUX
     for (uint32_t i = 0; i < 8 && i < word; i++)
         gprs[i] = words[i];
-    perry_ppc_registers registers;
-    perry_ppc_invoke_darwin(function, gprs, fprs, words, word, &registers);
-    switch (plan.result.kind) {
-    case KIND_DOUBLE: {
-        uint64_t bits;
-        memcpy(&bits, &registers.f1, 8);
-        result[0] = (uint32_t)(bits >> 32);
-        result[1] = (uint32_t)bits;
-        break;
-    }
-    case KIND_FLOAT: {
-        float single = (float)registers.f1;
-        memcpy(&result[0], &single, 4);
-        result[1] = 0;
-        break;
-    }
-    default:
-        result[0] = registers.r3;
-        result[1] = registers.r4;
-        break;
-    }
+    perry_ppc_invoke_darwin(function, gprs, fprs, words, word, result);
 }
 
 // MARK: - Sends from Linux code
@@ -554,27 +592,24 @@ void perry_ppc_set_method_lookup(perry_ppc_method_lookup lookup) {
     method_lookup = lookup;
 }
 
-// Called by the perry_ppc_send_* entry points (ppc_abi.S) with Linux's
-// argument words: r3-r10, then the caller's stack from 8(r1). `kind` says
-// which send: bit 0 a structure result (a pointer first), bit 1 a super
-// send (the first word an objc_super: receiver, then the class whose
-// superclass to start at).
+// Called by the perry_ppc_send_* entry points (ppc_abi.S) with the
+// registers and stack of a send Linux code made. `kind` says which send: bit
+// 0 a structure result (a pointer first), bit 1 a super send (the first word
+// an objc_super: receiver, then the class whose superclass to start at).
 __attribute__((visibility("hidden")))
-void perry_ppc_send_from_linux(uint32_t kind, const uint32_t *gprs, const uint32_t *caller_stack,
+void perry_ppc_send_from_linux(uint32_t kind, uint32_t *gprs, const double *fprs, const uint32_t *caller_stack,
                                perry_ppc_registers *result) {
-    uint32_t words[MAX_ARGUMENTS + 8];
-    for (uint32_t i = 0; i < MAX_ARGUMENTS + 8; i++)
-        words[i] = i < 8 ? gprs[i] : caller_stack[2 + (i - 8)];    // 8(r1) is word 2
+    const uint32_t *stack = caller_stack + 2;   // 8(r1)
     uint32_t self_index = kind & 1 ? 1 : 0;
-    void *receiver = (void *)(uintptr_t)words[self_index];
+    void *receiver = (void *)(uintptr_t)gprs[self_index];
     void *start = NULL;
     if (kind & 2) {
-        const uint32_t *super = (const uint32_t *)(uintptr_t)words[self_index];
+        const uint32_t *super = (const uint32_t *)(uintptr_t)gprs[self_index];
         receiver = (void *)(uintptr_t)super[0];
         start = *(void **)((uintptr_t)super[1] + 4);    // its superclass
-        words[self_index] = super[0];
+        gprs[self_index] = super[0];
     }
-    const void *selector = (const void *)(uintptr_t)words[self_index + 1];
+    const void *selector = (const void *)(uintptr_t)gprs[self_index + 1];
     result->r3 = result->r4 = 0;
     result->f1 = 0;
     if (!receiver || !method_lookup)
@@ -583,19 +618,13 @@ void perry_ppc_send_from_linux(uint32_t kind, const uint32_t *gprs, const uint32
     void *imp = method_lookup(receiver, selector, start, &types);
     if (!imp)
         return;
-    uint32_t out[2];
     if (!types) {
         // No encoding: words, as many as there can be in registers.
-        perry_ppc_registers registers;
-        double fprs[13] = { 0 };
-        perry_ppc_invoke_darwin(imp, words, fprs, words, 8, &registers);
-        result->r3 = registers.r3;
-        result->r4 = registers.r4;
+        double none[13] = { 0 };
+        perry_ppc_invoke_darwin(imp, gprs, none, gprs, 8, result);
         return;
     }
-    perry_ppc_call_darwin(imp, types, words, MAX_ARGUMENTS + 8, out);
-    result->r3 = out[0];
-    result->r4 = out[1];
+    perry_ppc_call_darwin(imp, types, gprs, fprs, stack, result);
 }
 
 bool perry_ppc_types_need_moves(const char *types) {

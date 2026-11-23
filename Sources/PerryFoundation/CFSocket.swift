@@ -464,7 +464,7 @@ public func CFSocketSetAddress(_ socket: UnsafeMutableRawPointer?, _ address: Un
 /// Connects, waiting up to `timeout` seconds; a negative one connects in
 /// the background, which the connect callback reports. A CFSocketError:
 /// 0, -1 for an error or -2 for a timeout.
-@c(_CFSocketConnectToAddress)
+@DarwinC("_CFSocketConnectToAddress")
 public func CFSocketConnectToAddress(_ socket: UnsafeMutableRawPointer?, _ address: UnsafeMutableRawPointer?,
                                      _ timeout: Double) -> Int {
     guard let storage = Sockets.storage(socket), storage.valid, let endpoint = Sockets.endpoint(address) else { return -1 }

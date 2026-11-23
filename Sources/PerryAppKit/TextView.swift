@@ -478,9 +478,22 @@ open class NSLayoutManager: NSObject {
     var containers: [NSTextContainer] = []
     /// Not retained.
     var delegateObject: UnsafeMutableRawPointer?
+    /// How attachments' images scale to their cells: kept, since attachments
+    /// draw at their own size here. NSImageScaleNone, as AppKit's default.
+    var defaultAttachmentScaling = 2
+    /// Whether layout uses screen fonts' metrics: kept, since text is laid
+    /// out with the printer fonts' here. On by default, as AppKit's.
+    var usesScreenFonts = true
 
     @ObjCMethod("init")
     public required override init() { super.init() }
+
+    @ObjCMethod("defaultAttachmentScaling") func attachmentScaling() -> Int { defaultAttachmentScaling }
+    @ObjCMethod("setDefaultAttachmentScaling:") func setDefaultAttachmentScaling(_ scaling: Int) {
+        defaultAttachmentScaling = scaling
+    }
+    @ObjCMethod("usesScreenFonts") func screenFonts() -> Bool { usesScreenFonts }
+    @ObjCMethod("setUsesScreenFonts:") func setUsesScreenFonts(_ uses: Bool) { usesScreenFonts = uses }
 
     @ObjCMethod("initWithCoder:")
     public required init(coder: NSObject?) {

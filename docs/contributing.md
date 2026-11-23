@@ -35,7 +35,7 @@ reports:
     date: 2026-11-19     # the PR's merge date
     perry: "e9a46074"    # the merge commit, 8 characters, always quoted
     platform: ios        # the same as the app's platform
-    cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386; maccatalyst: arm64 | x86_64
+    cpu: arm64           # ios: arm64 | armv7 | armv6; macos: arm64 | x86_64 | i386 | ppc; maccatalyst: arm64 | x86_64
     app_version: "8.1"   # only if the PR states it, always quoted
     hardware: Lenovo Duet 3  # the machine it ran on
     resolution: "1170x2532"  # the size it drew at, if stated: "WxH" pixels, or "WxH@S" points at a scale
@@ -76,7 +76,8 @@ more than the reports do.
   `os` is the operating system it ran, such as Debian 13, Debian sid or
   ROCKNIX.
   Perry runs code natively, so an arm64 machine runs arm64 slices and an
-  x86 machine runs x86_64 or i386 ones.
+  x86 machine runs x86_64 or i386 ones, and a 32-bit PowerPC machine ppc
+  ones.
 - `tags` names the languages and engines the app is built with: Swift,
   ObjC, C++, Unity, Unreal, SpriteKit, SceneKit, Cocos2D (cocos2d-iphone,
   Objective-C), Cocos2D-X (C++), SexyAppFramework, Mono, XNA, Lua and

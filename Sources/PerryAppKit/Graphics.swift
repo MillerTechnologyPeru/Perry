@@ -1290,13 +1290,13 @@ open class NSBezierPath: NSObject {
 // MARK: - Drawing functions
 
 /// Fills `rect` with the current fill color.
-@c(_NSRectFill)
+@DarwinC("_NSRectFill")
 public func NSRectFill(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.fillRect(context, rect)
 }
 
-@c(_NSRectFillUsingOperation)
+@DarwinC("_NSRectFillUsingOperation")
 public func NSRectFillUsingOperation(_ rect: CGRect, _ operation: UInt) { NSRectFill(rect) }
 
 @c(_NSRectFillList)
@@ -1305,14 +1305,14 @@ public func NSRectFillList(_ rects: UnsafePointer<CGRect>?, _ count: Int) {
     for index in 0..<count { NSRectFill(rects[index]) }
 }
 
-@c(_NSRectClip)
+@DarwinC("_NSRectClip")
 public func NSRectClip(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.clipToRect(context, rect)
 }
 
 /// Draws the inside edge of `rect`, `width` wide, in the fill color.
-@c(_NSFrameRectWithWidth)
+@DarwinC("_NSFrameRectWithWidth")
 public func NSFrameRectWithWidth(_ rect: CGRect, _ width: CGFloat) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.fillRect(context, CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: width))
@@ -1321,13 +1321,13 @@ public func NSFrameRectWithWidth(_ rect: CGRect, _ width: CGFloat) {
     CG.fillRect(context, CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height))
 }
 
-@c(_NSFrameRect)
+@DarwinC("_NSFrameRect")
 public func NSFrameRect(_ rect: CGRect) { NSFrameRectWithWidth(rect, 1) }
 
-@c(_NSFrameRectWithWidthUsingOperation)
+@DarwinC("_NSFrameRectWithWidthUsingOperation")
 public func NSFrameRectWithWidthUsingOperation(_ rect: CGRect, _ width: CGFloat, _ operation: UInt) { NSFrameRectWithWidth(rect, width) }
 
-@c(_NSEraseRect)
+@DarwinC("_NSEraseRect")
 public func NSEraseRect(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.saveGState(context)
@@ -1336,7 +1336,7 @@ public func NSEraseRect(_ rect: CGRect) {
     CG.restoreGState(context)
 }
 
-@c(_NSDrawWindowBackground)
+@DarwinC("_NSDrawWindowBackground")
 public func NSDrawWindowBackground(_ rect: CGRect) {
     guard let context = NSGraphicsContext.currentCG else { return }
     CG.saveGState(context)
@@ -1346,16 +1346,16 @@ public func NSDrawWindowBackground(_ rect: CGRect) {
 }
 
 /// Fills `rect` in the gray of NSDrawGrayBezel's face.
-@c(_NSDrawGroove)
+@DarwinC("_NSDrawGroove")
 public func NSDrawGroove(_ rect: CGRect, _ clip: CGRect) {
     NSColor.gridColor().setFill()
     NSFrameRect(rect)
 }
 
-@c(_NSDrawLightBezel)
+@DarwinC("_NSDrawLightBezel")
 public func NSDrawLightBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect, clip) }
 
-@c(_NSDrawGrayBezel)
+@DarwinC("_NSDrawGrayBezel")
 public func NSDrawGrayBezel(_ rect: CGRect, _ clip: CGRect) { NSDrawGroove(rect, clip) }
 
 /// System template images and symbols Perry draws itself, in the label

@@ -195,10 +195,10 @@ public func dispatch_source_merge_data(_ source: Object?, _ value: UInt) {
     linux_dispatch_source_merge_data(Objects.linux(source), value)
 }
 
-@c(_dispatch_source_set_timer)
-public func dispatch_source_set_timer(_ source: Object?, _ start: UInt64.ObjCType, _ interval: UInt64.ObjCType,
-                                      _ leeway: UInt64.ObjCType) {
+@DarwinC("_dispatch_source_set_timer")
+public func dispatch_source_set_timer(_ source: Object?, _ start: UInt64, _ interval: UInt64,
+                                      _ leeway: UInt64) {
     // The interval and leeway are nanoseconds on both.
-    linux_dispatch_source_set_timer(Objects.linux(source), DarwinTime.linux(UInt64(objCArgument: start)),
-                                    UInt64(objCArgument: interval), UInt64(objCArgument: leeway))
+    linux_dispatch_source_set_timer(Objects.linux(source), DarwinTime.linux(start),
+                                    interval, leeway)
 }

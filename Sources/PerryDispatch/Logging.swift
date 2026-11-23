@@ -415,9 +415,9 @@ public func os_signpost_id_make_with_pointer(_ log: Object?, _ pointer: UnsafeRa
 public func os_signpost_enabled(_ log: Object?) -> Bool { false }
 
 /// Signposts mark intervals for Instruments, which Linux lacks.
-@c(__os_signpost_emit_with_name_impl)
+@DarwinC("__os_signpost_emit_with_name_impl")
 public func _os_signpost_emit_with_name_impl(_ dso: UnsafeRawPointer?, _ log: Object?, _ type: UInt8,
-                                             _ identifier: UInt64.ObjCType, _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
+                                             _ identifier: UInt64, _ name: UnsafePointer<CChar>?, _ format: UnsafePointer<CChar>?,
                                              _ buffer: UnsafePointer<UInt8>?, _ size: UInt32) {}
 
 // MARK: - Activities

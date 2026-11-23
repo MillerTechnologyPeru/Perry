@@ -96,8 +96,11 @@ public macro ObjCConstants() =
 /// @c(name) would, with Darwin's calling convention for floating point,
 /// 64-bit integers and structures of them (their ObjCType and
 /// ObjCResultType), and as perry_native_<name without its underscore>
-/// unchanged, for other providers.
-@attached(peer, names: prefixed(__darwin_), prefixed(__native_))
+/// unchanged, for other providers. On ppc the Darwin entry takes Darwin's
+/// registers as they are (DarwinCMacro.ppcEntry), or past the registers is
+/// perry_ppc_moved_<name>, with __darwin_types_<function> giving its type
+/// encoding to the loader.
+@attached(peer, names: prefixed(__darwin_), prefixed(__native_), prefixed(__darwin_types_))
 public macro DarwinC(_ name: String) =
     #externalMacro(module: "PerryObjCMacros", type: "DarwinCMacro")
 

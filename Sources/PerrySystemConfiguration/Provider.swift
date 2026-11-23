@@ -37,7 +37,7 @@ enum Dispatch {
     nonisolated(unsafe) static var main: UnsafeMutableRawPointer!
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
-        guard let async = lookup("_dispatch_async_f"), let after = lookup("_dispatch_after_f"), let time = lookup("_dispatch_time"),
+        guard let async = lookup("_dispatch_async_f"), let after = lookup("perry_native_dispatch_after_f"), let time = lookup("perry_native_dispatch_time"),
               let global = lookup("_dispatch_get_global_queue"), let main = lookup("__dispatch_main_q") else { return false }
         self.async = unsafeBitCast(async, to: Async.self)
         self.after = unsafeBitCast(after, to: After.self)

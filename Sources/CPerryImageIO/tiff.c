@@ -26,6 +26,8 @@ static struct {
     int (*get_field_defaulted)(TIFF *, uint32_t, ...);
     int (*read_rgba)(TIFF *, uint32_t, uint32_t, uint32_t *, int, int);
     int (*read_directory)(TIFF *);
+    int (*read_scanline)(TIFF *, void *, uint32_t, uint16_t);
+    ssize_t (*scanline_size)(TIFF *);
     void *(*set_warning_handler)(void *);
     void *(*set_error_handler)(void *);
     int loaded;
@@ -43,6 +45,8 @@ static int load_libtiff(void) {
     *(void **)&libtiff.get_field_defaulted = dlsym(library, "TIFFGetFieldDefaulted");
     *(void **)&libtiff.read_rgba = dlsym(library, "TIFFReadRGBAImageOriented");
     *(void **)&libtiff.read_directory = dlsym(library, "TIFFReadDirectory");
+    *(void **)&libtiff.read_scanline = dlsym(library, "TIFFReadScanline");
+    *(void **)&libtiff.scanline_size = dlsym(library, "TIFFScanlineSize");
     *(void **)&libtiff.set_warning_handler = dlsym(library, "TIFFSetWarningHandler");
     *(void **)&libtiff.set_error_handler = dlsym(library, "TIFFSetErrorHandler");
     if (!libtiff.client_open || !libtiff.close || !libtiff.get_field || !libtiff.get_field_defaulted || !libtiff.read_rgba ||
@@ -99,8 +103,52 @@ static void memory_unmap(void *handle, void *base, uint64_t size) { (void)handle
 enum {
     TAG_IMAGE_WIDTH = 256, TAG_IMAGE_LENGTH = 257, TAG_BITS_PER_SAMPLE = 258, TAG_PHOTOMETRIC = 262,
     TAG_ORIENTATION = 274, TAG_SAMPLES_PER_PIXEL = 277, TAG_X_RESOLUTION = 282, TAG_Y_RESOLUTION = 283,
-    TAG_RESOLUTION_UNIT = 296, TAG_EXTRA_SAMPLES = 338,
+    TAG_RESOLUTION_UNIT = 296, TAG_EXTRA_SAMPLES = 338, TAG_PLANAR_CONFIG = 284,
 };
+
+// RGB with 4 bits a sample, with or without alpha, which libtiff's RGBA
+// raster has no converter for ("Sorry, can not handle image"): old Mac
+// toolbar icons (Bean's font style buttons) are stored so. Reads the
+// scanlines and widens each sample (times 17, so 15 is 255), into a raster
+// laid out as read_rgba's on this machine.
+static int read_rgb4(TIFF *tiff, uint32_t width, uint32_t height, uint32_t *raster) {
+    uint16_t bits = 0, samples = 0, photometric = 0, planar = 1, extra_count = 0;
+    uint16_t *extra = NULL;
+    libtiff.get_field_defaulted(tiff, TAG_BITS_PER_SAMPLE, &bits);
+    libtiff.get_field_defaulted(tiff, TAG_SAMPLES_PER_PIXEL, &samples);
+    libtiff.get_field(tiff, TAG_PHOTOMETRIC, &photometric);
+    libtiff.get_field_defaulted(tiff, TAG_PLANAR_CONFIG, &planar);
+    libtiff.get_field_defaulted(tiff, TAG_EXTRA_SAMPLES, &extra_count, &extra);
+    if (!libtiff.read_scanline || !libtiff.scanline_size || bits != 4 || photometric != 2 || planar != 1 ||
+        (samples != 3 && samples != 4))
+        return 0;
+    ssize_t line_size = libtiff.scanline_size(tiff);
+    if (line_size < (ssize_t)((width * samples * 4 + 7) / 8)) return 0;
+    uint8_t *line = malloc((size_t)line_size);
+    if (!line) return 0;
+    // Unassociated alpha (2) is multiplied in, as libtiff's raster has it.
+    int unassociated = samples == 4 && extra_count > 0 && extra && extra[0] == 2;
+    for (uint32_t y = 0; y < height; y++) {
+        if (libtiff.read_scanline(tiff, line, y, 0) < 0) {
+            free(line);
+            return 0;
+        }
+        for (uint32_t x = 0; x < width; x++) {
+            uint8_t value[4] = {0, 0, 0, 255};
+            for (uint16_t s = 0; s < samples; s++) {
+                size_t nibble = (size_t)x * samples + s;
+                uint8_t byte = line[nibble / 2];
+                value[s] = (uint8_t)(((nibble & 1) ? byte & 0xf : byte >> 4) * 17);
+            }
+            if (unassociated)
+                for (int c = 0; c < 3; c++) value[c] = (uint8_t)((value[c] * value[3] + 127) / 255);
+            raster[(size_t)y * width + x] = (uint32_t)value[0] | (uint32_t)value[1] << 8 |
+                                            (uint32_t)value[2] << 16 | (uint32_t)value[3] << 24;
+        }
+    }
+    free(line);
+    return 1;
+}
 
 int perry_tiff_decode(const uint8_t *data, size_t size, perry_decoded *out) {
     memset(out, 0, sizeof(*out));
@@ -119,10 +167,16 @@ int perry_tiff_decode(const uint8_t *data, size_t size, perry_decoded *out) {
         // bytes in memory on a little-endian machine, from the top row.
         uint32_t *raster = malloc((size_t)width * height * 4);
         if (!raster) break;
-        if (!libtiff.read_rgba(tiff, width, height, raster, 1, 0)) {   // ORIENTATION_TOPLEFT
+        // 4-bit RGB first, which read_rgba would only complain about.
+        if (!read_rgb4(tiff, width, height, raster) &&
+            !libtiff.read_rgba(tiff, width, height, raster, 1, 0)) {   // ORIENTATION_TOPLEFT
             free(raster);
             continue;
         }
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+        // On a big-endian one, the same words in memory are ABGR.
+        for (size_t i = 0; i < (size_t)width * height; i++) raster[i] = __builtin_bswap32(raster[i]);
+#endif
         if (out->count == capacity) {
             int grown_capacity = capacity ? capacity * 2 : 2;
             perry_frame *grown = realloc(out->frames, (size_t)grown_capacity * sizeof *grown);

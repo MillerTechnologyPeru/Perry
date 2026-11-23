@@ -179,7 +179,7 @@ public func os_workgroup_get_working_arena(_ workgroup: Object?, _ index: Unsafe
 
 // MARK: - Intervals
 
-@c(_os_workgroup_interval_start)
+@DarwinC("_os_workgroup_interval_start")
 public func os_workgroup_interval_start(_ workgroup: Object?, _ start: UInt64, _ deadline: UInt64, _ data: UnsafeMutableRawPointer?) -> Int32 {
     guard let state = Workgroups.state(workgroup), state.isInterval else { return EINVAL_DARWIN }
     return state.lock.withLock {
@@ -190,7 +190,7 @@ public func os_workgroup_interval_start(_ workgroup: Object?, _ start: UInt64, _
     }
 }
 
-@c(_os_workgroup_interval_update)
+@DarwinC("_os_workgroup_interval_update")
 public func os_workgroup_interval_update(_ workgroup: Object?, _ deadline: UInt64, _ data: UnsafeMutableRawPointer?) -> Int32 {
     guard let state = Workgroups.state(workgroup), state.isInterval else { return EINVAL_DARWIN }
     return state.lock.withLock {

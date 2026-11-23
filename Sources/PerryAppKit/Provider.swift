@@ -387,10 +387,10 @@ enum Dispatch {
         guard let async = lookup("_dispatch_async_f"), let main = lookup("__dispatch_main_q") else { return false }
         self.async = unsafeBitCast(async, to: Async.self)
         self.main = main
-        afterFunction = lookup("_dispatch_after_f").map { unsafeBitCast($0, to: After.self) }
+        afterFunction = lookup("perry_native_dispatch_after_f").map { unsafeBitCast($0, to: After.self) }
         sync = lookup("_dispatch_sync_f").map { unsafeBitCast($0, to: Async.self) }
         mainThread = pthread_self()
-        time = lookup("_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
+        time = lookup("perry_native_dispatch_time").map { unsafeBitCast($0, to: Time.self) }
         globalBlockClass = lookup("__NSConcreteGlobalBlock")
         mainQueuePort = lookup("__dispatch_get_main_queue_port_4CF").map { unsafeBitCast($0, to: (@convention(c) () -> Int32).self) }
         return true
@@ -441,6 +441,8 @@ enum Dispatch {
 /// The main run loop, which AppKit runs between events: timers, the main
 /// queue and performs.
 enum RunLoop {
+    /// Foundation's CFRunLoopRunInMode as providers call it, with Swift's
+    /// types (perry_native_, which @DarwinC exports beside Darwin's entry).
     typealias RunInMode = @convention(c) (UnsafeMutableRawPointer?, Double, Bool) -> Int32
     nonisolated(unsafe) static var runInMode: RunInMode!
     /// kCFRunLoopDefaultMode's slot, read when the loop runs: Foundation
@@ -448,7 +450,7 @@ enum RunLoop {
     nonisolated(unsafe) static var defaultModeSlot: UnsafeMutableRawPointer?
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
-        guard let run = lookup("_CFRunLoopRunInMode") else { return false }
+        guard let run = lookup("perry_native_CFRunLoopRunInMode") else { return false }
         runInMode = unsafeBitCast(run, to: RunInMode.self)
         defaultModeSlot = lookup("_kCFRunLoopDefaultMode")
         return true

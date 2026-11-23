@@ -38,7 +38,7 @@ a merged pull request, which the Last tested column links to.
   {%- for app in platform_apps %}
     {%- assign current = app.reports | last -%}
     {%- assign level = site.data.levels | where: "level", current.level | first -%}
-    {%- assign cpu_order = "armv6,armv7,i386,x86_64,arm64" | split: "," -%}
+    {%- assign cpu_order = "armv6,armv7,ppc,i386,x86_64,arm64" | split: "," -%}
     {%- assign tested = app.reports | map: "cpu" | uniq -%}
     {%- assign cpus = "" | split: "" -%}
     {%- for cpu in cpu_order -%}{%- if tested contains cpu -%}{%- assign cpus = cpus | push: cpu -%}{%- endif -%}{%- endfor -%}

@@ -77,8 +77,14 @@ DARWIN_FLOAT_ABI struct darwin_double2 darwin___sincospi_stret(double x) {
     return result;
 }
 
-#if defined(__arm__) || defined(__i386__)
+#if defined(__arm__) || defined(__i386__) || (defined(__powerpc__) && !defined(__powerpc64__))
 // MARK: - libm and the rest of libc's floating point on armv7
+//
+// On ppc those whose arguments are all floating point, or all words, pass the
+// same as Darwin's. One with a word after floating point takes it where
+// Darwin puts it, after the GPRs the floating point would have used: SKIP
+// stands for them (two for a double, one for a float), which puts the word in
+// the same register under Linux's ABI.
 
 #define F1(name, type)                                                       \
     DARWIN_FLOAT_ABI type darwin_##name(type x) DARWIN_SYMBOL(name);         \
@@ -86,9 +92,17 @@ DARWIN_FLOAT_ABI struct darwin_double2 darwin___sincospi_stret(double x) {
 #define F2(name, type)                                                       \
     DARWIN_FLOAT_ABI type darwin_##name(type x, type y) DARWIN_SYMBOL(name); \
     DARWIN_FLOAT_ABI type darwin_##name(type x, type y) { return name(x, y); }
+#if defined(__powerpc__)
+#define SKIP_double uint32_t skip0, uint32_t skip1,
+#define SKIP_float uint32_t skip0,
+#define F_ARG(name, type, arg)                                                            \
+    type darwin_##name(type x, SKIP_##type arg a) DARWIN_SYMBOL(name);                    \
+    type darwin_##name(type x, SKIP_##type arg a) { (void)skip0; return name(x, a); }
+#else
 #define F_ARG(name, type, arg)                                               \
     DARWIN_FLOAT_ABI type darwin_##name(type x, arg a) DARWIN_SYMBOL(name);  \
     DARWIN_FLOAT_ABI type darwin_##name(type x, arg a) { return name(x, a); }
+#endif
 
 F1(acos, double) F1(asin, double) F1(atan, double) F1(cbrt, double) F1(ceil, double) F1(cos, double)
 F1(cosh, double) F1(exp, double) F1(exp2, double) F1(expm1, double) F1(fabs, double) F1(floor, double)
@@ -110,8 +124,10 @@ F_ARG(ldexp, double, int) F_ARG(scalbn, double, int) F_ARG(frexp, double, int *)
 F_ARG(lgamma_r, double, int *) F_ARG(ldexpf, float, int) F_ARG(scalbnf, float, int) F_ARG(frexpf, float, int *)
 F_ARG(modff, float, float *) F_ARG(lgammaf_r, float, int *)
 
-// long double is double on both.
+#if !defined(__powerpc__)
+// long double is double on both (on ppc it is 128 bits: not yet).
 F2(fmodl, double) F_ARG(lgammal_r, double, int *)
+#endif
 
 DARWIN_FLOAT_ABI double darwin___exp10(double x) DARWIN_SYMBOL(__exp10);
 DARWIN_FLOAT_ABI double darwin___exp10(double x) { return exp10(x); }
@@ -122,10 +138,20 @@ DARWIN_FLOAT_ABI double darwin_fma(double x, double y, double z) DARWIN_SYMBOL(f
 DARWIN_FLOAT_ABI double darwin_fma(double x, double y, double z) { return fma(x, y, z); }
 DARWIN_FLOAT_ABI float darwin_fmaf(float x, float y, float z) DARWIN_SYMBOL(fmaf);
 DARWIN_FLOAT_ABI float darwin_fmaf(float x, float y, float z) { return fmaf(x, y, z); }
+#if defined(__powerpc__)
+double darwin_remquo(double x, double y, uint32_t s0, uint32_t s1, uint32_t s2, uint32_t s3, int *q) DARWIN_SYMBOL(remquo);
+double darwin_remquo(double x, double y, uint32_t s0, uint32_t s1, uint32_t s2, uint32_t s3, int *q) {
+    (void)s0, (void)s1, (void)s2, (void)s3;
+    return remquo(x, y, q);
+}
+float darwin_remquof(float x, float y, uint32_t s0, uint32_t s1, int *q) DARWIN_SYMBOL(remquof);
+float darwin_remquof(float x, float y, uint32_t s0, uint32_t s1, int *q) { (void)s0, (void)s1; return remquof(x, y, q); }
+#else
 DARWIN_FLOAT_ABI double darwin_remquo(double x, double y, int *q) DARWIN_SYMBOL(remquo);
 DARWIN_FLOAT_ABI double darwin_remquo(double x, double y, int *q) { return remquo(x, y, q); }
 DARWIN_FLOAT_ABI float darwin_remquof(float x, float y, int *q) DARWIN_SYMBOL(remquof);
 DARWIN_FLOAT_ABI float darwin_remquof(float x, float y, int *q) { return remquof(x, y, q); }
+#endif
 DARWIN_FLOAT_ABI long darwin_lround(double x) DARWIN_SYMBOL(lround);
 DARWIN_FLOAT_ABI long darwin_lround(double x) { return lround(x); }
 DARWIN_FLOAT_ABI long darwin_lroundf(float x) DARWIN_SYMBOL(lroundf);
@@ -146,9 +172,18 @@ DARWIN_FLOAT_ABI float darwin_nanf(const char *tag) DARWIN_SYMBOL(nanf);
 DARWIN_FLOAT_ABI float darwin_nanf(const char *tag) { return nanf(tag); }
 DARWIN_FLOAT_ABI double darwin_nan(const char *tag) DARWIN_SYMBOL(nan);
 DARWIN_FLOAT_ABI double darwin_nan(const char *tag) { return nan(tag); }
+#if !defined(__powerpc__)
 DARWIN_FLOAT_ABI double darwin_cabs(double complex z) DARWIN_SYMBOL(cabs);
 DARWIN_FLOAT_ABI double darwin_cabs(double complex z) { return cabs(z); }
+#endif
 
+#if defined(__powerpc__)
+// On ppc the double goes in f1 either way.
+double darwin_jn(int n, double x) DARWIN_SYMBOL(jn);
+double darwin_jn(int n, double x) { return jn(n, x); }
+double darwin_yn(int n, double x) DARWIN_SYMBOL(yn);
+double darwin_yn(int n, double x) { return yn(n, x); }
+#else
 // jn and yn take the int first, which puts the double in r1 and r2 on
 // Darwin, where AAPCS would skip to r2 and r3: they take its words.
 static double from_words(uint32_t low, uint32_t high) {
@@ -162,6 +197,7 @@ DARWIN_FLOAT_ABI double darwin_jn(int n, uint32_t low, uint32_t high) DARWIN_SYM
 DARWIN_FLOAT_ABI double darwin_jn(int n, uint32_t low, uint32_t high) { return jn(n, from_words(low, high)); }
 DARWIN_FLOAT_ABI double darwin_yn(int n, uint32_t low, uint32_t high) DARWIN_SYMBOL(yn);
 DARWIN_FLOAT_ABI double darwin_yn(int n, uint32_t low, uint32_t high) { return yn(n, from_words(low, high)); }
+#endif
 
 // Conversions and the rest of libc's floating point. The _l forms format in
 // the C locale, as on arm64.
@@ -175,22 +211,43 @@ DARWIN_FLOAT_ABI double darwin_strtod_l(const char *s, char **end, void *locale)
 DARWIN_FLOAT_ABI double darwin_strtod_l(const char *s, char **end, void *locale) { (void)locale; return strtod(s, end); }
 DARWIN_FLOAT_ABI float darwin_strtof_l(const char *s, char **end, void *locale) DARWIN_SYMBOL(strtof_l);
 DARWIN_FLOAT_ABI float darwin_strtof_l(const char *s, char **end, void *locale) { (void)locale; return strtof(s, end); }
+#if !defined(__powerpc__)
 DARWIN_FLOAT_ABI double darwin_strtold_l(const char *s, char **end, void *locale) DARWIN_SYMBOL(strtold_l);
 DARWIN_FLOAT_ABI double darwin_strtold_l(const char *s, char **end, void *locale) { (void)locale; return strtod(s, end); }
 DARWIN_FLOAT_ABI double darwin_strtold(const char *s, char **end) DARWIN_SYMBOL(strtold);
 DARWIN_FLOAT_ABI double darwin_strtold(const char *s, char **end) { return strtod(s, end); }
+#endif
 DARWIN_FLOAT_ABI double darwin_wcstod(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstod);
 DARWIN_FLOAT_ABI double darwin_wcstod(const wchar_t *s, wchar_t **end) { return wcstod(s, end); }
 DARWIN_FLOAT_ABI float darwin_wcstof(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstof);
 DARWIN_FLOAT_ABI float darwin_wcstof(const wchar_t *s, wchar_t **end) { return wcstof(s, end); }
+#if !defined(__powerpc__)
 DARWIN_FLOAT_ABI double darwin_wcstold(const wchar_t *s, wchar_t **end) DARWIN_SYMBOL(wcstold);
 DARWIN_FLOAT_ABI double darwin_wcstold(const wchar_t *s, wchar_t **end) { return wcstod(s, end); }
+#endif
 DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) DARWIN_SYMBOL(difftime);
 DARWIN_FLOAT_ABI double darwin_difftime(time_t end, time_t start) { return difftime(end, start); }
 DARWIN_FLOAT_ABI double darwin_drand48(void) DARWIN_SYMBOL(drand48);
 DARWIN_FLOAT_ABI double darwin_drand48(void) { return drand48(); }
 // The old conversions of a double to its digits, in a buffer of the C
 // library's that the next call overwrites.
+#if defined(__powerpc__)
+char *darwin_fcvt(double value, uint32_t s0, uint32_t s1, int digits, int *point, int *negative) DARWIN_SYMBOL(fcvt);
+char *darwin_fcvt(double value, uint32_t s0, uint32_t s1, int digits, int *point, int *negative) {
+    (void)s0, (void)s1;
+    return fcvt(value, digits, point, negative);
+}
+char *darwin_ecvt(double value, uint32_t s0, uint32_t s1, int digits, int *point, int *negative) DARWIN_SYMBOL(ecvt);
+char *darwin_ecvt(double value, uint32_t s0, uint32_t s1, int digits, int *point, int *negative) {
+    (void)s0, (void)s1;
+    return ecvt(value, digits, point, negative);
+}
+char *darwin_gcvt(double value, uint32_t s0, uint32_t s1, int digits, char *buffer) DARWIN_SYMBOL(gcvt);
+char *darwin_gcvt(double value, uint32_t s0, uint32_t s1, int digits, char *buffer) {
+    (void)s0, (void)s1;
+    return gcvt(value, digits, buffer);
+}
+#else
 DARWIN_FLOAT_ABI char *darwin_fcvt(double value, int digits, int *point, int *negative) DARWIN_SYMBOL(fcvt);
 DARWIN_FLOAT_ABI char *darwin_fcvt(double value, int digits, int *point, int *negative) {
     return fcvt(value, digits, point, negative);
@@ -201,4 +258,5 @@ DARWIN_FLOAT_ABI char *darwin_ecvt(double value, int digits, int *point, int *ne
 }
 DARWIN_FLOAT_ABI char *darwin_gcvt(double value, int digits, char *buffer) DARWIN_SYMBOL(gcvt);
 DARWIN_FLOAT_ABI char *darwin_gcvt(double value, int digits, char *buffer) { return gcvt(value, digits, buffer); }
+#endif
 #endif

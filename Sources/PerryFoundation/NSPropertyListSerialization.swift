@@ -118,7 +118,7 @@ enum PropertyLists {
         if value.isNaN { return "nan" }
         if value.isInfinite { return value < 0 ? "-infinity" : "+infinity" }
         var buffer = [CChar](repeating: 0, count: 64)
-        _ = withVaList([value]) { vsnprintf(&buffer, buffer.count, "%.17g", $0) }
+        _ = perryWithVaList([value]) { vsnprintf(&buffer, buffer.count, "%.17g", $0) }
         return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 

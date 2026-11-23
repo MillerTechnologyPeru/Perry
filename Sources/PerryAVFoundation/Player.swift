@@ -812,8 +812,8 @@ enum Players {
 
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) {
         let library = "/usr/lib/system/libdispatch.dylib"
-        dispatchAfter = lookup(library, "_dispatch_after_f").map { unsafeBitCast($0, to: DispatchAfter.self) }
-        dispatchTime = lookup(library, "_dispatch_time").map { unsafeBitCast($0, to: DispatchTime.self) }
+        dispatchAfter = lookup(library, "perry_native_dispatch_after_f").map { unsafeBitCast($0, to: DispatchAfter.self) }
+        dispatchTime = lookup(library, "perry_native_dispatch_time").map { unsafeBitCast($0, to: DispatchTime.self) }
         dispatchAsync = lookup(library, "_dispatch_async_f").map { unsafeBitCast($0, to: DispatchAsync.self) }
         mainQueue = lookup(library, "__dispatch_main_q")
     }

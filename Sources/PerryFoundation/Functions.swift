@@ -137,7 +137,7 @@ public func NSStringFromProtocol(_ proto: UnsafeMutableRawPointer?) -> UnsafeMut
 // MARK: - Ranges
 
 /// "{location, length}".
-@c(_NSStringFromRange)
+@DarwinC("_NSStringFromRange")
 public func NSStringFromRange(_ range: NSRange) -> UnsafeMutableRawPointer? {
     Strings.autoreleased("{\(range.location), \(range.length)}")
 }
@@ -150,14 +150,14 @@ public func NSRangeFromString(_ string: UnsafeMutableRawPointer?) -> NSRange {
     return NSRange(location: numbers.first ?? 0, length: numbers.dropFirst().first ?? 0)
 }
 
-@c(_NSUnionRange)
+@DarwinC("_NSUnionRange")
 public func NSUnionRange(_ a: NSRange, _ b: NSRange) -> NSRange {
     let start = min(a.location, b.location), end = max(a.location + a.length, b.location + b.length)
     return NSRange(location: start, length: end - start)
 }
 
 /// The overlap, or an empty range where they do not meet.
-@c(_NSIntersectionRange)
+@DarwinC("_NSIntersectionRange")
 public func NSIntersectionRange(_ a: NSRange, _ b: NSRange) -> NSRange {
     let start = max(a.location, b.location), end = min(a.location + a.length, b.location + b.length)
     return end > start ? NSRange(location: start, length: end - start) : NSRange(location: 0, length: 0)

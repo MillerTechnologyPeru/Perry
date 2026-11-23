@@ -791,6 +791,22 @@ static bool provider_lookup(perry_loader *loader, perry_provider *provider, cons
     // Symbols the provider defines at run time, such as Swift constants.
     if (!sym && provider->symbol)
         sym = provider->symbol(name);
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    // A @DarwinC function whose arguments go past the registers, where
+    // Darwin's and Linux's stack areas differ, is exported as
+    // perry_ppc_moved_<name>, with its type encoding from
+    // perry_ppc_types_<name>: Darwin code calls it through the loader's moves
+    // (DarwinCMacro, ppc_abi.c).
+    if (!sym && name[0] == '_') {
+        char moved[512], described[512];
+        snprintf(moved, sizeof(moved), "perry_ppc_moved_%s", name + 1);
+        snprintf(described, sizeof(described), "perry_ppc_types_%s", name + 1);
+        void *function = dlsym(provider->handle, moved);
+        const char *(*types)(void) = (const char *(*)(void))dlsym(provider->handle, described);
+        if (function && types && dladdr(function, &info) && info.dli_fbase == provider->base)
+            sym = perry_ppc_darwin_entry(function, types());
+    }
+#endif
     // Re-exports can go round (Carbon's CoreServices re-exports Carbon):
     // a provider being searched already is not searched again.
     provider->searching = true;

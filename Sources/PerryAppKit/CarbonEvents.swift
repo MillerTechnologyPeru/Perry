@@ -86,7 +86,7 @@ public func RemoveEventHandler(_ reference: UnsafeMutableRawPointer?) -> Int32 {
 /// timeout (kEventDurationForever, -1, for ever) while timers and the main
 /// queue run, as the run loop does on a Mac; eventLoopTimedOutErr if none
 /// came. A pulled event is the caller's to release.
-@c(_ReceiveNextEvent)
+@DarwinC("_ReceiveNextEvent")
 public func ReceiveNextEvent(_ count: Int, _ types: UnsafeRawPointer?, _ timeout: Double, _ pull: UInt8,
                              _ event: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
     event?.pointee = nil
@@ -111,7 +111,7 @@ public func SendEventToEventTarget(_ event: UnsafeMutableRawPointer?, _ target: 
 
 /// OSStatus RunCurrentEventLoop(EventTimeout): events and the run loop's
 /// sources handled for that long; eventLoopTimedOutErr when it passes.
-@c(_RunCurrentEventLoop)
+@DarwinC("_RunCurrentEventLoop")
 public func RunCurrentEventLoop(_ timeout: Double) -> Int32 {
     let end = Clock.now + max(timeout, 0)
     repeat {
