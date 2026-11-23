@@ -210,10 +210,11 @@ enum ZeroGeometry {
 @c(_CFPropertyListCreateWithData)
 public func CFPropertyListCreateWithData(_ allocator: id?, _ data: id?, _ options: UInt, _ format: UnsafeMutablePointer<UInt>?,
                                          _ error: UnsafeMutablePointer<id?>?) -> id? {
-    typealias Read = @convention(c) (id?, SEL, id?, UInt, UnsafeMutablePointer<UInt>?, UnsafeMutablePointer<id?>?) -> id?
-    let read = unsafeBitCast(ObjC.msgSend, to: Read.self)
-    let made = read(named("NSPropertyListSerialization"), ObjC.selector("propertyListWithData:options:format:error:"),
-                    data, options, format, error)
+    // Read here rather than by +propertyListWithData:options:format:error:,
+    // which a program may replace with a method that calls this (Xcode 4's
+    // DVTFoundation does), as CF is what Foundation's method is made of.
+    let made = NSPropertyListSerialization.propertyList(with: data.map { ObjCObject($0) }, options: options,
+                                                        format: format, error: error)
     if let error, let reported = error.pointee { error.pointee = ObjC.retain(reported) }
     return ObjC.retain(made)
 }
@@ -222,10 +223,8 @@ public func CFPropertyListCreateWithData(_ allocator: id?, _ data: id?, _ option
 @c(_CFPropertyListCreateData)
 public func CFPropertyListCreateData(_ allocator: id?, _ plist: id?, _ format: UInt, _ options: UInt,
                                      _ error: UnsafeMutablePointer<id?>?) -> id? {
-    typealias Write = @convention(c) (id?, SEL, id?, UInt, UInt, UnsafeMutablePointer<id?>?) -> id?
-    let write = unsafeBitCast(ObjC.msgSend, to: Write.self)
-    let made = write(named("NSPropertyListSerialization"), ObjC.selector("dataWithPropertyList:format:options:error:"),
-                     plist, format, options, error)
+    // Written here, as the property list is read above.
+    let made = NSPropertyListSerialization.data(with: plist.map { ObjCObject($0) }, format: format, options: options, error: error)
     if let error, let reported = error.pointee { error.pointee = ObjC.retain(reported) }
     return ObjC.retain(made)
 }
