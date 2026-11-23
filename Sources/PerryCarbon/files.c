@@ -322,6 +322,18 @@ OSErr carbon_FSpDirCreate(const FSSpec *spec, int16_t script, int32_t *created) 
     return noErr;
 }
 
+/// The classic DirCreate: a folder of a name in a volume and folder.
+OSErr carbon_DirCreate(int16_t volume, int32_t parent, const unsigned char *name, int32_t *created) CARBON_SYMBOL(DirCreate);
+OSErr carbon_DirCreate(int16_t volume, int32_t parent, const unsigned char *name, int32_t *created) {
+    const char *folder = folder_of(volume, parent);
+    char path[PATH_MAX];
+    if (!folder) return dirNFErr;
+    if (!name || !name[0] || !join(folder, name, path, sizeof path)) return bdNamErr;
+    if (mkdir(path, 0755) != 0) return error_for(errno);
+    if (created) *created = (int32_t)directory_id(path);
+    return noErr;
+}
+
 OSErr carbon_FSpDelete(const FSSpec *spec) CARBON_SYMBOL(FSpDelete);
 OSErr carbon_FSpDelete(const FSSpec *spec) {
     char path[PATH_MAX];
@@ -1268,3 +1280,69 @@ OSErr carbon_FSGetCatalogInfo(const FSRef *ref, uint32_t which, void *info, HFSU
     }
     return error;
 }
+
+
+// MARK: - Aliases
+
+// An alias record is opaque past its user type and size: Perry's keeps
+// the item's path after them, which FSResolveAlias makes an FSRef of again.
+#pragma pack(push, 2)
+typedef struct {
+    OSType userType;
+    uint16_t aliasSize;
+    char magic[4];   // 'PRRY'
+    char path[];
+} alias_record;
+#pragma pack(pop)
+
+typedef alias_record **AliasHandle;
+
+static OSErr new_alias(const FSRef *target, AliasHandle *alias) {
+    if (!alias) return paramErr;
+    *alias = NULL;
+    char path[PATH_MAX];
+    if (!ref_path(target, path, sizeof path)) return fnfErr;
+    size_t size = sizeof(alias_record) + strlen(path) + 1;
+    if (size > 0xffff) return paramErr;
+    Handle (*new_handle)(long) = (Handle (*)(long))carbon_function(CORESERVICES, "_NewHandleClear");
+    Handle made = new_handle ? new_handle((long)size) : NULL;
+    if (!made || !*made) return memFullErr;
+    alias_record *record = (alias_record *)*made;
+    record->aliasSize = (uint16_t)size;
+    memcpy(record->magic, "PRRY", 4);
+    strcpy(record->path, path);
+    *alias = (AliasHandle)made;
+    return noErr;
+}
+
+/// OSErr FSNewAlias(const FSRef *fromFile, const FSRef *target, AliasHandle *):
+/// an alias of the target, by its path whatever it is relative to.
+OSErr carbon_FSNewAlias(const FSRef *from, const FSRef *target, AliasHandle *alias) CARBON_SYMBOL(FSNewAlias);
+OSErr carbon_FSNewAlias(const FSRef *from, const FSRef *target, AliasHandle *alias) {
+    (void)from;
+    return new_alias(target, alias);
+}
+
+OSErr carbon_FSNewAliasMinimal(const FSRef *target, AliasHandle *alias) CARBON_SYMBOL(FSNewAliasMinimal);
+OSErr carbon_FSNewAliasMinimal(const FSRef *target, AliasHandle *alias) { return new_alias(target, alias); }
+
+/// The item an alias of Perry's names, if it is there.
+OSErr carbon_FSResolveAliasWithMountFlags(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed,
+                                          unsigned long flags) CARBON_SYMBOL(FSResolveAliasWithMountFlags);
+OSErr carbon_FSResolveAliasWithMountFlags(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed,
+                                          unsigned long flags) {
+    (void)from; (void)flags;
+    if (changed) *changed = false;
+    if (!alias || !*alias || !target) return paramErr;
+    alias_record *record = *alias;
+    if (record->aliasSize <= sizeof(alias_record) || memcmp(record->magic, "PRRY", 4) != 0) return paramErr;
+    return make_ref(record->path, target, NULL) == noErr ? noErr : fnfErr;
+}
+
+OSErr carbon_FSResolveAlias(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed) CARBON_SYMBOL(FSResolveAlias);
+OSErr carbon_FSResolveAlias(const FSRef *from, AliasHandle alias, FSRef *target, Boolean *changed) {
+    return carbon_FSResolveAliasWithMountFlags(from, alias, target, changed, 0);
+}
+
+uint16_t carbon_GetAliasSize(AliasHandle alias) CARBON_SYMBOL(GetAliasSize);
+uint16_t carbon_GetAliasSize(AliasHandle alias) { return alias && *alias ? (*alias)->aliasSize : 0; }
