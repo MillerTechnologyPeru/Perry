@@ -31,6 +31,11 @@ final class ContextState: @unchecked Sendable {
     private var mirror: UnsafeMutableRawPointer?
     /// A row of memory, to compare with the mirror's.
     private var scratch: UnsafeMutableRawPointer?
+    /// The graphics state Silica doesn't keep (HDR.swift).
+    let extended = ExtendedGraphicsState()
+    /// Run as the context goes, before its memory is freed: an adaptive
+    /// context hands its buffer back.
+    var onRelease: (() -> Void)?
 
     init?(width: Int, height: Int, bytesPerRow: Int, format: PixelFormat, space: Ref, data: UnsafeMutableRawPointer, ownsData: Bool) {
         let cairoLayout = format.bitsPerComponent == 8 && format.colorComponents == 3 && format.byteOrder == 0x2000
@@ -63,6 +68,7 @@ final class ContextState: @unchecked Sendable {
     }
 
     deinit {
+        onRelease?()
         ObjCRuntime.release(space)
         if ownsData { free(data) }
         free(mirror)
@@ -280,8 +286,19 @@ public func CGBitmapContextCreateImage(_ context: Ref?) -> Ref? {
 
 // MARK: Graphics state
 
-@c(_CGContextSaveGState) public func CGContextSaveGState(_ context: Ref?) { Contexts.canvas(context)?.save() }
-@c(_CGContextRestoreGState) public func CGContextRestoreGState(_ context: Ref?) { Contexts.canvas(context)?.restore() }
+@c(_CGContextSaveGState)
+public func CGContextSaveGState(_ context: Ref?) {
+    guard let state = Contexts.state(context) else { return }
+    state.canvas.save()
+    state.extended.save()
+}
+
+@c(_CGContextRestoreGState)
+public func CGContextRestoreGState(_ context: Ref?) {
+    guard let state = Contexts.state(context) else { return }
+    state.canvas.restore()
+    state.extended.restore()
+}
 
 @DarwinC("_CGContextSetRGBFillColor")
 public func CGContextSetRGBFillColor(_ context: Ref?, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat) {
