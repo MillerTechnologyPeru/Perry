@@ -168,7 +168,12 @@ static void crash_handler(int signal, siginfo_t *info, void *raw_context) {
         uintptr_t next = record[0];
         if (next <= fp || (next & FRAME_ALIGNMENT) || next - fp >= (64 << 20))
             break;
-        uintptr_t ret = ((uintptr_t *)next)[2];
+        // A Linux function saves its return address in the word after the
+        // back chain, a Darwin one two words after: the one in a Linux
+        // library's code is Linux's.
+        uintptr_t linux_ret = ((uintptr_t *)next)[1];
+        Dl_info code;
+        uintptr_t ret = linux_ret && dladdr((void *)linux_ret, &code) && code.dli_fname ? linux_ret : ((uintptr_t *)next)[2];
 #else
         uintptr_t next = record[0], ret = record[1];
 #endif
