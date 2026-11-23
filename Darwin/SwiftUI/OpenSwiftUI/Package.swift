@@ -1048,6 +1048,17 @@ if swiftCryptoCondition {
     openSwiftUITarget.addSwiftCryptoSettings()
 }
 
+// Perry: a build for another platform leaves the test targets out, with
+// their support libraries, which need Swift Testing, and the bridge to
+// Apple's SwiftUI, which SwiftPM's native build system builds whatever
+// product is asked for. With the tests, it builds every target for the
+// host too, for the macros' tests.
+if envBoolValue("NO_TESTS") {
+    let left: (String) -> Bool = { $0.hasSuffix("TestsSupport") || $0 == "OpenSwiftUIBridge" }
+    package.targets.removeAll { $0.isTest || left($0.name) }
+    package.products.removeAll { left($0.name) }
+}
+
 #if TUIST
 import struct ProjectDescription.PackageSettings
 import enum ProjectDescription.Product
