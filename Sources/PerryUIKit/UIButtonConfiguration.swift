@@ -171,6 +171,8 @@ final class ButtonConfigurationState: ObjectState {
     /// medium 2, large 3, capsule 4.
     var cornerStyle = 0
     var buttonSize = 0
+    /// UIButtonConfigurationTitleAlignment: automatic 0, leading 1, center 2,
+    /// trailing 3.
     var titleAlignment = 0
     var titleLineBreakMode = 0
     var macIdiomStyle = 0
