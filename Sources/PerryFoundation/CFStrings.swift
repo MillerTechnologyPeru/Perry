@@ -54,7 +54,15 @@ enum CFStringEncodings {
                 index += 4
             }
             return String(text)
-        default: return StringEncoding.decode(bytes, nsEncoding(encoding))
+        default:
+            if let text = StringEncoding.decode(bytes, nsEncoding(encoding)) { return text }
+            // The old Mac OS scripts' encodings (MacJapanese is 1, on to
+            // 0xFF) aren't decoded here, but each one's lower half is
+            // ASCII's: text that is all ASCII reads the same in any of
+            // them. MacSoft's Halo names its preferences with a call that
+            // passes the name's length as the encoding, and so depends on it.
+            guard encoding > 0, encoding < 0x100, bytes.allSatisfy({ $0 < 0x80 }) else { return nil }
+            return String(decoding: bytes, as: UTF8.self)
         }
     }
 
