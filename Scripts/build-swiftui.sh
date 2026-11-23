@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Builds Perry's SwiftUI on a Mac with Xcode: Darwin/SwiftUI, OpenSwiftUI
 # made to stand in for Apple's SwiftUI.framework. Its packages are built for
 # iOS arm64 with library evolution under SwiftUI's ABI names, so apps built
@@ -18,8 +18,49 @@ out=${1:-.build/perry-swift-runtime}
 case $out in /*) ;; *) out=$root/$out ;; esac
 work=$root/.build/perry-swiftui
 configuration=${CONFIGURATION:-debug}
-sdk=$(xcrun --sdk iphoneos --show-sdk-path)
-target=arm64-apple-ios18.0
+# PERRY_OVERLAY_PLATFORM and PERRY_OVERLAY_TARGET name another SDK and
+# target, as for Scripts/build-overlay.sh: macosx and
+# x86_64-apple-ios18.0-macabi for a Mac Catalyst app on x86_64, whose
+# frameworks and Swift modules are under the macOS SDK's System/iOSSupport.
+platform=${PERRY_OVERLAY_PLATFORM:-iphoneos}
+sdk=$(xcrun --sdk "$platform" --show-sdk-path)
+target=${PERRY_OVERLAY_TARGET:-arm64-apple-ios18.0}
+# The SDK's interfaces are arm64e's for arm64, and named without versions.
+interface=$(echo "$target" | sed -E 's/(ios|macos)[0-9.]+/\1/')
+sdk_interface=$(echo "$interface" | sed 's/^arm64-/arm64e-/')
+frameworks=$sdk/System/Library/Frameworks
+catalyst=() spm_system=() spm_target=(--triple "$target" --sdk "$sdk") install=
+case $target in *-macabi)
+    support=$sdk/System/iOSSupport
+    install=/System/iOSSupport
+    frameworks=$support/System/Library/Frameworks
+    mkdir -p "$work"
+    # SwiftPM's default build system builds swift-syntax for the target
+    # alone here, and the macro plugin, a host tool, then lacks it. The
+    # native one builds every target for the host too while the package
+    # has its macros' tests, so they are left out.
+    spm_system=(--build-system native)
+    export OPENSWIFTUI_NO_TESTS=1
+    # System/iOSSupport's search paths go in a destination file, which
+    # covers the target's compiles alone: given as -Xcc they would reach the
+    # host tools' builds too, where its UIKit meets the Mac's AppKit.
+    cat > "$work/destination-$target.json" <<JSON
+{
+  "version": 1,
+  "sdk": "$sdk",
+  "toolchain-bin-dir": "$(dirname "$(xcrun -f swiftc)")",
+  "target": "$target",
+  "extra-cc-flags": ["-iframework", "$frameworks", "-isystem", "$support/usr/include"],
+  "extra-cpp-flags": ["-iframework", "$frameworks", "-isystem", "$support/usr/include"],
+  "extra-swiftc-flags": ["-Fsystem", "$frameworks", "-I", "$support/usr/lib/swift"]
+}
+JSON
+    spm_target=(--destination "$work/destination-$target.json")
+    # The Mac's libAccessibility lacks iOS's hover text setting, which the
+    # loader binds where the library is loaded.
+    catalyst=(-Fsystem "$frameworks" -I "$support/usr/lib/swift" -L "$support/usr/lib/swift" -L "$support/usr/lib"
+              -Xlinker -U -Xlinker __AXSHoverTextEnabled) ;;
+esac
 packages=$root/Darwin/SwiftUI
 mkdir -p "$work" "$out/SwiftUI.framework"
 
@@ -65,8 +106,8 @@ restore Compute https://github.com/OpenSwiftUIProject/Compute.git 41ecaef85f8bd3
 # protocol that needs it.
 uikit=$work/sdk/UIKit.swiftmodule
 mkdir -p "$uikit"
-python3 -I - "$sdk/System/Library/Frameworks/UIKit.framework/Modules/UIKit.swiftmodule/arm64e-apple-ios.swiftinterface" \
-    "$uikit/arm64-apple-ios.swiftinterface" <<'PY'
+python3 -I - "$frameworks/UIKit.framework/Modules/UIKit.swiftmodule/$sdk_interface.swiftinterface" \
+    "$uikit/$interface.swiftinterface" <<'PY'
 import re, sys
 s = open(sys.argv[1]).read()
 s = s.replace("\nimport SwiftUICore\n", "\n", 1)
@@ -76,6 +117,14 @@ assert "SwiftUICore" not in s
 s = s.replace("-target arm64e-apple-ios", "-target arm64-apple-ios")
 open(sys.argv[2], "w").write(s)
 PY
+
+# Mac Catalyst's UIKit brings in AppKit's Swift module, which imports
+# SwiftUICore too and uses nothing of it.
+case $target in *-macabi)
+    mkdir -p "$work/sdk/AppKit.swiftmodule"
+    grep -v '^import SwiftUICore$' "$sdk/System/Library/Frameworks/AppKit.framework/Modules/AppKit.swiftmodule/$sdk_interface.swiftinterface" \
+        > "$work/sdk/AppKit.swiftmodule/$interface.swiftinterface" ;;
+esac
 
 # Perry's DeveloperToolsSupport (Scripts/build-framework.sh), in place of
 # the SDK's: SwiftUI reads its resources' names and bundles through Perry's
@@ -90,8 +139,8 @@ cp -R "$dts" "$work/sdk/DeveloperToolsSupport.swiftmodule"
 # Swift's Observation sources do.
 observation=$work/sdk/Observation.swiftmodule
 mkdir -p "$observation"
-python3 -I - "$sdk/usr/lib/swift/Observation.swiftmodule/arm64e-apple-ios.swiftinterface" \
-    "$observation/arm64-apple-ios.swiftinterface" <<'PY'
+python3 -I - "$sdk/usr/lib/swift/Observation.swiftmodule/$sdk_interface.swiftinterface" \
+    "$observation/$interface.swiftinterface" <<'PY'
 import sys
 s = open(sys.argv[1]).read()
 anchor = "public struct ObservationTracking : Swift::Sendable {\n"
@@ -123,21 +172,38 @@ export OPENSWIFTUI_USE_LOCAL_DEPS=1 OPENRENDERBOX_USE_LOCAL_DEPS=1 \
 
 # Each target's object file, linked below, is written anew by the build;
 # those of targets no longer built are cleared first.
-products=$(cd "$packages/OpenSwiftUI" && swift build -c "$configuration" --scratch-path "$work/spm" \
-    --triple "$target" --sdk "$sdk" --show-bin-path)
+products=$(cd "$packages/OpenSwiftUI" && swift build ${spm_system[@]+"${spm_system[@]}"} -c "$configuration" --scratch-path "$work/spm" \
+    "${spm_target[@]}" --show-bin-path)
 rm -f "$products"/*.o
-(cd "$packages/OpenSwiftUI" && swift build -c "$configuration" --scratch-path "$work/spm" \
-    --triple "$target" --sdk "$sdk" -Xswiftc -I -Xswiftc "$work/sdk" --product OpenSwiftUI)
+(cd "$packages/OpenSwiftUI" && swift build ${spm_system[@]+"${spm_system[@]}"} -c "$configuration" --scratch-path "$work/spm" \
+    "${spm_target[@]}" -Xswiftc -I -Xswiftc "$work/sdk" --product OpenSwiftUI)
+# The native build system leaves out Compute's C++ targets that nothing
+# imports as a module; they are built by name.
+if [ ${#spm_system[@]} -gt 0 ]; then
+    for each in Platform Utilities; do
+        (cd "$packages/OpenSwiftUI" && swift build "${spm_system[@]}" -c "$configuration" --scratch-path "$work/spm" \
+            "${spm_target[@]}" -Xswiftc -I -Xswiftc "$work/sdk" --target "$each")
+    done
+fi
 
 # Every package's objects in one image; libswiftDemangle, which the iOS SDK
 # does not ship, links through a stub of the exports Compute uses, and
 # DeveloperToolsSupport is Perry's.
+# SwiftPM's native build system leaves each target's objects in its own
+# directory, swift-syntax's (the macros', which are the host's) and those
+# of targets left out among them.
+objects=("$products"/*.o)
+if [ ${#spm_system[@]} -gt 0 ]; then
+    find "$products" -name '*.o' -path '*.build/*' | grep -Ev '/(Swift[A-Z][A-Za-z0-9]*|_[A-Za-z]+|[A-Za-z]*TestsSupport|OpenSwiftUIBridge)\.build/' \
+        | sed 's/.*/"&"/' > "$work/objects-$target.txt"
+    objects=("@$work/objects-$target.txt")
+fi
 link() { # extra linker arguments...
-    xcrun --sdk iphoneos swiftc -target "$target" -sdk "$sdk" -emit-library "$products"/*.o \
+    xcrun --sdk "$platform" swiftc -target "$target" -sdk "$sdk" ${catalyst[@]+"${catalyst[@]}"} -emit-library "${objects[@]}" \
         -framework UIKit -framework CoreServices -framework QuartzCore -framework CoreText \
         -lMobileGestalt -lAccessibility -lc++ -L "$packages/Stubs" -lswiftDemangle \
         "$out/DeveloperToolsSupport.framework/DeveloperToolsSupport" \
-        -Xlinker -install_name -Xlinker /System/Library/Frameworks/SwiftUI.framework/SwiftUI \
+        -Xlinker -install_name -Xlinker "$install/System/Library/Frameworks/SwiftUI.framework/SwiftUI" \
         -Xlinker -not_for_dyld_shared_cache -Xlinker -ObjC "$@" \
         -o "$out/SwiftUI.framework/SwiftUI"
 }
