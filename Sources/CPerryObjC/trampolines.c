@@ -16,6 +16,20 @@
 //   nop
 //   .long block
 //
+// and on ppc, which has no PC-relative load, so finds itself with a branch
+// that links and puts the link register back before leaving through ctr:
+//
+//   mflr  r0
+//   bcl   20, 31, .+4        lr is the next instruction's address, code + 8
+//   mflr  r12
+//   mtlr  r0                 the caller's return address again
+//   mr    r4, r3             self becomes the block's first argument
+//   lwz   r3, 28(r12)        the block, at code + 36
+//   lwz   r12, 12(r3)        its invoke function
+//   mtctr r12
+//   bctr
+//   .long block
+//
 // Trampolines are made in pages of their own, writable and executable, or
 // switched between the two where the host refuses both at once, and never
 // freed: a removed one is kept for reuse.
@@ -28,7 +42,11 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#if defined(__powerpc__)
+enum { TRAMPOLINE_SIZE = 48, PAGE_SIZE_BYTES = 0x4000 };
+#else
 enum { TRAMPOLINE_SIZE = 32, PAGE_SIZE_BYTES = 0x4000 };
+#endif
 
 #if defined(__aarch64__)
 enum {
@@ -77,6 +95,26 @@ enum {
     TRAMPOLINE_STRET_WORD3 = 0x408b0c24,
     BLOCK_USE_STRET = 1 << 29,
 };
+#elif defined(__powerpc__)
+enum {
+    TRAMPOLINE_WORD0 = 0x7c0802a6,  // mflr r0
+    TRAMPOLINE_WORD1 = 0x429f0005,  // bcl 20, 31, .+4
+    TRAMPOLINE_WORD2 = 0x7d8802a6,  // mflr r12
+    TRAMPOLINE_WORD3 = 0x7c0803a6,  // mtlr r0
+};
+// A block that returns through memory has the result pointer in r3, so self
+// is in r4 and moves to r5, and the block goes in r4.
+enum {
+    TRAMPOLINE_MOVE_SELF = 0x7c641b78,          // mr r4, r3
+    TRAMPOLINE_LOAD_BLOCK = 0x806c001c,         // lwz r3, 28(r12)
+    TRAMPOLINE_LOAD_INVOKE = 0x8183000c,        // lwz r12, 12(r3)
+    TRAMPOLINE_STRET_MOVE_SELF = 0x7c852378,    // mr r5, r4
+    TRAMPOLINE_STRET_LOAD_BLOCK = 0x808c001c,   // lwz r4, 28(r12)
+    TRAMPOLINE_STRET_LOAD_INVOKE = 0x8184000c,  // lwz r12, 12(r4)
+    TRAMPOLINE_MTCTR = 0x7d8903a6,              // mtctr r12
+    TRAMPOLINE_BCTR = 0x4e800420,               // bctr
+    BLOCK_USE_STRET = 1 << 29,
+};
 #else
 #error "no block trampolines for this architecture"
 #endif
@@ -84,6 +122,8 @@ enum {
 // Which word the block is in.
 #if defined(__i386__)
 enum { TRAMPOLINE_BLOCK_WORD = 7 };
+#elif defined(__powerpc__)
+enum { TRAMPOLINE_BLOCK_WORD = 9 };
 #else
 enum { TRAMPOLINE_BLOCK_WORD = 4 };
 #endif
@@ -139,6 +179,13 @@ void *perry_objc_trampoline_create(void *block) {
     code[4] = 0x24448917;
     code[5] = stret ? 0x0c60ff08 : 0x0c60ff04;
     code[6] = 0xcccccccc;
+#elif defined(__powerpc__)
+    bool stret = ((const int *)block)[1] & BLOCK_USE_STRET;
+    code[4] = stret ? TRAMPOLINE_STRET_MOVE_SELF : TRAMPOLINE_MOVE_SELF;
+    code[5] = stret ? TRAMPOLINE_STRET_LOAD_BLOCK : TRAMPOLINE_LOAD_BLOCK;
+    code[6] = stret ? TRAMPOLINE_STRET_LOAD_INVOKE : TRAMPOLINE_LOAD_INVOKE;
+    code[7] = TRAMPOLINE_MTCTR;
+    code[8] = TRAMPOLINE_BCTR;
 #endif
     memcpy(&code[TRAMPOLINE_BLOCK_WORD], &block, sizeof(block));
     __builtin___clear_cache((char *)code, (char *)code + TRAMPOLINE_SIZE);
