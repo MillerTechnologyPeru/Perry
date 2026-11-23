@@ -7,13 +7,19 @@ import PerryObjCInterop
 // mounted file systems, where libSystem's getmntinfo lists it at
 // /Volumes/<its name>.
 //
+// The disc's media is the whole disc ("disk2" for the first), and its file
+// system is on a partition under it, a plain IOMedia ("disk2s1"), as a Mac
+// CD's is under its partition map: a game looks through a disc's children
+// for the device its volume is mounted from, which is what getmntinfo
+// names.
+//
 // A disc is a file system mounted from an optical drive (/dev/sr0), or from
 // a loop device with a disc's file system (ISO 9660, UDF, HFS, HFS+), which
 // is how a desktop mounts a disc image. PERRY_DISCS names others, as paths
 // or Name=path pairs, colon-separated: a folder or a FUSE mount to offer as
 // a disc. libPerrySystem finds the same discs in the same order
-// (Sources/PerrySystem/files.c), so that media "disk2" here is /dev/disk2
-// there.
+// (Sources/PerrySystem/files.c), so that partition "disk2s1" here is
+// /dev/disk2s1 there.
 
 struct Disc {
     var name: String
@@ -25,8 +31,10 @@ struct Disc {
 }
 
 enum Discs {
-    /// The first disc's registry handle; the others follow it.
+    /// The first disc's registry handle; the others follow it. Each one's
+    /// partition is at the same place after firstPartitionHandle.
     static let firstHandle: Handle = 0x1100
+    static let firstPartitionHandle: Handle = 0x1180
 
     private static let fileSystems: Set<String> = ["iso9660", "udf", "hfs", "hfsplus"]
 
@@ -102,8 +110,16 @@ enum Discs {
     }
 
     static func handles() -> [Handle] { mounted().indices.map { firstHandle + Handle($0) } }
+    static func partitionHandles() -> [Handle] { mounted().indices.map { firstPartitionHandle + Handle($0) } }
+
+    /// A disc's partition, if `handle` is a disc's.
+    static func partition(of handle: Handle) -> Handle? {
+        guard handle >= firstHandle, handle < firstHandle + 8, entry(handle) != nil else { return nil }
+        return firstPartitionHandle + (handle - firstHandle)
+    }
 
     static func entry(_ handle: Handle) -> RegistryEntry? {
+        if handle >= firstPartitionHandle, handle < firstPartitionHandle + 8 { return partitionEntry(handle) }
         guard handle >= firstHandle, handle < firstHandle + 8 else { return nil }
         let discs = mounted()
         let index = Int(handle - firstHandle)
@@ -118,7 +134,7 @@ enum Discs {
              ("Removable", NSNumber.make(bool: true)),
              ("Writable", NSNumber.make(bool: false)),
              ("Whole", NSNumber.make(bool: true)),
-             ("Leaf", NSNumber.make(bool: true)),
+             ("Leaf", NSNumber.make(bool: false)),
              ("Content", NSObject.string("")),
              ("Content Hint", NSObject.string("")),
              ("Type", NSObject.string(disc.isDVD ? "DVD-ROM" : "CD-ROM")),
@@ -126,6 +142,31 @@ enum Discs {
              ("Size", NSNumber.make(int64: disc.bytes)),
              ("IOMediaIcon", NSMutableDictionary.of([("IOBundleResourceFile", NSObject.string("CD.icns"))])),
              ("IOProviderClass", NSObject.string(disc.isDVD ? "IODVDMedia" : "IOCDMedia"))]
+        }
+    }
+
+    /// The partition a disc's file system is on.
+    private static func partitionEntry(_ handle: Handle) -> RegistryEntry? {
+        let discs = mounted()
+        let index = Int(handle - firstPartitionHandle)
+        guard index < discs.count else { return nil }
+        let disc = discs[index]
+        return RegistryEntry(className: "IOMedia", name: disc.name, parent: firstHandle + Handle(index)) {
+            [("BSD Name", NSObject.string(disc.device + "s1")),
+             ("BSD Unit", NSNumber.make(int64: Int64(index + 2))),
+             ("BSD Major", NSNumber.make(int64: 14)),
+             ("BSD Minor", NSNumber.make(int64: Int64(index + 2) * 8 + 1)),
+             ("Ejectable", NSNumber.make(bool: true)),
+             ("Removable", NSNumber.make(bool: true)),
+             ("Writable", NSNumber.make(bool: false)),
+             ("Whole", NSNumber.make(bool: false)),
+             ("Leaf", NSNumber.make(bool: true)),
+             ("Content", NSObject.string("Apple_HFS")),
+             ("Content Hint", NSObject.string("Apple_HFS")),
+             ("Partition ID", NSNumber.make(int64: 1)),
+             ("Preferred Block Size", NSNumber.make(int64: 2048)),
+             ("Size", NSNumber.make(int64: disc.bytes)),
+             ("IOProviderClass", NSObject.string("IOMedia"))]
         }
     }
 
