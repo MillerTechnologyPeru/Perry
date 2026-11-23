@@ -149,5 +149,15 @@ perry_tlv_get_addr:
     popl %ebp
     ret
     .size perry_tlv_get_addr, .-perry_tlv_get_addr
+#elif defined(__powerpc__)
+// ppc Mac programs have no thread-local variables (they came with Mac OS X
+// 10.7, after ppc), so none calls this; it is perry_tlv_address.
+    .text
+    .globl perry_tlv_get_addr
+    .type perry_tlv_get_addr, @function
+    .p2align 2
+perry_tlv_get_addr:
+    b perry_tlv_address
+    .size perry_tlv_get_addr, .-perry_tlv_get_addr
 #endif
     .section .note.GNU-stack,"",%progbits
