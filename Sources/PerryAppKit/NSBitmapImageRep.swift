@@ -138,15 +138,31 @@ open class NSBitmapImageRep: NSImageRep {
         planar = isPlanar
         format = bitmapFormat
         if let colorSpaceName { colorSpace = colorSpaceName }
-        self.bitsPerPixel = bitsPerPixel != 0 ? bitsPerPixel : bitsPerSample * samplesPerPixel
+        // A planar bitmap has a plane for each sample, whose rows hold that
+        // sample alone.
+        let pixelBits = isPlanar ? bitsPerSample : bitsPerSample * samplesPerPixel
+        self.bitsPerPixel = bitsPerPixel != 0 ? bitsPerPixel : pixelBits
         self.bytesPerRow = bytesPerRow != 0 ? bytesPerRow : (pixelsWide * self.bitsPerPixel + 7) / 8
         size = CGSize(width: CGFloat(pixelsWide), height: CGFloat(pixelsHigh))
+        let planeCount = isPlanar ? max(1, min(samplesPerPixel, 5)) : 1
         if let first = planes?.pointee {
             pixels = first
+            for index in 0..<planeCount { planePointers[index] = planes?[index] }
         } else {
-            pixels = calloc(max(1, self.bytesPerRow * pixelsHigh), 1)?.assumingMemoryBound(to: UInt8.self)
+            // Its own storage: the planes one after another.
+            let planeBytes = max(1, self.bytesPerRow * pixelsHigh)
+            pixels = calloc(planeBytes * planeCount, 1)?.assumingMemoryBound(to: UInt8.self)
             ownsPixels = true
+            for index in 0..<planeCount { planePointers[index] = pixels.map { $0 + index * planeBytes } }
         }
+    }
+
+    /// The planes' data: a pointer for each plane, the rest of the five NULL.
+    private var planePointers = [UnsafeMutablePointer<UInt8>?](repeating: nil, count: 5)
+
+    @ObjCMethod("getBitmapDataPlanes:")
+    func getBitmapDataPlanes(_ data: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>?) {
+        for index in 0..<5 { data?[index] = planePointers[index] }
     }
 
     deinit { if ownsPixels { free(pixels) } }

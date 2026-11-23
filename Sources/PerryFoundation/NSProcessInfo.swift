@@ -23,7 +23,11 @@ enum Process {
         if let path = info.executable_path { executablePath = String(cString: path) }
         bundlePath = info.bundle_path.map { String(cString: $0) }
         mainHeader = info.main_header.map { UnsafeRawPointer($0) }
-        if let header = info.main_header { sdkVersion = buildSDK(header) ?? legacyMacVersion }
+        if let header = info.main_header {
+            // MH_MAGIC_64: a 64-bit program.
+            let is64Bit = UnsafeRawPointer(header).load(as: UInt32.self) == 0xfeed_facf
+            sdkVersion = buildSDK(header) ?? (is64Bit ? legacyMac64Version : legacyMacVersion)
+        }
         // PERRY_OS_VERSION ("13.7", "10.6.8") is the version to be, in
         // place of the one the app was built for.
         if let setting = getenv("PERRY_OS_VERSION") {
@@ -39,6 +43,12 @@ enum Process {
     /// with Mac OS X 10.6's SDK or before, which named none. It sees Mac OS X
     /// 10.5, as programs of that time knew it.
     static let legacyMacVersion = NSOperatingSystemVersion(majorVersion: 10, minorVersion: 5, patchVersion: 8)
+
+    /// The same for a 64-bit one: Mac OS X 10.6, the first system most
+    /// 64-bit programs were built for, and the one whose functions they
+    /// check for before using them (SDL 1.2's display modes), having no
+    /// older ones in 64 bits to fall back on.
+    static let legacyMac64Version = NSOperatingSystemVersion(majorVersion: 10, minorVersion: 6, patchVersion: 8)
 
     /// The SDK the program was built with: LC_BUILD_VERSION's, or
     /// LC_VERSION_MIN_MACOSX's or LC_VERSION_MIN_IPHONEOS's (xxxx.yy.zz in
