@@ -26,6 +26,8 @@ open class MTLBuffer: NSObject, MTLBufferProtocol {
     var owner: MTLDevice?
     var options: UInt = 0
     var label: String?
+    /// Called once the buffer goes: a no-copy buffer's deallocator.
+    var onRelease: (() -> Void)?
 
     init(handle: perry_m2v_handle, device: MTLDevice, options: UInt) {
         self.handle = handle
@@ -36,6 +38,7 @@ open class MTLBuffer: NSObject, MTLBufferProtocol {
 
     deinit {
         if let handle { M2V.api.buffer_release(handle) }
+        onRelease?()
     }
 
     @ObjCMethod("device") func device() -> MTLDevice? { owner }
