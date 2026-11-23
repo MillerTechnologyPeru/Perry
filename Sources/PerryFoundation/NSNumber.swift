@@ -196,6 +196,18 @@ public class NSNumber: NSValue {
         Numbers.numberClass = cls.storage
     }
 
+    /// NSNumber for the private classes numbers are made in (the kept and
+    /// constant numbers, the booleans), as archivers see Darwin's; a
+    /// subclass such as NSDecimalNumber stays itself.
+    @ObjCMethod("classForCoder")
+    func numberClassForCoder() -> UnsafeMutableRawPointer? {
+        let cls = ObjC.objectGetClass(objcObject)
+        let privates = [Numbers.keptClass, Numbers.booleanClass, Numbers.constantIntegerClass, Numbers.constantDoubleClass,
+                        Numbers.constantFloatClass]
+        if let cls, privates.contains(where: { $0 == cls }) { return UnsafeMutableRawPointer(Numbers.numberClass) }
+        return cls.map { UnsafeMutableRawPointer($0) }
+    }
+
     private var number: NumberStorage { Numbers.storage(objcObject) }
 
     /// An -init…'s result, +1, as the receiver is released when the method
