@@ -25,8 +25,8 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         library.withCString { library in name.withCString { lookup(library, $0) } }
     }
     let dispatch = "/usr/lib/system/libdispatch.dylib"
-    Dispatch.after = symbol(dispatch, "_dispatch_after_f").map { unsafeBitCast($0, to: Dispatch.After.self) }
-    Dispatch.time = symbol(dispatch, "_dispatch_time").map { unsafeBitCast($0, to: Dispatch.Time.self) }
+    Dispatch.after = symbol(dispatch, "perry_native_dispatch_after_f").map { unsafeBitCast($0, to: Dispatch.After.self) }
+    Dispatch.time = symbol(dispatch, "perry_native_dispatch_time").map { unsafeBitCast($0, to: Dispatch.Time.self) }
     Dispatch.mainQueue = symbol(dispatch, "__dispatch_main_q")
     Clock.machAbsoluteTime = symbol("/usr/lib/libSystem.B.dylib", "_mach_absolute_time")
         .map { unsafeBitCast($0, to: (@convention(c) () -> UInt64).self) }
