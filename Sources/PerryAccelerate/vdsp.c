@@ -460,3 +460,104 @@ static void *dft_create(vDSP_Length length, int direction, int real) {
 
 DFT(float, , DSPSplitComplex)
 DFT(double, D, DSPDoubleSplitComplex)
+
+// Interleaved DFTs of Length complex elements: complex to complex, or real
+// to complex over 2 Length reals, packed as the split real DFT packs them.
+typedef struct interleaved_setup { vDSP_Length length; int direction; int real; } interleaved_setup;
+
+static void *interleaved_create(vDSP_Length length, int direction, int real) {
+    interleaved_setup *setup = malloc(sizeof(interleaved_setup));
+    if (setup) *setup = (interleaved_setup){length, direction, real};
+    return setup;
+}
+
+#define INTERLEAVED(type, suffix, split, interleaved) \
+    void *vDSP_DFT_Interleaved_CreateSetup##suffix(void *previous, vDSP_Length length, int direction, int real) \
+        DARWIN_SYMBOL(vDSP_DFT_Interleaved_CreateSetup##suffix); \
+    void *vDSP_DFT_Interleaved_CreateSetup##suffix(void *previous, vDSP_Length length, int direction, int real) { \
+        return interleaved_create(length, direction, real); \
+    } \
+    void vDSP_DFT_Interleaved_Execute##suffix(const void *setup, const interleaved *Iri, interleaved *Ori) \
+        DARWIN_SYMBOL(vDSP_DFT_Interleaved_Execute##suffix); \
+    void vDSP_DFT_Interleaved_Execute##suffix(const void *setup, const interleaved *Iri, interleaved *Ori) { \
+        const interleaved_setup *s = setup; \
+        size_t pairs = s->length; \
+        type *buffer = malloc(4 * pairs * sizeof(type)); \
+        split in = {buffer, buffer + pairs}, out = {buffer + 2 * pairs, buffer + 3 * pairs}; \
+        for (size_t k = 0; k < pairs; k++) { in.realp[k] = Iri[k].real; in.imagp[k] = Iri[k].imag; } \
+        if (s->real) real_fft##suffix(&in, 1, &out, 1, 2 * pairs, s->direction); \
+        else complex_fft##suffix(&in, 1, &out, 1, pairs, s->direction); \
+        for (size_t k = 0; k < pairs; k++) { Ori[k].real = out.realp[k]; Ori[k].imag = out.imagp[k]; } \
+        free(buffer); \
+    } \
+    void vDSP_DFT_Interleaved_DestroySetup##suffix(void *setup) DARWIN_SYMBOL(vDSP_DFT_Interleaved_DestroySetup##suffix); \
+    void vDSP_DFT_Interleaved_DestroySetup##suffix(void *setup) { free(setup); }
+
+INTERLEAVED(float, , DSPSplitComplex, DSPComplex)
+INTERLEAVED(double, D, DSPDoubleSplitComplex, DSPDoubleComplex)
+
+// Discrete cosine transforms II, III and IV, unnormalized, from a setup
+// vDSP_DFT_DestroySetup frees.
+void *vDSP_DCT_CreateSetup(void *previous, vDSP_Length length, int type) DARWIN_SYMBOL(vDSP_DCT_CreateSetup);
+void *vDSP_DCT_CreateSetup(void *previous, vDSP_Length length, int type) {
+    if (type < 2 || type > 4 || length == 0) return NULL;
+    return dft_create(length, type, 2);
+}
+
+void vDSP_DCT_Execute(const void *setup, const float *input, float *output) DARWIN_SYMBOL(vDSP_DCT_Execute);
+void vDSP_DCT_Execute(const void *setup, const float *input, float *output) {
+    const dft_setup *s = setup;
+    size_t n = s->length;
+    double *out = malloc(n * sizeof(double));
+    for (size_t k = 0; k < n; k++) {
+        double sum = 0;
+        for (size_t j = 0; j < n; j++) {
+            double x = input[j];
+            switch (s->direction) {
+            case 2: sum += x * cos(M_PI / n * (j + 0.5) * k); break;
+            case 3: sum += j == 0 ? x / 2 : x * cos(M_PI / n * j * (k + 0.5)); break;
+            default: sum += x * cos(M_PI / n * (j + 0.5) * (k + 0.5)); break;
+            }
+        }
+        out[k] = sum;
+    }
+    for (size_t k = 0; k < n; k++) output[k] = (float)out[k];
+    free(out);
+}
+
+// Two-dimensional FFTs: 2^log2N1 rows of 2^log2N0 elements; IA0 steps
+// along a row, IA1 between rows (0 for rows packed one after another).
+#define FFT2D(type, suffix, split) \
+    void vDSP_fft2d_zop##suffix(void *setup, const split *A, vDSP_Stride IA0, vDSP_Stride IA1, const split *C, vDSP_Stride IC0, \
+                                vDSP_Stride IC1, vDSP_Length log2N0, vDSP_Length log2N1, int direction) \
+        DARWIN_SYMBOL(vDSP_fft2d_zop##suffix); \
+    void vDSP_fft2d_zop##suffix(void *setup, const split *A, vDSP_Stride IA0, vDSP_Stride IA1, const split *C, vDSP_Stride IC0, \
+                                vDSP_Stride IC1, vDSP_Length log2N0, vDSP_Length log2N1, int direction) { \
+        size_t columns = (size_t)1 << log2N0, rows = (size_t)1 << log2N1; \
+        if (IA1 == 0) IA1 = IA0 * (vDSP_Stride)columns; \
+        if (IC1 == 0) IC1 = IC0 * (vDSP_Stride)columns; \
+        int sign = direction >= 0 ? -1 : 1; \
+        double complex *x = malloc(rows * columns * sizeof(double complex)); \
+        double complex *line = malloc((rows > columns ? rows : columns) * sizeof(double complex)); \
+        for (size_t r = 0; r < rows; r++) \
+            for (size_t c = 0; c < columns; c++) { \
+                size_t i = r * IA1 + c * IA0; \
+                x[r * columns + c] = A->realp[i] + IMAGINARY * A->imagp[i]; \
+            } \
+        for (size_t r = 0; r < rows; r++) transform(x + r * columns, columns, sign); \
+        for (size_t c = 0; c < columns; c++) { \
+            for (size_t r = 0; r < rows; r++) line[r] = x[r * columns + c]; \
+            transform(line, rows, sign); \
+            for (size_t r = 0; r < rows; r++) x[r * columns + c] = line[r]; \
+        } \
+        for (size_t r = 0; r < rows; r++) \
+            for (size_t c = 0; c < columns; c++) { \
+                size_t i = r * IC1 + c * IC0; \
+                C->realp[i] = (type)creal(x[r * columns + c]); C->imagp[i] = (type)cimag(x[r * columns + c]); \
+            } \
+        free(line); \
+        free(x); \
+    }
+
+FFT2D(float, , DSPSplitComplex)
+FFT2D(double, D, DSPDoubleSplitComplex)
