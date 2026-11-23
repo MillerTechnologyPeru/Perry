@@ -20,6 +20,8 @@ for source in Sources/PerryLoaderCore/*.c Sources/PerryLoaderCore/*.S Sources/Pe
 done
 # Executables from before Mac OS X 10.5 are not position independent: they
 # load at 0x1000 and run from there. So perry is linked at a fixed address far
-# above them and the libraries they bring.
-$cc -no-pie -Wl,-Ttext-segment=0x70000000 $objects -o "$out/bin/perry" -ldl -lpthread
+# above them and the libraries they bring. Its pthread_create takes the place
+# of glibc's for every library, so that each thread notes its stack
+# (ppc_thread.c).
+$cc -no-pie -Wl,-Ttext-segment=0x70000000 -Wl,--export-dynamic-symbol=pthread_create $objects -o "$out/bin/perry" -ldl -lpthread
 echo "$out/bin/perry"
