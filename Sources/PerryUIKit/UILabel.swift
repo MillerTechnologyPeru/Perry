@@ -402,7 +402,7 @@ open class UILabel: UIView {
     var font: UIFont { firstAttributes?.object(forKey: "NSFont")?.as(UIFont.self) ?? label.font ?? UIFont.systemFont(size: 17) }
 
     /// NSTextAlignment, from the attributed text's paragraph style when it has one.
-    private var alignment: Int {
+    var alignment: Int {
         firstAttributes?.object(forKey: "NSParagraphStyle")?.as(NSParagraphStyle.self)?.state.alignment ?? label.textAlignment
     }
 
