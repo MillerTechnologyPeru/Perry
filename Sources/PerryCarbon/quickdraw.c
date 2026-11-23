@@ -7,6 +7,8 @@
 
 #include "PerryCarbon.h"
 
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -213,6 +215,128 @@ OSErr carbon_DMGetGDeviceByDisplayID(uint32_t display, GDHandle *device, Boolean
     (void)display; (void)failToMain;
     if (!device) return paramErr;
     *device = carbon_main_device();
+    return noErr;
+}
+
+/// The display of a device: the main one. Mac OS X's display IDs are
+/// opaque and large, never 1, which Age of Empires III starts its search
+/// for a display it has seen with, as none: one as a Mac's might be.
+OSErr carbon_DMGetDisplayIDByGDevice(GDHandle device, uint32_t *display, Boolean failToMain)
+    CARBON_SYMBOL(DMGetDisplayIDByGDevice);
+OSErr carbon_DMGetDisplayIDByGDevice(GDHandle device, uint32_t *display, Boolean failToMain) {
+    (void)device; (void)failToMain;
+    if (!display) return paramErr;
+    *display = 0x04280A80;
+    return noErr;
+}
+
+// The Display Manager's lists of a display's modes: the common sizes up to
+// the screen's and the screen's own, at 60 Hz, each in 16 and 32 bits. A
+// mode reaches a list's iterator as a DMDisplayModeListEntryRec, whose
+// resolution, timing and depth records are laid out as the Display
+// Manager's (and Age of Empires III reads them).
+enum { kDMNotFoundErr = -6229 };
+
+#pragma pack(push, 2)
+typedef struct {
+    void *vpBaseOffset;
+    int16_t vpRowBytes;
+    Rect vpBounds;
+    int16_t vpVersion, vpPackType;
+    int32_t vpPackSize, vpHRes, vpVRes;
+    int16_t vpPixelType, vpPixelSize, vpCmpCount, vpCmpSize;
+    int32_t vpPlaneBytes;
+} VPBlock;
+#pragma pack(pop)
+
+_Static_assert(sizeof(void *) != 4 || offsetof(VPBlock, vpPixelSize) == 0x20, "VPBlock's vpPixelSize is at 0x20");
+
+typedef struct {
+    uint32_t csPreviousDisplayModeID, csDisplayModeID, csHorizontalPixels, csVerticalLines;
+    int32_t csRefreshRate;
+    uint32_t csMaxDepthMode, csResolutionFlags, csReserved;
+} VDResolutionInfoRec;
+
+typedef struct { uint32_t csTimingMode, csTimingReserved, csTimingFormat, csTimingData, csTimingFlags; } VDTimingInfoRec;
+typedef struct { void *depthSwitchInfo; VPBlock *depthVPBlock; uint32_t depthFlags, depthReserved1, depthReserved2; } DMDepthInfoRec;
+typedef struct { uint32_t depthBlockCount; DMDepthInfoRec *depthVPBlock; uint32_t depthBlockFlags, depthBlockReserved1, depthBlockReserved2; } DMDepthInfoBlockRec;
+
+typedef struct {
+    uint32_t displayModeFlags;
+    void *displayModeSwitchInfo;
+    VDResolutionInfoRec *displayModeResolutionInfo;
+    VDTimingInfoRec *displayModeTimingInfo;
+    DMDepthInfoBlockRec *displayModeDepthBlockInfo;
+    uint32_t displayModeVersion;
+    unsigned char *displayModeName;
+    void *displayModeDisplayInfo;
+} DMDisplayModeListEntryRec;
+
+typedef struct {
+    VDResolutionInfoRec resolution;
+    VDTimingInfoRec timing;
+    VPBlock pixels[2];
+    DMDepthInfoRec depths[2];
+    DMDepthInfoBlockRec depthBlock;
+    unsigned char name[32];
+    DMDisplayModeListEntryRec entry;
+} display_mode;
+
+typedef struct { uint32_t count; display_mode modes[16]; } display_mode_list;
+
+static void add_mode(display_mode_list *list, uint32_t width, uint32_t height) {
+    for (uint32_t index = 0; index < list->count; index++)
+        if (list->modes[index].resolution.csHorizontalPixels == width && list->modes[index].resolution.csVerticalLines == height) return;
+    if (list->count >= 16) return;
+    display_mode *mode = &list->modes[list->count];
+    mode->resolution = (VDResolutionInfoRec){0, 0x80 + list->count, width, height, 60 << 16, 2, 0, 0};
+    for (int depth = 0; depth < 2; depth++) {
+        int16_t bits = depth ? 32 : 16;
+        mode->pixels[depth] = (VPBlock){NULL, (int16_t)(width * (uint32_t)bits / 8), {0, 0, (int16_t)height, (int16_t)width}, 0, 0, 0,
+                                        72 << 16, 72 << 16, 16, bits, 3, depth ? 8 : 5, 0};
+        mode->depths[depth] = (DMDepthInfoRec){NULL, &mode->pixels[depth], 0, 0, 0};
+    }
+    mode->depthBlock = (DMDepthInfoBlockRec){2, mode->depths, 0, 0, 0};
+    mode->name[0] = (unsigned char)snprintf((char *)mode->name + 1, sizeof mode->name - 1, "%ux%u", width, height);
+    mode->entry = (DMDisplayModeListEntryRec){1, NULL, &mode->resolution, &mode->timing, &mode->depthBlock, 0, mode->name, NULL};
+    list->count++;
+}
+
+OSErr carbon_DMNewDisplayModeList(uint32_t display, uint32_t options, void *parameters, uint32_t *count, void **list)
+    CARBON_SYMBOL(DMNewDisplayModeList);
+OSErr carbon_DMNewDisplayModeList(uint32_t display, uint32_t options, void *parameters, uint32_t *count, void **list) {
+    (void)display; (void)options; (void)parameters;
+    display_mode_list *made = calloc(1, sizeof *made);
+    if (!made) return memFullErr;
+    GDHandle device = carbon_main_device();
+    uint32_t screen_width = (uint32_t)((*device)->gdRect.right - (*device)->gdRect.left);
+    uint32_t screen_height = (uint32_t)((*device)->gdRect.bottom - (*device)->gdRect.top);
+    static const uint16_t sizes[][2] = {{640, 480}, {800, 600}, {1024, 768}, {1152, 864}, {1280, 720}, {1280, 800}, {1280, 1024},
+                                        {1440, 900}, {1600, 900}, {1600, 1200}, {1680, 1050}, {1920, 1080}, {1920, 1200}};
+    for (size_t index = 0; index < sizeof sizes / sizeof sizes[0]; index++)
+        if (sizes[index][0] <= screen_width && sizes[index][1] <= screen_height) add_mode(made, sizes[index][0], sizes[index][1]);
+    add_mode(made, screen_width, screen_height);
+    if (count) *count = made->count;
+    if (list) *list = made;
+    else free(made);
+    return noErr;
+}
+
+/// Calls the iterator with the list's mode at the index:
+/// (userData, index, DMDisplayModeListEntryPtr).
+OSErr carbon_DMGetIndexedDisplayModeFromList(void *list, uint32_t index, uint32_t options, void *iterator, void *userData)
+    CARBON_SYMBOL(DMGetIndexedDisplayModeFromList);
+OSErr carbon_DMGetIndexedDisplayModeFromList(void *list, uint32_t index, uint32_t options, void *iterator, void *userData) {
+    (void)options;
+    display_mode_list *modes = list;
+    if (!modes || index >= modes->count) return kDMNotFoundErr;
+    if (iterator) ((void (*)(void *, uint32_t, DMDisplayModeListEntryRec *))iterator)(userData, index, &modes->modes[index].entry);
+    return noErr;
+}
+
+OSErr carbon_DMDisposeList(void *list) CARBON_SYMBOL(DMDisposeList);
+OSErr carbon_DMDisposeList(void *list) {
+    free(list);
     return noErr;
 }
 
