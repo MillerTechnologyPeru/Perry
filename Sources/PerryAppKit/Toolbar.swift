@@ -8,6 +8,11 @@ import PerryObjCInterop
 
 @ObjCClass("NSToolbar")
 open class NSToolbar: NSObject {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// Whether an item identifier is one a toolbar leaves out: none is.
+    @ObjCClassMethod("_shouldIgnoreItemIdentifier:") static func shouldIgnoreItemIdentifier(_ identifier: NSObject?) -> Bool { false }
+
     var identifier = ""
     var items: [NSToolbarItem] = []
     var defaultIdentifiers: [String] = []

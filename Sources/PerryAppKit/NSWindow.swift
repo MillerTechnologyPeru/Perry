@@ -56,6 +56,13 @@ enum Windows {
 
 @ObjCClass("NSWindow")
 open class NSWindow: NSResponder {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// A view to redraw with the default button's pulse, which doesn't run.
+    @ObjCMethod("_addHeartBeatClientView:") func addHeartBeatClientView(_ view: NSObject?) {}
+    /// The default button's cell: the button Return presses is its view's.
+    @ObjCMethod("setDefaultButtonCell:") func setDefaultButtonCell(_ cell: NSObject?) {}
+
     /// AppKit's instance variables that Interface Builder reads and writes
     /// itself: the dragged types registered and the views last hit by the
     /// mouse buttons. The window keeps none of these in them; they are

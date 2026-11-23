@@ -40,6 +40,12 @@ enum IndexSets {
 
 @ObjCClass("NSTableView")
 open class NSTableView: NSControl {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// The columns' saved widths and order, which aren't saved here.
+    @ObjCMethod("_writePersistentTableColumns") func writePersistentTableColumns() {}
+    @ObjCMethod("_readPersistentTableColumns") func readPersistentTableColumns() {}
+
     var columns: [NSTableColumn] = []
     var headerView: NSTableHeaderView?
     var cornerView: NSView?

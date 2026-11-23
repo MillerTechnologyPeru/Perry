@@ -180,6 +180,11 @@ open class NSBox: NSView {
 /// one above another, a thin divider between each.
 @ObjCClass("NSSplitView")
 open class NSSplitView: NSView {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// Saves the panes' sizes under the autosave name, which isn't done here.
+    @ObjCMethod("_autosaveSubviewLayoutIfNecessary") func autosaveSubviewLayoutIfNecessary() {}
+
     var vertical = false
     /// NSSplitViewDividerStyle: thick 1, thin 2, pane splitter 3.
     var dividerStyle = 2
