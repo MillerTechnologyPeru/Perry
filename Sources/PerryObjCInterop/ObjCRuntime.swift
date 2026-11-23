@@ -143,6 +143,9 @@ public enum ObjCRuntime {
         return true
     }
 
+    /// Whether the runtime functions are installed yet.
+    public static var isInstalled: Bool { installed != nil }
+
     @inline(__always)
     public static var functions: ObjCRuntimeFunctions {
         guard let installed else { objcInteropFatal("the Objective-C runtime functions are not installed") }
