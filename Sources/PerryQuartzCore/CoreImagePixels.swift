@@ -44,7 +44,7 @@ enum CoreImageGeometry {
 }
 
 /// A rectangle of whole pixels.
-struct PixelRect: Equatable {
+struct ImageRect: Equatable {
     var x = 0, y = 0, width = 0, height = 0
 
     var isEmpty: Bool { width <= 0 || height <= 0 }
@@ -52,6 +52,8 @@ struct PixelRect: Equatable {
     var maxY: Int { y + height }
     var count: Int { isEmpty ? 0 : width * height }
     var cgRect: CGRect { CGRect(x: CGFloat(x), y: CGFloat(y), width: CGFloat(width), height: CGFloat(height)) }
+
+    init() {}
 
     init(x: Int, y: Int, width: Int, height: Int) {
         (self.x, self.y, self.width, self.height) = (x, y, width, height)
@@ -68,24 +70,24 @@ struct PixelRect: Equatable {
         (x, y, width, height) = (minX, minY, maxX - minX, maxY - minY)
     }
 
-    func intersection(_ other: PixelRect) -> PixelRect {
+    func intersection(_ other: ImageRect) -> ImageRect {
         let minX = max(x, other.x), minY = max(y, other.y)
-        return PixelRect(x: minX, y: minY, width: max(0, min(maxX, other.maxX) - minX), height: max(0, min(maxY, other.maxY) - minY))
+        return ImageRect(x: minX, y: minY, width: max(0, min(maxX, other.maxX) - minX), height: max(0, min(maxY, other.maxY) - minY))
     }
 
-    func outset(_ amount: Int) -> PixelRect {
-        PixelRect(x: x - amount, y: y - amount, width: width + 2 * amount, height: height + 2 * amount)
+    func outset(_ amount: Int) -> ImageRect {
+        ImageRect(x: x - amount, y: y - amount, width: width + 2 * amount, height: height + 2 * amount)
     }
 }
 
 /// Pixels of a rectangle, premultiplied, in rows from the top as bitmaps
 /// keep them.
 struct Pixels {
-    let rect: PixelRect
+    let rect: ImageRect
     var data: [RGBA]
 
     /// Transparent pixels.
-    init(_ rect: PixelRect) {
+    init(_ rect: ImageRect) {
         self.rect = rect
         data = Array(repeating: .zero, count: rect.count)
     }
@@ -127,7 +129,7 @@ enum Bitmaps {
 
     /// A cleared bitmap context of the rectangle's pixels whose user space
     /// is Core Image's: drawing at a point lands on the same pixel.
-    static func context(_ rect: PixelRect) -> CGRef? {
+    static func context(_ rect: ImageRect) -> CGRef? {
         guard !rect.isEmpty, rect.count <= maximumPixels, let space = CG.colorSpaceCreateDeviceRGB() else { return nil }
         defer { CG.release(space) }
         guard let context = CG.bitmapContextCreate(nil, rect.width, rect.height, 8, rect.width * 4, space, CG.bitmapInfo(opaque: false))
@@ -138,7 +140,7 @@ enum Bitmaps {
     }
 
     /// The rectangle's pixels as `draw` draws them in Core Image's space.
-    static func drawing(_ rect: PixelRect, _ draw: (CGRef) -> Void) -> Pixels {
+    static func drawing(_ rect: ImageRect, _ draw: (CGRef) -> Void) -> Pixels {
         var pixels = Pixels(rect)
         guard let context = context(rect) else { return pixels }
         defer { CG.release(context) }
@@ -185,7 +187,7 @@ enum Bitmaps {
 
     /// Pixels read from 8-bit samples, premultiplied, rows from the top.
     static func read(_ bytes: UnsafePointer<UInt8>, rowBytes: Int, width: Int, height: Int, order: (Int, Int, Int, Int)) -> Pixels {
-        var pixels = Pixels(PixelRect(x: 0, y: 0, width: width, height: height))
+        var pixels = Pixels(ImageRect(x: 0, y: 0, width: width, height: height))
         let scale: Float = 1 / 255
         for row in 0..<height {
             let line = bytes + row * rowBytes
@@ -207,18 +209,18 @@ enum Bitmaps {
 /// An image's recipe: its extent and how to render a rectangle of it.
 final class ImageNode {
     let extent: CGRect
-    private let renderer: (PixelRect) -> Pixels
+    private let renderer: (ImageRect) -> Pixels
 
-    init(extent: CGRect, _ renderer: @escaping (PixelRect) -> Pixels) {
+    init(extent: CGRect, _ renderer: @escaping (ImageRect) -> Pixels) {
         self.extent = extent
         self.renderer = renderer
     }
 
     /// The rectangle's pixels; transparent outside the extent.
-    func render(_ rect: PixelRect) -> Pixels { rect.isEmpty ? Pixels(rect) : renderer(rect) }
+    func render(_ rect: ImageRect) -> Pixels { rect.isEmpty ? Pixels(rect) : renderer(rect) }
 
     /// The pixels the extent covers; nil for an infinite one.
-    var pixelExtent: PixelRect? { CoreImageGeometry.isInfinite(extent) ? nil : PixelRect(covering: extent) }
+    var pixelExtent: ImageRect? { CoreImageGeometry.isInfinite(extent) ? nil : ImageRect(covering: extent) }
 
     /// The whole image as a CGImage, +1; nil for an empty or infinite one.
     func makeCGImage() -> CGRef? {
@@ -226,7 +228,7 @@ final class ImageNode {
         return Bitmaps.image(render(rect))
     }
 
-    static let empty = ImageNode(extent: .zero) { Pixels($0) }
+    nonisolated(unsafe) static let empty = ImageNode(extent: .zero) { Pixels($0) }
 
     /// A color without edges; `color` premultiplied.
     static func color(_ color: RGBA) -> ImageNode {
@@ -266,7 +268,7 @@ final class ImageNode {
         let source = self
         return ImageNode(extent: infinite ? extent : transform.apply(extent)) { rect in
             // The pixels the rectangle samples, and a margin for filtering.
-            var needed = PixelRect(covering: transform.inverted.apply(rect.cgRect)).outset(2)
+            var needed = ImageRect(covering: transform.inverted.apply(rect.cgRect)).outset(2)
             if let bounds = source.pixelExtent { needed = needed.intersection(bounds) }
             guard !needed.isEmpty, let image = Bitmaps.image(source.render(needed)) else { return Pixels(rect) }
             defer { CG.release(image) }
@@ -280,7 +282,7 @@ final class ImageNode {
     func cropped(to crop: CGRect) -> ImageNode {
         let extent = CoreImageGeometry.intersection(self.extent, crop)
         if CoreImageGeometry.isInfinite(crop) { return self }
-        let source = self, bounds = PixelRect(covering: extent)
+        let source = self, bounds = ImageRect(covering: extent)
         return ImageNode(extent: extent) { rect in
             var out = Pixels(rect)
             let inside = rect.intersection(bounds)
@@ -299,7 +301,7 @@ final class ImageNode {
             func clampX(_ x: Int) -> Int { min(max(x, bounds.x), bounds.maxX - 1) }
             func clampY(_ y: Int) -> Int { min(max(y, bounds.y), bounds.maxY - 1) }
             let (left, bottom) = (clampX(rect.x), clampY(rect.y))
-            let needed = PixelRect(x: left, y: bottom, width: clampX(rect.maxX - 1) - left + 1, height: clampY(rect.maxY - 1) - bottom + 1)
+            let needed = ImageRect(x: left, y: bottom, width: clampX(rect.maxX - 1) - left + 1, height: clampY(rect.maxY - 1) - bottom + 1)
             let pixels = source.render(needed)
             var out = Pixels(rect)
             var i = 0
