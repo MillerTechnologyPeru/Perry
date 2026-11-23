@@ -30,7 +30,7 @@ open class UIStoryboard: NSObject {
     /// localization.
     @ObjCClassMethod("storyboardWithName:bundle:")
     static func storyboard(name: String, bundle: NSObject?) -> UIStoryboard? {
-        let root = (bundle?.as(NSBundle.self) ?? NSBundle.main()).bundlePath()
+        let root = (bundle?.as(NSBundle.self) ?? NSBundle.main()).resourceDirectory
         for directory in [root, root + "/Base.lproj", root + "/en.lproj"] {
             let path = "\(directory)/\(name).storyboardc"
             guard let info = NSDictionary.contents(ofFile: path + "/Info.plist") else { continue }
@@ -359,7 +359,7 @@ extension UIViewController {
             names.append(name)
         }
         guard !names.isEmpty else { return false }
-        let directory = state.storyboard?.state.path ?? state.nibBundlePath ?? NSBundle.main().bundlePath()
+        let directory = state.storyboard?.state.path ?? state.nibBundlePath ?? NSBundle.main().resourceDirectory
         var archive: NibArchive?
         var path = directory
         for name in names {
