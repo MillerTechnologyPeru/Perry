@@ -104,13 +104,26 @@ r12 and cr0, which are scratch at a call in both ABIs:
   method, and function pointers to Linux code that Darwin code calls
   directly (an IMP from `-methodForSelector:`, a block's invoke, `dlsym`'s
   results).
-- Linux to Darwin: Linux code that calls Darwin code keeps r2 around the call
-  (`PERRY_DARWIN_CALL` in the loader, for initializers and `main`;
-  `PERRY_KEEP_R9` in libSystem, as armv7 keeps r9, for `qsort`'s
-  comparators, thread start routines, exit handlers and thread-specific
-  destructors). Still to do: libdispatch's work functions, Foundation's
-  threads, libxml2's callbacks, signal handlers, and messages that providers
-  send to the program's objects.
+- Linux to Darwin: a Darwin function saves its lr at 8(r1) of its caller's
+  frame, where Linux code keeps its own registers (Swift's code saves r30
+  there), and may store r3-r10 from 24(r1). So Linux code calls Darwin code
+  from a frame laid out as a Darwin caller's, keeping r2 around the call:
+  `PERRY_DARWIN_CALL` in the loader, for initializers and `main`; the
+  loader's sends, for messages; and for the rest a stub
+  (`perry_ppc_linux_callable`) that branches to
+  `perry_ppc_darwin_from_linux`, which makes that frame. Providers ask for
+  it with `darwinCallable` (Swift) or `PERRY_DARWIN_FUNCTION` (C): blocks'
+  invoke functions (`ObjCBlock.function(as:)` and each provider's
+  `Blocks`), libdispatch's work functions and finalizers, `qsort`'s and
+  `bsearch`'s comparators, thread start routines, exit handlers,
+  thread-specific destructors and the once functions. Its arguments must be
+  words, or floating point after every word. Still to do: Darwin function
+  pointers that providers keep as callbacks (CoreFoundation's collection
+  and run loop callbacks, libxml2's).
+- Signals: the kernel enters a handler with r2 as the interrupted code left
+  it, so Perry's handlers (libSystem's, which calls the program's, and the
+  loader's crash and profiling handlers) are entered through the r2 stub,
+  and `sigaltstack`'s stacks are noted in the table too.
 
 ## Methods and functions with floating point or structures
 
@@ -153,8 +166,18 @@ provider's send to another provider's method arrives as it left, and Swift's
 sends and methods, the macros' and those written by hand, are right as they
 are.
 
+**NSInvocation and key-value coding** call a method's IMP with arguments
+they hold as bytes. On ppc every IMP is Darwin code or a provider's Darwin
+entry, so they give the loader the bytes and the encoding
+(`perry_ppc_call_darwin_values`, through Foundation's `DarwinCalls`), which
+lays them out as Darwin's caller would and reads the result from r3, r3:r4,
+f1 or memory. Forwarding (`-forwardInvocation:`), which would capture a
+message's arguments into an NSInvocation, is not done on ppc yet.
+
 `Scripts/test-ppc-abi.sh` checks the moves against code Apple's own GCC
-compiled.
+compiled, and `Tests/Fixtures/ppc_runtime.m`, built with
+`Scripts/build-ppc-fixtures.sh`, the callbacks, signals, NSInvocation and
+key-value coding under perry.
 
 ## Status
 
