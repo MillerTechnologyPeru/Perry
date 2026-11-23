@@ -351,6 +351,7 @@ struct relocation_info {
 };
 #define R_SCATTERED             0x80000000u
 #define GENERIC_RELOC_VANILLA   0
+#define X86_64_RELOC_UNSIGNED    0
 
 struct symtab_command {
     uint32_t cmd;
@@ -374,6 +375,7 @@ struct symtab_command {
 typedef struct mach_header_64 mach_header_t;
 typedef struct segment_command_64 segment_command_t;
 typedef struct section_64 section_t;
+typedef struct nlist_64 nlist_t;
 typedef struct encryption_info_command_64 encryption_info_command_t;
 #else
 #define MH_MAGIC_NATIVE         MH_MAGIC
@@ -382,6 +384,7 @@ typedef struct encryption_info_command_64 encryption_info_command_t;
 typedef struct mach_header mach_header_t;
 typedef struct segment_command segment_command_t;
 typedef struct section section_t;
+typedef struct nlist nlist_t;
 typedef struct encryption_info_command encryption_info_command_t;
 #endif
 
