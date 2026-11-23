@@ -161,6 +161,10 @@ open class NSColor: NSObject {
     static func color(calibratedHue hue: CGFloat, saturation: CGFloat, brightness: CGFloat, alpha: CGFloat) -> NSColor {
         color(hue: hue, saturation: saturation, brightness: brightness, alpha: alpha)
     }
+    @ObjCClassMethod("colorWithDeviceHue:saturation:brightness:alpha:")
+    static func color(deviceHue hue: CGFloat, saturation: CGFloat, brightness: CGFloat, alpha: CGFloat) -> NSColor {
+        color(hue: hue, saturation: saturation, brightness: brightness, alpha: alpha)
+    }
     @ObjCClassMethod("colorWithCGColor:")
     static func color(cgColor: UnsafeMutableRawPointer?) -> NSColor? {
         guard let cgColor, CG.ready, let components = CG.colorGetComponents(cgColor) else { return nil }
