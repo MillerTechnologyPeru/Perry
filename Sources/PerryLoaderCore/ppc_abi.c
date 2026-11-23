@@ -397,9 +397,33 @@ static bool in_linux_code(void *address) {
     return dladdr(address, &info) && info.dli_fname;
 }
 
+// Linux libraries' code that takes Darwin's arguments itself, written in
+// assembly (KVO's setter): it gets r2 set, and nothing moved.
+enum { MAX_DARWIN_CODE = 64 };
+static void *darwin_code[MAX_DARWIN_CODE];
+static unsigned darwin_code_count;
+
+void perry_ppc_darwin_code(void *address) {
+    pthread_mutex_lock(&lock);
+    if (darwin_code_count < MAX_DARWIN_CODE)
+        darwin_code[darwin_code_count++] = address;
+    pthread_mutex_unlock(&lock);
+}
+
+static bool is_darwin_code(void *address) {
+    pthread_mutex_lock(&lock);
+    bool found = false;
+    for (unsigned i = 0; i < darwin_code_count && !found; i++)
+        found = darwin_code[i] == address;
+    pthread_mutex_unlock(&lock);
+    return found;
+}
+
 void *perry_ppc_darwin_entry(void *function, const char *types) {
     if (!function || !types || !in_linux_code(function))
         return function;
+    if (is_darwin_code(function))
+        return perry_ppc_thread_stub(function);
     perry_ppc_plan plan;
     if (!parse(types, &plan)) {
         perry_warn("cannot move the arguments of %s for Darwin's ppc ABI", types);
