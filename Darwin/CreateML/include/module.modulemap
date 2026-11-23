@@ -1,0 +1,6 @@
+// CreateML is a Swift-only framework: there are no Objective-C headers for
+// the overlay to be compiled over, so this empty module stands in for them.
+module CreateML {
+    header "CreateML.h"
+    export *
+}
