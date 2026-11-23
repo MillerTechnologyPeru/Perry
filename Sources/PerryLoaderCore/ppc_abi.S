@@ -205,6 +205,62 @@ perry_ppc_invoke_darwin:
     blr
     .size perry_ppc_invoke_darwin, . - perry_ppc_invoke_darwin
 
+// perry_ppc_darwin_from_linux calls the Darwin function in r11 with the
+// words in r3-r10 for Linux code: the stubs perry_ppc_linux_callable makes
+// branch here (a block's invoke, a work function, a comparator). Darwin's
+// callee saves its lr at 8(r1) of its caller's frame, and may store r3-r10
+// at 24(r1) on, where a Linux caller keeps its own registers and locals: so
+// the call is made from this frame, laid out as a Darwin caller's (the
+// linkage area, then a parameter area holding the words), and r2, Linux's
+// thread pointer, is kept. The results (r3, r3:r4, f1) come back as they
+// are, and so do f1-f8, which Darwin reads as Linux passes them when they
+// follow every word argument.
+WFRAME = 80
+W_R2 = 64
+    .globl perry_ppc_darwin_from_linux
+    .hidden perry_ppc_darwin_from_linux
+    .type perry_ppc_darwin_from_linux, @function
+    .p2align 4
+perry_ppc_darwin_from_linux:
+    mflr %r0
+    stw %r0, 4(%r1)
+    stwu %r1, -WFRAME(%r1)
+    stw %r2, W_R2(%r1)
+    stw %r3, 24(%r1)
+    stw %r4, 28(%r1)
+    stw %r5, 32(%r1)
+    stw %r6, 36(%r1)
+    stw %r7, 40(%r1)
+    stw %r8, 44(%r1)
+    stw %r9, 48(%r1)
+    stw %r10, 52(%r1)
+    mtctr %r11
+    bctrl
+    lwz %r2, W_R2(%r1)
+    addi %r1, %r1, WFRAME
+    lwz %r0, 4(%r1)
+    mtlr %r0
+    blr
+    .size perry_ppc_darwin_from_linux, . - perry_ppc_darwin_from_linux
+
+// uint32_t perry_ppc_call_darwin_words(void *function, uint32_t a, ...)
+//
+// The same, for a call of up to seven words that names the function.
+    .globl perry_ppc_call_darwin_words
+    .type perry_ppc_call_darwin_words, @function
+    .p2align 4
+perry_ppc_call_darwin_words:
+    mr %r11, %r3
+    mr %r3, %r4
+    mr %r4, %r5
+    mr %r5, %r6
+    mr %r6, %r7
+    mr %r7, %r8
+    mr %r8, %r9
+    mr %r9, %r10
+    b perry_ppc_darwin_from_linux
+    .size perry_ppc_call_darwin_words, . - perry_ppc_call_darwin_words
+
 // Sends from Linux code (the Swift providers), with the arguments as Linux
 // passes their C signature: perry_ppc_send_from_linux finds the method and
 // calls it as Darwin code would, by its type encoding. A provider's own
