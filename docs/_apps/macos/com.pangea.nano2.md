@@ -4,7 +4,6 @@ bundle_id: "com.pangea.nano2"
 platform: macos
 kind: game
 developer: Pangea Software
-tags: []
 reports:
   - pr: 285
     date: 2026-11-22
