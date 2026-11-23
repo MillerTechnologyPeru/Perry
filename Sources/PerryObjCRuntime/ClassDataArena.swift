@@ -8,6 +8,9 @@ import Synchronization
 /// method lookup does), which cuts a pointer into Linux's heap, far above.
 /// The data lives as long as its class, so it is never freed.
 enum ClassDataArena {
+    // 64-bit only: a 32-bit process's heap is below the limit already, and
+    // its UInt cannot hold these addresses.
+#if _pointerBitWidth(_64)
     /// The highest address the data may end at.
     private static let limit: UInt = 1 << 39
     /// Where to ask for space: above where images are mapped (4 GB up), and
@@ -23,6 +26,7 @@ enum ClassDataArena {
     }
 
     private static let chunk = Mutex(Chunk())
+#endif
 
     /// `size` bytes aligned to 8, zeroed; from the heap when no space is to
     /// be had below the limit (32-bit processes, whose heap is below it).
@@ -45,6 +49,7 @@ enum ClassDataArena {
         return pointer
     }
 
+#if _pointerBitWidth(_64)
     /// A fresh chunk below the limit, asked for at the hint and a gigabyte
     /// on each time it is taken; nil when there is none.
     private static func mapChunk(_ chunk: inout Chunk) -> UInt? {
@@ -65,4 +70,5 @@ enum ClassDataArena {
         chunk.unavailable = true
         return nil
     }
+#endif
 }
