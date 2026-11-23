@@ -729,11 +729,16 @@ static void run_loop(int *quit) {
     loop_depth--;
 }
 
+/// Runs until QuitApplicationEventLoop, whose request this loop takes: a
+/// program that ran it for a while (Age of Empires III, for its license)
+/// goes on to its own loop, whose ReceiveNextEvent would answer
+/// eventLoopQuitErr from then on otherwise.
 void carbon_RunApplicationEventLoop(void) CARBON_SYMBOL(RunApplicationEventLoop);
 void carbon_RunApplicationEventLoop(void) {
     carbon_apple_event_open();
     quit_requested = 0;
     run_loop(&quit_requested);
+    quit_requested = 0;
 }
 
 void carbon_QuitApplicationEventLoop(void) CARBON_SYMBOL(QuitApplicationEventLoop);
