@@ -26,7 +26,7 @@ public struct DarwinCMacro: PeerMacro {
     /// The types whose Darwin convention can differ from Linux's, which
     /// conform to ObjCValue.
     static let converted: Set<String> = [
-        "CGFloat", "Double", "Float", "Int64", "UInt64", "TimeInterval",
+        "CGFloat", "Double", "Float", "Int64", "UInt64", "TimeInterval", "NSRange",
         "CGPoint", "CGSize", "CGRect", "CGAffineTransform", "UIEdgeInsets", "CATransform3D", "CAFrameRateRange",
         "CLLocationCoordinate2D", "MKCoordinateSpan", "MKCoordinateRegion", "MKMapPoint", "MKMapSize", "MKMapRect",
     ]
@@ -132,7 +132,7 @@ public struct DarwinCMacro: PeerMacro {
 
     static let ppcKinds: [String: PPCKind] = [
         "CGFloat": .float, "Float": .float, "Double": .double, "TimeInterval": .double,
-        "Int64": .pair, "UInt64": .pair,
+        "Int64": .pair, "UInt64": .pair, "NSRange": .words(2),
         "CGPoint": .words(2), "CGSize": .words(2), "CGRect": .words(4), "CGAffineTransform": .words(6),
         "UIEdgeInsets": .words(4), "CATransform3D": .words(16), "CAFrameRateRange": .words(3),
         "CLLocationCoordinate2D": .words(4), "MKCoordinateSpan": .words(4), "MKCoordinateRegion": .words(8),
