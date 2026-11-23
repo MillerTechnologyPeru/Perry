@@ -16,6 +16,38 @@ public typealias GeometryValue = Float
 public typealias GeometryValue = Double
 #endif
 
+// As Objective-C values, for the functions @DarwinC exports: what a
+// CGFloat is says the encoding. i386 returns a rectangle through memory (a
+// point or size comes back in eax:edx), ppc every structure.
+#if arch(i386) || arch(powerpc)
+private let geometryCode = "f"
+#else
+private let geometryCode = "d"
+#endif
+
+extension CGPoint: ObjCScalar {
+    public static var objCTypeEncoding: String { "{CGPoint=\(geometryCode)\(geometryCode)}" }
+    #if arch(powerpc)
+    public static var objCReturnsIndirectly: Bool { true }
+    #endif
+}
+
+extension CGSize: ObjCScalar {
+    public static var objCTypeEncoding: String { "{CGSize=\(geometryCode)\(geometryCode)}" }
+    #if arch(powerpc)
+    public static var objCReturnsIndirectly: Bool { true }
+    #endif
+}
+
+extension CGRect: ObjCScalar {
+    public static var objCTypeEncoding: String {
+        "{CGRect={CGPoint=\(geometryCode)\(geometryCode)}{CGSize=\(geometryCode)\(geometryCode)}}"
+    }
+    #if arch(i386) || arch(powerpc)
+    public static var objCReturnsIndirectly: Bool { true }
+    #endif
+}
+
 private func normalized(_ rect: CGRect) -> CGRect {
     var rect = rect
     if rect.size.width < 0 { rect.origin.x += rect.size.width; rect.size.width = -rect.size.width }
@@ -33,31 +65,31 @@ private func maxX(_ r: CGRect) -> GeometryValue { r.origin.x + r.size.width }
 private func maxY(_ r: CGRect) -> GeometryValue { r.origin.y + r.size.height }
 private func isEmpty(_ r: CGRect) -> Bool { !(r.size.width > 0 && r.size.height > 0) }
 
-@c(_NSEqualPoints)
+@DarwinC("_NSEqualPoints")
 public func NSEqualPoints(_ a: CGPoint, _ b: CGPoint) -> Bool { a.x == b.x && a.y == b.y }
 
-@c(_NSEqualSizes)
+@DarwinC("_NSEqualSizes")
 public func NSEqualSizes(_ a: CGSize, _ b: CGSize) -> Bool { a.width == b.width && a.height == b.height }
 
-@c(_NSEqualRects)
+@DarwinC("_NSEqualRects")
 public func NSEqualRects(_ a: CGRect, _ b: CGRect) -> Bool { NSEqualPoints(a.origin, b.origin) && NSEqualSizes(a.size, b.size) }
 
-@c(_NSIsEmptyRect)
+@DarwinC("_NSIsEmptyRect")
 public func NSIsEmptyRect(_ rect: CGRect) -> Bool { isEmpty(rect) }
 
-@c(_NSInsetRect)
+@DarwinC("_NSInsetRect")
 public func NSInsetRect(_ rect: CGRect, _ dx: GeometryValue, _ dy: GeometryValue) -> CGRect {
     make(rect.origin.x + dx, rect.origin.y + dy, rect.size.width - 2 * dx, rect.size.height - 2 * dy)
 }
 
-@c(_NSOffsetRect)
+@DarwinC("_NSOffsetRect")
 public func NSOffsetRect(_ rect: CGRect, _ dx: GeometryValue, _ dy: GeometryValue) -> CGRect {
     make(rect.origin.x + dx, rect.origin.y + dy, rect.size.width, rect.size.height)
 }
 
 /// The smallest rectangle on whole numbers that holds this one; empty ones
 /// are all zeros.
-@c(_NSIntegralRect)
+@DarwinC("_NSIntegralRect")
 public func NSIntegralRect(_ rect: CGRect) -> CGRect {
     guard !isEmpty(rect) else { return make(0, 0, 0, 0) }
     let x = minX(rect).rounded(.down), y = minY(rect).rounded(.down)
@@ -67,7 +99,7 @@ public func NSIntegralRect(_ rect: CGRect) -> CGRect {
 /// NSAlignmentOptions: each edge, width or height rounded inward (bits 0
 /// to 5), outward (8 to 13) or to the nearest (16 to 21); this rounds edges
 /// as the options' outward and nearest bits ask, inward otherwise.
-@c(_NSIntegralRectWithOptions)
+@DarwinC("_NSIntegralRectWithOptions")
 public func NSIntegralRectWithOptions(_ rect: CGRect, _ options: UInt64) -> CGRect {
     func round(_ value: GeometryValue, inward: UInt64, outward: UInt64, nearest: UInt64, up: Bool) -> GeometryValue {
         if options & nearest != 0 { return value.rounded() }
@@ -82,7 +114,7 @@ public func NSIntegralRectWithOptions(_ rect: CGRect, _ options: UInt64) -> CGRe
     return make(x0, y0, max(0, x1 - x0), max(0, y1 - y0))
 }
 
-@c(_NSUnionRect)
+@DarwinC("_NSUnionRect")
 public func NSUnionRect(_ a: CGRect, _ b: CGRect) -> CGRect {
     if isEmpty(a) { return b }
     if isEmpty(b) { return a }
@@ -90,28 +122,28 @@ public func NSUnionRect(_ a: CGRect, _ b: CGRect) -> CGRect {
     return make(x, y, max(maxX(a), maxX(b)) - x, max(maxY(a), maxY(b)) - y)
 }
 
-@c(_NSIntersectionRect)
+@DarwinC("_NSIntersectionRect")
 public func NSIntersectionRect(_ a: CGRect, _ b: CGRect) -> CGRect {
     let x = max(minX(a), minX(b)), y = max(minY(a), minY(b))
     let width = min(maxX(a), maxX(b)) - x, height = min(maxY(a), maxY(b)) - y
     return width > 0 && height > 0 ? make(x, y, width, height) : make(0, 0, 0, 0)
 }
 
-@c(_NSIntersectsRect)
+@DarwinC("_NSIntersectsRect")
 public func NSIntersectsRect(_ a: CGRect, _ b: CGRect) -> Bool { !isEmpty(NSIntersectionRect(a, b)) }
 
-@c(_NSContainsRect)
+@DarwinC("_NSContainsRect")
 public func NSContainsRect(_ a: CGRect, _ b: CGRect) -> Bool {
     !isEmpty(b) && minX(a) <= minX(b) && minY(a) <= minY(b) && maxX(a) >= maxX(b) && maxY(a) >= maxY(b)
 }
 
-@c(_NSPointInRect)
+@DarwinC("_NSPointInRect")
 public func NSPointInRect(_ point: CGPoint, _ rect: CGRect) -> Bool {
     point.x >= minX(rect) && point.x < maxX(rect) && point.y >= minY(rect) && point.y < maxY(rect)
 }
 
 /// Whether the point is in the rectangle, in a flipped view (y down) or not.
-@c(_NSMouseInRect)
+@DarwinC("_NSMouseInRect")
 public func NSMouseInRect(_ point: CGPoint, _ rect: CGRect, _ flipped: Bool) -> Bool {
     guard point.x >= minX(rect) && point.x < maxX(rect) else { return false }
     return flipped ? point.y >= minY(rect) && point.y < maxY(rect) : point.y > minY(rect) && point.y <= maxY(rect)
@@ -119,7 +151,7 @@ public func NSMouseInRect(_ point: CGPoint, _ rect: CGRect, _ flipped: Bool) -> 
 
 /// Cuts `amount` off the rectangle's `edge` (NSRectEdge: min x 0, min y 1,
 /// max x 2, max y 3) into `slice`, the rest into `remainder`.
-@c(_NSDivideRect)
+@DarwinC("_NSDivideRect")
 public func NSDivideRect(_ rect: CGRect, _ slice: UnsafeMutablePointer<CGRect>?, _ remainder: UnsafeMutablePointer<CGRect>?,
                          _ amount: GeometryValue, _ edge: UInt32) {
     let r = normalized(rect)
@@ -160,15 +192,15 @@ private func numbers(_ string: id?, count: Int) -> [GeometryValue] {
 }
 
 /// "{x, y}"
-@c(_NSStringFromPoint)
+@DarwinC("_NSStringFromPoint")
 public func NSStringFromPoint(_ point: CGPoint) -> id? { Strings.autoreleased("{\(number(point.x)), \(number(point.y))}") }
 
 /// "{width, height}"
-@c(_NSStringFromSize)
+@DarwinC("_NSStringFromSize")
 public func NSStringFromSize(_ size: CGSize) -> id? { Strings.autoreleased("{\(number(size.width)), \(number(size.height))}") }
 
 /// "{{x, y}, {width, height}}"
-@c(_NSStringFromRect)
+@DarwinC("_NSStringFromRect")
 public func NSStringFromRect(_ rect: CGRect) -> id? {
     Strings.autoreleased("{{\(number(rect.origin.x)), \(number(rect.origin.y))}, {\(number(rect.size.width)), \(number(rect.size.height))}}")
 }
