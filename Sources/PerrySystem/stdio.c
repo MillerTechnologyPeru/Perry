@@ -284,9 +284,9 @@ int perry_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, va_
     return perry_vsnprintf(buf, size, fmt, arguments);
 }
 
-#if defined(__arm__) || defined(__i386__)
-// The same, and asl_log's, for armv7's variadic thunks, which pass a Darwin
-// va_list that the format's arguments are repacked from.
+#if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
+// The same, and asl_log's, for the 32-bit variadic thunks, which pass a
+// Darwin va_list that the format's arguments are repacked from.
 int perry_darwin_vsnprintf_l(char *buf, size_t size, void *locale, const char *fmt, darwin_va_list ap) {
     (void)locale;
     return darwin_vsnprintf(buf, size, fmt, ap);
