@@ -69,6 +69,33 @@ open class UIImage: NSObject {
         make(cls, cgImage: cgImage, scale: scale, orientation: orientation)
     }
 
+    /// A Core Image image rendered, +0: QuartzCore's provider renders it.
+    static func cgImage(ofCIImage image: NSObject?) -> UnsafeMutableRawPointer? {
+        guard let image, image.responds(to: "_perryCGImage") else { return nil }
+        typealias Render = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+        return unsafeBitCast(ObjCRuntime.msgSend, to: Render.self)(image.objcObject, ObjCRuntime.selector("_perryCGImage"))
+    }
+
+    @ObjCClassMethod("imageWithCIImage:")
+    static func image(_ cls: ObjCClass, ciImage: NSObject?) -> UIImage { make(cls, cgImage: cgImage(ofCIImage: ciImage), scale: 1) }
+
+    @ObjCClassMethod("imageWithCIImage:scale:orientation:")
+    static func image(_ cls: ObjCClass, ciImage: NSObject?, scale: CGFloat, orientation: Int) -> UIImage {
+        make(cls, cgImage: cgImage(ofCIImage: ciImage), scale: scale, orientation: orientation)
+    }
+
+    @ObjCMethod("initWithCIImage:")
+    func initialize(ciImage: NSObject?) -> Self {
+        state.set(UIImage.cgImage(ofCIImage: ciImage), scale: 1, orientation: 0)
+        return self
+    }
+
+    @ObjCMethod("initWithCIImage:scale:orientation:")
+    func initialize(ciImage: NSObject?, scale: CGFloat, orientation: Int) -> Self {
+        state.set(UIImage.cgImage(ofCIImage: ciImage), scale: scale, orientation: orientation)
+        return self
+    }
+
     @ObjCMethod("initWithCGImage:")
     func initialize(cgImage: UnsafeMutableRawPointer?) -> Self {
         state.set(cgImage, scale: 1, orientation: 0)
