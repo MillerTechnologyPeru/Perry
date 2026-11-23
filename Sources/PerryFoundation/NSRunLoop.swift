@@ -465,12 +465,12 @@ public func CFRunLoopRun() {
     }
 }
 
-@c(_CFRunLoopRunInMode)
-public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double.ObjCType,
+@DarwinC("_CFRunLoopRunInMode")
+public func CFRunLoopRunInMode(_ mode: UnsafeMutableRawPointer?, _ seconds: Double,
                                _ returnAfterSourceHandled: Bool) -> Int32 {
     // A loop with an input source waits for it, as on Darwin.
     let state = RunLoops.current
-    return state.run(until: absoluteTimeNow() + Double(objCArgument: seconds), returnAfterSourceHandled: returnAfterSourceHandled,
+    return state.run(until: absoluteTimeNow() + seconds, returnAfterSourceHandled: returnAfterSourceHandled,
                      waitWhenEmpty: state.ports > 0 ? true : nil).rawValue
 }
 
