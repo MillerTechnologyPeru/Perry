@@ -934,8 +934,9 @@ public class NSKeyedArchiver: NSCoder {
     }
 
     @ObjCClassMethod("archiveRootObject:toFile:")
-    static func archive(_ cls: ObjCClass, rootObject: ObjCObject?, toFile path: String) -> Bool {
-        guard let data = archivedData(cls, rootObject: rootObject) else { return false }
+    /// A nil path, which an app made of a missing folder, archives nothing.
+    static func archive(_ cls: ObjCClass, rootObject: ObjCObject?, toFile path: String?) -> Bool {
+        guard let path, let data = archivedData(cls, rootObject: rootObject) else { return false }
         return FileManager.default.createFile(atPath: path, contents: DataObjects.data(data))
     }
 
