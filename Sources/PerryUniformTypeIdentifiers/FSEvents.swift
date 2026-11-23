@@ -47,7 +47,7 @@ private func makeStream(_ paths: UnsafeMutableRawPointer?) -> UnsafeMutableRawPo
 /// FSEventStreamRef FSEventStreamCreate(CFAllocatorRef, FSEventStreamCallback,
 /// FSEventStreamContext *, CFArrayRef pathsToWatch, FSEventStreamEventId
 /// sinceWhen, CFTimeInterval latency, FSEventStreamCreateFlags).
-@c(_FSEventStreamCreate)
+@DarwinC("_FSEventStreamCreate")
 public func FSEventStreamCreate(_ allocator: UnsafeRawPointer?, _ callback: UnsafeRawPointer?, _ context: UnsafeRawPointer?,
                                 _ paths: UnsafeMutableRawPointer?, _ since: UInt64, _ latency: Double, _ flags: UInt32)
     -> UnsafeMutableRawPointer? {
@@ -55,7 +55,7 @@ public func FSEventStreamCreate(_ allocator: UnsafeRawPointer?, _ callback: Unsa
 }
 
 /// The same, for paths relative to a device's root.
-@c(_FSEventStreamCreateRelativeToDevice)
+@DarwinC("_FSEventStreamCreateRelativeToDevice")
 public func FSEventStreamCreateRelativeToDevice(_ allocator: UnsafeRawPointer?, _ callback: UnsafeRawPointer?,
                                                 _ context: UnsafeRawPointer?, _ device: Int32,
                                                 _ paths: UnsafeMutableRawPointer?, _ since: UInt64, _ latency: Double,
