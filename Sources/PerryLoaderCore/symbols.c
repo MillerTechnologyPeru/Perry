@@ -1162,9 +1162,13 @@ static void *string_constant(perry_loader *loader, const char *name) {
     if (name[0] != '_' || strncmp(name, "_OBJC_", 6) == 0) return NULL;
     // LaunchServices, Accessibility, the File Manager, Apple Events and
     // Search Kit name their constants kLS…, kAX…, kAE… too
-    // (LSCopyItemAttribute is a function).
+    // (LSCopyItemAttribute is a function). Search Kit's functions are named
+    // by family (SKIndexCreate, SKSearchFindMatches): StoreKit's names start
+    // with SK as well, and those are string constants
+    // (SKStoreProductParameterITunesItemIdentifier, SKErrorDomain).
     static const char *const function_prefixes[] = { "_CF", "_CG", "_CT", "_CV", "_CM", "_CC", "_Sec",
-                                                     "_LS", "_AX", "_FS", "_AE", "_SK" };
+                                                     "_LS", "_AX", "_FS", "_AE", "_SKIndex", "_SKDocument",
+                                                     "_SKSearch", "_SKSummary", "_SKLoad" };
     for (size_t i = 0; i < sizeof(function_prefixes) / sizeof(function_prefixes[0]); i++) {
         size_t length = strlen(function_prefixes[i]);
         if (strncmp(name, function_prefixes[i], length) == 0 && name[length] >= 'A' && name[length] <= 'Z')
