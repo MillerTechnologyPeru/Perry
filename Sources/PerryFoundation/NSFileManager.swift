@@ -307,6 +307,22 @@ final class NSFileManager: NSObject {
         }
     }
 
+    // Mac OS X 10.4's forms, whose handler is told of errors: there is
+    // none to tell here, and failure is the result.
+
+    @ObjCMethod("removeFileAtPath:handler:")
+    func removeFile(atPath path: String?, handler: ObjCObject?) -> Bool { removeItem(atPath: path, error: nil) }
+
+    @ObjCMethod("copyPath:toPath:handler:")
+    func copyPath(_ source: String?, toPath destination: String?, handler: ObjCObject?) -> Bool {
+        copyItem(atPath: source, toPath: destination, error: nil)
+    }
+
+    @ObjCMethod("movePath:toPath:handler:")
+    func movePath(_ source: String?, toPath destination: String?, handler: ObjCObject?) -> Bool {
+        moveItem(atPath: source, toPath: destination, error: nil)
+    }
+
     @ObjCMethod("removeItemAtURL:error:")
     func removeItem(at url: ObjCObject, error errorPointer: UnsafeMutablePointer<id?>?) -> Bool {
         removeItem(atPath: FileManagers.path(URLs.url(url.id)), error: errorPointer)
