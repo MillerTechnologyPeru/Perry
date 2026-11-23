@@ -50,7 +50,7 @@ final class SourceState {
             ObjCRuntime.autoreleasepool { Blocks.invoke(block) }
             Runtime.blockRelease(block)
         case .function(let function):
-            ObjCRuntime.autoreleasepool { function(context) }
+            ObjCRuntime.autoreleasepool { darwinCallable(function)(context) }
         case nil:
             break
         }
@@ -72,7 +72,7 @@ final class SourceState {
         guard let context else { return }
         let state = Unmanaged<SourceState>.fromOpaque(context)
         let source = state.takeUnretainedValue()
-        if let finalizer = source.finalizer { keepingLinuxRegisters { finalizer(source.context) } }
+        if let finalizer = source.finalizer { keepingLinuxRegisters { darwinCallable(finalizer)(source.context) } }
         state.release()
     }
 }
