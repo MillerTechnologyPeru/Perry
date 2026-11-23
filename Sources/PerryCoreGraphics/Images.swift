@@ -268,7 +268,7 @@ public func CGColorSpaceCreateCalibratedRGB(_ whitePoint: UnsafePointer<CGFloat>
     ColorSpaces.make(model: 1, name: nil)
 }
 
-@c(_CGColorSpaceCreateCalibratedGray)
+@DarwinC("_CGColorSpaceCreateCalibratedGray")
 public func CGColorSpaceCreateCalibratedGray(_ whitePoint: UnsafePointer<CGFloat>?, _ blackPoint: UnsafePointer<CGFloat>?,
                                              _ gamma: CGFloat) -> Ref {
     ColorSpaces.make(model: 0, name: nil)
