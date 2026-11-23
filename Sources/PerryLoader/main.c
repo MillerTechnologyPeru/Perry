@@ -68,8 +68,10 @@ static void redirect(const char *container, const char *name, const char *variab
 }
 
 // An app's container, as iOS gives each app: its home directory, with
-// Documents, Library (Caches, Preferences) and tmp, which HOME and TMPDIR
-// name while it runs. PERRY_DOCUMENTS, PERRY_LIBRARY, PERRY_CACHES,
+// Documents, Library (Application Support, Caches, Preferences) and tmp,
+// which HOME and TMPDIR name while it runs. Application Support is there
+// from the start, as it is in a Mac's home, where apps make their own
+// folder in it without making it first. PERRY_DOCUMENTS, PERRY_LIBRARY, PERRY_CACHES,
 // PERRY_PREFERENCES and PERRY_TMP put those directories elsewhere.
 static void enter_container(const perry_bundle *bundle) {
     const char *container = getenv("PERRY_CONTAINER");
@@ -85,7 +87,8 @@ static void enter_container(const perry_bundle *bundle) {
     redirect(container, "Library/Caches", "PERRY_CACHES");
     redirect(container, "Library/Preferences", "PERRY_PREFERENCES");
     redirect(container, "tmp", "PERRY_TMP");
-    const char *directories[] = { "Documents", "Library/Caches", "Library/Preferences", "tmp" };
+    const char *directories[] = { "Documents", "Library/Application Support", "Library/Caches", "Library/Preferences",
+                                  "tmp" };
     for (size_t index = 0; index < sizeof(directories) / sizeof(directories[0]); index++) {
         char directory[PATH_MAX];
         snprintf(directory, sizeof(directory), "%s/%s", container, directories[index]);
