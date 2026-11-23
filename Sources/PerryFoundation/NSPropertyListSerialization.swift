@@ -662,6 +662,28 @@ public final class NSPropertyListSerialization: NSObject {
         return PropertyLists.object(value, mutability: options)
     }
 
+    /// The rest of an open stream, read with -read:maxLength:, as a
+    /// property list (Xcode 4 swizzles this method, so it must be here).
+    @ObjCClassMethod("propertyListWithStream:options:format:error:")
+    static func propertyList(withStream stream: ObjCObject?, options: UInt, format: UnsafeMutablePointer<UInt>?,
+                             error: UnsafeMutablePointer<id?>?) -> UnsafeMutableRawPointer? {
+        typealias Read = @convention(c) (id?, SEL, UnsafeMutablePointer<UInt8>, UInt) -> Int
+        let read = unsafeBitCast(ObjC.msgSend, to: Read.self)
+        var bytes: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while let stream = stream?.id {
+            let count = buffer.withUnsafeMutableBufferPointer { read(stream, ObjC.selector("read:maxLength:"), $0.baseAddress!, UInt($0.count)) }
+            guard count > 0 else { break }
+            bytes += buffer[..<count]
+        }
+        guard let (value, kind) = PropertyLists.parse(bytes) else {
+            error?.pointee = Self.error(3840, "The data couldn’t be read because it isn’t in the correct format.")
+            return nil
+        }
+        format?.pointee = kind
+        return PropertyLists.object(value, mutability: options)
+    }
+
     @ObjCClassMethod("propertyList:isValidForFormat:")
     static func isValid(_ plist: ObjCObject?, for format: UInt) -> Bool {
         format != PropertyLists.openStep && PropertyLists.value(plist?.id) != nil
