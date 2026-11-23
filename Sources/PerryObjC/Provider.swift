@@ -81,7 +81,7 @@ public func perry_objc_lookup_slow(_ receiver: UnsafeMutableRawPointer?, _ sel: 
     return Runtime.lookUpIMP(receiver: receiver, selector: sel.assumingMemoryBound(to: CChar.self), cls: cls)
 }
 
-#if arch(arm)
+#if arch(arm) || arch(powerpc)
 @c @implementation
 public func perry_objc_lookup_slow_stret(_ receiver: UnsafeMutableRawPointer?, _ sel: UnsafeRawPointer?,
                                          _ cls: UnsafeMutablePointer<perry_objc_class>?) -> UnsafeMutableRawPointer? {
