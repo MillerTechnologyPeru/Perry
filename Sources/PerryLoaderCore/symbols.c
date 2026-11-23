@@ -506,6 +506,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "UniformTypeIdentifiers");
         return true;
     }
+    // PackageKit, the installer's private framework, which Mac apps read
+    // packages and receipts with, is beside them.
+    if (strstr(install_name, "/PackageKit.framework/")) {
+        snprintf(out, out_size, "UniformTypeIdentifiers");
+        return true;
+    }
     // Accelerate's sub-frameworks (vecLib, vImage) are the umbrella's provider.
     if (strstr(install_name, "/Accelerate.framework/")) {
         snprintf(out, out_size, "Accelerate");

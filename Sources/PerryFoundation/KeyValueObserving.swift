@@ -130,7 +130,12 @@ enum KeyValueObserving {
     static func subclass(of original: Class) -> Class {
         locked {
             if let existing = byOriginal[original] { return existing }
-            let name = "NSKVONotifying_" + ObjC.className(UnsafeMutableRawPointer(original))
+            // The class's own name: a metaclass's (a class object observed,
+            // as Xcode 4 observes DVTPlatform's) is its class's, marked so
+            // its subclass is not the instances' one.
+            let className = ObjC.name(ofClass: UnsafeMutableRawPointer(original))
+            let isMeta = ObjC.classIsMetaClass?(original) ?? false
+            let name = "NSKVONotifying_" + (isMeta ? "META_" : "") + className
             let cls = name.withCString { ObjC.allocateClassPair(original, $0, 0) }!
             _ = ObjC.addMethod(cls, ObjC.selector("class"), unsafeBitCast(classIMP, to: UnsafeRawPointer.self), "#16@0:8")
             _ = ObjC.addMethod(cls, ObjC.selector("dealloc"), unsafeBitCast(deallocIMP, to: UnsafeRawPointer.self), "v16@0:8")

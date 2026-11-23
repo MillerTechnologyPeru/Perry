@@ -677,6 +677,11 @@ open class NSImageView: NSControl {
 /// NSProgressIndicatorStyle: bar 0, spinning 1.
 @ObjCClass("NSProgressIndicator")
 open class NSProgressIndicator: NSView {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// Starts or stops the timer that animates it: it is drawn as it is.
+    @ObjCMethod("_installHeartBeat:") func installHeartBeat(_ install: Bool) {}
+
     var indeterminate = true
     var minValue: Double = 0
     var maxValue: Double = 100

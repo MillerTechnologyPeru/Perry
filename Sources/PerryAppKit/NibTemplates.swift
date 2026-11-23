@@ -153,6 +153,14 @@ open class NSCustomResource: NSObject {
 /// A window's settings, from which loading the nib makes the window.
 @ObjCClass("NSWindowTemplate")
 open class NSWindowTemplate: NSObject {
+    // AppKit's private methods that Xcode 4's Interface Builder swizzles,
+    // so they must be here.
+    /// The class the window is made of.
+    @ObjCMethod("windowClassForNibInstantiate")
+    func windowClassForNibInstantiate() -> UnsafeMutableRawPointer? {
+        (Classes.named(windowClass) ?? Classes.named("NSWindow"))?.pointer
+    }
+
     /// AppKit's instance variables that Interface Builder's Cocoa plug-in
     /// reads and writes itself: the window's and screen's rectangles and the
     /// content view. The template keeps those values in them.
