@@ -251,10 +251,47 @@ public func GetAliasSize(_ alias: UnsafeMutableRawPointer?) -> Int {
     return Int(record.loadUnaligned(fromByteOffset: 4, as: UInt16.self))
 }
 
+/// The discs mounted, as libPerrySystem finds them for getmntinfo: volumes
+/// after "Macintosh HD", numbered -101 and down. Its perry_disc_volume is
+/// found in the library as it is loaded here.
+enum DiscVolumes {
+    private typealias Volume = @convention(c) (Int32, UnsafeMutablePointer<CChar>?, Int, UnsafeMutablePointer<CChar>?, Int) -> Int32
+
+    nonisolated(unsafe) private static let volume: Volume? = {
+        // The library's path, from this process's mappings: it is loaded
+        // by its path, with no name to ask the loader for.
+        guard let maps = fopen("/proc/self/maps", "r") else { return nil }
+        defer { fclose(maps) }
+        var line = [CChar](repeating: 0, count: 4096)
+        while fgets(&line, Int32(line.count), maps) != nil {
+            let text = String(cString: line)
+            guard text.hasSuffix("/libPerrySystem.so\n"), let start = text.firstIndex(of: "/") else { continue }
+            let path = String(text[start...].dropLast())
+            guard let library = dlopen(path, RTLD_NOW | RTLD_NOLOAD), let symbol = dlsym(library, "perry_disc_volume") else { return nil }
+            return unsafeBitCast(symbol, to: Volume.self)
+        }
+        return nil
+    }()
+
+    static var count: Int { volume.map { Int($0(-1, nil, 0, nil, 0)) } ?? 0 }
+
+    /// The name and mount point of the disc at `index`, from 0.
+    static func disc(_ index: Int) -> (name: String, mount: String)? {
+        guard let volume, index >= 0 else { return nil }
+        var name = [CChar](repeating: 0, count: 256), mount = [CChar](repeating: 0, count: 4096)
+        guard index < Int(volume(Int32(index), &name, name.count, &mount, mount.count)) else { return nil }
+        return (String(cString: name), String(cString: mount))
+    }
+
+    /// The disc a volume reference number names: -101 is the first.
+    static func index(ofVolume volume: Int16) -> Int? { volume <= -101 && volume > -101 - 8 ? Int(-101 - Int(volume)) : nil }
+}
+
 /// OSErr FSGetVolumeInfo(FSVolumeRefNum volume, ItemCount volumeIndex,
 /// FSVolumeRefNum *actualVolume, FSVolumeInfoBitmap whichInfo, FSVolumeInfo
-/// *info, HFSUniStr255 *volumeName, FSRef *rootDirectory): the one volume,
-/// "Macintosh HD" (refnum -100) over the home's file system. FSVolumeInfo
+/// *info, HFSUniStr255 *volumeName, FSRef *rootDirectory): the volume
+/// "Macintosh HD" (refnum -100) over the home's file system, and after it
+/// the discs mounted, each by its name over its mount point. FSVolumeInfo
 /// (2-byte packed, 126 bytes): four UTCDateTimes, file and folder counts at
 /// 32, total and free bytes at 40 and 48, block size and total and free
 /// blocks at 56, 60 and 64, flags at 116 and the signature ('H+') at 120.
@@ -262,14 +299,27 @@ public func GetAliasSize(_ alias: UnsafeMutableRawPointer?) -> Int {
 public func FSGetVolumeInfo(_ volume: Int16, _ index: Int, _ actual: UnsafeMutablePointer<Int16>?, _ which: UInt32,
                             _ info: UnsafeMutableRawPointer?, _ name: UnsafeMutablePointer<UInt16>?,
                             _ root: UnsafeMutableRawPointer?) -> Int16 {
-    // By index, from 1, when no volume is named (kFSInvalidVolumeRefNum).
-    if volume == 0 && index != 1 { return -35 }     // nsvErr
-    if volume != 0 && volume != -100 && volume != -32768 && volume != -32767 && volume != -32763 { return -35 }
-    actual?.pointee = -100
+    // By index, from 1, when no volume is named (kFSInvalidVolumeRefNum):
+    // the discs follow the first.
+    var disc: (name: String, mount: String)?
+    var discNumber = 0
+    if volume == 0, index > 1 {
+        discNumber = index - 2
+        disc = DiscVolumes.disc(discNumber)
+        if disc == nil { return -35 }               // nsvErr
+    } else if let number = DiscVolumes.index(ofVolume: volume) {
+        discNumber = number
+        disc = DiscVolumes.disc(number)
+        if disc == nil { return -35 }
+    } else {
+        if volume == 0 && index != 1 { return -35 }
+        if volume != 0 && volume != -100 && volume != -32768 && volume != -32767 && volume != -32763 { return -35 }
+    }
+    actual?.pointee = disc == nil ? -100 : Int16(-101 - discNumber)
     if let info {
         info.initializeMemory(as: UInt8.self, repeating: 0, count: 126)
         var stats = statvfs()
-        let home = getenv("HOME").map { String(cString: $0) } ?? "/"
+        let home = disc?.mount ?? getenv("HOME").map { String(cString: $0) } ?? "/"
         if statvfs(home, &stats) == 0 {
             let block = UInt64(stats.f_frsize)
             info.storeBytes(of: UInt64(stats.f_blocks) * block, toByteOffset: 40, as: UInt64.self)
@@ -284,11 +334,11 @@ public func FSGetVolumeInfo(_ volume: Int16, _ index: Int, _ actual: UnsafeMutab
         info.storeBytes(of: UInt16(0x482B), toByteOffset: 120, as: UInt16.self)
     }
     if let name {
-        let units = Array("Macintosh HD".utf16)
+        let units = Array((disc?.name ?? "Macintosh HD").utf16.prefix(255))
         name.pointee = UInt16(units.count)
         for (offset, unit) in units.enumerated() { name[1 + offset] = unit }
     }
-    if let root { FileRefs.store("/", in: root) }
+    if let root { FileRefs.store(disc?.mount ?? "/", in: root) }
     _ = which
     return noErr
 }

@@ -11,6 +11,7 @@
 #include "PerryCarbon.h"
 
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -1107,16 +1108,57 @@ OSErr carbon_PBGetCatInfoSync(CInfoPB *block) {
 OSErr carbon_PBGetCatInfoAsync(CInfoPB *block) CARBON_SYMBOL(PBGetCatInfoAsync);
 OSErr carbon_PBGetCatInfoAsync(CInfoPB *block) { return carbon_PBGetCatInfoSync(block); }
 
-/// The one volume, by its number, its name or its index (1).
+// The discs mounted are volumes after the first, numbered -101 and down, as
+// CoreServices' FSGetVolumeInfo numbers them: libPerrySystem finds them, for
+// getmntinfo, and its perry_disc_volume is found in that library as it is
+// loaded here (by its path, from this process's mappings).
+#define FIRST_DISC_VOLUME (-101)
+
+static int disc_volume(int index, char *name, size_t name_size, char *mount, size_t mount_size) {
+    static int (*volume)(int, char *, size_t, char *, size_t);
+    static bool looked;
+    if (!looked) {
+        looked = true;
+        FILE *maps = fopen("/proc/self/maps", "r");
+        char line[4096];
+        while (maps && fgets(line, sizeof line, maps)) {
+            char *path = strchr(line, '/');
+            size_t length = path ? strcspn(path, "\n") : 0;
+            static const char library[] = "/libPerrySystem.so";
+            if (length < sizeof library - 1 || strncmp(path + length - (sizeof library - 1), library, sizeof library - 1) != 0)
+                continue;
+            path[length] = '\0';
+            void *handle = dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+            if (handle) volume = (int (*)(int, char *, size_t, char *, size_t))dlsym(handle, "perry_disc_volume");
+            break;
+        }
+        if (maps) fclose(maps);
+    }
+    return volume ? volume(index, name, name_size, mount, mount_size) : 0;
+}
+
+/// The disc a volume number or a volume index (from 1; the discs from 2)
+/// names, from 0, or -1 for the first volume; -2 if there is no such volume.
+static int disc_for(int16_t volume, int index, char *name, size_t name_size, char *mount, size_t mount_size) {
+    int disc = -1;
+    if (index > 1) disc = index - 2;
+    else if (index <= 0 && volume <= FIRST_DISC_VOLUME) disc = FIRST_DISC_VOLUME - volume;
+    else if (index <= 0 && volume != 0 && volume != ROOT_VOLUME && volume != -1) return -2;
+    if (disc < 0) return -1;
+    return disc < disc_volume(disc, name, name_size, mount, mount_size) ? disc : -2;
+}
+
+/// A volume, by its number, its name or its index (from 1): the first, and
+/// the discs mounted after it.
 OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) CARBON_SYMBOL(PBHGetVInfoSync);
 OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     if (!block) return paramErr;
-    if (block->ioVolIndex > 1 || (block->ioVolIndex == 0 && block->header.ioVRefNum != 0 &&
-                                  block->header.ioVRefNum != ROOT_VOLUME && block->header.ioVRefNum != -1))
-        return block->header.ioResult = nsvErr;
+    char disc_name[256] = "", disc_mount[PATH_MAX] = "";
+    int disc = disc_for(block->header.ioVRefNum, block->ioVolIndex, disc_name, sizeof disc_name, disc_mount, sizeof disc_mount);
+    if (disc == -2) return block->header.ioResult = nsvErr;
     struct statvfs stats;
     uint64_t total = 0, available = 0;
-    if (statvfs("/", &stats) == 0) {
+    if (statvfs(disc >= 0 ? disc_mount : "/", &stats) == 0) {
         total = (uint64_t)stats.f_blocks * stats.f_frsize;
         available = (uint64_t)stats.f_bavail * stats.f_frsize;
     }
@@ -1128,11 +1170,12 @@ OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     if (available > limit) available = limit;
     uint32_t size = 512;
     while (total / size > 0xffff) size *= 2;
-    if (block->header.ioNamePtr) pascal("Macintosh HD", block->header.ioNamePtr, 28);
-    block->header.ioVRefNum = ROOT_VOLUME;
+    if (block->header.ioNamePtr) pascal(disc >= 0 ? disc_name : "Macintosh HD", block->header.ioNamePtr, 28);
+    block->header.ioVRefNum = disc >= 0 ? (int16_t)(FIRST_DISC_VOLUME - disc) : ROOT_VOLUME;
     block->ioVCrDate = mac_time(0);
     block->ioVLsMod = mac_time(time(NULL));
-    block->ioVAtrb = 0;
+    // A disc is locked, by hardware and by software.
+    block->ioVAtrb = disc >= 0 ? (int16_t)0x8080 : 0;
     block->ioVNmFls = 0;
     block->ioVNmAlBlks = (uint16_t)(total / size);
     block->ioVAlBlkSiz = size;
@@ -1145,7 +1188,8 @@ OSErr carbon_PBHGetVInfoSync(HVolumeParam *block) {
     block->ioVFilCnt = 0;
     block->ioVDirCnt = 0;
     memset(block->ioVFndrInfo, 0, sizeof block->ioVFndrInfo);
-    CARBON_TRACE("volume info: index %d, %u blocks of %u, %u free", block->ioVolIndex, block->ioVNmAlBlks, size, block->ioVFrBlk);
+    CARBON_TRACE("volume info: index %d, volume %d \"%s\", %u blocks of %u, %u free", block->ioVolIndex, block->header.ioVRefNum,
+                 disc >= 0 ? disc_name : "Macintosh HD", block->ioVNmAlBlks, size, block->ioVFrBlk);
     return block->header.ioResult = noErr;
 }
 
@@ -1171,12 +1215,18 @@ OSErr carbon_PBHGetVolSync(WDPBRec *block) {
 }
 
 /// The volume's parameters: version 4's GetVolParmsInfoBuffer, of a local,
-/// fixed disk that keeps no desktop database.
+/// fixed disk that keeps no desktop database; a disc's, of an ejectable,
+/// removable one. Its device ID is the volume's BSD name ("disk2s1" for the
+/// first disc, as IOKit's media and getmntinfo name it), which a program
+/// matches with the media it found.
 OSErr carbon_PBHGetVolParmsSync(HIOParam *block) CARBON_SYMBOL(PBHGetVolParmsSync);
 OSErr carbon_PBHGetVolParmsSync(HIOParam *block) {
     if (!block) return paramErr;
-    if (block->header.ioVRefNum != 0 && block->header.ioVRefNum != ROOT_VOLUME && block->header.ioVRefNum != -1)
-        return block->header.ioResult = nsvErr;
+    int disc = disc_for(block->header.ioVRefNum, 0, NULL, 0, NULL, 0);
+    if (disc == -2) return block->header.ioResult = nsvErr;
+    // Kept: the buffer holds a pointer to the name.
+    static char devices[8][16];
+    static char first_device[] = "disk1s1";
 #pragma pack(push, 2)
     struct {
         int16_t vMVersion;
@@ -1188,8 +1238,15 @@ OSErr carbon_PBHGetVolParmsSync(HIOParam *block) {
         int32_t vMExtendedAttributes;
         void *vMDeviceID;
         uint32_t vMMaxNameLength;
-    } parameters = {4, (int32_t)(1u << 31 | 1u << 20 | 1u << 17), NULL, 0, 0, 0, 0, NULL, 255};
+    } parameters = {4, (int32_t)(1u << 31 | 1u << 20 | 1u << 17), NULL, 0, 0, 0, 0, first_device, 255};
 #pragma pack(pop)
+    if (disc >= 0 && disc < 8) {
+        snprintf(devices[disc], sizeof devices[disc], "disk%ds1", disc + 2);
+        parameters.vMDeviceID = devices[disc];
+        // bIsEjectable (0) and bIsRemovable (11).
+        parameters.vMExtendedAttributes = (int32_t)(1u << 0 | 1u << 11);
+    }
+    CARBON_TRACE("volume parameters: volume %d, device %s", block->header.ioVRefNum, (const char *)parameters.vMDeviceID);
     int32_t size = block->ioReqCount < (int32_t)sizeof parameters ? block->ioReqCount : (int32_t)sizeof parameters;
     if (block->ioBuffer && size > 0) memcpy(block->ioBuffer, &parameters, (size_t)size);
     block->ioActCount = size > 0 ? size : 0;
