@@ -48,6 +48,8 @@ let package = Package(
         .library(name: "Perryexpat", type: .dynamic, targets: ["PerryExpat"]),
         .library(name: "Perrysqlite3", type: .dynamic, targets: ["PerrySQLite3"]),
         .library(name: "Perryiconv", type: .dynamic, targets: ["PerryIconv"]),
+        // libresolv: Darwin's resolver state, from glibc's configuration.
+        .library(name: "Perryresolv", type: .dynamic, targets: ["PerryResolv"]),
         .library(name: "Perryicucore", type: .dynamic, targets: ["PerryICUCore"]),
         // libcompression, Apple's API over open compressors.
         .library(name: "Perrycompression", type: .dynamic, targets: ["PerryCompression"]),
@@ -255,6 +257,7 @@ let package = Package(
         // SQLite 3.54, built in the Docker image as libperry-sqlite3.
         .target(name: "PerrySQLite3", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("perry-sqlite3")]),
         .target(name: "PerryIconv"),
+        .target(name: "PerryResolv", linkerSettings: [.linkedLibrary("resolv")]),
         // The system's ICU, opened when first needed: its names carry its version.
         .target(name: "PerryICUCore", linkerSettings: [.linkedLibrary("dl")]),
         .target(name: "PerryAccelerate", dependencies: ["CPerryWrapped"], linkerSettings: [.linkedLibrary("openblas")]),
