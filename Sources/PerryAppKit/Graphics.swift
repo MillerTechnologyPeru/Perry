@@ -128,6 +128,14 @@ open class NSColor: NSObject {
 
     @ObjCClassMethod("colorWithRed:green:blue:alpha:")
     static func color(red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> NSColor { NSColor(red: red, green: green, blue: blue, alpha: alpha) }
+    /// A Core Image color's components; Core Image is QuartzCore's.
+    @ObjCClassMethod("colorWithCIColor:")
+    static func color(ciColor: NSObject?) -> NSColor {
+        typealias Component = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer) -> CGFloat
+        guard let color = ciColor?.objcObject else { return NSColor(red: 0, green: 0, blue: 0, alpha: 1) }
+        func component(_ name: String) -> CGFloat { unsafeBitCast(ObjCRuntime.msgSend, to: Component.self)(color, ObjCRuntime.selector(name)) }
+        return NSColor(red: component("red"), green: component("green"), blue: component("blue"), alpha: component("alpha"))
+    }
     @ObjCClassMethod("colorWithSRGBRed:green:blue:alpha:")
     static func color(sRGBRed red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat) -> NSColor { NSColor(red: red, green: green, blue: blue, alpha: alpha) }
     @ObjCClassMethod("colorWithCalibratedRed:green:blue:alpha:")
@@ -829,6 +837,13 @@ open class NSImage: NSObject {
         // Decoded once CoreGraphics is there to decode it.
         guard CG.ready else { return nil }
         decoded = true
+        // An image made of representations draws the first that gives a
+        // CGImage: a bitmap's, or Core Image's.
+        if data == nil, path == nil,
+           let made = representations.lazy.compactMap({ Send.responds($0.objcObject, "CGImage") ? Send.object($0.objcObject, "CGImage") : nil }).first {
+            cgImage = ObjCRuntime.retain(made)
+            return cgImage
+        }
         var source = data
         if source == nil, let path, let read = Send.object(Classes.named("NSData")?.pointer, "dataWithContentsOfFile:", path.objCArgument()) {
             source = NSObject(read)
@@ -938,7 +953,13 @@ open class NSImage: NSObject {
     @ObjCMethod("setCacheMode:") func setCacheMode(_ mode: UInt) {}
     @ObjCMethod("isValid") func isValid() -> Bool { true }
     @ObjCMethod("representations") func imageRepresentations() -> NSObject { NSMutableArray.of(representations) }
-    @ObjCMethod("addRepresentation:") func addRepresentation(_ representation: NSObject?) { representation.map { representations.append($0) } }
+    @ObjCMethod("addRepresentation:")
+    func addRepresentation(_ representation: NSObject?) {
+        guard let representation else { return }
+        representations.append(representation)
+        // An image of no file or drawing shows its representation.
+        if cgImage == nil, data == nil, path == nil, drawing == nil, drawingHandler == nil { decoded = false }
+    }
     @ObjCMethod("removeRepresentation:") func removeRepresentation(_ representation: NSObject?) { representations.removeAll { $0 === representation } }
     @ObjCMethod("CGImageForProposedRect:context:hints:")
     func cgImage(forProposedRect rect: UnsafeMutablePointer<CGRect>?, context: NSObject?, hints: NSObject?) -> UnsafeMutableRawPointer? { bitmap() }
@@ -1046,6 +1067,7 @@ open class NSGraphicsContext: NSObject {
     nonisolated(unsafe) static var saved: [NSGraphicsContext?] = []
     var cgContext: CGRef?
     var flipped = false
+    var ciContext: NSObject?
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -1095,6 +1117,19 @@ open class NSGraphicsContext: NSObject {
     @ObjCMethod("flushGraphics") func flushGraphics() {}
     @ObjCMethod("CGContext") func cgContextObject() -> UnsafeMutableRawPointer? { cgContext }
     @ObjCMethod("graphicsPort") func graphicsPort() -> UnsafeMutableRawPointer? { cgContext }
+    /// A Core Image context drawing into this one, made when first asked
+    /// for; nil when the app doesn't load Core Image.
+    @ObjCMethod("CIContext")
+    func ciContextObject() -> NSObject? {
+        if let ciContext { return ciContext }
+        guard let cls = Classes.named("CIContext") else { return nil }
+        typealias Make = @convention(c) (UnsafeMutableRawPointer, UnsafeRawPointer, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?)
+            -> UnsafeMutableRawPointer?
+        let made = unsafeBitCast(ObjCRuntime.msgSend, to: Make.self)(cls.pointer, ObjCRuntime.selector("contextWithCGContext:options:"),
+                                                                     cgContext, nil)
+        ciContext = made.map { NSObject($0) }
+        return ciContext
+    }
     @ObjCMethod("isFlipped") func isFlipped() -> Bool { flipped }
     @ObjCMethod("isDrawingToScreen") func isDrawingToScreen() -> Bool { true }
     @ObjCMethod("imageInterpolation") func imageInterpolation() -> UInt { 3 }
