@@ -23,6 +23,9 @@ open class NSApplication: NSResponder {
     var mainMenu: NSObject?
     var windowsMenu: NSObject?
     var servicesMenu: NSObject?
+    /// The object that answers the Services menu's requests, which nothing
+    /// sends here: kept for -servicesProvider (Bean sets it at launch).
+    var servicesProvider: NSObject?
     var helpMenu: NSObject?
     var applicationIconImage: NSObject?
     var appearance: NSObject?
@@ -58,6 +61,9 @@ open class NSApplication: NSResponder {
 
     @ObjCMethod("delegate") func appDelegate() -> NSObject? { delegateObject.map(NSObject.init) }
     @ObjCMethod("setDelegate:") func setDelegate(_ delegate: NSObject?) { delegateObject = delegate?.objcObject }
+
+    @ObjCMethod("servicesProvider") func appServicesProvider() -> NSObject? { servicesProvider }
+    @ObjCMethod("setServicesProvider:") func setServicesProvider(_ provider: NSObject?) { servicesProvider = provider }
 
     /// Tells the delegate, then posts the notification.
     func notify(_ selector: String, _ name: String, userInfo: NSObject? = nil) {
