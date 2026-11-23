@@ -182,6 +182,9 @@ open class NSColor: NSObject {
         let accent: (CGFloat, CGFloat, CGFloat) = (0.04, 0.52, 1.0)
         return [
             "windowBackgroundColor": (0.196, 0.196, 0.196, 1), "underPageBackgroundColor": (0.157, 0.157, 0.157, 1),
+            // A source list's (sidebar's) background, which nibs keep as a
+            // System color with the selection's blue as its fallback.
+            "_sourceListBackgroundColor": (0.176, 0.176, 0.176, 1),
             "controlColor": (1, 1, 1, 0.25), "controlBackgroundColor": (0.118, 0.118, 0.118, 1), "textBackgroundColor": (0.118, 0.118, 0.118, 1),
             "controlTextColor": (1, 1, 1, 0.85), "textColor": (1, 1, 1, 1), "labelColor": (1, 1, 1, 0.85),
             "secondaryLabelColor": (1, 1, 1, 0.55), "tertiaryLabelColor": (1, 1, 1, 0.25), "quaternaryLabelColor": (1, 1, 1, 0.1),
@@ -220,6 +223,7 @@ open class NSColor: NSObject {
             "orangeColor": (1, 0.5, 0, 1), "brownColor": (0.6, 0.4, 0.2, 1), "purpleColor": (0.5, 0, 0.5, 1),
             "cyanColor": (0, 1, 1, 1), "magentaColor": (1, 0, 1, 1),
             "windowBackgroundColor": (0.925, 0.925, 0.925, 1), "underPageBackgroundColor": (0.59, 0.59, 0.59, 1),
+            "_sourceListBackgroundColor": (0.91, 0.91, 0.92, 1),
             "controlColor": (1, 1, 1, 1), "controlBackgroundColor": (1, 1, 1, 1), "textBackgroundColor": (1, 1, 1, 1),
             "controlTextColor": (0, 0, 0, 0.85), "textColor": (0, 0, 0, 1), "labelColor": (0, 0, 0, 0.85),
             "secondaryLabelColor": (0, 0, 0, 0.5), "tertiaryLabelColor": (0, 0, 0, 0.26), "quaternaryLabelColor": (0, 0, 0, 0.1),
