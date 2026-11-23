@@ -288,20 +288,24 @@ public func CFStringGetCStringPtr(_ string: id?, _ encoding: UInt32) -> UnsafePo
     return Strings.utf8(string)
 }
 
+/// The UTF-16 unit at an index, or 0 past the end, which CoreFoundation
+/// doesn't check either.
 @c(_CFStringGetCharacterAtIndex)
 public func CFStringGetCharacterAtIndex(_ string: id?, _ index: Int) -> UInt16 {
-    let units = CFStrings.value(string).utf16
-    return units[units.index(units.startIndex, offsetBy: index)]
+    let units = Array(CFStrings.value(string).utf16)
+    return units.indices.contains(index) ? units[index] : 0
 }
 
+/// The range's UTF-16 units. A range past the end, which CoreFoundation
+/// doesn't check (Age of Empires III asks for 256 of a cursor's name,
+/// however long), gets zeros for the units that aren't there.
 @c(_CFStringGetCharacters)
 public func CFStringGetCharacters(_ string: id?, _ range: CFRange, _ buffer: UnsafeMutablePointer<UInt16>?) {
-    let units = CFStrings.value(string).utf16
-    guard let buffer, range.length > 0 else { return }
-    var index = units.index(units.startIndex, offsetBy: range.location)
+    guard let buffer, range.length > 0, range.location >= 0 else { return }
+    let units = Array(CFStrings.value(string).utf16)
     for offset in 0..<range.length {
-        buffer[offset] = units[index]
-        index = units.index(after: index)
+        let index = range.location + offset
+        buffer[offset] = index < units.count ? units[index] : 0
     }
 }
 
