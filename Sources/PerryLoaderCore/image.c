@@ -1259,7 +1259,7 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
 
 static perry_loader *startup_loader;
 
-static void *lookup_symbol(const char *install_name, const char *name) {
+static void *find_symbol(const char *install_name, const char *name) {
     perry_loader *loader = startup_loader;
     for (perry_image *image = loader->images; image; image = image->next) {
         // By install name, or by path: the main program's, and a library's
@@ -1297,7 +1297,7 @@ static void *lookup_symbol(const char *install_name, const char *name) {
 // As dlsym(RTLD_NEXT) looks for code at `caller`: in the images loaded
 // after the one it is in, then in the providers. A library that defines a
 // function of the system's, to wrap it, finds the system's so.
-static void *lookup_symbol_after(const void *caller, const char *name) {
+static void *find_symbol_after(const void *caller, const char *name) {
     perry_loader *loader = startup_loader;
     perry_image *from = NULL;
     for (perry_image *image = loader->images; image && !from; image = image->next) {
@@ -1319,6 +1319,24 @@ static void *lookup_symbol_after(const void *caller, const char *name) {
             return address;
     }
     return NULL;
+}
+
+// What dlsym and the like give Darwin code, which may call it: on ppc a Linux
+// function's stub that sets r2.
+static void *darwin_callable(void *address) {
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    return perry_ppc_linux_entry(address);
+#else
+    return address;
+#endif
+}
+
+static void *lookup_symbol(const char *install_name, const char *name) {
+    return darwin_callable(find_symbol(install_name, name));
+}
+
+static void *lookup_symbol_after(const void *caller, const char *name) {
+    return darwin_callable(find_symbol_after(caller, name));
 }
 
 // Darwin's layering: libSystem, then libobjc, then libdispatch (whose
