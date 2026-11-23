@@ -371,14 +371,15 @@ static void apply_dyld_info(perry_loader *loader, perry_image *image) {
 
 // MARK: - Symbol table binding
 
-// Images linked before LC_DYLD_INFO, which are 32-bit. Symbol pointer
-// sections (the non-lazy pointers and the stubs' lazy ones, bound now) have
-// an entry each in the indirect symbol table, from the section's reserved1;
-// other pointers to imports have external relocations, whose addend is in
-// place. Local relocations only move an image that is slid.
-#if !defined(__LP64__)
+// Images linked before LC_DYLD_INFO: the 32-bit ones, and x86_64's built for
+// Mac OS X 10.5. Symbol pointer sections (the non-lazy pointers and the
+// stubs' lazy ones, bound now) have an entry each in the indirect symbol
+// table, from the section's reserved1; other pointers to imports have
+// external relocations, whose addend is in place. Local relocations only
+// move an image that is slid.
+#if !defined(__LP64__) || defined(__x86_64__)
 typedef struct classic_symbols {
-    const struct nlist *symbols;
+    const nlist_t *symbols;
     uint32_t count;
     const char *strings;
     uint32_t strings_size;
@@ -423,11 +424,11 @@ static void fill_dyld_section(perry_image *image) {
 }
 #endif
 
-static uint32_t classic_symbol_value(perry_loader *loader, perry_image *image, const classic_symbols *table,
-                                     uint32_t index, const char **name_out) {
+static uintptr_t classic_symbol_value(perry_loader *loader, perry_image *image, const classic_symbols *table,
+                                      uint32_t index, const char **name_out) {
     if (index >= table->count)
         perry_fatal("%s: symbol index %u out of range", image->path, index);
-    const struct nlist *symbol = &table->symbols[index];
+    const nlist_t *symbol = &table->symbols[index];
     const char *name = symbol->n_strx < table->strings_size ? table->strings + symbol->n_strx : "";
     *name_out = name;
     if ((symbol->n_type & N_TYPE) == N_UNDF) {
@@ -439,15 +440,22 @@ static uint32_t classic_symbol_value(perry_loader *loader, perry_image *image, c
         // library for its symbols.
         if (!(image->header->flags & MH_TWOLEVEL))
             ordinal = -2;
-        return (uint32_t)bind_target(loader, image, ordinal, name, (symbol->n_desc & N_WEAK_REF) != 0);
+        return (uintptr_t)bind_target(loader, image, ordinal, name, (symbol->n_desc & N_WEAK_REF) != 0);
     }
 #if defined(__arm__)
     uint32_t address = (uint32_t)(uintptr_t)perry_image_vmaddr(image, symbol->n_value & ~1u);
     return address | ((symbol->n_desc & N_ARM_THUMB_DEF) || (symbol->n_value & 1) ? 1 : 0);
 #else
-    return (uint32_t)(uintptr_t)perry_image_vmaddr(image, symbol->n_value);
+    return (uintptr_t)perry_image_vmaddr(image, symbol->n_value);
 #endif
 }
+
+// A whole pointer's relocation: its r_length is the pointer size's log2.
+#if defined(__LP64__)
+enum { POINTER_LENGTH = 3, POINTER_RELOCATION = X86_64_RELOC_UNSIGNED };
+#else
+enum { POINTER_LENGTH = 2, POINTER_RELOCATION = GENERIC_RELOC_VANILLA };
+#endif
 
 static void apply_symbol_table(perry_loader *loader, perry_image *image) {
     const struct symtab_command *st = image->symtab;
@@ -457,6 +465,45 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
     };
     if (!table.symbols || !table.strings)
         perry_fatal("%s: the symbol table is not in a mapped segment", image->path);
+
+    // r_address is from the first segment, __PAGEZERO in an executable; on
+    // x86_64 from the first segment that can be written.
+    uint64_t first = image->segment_count ? image->segments[0].vmaddr : 0;
+#if defined(__x86_64__)
+    for (uint32_t s = 0; s < image->segment_count; s++)
+        if (image->segments[s].initprot & PROT_WRITE) {
+            first = image->segments[s].vmaddr;
+            break;
+        }
+#endif
+    uint8_t *relocation_base = perry_image_vmaddr(image, first);
+
+    // Local relocations first: the lazy pointers have them too, for the
+    // stub helpers they start out pointing at.
+    const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
+    for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
+        const struct relocation_info *relocation = &local[i];
+#if defined(__i386__) || defined(__powerpc__)
+        // On i386 and ppc scattered entries are also pointers to a local
+        // symbol with an offset: r_address is their low 24 bits, then r_type
+        // and r_length. ppc's others are parts of instructions' immediates,
+        // which code built to be slid (PIC) has none of.
+        if ((uint32_t)relocation->r_address & R_SCATTERED) {
+            uint32_t bits = (uint32_t)relocation->r_address;
+            if (((bits >> 24) & 0xf) == GENERIC_RELOC_VANILLA && ((bits >> 28) & 3) == 2 && !((bits >> 30) & 1))
+                *(slot_t *)(relocation_base + (bits & 0xffffff)) += (slot_t)image->slide;
+            continue;
+        }
+#else
+        // Scattered entries are parts of instructions' immediates, which are
+        // not slid; the rest are pointers.
+        if ((uint32_t)relocation->r_address & R_SCATTERED)
+            continue;
+#endif
+        if (relocation->r_length != POINTER_LENGTH || relocation->r_type != POINTER_RELOCATION)
+            perry_fatal("%s: unsupported local relocation %u", image->path, i);
+        *(slot_t *)(relocation_base + relocation->r_address) += (slot_t)image->slide;
+    }
 
     const uint32_t *indirect = dst->nindirectsyms ? perry_image_fileoff(image, dst->indirectsymoff) : NULL;
     for (uint32_t s = 0; s < image->segment_count; s++) {
@@ -504,52 +551,25 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
                     continue;
                 }
                 const char *name;
-                uint32_t value = classic_symbol_value(loader, image, &table, index, &name);
+                uintptr_t value = classic_symbol_value(loader, image, &table, index, &name);
                 if (type == S_LAZY_SYMBOL_POINTERS)
-                    value = (uint32_t)called_function(value, name);
+                    value = (uintptr_t)called_function(value, name);
                 write_bind(loader, &slots[n], value, name);
             }
         }
     }
 
-    // r_address is from the first segment, __PAGEZERO in an executable.
-    uint8_t *relocation_base = perry_image_vmaddr(image, image->segment_count ? image->segments[0].vmaddr : 0);
     const struct relocation_info *external = dst->nextrel ? perry_image_fileoff(image, dst->extreloff) : NULL;
     for (uint32_t i = 0; external && i < dst->nextrel; i++) {
         const struct relocation_info *relocation = &external[i];
         if (((uint32_t)relocation->r_address & R_SCATTERED) || !relocation->r_extern || relocation->r_pcrel
-            || relocation->r_length != 2 || relocation->r_type != GENERIC_RELOC_VANILLA)
+            || relocation->r_length != POINTER_LENGTH || relocation->r_type != POINTER_RELOCATION)
             perry_fatal("%s: unsupported external relocation %u", image->path, i);
         slot_t *slot = (slot_t *)(relocation_base + relocation->r_address);
         const char *name;
-        uint32_t value = classic_symbol_value(loader, image, &table, relocation->r_symbolnum, &name);
+        uintptr_t value = classic_symbol_value(loader, image, &table, relocation->r_symbolnum, &name);
         // A missing weak import stays NULL, whatever the addend.
         write_bind(loader, slot, value ? value + *slot : 0, name);
-    }
-
-    const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
-    for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
-        const struct relocation_info *relocation = &local[i];
-#if defined(__i386__) || defined(__powerpc__)
-        // On i386 and ppc scattered entries are also pointers to a local
-        // symbol with an offset: r_address is their low 24 bits, then r_type
-        // and r_length. ppc's others are parts of instructions' immediates,
-        // which code built to be slid (PIC) has none of.
-        if ((uint32_t)relocation->r_address & R_SCATTERED) {
-            uint32_t bits = (uint32_t)relocation->r_address;
-            if (((bits >> 24) & 0xf) == GENERIC_RELOC_VANILLA && ((bits >> 28) & 3) == 2 && !((bits >> 30) & 1))
-                *(slot_t *)(relocation_base + (bits & 0xffffff)) += (slot_t)image->slide;
-            continue;
-        }
-#else
-        // Scattered entries are parts of instructions' immediates, which are
-        // not slid; the rest are pointers.
-        if ((uint32_t)relocation->r_address & R_SCATTERED)
-            continue;
-#endif
-        if (relocation->r_length != 2 || relocation->r_type != GENERIC_RELOC_VANILLA)
-            perry_fatal("%s: unsupported local relocation %u", image->path, i);
-        *(slot_t *)(relocation_base + relocation->r_address) += (slot_t)image->slide;
     }
 }
 #endif
@@ -624,7 +644,7 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
         apply_chained_fixups(loader, image);
     else if (image->dyld_info)
         apply_dyld_info(loader, image);
-#if !defined(__LP64__)
+#if !defined(__LP64__) || defined(__x86_64__)
     else if (image->symtab && image->dysymtab)
         apply_symbol_table(loader, image);
 #endif
