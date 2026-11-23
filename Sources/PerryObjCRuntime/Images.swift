@@ -196,7 +196,7 @@ extension Runtime {
                 }
             }
 
-            #if arch(i386)
+            #if arch(i386) || arch(powerpc)
             mapLegacyMetadata(image, classNames: &classNames, loadClasses: &loadClasses, loadCategories: &loadCategories)
             #endif
 
@@ -377,7 +377,7 @@ extension Protocols {
 
     /// A protocol's method descriptions of one kind: selectors and types.
     public static func methods(_ proto: UnsafePointer<perry_protocol>, required: Bool, instance: Bool) -> [(SEL, UnsafePointer<CChar>?)] {
-        #if arch(i386)
+        #if arch(i386) || arch(powerpc)
         // Code's own address for a protocol is only its first five words.
         let proto = proto.pointee.name.flatMap(lookUp).map { UnsafePointer($0) } ?? proto
         #endif
@@ -395,7 +395,7 @@ extension Protocols {
 
     /// A protocol's instance properties (property_t: name, attributes).
     public static func properties(_ proto: UnsafePointer<perry_protocol>) -> [UnsafeRawPointer] {
-        #if arch(i386)
+        #if arch(i386) || arch(powerpc)
         let proto = proto.pointee.name.flatMap(lookUp).map { UnsafePointer($0) } ?? proto
         #endif
         guard let list = proto.pointee.instance_properties else { return [] }
