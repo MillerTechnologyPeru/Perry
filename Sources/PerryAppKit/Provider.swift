@@ -48,6 +48,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
 /// whether the app is active). The app is UIKit's to run, so this one is
 /// only made, and is active as the app is.
 func providerDidStart(_ info: perry_startup_info) {
+    NSAlert.registerLegacyConstructor()
     guard isMacCatalystApp(info.main_header), let cls = Classes.named("NSApplication") else { return }
     _ = Send.object(cls.pointer, "sharedApplication")
     App.shared?.active = true
