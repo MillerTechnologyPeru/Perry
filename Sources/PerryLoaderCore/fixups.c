@@ -18,7 +18,12 @@ static uint64_t bind_target(perry_loader *loader, perry_image *image, int ordina
     if (image->header->filetype == MH_EXECUTE && image != loader->main_image && strcmp(name, "_exit") == 0)
         return (uint64_t)(uintptr_t)perry_extension_exit;
     perry_symbol sym = perry_resolve(loader, image, ordinal, name, weak_import);
+#if defined(__powerpc__)
+    // Darwin code reaches a Linux function through a stub that sets r2.
+    return (uint64_t)(uintptr_t)perry_ppc_linux_entry(sym.address);
+#else
     return (uint64_t)(uintptr_t)sym.address;
+#endif
 }
 
 // A pointer-sized slot in the image, which Darwin's ARM ABIs size as the
@@ -382,7 +387,11 @@ static void dyld_nothing(void) {}
 
 static int dyld_func_lookup(const char *name, void **address) {
     (void)name;
+#if defined(__powerpc__)
+    *address = perry_ppc_thread_stub((void *)dyld_nothing);
+#else
     *address = (void *)dyld_nothing;
+#endif
     return 1;
 }
 
@@ -397,8 +406,13 @@ static void fill_dyld_section(perry_image *image) {
             if (strncmp(section->sectname, "__dyld", 16) != 0 || section->size < 2 * sizeof(slot_t))
                 continue;
             slot_t *slots = perry_image_vmaddr(image, section->addr);
+#if defined(__powerpc__)
+            slots[0] = (slot_t)(uintptr_t)perry_ppc_thread_stub((void *)dyld_nothing);
+            slots[1] = (slot_t)(uintptr_t)perry_ppc_thread_stub((void *)dyld_func_lookup);
+#else
             slots[0] = (slot_t)(uintptr_t)dyld_nothing;
             slots[1] = (slot_t)(uintptr_t)dyld_func_lookup;
+#endif
         }
     }
 }
