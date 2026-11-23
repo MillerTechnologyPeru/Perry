@@ -81,10 +81,19 @@ enum Bluetooth {
             let socket = directory.appending(path: "bus").path
             address = "unix:path=\(socket)"
 
+            let daemonLog = directory.appending(path: "dbus.log")
+            FileManager.default.createFile(atPath: daemonLog.path, contents: nil)
             daemon.executableURL = Bluetooth.tool("dbus-daemon")
             daemon.arguments = ["--session", "--nofork", "--address=\(address)"]
+            daemon.standardOutput = try FileHandle(forWritingTo: daemonLog)
+            daemon.standardError = daemon.standardOutput
             try daemon.run()
-            try Self.waitFor { FileManager.default.fileExists(atPath: socket) }
+            do {
+                try Self.waitFor { FileManager.default.fileExists(atPath: socket) }
+            } catch {
+                let output = (try? String(contentsOf: daemonLog, encoding: .utf8)) ?? ""
+                throw TestError.missingTool("a dbus-daemon that starts at \(socket) (\(output.isEmpty ? "no output" : output))")
+            }
 
             let log = directory.appending(path: "bluez.log")
             FileManager.default.createFile(atPath: log.path, contents: nil)
