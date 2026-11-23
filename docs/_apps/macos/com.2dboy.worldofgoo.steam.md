@@ -22,7 +22,7 @@ reports:
       - "PERRY_OBJC_UNRECOGNIZED=continue"
     level: 5
     source: maintainer
-    notes: Steam's Mac build (25111706) plays, drawing its levels through SDL and OpenGL once CoreVideo's display links exist. The maintainer played it and found mouse, keyboard and sound working.
+    notes: Steam's Mac build (25111706, Steam build ID 20824155) plays, drawing its levels through SDL and OpenGL once CoreVideo's display links exist. The maintainer played it and found mouse, keyboard and sound working.
     screenshots:
       - url: https://github.com/user-attachments/assets/e0a024fa-32b9-45ff-a83f-162b3a960cbb
         caption: In a level
