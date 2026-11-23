@@ -93,7 +93,11 @@ static void profile_handler(int signal, siginfo_t *info, void *raw_context) {
     (void)signal, (void)info;
     int saved = errno;
     ucontext_t *context = raw_context;
+#if defined(__powerpc__)
+    mcontext_t *machine = context->uc_mcontext.uc_regs;
+#else
     mcontext_t *machine = &context->uc_mcontext;
+#endif
     char line[64 * 17 + 24];
     char *out = line;
     if (profile_all) {
@@ -110,6 +114,10 @@ static void profile_handler(int signal, siginfo_t *info, void *raw_context) {
 #elif defined(__x86_64__)
     uintptr_t pc = (uintptr_t)machine->gregs[REG_RIP], fp = (uintptr_t)machine->gregs[REG_RBP], low = (uintptr_t)machine->gregs[REG_RSP];
     const uintptr_t alignment = 7;
+#elif defined(__powerpc__)
+    // No frame pointer: frames chain from r1, the stack pointer (see crash.c).
+    uintptr_t pc = machine->gregs[32], fp = machine->gregs[1], low = fp;
+    const uintptr_t alignment = 3;
 #else
     uintptr_t pc = machine->pc, fp = machine->regs[29], low = machine->sp;
     const uintptr_t alignment = 7;
@@ -118,7 +126,16 @@ static void profile_handler(int signal, siginfo_t *info, void *raw_context) {
     // Frame records are {previous fp, return address}, ascending the stack.
     for (int frame = 0; frame < 63 && fp && (fp & alignment) == 0 && fp >= low && fp - low < (64 << 20); frame++) {
         uintptr_t *record = (uintptr_t *)fp;
+#if defined(__powerpc__)
+        // The return address is the third word of the caller's frame (Darwin's
+        // linkage area).
+        uintptr_t next = record[0];
+        if (next <= fp || (next & alignment) || next - fp >= (64 << 20))
+            break;
+        uintptr_t ret = ((uintptr_t *)next)[2];
+#else
         uintptr_t next = record[0], ret = record[1];
+#endif
         if (!ret)
             break;
         *out++ = ' ';
