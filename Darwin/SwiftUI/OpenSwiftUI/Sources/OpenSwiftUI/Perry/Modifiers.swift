@@ -5,8 +5,9 @@
 //  Status: Perry's implementation, interim
 //
 //  Modifiers with a plainer effect than Apple's: Liquid Glass as a
-//  translucent fill of its shape; and some with none yet: list row and
-//  section separators, swipe actions, context menus, masks, scroll content
+//  blurred material in its shape, without its refraction; and some with
+//  none yet: list row and section separators, swipe actions, context
+//  menus, masks, scroll content
 //  backgrounds' visibility, and accessibility labels, values, hints and
 //  identifiers, which nothing reads.
 
@@ -41,10 +42,21 @@ public struct Glass: Equatable, Sendable {
 
 @available(OpenSwiftUI_v7_0, *)
 extension View {
-    /// Applies the Liquid Glass effect to a view: a translucent fill of the
-    /// shape behind it.
+    /// Applies the Liquid Glass effect to a view: behind it, the shape
+    /// filled with what is under it blurred, as a thin material is, then
+    /// with the glass's tint, and edged with a faint light rim.
     nonisolated public func glassEffect(_ glass: Glass = .regular, in shape: some Shape) -> some View {
-        background(shape.fill((glass.tintColor ?? Color.white).opacity(glass.opacity)))
+        background(
+            ZStack {
+                if glass.opacity > 0 {
+                    shape.fill(Material.ultraThin)
+                    if let tint = glass.tintColor {
+                        shape.fill(tint.opacity(glass.opacity * 0.5))
+                    }
+                    shape.stroke(Color.white.opacity(0.45), lineWidth: 0.5)
+                }
+            }
+        )
     }
 }
 

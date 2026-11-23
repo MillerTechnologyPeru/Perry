@@ -194,6 +194,8 @@ package struct _ShapeStyle_RenderedShape {
             render(color: resolved)
         case let .paint(paint):
             render(paint: paint)
+        case let .backgroundMaterial(material):
+            render(material: material)
         default:
             _openSwiftUIUnimplementedFailure()
         }
@@ -252,6 +254,57 @@ package struct _ShapeStyle_RenderedShape {
             }
         case .empty:
             break
+        }
+    }
+
+    /// A background material: what is behind the shape, blurred and with
+    /// its colors deepened, under the material's tint.
+    ///
+    /// The system takes each material's blur, saturation and tint from its
+    /// CoreMaterial recipe; these are close to those by eye, a thinner
+    /// material letting more of what is behind it through.
+    private mutating func render(material: Material.ResolvedMaterial) {
+        guard case let .path(path, fillStyle) = shape else {
+            _openSwiftUIUnimplementedWarning()
+            return
+        }
+        let dark = material.flags.contains(.darkColorScheme)
+        let cover: Float = switch material.id {
+        case .ultraThin: dark ? 0.35 : 0.3
+        case .thin: dark ? 0.5 : 0.45
+        case .regular: dark ? 0.66 : 0.6
+        case .thick: dark ? 0.8 : 0.76
+        case .ultraThick: dark ? 0.9 : 0.88
+        default: dark ? 0.75 : 0.72
+        }
+        let white: Float = dark ? 0.14 : 1
+        let tint = Color.Resolved(red: white, green: white, blue: white, opacity: cover)
+        guard !material.flags.contains(.reduceTransparency), !material.flags.contains(.noBlur) else {
+            // Nothing shows through: the material's own color, opaque.
+            let plain: Float = dark ? 0.17 : 0.95
+            render(color: Color.Resolved(red: plain, green: plain, blue: plain, opacity: 1))
+            return
+        }
+        let effect = BackdropEffect(
+            color: tint,
+            filters: [.blur(BlurStyle(radius: 30, isOpaque: true)), .saturation(1.8)]
+        )
+        let bounds = path.rect() ?? path.boundingRect
+        let content = DisplayList.Item.Value.content(DisplayList.Content(.backdrop(effect), seed: contentSeed))
+        if path.rect() != nil {
+            item.value = content
+            item.frame.origin.x += bounds.origin.x
+            item.frame.origin.y += bounds.origin.y
+            item.frame.size = bounds.size
+        } else {
+            // Any other shape clips the backdrop that fills its bounds.
+            let backdrop = DisplayList.Item(
+                content,
+                frame: bounds,
+                identity: .none,
+                version: item.version
+            )
+            item.value = .effect(.clip(path, fillStyle), DisplayList(backdrop))
         }
     }
 
