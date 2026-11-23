@@ -23,5 +23,5 @@ done
 # above them and the libraries they bring. Its pthread_create takes the place
 # of glibc's for every library, so that each thread notes its stack
 # (ppc_thread.c).
-$cc -no-pie -Wl,-Ttext-segment=0x70000000 -Wl,--export-dynamic-symbol=pthread_create $objects -o "$out/bin/perry" -ldl -lpthread
+$cc -no-pie -Wl,-Ttext-segment=0x70000000 -Wl,--export-dynamic-symbol=pthread_create '-Wl,--export-dynamic-symbol=perry_ppc_*' $objects -o "$out/bin/perry" -ldl -lpthread
 echo "$out/bin/perry"
