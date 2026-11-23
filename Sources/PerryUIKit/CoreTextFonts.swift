@@ -50,15 +50,30 @@ enum CTFonts {
     /// The CGFont of each font name, made once.
     nonisolated(unsafe) private static var faces: [String: UnsafeMutableRawPointer] = [:]
 
-    /// A system font's name is FontConfig's sans-serif.
+    /// The family the system font is drawn in: Inter, which is drawn after
+    /// Apple's San Francisco, when FontConfig has it, and DejaVu Sans, which
+    /// Perry's packages install, otherwise.
+    static let systemFamily = has("Inter") ? "Inter" : "DejaVu Sans"
+
+    /// Whether FontConfig has the family, not only a font in its place.
+    static func has(_ family: String) -> Bool {
+        guard let face = named(family) else { return false }
+        defer { ObjCRuntime.release(face) }
+        guard let name = copyPostScriptName?(face) else { return false }
+        defer { ObjCRuntime.release(name) }
+        return String(objCArgument: name).hasPrefix(String(family.filter { $0 != " " }))
+    }
+
+    private static func named(_ name: String) -> UnsafeMutableRawPointer? {
+        let string = name.objCOwnedReturnValue()
+        defer { ObjCRuntime.release(string) }
+        return createWithFontName?(string)
+    }
+
+    /// The face a font is drawn in, as text views and labels draw it.
     static func face(_ font: UIFont) -> UnsafeMutableRawPointer? {
-        let name = font.state.name.hasPrefix(".") ? "sans-serif" : font.state.name
+        let name = font.drawingName
         if let face = faces[name] { return face }
-        func named(_ name: String) -> UnsafeMutableRawPointer? {
-            let string = name.objCOwnedReturnValue()
-            defer { ObjCRuntime.release(string) }
-            return createWithFontName?(string)
-        }
         guard let face = named(name) ?? named("sans-serif") else { return nil }
         faces[name] = face
         return face
