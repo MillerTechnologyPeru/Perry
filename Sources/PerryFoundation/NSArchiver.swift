@@ -358,8 +358,10 @@ public final class NSArchiver: NSObject {
     }
 
     @ObjCClassMethod("archiveRootObject:toFile:")
-    static func archiveRootObject(_ root: ObjCObject?, toFile path: String) -> Bool {
-        (try? LegacyArchivers.archive(root?.id).write(to: URL(fileURLWithPath: path))) != nil
+    /// A nil path archives nothing.
+    static func archiveRootObject(_ root: ObjCObject?, toFile path: String?) -> Bool {
+        guard let path else { return false }
+        return (try? LegacyArchivers.archive(root?.id).write(to: URL(fileURLWithPath: path))) != nil
     }
 
     @ObjCMethod("initForWritingWithMutableData:")
@@ -876,8 +878,8 @@ public final class NSUnarchiver: NSObject {
     }
 
     @ObjCClassMethod("unarchiveObjectWithFile:")
-    static func unarchiveObject(withFile path: String) -> ObjCObject? {
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+    static func unarchiveObject(withFile path: String?) -> ObjCObject? {
+        guard let path, let data = FileManager.default.contents(atPath: path) else { return nil }
         return root(Array(data))
     }
 
