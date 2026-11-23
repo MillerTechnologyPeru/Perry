@@ -299,8 +299,9 @@ public func dispatch_set_finalizer_f(_ object: Object?, _ finalizer: Function?) 
         source.finalizer = finalizer
     } else {
         // libdispatch calls it with only the context; on armv7 it does not
-        // keep r9 for libdispatch as the functions it runs do.
-        linux_dispatch_set_finalizer_f(Objects.linux(object), finalizer)
+        // keep r9 for libdispatch as the functions it runs do, and on ppc
+        // the loader's stub calls it (darwinCallable).
+        linux_dispatch_set_finalizer_f(Objects.linux(object), finalizer.map { darwinCallable($0) })
     }
 }
 
