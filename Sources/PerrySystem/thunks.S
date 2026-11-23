@@ -191,7 +191,6 @@ PASSTHROUGH _pthread_equal, pthread_equal
 #endif
 PASSTHROUGH _pthread_attr_init, pthread_attr_init
 PASSTHROUGH _pthread_attr_destroy, pthread_attr_destroy
-PASSTHROUGH _pthread_attr_getstacksize, pthread_attr_getstacksize
 PASSTHROUGH _access, perry_access
 PASSTHROUGH _mkdir, mkdir
 PASSTHROUGH _symlink, symlink
