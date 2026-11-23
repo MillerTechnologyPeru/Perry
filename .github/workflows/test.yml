@@ -16,10 +16,11 @@ concurrency:
 jobs:
   # The Objective-C and Swift fixtures in Tests/Fixtures/Darwin are built
   # against Apple's SDK, and their expected output is recorded from Apple's
-  # frameworks, so they come from a Mac.
+  # frameworks, so they come from a Mac: one on macOS 27, whose libraries
+  # (SQLite 3.54 among them) are the ones Perry matches.
   fixtures:
     name: Darwin fixtures
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 60
     steps:
       - name: Check out
