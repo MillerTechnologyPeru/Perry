@@ -121,13 +121,13 @@ public func LSOpenCFURLRef(_ url: UnsafeMutableRawPointer?, _ launched: UnsafeMu
 
 /// LongDateTime: seconds since 1904, as an Int64; CFAbsoluteTime counts
 /// from 2001, 3,061,152,000 seconds later.
-@c(_UCConvertCFAbsoluteTimeToLongDateTime)
+@DarwinC("_UCConvertCFAbsoluteTimeToLongDateTime")
 public func UCConvertCFAbsoluteTimeToLongDateTime(_ time: Double, _ longDate: UnsafeMutablePointer<Int64>?) -> Int32 {
     longDate?.pointee = Int64((time + 3_061_152_000).rounded(.down))
     return 0
 }
 
-@c(_UCConvertLongDateTimeToCFAbsoluteTime)
+@DarwinC("_UCConvertLongDateTimeToCFAbsoluteTime")
 public func UCConvertLongDateTimeToCFAbsoluteTime(_ longDate: Int64, _ time: UnsafeMutablePointer<Double>?) -> Int32 {
     time?.pointee = Double(longDate) - 3_061_152_000
     return 0
