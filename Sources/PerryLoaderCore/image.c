@@ -38,6 +38,10 @@ void perry_loader_init(perry_loader *loader) {
     if (host_page_size > 0x4000)
         perry_fatal("host page size %zu is larger than the 16 KB Mach-O segment alignment", host_page_size);
 
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    perry_ppc_note_thread();
+#endif
+
     const char *env = getenv("PERRY_LIBRARY_PATH");
     if (env) {
         char *copy = strdup(env);
@@ -1237,14 +1241,14 @@ static void run_image_initializers(perry_loader *loader, perry_image *image, int
                 initializer_fn *fns = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(void *); k++) {
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fns[k], image->path);
-                    fns[k](argc, argv, envp, apple, &vars);
+                    PERRY_DARWIN_CALL(fns[k](argc, argv, envp, apple, &vars));
                 }
             } else if (type == S_INIT_FUNC_OFFSETS) {
                 const uint32_t *offsets = perry_image_vmaddr(image, sect->addr);
                 for (uint64_t k = 0; k < sect->size / sizeof(uint32_t); k++) {
                     initializer_fn fn = (initializer_fn)(void *)(image->base + offsets[k]);
                     perry_trace(PERRY_TRACE_INIT, "initializer %p in %s", (void *)fn, image->path);
-                    fn(argc, argv, envp, apple, &vars);
+                    PERRY_DARWIN_CALL(fn(argc, argv, envp, apple, &vars));
                 }
             }
         }
@@ -1651,5 +1655,7 @@ void perry_run_main(perry_loader *loader, perry_image *image, int argc, char **a
     main_fn entry = image->has_entry ? (main_fn)(void *)(image->base + image->entryoff)
                                      : (main_fn)image->legacy_main;
     perry_trace(PERRY_TRACE_INIT, "calling main at %p", (void *)entry);
-    exit(entry(argc, argv, envp, apple));
+    int status;
+    PERRY_DARWIN_CALL(status = entry(argc, argv, envp, apple));
+    exit(status);
 }
