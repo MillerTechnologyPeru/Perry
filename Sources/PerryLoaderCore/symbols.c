@@ -525,10 +525,12 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
-    // A Mac app's Core Image has no provider: Core Image is UIKit's, whose
-    // classes AppKit's would collide with, so a Mac app finds it missing,
-    // as one that links it weakly can.
-    if (strstr(install_name, "/CoreImage.framework/Versions/"))
+    // A Mac app's Core Image and AuthenticationServices have no provider:
+    // they're UIKit's, whose classes AppKit's would collide with
+    // (NSTextContainer), so a Mac app finds them missing, as one that links
+    // them weakly can. TurboTax links AuthenticationServices for web sign-in.
+    if (strstr(install_name, "/CoreImage.framework/Versions/") ||
+        strstr(install_name, "/AuthenticationServices.framework/Versions/"))
         return false;
 #endif
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
