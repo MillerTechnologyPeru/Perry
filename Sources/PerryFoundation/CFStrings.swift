@@ -479,9 +479,9 @@ public func CFStringHasSuffix(_ string: id?, _ suffix: id?) -> Bool {
 @c(_CFStringGetIntValue)
 public func CFStringGetIntValue(_ string: id?) -> Int32 { Int32(truncatingIfNeeded: Strings.integerPrefix(CFStrings.value(string))) }
 
-@c(_CFStringGetDoubleValue)
-public func CFStringGetDoubleValue(_ string: id?) -> Double.ObjCResultType {
-    darwinResult(CFStrings.value(string).withCString { strtod($0, nil) })
+@DarwinC("_CFStringGetDoubleValue")
+public func CFStringGetDoubleValue(_ string: id?) -> Double {
+    CFStrings.value(string).withCString { strtod($0, nil) }
 }
 
 @c(_CFStringCreateArrayBySeparatingStrings)
