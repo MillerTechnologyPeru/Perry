@@ -762,6 +762,10 @@ open class NSAlert: NSObject {
     var icon: NSObject?
     var showsHelp = false
     var delegate: UnsafeMutableRawPointer?
+    /// Made by +alertWithMessageText:…, whose buttons answer
+    /// NSAlertDefaultReturn (1), NSAlertAlternateReturn (0) and
+    /// NSAlertOtherReturn (-1).
+    var legacyReturns = false
 
     @ObjCMethod("init")
     public required override init() { super.init() }
@@ -820,6 +824,12 @@ open class NSAlert: NSObject {
     /// button answers.
     @ObjCMethod("runModal")
     func runModal() -> Int {
+        let chosen = modalChoice()
+        guard legacyReturns else { return chosen }
+        return [1, 0, -1][max(0, min(2, chosen - 1000))]
+    }
+
+    private func modalChoice() -> Int {
         let titles = buttons.map(\.title)
         appKitWarning("alert: \(messageText)\(informativeText.isEmpty ? "" : " — \(informativeText)")"
                       + (titles.isEmpty ? "" : " [\(titles.joined(separator: ", "))]"))
@@ -876,5 +886,42 @@ open class NSAlert: NSObject {
     @ObjCMethod("beginSheetModalForWindow:modalDelegate:didEndSelector:contextInfo:")
     func beginSheetModal(for window: NSObject?, modalDelegate: NSObject?, didEndSelector: ObjCSelector?, contextInfo: UnsafeMutableRawPointer?) {
         _ = runModal()
+    }
+}
+
+// MARK: - The original alert
+
+extension NSAlert {
+    /// +alertWithMessageText:defaultButton:alternateButton:otherButton:
+    /// informativeTextWithFormat:, which ends in a format's arguments: a
+    /// method of no fixed arity, added by hand. Its buttons are the default
+    /// ("OK" when it has no title), the alternate and the other, as given.
+    /// The format's first %@ is its first argument on i386 and x86_64,
+    /// where that argument is where a fixed one after the format would be;
+    /// elsewhere the format is the text as it is.
+    static func registerLegacyConstructor() {
+        typealias Object = UnsafeMutableRawPointer?
+        typealias Make = @convention(c) (Object, UnsafeRawPointer?, Object, Object, Object, Object, Object, Object) -> Object
+        let make: Make = { cls, _, message, defaultTitle, alternateTitle, otherTitle, format, first in
+            guard let made = Send.object(cls, "new"), let alert = NSObject(made).as(NSAlert.self) else { return nil }
+            func text(_ string: Object) -> String? { string.map { String(objCArgument: $0) } }
+            alert.messageText = text(message) ?? ""
+            var informative = text(format) ?? ""
+            #if arch(x86_64) || arch(i386)
+            if let range = informative.firstRange(of: "%@") {
+                let argument = first.flatMap { Send.object($0, "description") }.map { String(objCArgument: $0) } ?? "(null)"
+                informative.replaceSubrange(range, with: argument)
+            }
+            #endif
+            alert.informativeText = informative
+            _ = alert.addButton(title: text(defaultTitle) ?? "OK")
+            if let title = text(alternateTitle) { _ = alert.addButton(title: title) }
+            if let title = text(otherTitle) { _ = alert.addButton(title: title) }
+            alert.legacyReturns = true
+            return Send.object(made, "autorelease")
+        }
+        NSAlert.objCClass.addMethod("alertWithMessageText:defaultButton:alternateButton:otherButton:informativeTextWithFormat:",
+                                    types: "@@:@@@@@", implementation: unsafeBitCast(make, to: UnsafeRawPointer.self),
+                                    isClassMethod: true)
     }
 }
