@@ -285,13 +285,131 @@ static bool perry_path_hidden(const char *path) {
     return false;
 }
 
+// MARK: - Discs
+
+// Optical discs and disc images mounted on this machine are volumes of
+// their own, as a Mac shows them: at /Volumes/<name>, from /dev/disk2 and
+// on, which getmntinfo lists after the volume at / and IOKit's IOCDMedia
+// names (Sources/PerryIOKit/Discs.swift finds the same discs in the same
+// order). A disc is a file system mounted from an optical drive (/dev/sr0),
+// or from a loop device with a disc's file system (ISO 9660, UDF, HFS,
+// HFS+), which is how a desktop mounts a disc image; PERRY_DISCS names
+// others, as paths or Name=path pairs, colon-separated.
+enum { PERRY_MAX_DISCS = 8 };
+
+struct perry_disc {
+    char name[256];
+    char mount[PATH_MAX];
+};
+
+/// A mountinfo field, with its octal escapes (\040 for a space) undone.
+static void mountinfo_field(const char *field, size_t length, char *out, size_t size) {
+    size_t written = 0;
+    for (size_t i = 0; i < length && written + 1 < size; i++) {
+        if (field[i] == '\\' && i + 3 < length && field[i + 1] >= '0' && field[i + 1] <= '3' &&
+            field[i + 2] >= '0' && field[i + 2] <= '7' && field[i + 3] >= '0' && field[i + 3] <= '7') {
+            out[written++] = (char)(((field[i + 1] - '0') << 6) | ((field[i + 2] - '0') << 3) | (field[i + 3] - '0'));
+            i += 3;
+        } else {
+            out[written++] = field[i];
+        }
+    }
+    out[written] = '\0';
+}
+
+static const char *last_component(const char *path) {
+    const char *end = path + strlen(path);
+    while (end > path && end[-1] == '/') end--;
+    const char *start = end;
+    while (start > path && start[-1] != '/') start--;
+    return start;
+}
+
+static int add_disc(struct perry_disc *discs, int count, const char *name, size_t name_length, const char *mount) {
+    if (count >= PERRY_MAX_DISCS || !*mount) return count;
+    for (int i = 0; i < count; i++)
+        if (strcmp(discs[i].mount, mount) == 0) return count;
+    while (name_length > 0 && name[name_length - 1] == '/') name_length--;
+    if (name_length == 0 || name_length >= sizeof(discs[count].name)) return count;
+    memcpy(discs[count].name, name, name_length);
+    discs[count].name[name_length] = '\0';
+    snprintf(discs[count].mount, sizeof(discs[count].mount), "%s", mount);
+    return count + 1;
+}
+
+/// The discs mounted now, at most PERRY_MAX_DISCS.
+static int perry_discs(struct perry_disc *discs) {
+    int count = 0;
+    const char *setting = getenv("PERRY_DISCS");
+    while (setting && *setting) {
+        const char *end = strchrnul(setting, ':');
+        char item[PATH_MAX];
+        size_t length = (size_t)(end - setting);
+        if (length > 0 && length < sizeof(item)) {
+            memcpy(item, setting, length);
+            item[length] = '\0';
+            char *equals = strchr(item, '=');
+            if (equals && !memchr(item, '/', (size_t)(equals - item))) {
+                count = add_disc(discs, count, item, (size_t)(equals - item), equals + 1);
+            } else {
+                const char *name = last_component(item);
+                count = add_disc(discs, count, name, strlen(name), item);
+            }
+        }
+        setting = *end ? end + 1 : end;
+    }
+    // "id parent major:minor root mount options [tags] - type source super".
+    FILE *file = fopen("/proc/self/mountinfo", "r");
+    if (!file) return count;
+    char line[4096];
+    while (fgets(line, sizeof(line), file)) {
+        char *rest = strstr(line, " - ");
+        if (!rest) continue;
+        *rest = '\0';
+        char type[64] = "", source[256] = "";
+        if (sscanf(rest + 3, "%63s %255s", type, source) != 2) continue;
+        bool optical = strncmp(source, "/dev/sr", 7) == 0;
+        bool image = strncmp(source, "/dev/loop", 9) == 0 &&
+                     (strcmp(type, "iso9660") == 0 || strcmp(type, "udf") == 0 || strcmp(type, "hfs") == 0 ||
+                      strcmp(type, "hfsplus") == 0);
+        if (!optical && !image) continue;
+        // The mount point is the fifth field.
+        const char *field = line;
+        for (int skipped = 0; skipped < 4 && field; skipped++) {
+            field = strchr(field, ' ');
+            if (field) field++;
+        }
+        if (!field) continue;
+        char mount[PATH_MAX];
+        mountinfo_field(field, strcspn(field, " "), mount, sizeof(mount));
+        const char *name = last_component(mount);
+        count = add_disc(discs, count, name, strlen(name), mount);
+    }
+    fclose(file);
+    return count;
+}
+
+/// Where a path under /Volumes/<a disc's name> is on this machine.
+static bool disc_path(const char *path, char *out, size_t size) {
+    if (!path || strncmp(path, "/Volumes/", 9) != 0) return false;
+    struct perry_disc discs[PERRY_MAX_DISCS];
+    int count = perry_discs(discs);
+    for (int i = 0; i < count; i++) {
+        size_t length = strlen(discs[i].name);
+        const char *rest = path + 9 + length;
+        if (strncmp(path + 9, discs[i].name, length) != 0 || (*rest != '\0' && *rest != '/')) continue;
+        return (size_t)snprintf(out, size, "%s%s", discs[i].mount, rest) < size;
+    }
+    return false;
+}
+
 /// Whether a failed lookup of `path` is worth trying again: it was not
-/// found, and another name for it is, in another case or a system file
-/// made here. errno is kept.
+/// found, and another name for it is, in another case, a system file
+/// made here or a disc's. errno is kept.
 static bool other_case(const char *path, char *out, size_t size) {
     if (errno != ENOENT)
         return false;
-    bool found = darwin_system_file(path, out, size) || path_in_any_case(path, out, size);
+    bool found = disc_path(path, out, size) || darwin_system_file(path, out, size) || path_in_any_case(path, out, size);
     errno = ENOENT;
     return found;
 }
@@ -998,31 +1116,66 @@ int darwin_fstatvfs(int fd, struct darwin_statvfs *out) {
 #endif
 
 // getmntinfo: the file systems mounted, as an array the library keeps and
-// the next call reuses. There is the one volume, at /, as statfs reports
-// every file system, with the sizes of the one the program's home is on:
-// where it keeps what it writes.
+// the next call reuses. There is the volume at /, as statfs reports every
+// file system of this machine's own, with the sizes of the one the
+// program's home is on, where it keeps what it writes; and after it the
+// discs mounted, each read-only at /Volumes/<its name> from /dev/disk2 and
+// on.
 static int mounted(struct darwin_statfs *out) {
     struct statfs info;
     const char *home = getenv("HOME");
-    if (statfs(home ? home : "/", &info) != 0 && statfs("/", &info) != 0) return -1;
-    statfs_to_darwin(&info, out);
-    return 0;
+    if (statfs(home ? home : "/", &info) != 0 && statfs("/", &info) != 0) return 0;
+    statfs_to_darwin(&info, &out[0]);
+    struct perry_disc discs[PERRY_MAX_DISCS];
+    int count = perry_discs(discs), volumes = 1;
+    for (int i = 0; i < count; i++) {
+        struct darwin_statfs *volume = &out[volumes];
+        if (statfs(discs[i].mount, &info) != 0) continue;
+        statfs_to_darwin(&info, volume);
+        volume->f_flags |= DARWIN_MNT_RDONLY;
+        strcpy(volume->f_fstypename, "cd9660");
+        snprintf(volume->f_mntonname, sizeof(volume->f_mntonname), "/Volumes/%s", discs[i].name);
+        // The device is numbered by the disc's place among them all, as
+        // IOKit's media are.
+        snprintf(volume->f_mntfromname, sizeof(volume->f_mntfromname), "/dev/disk%d", i + 2);
+        volumes++;
+    }
+    return volumes;
 }
 
 int darwin_getmntinfo(struct darwin_statfs **out, int flags) INODE64_SYMBOL(getmntinfo);
 int darwin_getmntinfo(struct darwin_statfs **out, int flags) {
     (void)flags;
-    static struct darwin_statfs volume;
-    if (!out || mounted(&volume) != 0) return 0;
-    *out = &volume;
-    return 1;
+    static struct darwin_statfs volumes[1 + PERRY_MAX_DISCS];
+    if (!out) return 0;
+    int count = mounted(volumes);
+    *out = volumes;
+    return count;
 }
 
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) INODE64_SYMBOL(statfs);
 int darwin_statfs_path(const char *path, struct darwin_statfs *out) {
     struct statfs info;
-    if (statfs(path, &info) != 0) return -1;
+    char found[PATH_MAX];
+    int result = statfs(path, &info);
+    if (result != 0 && errno == ENOENT && disc_path(path, found, sizeof(found))) {
+        path = found;
+        result = statfs(path, &info);
+    }
+    if (result != 0) return -1;
     statfs_to_darwin(&info, out);
+    // A path on a disc is on that disc's volume.
+    struct perry_disc discs[PERRY_MAX_DISCS];
+    int count = perry_discs(discs);
+    for (int i = 0; i < count; i++) {
+        size_t length = strlen(discs[i].mount);
+        if (strncmp(path, discs[i].mount, length) != 0 || (path[length] != '\0' && path[length] != '/')) continue;
+        out->f_flags |= DARWIN_MNT_RDONLY;
+        strcpy(out->f_fstypename, "cd9660");
+        snprintf(out->f_mntonname, sizeof(out->f_mntonname), "/Volumes/%s", discs[i].name);
+        snprintf(out->f_mntfromname, sizeof(out->f_mntfromname), "/dev/disk%d", i + 2);
+        break;
+    }
     return 0;
 }
 
@@ -1526,8 +1679,9 @@ static int statfs_to_32(int result, const struct darwin_statfs *in, struct darwi
     out->f_type = 17;
     out->f_flags = (int32_t)in->f_flags;
     strcpy(out->f_fstypename, "hfs");
-    strcpy(out->f_mntonname, in->f_mntonname);
-    strcpy(out->f_mntfromname, in->f_mntfromname);
+    // The old structure's names are 90 bytes.
+    snprintf(out->f_mntonname, sizeof(out->f_mntonname), "%s", in->f_mntonname);
+    snprintf(out->f_mntfromname, sizeof(out->f_mntfromname), "%s", in->f_mntfromname);
     return 0;
 }
 
@@ -1546,11 +1700,16 @@ int darwin_fstatfs32(int fd, struct darwin_statfs32 *out) {
 int darwin_getmntinfo32(struct darwin_statfs32 **out, int flags) DARWIN_SYMBOL(getmntinfo);
 int darwin_getmntinfo32(struct darwin_statfs32 **out, int flags) {
     (void)flags;
-    static struct darwin_statfs32 volume;
-    struct darwin_statfs info;
-    if (!out || statfs_to_32(mounted(&info), &info, &volume) != 0) return 0;
-    *out = &volume;
-    return 1;
+    static struct darwin_statfs32 volumes[1 + PERRY_MAX_DISCS];
+    struct darwin_statfs info[1 + PERRY_MAX_DISCS];
+    if (!out) return 0;
+    int count = mounted(info);
+    for (int i = 0; i < count; i++) {
+        statfs_to_32(0, &info[i], &volumes[i]);
+        if (i > 0) strcpy(volumes[i].f_fstypename, "cd9660");
+    }
+    *out = volumes;
+    return count;
 }
 
 // Names longer than the old d_name are cut short; Linux allows 255 bytes, as
