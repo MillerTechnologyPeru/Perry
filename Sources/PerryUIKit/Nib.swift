@@ -705,7 +705,7 @@ open class UINib: NSObject {
 
     @ObjCClassMethod("nibWithNibName:bundle:")
     static func nib(named name: String, bundle: NSObject?) -> UINib? {
-        let directory = (bundle?.as(NSBundle.self) ?? NSBundle.main()).bundlePath()
+        let directory = (bundle?.as(NSBundle.self) ?? NSBundle.main()).resourceDirectory
         for candidate in [directory, directory + "/Base.lproj", directory + "/en.lproj"] {
             if let archive = Nibs.load(named: name, in: candidate) { return make(archive, bundlePath: candidate) }
         }
@@ -715,7 +715,7 @@ open class UINib: NSObject {
     @ObjCClassMethod("nibWithData:bundle:")
     static func nib(data: NSObject, bundle: NSObject?) -> UINib? {
         guard let archive = NibArchive(data.as(NSData.self)?.byteArray ?? []) else { return nil }
-        return make(archive, bundlePath: (bundle?.as(NSBundle.self) ?? NSBundle.main()).bundlePath())
+        return make(archive, bundlePath: (bundle?.as(NSBundle.self) ?? NSBundle.main()).resourceDirectory)
     }
 
     /// A nib inside another, as prototype cells are kept.
@@ -870,6 +870,11 @@ extension NSData {
 
 extension NSBundle {
     @ObjCMethod("bundlePath") func bundlePath() -> String
+
+    /// Where the bundle's nibs, storyboards and fonts are: the bundle
+    /// itself for an iOS app, Contents/Resources for a Mac one, a Mac
+    /// Catalyst app among them.
+    var resourceDirectory: String { resourcePath() ?? bundlePath() }
 }
 
 extension NSDictionary {
