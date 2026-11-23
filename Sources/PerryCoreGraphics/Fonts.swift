@@ -92,6 +92,18 @@ enum Fonts {
     static var directory: String {
         getenv("PERRY_TMP").map { String(cString: $0) } ?? "/tmp"
     }
+
+    /// Adds the user's own fonts (~/.local/share/fonts and ~/.fonts) to the
+    /// ones FontConfig chooses from. It looks for them in HOME, which the
+    /// loader sets to the app's container, so they are found from the home
+    /// directory the system has for the user.
+    static func addUserFonts() {
+        guard let user = getpwuid(getuid()), let directory = user.pointee.pw_dir else { return }
+        let home = String(cString: directory)
+        for fonts in [home + "/.local/share/fonts", home + "/.fonts"] where access(fonts, F_OK) == 0 {
+            _ = fonts.withCString { FcConfigAppFontAddDir(nil, $0) }
+        }
+    }
 }
 
 @c(_CGFontGetTypeID) public func CGFontGetTypeID() -> UInt { TypeIDs.font }
