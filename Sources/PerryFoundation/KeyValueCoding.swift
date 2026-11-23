@@ -301,8 +301,13 @@ enum Structures {
     static func get(_ object: id, _ selector: SEL, type: String) -> id? {
         guard let size = TypeEncoding.size(of: type), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
         else { return nil }
-        var bytes = [UInt8](repeating: 0, count: max(size, 4))
-        #if arch(i386)
+        var bytes = [UInt8](repeating: 0, count: max(size, 8))
+        #if arch(powerpc)
+        // By the type, as Darwin's ABI has it (DarwinCalls): floating point
+        // comes back in f1, a long long in r3:r4.
+        let receiver = withUnsafeBytes(of: object) { Array($0) }, cmd = withUnsafeBytes(of: selector) { Array($0) }
+        bytes.withUnsafeMutableBytes { DarwinCalls.call(imp, types: [type, "@", ":"], arguments: [receiver, cmd], result: $0.baseAddress) }
+        #elseif arch(i386)
         // Floating point comes back on the x87 stack, structures of 1, 2, 4
         // or 8 bytes in eax:edx, and the rest through a pointer.
         if type.hasPrefix("d") {
@@ -341,6 +346,13 @@ enum Structures {
     static func set(_ object: id, _ selector: SEL, _ value: id?) {
         guard let storage = Values.storage(value), let imp = ObjC.methodImplementation(ObjC.objectGetClass(object), selector)
         else { return }
+        #if arch(powerpc)
+        // By the type, as Darwin's ABI has it (DarwinCalls): a double or a
+        // float goes in f1.
+        let receiver = withUnsafeBytes(of: object) { Array($0) }, cmd = withUnsafeBytes(of: selector) { Array($0) }
+        DarwinCalls.call(imp, types: ["v", "@", ":", storage.type], arguments: [receiver, cmd, storage.bytes], result: nil)
+        return
+        #endif
         guard storage.bytes.count <= argumentWords * 4 else {
             foundationFatal("-[\(ObjC.className(object)) \(String(cString: selector))]: a \(storage.bytes.count)-byte structure is too large for key-value coding")
         }
