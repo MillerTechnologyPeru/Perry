@@ -342,11 +342,6 @@ final class WebPage {
         (self.size, self.scale) = (size, scale)
         slot.pointee = Unmanaged.passUnretained(self).toOpaque()
         wpe.viewBackendDispatchSetDeviceScaleFactor(backend, scale)
-        // The size again, now the view is there to hear it: older WPE
-        // (WebKit 2.48 with WPEBackend-fdo 1.16.0, as Debian 13 has) lays
-        // the page out 800 by 600 until told, whatever the exportable was
-        // made with.
-        wpe.viewBackendDispatchSetSize(backend, size.0, size.1)
         wpe.viewBackendAddActivityState(backend, WPE.activityShown)
         let data = Unmanaged.passUnretained(self).toOpaque()
         handlers.append(wpe.signalConnectData(view, "load-changed", unsafeBitCast(WebPage.onLoadChanged, to: UnsafeRawPointer.self), data, nil, 0))
