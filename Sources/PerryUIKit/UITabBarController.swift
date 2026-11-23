@@ -598,7 +598,5 @@ open class UITabBarItem: UIBarItem {
     }
     @ObjCMethod("titlePositionAdjustment") func titlePositionAdjustment() -> CGSize { .zero }
     @ObjCMethod("setTitlePositionAdjustment:") func setTitlePositionAdjustment(_ adjustment: CGSize) {}
-    @ObjCMethod("imageInsets") func imageInsets() -> UIEdgeInsets { .zero }
-    @ObjCMethod("setImageInsets:") func setImageInsets(_ insets: UIEdgeInsets) {}
     @ObjCMethod("setBadgeTextAttributes:forState:") func setBadgeTextAttributes(_ attributes: NSObject?, for controlState: UInt) {}
 }
