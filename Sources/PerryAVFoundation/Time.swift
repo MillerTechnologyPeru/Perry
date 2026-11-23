@@ -64,18 +64,13 @@ extension CGAffineTransform: ObjCScalar {
 
 // MARK: - Times
 
-/// Two numeric times in one timescale, the finer of theirs.
-private func common(_ a: CMTime, _ b: CMTime) -> (Int64, Int64, Int32) {
-    let scale = max(a.timescale, b.timescale)
-    return (a.converted(to: scale).value, b.converted(to: scale).value, scale)
-}
-
+/// kCMTimeInvalid for a timescale that isn't positive, as on Darwin.
 @c(_CMTimeMake) public func CMTimeMake(_ value: Int64, _ timescale: Int32) -> CMTime {
-    CMTime(value: value, timescale: timescale, flags: CMTime.valid, epoch: 0)
+    timescale > 0 ? CMTime(value: value, timescale: timescale, flags: CMTime.valid, epoch: 0) : .invalid
 }
 
 @c(_CMTimeMakeWithEpoch) public func CMTimeMakeWithEpoch(_ value: Int64, _ timescale: Int32, _ epoch: Int64) -> CMTime {
-    CMTime(value: value, timescale: timescale, flags: CMTime.valid, epoch: epoch)
+    timescale > 0 ? CMTime(value: value, timescale: timescale, flags: CMTime.valid, epoch: epoch) : .invalid
 }
 
 @c(_CMTimeMakeWithSeconds) public func CMTimeMakeWithSeconds(_ seconds: Double, _ preferredTimescale: Int32) -> CMTime {
@@ -84,29 +79,112 @@ private func common(_ a: CMTime, _ b: CMTime) -> (Int64, Int64, Int32) {
 
 @c(_CMTimeGetSeconds) public func CMTimeGetSeconds(_ time: CMTime) -> Double { time.seconds }
 
-/// -1, 0 or 1: invalid times first, then by value, the infinities at the
-/// ends.
-@c(_CMTimeCompare) public func CMTimeCompare(_ a: CMTime, _ b: CMTime) -> Int32 {
-    if a.isNumeric, b.isNumeric {
-        let (x, y, _) = common(a, b)
-        return x < y ? -1 : x > y ? 1 : 0
+/// What a time is, in CMTimeCompare's order: negative infinity first, then
+/// numeric times, indefinite ones, positive infinity, and invalid times
+/// last. A time without the valid flag, or with a timescale that is not
+/// positive while numeric, is invalid; positive infinity's flag counts
+/// before negative infinity's, and both before indefinite's.
+private enum TimeKind: Int, Comparable {
+    case negativeInfinity, numeric, indefinite, positiveInfinity, invalid
+
+    init(_ time: CMTime) {
+        if time.flags & CMTime.valid == 0 { self = .invalid }
+        else if time.flags & CMTime.positiveInfinity != 0 { self = .positiveInfinity }
+        else if time.flags & CMTime.negativeInfinity != 0 { self = .negativeInfinity }
+        else if time.flags & CMTime.indefinite != 0 { self = .indefinite }
+        else if time.timescale <= 0 { self = .invalid }
+        else { self = .numeric }
     }
-    let (x, y) = (a.seconds, b.seconds)
-    if x.isNaN || y.isNaN { return x.isNaN && y.isNaN ? 0 : x.isNaN ? -1 : 1 }
-    return x < y ? -1 : x > y ? 1 : 0
+
+    static func < (a: TimeKind, b: TimeKind) -> Bool { a.rawValue < b.rawValue }
 }
 
-@c(_CMTimeAdd) public func CMTimeAdd(_ a: CMTime, _ b: CMTime) -> CMTime {
-    guard a.isNumeric, b.isNumeric else { return CMTime(seconds: a.seconds + b.seconds) }
-    let (x, y, scale) = common(a, b)
-    return CMTime(value: x &+ y, timescale: scale, flags: CMTime.valid, epoch: a.epoch)
+extension CMTime {
+    static let hasBeenRounded: UInt32 = 2
+    static let positiveInfinityTime = CMTime(value: 0, timescale: 0, flags: valid | positiveInfinity, epoch: 0)
+    static let negativeInfinityTime = CMTime(value: 0, timescale: 0, flags: valid | negativeInfinity, epoch: 0)
+    static let indefiniteTime = CMTime(value: 0, timescale: 0, flags: valid | indefinite, epoch: 0)
 }
 
-@c(_CMTimeSubtract) public func CMTimeSubtract(_ a: CMTime, _ b: CMTime) -> CMTime {
-    guard a.isNumeric, b.isNumeric else { return CMTime(seconds: a.seconds - b.seconds) }
-    let (x, y, scale) = common(a, b)
-    return CMTime(value: x &- y, timescale: scale, flags: CMTime.valid, epoch: a.epoch)
+/// A numeric value counted in another timescale, rounded half away from
+/// zero, and whether that was exact; nil if it doesn't fit in 64 bits.
+private func rescale(_ value: Int64, from: Int32, to: Int32) -> (value: Int64, exact: Bool)? {
+    if from == to { return (value, true) }
+    let divisor = UInt64(from)
+    let product = value.magnitude.multipliedFullWidth(by: UInt64(to))
+    guard product.high < divisor else { return nil }
+    var (quotient, remainder) = divisor.dividingFullWidth(product)
+    if remainder != 0, remainder >= divisor - remainder {
+        guard quotient < .max else { return nil }
+        quotient += 1
+    }
+    if value < 0 {
+        guard quotient <= UInt64(Int64.max) + 1 else { return nil }
+        return (Int64(bitPattern: 0 &- quotient), remainder == 0)
+    }
+    guard quotient <= UInt64(Int64.max) else { return nil }
+    return (Int64(quotient), remainder == 0)
 }
+
+private func greatestCommonDivisor(_ a: Int64, _ b: Int64) -> Int64 {
+    var (a, b) = (a, b)
+    while b != 0 { (a, b) = (b, a % b) }
+    return a
+}
+
+/// a + b, or a - b: invalid if either is, or for infinities of opposite
+/// signs; an infinity otherwise wins over everything, then indefinite.
+/// Numeric times are added in the least common multiple of their
+/// timescales, or in nanoseconds if that is beyond 32 bits; if the values
+/// overflow there, in the larger timescale, then in seconds, and as an
+/// infinity if even those overflow. Times in different nonzero epochs
+/// can't be added; a time in epoch 0 takes the other's epoch, and two in
+/// one epoch give epoch 0.
+private func combine(_ a: CMTime, _ b: CMTime, subtracting: Bool) -> CMTime {
+    let x = TimeKind(a)
+    var y = TimeKind(b)
+    if subtracting { y = y == .positiveInfinity ? .negativeInfinity : y == .negativeInfinity ? .positiveInfinity : y }
+    if x == .invalid || y == .invalid { return .invalid }
+    let xInfinite = x == .positiveInfinity || x == .negativeInfinity, yInfinite = y == .positiveInfinity || y == .negativeInfinity
+    if xInfinite || yInfinite {
+        if xInfinite, yInfinite, x != y { return .invalid }
+        return (xInfinite ? x : y) == .positiveInfinity ? .positiveInfinityTime : .negativeInfinityTime
+    }
+    if x == .indefinite || y == .indefinite { return .indefiniteTime }
+    let epoch: Int64
+    if a.epoch == b.epoch { epoch = 0 }
+    else if a.epoch == 0 { epoch = b.epoch }
+    else if b.epoch == 0 { epoch = a.epoch }
+    else { return .invalid }
+    let (s, t) = (Int64(a.timescale), Int64(b.timescale))
+    let multiple = s / greatestCommonDivisor(s, t) * t
+    let rounded = (a.flags | b.flags) & CMTime.hasBeenRounded
+    for scale in [multiple <= Int64(Int32.max) ? Int32(multiple) : 1_000_000_000, max(a.timescale, b.timescale), 1] {
+        guard let p = rescale(a.value, from: a.timescale, to: scale), let q = rescale(b.value, from: b.timescale, to: scale) else { continue }
+        let (sum, overflow) = subtracting ? p.value.subtractingReportingOverflow(q.value) : p.value.addingReportingOverflow(q.value)
+        if overflow { continue }
+        let inexact = p.exact && q.exact ? 0 : CMTime.hasBeenRounded
+        return CMTime(value: sum, timescale: scale, flags: CMTime.valid | rounded | inexact, epoch: epoch)
+    }
+    let seconds = Double(a.value) / Double(a.timescale) + (subtracting ? -1 : 1) * Double(b.value) / Double(b.timescale)
+    return seconds < 0 ? .negativeInfinityTime : .positiveInfinityTime
+}
+
+/// -1, 0 or 1: negative infinity first, then numeric times (by epoch, then
+/// exactly by value), indefinite times, positive infinity, and invalid
+/// times last, equal to each other.
+@c(_CMTimeCompare) public func CMTimeCompare(_ a: CMTime, _ b: CMTime) -> Int32 {
+    let (x, y) = (TimeKind(a), TimeKind(b))
+    guard x == .numeric, y == .numeric else { return x < y ? -1 : x == y ? 0 : 1 }
+    if a.epoch != b.epoch { return a.epoch < b.epoch ? -1 : 1 }
+    let left = a.value.multipliedFullWidth(by: Int64(b.timescale)), right = b.value.multipliedFullWidth(by: Int64(a.timescale))
+    if left.high != right.high { return left.high < right.high ? -1 : 1 }
+    return left.low < right.low ? -1 : left.low == right.low ? 0 : 1
+}
+
+@c(_CMTimeAdd) public func CMTimeAdd(_ a: CMTime, _ b: CMTime) -> CMTime { combine(a, b, subtracting: false) }
+
+@c(_CMTimeSubtract) public func CMTimeSubtract(_ a: CMTime, _ b: CMTime) -> CMTime { combine(a, b, subtracting: true) }
 
 @c(_CMTimeMultiply) public func CMTimeMultiply(_ time: CMTime, _ multiplier: Int32) -> CMTime {
     guard time.isNumeric else { return time }
@@ -152,6 +230,30 @@ private func common(_ a: CMTime, _ b: CMTime) -> (Int64, Int64, Int32) {
 
 @c(_CMTimeRangeEqual) public func CMTimeRangeEqual(_ a: CMTimeRange, _ b: CMTimeRange) -> UInt8 {
     CMTimeCompare(a.start, b.start) == 0 && CMTimeCompare(a.duration, b.duration) == 0 ? 1 : 0
+}
+
+/// Whether `other` starts in `range` (as CMTimeRangeContainsTime has it,
+/// at or after its start and before its end) and ends within it, its end
+/// at its start or end included. An empty range is in a range only before
+/// that range's end; nothing is in an empty range.
+@c(_CMTimeRangeContainsTimeRange) public func CMTimeRangeContainsTimeRange(_ range: CMTimeRange, _ other: CMTimeRange) -> UInt8 {
+    let end = CMTimeRangeGetEnd(range), otherEnd = CMTimeRangeGetEnd(other)
+    return CMTimeRangeContainsTime(range, other.start) != 0 && CMTimeCompare(otherEnd, range.start) >= 0
+        && CMTimeCompare(otherEnd, end) <= 0 ? 1 : 0
+}
+
+/// From the earlier start to the later end. An invalid time is later than
+/// any other, so a range with one has an invalid end, and so duration.
+@c(_CMTimeRangeGetUnion) public func CMTimeRangeGetUnion(_ a: CMTimeRange, _ b: CMTimeRange) -> CMTimeRange {
+    CMTimeRangeFromTimeToTime(CMTimeMinimum(a.start, b.start), CMTimeMaximum(CMTimeRangeGetEnd(a), CMTimeRangeGetEnd(b)))
+}
+
+/// From the later start to the earlier end, or kCMTimeRangeZero if that
+/// end isn't after that start: ranges that only touch, or don't meet.
+@c(_CMTimeRangeGetIntersection) public func CMTimeRangeGetIntersection(_ a: CMTimeRange, _ b: CMTimeRange) -> CMTimeRange {
+    let start = CMTimeMaximum(a.start, b.start), end = CMTimeMinimum(CMTimeRangeGetEnd(a), CMTimeRangeGetEnd(b))
+    guard CMTimeCompare(end, start) > 0 else { return CMTimeRange(start: .zero, duration: .zero) }
+    return CMTimeRangeFromTimeToTime(start, end)
 }
 
 // MARK: - Format descriptions
