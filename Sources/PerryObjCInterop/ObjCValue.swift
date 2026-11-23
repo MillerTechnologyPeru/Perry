@@ -94,9 +94,11 @@ extension ObjCScalar {
 extension Int: ObjCScalar { public static var objCTypeEncoding: String { "i" } }
 extension UInt: ObjCScalar { public static var objCTypeEncoding: String { "I" } }
 extension Bool: ObjCScalar { public static var objCTypeEncoding: String { "c" } }
-#if arch(i386)
-// Every argument is on the stack in the same words on Darwin and Linux, and
-// results are in the same registers, so these need no conversion.
+#if arch(i386) || arch(powerpc)
+// On i386 every argument is on the stack in the same words on Darwin and
+// Linux, and results are in the same registers, so these need no conversion.
+// On ppc they differ, and the loader moves them by the method's or function's
+// type encoding between Darwin's places and these types' (ppc_abi.c).
 extension Int64: ObjCScalar { public static var objCTypeEncoding: String { "q" } }
 extension UInt64: ObjCScalar { public static var objCTypeEncoding: String { "Q" } }
 extension Double: ObjCScalar { public static var objCTypeEncoding: String { "d" } }
@@ -138,6 +140,9 @@ extension ObjCStructure {
         #if arch(i386)
         // Structures of 1, 2, 4 or 8 bytes come back in eax:edx.
         ![1, 2, 4, 8].contains(MemoryLayout<ObjCResultType>.size)
+        #elseif arch(powerpc)
+        // ppc returns every structure through memory.
+        true
         #elseif _pointerBitWidth(_32)
         MemoryLayout<ObjCResultType>.size > 4
         #elseif arch(x86_64)
@@ -195,7 +200,7 @@ extension ObjCWordPairValue {
     @inline(__always) public static func objCArgumentForm(ofResult value: UInt64) -> ObjCWordPair { ObjCWordPair(value) }
 }
 
-#if _pointerBitWidth(_32) && !arch(i386)
+#if _pointerBitWidth(_32) && !arch(i386) && !arch(powerpc)
 extension Double: ObjCWordPairValue {
     public static var objCTypeEncoding: String { "d" }
     @inline(__always) public init(objCBits: UInt64) { self.init(bitPattern: objCBits) }
