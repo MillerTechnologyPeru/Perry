@@ -187,8 +187,16 @@ public final class NSInvocation: NSObject {
         return type.first == "@" && !type.hasPrefix("@?")
     }
 
+    /// Whether the argument is a block, which an invocation that retains
+    /// its arguments copies: one made on a stack is gone by the time an
+    /// invocation kept for later (MAP's token queue jobs) is invoked.
+    private func isBlock(_ storage: InvocationStorage, _ index: Int) -> Bool {
+        guard let details = MethodSignatures.storage(storage.signature) else { return false }
+        return String(cString: details.parts[index + 1]).drop { "rnNoORVAj".contains($0) }.hasPrefix("@?")
+    }
+
     private func releaseArguments(_ storage: InvocationStorage) {
-        for index in storage.arguments.indices where isObject(storage, index) {
+        for index in storage.arguments.indices where isObject(storage, index) || isBlock(storage, index) {
             if let object = storage.object(at: index) { ObjC.release(object) }
         }
     }
@@ -211,7 +219,11 @@ public final class NSInvocation: NSObject {
     }
 
     private func setArgument(_ storage: InvocationStorage, at index: Int, _ object: id?) {
-        if storage.retained, isObject(storage, index) {
+        var object = object
+        if storage.retained, isBlock(storage, index) {
+            object = object.flatMap { ObjC.retainBlock($0) }
+            if let old = storage.object(at: index) { ObjC.release(old) }
+        } else if storage.retained, isObject(storage, index) {
             if let object { _ = ObjC.retain(object) }
             if let old = storage.object(at: index) { ObjC.release(old) }
         }
@@ -236,7 +248,7 @@ public final class NSInvocation: NSObject {
     func setArgument(_ buffer: UnsafeRawPointer?, at index: Int) {
         let storage = checked(index)
         guard let buffer, let details = MethodSignatures.storage(storage.signature) else { return }
-        if isObject(storage, index) {
+        if isObject(storage, index) || isBlock(storage, index) {
             setArgument(storage, at: index, UnsafeMutableRawPointer(bitPattern: buffer.load(as: UInt.self)))
             return
         }
@@ -261,8 +273,13 @@ public final class NSInvocation: NSObject {
     func retainArguments() {
         guard let storage, !storage.retained else { return }
         storage.retained = true
-        for index in storage.arguments.indices where isObject(storage, index) {
-            if let object = storage.object(at: index) { _ = ObjC.retain(object) }
+        for index in storage.arguments.indices {
+            guard let object = storage.object(at: index) else { continue }
+            if isBlock(storage, index) {
+                storage.setObject(ObjC.retainBlock(object), at: index)
+            } else if isObject(storage, index) {
+                _ = ObjC.retain(object)
+            }
         }
     }
 
