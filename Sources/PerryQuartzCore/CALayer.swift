@@ -634,7 +634,7 @@ open class CALayer: NSObject {
         // As presented: with its animations' values at this moment.
         let (state, shape) = Presentation.presented(self)
         if state.opacity != 1 { text += " opacity \(state.opacity)" }
-        if let filter = state.compositingFilter { text += " filter \(filter.stringValue)" }
+        if let filter = state.compositingFilter { text += " filter \(CALayer.filterName(filter))" }
         if state.hidden != self.state.hidden { text += " presented hidden \(state.hidden)" }
         if state.speed != 1 || state.timeOffset != 0 { text += " speed \(state.speed) offset \(state.timeOffset)" }
         if !state.transform.isIdentity {
@@ -1064,9 +1064,19 @@ extension CALayer {
 
     /// The CGBlendMode a compositing filter's name stands for, 0 (normal) for
     /// the names that are not blend modes.
+    /// A compositing filter's name: a string, or a CIFilter's, as the Mac
+    /// gives one ("CIMultiplyBlendMode" as "MultiplyBlendMode").
+    static func filterName(_ filter: NSObject) -> String {
+        guard let ciFilter = filter.as(CIFilter.self) else { return filter.stringValue }
+        var name = Substring(ciFilter.filter.name)
+        if name.hasPrefix("CI") { name = name.dropFirst(2) }
+        if name.hasSuffix("Compositing") { name = name.dropLast(11) }
+        return String(name)
+    }
+
     static func blendMode(named filter: NSObject?) -> Int32 {
         guard let filter else { return 0 }
-        var name = filter.stringValue.lowercased()
+        var name = filterName(filter).lowercased()
         for (word, replacement) in [("blendmode", ""), ("destination", "dest")] where name.hasSuffix(word) || name.hasPrefix(word) {
             name = name.hasSuffix(word) ? String(name.dropLast(word.count)) : replacement + name.dropFirst(word.count)
         }
