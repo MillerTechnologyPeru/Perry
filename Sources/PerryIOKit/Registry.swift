@@ -24,6 +24,17 @@ final class RegistryEntry {
     func property(_ key: String) -> NSObject? { properties().first { $0.0 == key }?.1 }
 }
 
+/// PERRY_IOKIT_TRACE says what a program asks the registry.
+enum Trace {
+    nonisolated(unsafe) static let enabled = getenv("PERRY_IOKIT_TRACE") != nil
+
+    static func log(_ message: @autoclosure () -> String) {
+        guard enabled else { return }
+        let line = "perry: IOKit: " + message() + "\n"
+        line.withCString { _ = write(2, $0, strlen($0)) }
+    }
+}
+
 enum Registry {
     static let rootHandle: Handle = 0x1001
     static let platformHandle: Handle = 0x1002
@@ -75,21 +86,30 @@ enum Registry {
     /// An entry's children: the discs are the platform device's.
     static func children(of handle: Handle) -> [Handle] {
         entries.filter { $0.value.parent == handle }.map(\.key).sorted() + (handle == platformHandle ? Discs.handles() : [])
+            + (Discs.partition(of: handle).map { [$0] } ?? [])
     }
 
     /// The entries a matching dictionary matches: by IOProviderClass (the
     /// class or a superclass), IONameMatch, or a registry entry ID.
     static func matches(_ matching: UnsafeMutableRawPointer?) -> [Handle] {
+        let found = entriesMatching(matching)
+        Trace.log("matching \(matching.map { NSDictionary($0).keys().sorted().map { key in "\(key)=\(NSDictionary(matching!).object(key).map { $0.isString ? $0.stringValue : "…" } ?? "")" }.joined(separator: ", ") } ?? "nothing"): \(found.map { String($0, radix: 16) })")
+        return found
+    }
+
+    private static func entriesMatching(_ matching: UnsafeMutableRawPointer?) -> [Handle] {
         guard let matching else { return [] }
         let dictionary = NSDictionary(matching)
         if let cls = dictionary.object("IOProviderClass"), cls.isString {
             let name = cls.stringValue
-            let discs = Discs.handles().filter { handle in Discs.entry(handle).map { Discs.matches($0, className: name) } ?? false }
+            let discs = (Discs.handles() + Discs.partitionHandles()).filter { handle in
+                Discs.entry(handle).map { Discs.matches($0, className: name) } ?? false
+            }
             return entries.filter { $0.value.className == name || (name == "IOService" && $0.key != rootHandle) }.map(\.key).sorted() + discs
         }
         if let device = dictionary.object("BSD Name"), device.isString {
             let name = device.stringValue
-            return Discs.handles().filter { Discs.entry($0)?.property("BSD Name")?.stringValue == name }
+            return (Discs.handles() + Discs.partitionHandles()).filter { Discs.entry($0)?.property("BSD Name")?.stringValue == name }
         }
         if let name = dictionary.object("IONameMatch"), name.isString {
             return entries.filter { $0.value.name == name.stringValue }.map(\.key).sorted()
@@ -200,7 +220,11 @@ public func IOServiceAddInterestNotification(_ port: UnsafeMutableRawPointer?, _
 
 // MARK: - Objects and iterators
 
-@c(_IOIteratorNext) public func IOIteratorNext(_ iterator: Handle) -> Handle { Registry.next(iterator) }
+@c(_IOIteratorNext) public func IOIteratorNext(_ iterator: Handle) -> Handle {
+    let next = Registry.next(iterator)
+    Trace.log("iterator \(String(iterator, radix: 16)) next: \(String(next, radix: 16))")
+    return next
+}
 @c(_IOIteratorIsValid) public func IOIteratorIsValid(_ iterator: Handle) -> UInt32 { Registry.isIterator(iterator) ? 1 : 0 }
 @c(_IOIteratorReset) public func IOIteratorReset(_ iterator: Handle) {}
 
@@ -216,6 +240,7 @@ public func IOObjectRelease(_ object: Handle) -> Int32 {
 @c(_IOObjectGetClass)
 public func IOObjectGetClass(_ object: Handle, _ name: UnsafeMutablePointer<CChar>?) -> Int32 {
     guard let name, let entry = Registry.entry(object) else { return IOReturn.badArgument }
+    Trace.log("class of \(String(object, radix: 16)): \(entry.className)")
     _ = entry.className.withCString { strncpy(name, $0, 127) }
     name[127] = 0
     return IOReturn.success
@@ -225,7 +250,7 @@ public func IOObjectGetClass(_ object: Handle, _ name: UnsafeMutablePointer<CCha
 public func IOObjectConformsTo(_ object: Handle, _ name: UnsafePointer<CChar>?) -> UInt32 {
     guard let name, let entry = Registry.entry(object) else { return 0 }
     let wanted = String(cString: name)
-    if entry.className == "IOCDMedia" || entry.className == "IODVDMedia", wanted == "IOMedia" { return 1 }
+    if entry.className == "IOCDMedia" || entry.className == "IODVDMedia", wanted == "IOMedia" || wanted == "IOStorage" { return 1 }
     return entry.className == wanted || wanted == "IOService" || wanted == "IORegistryEntry" ? 1 : 0
 }
 
@@ -255,7 +280,13 @@ public func IORegistryEntryCopyFromPath(_ port: UInt32, _ path: UnsafeMutableRaw
 @c(_IORegistryEntryCreateCFProperty)
 public func IORegistryEntryCreateCFProperty(_ entry: Handle, _ key: UnsafeMutableRawPointer?, _ allocator: UnsafeRawPointer?,
                                             _ options: UInt32) -> UnsafeMutableRawPointer? {
-    guard let key, let value = Registry.entry(entry)?.property(String(objCArgument: key)) else { return nil }
+    guard let key else { return nil }
+    let name = String(objCArgument: key)
+    guard let value = Registry.entry(entry)?.property(name) else {
+        Trace.log("property \(name) of \(String(entry, radix: 16)): none")
+        return nil
+    }
+    Trace.log("property \(name) of \(String(entry, radix: 16))\(value.isString ? ": " + value.stringValue : "")")
     return ObjCRuntime.retain(value.objcObject)
 }
 
@@ -270,13 +301,18 @@ public func IORegistryEntrySearchCFProperty(_ entry: Handle, _ plane: UnsafePoin
 public func IORegistryEntryCreateCFProperties(_ entry: Handle, _ properties: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                                               _ allocator: UnsafeRawPointer?, _ options: UInt32) -> Int32 {
     guard let found = Registry.entry(entry) else { return IOReturn.badArgument }
+    Trace.log("properties of \(String(entry, radix: 16))")
     properties?.pointee = ObjCRuntime.retain(NSMutableDictionary.of(found.properties()).objcObject)
     return IOReturn.success
 }
 
 @c(_IORegistryEntryGetParentEntry)
 public func IORegistryEntryGetParentEntry(_ entry: Handle, _ plane: UnsafePointer<CChar>?, _ parent: UnsafeMutablePointer<Handle>?) -> Int32 {
-    guard let found = Registry.entry(entry)?.parent else { return IOReturn.noDevice }
+    guard let found = Registry.entry(entry)?.parent else {
+        Trace.log("parent of \(String(entry, radix: 16)): none")
+        return IOReturn.noDevice
+    }
+    Trace.log("parent of \(String(entry, radix: 16)): \(String(found, radix: 16))")
     parent?.pointee = found
     return IOReturn.success
 }
@@ -310,6 +346,7 @@ public func IORegistryEntryCreateIterator(_ entry: Handle, _ plane: UnsafePointe
             if options & 1 != 0 { pending.insert(contentsOf: Registry.children(of: child), at: 0) }
         }
     }
+    Trace.log("iterator from \(String(entry, radix: 16)), options \(options): \(found.map { String($0, radix: 16) })")
     iterator?.pointee = Registry.makeIterator(found)
     return IOReturn.success
 }
@@ -355,6 +392,7 @@ public func IOCreatePlugInInterfaceForService(_ service: Handle, _ pluginType: U
                                               _ interface: UnsafeMutablePointer<UnsafeMutableRawPointer?>?,
                                               _ score: UnsafeMutablePointer<Int32>?) -> Int32 {
     guard Registry.entry(service)?.className == "IOHIDDevice" else {
+        Trace.log("no plug-in for \(String(service, radix: 16)) (\(Registry.entry(service)?.className ?? "no entry"))")
         interface?.pointee = nil
         return IOReturn.unsupported
     }
