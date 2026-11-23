@@ -31,6 +31,10 @@ enum Alignment {
 
 @ObjCClass("NSCell")
 open class NSCell: NSObject {
+    /// AppKit's private commit of a field editor's text to the cell, which
+    /// Interface Builder swizzles: fields here commit their text themselves.
+    @ObjCMethod("_validateEditing:") func validateEditing(_ editor: NSObject?) {}
+
     var objectValue: NSObject?
     var font: NSFont?
     var alignment = 4
