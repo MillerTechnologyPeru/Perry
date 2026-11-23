@@ -51,6 +51,33 @@
 #define PERRY_KEEP_R9(call) do { call; } while (0)
 #endif
 
+// What Linux code calls for a Darwin function whose arguments are words (a
+// comparator, a thread's start, a block's invoke). On ppc a Darwin function
+// saves its return address in its caller's frame, at 8(r1), where Linux code
+// keeps its own registers: the loader gives a stub that calls it from a
+// frame laid out as a Darwin caller's, keeping r2 (perry_ppc_linux_callable).
+// Linux code, and every function elsewhere, is as it is.
+#if defined(__powerpc__) && !defined(__powerpc64__)
+void *perry_darwin_callable(void *function);
+#define PERRY_DARWIN_FUNCTION(function) ((__typeof__(function))perry_darwin_callable((void *)(function)))
+#else
+#define PERRY_DARWIN_FUNCTION(function) (function)
+#endif
+
+// What the kernel calls for a signal handler of Perry's, which may interrupt
+// Darwin code. On ppc r2 is then whatever that code left in it, so the
+// loader gives a stub that sets it again from the stack first
+// (perry_ppc_thread_stub); a signal stack is noted for that
+// (perry_note_signal_stack). Elsewhere the handler is as it is.
+#if defined(__powerpc__) && !defined(__powerpc64__)
+void *perry_signal_entry(void *handler);
+void perry_note_signal_stack(void *low, size_t size);
+#define PERRY_SIGNAL_ENTRY(handler) ((__typeof__(&(handler)))perry_signal_entry((void *)(handler)))
+#else
+#define PERRY_SIGNAL_ENTRY(handler) (handler)
+#define perry_note_signal_stack(low, size) ((void)(low), (void)(size))
+#endif
+
 // The device Darwin code is told it runs on: an arm64 iPhone, or for armv7
 // programs an iPhone 4S (armv7, iOS 5 to 9), with Darwin's page size.
 #if defined(__arm__)
