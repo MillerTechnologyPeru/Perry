@@ -1871,6 +1871,31 @@ int darwin_shm_open(const char *name, int flags, int mode) {
     return shm_open(path, linux_flags, linux_flags & O_CREAT ? (mode_t)mode : 0);
 }
 
+// tempnam(dir, prefix): a new file name, malloc'd, in $TMPDIR as Darwin
+// prefers it, else the directory given, else /tmp; up to five characters of
+// the prefix and six random ones. Made with mkstemp, so the name is free
+// when it's returned.
+char *darwin_tempnam(const char *dir, const char *prefix) DARWIN_SYMBOL(tempnam);
+char *darwin_tempnam(const char *dir, const char *prefix) {
+    const char *candidates[] = { getenv("TMPDIR"), dir, P_tmpdir, "/tmp" };
+    for (size_t i = 0; i < sizeof candidates / sizeof *candidates; i++) {
+        const char *directory = candidates[i];
+        struct stat status;
+        if (!directory || !*directory || stat(directory, &status) != 0 || !S_ISDIR(status.st_mode)) continue;
+        size_t length = strlen(directory);
+        const char *separator = directory[length - 1] == '/' ? "" : "/";
+        char *path = NULL;
+        if (asprintf(&path, "%s%s%.5sXXXXXX", directory, separator, prefix ? prefix : "") < 0) return NULL;
+        int fd = mkstemp(path);
+        if (fd < 0) { free(path); continue; }
+        close(fd);
+        unlink(path);
+        return path;
+    }
+    errno = ENOENT;
+    return NULL;
+}
+
 int darwin_shm_unlink(const char *name) DARWIN_SYMBOL(shm_unlink);
 int darwin_shm_unlink(const char *name) {
     if (!name) { errno = EINVAL; return -1; }
