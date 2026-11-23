@@ -735,6 +735,13 @@ extension NSString {
         return true
     }
 
+    /// Before Mac OS X 10.5's encodings: written as UTF-8.
+    @ObjCMethod("writeToFile:atomically:")
+    func write(toFile path: String?, atomically: Bool) -> Bool {
+        guard let path else { return false }
+        return write(toFile: path, atomically: atomically, encoding: 4, error: nil)
+    }
+
     /// Only file URLs can be written.
     @ObjCMethod("writeToURL:atomically:encoding:error:")
     func write(to url: NSURL, atomically: Bool, encoding: UInt, error: UnsafeMutablePointer<id?>?) -> Bool {
