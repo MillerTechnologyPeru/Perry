@@ -81,11 +81,21 @@ open class UIImage: NSObject {
         return self
     }
 
-    /// From a nib: the named image in the bundle the nib came from, else in
-    /// the main bundle.
+    /// From a nib: a system symbol Interface Builder picked, at its
+    /// configuration, else the named image in the bundle the nib came from,
+    /// else in the main bundle.
     @ObjCMethod("initWithCoder:")
     func initialize(coder: NSObject) -> Self {
         let decoded = Coder(coder: coder)
+        if let symbol = decoded.string("UISystemSymbolResourceName") {
+            let configuration = decoded.object("UISymbolImageConfiguration")?.as(UIImageConfiguration.self)
+            if let image = Symbols.image(named: symbol, configuration: configuration) {
+                state.set(image.state.cgImage, scale: image.state.scale, orientation: 0)
+                state.renderingMode = image.state.renderingMode
+                (state.symbolName, state.configuration) = (symbol, image.state.configuration)
+            }
+            return self
+        }
         guard let name = decoded.string("UIResourceName") ?? decoded.string("UIImageName") else { return self }
         let nibBundle = coder.as(UINibDecoder.self)?.nib?.bundlePath.flatMap { NSBundle.bundle(path: $0) }
         let image = nibBundle.flatMap { UIImage.image(UIImage.objCClass, named: name, in: $0, catalog: false) }
