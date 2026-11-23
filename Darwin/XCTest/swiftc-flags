@@ -1,0 +1,6 @@
+-F
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
+-framework
+XCTest
+-Xlinker
+-not_for_dyld_shared_cache
