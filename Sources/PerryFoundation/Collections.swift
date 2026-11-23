@@ -15,10 +15,11 @@ struct ObjectKey: Hashable {
     }
 }
 
-/// Blocks: the invoke function is the word after isa, flags and reserved.
+/// Blocks: the invoke function is the word after isa, flags and reserved,
+/// callable from Linux code (darwinCallable).
 enum Blocks {
     static func invoke<Function>(_ block: id, as type: Function.Type) -> Function {
-        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: type)
+        darwinCallable(unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: type))
     }
 }
 
