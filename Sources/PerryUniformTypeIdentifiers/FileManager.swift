@@ -186,6 +186,15 @@ public func FSResolveAliasFile(_ ref: UnsafeMutableRawPointer?, _ chains: UInt8,
     return noErr
 }
 
+/// OSErr FSResolveAliasFileWithMountFlags(FSRef *, Boolean
+/// resolveAliasChains, Boolean *targetIsFolder, Boolean *wasAliased,
+/// unsigned long mountFlags): as FSResolveAliasFile.
+@c(_FSResolveAliasFileWithMountFlags)
+public func FSResolveAliasFileWithMountFlags(_ ref: UnsafeMutableRawPointer?, _ chains: UInt8, _ targetIsFolder: UnsafeMutablePointer<UInt8>?,
+                                             _ wasAliased: UnsafeMutablePointer<UInt8>?, _ flags: UInt) -> Int16 {
+    FSResolveAliasFile(ref, chains, targetIsFolder, wasAliased)
+}
+
 // An alias record is opaque past its user type (4 bytes) and its size (2):
 // Perry's keeps a mark ('PRRY') and the item's path after them, which
 // FSResolveAlias makes an FSRef of again.
