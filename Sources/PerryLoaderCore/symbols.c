@@ -439,7 +439,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
 //   …/Metal.framework/Metal                               -> Metal, else QuartzCore
-//   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
+//   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> Network
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
 //   …/MetalKit.framework/MetalKit                       -> UIKit
 //   …/SpriteKit.framework/SpriteKit                     -> UIKit
@@ -590,11 +590,10 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "GameController");
         return true;
     }
-    // Network's path monitor reads the routes SystemConfiguration's
-    // reachability does. Its C API is libnetwork's, which Network's Swift
-    // overlay binds to directly.
+    // Network's C API is libnetwork's, which Network's Swift overlay binds
+    // to directly: both are libPerryNetwork.
     if (strstr(install_name, "/Network.framework/") || strcmp(install_name, "/usr/lib/libnetwork.dylib") == 0) {
-        snprintf(out, out_size, "SystemConfiguration");
+        snprintf(out, out_size, "Network");
         return true;
     }
     // ImageIO's images are CoreGraphics' own.
