@@ -119,7 +119,7 @@ struct DarwinFixtureTests {
         let result = try runPerry([DarwinFixtures.app(name).path], environment: DarwinFixtures.environment(name))
         #expect(result.status == 0, "\(result.stderr)")
         let expected = try String(contentsOf: DarwinFixtures.reference(name), encoding: .utf8)
-        #expect(result.stdout == expected)
+        #expect(result.stdout == expected, "stderr: \(result.stderr)")
     }
 }
 
