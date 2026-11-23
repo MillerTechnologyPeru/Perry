@@ -427,7 +427,21 @@ open class NSWindow: NSResponder {
     @ObjCMethod("backgroundColor") func windowBackgroundColor() -> NSObject? { backgroundColor }
     @ObjCMethod("setBackgroundColor:") func setBackgroundColor(_ color: NSObject?) { backgroundColor = color }
     @ObjCMethod("alphaValue") func windowAlphaValue() -> CGFloat { alphaValue }
-    @ObjCMethod("setAlphaValue:") func setAlphaValue(_ alpha: CGFloat) { alphaValue = alpha }
+    /// A window at alpha 0 is ordered in but not seen, as AppKit's is:
+    /// VLC's fullscreen controls wait so for their fade in. Above 0 its SDL
+    /// window is shown, at the alpha as its opacity.
+    @ObjCMethod("setAlphaValue:")
+    func setAlphaValue(_ alpha: CGFloat) {
+        let wasSeen = alphaValue > 0
+        alphaValue = alpha
+        guard visible else { return }
+        if alpha > 0 {
+            if !wasSeen { show() }
+            if let sdlWindow { _ = SDL_SetWindowOpacity(sdlWindow.unsafePointer, Float(min(alpha, 1))) }
+        } else if wasSeen, let sdlWindow {
+            try? sdlWindow.hide()
+        }
+    }
     @ObjCMethod("hasShadow") func windowHasShadow() -> Bool { hasShadow }
     @ObjCMethod("setHasShadow:") func setHasShadow(_ value: Bool) { hasShadow = value }
     @ObjCMethod("appearance") func windowAppearance() -> NSObject? { appearance }
@@ -739,6 +753,8 @@ open class NSWindow: NSResponder {
 
     /// The SDL window and its renderer, made when the window is first shown.
     private func show() {
+        // Shown when its alpha is raised.
+        guard alphaValue > 0 else { return }
         if let sdlWindow {
             if bordersWhileShown { _ = SDL_SetWindowBordered(sdlWindow.unsafePointer, true) }
             try? sdlWindow.show()
