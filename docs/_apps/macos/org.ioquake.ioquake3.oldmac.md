@@ -4,7 +4,7 @@ bundle_id: "org.ioquake.ioquake3.oldmac"
 platform: macos
 kind: game
 developer: Matthew Deaves
-tags: [C, ObjC]
+tags: [ObjC]
 reports:
   - pr: 326
     date: 2026-11-23
