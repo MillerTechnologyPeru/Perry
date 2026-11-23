@@ -25,9 +25,9 @@ public func dispatch_group_leave(_ group: Object?) {
     linux_dispatch_group_leave(Objects.linux(group))
 }
 
-@c(_dispatch_group_wait)
-public func dispatch_group_wait(_ group: Object?, _ timeout: UInt64.ObjCType) -> Int {
-    Blocking.wait(DarwinTime.linux(UInt64(objCArgument: timeout))) { linux_dispatch_group_wait(Objects.linux(group), $0) }
+@DarwinC("_dispatch_group_wait")
+public func dispatch_group_wait(_ group: Object?, _ timeout: UInt64) -> Int {
+    Blocking.wait(DarwinTime.linux(timeout)) { linux_dispatch_group_wait(Objects.linux(group), $0) }
 }
 
 @c(_dispatch_group_async)
@@ -63,9 +63,9 @@ public func dispatch_semaphore_create(_ value: Int) -> Object? {
     linux_dispatch_semaphore_create(value).map { Objects.make(Classes.semaphore, linux: $0) }
 }
 
-@c(_dispatch_semaphore_wait)
-public func dispatch_semaphore_wait(_ semaphore: Object?, _ timeout: UInt64.ObjCType) -> Int {
-    Blocking.wait(DarwinTime.linux(UInt64(objCArgument: timeout))) { linux_dispatch_semaphore_wait(Objects.linux(semaphore), $0) }
+@DarwinC("_dispatch_semaphore_wait")
+public func dispatch_semaphore_wait(_ semaphore: Object?, _ timeout: UInt64) -> Int {
+    Blocking.wait(DarwinTime.linux(timeout)) { linux_dispatch_semaphore_wait(Objects.linux(semaphore), $0) }
 }
 
 /// What a thread lets go of before it blocks (libSystem's hook, for an
@@ -92,9 +92,9 @@ public func dispatch_semaphore_signal(_ semaphore: Object?) -> Int {
 
 // MARK: - Time
 
-@c(_dispatch_time)
-public func dispatch_time(_ when: UInt64.ObjCType, _ delta: Int64.ObjCType) -> UInt64 {
-    DarwinTime.darwin(linux_dispatch_time(DarwinTime.linux(UInt64(objCArgument: when)), Int64(objCArgument: delta)))
+@DarwinC("perry_native_dispatch_time")
+public func dispatch_time(_ when: UInt64, _ delta: Int64) -> UInt64 {
+    DarwinTime.darwin(linux_dispatch_time(DarwinTime.linux(when), delta))
 }
 
 /// Darwin's dispatch_time_t encoding, which Linux's libdispatch shares but
@@ -141,9 +141,9 @@ enum DarwinTime {
     }
 }
 
-@c(_dispatch_walltime)
-public func dispatch_walltime(_ when: UnsafePointer<timespec>?, _ delta: Int64.ObjCType) -> UInt64 {
-    linux_dispatch_walltime(when, Int64(objCArgument: delta))
+@DarwinC("_dispatch_walltime")
+public func dispatch_walltime(_ when: UnsafePointer<timespec>?, _ delta: Int64) -> UInt64 {
+    linux_dispatch_walltime(when, delta)
 }
 
 // MARK: - Once
