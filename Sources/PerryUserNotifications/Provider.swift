@@ -44,7 +44,7 @@ enum Dispatch {
     nonisolated(unsafe) static var globalBlockClass: UnsafeMutableRawPointer!
 
     static func load(_ lookup: (String) -> UnsafeMutableRawPointer?) -> Bool {
-        guard let async = lookup("_dispatch_async_f"), let after = lookup("_dispatch_after_f"), let time = lookup("_dispatch_time"),
+        guard let async = lookup("_dispatch_async_f"), let after = lookup("perry_native_dispatch_after_f"), let time = lookup("perry_native_dispatch_time"),
               let global = lookup("_dispatch_get_global_queue"), let main = lookup("__dispatch_main_q"),
               let globalBlockClass = lookup("__NSConcreteGlobalBlock") else { return false }
         self.globalBlockClass = globalBlockClass
