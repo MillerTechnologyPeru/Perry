@@ -26,6 +26,17 @@ Under qemu-user, with the target's libraries at `$TARGET`:
         -E LD_LIBRARY_PATH=.build/ppc-pm/powerpc-unknown-linux-gnu/release \
         .build/ppc/bin/perry Program.app
 
+Test programs are built with Xcode 3.2.6's own ppc toolchain, run under
+Perry on the host, since today's clang has no ppc Darwin target and current
+ld64 has dropped ppc: its cc1 (i386) under `perry32`, its as and ld (x86_64)
+under `perry`, against the 10.6 SDK's ppc stubs:
+
+    XCODE3=.../Xcode-3.2.6/Developer Scripts/build-ppc-fixtures.sh hello.c
+
+`hello.c` built so prints its arguments and exits with 7 under the ppc
+`perry`: crt1's start, `__dyld`, r2 stubs (GCC's code uses r2 for
+addresses), and `printf$LDBL128` through the variadic thunk.
+
 ## Darwin ppc ABI, against Linux's (SysV ppc32)
 
 - Both are big-endian, so Mach-O files are read in place. Universal headers,
@@ -141,6 +152,4 @@ CoreGraphics' functions) get the same moves as thunks.
   `scanf`), 64-bit offsets move to aligned pairs, and setjmp keeps r1, lr,
   cr, r13-r31, f14-f31 and the FPSCR.
 - Not yet: the rest of the thread pointer, floating-point and structure
-  arguments (above), and the Swift providers past libobjc. Fixtures need a ppc Darwin compiler and linker. Today's clang
-  has no ppc Darwin target (`powerpc-apple-macosx`), and current ld64 has
-  dropped ppc, so for now the test programs are real ppc apps.
+  arguments (above), and the Swift providers past libobjc.
