@@ -1158,9 +1158,9 @@ public func perry_objc_preprocess_exception(_ exception: UnsafeMutableRawPointer
     exceptionPreprocessor(exception)
 }
 
-#if !arch(arm) && !arch(i386) && !arch(arm64)
+#if !arch(arm) && !arch(i386) && !arch(arm64) && !arch(powerpc)
 /// Throws an exception, which on x86_64 nothing catches: every exception
-/// is uncaught. armv7, i386 and arm64 have their own (exceptions_arm.c,
+/// is uncaught. armv7, i386, ppc and arm64 have their own (exceptions_arm.c,
 /// exceptions_i386.c, exceptions_arm64.c).
 @c(_objc_exception_throw)
 public func objc_exception_throw(_ exception: UnsafeMutableRawPointer?) -> Never {
