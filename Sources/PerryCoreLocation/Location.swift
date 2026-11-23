@@ -76,7 +76,7 @@ enum LocationConstants {
     static let CLLocationDistanceMax: Double = 1.7976931348623157e308
     static let CLTimeIntervalMax: Double = 1.7976931348623157e308
     static let kCLErrorDomain = "kCLErrorDomain"
-    static let kCLErrorUserInfoAlternateRegionKey = "alternateRegion"
+    static let kCLErrorUserInfoAlternateRegionKey = "kCLErrorUserInfoAlternateRegionKey"
 }
 
 final class LocationState: ObjectState {

@@ -221,6 +221,20 @@ OSStatus darwin_AudioObjectSetPropertyData(AudioObjectID object, const AudioObje
     return 0;
 }
 
+/// Of the properties there are, the device's rate and buffer size, which
+/// AudioObjectSetPropertyData takes, are settable.
+OSStatus darwin_AudioObjectIsPropertySettable(AudioObjectID object, const AudioObjectPropertyAddress *address, uint8_t *settable)
+    DARWIN_SYMBOL(AudioObjectIsPropertySettable);
+OSStatus darwin_AudioObjectIsPropertySettable(AudioObjectID object, const AudioObjectPropertyAddress *address, uint8_t *settable) {
+    if (!address || !settable) return kAudioHardwareIllegalOperationError;
+    *settable = 0;
+    uint32_t size = 0;
+    OSStatus status = property(object, address, NULL, &size);
+    if (status != 0) return status;
+    *settable = object == DEVICE && (address->selector == FOURCC('n', 's', 'r', 't') || address->selector == FOURCC('f', 's', 'i', 'z'));
+    return 0;
+}
+
 typedef OSStatus (*property_listener)(AudioObjectID, uint32_t, const AudioObjectPropertyAddress *, void *);
 
 OSStatus darwin_AudioObjectAddPropertyListener(AudioObjectID object, const AudioObjectPropertyAddress *address, property_listener listener,
@@ -518,4 +532,129 @@ OSStatus darwin_AudioDeviceGetCurrentTime(uint32_t device, AudioTimeStamp *out) 
     out->mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid | kAudioTimeStampRateScalarValid;
     return 0;
 }
+#define kAudioHardwareUnsupportedOperationError FOURCC('u', 'n', 'o', 'p')
+
+/// Nothing to unload: the device stays as it is.
+OSStatus darwin_AudioHardwareUnload(void) DARWIN_SYMBOL(AudioHardwareUnload);
+OSStatus darwin_AudioHardwareUnload(void) { return 0; }
+
+// There is one device, so no aggregate of several, and no other
+// processes' audio to tap: making either is unsupported. Destroying one
+// that doesn't exist succeeds, as it does on Darwin.
+OSStatus darwin_AudioHardwareCreateAggregateDevice(const void *description, AudioObjectID *out)
+    DARWIN_SYMBOL(AudioHardwareCreateAggregateDevice);
+OSStatus darwin_AudioHardwareCreateAggregateDevice(const void *description, AudioObjectID *out) {
+    if (!description || !out) return kAudioHardwareIllegalOperationError;
+    *out = 0;
+    return kAudioHardwareUnsupportedOperationError;
+}
+
+OSStatus darwin_AudioHardwareDestroyAggregateDevice(AudioObjectID device) DARWIN_SYMBOL(AudioHardwareDestroyAggregateDevice);
+OSStatus darwin_AudioHardwareDestroyAggregateDevice(AudioObjectID device) {
+    (void)device;
+    return 0;
+}
+
+OSStatus darwin_AudioHardwareCreateProcessTap(void *description, AudioObjectID *out) DARWIN_SYMBOL(AudioHardwareCreateProcessTap);
+OSStatus darwin_AudioHardwareCreateProcessTap(void *description, AudioObjectID *out) {
+    if (!description || !out) return kAudioHardwareIllegalOperationError;
+    *out = 0;
+    return kAudioHardwareUnsupportedOperationError;
+}
+
+OSStatus darwin_AudioHardwareDestroyProcessTap(AudioObjectID tap) DARWIN_SYMBOL(AudioHardwareDestroyProcessTap);
+OSStatus darwin_AudioHardwareDestroyProcessTap(AudioObjectID tap) {
+    (void)tap;
+    return 0;
+}
+
+/// The running device's last buffer time, its sample time against its
+/// host time, or false if it isn't running. Before the first buffer, now
+/// is sample 0.
+static bool io_reference(AudioTimeStamp *reference) {
+    pthread_mutex_lock(&io_lock);
+    bool running = io_running;
+    *reference = io_time;
+    pthread_mutex_unlock(&io_lock);
+    if (running && !reference->mHostTime) {
+        reference->mSampleTime = 0;
+        reference->mHostTime = darwin_AudioGetCurrentHostTime();
+    }
+    return running;
+}
+
+/// `in`'s sample or host time, as the other at the device's rate; the
+/// fields `out` asks for by its flags (all three if none) are filled, and
+/// its flags then say which.
+static OSStatus io_translate(const AudioTimeStamp *reference, const AudioTimeStamp *in, AudioTimeStamp *out) {
+    double sample;
+    uint64_t host;
+    if (in->mFlags & kAudioTimeStampSampleTimeValid) {
+        sample = in->mSampleTime;
+        double nanoseconds = (sample - reference->mSampleTime) * 1e9 / RATE;
+        host = (uint64_t)((double)reference->mHostTime + nanoseconds);
+    } else if (in->mFlags & kAudioTimeStampHostTimeValid) {
+        host = in->mHostTime;
+        sample = reference->mSampleTime + ((double)host - (double)reference->mHostTime) * RATE / 1e9;
+    } else {
+        return kAudioHardwareIllegalOperationError;
+    }
+    uint32_t wanted = out->mFlags & (kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid | kAudioTimeStampRateScalarValid);
+    if (!wanted) wanted = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid | kAudioTimeStampRateScalarValid;
+    memset(out, 0, sizeof *out);
+    if (wanted & kAudioTimeStampSampleTimeValid) out->mSampleTime = sample;
+    if (wanted & kAudioTimeStampHostTimeValid) out->mHostTime = host;
+    if (wanted & kAudioTimeStampRateScalarValid) out->mRateScalar = 1;
+    out->mFlags = wanted;
+    return 0;
+}
+
+OSStatus darwin_AudioDeviceTranslateTime(AudioObjectID device, const AudioTimeStamp *in, AudioTimeStamp *out)
+    DARWIN_SYMBOL(AudioDeviceTranslateTime);
+OSStatus darwin_AudioDeviceTranslateTime(AudioObjectID device, const AudioTimeStamp *in, AudioTimeStamp *out) {
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    if (!in || !out) return kAudioHardwareIllegalOperationError;
+    AudioTimeStamp reference;
+    if (!io_reference(&reference)) return kAudioHardwareNotRunningError;
+    return io_translate(&reference, in, out);
+}
+
+/// The requested time, or now if that has passed: the device can start a
+/// proc at any sample.
+OSStatus darwin_AudioDeviceGetNearestStartTime(AudioObjectID device, AudioTimeStamp *time, uint32_t flags)
+    DARWIN_SYMBOL(AudioDeviceGetNearestStartTime);
+OSStatus darwin_AudioDeviceGetNearestStartTime(AudioObjectID device, AudioTimeStamp *time, uint32_t flags) {
+    (void)flags;
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    if (!time) return kAudioHardwareIllegalOperationError;
+    AudioTimeStamp reference, requested = *time, now;
+    if (!io_reference(&reference)) return kAudioHardwareNotRunningError;
+    uint64_t host = darwin_AudioGetCurrentHostTime();
+    AudioTimeStamp current = { .mHostTime = host, .mFlags = kAudioTimeStampHostTimeValid };
+    now.mFlags = time->mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
+    io_translate(&reference, &current, &now);
+    OSStatus status = io_translate(&reference, &requested, time);
+    if (status != 0) return status;
+    if (time->mSampleTime < now.mSampleTime) *time = now;
+    return 0;
+}
+
+/// Starts the proc now, as near the time as it can be, and gives the
+/// time it started at. As on Darwin, the device must already be running.
+OSStatus darwin_AudioDeviceStartAtTime(AudioObjectID device, io_proc proc, AudioTimeStamp *time, uint32_t flags)
+    DARWIN_SYMBOL(AudioDeviceStartAtTime);
+OSStatus darwin_AudioDeviceStartAtTime(AudioObjectID device, io_proc proc, AudioTimeStamp *time, uint32_t flags) {
+    (void)flags;
+    if (device != DEVICE) return kAudioHardwareBadDeviceError;
+    if (!time) return kAudioHardwareIllegalOperationError;
+    AudioTimeStamp reference;
+    if (!io_reference(&reference)) return kAudioHardwareNotRunningError;
+    OSStatus status = darwin_AudioDeviceStart(device, proc);
+    if (status != 0) return status;
+    AudioTimeStamp current = { .mHostTime = darwin_AudioGetCurrentHostTime(), .mFlags = kAudioTimeStampHostTimeValid };
+    time->mFlags = kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid;
+    io_translate(&reference, &current, time);
+    return 0;
+}
 #endif
+

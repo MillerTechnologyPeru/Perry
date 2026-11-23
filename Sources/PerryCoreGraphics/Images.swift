@@ -10,6 +10,7 @@ enum TypeIDs {
     static let colorSpace: UInt = 73, color: UInt = 74, image: UInt = 75, dataProvider: UInt = 76, context: UInt = 77
     static let imageSource: UInt = 78, imageDestination: UInt = 79
     static let font: UInt = 80
+    static let layer: UInt = 85, pdfStructureElement: UInt = 86, renderingBufferProvider: UInt = 87
 }
 
 // MARK: - Pixel formats
@@ -168,16 +169,36 @@ struct Bitmap {
 // MARK: - Color spaces
 
 final class ColorSpaceState: @unchecked Sendable {
-    /// CGColorSpaceModel: monochrome 0, RGB 1, CMYK 2.
+    /// CGColorSpaceModel: monochrome 0, RGB 1, CMYK 2, Lab 3, indexed 5,
+    /// pattern 6.
     let model: Int32
     let name: String?
+    /// An indexed or pattern space's base space, retained.
+    let base: Ref?
+    /// An indexed space's colors: each entry the base's components, a byte
+    /// each.
+    let table: [UInt8]
+    /// The ICC profile the space was made from.
+    let iccData: [UInt8]?
 
-    init(model: Int32, name: String?) {
+    init(model: Int32, name: String?, base: Ref? = nil, table: [UInt8] = [], iccData: [UInt8]? = nil) {
         self.model = model
         self.name = name
+        self.base = base.flatMap { ObjCRuntime.retain($0) }
+        self.table = table
+        self.iccData = iccData
     }
 
-    var components: Int { model == 0 ? 1 : model == 2 ? 4 : 3 }
+    deinit { ObjCRuntime.release(base) }
+
+    var components: Int {
+        switch model {
+        case 0, 5: return 1
+        case 2: return 4
+        case 6: return 0
+        default: return 3
+        }
+    }
 }
 
 @ObjCClass("CGColorSpace")
@@ -195,14 +216,14 @@ public final class CGColorSpaceObject: NSObject {
     @ObjCMethod("isEqual:")
     func isEqual(_ other: NSObject?) -> Bool {
         guard let other = CGColorSpaceObject.states[other?.objcObject], let mine = CGColorSpaceObject.states[objcObject] else { return false }
-        return other.model == mine.model && other.name == mine.name
+        return other.model == mine.model && other.name == mine.name && other.iccData == mine.iccData && other.table == mine.table
     }
 }
 
 enum ColorSpaces {
-    static func make(model: Int32, name: String?) -> Ref {
-        makeObject(CGColorSpaceObject.objCClass, CGColorSpaceObject.states, ColorSpaceState(model: model, name: name))
-    }
+    static func make(model: Int32, name: String?) -> Ref { make(ColorSpaceState(model: model, name: name)) }
+
+    static func make(_ state: ColorSpaceState) -> Ref { makeObject(CGColorSpaceObject.objCClass, CGColorSpaceObject.states, state) }
 
     static func state(_ space: Ref?) -> ColorSpaceState? { CGColorSpaceObject.states[space] }
 }

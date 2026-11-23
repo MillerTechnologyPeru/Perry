@@ -743,6 +743,10 @@ open class MTLRenderPassDescriptor: NSObject {
     var renderTargetArrayLength: UInt = 0
     var defaultRasterSampleCount: UInt = 0
     var sampleAttachments = MTLPassSampleBufferAttachmentDescriptorArray()
+    /// Programmable sample positions, x and y of each: kept and given back,
+    /// as a device without them (areProgrammableSamplePositionsSupported)
+    /// draws with the defaults.
+    var samplePositions: [Float] = []
 
     @ObjCMethod("init") public required override init() { super.init() }
 
@@ -759,6 +763,7 @@ open class MTLRenderPassDescriptor: NSObject {
         copy.visibilityResultBuffer = visibilityResultBuffer
         (copy.renderTargetWidth, copy.renderTargetHeight) = (renderTargetWidth, renderTargetHeight)
         (copy.renderTargetArrayLength, copy.defaultRasterSampleCount) = (renderTargetArrayLength, defaultRasterSampleCount)
+        copy.samplePositions = samplePositions
         return copy
     }
 

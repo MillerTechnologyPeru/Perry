@@ -3,23 +3,27 @@
 // anywhere here: Swift Playgrounds' compiler talks to its source-code
 // service in the same process, through these objects, and an app extension
 // is run in its host's process. Objects are reference counted; a collection
-// owns the values it holds.
+// owns the values it holds. There are no connections: a message has no peer
+// to reply to, and sending one goes nowhere.
 
 #define _GNU_SOURCE
 #include "PerrySystem.h"
 
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 // An XPC object is an Objective-C object, as Darwin's are: Swift retains and
 // releases them as it does any other, so each is an instance of a class
 // made here, its state in the instance's extra bytes.
-enum xpc_kind { Null, Bool, Int64, UInt64, Double, String, Data, Array, Dictionary, Error };
+enum xpc_kind { Null, Bool, Int64, UInt64, Double, String, Data, Array, Dictionary, Error, Uuid, Fd };
 
 struct xpc_type { const char *name; };
 
@@ -30,6 +34,8 @@ struct xpc_body {
         int64_t int64;
         uint64_t uint64;
         double real;
+        uint8_t uuid[16];
+        int fd;
         struct { char *chars; size_t length; } string;
         struct { uint8_t *bytes; size_t length; } data;
         struct { void **items; size_t count, capacity; } array;
@@ -46,7 +52,7 @@ static struct {
     void *(*get_class)(const char *);
     void *(*allocate_class_pair)(void *, const char *, size_t);
     void (*register_class_pair)(void *);
-    int (*add_method)(void *, const char *, void *, const char *);
+    int (*add_method)(void *, void *, void *, const char *);
     void *(*create_instance)(void *, size_t);
     void *(*indexed_ivars)(void *);
     void *(*retain)(void *);
@@ -58,12 +64,32 @@ static struct {
 } objc = { .once = PTHREAD_ONCE_INIT };
 
 static void xpc_dealloc(void *self, void *cmd);
+static void *xpc_retain_method(void *self, void *cmd);
+static void xpc_release_method(void *self, void *cmd);
+static void *xpc_autorelease_method(void *self, void *cmd);
+static unsigned long xpc_retain_count_method(void *self, void *cmd);
 
 // The two errors programs compare connections' failures with are objects
 // that live as long as the process: an isa, then the state.
 struct static_object { void *isa; struct xpc_body body; };
 struct static_object error_interrupted DARWIN_SYMBOL(_xpc_error_connection_interrupted) = { .body = { .kind = Error } };
 struct static_object error_invalid DARWIN_SYMBOL(_xpc_error_connection_invalid) = { .body = { .kind = Error } };
+struct static_object error_termination_imminent DARWIN_SYMBOL(_xpc_error_termination_imminent) = { .body = { .kind = Error } };
+struct static_object error_peer_requirement DARWIN_SYMBOL(_xpc_error_peer_code_signing_requirement) = { .body = { .kind = Error } };
+// The two booleans, which xpc_bool_create gives as Darwin does.
+struct static_object bool_true DARWIN_SYMBOL(_xpc_bool_true) = { .body = { .kind = Bool, .boolean = true } };
+struct static_object bool_false DARWIN_SYMBOL(_xpc_bool_false) = { .body = { .kind = Bool, .boolean = false } };
+
+static struct static_object *const static_objects[] = {
+    &error_interrupted, &error_invalid, &error_termination_imminent, &error_peer_requirement, &bool_true, &bool_false,
+};
+
+static bool is_static(const void *object) {
+    for (size_t i = 0; i < sizeof(static_objects) / sizeof(static_objects[0]); i++)
+        if (object == static_objects[i])
+            return true;
+    return false;
+}
 
 static void load_runtime(void) {
     void *handle = dlopen("libPerryobjc.so", RTLD_NOW | RTLD_NOLOAD);
@@ -80,23 +106,32 @@ static void load_runtime(void) {
     objc.register_name = dlsym(handle, "_sel_registerName");
     objc.msg_send_super = dlsym(handle, "_objc_msgSendSuper2");
     if (!objc.get_class || !objc.allocate_class_pair || !objc.register_class_pair || !objc.add_method
-        || !objc.create_instance || !objc.indexed_ivars)
+        || !objc.create_instance || !objc.indexed_ivars || !objc.register_name)
         return;
     void *base = objc.get_class("NSObject");
     void *cls = base ? objc.allocate_class_pair(base, "OS_xpc_object", 0) : NULL;
     if (!cls)
         return;
-    objc.add_method(cls, "dealloc", (void *)xpc_dealloc, "v16@0:8");
+    // Methods are added by their selectors, which are registered names (a
+    // string isn't one).
+    objc.add_method(cls, objc.register_name("dealloc"), (void *)xpc_dealloc, "v16@0:8");
+    // The objects in data (the booleans, the connection errors) live as long
+    // as the process, as Darwin's do: retaining and releasing them does
+    // nothing, and the others count as NSObject's do.
+    objc.add_method(cls, objc.register_name("retain"), (void *)xpc_retain_method, "@16@0:8");
+    objc.add_method(cls, objc.register_name("release"), (void *)xpc_release_method, "Vv16@0:8");
+    objc.add_method(cls, objc.register_name("autorelease"), (void *)xpc_autorelease_method, "@16@0:8");
+    objc.add_method(cls, objc.register_name("retainCount"), (void *)xpc_retain_count_method, "Q16@0:8");
     objc.register_class_pair(cls);
     objc.cls = cls;
-    error_interrupted.isa = cls;
-    error_invalid.isa = cls;
+    for (size_t i = 0; i < sizeof(static_objects) / sizeof(static_objects[0]); i++)
+        static_objects[i]->isa = cls;
 }
 
 static struct xpc_body *body(xpc_object_t object) {
     if (!object)
         return NULL;
-    if (object == &error_interrupted || object == &error_invalid)
+    if (is_static(object))
         return &((struct static_object *)object)->body;
     return objc.indexed_ivars ? objc.indexed_ivars(object) : NULL;
 }
@@ -111,9 +146,30 @@ struct xpc_type darwin_xpc_type_data DARWIN_SYMBOL(_xpc_type_data) = { "data" };
 struct xpc_type darwin_xpc_type_array DARWIN_SYMBOL(_xpc_type_array) = { "array" };
 struct xpc_type darwin_xpc_type_dictionary DARWIN_SYMBOL(_xpc_type_dictionary) = { "dictionary" };
 struct xpc_type darwin_xpc_type_error DARWIN_SYMBOL(_xpc_type_error) = { "error" };
+struct xpc_type darwin_xpc_type_uuid DARWIN_SYMBOL(_xpc_type_uuid) = { "uuid" };
+struct xpc_type darwin_xpc_type_fd DARWIN_SYMBOL(_xpc_type_fd) = { "fd" };
+// The types of objects made only by what isn't here (connections, services,
+// shared memory…): programs compare with them, and no object has them.
+struct xpc_type darwin_xpc_type_connection DARWIN_SYMBOL(_xpc_type_connection) = { "connection" };
+struct xpc_type darwin_xpc_type_endpoint DARWIN_SYMBOL(_xpc_type_endpoint) = { "endpoint" };
+struct xpc_type darwin_xpc_type_date DARWIN_SYMBOL(_xpc_type_date) = { "date" };
+struct xpc_type darwin_xpc_type_shmem DARWIN_SYMBOL(_xpc_type_shmem) = { "shmem" };
+struct xpc_type darwin_xpc_type_activity DARWIN_SYMBOL(_xpc_type_activity) = { "activity" };
+struct xpc_type darwin_xpc_type_rich_error DARWIN_SYMBOL(_xpc_type_rich_error) = { "rich_error" };
+struct xpc_type darwin_xpc_type_bundle DARWIN_SYMBOL(_xpc_type_bundle) = { "bundle" };
+struct xpc_type darwin_xpc_type_file_transfer DARWIN_SYMBOL(_xpc_type_file_transfer) = { "file_transfer" };
+struct xpc_type darwin_xpc_type_mach_recv DARWIN_SYMBOL(_xpc_type_mach_recv) = { "mach_recv" };
+struct xpc_type darwin_xpc_type_mach_send DARWIN_SYMBOL(_xpc_type_mach_send) = { "mach_send" };
+struct xpc_type darwin_xpc_type_mach_send_once DARWIN_SYMBOL(_xpc_type_mach_send_once) = { "mach_send_once" };
+struct xpc_type darwin_xpc_type_pipe DARWIN_SYMBOL(_xpc_type_pipe) = { "pipe" };
+struct xpc_type darwin_xpc_type_pointer DARWIN_SYMBOL(_xpc_type_pointer) = { "pointer" };
+struct xpc_type darwin_xpc_type_serializer DARWIN_SYMBOL(_xpc_type_serializer) = { "serializer" };
+struct xpc_type darwin_xpc_type_service DARWIN_SYMBOL(_xpc_type_service) = { "service" };
+struct xpc_type darwin_xpc_type_service_instance DARWIN_SYMBOL(_xpc_type_service_instance) = { "service_instance" };
 
 const char *const darwin_xpc_error_key_description DARWIN_SYMBOL(_xpc_error_key_description) =
     "XPCErrorDescription";
+const char *const darwin_xpc_event_key_name DARWIN_SYMBOL(_xpc_event_key_name) = "XPCEventName";
 
 static xpc_object_t make(enum xpc_kind kind) {
     pthread_once(&objc.once, load_runtime);
@@ -126,7 +182,7 @@ static xpc_object_t make(enum xpc_kind kind) {
     return object;
 }
 
-static bool immortal(xpc_object_t object) { return object == &error_interrupted || object == &error_invalid; }
+static bool immortal(xpc_object_t object) { return is_static(object); }
 
 xpc_object_t darwin_xpc_retain(xpc_object_t object) DARWIN_SYMBOL(xpc_retain);
 xpc_object_t darwin_xpc_retain(xpc_object_t object) {
@@ -141,6 +197,34 @@ void darwin_xpc_release(xpc_object_t object) {
         objc.release(object);
 }
 
+/// Sends a method to NSObject's implementation, for the objects that
+/// aren't static (objc_msgSendSuper2 takes this class and looks above it).
+static void *send_super(void *self, const char *selector) {
+    struct { void *receiver; void *current_class; } super = { self, objc.cls };
+    return ((void *(*)(void *, void *))objc.msg_send_super)(&super, objc.register_name(selector));
+}
+
+static void *xpc_retain_method(void *self, void *cmd) {
+    (void)cmd;
+    return is_static(self) ? self : send_super(self, "retain");
+}
+
+static void xpc_release_method(void *self, void *cmd) {
+    (void)cmd;
+    if (!is_static(self))
+        send_super(self, "release");
+}
+
+static void *xpc_autorelease_method(void *self, void *cmd) {
+    (void)cmd;
+    return is_static(self) ? self : send_super(self, "autorelease");
+}
+
+static unsigned long xpc_retain_count_method(void *self, void *cmd) {
+    (void)cmd;
+    return is_static(self) ? (unsigned long)-1 : (unsigned long)(uintptr_t)send_super(self, "retainCount");
+}
+
 // When the last reference goes: what the object holds is let go.
 static void xpc_dealloc(void *self, void *cmd) {
     struct xpc_body *state = body(self);
@@ -148,6 +232,7 @@ static void xpc_dealloc(void *self, void *cmd) {
         switch (state->kind) {
         case String: free(state->string.chars); break;
         case Data: free(state->data.bytes); break;
+        case Fd: close(state->fd); break;
         case Array:
             for (size_t i = 0; i < state->array.count; i++)
                 darwin_xpc_release(state->array.items[i]);
@@ -164,7 +249,7 @@ static void xpc_dealloc(void *self, void *cmd) {
         default: break;
         }
     }
-    struct { void *receiver; void *super_class; } super = { self, objc.get_class("NSObject") };
+    struct { void *receiver; void *current_class; } super = { self, objc.cls };
     ((void (*)(void *, void *))objc.msg_send_super)(&super, objc.register_name("dealloc"));
 }
 
@@ -184,6 +269,8 @@ const struct xpc_type *darwin_xpc_get_type(xpc_object_t object) {
     case Array: return &darwin_xpc_type_array;
     case Dictionary: return &darwin_xpc_type_dictionary;
     case Error: return &darwin_xpc_type_error;
+    case Uuid: return &darwin_xpc_type_uuid;
+    case Fd: return &darwin_xpc_type_fd;
     }
     return NULL;
 }
@@ -195,10 +282,8 @@ xpc_object_t darwin_xpc_null_create(void) { return make(Null); }
 
 xpc_object_t darwin_xpc_bool_create(bool value) DARWIN_SYMBOL(xpc_bool_create);
 xpc_object_t darwin_xpc_bool_create(bool value) {
-    xpc_object_t object = make(Bool);
-    if (object)
-        body(object)->boolean = value;
-    return object;
+    pthread_once(&objc.once, load_runtime);
+    return value ? (xpc_object_t)&bool_true : (xpc_object_t)&bool_false;
 }
 
 bool darwin_xpc_bool_get_value(xpc_object_t object) DARWIN_SYMBOL(xpc_bool_get_value);
@@ -502,4 +587,232 @@ bool darwin_xpc_dictionary_apply(xpc_object_t dictionary, void *block) {
         if (!invoke(block, body(dictionary)->dictionary.keys[i], body(dictionary)->dictionary.values[i]))
             return false;
     return true;
+}
+
+size_t darwin_xpc_dictionary_get_count(xpc_object_t dictionary) DARWIN_SYMBOL(xpc_dictionary_get_count);
+size_t darwin_xpc_dictionary_get_count(xpc_object_t dictionary) {
+    return dictionary && body(dictionary)->kind == Dictionary ? body(dictionary)->dictionary.count : 0;
+}
+
+// A message here never came from a peer: there is nobody to reply to, no
+// connection it came on, and no peer's audit token (all zero).
+xpc_object_t darwin_xpc_dictionary_create_reply(xpc_object_t original) DARWIN_SYMBOL(xpc_dictionary_create_reply);
+xpc_object_t darwin_xpc_dictionary_create_reply(xpc_object_t original) {
+    (void)original;
+    return NULL;
+}
+
+void *darwin_xpc_dictionary_get_remote_connection(xpc_object_t message) DARWIN_SYMBOL(xpc_dictionary_get_remote_connection);
+void *darwin_xpc_dictionary_get_remote_connection(xpc_object_t message) {
+    (void)message;
+    return NULL;
+}
+
+void darwin_xpc_dictionary_get_audit_token(xpc_object_t message, void *token) DARWIN_SYMBOL(xpc_dictionary_get_audit_token);
+void darwin_xpc_dictionary_get_audit_token(xpc_object_t message, void *token) {
+    (void)message;
+    if (token)
+        memset(token, 0, 32);
+}
+
+void darwin_xpc_connection_send_message(void *connection, xpc_object_t message) DARWIN_SYMBOL(xpc_connection_send_message);
+void darwin_xpc_connection_send_message(void *connection, xpc_object_t message) {
+    (void)connection;
+    (void)message;
+}
+
+// MARK: - UUIDs and file descriptors
+
+xpc_object_t darwin_xpc_uuid_create(const uint8_t *uuid) DARWIN_SYMBOL(xpc_uuid_create);
+xpc_object_t darwin_xpc_uuid_create(const uint8_t *uuid) {
+    xpc_object_t object = make(Uuid);
+    if (object && uuid)
+        memcpy(body(object)->uuid, uuid, 16);
+    return object;
+}
+
+const uint8_t *darwin_xpc_uuid_get_bytes(xpc_object_t object) DARWIN_SYMBOL(xpc_uuid_get_bytes);
+const uint8_t *darwin_xpc_uuid_get_bytes(xpc_object_t object) {
+    return object && body(object)->kind == Uuid ? body(object)->uuid : NULL;
+}
+
+// The object keeps its own duplicate of the descriptor, closed with it.
+xpc_object_t darwin_xpc_fd_create(int fd) DARWIN_SYMBOL(xpc_fd_create);
+xpc_object_t darwin_xpc_fd_create(int fd) {
+    int copy = dup(fd);
+    if (copy < 0)
+        return NULL;
+    xpc_object_t object = make(Fd);
+    if (!object) {
+        close(copy);
+        return NULL;
+    }
+    body(object)->fd = copy;
+    return object;
+}
+
+int darwin_xpc_fd_dup(xpc_object_t object) DARWIN_SYMBOL(xpc_fd_dup);
+int darwin_xpc_fd_dup(xpc_object_t object) {
+    return object && body(object)->kind == Fd ? dup(body(object)->fd) : -1;
+}
+
+// MARK: - Equality, hashing and descriptions
+
+bool darwin_xpc_equal(xpc_object_t a, xpc_object_t b) DARWIN_SYMBOL(xpc_equal);
+bool darwin_xpc_equal(xpc_object_t a, xpc_object_t b) {
+    if (a == b)
+        return true;
+    struct xpc_body *x = body(a), *y = body(b);
+    if (!x || !y || x->kind != y->kind)
+        return false;
+    switch (x->kind) {
+    case Null: return true;
+    case Bool: return x->boolean == y->boolean;
+    case Int64: return x->int64 == y->int64;
+    case UInt64: return x->uint64 == y->uint64;
+    case Double: return x->real == y->real;
+    case String: return x->string.length == y->string.length && memcmp(x->string.chars, y->string.chars, x->string.length) == 0;
+    case Data: return x->data.length == y->data.length && (x->data.length == 0 || memcmp(x->data.bytes, y->data.bytes, x->data.length) == 0);
+    case Uuid: return memcmp(x->uuid, y->uuid, 16) == 0;
+    case Array:
+        if (x->array.count != y->array.count)
+            return false;
+        for (size_t i = 0; i < x->array.count; i++)
+            if (!darwin_xpc_equal(x->array.items[i], y->array.items[i]))
+                return false;
+        return true;
+    case Dictionary:
+        if (x->dictionary.count != y->dictionary.count)
+            return false;
+        for (size_t i = 0; i < x->dictionary.count; i++)
+            if (!darwin_xpc_equal(x->dictionary.values[i], darwin_xpc_dictionary_get_value(b, x->dictionary.keys[i])))
+                return false;
+        return true;
+    case Error: case Fd: return false;
+    }
+    return false;
+}
+
+static size_t hash_bytes(const void *bytes, size_t length, size_t seed) {
+    const uint8_t *p = bytes;
+    size_t hash = seed ^ 1469598103934665603ull;
+    for (size_t i = 0; i < length; i++)
+        hash = (hash ^ p[i]) * 1099511628211ull;
+    return hash;
+}
+
+size_t darwin_xpc_hash(xpc_object_t object) DARWIN_SYMBOL(xpc_hash);
+size_t darwin_xpc_hash(xpc_object_t object) {
+    struct xpc_body *state = body(object);
+    if (!state)
+        return 0;
+    switch (state->kind) {
+    case Null: return 0;
+    case Bool: return state->boolean;
+    case Int64: return (size_t)state->int64;
+    case UInt64: return (size_t)state->uint64;
+    case Double: return hash_bytes(&state->real, sizeof(state->real), Double);
+    case String: return hash_bytes(state->string.chars, state->string.length, String);
+    case Data: return hash_bytes(state->data.bytes, state->data.length, Data);
+    case Uuid: return hash_bytes(state->uuid, 16, Uuid);
+    case Array: return state->array.count * 31 + Array;
+    // Equal dictionaries may hold their keys in different orders: only the
+    // count goes in.
+    case Dictionary: return state->dictionary.count * 31 + Dictionary;
+    case Error: case Fd: return (size_t)(uintptr_t)object;
+    }
+    return 0;
+}
+
+// A growing string for descriptions.
+struct text { char *chars; size_t length, capacity; };
+
+static void append(struct text *text, const char *format, ...) __attribute__((format(printf, 2, 3)));
+static void append(struct text *text, const char *format, ...) {
+    va_list arguments;
+    va_start(arguments, format);
+    va_list copy;
+    va_copy(copy, arguments);
+    int needed = vsnprintf(NULL, 0, format, copy);
+    va_end(copy);
+    if (needed > 0 && text->length + (size_t)needed + 1 > text->capacity) {
+        size_t capacity = (text->length + (size_t)needed + 1) * 2;
+        char *chars = realloc(text->chars, capacity);
+        if (!chars) {
+            va_end(arguments);
+            return;
+        }
+        text->chars = chars;
+        text->capacity = capacity;
+    }
+    if (needed > 0) {
+        vsnprintf(text->chars + text->length, (size_t)needed + 1, format, arguments);
+        text->length += (size_t)needed;
+    }
+    va_end(arguments);
+}
+
+static void describe(struct text *text, xpc_object_t object, int depth) {
+    struct xpc_body *state = body(object);
+    if (!state) {
+        append(text, "<null>");
+        return;
+    }
+    switch (state->kind) {
+    case Null: append(text, "<null>"); break;
+    case Bool: append(text, "<bool: %s>", state->boolean ? "true" : "false"); break;
+    case Int64: append(text, "<int64: %lld>", (long long)state->int64); break;
+    case UInt64: append(text, "<uint64: %llu>", (unsigned long long)state->uint64); break;
+    case Double: append(text, "<double: %g>", state->real); break;
+    case String: append(text, "<string: { length = %zu, contents = \"%s\" }>", state->string.length, state->string.chars ? state->string.chars : ""); break;
+    case Data: append(text, "<data: { length = %zu bytes }>", state->data.length); break;
+    case Fd: append(text, "<fd: %d>", state->fd); break;
+    case Error: append(text, "<error>"); break;
+    case Uuid: {
+        const uint8_t *u = state->uuid;
+        append(text, "<uuid: %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X>",
+               u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
+        break;
+    }
+    case Array:
+        append(text, "<array: { count = %zu, contents =\n", state->array.count);
+        for (size_t i = 0; i < state->array.count; i++) {
+            append(text, "%*s%zu: ", (depth + 1) * 4, "", i);
+            describe(text, state->array.items[i], depth + 1);
+            append(text, "\n");
+        }
+        append(text, "%*s}>", depth * 4, "");
+        break;
+    case Dictionary:
+        append(text, "<dictionary: { count = %zu, contents =\n", state->dictionary.count);
+        for (size_t i = 0; i < state->dictionary.count; i++) {
+            append(text, "%*s\"%s\" => ", (depth + 1) * 4, "", state->dictionary.keys[i]);
+            describe(text, state->dictionary.values[i], depth + 1);
+            append(text, "\n");
+        }
+        append(text, "%*s}>", depth * 4, "");
+        break;
+    }
+}
+
+// Freed by the caller, as Darwin's is.
+char *darwin_xpc_copy_description(xpc_object_t object) DARWIN_SYMBOL(xpc_copy_description);
+char *darwin_xpc_copy_description(xpc_object_t object) {
+    struct text text = { 0 };
+    describe(&text, object, 0);
+    return text.chars ? text.chars : strdup("");
+}
+
+// Rich errors come from sessions, which aren't here: one describes itself
+// generally and can't be retried.
+char *darwin_xpc_rich_error_copy_description(xpc_object_t error) DARWIN_SYMBOL(xpc_rich_error_copy_description);
+char *darwin_xpc_rich_error_copy_description(xpc_object_t error) {
+    (void)error;
+    return strdup("XPC is not available");
+}
+
+bool darwin_xpc_rich_error_can_retry(xpc_object_t error) DARWIN_SYMBOL(xpc_rich_error_can_retry);
+bool darwin_xpc_rich_error_can_retry(xpc_object_t error) {
+    (void)error;
+    return false;
 }
