@@ -9,9 +9,31 @@
 
 #if defined(__arm__) || defined(__i386__) || defined(__powerpc__)
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
+
+#if defined(__powerpc__)
+void *perry_darwin_callable(void *function) {
+    // The loader's, which perry exports: RTLD_DEFAULT finds it.
+    static void *(*callable)(void *);
+    if (!callable)
+        callable = (void *(*)(void *))dlsym(RTLD_DEFAULT, "perry_ppc_linux_callable");
+    return callable ? callable(function) : function;
+}
+
+void *perry_signal_entry(void *handler) {
+    void *(*stub)(void *) = (void *(*)(void *))dlsym(RTLD_DEFAULT, "perry_ppc_thread_stub");
+    return stub ? stub(handler) : handler;
+}
+
+void perry_note_signal_stack(void *low, size_t size) {
+    void (*note)(void *, size_t) = (void (*)(void *, size_t))dlsym(RTLD_DEFAULT, "perry_ppc_note_stack");
+    if (note)
+        note(low, size);
+}
+#endif
 
 typedef int (*comparator)(const void *, const void *);
 
@@ -23,7 +45,7 @@ static int compare(const void *a, const void *b, void *function) {
 
 void darwin_qsort(void *base, size_t count, size_t size, comparator function) DARWIN_SYMBOL(qsort);
 void darwin_qsort(void *base, size_t count, size_t size, comparator function) {
-    qsort_r(base, count, size, compare, (void *)function);
+    qsort_r(base, count, size, compare, (void *)PERRY_DARWIN_FUNCTION(function));
 }
 
 // Here, so glibc's code is not between it and the comparator.
@@ -31,6 +53,7 @@ void *darwin_bsearch(const void *key, const void *base, size_t count, size_t siz
     DARWIN_SYMBOL(bsearch);
 void *darwin_bsearch(const void *key, const void *base, size_t count, size_t size, comparator function) {
     const char *low = base;
+    function = PERRY_DARWIN_FUNCTION(function);
     while (count > 0) {
         const char *middle = low + (count / 2) * size;
         int order = function(key, middle);
@@ -55,7 +78,7 @@ static void *start(void *pointer) {
     struct call call = *(struct call *)pointer;
     free(pointer);
     void *result;
-    PERRY_KEEP_R9(result = call.function(call.argument));
+    PERRY_KEEP_R9(result = PERRY_DARWIN_FUNCTION(call.function)(call.argument));
     return result;
 }
 
@@ -80,7 +103,7 @@ int darwin_pthread_create(pthread_t *thread, const pthread_attr_t *attributes, v
 static void finish(void *pointer) {
     struct call call = *(struct call *)pointer;
     free(pointer);
-    PERRY_KEEP_R9(call.function(call.argument));
+    PERRY_KEEP_R9(PERRY_DARWIN_FUNCTION(call.function)(call.argument));
 }
 
 int __cxa_atexit(void (*)(void *), void *, void *);
