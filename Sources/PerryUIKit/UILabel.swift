@@ -191,16 +191,16 @@ open class UIFont: NSObject {
     }
 
     /// The font CoreGraphics draws with, as FontConfig names it
-    /// ("Family-Style"): for the system font and monospaced fonts, DejaVu
-    /// Sans or Sans Mono, bold and oblique as the font is; other fonts by
-    /// their names.
+    /// ("Family-Style"): for the system font, the system family (Inter or
+    /// DejaVu Sans), and for monospaced fonts DejaVu Sans Mono, bold and
+    /// italic as the font is; other fonts by their names.
     var drawingName: String {
         let state = state
         if let name = state.drawingName { return name }
         let name: String
         if state.name.hasPrefix(".") || isMonospaced {
-            let family = isMonospaced ? "DejaVu Sans Mono" : "DejaVu Sans"
-            let style = (isBold ? "Bold" : "") + (isItalic ? "Oblique" : "")
+            let family = isMonospaced ? "DejaVu Sans Mono" : CTFonts.systemFamily
+            let style = (isBold ? "Bold" : "") + (isItalic ? (family == "Inter" ? "Italic" : "Oblique") : "")
             name = style.isEmpty ? family : family + "-" + style
         } else {
             name = state.name
