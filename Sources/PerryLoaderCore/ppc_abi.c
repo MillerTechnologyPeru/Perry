@@ -45,6 +45,7 @@ void perry_ppc_invoke_sysv(void *function, const uint32_t gprs[8], const double 
                            uint32_t stack_words, perry_ppc_registers *result);
 void perry_ppc_invoke_darwin(void *function, const uint32_t gprs[8], const double fprs[13], const uint32_t *words,
                              uint32_t word_count, perry_ppc_registers *result);
+void perry_ppc_darwin_from_linux(void);
 
 // MARK: - Plans
 
@@ -62,6 +63,8 @@ enum kind {
 typedef struct plan_value {
     enum kind kind;
     uint32_t words;
+    uint32_t size;  // in memory, as Darwin lays it out
+    char code;      // the encoding's type character
 } plan_value;
 
 enum { MAX_ARGUMENTS = 32 };
@@ -195,6 +198,8 @@ static const char *value(const char *p, plan_value *out, bool *ok) {
     enum kind single;
     const char *start = skip_qualifiers(p);
     p = measure(start, &size, &align, &single);
+    out->size = size;
+    out->code = *start;
     switch (*start) {
     case 'v': out->kind = KIND_VOID; break;
     case 'f': out->kind = KIND_FLOAT; break;
@@ -511,6 +516,61 @@ void *perry_ppc_darwin_entry(void *function, const char *types) {
 
 // MARK: - Linux to Darwin
 
+// What Linux code calls for a Darwin function whose arguments are words, or
+// floating point after every word (a block's invoke, a callback): a stub
+// that calls it through perry_ppc_darwin_from_linux, from a frame laid out
+// as Darwin's caller's, keeping r2. Linux code comes back as it is. A stub
+// is made once for each function.
+static struct { void *function; uint32_t *stub; } *callables;
+static size_t callables_size, callables_count;
+
+static size_t callable_slot(void *function) {
+    size_t mask = callables_size - 1;
+    size_t i = ((uintptr_t)function >> 2) & mask;
+    while (callables[i].function && callables[i].function != function)
+        i = (i + 1) & mask;
+    return i;
+}
+
+void *perry_ppc_linux_callable(void *function) {
+    if (!function || in_linux_code(function))
+        return function;
+    return perry_ppc_callable_stub(function);
+}
+
+void *perry_ppc_callable_stub(void *function) {
+    pthread_mutex_lock(&lock);
+    if (callables_count * 2 >= callables_size) {
+        __typeof__(callables) old = callables;
+        size_t old_size = callables_size;
+        callables_size = old_size ? old_size * 2 : 256;
+        callables = calloc(callables_size, sizeof(*callables));
+        for (size_t i = 0; i < old_size; i++)
+            if (old[i].function)
+                callables[callable_slot(old[i].function)] = old[i];
+        free(old);
+    }
+    size_t slot = callable_slot(function);
+    if (!callables[slot].function) {
+        uint32_t *code = new_stub();
+        uint32_t target = (uint32_t)(uintptr_t)function, through = (uint32_t)(uintptr_t)perry_ppc_darwin_from_linux;
+        code[0] = 0x3d600000u | (target >> 16);         // lis r11, function@h
+        code[1] = 0x616b0000u | (target & 0xffff);      // ori r11, r11, function@l
+        code[2] = 0x3d800000u | (through >> 16);        // lis r12, perry_ppc_darwin_from_linux@h
+        code[3] = 0x618c0000u | (through & 0xffff);     // ori r12, r12, perry_ppc_darwin_from_linux@l
+        code[4] = 0x7d8903a6u;                          // mtctr r12
+        code[5] = 0x4e800420u;                          // bctr
+        __builtin___clear_cache((char *)code, (char *)(code + 6));
+        callables[slot].function = function;
+        callables[slot].stub = code;
+        callables_count++;
+        perry_trace(PERRY_TRACE_BIND, "Linux-callable stub %p for %p", (void *)code, function);
+    }
+    uint32_t *stub = callables[slot].stub;
+    pthread_mutex_unlock(&lock);
+    return stub;
+}
+
 // Calls a Darwin function with the arguments of a call Linux code made (its
 // registers, and its stack from 8(r1)), laid out for Darwin by `types`; the
 // result registers are the same on both.
@@ -577,6 +637,74 @@ void perry_ppc_call_darwin(void *function, const char *types, const uint32_t lin
                 fprs[fpr++] = single;
             break;
         }
+        }
+    }
+    for (uint32_t i = 0; i < 8 && i < word; i++)
+        gprs[i] = words[i];
+    perry_ppc_invoke_darwin(function, gprs, fprs, words, word, result);
+}
+
+// Calls a Darwin function (an IMP, a block's invoke) by its type encoding
+// with its arguments as they are in memory, `arguments` pointing at each:
+// NSInvocation's and key-value coding's calls. A structure result goes to
+// `structure`; the others are in `result`'s registers.
+void perry_ppc_call_darwin_values(void *function, const char *types, void *const *arguments, void *structure,
+                                  perry_ppc_registers *result) {
+    perry_ppc_plan plan;
+    if (!parse(types, &plan))
+        perry_fatal("cannot move the arguments of %s for Darwin's ppc ABI", types);
+    uint32_t gprs[8] = { 0 };
+    double fprs[13] = { 0 };
+    uint32_t words[MAX_ARGUMENTS * 4 + 8];
+    uint32_t word = 0, fpr = 0;
+    if (is_structure(plan.result.kind))
+        words[word++] = (uint32_t)(uintptr_t)structure;
+    for (uint32_t i = 0; i < plan.count; i++) {
+        const plan_value *argument = &plan.arguments[i];
+        const unsigned char *bytes = arguments[i];
+        switch (argument->kind) {
+        case KIND_WORD:
+        case KIND_VOID: {
+            // Promoted to a word as C passes it: chars and shorts by their sign.
+            uint32_t value = 0;
+            if (argument->size == 1)
+                value = argument->code == 'c' ? (uint32_t)(int32_t)*(const int8_t *)bytes : *bytes;
+            else if (argument->size == 2) {
+                uint16_t half;
+                memcpy(&half, bytes, 2);
+                value = argument->code == 's' ? (uint32_t)(int32_t)(int16_t)half : half;
+            } else
+                memcpy(&value, bytes, 4);
+            words[word++] = value;
+            break;
+        }
+        case KIND_PAIR:
+            memcpy(&words[word], bytes, 8);
+            word += 2;
+            break;
+        case KIND_DOUBLE:
+        case KIND_STRUCT_DOUBLE:
+            memcpy(&words[word], bytes, 8);
+            word += 2;
+            if (fpr < 13)
+                memcpy(&fprs[fpr++], bytes, 8);
+            break;
+        case KIND_FLOAT:
+        case KIND_STRUCT_FLOAT: {
+            float single;
+            memcpy(&single, bytes, 4);
+            memcpy(&words[word++], bytes, 4);
+            if (fpr < 13)
+                fprs[fpr++] = single;
+            break;
+        }
+        case KIND_STRUCT:
+            if (word + argument->words > MAX_ARGUMENTS * 4)
+                perry_fatal("the arguments of %s are too large to move for Darwin's ppc ABI", types);
+            memset(&words[word], 0, argument->words * 4);
+            memcpy(&words[word], bytes, argument->size);
+            word += argument->words;
+            break;
         }
     }
     for (uint32_t i = 0; i < 8 && i < word; i++)

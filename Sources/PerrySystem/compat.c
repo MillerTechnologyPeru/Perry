@@ -209,7 +209,7 @@ struct compare_block {
 static int compare_with_block(const void *a, const void *b, void *context) {
     struct compare_block *block = context;
     int order;
-    PERRY_KEEP_R9(order = block->invoke(block, a, b));
+    PERRY_KEEP_R9(order = PERRY_DARWIN_FUNCTION(block->invoke)(block, a, b));
     return order;
 }
 
@@ -1522,6 +1522,8 @@ int darwin_sigaltstack(const struct darwin_stack *stack, struct darwin_stack *pr
         linux_stack.ss_flags = stack->flags & SS_DISABLE;
     }
     int result = sigaltstack(stack ? &linux_stack : NULL, previous ? &linux_previous : NULL);
+    if (result == 0 && stack && !(stack->flags & SS_DISABLE))
+        perry_note_signal_stack(stack->sp, stack->size);
     if (result == 0 && previous) {
         previous->sp = linux_previous.ss_sp;
         previous->size = linux_previous.ss_size;

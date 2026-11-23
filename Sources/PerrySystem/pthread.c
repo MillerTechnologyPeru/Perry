@@ -719,7 +719,7 @@ static pthread_key_t key_to_linux(unsigned long key) { return (pthread_key_t)(((
 #define RESERVED_DESTRUCTOR(n) \
     static void reserved_destructor_##n(void *value) { \
         if (reserved_destructors[n]) \
-            PERRY_KEEP_R9(reserved_destructors[n](value)); \
+            PERRY_KEEP_R9(PERRY_DARWIN_FUNCTION(reserved_destructors[n])(value)); \
     }
 RESERVED_DESTRUCTOR(0) RESERVED_DESTRUCTOR(1) RESERVED_DESTRUCTOR(2) RESERVED_DESTRUCTOR(3)
 RESERVED_DESTRUCTOR(4) RESERVED_DESTRUCTOR(5) RESERVED_DESTRUCTOR(6) RESERVED_DESTRUCTOR(7)
@@ -788,7 +788,9 @@ static _Atomic bool fixed_keys_made[FIXED_RANGE_END];
 // (see PERRY_KEEP_R9).
 static void (*fixed_destructors[FIXED_RANGE_END])(void *);
 #define FIXED_DESTRUCTOR(n) \
-    static void fixed_destructor_##n(void *value) { PERRY_KEEP_R9(fixed_destructors[n](value)); }
+    static void fixed_destructor_##n(void *value) { \
+        PERRY_KEEP_R9(PERRY_DARWIN_FUNCTION(fixed_destructors[n])(value)); \
+    }
 FIXED_DESTRUCTOR(100) FIXED_DESTRUCTOR(101) FIXED_DESTRUCTOR(102) FIXED_DESTRUCTOR(103)
 FIXED_DESTRUCTOR(104) FIXED_DESTRUCTOR(105) FIXED_DESTRUCTOR(106) FIXED_DESTRUCTOR(107)
 FIXED_DESTRUCTOR(108) FIXED_DESTRUCTOR(109) FIXED_DESTRUCTOR(110) FIXED_DESTRUCTOR(111)

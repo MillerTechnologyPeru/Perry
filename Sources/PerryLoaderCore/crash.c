@@ -201,6 +201,12 @@ void perry_install_crash_reporter(perry_loader *loader) {
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_sigaction = crash_handler;
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    // A crash in Darwin code leaves r2 as that code had it: the handler's
+    // stub sets it again from its stack, noted here.
+    perry_ppc_note_stack(alternate, sizeof(alternate));
+    action.sa_sigaction = (void (*)(int, siginfo_t *, void *))perry_ppc_thread_stub((void *)crash_handler);
+#endif
     action.sa_flags = SA_SIGINFO | SA_ONSTACK;
     sigemptyset(&action.sa_mask);
     int signals[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP, SIGABRT };

@@ -170,6 +170,10 @@ void perry_install_profiler(perry_loader *loader) {
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_sigaction = profile_handler;
+#if defined(__powerpc__) && !defined(__powerpc64__)
+    // A sample in Darwin code finds r2 as that code had it: set it again.
+    action.sa_sigaction = (void (*)(int, siginfo_t *, void *))perry_ppc_thread_stub((void *)profile_handler);
+#endif
     action.sa_flags = SA_SIGINFO | SA_RESTART;
     sigemptyset(&action.sa_mask);
     sigaction(SIGPROF, &action, NULL);

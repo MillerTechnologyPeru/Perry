@@ -33,7 +33,7 @@ enum IO {
         keepingLinuxRegisters {
             ObjCRuntime.autoreleasepool {
                 typealias Handler = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
-                unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                Blocks.function(block, as: Handler.self)(
                     block, IO.darwinError(error))
             }
             Runtime.blockRelease(block)
@@ -47,7 +47,7 @@ enum IO {
             IO.withData(data) { data in
                 ObjCRuntime.autoreleasepool {
                     typealias Handler = @convention(c) (UnsafeMutableRawPointer, Bool, Object?, Int32) -> Void
-                    unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                    Blocks.function(block, as: Handler.self)(
                         block, done, data, IO.darwinError(error))
                 }
             }
@@ -62,7 +62,7 @@ enum IO {
             IO.withData(data) { data in
                 ObjCRuntime.autoreleasepool {
                     typealias Handler = @convention(c) (UnsafeMutableRawPointer, Object?, Int32) -> Void
-                    unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Handler.self)(
+                    Blocks.function(block, as: Handler.self)(
                         block, data, IO.darwinError(error))
                 }
             }

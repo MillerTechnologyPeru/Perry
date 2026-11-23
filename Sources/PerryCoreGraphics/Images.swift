@@ -29,6 +29,29 @@ struct PixelFormat: Equatable {
     var bytesPerPixel: Int { bitsPerPixel / 8 }
     var hasAlpha: Bool { [1, 2, 3, 4, 7].contains(alphaInfo) }
 
+    /// kCGBitmapByteOrder32Host: 32-bit words in the machine's byte order.
+#if _endian(little)
+    static let byteOrder32Host: UInt32 = 0x2000
+#else
+    static let byteOrder32Host: UInt32 = 0x4000
+#endif
+
+    /// Whether the pixels are Cairo's ARGB32 (RGB24 with alpha skipped):
+    /// 8-bit RGB with premultiplied or skipped alpha first in 32-bit words of
+    /// the machine's byte order. That is B, G, R, A in memory on a
+    /// little-endian machine, and A, R, G, B on a big-endian one, where
+    /// kCGBitmapByteOrderDefault's bytes are those too.
+    var isNativeARGB: Bool {
+        guard bitsPerComponent == 8, bitsPerPixel == 32, colorComponents == 3, alphaInfo == 2 || alphaInfo == 6 else {
+            return false
+        }
+#if _endian(little)
+        return byteOrder == 0x2000
+#else
+        return byteOrder == 0x4000 || byteOrder == 0
+#endif
+    }
+
     static let rgbaPremultiplied = PixelFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorComponents: 3, bitmapInfo: 1)
     static let rgbx = PixelFormat(bitsPerComponent: 8, bitsPerPixel: 32, colorComponents: 3, bitmapInfo: 5)
 

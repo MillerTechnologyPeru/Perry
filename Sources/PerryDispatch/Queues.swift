@@ -71,11 +71,18 @@ enum DrainPool {
 // (keepingLinuxRegisters) around the Darwin code it runs.
 
 enum Blocks {
-    /// The block's invoke function, which takes the block first.
+    /// A block's invoke function, which takes the block first, cast to its
+    /// C signature and callable from Linux code (darwinCallable).
+    @inline(__always)
+    static func function<Function>(_ block: UnsafeMutableRawPointer, as type: Function.Type) -> Function {
+        darwinCallable(unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: type))
+    }
+
+    /// Runs a block of no arguments.
     @inline(__always)
     static func invoke(_ block: UnsafeMutableRawPointer) {
         typealias Invoke = @convention(c) (UnsafeMutableRawPointer) -> Void
-        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(block)
+        Blocks.function(block, as: Invoke.self)(block)
     }
 
     /// A heap copy of a block (+1).
@@ -111,16 +118,17 @@ enum Blocks {
         guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, Function).self) else { return }
         let (context, work) = call.pointee
         call.deallocate()
-        keepingLinuxRegisters { DrainPool.run { work(context) } }
+        keepingLinuxRegisters { DrainPool.run { darwinCallable(work)(context) } }
     }
 
     /// For the synchronous _f calls, which libdispatch runs before they
     /// return: the context and function to give it for a Darwin function and
     /// its context, valid during `body`. On armv7 they keep r9 around the
-    /// call; elsewhere they are the Darwin ones.
+    /// call, and on ppc call it from Linux code (darwinCallable); elsewhere
+    /// they are the Darwin ones.
     static func synchronous(_ context: UnsafeMutableRawPointer?, _ work: Function?,
                             _ body: (UnsafeMutableRawPointer?, Function?) -> Void) {
-#if arch(arm)
+#if arch(arm) || arch(powerpc)
         guard let work else { return body(context, nil) }
         var call = (context, work)
         withUnsafeMutablePointer(to: &call) { body(UnsafeMutableRawPointer($0), Blocks.runCall) }
@@ -134,7 +142,7 @@ enum Blocks {
     /// synchronous(_:_:_:) for dispatch_apply_f's function of an index.
     static func synchronous(_ context: UnsafeMutableRawPointer?, _ work: ApplyFunction?,
                             _ body: (UnsafeMutableRawPointer?, ApplyFunction?) -> Void) {
-#if arch(arm)
+#if arch(arm) || arch(powerpc)
         guard let work else { return body(context, nil) }
         var call = (context, work)
         withUnsafeMutablePointer(to: &call) { body(UnsafeMutableRawPointer($0), Blocks.runApply) }
@@ -143,15 +151,15 @@ enum Blocks {
 #endif
     }
 
-#if arch(arm)
+#if arch(arm) || arch(powerpc)
     private static let runCall: Function = { pointer in
         guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, Function).self) else { return }
-        keepingLinuxRegisters { call.pointee.1(call.pointee.0) }
+        keepingLinuxRegisters { darwinCallable(call.pointee.1)(call.pointee.0) }
     }
 
     private static let runApply: ApplyFunction = { pointer, index in
         guard let call = pointer?.assumingMemoryBound(to: (UnsafeMutableRawPointer?, ApplyFunction).self) else { return }
-        keepingLinuxRegisters { call.pointee.1(call.pointee.0, index) }
+        keepingLinuxRegisters { darwinCallable(call.pointee.1)(call.pointee.0, index) }
     }
 #endif
 }
@@ -412,7 +420,7 @@ private let applyBlock: @convention(c) (UnsafeMutableRawPointer?, Int) -> Void =
     typealias Invoke = @convention(c) (UnsafeMutableRawPointer, Int) -> Void
     guard let block else { return }
     keepingLinuxRegisters {
-        unsafeBitCast(block.load(fromByteOffset: DarwinLayout.blockInvoke, as: UnsafeRawPointer.self), to: Invoke.self)(block, index)
+        Blocks.function(block, as: Invoke.self)(block, index)
     }
 }
 

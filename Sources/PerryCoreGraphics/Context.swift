@@ -4,9 +4,9 @@ import PerryObjCInterop
 
 // Bitmap contexts, paths and gradients. A context's drawing goes through
 // Silica's Cairo renderer (Rendering.swift). Memory already in Cairo's
-// layout (premultiplied ARGB in 32-bit little-endian words, which is
-// kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little, UIKit's
-// format) is drawn into directly; any other format is kept in step with a
+// layout (premultiplied ARGB in 32-bit words of the machine's byte order,
+// which is kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+// UIKit's format on little-endian machines) is drawn into directly; any other format is kept in step with a
 // Cairo surface: before each painting operation the rows of memory the
 // program has changed since the last are copied into the surface, and
 // after it the rows the painting changed are copied back. A copy of the
@@ -38,8 +38,7 @@ final class ContextState: @unchecked Sendable {
     var onRelease: (() -> Void)?
 
     init?(width: Int, height: Int, bytesPerRow: Int, format: PixelFormat, space: Ref, data: UnsafeMutableRawPointer, ownsData: Bool) {
-        let cairoLayout = format.bitsPerComponent == 8 && format.colorComponents == 3 && format.byteOrder == 0x2000
-            && (format.alphaInfo == 2 || format.alphaInfo == 6) && bytesPerRow == width * 4
+        let cairoLayout = format.isNativeARGB && bytesPerRow == width * 4
         let canvas = cairoLayout
             ? Canvas(width: width, height: height, memory: data.assumingMemoryBound(to: UInt8.self), bytesPerRow: bytesPerRow,
                      opaque: format.alphaInfo == 6)
@@ -88,21 +87,23 @@ final class ContextState: @unchecked Sendable {
         store()
     }
 
-    /// A row of memory as a row of the canvas: B, G, R, A, premultiplied.
+    /// A row of memory as a row of the canvas, whose pixels are premultiplied
+    /// 0xAARRGGBB words in the machine's byte order.
     private func convert(row source: UnsafeRawPointer, to pixels: UnsafeMutableRawPointer) {
         let opaque: UInt32 = format.alphaInfo == 5 || format.alphaInfo == 6 ? 0xFF00_0000 : 0
         switch layout {
         case .rgba:
-            // R, G, B, A in memory is A, B, G, R in the word: red and blue
-            // change places.
+            // R, G, B, A in memory is 0xAABBGGRR read little-endian: red and
+            // blue change places.
             for x in 0..<width {
-                let v = source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self)
+                let v = UInt32(littleEndian: source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self))
                 pixels.storeBytes(of: (v & 0xFF00_FF00) | ((v & 0xFF) << 16) | ((v >> 16) & 0xFF) | opaque, toByteOffset: x * 4, as: UInt32.self)
             }
         case .argb:
+            // A, R, G, B in memory is 0xAARRGGBB read big-endian.
             for x in 0..<width {
-                let v = source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self)
-                pixels.storeBytes(of: v.byteSwapped | opaque, toByteOffset: x * 4, as: UInt32.self)
+                let v = UInt32(bigEndian: source.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self))
+                pixels.storeBytes(of: v | opaque, toByteOffset: x * 4, as: UInt32.self)
             }
         case .alphaOnly:
             for x in 0..<width {
@@ -114,10 +115,10 @@ final class ContextState: @unchecked Sendable {
                 pixels.storeBytes(of: 0xFF00_0000 | y << 16 | y << 8 | y, toByteOffset: x * 4, as: UInt32.self)
             }
         case .other:
-            let p = pixels.assumingMemoryBound(to: UInt8.self)
             for x in 0..<width {
                 let (r, g, b, a) = format.read(source + x * format.bytesPerPixel)
-                (p[x * 4], p[x * 4 + 1], p[x * 4 + 2], p[x * 4 + 3]) = (b, g, r, a)
+                let word = UInt32(a) << 24 | UInt32(r) << 16 | UInt32(g) << 8 | UInt32(b)
+                pixels.storeBytes(of: word, toByteOffset: x * 4, as: UInt32.self)
             }
         }
     }
@@ -129,12 +130,13 @@ final class ContextState: @unchecked Sendable {
         case .rgba:
             for x in 0..<width {
                 let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self)
-                target.storeBytes(of: (v & 0xFF00_FF00) | ((v & 0xFF) << 16) | ((v >> 16) & 0xFF) | opaque, toByteOffset: x * 4, as: UInt32.self)
+                let word = (v & 0xFF00_FF00) | ((v & 0xFF) << 16) | ((v >> 16) & 0xFF) | opaque
+                target.storeBytes(of: word.littleEndian, toByteOffset: x * 4, as: UInt32.self)
             }
         case .argb:
             for x in 0..<width {
                 let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self) | opaque
-                target.storeBytes(of: v.byteSwapped, toByteOffset: x * 4, as: UInt32.self)
+                target.storeBytes(of: v.bigEndian, toByteOffset: x * 4, as: UInt32.self)
             }
         case .alphaOnly:
             for x in 0..<width {
@@ -147,9 +149,10 @@ final class ContextState: @unchecked Sendable {
                 target.storeBytes(of: UInt8((r * 299 + g * 587 + b * 114 + 500) / 1000), toByteOffset: x, as: UInt8.self)
             }
         case .other:
-            let p = pixels.assumingMemoryBound(to: UInt8.self)
             for x in 0..<width {
-                format.write((p[x * 4 + 2], p[x * 4 + 1], p[x * 4], p[x * 4 + 3]), to: target + x * format.bytesPerPixel)
+                let v = pixels.load(fromByteOffset: x * 4, as: UInt32.self)
+                format.write((UInt8(truncatingIfNeeded: v >> 16), UInt8(truncatingIfNeeded: v >> 8), UInt8(truncatingIfNeeded: v),
+                              UInt8(truncatingIfNeeded: v >> 24)), to: target + x * format.bytesPerPixel)
             }
         }
     }

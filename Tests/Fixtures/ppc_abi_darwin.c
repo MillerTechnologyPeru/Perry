@@ -39,3 +39,10 @@ Rect darwin_rect_method(void *self, void *sel, float scale) {
     Rect r = {scale, 2 * scale, 3 * scale, 4 * scale};
     return r;
 }
+/* A function of words, which changes r2 (Darwin's code may: it is Linux's
+   thread pointer) and calls another, so it saves its lr in its caller's
+   frame. */
+int darwin_words(int a, int b, int c, int d, int e, int f, int g) {
+    __asm__ volatile("li r2, 0x1234" : : : "r2");
+    return a + 2 * b + 3 * c + 4 * d + 5 * e + 6 * f + 7 * g + (int)darwin_halve(2.0f);
+}

@@ -106,10 +106,17 @@ open class NSCursor: NSObject {
         guard let space = CG.colorSpaceCreateDeviceRGB(),
               let surface = try? SDLSurface(format: .argb8888, size: (width, height)) else { return }
         defer { CG.release(space) }
-        // Premultiplied alpha first in 32-bit little-endian words, SDL's
-        // ARGB8888, drawn into the surface from the top row down.
+        // Premultiplied alpha first in 32-bit words of the machine's byte
+        // order (kCGBitmapByteOrder32Host), SDL's ARGB8888, drawn into the
+        // surface from the top row down.
+#if _endian(little)
+        let byteOrder32Host: UInt32 = 0x2000
+#else
+        let byteOrder32Host: UInt32 = 0x4000
+#endif
         let visible = try? surface.withUnsafeMutableBytes { pixels -> Bool in
-            guard let context = CG.bitmapContextCreate(pixels, width, height, 8, surface.pitch, space, 2 | 0x2000) else { return false }
+            guard let context = CG.bitmapContextCreate(pixels, width, height, 8, surface.pitch, space, 2 | byteOrder32Host)
+            else { return false }
             defer { CG.release(context) }
             CG.drawImage(context, CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)), cgImage)
             return (0..<height).contains { row in

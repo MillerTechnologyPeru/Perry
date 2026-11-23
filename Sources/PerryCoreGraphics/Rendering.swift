@@ -3,8 +3,9 @@ import Foundation
 import SilicaCairo
 
 // Drawing through Silica's Cairo renderer. A Canvas is a Cairo image
-// surface (ARGB32: premultiplied, native-endian 0xAARRGGBB, so B, G, R, A
-// in memory here) with Silica's context on it, origin at the bottom left as
+// surface (ARGB32: premultiplied 0xAARRGGBB words in the machine's byte
+// order, so B, G, R, A in memory on x86 and ARM, and A, R, G, B on ppc)
+// with Silica's context on it, origin at the bottom left as
 // in a CoreGraphics bitmap context. This file speaks only in numbers, so
 // CoreGraphics' C types and Silica's never meet: Context.swift converts.
 
@@ -42,7 +43,8 @@ final class Canvas {
         context.shouldAntialias = true
     }
 
-    /// The surface's pixels: B, G, R, A per pixel, premultiplied.
+    /// The surface's pixels: premultiplied 0xAARRGGBB words in the machine's
+    /// byte order.
     func withPixels<T>(_ body: (UnsafeMutablePointer<UInt8>, Int) -> T) -> T? {
         context.flush()
         let stride = surface.stride
@@ -197,11 +199,11 @@ final class Canvas {
         context.draw(surface: surface, width: image.width, height: image.height, in: CGRect(x: x, y: y, width: w, height: h))
     }
 
-    /// The image's pixels as an ARGB32 surface: B, G, R, A in memory.
+    /// The image's pixels as an ARGB32 surface.
     private static func surface(for image: ImageState) -> Cairo.Surface.Image? {
         if let surface = image.renderCache as? Cairo.Surface.Image { return surface }
         // Pixels already in the surface's layout are copied a row at a time.
-        if image.isBGRA, let bytes = DataProviders.bytes(image.provider),
+        if image.format.isNativeARGB, let bytes = DataProviders.bytes(image.provider),
            bytes.count >= image.bytesPerRow * (image.height - 1) + image.width * 4, image.width > 0, image.height > 0,
            let surface = try? Cairo.Surface.Image(format: .argb32, width: image.width, height: image.height) {
             let stride = surface.stride, opaque = image.format.alphaInfo == 6
@@ -211,7 +213,13 @@ final class Canvas {
                     for y in 0..<image.height {
                         let from = source + y * image.bytesPerRow, to = destination + y * stride
                         to.update(from: from, count: image.width * 4)
-                        if opaque { for x in 0..<image.width { to[x * 4 + 3] = 255 } }
+                        if opaque {
+                            let words = UnsafeMutableRawPointer(to)
+                            for x in 0..<image.width {
+                                words.storeBytes(of: words.load(fromByteOffset: x * 4, as: UInt32.self) | 0xFF00_0000,
+                                                 toByteOffset: x * 4, as: UInt32.self)
+                            }
+                        }
                     }
                 }
             }
@@ -227,9 +235,12 @@ final class Canvas {
             _ = surface.withUnsafeMutableBytes { destination in
                 for y in 0..<bitmap.height {
                     let from = source.baseAddress! + y * bitmap.width * 4, to = destination + y * stride
+                    // R, G, B, A bytes to 0xAARRGGBB words.
+                    let words = UnsafeMutableRawPointer(to)
                     for x in 0..<bitmap.width {
                         let i = x * 4
-                        (to[i], to[i + 1], to[i + 2], to[i + 3]) = (from[i + 2], from[i + 1], from[i], from[i + 3])
+                        let word = UInt32(from[i + 3]) << 24 | UInt32(from[i]) << 16 | UInt32(from[i + 1]) << 8 | UInt32(from[i + 2])
+                        words.storeBytes(of: word, toByteOffset: i, as: UInt32.self)
                     }
                 }
             }

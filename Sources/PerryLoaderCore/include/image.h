@@ -167,6 +167,20 @@ typedef struct perry_ppc_registers {
 // r3-r10, f1-f8 and stack from 8(r1)), laid out for Darwin by `types`.
 void perry_ppc_call_darwin(void *function, const char *types, const uint32_t linux_gprs[8], const double linux_fprs[8],
                            const uint32_t *linux_stack, perry_ppc_registers *result);
+// Calls a Darwin function by `types` with its arguments as they are in
+// memory, one pointer for each (NSInvocation's and key-value coding's
+// calls); a structure result goes to `structure`.
+void perry_ppc_call_darwin_values(void *function, const char *types, void *const *arguments, void *structure,
+                                  perry_ppc_registers *result);
+// What Linux code calls for a Darwin function whose arguments are words (a
+// block's invoke, a callback): a stub that calls it from a frame laid out as
+// a Darwin caller's, keeping r2. Linux code is returned as it is.
+void *perry_ppc_linux_callable(void *function);
+// The stub itself, for any function.
+void *perry_ppc_callable_stub(void *function);
+// Calls a Darwin function of up to seven words so, without a stub.
+uint32_t perry_ppc_call_darwin_words(void *function, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e,
+                                     uint32_t f, uint32_t g);
 // Where perry_ppc_send and its forms find a message's method and its type
 // encoding: libobjc's lookup, which it sets at startup. start_class is the
 // class to start at, for a super send, or NULL.

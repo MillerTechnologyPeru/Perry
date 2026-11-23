@@ -25,7 +25,7 @@ static void run_once(once_predicate *predicate, void *context, void (*function)(
         return;
     intptr_t expected = ONCE_PENDING;
     if (atomic_compare_exchange_strong(predicate, &expected, ONCE_RUNNING)) {
-        function(context);
+        PERRY_DARWIN_FUNCTION(function)(context);
         atomic_store_explicit(predicate, ONCE_DONE, memory_order_release);
         return;
     }
@@ -42,7 +42,7 @@ void darwin_dispatch_once_f(once_predicate *predicate, void *context, void (*fun
 }
 
 static void invoke_block(void *block) {
-    ((struct once_block *)block)->invoke(block);
+    PERRY_DARWIN_FUNCTION(((struct once_block *)block)->invoke)(block);
 }
 
 void darwin_dispatch_once(once_predicate *predicate, void *block) DARWIN_SYMBOL(dispatch_once);

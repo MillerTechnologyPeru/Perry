@@ -21,6 +21,11 @@ typedef void *(*lookup_fn)(void *, const void *, void *, const char **);
 void perry_ppc_set_method_lookup(lookup_fn);
 void perry_ppc_send(void);
 void perry_ppc_send_stret(void);
+uint32_t perry_ppc_call_darwin_words(void *function, uint32_t a, uint32_t b, uint32_t c, uint32_t d, uint32_t e,
+                                     uint32_t f, uint32_t g);
+void *perry_ppc_callable_stub(void *function);
+void perry_ppc_call_darwin_values(void *function, const char *types, void *const *arguments, void *structure,
+                                  perry_ppc_registers *result);
 
 typedef struct { float x, y, w, h; } Rect;
 typedef struct { double a; } OneDouble;
@@ -74,6 +79,7 @@ void darwin_scale(void) __asm__("_darwin_scale");
 void darwin_halve(void) __asm__("_darwin_halve");
 void darwin_method(void) __asm__("_darwin_method");
 void darwin_rect_method(void) __asm__("_darwin_rect_method");
+void darwin_words(void) __asm__("_darwin_words");
 
 // libgcc's, which Darwin code calls by its Darwin name; it passes the same.
 double darwin_floatdidf(long long a) __asm__("___floatdidf");
@@ -90,6 +96,7 @@ static void *lookup(void *receiver, const void *selector, void *start, const cha
 }
 
 int main(void) {
+    setvbuf(stdout, NULL, _IONBF, 0);   // every line, should a check crash
     perry_ppc_note_thread();
 
     // Darwin to Linux.
@@ -132,5 +139,39 @@ int main(void) {
     Rect rect = send_rect(&object, "rect", 1.5f);
     snprintf(text, sizeof(text), "%g {%g %g %g %g}", sent, rect.x, rect.y, rect.w, rect.h);
     check("sends to Darwin methods", text, "1018.25 {1.5 3 4.5 6}");
+
+    // Calls of words from Linux code (blocks, work functions, comparators).
+    unsigned long before, after;
+    __asm__ volatile("mr %0, 2" : "=r"(before));
+    uint32_t sum = perry_ppc_call_darwin_words((void *)darwin_words, 1, 2, 3, 4, 5, 6, 7);
+    __asm__ volatile("mr %0, 2" : "=r"(after));
+    snprintf(text, sizeof(text), "%u, r2 %s", sum, before == after ? "kept" : "changed");
+    check("calls of words to Darwin functions", text, "141, r2 kept");
+    // (Here the Darwin side is in this ELF program, which
+    // perry_ppc_linux_callable would take for Linux code: so its stub.)
+    int (*callable)(int, int, int, int, int, int, int) = perry_ppc_callable_stub((void *)darwin_words);
+    __asm__ volatile("mr %0, 2" : "=r"(before));
+    int through = callable(7, 6, 5, 4, 3, 2, 1);
+    __asm__ volatile("mr %0, 2" : "=r"(after));
+    snprintf(text, sizeof(text), "%d, r2 %s, %s", through, before == after ? "kept" : "changed",
+             perry_ppc_callable_stub((void *)darwin_words) == (void *)callable ? "one stub" : "two stubs");
+    check("Linux-callable stubs of Darwin functions", text, "85, r2 kept, one stub");
+
+    // Calls by type encoding with the arguments in memory (NSInvocation's,
+    // key-value coding's).
+    void *receiver = &object;
+    const char *method = "method", *rect_method = "rect";
+    double a = 1.5;
+    int b = 4;
+    float c = 0.25f, scale = 1.5f;
+    long long q = 1000;
+    void *values[] = { &receiver, &method, &a, &b, &c, &r, &q };
+    perry_ppc_call_darwin_values((void *)darwin_method, "d@:dif{Rect=ffff}q", values, NULL, &result);
+    double invoked = result.f1;
+    void *rect_values[] = { &receiver, &rect_method, &scale };
+    Rect returned = { 0 };
+    perry_ppc_call_darwin_values((void *)darwin_rect_method, "{Rect=ffff}@:f", rect_values, &returned, &result);
+    snprintf(text, sizeof(text), "%g {%g %g %g %g}", invoked, returned.x, returned.y, returned.w, returned.h);
+    check("calls by type encoding to Darwin methods", text, "1018.25 {1.5 3 4.5 6}");
     return failures;
 }
