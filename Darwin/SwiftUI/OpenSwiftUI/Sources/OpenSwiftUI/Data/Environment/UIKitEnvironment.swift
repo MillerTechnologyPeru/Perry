@@ -147,10 +147,13 @@ extension UITraitCollection {
         result.horizontalSizeClass = UserInterfaceSizeClass(horizontalSizeClass)
         result.verticalSizeClass = UserInterfaceSizeClass(verticalSizeClass)
         result.backgroundInfo.layer = userInterfaceLevel.rawValue
+        // Perry: the environment's corner radius is unavailable in Mac Catalyst.
+        #if !targetEnvironment(macCatalyst)
         let displayCornerRadius = displayCornerRadius
         if displayCornerRadius != _UITraitCollectionDisplayCornerRadiusUnspecified {
             result.displayCornerRadius = displayCornerRadius
         }
+        #endif
         if _userInterfaceRenderingMode == 2 {
             result.backgroundMaterial = .thick
             result.vibrantColorStyle = SystemVibrantColorStyle.self
