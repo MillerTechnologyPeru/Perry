@@ -577,8 +577,18 @@ public final class NSBundle: NSObject {
     @ObjCMethod("localizedInfoDictionary")
     func localizedInfoDictionary() -> NSDictionary { infoDictionary() }
 
+    /// The localized value from InfoPlist.strings when there is one, as
+    /// Darwin gives it: iWeb's Info.plist has no CFBundleName, only its
+    /// English.lproj does.
     @ObjCMethod("objectForInfoDictionaryKey:")
     func object(forInfoDictionaryKey key: ObjCObject) -> ObjCObject? {
+        if let name = Strings.value(of: key.id) {
+            let directories = storage.localizationDirectories(nil, available: storage.localizations,
+                                                              development: developmentLocalization() ?? "en")
+            if let localized = storage.localizedString(name, table: "InfoPlist", directories: directories) {
+                return ObjCObject(Strings.autoreleased(localized))
+            }
+        }
         let value = Dictionaries.value(storage.infoDictionary, for: key.id)
         if BundleTrace.on {
             let described = value.flatMap { Strings.value(of: ObjC.send($0, ObjC.selector("description"))) } ?? "nil"
