@@ -1211,6 +1211,16 @@ darwin_dir *darwin_opendir(const char *path) {
     return wrap_dir(directory);
 }
 
+/// libc's own opendir, with flags for union mounts' whiteouts and duplicate
+/// entries (DTF_HIDEW, DTF_NODUP, DTF_REWIND), which Linux's directories
+/// have none of: the directory opens as opendir opens it. Apps import it
+/// weakly to check that libc's functions are unhooked.
+darwin_dir *darwin___opendir2(const char *path, int flags) INODE64_SYMBOL(__opendir2);
+darwin_dir *darwin___opendir2(const char *path, int flags) {
+    (void)flags;
+    return darwin_opendir(path);
+}
+
 darwin_dir *darwin_fdopendir(int fd) DARWIN_SYMBOL(fdopendir);
 darwin_dir *darwin_fdopendir(int fd) {
     return wrap_dir(fdopendir(fd));
