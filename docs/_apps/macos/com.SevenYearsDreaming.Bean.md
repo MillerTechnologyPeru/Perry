@@ -38,7 +38,11 @@ reports:
       - "SDL_RENDER_DRIVER=software"
     level: 3
     source: maintainer
-    notes: Its PowerPC slice launches on 32-bit PowerPC Linux and shows the document window with its menu bar, toolbar, white page and status bar. The status bar's word count reads "(null)" and another of its fields shows a stray number.
+    resolution: "1280x800"
+    notes: Its PowerPC slice launches on 32-bit PowerPC Linux and shows the document window with its menu bar, toolbar, white page and status bar. The page keeps its first size when the window grows, and the status bar's counts read "(null)" beside a stray number.
+    screenshots:
+      - url: https://github.com/user-attachments/assets/010b94ea-2f9e-4cdb-82e3-926b5dedd5ba
+        caption: The PowerPC slice's document window, maximized, its page still at its first size
 ---
 
 A small i386 Cocoa word processor, nib-based on AppKit with some Carbon.
@@ -51,11 +55,13 @@ dark rather than as a white sheet. Needs `PERRY_UNIMPLEMENTED=continue` and
 `NSView.encode(with:)` overflow fix to compile.
 
 Its PowerPC slice runs under `perry` built for 32-bit PowerPC Linux, in a
-sway session on an emulated G4 (QEMU's mac99), with the loader translating between Darwin's ppc
-calling convention and Linux's (see
+sway session on an emulated G4 (QEMU's mac99), with the loader
+translating between Darwin's ppc calling convention and Linux's (see
 [Documentation/powerpc.md](https://github.com/MillerTechnologyPeru/Perry/blob/master/Documentation/powerpc.md)).
 The window comes up with the right colors only with a Mesa that labels its
 software-rendered Wayland buffers by their byte order; stock Mesa on
 big-endian hands them to the compositor with red, green, blue and alpha
-mixed up, so grey draws lavender and black blue. The status bar shows
-"Words: (null)" and a stray number beside the line count.
+mixed up, so grey draws lavender and black blue. When the window grows,
+the page and its margins stay at their first size and the vertical
+scroller sits partway down. The status bar shows "Words: (null)" and
+"Chars: (null)", and a stray number beside the line count.
