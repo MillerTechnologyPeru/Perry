@@ -629,6 +629,30 @@ public final class NSBundle: NSObject {
         storage.resource(name, type: type, directory: nil)
     }
 
+    /// AppKit's: an image of the name, with an extension or with each image
+    /// type NSImage reads.
+    @ObjCMethod("pathForImageResource:")
+    func path(forImageResource name: String?) -> String? {
+        guard let name else { return nil }
+        if name.contains("."), let found = storage.resource(name, type: nil, directory: nil) { return found }
+        for type in ["tiff", "tif", "png", "icns", "jpg", "jpeg", "gif", "pdf", "bmp", "pict"] {
+            if let found = storage.resource(name, type: type, directory: nil) { return found }
+        }
+        return nil
+    }
+
+    /// AppKit's: a sound of the name, with an extension or with each sound
+    /// type NSSound reads.
+    @ObjCMethod("pathForSoundResource:")
+    func path(forSoundResource name: String?) -> String? {
+        guard let name else { return nil }
+        if name.contains("."), let found = storage.resource(name, type: nil, directory: nil) { return found }
+        for type in ["aiff", "aif", "wav", "caf", "mp3", "m4a", "snd"] {
+            if let found = storage.resource(name, type: type, directory: nil) { return found }
+        }
+        return nil
+    }
+
     @ObjCMethod("pathForResource:ofType:inDirectory:")
     func path(forResource name: String?, ofType type: String?, inDirectory directory: String?) -> String? {
         storage.resource(name, type: type, directory: directory)
