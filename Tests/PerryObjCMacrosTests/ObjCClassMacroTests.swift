@@ -441,7 +441,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 }
 
                 /// Installs the Paths category's methods into `registrar`.
-                public static func registerObjCCategoryPaths(_ registrar: any ObjCMethodRegistrar) {
+                static func registerObjCCategoryPaths(_ registrar: any ObjCMethodRegistrar) {
                     registrar.addMethod("lastPathComponent", types: ObjCTypeEncoding.method(returning: String.self, arguments: []), implementation: unsafeBitCast({ (receiver: UnsafeMutableRawPointer?, _: UnsafeRawPointer?) -> String.ObjCResultType in
                                 let this = NSString.objCInstance(receiver!, ownership: .retain);
                                 return String.objCResult(this.lastPathComponent().objCReturnValue())
@@ -449,7 +449,7 @@ private func expect(_ source: String, expands expanded: String, diagnostics: [Di
                 }
 
                 /// Adds the Paths category's methods to NSString's class.
-                public static func addObjCCategoryPaths() {
+                static func addObjCCategoryPaths() {
                     registerObjCCategoryPaths(objCClass)
                 }
             }
