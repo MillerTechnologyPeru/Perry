@@ -42,18 +42,23 @@ min=15.0
 failed=""
 
 # Runs a command for at most $2 seconds, recording its stdout as fixture
-# $1's reference; a failure is kept for the end, without a reference.
+# $1's reference, and once more if it fails or runs out of time: a
+# simulator that has just booted can take longer than that to start a
+# program. A second failure is kept for the end, without a reference.
 record() {
     record_name=$1
     record_seconds=$2
     shift 2
-    if ! perl -e 'alarm shift; exec @ARGV' "$record_seconds" "$@" > "$out/$record_name.expected" 2> "$out/$record_name.stderr"; then
-        echo "reference run of $record_name failed:" >&2
+    for record_attempt in 1 2; do
+        if perl -e 'alarm shift; exec @ARGV' "$record_seconds" "$@" > "$out/$record_name.expected" 2> "$out/$record_name.stderr"; then
+            rm -f "$out/$record_name.stderr"
+            return 0
+        fi
+        echo "reference run $record_attempt of $record_name failed:" >&2
         tail -20 "$out/$record_name.stderr" >&2
-        rm -f "$out/$record_name.expected"
-        failed="$failed $record_name"
-    fi
-    rm -f "$out/$record_name.stderr"
+    done
+    rm -f "$out/$record_name.expected" "$out/$record_name.stderr"
+    failed="$failed $record_name"
 }
 
 for src in Tests/Fixtures/Darwin/*/; do
