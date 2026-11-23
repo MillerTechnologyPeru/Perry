@@ -152,11 +152,12 @@ extern const void *perry_system_main_header;
 typedef struct { int darwin, minor; } perry_macos_release;
 perry_macos_release perry_system_macos_release(void);
 
-#if defined(__arm__)
+#if defined(__arm__) || defined(__powerpc__)
 #include <stddef.h>
-// Darwin armv7's varargs for a printf-style format, in glibc armhf's layout:
-// the bytes `format`'s arguments take, and, when `out` is not NULL (8-byte
-// aligned, that big), the arguments copied there from the Darwin va_list.
+// Darwin armv7's or ppc's varargs for a printf-style format, in glibc's
+// layout (armhf's va_list, ppc's overflow area): the bytes `format`'s
+// arguments take, and, when `out` is not NULL (8-byte aligned, that big), the
+// arguments copied there from the Darwin va_list.
 size_t perry_repack_arguments(const char *format, const void *darwin_ap, void *out);
 #endif
 
