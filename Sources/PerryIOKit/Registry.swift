@@ -4,9 +4,10 @@ import PerryObjCInterop
 // The I/O Registry: io_object_t handles, as mach ports are, for its
 // entries and for iterators over matches. It has the root, the platform
 // expert device (IOPlatformUUID, IOPlatformSerialNumber, model) and the
-// keyboard, an IOHIDDevice whose plug-in is the HID device interface;
-// matching dictionaries find those by their classes and nothing else, so an
-// app looking for a GPU, a battery or USB devices finds none.
+// keyboard, an IOHIDDevice whose plug-in is the HID device interface, and
+// the optical discs mounted (Discs.swift); matching dictionaries find those
+// by their classes and nothing else, so an app looking for a GPU, a battery
+// or USB devices finds none.
 
 public typealias Handle = UInt32
 
@@ -69,7 +70,12 @@ enum Registry {
         },
     ]
 
-    static func entry(_ handle: Handle) -> RegistryEntry? { entries[handle] }
+    static func entry(_ handle: Handle) -> RegistryEntry? { entries[handle] ?? Discs.entry(handle) }
+
+    /// An entry's children: the discs are the platform device's.
+    static func children(of handle: Handle) -> [Handle] {
+        entries.filter { $0.value.parent == handle }.map(\.key).sorted() + (handle == platformHandle ? Discs.handles() : [])
+    }
 
     /// The entries a matching dictionary matches: by IOProviderClass (the
     /// class or a superclass), IONameMatch, or a registry entry ID.
@@ -78,7 +84,12 @@ enum Registry {
         let dictionary = NSDictionary(matching)
         if let cls = dictionary.object("IOProviderClass"), cls.isString {
             let name = cls.stringValue
-            return entries.filter { $0.value.className == name || (name == "IOService" && $0.key != rootHandle) }.map(\.key).sorted()
+            let discs = Discs.handles().filter { handle in Discs.entry(handle).map { Discs.matches($0, className: name) } ?? false }
+            return entries.filter { $0.value.className == name || (name == "IOService" && $0.key != rootHandle) }.map(\.key).sorted() + discs
+        }
+        if let device = dictionary.object("BSD Name"), device.isString {
+            let name = device.stringValue
+            return Discs.handles().filter { Discs.entry($0)?.property("BSD Name")?.stringValue == name }
         }
         if let name = dictionary.object("IONameMatch"), name.isString {
             return entries.filter { $0.value.name == name.stringValue }.map(\.key).sorted()
@@ -214,6 +225,7 @@ public func IOObjectGetClass(_ object: Handle, _ name: UnsafeMutablePointer<CCha
 public func IOObjectConformsTo(_ object: Handle, _ name: UnsafePointer<CChar>?) -> UInt32 {
     guard let name, let entry = Registry.entry(object) else { return 0 }
     let wanted = String(cString: name)
+    if entry.className == "IOCDMedia" || entry.className == "IODVDMedia", wanted == "IOMedia" { return 1 }
     return entry.className == wanted || wanted == "IOService" || wanted == "IORegistryEntry" ? 1 : 0
 }
 
@@ -271,7 +283,34 @@ public func IORegistryEntryGetParentEntry(_ entry: Handle, _ plane: UnsafePointe
 
 @c(_IORegistryEntryGetChildIterator)
 public func IORegistryEntryGetChildIterator(_ entry: Handle, _ plane: UnsafePointer<CChar>?, _ iterator: UnsafeMutablePointer<Handle>?) -> Int32 {
-    iterator?.pointee = Registry.makeIterator(Registry.entries.filter { $0.value.parent == entry }.map(\.key).sorted())
+    iterator?.pointee = Registry.makeIterator(Registry.children(of: entry))
+    return IOReturn.success
+}
+
+/// kern_return_t IORegistryEntryCreateIterator(io_registry_entry_t, const
+/// io_name_t plane, IOOptionBits, io_iterator_t *): the entry's children,
+/// and theirs when kIORegistryIterateRecursively (1) is set; its parents,
+/// up to the root, with kIORegistryIterateParents (2).
+@c(_IORegistryEntryCreateIterator)
+public func IORegistryEntryCreateIterator(_ entry: Handle, _ plane: UnsafePointer<CChar>?, _ options: UInt32,
+                                          _ iterator: UnsafeMutablePointer<Handle>?) -> Int32 {
+    guard Registry.entry(entry) != nil else { return IOReturn.badArgument }
+    var found: [Handle] = []
+    if options & 2 != 0 {
+        var next = Registry.entry(entry)?.parent
+        while let parent = next {
+            found.append(parent)
+            next = options & 1 != 0 ? Registry.entry(parent)?.parent : nil
+        }
+    } else {
+        var pending = Registry.children(of: entry)
+        while !pending.isEmpty {
+            let child = pending.removeFirst()
+            found.append(child)
+            if options & 1 != 0 { pending.insert(contentsOf: Registry.children(of: child), at: 0) }
+        }
+    }
+    iterator?.pointee = Registry.makeIterator(found)
     return IOReturn.success
 }
 
