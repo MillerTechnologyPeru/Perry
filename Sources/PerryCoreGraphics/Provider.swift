@@ -27,6 +27,7 @@ func providerWillStart(_ info: perry_startup_info) -> Bool {
         libobjc.withCString { library in name.withCString { lookup(library, $0) } }
     }
     guard loaded else { graphicsFatal("CoreGraphics needs libPerryobjc, which is missing or incomplete") }
+    Fonts.addUserFonts()
     return true
 }
 
