@@ -9,7 +9,7 @@
 
 #include "OpenSwiftUIBase.h"
 
-#if __has_include(<AppKit/AppKit.h>)
+#if TARGET_OS_OSX && __has_include(<AppKit/AppKit.h>)
 
 #import <AppKit/AppKit.h>
 #import "NSButton_Private.h"
