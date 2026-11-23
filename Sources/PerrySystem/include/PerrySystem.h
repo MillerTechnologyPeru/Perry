@@ -38,6 +38,15 @@
         call; \
         __asm__ volatile("mov r9, %0" : : "r"(perry_r9) : "memory"); \
     } while (0)
+#elif defined(__powerpc__) && !defined(__powerpc64__)
+// On ppc Darwin's code may change r2, Linux's thread pointer, which Linux's
+// code never reloads.
+#define PERRY_KEEP_R9(call) do { \
+        unsigned long perry_r2; \
+        __asm__ volatile("mr %0, 2" : "=r"(perry_r2)); \
+        call; \
+        __asm__ volatile("mr 2, %0" : : "r"(perry_r2) : "memory"); \
+    } while (0)
 #else
 #define PERRY_KEEP_R9(call) do { call; } while (0)
 #endif
