@@ -187,22 +187,29 @@ enum Text {
         let font = first.run.font
         let full = line.text
         let ellipsis = "…"
-        var kept = Substring(full)
         func fits(_ text: String) -> Bool { self.width(text, font: font) <= width }
-        var result: String
+        // A longer cut is never narrower, so the most characters that fit
+        // are found by halving: a line can be a whole document's remainder
+        // (a license shown in a few lines), far too long to shorten a
+        // character at a time.
+        let characters = Array(full)
+        func longest(_ text: (Int) -> String) -> String {
+            var low = 0, high = characters.count
+            while low < high {
+                let middle = (low + high + 1) / 2
+                if fits(text(middle)) { low = middle } else { high = middle - 1 }
+            }
+            return text(low)
+        }
+        let result: String
         switch mode {
         case 3:
-            while !kept.isEmpty, !fits(ellipsis + kept) { kept = kept.dropFirst() }
-            result = ellipsis + kept
+            result = longest { ellipsis + String(characters[(characters.count - $0)...]) }
         case 5:
-            var head = Substring(full.prefix(full.count / 2)), tail = Substring(full.suffix(full.count - full.count / 2))
-            while !(head.isEmpty && tail.isEmpty), !fits(String(head) + ellipsis + tail) {
-                if head.count >= tail.count { head = head.dropLast() } else { tail = tail.dropFirst() }
-            }
-            result = String(head) + ellipsis + tail
+            // The head keeps the odd character, as halves of the line do.
+            result = longest { String(characters[..<(($0 + 1) / 2)]) + ellipsis + String(characters[(characters.count - $0 / 2)...]) }
         default:
-            while !kept.isEmpty, !fits(String(kept).trimmingTrailingSpaces + ellipsis) { kept = kept.dropLast() }
-            result = String(kept).trimmingTrailingSpaces + ellipsis
+            result = longest { String(characters[..<$0]).trimmingTrailingSpaces + ellipsis }
         }
         var run = first.run
         run.text = result
