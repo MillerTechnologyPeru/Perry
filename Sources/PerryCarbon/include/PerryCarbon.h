@@ -260,6 +260,10 @@ void carbon_target_free(carbon_target *target);
 /// focus's when NULL.
 OSStatus carbon_process_command(uint32_t command, void *control, void *menu, uint16_t item, carbon_target *target);
 
+/// Whether the command is a Dialog Manager dialog's button's, which ends
+/// that dialog's ModalDialog with the button's item.
+bool carbon_dialog_command(uint32_t command);
+
 /// The application is asked to quit (Quit in its menu).
 OSStatus carbon_quit_requested(void);
 
