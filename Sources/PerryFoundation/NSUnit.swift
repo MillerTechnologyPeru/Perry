@@ -668,7 +668,7 @@ extension Units {
         if value.isNaN { return "NaN" }
         if value.isInfinite { return value < 0 ? "-∞" : "∞" }
         var buffer = [CChar](repeating: 0, count: 64)
-        _ = withVaList([maximumFractionDigits, abs(value)]) { vsnprintf(&buffer, buffer.count, "%.*f", $0) }
+        _ = perryWithVaList([maximumFractionDigits, abs(value)]) { vsnprintf(&buffer, buffer.count, "%.*f", $0) }
         var text = String(cString: buffer)
         if text.contains(".") {
             while text.hasSuffix("0") { text.removeLast() }
