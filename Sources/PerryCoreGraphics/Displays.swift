@@ -89,6 +89,22 @@ enum Displays {
         let state = SDL.globalMouseState
         return CGPoint(x: CGFloat(state.x), y: CGFloat(state.y))
     }
+
+    /// Where the mouse was when CGGetLastMouseDelta last asked.
+    nonisolated(unsafe) private static var lastMouse: CGPoint?
+    private static let mouseLock = Lock()
+
+    /// The mouse's movement since the last time this was asked; none the
+    /// first time.
+    static func mouseDelta() -> (x: Int32, y: Int32) {
+        let now = mouse
+        return mouseLock.withLock {
+            defer { lastMouse = now }
+            guard let last = lastMouse else { return (0, 0) }
+            let dx = Double(now.x - last.x).rounded(), dy = Double(now.y - last.y).rounded()
+            return (Int32(clamping: Int(max(-2e9, min(2e9, dx)))), Int32(clamping: Int(max(-2e9, min(2e9, dy)))))
+        }
+    }
 }
 
 // MARK: - Displays
@@ -395,10 +411,56 @@ public func CGAssociateMouseAndMouseCursorPosition(_ connected: UInt32) -> Int32
 
 // MARK: - Events
 
-/// A CGEvent: where it happened and its flags. Events aren't posted.
+/// A CGEvent: its type, where it happened, its flags and the integer fields
+/// set on it. Events aren't posted.
 final class EventState {
+    var type: UInt32 = 0
     var location = CGPoint(x: 0, y: 0)
     var flags: UInt64 = 0
+    var fields: [UInt32: Int64] = [:]
+
+    /// The event flattened, as CGEventCreateData gives it: "PCGE", a
+    /// version, the type, the flags, the location's coordinates as doubles,
+    /// then each field and value; little-endian. Perry's own layout, read
+    /// back by CGEventCreateFromData.
+    var data: [UInt8] {
+        var bytes = Array("PCGE".utf8)
+        func append<T: FixedWidthInteger>(_ value: T) { withUnsafeBytes(of: value.littleEndian) { bytes += $0 } }
+        append(UInt32(1))
+        append(type)
+        append(flags)
+        append(Double(location.x).bitPattern)
+        append(Double(location.y).bitPattern)
+        append(UInt32(fields.count))
+        for (field, value) in fields.sorted(by: { $0.key < $1.key }) {
+            append(field)
+            append(value)
+        }
+        return bytes
+    }
+
+    convenience init?(data bytes: [UInt8]) {
+        guard bytes.count >= 40, Array(bytes[0..<4]) == Array("PCGE".utf8) else { return nil }
+        var offset = 4
+        func read<T: FixedWidthInteger>(_: T.Type) -> T? {
+            let size = MemoryLayout<T>.size
+            guard offset + size <= bytes.count else { return nil }
+            var value: T = 0
+            withUnsafeMutableBytes(of: &value) { for index in 0..<size { $0[index] = bytes[offset + index] } }
+            offset += size
+            return T(littleEndian: value)
+        }
+        guard read(UInt32.self) == 1, let type = read(UInt32.self), let flags = read(UInt64.self),
+              let x = read(UInt64.self), let y = read(UInt64.self), let count = read(UInt32.self) else { return nil }
+        self.init()
+        self.type = type
+        self.flags = flags
+        location = CGPoint(x: CGFloat(Double(bitPattern: x)), y: CGFloat(Double(bitPattern: y)))
+        for _ in 0..<count {
+            guard let field = read(UInt32.self), let value = read(Int64.self) else { return nil }
+            fields[field] = value
+        }
+    }
 }
 
 @ObjCClass("CGEvent")
@@ -415,10 +477,17 @@ public final class CGEventObject: NSObject {
 @ObjCClass("CGEventSource")
 public final class CGEventSourceObject: NSObject {}
 
-private func event(at location: CGPoint) -> Ref {
+private func event(at location: CGPoint, type: UInt32 = 0, fields: [UInt32: Int64] = [:]) -> Ref {
     let state = EventState()
     state.location = location
+    state.type = type
+    state.fields = fields
     return makeObject(CGEventObject.objCClass, CGEventObject.states, state)
+}
+
+/// CGEventField numbers the creating functions set.
+private enum EventField {
+    static let mouseButtonNumber: UInt32 = 3, keyboardKeycode: UInt32 = 9, scrollWheelDeltaAxis1: UInt32 = 11
 }
 
 @c(_CGEventSourceCreate)
@@ -436,22 +505,56 @@ public func CGEventSourceSetLocalEventsSuppressionInterval(_ source: Ref?, _ sec
 @c(_CGEventCreate) public func CGEventCreate(_ source: Ref?) -> Ref? { event(at: Displays.mouse) }
 
 @c(_CGEventCreateMouseEvent)
-public func CGEventCreateMouseEvent(_ source: Ref?, _ type: UInt32, _ location: CGPoint, _ button: UInt32) -> Ref? { event(at: location) }
+public func CGEventCreateMouseEvent(_ source: Ref?, _ type: UInt32, _ location: CGPoint, _ button: UInt32) -> Ref? {
+    event(at: location, type: type, fields: [EventField.mouseButtonNumber: Int64(button)])
+}
 
+/// kCGEventKeyDown 10, kCGEventKeyUp 11.
 @c(_CGEventCreateKeyboardEvent)
-public func CGEventCreateKeyboardEvent(_ source: Ref?, _ key: UInt16, _ down: Bool) -> Ref? { event(at: Displays.mouse) }
+public func CGEventCreateKeyboardEvent(_ source: Ref?, _ key: UInt16, _ down: Bool) -> Ref? {
+    event(at: Displays.mouse, type: down ? 10 : 11, fields: [EventField.keyboardKeycode: Int64(key)])
+}
 
-/// Variadic in C: the wheel counts that follow are in registers, unread.
+/// Variadic in C: the wheel counts after the first are in registers, unread.
+/// kCGEventScrollWheel 22.
 @c(_CGEventCreateScrollWheelEvent)
-public func CGEventCreateScrollWheelEvent(_ source: Ref?, _ units: UInt32, _ count: UInt32, _ first: Int32) -> Ref? { event(at: Displays.mouse) }
+public func CGEventCreateScrollWheelEvent(_ source: Ref?, _ units: UInt32, _ count: UInt32, _ first: Int32) -> Ref? {
+    event(at: Displays.mouse, type: 22, fields: count > 0 ? [EventField.scrollWheelDeltaAxis1: Int64(first)] : [:])
+}
+
+/// The event flattened into a CFData (+1).
+@c(_CGEventCreateData)
+public func CGEventCreateData(_ allocator: Ref?, _ object: Ref?) -> Ref? {
+    guard let state = CGEventObject.states[object] else { return nil }
+    return NSData.of(state.data).objCOwnedReturnValue()
+}
+
+/// An event from CGEventCreateData's data.
+@c(_CGEventCreateFromData)
+public func CGEventCreateFromData(_ allocator: Ref?, _ data: Ref?) -> Ref? {
+    guard let data, let state = EventState(data: NSData(objCArgument: data).array) else { return nil }
+    return makeObject(CGEventObject.objCClass, CGEventObject.states, state)
+}
+
+@c(_CGEventGetType) public func CGEventGetType(_ object: Ref?) -> UInt32 { CGEventObject.states[object]?.type ?? 0 }
+
+/// The mouse's movement since the last call, in whole points.
+@c(_CGGetLastMouseDelta)
+public func CGGetLastMouseDelta(_ deltaX: UnsafeMutablePointer<Int32>?, _ deltaY: UnsafeMutablePointer<Int32>?) {
+    let delta = Displays.mouseDelta()
+    deltaX?.pointee = delta.x
+    deltaY?.pointee = delta.y
+}
 
 @c(_CGEventGetLocation) public func CGEventGetLocation(_ object: Ref?) -> CGPoint { CGEventObject.states[object]?.location ?? Displays.mouse }
 @c(_CGEventSetLocation) public func CGEventSetLocation(_ object: Ref?, _ location: CGPoint) { CGEventObject.states[object]?.location = location }
 @c(_CGEventGetFlags) public func CGEventGetFlags(_ object: Ref?) -> UInt64 { CGEventObject.states[object]?.flags ?? 0 }
 @c(_CGEventSetFlags) public func CGEventSetFlags(_ object: Ref?, _ flags: UInt64) { CGEventObject.states[object]?.flags = flags }
-@c(_CGEventSetIntegerValueField) public func CGEventSetIntegerValueField(_ object: Ref?, _ field: UInt32, _ value: Int64) {}
-@c(_CGEventGetIntegerValueField) public func CGEventGetIntegerValueField(_ object: Ref?, _ field: UInt32) -> Int64 { 0 }
-@c(_CGEventSetType) public func CGEventSetType(_ object: Ref?, _ type: UInt32) {}
+@c(_CGEventSetIntegerValueField)
+public func CGEventSetIntegerValueField(_ object: Ref?, _ field: UInt32, _ value: Int64) { CGEventObject.states[object]?.fields[field] = value }
+@c(_CGEventGetIntegerValueField)
+public func CGEventGetIntegerValueField(_ object: Ref?, _ field: UInt32) -> Int64 { CGEventObject.states[object]?.fields[field] ?? 0 }
+@c(_CGEventSetType) public func CGEventSetType(_ object: Ref?, _ type: UInt32) { CGEventObject.states[object]?.type = type }
 @c(_CGEventPost) public func CGEventPost(_ tap: UInt32, _ object: Ref?) {}
 
 // MARK: - The session
