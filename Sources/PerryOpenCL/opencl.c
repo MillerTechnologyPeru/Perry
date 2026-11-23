@@ -217,6 +217,16 @@ cl_int perry_clSetKernelArg(void *kernel, cl_uint index, size_t size, const void
     return CL_INVALID_KERNEL;
 }
 
+// Apple's extension that sets a kernel's arguments from a va_list of
+// (size, value) pairs, which the OpenCL overlay's variadic form calls. The
+// list (a pointer on x86_64 and arm64 Darwin) is never read: no kernel can
+// exist, so it answers as clSetKernelArg does.
+cl_int perry_clSetKernelArgsVaListAPPLE(void *kernel, cl_uint count, void *arguments) CL_SYMBOL(clSetKernelArgsVaListAPPLE);
+cl_int perry_clSetKernelArgsVaListAPPLE(void *kernel, cl_uint count, void *arguments) {
+    (void)kernel; (void)count; (void)arguments;
+    return CL_INVALID_KERNEL;
+}
+
 // MARK: - Commands
 
 cl_int perry_clEnqueueNDRangeKernel(void *queue, void *kernel, cl_uint dimensions, const size_t *offset, const size_t *global,
