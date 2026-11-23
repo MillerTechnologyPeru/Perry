@@ -53,7 +53,24 @@ enum TestEnvironment {
         }
     }()
 
-    static var canRunFixtures: Bool { llvmBin != nil && perry != nil }
+    /// Whether this machine runs the arm64 programs the fixtures are: `perry`
+    /// on x86_64 runs x86_64 ones only.
+    static var runsARM64: Bool {
+        #if arch(arm64)
+        true
+        #else
+        false
+        #endif
+    }
+
+    static var canRunFixtures: Bool { runsARM64 && llvmBin != nil && perry != nil }
+
+    /// Whether `PERRY_REQUIRE_FIXTURES=1` is set, as it is in CI: suites
+    /// that would skip for want of a tool or a fixture fail instead
+    /// (RequiredFixtureTests).
+    static var requiresFixtures: Bool {
+        ProcessInfo.processInfo.environment["PERRY_REQUIRE_FIXTURES"] == "1"
+    }
 }
 
 struct ProcessResult {
