@@ -535,6 +535,18 @@ void carbon_DisposeGWorld(CGrafPtr world) {
     carbon_port_free(world);
 }
 
+/// A color graphics port of its own, for drawing or measuring text with
+/// no window: a one-pixel world, its port rectangle empty.
+CGrafPtr carbon_CreateNewPort(void) CARBON_SYMBOL(CreateNewPort);
+CGrafPtr carbon_CreateNewPort(void) {
+    CGrafPtr port = carbon_port_new(1, 1, 32, NULL, 0);
+    if (port) port->portRect = (Rect){0, 0, 0, 0};
+    return port;
+}
+
+void carbon_DisposePort(CGrafPtr port) CARBON_SYMBOL(DisposePort);
+void carbon_DisposePort(CGrafPtr port) { carbon_DisposeGWorld(port); }
+
 PixMapHandle carbon_GetGWorldPixMap(CGrafPtr world) CARBON_SYMBOL(GetGWorldPixMap);
 PixMapHandle carbon_GetGWorldPixMap(CGrafPtr world) { return carbon_GetPortPixMap(world); }
 
