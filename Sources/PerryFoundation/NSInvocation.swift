@@ -3,8 +3,9 @@ import Glibc
 import PerryObjCInterop
 
 // NSInvocation: a message as a value, with its arguments in the shape its
-// method signature gives them. -invoke places them as x86_64's calling
-// convention does, or Darwin's arm64 one; armv7 doesn't have the call yet.
+// method signature gives them. -invoke places them as the calling
+// convention does: x86_64's, Darwin's arm64, i386 and armv7 ones, and on
+// ppc Darwin's through the loader (DarwinCalls).
 
 final class InvocationStorage {
     let signature: id
@@ -400,8 +401,17 @@ public final class NSInvocation: NSObject {
             guard !indirect, returnSize > 0 else { return }
             out.withUnsafeBytes { result.copyMemory(from: UnsafeRawBufferPointer(rebasing: $0[0..<min(returnSize, 8)])) }
         }
+        #elseif arch(powerpc)
+        // The loader lays the arguments out by the signature (DarwinCalls).
+        let types = details.parts.map { String(cString: $0) }
+        let arguments = storage.arguments.enumerated().map { index, bytes in
+            Array(bytes.prefix(details.sizes[index + 1])) + [UInt8](repeating: 0, count: max(0, details.sizes[index + 1] - bytes.count))
+        }
+        storage.result.withUnsafeMutableBytes { result in
+            DarwinCalls.call(imp, types: types, arguments: arguments, result: result.count > 0 ? result.baseAddress : nil)
+        }
         #else
-        foundationFatal("-[NSInvocation invoke] is available on x86_64, arm64, i386 and armv7 only")
+        foundationFatal("-[NSInvocation invoke] is available on x86_64, arm64, i386, armv7 and ppc only")
         #endif
     }
 }
