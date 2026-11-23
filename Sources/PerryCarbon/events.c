@@ -962,6 +962,9 @@ OSStatus carbon_UnregisterEventHotKey(void *hotKey) { (void)hotKey; return noErr
 /// window's for a control's, the focus's for a menu's), on from there to
 /// the application's.
 OSStatus carbon_process_command(uint32_t command, void *control, void *menu, uint16_t item, carbon_target *target) {
+    // A Dialog Manager dialog's button ends ModalDialog: it is no command
+    // of the program's.
+    if (carbon_dialog_command(command)) return noErr;
     // HICommandExtended: kHICommandFromMenu with the menu and item, or
     // kHICommandFromControl with the control, which dialogs' handlers
     // look for before they act on a button's command.
