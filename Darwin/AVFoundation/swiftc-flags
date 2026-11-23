@@ -1,0 +1,9 @@
+-autolink-force-load
+-module-link-name
+swiftAVFoundation
+-Xlinker
+-alias
+-Xlinker
+_$sSo19AVAssetReaderOutputC12AVFoundationE16SupportedPayloadMp
+-Xlinker
+_$sSo19AVAssetReaderOutputC12AVFoundationE16SupportedPayloadTL
