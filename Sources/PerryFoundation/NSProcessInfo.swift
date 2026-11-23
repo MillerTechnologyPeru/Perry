@@ -3,6 +3,7 @@ import FoundationEssentials
 import Glibc
 import PerryInterface
 import PerryObjCInterop
+import Synchronization
 
 /// What the loader tells Foundation about the program: its own arguments
 /// and paths, not perry's.
@@ -94,19 +95,40 @@ public final class NSProcessInfo: NSObject {
     @ObjCMethod("arguments")
     func arguments() -> NSArray { Arrays.owned(Process.arguments.map { Strings.autoreleased($0) }) }
 
+    /// The last dictionary -environment made, and the environ entries it
+    /// was made from: setenv and unsetenv change the entries (a changed
+    /// value is a new string), so an unchanged list is an unchanged
+    /// environment. Ad SDKs ask for the environment many times a second (to
+    /// tell a simulator by SIMULATOR_DEVICE_NAME); a dictionary of fresh
+    /// strings each time filled memory faster than pools drained.
+    private static let environmentCache = Mutex<(entries: [UInt], dictionary: UInt)>(([], 0))
+
     @ObjCMethod("environment")
     func environment() -> NSDictionary {
-        var entries: [(key: id, value: id)] = []
+        var current: [UInt] = []
         var cursor = environ
         while let entry = cursor.pointee {
-            let text = String(cString: entry)
-            if let equals = text.firstIndex(of: "=") {
-                entries.append((key: Strings.autoreleased(String(text[..<equals])),
-                                value: Strings.autoreleased(String(text[text.index(after: equals)...]))))
-            }
+            current.append(UInt(bitPattern: entry))
             cursor += 1
         }
-        return Dictionaries.owned(entries)
+        let dictionary = Self.environmentCache.withLock { cache -> id in
+            if cache.dictionary != 0, cache.entries == current, let cached = UnsafeMutableRawPointer(bitPattern: cache.dictionary) {
+                return ObjC.retain(cached)!
+            }
+            var entries: [(key: id, value: id)] = []
+            for address in current {
+                let text = String(cString: UnsafePointer<CChar>(bitPattern: address)!)
+                if let equals = text.firstIndex(of: "=") {
+                    entries.append((key: Strings.autoreleased(String(text[..<equals])),
+                                    value: Strings.autoreleased(String(text[text.index(after: equals)...]))))
+                }
+            }
+            let made = Dictionaries.make(entries)
+            if let old = UnsafeMutableRawPointer(bitPattern: cache.dictionary) { ObjC.release(old) }
+            cache = (current, UInt(bitPattern: ObjC.retain(made)!))
+            return made
+        }
+        return NSDictionary(objCOwned: dictionary)
     }
 
     @ObjCMethod("processName") func processName() -> String { Process.name }

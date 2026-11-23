@@ -631,11 +631,15 @@ open class WKWebView: UIView {
         super.dealloc()
     }
 
+    /// WebKit's designated initializer: UIView's -initWithFrame:, as
+    /// WebKit calls it on super, not a subclass's override. Subclasses
+    /// (Moloco's ad view) override init(frame:) to call this one, which
+    /// recursed until the stack ran out when this sent -initWithFrame:.
     @ObjCMethod("initWithFrame:configuration:")
     func initialize(frame: CGRect, configuration: NSObject?) -> NSObject {
-        let view = initializeView(frame: frame).unsafeCast(to: WKWebView.self)
-        view.web.configuration = configuration
-        return view
+        _ = super.initialize(frame: frame)
+        web.configuration = configuration
+        return self
     }
 
     @ObjCMethod("configuration") func configuration() -> NSObject? { web.configuration }
