@@ -79,3 +79,23 @@ void vvpowsf(float *z, const float *y, const float *x, const int *n) DARWIN_SYMB
 void vvpowsf(float *z, const float *y, const float *x, const int *n) { for (int i = 0; i < *n; i++) z[i] = powf(x[i], *y); }
 void vvpows(double *z, const double *y, const double *x, const int *n) DARWIN_SYMBOL(vvpows);
 void vvpows(double *z, const double *y, const double *x, const int *n) { for (int i = 0; i < *n; i++) z[i] = pow(x[i], *y); }
+
+// sin, cos and tan of pi x, exact at the integers and half-integers.
+static double sinpi_(double x) {
+    double r = fmod(x, 2);
+    if (r == 0 || r == 1 || r == -1) return copysign(0, x) * (r == 0 ? 1 : -1);
+    return sin(M_PI * r);
+}
+static double cospi_(double x) {
+    double r = fmod(fabs(x), 2);
+    if (r == 0.5 || r == 1.5) return 0;
+    return cos(M_PI * r);
+}
+static double tanpi_(double x) { return sinpi_(x) / cospi_(x); }
+static inline float sinpi_f(float x) { return (float)sinpi_(x); }
+static inline float cospi_f(float x) { return (float)cospi_(x); }
+static inline float tanpi_f(float x) { return (float)tanpi_(x); }
+
+UNARY(sinpi, sinpi_)
+UNARY(cospi, cospi_)
+UNARY(tanpi, tanpi_)
