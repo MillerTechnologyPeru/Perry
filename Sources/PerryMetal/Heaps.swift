@@ -64,6 +64,9 @@ open class MTLHeap: NSObject, MTLHeapProtocol {
     var options: UInt = 0
     var type: UInt = 0
     var used: UInt = 0
+    /// The buffers and textures made from the heap that are still alive,
+    /// which useHeap: makes resident.
+    private var made: [WeakResource] = []
 
     init(device: MTLDevice, descriptor: MTLHeapDescriptor) {
         owner = device
@@ -106,16 +109,30 @@ open class MTLHeap: NSObject, MTLHeapProtocol {
 
     private func make(length: UInt, options: UInt) -> MTLBuffer? {
         let buffer = owner?.newBuffer(length: length, options: options)
-        if buffer != nil { used += Self.aligned(length) }
+        if let buffer {
+            used += Self.aligned(length)
+            remember(buffer)
+        }
         return buffer
     }
 
     private func make(_ descriptor: MTLTextureDescriptor?) -> MTLTexture? {
         guard let descriptor else { return nil }
         let texture = owner?.newTexture(descriptor: descriptor)
-        if texture != nil { used += MTLHeap.textureSizeAndAlign(descriptor).size }
+        if let texture {
+            used += MTLHeap.textureSizeAndAlign(descriptor).size
+            remember(texture)
+        }
         return texture
     }
+
+    private func remember(_ resource: NSObject) {
+        made.removeAll { $0.object == nil }
+        made.append(WeakResource(resource))
+    }
+
+    /// The heap's resources that are still alive.
+    var resources: [NSObject] { made.compactMap(\.object) }
 
     static func aligned(_ length: UInt) -> UInt { (length + 255) & ~255 }
 
@@ -153,4 +170,10 @@ open class MTLHeap: NSObject, MTLHeapProtocol {
         default: return 4
         }
     }
+}
+
+/// A resource a heap made, not kept alive by it.
+final class WeakResource {
+    weak var object: NSObject?
+    init(_ object: NSObject) { self.object = object }
 }
