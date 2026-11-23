@@ -8,7 +8,7 @@ tags: [ObjC]
 reports:
   - pr: 290
     date: 2026-11-22
-    perry: "e7634f19"
+    perry: "22f734e5"
     platform: macos
     cpu: x86_64
     app_version: "4.6"
