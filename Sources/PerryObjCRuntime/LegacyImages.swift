@@ -1,4 +1,4 @@
-#if arch(i386)
+#if arch(i386) || arch(powerpc)
 import CPerryObjC
 import Glibc
 
