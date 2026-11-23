@@ -254,10 +254,10 @@ enum Format {
     /// Formats one value with glibc.
     private static func c(_ spec: String, _ value: CVarArg, encoding: CStringEncoding = .utf8) -> String {
         var buffer = [CChar](repeating: 0, count: 64)
-        let needed = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
+        let needed = perryWithVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
         if needed >= buffer.count {
             buffer = [CChar](repeating: 0, count: Int(needed) + 1)
-            _ = withVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
+            _ = perryWithVaList([value]) { vsnprintf(&buffer, buffer.count, spec, $0) }
         }
         let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
         switch encoding {
