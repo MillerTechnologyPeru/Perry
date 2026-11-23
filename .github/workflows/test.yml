@@ -1,0 +1,106 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The Objective-C and Swift fixtures in Tests/Fixtures/Darwin are built
+  # against Apple's SDK, and their expected output is recorded from Apple's
+  # frameworks, so they come from a Mac.
+  fixtures:
+    name: Darwin fixtures
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install the Metal toolchain
+        run: xcodebuild -downloadComponent MetalToolchain
+
+      - name: Build the fixtures
+        run: Scripts/build-darwin-fixtures.sh
+
+      # A tar keeps the executables' modes, which an artifact doesn't.
+      - name: Pack the fixtures
+        run: tar -czf perry-fixtures.tar.gz -C .build/perry-fixtures darwin
+
+      - name: Upload the fixtures
+        uses: actions/upload-artifact@v7
+        with:
+          name: perry-fixtures
+          path: perry-fixtures.tar.gz
+          retention-days: 7
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: fixtures
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The fixtures are arm64 programs, as iOS apps are: arm64 runs all
+          # of them, and must have them all.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            fixtures: true
+          # x86_64 builds everything and runs what needs no arm64 program.
+          - arch: x86_64
+            runner: ubuntu-24.04
+            fixtures: false
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: perry-dev
+          cache-from: type=gha,scope=perry-dev-${{ matrix.arch }}
+          cache-to: type=gha,scope=perry-dev-${{ matrix.arch }},mode=max
+
+      - name: Download the fixtures
+        if: matrix.fixtures
+        uses: actions/download-artifact@v8
+        with:
+          name: perry-fixtures
+
+      - name: Unpack the fixtures
+        if: matrix.fixtures
+        run: |
+          mkdir -p .build/perry-fixtures
+          tar -xzf perry-fixtures.tar.gz -C .build/perry-fixtures
+          rm perry-fixtures.tar.gz
+
+      # As Scripts/docker-test.sh runs them. WebKit's web processes run
+      # without their bubblewrap sandbox, which can't make namespaces in a
+      # container; the tests' pages are their own.
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/perry" perry-dev \
+            swift build --build-tests --scratch-path .build/linux
+
+      - name: Test
+        run: |
+          docker run --rm -v "$PWD:/perry" \
+            -e WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+            ${{ matrix.fixtures && '-e PERRY_REQUIRE_FIXTURES=1' || '' }} \
+            perry-dev \
+            swift test --skip-build --scratch-path .build/linux
