@@ -625,7 +625,7 @@ open class CIImage: NSObject {
 
     @ObjCMethod("imageByCompositingOverImage:")
     func compositing(over background: CIImage?) -> CIImage {
-        CIImage.make(Compositing.node(named: "CISourceOverCompositing", node, background?.node ?? .empty))
+        CIImage.make(ImageCompositing.node(named: "CISourceOverCompositing", node, background?.node ?? .empty))
     }
 
     @ObjCMethod("imageByApplyingFilter:withInputParameters:")
@@ -682,15 +682,15 @@ open class CIContext: NSObject {
 
     static func make(_ cls: ObjCClass, cgContext: CGRef? = nil) -> CIContext {
         let made = cls.object.allocated().initialized().unsafeCast(to: CIContext.self)
-        made.context.cgContext = cgContext.map(RetainedCG.init)
+        made.context.cgContext = cgContext.map { RetainedCG($0) }
         return made
     }
 
     /// The rectangle of an image that a source rectangle names: the
     /// image's extent for an empty or infinite one.
-    static func pixels(of node: ImageNode, in source: CGRect) -> PixelRect {
-        if CoreImageGeometry.isInfinite(source) || CoreImageGeometry.isEmpty(source) { return node.pixelExtent ?? PixelRect() }
-        return PixelRect(covering: source)
+    static func pixels(of node: ImageNode, in source: CGRect) -> ImageRect {
+        if CoreImageGeometry.isInfinite(source) || CoreImageGeometry.isEmpty(source) { return node.pixelExtent ?? ImageRect() }
+        return ImageRect(covering: source)
     }
 
     /// Draws the source rectangle of an image into a rectangle of a
@@ -765,7 +765,7 @@ open class CIContext: NSObject {
     @ObjCMethod("render:toBitmap:rowBytes:bounds:format:colorSpace:")
     func render(_ image: CIImage?, toBitmap data: UnsafeMutableRawPointer?, rowBytes: Int, bounds: CGRect, format: Int32, colorSpace: CGRef?) {
         guard let image, let data, let order = byteOrder(of: format) else { return }
-        let region = PixelRect(covering: bounds)
+        let region = ImageRect(covering: bounds)
         guard !region.isEmpty, rowBytes >= region.width * 4 else { return }
         Bitmaps.write(image.node.render(region), to: data.assumingMemoryBound(to: UInt8.self), rowBytes: rowBytes, order: order)
     }
