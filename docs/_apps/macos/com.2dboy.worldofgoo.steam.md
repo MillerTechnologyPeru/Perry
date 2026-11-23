@@ -4,7 +4,7 @@ bundle_id: "com.2dboy.worldofgoo.steam"
 platform: macos
 kind: game
 developer: 2D BOY
-tags: [C++, SDL]
+tags: [C++, ObjC]
 reports:
   - pr: 314
     date: 2026-11-23
