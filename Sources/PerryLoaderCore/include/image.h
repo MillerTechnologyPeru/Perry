@@ -169,6 +169,9 @@ void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *wo
 typedef void *(*perry_ppc_method_lookup)(void *receiver, const void *selector, void *start_class,
                                          const char **types);
 void perry_ppc_set_method_lookup(perry_ppc_method_lookup lookup);
+// Marks a Linux library's function as taking Darwin's arguments itself (an
+// assembly entry such as KVO's setter): its Darwin entry only sets r2.
+void perry_ppc_darwin_code(void *address);
 // Whether a type encoding has arguments or a result that need moving.
 bool perry_ppc_types_need_moves(const char *types);
 // Calls Darwin code from Linux code, which needs r2 as it was afterwards.
