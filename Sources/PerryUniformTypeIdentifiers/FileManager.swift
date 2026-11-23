@@ -6,7 +6,8 @@ import Glibc
 // their folders and files with it: FSRefs over paths. An FSRef is 80 opaque
 // bytes; here it holds a tag and the index of its path in a table that only
 // grows, so a copy names the same item and two refs to one path are equal.
-// There are no aliases, resource forks or HFS catalog IDs here.
+// An alias keeps its item's path. There are no alias files, resource forks
+// or HFS catalog IDs here.
 
 private let noErr: Int16 = 0
 private let fnfErr: Int16 = -43
@@ -183,6 +184,71 @@ public func FSResolveAliasFile(_ ref: UnsafeMutableRawPointer?, _ chains: UInt8,
     targetIsFolder?.pointee = FileRefs.isDirectory(path) ? 1 : 0
     wasAliased?.pointee = 0
     return noErr
+}
+
+// An alias record is opaque past its user type (4 bytes) and its size (2):
+// Perry's keeps a mark ('PRRY') and the item's path after them, which
+// FSResolveAlias makes an FSRef of again.
+private let aliasHeaderSize = 10
+
+private func newAlias(_ target: UnsafeRawPointer?, _ alias: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int16 {
+    guard let alias else { return paramErr }
+    alias.pointee = nil
+    guard let path = FileRefs.path(of: target) else { return fnfErr }
+    let bytes = Array(path.utf8)
+    let size = aliasHeaderSize + bytes.count + 1
+    guard size <= 0xffff else { return paramErr }
+    guard let handle = NewHandleClear(size),
+          let record = handle.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return -108 }   // memFullErr
+    record.storeBytes(of: UInt16(size), toByteOffset: 4, as: UInt16.self)
+    record.storeBytes(of: FileRefs.code("PRRY").bigEndian, toByteOffset: 6, as: UInt32.self)
+    (record + aliasHeaderSize).copyMemory(from: bytes, byteCount: bytes.count)
+    alias.pointee = handle
+    return noErr
+}
+
+/// OSErr FSNewAlias(const FSRef *fromFile, const FSRef *target, AliasHandle
+/// *): an alias of the target, by its path whatever it is relative to.
+@c(_FSNewAlias)
+public func FSNewAlias(_ from: UnsafeRawPointer?, _ target: UnsafeRawPointer?, _ alias: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int16 {
+    newAlias(target, alias)
+}
+
+/// OSErr FSNewAliasMinimal(const FSRef *target, AliasHandle *).
+@c(_FSNewAliasMinimal)
+public func FSNewAliasMinimal(_ target: UnsafeRawPointer?, _ alias: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int16 {
+    newAlias(target, alias)
+}
+
+/// OSErr FSResolveAliasWithMountFlags(const FSRef *fromFile, AliasHandle,
+/// FSRef *target, Boolean *wasChanged, unsigned long mountFlags): the item
+/// an alias of Perry's names, if it is there.
+@c(_FSResolveAliasWithMountFlags)
+public func FSResolveAliasWithMountFlags(_ from: UnsafeRawPointer?, _ alias: UnsafeMutableRawPointer?, _ target: UnsafeMutableRawPointer?,
+                                         _ changed: UnsafeMutablePointer<UInt8>?, _ flags: UInt) -> Int16 {
+    changed?.pointee = 0
+    guard let target, let record = alias?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return paramErr }
+    let size = Int(record.loadUnaligned(fromByteOffset: 4, as: UInt16.self))
+    guard size > aliasHeaderSize, record.loadUnaligned(fromByteOffset: 6, as: UInt32.self) == FileRefs.code("PRRY").bigEndian else { return paramErr }
+    let path = String(cString: (record + aliasHeaderSize).assumingMemoryBound(to: CChar.self))
+    guard FileRefs.exists(path) else { return fnfErr }
+    FileRefs.store(path, in: target)
+    return noErr
+}
+
+/// OSErr FSResolveAlias(const FSRef *fromFile, AliasHandle, FSRef *target,
+/// Boolean *wasChanged).
+@c(_FSResolveAlias)
+public func FSResolveAlias(_ from: UnsafeRawPointer?, _ alias: UnsafeMutableRawPointer?, _ target: UnsafeMutableRawPointer?,
+                           _ changed: UnsafeMutablePointer<UInt8>?) -> Int16 {
+    FSResolveAliasWithMountFlags(from, alias, target, changed, 0)
+}
+
+/// Size GetAliasSize(AliasHandle).
+@c(_GetAliasSize)
+public func GetAliasSize(_ alias: UnsafeMutableRawPointer?) -> Int {
+    guard let record = alias?.assumingMemoryBound(to: UnsafeMutableRawPointer?.self).pointee else { return 0 }
+    return Int(record.loadUnaligned(fromByteOffset: 4, as: UInt16.self))
 }
 
 /// OSErr FSGetVolumeInfo(FSVolumeRefNum volume, ItemCount volumeIndex,
