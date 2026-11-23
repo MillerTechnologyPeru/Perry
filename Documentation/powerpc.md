@@ -69,25 +69,32 @@ Under qemu-user, with the target's libraries at `$TARGET`:
 
 ## The thread pointer
 
-Not done yet. The plan:
+r2 is found again from the stack pointer (`ppc_thread.c`). A table with a word
+for each 4 KB page of the address space (4 MB, reserved and filled only where
+there are stacks) holds the thread pointer of the thread whose stack is
+there. The loader notes the main thread's stack when it starts. `perry`
+exports a `pthread_create`, which takes the place of glibc's for every
+library in the process, so each thread, libdispatch's too, notes its own
+before it runs anything. Then seven instructions set r2 using only r0, r11,
+r12 and cr0, which are scratch at a call in both ABIs:
 
-- Every thread runs on a stack of a fixed power-of-two size, aligned to that
-  size, whose lowest word holds the thread's r2. `perry` exports a
-  `pthread_create` that makes such stacks, which takes the place of glibc's
-  for every library in the process, and runs the program's main thread on
-  one too. Then r2 can be found without r2: `rlwinm r11,r1,0,0,N; lwz
-  r2,0(r11)`.
-- Darwin to Linux: what the loader binds a Darwin import to is a stub that
-  sets r2 so and jumps to the function. `objc_msgSend` sets r2 the same way
-  before it jumps to any method. Function pointers to Linux code that Darwin
-  code calls directly (an IMP from `-methodForSelector:`, a block's invoke,
-  `dlsym`'s results) need the same stubs.
-- Linux to Darwin: a call whose result comes back from Darwin code finds r2
-  again before going on. Where Linux code calls Darwin code is where armv7
-  saves r9 (`PERRY_KEEP_R9`, `keepingLinuxRegisters`): `qsort`,
-  `pthread_create`, `atexit`, thread-specific destructors, libdispatch's
-  work functions, Foundation's threads, libxml2's callbacks, and messages
-  that providers send to the program's objects.
+    rlwinm r11, r1, 22, 10, 29;  lis/ori r12, table;  lwzx r0, r11, r12
+    cmpwi r0, 0;  beq 1f;  mr r2, r0
+
+- Darwin to Linux: what the loader binds a Darwin import to, when it is a
+  function of a Linux library and not data (`dladdr1`'s symbol type), is a
+  stub that sets r2 and jumps to it. So are `__dyld`'s entries and the
+  unresolved-import stubs. Still to do: `objc_msgSend`, before it jumps to a
+  method, and function pointers to Linux code that Darwin code calls
+  directly (an IMP from `-methodForSelector:`, a block's invoke, `dlsym`'s
+  results).
+- Linux to Darwin: Linux code that calls Darwin code keeps r2 around the call
+  (`PERRY_DARWIN_CALL` in the loader, for initializers and `main`;
+  `PERRY_KEEP_R9` in libSystem, as armv7 keeps r9, for `qsort`'s
+  comparators, thread start routines, exit handlers and thread-specific
+  destructors). Still to do: libdispatch's work functions, Foundation's
+  threads, libxml2's callbacks, signal handlers, and messages that providers
+  send to the program's objects.
 
 ## Status
 
@@ -95,13 +102,15 @@ Not done yet. The plan:
   on a kernel-style stack, classic binding and `__dyld`, unresolved-import
   stubs and the ppc crash and profiler register views. Bean's ppc slice
   is mapped at 0x1000, bound to libPerrySystem, and runs from crt1 through
-  `main` to `NSApplicationMain` under qemu-ppc.
+  `main` to `NSApplicationMain` under qemu-ppc. The r2 stubs work under
+  qemu-ppc with r2 wrecked before the call: `errno` and `__thread`
+  variables read right, on the main thread and on a second one.
 - libSystem: the C sources build for ppc. Done: the printf family's
   `va_list` and argument repacking, block trampolines, signal contexts as
   Darwin's ppc thread states, and the 32-bit file layouts from before 64-bit
   inodes.
 - Not yet: `objc_msgSend` and the old-ABI exception entry points for ppc
-  (libobjc does not load), the thread pointer, ppc's libSystem thunks
+  (libobjc does not load), the rest of the thread pointer, ppc's libSystem thunks
   (setjmp, `long long` and floating-point argument moves), and the
   Swift providers' entry points with floating-point, structure or 64-bit
   parameters. Fixtures need a ppc Darwin compiler and linker. Today's clang
