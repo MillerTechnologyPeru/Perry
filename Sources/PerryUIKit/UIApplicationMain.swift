@@ -26,7 +26,7 @@ enum Launch {
         let bundle = NSBundle.main()
         let names = bundle.infoObject(forKey: "UIAppFonts")?.as(NSArray.self)?.elements.map { $0.stringValue } ?? []
         for name in names {
-            guard let url = NSURLObject.make(fileURLWithPath: bundle.bundlePath() + "/" + name),
+            guard let url = NSURLObject.make(fileURLWithPath: bundle.resourceDirectory + "/" + name),
                   let provider = CG.dataProviderCreateWithURL(url.objcObject) else { continue }
             defer { CG.dataProviderRelease(provider) }
             guard let font = CG.fontCreateWithDataProvider(provider) else {
