@@ -15,7 +15,7 @@ func absoluteTimeNow() -> Double {
 }
 
 /// An NSDate's value.
-final class DateStorage {
+class DateStorage {
     let date: Date
 
     init(_ date: Date) {
@@ -73,7 +73,7 @@ enum Dates {
 
 /// NSDate.
 @ObjCClass("NSDate")
-public final class NSDate: NSObject {
+public class NSDate: NSObject {
     /// What the Swift runtime asks to tell Foundation's classes apart.
     @ObjCMethod("isNSDate__") func isNSDate__() -> Bool { true }
 
