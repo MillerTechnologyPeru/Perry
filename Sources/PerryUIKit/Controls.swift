@@ -393,6 +393,7 @@ open class UIButton: UIControl {
         button.contentEdgeInsets = shown.contentInsets
         if let font = title.font { titleLabel().setFont(font) }
         if shown.titleLineBreakMode != 0 { titleLabel().setLineBreakMode(shown.titleLineBreakMode) }
+        titleLabel().setTextAlignment(titleTextAlignment(shown.titleAlignment))
         if shown.image != nil { imageView().setTintColor(colors.foreground) }
 
         let background = shown.background?.background
@@ -418,6 +419,24 @@ open class UIButton: UIControl {
             button.backgroundView = nil
         }
         update()
+    }
+
+    /// The NSTextAlignment a configuration's title alignment gives its label
+    /// (left 0, center 1, right 2, natural 4): automatic follows the
+    /// content's horizontal alignment, centered unless it is at an edge.
+    private func titleTextAlignment(_ alignment: Int) -> Int {
+        switch alignment {
+        case 1: return 4
+        case 2: return 1
+        case 3: return 2
+        default:
+            switch control.contentHorizontalAlignment {
+            case 1: return 0
+            case 4: return 4
+            case 2, 5: return 2
+            default: return 1
+            }
+        }
     }
 
     /// A tint change is a configuration's colors' change.
