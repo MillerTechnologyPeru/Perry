@@ -77,13 +77,13 @@ open class ASWebAuthenticationSession: NSObject {
     @ObjCMethod("setAdditionalHeaderFields:") func setAdditionalHeaderFields(_ headers: NSObject?) { session.headers = headers }
 
     /// Whether the session can start: there is a web engine.
-    @ObjCMethod("canStart") func canStart() -> Bool { !session.started && WPE.shared != nil }
+    @ObjCMethod("canStart") func canStart() -> Bool { !session.started && WPE.isAvailable }
 
     /// Shows the sheet in the next update pass, as UIKit presents; false
     /// when the session has started or can't.
     @ObjCMethod("start")
     func start() -> Bool {
-        guard !session.started, WPE.shared != nil, let url = session.url else { return false }
+        guard !session.started, WPE.isAvailable, let url = session.url else { return false }
         session.started = true
         let object = ObjCRuntime.retain(objcObject)!
         Updates.afterPass {
