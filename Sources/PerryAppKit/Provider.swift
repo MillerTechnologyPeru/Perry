@@ -668,21 +668,39 @@ func post(_ name: String, object: NSObject?, userInfo: NSObject? = nil) {
 
 // MARK: - Geometry, as Objective-C values
 
+// On ppc a CGFloat is a float, which the encodings say: the loader moves
+// these structures' words by them (ppc_abi.c). And ppc returns every
+// structure through memory, so their sends are objc_msgSend_stret's.
+
 extension CGPoint: ObjCScalar {
+    #if arch(powerpc)
+    public static var objCTypeEncoding: String { "{CGPoint=ff}" }
+    public static var objCReturnsIndirectly: Bool { true }
+    #else
     public static var objCTypeEncoding: String { "{CGPoint=dd}" }
+    #endif
     static let zero = CGPoint(x: 0, y: 0)
 }
 
 extension CGSize: ObjCScalar {
+    #if arch(powerpc)
+    public static var objCTypeEncoding: String { "{CGSize=ff}" }
+    public static var objCReturnsIndirectly: Bool { true }
+    #else
     public static var objCTypeEncoding: String { "{CGSize=dd}" }
+    #endif
     static let zero = CGSize(width: 0, height: 0)
 }
 
 extension CGRect: ObjCScalar {
+    #if arch(powerpc)
+    public static var objCTypeEncoding: String { "{CGRect={CGPoint=ff}{CGSize=ff}}" }
+    #else
     public static var objCTypeEncoding: String { "{CGRect={CGPoint=dd}{CGSize=dd}}" }
-    #if arch(i386)
-    /// 32-bit Intel returns a rectangle through memory, so its sends are
-    /// objc_msgSend_stret's.
+    #endif
+    #if arch(i386) || arch(powerpc)
+    /// 32-bit Intel and ppc return a rectangle through memory, so its sends
+    /// are objc_msgSend_stret's.
     public static var objCReturnsIndirectly: Bool { true }
     #endif
     static let zero = CGRect(origin: .zero, size: .zero)
