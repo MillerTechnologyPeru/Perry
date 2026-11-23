@@ -374,7 +374,7 @@ typedef struct classic_symbols {
     uint32_t strings_size;
 } classic_symbols;
 
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
 // What `__dyld_func_lookup` gives crt1 of programs from before Mac OS X 10.5,
 // for the startup functions it looks up and calls with no arguments: there
 // is nothing left for them to do.
@@ -511,9 +511,11 @@ static void apply_symbol_table(perry_loader *loader, perry_image *image) {
     const struct relocation_info *local = dst->nlocrel && image->slide ? perry_image_fileoff(image, dst->locreloff) : NULL;
     for (uint32_t i = 0; local && i < dst->nlocrel; i++) {
         const struct relocation_info *relocation = &local[i];
-#if defined(__i386__)
-        // On i386 scattered entries are also pointers to a local symbol with
-        // an offset: r_address is their low 24 bits, then r_type and r_length.
+#if defined(__i386__) || defined(__powerpc__)
+        // On i386 and ppc scattered entries are also pointers to a local
+        // symbol with an offset: r_address is their low 24 bits, then r_type
+        // and r_length. ppc's others are parts of instructions' immediates,
+        // which code built to be slid (PIC) has none of.
         if ((uint32_t)relocation->r_address & R_SCATTERED) {
             uint32_t bits = (uint32_t)relocation->r_address;
             if (((bits >> 24) & 0xf) == GENERIC_RELOC_VANILLA && ((bits >> 28) & 3) == 2 && !((bits >> 30) & 1))
@@ -547,7 +549,7 @@ void perry_apply_fixups(perry_loader *loader, perry_image *image) {
 #endif
     else if (image->slide != 0 && image->header->filetype != MH_EXECUTE)
         perry_warn("%s: no fixup information; image may not work when slid", image->path);
-#if defined(__i386__)
+#if defined(__i386__) || defined(__powerpc__)
     fill_dyld_section(image);
 #endif
 }
