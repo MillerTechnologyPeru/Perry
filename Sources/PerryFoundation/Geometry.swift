@@ -9,8 +9,8 @@ import PerryObjCInterop
 
 #if !arch(arm)
 
-/// What a CGFloat is: 32-bit Mac programs' is a float.
-#if arch(i386)
+/// What a CGFloat is: 32-bit Mac programs' (i386 and ppc) is a float.
+#if arch(i386) || arch(powerpc)
 public typealias GeometryValue = Float
 #else
 public typealias GeometryValue = Double

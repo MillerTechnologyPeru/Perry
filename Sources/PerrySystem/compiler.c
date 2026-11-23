@@ -286,4 +286,20 @@ float perry_i386_floatundisf(unsigned long long a) I386_LIBGCC(__floatundisf);
 float perry_i386_floatundisf(unsigned long long a) { return (float)a; }
 long double perry_i386_floatundixf(unsigned long long a) I386_LIBGCC(__floatundixf);
 long double perry_i386_floatundixf(unsigned long long a) { return (long double)a; }
+
+// Bit counts, which GCC's code calls libgcc for on i386
+// (Xcode 3's cc1, for one). As libgcc's, a count of trailing or leading
+// zeros of zero is undefined.
+int perry_i386_ctzdi2(unsigned long long a) I386_LIBGCC(__ctzdi2);
+int perry_i386_ctzdi2(unsigned long long a) { return __builtin_ctzll(a); }
+int perry_i386_clzdi2(unsigned long long a) I386_LIBGCC(__clzdi2);
+int perry_i386_clzdi2(unsigned long long a) { return __builtin_clzll(a); }
+int perry_i386_ffsdi2(long long a) I386_LIBGCC(__ffsdi2);
+int perry_i386_ffsdi2(long long a) { return __builtin_ffsll(a); }
+int perry_i386_paritydi2(unsigned long long a) I386_LIBGCC(__paritydi2);
+int perry_i386_paritydi2(unsigned long long a) { return __builtin_parityll(a); }
+int perry_i386_popcountsi2(unsigned a) I386_LIBGCC(__popcountsi2);
+int perry_i386_popcountsi2(unsigned a) { return __builtin_popcount(a); }
+int perry_i386_paritysi2(unsigned a) I386_LIBGCC(__paritysi2);
+int perry_i386_paritysi2(unsigned a) { return __builtin_parity(a); }
 #endif

@@ -274,6 +274,12 @@ PASSTHROUGH _wcsncpy, wcsncpy
 PASSTHROUGH _fputws, fputws
 PASSTHROUGH _setlogmask, setlogmask
 PASSTHROUGH _swscanf, swscanf
+// Binary search trees: glibc's take the same nodes, comparators and visit
+// orders (preorder 0, postorder, endorder, leaf) as Darwin's.
+PASSTHROUGH _tsearch, tsearch
+PASSTHROUGH _tfind, tfind
+PASSTHROUGH _tdelete, tdelete
+PASSTHROUGH _twalk, twalk
 
 // MARK: - setjmp
 //

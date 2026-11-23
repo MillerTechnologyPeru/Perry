@@ -153,6 +153,27 @@ int perry_ppc_emit_thread_pointer(uint32_t *code);
 void *perry_ppc_linux_entry(void *address);
 // The same stub for any Linux code, such as a function with no symbol.
 void *perry_ppc_thread_stub(void *address);
+// Darwin code's entry to a Linux function whose arguments or result are not
+// all words (ppc_abi.c): a stub that sets r2 and moves Darwin's arguments to
+// where the function's C signature, as ObjCValue types it on 32-bit, has
+// them. `types` is its Objective-C type encoding, result first.
+void *perry_ppc_darwin_entry(void *function, const char *types);
+// Calls a Darwin function from Linux code, with the arguments as words the
+// way ObjCValue passes them (an ObjCWordPair or structure as a pointer to
+// it), and returns its result as the C signature has it: r3 and r4.
+void perry_ppc_call_darwin(void *function, const char *types, const uint32_t *words, uint32_t count,
+                           uint32_t result[2]);
+// Where perry_ppc_send and its forms find a message's method and its type
+// encoding: libobjc's lookup, which it sets at startup. start_class is the
+// class to start at, for a super send, or NULL.
+typedef void *(*perry_ppc_method_lookup)(void *receiver, const void *selector, void *start_class,
+                                         const char **types);
+void perry_ppc_set_method_lookup(perry_ppc_method_lookup lookup);
+// Marks a Linux library's function as taking Darwin's arguments itself (an
+// assembly entry such as KVO's setter): its Darwin entry only sets r2.
+void perry_ppc_darwin_code(void *address);
+// Whether a type encoding has arguments or a result that need moving.
+bool perry_ppc_types_need_moves(const char *types);
 // Calls Darwin code from Linux code, which needs r2 as it was afterwards.
 #define PERRY_DARWIN_CALL(call) do { \
         unsigned long perry_r2; \

@@ -266,8 +266,26 @@ extension ObjCClass {
 
 /// A variadic method's entry point in variadic.S, as an implementation.
 func variadicEntry(_ entry: @convention(c) () -> Void) -> UnsafeRawPointer {
-    unsafeBitCast(entry, to: UnsafeRawPointer.self)
+    let address = unsafeBitCast(entry, to: UnsafeRawPointer.self)
+    #if arch(powerpc)
+    markDarwinCode(address)
+    #endif
+    return address
 }
+
+#if arch(powerpc)
+/// Tells the loader that a method's implementation here takes Darwin's
+/// arguments itself (the assembly entries: variadic_ppc.S, kvo_ppc.S), so
+/// that it moves none for it, as it does for Linux code's methods.
+func markDarwinCode(_ address: UnsafeRawPointer) {
+    darwinCodeMark?(address)
+}
+
+/// The loader's perry_ppc_darwin_code, which perry exports.
+private let darwinCodeMark = dlsym(nil, "perry_ppc_darwin_code").map {
+    unsafeBitCast($0, to: (@convention(c) (UnsafeRawPointer?) -> Void).self)
+}
+#endif
 
 /// Each Foundation object keeps its Swift state in extra words after its
 /// ivars, allocated by +alloc through class_createInstance: a cookie made
