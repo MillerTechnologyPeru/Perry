@@ -22,8 +22,9 @@ public enum Runtime {
     nonisolated(unsafe) static let emptyTable = perry_objc_empty_cache_table()!
     nonisolated(unsafe) public static let msgForward = IMP(mutating: perry_objc_msgForward_address()!)
     /// The forwarder for a message that returns a structure through a
-    /// pointer: its own on armv7, where the pointer takes the first register.
-    #if arch(arm)
+    /// pointer: its own on armv7 and ppc, where the pointer takes the first
+    /// register.
+    #if arch(arm) || arch(powerpc)
     nonisolated(unsafe) public static let msgForwardStret = IMP(mutating: perry_objc_msgForward_stret_address()!)
     #else
     nonisolated(unsafe) public static let msgForwardStret = msgForward
