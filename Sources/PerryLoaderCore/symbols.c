@@ -438,6 +438,7 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/MobileCoreServices.framework/MobileCoreServices     -> UniformTypeIdentifiers
 //   /System/Library/Frameworks/ImageIO.framework/ImageIO  -> CoreGraphics
 //   …/QuartzCore.framework/QuartzCore                     -> QuartzCore
+//   …/CoreImage.framework/CoreImage                       -> QuartzCore
 //   …/Metal.framework/Metal                               -> Metal, else QuartzCore
 //   …/Network.framework/Network, /usr/lib/libnetwork.dylib -> SystemConfiguration
 //   …/OpenGLES.framework/OpenGLES, …/GLKit.framework/GLKit -> UIKit
@@ -449,7 +450,6 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
-//   …/CoreImage.framework/CoreImage                       -> UIKit
 //   …/Carbon.framework, …/HIToolbox.framework             -> AppKit (not on armv7)
 //   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit (not on armv7)
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
@@ -531,22 +531,27 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         snprintf(out, out_size, "MapKitAppKit");
         return true;
     }
-    // A Mac app's Core Image and AuthenticationServices have no provider:
-    // they're UIKit's, whose classes AppKit's would collide with
-    // (NSTextContainer), so a Mac app finds them missing, as one that links
-    // them weakly can. TurboTax links AuthenticationServices for web sign-in.
-    if (strstr(install_name, "/CoreImage.framework/Versions/") ||
-        strstr(install_name, "/AuthenticationServices.framework/Versions/"))
+    // A Mac app's AuthenticationServices has no provider: it's UIKit's,
+    // whose classes AppKit's would collide with (NSTextContainer), so a Mac
+    // app finds it missing, as one that links it weakly can. TurboTax links
+    // it for web sign-in.
+    if (strstr(install_name, "/AuthenticationServices.framework/Versions/"))
         return false;
 #endif
+    // Core Image is QuartzCore's, for Mac and iOS apps alike: Mac OS X kept
+    // its classes in QuartzCore until 10.11.
+    if (strstr(install_name, "/CoreImage.framework/")) {
+        snprintf(out, out_size, "QuartzCore");
+        return true;
+    }
     // UIKit keeps OpenGL ES's contexts and GLKit's views built on them,
     // MetalKit's views over QuartzCore's Metal layers, SpriteKit's scenes
     // drawn by its layers, SceneKit's scenes,
     // answers libAccessibility's and Accessibility's questions about
     // accessibility settings, and stands in for Social's and Safari's view
     // controllers, AuthenticationServices' web sign-in sessions, CoreText's
-    // text attributes, AVKit's player view controller, Core Image's
-    // images and filters and MessageUI's compose view controllers.
+    // text attributes, AVKit's player view controller and MessageUI's
+    // compose view controllers.
     if (strstr(install_name, "/OpenGLES.framework/") || strstr(install_name, "/GLKit.framework/") ||
         strstr(install_name, "/MetalKit.framework/") || strstr(install_name, "/SpriteKit.framework/") ||
         strstr(install_name, "/SceneKit.framework/") || strstr(install_name, "/GameplayKit.framework/") ||
@@ -555,7 +560,7 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
         strstr(install_name, "/SafariServices.framework/") || strstr(install_name, "/AuthenticationServices.framework/") ||
         strstr(install_name, "/CoreText.framework/") ||
         strstr(install_name, "/AVKit.framework/") || strstr(install_name, "/AppTrackingTransparency.framework/") ||
-        strstr(install_name, "/AdSupport.framework/") || strstr(install_name, "/CoreImage.framework/") ||
+        strstr(install_name, "/AdSupport.framework/") ||
         strstr(install_name, "/MessageUI.framework/")) {
         snprintf(out, out_size, "UIKit");
         return true;

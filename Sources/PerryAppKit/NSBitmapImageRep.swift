@@ -160,3 +160,47 @@ open class NSBitmapImageRep: NSImageRep {
     @ObjCMethod("isPlanar") func repIsPlanar() -> Bool { planar }
     @ObjCMethod("bitmapFormat") func repBitmapFormat() -> UInt { format }
 }
+
+/// NSCIImageRep: a Core Image image as an image rep. Core Image's classes
+/// are QuartzCore's provider's, which renders the image for it.
+@ObjCClass("NSCIImageRep")
+open class NSCIImageRep: NSImageRep {
+    var ciImage: NSObject?
+
+    @ObjCMethod("init")
+    public required init() { super.init() }
+
+    @ObjCMethod("initWithCIImage:")
+    public required init(ciImage: NSObject?) {
+        super.init()
+        self.ciImage = ciImage
+        hasAlpha = true
+        if CG.ready, let image = NSCIImageRep.rendered(ciImage) {
+            (pixelsWide, pixelsHigh) = (CG.imageGetWidth(image), CG.imageGetHeight(image))
+            size = CGSize(width: CGFloat(pixelsWide), height: CGFloat(pixelsHigh))
+        }
+    }
+
+    @ObjCClassMethod("imageRepWithCIImage:")
+    static func imageRep(ciImage: NSObject?) -> NSCIImageRep { NSCIImageRep(ciImage: ciImage) }
+
+    /// The image rendered whole, +0.
+    static func rendered(_ image: NSObject?) -> CGRef? {
+        guard let image, Send.responds(image.objcObject, "_perryCGImage") else { return nil }
+        return Send.object(image.objcObject, "_perryCGImage")
+    }
+
+    @ObjCMethod("CIImage") func image() -> NSObject? { ciImage }
+    /// What NSImage draws of it.
+    @ObjCMethod("CGImage") func cgImage() -> UnsafeMutableRawPointer? { NSCIImageRep.rendered(ciImage) }
+
+    @ObjCMethod("draw") func draw() -> Bool { draw(in: CGRect(origin: .zero, size: size)) }
+    @ObjCMethod("drawAtPoint:") func draw(at point: CGPoint) -> Bool { draw(in: CGRect(origin: point, size: size)) }
+
+    @ObjCMethod("drawInRect:")
+    func draw(in rect: CGRect) -> Bool {
+        guard let context = NSGraphicsContext.currentCG, let image = NSCIImageRep.rendered(ciImage) else { return false }
+        CG.drawImage(context, rect, image)
+        return true
+    }
+}

@@ -74,6 +74,10 @@ enum CG {
     nonisolated(unsafe) static var imageGetBytesPerRow: (@convention(c) (Ref) -> Int)!
     nonisolated(unsafe) static var imageGetDataProvider: (@convention(c) (Ref) -> Ref)!
     nonisolated(unsafe) static var dataProviderCopyData: (@convention(c) (Ref) -> Ref)!
+    /// ImageIO's decoding, for Core Image's images of files and data;
+    /// nil when CoreGraphics' provider lacks it.
+    nonisolated(unsafe) static var imageSourceCreateWithData: (@convention(c) (Ref, Ref) -> Ref)?
+    nonisolated(unsafe) static var imageSourceCreateImageAtIndex: (@convention(c) (Ref, Int, Ref) -> Ref)?
 
     /// Binds the functions through `lookup`; false if one is missing.
     static func load(_ lookup: (String, String) -> UnsafeMutableRawPointer?) -> Bool {
@@ -144,7 +148,10 @@ enum CG {
         imageGetBytesPerRow = bind("CGImageGetBytesPerRow")
         imageGetDataProvider = bind("CGImageGetDataProvider")
         dataProviderCopyData = bind("CGDataProviderCopyData")
-        return complete
+        let required = complete
+        imageSourceCreateWithData = bind("CGImageSourceCreateWithData")
+        imageSourceCreateImageAtIndex = bind("CGImageSourceCreateImageAtIndex")
+        return required
     }
 
     /// An image's pixels, with its bytes per row, while `body` runs: a
