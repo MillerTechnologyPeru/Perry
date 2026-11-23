@@ -1,0 +1,5 @@
+// swift-interface-format-version: 1.0
+// swift-module-flags: -enable-library-evolution -module-name _Builtin_float -module-abi-name Darwin
+// The C module alone, without the SDK's Swift overlay of it, whose
+// declarations this overlay makes itself (under the same names).
+@_exported import _Builtin_float
