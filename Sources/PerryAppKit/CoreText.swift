@@ -25,6 +25,8 @@ enum CoreText {
     nonisolated(unsafe) static var glyphForCharacter: (@convention(c) (Ref, UInt32) -> UInt16)?
     nonisolated(unsafe) static var pathForGlyph: (@convention(c) (Ref, UInt16, CGFloat, UnsafePointer<CGAffineTransform>?) -> Ref)?
 
+    nonisolated(unsafe) static var copyPostScriptName: (@convention(c) (Ref) -> Ref)?
+
     nonisolated(unsafe) private static var loaded = false
 
     /// Binds CoreGraphics' font functions; a missing one leaves its Core
@@ -47,6 +49,25 @@ enum CoreText {
         glyphBBoxes = bind("CGFontGetGlyphBBoxes")
         glyphForCharacter = bind("perry_cgfont_glyph_for_character")
         pathForGlyph = bind("perry_cgfont_create_path_for_glyph")
+        copyPostScriptName = bind("CGFontCopyPostScriptName")
+    }
+
+    /// The family the system font is drawn in: Inter, which is drawn after
+    /// Apple's San Francisco, when FontConfig has it, and DejaVu Sans, which
+    /// Perry's packages install, otherwise.
+    static let systemFamily: String = {
+        load()
+        guard let face = named("Inter") else { return "DejaVu Sans" }
+        defer { ObjCRuntime.release(face) }
+        guard let name = copyPostScriptName?(face) else { return "DejaVu Sans" }
+        defer { ObjCRuntime.release(name) }
+        return String(objCArgument: name).hasPrefix("Inter") ? "Inter" : "DejaVu Sans"
+    }()
+
+    private static func named(_ name: String) -> UnsafeMutableRawPointer? {
+        let string = name.objCOwnedReturnValue()
+        defer { ObjCRuntime.release(string) }
+        return createWithFontName?(string)
     }
 
     /// The CGFont of each name a font draws in, made once.
@@ -56,11 +77,6 @@ enum CoreText {
         load()
         let name = font.drawingName
         if let face = faces[name] { return face }
-        func named(_ name: String) -> UnsafeMutableRawPointer? {
-            let string = name.objCOwnedReturnValue()
-            defer { ObjCRuntime.release(string) }
-            return createWithFontName?(string)
-        }
         guard let face = named(name) ?? named("sans-serif") else { return nil }
         faces[name] = face
         return face
