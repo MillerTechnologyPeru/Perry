@@ -138,7 +138,7 @@ enum DarwinFixtures {
     static var withReference: [String] {
         [
             "Abacus", "Almanac", "Anvil", "Archivist", "Atlas", "Babel", "Bedrock", "Chronicle", "Cipher", "Clock", "Cobweb", "Cornerstone", "Courier", "Darkroom", "Easel", "Foreman", "Forge", "Foundry", "Gatekeeper", "Gossamer", "Herald", "Itinerary", "Keyring", "Lantern", "Launchpad", "Ledger", "Lexicon", "Logbook", "Menagerie", "Panorama", "Parsley",
-            "Quill", "Relay", "Roster", "Satchel", "Scribe", "Scriptorium", "Sentinel", "Shelf", "Sketchbook", "Telegraph", "Typecast", "Vault", "Viewport",
+            "Quill", "Relay", "Roster", "Satchel", "Scribe", "Scriptorium", "Sentinel", "Shelf", "Sketchbook", "Tally", "Telegraph", "Typecast", "Vault", "Viewport",
         ].filter {
             built($0) && FileManager.default.fileExists(atPath: reference($0).path)
         } + swift.filter {
