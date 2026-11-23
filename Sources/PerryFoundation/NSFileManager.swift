@@ -79,6 +79,13 @@ enum FileAttributes {
     static let NSFileTypeBlockSpecial = "NSFileTypeBlockSpecial"
     static let NSFileTypeSocket = "NSFileTypeSocket"
     static let NSFileTypeUnknown = "NSFileTypeUnknown"
+    /// Keys Linux's files have no value for, named for a program's sets
+    /// and dictionaries of keys (Xcode 4 makes a set of every key).
+    static let NSFileAppendOnly = "NSFileAppendOnly"
+    static let NSFileBusy = "NSFileBusy"
+    static let NSFileDeviceIdentifier = "NSFileDeviceIdentifier"
+    static let NSFileExtensionHidden = "NSFileExtensionHidden"
+    static let NSFileReferenceCount = "NSFileReferenceCount"
 }
 
 /// NSFileManager.

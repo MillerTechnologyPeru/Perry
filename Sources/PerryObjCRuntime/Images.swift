@@ -147,6 +147,8 @@ extension Runtime {
         if let info = image.section(segment: "__DATA", name: "__objc_imageinfo") ?? image.section(segment: "__OBJC", name: "__image_info"),
            info.count >= 8, info.load(fromByteOffset: 4, as: UInt32.self) & 0x6 != 0 {
             RetainCounts.keepsObjects = true
+            // One that requires it (Xcode 4) ran only with it on.
+            if info.load(fromByteOffset: 4, as: UInt32.self) & 0x4 != 0 { GarbageCollector.required = true }
         }
 
         lock.withLock {
@@ -401,4 +403,11 @@ extension Protocols {
         let count = Int(list.load(fromByteOffset: 4, as: UInt32.self))
         return (0..<count).map { list + 8 + $0 * entsize }
     }
+}
+
+/// The garbage collector programs were built for, which isn't here.
+public enum GarbageCollector {
+    /// Whether an image requires it, as Darwin then runs the program with
+    /// it on.
+    nonisolated(unsafe) public static var required = false
 }

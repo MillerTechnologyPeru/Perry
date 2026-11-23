@@ -83,6 +83,7 @@ static void destroy(int reason, struct unwind_exception *header) {
 
 _Noreturn void objc_exception_throw(void *object) DARWIN_SYMBOL("_objc_exception_throw");
 _Noreturn void objc_exception_throw(void *object) {
+    object = perry_objc_preprocess_exception(object);
     struct objc_exception *exception = calloc(1, sizeof(*exception));
     exception->header.exception_class = objc_exception_class;
     exception->header.exception_cleanup = destroy;

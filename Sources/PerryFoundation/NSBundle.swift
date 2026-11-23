@@ -406,10 +406,18 @@ public final class NSBundle: NSObject {
     /// The app's own frameworks, which Darwin has loaded with it.
     static func frameworkBundles() -> [UnsafeMutableRawPointer] {
         guard let main = Bundles.storage(Bundles.main) else { return [] }
+        // The frameworks images were loaded from, as Darwin's: a Mac app's
+        // are in Contents/Frameworks and wherever else it links them (Xcode
+        // 4's SharedFrameworks), and Xcode 4 finds its plug-ins' extension
+        // points in theirs. Then the app's own, an iOS app's Frameworks.
         let frameworks = main.path + "/Frameworks"
-        return ((try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? []).sorted()
-            .filter { $0.hasSuffix(".framework") }
-            .compactMap { Bundles.bundle(path: frameworks + "/" + $0) }
+        let own = ((try? FileManager.default.contentsOfDirectory(atPath: frameworks)) ?? []).sorted()
+            .filter { $0.hasSuffix(".framework") }.map { frameworks + "/" + $0 }
+        var paths: [String] = []
+        for path in Bundles.loadedFrameworks() + own where !paths.contains(path) && FileManager.default.fileExists(atPath: path) {
+            paths.append(path)
+        }
+        return paths.compactMap { Bundles.bundle(path: $0) }
     }
 
     /// The main bundle: no other non-framework bundles are loaded.
@@ -644,6 +652,13 @@ public final class NSBundle: NSObject {
     @ObjCMethod("URLForResource:withExtension:subdirectory:")
     func url(forResource name: String?, withExtension type: String?, subdirectory: String?) -> NSURL? {
         URLs.wrapped(storage.resource(name, type: type, directory: subdirectory).map { URL(filePath: $0) })
+    }
+
+    /// A resource in a localization's folder, else outside any (Xcode 4
+    /// finds its plug-ins' .xcplugindata so).
+    @ObjCMethod("URLForResource:withExtension:subdirectory:localization:")
+    func url(forResource name: String?, withExtension type: String?, subdirectory: String?, localization: String?) -> NSURL? {
+        URLs.wrapped(path(forResource: name, ofType: type, inDirectory: subdirectory, forLocalization: localization).map { URL(filePath: $0) })
     }
 
     @ObjCMethod("URLsForResourcesWithExtension:subdirectory:")
