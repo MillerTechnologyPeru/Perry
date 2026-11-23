@@ -28,8 +28,12 @@ jobs:
       - name: Install the Metal toolchain
         run: xcodebuild -downloadComponent MetalToolchain
 
+      # Cumulus asks CloudKit about an account, and no test reads its
+      # reference.
       - name: Build the fixtures
         run: Scripts/build-darwin-fixtures.sh
+        env:
+          PERRY_FIXTURES_UNRECORDED: Cumulus
 
       # A tar keeps the executables' modes, which an artifact doesn't.
       - name: Pack the fixtures
