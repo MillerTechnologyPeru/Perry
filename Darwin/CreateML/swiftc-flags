@@ -1,0 +1,2 @@
+-Xlinker
+-dead_strip_dylibs
