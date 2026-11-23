@@ -216,11 +216,10 @@ static bool lookup_in_dependency(perry_loader *loader, perry_dependency *dep, co
     return false;
 }
 
-#if defined(__i386__) || defined(__powerpc__)
 // Images linked before export tries list their exports in the symbol table,
 // sorted by name by Apple's linker; others' (RAD's Bink) are in any order,
 // and are looked through.
-static bool symbol_table_found(perry_image *image, const struct nlist *symbol, perry_symbol *out) {
+static bool symbol_table_found(perry_image *image, const nlist_t *symbol, perry_symbol *out) {
     out->found = true;
     out->weak_def = symbol->n_desc & N_WEAK_DEF;
     out->address = (symbol->n_type & N_TYPE) == N_ABS
@@ -232,11 +231,11 @@ static bool symbol_table_found(perry_image *image, const struct nlist *symbol, p
 static bool symbol_table_lookup(perry_image *image, const char *name, perry_symbol *out) {
     const struct symtab_command *st = image->symtab;
     const struct dysymtab_command *dst = image->dysymtab;
-    const struct nlist *symbols = perry_image_fileoff(image, st->symoff);
+    const nlist_t *symbols = perry_image_fileoff(image, st->symoff);
     const char *strings = perry_image_fileoff(image, st->stroff);
     if (dst->iextdefsym + dst->nextdefsym > st->nsyms)
         return false;
-    const struct nlist *low = symbols + dst->iextdefsym;
+    const nlist_t *low = symbols + dst->iextdefsym;
     size_t count = dst->nextdefsym;
     if (image->exports_sorted == 0) {
         image->exports_sorted = 1;
@@ -253,7 +252,7 @@ static bool symbol_table_lookup(perry_image *image, const char *name, perry_symb
         return false;
     }
     while (count) {
-        const struct nlist *middle = low + count / 2;
+        const nlist_t *middle = low + count / 2;
         int order = strcmp(name, strings + middle->n_strx);
         if (order == 0)
             return symbol_table_found(image, middle, out);
@@ -266,7 +265,6 @@ static bool symbol_table_lookup(perry_image *image, const char *name, perry_symb
     }
     return false;
 }
-#endif
 
 bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *name, perry_symbol *out, int depth) {
     if (depth > 32)
@@ -304,10 +302,14 @@ bool perry_exports_lookup(perry_loader *loader, perry_image *image, const char *
             return true;
         }
     }
-#if defined(__i386__) || defined(__powerpc__)
-    if (!image->exports_trie && image->symtab && image->dysymtab && symbol_table_lookup(image, name, out))
-        return true;
+#if defined(__LP64__)
+    // x86_64 images from before Mac OS X 10.6, which have no dyld info.
+    bool listed = !image->dyld_info && !image->chained_fixups;
+#else
+    bool listed = true;
 #endif
+    if (listed && !image->exports_trie && image->symtab && image->dysymtab && symbol_table_lookup(image, name, out))
+        return true;
     // Symbols of re-exported libraries are visible through this image.
     for (uint32_t i = 0; i < image->dep_count; i++)
         if (image->deps[i].reexport && lookup_in_dependency(loader, &image->deps[i], name, out, depth))
@@ -450,7 +452,8 @@ static void link_provider(perry_loader *loader, perry_provider *provider, const 
 //   …/Social.framework, …/SafariServices.framework, …/CoreText.framework  -> UIKit
 //   …/AVKit.framework                                    -> UIKit
 //   …/AppTrackingTransparency.framework, …/AdSupport.framework -> UIKit
-//   …/Carbon.framework, …/HIToolbox.framework             -> AppKit (not on armv7)
+//   …/Carbon.framework, …/HIToolbox.framework             -> Carbon (32-bit), AppKit (64-bit)
+//   …/Cocoa.framework                                     -> AppKit (not on armv7)
 //   …/WebKit.framework/Versions/A/WebKit (a Mac app's)     -> AppKit (not on armv7)
 static bool provider_short_name(const char *install_name, char *out, size_t out_size) {
     if (strcmp(install_name, LIBDISPATCH) == 0) {
@@ -575,8 +578,21 @@ static bool provider_short_name(const char *install_name, char *out, size_t out_
     // Carbon (HIToolbox, QuickDraw) is Carbon's provider, over AppKit's
     // windows and events; it re-exports AppKit's, whose text input sources
     // are the keyboard layouts AppKit's key events are typed with.
+    // That provider is built for the 32-bit loaders, whose programs are
+    // Carbon's own; a 64-bit program has only the little of Carbon that
+    // outlived them, which AppKit's provider has.
     if (strstr(install_name, "/Carbon.framework/") || strstr(install_name, "/HIToolbox.framework/")) {
+#if defined(__LP64__)
+        snprintf(out, out_size, "AppKit");
+#else
         snprintf(out, out_size, "Carbon");
+#endif
+        return true;
+    }
+    // Cocoa is an umbrella over AppKit and Foundation, with nothing of its
+    // own.
+    if (strstr(install_name, "/Cocoa.framework/")) {
+        snprintf(out, out_size, "AppKit");
         return true;
     }
 #endif
