@@ -155,16 +155,16 @@ struct FilterSpec {
         return out
     }
 
-    static let byName: [String: FilterSpec] = Dictionary(all.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+    nonisolated(unsafe) static let byName: [String: FilterSpec] = Dictionary(all.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
 
-    static let all: [FilterSpec] = compositing + adjustments + geometry + effects + transitions
+    nonisolated(unsafe) static let all: [FilterSpec] = compositing + adjustments + geometry + effects + transitions
 
     // MARK: Compositing
 
-    static let compositing: [FilterSpec] = Compositing.names.map { name in
+    nonisolated(unsafe) static let compositing: [FilterSpec] = ImageCompositing.names.map { name in
         FilterSpec(name: name, categories: ["CICategoryCompositeOperation"], inputs: [.image(), .image("inputBackgroundImage")]) { values in
             guard let image = values.image() else { return nil }
-            return Compositing.node(named: name, image, values.image("inputBackgroundImage") ?? .empty)
+            return ImageCompositing.node(named: name, image, values.image("inputBackgroundImage") ?? .empty)
         }
     }
 
@@ -175,7 +175,7 @@ struct FilterSpec {
     static func rgb(_ c: RGBA) -> SIMD3<Float> { SIMD3(c.x, c.y, c.z) }
     static func with(_ rgb: SIMD3<Float>, _ alpha: Float) -> RGBA { RGBA(rgb.x, rgb.y, rgb.z, alpha) }
 
-    static let adjustments: [FilterSpec] = [
+    nonisolated(unsafe) static let adjustments: [FilterSpec] = [
         FilterSpec(name: "CIColorControls", categories: ["CICategoryColorAdjustment"], inputs: [
             .image(),
             .number("inputSaturation", 1, min: 0, max: 2, identity: 1),
@@ -273,7 +273,7 @@ struct FilterSpec {
 
     // MARK: Geometry
 
-    static let geometry: [FilterSpec] = [
+    nonisolated(unsafe) static let geometry: [FilterSpec] = [
         FilterSpec(name: "CIAffineTransform", categories: ["CICategoryGeometryAdjustment"], inputs: [.image(), .transform()]) { values in
             values.image()?.transformed(values.transform())
         },
@@ -299,7 +299,7 @@ struct FilterSpec {
 
     // MARK: Blur and sharpening
 
-    static let effects: [FilterSpec] = [
+    nonisolated(unsafe) static let effects: [FilterSpec] = [
         FilterSpec(name: "CIGaussianBlur", categories: ["CICategoryBlur"], inputs: [
             .image(), .number("inputRadius", 10, "CIAttributeTypeDistance", min: 0, sliderMax: 100, identity: 0),
         ]) { values in
@@ -333,7 +333,7 @@ struct FilterSpec {
         }
     }
 
-    static let transitions: [FilterSpec] = [
+    nonisolated(unsafe) static let transitions: [FilterSpec] = [
         transition("CIDissolveTransition"),
         transition("CIDisintegrateWithMaskTransition", extra: [
             .image("inputMaskImage"), .number("inputShadowRadius", 8, "CIAttributeTypeDistance", min: 0, sliderMax: 50),
@@ -371,7 +371,7 @@ struct FilterSpec {
 // MARK: - Compositing
 
 /// The blend modes and Porter-Duff operators, on premultiplied pixels.
-enum Compositing {
+enum ImageCompositing {
     static let names = blendModes.map(\.0) + operators.map(\.0)
 
     typealias Blend = (SIMD3<Float>, SIMD3<Float>) -> SIMD3<Float>
@@ -402,7 +402,7 @@ enum Compositing {
     }
 
     /// Backdrop and source colors, unpremultiplied, to the blend.
-    static let blendModes: [(String, Blend)] = [
+    nonisolated(unsafe) static let blendModes: [(String, Blend)] = [
         ("CIMultiplyBlendMode", separable { b, s in b * s }),
         ("CIScreenBlendMode", separable { b, s in b + s - b * s }),
         ("CIOverlayBlendMode", separable { b, s in hardLight(s, b) }),
@@ -425,7 +425,7 @@ enum Compositing {
     ]
 
     /// Source and backdrop, premultiplied, to the result.
-    static let operators: [(String, (RGBA, RGBA) -> RGBA)] = [
+    nonisolated(unsafe) static let operators: [(String, (RGBA, RGBA) -> RGBA)] = [
         ("CISourceOverCompositing", { s, b in s + b * (1 - s.w) }),
         ("CISourceInCompositing", { s, b in s * b.w }),
         ("CISourceOutCompositing", { s, b in s * (1 - b.w) }),
