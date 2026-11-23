@@ -2,41 +2,13 @@
 // conversions between ARGB, RGBA and RGB, copying, reflection, rotation by
 // quarter turns, premultiplying, and scaling by area averaging.
 
-#include "PerryAccelerate.h"
-
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-
-typedef unsigned long vImagePixelCount;
-typedef long vImage_Error;
-typedef uint32_t vImage_Flags;
-
-typedef struct vImage_Buffer {
-    void *data;
-    vImagePixelCount height;
-    vImagePixelCount width;
-    size_t rowBytes;
-} vImage_Buffer;
-
-enum {
-    kvImageNoError = 0,
-    kvImageRoiLargerThanInputBuffer = -21766,
-    kvImageInvalidParameter = -21773,
-    kvImageMemoryAllocationError = -21771,
-    kvImageBufferSizeMismatch = -21772,
-    kvImageNoAllocate = 0x200,
-};
+#include "vimage.h"
 
 static uint8_t *pixel(const vImage_Buffer *b, vImagePixelCount x, vImagePixelCount y, int bytes) {
-    return (uint8_t *)b->data + y * b->rowBytes + x * (vImagePixelCount)bytes;
+    return vimage_pixel(b, x, y, (size_t)bytes);
 }
 
-static vImage_Error check(const vImage_Buffer *src, const vImage_Buffer *dest) {
-    if (!src || !dest || !src->data || !dest->data) return kvImageInvalidParameter;
-    if (dest->width > src->width || dest->height > src->height) return kvImageRoiLargerThanInputBuffer;
-    return kvImageNoError;
-}
+static vImage_Error check(const vImage_Buffer *src, const vImage_Buffer *dest) { return vimage_check(src, dest); }
 
 /// Rows padded to 16 bytes, as vImage chooses.
 vImage_Error vImageBuffer_Init(vImage_Buffer *buffer, vImagePixelCount height, vImagePixelCount width, uint32_t bitsPerPixel,
@@ -223,16 +195,18 @@ vImage_Error vImageVerticalReflect_ARGB8888(const vImage_Buffer *src, const vIma
     DARWIN_SYMBOL(vImageVerticalReflect_ARGB8888);
 vImage_Error vImageVerticalReflect_ARGB8888(const vImage_Buffer *src, const vImage_Buffer *dest, vImage_Flags flags) { return remap(src, dest, 1); }
 
-/// kRotate0DegreesClockwise 0, 90 1, 180 2, 270 3.
+/// Quarter turns counterclockwise: kRotate0DegreesClockwise 0,
+/// kRotate270DegreesClockwise 1, kRotate180DegreesClockwise 2,
+/// kRotate90DegreesClockwise 3.
 vImage_Error vImageRotate90_ARGB8888(const vImage_Buffer *src, const vImage_Buffer *dest, uint8_t rotation, const uint8_t background[4],
                                      vImage_Flags flags) DARWIN_SYMBOL(vImageRotate90_ARGB8888);
 vImage_Error vImageRotate90_ARGB8888(const vImage_Buffer *src, const vImage_Buffer *dest, uint8_t rotation, const uint8_t background[4],
                                      vImage_Flags flags) {
     switch (rotation & 3) {
     case 0: return vImageCopyBuffer(src, dest, 4, flags);
-    case 1: return remap(src, dest, 4);
+    case 1: return remap(src, dest, 2);
     case 2: return remap(src, dest, 3);
-    default: return remap(src, dest, 2);
+    default: return remap(src, dest, 4);
     }
 }
 
