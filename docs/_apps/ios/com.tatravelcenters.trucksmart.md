@@ -73,4 +73,17 @@ reports:
     level: 3
     source: body
     notes: Starts again without aborting and no longer redraws while idle; list drags are still slow.
+  - pr: 295
+    date: 2026-11-22
+    perry: "27336eab"
+    platform: ios
+    cpu: arm64
+    app_version: "6.3"
+    hardware: Lenovo Duet 3
+    os: Debian sid
+    env:
+      - "PERRY_OS_VERSION=26.0"
+    level: 3
+    source: body
+    notes: "Run as an iOS 26 app on master's compositor with the pull request's SwiftUI: the Locations sheet is frosted over the map and the tab bar floats as a glass capsule. The sheet's rounded corners still come out square, and a scripted tap on the site card did not open its detail screen in this run."
 ---
