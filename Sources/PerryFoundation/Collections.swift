@@ -104,14 +104,29 @@ enum Describe {
         return pad(indent) + "{\n" + body.joined(separator: "\n") + "\n" + pad(indent) + "}"
     }
 
+    /// The entries as a strings file has them, a `"key" = "value";` line
+    /// each, sorted by key when the keys are all strings, with no braces.
+    static func stringsFile(_ entries: [(key: id, value: id)]) -> String {
+        func item(_ object: id) -> String {
+            if let string = Strings.value(of: object) { return quoted(string, always: true) }
+            return Describe.object(object, indent: 0)
+        }
+        var lines = entries.map { (key: item($0.key), value: item($0.value)) }
+        if entries.allSatisfy({ Strings.value(of: $0.key) != nil }) {
+            let keys = entries.map { Strings.value(of: $0.key) ?? "" }
+            lines = zip(keys, lines).sorted { Strings.compare($0.0, $1.0) < 0 }.map(\.1)
+        }
+        return lines.map { "\($0.key) = \($0.value);\n" }.joined()
+    }
+
     private static func pad(_ level: Int) -> String {
         String(repeating: " ", count: level * 4)
     }
 
     /// Strings print bare when they are a plain word, otherwise quoted
-    /// with escapes.
-    static func quoted(_ string: String) -> String {
-        let plain = !string.isEmpty && string.unicodeScalars.allSatisfy {
+    /// with escapes; `always` quotes plain words too.
+    static func quoted(_ string: String, always: Bool = false) -> String {
+        let plain = !always && !string.isEmpty && string.unicodeScalars.allSatisfy {
             $0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains(Character($0)) || "_$.".unicodeScalars.contains($0))
         }
         if plain { return string }

@@ -402,6 +402,10 @@ public class NSDictionary: NSObject {
         Describe.object(objcObject, indent: Int(indent))
     }
 
+    /// The entries as `"key" = "value";` lines, as a .strings file has them.
+    @ObjCMethod("descriptionInStringsFileFormat")
+    func descriptionInStringsFileFormat() -> String { Describe.stringsFile(entries) }
+
     /// The keys whose values are equal to `object`.
     @ObjCMethod("allKeysForObject:")
     func allKeys(for object: ObjCObject?) -> NSArray {
