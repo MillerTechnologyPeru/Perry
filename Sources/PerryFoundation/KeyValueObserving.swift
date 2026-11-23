@@ -150,9 +150,19 @@ enum KeyValueObserving {
               let method = ObjC.instanceMethod(original, selector), let types = ObjC.methodTypes(method),
               ObjC.sendBool(UnsafeMutableRawPointer(original), ObjC.selector("automaticallyNotifiesObserversForKey:"),
                             Strings.autoreleased(key)) else { return }
+        #if arch(powerpc)
+        _ = setterIsDarwinCode
+        #endif
         _ = ObjC.addMethod(subclass, selector, unsafeBitCast(perry_kvo_setter as @convention(c) () -> Void, to: UnsafeRawPointer.self), types)
         locked { subclasses[subclass]?.setters[UnsafeRawPointer(selector)] = key }
     }
+
+    #if arch(powerpc)
+    /// perry_kvo_setter takes Darwin's arguments itself (kvo_ppc.S).
+    private static let setterIsDarwinCode: Void = {
+        markDarwinCode(unsafeBitCast(perry_kvo_setter as @convention(c) () -> Void, to: UnsafeRawPointer.self))
+    }()
+    #endif
 
     /// The keys whose changes change `key`: itself and, in turn, those its
     /// +keyPathsForValuesAffectingValueForKey: name.
