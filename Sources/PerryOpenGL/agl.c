@@ -1,5 +1,5 @@
 // AGL, Carbon's OpenGL contexts, over NSOpenGLContext as CGL's are: an
-// AGLContext is an NSOpenGLContext and an AGLPixelFormat an
+// AGLContext stands for an NSOpenGLContext and an AGLPixelFormat is an
 // NSOpenGLPixelFormat, made from AGL's attributes (which NSOpenGLPixelFormat's
 // mostly are). A drawable is a Carbon window's port, which AppKit's Carbon
 // gives the content view of (-_perryCarbonContentView); full screen is that
@@ -148,18 +148,79 @@ void perry_aglDestroyPixelFormat(id format) {
 
 // MARK: - Contexts
 
+// MARK: - Contexts
+
+// An AGLContext laid out as AGL's: its renderer, then OpenGL's dispatch
+// table (agl_dispatch.c), which programs built with AGL/aglMacro.h call
+// through; then the NSOpenGLContext it stands for.
+extern const void *const perry_agl_dispatch[];
+extern const size_t perry_agl_dispatch_count;
+
+typedef struct agl_context {
+    void *rend;
+    const void *disp[759];
+    id context;
+    uint32_t magic;
+    struct agl_context *next;
+} agl_context;
+
+#define AGL_CONTEXT_MAGIC 0x41474c43u   // 'AGLC'
+
+static agl_context *agl_contexts;
+
+/// The NSOpenGLContext of an AGLContext, or the context itself when it is
+/// one (AppKit's, given as an AGLContext).
+static id ns_context(id context) {
+    agl_context *agl = context;
+    return agl && agl->magic == AGL_CONTEXT_MAGIC ? agl->context : context;
+}
+
+/// The AGLContext of an NSOpenGLContext AGL made, or the NSOpenGLContext.
+static id agl_for(id context) {
+    for (agl_context *each = agl_contexts; each; each = each->next)
+        if (each->context == context) return each;
+    return context;
+}
+
 id perry_aglCreateContext(id format, id share) AGL_SYMBOL(aglCreateContext);
 id perry_aglCreateContext(id format, id share) {
     if (!format) return (id)(uintptr_t)fail(AGL_BAD_PIXELFMT);
     if (!ready()) return (id)(uintptr_t)fail(AGL_BAD_ALLOC);
+    _Static_assert(sizeof(((agl_context *)0)->disp) / sizeof(void *) == 759, "gliDispatch.h's table has 759 entries");
+    agl_context *agl = calloc(1, sizeof *agl);
+    if (!agl || perry_agl_dispatch_count != 759) {
+        free(agl);
+        return (id)(uintptr_t)fail(AGL_BAD_ALLOC);
+    }
     id context = msg_send(get_class("NSOpenGLContext"), SELECTOR("alloc"));
-    context = ((id (*)(id, SEL, id, id))msg_send)(context, SELECTOR("initWithFormat:shareContext:"), format, share);
-    if (!context) last_error = AGL_BAD_MATCH;
-    return context;
+    context = ((id (*)(id, SEL, id, id))msg_send)(context, SELECTOR("initWithFormat:shareContext:"), format, ns_context(share));
+    if (!context) {
+        free(agl);
+        last_error = AGL_BAD_MATCH;
+        return NULL;
+    }
+    agl->rend = agl;
+    memcpy(agl->disp, perry_agl_dispatch, sizeof agl->disp);
+    agl->context = context;
+    agl->magic = AGL_CONTEXT_MAGIC;
+    agl->next = agl_contexts;
+    agl_contexts = agl;
+    return agl;
 }
 
 GLboolean perry_aglDestroyContext(id context) AGL_SYMBOL(aglDestroyContext);
 GLboolean perry_aglDestroyContext(id context) {
+    agl_context *agl = context;
+    if (agl && agl->magic == AGL_CONTEXT_MAGIC) {
+        for (agl_context **link = &agl_contexts; *link; link = &(*link)->next)
+            if (*link == agl) {
+                *link = agl->next;
+                break;
+            }
+        agl->magic = 0;
+        context = agl->context;
+        free(agl);
+    }
     if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
     if (msg_send(get_class("NSOpenGLContext"), SELECTOR("currentContext")) == context)
         msg_send(get_class("NSOpenGLContext"), SELECTOR("clearCurrentContext"));
@@ -170,6 +231,7 @@ GLboolean perry_aglDestroyContext(id context) {
 
 GLboolean perry_aglSetCurrentContext(id context) AGL_SYMBOL(aglSetCurrentContext);
 GLboolean perry_aglSetCurrentContext(id context) {
+    context = ns_context(context);
     if (!ready()) return fail(AGL_BAD_CONTEXT);
     if (context) msg_send(context, SELECTOR("makeCurrentContext"));
     else msg_send(get_class("NSOpenGLContext"), SELECTOR("clearCurrentContext"));
@@ -178,13 +240,14 @@ GLboolean perry_aglSetCurrentContext(id context) {
 
 id perry_aglGetCurrentContext(void) AGL_SYMBOL(aglGetCurrentContext);
 id perry_aglGetCurrentContext(void) {
-    return ready() ? msg_send(get_class("NSOpenGLContext"), SELECTOR("currentContext")) : NULL;
+    return ready() ? agl_for(msg_send(get_class("NSOpenGLContext"), SELECTOR("currentContext"))) : NULL;
 }
 
 // A drawable is a port: its window's content view is what the context
 // draws into. NULL takes the context off its drawable.
 GLboolean perry_aglSetDrawable(id context, id port) AGL_SYMBOL(aglSetDrawable);
 GLboolean perry_aglSetDrawable(id context, id port) {
+    context = ns_context(context);
     if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
     if (!port) {
         msg_send(context, SELECTOR("clearDrawable"));
@@ -200,6 +263,7 @@ GLboolean perry_aglSetDrawable(id context, id port) {
 
 id perry_aglGetDrawable(id context) AGL_SYMBOL(aglGetDrawable);
 id perry_aglGetDrawable(id context) {
+    context = ns_context(context);
     if (!context || !ready()) return (id)(uintptr_t)fail(AGL_BAD_CONTEXT);
     id view = msg_send(context, SELECTOR("view"));
     id (*view_port)(id) = (id (*)(id))carbon("_PerryCarbonViewPort");
@@ -222,6 +286,7 @@ GLboolean perry_aglSetFullScreen(id context, GLint width, GLint height, GLint fr
 
 void perry_aglSwapBuffers(id context) AGL_SYMBOL(aglSwapBuffers);
 void perry_aglSwapBuffers(id context) {
+    context = ns_context(context);
     if (!context || !ready()) {
         last_error = AGL_BAD_CONTEXT;
         return;
@@ -231,6 +296,7 @@ void perry_aglSwapBuffers(id context) {
 
 GLboolean perry_aglUpdateContext(id context) AGL_SYMBOL(aglUpdateContext);
 GLboolean perry_aglUpdateContext(id context) {
+    context = ns_context(context);
     if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
     msg_send(context, SELECTOR("update"));
     return 1;
@@ -240,6 +306,7 @@ GLboolean perry_aglUpdateContext(id context) {
 // whole drawable here, and the other options change nothing.
 GLboolean perry_aglSetInteger(id context, GLenum name, const GLint *values) AGL_SYMBOL(aglSetInteger);
 GLboolean perry_aglSetInteger(id context, GLenum name, const GLint *values) {
+    context = ns_context(context);
     if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
     if (name == AGL_SWAP_INTERVAL) {
         if (!values) return fail(AGL_BAD_VALUE);
@@ -321,6 +388,7 @@ GLboolean perry_aglDescribePixelFormat(id format, GLint attribute, GLint *value)
 // they've not been set.
 GLboolean perry_aglGetInteger(id context, GLenum name, GLint *values) AGL_SYMBOL(aglGetInteger);
 GLboolean perry_aglGetInteger(id context, GLenum name, GLint *values) {
+    context = ns_context(context);
     if (!context || !ready()) return fail(AGL_BAD_CONTEXT);
     if (!values) return fail(AGL_BAD_VALUE);
     if (name == AGL_SWAP_INTERVAL) {
